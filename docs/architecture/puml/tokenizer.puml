@@ -1,0 +1,8 @@
+@startuml
+
+[*] --> initialized
+initialized --> tokenizing : emel::tokenizer::event::tokenize\n [boost::sml::aux::zero_wrapper<emel::tokenizer::guard::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tokenizer/guards.hpp:5:31)>]
+tokenizing --> done : emel::tokenizer::event::tokenizing_done
+tokenizing --> errored : emel::tokenizer::event::tokenizing_error
+
+@enduml

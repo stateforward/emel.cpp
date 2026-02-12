@@ -1,0 +1,8 @@
+@startuml
+
+[*] --> initialized
+initialized --> tokenizing : emel::codec::encoder::event::encode
+tokenizing --> done : emel::codec::encoder::event::tokenized_done
+tokenizing --> errored : emel::codec::encoder::event::tokenized_error
+
+@enduml

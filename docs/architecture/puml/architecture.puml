@@ -1,0 +1,8 @@
+@startuml
+
+[*] --> initialized
+initialized --> resolving : emel::model::architecture::event::resolve\n [boost::sml::aux::zero_wrapper<emel::model::architecture::guard::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/model/architecture/guards.hpp:5:30)>]
+resolving --> done : emel::model::architecture::event::resolve_done
+resolving --> errored : emel::model::architecture::event::resolve_error
+
+@enduml

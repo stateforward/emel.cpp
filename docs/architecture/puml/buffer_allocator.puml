@@ -1,0 +1,10 @@
+@startuml
+
+[*] --> initialized
+initialized --> allocating : emel::buffer_allocator::event::allocate_buffer
+allocating --> uploading : emel::buffer_allocator::events::allocation_done
+allocating --> errored : emel::buffer_allocator::events::allocation_error
+uploading --> done : emel::buffer_allocator::events::upload_done
+uploading --> errored : emel::buffer_allocator::events::upload_error
+
+@enduml
