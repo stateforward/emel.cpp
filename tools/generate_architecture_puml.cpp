@@ -44,7 +44,7 @@ void dump_transition(std::ostream & out) noexcept {
 }
 
 template <class TTransitions>
-void dump_transitions(const TTransitions &, std::ostream & out) noexcept {}
+void dump_transitions(const TTransitions &, std::ostream &) noexcept {}
 
 template <template <class...> class T, class... Ts>
 void dump_transitions(const T<Ts...> &, std::ostream & out) noexcept {

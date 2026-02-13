@@ -1,0 +1,5 @@
+stateDiagram-v2
+  [*] --> initialized
+  initialized --> detokenizing : emel::decoder::event::decode [boost::sml::front::always] / boost::sml::front::none
+  detokenizing --> done : emel::decoder::event::detokenized_done [boost::sml::front::always] / boost::sml::front::none
+  detokenizing --> errored : emel::decoder::event::detokenized_error [boost::sml::front::always] / boost::sml::front::none

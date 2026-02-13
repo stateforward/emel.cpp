@@ -14,8 +14,12 @@ if ! command -v ninja >/dev/null 2>&1; then
   exit 1
 fi
 
+zig_bin="$(command -v zig)"
+
 cmake -S . -B build/zig -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_C_COMPILER="zig cc" \
-  -DCMAKE_CXX_COMPILER="zig c++"
+  -DCMAKE_C_COMPILER="$zig_bin" \
+  -DCMAKE_C_COMPILER_ARG1=cc \
+  -DCMAKE_CXX_COMPILER="$zig_bin" \
+  -DCMAKE_CXX_COMPILER_ARG1=c++
 cmake --build build/zig --parallel

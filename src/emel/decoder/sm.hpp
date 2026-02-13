@@ -3,11 +3,11 @@
 #include <cstdint>
 
 #include "emel/sm.hpp"
-#include "emel/codec/decoder/actions.hpp"
-#include "emel/codec/decoder/events.hpp"
-#include "emel/codec/decoder/guards.hpp"
+#include "emel/decoder/actions.hpp"
+#include "emel/decoder/events.hpp"
+#include "emel/decoder/guards.hpp"
 
-namespace emel::codec::decoder {
+namespace emel::decoder {
 
 struct model {
   auto operator()() const {
@@ -33,4 +33,4 @@ struct sm : emel::sm<model> {
   int32_t status_code = 0;
 };
 
-}  // namespace emel::codec::decoder
+}  // namespace emel::decoder

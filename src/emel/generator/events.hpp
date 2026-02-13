@@ -1,11 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 namespace emel::generator::event {
 
 struct generate {
-  const char * prompt = nullptr;
+  std::string_view prompt = {};
   int32_t max_tokens = 0;
 };
 

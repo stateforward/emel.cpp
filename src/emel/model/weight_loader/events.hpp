@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace emel::buffer_allocator {
 struct sm;
 }  // namespace emel::buffer_allocator
@@ -22,13 +24,27 @@ struct load_weights {
 };
 
 struct transport_selected {};
-struct weights_loaded {};
+struct weights_loaded {
+  bool success = true;
+  int32_t status_code = 0;
+  bool used_mmap = false;
+  uint64_t bytes_total = 0;
+  uint64_t bytes_done = 0;
+};
 
 }  // namespace emel::model::weight_loader::event
 
 namespace emel::model::weight_loader::events {
 
-struct loading_done {};
-struct loading_error {};
+struct loading_done {
+  int32_t status_code = 0;
+  uint64_t bytes_total = 0;
+  uint64_t bytes_done = 0;
+};
+
+struct loading_error {
+  int32_t status_code = 0;
+  bool used_mmap = false;
+};
 
 }  // namespace emel::model::weight_loader::events

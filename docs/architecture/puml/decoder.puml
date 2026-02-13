@@ -1,8 +1,8 @@
 @startuml
 
 [*] --> initialized
-initialized --> detokenizing : emel::codec::decoder::event::decode
-detokenizing --> done : emel::codec::decoder::event::detokenized_done
-detokenizing --> errored : emel::codec::decoder::event::detokenized_error
+initialized --> detokenizing : emel::decoder::event::decode
+detokenizing --> done : emel::decoder::event::detokenized_done
+detokenizing --> errored : emel::decoder::event::detokenized_error
 
 @enduml

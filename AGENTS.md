@@ -8,6 +8,11 @@ ALWAYS map directory layout to namespaces.
 ALWAYS colocate machine definition, data, guards, actions, and events within the same component directory.
 NEVER place state-machine orchestration logic in data-only files.
 ALWAYS use Boost.SML for orchestration state machines.
+ALWAYS define trigger intent events in the `event` namespace using noun-like, domain-action names without `cmd_` prefixes (for example `reserve`, `grow`, `recover`, `reset`).
+ALWAYS define machine outcome events in the `events` namespace with explicit `_done` and `_error` suffixes.
+NEVER use `cmd_*`-prefixed event names.
+NEVER port machine logic, states, guards, actions, or transitions from `machine/machine.cpp`; treat it as non-functional reference only.
+ALWAYS treat `tmp/llama.cpp` as the functional logic reference for allocator/behavioral parity work.
 ALWAYS keep guards pure and deterministic.
 ALWAYS keep side effects in actions only.
 ALWAYS model orchestration decisions with transitions and guards instead of ad-hoc control flow.
@@ -17,6 +22,9 @@ ALWAYS define explicit behavior for unexpected events.
 ALWAYS keep machine coupling event-based.
 NEVER mutate another machine's context directly.
 ALWAYS mutate context inside transition actions, including internal transitions when needed.
+ALWAYS define a component-local state-machine context type (for example `action::context`) and inject it into Boost.SML through the machine constructor.
+ALWAYS make guards and actions operate on the injected context object, not by mutating `sm` internals directly.
+NEVER rely on `friend` access to `sm` private fields for normal guard/action state mutation.
 NEVER call another state machine's actions directly.
 NEVER call another state machine's guards directly.
 NEVER call another state machine's functions directly.
@@ -29,6 +37,10 @@ ALWAYS have child-to-parent communication dispatch events only via the parent's
 `process_event(...)` boundary, never by invoking parent actions, guards, or other functions directly.
 ALWAYS define Boost.SML transition tables in `struct model` and expose machine aliases as
 `using sm = boost::sml::sm<model>;`.
+ALWAYS keep canonical machine types in component namespaces as `emel::<component>::sm`.
+ALWAYS provide top-level PascalCase C++ type aliases for orchestration readability
+(`emel::Model`, `emel::Parser`, `emel::Generator`, etc.) that alias canonical `emel::<component>::sm` types.
+NEVER replace canonical component-scoped `sm` types with top-level aliases; aliases are additive only.
 ALWAYS use snake_case for internal SML state type identifiers.
 ALWAYS put per-invocation external inputs (other machine pointers, target model pointers, capability
 flags, policy flags) on the triggering event payload, not in persistent machine `data`.

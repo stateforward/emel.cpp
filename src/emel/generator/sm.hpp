@@ -6,6 +6,8 @@
 #include "emel/generator/actions.hpp"
 #include "emel/generator/events.hpp"
 #include "emel/generator/guards.hpp"
+#include "emel/model/data.hpp"
+#include "emel/tokenizer/sm.hpp"
 
 namespace emel::generator {
 
@@ -38,9 +40,11 @@ struct model {
 };
 
 struct sm : emel::sm<model> {
-  using emel::sm<model>::sm;
+  explicit sm(emel::model::data & model_data) : model_(model_data) {}
 
  private:
+  emel::model::data & model_;
+  emel::tokenizer::sm tokenizer_ = {};
   int32_t status_code = 0;
   int32_t tokens_generated = 0;
   int32_t max_tokens = 0;

@@ -1,0 +1,10 @@
+stateDiagram-v2
+  [*] --> initialized
+  initialized --> tokenizing_prompt : emel::generator::event::generate [boost::sml::front::always] / boost::sml::front::none
+  tokenizing_prompt --> prefilling : emel::generator::event::prompt_tokenized_done [boost::sml::front::always] / boost::sml::front::none
+  tokenizing_prompt --> errored : emel::generator::event::prompt_tokenized_error [boost::sml::front::always] / boost::sml::front::none
+  prefilling --> decoding : emel::generator::event::prefill_done [boost::sml::front::always] / boost::sml::front::none
+  prefilling --> errored : emel::generator::event::prefill_error [boost::sml::front::always] / boost::sml::front::none
+  decoding --> decoding : emel::generator::event::decode_step_done [boost::sml::aux::zero_wrapper<emel::generator::guard::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/generator/guards.hpp:8:48)>] / boost::sml::front::none
+  decoding --> done : emel::generator::event::stop_condition_met [boost::sml::front::always] / boost::sml::front::none
+  decoding --> errored : emel::generator::event::decode_step_error [boost::sml::front::always] / boost::sml::front::none

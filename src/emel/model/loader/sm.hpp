@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cstdint>
-
 #include "emel/sm.hpp"
 #include "emel/model/loader/actions.hpp"
 #include "emel/model/loader/events.hpp"
@@ -65,11 +63,6 @@ struct model {
 
 struct sm : emel::sm<model> {
   using emel::sm<model>::sm;
-
- private:
-  int32_t parser_index = -1;
-  int32_t architecture_index = -1;
-  int32_t status_code = 0;
 };
 
 inline bool load(sm & state_machine, const event::load & ev) {

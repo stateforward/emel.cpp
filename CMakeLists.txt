@@ -9,6 +9,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(MSVC)
+  add_compile_options(/W4 /WX)
+else()
+  add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+endif()
+
 option(EMEL_ENABLE_TESTS "Build tests" ON)
 
 include(FetchContent)
@@ -79,6 +85,11 @@ if(EMEL_ENABLE_TESTS)
 
   add_executable(emel_tests_bin
     tests/model/loader_tests.cpp
+    tests/model/weight_loader_tests.cpp
+    tests/model/buffer_allocator_tests.cpp
+    tests/model/buffer_planner_tests.cpp
+    tests/model/buffer_allocator_actions_tests.cpp
+    tests/model/buffer_planner_actions_tests.cpp
   )
 
   target_link_libraries(emel_tests_bin

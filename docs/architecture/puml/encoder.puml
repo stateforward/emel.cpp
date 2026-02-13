@@ -1,8 +1,23 @@
 @startuml
 
 [*] --> initialized
-initialized --> tokenizing : emel::codec::encoder::event::encode
-tokenizing --> done : emel::codec::encoder::event::tokenized_done
-tokenizing --> errored : emel::codec::encoder::event::tokenized_error
+initialized --> pretokenizing : emel::encoder::event::encode
+pretokenizing --> selecting_algorithm : emel::encoder::event::pretokenizing_done
+pretokenizing --> errored : emel::encoder::event::pretokenizing_error
+selecting_algorithm --> merging : emel::encoder::event::algorithm_selected\n [boost::sml::aux::zero_wrapper<emel::encoder::guard::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/encoder/guards.hpp:9:37)>]
+selecting_algorithm --> searching : emel::encoder::event::algorithm_selected\n [boost::sml::aux::zero_wrapper<emel::encoder::guard::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/encoder/guards.hpp:12:39)>]
+selecting_algorithm --> scanning : emel::encoder::event::algorithm_selected\n [boost::sml::aux::zero_wrapper<emel::encoder::guard::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/encoder/guards.hpp:15:38)>]
+merging --> emitting_tokens : emel::encoder::event::algorithm_step_done
+merging --> errored : emel::encoder::event::algorithm_step_error
+searching --> emitting_tokens : emel::encoder::event::algorithm_step_done
+searching --> errored : emel::encoder::event::algorithm_step_error
+scanning --> emitting_tokens : emel::encoder::event::algorithm_step_done
+scanning --> errored : emel::encoder::event::algorithm_step_error
+emitting_tokens --> applying_backend_postrules : emel::encoder::event::emission_done
+emitting_tokens --> errored : emel::encoder::event::emission_error
+applying_backend_postrules --> done : emel::encoder::event::postrules_done
+applying_backend_postrules --> errored : emel::encoder::event::postrules_error
+done --> done : emel::encoder::event::tokenized_done
+errored --> errored : emel::encoder::event::tokenized_error
 
 @enduml

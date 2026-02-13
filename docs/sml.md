@@ -1714,6 +1714,27 @@ sml::sm<example, sml::thread_safe<std::recursive_mutex>, sml::logger<my_logger>>
 sml::sm<example, sml::logger<my_logger>, sml::thread_safe<std::recursive_mutex>> sm; // thread safe and logger policy
 ```
 
+### emel extension: coroutine scheduler policy
+
+`emel::co_sm` supports a scheduler policy in addition to SML policies.
+Default is:
+
+```cpp
+emel::policy::coroutine_scheduler<emel::policy::fifo_scheduler<>>
+```
+
+```cpp
+using inline_policy = emel::policy::coroutine_scheduler<emel::policy::inline_scheduler>;
+emel::co_sm<example, inline_policy> co;
+```
+
+Custom scheduler requirement:
+- provide `schedule(Fn)` where `Fn` is a no-arg callable used to resume coroutine work.
+- declare strict ordering guarantees:
+  - `static constexpr bool guarantees_fifo = true;`
+  - `static constexpr bool single_consumer = true;`
+  - `static constexpr bool run_to_completion = true;`
+
 ```cpp
 //
 // Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
