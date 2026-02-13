@@ -28,11 +28,25 @@ namespace emel::buffer_planner::action {
 
 inline constexpr int32_t k_max_buffers = 16;
 inline constexpr int32_t k_max_tensors = 2048;
+inline constexpr int32_t k_max_free_blocks = 256;
+
+struct free_block {
+  int32_t offset = 0;
+  int32_t size = 0;
+};
+
+struct buffer_layout {
+  std::array<free_block, k_max_free_blocks> free_blocks = {};
+  int32_t free_block_count = 0;
+  int32_t high_watermark = 0;
+};
 
 struct tensor_record {
   int32_t tensor_id = -1;
   int32_t alloc_size = 0;
   int32_t buffer_id = 0;
+  int32_t alloc_offset = -1;
+  int32_t alloc_reserved = 0;
   int32_t n_children = 0;
   int32_t n_views = 0;
   int32_t view_src_id = -1;
@@ -56,6 +70,7 @@ struct context {
 
   std::array<int32_t, k_max_buffers> current_bytes_by_buffer = {};
   std::array<int32_t, k_max_buffers> bytes_by_buffer = {};
+  std::array<buffer_layout, k_max_buffers> buffer_layouts = {};
   std::array<tensor_record, k_max_tensors> tensors = {};
   int32_t tensor_count = 0;
   int32_t total_bytes = 0;
@@ -111,6 +126,124 @@ inline int32_t buffer_id_for(
 
 inline bool valid_buffer_id(const int32_t buffer_id, const int32_t buffer_count) noexcept {
   return buffer_id >= 0 && buffer_id < buffer_count;
+}
+
+inline void reset_layouts(context & ctx) noexcept {
+  for (int32_t i = 0; i < k_max_buffers; ++i) {
+    ctx.buffer_layouts[i] = {};
+  }
+}
+
+inline void remove_free_block(buffer_layout & layout, const int32_t idx) noexcept {
+  if (idx < 0 || idx >= layout.free_block_count) {
+    return;
+  }
+  for (int32_t i = idx; i + 1 < layout.free_block_count; ++i) {
+    layout.free_blocks[i] = layout.free_blocks[i + 1];
+  }
+  layout.free_block_count -= 1;
+}
+
+inline bool insert_free_block(
+    buffer_layout & layout, const int32_t offset, const int32_t size) noexcept {
+  if (size <= 0 || offset < 0) {
+    return true;
+  }
+  if (layout.free_block_count >= k_max_free_blocks) {
+    return false;
+  }
+
+  int32_t pos = 0;
+  while (pos < layout.free_block_count && layout.free_blocks[pos].offset < offset) {
+    pos += 1;
+  }
+  for (int32_t i = layout.free_block_count; i > pos; --i) {
+    layout.free_blocks[i] = layout.free_blocks[i - 1];
+  }
+  layout.free_blocks[pos] = free_block{
+    .offset = offset,
+    .size = size,
+  };
+  layout.free_block_count += 1;
+
+  if (pos > 0) {
+    auto & prev = layout.free_blocks[pos - 1];
+    auto & cur = layout.free_blocks[pos];
+    if (sat_add(prev.offset, prev.size) >= cur.offset) {
+      const int32_t prev_end = sat_add(prev.offset, prev.size);
+      const int32_t cur_end = sat_add(cur.offset, cur.size);
+      prev.size = (cur_end > prev_end ? cur_end : prev_end) - prev.offset;
+      remove_free_block(layout, pos);
+      pos -= 1;
+    }
+  }
+
+  if (pos + 1 < layout.free_block_count) {
+    auto & cur = layout.free_blocks[pos];
+    auto & next = layout.free_blocks[pos + 1];
+    if (sat_add(cur.offset, cur.size) >= next.offset) {
+      const int32_t cur_end = sat_add(cur.offset, cur.size);
+      const int32_t next_end = sat_add(next.offset, next.size);
+      cur.size = (next_end > cur_end ? next_end : cur_end) - cur.offset;
+      remove_free_block(layout, pos + 1);
+    }
+  }
+
+  return true;
+}
+
+inline bool alloc_bytes_from_layout(
+    context & ctx, const int32_t buffer_id, const int32_t size, int32_t & out_offset) noexcept {
+  if (!valid_buffer_id(buffer_id, ctx.buffer_count)) {
+    return false;
+  }
+  const int32_t alloc_size = align_up(size);
+  auto & layout = ctx.buffer_layouts[buffer_id];
+
+  int32_t best_idx = -1;
+  int32_t best_waste = std::numeric_limits<int32_t>::max();
+  for (int32_t i = 0; i < layout.free_block_count; ++i) {
+    const auto & block = layout.free_blocks[i];
+    if (block.size < alloc_size) {
+      continue;
+    }
+    const int32_t waste = block.size - alloc_size;
+    if (waste < best_waste) {
+      best_waste = waste;
+      best_idx = i;
+    }
+  }
+
+  if (best_idx >= 0) {
+    auto & block = layout.free_blocks[best_idx];
+    out_offset = block.offset;
+    block.offset = sat_add(block.offset, alloc_size);
+    block.size = sat_sub_floor_zero(block.size, alloc_size);
+    if (block.size == 0) {
+      remove_free_block(layout, best_idx);
+    }
+    return true;
+  }
+
+  const int32_t offset = layout.high_watermark;
+  const int32_t end = sat_add(offset, alloc_size);
+  if (end < offset) {
+    return false;
+  }
+  out_offset = offset;
+  layout.high_watermark = end;
+  if (layout.high_watermark > ctx.bytes_by_buffer[buffer_id]) {
+    ctx.bytes_by_buffer[buffer_id] = layout.high_watermark;
+  }
+  return true;
+}
+
+inline bool free_bytes_to_layout(
+    context & ctx, const int32_t buffer_id, const int32_t offset, const int32_t size) noexcept {
+  if (!valid_buffer_id(buffer_id, ctx.buffer_count)) {
+    return false;
+  }
+  return insert_free_block(ctx.buffer_layouts[buffer_id], offset, align_up(size));
 }
 
 inline int32_t find_record_index(const context & ctx, const int32_t tensor_id) noexcept {
@@ -183,27 +316,38 @@ inline bool allocate_record(context & ctx, tensor_record & rec, const int32_t bu
     return false;
   }
 
+  int32_t offset = -1;
+  if (!alloc_bytes_from_layout(ctx, buffer_id, rec.alloc_size, offset)) {
+    return false;
+  }
+
   rec.buffer_id = buffer_id;
+  rec.alloc_offset = offset;
+  rec.alloc_reserved = rec.alloc_size;
   rec.allocated = true;
   ctx.current_bytes_by_buffer[buffer_id] =
-    sat_add(ctx.current_bytes_by_buffer[buffer_id], rec.alloc_size);
-  if (ctx.current_bytes_by_buffer[buffer_id] > ctx.bytes_by_buffer[buffer_id]) {
-    ctx.bytes_by_buffer[buffer_id] = ctx.current_bytes_by_buffer[buffer_id];
-  }
+    sat_add(ctx.current_bytes_by_buffer[buffer_id], rec.alloc_reserved);
   return true;
 }
 
-inline void free_record(context & ctx, tensor_record & rec) noexcept {
+inline bool free_record(context & ctx, tensor_record & rec) noexcept {
   if (!rec.allocatable || !rec.allocated) {
-    return;
+    return true;
   }
   if (!valid_buffer_id(rec.buffer_id, ctx.buffer_count)) {
     rec.allocated = false;
-    return;
+    return false;
+  }
+
+  if (!free_bytes_to_layout(ctx, rec.buffer_id, rec.alloc_offset, rec.alloc_reserved)) {
+    return false;
   }
   ctx.current_bytes_by_buffer[rec.buffer_id] =
-    sat_sub_floor_zero(ctx.current_bytes_by_buffer[rec.buffer_id], rec.alloc_size);
+    sat_sub_floor_zero(ctx.current_bytes_by_buffer[rec.buffer_id], rec.alloc_reserved);
   rec.allocated = false;
+  rec.alloc_offset = -1;
+  rec.alloc_reserved = 0;
+  return true;
 }
 
 inline bool valid_plan_event(const event::plan & ev) noexcept {
@@ -388,28 +532,67 @@ inline void default_plan_nodes(context & ctx) noexcept {
           ctx.pending_error = EMEL_ERR_INVALID_ARGUMENT;
           return;
         }
-        if (!parent->allocatable || !parent->allocated || parent->is_output) {
+        tensor_record * reuse_owner = parent;
+        bool reuse_from_view_src = false;
+        if (parent->is_view) {
+          if (parent->view_src_id < 0) {
+            continue;
+          }
+          auto * view_src = detail::find_record(ctx, parent->view_src_id);
+          if (view_src == nullptr) {
+            ctx.pending_error = EMEL_ERR_INVALID_ARGUMENT;
+            return;
+          }
+          if (!view_src->allocatable || !view_src->allocated || view_src->is_output) {
+            continue;
+          }
+          if (view_src->n_views != 1 || view_src->n_children != 0) {
+            continue;
+          }
+          reuse_owner = view_src;
+          reuse_from_view_src = true;
+        }
+
+        if (!reuse_owner->allocatable || !reuse_owner->allocated || reuse_owner->is_output) {
           continue;
         }
-        if (!detail::valid_buffer_id(parent->buffer_id, ctx.buffer_count) ||
-            parent->buffer_id != buffer_id) {
+        if (!detail::valid_buffer_id(reuse_owner->buffer_id, ctx.buffer_count) ||
+            reuse_owner->buffer_id != buffer_id) {
           continue;
         }
-        if (parent->n_children != 1 || parent->n_views != 0) {
-          continue;
+        if (reuse_from_view_src) {
+          if (reuse_owner->n_views != 1 || reuse_owner->n_children != 0) {
+            continue;
+          }
+        } else {
+          if (reuse_owner->n_children != 1 || reuse_owner->n_views != 0) {
+            continue;
+          }
         }
-        if (parent->alloc_size < node_rec->alloc_size) {
+        if (reuse_owner->alloc_size < node_rec->alloc_size) {
           continue;
         }
 
-        node_rec->buffer_id = parent->buffer_id;
+        node_rec->buffer_id = reuse_owner->buffer_id;
+        node_rec->alloc_offset = reuse_owner->alloc_offset;
+        node_rec->alloc_reserved = node_rec->alloc_size;
         node_rec->allocated = true;
-        const int32_t extra = parent->alloc_size - node_rec->alloc_size;
+        const int32_t extra = reuse_owner->alloc_reserved - node_rec->alloc_reserved;
         if (extra > 0) {
-          ctx.current_bytes_by_buffer[parent->buffer_id] =
-            detail::sat_sub_floor_zero(ctx.current_bytes_by_buffer[parent->buffer_id], extra);
+          if (!detail::free_bytes_to_layout(
+                ctx,
+                reuse_owner->buffer_id,
+                detail::sat_add(reuse_owner->alloc_offset, node_rec->alloc_reserved),
+                extra)) {
+            ctx.pending_error = EMEL_ERR_BACKEND;
+            return;
+          }
+          ctx.current_bytes_by_buffer[reuse_owner->buffer_id] =
+            detail::sat_sub_floor_zero(ctx.current_bytes_by_buffer[reuse_owner->buffer_id], extra);
         }
-        parent->allocated = false;
+        reuse_owner->allocated = false;
+        reuse_owner->alloc_offset = -1;
+        reuse_owner->alloc_reserved = 0;
         reused_parent = true;
         break;
       }
@@ -450,10 +633,16 @@ inline void default_plan_nodes(context & ctx) noexcept {
           view_src->n_views = view_src->n_views <= 0 ? 0 : view_src->n_views - 1;
           if (view_src->n_views == 0 && view_src->n_children == 0 && view_src->allocated &&
               !view_src->is_output) {
-            detail::free_record(ctx, *view_src);
+            if (!detail::free_record(ctx, *view_src)) {
+              ctx.pending_error = EMEL_ERR_BACKEND;
+              return;
+            }
           }
         } else if (parent->allocated && !parent->is_output) {
-          detail::free_record(ctx, *parent);
+          if (!detail::free_record(ctx, *parent)) {
+            ctx.pending_error = EMEL_ERR_BACKEND;
+            return;
+          }
         }
       }
     }
@@ -539,6 +728,7 @@ struct on_reset_done {
   void operator()(const event::reset_done &, context & ctx) const noexcept {
     ctx.current_bytes_by_buffer.fill(0);
     ctx.bytes_by_buffer.fill(0);
+    detail::reset_layouts(ctx);
     ctx.tensors.fill(tensor_record{});
     ctx.tensor_count = 0;
     ctx.total_bytes = 0;

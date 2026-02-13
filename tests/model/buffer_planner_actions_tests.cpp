@@ -68,6 +68,52 @@ TEST_CASE("buffer_planner_action_math_helpers_handle_edges") {
   CHECK(emel::buffer_planner::action::detail::align_up(-8) == 0);
 }
 
+TEST_CASE("buffer_planner_layout_split_and_merge_blocks") {
+  emel::buffer_planner::action::context ctx{};
+  ctx.buffer_count = 1;
+  emel::buffer_planner::action::detail::reset_layouts(ctx);
+
+  int32_t a0 = -1;
+  int32_t a1 = -1;
+  CHECK(emel::buffer_planner::action::detail::alloc_bytes_from_layout(ctx, 0, 64, a0));
+  CHECK(emel::buffer_planner::action::detail::alloc_bytes_from_layout(ctx, 0, 64, a1));
+  CHECK(a0 == 0);
+  CHECK(a1 == 64);
+  CHECK(ctx.bytes_by_buffer[0] == 128);
+
+  CHECK(emel::buffer_planner::action::detail::free_bytes_to_layout(ctx, 0, a0, 64));
+  CHECK(emel::buffer_planner::action::detail::free_bytes_to_layout(ctx, 0, a1, 64));
+  CHECK(ctx.buffer_layouts[0].free_block_count == 1);
+  CHECK(ctx.buffer_layouts[0].free_blocks[0].offset == 0);
+  CHECK(ctx.buffer_layouts[0].free_blocks[0].size == 128);
+
+  int32_t a2 = -1;
+  CHECK(emel::buffer_planner::action::detail::alloc_bytes_from_layout(ctx, 0, 96, a2));
+  CHECK(a2 == 0);
+  CHECK(ctx.bytes_by_buffer[0] == 128);
+}
+
+TEST_CASE("buffer_planner_layout_prefers_reuse_before_growth") {
+  emel::buffer_planner::action::context ctx{};
+  ctx.buffer_count = 1;
+  emel::buffer_planner::action::detail::reset_layouts(ctx);
+
+  int32_t a0 = -1;
+  int32_t a1 = -1;
+  CHECK(emel::buffer_planner::action::detail::alloc_bytes_from_layout(ctx, 0, 128, a0));
+  CHECK(emel::buffer_planner::action::detail::alloc_bytes_from_layout(ctx, 0, 32, a1));
+  CHECK(a0 == 0);
+  CHECK(a1 == 128);
+  CHECK(ctx.bytes_by_buffer[0] == 160);
+
+  CHECK(emel::buffer_planner::action::detail::free_bytes_to_layout(ctx, 0, a0, 128));
+
+  int32_t a2 = -1;
+  CHECK(emel::buffer_planner::action::detail::alloc_bytes_from_layout(ctx, 0, 64, a2));
+  CHECK(a2 == 0);
+  CHECK(ctx.bytes_by_buffer[0] == 160);
+}
+
 TEST_CASE("buffer_planner_begin_plan_rejects_invalid_event_shapes") {
   const graph_storage g = make_graph();
   int32_t error_code = EMEL_OK;
