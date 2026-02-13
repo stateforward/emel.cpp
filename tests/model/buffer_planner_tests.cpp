@@ -377,3 +377,36 @@ TEST_CASE("buffer_planner_guards_reflect_pending_error") {
   CHECK_FALSE(emel::buffer_planner::guard::no_error{}(ev, ctx));
   CHECK(emel::buffer_planner::guard::has_error{}(ev, ctx));
 }
+
+TEST_CASE("buffer_planner_testing_sm_can_target_error_and_recovery_paths") {
+  emel::buffer_planner::action::context ctx{};
+  boost::sml::sm<emel::buffer_planner::model, boost::sml::testing> machine{ctx};
+
+  const emel::buffer_planner::event::plan plan_event{
+    .graph = graph_view{},
+    .node_buffer_ids = nullptr,
+    .leaf_buffer_ids = nullptr,
+    .buffer_count = 1,
+    .size_only = true,
+    .sizes_out = nullptr,
+    .sizes_out_count = 0,
+    .error_out = nullptr,
+  };
+
+  CHECK(machine.process_event(plan_event));
+  CHECK(machine.process_event(emel::buffer_planner::event::reset_done{}));
+  CHECK(machine.process_event(emel::buffer_planner::event::seed_leafs_done{}));
+  CHECK(machine.process_event(emel::buffer_planner::event::count_references_done{}));
+  CHECK(machine.process_event(emel::buffer_planner::event::alloc_explicit_inputs_done{}));
+  CHECK(machine.process_event(emel::buffer_planner::event::plan_nodes_done{}));
+  CHECK(machine.process_event(emel::buffer_planner::event::release_expired_done{}));
+  CHECK(machine.process_event(emel::buffer_planner::event::finalize_done{}));
+  CHECK(machine.process_event(emel::buffer_planner::events::plan_done{}));
+
+  CHECK(machine.process_event(plan_event));
+  ctx.pending_error = EMEL_ERR_BACKEND;
+  CHECK(machine.process_event(emel::buffer_planner::event::reset_done{}));
+  CHECK(machine.process_event(emel::buffer_planner::events::plan_error{
+    .err = EMEL_ERR_BACKEND,
+  }));
+}

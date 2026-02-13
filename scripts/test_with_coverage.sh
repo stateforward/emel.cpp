@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+LINE_COVERAGE_MIN="${LINE_COVERAGE_MIN:-90}"
+BRANCH_COVERAGE_MIN="${BRANCH_COVERAGE_MIN:-75}"
+
 # Resolve Homebrew LLVM when binaries exist but are not in PATH.
 if ! command -v llvm-cov >/dev/null 2>&1 || ! command -v llvm-profdata >/dev/null 2>&1; then
   for llvm_bin in /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin; do
@@ -31,11 +34,14 @@ cmake -S . -B build/coverage -G Ninja \
 cmake --build build/coverage --parallel
 ctest --test-dir build/coverage --output-on-failure -R emel_tests
 
+echo "enforcing coverage thresholds: line >= ${LINE_COVERAGE_MIN}%, branch >= ${BRANCH_COVERAGE_MIN}%"
+
 gcovr \
   --root . \
   --filter src \
   --exclude tests \
   --txt-summary \
   --print-summary \
-  --fail-under-line 90 \
+  --fail-under-line "$LINE_COVERAGE_MIN" \
+  --fail-under-branch "$BRANCH_COVERAGE_MIN" \
   build/coverage
