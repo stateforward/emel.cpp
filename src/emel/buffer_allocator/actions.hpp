@@ -12,6 +12,22 @@
 namespace emel::buffer_allocator::action {
 
 inline constexpr int32_t k_max_buffers = 16;
+inline constexpr int32_t k_max_graph_tensors = 1024;
+
+struct tensor_alloc {
+  int32_t tensor_id = -1;
+  int32_t buffer_id = -1;
+  int32_t size_max = 0;
+};
+
+struct node_alloc {
+  tensor_alloc dst = {};
+  std::array<tensor_alloc, event::k_max_sources> src = {};
+};
+
+struct leaf_alloc {
+  tensor_alloc leaf = {};
+};
 
 struct context {
   int32_t buffer_count = 0;
@@ -24,9 +40,12 @@ struct context {
   uint32_t step = 0;
   int32_t last_n_nodes = 0;
   int32_t last_n_leafs = 0;
+  bool has_reserve_snapshot = false;
   std::array<int32_t, k_max_buffers> committed_sizes = {};
-  std::array<int32_t, 1024> last_node_buffer_ids = {};
-  std::array<int32_t, 1024> last_leaf_buffer_ids = {};
+  std::array<int32_t, k_max_graph_tensors> last_node_buffer_ids = {};
+  std::array<int32_t, k_max_graph_tensors> last_leaf_buffer_ids = {};
+  std::array<node_alloc, k_max_graph_tensors> node_allocs = {};
+  std::array<leaf_alloc, k_max_graph_tensors> leaf_allocs = {};
 };
 
 namespace detail {
@@ -49,8 +68,166 @@ inline bool valid_graph_tensors(const event::graph_view & g) noexcept {
   return true;
 }
 
+inline int32_t align_up_16(const int32_t value) noexcept {
+  if (value <= 0) {
+    return 0;
+  }
+  const int64_t aligned = (static_cast<int64_t>(value) + 15LL) & ~15LL;
+  if (aligned > std::numeric_limits<int32_t>::max()) {
+    return std::numeric_limits<int32_t>::max();
+  }
+  return static_cast<int32_t>(aligned);
+}
+
 inline int32_t get_buffer_id(const int32_t * ids, const int32_t index) noexcept {
   return ids == nullptr ? 0 : ids[index];
+}
+
+inline const event::tensor_desc * find_tensor(
+    const event::graph_view & g, const int32_t tensor_id, bool & is_node, int32_t & index) noexcept {
+  for (int32_t i = 0; i < g.n_nodes; ++i) {
+    if (g.nodes[i].tensor_id == tensor_id) {
+      is_node = true;
+      index = i;
+      return &g.nodes[i];
+    }
+  }
+  for (int32_t i = 0; i < g.n_leafs; ++i) {
+    if (g.leafs[i].tensor_id == tensor_id) {
+      is_node = false;
+      index = i;
+      return &g.leafs[i];
+    }
+  }
+  return nullptr;
+}
+
+inline bool build_tensor_alloc(
+    tensor_alloc & out, const event::tensor_desc & tensor, const int32_t buffer_id,
+    const int32_t buffer_count) noexcept {
+  out.tensor_id = tensor.tensor_id;
+  if (tensor.has_external_data || tensor.is_view) {
+    out.buffer_id = -1;
+    out.size_max = 0;
+    return true;
+  }
+  if (buffer_id < 0 || buffer_id >= buffer_count) {
+    return false;
+  }
+  out.buffer_id = buffer_id;
+  out.size_max = align_up_16(tensor.alloc_size);
+  return true;
+}
+
+inline bool capture_alloc_snapshot(
+    context & c, const event::graph_view & graph, const int32_t * node_buffer_ids,
+    const int32_t * leaf_buffer_ids) noexcept {
+  if (!valid_graph_tensors(graph)) {
+    return false;
+  }
+  if (graph.n_nodes > static_cast<int32_t>(c.node_allocs.size()) ||
+      graph.n_leafs > static_cast<int32_t>(c.leaf_allocs.size())) {
+    return false;
+  }
+
+  for (int32_t i = 0; i < graph.n_nodes; ++i) {
+    auto & dst = c.node_allocs[i];
+    dst = {};
+    const auto & node = graph.nodes[i];
+    const int32_t node_buffer_id = get_buffer_id(node_buffer_ids, i);
+    if (!build_tensor_alloc(dst.dst, node, node_buffer_id, c.buffer_count)) {
+      return false;
+    }
+
+    for (int32_t j = 0; j < event::k_max_sources; ++j) {
+      const int32_t src_id = node.src_ids[j];
+      if (src_id < 0) {
+        dst.src[j] = {};
+        continue;
+      }
+      bool src_is_node = false;
+      int32_t src_index = -1;
+      const auto * src = find_tensor(graph, src_id, src_is_node, src_index);
+      if (src == nullptr || src_index < 0) {
+        return false;
+      }
+      const int32_t src_buffer_id = src_is_node ? get_buffer_id(node_buffer_ids, src_index)
+                                                : get_buffer_id(leaf_buffer_ids, src_index);
+      if (!build_tensor_alloc(dst.src[j], *src, src_buffer_id, c.buffer_count)) {
+        return false;
+      }
+    }
+  }
+
+  for (int32_t i = 0; i < graph.n_leafs; ++i) {
+    auto & dst = c.leaf_allocs[i];
+    dst = {};
+    const auto & leaf = graph.leafs[i];
+    const int32_t leaf_buffer_id = get_buffer_id(leaf_buffer_ids, i);
+    if (!build_tensor_alloc(dst.leaf, leaf, leaf_buffer_id, c.buffer_count)) {
+      return false;
+    }
+  }
+
+  for (int32_t i = graph.n_nodes; i < static_cast<int32_t>(c.node_allocs.size()); ++i) {
+    c.node_allocs[i] = {};
+  }
+  for (int32_t i = graph.n_leafs; i < static_cast<int32_t>(c.leaf_allocs.size()); ++i) {
+    c.leaf_allocs[i] = {};
+  }
+  c.has_reserve_snapshot = true;
+  return true;
+}
+
+inline bool tensor_needs_realloc(
+    const event::tensor_desc & tensor, const tensor_alloc & alloc) noexcept {
+  if (tensor.has_external_data || tensor.is_view) {
+    return false;
+  }
+  if (alloc.buffer_id < 0) {
+    return true;
+  }
+  return alloc.size_max < align_up_16(tensor.alloc_size);
+}
+
+inline bool graph_needs_realloc(const event::graph_view & graph, const context & c) noexcept {
+  if (!c.has_reserve_snapshot) {
+    return true;
+  }
+  if (graph.n_nodes != c.last_n_nodes || graph.n_leafs != c.last_n_leafs) {
+    return true;
+  }
+
+  for (int32_t i = 0; i < graph.n_nodes; ++i) {
+    const auto & node = graph.nodes[i];
+    const auto & node_alloc = c.node_allocs[i];
+    if (node_alloc.dst.tensor_id != node.tensor_id ||
+        tensor_needs_realloc(node, node_alloc.dst)) {
+      return true;
+    }
+
+    for (int32_t j = 0; j < event::k_max_sources; ++j) {
+      const int32_t src_id = node.src_ids[j];
+      const auto & src_alloc = node_alloc.src[j];
+      if (src_id < 0) {
+        if (src_alloc.tensor_id != -1) {
+          return true;
+        }
+        continue;
+      }
+      if (src_alloc.tensor_id != src_id) {
+        return true;
+      }
+      bool src_is_node = false;
+      int32_t src_index = -1;
+      const auto * src = find_tensor(graph, src_id, src_is_node, src_index);
+      if (src == nullptr || src_index < 0 || tensor_needs_realloc(*src, src_alloc)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 inline bool valid_buffer_ids_for_graph(
@@ -129,6 +306,12 @@ inline void capture_buffer_map(
   for (int32_t i = 0; i < graph.n_leafs && i < static_cast<int32_t>(c.last_leaf_buffer_ids.size()); ++i) {
     c.last_leaf_buffer_ids[i] = get_buffer_id(leaf_buffer_ids, i);
   }
+  for (int32_t i = graph.n_nodes; i < static_cast<int32_t>(c.last_node_buffer_ids.size()); ++i) {
+    c.last_node_buffer_ids[i] = 0;
+  }
+  for (int32_t i = graph.n_leafs; i < static_cast<int32_t>(c.last_leaf_buffer_ids.size()); ++i) {
+    c.last_leaf_buffer_ids[i] = 0;
+  }
 }
 
 }  // namespace detail
@@ -177,6 +360,11 @@ struct begin_reserve_n_size {
       return;
     }
     detail::capture_buffer_map(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids);
+    if (!detail::capture_alloc_snapshot(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids)) {
+      c.pending_error = EMEL_ERR_INVALID_ARGUMENT;
+      c.step += 1;
+      return;
+    }
     c.pending_error = EMEL_OK;
     c.step += 1;
   }
@@ -214,6 +402,11 @@ struct begin_reserve_n {
       return;
     }
     detail::capture_buffer_map(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids);
+    if (!detail::capture_alloc_snapshot(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids)) {
+      c.pending_error = EMEL_ERR_INVALID_ARGUMENT;
+      c.step += 1;
+      return;
+    }
     detail::commit_sizes(c.committed_sizes, required, c.buffer_count);
     c.pending_error = EMEL_OK;
     c.step += 1;
@@ -237,6 +430,11 @@ struct begin_reserve {
       return;
     }
     detail::capture_buffer_map(c, ev.graph, nullptr, nullptr);
+    if (!detail::capture_alloc_snapshot(c, ev.graph, nullptr, nullptr)) {
+      c.pending_error = EMEL_ERR_INVALID_ARGUMENT;
+      c.step += 1;
+      return;
+    }
     detail::commit_sizes(c.committed_sizes, required, c.buffer_count);
     c.pending_error = EMEL_OK;
     c.step += 1;
@@ -266,21 +464,22 @@ struct begin_alloc_graph {
       return;
     }
 
-    const bool shape_matches_last_reserve =
-      ev.graph.n_nodes == c.last_n_nodes && ev.graph.n_leafs == c.last_n_leafs;
-    if (c.buffer_count > 1 && !shape_matches_last_reserve) {
+    const bool needs_realloc = detail::graph_needs_realloc(ev.graph, c);
+
+    if (needs_realloc && c.buffer_count > 1) {
       c.pending_error = EMEL_ERR_BACKEND;
       c.step += 1;
       return;
     }
 
-    std::array<int32_t, k_max_buffers> required = {};
     const int32_t * node_ids = nullptr;
     const int32_t * leaf_ids = nullptr;
-    if (shape_matches_last_reserve) {
+    if (!needs_realloc) {
       node_ids = c.last_node_buffer_ids.data();
       leaf_ids = c.last_leaf_buffer_ids.data();
     }
+
+    std::array<int32_t, k_max_buffers> required = {};
     int32_t err = EMEL_OK;
     if (!detail::run_planner(
           ev.buffer_planner_sm, ev.graph, node_ids, leaf_ids, c.buffer_count, true, required.data(),
@@ -290,20 +489,23 @@ struct begin_alloc_graph {
       return;
     }
 
-    if (!detail::requires_growth(c.committed_sizes, required, c.buffer_count)) {
-      c.pending_error = EMEL_OK;
+    detail::capture_buffer_map(c, ev.graph, node_ids, leaf_ids);
+    if (!detail::capture_alloc_snapshot(c, ev.graph, node_ids, leaf_ids)) {
+      c.pending_error = EMEL_ERR_INVALID_ARGUMENT;
       c.step += 1;
       return;
     }
 
-    if (c.buffer_count == 1) {
+    if (detail::requires_growth(c.committed_sizes, required, c.buffer_count)) {
+      if (c.buffer_count > 1) {
+        c.pending_error = EMEL_ERR_BACKEND;
+        c.step += 1;
+        return;
+      }
       detail::commit_sizes(c.committed_sizes, required, c.buffer_count);
-      c.pending_error = EMEL_OK;
-      c.step += 1;
-      return;
     }
 
-    c.pending_error = EMEL_ERR_BACKEND;
+    c.pending_error = EMEL_OK;
     c.step += 1;
   }
 };

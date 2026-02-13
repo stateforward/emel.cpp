@@ -27,6 +27,21 @@ Design overview
 - `default_strategies::*` currently alias to `gallocr_parity` by design to preserve one
   canonical behavior while keeping extension points explicit.
 
+`needs_realloc` parity contract
+- Reserve operations persist allocation assignment snapshots per node destination and per-node
+  sources (`tensor_id`, `buffer_id`, `size_max`).
+- `alloc_graph` checks snapshot validity before deciding behavior:
+  - snapshot missing, node/leaf count changed, tensor identity changed, source identity changed,
+    or `size_max < required_size` for allocatable tensors => `needs_realloc = true`.
+  - external-data and view tensors bypass size/buffer checks (matching gallocr semantics).
+- If `needs_realloc = true`:
+  - single-buffer mode: auto-reserve (planner recompute + committed-size growth).
+  - multi-buffer mode: fail with backend error and require explicit reserve first.
+
+Multi-buffer mismatch error contract
+- Any `needs_realloc` condition in multi-buffer mode returns allocator-path backend error.
+- This includes shape drift, source wiring drift, and growth beyond reserved assignment capacity.
+
 Unexpected-event policy intent
 - Unexpected event = known event type with no valid transition from current state.
 - This is a sequencing contract violation (not an unknown type).
@@ -43,11 +58,11 @@ Why unexpected events can still happen
 
 Production completion checklist (open)
 - [ ] Explicit handling path for all unexpected event/state combinations.
-- [ ] Reserve-to-alloc assignment validity persistence and verification parity
+- [x] Reserve-to-alloc assignment validity persistence and verification parity
       (`needs_realloc`-style checks).
 - [ ] Full view/in-place lifetime edge parity.
 - [ ] Chunk/address placement internals (alignment, split/merge, reuse preference).
-- [ ] Explicit multi-buffer mapping mismatch validation and error coding.
+- [x] Explicit multi-buffer mapping mismatch validation and error coding.
 - [ ] Overflow/limit hardening across size/count paths.
 - [ ] Strategy contract tests for null/invalid/override tables.
 - [ ] Ported allocator parity scenarios from tmp/llama.cpp/tests/test-alloc.cpp.
