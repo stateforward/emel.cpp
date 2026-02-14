@@ -4,6 +4,7 @@
 
 #include "emel/buffer/allocator/actions.hpp"
 #include "emel/buffer/allocator/events.hpp"
+#include "emel/buffer/chunk_allocator/sm.hpp"
 #include "emel/buffer/allocator/guards.hpp"
 #include "emel/buffer/planner/sm.hpp"
 #include "emel/sm.hpp"
@@ -61,7 +62,7 @@ Production completion checklist (open)
 - [x] Reserve-to-alloc assignment validity persistence and verification parity
       (`needs_realloc`-style checks).
 - [ ] Full view/in-place lifetime edge parity.
-- [ ] Chunk/address placement internals (alignment, split/merge, reuse preference).
+- [x] Chunk/address placement internals (alignment, split/merge, reuse preference).
 - [x] Explicit multi-buffer mapping mismatch validation and error coding.
 - [ ] Overflow/limit hardening across size/count paths.
 - [ ] Strategy contract tests for null/invalid/override tables.
@@ -155,7 +156,9 @@ struct sm : emel::sm<model> {
   using base_type::process_event;
 
   bool process_event(const event::initialize & ev) {
-    if (!base_type::process_event(ev)) {
+    auto wired = ev;
+    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
+    if (!base_type::process_event(wired)) {
       return false;
     }
     return finalize_request<events::initialize_done, events::initialize_error>();
@@ -164,6 +167,7 @@ struct sm : emel::sm<model> {
   bool process_event(const event::reserve_n_size & ev) {
     auto wired = ev;
     wired.buffer_planner_sm = &buffer_planner_sm_;
+    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
     if (wired.strategy == nullptr) {
       wired.strategy = &emel::buffer::planner::default_strategies::reserve_n_size;
     }
@@ -176,6 +180,7 @@ struct sm : emel::sm<model> {
   bool process_event(const event::reserve_n & ev) {
     auto wired = ev;
     wired.buffer_planner_sm = &buffer_planner_sm_;
+    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
     if (wired.strategy == nullptr) {
       wired.strategy = &emel::buffer::planner::default_strategies::reserve_n;
     }
@@ -188,6 +193,7 @@ struct sm : emel::sm<model> {
   bool process_event(const event::reserve & ev) {
     auto wired = ev;
     wired.buffer_planner_sm = &buffer_planner_sm_;
+    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
     if (wired.strategy == nullptr) {
       wired.strategy = &emel::buffer::planner::default_strategies::reserve;
     }
@@ -200,6 +206,7 @@ struct sm : emel::sm<model> {
   bool process_event(const event::alloc_graph & ev) {
     auto wired = ev;
     wired.buffer_planner_sm = &buffer_planner_sm_;
+    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
     if (wired.strategy == nullptr) {
       wired.strategy = &emel::buffer::planner::default_strategies::alloc_graph;
     }
@@ -210,7 +217,9 @@ struct sm : emel::sm<model> {
   }
 
   bool process_event(const event::release & ev) {
-    if (!base_type::process_event(ev)) {
+    auto wired = ev;
+    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
+    if (!base_type::process_event(wired)) {
       return false;
     }
     return finalize_request<events::release_done, events::release_error>();
@@ -224,6 +233,29 @@ struct sm : emel::sm<model> {
   }
 
   int32_t last_error() const noexcept { return context_.last_error; }
+
+  int32_t get_buffer_chunk_id(const int32_t buffer_id) const noexcept {
+    if (buffer_id < 0 || buffer_id >= context_.buffer_count) {
+      return -1;
+    }
+    return context_.committed_chunk_ids[buffer_id];
+  }
+
+  uint64_t get_buffer_chunk_offset(const int32_t buffer_id) const noexcept {
+    if (buffer_id < 0 || buffer_id >= context_.buffer_count) {
+      return 0;
+    }
+    return context_.committed_chunk_offsets[buffer_id];
+  }
+
+  uint64_t get_buffer_alloc_size(const int32_t buffer_id) const noexcept {
+    if (buffer_id < 0 || buffer_id >= context_.buffer_count) {
+      return 0;
+    }
+    return context_.committed_chunk_sizes[buffer_id];
+  }
+
+  int32_t chunk_count() const noexcept { return buffer_chunk_allocator_sm_.chunk_count(); }
 
   emel::buffer::planner::sm & planner_sm() noexcept { return buffer_planner_sm_; }
 
@@ -241,6 +273,7 @@ struct sm : emel::sm<model> {
 
   action::context context_{};
   emel::buffer::planner::sm buffer_planner_sm_{};
+  emel::buffer::chunk_allocator::sm buffer_chunk_allocator_sm_{};
 };
 
 }  // namespace emel::buffer::allocator

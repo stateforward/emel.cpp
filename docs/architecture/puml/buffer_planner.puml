@@ -1,36 +1,36 @@
 @startuml
 
 [*] --> idle
-idle --> resetting : emel::buffer_planner::event::plan
-resetting --> seeding_leafs : emel::buffer_planner::event::reset_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::no_error>]
-resetting --> errored : emel::buffer_planner::event::reset_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::has_error>]
-resetting --> errored : emel::buffer_planner::event::reset_error
-seeding_leafs --> counting_references : emel::buffer_planner::event::seed_leafs_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::no_error>]
-seeding_leafs --> errored : emel::buffer_planner::event::seed_leafs_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::has_error>]
-seeding_leafs --> errored : emel::buffer_planner::event::seed_leafs_error
-counting_references --> allocating_explicit_inputs : emel::buffer_planner::event::count_references_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::no_error>]
-counting_references --> errored : emel::buffer_planner::event::count_references_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::has_error>]
-counting_references --> errored : emel::buffer_planner::event::count_references_error
-allocating_explicit_inputs --> planning_nodes : emel::buffer_planner::event::alloc_explicit_inputs_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::no_error>]
-allocating_explicit_inputs --> errored : emel::buffer_planner::event::alloc_explicit_inputs_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::has_error>]
-allocating_explicit_inputs --> errored : emel::buffer_planner::event::alloc_explicit_inputs_error
-planning_nodes --> releasing_expired : emel::buffer_planner::event::plan_nodes_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::no_error>]
-planning_nodes --> errored : emel::buffer_planner::event::plan_nodes_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::has_error>]
-planning_nodes --> errored : emel::buffer_planner::event::plan_nodes_error
-releasing_expired --> finalizing : emel::buffer_planner::event::release_expired_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::no_error>]
-releasing_expired --> errored : emel::buffer_planner::event::release_expired_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::has_error>]
-releasing_expired --> errored : emel::buffer_planner::event::release_expired_error
-finalizing --> done : emel::buffer_planner::event::finalize_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::no_error>]
-finalizing --> errored : emel::buffer_planner::event::finalize_done\n [boost::sml::aux::zero_wrapper<emel::buffer_planner::guard::has_error>]
-finalizing --> errored : emel::buffer_planner::event::finalize_error
-resetting --> idle : emel::buffer_planner::events::plan_error
-seeding_leafs --> idle : emel::buffer_planner::events::plan_error
-counting_references --> idle : emel::buffer_planner::events::plan_error
-allocating_explicit_inputs --> idle : emel::buffer_planner::events::plan_error
-planning_nodes --> idle : emel::buffer_planner::events::plan_error
-releasing_expired --> idle : emel::buffer_planner::events::plan_error
-finalizing --> idle : emel::buffer_planner::events::plan_error
-errored --> idle : emel::buffer_planner::events::plan_error
-done --> idle : emel::buffer_planner::events::plan_done
+idle --> resetting : emel::buffer::planner::event::plan
+resetting --> seeding_leafs : emel::buffer::planner::event::reset_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::no_error>]
+resetting --> errored : emel::buffer::planner::event::reset_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::has_error>]
+resetting --> errored : emel::buffer::planner::event::reset_error
+seeding_leafs --> counting_references : emel::buffer::planner::event::seed_leafs_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::no_error>]
+seeding_leafs --> errored : emel::buffer::planner::event::seed_leafs_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::has_error>]
+seeding_leafs --> errored : emel::buffer::planner::event::seed_leafs_error
+counting_references --> allocating_explicit_inputs : emel::buffer::planner::event::count_references_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::no_error>]
+counting_references --> errored : emel::buffer::planner::event::count_references_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::has_error>]
+counting_references --> errored : emel::buffer::planner::event::count_references_error
+allocating_explicit_inputs --> planning_nodes : emel::buffer::planner::event::alloc_explicit_inputs_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::no_error>]
+allocating_explicit_inputs --> errored : emel::buffer::planner::event::alloc_explicit_inputs_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::has_error>]
+allocating_explicit_inputs --> errored : emel::buffer::planner::event::alloc_explicit_inputs_error
+planning_nodes --> releasing_expired : emel::buffer::planner::event::plan_nodes_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::no_error>]
+planning_nodes --> errored : emel::buffer::planner::event::plan_nodes_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::has_error>]
+planning_nodes --> errored : emel::buffer::planner::event::plan_nodes_error
+releasing_expired --> finalizing : emel::buffer::planner::event::release_expired_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::no_error>]
+releasing_expired --> errored : emel::buffer::planner::event::release_expired_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::has_error>]
+releasing_expired --> errored : emel::buffer::planner::event::release_expired_error
+finalizing --> done : emel::buffer::planner::event::finalize_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::no_error>]
+finalizing --> errored : emel::buffer::planner::event::finalize_done\n [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::has_error>]
+finalizing --> errored : emel::buffer::planner::event::finalize_error
+resetting --> idle : emel::buffer::planner::events::plan_error
+seeding_leafs --> idle : emel::buffer::planner::events::plan_error
+counting_references --> idle : emel::buffer::planner::events::plan_error
+allocating_explicit_inputs --> idle : emel::buffer::planner::events::plan_error
+planning_nodes --> idle : emel::buffer::planner::events::plan_error
+releasing_expired --> idle : emel::buffer::planner::events::plan_error
+finalizing --> idle : emel::buffer::planner::events::plan_error
+errored --> idle : emel::buffer::planner::events::plan_error
+done --> idle : emel::buffer::planner::events::plan_done
 
 @enduml

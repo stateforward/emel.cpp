@@ -8,6 +8,10 @@ struct sm;
 struct strategy;
 }  // namespace emel::buffer::planner
 
+namespace emel::buffer::chunk_allocator {
+struct sm;
+}  // namespace emel::buffer::chunk_allocator
+
 namespace emel::buffer::allocator::event {
 
 inline constexpr int32_t k_max_sources = 4;
@@ -32,6 +36,7 @@ struct graph_view {
 
 struct initialize {
   int32_t buffer_count = 1;
+  emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
 };
 
 struct reserve_n_size {
@@ -41,6 +46,7 @@ struct reserve_n_size {
   int32_t * sizes_out = nullptr;
   int32_t sizes_out_count = 0;
   emel::buffer::planner::sm * buffer_planner_sm = nullptr;
+  emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
   const emel::buffer::planner::strategy * strategy = nullptr;
 };
 
@@ -49,22 +55,27 @@ struct reserve_n {
   const int32_t * node_buffer_ids = nullptr;
   const int32_t * leaf_buffer_ids = nullptr;
   emel::buffer::planner::sm * buffer_planner_sm = nullptr;
+  emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
   const emel::buffer::planner::strategy * strategy = nullptr;
 };
 
 struct reserve {
   graph_view graph = {};
   emel::buffer::planner::sm * buffer_planner_sm = nullptr;
+  emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
   const emel::buffer::planner::strategy * strategy = nullptr;
 };
 
 struct alloc_graph {
   graph_view graph = {};
   emel::buffer::planner::sm * buffer_planner_sm = nullptr;
+  emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
   const emel::buffer::planner::strategy * strategy = nullptr;
 };
 
-struct release {};
+struct release {
+  emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
+};
 
 }  // namespace emel::buffer::allocator::event
 

@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <limits>
 
+#include "emel/buffer/chunk_allocator/events.hpp"
+#include "emel/buffer/chunk_allocator/sm.hpp"
 #include "emel/buffer/allocator/events.hpp"
 #include "emel/buffer/planner/events.hpp"
 #include "emel/buffer/planner/sm.hpp"
@@ -42,6 +44,9 @@ struct context {
   int32_t last_n_leafs = 0;
   bool has_reserve_snapshot = false;
   std::array<int32_t, k_max_buffers> committed_sizes = {};
+  std::array<int32_t, k_max_buffers> committed_chunk_ids = {};
+  std::array<uint64_t, k_max_buffers> committed_chunk_offsets = {};
+  std::array<uint64_t, k_max_buffers> committed_chunk_sizes = {};
   std::array<int32_t, k_max_graph_tensors> last_node_buffer_ids = {};
   std::array<int32_t, k_max_graph_tensors> last_leaf_buffer_ids = {};
   std::array<node_alloc, k_max_graph_tensors> node_allocs = {};
@@ -314,6 +319,162 @@ inline void capture_buffer_map(
   }
 }
 
+inline void reset_chunk_bindings(context & c) noexcept {
+  for (int32_t i = 0; i < k_max_buffers; ++i) {
+    c.committed_chunk_ids[i] = -1;
+    c.committed_chunk_offsets[i] = 0;
+    c.committed_chunk_sizes[i] = 0;
+  }
+}
+
+inline bool chunk_bindings_cover_required(
+    const context & c, const std::array<int32_t, k_max_buffers> & required,
+    const int32_t buffer_count) noexcept {
+  for (int32_t i = 0; i < buffer_count; ++i) {
+    if (required[i] <= 0) {
+      continue;
+    }
+    if (c.committed_chunk_ids[i] < 0) {
+      return false;
+    }
+    if (c.committed_chunk_sizes[i] < static_cast<uint64_t>(required[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool configure_chunk_allocator(
+    emel::buffer::chunk_allocator::sm * chunk_allocator_sm, int32_t & out_error) noexcept {
+  if (chunk_allocator_sm == nullptr) {
+    out_error = EMEL_ERR_INVALID_ARGUMENT;
+    return false;
+  }
+
+  int32_t reset_error = EMEL_OK;
+  if (!chunk_allocator_sm->process_event(emel::buffer::chunk_allocator::event::reset{
+        .error_out = &reset_error,
+      }) ||
+      reset_error != EMEL_OK) {
+    out_error = normalize_error(reset_error, EMEL_ERR_BACKEND);
+    return false;
+  }
+
+  int32_t configure_error = EMEL_OK;
+  if (!chunk_allocator_sm->process_event(emel::buffer::chunk_allocator::event::configure{
+        .alignment = 16,
+        .max_chunk_size = static_cast<uint64_t>(std::numeric_limits<int32_t>::max()),
+        .error_out = &configure_error,
+      }) ||
+      configure_error != EMEL_OK) {
+    out_error = normalize_error(configure_error, EMEL_ERR_BACKEND);
+    return false;
+  }
+
+  out_error = EMEL_OK;
+  return true;
+}
+
+inline bool apply_required_sizes_to_chunks(
+    context & c, const std::array<int32_t, k_max_buffers> & required,
+    emel::buffer::chunk_allocator::sm * chunk_allocator_sm, int32_t & out_error) noexcept {
+  if (chunk_allocator_sm == nullptr) {
+    out_error = EMEL_ERR_INVALID_ARGUMENT;
+    return false;
+  }
+
+  for (int32_t i = 0; i < c.buffer_count; ++i) {
+    const int32_t target_size = required[i] > c.committed_sizes[i] ? required[i] : c.committed_sizes[i];
+    if (target_size <= 0) {
+      continue;
+    }
+
+    const bool missing_binding = c.committed_chunk_ids[i] < 0;
+    const bool undersized_binding = c.committed_chunk_sizes[i] < static_cast<uint64_t>(target_size);
+    if (!missing_binding && !undersized_binding) {
+      continue;
+    }
+
+    int32_t new_chunk = -1;
+    uint64_t new_offset = 0;
+    uint64_t new_size = 0;
+    int32_t alloc_error = EMEL_OK;
+    if (!chunk_allocator_sm->process_event(emel::buffer::chunk_allocator::event::allocate{
+          .size = static_cast<uint64_t>(target_size),
+          .chunk_out = &new_chunk,
+          .offset_out = &new_offset,
+          .aligned_size_out = &new_size,
+          .error_out = &alloc_error,
+        }) ||
+        alloc_error != EMEL_OK) {
+      out_error = normalize_error(alloc_error, EMEL_ERR_BACKEND);
+      return false;
+    }
+
+    if (c.committed_chunk_ids[i] >= 0 && c.committed_chunk_sizes[i] > 0) {
+      int32_t release_error = EMEL_OK;
+      if (!chunk_allocator_sm->process_event(emel::buffer::chunk_allocator::event::release{
+            .chunk = c.committed_chunk_ids[i],
+            .offset = c.committed_chunk_offsets[i],
+            .size = c.committed_chunk_sizes[i],
+            .error_out = &release_error,
+          }) ||
+          release_error != EMEL_OK) {
+        out_error = normalize_error(release_error, EMEL_ERR_BACKEND);
+        return false;
+      }
+    }
+
+    c.committed_chunk_ids[i] = new_chunk;
+    c.committed_chunk_offsets[i] = new_offset;
+    c.committed_chunk_sizes[i] = new_size;
+  }
+
+  commit_sizes(c.committed_sizes, required, c.buffer_count);
+  out_error = EMEL_OK;
+  return true;
+}
+
+inline bool release_all_chunk_bindings(
+    context & c, emel::buffer::chunk_allocator::sm * chunk_allocator_sm, int32_t & out_error) noexcept {
+  if (chunk_allocator_sm == nullptr) {
+    out_error = EMEL_ERR_INVALID_ARGUMENT;
+    return false;
+  }
+
+  for (int32_t i = 0; i < c.buffer_count; ++i) {
+    if (c.committed_chunk_ids[i] < 0 || c.committed_chunk_sizes[i] == 0) {
+      continue;
+    }
+    int32_t release_error = EMEL_OK;
+    if (!chunk_allocator_sm->process_event(emel::buffer::chunk_allocator::event::release{
+          .chunk = c.committed_chunk_ids[i],
+          .offset = c.committed_chunk_offsets[i],
+          .size = c.committed_chunk_sizes[i],
+          .error_out = &release_error,
+        }) ||
+        release_error != EMEL_OK) {
+      out_error = normalize_error(release_error, EMEL_ERR_BACKEND);
+      return false;
+    }
+    c.committed_chunk_ids[i] = -1;
+    c.committed_chunk_offsets[i] = 0;
+    c.committed_chunk_sizes[i] = 0;
+  }
+
+  int32_t reset_error = EMEL_OK;
+  if (!chunk_allocator_sm->process_event(emel::buffer::chunk_allocator::event::reset{
+        .error_out = &reset_error,
+      }) ||
+      reset_error != EMEL_OK) {
+    out_error = normalize_error(reset_error, EMEL_ERR_BACKEND);
+    return false;
+  }
+
+  out_error = EMEL_OK;
+  return true;
+}
+
 }  // namespace detail
 
 struct begin_initialize {
@@ -324,6 +485,11 @@ struct begin_initialize {
     if (c.pending_error == EMEL_OK) {
       c = {};
       c.buffer_count = ev.buffer_count;
+      detail::reset_chunk_bindings(c);
+      int32_t chunk_error = EMEL_OK;
+      if (!detail::configure_chunk_allocator(ev.chunk_allocator_sm, chunk_error)) {
+        c.pending_error = chunk_error;
+      }
     }
     c.step += 1;
   }
@@ -407,7 +573,11 @@ struct begin_reserve_n {
       c.step += 1;
       return;
     }
-    detail::commit_sizes(c.committed_sizes, required, c.buffer_count);
+    if (!detail::apply_required_sizes_to_chunks(c, required, ev.chunk_allocator_sm, err)) {
+      c.pending_error = err;
+      c.step += 1;
+      return;
+    }
     c.pending_error = EMEL_OK;
     c.step += 1;
   }
@@ -435,7 +605,11 @@ struct begin_reserve {
       c.step += 1;
       return;
     }
-    detail::commit_sizes(c.committed_sizes, required, c.buffer_count);
+    if (!detail::apply_required_sizes_to_chunks(c, required, ev.chunk_allocator_sm, err)) {
+      c.pending_error = err;
+      c.step += 1;
+      return;
+    }
     c.pending_error = EMEL_OK;
     c.step += 1;
   }
@@ -496,13 +670,20 @@ struct begin_alloc_graph {
       return;
     }
 
-    if (detail::requires_growth(c.committed_sizes, required, c.buffer_count)) {
+    const bool needs_growth = detail::requires_growth(c.committed_sizes, required, c.buffer_count);
+    const bool missing_chunk_bindings =
+        !detail::chunk_bindings_cover_required(c, required, c.buffer_count);
+    if (needs_growth || missing_chunk_bindings) {
       if (c.buffer_count > 1) {
         c.pending_error = EMEL_ERR_BACKEND;
         c.step += 1;
         return;
       }
-      detail::commit_sizes(c.committed_sizes, required, c.buffer_count);
+      if (!detail::apply_required_sizes_to_chunks(c, required, ev.chunk_allocator_sm, err)) {
+        c.pending_error = err;
+        c.step += 1;
+        return;
+      }
     }
 
     c.pending_error = EMEL_OK;
@@ -526,7 +707,13 @@ struct on_alloc_graph_error {
 };
 
 struct begin_release {
-  void operator()(const event::release &, context & c) const noexcept {
+  void operator()(const event::release & ev, context & c) const noexcept {
+    int32_t err = EMEL_OK;
+    if (!detail::release_all_chunk_bindings(c, ev.chunk_allocator_sm, err)) {
+      c.pending_error = err;
+      c.step += 1;
+      return;
+    }
     c.pending_error = EMEL_OK;
     c.step += 1;
   }

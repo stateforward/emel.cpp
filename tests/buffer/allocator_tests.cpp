@@ -234,6 +234,9 @@ TEST_CASE("buffer_allocator_starts_uninitialized") {
   int state_count = 0;
   machine.visit_current_states([&](auto) { state_count += 1; });
   CHECK(state_count == 1);
+  CHECK(machine.get_buffer_chunk_id(-1) == -1);
+  CHECK(machine.get_buffer_chunk_offset(-1) == 0);
+  CHECK(machine.get_buffer_alloc_size(-1) == 0);
 }
 
 TEST_CASE("buffer_allocator_rejects_invalid_initialize") {
@@ -470,6 +473,9 @@ TEST_CASE("buffer_allocator_release_resets_allocator") {
   CHECK(machine.get_buffer_size(0) > 0);
   CHECK(machine.process_event(emel::buffer::allocator::event::release{}));
   CHECK(machine.get_buffer_size(0) == 0);
+  CHECK(machine.get_buffer_chunk_id(0) == -1);
+  CHECK(machine.get_buffer_alloc_size(0) == 0);
+  CHECK(machine.chunk_count() == 0);
 }
 
 TEST_CASE("buffer_allocator_reserve_n_size_rejects_output_count_mismatch") {
@@ -485,4 +491,63 @@ TEST_CASE("buffer_allocator_reserve_n_size_rejects_output_count_mismatch") {
     .sizes_out = sizes.data(),
     .sizes_out_count = static_cast<int32_t>(sizes.size()),
   }));
+}
+
+TEST_CASE("buffer_allocator_chunk_placement_tracks_reserved_bytes") {
+  emel::buffer::allocator::sm machine{};
+  initialize_ready(machine, 1);
+
+  const graph_storage small = make_chain_graph(64, 128, 128);
+  const graph_storage large = make_chain_graph(64, 768, 1536);
+  std::array<int32_t, 1> sizes = {{0}};
+
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve_n_size{
+    .graph = as_view(small),
+    .node_buffer_ids = nullptr,
+    .leaf_buffer_ids = nullptr,
+    .sizes_out = sizes.data(),
+    .sizes_out_count = static_cast<int32_t>(sizes.size()),
+  }));
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve{
+    .graph = as_view(small),
+  }));
+
+  const int32_t first_chunk = machine.get_buffer_chunk_id(0);
+  const uint64_t first_offset = machine.get_buffer_chunk_offset(0);
+  const uint64_t first_alloc = machine.get_buffer_alloc_size(0);
+  CHECK(first_chunk >= 0);
+  CHECK(first_alloc >= static_cast<uint64_t>(machine.get_buffer_size(0)));
+
+  CHECK(machine.process_event(emel::buffer::allocator::event::alloc_graph{
+    .graph = as_view(large),
+  }));
+  CHECK(machine.get_buffer_size(0) > sizes[0]);
+  CHECK(machine.get_buffer_chunk_id(0) >= 0);
+  CHECK(machine.get_buffer_alloc_size(0) >= static_cast<uint64_t>(machine.get_buffer_size(0)));
+  const bool remapped_or_grown =
+      machine.get_buffer_alloc_size(0) > first_alloc || machine.get_buffer_chunk_id(0) != first_chunk ||
+      machine.get_buffer_chunk_offset(0) != first_offset;
+  CHECK(remapped_or_grown);
+}
+
+TEST_CASE("buffer_allocator_multi_buffer_reserve_assigns_chunk_bindings") {
+  emel::buffer::allocator::sm machine{};
+  initialize_ready(machine, 2);
+
+  const graph_storage g = make_chain_graph(128, 256, 512);
+  const std::array<int32_t, 2> node_ids = {{0, 1}};
+  const std::array<int32_t, 1> leaf_ids = {{1}};
+
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve_n{
+    .graph = as_view(g),
+    .node_buffer_ids = node_ids.data(),
+    .leaf_buffer_ids = leaf_ids.data(),
+  }));
+
+  CHECK(machine.get_buffer_size(0) > 0);
+  CHECK(machine.get_buffer_size(1) > 0);
+  CHECK(machine.get_buffer_chunk_id(0) >= 0);
+  CHECK(machine.get_buffer_chunk_id(1) >= 0);
+  CHECK(machine.get_buffer_alloc_size(0) >= static_cast<uint64_t>(machine.get_buffer_size(0)));
+  CHECK(machine.get_buffer_alloc_size(1) >= static_cast<uint64_t>(machine.get_buffer_size(1)));
 }

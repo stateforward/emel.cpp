@@ -1,43 +1,37 @@
 @startuml
 
 [*] --> idle
-idle --> validating : emel::tensor_allocator::event::allocate_tensors
-validating --> validating : emel::tensor_allocator::event::validate
-validating --> scanning_tensors : emel::tensor_allocator::events::validate_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::no_error>]
-validating --> failed : emel::tensor_allocator::events::validate_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::has_error>]
-validating --> failed : emel::tensor_allocator::events::validate_error
-scanning_tensors --> scanning_tensors : emel::tensor_allocator::event::scan_tensors
-scanning_tensors --> partitioning_ranges : emel::tensor_allocator::events::scan_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::no_error>]
-scanning_tensors --> failed : emel::tensor_allocator::events::scan_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::has_error>]
-scanning_tensors --> failed : emel::tensor_allocator::events::scan_error
-partitioning_ranges --> partitioning_ranges : emel::tensor_allocator::event::partition_ranges
-partitioning_ranges --> allocating_ranges : emel::tensor_allocator::events::partition_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::no_error>]
-partitioning_ranges --> failed : emel::tensor_allocator::events::partition_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::has_error>]
-partitioning_ranges --> failed : emel::tensor_allocator::events::partition_error
-allocating_ranges --> allocating_ranges : emel::tensor_allocator::event::allocate_ranges
-allocating_ranges --> initializing_tensors : emel::tensor_allocator::events::allocate_ranges_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::no_error>]
-allocating_ranges --> failed : emel::tensor_allocator::events::allocate_ranges_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::has_error>]
-allocating_ranges --> failed : emel::tensor_allocator::events::allocate_ranges_error
-initializing_tensors --> initializing_tensors : emel::tensor_allocator::event::initialize_tensors
-initializing_tensors --> assembling_result : emel::tensor_allocator::events::initialize_tensors_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::no_error>]
-initializing_tensors --> failed : emel::tensor_allocator::events::initialize_tensors_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::has_error>]
-initializing_tensors --> failed : emel::tensor_allocator::events::initialize_tensors_error
-assembling_result --> assembling_result : emel::tensor_allocator::event::assemble
-assembling_result --> done : emel::tensor_allocator::events::assemble_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::no_error>]
-assembling_result --> failed : emel::tensor_allocator::events::assemble_done\n [boost::sml::aux::zero_wrapper<emel::tensor_allocator::guard::has_error>]
-assembling_result --> failed : emel::tensor_allocator::events::assemble_error
-done --> idle : emel::tensor_allocator::events::allocate_done
-failed --> idle : emel::tensor_allocator::events::allocate_error
-idle --> releasing : emel::tensor_allocator::event::release
-validating --> releasing : emel::tensor_allocator::event::release
-scanning_tensors --> releasing : emel::tensor_allocator::event::release
-partitioning_ranges --> releasing : emel::tensor_allocator::event::release
-allocating_ranges --> releasing : emel::tensor_allocator::event::release
-initializing_tensors --> releasing : emel::tensor_allocator::event::release
-assembling_result --> releasing : emel::tensor_allocator::event::release
-done --> releasing : emel::tensor_allocator::event::release
-failed --> releasing : emel::tensor_allocator::event::release
-releasing --> idle : emel::tensor_allocator::events::release_done
-releasing --> failed : emel::tensor_allocator::events::release_error
+idle --> validating : emel::tensor::allocator::event::allocate_tensors
+validating --> validating : emel::tensor::allocator::event::validate
+validating --> scanning_tensors : emel::tensor::allocator::events::validate_done
+validating --> failed : emel::tensor::allocator::events::validate_error
+scanning_tensors --> scanning_tensors : emel::tensor::allocator::event::scan_tensors
+scanning_tensors --> partitioning_ranges : emel::tensor::allocator::events::scan_done
+scanning_tensors --> failed : emel::tensor::allocator::events::scan_error
+partitioning_ranges --> partitioning_ranges : emel::tensor::allocator::event::partition_ranges
+partitioning_ranges --> allocating_ranges : emel::tensor::allocator::events::partition_done
+partitioning_ranges --> failed : emel::tensor::allocator::events::partition_error
+allocating_ranges --> allocating_ranges : emel::tensor::allocator::event::allocate_ranges
+allocating_ranges --> initializing_tensors : emel::tensor::allocator::events::allocate_ranges_done
+allocating_ranges --> failed : emel::tensor::allocator::events::allocate_ranges_error
+initializing_tensors --> initializing_tensors : emel::tensor::allocator::event::initialize_tensors
+initializing_tensors --> assembling_result : emel::tensor::allocator::events::initialize_tensors_done
+initializing_tensors --> failed : emel::tensor::allocator::events::initialize_tensors_error
+assembling_result --> assembling_result : emel::tensor::allocator::event::assemble
+assembling_result --> done : emel::tensor::allocator::events::assemble_done
+assembling_result --> failed : emel::tensor::allocator::events::assemble_error
+done --> idle : emel::tensor::allocator::events::allocate_done
+failed --> idle : emel::tensor::allocator::events::allocate_error
+idle --> releasing : emel::tensor::allocator::event::release
+validating --> releasing : emel::tensor::allocator::event::release
+scanning_tensors --> releasing : emel::tensor::allocator::event::release
+partitioning_ranges --> releasing : emel::tensor::allocator::event::release
+allocating_ranges --> releasing : emel::tensor::allocator::event::release
+initializing_tensors --> releasing : emel::tensor::allocator::event::release
+assembling_result --> releasing : emel::tensor::allocator::event::release
+done --> releasing : emel::tensor::allocator::event::release
+failed --> releasing : emel::tensor::allocator::event::release
+releasing --> idle : emel::tensor::allocator::events::release_done
+releasing --> failed : emel::tensor::allocator::events::release_error
 
 @enduml
