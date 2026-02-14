@@ -621,4 +621,109 @@ TEST_CASE("buffer_chunk_allocator_select_best_last_prefers_tighter_reuse") {
   CHECK(c.selected_block == 0);
 }
 
+TEST_CASE("buffer_chunk_allocator_prefers_non_last_block_over_last_block_growth") {
+  emel::buffer::chunk_allocator::sm machine{};
+  int32_t error = EMEL_OK;
+
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::configure{
+    .alignment = 16,
+    .max_chunk_size = 128,
+    .error_out = &error,
+  }));
+  CHECK(error == EMEL_OK);
+
+  int32_t chunk = -1;
+  uint64_t a0 = 0;
+  uint64_t a1 = 0;
+  uint64_t a2 = 0;
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::allocate{
+    .size = 32,
+    .chunk_out = &chunk,
+    .offset_out = &a0,
+    .error_out = &error,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::allocate{
+    .size = 32,
+    .chunk_out = &chunk,
+    .offset_out = &a1,
+    .error_out = &error,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::allocate{
+    .size = 32,
+    .chunk_out = &chunk,
+    .offset_out = &a2,
+    .error_out = &error,
+  }));
+
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::release{
+    .chunk = 0,
+    .offset = a1,
+    .size = 32,
+    .error_out = &error,
+  }));
+  CHECK(error == EMEL_OK);
+
+  uint64_t reused = 0;
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::allocate{
+    .size = 24,
+    .chunk_out = &chunk,
+    .offset_out = &reused,
+    .error_out = &error,
+  }));
+  CHECK(error == EMEL_OK);
+  CHECK(chunk == 0);
+  CHECK(reused == a1);
+}
+
+TEST_CASE("buffer_chunk_allocator_last_block_reuse_factor_negative_prefers_least_growth") {
+  emel::buffer::chunk_allocator::sm machine{};
+  int32_t error = EMEL_OK;
+
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::configure{
+    .alignment = 16,
+    .max_chunk_size = 64,
+    .error_out = &error,
+  }));
+  CHECK(error == EMEL_OK);
+
+  int32_t chunk = -1;
+  uint64_t offset = 0;
+
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::allocate{
+    .size = 48,
+    .chunk_out = &chunk,
+    .offset_out = &offset,
+    .error_out = &error,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::allocate{
+    .size = 32,
+    .chunk_out = &chunk,
+    .offset_out = &offset,
+    .error_out = &error,
+  }));
+
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::release{
+    .chunk = 0,
+    .offset = 0,
+    .size = 48,
+    .error_out = &error,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::release{
+    .chunk = 1,
+    .offset = 0,
+    .size = 32,
+    .error_out = &error,
+  }));
+
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::event::allocate{
+    .size = 64,
+    .chunk_out = &chunk,
+    .offset_out = &offset,
+    .error_out = &error,
+  }));
+  CHECK(error == EMEL_OK);
+  CHECK(chunk == 0);
+  CHECK(offset == 0);
+}
+
 }  // namespace
