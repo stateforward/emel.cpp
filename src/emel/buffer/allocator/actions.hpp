@@ -4,12 +4,12 @@
 #include <cstdint>
 #include <limits>
 
-#include "emel/buffer_allocator/events.hpp"
-#include "emel/buffer_planner/events.hpp"
-#include "emel/buffer_planner/sm.hpp"
+#include "emel/buffer/allocator/events.hpp"
+#include "emel/buffer/planner/events.hpp"
+#include "emel/buffer/planner/sm.hpp"
 #include "emel/emel.h"
 
-namespace emel::buffer_allocator::action {
+namespace emel::buffer::allocator::action {
 
 inline constexpr int32_t k_max_buffers = 16;
 inline constexpr int32_t k_max_graph_tensors = 1024;
@@ -246,10 +246,10 @@ inline bool valid_buffer_ids_for_graph(
 }
 
 inline bool run_planner(
-    emel::buffer_planner::sm * planner, const event::graph_view & graph,
+    emel::buffer::planner::sm * planner, const event::graph_view & graph,
     const int32_t * node_buffer_ids, const int32_t * leaf_buffer_ids, const int32_t buffer_count,
     const bool size_only, int32_t * sizes_out, const int32_t sizes_out_count,
-    const emel::buffer_planner::strategy * planner_strategy,
+    const emel::buffer::planner::strategy * planner_strategy,
     int32_t & out_error) noexcept {
   if (planner == nullptr) {
     out_error = EMEL_ERR_INVALID_ARGUMENT;
@@ -257,7 +257,7 @@ inline bool run_planner(
   }
 
   int32_t planner_error = EMEL_OK;
-  const bool ok = planner->process_event(emel::buffer_planner::event::plan{
+  const bool ok = planner->process_event(emel::buffer::planner::event::plan{
     .graph = graph,
     .node_buffer_ids = node_buffer_ids,
     .leaf_buffer_ids = leaf_buffer_ids,
@@ -566,4 +566,4 @@ inline constexpr begin_release begin_release{};
 inline constexpr on_release_done on_release_done{};
 inline constexpr on_release_error on_release_error{};
 
-}  // namespace emel::buffer_allocator::action
+}  // namespace emel::buffer::allocator::action

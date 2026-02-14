@@ -3,15 +3,15 @@
 #include <cstdint>
 #include <doctest/doctest.h>
 
-#include "emel/buffer_allocator/events.hpp"
-#include "emel/buffer_planner/guards.hpp"
-#include "emel/buffer_planner/sm.hpp"
+#include "emel/buffer/allocator/events.hpp"
+#include "emel/buffer/planner/guards.hpp"
+#include "emel/buffer/planner/sm.hpp"
 #include "emel/emel.h"
 
 namespace {
 
-using tensor_desc = emel::buffer_allocator::event::tensor_desc;
-using graph_view = emel::buffer_allocator::event::graph_view;
+using tensor_desc = emel::buffer::allocator::event::tensor_desc;
+using graph_view = emel::buffer::allocator::event::graph_view;
 
 struct graph_storage {
   std::array<tensor_desc, 6> nodes = {};
@@ -206,19 +206,19 @@ graph_view as_view(const graph_storage & g) {
 }  // namespace
 
 TEST_CASE("buffer_planner_starts_idle") {
-  emel::buffer_planner::sm planner{};
+  emel::buffer::planner::sm planner{};
   int state_count = 0;
   planner.visit_current_states([&](auto) { state_count += 1; });
   CHECK(state_count == 1);
 }
 
 TEST_CASE("buffer_planner_plans_sizes_successfully") {
-  emel::buffer_planner::sm planner{};
+  emel::buffer::planner::sm planner{};
   const graph_storage g = make_valid_graph();
   std::array<int32_t, 1> sizes = {{0}};
   int32_t error_code = -1;
 
-  CHECK(planner.process_event(emel::buffer_planner::event::plan{
+  CHECK(planner.process_event(emel::buffer::planner::event::plan{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -234,12 +234,12 @@ TEST_CASE("buffer_planner_plans_sizes_successfully") {
 }
 
 TEST_CASE("buffer_planner_reports_invalid_arguments") {
-  emel::buffer_planner::sm planner{};
+  emel::buffer::planner::sm planner{};
   const graph_storage g = make_valid_graph();
   std::array<int32_t, 1> sizes = {{0}};
   int32_t error_code = 0;
 
-  CHECK_FALSE(planner.process_event(emel::buffer_planner::event::plan{
+  CHECK_FALSE(planner.process_event(emel::buffer::planner::event::plan{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -251,7 +251,7 @@ TEST_CASE("buffer_planner_reports_invalid_arguments") {
   }));
   CHECK(error_code == EMEL_ERR_INVALID_ARGUMENT);
 
-  CHECK_FALSE(planner.process_event(emel::buffer_planner::event::plan{
+  CHECK_FALSE(planner.process_event(emel::buffer::planner::event::plan{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -265,12 +265,12 @@ TEST_CASE("buffer_planner_reports_invalid_arguments") {
 }
 
 TEST_CASE("buffer_planner_reports_invalid_sources") {
-  emel::buffer_planner::sm planner{};
+  emel::buffer::planner::sm planner{};
   const graph_storage g = make_invalid_source_graph();
   std::array<int32_t, 1> sizes = {{0}};
   int32_t error_code = 0;
 
-  CHECK_FALSE(planner.process_event(emel::buffer_planner::event::plan{
+  CHECK_FALSE(planner.process_event(emel::buffer::planner::event::plan{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -284,12 +284,12 @@ TEST_CASE("buffer_planner_reports_invalid_sources") {
 }
 
 TEST_CASE("buffer_planner_reuses_parent_storage_for_inplace_chain") {
-  emel::buffer_planner::sm planner{};
+  emel::buffer::planner::sm planner{};
   const graph_storage g = make_inplace_reuse_graph();
   std::array<int32_t, 1> sizes = {{0}};
   int32_t error_code = 0;
 
-  CHECK(planner.process_event(emel::buffer_planner::event::plan{
+  CHECK(planner.process_event(emel::buffer::planner::event::plan{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -304,12 +304,12 @@ TEST_CASE("buffer_planner_reuses_parent_storage_for_inplace_chain") {
 }
 
 TEST_CASE("buffer_planner_prefers_freed_blocks_over_growth") {
-  emel::buffer_planner::sm planner{};
+  emel::buffer::planner::sm planner{};
   const graph_storage g = make_prefer_freed_block_graph();
   std::array<int32_t, 1> sizes = {{0}};
   int32_t error_code = 0;
 
-  CHECK(planner.process_event(emel::buffer_planner::event::plan{
+  CHECK(planner.process_event(emel::buffer::planner::event::plan{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -324,12 +324,12 @@ TEST_CASE("buffer_planner_prefers_freed_blocks_over_growth") {
 }
 
 TEST_CASE("buffer_planner_handles_view_parent_inplace_reuse") {
-  emel::buffer_planner::sm planner{};
+  emel::buffer::planner::sm planner{};
   const graph_storage g = make_view_inplace_graph();
   std::array<int32_t, 1> sizes = {{0}};
   int32_t error_code = 0;
 
-  CHECK(planner.process_event(emel::buffer_planner::event::plan{
+  CHECK(planner.process_event(emel::buffer::planner::event::plan{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -344,14 +344,14 @@ TEST_CASE("buffer_planner_handles_view_parent_inplace_reuse") {
 }
 
 TEST_CASE("buffer_planner_reports_zero_for_unused_secondary_buffer") {
-  emel::buffer_planner::sm planner{};
+  emel::buffer::planner::sm planner{};
   const graph_storage g = make_valid_graph();
   const std::array<int32_t, 2> node_ids = {{0, 0}};
   const std::array<int32_t, 1> leaf_ids = {{0}};
   std::array<int32_t, 2> sizes = {{0, 0}};
   int32_t error_code = 0;
 
-  CHECK(planner.process_event(emel::buffer_planner::event::plan{
+  CHECK(planner.process_event(emel::buffer::planner::event::plan{
     .graph = as_view(g),
     .node_buffer_ids = node_ids.data(),
     .leaf_buffer_ids = leaf_ids.data(),
@@ -367,22 +367,22 @@ TEST_CASE("buffer_planner_reports_zero_for_unused_secondary_buffer") {
 }
 
 TEST_CASE("buffer_planner_guards_reflect_pending_error") {
-  emel::buffer_planner::action::context ctx{};
-  emel::buffer_planner::event::reset_done ev{};
+  emel::buffer::planner::action::context ctx{};
+  emel::buffer::planner::event::reset_done ev{};
 
-  CHECK(emel::buffer_planner::guard::no_error{}(ev, ctx));
-  CHECK_FALSE(emel::buffer_planner::guard::has_error{}(ev, ctx));
+  CHECK(emel::buffer::planner::guard::no_error{}(ev, ctx));
+  CHECK_FALSE(emel::buffer::planner::guard::has_error{}(ev, ctx));
 
   ctx.pending_error = EMEL_ERR_BACKEND;
-  CHECK_FALSE(emel::buffer_planner::guard::no_error{}(ev, ctx));
-  CHECK(emel::buffer_planner::guard::has_error{}(ev, ctx));
+  CHECK_FALSE(emel::buffer::planner::guard::no_error{}(ev, ctx));
+  CHECK(emel::buffer::planner::guard::has_error{}(ev, ctx));
 }
 
 TEST_CASE("buffer_planner_testing_sm_can_target_error_and_recovery_paths") {
-  emel::buffer_planner::action::context ctx{};
-  boost::sml::sm<emel::buffer_planner::model, boost::sml::testing> machine{ctx};
+  emel::buffer::planner::action::context ctx{};
+  boost::sml::sm<emel::buffer::planner::model, boost::sml::testing> machine{ctx};
 
-  const emel::buffer_planner::event::plan plan_event{
+  const emel::buffer::planner::event::plan plan_event{
     .graph = graph_view{},
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -394,19 +394,19 @@ TEST_CASE("buffer_planner_testing_sm_can_target_error_and_recovery_paths") {
   };
 
   CHECK(machine.process_event(plan_event));
-  CHECK(machine.process_event(emel::buffer_planner::event::reset_done{}));
-  CHECK(machine.process_event(emel::buffer_planner::event::seed_leafs_done{}));
-  CHECK(machine.process_event(emel::buffer_planner::event::count_references_done{}));
-  CHECK(machine.process_event(emel::buffer_planner::event::alloc_explicit_inputs_done{}));
-  CHECK(machine.process_event(emel::buffer_planner::event::plan_nodes_done{}));
-  CHECK(machine.process_event(emel::buffer_planner::event::release_expired_done{}));
-  CHECK(machine.process_event(emel::buffer_planner::event::finalize_done{}));
-  CHECK(machine.process_event(emel::buffer_planner::events::plan_done{}));
+  CHECK(machine.process_event(emel::buffer::planner::event::reset_done{}));
+  CHECK(machine.process_event(emel::buffer::planner::event::seed_leafs_done{}));
+  CHECK(machine.process_event(emel::buffer::planner::event::count_references_done{}));
+  CHECK(machine.process_event(emel::buffer::planner::event::alloc_explicit_inputs_done{}));
+  CHECK(machine.process_event(emel::buffer::planner::event::plan_nodes_done{}));
+  CHECK(machine.process_event(emel::buffer::planner::event::release_expired_done{}));
+  CHECK(machine.process_event(emel::buffer::planner::event::finalize_done{}));
+  CHECK(machine.process_event(emel::buffer::planner::events::plan_done{}));
 
   CHECK(machine.process_event(plan_event));
   ctx.pending_error = EMEL_ERR_BACKEND;
-  CHECK(machine.process_event(emel::buffer_planner::event::reset_done{}));
-  CHECK(machine.process_event(emel::buffer_planner::events::plan_error{
+  CHECK(machine.process_event(emel::buffer::planner::event::reset_done{}));
+  CHECK(machine.process_event(emel::buffer::planner::events::plan_error{
     .err = EMEL_ERR_BACKEND,
   }));
 }

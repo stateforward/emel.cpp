@@ -117,7 +117,7 @@ CPP
   for h in "${sm_headers[@]}"; do
     rel="${h#"$ROOT_DIR/src/emel/"}"
     dir="${rel%/sm.hpp}"
-    name="${dir##*/}"
+    name="${dir//\//_}"
     type="emel::${dir//\//::}::model"
     echo "  { std::ofstream f(out_dir + \"/$name.puml\"); dump_model<$type>(f); }"
   done
@@ -140,7 +140,7 @@ if [[ "${1:-}" == "--check" ]]; then
   for h in "${sm_headers[@]}"; do
     rel="${h#"$ROOT_DIR/src/emel/"}"
     dir="${rel%/sm.hpp}"
-    name="${dir##*/}"
+    name="${dir//\//_}"
     if [[ ! -f "$OUT_DIR/$name.puml" ]]; then
       echo "error: missing $OUT_DIR/$name.puml" >&2
       exit 1
@@ -156,7 +156,7 @@ fi
 for h in "${sm_headers[@]}"; do
   rel="${h#"$ROOT_DIR/src/emel/"}"
   dir="${rel%/sm.hpp}"
-  name="${dir##*/}"
+  name="${dir//\//_}"
   cp "$GEN_DIR/$name.puml" "$OUT_DIR/$name.puml"
   echo "updated: $OUT_DIR/$name.puml"
 done

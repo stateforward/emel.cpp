@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
-namespace emel::buffer_allocator {
+namespace emel::buffer::allocator {
 struct sm;
-}  // namespace emel::buffer_allocator
+}  // namespace emel::buffer::allocator
 
 namespace emel::model::loader {
 struct sm;
@@ -19,7 +19,7 @@ struct load_weights {
   bool no_alloc = false;
   bool mmap_supported = true;
   bool direct_io_supported = false;
-  emel::buffer_allocator::sm * buffer_allocator_sm = nullptr;
+  emel::buffer::allocator::sm * buffer_allocator_sm = nullptr;
   emel::model::loader::sm * model_loader_sm = nullptr;
 };
 

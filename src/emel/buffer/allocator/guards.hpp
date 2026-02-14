@@ -1,9 +1,9 @@
 #pragma once
 
-#include "emel/buffer_allocator/actions.hpp"
-#include "emel/buffer_allocator/events.hpp"
+#include "emel/buffer/allocator/actions.hpp"
+#include "emel/buffer/allocator/events.hpp"
 
-namespace emel::buffer_allocator::guard {
+namespace emel::buffer::allocator::guard {
 
 struct valid_initialize {
   bool operator()(const event::initialize & ev) const noexcept {
@@ -41,4 +41,4 @@ struct can_alloc_graph {
   }
 };
 
-}  // namespace emel::buffer_allocator::guard
+}  // namespace emel::buffer::allocator::guard

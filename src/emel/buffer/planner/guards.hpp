@@ -1,8 +1,8 @@
 #pragma once
 
-#include "emel/buffer_planner/actions.hpp"
+#include "emel/buffer/planner/actions.hpp"
 
-namespace emel::buffer_planner::guard {
+namespace emel::buffer::planner::guard {
 
 struct no_error {
   template <class Event>
@@ -18,4 +18,4 @@ struct has_error {
   }
 };
 
-}  // namespace emel::buffer_planner::guard
+}  // namespace emel::buffer::planner::guard

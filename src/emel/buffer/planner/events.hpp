@@ -2,15 +2,15 @@
 
 #include <cstdint>
 
-#include "emel/buffer_allocator/events.hpp"
+#include "emel/buffer/allocator/events.hpp"
 
-namespace emel::buffer_planner {
+namespace emel::buffer::planner {
 struct strategy;
-}  // namespace emel::buffer_planner
+}  // namespace emel::buffer::planner
 
-namespace emel::buffer_planner::event {
+namespace emel::buffer::planner::event {
 
-using graph_view = emel::buffer_allocator::event::graph_view;
+using graph_view = emel::buffer::allocator::event::graph_view;
 
 struct plan {
   graph_view graph = {};
@@ -21,7 +21,7 @@ struct plan {
   int32_t * sizes_out = nullptr;
   int32_t sizes_out_count = 0;
   int32_t * error_out = nullptr;
-  const emel::buffer_planner::strategy * strategy = nullptr;
+  const emel::buffer::planner::strategy * strategy = nullptr;
 };
 
 struct reset_done {};
@@ -59,9 +59,9 @@ struct finalize_error {
   int32_t err = 0;
 };
 
-}  // namespace emel::buffer_planner::event
+}  // namespace emel::buffer::planner::event
 
-namespace emel::buffer_planner::events {
+namespace emel::buffer::planner::events {
 
 struct plan_done {
   int32_t total_bytes = 0;
@@ -73,4 +73,4 @@ struct plan_error {
 
 using bootstrap_event = event::plan;
 
-}  // namespace emel::buffer_planner::events
+}  // namespace emel::buffer::planner::events

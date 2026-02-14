@@ -2,13 +2,13 @@
 
 #include <cstdint>
 
-#include "emel/buffer_allocator/actions.hpp"
-#include "emel/buffer_allocator/events.hpp"
-#include "emel/buffer_allocator/guards.hpp"
-#include "emel/buffer_planner/sm.hpp"
+#include "emel/buffer/allocator/actions.hpp"
+#include "emel/buffer/allocator/events.hpp"
+#include "emel/buffer/allocator/guards.hpp"
+#include "emel/buffer/planner/sm.hpp"
 #include "emel/sm.hpp"
 
-namespace emel::buffer_allocator {
+namespace emel::buffer::allocator {
 
 /*
 Buffer allocator architecture notes (single source of truth)
@@ -165,7 +165,7 @@ struct sm : emel::sm<model> {
     auto wired = ev;
     wired.buffer_planner_sm = &buffer_planner_sm_;
     if (wired.strategy == nullptr) {
-      wired.strategy = &emel::buffer_planner::default_strategies::reserve_n_size;
+      wired.strategy = &emel::buffer::planner::default_strategies::reserve_n_size;
     }
     if (!base_type::process_event(wired)) {
       return false;
@@ -177,7 +177,7 @@ struct sm : emel::sm<model> {
     auto wired = ev;
     wired.buffer_planner_sm = &buffer_planner_sm_;
     if (wired.strategy == nullptr) {
-      wired.strategy = &emel::buffer_planner::default_strategies::reserve_n;
+      wired.strategy = &emel::buffer::planner::default_strategies::reserve_n;
     }
     if (!base_type::process_event(wired)) {
       return false;
@@ -189,7 +189,7 @@ struct sm : emel::sm<model> {
     auto wired = ev;
     wired.buffer_planner_sm = &buffer_planner_sm_;
     if (wired.strategy == nullptr) {
-      wired.strategy = &emel::buffer_planner::default_strategies::reserve;
+      wired.strategy = &emel::buffer::planner::default_strategies::reserve;
     }
     if (!base_type::process_event(wired)) {
       return false;
@@ -201,7 +201,7 @@ struct sm : emel::sm<model> {
     auto wired = ev;
     wired.buffer_planner_sm = &buffer_planner_sm_;
     if (wired.strategy == nullptr) {
-      wired.strategy = &emel::buffer_planner::default_strategies::alloc_graph;
+      wired.strategy = &emel::buffer::planner::default_strategies::alloc_graph;
     }
     if (!base_type::process_event(wired)) {
       return false;
@@ -225,7 +225,7 @@ struct sm : emel::sm<model> {
 
   int32_t last_error() const noexcept { return context_.last_error; }
 
-  emel::buffer_planner::sm & planner_sm() noexcept { return buffer_planner_sm_; }
+  emel::buffer::planner::sm & planner_sm() noexcept { return buffer_planner_sm_; }
 
  private:
   template <class DoneEvent, class ErrorEvent>
@@ -240,7 +240,7 @@ struct sm : emel::sm<model> {
   }
 
   action::context context_{};
-  emel::buffer_planner::sm buffer_planner_sm_{};
+  emel::buffer::planner::sm buffer_planner_sm_{};
 };
 
-}  // namespace emel::buffer_allocator
+}  // namespace emel::buffer::allocator

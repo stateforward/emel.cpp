@@ -2,14 +2,14 @@
 #include <cstdint>
 #include <doctest/doctest.h>
 
-#include "emel/buffer_allocator/actions.hpp"
-#include "emel/buffer_allocator/sm.hpp"
+#include "emel/buffer/allocator/actions.hpp"
+#include "emel/buffer/allocator/sm.hpp"
 #include "emel/emel.h"
 
 namespace {
 
-using tensor_desc = emel::buffer_allocator::event::tensor_desc;
-using graph_view = emel::buffer_allocator::event::graph_view;
+using tensor_desc = emel::buffer::allocator::event::tensor_desc;
+using graph_view = emel::buffer::allocator::event::graph_view;
 
 struct graph_storage {
   std::array<tensor_desc, 1> nodes = {};
@@ -65,29 +65,29 @@ graph_view invalid_view() {
 
 TEST_CASE("buffer_allocator_actions_normalize_error_fallbacks") {
   CHECK(
-    emel::buffer_allocator::action::detail::normalize_error(EMEL_ERR_INVALID_ARGUMENT, EMEL_OK) ==
+    emel::buffer::allocator::action::detail::normalize_error(EMEL_ERR_INVALID_ARGUMENT, EMEL_OK) ==
     EMEL_ERR_INVALID_ARGUMENT);
   CHECK(
-    emel::buffer_allocator::action::detail::normalize_error(0, EMEL_ERR_INVALID_ARGUMENT) ==
+    emel::buffer::allocator::action::detail::normalize_error(0, EMEL_ERR_INVALID_ARGUMENT) ==
     EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(emel::buffer_allocator::action::detail::normalize_error(0, 0) == EMEL_ERR_BACKEND);
+  CHECK(emel::buffer::allocator::action::detail::normalize_error(0, 0) == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("buffer_allocator_actions_error_handlers_set_backend_fallback") {
-  emel::buffer_allocator::action::context ctx{};
+  emel::buffer::allocator::action::context ctx{};
 
-  emel::buffer_allocator::action::on_initialize_error(
-    emel::buffer_allocator::events::initialize_error{.err = 0}, ctx);
+  emel::buffer::allocator::action::on_initialize_error(
+    emel::buffer::allocator::events::initialize_error{.err = 0}, ctx);
   CHECK(ctx.last_error == EMEL_ERR_BACKEND);
 
   ctx.pending_error = EMEL_OK;
-  emel::buffer_allocator::action::on_reserve_n_size_error(
-    emel::buffer_allocator::events::reserve_n_size_error{.err = 0}, ctx);
+  emel::buffer::allocator::action::on_reserve_n_size_error(
+    emel::buffer::allocator::events::reserve_n_size_error{.err = 0}, ctx);
   CHECK(ctx.last_error == EMEL_ERR_BACKEND);
 
   ctx.pending_error = EMEL_OK;
-  emel::buffer_allocator::action::on_release_error(
-    emel::buffer_allocator::events::release_error{.err = 0}, ctx);
+  emel::buffer::allocator::action::on_release_error(
+    emel::buffer::allocator::events::release_error{.err = 0}, ctx);
   CHECK(ctx.last_error == EMEL_ERR_BACKEND);
 }
 
@@ -96,10 +96,10 @@ TEST_CASE("buffer_allocator_actions_validate_graph_and_planner_presence") {
   std::array<int32_t, 1> sizes = {{0}};
 
   {
-    emel::buffer_allocator::action::context ctx{};
+    emel::buffer::allocator::action::context ctx{};
     ctx.buffer_count = 1;
-    emel::buffer_allocator::action::begin_reserve_n_size(
-      emel::buffer_allocator::event::reserve_n_size{
+    emel::buffer::allocator::action::begin_reserve_n_size(
+      emel::buffer::allocator::event::reserve_n_size{
         .graph = invalid_view(),
         .node_buffer_ids = nullptr,
         .leaf_buffer_ids = nullptr,
@@ -112,10 +112,10 @@ TEST_CASE("buffer_allocator_actions_validate_graph_and_planner_presence") {
   }
 
   {
-    emel::buffer_allocator::action::context ctx{};
+    emel::buffer::allocator::action::context ctx{};
     ctx.buffer_count = 1;
-    emel::buffer_allocator::action::begin_reserve_n_size(
-      emel::buffer_allocator::event::reserve_n_size{
+    emel::buffer::allocator::action::begin_reserve_n_size(
+      emel::buffer::allocator::event::reserve_n_size{
         .graph = as_view(g),
         .node_buffer_ids = nullptr,
         .leaf_buffer_ids = nullptr,
@@ -128,10 +128,10 @@ TEST_CASE("buffer_allocator_actions_validate_graph_and_planner_presence") {
   }
 
   {
-    emel::buffer_allocator::action::context ctx{};
+    emel::buffer::allocator::action::context ctx{};
     ctx.buffer_count = 1;
-    emel::buffer_allocator::action::begin_reserve_n(
-      emel::buffer_allocator::event::reserve_n{
+    emel::buffer::allocator::action::begin_reserve_n(
+      emel::buffer::allocator::event::reserve_n{
         .graph = invalid_view(),
         .node_buffer_ids = nullptr,
         .leaf_buffer_ids = nullptr,
@@ -142,10 +142,10 @@ TEST_CASE("buffer_allocator_actions_validate_graph_and_planner_presence") {
   }
 
   {
-    emel::buffer_allocator::action::context ctx{};
+    emel::buffer::allocator::action::context ctx{};
     ctx.buffer_count = 1;
-    emel::buffer_allocator::action::begin_reserve_n(
-      emel::buffer_allocator::event::reserve_n{
+    emel::buffer::allocator::action::begin_reserve_n(
+      emel::buffer::allocator::event::reserve_n{
         .graph = as_view(g),
         .node_buffer_ids = nullptr,
         .leaf_buffer_ids = nullptr,
@@ -156,10 +156,10 @@ TEST_CASE("buffer_allocator_actions_validate_graph_and_planner_presence") {
   }
 
   {
-    emel::buffer_allocator::action::context ctx{};
+    emel::buffer::allocator::action::context ctx{};
     ctx.buffer_count = 1;
-    emel::buffer_allocator::action::begin_reserve(
-      emel::buffer_allocator::event::reserve{
+    emel::buffer::allocator::action::begin_reserve(
+      emel::buffer::allocator::event::reserve{
         .graph = invalid_view(),
         .buffer_planner_sm = nullptr,
       },
@@ -168,10 +168,10 @@ TEST_CASE("buffer_allocator_actions_validate_graph_and_planner_presence") {
   }
 
   {
-    emel::buffer_allocator::action::context ctx{};
+    emel::buffer::allocator::action::context ctx{};
     ctx.buffer_count = 1;
-    emel::buffer_allocator::action::begin_reserve(
-      emel::buffer_allocator::event::reserve{
+    emel::buffer::allocator::action::begin_reserve(
+      emel::buffer::allocator::event::reserve{
         .graph = as_view(g),
         .buffer_planner_sm = nullptr,
       },
@@ -180,10 +180,10 @@ TEST_CASE("buffer_allocator_actions_validate_graph_and_planner_presence") {
   }
 
   {
-    emel::buffer_allocator::action::context ctx{};
+    emel::buffer::allocator::action::context ctx{};
     ctx.buffer_count = 1;
-    emel::buffer_allocator::action::begin_alloc_graph(
-      emel::buffer_allocator::event::alloc_graph{
+    emel::buffer::allocator::action::begin_alloc_graph(
+      emel::buffer::allocator::event::alloc_graph{
         .graph = invalid_view(),
         .buffer_planner_sm = nullptr,
       },
@@ -192,10 +192,10 @@ TEST_CASE("buffer_allocator_actions_validate_graph_and_planner_presence") {
   }
 
   {
-    emel::buffer_allocator::action::context ctx{};
+    emel::buffer::allocator::action::context ctx{};
     ctx.buffer_count = 1;
-    emel::buffer_allocator::action::begin_alloc_graph(
-      emel::buffer_allocator::event::alloc_graph{
+    emel::buffer::allocator::action::begin_alloc_graph(
+      emel::buffer::allocator::event::alloc_graph{
         .graph = as_view(g),
         .buffer_planner_sm = nullptr,
       },
@@ -205,18 +205,18 @@ TEST_CASE("buffer_allocator_actions_validate_graph_and_planner_presence") {
 }
 
 TEST_CASE("buffer_allocator_wrapper_rejects_reserve_calls_when_uninitialized") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   const graph_storage g = make_graph();
 
-  CHECK_FALSE(machine.process_event(emel::buffer_allocator::event::reserve_n{
+  CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::reserve_n{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
   }));
-  CHECK_FALSE(machine.process_event(emel::buffer_allocator::event::reserve{
+  CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::reserve{
     .graph = as_view(g),
   }));
-  CHECK_FALSE(machine.process_event(emel::buffer_allocator::event::alloc_graph{
+  CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(g),
   }));
 }

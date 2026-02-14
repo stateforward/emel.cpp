@@ -8,7 +8,7 @@
 #include "emel/model/weight_loader/events.hpp"
 #include "emel/model/weight_loader/guards.hpp"
 #include "emel/sm.hpp"
-#include "emel/buffer_allocator/sm.hpp"
+#include "emel/buffer/allocator/sm.hpp"
 
 namespace emel::model::weight_loader {
 
@@ -152,7 +152,7 @@ struct sm : emel::sm<model> {
   bool check_tensors_ = true;
   bool no_alloc_ = false;
   emel::model::loader::sm * model_loader_sm_ = nullptr;
-  emel::buffer_allocator::sm * buffer_allocator_sm_ = nullptr;
+  emel::buffer::allocator::sm * buffer_allocator_sm_ = nullptr;
 };
 
 namespace test {

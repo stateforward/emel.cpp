@@ -1,11 +1,11 @@
 #pragma once
 
-#include "emel/buffer_planner/actions.hpp"
-#include "emel/buffer_planner/events.hpp"
-#include "emel/buffer_planner/guards.hpp"
+#include "emel/buffer/planner/actions.hpp"
+#include "emel/buffer/planner/events.hpp"
+#include "emel/buffer/planner/guards.hpp"
 #include "emel/sm.hpp"
 
-namespace emel::buffer_planner {
+namespace emel::buffer::planner {
 
 struct model {
   auto operator()() const {
@@ -150,4 +150,4 @@ struct sm : emel::sm<model> {
   action::context context_{};
 };
 
-}  // namespace emel::buffer_planner
+}  // namespace emel::buffer::planner

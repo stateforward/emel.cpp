@@ -3,13 +3,13 @@
 #include <cstdint>
 #include <doctest/doctest.h>
 
-#include "emel/buffer_allocator/sm.hpp"
+#include "emel/buffer/allocator/sm.hpp"
 #include "emel/emel.h"
 
 namespace {
 
-using tensor_desc = emel::buffer_allocator::event::tensor_desc;
-using graph_view = emel::buffer_allocator::event::graph_view;
+using tensor_desc = emel::buffer::allocator::event::tensor_desc;
+using graph_view = emel::buffer::allocator::event::graph_view;
 
 struct graph_storage {
   std::array<tensor_desc, 3> nodes = {};
@@ -27,8 +27,8 @@ graph_view as_view(const graph_storage & g) {
   };
 }
 
-void initialize_ready(emel::buffer_allocator::sm & machine, const int32_t buffers = 1) {
-  CHECK(machine.process_event(emel::buffer_allocator::event::initialize{
+void initialize_ready(emel::buffer::allocator::sm & machine, const int32_t buffers = 1) {
+  CHECK(machine.process_event(emel::buffer::allocator::event::initialize{
     .buffer_count = buffers,
   }));
 }
@@ -230,26 +230,26 @@ graph_storage make_external_input_graph() {
 }  // namespace
 
 TEST_CASE("buffer_allocator_starts_uninitialized") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   int state_count = 0;
   machine.visit_current_states([&](auto) { state_count += 1; });
   CHECK(state_count == 1);
 }
 
 TEST_CASE("buffer_allocator_rejects_invalid_initialize") {
-  emel::buffer_allocator::sm machine{};
-  CHECK_FALSE(machine.process_event(emel::buffer_allocator::event::initialize{
+  emel::buffer::allocator::sm machine{};
+  CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::initialize{
     .buffer_count = 0,
   }));
 }
 
 TEST_CASE("buffer_allocator_reserve_n_size_and_commit_reserve") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 1);
   const graph_storage g = make_chain_graph(256, 512, 768);
 
   std::array<int32_t, 1> sizes = {{0}};
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve_n_size{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve_n_size{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -259,19 +259,19 @@ TEST_CASE("buffer_allocator_reserve_n_size_and_commit_reserve") {
   CHECK(sizes[0] > 0);
   CHECK(machine.get_buffer_size(0) == 0);
 
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve{
     .graph = as_view(g),
   }));
   CHECK(machine.get_buffer_size(0) == sizes[0]);
 }
 
 TEST_CASE("buffer_allocator_alloc_graph_after_reserve_n_size_autocommits_single_buffer") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 1);
   const graph_storage g = make_chain_graph(256, 512, 768);
 
   std::array<int32_t, 1> sizes = {{0}};
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve_n_size{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve_n_size{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -280,19 +280,19 @@ TEST_CASE("buffer_allocator_alloc_graph_after_reserve_n_size_autocommits_single_
   }));
   CHECK(machine.get_buffer_size(0) == 0);
 
-  CHECK(machine.process_event(emel::buffer_allocator::event::alloc_graph{
+  CHECK(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(g),
   }));
   CHECK(machine.get_buffer_size(0) == sizes[0]);
 }
 
 TEST_CASE("buffer_allocator_reuses_parent_storage_for_inplace_chain") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 1);
   const graph_storage g = make_chain_graph(512, 512, 256);
 
   std::array<int32_t, 1> sizes = {{0}};
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve_n_size{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve_n_size{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -303,7 +303,7 @@ TEST_CASE("buffer_allocator_reuses_parent_storage_for_inplace_chain") {
 }
 
 TEST_CASE("buffer_allocator_keeps_view_source_live_until_view_consumed") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 1);
 
   const graph_storage view_graph = make_view_graph();
@@ -312,14 +312,14 @@ TEST_CASE("buffer_allocator_keeps_view_source_live_until_view_consumed") {
   std::array<int32_t, 1> view_sizes = {{0}};
   std::array<int32_t, 1> direct_sizes = {{0}};
 
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve_n_size{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve_n_size{
     .graph = as_view(view_graph),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
     .sizes_out = view_sizes.data(),
     .sizes_out_count = static_cast<int32_t>(view_sizes.size()),
   }));
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve_n_size{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve_n_size{
     .graph = as_view(direct_graph),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -331,29 +331,29 @@ TEST_CASE("buffer_allocator_keeps_view_source_live_until_view_consumed") {
 }
 
 TEST_CASE("buffer_allocator_auto_reallocates_single_buffer_on_alloc_graph") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 1);
 
   const graph_storage small = make_chain_graph(64, 128, 128);
   const graph_storage large = make_chain_graph(64, 1024, 2048);
 
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve{
     .graph = as_view(small),
   }));
   const int32_t before = machine.get_buffer_size(0);
   CHECK(before > 0);
 
-  CHECK(machine.process_event(emel::buffer_allocator::event::alloc_graph{
+  CHECK(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(small),
   }));
-  CHECK(machine.process_event(emel::buffer_allocator::event::alloc_graph{
+  CHECK(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(large),
   }));
   CHECK(machine.get_buffer_size(0) > before);
 }
 
 TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_requires_explicit_reserve") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 2);
 
   const graph_storage small = make_chain_graph(64, 128, 128);
@@ -361,34 +361,34 @@ TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_requires_explicit_reserve")
   const std::array<int32_t, 2> node_ids = {{0, 1}};
   const std::array<int32_t, 1> leaf_ids = {{0}};
 
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve_n{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve_n{
     .graph = as_view(small),
     .node_buffer_ids = node_ids.data(),
     .leaf_buffer_ids = leaf_ids.data(),
   }));
-  CHECK(machine.process_event(emel::buffer_allocator::event::alloc_graph{
+  CHECK(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(small),
   }));
 
-  CHECK_FALSE(machine.process_event(emel::buffer_allocator::event::alloc_graph{
+  CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(large),
   }));
   CHECK(machine.last_error() == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_rejects_unreserved_shape") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 2);
   const graph_storage g = make_chain_graph(64, 128, 128);
 
-  CHECK_FALSE(machine.process_event(emel::buffer_allocator::event::alloc_graph{
+  CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(g),
   }));
   CHECK(machine.last_error() == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_rejects_changed_assignment_snapshot") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 2);
 
   const graph_storage baseline = make_chain_graph(64, 128, 128);
@@ -396,23 +396,23 @@ TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_rejects_changed_assignment_
   const std::array<int32_t, 2> node_ids = {{0, 1}};
   const std::array<int32_t, 1> leaf_ids = {{0}};
 
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve_n{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve_n{
     .graph = as_view(baseline),
     .node_buffer_ids = node_ids.data(),
     .leaf_buffer_ids = leaf_ids.data(),
   }));
-  CHECK(machine.process_event(emel::buffer_allocator::event::alloc_graph{
+  CHECK(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(baseline),
   }));
 
-  CHECK_FALSE(machine.process_event(emel::buffer_allocator::event::alloc_graph{
+  CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(shifted),
   }));
   CHECK(machine.last_error() == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("buffer_allocator_reserve_n_size_tracks_per_buffer_assignments") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 2);
 
   const graph_storage g = make_chain_graph(128, 256, 512);
@@ -420,7 +420,7 @@ TEST_CASE("buffer_allocator_reserve_n_size_tracks_per_buffer_assignments") {
   const std::array<int32_t, 1> leaf_ids = {{1}};
   std::array<int32_t, 2> sizes = {{0, 0}};
 
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve_n_size{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve_n_size{
     .graph = as_view(g),
     .node_buffer_ids = node_ids.data(),
     .leaf_buffer_ids = leaf_ids.data(),
@@ -433,23 +433,23 @@ TEST_CASE("buffer_allocator_reserve_n_size_tracks_per_buffer_assignments") {
 }
 
 TEST_CASE("buffer_allocator_invalid_source_reports_error") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 1);
   const graph_storage g = make_invalid_source_graph();
 
-  CHECK_FALSE(machine.process_event(emel::buffer_allocator::event::reserve{
+  CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::reserve{
     .graph = as_view(g),
   }));
   CHECK(machine.last_error() == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("buffer_allocator_external_input_is_not_reserved") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 1);
   const graph_storage g = make_external_input_graph();
   std::array<int32_t, 1> sizes = {{0}};
 
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve_n_size{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve_n_size{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
@@ -460,25 +460,25 @@ TEST_CASE("buffer_allocator_external_input_is_not_reserved") {
 }
 
 TEST_CASE("buffer_allocator_release_resets_allocator") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 1);
   const graph_storage g = make_chain_graph(128, 256, 256);
 
-  CHECK(machine.process_event(emel::buffer_allocator::event::reserve{
+  CHECK(machine.process_event(emel::buffer::allocator::event::reserve{
     .graph = as_view(g),
   }));
   CHECK(machine.get_buffer_size(0) > 0);
-  CHECK(machine.process_event(emel::buffer_allocator::event::release{}));
+  CHECK(machine.process_event(emel::buffer::allocator::event::release{}));
   CHECK(machine.get_buffer_size(0) == 0);
 }
 
 TEST_CASE("buffer_allocator_reserve_n_size_rejects_output_count_mismatch") {
-  emel::buffer_allocator::sm machine{};
+  emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 2);
   const graph_storage g = make_chain_graph(128, 256, 512);
   std::array<int32_t, 1> sizes = {{0}};
 
-  CHECK_FALSE(machine.process_event(emel::buffer_allocator::event::reserve_n_size{
+  CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::reserve_n_size{
     .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,

@@ -1,10 +1,32 @@
 @startuml
 
-[*] --> initialized
-initialized --> allocating : emel::buffer_allocator::event::allocate_buffer
-allocating --> uploading : emel::buffer_allocator::events::allocation_done
-allocating --> errored : emel::buffer_allocator::events::allocation_error
-uploading --> done : emel::buffer_allocator::events::upload_done
-uploading --> errored : emel::buffer_allocator::events::upload_error
+[*] --> uninitialized
+uninitialized --> initializing : emel::buffer_allocator::event::initialize\n [boost::sml::aux::zero_wrapper<emel::buffer_allocator::guard::valid_initialize>]
+initializing --> ready : emel::buffer_allocator::events::initialize_done
+initializing --> failed : emel::buffer_allocator::events::initialize_error
+ready --> reserving_n_size : emel::buffer_allocator::event::reserve_n_size\n [boost::sml::aux::zero_wrapper<emel::buffer_allocator::guard::can_reserve_n_size>]
+allocated --> reserving_n_size : emel::buffer_allocator::event::reserve_n_size\n [boost::sml::aux::zero_wrapper<emel::buffer_allocator::guard::can_reserve_n_size>]
+reserving_n_size --> ready : emel::buffer_allocator::events::reserve_n_size_done
+reserving_n_size --> failed : emel::buffer_allocator::events::reserve_n_size_error
+ready --> reserving : emel::buffer_allocator::event::reserve_n\n [boost::sml::aux::zero_wrapper<emel::buffer_allocator::guard::can_reserve_n>]
+allocated --> reserving : emel::buffer_allocator::event::reserve_n\n [boost::sml::aux::zero_wrapper<emel::buffer_allocator::guard::can_reserve_n>]
+ready --> reserving : emel::buffer_allocator::event::reserve\n [boost::sml::aux::zero_wrapper<emel::buffer_allocator::guard::can_reserve>]
+allocated --> reserving : emel::buffer_allocator::event::reserve\n [boost::sml::aux::zero_wrapper<emel::buffer_allocator::guard::can_reserve>]
+reserving --> ready : emel::buffer_allocator::events::reserve_done
+reserving --> failed : emel::buffer_allocator::events::reserve_error
+ready --> allocating_graph : emel::buffer_allocator::event::alloc_graph\n [boost::sml::aux::zero_wrapper<emel::buffer_allocator::guard::can_alloc_graph>]
+allocated --> allocating_graph : emel::buffer_allocator::event::alloc_graph\n [boost::sml::aux::zero_wrapper<emel::buffer_allocator::guard::can_alloc_graph>]
+allocating_graph --> allocated : emel::buffer_allocator::events::alloc_graph_done
+allocating_graph --> failed : emel::buffer_allocator::events::alloc_graph_error
+uninitialized --> releasing : emel::buffer_allocator::event::release
+initializing --> releasing : emel::buffer_allocator::event::release
+ready --> releasing : emel::buffer_allocator::event::release
+reserving_n_size --> releasing : emel::buffer_allocator::event::release
+reserving --> releasing : emel::buffer_allocator::event::release
+allocating_graph --> releasing : emel::buffer_allocator::event::release
+allocated --> releasing : emel::buffer_allocator::event::release
+failed --> releasing : emel::buffer_allocator::event::release
+releasing --> uninitialized : emel::buffer_allocator::events::release_done
+releasing --> failed : emel::buffer_allocator::events::release_error
 
 @enduml

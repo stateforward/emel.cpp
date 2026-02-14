@@ -186,7 +186,7 @@ CPP
     rel="${h#"$ROOT_DIR/src/"}"
     rel_emel="${h#"$ROOT_DIR/src/emel/"}"
     dir="${rel_emel%/sm.hpp}"
-    name="${dir##*/}"
+    name="${dir//\//_}"
     type="emel::${dir//\//::}::model"
     echo "  {"
     echo "    std::ofstream md(out_md_dir + \"/$name.md\");"
@@ -213,7 +213,7 @@ if [[ "${1:-}" == "--check" ]]; then
   for h in "${sm_headers[@]}"; do
     rel="${h#"$ROOT_DIR/src/emel/"}"
     dir="${rel%/sm.hpp}"
-    name="${dir##*/}"
+    name="${dir//\//_}"
 
     if [[ ! -f "$OUT_MD_DIR/$name.md" ]]; then
       echo "error: missing $OUT_MD_DIR/$name.md" >&2
@@ -238,7 +238,7 @@ fi
 for h in "${sm_headers[@]}"; do
   rel="${h#"$ROOT_DIR/src/emel/"}"
   dir="${rel%/sm.hpp}"
-  name="${dir##*/}"
+  name="${dir//\//_}"
   cp "$GEN_MD_DIR/$name.md" "$OUT_MD_DIR/$name.md"
   cp "$GEN_MERMAID_DIR/$name.mmd" "$OUT_MERMAID_DIR/$name.mmd"
   echo "updated: $OUT_MD_DIR/$name.md"

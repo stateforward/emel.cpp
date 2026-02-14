@@ -4,14 +4,14 @@
 #include <cstdint>
 #include <limits>
 
-#include "emel/buffer_planner/events.hpp"
+#include "emel/buffer/planner/events.hpp"
 #include "emel/emel.h"
 
-namespace emel::buffer_planner::action {
+namespace emel::buffer::planner::action {
 struct context;
 }
 
-namespace emel::buffer_planner {
+namespace emel::buffer::planner {
 
 struct strategy {
   void (*seed_leafs)(action::context &) noexcept = nullptr;
@@ -22,9 +22,9 @@ struct strategy {
   void (*finalize)(action::context &) noexcept = nullptr;
 };
 
-}  // namespace emel::buffer_planner
+}  // namespace emel::buffer::planner
 
-namespace emel::buffer_planner::action {
+namespace emel::buffer::planner::action {
 
 inline constexpr int32_t k_max_buffers = 16;
 inline constexpr int32_t k_max_tensors = 2048;
@@ -66,7 +66,7 @@ struct context {
   int32_t * sizes_out = nullptr;
   int32_t sizes_out_count = 0;
   int32_t * error_out = nullptr;
-  const emel::buffer_planner::strategy * strategy = nullptr;
+  const emel::buffer::planner::strategy * strategy = nullptr;
 
   std::array<int32_t, k_max_buffers> current_bytes_by_buffer = {};
   std::array<int32_t, k_max_buffers> bytes_by_buffer = {};
@@ -266,12 +266,12 @@ inline const tensor_record * find_record(const context & ctx, const int32_t tens
 }
 
 inline bool can_allocate_tensor(
-    const emel::buffer_allocator::event::tensor_desc & tensor) noexcept {
+    const emel::buffer::allocator::event::tensor_desc & tensor) noexcept {
   return !tensor.has_external_data && !tensor.is_view && tensor.alloc_size > 0;
 }
 
 inline bool register_tensor(
-    context & ctx, const emel::buffer_allocator::event::tensor_desc & tensor) noexcept {
+    context & ctx, const emel::buffer::allocator::event::tensor_desc & tensor) noexcept {
   if (tensor.tensor_id < 0 || tensor.alloc_size < 0) {
     return false;
   }
@@ -371,7 +371,7 @@ inline bool valid_plan_event(const event::plan & ev) noexcept {
   return true;
 }
 
-inline bool valid_strategy(const emel::buffer_planner::strategy * strategy) noexcept {
+inline bool valid_strategy(const emel::buffer::planner::strategy * strategy) noexcept {
   if (strategy == nullptr) {
     return true;
   }
@@ -426,7 +426,7 @@ inline void default_count_references(context & ctx) noexcept {
       }
       view_src->n_views = detail::sat_add(view_src->n_views, 1);
     }
-    for (int32_t j = 0; j < emel::buffer_allocator::event::k_max_sources; ++j) {
+    for (int32_t j = 0; j < emel::buffer::allocator::event::k_max_sources; ++j) {
       const int32_t src_id = node.src_ids[j];
       if (src_id < 0) {
         continue;
@@ -466,7 +466,7 @@ inline void default_alloc_explicit_inputs(context & ctx) noexcept {
       }
     }
 
-    for (int32_t j = 0; j < emel::buffer_allocator::event::k_max_sources; ++j) {
+    for (int32_t j = 0; j < emel::buffer::allocator::event::k_max_sources; ++j) {
       const int32_t src_id = node.src_ids[j];
       if (src_id < 0) {
         continue;
@@ -504,7 +504,7 @@ inline void default_plan_nodes(context & ctx) noexcept {
       return;
     }
 
-    for (int32_t j = 0; j < emel::buffer_allocator::event::k_max_sources; ++j) {
+    for (int32_t j = 0; j < emel::buffer::allocator::event::k_max_sources; ++j) {
       const int32_t src_id = node.src_ids[j];
       if (src_id < 0) {
         continue;
@@ -522,7 +522,7 @@ inline void default_plan_nodes(context & ctx) noexcept {
 
     if (!node.is_input && node_rec->allocatable && !node_rec->allocated) {
       bool reused_parent = false;
-      for (int32_t j = 0; j < emel::buffer_allocator::event::k_max_sources; ++j) {
+      for (int32_t j = 0; j < emel::buffer::allocator::event::k_max_sources; ++j) {
         const int32_t src_id = node.src_ids[j];
         if (src_id < 0) {
           continue;
@@ -607,7 +607,7 @@ inline void default_plan_nodes(context & ctx) noexcept {
       }
     }
 
-    for (int32_t j = 0; j < emel::buffer_allocator::event::k_max_sources; ++j) {
+    for (int32_t j = 0; j < emel::buffer::allocator::event::k_max_sources; ++j) {
       const int32_t src_id = node.src_ids[j];
       if (src_id < 0) {
         continue;
@@ -664,8 +664,8 @@ inline void default_finalize(context & ctx) noexcept {
   }
 }
 
-inline constexpr emel::buffer_planner::strategy make_gallocr_strategy() noexcept {
-  return emel::buffer_planner::strategy{
+inline constexpr emel::buffer::planner::strategy make_gallocr_strategy() noexcept {
+  return emel::buffer::planner::strategy{
     .seed_leafs = default_seed_leafs,
     .count_references = default_count_references,
     .alloc_explicit_inputs = default_alloc_explicit_inputs,
@@ -677,9 +677,9 @@ inline constexpr emel::buffer_planner::strategy make_gallocr_strategy() noexcept
 
 }  // namespace detail
 
-}  // namespace emel::buffer_planner::action
+}  // namespace emel::buffer::planner::action
 
-namespace emel::buffer_planner::default_strategies {
+namespace emel::buffer::planner::default_strategies {
 
 inline constexpr strategy gallocr_parity = action::detail::make_gallocr_strategy();
 inline constexpr strategy reserve_n_size = gallocr_parity;
@@ -687,18 +687,18 @@ inline constexpr strategy reserve_n = gallocr_parity;
 inline constexpr strategy reserve = gallocr_parity;
 inline constexpr strategy alloc_graph = gallocr_parity;
 
-}  // namespace emel::buffer_planner::default_strategies
+}  // namespace emel::buffer::planner::default_strategies
 
-namespace emel::buffer_planner::action::detail {
+namespace emel::buffer::planner::action::detail {
 
-inline const emel::buffer_planner::strategy * resolve_strategy(const context & ctx) noexcept {
-  return ctx.strategy == nullptr ? &emel::buffer_planner::default_strategies::gallocr_parity
+inline const emel::buffer::planner::strategy * resolve_strategy(const context & ctx) noexcept {
+  return ctx.strategy == nullptr ? &emel::buffer::planner::default_strategies::gallocr_parity
                                  : ctx.strategy;
 }
 
 }  // namespace detail
 
-namespace emel::buffer_planner::action {
+namespace emel::buffer::planner::action {
 
 struct no_op {
   template <class Event>
@@ -841,4 +841,4 @@ inline constexpr record_phase_error record_phase_error{};
 inline constexpr on_plan_done on_plan_done{};
 inline constexpr on_plan_error on_plan_error{};
 
-}  // namespace emel::buffer_planner::action
+}  // namespace emel::buffer::planner::action

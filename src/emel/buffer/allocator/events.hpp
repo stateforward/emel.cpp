@@ -3,12 +3,12 @@
 #include <array>
 #include <cstdint>
 
-namespace emel::buffer_planner {
+namespace emel::buffer::planner {
 struct sm;
 struct strategy;
-}  // namespace emel::buffer_planner
+}  // namespace emel::buffer::planner
 
-namespace emel::buffer_allocator::event {
+namespace emel::buffer::allocator::event {
 
 inline constexpr int32_t k_max_sources = 4;
 
@@ -40,35 +40,35 @@ struct reserve_n_size {
   const int32_t * leaf_buffer_ids = nullptr;
   int32_t * sizes_out = nullptr;
   int32_t sizes_out_count = 0;
-  emel::buffer_planner::sm * buffer_planner_sm = nullptr;
-  const emel::buffer_planner::strategy * strategy = nullptr;
+  emel::buffer::planner::sm * buffer_planner_sm = nullptr;
+  const emel::buffer::planner::strategy * strategy = nullptr;
 };
 
 struct reserve_n {
   graph_view graph = {};
   const int32_t * node_buffer_ids = nullptr;
   const int32_t * leaf_buffer_ids = nullptr;
-  emel::buffer_planner::sm * buffer_planner_sm = nullptr;
-  const emel::buffer_planner::strategy * strategy = nullptr;
+  emel::buffer::planner::sm * buffer_planner_sm = nullptr;
+  const emel::buffer::planner::strategy * strategy = nullptr;
 };
 
 struct reserve {
   graph_view graph = {};
-  emel::buffer_planner::sm * buffer_planner_sm = nullptr;
-  const emel::buffer_planner::strategy * strategy = nullptr;
+  emel::buffer::planner::sm * buffer_planner_sm = nullptr;
+  const emel::buffer::planner::strategy * strategy = nullptr;
 };
 
 struct alloc_graph {
   graph_view graph = {};
-  emel::buffer_planner::sm * buffer_planner_sm = nullptr;
-  const emel::buffer_planner::strategy * strategy = nullptr;
+  emel::buffer::planner::sm * buffer_planner_sm = nullptr;
+  const emel::buffer::planner::strategy * strategy = nullptr;
 };
 
 struct release {};
 
-}  // namespace emel::buffer_allocator::event
+}  // namespace emel::buffer::allocator::event
 
-namespace emel::buffer_allocator::events {
+namespace emel::buffer::allocator::events {
 
 struct initialize_done {};
 struct initialize_error {
@@ -97,4 +97,4 @@ struct release_error {
 
 using bootstrap_event = event::initialize;
 
-}  // namespace emel::buffer_allocator::events
+}  // namespace emel::buffer::allocator::events
