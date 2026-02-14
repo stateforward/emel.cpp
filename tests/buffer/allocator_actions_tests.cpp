@@ -6,6 +6,7 @@
 #include "emel/buffer/allocator/actions.hpp"
 #include "emel/buffer/chunk_allocator/sm.hpp"
 #include "emel/buffer/allocator/sm.hpp"
+#include "emel/buffer/realloc_analyzer/sm.hpp"
 #include "emel/emel.h"
 
 namespace {
@@ -287,6 +288,43 @@ TEST_CASE("buffer_allocator_actions_require_chunk_allocator_in_initialize_reserv
       },
       ctx);
   CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+
+  ctx = {};
+  ctx.buffer_count = 1;
+  emel::buffer::chunk_allocator::sm chunk_machine{};
+  emel::buffer::allocator::action::begin_reserve(
+      emel::buffer::allocator::event::reserve{
+        .graph = as_view(g),
+        .buffer_planner_sm = &planner,
+        .chunk_allocator_sm = &chunk_machine,
+      },
+      ctx);
+  CHECK(ctx.pending_error == EMEL_OK);
+
+  ctx = {};
+  ctx.buffer_count = 1;
+  emel::buffer::realloc_analyzer::sm analyzer{};
+  emel::buffer::allocator::action::begin_alloc_graph(
+      emel::buffer::allocator::event::alloc_graph{
+        .graph = as_view(g),
+        .buffer_planner_sm = &planner,
+        .chunk_allocator_sm = &chunk_machine,
+        .buffer_realloc_analyzer_sm = nullptr,
+      },
+      ctx);
+  CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+
+  ctx = {};
+  ctx.buffer_count = 1;
+  emel::buffer::allocator::action::begin_alloc_graph(
+      emel::buffer::allocator::event::alloc_graph{
+        .graph = as_view(g),
+        .buffer_planner_sm = &planner,
+        .chunk_allocator_sm = &chunk_machine,
+        .buffer_realloc_analyzer_sm = &analyzer,
+      },
+      ctx);
+  CHECK(ctx.pending_error == EMEL_OK);
 }
 
 TEST_CASE("buffer_allocator_actions_helper_edges_for_branch_coverage") {

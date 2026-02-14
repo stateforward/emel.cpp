@@ -12,6 +12,10 @@ namespace emel::buffer::chunk_allocator {
 struct sm;
 }  // namespace emel::buffer::chunk_allocator
 
+namespace emel::buffer::realloc_analyzer {
+struct sm;
+}  // namespace emel::buffer::realloc_analyzer
+
 namespace emel::buffer::allocator::event {
 
 inline constexpr int32_t k_max_sources = 4;
@@ -70,6 +74,7 @@ struct alloc_graph {
   graph_view graph = {};
   emel::buffer::planner::sm * buffer_planner_sm = nullptr;
   emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
+  emel::buffer::realloc_analyzer::sm * buffer_realloc_analyzer_sm = nullptr;
   const emel::buffer::planner::strategy * strategy = nullptr;
 };
 

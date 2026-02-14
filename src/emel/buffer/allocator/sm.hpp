@@ -7,6 +7,7 @@
 #include "emel/buffer/chunk_allocator/sm.hpp"
 #include "emel/buffer/allocator/guards.hpp"
 #include "emel/buffer/planner/sm.hpp"
+#include "emel/buffer/realloc_analyzer/sm.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::buffer::allocator {
@@ -207,6 +208,7 @@ struct sm : emel::sm<model> {
     auto wired = ev;
     wired.buffer_planner_sm = &buffer_planner_sm_;
     wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
+    wired.buffer_realloc_analyzer_sm = &buffer_realloc_analyzer_sm_;
     if (wired.strategy == nullptr) {
       wired.strategy = &emel::buffer::planner::default_strategies::alloc_graph;
     }
@@ -274,6 +276,7 @@ struct sm : emel::sm<model> {
   action::context context_{};
   emel::buffer::planner::sm buffer_planner_sm_{};
   emel::buffer::chunk_allocator::sm buffer_chunk_allocator_sm_{};
+  emel::buffer::realloc_analyzer::sm buffer_realloc_analyzer_sm_{};
 };
 
 }  // namespace emel::buffer::allocator

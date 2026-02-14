@@ -9,6 +9,8 @@
 #include "emel/buffer/allocator/events.hpp"
 #include "emel/buffer/planner/events.hpp"
 #include "emel/buffer/planner/sm.hpp"
+#include "emel/buffer/realloc_analyzer/events.hpp"
+#include "emel/buffer/realloc_analyzer/sm.hpp"
 #include "emel/emel.h"
 
 namespace emel::buffer::allocator::action {
@@ -16,20 +18,9 @@ namespace emel::buffer::allocator::action {
 inline constexpr int32_t k_max_buffers = 16;
 inline constexpr int32_t k_max_graph_tensors = 1024;
 
-struct tensor_alloc {
-  int32_t tensor_id = -1;
-  int32_t buffer_id = -1;
-  int32_t size_max = 0;
-};
-
-struct node_alloc {
-  tensor_alloc dst = {};
-  std::array<tensor_alloc, event::k_max_sources> src = {};
-};
-
-struct leaf_alloc {
-  tensor_alloc leaf = {};
-};
+using tensor_alloc = emel::buffer::realloc_analyzer::event::tensor_alloc;
+using node_alloc = emel::buffer::realloc_analyzer::event::node_alloc;
+using leaf_alloc = emel::buffer::realloc_analyzer::event::leaf_alloc;
 
 struct context {
   int32_t buffer_count = 0;
@@ -279,6 +270,36 @@ inline bool run_planner(
     return false;
   }
 
+  out_error = EMEL_OK;
+  return true;
+}
+
+inline bool run_realloc_analyzer(
+    emel::buffer::realloc_analyzer::sm * analyzer, const event::graph_view & graph,
+    const context & c, bool & out_needs_realloc, int32_t & out_error) noexcept {
+  if (analyzer == nullptr) {
+    out_error = EMEL_ERR_INVALID_ARGUMENT;
+    return false;
+  }
+
+  int32_t analyze_error = EMEL_OK;
+  int32_t needs_realloc = 0;
+  const bool ok = analyzer->process_event(emel::buffer::realloc_analyzer::event::analyze{
+    .graph = graph,
+    .node_allocs = c.node_allocs.data(),
+    .node_alloc_count = c.last_n_nodes,
+    .leaf_allocs = c.leaf_allocs.data(),
+    .leaf_alloc_count = c.last_n_leafs,
+    .needs_realloc_out = &needs_realloc,
+    .error_out = &analyze_error,
+  });
+
+  if (!ok || analyze_error != EMEL_OK) {
+    out_error = normalize_error(analyze_error, EMEL_ERR_BACKEND);
+    return false;
+  }
+
+  out_needs_realloc = needs_realloc != 0;
   out_error = EMEL_OK;
   return true;
 }
@@ -638,7 +659,14 @@ struct begin_alloc_graph {
       return;
     }
 
-    const bool needs_realloc = detail::graph_needs_realloc(ev.graph, c);
+    int32_t err = EMEL_OK;
+    bool needs_realloc = false;
+    if (!detail::run_realloc_analyzer(
+          ev.buffer_realloc_analyzer_sm, ev.graph, c, needs_realloc, err)) {
+      c.pending_error = err;
+      c.step += 1;
+      return;
+    }
 
     if (needs_realloc && c.buffer_count > 1) {
       c.pending_error = EMEL_ERR_BACKEND;
@@ -654,7 +682,6 @@ struct begin_alloc_graph {
     }
 
     std::array<int32_t, k_max_buffers> required = {};
-    int32_t err = EMEL_OK;
     if (!detail::run_planner(
           ev.buffer_planner_sm, ev.graph, node_ids, leaf_ids, c.buffer_count, true, required.data(),
           c.buffer_count, ev.strategy, err)) {

@@ -11,6 +11,7 @@ using graph_view = emel::buffer::allocator::event::graph_view;
 inline constexpr int32_t k_max_sources = emel::buffer::allocator::event::k_max_sources;
 
 struct tensor_alloc {
+  int32_t tensor_id = -1;
   int32_t buffer_id = -1;
   int32_t size_max = 0;
 };
