@@ -108,6 +108,7 @@ ALWAYS maintain GGUF compatibility and versioned state schema migration paths.
 ALWAYS build with scripts/build_with_zig.sh for Zig builds.
 ALWAYS run coverage and threshold enforcement with scripts/test_with_coverage.sh.
 ALWAYS run lint snapshot gate with scripts/lint_snapshot.sh.
+ALWAYS run gates after each implementation change: scripts/build_with_zig.sh, scripts/test_with_coverage.sh, and scripts/lint_snapshot.sh.
 ALWAYS use ctest targets emel_tests and lint_snapshot for test execution.
 ALWAYS continue implementing every required state machine directly in production-quality C++ under `src/` until all are complete.
 ALWAYS proceed when implementing state machines and do not ask to continue.

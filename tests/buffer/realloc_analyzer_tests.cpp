@@ -465,4 +465,105 @@ TEST_CASE("buffer_realloc_analyzer_error_handlers_cover_with_and_without_output"
   CHECK(c.step == step_before + 2);
 }
 
+TEST_CASE("buffer_realloc_analyzer_requires_realloc_on_snapshot_tensor_id_drift") {
+  emel::buffer::realloc_analyzer::sm machine{};
+
+  std::array<tensor_desc, 1> nodes = {{
+    tensor_desc{
+      .tensor_id = 200,
+      .alloc_size = 64,
+      .src_ids = {{-1, -1, -1, -1}},
+      .is_view = false,
+      .view_src_id = -1,
+      .is_input = false,
+      .is_output = false,
+      .has_external_data = false,
+    },
+  }};
+  std::array<node_alloc, 1> node_allocs = {{
+    node_alloc{
+      .dst = {.tensor_id = 201, .buffer_id = 0, .size_max = 64},
+      .src = {{{}, {}, {}, {}}},
+    },
+  }};
+
+  int32_t needs_realloc = -1;
+  int32_t error = -1;
+  CHECK(machine.process_event(emel::buffer::realloc_analyzer::event::analyze{
+    .graph = graph_view{
+      .nodes = nodes.data(),
+      .n_nodes = static_cast<int32_t>(nodes.size()),
+      .leafs = nullptr,
+      .n_leafs = 0,
+    },
+    .node_allocs = node_allocs.data(),
+    .node_alloc_count = static_cast<int32_t>(node_allocs.size()),
+    .leaf_allocs = nullptr,
+    .leaf_alloc_count = 0,
+    .needs_realloc_out = &needs_realloc,
+    .error_out = &error,
+  }));
+
+  CHECK(error == EMEL_OK);
+  CHECK(needs_realloc == 1);
+}
+
+TEST_CASE("buffer_realloc_analyzer_requires_realloc_on_source_id_drift") {
+  emel::buffer::realloc_analyzer::sm machine{};
+
+  std::array<tensor_desc, 1> nodes = {{
+    tensor_desc{
+      .tensor_id = 210,
+      .alloc_size = 64,
+      .src_ids = {{211, -1, -1, -1}},
+      .is_view = false,
+      .view_src_id = -1,
+      .is_input = false,
+      .is_output = false,
+      .has_external_data = false,
+    },
+  }};
+  std::array<tensor_desc, 1> leafs = {{
+    tensor_desc{
+      .tensor_id = 211,
+      .alloc_size = 32,
+      .src_ids = {{-1, -1, -1, -1}},
+      .is_view = false,
+      .view_src_id = -1,
+      .is_input = true,
+      .is_output = false,
+      .has_external_data = false,
+    },
+  }};
+  std::array<node_alloc, 1> node_allocs = {{
+    node_alloc{
+      .dst = {.tensor_id = 210, .buffer_id = 0, .size_max = 64},
+      .src = {{{.tensor_id = 999, .buffer_id = 0, .size_max = 32}, {}, {}, {}}},
+    },
+  }};
+  std::array<leaf_alloc, 1> leaf_allocs = {{
+    leaf_alloc{.leaf = {.tensor_id = 211, .buffer_id = 0, .size_max = 32}},
+  }};
+
+  int32_t needs_realloc = -1;
+  int32_t error = -1;
+  CHECK(machine.process_event(emel::buffer::realloc_analyzer::event::analyze{
+    .graph = graph_view{
+      .nodes = nodes.data(),
+      .n_nodes = static_cast<int32_t>(nodes.size()),
+      .leafs = leafs.data(),
+      .n_leafs = static_cast<int32_t>(leafs.size()),
+    },
+    .node_allocs = node_allocs.data(),
+    .node_alloc_count = static_cast<int32_t>(node_allocs.size()),
+    .leaf_allocs = leaf_allocs.data(),
+    .leaf_alloc_count = static_cast<int32_t>(leaf_allocs.size()),
+    .needs_realloc_out = &needs_realloc,
+    .error_out = &error,
+  }));
+
+  CHECK(error == EMEL_OK);
+  CHECK(needs_realloc == 1);
+}
+
 }  // namespace

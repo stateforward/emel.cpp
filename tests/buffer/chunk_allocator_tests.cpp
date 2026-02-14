@@ -571,4 +571,54 @@ TEST_CASE("buffer_chunk_allocator_chunk_max_size_returns_zero_for_invalid_chunk"
   CHECK(machine.chunk_max_size(1) == 0);
 }
 
+TEST_CASE("buffer_chunk_allocator_release_merges_with_previous_block_path") {
+  namespace action = emel::buffer::chunk_allocator::action;
+
+  action::context c{};
+  c.chunk_count = 1;
+  c.request_chunk = 0;
+  c.request_offset = 16;
+  c.aligned_request_size = 16;
+  c.chunks[0].free_block_count = 2;
+  c.chunks[0].free_blocks[0] = action::free_block{
+    .offset = 0,
+    .size = 16,
+  };
+  c.chunks[0].free_blocks[1] = action::free_block{
+    .offset = 32,
+    .size = 16,
+  };
+
+  CHECK(action::detail::free_bytes(c));
+  CHECK(c.chunks[0].free_block_count == 1);
+  CHECK(c.chunks[0].free_blocks[0].offset == 0);
+  CHECK(c.chunks[0].free_blocks[0].size == 48);
+}
+
+TEST_CASE("buffer_chunk_allocator_select_best_last_prefers_tighter_reuse") {
+  namespace action = emel::buffer::chunk_allocator::action;
+
+  action::context c{};
+  c.chunk_count = 2;
+  c.aligned_request_size = 16;
+
+  c.chunks[0].free_block_count = 1;
+  c.chunks[0].free_blocks[0] = action::free_block{
+    .offset = 16,
+    .size = 32,
+  };
+  c.chunks[0].max_size = 42;
+
+  c.chunks[1].free_block_count = 1;
+  c.chunks[1].free_blocks[0] = action::free_block{
+    .offset = 16,
+    .size = 32,
+  };
+  c.chunks[1].max_size = 32;
+
+  action::detail::select_best_last(c);
+  CHECK(c.selected_chunk == 1);
+  CHECK(c.selected_block == 0);
+}
+
 }  // namespace
