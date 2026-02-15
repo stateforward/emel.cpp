@@ -25,12 +25,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(boost_sml)
 
-add_library(emel_core STATIC
-  src/emel/model/data.cpp
-)
+add_library(emel_core INTERFACE)
 
 target_include_directories(emel_core
-  PUBLIC
+  INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${boost_sml_SOURCE_DIR}/include
@@ -73,19 +71,21 @@ if(EMEL_ENABLE_TESTS)
   include(CTest)
   enable_testing()
 
-  FetchContent_Declare(
-    doctest_src
-    GIT_REPOSITORY https://github.com/doctest/doctest.git
-    GIT_TAG v2.4.11
-  )
-  FetchContent_GetProperties(doctest_src)
-  if(NOT doctest_src_POPULATED)
-    FetchContent_Populate(doctest_src)
+  set(DOCTEST_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/doctest)
+  if(NOT EXISTS ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h)
+    message(FATAL_ERROR "Missing doctest header at ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h")
   endif()
 
   add_executable(emel_tests_bin
     tests/model/loader_tests.cpp
     tests/model/weight_loader_tests.cpp
+    tests/decoder/decoder_tests.cpp
+    tests/decoder/compute_executor_tests.cpp
+    tests/decoder/ubatch_executor_tests.cpp
+    tests/batch/splitter_tests.cpp
+    tests/batch/splitter_actions_tests.cpp
+    tests/memory/coordinator_tests.cpp
+    tests/kv/cache_tests.cpp
     tests/buffer/allocator_tests.cpp
     tests/buffer/planner_tests.cpp
     tests/buffer/allocator_actions_tests.cpp
@@ -106,7 +106,7 @@ if(EMEL_ENABLE_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}/src
       ${CMAKE_CURRENT_SOURCE_DIR}/include
       ${boost_sml_SOURCE_DIR}/include
-      ${doctest_src_SOURCE_DIR}
+      ${DOCTEST_INCLUDE_DIR}
   )
 
   add_test(

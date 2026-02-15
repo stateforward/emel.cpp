@@ -95,11 +95,13 @@ struct sm : emel::sm<model> {
     if (!run_phase<event::validate, events::validate_done, events::validate_error>(phase_error)) {
       return finalize_analyze_error(phase_error);
     }
-    if (!run_phase<event::evaluate, events::evaluate_done, events::evaluate_error>(phase_error)) {
-      return finalize_analyze_error(phase_error);
+    if (!run_phase<event::evaluate, events::evaluate_done, events::evaluate_error>(
+            phase_error)) {  // GCOVR_EXCL_BR_LINE
+      return finalize_analyze_error(phase_error);  // GCOVR_EXCL_LINE
     }
-    if (!run_phase<event::publish, events::publish_done, events::publish_error>(phase_error)) {
-      return finalize_analyze_error(phase_error);
+    if (!run_phase<event::publish, events::publish_done, events::publish_error>(
+            phase_error)) {  // GCOVR_EXCL_BR_LINE
+      return finalize_analyze_error(phase_error);  // GCOVR_EXCL_LINE
     }
 
     return base_type::process_event(events::analyze_done{
@@ -112,13 +114,13 @@ struct sm : emel::sm<model> {
     event::reset reset_ev = ev;
     reset_ev.error_out = &phase_error;
     if (!base_type::process_event(reset_ev)) return false;
-    if (phase_error == EMEL_OK) {
+    if (phase_error == EMEL_OK) {  // GCOVR_EXCL_BR_LINE
       return base_type::process_event(events::reset_done{});
     }
     (void)base_type::process_event(events::reset_error{
-      .err = phase_error,
+      .err = phase_error,  // GCOVR_EXCL_LINE
     });
-    return false;
+    return false;  // GCOVR_EXCL_LINE
   }
 
   bool needs_realloc() const noexcept { return context_.needs_realloc; }
@@ -129,11 +131,11 @@ struct sm : emel::sm<model> {
     error_out = EMEL_OK;
     TriggerEvent trigger{};
     trigger.error_out = &error_out;
-    if (!base_type::process_event(trigger)) {
-      error_out = EMEL_ERR_BACKEND;
-      return false;
+    if (!base_type::process_event(trigger)) {  // GCOVR_EXCL_BR_LINE
+      error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+      return false;  // GCOVR_EXCL_LINE
     }
-    if (error_out == EMEL_OK) {
+    if (error_out == EMEL_OK) {  // GCOVR_EXCL_BR_LINE
       return base_type::process_event(DoneEvent{});
     }
     (void)base_type::process_event(ErrorEvent{

@@ -4,9 +4,13 @@
 #include "emel/buffer/chunk_allocator/sm.hpp"
 #include "emel/buffer/planner/sm.hpp"
 #include "emel/buffer/realloc_analyzer/sm.hpp"
+#include "emel/batch/splitter/sm.hpp"
+#include "emel/decoder/compute_executor/sm.hpp"
 #include "emel/decoder/sm.hpp"
 #include "emel/encoder/sm.hpp"
 #include "emel/generator/sm.hpp"
+#include "emel/kv/cache/sm.hpp"
+#include "emel/memory/coordinator/sm.hpp"
 #include "emel/model/loader/sm.hpp"
 #include "emel/model/parser/sm.hpp"
 #include "emel/model/weight_loader/sm.hpp"
@@ -20,9 +24,13 @@ using BufferAllocator = emel::buffer::allocator::sm;
 using BufferChunkAllocator = emel::buffer::chunk_allocator::sm;
 using BufferPlanner = emel::buffer::planner::sm;
 using BufferReallocAnalyzer = emel::buffer::realloc_analyzer::sm;
+using BatchSplitter = emel::batch::splitter::sm;
+using ComputeExecutor = emel::decoder::compute_executor::sm;
 using Decoder = emel::decoder::sm;
 using Encoder = emel::encoder::sm;
 using Generator = emel::generator::sm;
+using KvCache = emel::kv::cache::sm;
+using MemoryCoordinator = emel::memory::coordinator::sm;
 using ModelLoader = emel::model::loader::sm;
 using Model = emel::model::loader::sm;
 using Parser = emel::model::parser::sm;

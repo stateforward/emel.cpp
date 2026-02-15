@@ -11,6 +11,9 @@ ALWAYS use Boost.SML for orchestration state machines.
 ALWAYS define trigger intent events in the `event` namespace using noun-like, domain-action names without `cmd_` prefixes (for example `reserve`, `grow`, `recover`, `reset`).
 ALWAYS define machine outcome events in the `events` namespace with explicit `_done` and `_error` suffixes.
 NEVER use `cmd_*`-prefixed event names.
+NEVER add synthetic fault-injection knobs to production events or actions (for example `forced_error`, `requested_status`, `*_error_after`, or per-phase injected error fields).
+NEVER add test-only control fields to `src/` machine/event payloads.
+ALWAYS model failures from real operation results and route them through explicit `_error` events and error states.
 NEVER port machine logic, states, guards, actions, or transitions from `machine/machine.cpp`; treat it as non-functional reference only.
 ALWAYS treat `tmp/llama.cpp` as the functional logic reference for allocator/behavioral parity work.
 ALWAYS keep guards pure and deterministic.
@@ -45,6 +48,8 @@ ALWAYS use snake_case for internal SML state type identifiers.
 ALWAYS put per-invocation external inputs (other machine pointers, target model pointers, capability
 flags, policy flags) on the triggering event payload, not in persistent machine `data`.
 ALWAYS keep machine `data` focused on machine-owned runtime state and stable status fields.
+NEVER store orchestration phase/attempt/failure flags in machine context (for example `*_state`, `*_attempt`, `*_failure`) when they can be represented by explicit states and events.
+ALWAYS encode orchestration retries and one-shot attempts in the transition graph (states + `_done`/`_error` events), not in mutable context flags.
 NEVER add string/pointer `error` members to machine `data`; represent failures with explicit error states and `_error` events, and expose boundary status through error codes.
 ALWAYS model step outcomes with explicit `_done` / `_error` events and explicit transitions.
 NEVER rely on choice pseudostates for normal success/error routing when explicit events are available.

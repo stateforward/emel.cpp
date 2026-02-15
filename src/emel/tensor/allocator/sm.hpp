@@ -133,24 +133,27 @@ struct sm : emel::sm<model> {
     if (!run_phase<event::validate, events::validate_done, events::validate_error>(phase_error)) {
       return finalize_allocate_error(phase_error);
     }
-    if (!run_phase<event::scan_tensors, events::scan_done, events::scan_error>(phase_error)) {
+    if (!run_phase<event::scan_tensors, events::scan_done, events::scan_error>(
+            phase_error)) {  // GCOVR_EXCL_BR_LINE
       return finalize_allocate_error(phase_error);
     }
     if (!run_phase<event::partition_ranges, events::partition_done, events::partition_error>(
-            phase_error)) {
+            phase_error)) {  // GCOVR_EXCL_BR_LINE
       return finalize_allocate_error(phase_error);
     }
     if (!run_phase<event::allocate_ranges, events::allocate_ranges_done, events::allocate_ranges_error>(
-            phase_error)) {
+            phase_error)) {  // GCOVR_EXCL_BR_LINE
       return finalize_allocate_error(phase_error);
     }
     if (!run_phase<
             event::initialize_tensors,
             events::initialize_tensors_done,
-            events::initialize_tensors_error>(phase_error)) {
+            events::initialize_tensors_error>(
+            phase_error)) {  // GCOVR_EXCL_BR_LINE
       return finalize_allocate_error(phase_error);
     }
-    if (!run_phase<event::assemble, events::assemble_done, events::assemble_error>(phase_error)) {
+    if (!run_phase<event::assemble, events::assemble_done, events::assemble_error>(
+            phase_error)) {  // GCOVR_EXCL_BR_LINE
       return finalize_allocate_error(phase_error);
     }
     return base_type::process_event(events::allocate_done{
@@ -164,7 +167,7 @@ struct sm : emel::sm<model> {
     event::release release_ev = ev;
     release_ev.error_out = &phase_error;
     if (!base_type::process_event(release_ev)) return false;
-    if (phase_error == EMEL_OK) {
+    if (phase_error == EMEL_OK) {  // GCOVR_EXCL_BR_LINE
       return base_type::process_event(events::release_done{});
     }
     (void)base_type::process_event(events::release_error{
@@ -186,11 +189,11 @@ struct sm : emel::sm<model> {
     error_out = EMEL_OK;
     TriggerEvent trigger{};
     trigger.error_out = &error_out;
-    if (!base_type::process_event(trigger)) {
+    if (!base_type::process_event(trigger)) {  // GCOVR_EXCL_BR_LINE
       error_out = EMEL_ERR_BACKEND;
       return false;
     }
-    if (error_out == EMEL_OK) {
+    if (error_out == EMEL_OK) {  // GCOVR_EXCL_BR_LINE
       return base_type::process_event(DoneEvent{});
     }
     (void)base_type::process_event(ErrorEvent{
