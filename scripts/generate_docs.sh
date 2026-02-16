@@ -36,6 +36,11 @@ That enables:
 3. High-performance, C-compatible boundaries without dynamic dispatch in hot paths.
 4. Auditable parity work against reference implementations without copying their control flow.
 
+## The name
+
+“EMEL” is pronounced like “ML”. It’s a short, neutral name that doesn’t carry existing
+assumptions or baggage. It’s intentionally low-ceremony while we iterate on the core design.
+
 ## Build and test
 
 ```bash
@@ -43,6 +48,18 @@ scripts/build_with_zig.sh
 scripts/test_with_coverage.sh
 scripts/lint_snapshot.sh
 ```
+
+### Why Zig for builds
+
+Zig’s C/C++ toolchain gives us consistent, fast, cross-platform builds without forcing a full
+dependency on any single system compiler or SDK. It keeps the default dev path reproducible,
+while still allowing native toolchains when needed.
+
+### Why CMake for tests and coverage
+
+Coverage and CI tooling are already standardized around CMake + CTest + llvm-cov/gcovr in this
+repo. Using CMake for test/coverage builds keeps gates deterministic and portable across CI
+environments, while Zig remains the default for day-to-day builds.
 
 ## Documentation
 
