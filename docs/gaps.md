@@ -22,7 +22,7 @@ Allocator cluster gaps (ggml-alloc parity)
   `tests/buffer/allocator_parity_tests.cpp` and `tests/buffer/chunk_allocator_parity_tests.cpp`.
 - Public C API allocator-path tests for exact error/status mapping are implemented.
 - C API equivalents of `ggml_backend_alloc_ctx_tensors_from_buft[_size]` and
-  `ggml_backend_alloc_ctx_tensors` are available via EMEL allocator wrappers.
+  `ggml_backend_alloc_ctx_tensors` are available via EMEL allocator wrappers (without `ctx`).
 
 Unvalidated machines (no parity audit performed yet)
 - `src/emel/model/loader/sm.hpp`

@@ -89,7 +89,7 @@ emel_status emel_buffer_allocator_alloc_graph(
 
 emel_status emel_buffer_allocator_release(emel_buffer_allocator * allocator);
 
-emel_status emel_buffer_allocator_alloc_ctx_tensors_from_buft_size(
+emel_status emel_buffer_allocator_alloc_tensors_from_buft_size(
   emel_buffer_allocator * allocator,
   const emel_buffer_graph_view * graph,
   const int32_t * node_buffer_ids,
@@ -97,13 +97,13 @@ emel_status emel_buffer_allocator_alloc_ctx_tensors_from_buft_size(
   int32_t * sizes_out,
   int32_t sizes_out_count);
 
-emel_status emel_buffer_allocator_alloc_ctx_tensors_from_buft(
+emel_status emel_buffer_allocator_alloc_tensors_from_buft(
   emel_buffer_allocator * allocator,
   const emel_buffer_graph_view * graph,
   const int32_t * node_buffer_ids,
   const int32_t * leaf_buffer_ids);
 
-emel_status emel_buffer_allocator_alloc_ctx_tensors(
+emel_status emel_buffer_allocator_alloc_tensors(
   emel_buffer_allocator * allocator,
   const emel_buffer_graph_view * graph);
 

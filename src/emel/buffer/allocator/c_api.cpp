@@ -262,7 +262,7 @@ extern "C" emel_status emel_buffer_allocator_release(emel_buffer_allocator * all
   return normalize_status(ok, err);
 }
 
-extern "C" emel_status emel_buffer_allocator_alloc_ctx_tensors_from_buft_size(
+extern "C" emel_status emel_buffer_allocator_alloc_tensors_from_buft_size(
     emel_buffer_allocator * allocator,
     const emel_buffer_graph_view * graph,
     const int32_t * node_buffer_ids,
@@ -273,7 +273,7 @@ extern "C" emel_status emel_buffer_allocator_alloc_ctx_tensors_from_buft_size(
     allocator, graph, node_buffer_ids, leaf_buffer_ids, sizes_out, sizes_out_count);
 }
 
-extern "C" emel_status emel_buffer_allocator_alloc_ctx_tensors_from_buft(
+extern "C" emel_status emel_buffer_allocator_alloc_tensors_from_buft(
     emel_buffer_allocator * allocator,
     const emel_buffer_graph_view * graph,
     const int32_t * node_buffer_ids,
@@ -286,7 +286,7 @@ extern "C" emel_status emel_buffer_allocator_alloc_ctx_tensors_from_buft(
   return emel_buffer_allocator_alloc_graph(allocator, graph);
 }
 
-extern "C" emel_status emel_buffer_allocator_alloc_ctx_tensors(
+extern "C" emel_status emel_buffer_allocator_alloc_tensors(
     emel_buffer_allocator * allocator,
     const emel_buffer_graph_view * graph) {
   const emel_status reserve_status = emel_buffer_allocator_reserve(allocator, graph);

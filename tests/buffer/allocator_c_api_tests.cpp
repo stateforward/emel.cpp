@@ -79,7 +79,7 @@ TEST_CASE("buffer_allocator_c_api_reports_invalid_arguments") {
   emel_buffer_allocator_destroy(allocator);
 }
 
-TEST_CASE("buffer_allocator_c_api_alloc_ctx_tensors_wrappers") {
+TEST_CASE("buffer_allocator_c_api_alloc_tensors_wrappers") {
   alignas(64) static std::array<std::byte, 524288> storage = {};
   emel_buffer_allocator * allocator =
     emel_buffer_allocator_init(storage.data(), storage.size());
@@ -98,7 +98,7 @@ TEST_CASE("buffer_allocator_c_api_alloc_ctx_tensors_wrappers") {
   emel_buffer_graph_view graph = make_valid_graph(nodes, leafs);
 
   std::array<int32_t, 1> sizes = {{0}};
-  CHECK(emel_buffer_allocator_alloc_ctx_tensors_from_buft_size(
+  CHECK(emel_buffer_allocator_alloc_tensors_from_buft_size(
           allocator,
           &graph,
           nullptr,
@@ -107,13 +107,13 @@ TEST_CASE("buffer_allocator_c_api_alloc_ctx_tensors_wrappers") {
           static_cast<int32_t>(sizes.size())) == EMEL_OK);
   CHECK(sizes[0] > 0);
 
-  CHECK(emel_buffer_allocator_alloc_ctx_tensors_from_buft(
+  CHECK(emel_buffer_allocator_alloc_tensors_from_buft(
           allocator,
           &graph,
           nullptr,
           nullptr) == EMEL_OK);
 
-  CHECK(emel_buffer_allocator_alloc_ctx_tensors(allocator, &graph) == EMEL_OK);
+  CHECK(emel_buffer_allocator_alloc_tensors(allocator, &graph) == EMEL_OK);
 
   emel_buffer_allocator_destroy(allocator);
 }

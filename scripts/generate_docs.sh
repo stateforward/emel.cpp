@@ -18,6 +18,7 @@ generate_readme() {
 # EMEL
 
 Deterministic, production-grade C++ inference engine with Boost.SML orchestration.
+WARNING: Documentation is under active development and may change frequently.
 
 ## Build and test
 

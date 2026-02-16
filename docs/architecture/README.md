@@ -2,6 +2,7 @@
 
 This directory stores generated architecture artifacts (for example PUML) derived from `src/`.
 The source of truth for orchestration architecture is the Boost.SML code in `src/`.
+WARNING: This architecture documentation is under active development and may change frequently.
 
 ## Why These Patterns
 
