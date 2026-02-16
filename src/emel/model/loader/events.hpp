@@ -105,6 +105,13 @@ using validate_weights_fn = bool (*)(const emel::model::weight_loader::event::lo
                                      int32_t * err_out);
 using clean_up_weights_fn = bool (*)(const emel::model::weight_loader::event::load_weights &,
                                      int32_t * err_out);
+using upload_begin_fn = bool (*)(void * upload_ctx, uint64_t total_bytes, int32_t * err_out);
+using upload_chunk_fn = bool (*)(void * upload_ctx,
+                                 const void * data,
+                                 uint64_t size,
+                                 uint64_t offset,
+                                 int32_t * err_out);
+using upload_end_fn = bool (*)(void * upload_ctx, int32_t * err_out);
 
 struct load {
   emel::model::data & model_data;
@@ -125,6 +132,10 @@ struct load {
   void * format_ctx = nullptr;
   bool (*progress_callback)(float progress, void * user_data) = nullptr;
   void * progress_user_data = nullptr;
+  void * upload_ctx = nullptr;
+  upload_begin_fn upload_begin = nullptr;
+  upload_chunk_fn upload_chunk = nullptr;
+  upload_end_fn upload_end = nullptr;
 
   map_parser_fn map_parser = nullptr;
   bool (*parse_architecture)(const emel::model::parser::event::parse_model &, int32_t * err_out) = nullptr;

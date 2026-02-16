@@ -14,6 +14,10 @@
 #include <unistd.h>
 #endif
 
+#if defined(__linux__)
+#include <fcntl.h>
+#endif
+
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
 #include "emel/model/loader/events.hpp"
@@ -27,6 +31,8 @@ inline constexpr uint32_t k_default_alignment = 32;
 inline constexpr uint32_t k_max_architecture = 64;
 inline constexpr uint32_t k_max_key_length = 256;
 inline constexpr uint32_t k_max_path_length = 1024;
+inline constexpr uint32_t k_direct_io_alignment = 4096;
+inline constexpr uint32_t k_direct_io_chunk_size = 256 * 1024;
 
 inline constexpr char k_magic[] = "GGUF";
 inline constexpr char k_key_architecture[] = "general.architecture";
@@ -2382,6 +2388,24 @@ inline bool load_streamed(
     }
     return false;
   }
+  const bool use_direct_io = ev.request_direct_io && ev.direct_io_supported;
+#if !defined(__linux__)
+  if (use_direct_io) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_FORMAT_UNSUPPORTED;
+    }
+    return false;
+  }
+#endif
+  const bool wants_upload =
+    ev.upload_begin != nullptr || ev.upload_chunk != nullptr || ev.upload_end != nullptr;
+  if (wants_upload &&
+      (ev.upload_begin == nullptr || ev.upload_chunk == nullptr || ev.upload_end == nullptr)) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+    return false;
+  }
   context * ctx = get_context(request->format_ctx);
   if (ctx == nullptr) {
     if (err_out != nullptr) {
@@ -2421,20 +2445,29 @@ inline bool load_streamed(
   if (bytes_total != nullptr) {
     *bytes_total = total_size;
   }
+  if (wants_upload) {
+    int32_t upload_err = EMEL_OK;
+    if (!ev.upload_begin(ev.upload_ctx, total_size, &upload_err) || upload_err != EMEL_OK) {
+      if (err_out != nullptr) {
+        *err_out = upload_err == EMEL_OK ? EMEL_ERR_BACKEND : upload_err;
+      }
+      return false;
+    }
+  }
   uint64_t done = 0;
   constexpr size_t k_chunk_size = 1024 * 1024;
   uint64_t base_offset = 0;
   for (uint16_t split_idx = 0; split_idx < split_count; ++split_idx) {
     std::FILE * file = ctx->file;
     bool owns_file = false;
-    if (split_idx > 0 || file == nullptr) {
+    char path[k_max_path_length] = {};
+    if (split_idx > 0 || file == nullptr || use_direct_io) {
       if (request->model_path.empty() || request->model_path.size() >= k_max_path_length) {
         if (err_out != nullptr) {
           *err_out = EMEL_ERR_INVALID_ARGUMENT;
         }
         return false;
       }
-      char path[k_max_path_length] = {};
       if (split_count == 1) {
         std::memcpy(path, request->model_path.data(), request->model_path.size());
         path[request->model_path.size()] = '\0';
@@ -2445,6 +2478,8 @@ inline bool load_streamed(
         }
         return false;
       }
+    }
+    if (!use_direct_io && (split_idx > 0 || file == nullptr)) {
       file = std::fopen(path, "rb");
       if (file == nullptr) {
         if (err_out != nullptr) {
@@ -2457,7 +2492,7 @@ inline bool load_streamed(
     const uint64_t data_offset = request->model_data.weights_split_offsets[split_idx];
     const uint64_t data_size = request->model_data.weights_split_sizes[split_idx];
     if (data_size > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-      if (owns_file) {
+      if (owns_file && file != nullptr) {
         std::fclose(file);
       }
       if (err_out != nullptr) {
@@ -2465,22 +2500,74 @@ inline bool load_streamed(
       }
       return false;  // GCOVR_EXCL_LINE
     }
-    if (std::fseek(file, static_cast<long>(data_offset), SEEK_SET) != 0) {
-      if (owns_file) {
-        std::fclose(file);
-      }
-      if (err_out != nullptr) {
-        *err_out = EMEL_ERR_IO;  // GCOVR_EXCL_LINE
-      }
-      return false;  // GCOVR_EXCL_LINE
-    }
     uint8_t * dst =
       static_cast<uint8_t *>(request->weights_buffer) + base_offset;
     uint64_t remaining = data_size;
-    while (remaining > 0) {
-      const size_t chunk = static_cast<size_t>(
-        std::min<uint64_t>(remaining, k_chunk_size));
-      if (std::fread(dst, 1, chunk, file) != chunk) {
+    uint64_t split_offset = 0;
+#if defined(__linux__)
+    if (use_direct_io) {
+      const int fd = ::open(path, O_RDONLY | O_DIRECT);
+      if (fd < 0) {
+        if (err_out != nullptr) {
+          *err_out = EMEL_ERR_IO;
+        }
+        return false;
+      }
+      alignas(k_direct_io_alignment) std::array<uint8_t, k_direct_io_chunk_size> io_buffer = {};
+      uint64_t file_offset = data_offset;
+      while (remaining > 0) {
+        const uint64_t aligned_offset =
+          file_offset & ~(static_cast<uint64_t>(k_direct_io_alignment) - 1u);
+        const uint64_t prefix = file_offset - aligned_offset;
+        const uint64_t max_payload = k_direct_io_chunk_size - prefix;
+        const uint64_t payload = std::min<uint64_t>(remaining, max_payload);
+        const uint64_t aligned_size = align_up_u64(prefix + payload, k_direct_io_alignment);
+        const ssize_t bytes =
+          ::pread(fd, io_buffer.data(), aligned_size, static_cast<off_t>(aligned_offset));
+        if (bytes != static_cast<ssize_t>(aligned_size)) {
+          ::close(fd);
+          if (err_out != nullptr) {
+            *err_out = EMEL_ERR_IO;
+          }
+          return false;
+        }
+        std::memcpy(dst, io_buffer.data() + prefix, static_cast<size_t>(payload));
+        if (wants_upload) {
+          int32_t upload_err = EMEL_OK;
+          if (!ev.upload_chunk(ev.upload_ctx, dst, payload, base_offset + split_offset,
+                               &upload_err) ||
+              upload_err != EMEL_OK) {
+            ::close(fd);
+            if (err_out != nullptr) {
+              *err_out = upload_err == EMEL_OK ? EMEL_ERR_BACKEND : upload_err;
+            }
+            return false;
+          }
+        }
+        dst += payload;
+        file_offset += payload;
+        remaining -= payload;
+        split_offset += payload;
+        done += payload;
+        if (bytes_done != nullptr) {
+          *bytes_done = done;
+        }
+        if (ev.progress_callback != nullptr && total_size > 0) {
+          const float progress =
+            static_cast<float>(done) / static_cast<float>(total_size);
+          if (!ev.progress_callback(progress, ev.progress_user_data)) {
+            ::close(fd);
+            if (err_out != nullptr) {
+              *err_out = EMEL_ERR_BACKEND;
+            }
+            return false;
+          }
+        }
+      }
+      ::close(fd);
+    } else {
+#endif
+      if (std::fseek(file, static_cast<long>(data_offset), SEEK_SET) != 0) {
         if (owns_file) {
           std::fclose(file);
         }
@@ -2489,30 +2576,69 @@ inline bool load_streamed(
         }
         return false;  // GCOVR_EXCL_LINE
       }
-      dst += chunk;
-      remaining -= chunk;
-      done += chunk;
-      if (bytes_done != nullptr) {
-        *bytes_done = done;
-      }
-      if (ev.progress_callback != nullptr && total_size > 0) {
-        const float progress =
-          static_cast<float>(done) / static_cast<float>(total_size);
-        if (!ev.progress_callback(progress, ev.progress_user_data)) {
+      while (remaining > 0) {
+        const size_t chunk = static_cast<size_t>(
+          std::min<uint64_t>(remaining, k_chunk_size));
+        if (std::fread(dst, 1, chunk, file) != chunk) {
           if (owns_file) {
             std::fclose(file);
           }
           if (err_out != nullptr) {
-            *err_out = EMEL_ERR_BACKEND;
+            *err_out = EMEL_ERR_IO;  // GCOVR_EXCL_LINE
           }
-          return false;
+          return false;  // GCOVR_EXCL_LINE
+        }
+        if (wants_upload) {
+          int32_t upload_err = EMEL_OK;
+          if (!ev.upload_chunk(ev.upload_ctx, dst, chunk, base_offset + split_offset,
+                               &upload_err) ||
+              upload_err != EMEL_OK) {
+            if (owns_file) {
+              std::fclose(file);
+            }
+            if (err_out != nullptr) {
+              *err_out = upload_err == EMEL_OK ? EMEL_ERR_BACKEND : upload_err;
+            }
+            return false;
+          }
+        }
+        dst += chunk;
+        remaining -= chunk;
+        split_offset += chunk;
+        done += chunk;
+        if (bytes_done != nullptr) {
+          *bytes_done = done;
+        }
+        if (ev.progress_callback != nullptr && total_size > 0) {
+          const float progress =
+            static_cast<float>(done) / static_cast<float>(total_size);
+          if (!ev.progress_callback(progress, ev.progress_user_data)) {
+            if (owns_file) {
+              std::fclose(file);
+            }
+            if (err_out != nullptr) {
+              *err_out = EMEL_ERR_BACKEND;
+            }
+            return false;
+          }
         }
       }
+      if (owns_file) {
+        std::fclose(file);
+      }
+#if defined(__linux__)
     }
-    if (owns_file) {
-      std::fclose(file);
-    }
+#endif
     base_offset += data_size;
+  }
+  if (wants_upload) {
+    int32_t upload_err = EMEL_OK;
+    if (!ev.upload_end(ev.upload_ctx, &upload_err) || upload_err != EMEL_OK) {
+      if (err_out != nullptr) {
+        *err_out = upload_err == EMEL_OK ? EMEL_ERR_BACKEND : upload_err;
+      }
+      return false;
+    }
   }
   const auto * base = static_cast<const uint8_t *>(request->weights_buffer);
   request->model_data.weights_data = base;

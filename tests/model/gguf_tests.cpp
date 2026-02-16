@@ -20,6 +20,116 @@ namespace {
 
 emel::model::data model{};
 
+struct upload_probe {
+  uint64_t begin_total = 0;
+  uint64_t bytes = 0;
+  uint64_t last_offset = 0;
+  uint32_t begin_calls = 0;
+  uint32_t end_calls = 0;
+};
+
+struct upload_fail_probe {
+  uint32_t chunk_calls = 0;
+};
+
+bool upload_begin(void * ctx, const uint64_t total_bytes, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  if (ctx == nullptr) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+    return false;
+  }
+  auto * probe = static_cast<upload_probe *>(ctx);
+  probe->begin_calls += 1;
+  probe->begin_total = total_bytes;
+  return true;
+}
+
+bool upload_chunk(void * ctx, const void * data, const uint64_t size, const uint64_t offset,
+                  int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  if (ctx == nullptr || (data == nullptr && size > 0)) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+    return false;
+  }
+  auto * probe = static_cast<upload_probe *>(ctx);
+  probe->bytes += size;
+  probe->last_offset = offset;
+  return true;
+}
+
+bool upload_end(void * ctx, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  if (ctx == nullptr) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+    return false;
+  }
+  auto * probe = static_cast<upload_probe *>(ctx);
+  probe->end_calls += 1;
+  return true;
+}
+
+bool upload_begin_fail(void *, const uint64_t, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_ERR_BACKEND;
+  }
+  return false;
+}
+
+bool upload_begin_noop(void * ctx, const uint64_t, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return ctx != nullptr;
+}
+
+bool upload_chunk_fail(void * ctx, const void *, const uint64_t, const uint64_t,
+                       int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  if (ctx == nullptr) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+    return false;
+  }
+  auto * probe = static_cast<upload_fail_probe *>(ctx);
+  probe->chunk_calls += 1;
+  if (probe->chunk_calls == 1) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_BACKEND;
+    }
+    return false;
+  }
+  return true;
+}
+
+bool upload_end_fail(void *, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_ERR_BACKEND;
+  }
+  return false;
+}
+
+bool upload_end_noop(void * ctx, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return ctx != nullptr;
+}
+
 bool write_u32(std::FILE * file, const uint32_t value) {
   return std::fwrite(&value, 1, sizeof(value), file) == sizeof(value);
 }
@@ -739,6 +849,280 @@ TEST_CASE("gguf loader streams weights into provided buffer") {
 
   std::remove(path);
 }
+
+TEST_CASE("gguf loader streams weights with upload callbacks") {
+  char path[1024] = {};
+  CHECK(make_temp_path(path, sizeof(path)));
+  CHECK(write_minimal_gguf(path));
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_OK);
+
+  std::array<uint8_t, 128> buffer = {};
+  request.weights_buffer = buffer.data();
+  request.weights_buffer_size = buffer.size();
+
+  upload_probe probe{};
+  emel::model::weight_loader::event::load_weights load_req{
+    .upload_ctx = &probe,
+    .upload_begin = upload_begin,
+    .upload_chunk = upload_chunk,
+    .upload_end = upload_end,
+    .loader_request = &request
+  };
+
+  uint64_t done = 0;
+  uint64_t total = 0;
+  CHECK(emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(err == EMEL_OK);
+  CHECK(done == total);
+  CHECK(probe.begin_calls == 1);
+  CHECK(probe.end_calls == 1);
+  CHECK(probe.begin_total == total);
+  CHECK(probe.bytes == total);
+  CHECK(probe.last_offset < total);
+
+  std::remove(path);
+}
+
+TEST_CASE("gguf loader rejects partial upload callbacks") {
+  char path[1024] = {};
+  CHECK(make_temp_path(path, sizeof(path)));
+  CHECK(write_minimal_gguf(path));
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_OK);
+
+  std::array<uint8_t, 128> buffer = {};
+  request.weights_buffer = buffer.data();
+  request.weights_buffer_size = buffer.size();
+
+  upload_probe probe{};
+  emel::model::weight_loader::event::load_weights load_req{
+    .upload_ctx = &probe,
+    .upload_begin = upload_begin,
+    .loader_request = &request
+  };
+
+  uint64_t done = 0;
+  uint64_t total = 0;
+  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  std::remove(path);
+}
+
+TEST_CASE("gguf loader reports upload begin failure") {
+  char path[1024] = {};
+  CHECK(make_temp_path(path, sizeof(path)));
+  CHECK(write_minimal_gguf(path));
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_OK);
+
+  std::array<uint8_t, 128> buffer = {};
+  request.weights_buffer = buffer.data();
+  request.weights_buffer_size = buffer.size();
+
+  emel::model::weight_loader::event::load_weights load_req{
+    .upload_ctx = nullptr,
+    .upload_begin = upload_begin_fail,
+    .upload_chunk = upload_chunk,
+    .upload_end = upload_end,
+    .loader_request = &request
+  };
+
+  uint64_t done = 0;
+  uint64_t total = 0;
+  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(err == EMEL_ERR_BACKEND);
+
+  std::remove(path);
+}
+
+TEST_CASE("gguf loader reports upload chunk failure") {
+  char path[1024] = {};
+  CHECK(make_temp_path(path, sizeof(path)));
+  CHECK(write_minimal_gguf(path));
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_OK);
+
+  std::array<uint8_t, 128> buffer = {};
+  request.weights_buffer = buffer.data();
+  request.weights_buffer_size = buffer.size();
+
+  upload_fail_probe probe{};
+  emel::model::weight_loader::event::load_weights load_req{
+    .upload_ctx = &probe,
+    .upload_begin = upload_begin_noop,
+    .upload_chunk = upload_chunk_fail,
+    .upload_end = upload_end_noop,
+    .loader_request = &request
+  };
+
+  uint64_t done = 0;
+  uint64_t total = 0;
+  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(err == EMEL_ERR_BACKEND);
+
+  std::remove(path);
+}
+
+TEST_CASE("gguf loader reports upload end failure") {
+  char path[1024] = {};
+  CHECK(make_temp_path(path, sizeof(path)));
+  CHECK(write_minimal_gguf(path));
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_OK);
+
+  std::array<uint8_t, 128> buffer = {};
+  request.weights_buffer = buffer.data();
+  request.weights_buffer_size = buffer.size();
+
+  upload_probe probe{};
+  emel::model::weight_loader::event::load_weights load_req{
+    .upload_ctx = &probe,
+    .upload_begin = upload_begin,
+    .upload_chunk = upload_chunk,
+    .upload_end = upload_end_fail,
+    .loader_request = &request
+  };
+
+  uint64_t done = 0;
+  uint64_t total = 0;
+  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(err == EMEL_ERR_BACKEND);
+
+  std::remove(path);
+}
+
+#if !defined(__linux__)
+TEST_CASE("gguf loader rejects direct io on unsupported platforms") {
+  char path[1024] = {};
+  CHECK(make_temp_path(path, sizeof(path)));
+  CHECK(write_minimal_gguf(path));
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_OK);
+
+  std::array<uint8_t, 128> buffer = {};
+  request.weights_buffer = buffer.data();
+  request.weights_buffer_size = buffer.size();
+
+  emel::model::weight_loader::event::load_weights load_req{
+    .request_direct_io = true,
+    .direct_io_supported = true,
+    .loader_request = &request
+  };
+
+  uint64_t done = 0;
+  uint64_t total = 0;
+  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(err == EMEL_ERR_FORMAT_UNSUPPORTED);
+
+  std::remove(path);
+}
+#endif
+
+#if defined(__linux__)
+TEST_CASE("gguf loader streams weights with direct io") {
+  char path[1024] = {};
+  CHECK(make_temp_path(path, sizeof(path)));
+  CHECK(write_minimal_gguf(path));
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_OK);
+
+  const uint64_t padded_size =
+    emel::model::gguf::align_up_u64(ctx.data_offset + ctx.data_size,
+                                    emel::model::gguf::k_direct_io_alignment);
+  std::FILE * pad = std::fopen(path, "ab");
+  REQUIRE(pad != nullptr);
+  if (padded_size > 0) {
+    CHECK(std::fseek(pad, static_cast<long>(padded_size - 1), SEEK_SET) == 0);
+    const uint8_t zero = 0;
+    CHECK(std::fwrite(&zero, 1, 1, pad) == 1);
+  }
+  std::fclose(pad);
+
+  std::array<uint8_t, 128> buffer = {};
+  request.weights_buffer = buffer.data();
+  request.weights_buffer_size = buffer.size();
+
+  emel::model::weight_loader::event::load_weights load_req{
+    .request_direct_io = true,
+    .direct_io_supported = true,
+    .loader_request = &request
+  };
+
+  uint64_t done = 0;
+  uint64_t total = 0;
+  CHECK(emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(err == EMEL_OK);
+  CHECK(done == total);
+  CHECK(model.tensors[0].data == buffer.data());
+
+  std::remove(path);
+}
+#endif
 
 TEST_CASE("gguf loader rejects too-small weight buffer") {
   char path[1024] = {};
