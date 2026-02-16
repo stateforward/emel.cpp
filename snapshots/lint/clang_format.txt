@@ -4,6 +4,7 @@ src/emel/batch/splitter/events.hpp
 src/emel/batch/splitter/guards.hpp
 src/emel/batch/splitter/sm.hpp
 src/emel/buffer/allocator/actions.hpp
+src/emel/buffer/allocator/c_api.cpp
 src/emel/buffer/allocator/events.hpp
 src/emel/buffer/allocator/guards.hpp
 src/emel/buffer/allocator/sm.hpp
@@ -109,6 +110,7 @@ tests/buffer/allocator_action_branch_tests.cpp
 tests/buffer/allocator_action_line_targets_tests.cpp
 tests/buffer/allocator_actions_more_tests.cpp
 tests/buffer/allocator_actions_tests.cpp
+tests/buffer/allocator_c_api_tests.cpp
 tests/buffer/allocator_detail_tests.cpp
 tests/buffer/allocator_error_tests.cpp
 tests/buffer/allocator_parity_tests.cpp

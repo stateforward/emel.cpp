@@ -34,6 +34,15 @@ target_include_directories(emel_core
     ${boost_sml_SOURCE_DIR}/include
 )
 
+add_library(emel STATIC
+  src/emel/buffer/allocator/c_api.cpp
+)
+
+target_link_libraries(emel
+  PUBLIC
+    emel_core
+)
+
 
 add_executable(generate_architecture_puml
   tools/generate_architecture_puml.cpp
@@ -113,6 +122,7 @@ if(EMEL_ENABLE_TESTS)
     tests/buffer/allocator_detail_tests.cpp
     tests/buffer/allocator_sm_transition_tests.cpp
     tests/buffer/allocator_action_branch_tests.cpp
+    tests/buffer/allocator_c_api_tests.cpp
     tests/buffer/planner_tests.cpp
     tests/buffer/planner_error_tests.cpp
     tests/buffer/planner_sm_transition_tests.cpp
@@ -154,6 +164,7 @@ if(EMEL_ENABLE_TESTS)
   target_link_libraries(emel_tests_bin
     PRIVATE
       emel_core
+      emel
   )
 
   target_include_directories(emel_tests_bin

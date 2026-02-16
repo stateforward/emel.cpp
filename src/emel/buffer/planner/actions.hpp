@@ -103,6 +103,15 @@ inline int32_t sat_add(const int32_t lhs, const int32_t rhs) noexcept {
   return static_cast<int32_t>(sum);
 }
 
+inline bool add_checked(const int32_t lhs, const int32_t rhs, int32_t & out) noexcept {
+  const int64_t sum = static_cast<int64_t>(lhs) + static_cast<int64_t>(rhs);
+  if (sum > std::numeric_limits<int32_t>::max() || sum < std::numeric_limits<int32_t>::min()) {
+    return false;
+  }
+  out = static_cast<int32_t>(sum);
+  return true;
+}
+
 inline int32_t sat_sub_floor_zero(const int32_t lhs, const int32_t rhs) noexcept {
   if (rhs <= 0) {
     return lhs;
@@ -151,6 +160,25 @@ inline int32_t align_up(const int32_t value, const int32_t alignment) noexcept {
     return std::numeric_limits<int32_t>::max();
   }
   return static_cast<int32_t>(aligned);
+}
+
+inline bool align_up_checked(
+    const int32_t value, const int32_t alignment, int32_t & out) noexcept {
+  if (value <= 0) {
+    out = 0;
+    return true;
+  }
+  const int32_t align = sanitize_alignment(alignment);
+  const int64_t sum = static_cast<int64_t>(value) + static_cast<int64_t>(align) - 1;
+  if (sum > std::numeric_limits<int32_t>::max()) {
+    return false;
+  }
+  const int64_t aligned = sum & ~static_cast<int64_t>(align - 1);
+  if (aligned > std::numeric_limits<int32_t>::max()) {
+    return false;
+  }
+  out = static_cast<int32_t>(aligned);
+  return true;
 }
 
 inline int32_t aligned_alloc_size(
@@ -240,7 +268,10 @@ inline bool alloc_bytes_from_layout(
   if (!valid_buffer_id(buffer_id, ctx.buffer_count)) {
     return false;
   }
-  const int32_t alloc_size = align_up(size, alignment_for_buffer(ctx, buffer_id));
+  int32_t alloc_size = 0;
+  if (!align_up_checked(size, alignment_for_buffer(ctx, buffer_id), alloc_size)) {
+    return false;
+  }
   auto & layout = ctx.buffer_layouts[buffer_id];
 
   int32_t best_idx = -1;
@@ -286,8 +317,11 @@ inline bool free_bytes_to_layout(
   if (!valid_buffer_id(buffer_id, ctx.buffer_count)) {
     return false;
   }
-  return insert_free_block(
-    ctx.buffer_layouts[buffer_id], offset, align_up(size, alignment_for_buffer(ctx, buffer_id)));
+  int32_t aligned_size = 0;
+  if (!align_up_checked(size, alignment_for_buffer(ctx, buffer_id), aligned_size)) {
+    return false;
+  }
+  return insert_free_block(ctx.buffer_layouts[buffer_id], offset, aligned_size);
 }
 
 inline int32_t find_record_index(const context & ctx, const int32_t tensor_id) noexcept {
@@ -361,7 +395,10 @@ inline bool allocate_record(context & ctx, tensor_record & rec, const int32_t bu
   }
 
   int32_t offset = -1;
-  const int32_t aligned_size = aligned_alloc_size(ctx, buffer_id, rec.alloc_size);
+  int32_t aligned_size = 0;
+  if (!align_up_checked(rec.alloc_size, alignment_for_buffer(ctx, buffer_id), aligned_size)) {
+    return false;
+  }
   if (!alloc_bytes_from_layout(ctx, buffer_id, rec.alloc_size, offset)) {
     return false;
   }
@@ -644,10 +681,18 @@ inline int32_t default_plan_nodes(context & ctx) noexcept {
             continue;
           }
         }
-        const int32_t node_aligned =
-          detail::aligned_alloc_size(ctx, buffer_id, node_rec->alloc_size);
-        const int32_t reuse_aligned =
-          detail::aligned_alloc_size(ctx, reuse_owner->buffer_id, reuse_owner->alloc_size);
+        int32_t node_aligned = 0;
+        if (!detail::align_up_checked(
+              node_rec->alloc_size, detail::alignment_for_buffer(ctx, buffer_id), node_aligned)) {
+          return EMEL_ERR_INVALID_ARGUMENT;
+        }
+        int32_t reuse_aligned = 0;
+        if (!detail::align_up_checked(
+              reuse_owner->alloc_size,
+              detail::alignment_for_buffer(ctx, reuse_owner->buffer_id),
+              reuse_aligned)) {
+          return EMEL_ERR_INVALID_ARGUMENT;
+        }
         if (reuse_aligned < node_aligned) {
           continue;
         }
@@ -728,7 +773,12 @@ inline int32_t default_release_expired(context &) noexcept { return EMEL_OK; }
 inline int32_t default_finalize(context & ctx) noexcept {
   ctx.total_bytes = 0;
   for (int32_t i = 0; i < ctx.buffer_count; ++i) {
-    ctx.total_bytes = detail::sat_add(ctx.total_bytes, ctx.bytes_by_buffer[i]);
+    if (ctx.bytes_by_buffer[i] < 0) {
+      return EMEL_ERR_INVALID_ARGUMENT;
+    }
+    if (!detail::add_checked(ctx.total_bytes, ctx.bytes_by_buffer[i], ctx.total_bytes)) {
+      return EMEL_ERR_INVALID_ARGUMENT;
+    }
   }
   return EMEL_OK;
 }
@@ -851,10 +901,15 @@ inline int32_t run_split_required(context & ctx, const event::plan * request) no
     const int32_t alignment = alignment_for_buffer(ctx, i);
     const int32_t max_size = max_size_for_buffer(ctx, i);
     if (max_size <= 0 || max_size == k_default_max_size || max_size >= remaining) {
-      const int32_t aligned = align_up(remaining, alignment);
+      int32_t aligned = 0;
+      if (!align_up_checked(remaining, alignment, aligned)) {
+        return EMEL_ERR_INVALID_ARGUMENT;
+      }
       ctx.chunk_sizes[chunk_plan_index(i, 0)] = aligned;
       ctx.chunk_counts[i] = 1;
-      ctx.total_chunk_count = sat_add(ctx.total_chunk_count, 1);
+      if (!add_checked(ctx.total_chunk_count, 1, ctx.total_chunk_count)) {
+        return EMEL_ERR_INVALID_ARGUMENT;
+      }
       continue;
     }
 
@@ -864,7 +919,10 @@ inline int32_t run_split_required(context & ctx, const event::plan * request) no
         return EMEL_ERR_INVALID_ARGUMENT;
       }
       const int32_t chunk_size = remaining > max_size ? max_size : remaining;
-      const int32_t aligned = align_up(chunk_size, alignment);
+      int32_t aligned = 0;
+      if (!align_up_checked(chunk_size, alignment, aligned)) {
+        return EMEL_ERR_INVALID_ARGUMENT;
+      }
       if (aligned > max_size) {
         return EMEL_ERR_INVALID_ARGUMENT;
       }
@@ -873,7 +931,9 @@ inline int32_t run_split_required(context & ctx, const event::plan * request) no
       count += 1;
     }
     ctx.chunk_counts[i] = count;
-    ctx.total_chunk_count = sat_add(ctx.total_chunk_count, count);
+    if (!add_checked(ctx.total_chunk_count, count, ctx.total_chunk_count)) {
+      return EMEL_ERR_INVALID_ARGUMENT;
+    }
     if (ctx.total_chunk_count > k_max_chunk_plan_entries) {
       return EMEL_ERR_INVALID_ARGUMENT;
     }

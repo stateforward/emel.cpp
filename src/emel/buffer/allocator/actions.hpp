@@ -95,6 +95,7 @@ inline bool dispatch_plan_error(
 
 inline bool valid_graph_tensors(const event::graph_view & g) noexcept {
   if (g.n_nodes < 0 || g.n_leafs < 0) return false;
+  if (g.n_nodes > k_max_graph_tensors || g.n_leafs > k_max_graph_tensors) return false;
   if ((g.n_nodes > 0 && g.nodes == nullptr) || (g.n_leafs > 0 && g.leafs == nullptr)) return false;
   for (int32_t i = 0; i < g.n_nodes; ++i) {
     if (g.nodes[i].tensor_id < 0 || g.nodes[i].alloc_size < 0) return false;
@@ -117,6 +118,25 @@ inline int32_t align_up(const int32_t value, const int32_t alignment) noexcept {
     return std::numeric_limits<int32_t>::max();
   }
   return static_cast<int32_t>(aligned);
+}
+
+inline bool align_up_checked(
+    const int32_t value, const int32_t alignment, int32_t & out) noexcept {
+  if (value <= 0) {
+    out = 0;
+    return true;
+  }
+  const int32_t align = sanitize_alignment(alignment);
+  const int64_t sum = static_cast<int64_t>(value) + static_cast<int64_t>(align) - 1;
+  if (sum > std::numeric_limits<int32_t>::max()) {
+    return false;
+  }
+  const int64_t aligned = sum & ~static_cast<int64_t>(align - 1);
+  if (aligned > std::numeric_limits<int32_t>::max()) {
+    return false;
+  }
+  out = static_cast<int32_t>(aligned);
+  return true;
 }
 
 inline int32_t chunk_binding_index(const int32_t buffer_id, const int32_t chunk_index) noexcept {
@@ -161,7 +181,11 @@ inline bool build_tensor_alloc(
   }
   out.buffer_id = buffer_id;
   out.alignment = alignment_for_buffer(c, buffer_id);
-  out.size_max = align_up(tensor.alloc_size, out.alignment);
+  int32_t aligned = 0;
+  if (!align_up_checked(tensor.alloc_size, out.alignment, aligned)) {
+    return false;
+  }
+  out.size_max = aligned;
   return true;
 }
 
@@ -235,7 +259,11 @@ inline bool tensor_needs_realloc(
   }
   const int32_t alignment =
     alloc.alignment > 0 ? alloc.alignment : alignment_for_buffer(c, alloc.buffer_id);
-  return alloc.size_max < align_up(tensor.alloc_size, alignment);
+  int32_t aligned = 0;
+  if (!align_up_checked(tensor.alloc_size, alignment, aligned)) {
+    return true;
+  }
+  return alloc.size_max < aligned;
 }
 
 inline bool graph_needs_realloc(const event::graph_view & graph, const context & c) noexcept {

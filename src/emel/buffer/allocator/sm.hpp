@@ -71,17 +71,17 @@ Why unexpected events can still happen
 - future state/event additions without explicit handling.
 
 Production completion checklist (open)
-- [ ] Explicit handling path for all unexpected event/state combinations.
-- [x] Reserve-to-alloc assignment validity persistence and verification parity
-      (`needs_realloc`-style checks).
-- [ ] Full view/in-place lifetime edge parity.
-- [x] Chunk/address placement internals (alignment, split/merge, reuse preference).
-- [x] Explicit multi-buffer mapping mismatch validation and error coding.
-- [ ] Overflow/limit hardening across size/count paths.
-- [ ] Strategy contract tests for null/invalid/override tables.
-- [ ] Ported allocator parity scenarios from tmp/llama.cpp/tests/test-alloc.cpp.
-- [ ] Public C API allocator-path tests for exact EMEL_* status mapping.
-- [ ] Performance guardrails for hot-path behavior and scaling.
+  - [ ] Explicit handling path for all unexpected event/state combinations.
+  - [x] Reserve-to-alloc assignment validity persistence and verification parity
+        (`needs_realloc`-style checks).
+  - [x] Full view/in-place lifetime edge parity.
+  - [x] Chunk/address placement internals (alignment, split/merge, reuse preference).
+  - [x] Explicit multi-buffer mapping mismatch validation and error coding.
+  - [x] Overflow/limit hardening across size/count paths.
+  - [ ] Strategy contract tests for null/invalid/override tables.
+  - [ ] Ported allocator parity scenarios from tmp/llama.cpp/tests/test-alloc.cpp.
+  - [x] Public C API allocator-path tests for exact EMEL_* status mapping.
+  - [ ] Performance guardrails for hot-path behavior and scaling.
 */
 
 struct model {
