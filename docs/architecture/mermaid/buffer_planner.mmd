@@ -1,43 +1,43 @@
 stateDiagram-v2
   [*] --> idle
-  idle --> resetting : emel::buffer::planner::event::plan [boost::sml::aux::zero_wrapper<emel::buffer::planner::guard::valid_plan>] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::begin_plan>
-  idle --> errored : emel::buffer::planner::event::plan [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::reject_plan>
-  resetting --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/planner/sm.hpp:75:11)>
-  resetting --> seeding_leafs : emel::buffer::planner::event::reset_done [boost::sml::front::always] / boost::sml::front::none
-  resetting --> errored : emel::buffer::planner::event::reset_error [boost::sml::front::always] / boost::sml::front::none
-  seeding_leafs --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/planner/sm.hpp:94:11)>
-  seeding_leafs --> counting_references : emel::buffer::planner::event::seed_leafs_done [boost::sml::front::always] / boost::sml::front::none
-  seeding_leafs --> errored : emel::buffer::planner::event::seed_leafs_error [boost::sml::front::always] / boost::sml::front::none
-  counting_references --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/planner/sm.hpp:116:11)>
-  counting_references --> allocating_explicit_inputs : emel::buffer::planner::event::count_references_done [boost::sml::front::always] / boost::sml::front::none
-  counting_references --> errored : emel::buffer::planner::event::count_references_error [boost::sml::front::always] / boost::sml::front::none
-  allocating_explicit_inputs --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/planner/sm.hpp:139:11)>
-  allocating_explicit_inputs --> planning_nodes : emel::buffer::planner::event::alloc_explicit_inputs_done [boost::sml::front::always] / boost::sml::front::none
-  allocating_explicit_inputs --> errored : emel::buffer::planner::event::alloc_explicit_inputs_error [boost::sml::front::always] / boost::sml::front::none
-  planning_nodes --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/planner/sm.hpp:163:11)>
-  planning_nodes --> releasing_expired : emel::buffer::planner::event::plan_nodes_done [boost::sml::front::always] / boost::sml::front::none
-  planning_nodes --> errored : emel::buffer::planner::event::plan_nodes_error [boost::sml::front::always] / boost::sml::front::none
-  releasing_expired --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/planner/sm.hpp:187:11)>
-  releasing_expired --> finalizing : emel::buffer::planner::event::release_expired_done [boost::sml::front::always] / boost::sml::front::none
-  releasing_expired --> errored : emel::buffer::planner::event::release_expired_error [boost::sml::front::always] / boost::sml::front::none
-  finalizing --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/planner/sm.hpp:211:11)>
-  finalizing --> splitting_required : emel::buffer::planner::event::finalize_done [boost::sml::front::always] / boost::sml::front::none
-  finalizing --> errored : emel::buffer::planner::event::finalize_error [boost::sml::front::always] / boost::sml::front::none
-  splitting_required --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/planner/sm.hpp:234:11)>
-  splitting_required --> done : emel::buffer::planner::event::split_required_done [boost::sml::front::always] / boost::sml::front::none
-  splitting_required --> errored : emel::buffer::planner::event::split_required_error [boost::sml::front::always] / boost::sml::front::none
-  done --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/planner/sm.hpp:259:11)>
-  done --> idle : emel::buffer::planner::events::plan_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_plan_done>
-  errored --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/planner/sm.hpp:275:11)>
-  errored --> idle : emel::buffer::planner::events::plan_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_plan_error>
-  idle --> errored : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_unexpected>
-  resetting --> errored : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_unexpected>
-  seeding_leafs --> errored : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_unexpected>
-  counting_references --> errored : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_unexpected>
-  allocating_explicit_inputs --> errored : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_unexpected>
-  planning_nodes --> errored : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_unexpected>
-  releasing_expired --> errored : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_unexpected>
-  finalizing --> errored : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_unexpected>
-  splitting_required --> errored : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_unexpected>
-  done --> errored : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_unexpected>
-  errored --> errored : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::planner::action::on_unexpected>
+  idle --> resetting : emel__buffer__planner__event__plan [boost__sml__aux__zero_wrapper_emel__buffer__planner__guard__valid_plan_] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__begin_plan_
+  idle --> errored : emel__buffer__planner__event__plan [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__reject_plan_
+  resetting --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_buffer_planner_sm_hpp_75_11__
+  resetting --> seeding_leafs : emel__buffer__planner__event__reset_done [boost__sml__front__always] / boost__sml__front__none
+  resetting --> errored : emel__buffer__planner__event__reset_error [boost__sml__front__always] / boost__sml__front__none
+  seeding_leafs --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_buffer_planner_sm_hpp_94_11__
+  seeding_leafs --> counting_references : emel__buffer__planner__event__seed_leafs_done [boost__sml__front__always] / boost__sml__front__none
+  seeding_leafs --> errored : emel__buffer__planner__event__seed_leafs_error [boost__sml__front__always] / boost__sml__front__none
+  counting_references --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_buffer_planner_sm_hpp_116_11__
+  counting_references --> allocating_explicit_inputs : emel__buffer__planner__event__count_references_done [boost__sml__front__always] / boost__sml__front__none
+  counting_references --> errored : emel__buffer__planner__event__count_references_error [boost__sml__front__always] / boost__sml__front__none
+  allocating_explicit_inputs --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_buffer_planner_sm_hpp_139_11__
+  allocating_explicit_inputs --> planning_nodes : emel__buffer__planner__event__alloc_explicit_inputs_done [boost__sml__front__always] / boost__sml__front__none
+  allocating_explicit_inputs --> errored : emel__buffer__planner__event__alloc_explicit_inputs_error [boost__sml__front__always] / boost__sml__front__none
+  planning_nodes --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_buffer_planner_sm_hpp_163_11__
+  planning_nodes --> releasing_expired : emel__buffer__planner__event__plan_nodes_done [boost__sml__front__always] / boost__sml__front__none
+  planning_nodes --> errored : emel__buffer__planner__event__plan_nodes_error [boost__sml__front__always] / boost__sml__front__none
+  releasing_expired --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_buffer_planner_sm_hpp_187_11__
+  releasing_expired --> finalizing : emel__buffer__planner__event__release_expired_done [boost__sml__front__always] / boost__sml__front__none
+  releasing_expired --> errored : emel__buffer__planner__event__release_expired_error [boost__sml__front__always] / boost__sml__front__none
+  finalizing --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_buffer_planner_sm_hpp_211_11__
+  finalizing --> splitting_required : emel__buffer__planner__event__finalize_done [boost__sml__front__always] / boost__sml__front__none
+  finalizing --> errored : emel__buffer__planner__event__finalize_error [boost__sml__front__always] / boost__sml__front__none
+  splitting_required --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_buffer_planner_sm_hpp_234_11__
+  splitting_required --> done : emel__buffer__planner__event__split_required_done [boost__sml__front__always] / boost__sml__front__none
+  splitting_required --> errored : emel__buffer__planner__event__split_required_error [boost__sml__front__always] / boost__sml__front__none
+  done --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_buffer_planner_sm_hpp_259_11__
+  done --> idle : emel__buffer__planner__events__plan_done [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_plan_done_
+  errored --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_buffer_planner_sm_hpp_275_11__
+  errored --> idle : emel__buffer__planner__events__plan_error [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_plan_error_
+  idle --> errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_unexpected_
+  resetting --> errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_unexpected_
+  seeding_leafs --> errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_unexpected_
+  counting_references --> errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_unexpected_
+  allocating_explicit_inputs --> errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_unexpected_
+  planning_nodes --> errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_unexpected_
+  releasing_expired --> errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_unexpected_
+  finalizing --> errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_unexpected_
+  splitting_required --> errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_unexpected_
+  done --> errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_unexpected_
+  errored --> errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__on_unexpected_

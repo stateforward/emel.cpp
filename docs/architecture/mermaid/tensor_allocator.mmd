@@ -1,45 +1,45 @@
 stateDiagram-v2
   [*] --> idle
-  idle --> validating : emel::tensor::allocator::event::allocate_tensors [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::begin_allocate_tensors>
-  validating --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/allocator/sm.hpp:76:11)>
-  validating --> validating : emel::tensor::allocator::event::validate [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::run_validate>
-  validating --> scanning_tensors : emel::tensor::allocator::events::validate_done [boost::sml::front::always] / boost::sml::front::none
-  validating --> failed : emel::tensor::allocator::events::validate_error [boost::sml::front::always] / boost::sml::front::none
-  scanning_tensors --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/allocator/sm.hpp:108:11)>
-  scanning_tensors --> scanning_tensors : emel::tensor::allocator::event::scan_tensors [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::run_scan_tensors>
-  scanning_tensors --> partitioning_ranges : emel::tensor::allocator::events::scan_done [boost::sml::front::always] / boost::sml::front::none
-  scanning_tensors --> failed : emel::tensor::allocator::events::scan_error [boost::sml::front::always] / boost::sml::front::none
-  partitioning_ranges --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/allocator/sm.hpp:138:11)>
-  partitioning_ranges --> partitioning_ranges : emel::tensor::allocator::event::partition_ranges [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::run_partition_ranges>
-  partitioning_ranges --> allocating_ranges : emel::tensor::allocator::events::partition_done [boost::sml::front::always] / boost::sml::front::none
-  partitioning_ranges --> failed : emel::tensor::allocator::events::partition_error [boost::sml::front::always] / boost::sml::front::none
-  allocating_ranges --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/allocator/sm.hpp:168:11)>
-  allocating_ranges --> allocating_ranges : emel::tensor::allocator::event::allocate_ranges [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::run_allocate_ranges>
-  allocating_ranges --> initializing_tensors : emel::tensor::allocator::events::allocate_ranges_done [boost::sml::front::always] / boost::sml::front::none
-  allocating_ranges --> failed : emel::tensor::allocator::events::allocate_ranges_error [boost::sml::front::always] / boost::sml::front::none
-  initializing_tensors --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/allocator/sm.hpp:198:11)>
-  initializing_tensors --> initializing_tensors : emel::tensor::allocator::event::initialize_tensors [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::run_initialize_tensors>
-  initializing_tensors --> assembling_result : emel::tensor::allocator::events::initialize_tensors_done [boost::sml::front::always] / boost::sml::front::none
-  initializing_tensors --> failed : emel::tensor::allocator::events::initialize_tensors_error [boost::sml::front::always] / boost::sml::front::none
-  assembling_result --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/allocator/sm.hpp:228:11)>
-  assembling_result --> assembling_result : emel::tensor::allocator::event::assemble [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::run_assemble>
-  assembling_result --> done : emel::tensor::allocator::events::assemble_done [boost::sml::front::always] / boost::sml::front::none
-  assembling_result --> failed : emel::tensor::allocator::events::assemble_error [boost::sml::front::always] / boost::sml::front::none
-  done --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/allocator/sm.hpp:263:11)>
-  done --> idle : emel::tensor::allocator::events::allocate_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::on_allocate_done>
-  done --> idle : emel::tensor::allocator::events::allocate_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::on_allocate_error>
-  idle --> releasing : emel::tensor::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::begin_release>
-  validating --> releasing : emel::tensor::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::begin_release>
-  scanning_tensors --> releasing : emel::tensor::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::begin_release>
-  partitioning_ranges --> releasing : emel::tensor::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::begin_release>
-  allocating_ranges --> releasing : emel::tensor::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::begin_release>
-  initializing_tensors --> releasing : emel::tensor::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::begin_release>
-  assembling_result --> releasing : emel::tensor::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::begin_release>
-  done --> releasing : emel::tensor::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::begin_release>
-  failed --> releasing : emel::tensor::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::begin_release>
-  releasing --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/allocator/sm.hpp:298:11)>
-  releasing --> idle : emel::tensor::allocator::events::release_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::on_release_done>
-  releasing --> failed : emel::tensor::allocator::events::release_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::on_release_error>
-  failed --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/allocator/sm.hpp:312:11)>
-  failed --> idle : emel::tensor::allocator::events::allocate_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::on_allocate_error>
-  failed --> idle : emel::tensor::allocator::events::release_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::allocator::action::on_release_error>
+  idle --> validating : emel__tensor__allocator__event__allocate_tensors [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_allocate_tensors_
+  validating --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_tensor_allocator_sm_hpp_76_11__
+  validating --> validating : emel__tensor__allocator__event__validate [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_validate_
+  validating --> scanning_tensors : emel__tensor__allocator__events__validate_done [boost__sml__front__always] / boost__sml__front__none
+  validating --> failed : emel__tensor__allocator__events__validate_error [boost__sml__front__always] / boost__sml__front__none
+  scanning_tensors --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_tensor_allocator_sm_hpp_108_11__
+  scanning_tensors --> scanning_tensors : emel__tensor__allocator__event__scan_tensors [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_scan_tensors_
+  scanning_tensors --> partitioning_ranges : emel__tensor__allocator__events__scan_done [boost__sml__front__always] / boost__sml__front__none
+  scanning_tensors --> failed : emel__tensor__allocator__events__scan_error [boost__sml__front__always] / boost__sml__front__none
+  partitioning_ranges --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_tensor_allocator_sm_hpp_138_11__
+  partitioning_ranges --> partitioning_ranges : emel__tensor__allocator__event__partition_ranges [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_partition_ranges_
+  partitioning_ranges --> allocating_ranges : emel__tensor__allocator__events__partition_done [boost__sml__front__always] / boost__sml__front__none
+  partitioning_ranges --> failed : emel__tensor__allocator__events__partition_error [boost__sml__front__always] / boost__sml__front__none
+  allocating_ranges --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_tensor_allocator_sm_hpp_168_11__
+  allocating_ranges --> allocating_ranges : emel__tensor__allocator__event__allocate_ranges [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_allocate_ranges_
+  allocating_ranges --> initializing_tensors : emel__tensor__allocator__events__allocate_ranges_done [boost__sml__front__always] / boost__sml__front__none
+  allocating_ranges --> failed : emel__tensor__allocator__events__allocate_ranges_error [boost__sml__front__always] / boost__sml__front__none
+  initializing_tensors --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_tensor_allocator_sm_hpp_198_11__
+  initializing_tensors --> initializing_tensors : emel__tensor__allocator__event__initialize_tensors [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_initialize_tensors_
+  initializing_tensors --> assembling_result : emel__tensor__allocator__events__initialize_tensors_done [boost__sml__front__always] / boost__sml__front__none
+  initializing_tensors --> failed : emel__tensor__allocator__events__initialize_tensors_error [boost__sml__front__always] / boost__sml__front__none
+  assembling_result --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_tensor_allocator_sm_hpp_228_11__
+  assembling_result --> assembling_result : emel__tensor__allocator__event__assemble [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_assemble_
+  assembling_result --> done : emel__tensor__allocator__events__assemble_done [boost__sml__front__always] / boost__sml__front__none
+  assembling_result --> failed : emel__tensor__allocator__events__assemble_error [boost__sml__front__always] / boost__sml__front__none
+  done --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_tensor_allocator_sm_hpp_263_11__
+  done --> idle : emel__tensor__allocator__events__allocate_done [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_allocate_done_
+  done --> idle : emel__tensor__allocator__events__allocate_error [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_allocate_error_
+  idle --> releasing : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
+  validating --> releasing : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
+  scanning_tensors --> releasing : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
+  partitioning_ranges --> releasing : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
+  allocating_ranges --> releasing : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
+  initializing_tensors --> releasing : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
+  assembling_result --> releasing : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
+  done --> releasing : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
+  failed --> releasing : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
+  releasing --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_tensor_allocator_sm_hpp_298_11__
+  releasing --> idle : emel__tensor__allocator__events__release_done [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_release_done_
+  releasing --> failed : emel__tensor__allocator__events__release_error [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_release_error_
+  failed --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_tensor_allocator_sm_hpp_312_11__
+  failed --> idle : emel__tensor__allocator__events__allocate_error [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_allocate_error_
+  failed --> idle : emel__tensor__allocator__events__release_error [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_release_error_

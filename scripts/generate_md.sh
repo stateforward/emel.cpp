@@ -7,6 +7,7 @@ OUT_MERMAID_DIR="$ROOT_DIR/docs/architecture/mermaid"
 BUILD_DIR="$ROOT_DIR/build/debug"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
+REPO_URL="https://github.com/stateforward/emel.cpp"
 
 mkdir -p "$OUT_MD_DIR" "$OUT_MERMAID_DIR"
 
@@ -51,6 +52,7 @@ mkdir -p "$GEN_MD_DIR" "$GEN_MERMAID_DIR"
   echo '#include <iostream>'
   echo '#include <sstream>'
   echo '#include <string>'
+  echo '#include <cctype>'
   echo
 
   for h in "${sm_headers[@]}"; do
@@ -58,7 +60,9 @@ mkdir -p "$GEN_MD_DIR" "$GEN_MERMAID_DIR"
     echo "#include \"$rel\""
   done
 
-  cat <<'CPP'
+  sed "s|REPO_URL_PLACEHOLDER|$REPO_URL|g" <<'CPP'
+
+constexpr const char * k_repo_url = "REPO_URL_PLACEHOLDER";
 
 template <class T>
 std::string sml_name() noexcept {
@@ -70,8 +74,56 @@ inline bool is_none_like(const std::string & name) noexcept {
   return name.empty() || name == "none" || name == "zero_wrapper";
 }
 
+inline std::string short_name(const std::string & name) noexcept {
+  const auto pos = name.rfind("::");
+  if (pos == std::string::npos) {
+    return name;
+  }
+  return name.substr(pos + 2);
+}
+
+inline std::string sanitize_mermaid(const std::string & name) noexcept {
+  if (name == "[*]") {
+    return name;
+  }
+  std::string out;
+  out.reserve(name.size());
+  for (unsigned char c : name) {
+    if (std::isalnum(c) || c == '_') {
+      out.push_back(static_cast<char>(c));
+    } else {
+      out.push_back('_');
+    }
+  }
+  if (out.empty()) {
+    out = "state";
+  }
+  return out;
+}
+
+inline std::string md_link(const std::string & name, const std::string & source_header) noexcept {
+  if (name.empty() || name == "-") {
+    return "-";
+  }
+  if (name == "[*]") {
+    return "`[*]`";
+  }
+  const auto shorty = short_name(name);
+  std::string link;
+  link.reserve(64 + source_header.size() + shorty.size());
+  link.append("[`");
+  link.append(shorty);
+  link.append("`](");
+  link.append(k_repo_url);
+  link.append("/blob/main/");
+  link.append(source_header);
+  link.append(")");
+  return link;
+}
+
 template <class T>
-void dump_transition(std::ostream & md, std::ostream & mermaid) noexcept {
+void dump_transition(std::ostream & md, std::ostream & mermaid,
+                     const std::string & source_header) noexcept {
   namespace sml = boost::sml;
 
   auto src_state = sml_name<typename T::src_state>();
@@ -99,48 +151,56 @@ void dump_transition(std::ostream & md, std::ostream & mermaid) noexcept {
     action.clear();
   }
 
-  mermaid << "  " << src_state << " --> " << dst_state;
+  const auto src_id = sanitize_mermaid(src_state);
+  const auto dst_id = sanitize_mermaid(dst_state);
+  const auto event_label = sanitize_mermaid(event);
+  const auto guard_label = sanitize_mermaid(guard);
+  const auto action_label = sanitize_mermaid(action);
+
+  mermaid << "  " << src_id << " --> " << dst_id;
   if (!event.empty() || !guard.empty() || !action.empty()) {
     mermaid << " :";
     if (!event.empty()) {
-      mermaid << " " << event;
+      mermaid << " " << event_label;
     }
     if (!guard.empty()) {
-      mermaid << " [" << guard << "]";
+      mermaid << " [" << guard_label << "]";
     }
     if (!action.empty()) {
-      mermaid << " / " << action;
+      mermaid << " / " << action_label;
     }
   }
   mermaid << "\n";
 
-  md << "| `" << src_state << "` | ";
+  md << "| " << md_link(src_state, source_header) << " | ";
   if (event.empty()) {
     md << "-";
   } else {
-    md << "`" << event << "`";
+    md << md_link(event, source_header);
   }
   md << " | ";
   if (guard.empty()) {
     md << "-";
   } else {
-    md << "`" << guard << "`";
+    md << md_link(guard, source_header);
   }
   md << " | ";
   if (action.empty()) {
     md << "-";
   } else {
-    md << "`" << action << "`";
+    md << md_link(action, source_header);
   }
-  md << " | `" << dst_state << "` |\n";
+  md << " | " << md_link(dst_state, source_header) << " |\n";
 }
 
 template <class TTransitions>
-void dump_transitions(const TTransitions &, std::ostream &, std::ostream &) noexcept {}
+void dump_transitions(const TTransitions &, std::ostream &, std::ostream &,
+                      const std::string &) noexcept {}
 
 template <template <class...> class T, class... Ts>
-void dump_transitions(const T<Ts...> &, std::ostream & md, std::ostream & mermaid) noexcept {
-  int _[]{0, (dump_transition<Ts>(md, mermaid), 0)...};
+void dump_transitions(const T<Ts...> &, std::ostream & md, std::ostream & mermaid,
+                      const std::string & source_header) noexcept {
+  int _[]{0, (dump_transition<Ts>(md, mermaid, source_header), 0)...};
   (void)_;
 }
 
@@ -153,10 +213,11 @@ void dump_machine_doc(
 
   std::ostringstream table_rows;
   std::ostringstream mermaid_rows;
-  dump_transitions(transitions_t{}, table_rows, mermaid_rows);
+  dump_transitions(transitions_t{}, table_rows, mermaid_rows, source_header);
 
   md << "# " << machine_name << "\n\n";
-  md << "Source: `" << source_header << "`\n\n";
+  md << "Source: [`" << source_header << "`](" << k_repo_url << "/blob/main/"
+     << source_header << ")\n\n";
   md << "## Mermaid\n\n";
   md << "```mermaid\n";
   md << "stateDiagram-v2\n";
