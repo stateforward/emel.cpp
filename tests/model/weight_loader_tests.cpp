@@ -1,6 +1,7 @@
 #include "doctest/doctest.h"
 
 #include "emel/model/loader/events.hpp"
+#include "emel/model/weight_loader/guards.hpp"
 #include "emel/model/weight_loader/sm.hpp"
 
 namespace {
@@ -92,4 +93,45 @@ TEST_CASE("weight loader dispatches loading errors") {
   CHECK(!owner.done);
   CHECK(owner.error);
   CHECK(owner.error_event.err == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("weight loader guard selection covers branches") {
+  emel::model::weight_loader::event::load_weights ev{};
+  emel::model::weight_loader::guard::use_mmap use_mmap{};
+  emel::model::weight_loader::guard::use_stream use_stream{};
+
+  ev.request_mmap = true;
+  ev.mmap_supported = true;
+  ev.request_direct_io = false;
+  ev.direct_io_supported = true;
+  CHECK(use_mmap(ev));
+  CHECK(!use_stream(ev));
+
+  ev.request_direct_io = true;
+  ev.direct_io_supported = true;
+  CHECK(!use_mmap(ev));
+  CHECK(use_stream(ev));
+
+  ev.request_direct_io = false;
+  ev.request_mmap = false;
+  ev.mmap_supported = true;
+  CHECK(!use_mmap(ev));
+  CHECK(use_stream(ev));
+
+  ev.request_mmap = true;
+  ev.mmap_supported = false;
+  CHECK(!use_mmap(ev));
+  CHECK(use_stream(ev));
+}
+
+TEST_CASE("weight loader guard error predicates") {
+  emel::model::weight_loader::guard::no_error no_error{};
+  emel::model::weight_loader::guard::has_error has_error{};
+  emel::model::weight_loader::events::weights_loaded ok{.err = EMEL_OK};
+  emel::model::weight_loader::events::weights_loaded bad{.err = EMEL_ERR_BACKEND};
+
+  CHECK(no_error(ok));
+  CHECK(!has_error(ok));
+  CHECK(!no_error(bad));
+  CHECK(has_error(bad));
 }

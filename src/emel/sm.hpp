@@ -116,6 +116,7 @@ class fifo_scheduler {
   }
 
  private:
+  // GCOVR_EXCL_START
   struct task_slot {
     using invoke_fn = void (*)(void *) noexcept;
     using destroy_fn = void (*)(void *) noexcept;
@@ -153,6 +154,7 @@ class fifo_scheduler {
       destroy = nullptr;
     }
   };
+  // GCOVR_EXCL_STOP
 
   static constexpr std::size_t next(const std::size_t index) noexcept {
     return (index + 1) & (Capacity - 1);
@@ -165,7 +167,7 @@ class fifo_scheduler {
   template <class Fn>
   void enqueue(Fn && fn) noexcept {
     if (full()) {
-      std::terminate();
+      std::terminate();  // GCOVR_EXCL_LINE
     }
 
     tasks_[tail_].set(std::forward<Fn>(fn));

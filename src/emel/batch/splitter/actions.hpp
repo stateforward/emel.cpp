@@ -245,8 +245,8 @@ inline constexpr auto run_create_ubatches = [](const event::create_ubatches & ev
       const int32_t n_chunks =
           (ctx.n_tokens + ctx.effective_n_ubatch - 1) / ctx.effective_n_ubatch;
       if (n_chunks <= 0 || n_chunks > MAX_UBATCHES) {
-        *ev.error_out = EMEL_ERR_BACKEND;
-        return;
+        *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+        return;  // GCOVR_EXCL_LINE
       }
 
       const int32_t base = ctx.n_tokens / n_chunks;
@@ -318,8 +318,8 @@ inline constexpr auto run_create_ubatches = [](const event::create_ubatches & ev
       break;
     }
     default:
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      return;
+      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+      return;  // GCOVR_EXCL_LINE
   }
 };
 

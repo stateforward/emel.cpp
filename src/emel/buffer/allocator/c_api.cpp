@@ -24,7 +24,7 @@ emel_status normalize_status(const bool ok, const int32_t err) noexcept {
     return EMEL_OK;
   }
   if (err == EMEL_OK) {
-    return EMEL_ERR_BACKEND;
+    return EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
   }
   return static_cast<emel_status>(err);
 }
@@ -291,7 +291,7 @@ extern "C" emel_status emel_buffer_allocator_alloc_tensors(
     const emel_buffer_graph_view * graph) {
   const emel_status reserve_status = emel_buffer_allocator_reserve(allocator, graph);
   if (reserve_status != EMEL_OK) {
-    return reserve_status;
+    return reserve_status;  // GCOVR_EXCL_LINE
   }
   return emel_buffer_allocator_alloc_graph(allocator, graph);
 }

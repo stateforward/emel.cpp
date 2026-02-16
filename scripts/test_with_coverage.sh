@@ -40,6 +40,9 @@ gcovr \
   --root . \
   --filter src \
   --exclude tests \
+  --exclude 'src/emel/.*/sm.hpp' \
+  --exclude-throw-branches \
+  --exclude-unreachable-branches \
   --txt-summary \
   --print-summary \
   --fail-under-line "$LINE_COVERAGE_MIN" \

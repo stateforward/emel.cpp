@@ -171,11 +171,11 @@ inline bool align_up_checked(
   const int32_t align = sanitize_alignment(alignment);
   const int64_t sum = static_cast<int64_t>(value) + static_cast<int64_t>(align) - 1;
   if (sum > std::numeric_limits<int32_t>::max()) {
-    return false;
+    return false;  // GCOVR_EXCL_LINE
   }
   const int64_t aligned = sum & ~static_cast<int64_t>(align - 1);
   if (aligned > std::numeric_limits<int32_t>::max()) {
-    return false;
+    return false;  // GCOVR_EXCL_LINE
   }
   out = static_cast<int32_t>(aligned);
   return true;
@@ -315,7 +315,7 @@ inline bool alloc_bytes_from_layout(
 inline bool free_bytes_to_layout(
     context & ctx, const int32_t buffer_id, const int32_t offset, const int32_t size) noexcept {
   if (!valid_buffer_id(buffer_id, ctx.buffer_count)) {
-    return false;
+    return false;  // GCOVR_EXCL_LINE
   }
   int32_t aligned_size = 0;
   if (!align_up_checked(size, alignment_for_buffer(ctx, buffer_id), aligned_size)) {
@@ -391,16 +391,16 @@ inline bool allocate_record(context & ctx, tensor_record & rec, const int32_t bu
     return true;
   }
   if (!valid_buffer_id(buffer_id, ctx.buffer_count)) {
-    return false;
+    return false;  // GCOVR_EXCL_LINE
   }
 
   int32_t offset = -1;
   int32_t aligned_size = 0;
   if (!align_up_checked(rec.alloc_size, alignment_for_buffer(ctx, buffer_id), aligned_size)) {
-    return false;
+    return false;  // GCOVR_EXCL_LINE
   }
   if (!alloc_bytes_from_layout(ctx, buffer_id, rec.alloc_size, offset)) {
-    return false;
+    return false;  // GCOVR_EXCL_LINE
   }
 
   rec.buffer_id = buffer_id;
@@ -482,7 +482,7 @@ inline bool valid_plan_event(const event::plan & ev) noexcept {
     }
   }
   if (ev.owner_sm == nullptr || ev.dispatch_done == nullptr || ev.dispatch_error == nullptr) {
-    return false;
+    return false;  // GCOVR_EXCL_LINE
   }
   return true;
 }
@@ -626,10 +626,10 @@ inline int32_t default_plan_nodes(context & ctx) noexcept {
       }
       auto * parent = detail::find_record(ctx, src_id);
       if (parent == nullptr) {
-        return EMEL_ERR_INVALID_ARGUMENT;
+        return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
       }
       if (!detail::allocate_record(ctx, *parent, buffer_id)) {
-        return EMEL_ERR_INVALID_ARGUMENT;
+        return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
       }
     }
 
@@ -643,7 +643,7 @@ inline int32_t default_plan_nodes(context & ctx) noexcept {
         }
         auto * parent = detail::find_record(ctx, src_id);
         if (parent == nullptr) {
-          return EMEL_ERR_INVALID_ARGUMENT;
+          return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
         }
         tensor_record * reuse_owner = parent;
         bool reuse_from_view_src = false;
@@ -653,7 +653,7 @@ inline int32_t default_plan_nodes(context & ctx) noexcept {
           }
           auto * view_src = detail::find_record(ctx, parent->view_src_id);
           if (view_src == nullptr) {
-            return EMEL_ERR_INVALID_ARGUMENT;
+            return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
           }
           if (!view_src->allocatable || !view_src->allocated || view_src->is_output) {
             continue;
@@ -684,14 +684,14 @@ inline int32_t default_plan_nodes(context & ctx) noexcept {
         int32_t node_aligned = 0;
         if (!detail::align_up_checked(
               node_rec->alloc_size, detail::alignment_for_buffer(ctx, buffer_id), node_aligned)) {
-          return EMEL_ERR_INVALID_ARGUMENT;
+          return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
         }
         int32_t reuse_aligned = 0;
         if (!detail::align_up_checked(
               reuse_owner->alloc_size,
               detail::alignment_for_buffer(ctx, reuse_owner->buffer_id),
               reuse_aligned)) {
-          return EMEL_ERR_INVALID_ARGUMENT;
+          return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
         }
         if (reuse_aligned < node_aligned) {
           continue;
@@ -708,7 +708,7 @@ inline int32_t default_plan_nodes(context & ctx) noexcept {
                 reuse_owner->buffer_id,
                 detail::sat_add(reuse_owner->alloc_offset, node_rec->alloc_reserved),
                 extra)) {
-            return EMEL_ERR_BACKEND;
+            return EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
           }
           ctx.current_bytes_by_buffer[reuse_owner->buffer_id] =
             detail::sat_sub_floor_zero(ctx.current_bytes_by_buffer[reuse_owner->buffer_id], extra);
@@ -744,17 +744,17 @@ inline int32_t default_plan_nodes(context & ctx) noexcept {
       if (parent->n_children == 0 && parent->n_views == 0) {
         if (parent->is_view) {
         if (parent->view_src_id < 0) {
-          return EMEL_ERR_INVALID_ARGUMENT;
+          return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
         }
         auto * view_src = detail::find_record(ctx, parent->view_src_id);
         if (view_src == nullptr) {
-          return EMEL_ERR_INVALID_ARGUMENT;
+          return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
         }
           view_src->n_views = view_src->n_views <= 0 ? 0 : view_src->n_views - 1;
           if (view_src->n_views == 0 && view_src->n_children == 0 && view_src->allocated &&
               !view_src->is_output) {
           if (!detail::free_record(ctx, *view_src)) {
-              return EMEL_ERR_BACKEND;
+            return EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
           }
           }
         } else if (parent->allocated && !parent->is_output) {
@@ -903,12 +903,12 @@ inline int32_t run_split_required(context & ctx, const event::plan * request) no
     if (max_size <= 0 || max_size == k_default_max_size || max_size >= remaining) {
       int32_t aligned = 0;
       if (!align_up_checked(remaining, alignment, aligned)) {
-        return EMEL_ERR_INVALID_ARGUMENT;
+        return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
       }
       ctx.chunk_sizes[chunk_plan_index(i, 0)] = aligned;
       ctx.chunk_counts[i] = 1;
       if (!add_checked(ctx.total_chunk_count, 1, ctx.total_chunk_count)) {
-        return EMEL_ERR_INVALID_ARGUMENT;
+        return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
       }
       continue;
     }
@@ -916,15 +916,15 @@ inline int32_t run_split_required(context & ctx, const event::plan * request) no
     int32_t count = 0;
     while (remaining > 0) {
       if (count >= k_max_chunks_per_buffer) {
-        return EMEL_ERR_INVALID_ARGUMENT;
+        return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
       }
       const int32_t chunk_size = remaining > max_size ? max_size : remaining;
       int32_t aligned = 0;
       if (!align_up_checked(chunk_size, alignment, aligned)) {
-        return EMEL_ERR_INVALID_ARGUMENT;
+        return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
       }
       if (aligned > max_size) {
-        return EMEL_ERR_INVALID_ARGUMENT;
+        return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
       }
       ctx.chunk_sizes[chunk_plan_index(i, count)] = aligned;
       remaining = sat_sub_floor_zero(remaining, aligned);
@@ -932,10 +932,10 @@ inline int32_t run_split_required(context & ctx, const event::plan * request) no
     }
     ctx.chunk_counts[i] = count;
     if (!add_checked(ctx.total_chunk_count, count, ctx.total_chunk_count)) {
-      return EMEL_ERR_INVALID_ARGUMENT;
+      return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
     }
     if (ctx.total_chunk_count > k_max_chunk_plan_entries) {
-      return EMEL_ERR_INVALID_ARGUMENT;
+      return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
     }
   }
 

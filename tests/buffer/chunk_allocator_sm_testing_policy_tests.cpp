@@ -122,6 +122,71 @@ TEST_CASE("chunk_allocator_testing_policy_allocate_error_path") {
   }));
 }
 
+TEST_CASE("chunk_allocator_testing_policy_allocate_phase_errors") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  noop_queue queue{};
+  emel::buffer::chunk_allocator::Process process{queue};
+  boost::sml::sm<
+    emel::buffer::chunk_allocator::model,
+    boost::sml::testing,
+    emel::buffer::chunk_allocator::Process> machine{ctx, process};
+
+  emel::buffer::chunk_allocator::event::allocate allocate{
+    .size = 16,
+  };
+
+  CHECK(machine.process_event(allocate));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::validate_allocate_done{
+    .request = &allocate,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::select_block_error{
+    .err = EMEL_ERR_BACKEND,
+    .request = &allocate,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::allocate_error{
+    .err = EMEL_ERR_BACKEND,
+    .error_out = nullptr,
+    .request = &allocate,
+  }));
+
+  CHECK(machine.process_event(allocate));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::validate_allocate_done{
+    .request = &allocate,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::select_block_done{
+    .request = &allocate,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::ensure_chunk_error{
+    .err = EMEL_ERR_BACKEND,
+    .request = &allocate,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::allocate_error{
+    .err = EMEL_ERR_BACKEND,
+    .error_out = nullptr,
+    .request = &allocate,
+  }));
+
+  CHECK(machine.process_event(allocate));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::validate_allocate_done{
+    .request = &allocate,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::select_block_done{
+    .request = &allocate,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::ensure_chunk_done{
+    .request = &allocate,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::commit_allocate_error{
+    .err = EMEL_ERR_BACKEND,
+    .request = &allocate,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::allocate_error{
+    .err = EMEL_ERR_BACKEND,
+    .error_out = nullptr,
+    .request = &allocate,
+  }));
+}
+
 TEST_CASE("chunk_allocator_testing_policy_release_success_path") {
   emel::buffer::chunk_allocator::action::context ctx{};
   noop_queue queue{};
@@ -173,6 +238,36 @@ TEST_CASE("chunk_allocator_testing_policy_release_error_path") {
   }));
 }
 
+TEST_CASE("chunk_allocator_testing_policy_release_phase_errors") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  noop_queue queue{};
+  emel::buffer::chunk_allocator::Process process{queue};
+  boost::sml::sm<
+    emel::buffer::chunk_allocator::model,
+    boost::sml::testing,
+    emel::buffer::chunk_allocator::Process> machine{ctx, process};
+
+  emel::buffer::chunk_allocator::event::release release{
+    .chunk = 0,
+    .offset = 0,
+    .size = 16,
+  };
+
+  CHECK(machine.process_event(release));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::validate_release_done{
+    .request = &release,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::merge_release_error{
+    .err = EMEL_ERR_BACKEND,
+    .request = &release,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::release_error{
+    .err = EMEL_ERR_BACKEND,
+    .error_out = nullptr,
+    .request = &release,
+  }));
+}
+
 TEST_CASE("chunk_allocator_testing_policy_reset_paths") {
   emel::buffer::chunk_allocator::action::context ctx{};
   noop_queue queue{};
@@ -196,6 +291,11 @@ TEST_CASE("chunk_allocator_testing_policy_reset_paths") {
   CHECK(machine.process_event(reset));
   CHECK(machine.process_event(emel::buffer::chunk_allocator::events::apply_reset_error{
     .err = EMEL_ERR_BACKEND,
+    .request = &reset,
+  }));
+  CHECK(machine.process_event(emel::buffer::chunk_allocator::events::reset_error{
+    .err = EMEL_ERR_BACKEND,
+    .error_out = nullptr,
     .request = &reset,
   }));
   CHECK(machine.process_event(emel::buffer::chunk_allocator::events::reset_error{

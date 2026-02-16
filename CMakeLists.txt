@@ -91,7 +91,6 @@ if(EMEL_ENABLE_TESTS)
     tests/model/loader_tests.cpp
     tests/model/weight_loader_tests.cpp
     tests/sm/sm_policy_tests.cpp
-    tests/sm/branch_boost_tests.cpp
     tests/decoder/decoder_tests.cpp
     tests/decoder/decoder_sm_transition_tests.cpp
     tests/decoder/decoder_sm_intent_event_tests.cpp

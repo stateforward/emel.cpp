@@ -1,5 +1,6 @@
 #include <array>
 #include <cstdint>
+#include <limits>
 
 #include <doctest/doctest.h>
 
@@ -246,6 +247,208 @@ TEST_CASE("planner_default_plan_nodes_rejects_missing_view_source_in_reuse") {
   CHECK(emel::buffer::planner::action::detail::register_graph_tensors(ctx));
   CHECK(emel::buffer::planner::action::detail::default_plan_nodes(ctx) ==
         EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("planner_detail_helpers_cover_overflow_paths") {
+  using namespace emel::buffer::planner::action::detail;
+
+  int32_t out = 0;
+  CHECK_FALSE(add_checked(std::numeric_limits<int32_t>::max(), 1, out));
+
+  emel::buffer::planner::action::context ctx{};
+  ctx.buffer_count = 1;
+  CHECK(alignment_for_buffer(ctx, -1) == emel::buffer::planner::action::k_default_alignment);
+  CHECK(max_size_for_buffer(ctx, 2) == emel::buffer::planner::action::k_default_max_size);
+
+  CHECK_FALSE(align_up_checked(std::numeric_limits<int32_t>::max(), 16, out));
+}
+
+TEST_CASE("planner_detail_align_up_saturates") {
+  using emel::buffer::planner::action::detail::align_up;
+  const int32_t value = std::numeric_limits<int32_t>::max();
+  CHECK(align_up(value, 2) == std::numeric_limits<int32_t>::max());
+}
+
+TEST_CASE("planner_detail_alloc_and_free_alignment_failures") {
+  using namespace emel::buffer::planner::action::detail;
+
+  emel::buffer::planner::action::context ctx{};
+  ctx.buffer_count = 1;
+
+  int32_t offset = 0;
+  CHECK_FALSE(alloc_bytes_from_layout(ctx, 0, std::numeric_limits<int32_t>::max(), offset));
+  CHECK_FALSE(free_bytes_to_layout(ctx, 0, 0, std::numeric_limits<int32_t>::max()));
+
+  emel::buffer::planner::action::tensor_record rec{};
+  rec.tensor_id = 5;
+  rec.alloc_size = std::numeric_limits<int32_t>::max();
+  rec.allocatable = true;
+  rec.allocated = false;
+  CHECK_FALSE(allocate_record(ctx, rec, 0));
+}
+
+TEST_CASE("planner_default_alloc_explicit_inputs_paths") {
+  {
+    emel::buffer::planner::action::context ctx{};
+    ctx.buffer_count = 1;
+    ctx.node_count = 1;
+    ctx.nodes[0] = make_node(10, -1);
+    CHECK(emel::buffer::planner::action::detail::default_alloc_explicit_inputs(ctx) ==
+          EMEL_ERR_INVALID_ARGUMENT);
+  }
+
+  {
+    emel::buffer::planner::action::context ctx{};
+    ctx.buffer_count = 1;
+    ctx.node_count = 1;
+    ctx.nodes[0] = make_node(2, 1);
+    ctx.node_buffer_ids[0] = 2;
+    ctx.tensor_count = 2;
+    ctx.tensors[0].tensor_id = 2;
+    ctx.tensors[0].alloc_size = 16;
+    ctx.tensors[0].allocatable = true;
+    ctx.tensors[1].tensor_id = 1;
+    ctx.tensors[1].alloc_size = 16;
+    ctx.tensors[1].is_input = true;
+    ctx.tensors[1].allocatable = true;
+    CHECK(emel::buffer::planner::action::detail::default_alloc_explicit_inputs(ctx) ==
+          EMEL_ERR_INVALID_ARGUMENT);
+  }
+
+  {
+    emel::buffer::planner::action::context ctx{};
+    ctx.buffer_count = 1;
+    ctx.node_count = 1;
+    ctx.nodes[0] = make_node(2, 1);
+    ctx.node_buffer_ids[0] = 0;
+    ctx.tensor_count = 2;
+    ctx.tensors[0].tensor_id = 2;
+    ctx.tensors[0].alloc_size = 16;
+    ctx.tensors[0].allocatable = true;
+    ctx.tensors[1].tensor_id = 1;
+    ctx.tensors[1].alloc_size = 16;
+    ctx.tensors[1].is_input = true;
+    ctx.tensors[1].allocatable = true;
+    CHECK(emel::buffer::planner::action::detail::default_alloc_explicit_inputs(ctx) == EMEL_OK);
+    CHECK(ctx.planned_nodes > 0);
+  }
+}
+
+TEST_CASE("planner_default_finalize_error_paths") {
+  {
+    emel::buffer::planner::action::context ctx{};
+    ctx.buffer_count = 1;
+    ctx.bytes_by_buffer[0] = -1;
+    CHECK(emel::buffer::planner::action::detail::default_finalize(ctx) ==
+          EMEL_ERR_INVALID_ARGUMENT);
+  }
+
+  {
+    emel::buffer::planner::action::context ctx{};
+    ctx.buffer_count = 2;
+    ctx.bytes_by_buffer[0] = std::numeric_limits<int32_t>::max();
+    ctx.bytes_by_buffer[1] = 1;
+    CHECK(emel::buffer::planner::action::detail::default_finalize(ctx) ==
+          EMEL_ERR_INVALID_ARGUMENT);
+  }
+}
+
+TEST_CASE("planner_run_split_required_error_paths") {
+  using emel::buffer::planner::action::detail::run_split_required;
+
+  {
+    emel::buffer::planner::action::context ctx{};
+    ctx.buffer_count = 1;
+    ctx.buffer_alignments[0] = 16;
+    ctx.buffer_max_sizes[0] = 0;
+    ctx.bytes_by_buffer[0] = std::numeric_limits<int32_t>::max();
+    CHECK(run_split_required(ctx, nullptr) == EMEL_ERR_INVALID_ARGUMENT);
+  }
+
+  {
+    emel::buffer::planner::action::context ctx{};
+    ctx.buffer_count = 1;
+    ctx.buffer_alignments[0] = 1;
+    ctx.buffer_max_sizes[0] = 1;
+    ctx.bytes_by_buffer[0] =
+      (emel::buffer::planner::action::k_max_chunks_per_buffer + 1);
+    CHECK(run_split_required(ctx, nullptr) == EMEL_ERR_INVALID_ARGUMENT);
+  }
+
+  {
+    emel::buffer::planner::action::context ctx{};
+    ctx.buffer_count = 1;
+    ctx.buffer_alignments[0] = 16;
+    ctx.buffer_max_sizes[0] = std::numeric_limits<int32_t>::max() - 1;
+    ctx.bytes_by_buffer[0] = std::numeric_limits<int32_t>::max();
+    CHECK(run_split_required(ctx, nullptr) == EMEL_ERR_INVALID_ARGUMENT);
+  }
+
+  {
+    emel::buffer::planner::action::context ctx{};
+    ctx.buffer_count = 1;
+    ctx.buffer_alignments[0] = 8;
+    ctx.buffer_max_sizes[0] = 10;
+    ctx.bytes_by_buffer[0] = 20;
+    CHECK(run_split_required(ctx, nullptr) == EMEL_ERR_INVALID_ARGUMENT);
+  }
+}
+
+TEST_CASE("planner_on_unexpected_sets_error_out") {
+  emel::buffer::planner::action::context ctx{};
+  int32_t err = EMEL_OK;
+  emel::buffer::planner::event::plan ev{};
+  ev.error_out = &err;
+
+  struct emel::buffer::planner::action::on_unexpected handler{};
+  handler(ev, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+TEST_CASE("planner_valid_plan_event_rejects_invalid_limits") {
+  std::array<tensor_desc, 1> nodes = {{make_node(1, -1)}};
+  std::array<tensor_desc, 1> leafs = {{make_leaf(2)}};
+  std::array<int32_t, 1> sizes = {{0}};
+  std::array<int32_t, 1> counts = {{0}};
+  std::array<int32_t, 1> alignments = {{3}};
+  std::array<int32_t, 1> max_sizes = {{-1}};
+
+  emel::buffer::planner::event::plan ev{
+    .graph = emel::buffer::allocator::event::graph_view{
+      .nodes = nodes.data(),
+      .n_nodes = 1,
+      .leafs = leafs.data(),
+      .n_leafs = 1,
+    },
+    .buffer_count = 1,
+    .sizes_out = sizes.data(),
+    .sizes_out_count = static_cast<int32_t>(sizes.size()),
+    .chunk_counts_out = counts.data(),
+    .chunk_counts_out_count = 0,
+    .owner_sm = reinterpret_cast<void *>(0x1),
+    .dispatch_done = reinterpret_cast<bool (*)(void *, const emel::buffer::planner::events::plan_done &)>(0x1),
+    .dispatch_error = reinterpret_cast<bool (*)(void *, const emel::buffer::planner::events::plan_error &)>(0x1),
+  };
+
+  CHECK_FALSE(emel::buffer::planner::action::detail::valid_plan_event(ev));
+
+  ev.chunk_counts_out_count = 1;
+  ev.buffer_alignments = alignments.data();
+  CHECK_FALSE(emel::buffer::planner::action::detail::valid_plan_event(ev));
+
+  ev.buffer_alignments = nullptr;
+  ev.buffer_max_sizes = max_sizes.data();
+  CHECK_FALSE(emel::buffer::planner::action::detail::valid_plan_event(ev));
+
+  max_sizes[0] = 5;
+  alignments[0] = 4;
+  ev.buffer_alignments = alignments.data();
+  CHECK_FALSE(emel::buffer::planner::action::detail::valid_plan_event(ev));
+
+  max_sizes[0] = 2;
+  CHECK_FALSE(emel::buffer::planner::action::detail::valid_plan_event(ev));
+
+  max_sizes[0] = 6;
+  CHECK_FALSE(emel::buffer::planner::action::detail::valid_plan_event(ev));
 }
 
 TEST_CASE("planner_default_plan_nodes_skips_unallocatable_view_source") {
