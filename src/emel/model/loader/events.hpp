@@ -113,6 +113,8 @@ struct load {
   bool direct_io_supported = false;
   const void * architectures = nullptr;
   int32_t n_architectures = 0;
+  void * weights_buffer = nullptr;
+  uint64_t weights_buffer_size = 0;
   void * file_handle = nullptr;
   void * format_ctx = nullptr;
 

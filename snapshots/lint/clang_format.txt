@@ -52,6 +52,7 @@ src/emel/memory/coordinator/sm.hpp
 src/emel/model/architecture/data.hpp
 src/emel/model/data.cpp
 src/emel/model/data.hpp
+src/emel/model/gguf/loader.hpp
 src/emel/model/loader/actions.hpp
 src/emel/model/loader/events.hpp
 src/emel/model/loader/guards.hpp
@@ -154,6 +155,7 @@ tests/memory/coordinator_sm_testing_policy_tests.cpp
 tests/memory/coordinator_sm_transition_more_tests.cpp
 tests/memory/coordinator_sm_transition_tests.cpp
 tests/memory/coordinator_tests.cpp
+tests/model/gguf_tests.cpp
 tests/model/loader_tests.cpp
 tests/model/parser_tests.cpp
 tests/model/weight_loader_tests.cpp
