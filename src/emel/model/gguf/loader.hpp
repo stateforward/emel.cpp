@@ -1556,6 +1556,159 @@ inline bool parse_kv(
       model.vocab_data.remove_extra_whitespaces = value;
       continue;
     }
+    if (key_equals(key, key_len, "tokenizer.ggml.padding_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.pad_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.cls_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.cls_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.mask_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.mask_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.prefix_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.prefix_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.suffix_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.suffix_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.middle_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.middle_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.fim_pre_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.fim_pre_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.fim_suf_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.fim_suf_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.fim_mid_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.fim_mid_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.fim_pad_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.fim_pad_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.fim_rep_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.fim_rep_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.fim_sep_token_id")) {
+      int32_t value = -1;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.fim_sep_id = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.add_bos_token")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.add_bos = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.add_eos_token")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.add_eos = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.add_sep_token")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.add_sep = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.add_space_prefix")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.add_space_prefix = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.remove_extra_whitespaces")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.remove_extra_whitespaces = value;
+      continue;
+    }
 
     if (key_has_suffix(key, key_len, k_suffix_block_count, prefix_len)) {
       uint32_t block_count = 0;

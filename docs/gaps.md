@@ -36,6 +36,11 @@ Model loader audit (llama.cpp parity)
   progress/upload callbacks.
 - Note: public C API entrypoints and C-boundary status mapping remain pending as a separate task.
 
+Parser audit (llama.cpp parity)
+- Reference source: `tmp/llama.cpp/src/llama-model.cpp` and `tmp/llama.cpp/src/llama-vocab.cpp`.
+- Status: complete for GGUF metadata mapping to `emel::model::data` fields and parser orchestration.
+- Implemented: tokenizer IDs and flags, token arrays, merges, and vocabulary metadata required by EMEL.
+
 Weight loader audit (llama.cpp parity)
 - Reference source: `tmp/llama.cpp/src/llama-model-loader.cpp` (weight mapping + data load).
 - Status: implemented for EMEL loader callbacks (strategy selection, mappings init, mmap/stream
@@ -46,7 +51,6 @@ Weight loader audit (llama.cpp parity)
 
 Unvalidated machines (no parity audit performed yet)
 - `src/emel/model/weight_loader/sm.hpp`
-- `src/emel/model/parser/sm.hpp`
 - `src/emel/tokenizer/sm.hpp`
 - `src/emel/encoder/sm.hpp`
 - `src/emel/decoder/sm.hpp`
