@@ -1,0 +1,25 @@
+@startuml
+
+[*] --> emel::sampler::pipeline::initialized
+emel::sampler::pipeline::initialized --> emel::sampler::pipeline::preparing_candidates : emel::sampler::pipeline::event::sample
+emel::sampler::pipeline::preparing_candidates --> boost::sml::front::internal : on_entry
+emel::sampler::pipeline::preparing_candidates --> emel::sampler::pipeline::preparing_candidates : emel::sampler::pipeline::event::prepare_candidates
+emel::sampler::pipeline::preparing_candidates --> emel::sampler::pipeline::sampling : emel::sampler::pipeline::events::prepare_candidates_done
+emel::sampler::pipeline::preparing_candidates --> emel::sampler::pipeline::errored : emel::sampler::pipeline::events::prepare_candidates_error
+emel::sampler::pipeline::sampling --> boost::sml::front::internal : on_entry
+emel::sampler::pipeline::sampling --> boost::sml::front::internal : on_entry
+emel::sampler::pipeline::sampling --> emel::sampler::pipeline::sampling : emel::sampler::pipeline::event::apply_sampling
+emel::sampler::pipeline::sampling --> emel::sampler::pipeline::sampling : emel::sampler::pipeline::events::apply_sampling_done\n [boost::sml::aux::zero_wrapper<emel::sampler::pipeline::guard::has_more_samplers>]
+emel::sampler::pipeline::sampling --> emel::sampler::pipeline::selecting_token : emel::sampler::pipeline::events::apply_sampling_done\n [boost::sml::aux::zero_wrapper<emel::sampler::pipeline::guard::no_more_samplers>]
+emel::sampler::pipeline::sampling --> emel::sampler::pipeline::errored : emel::sampler::pipeline::events::apply_sampling_error
+emel::sampler::pipeline::selecting_token --> boost::sml::front::internal : on_entry
+emel::sampler::pipeline::selecting_token --> emel::sampler::pipeline::selecting_token : emel::sampler::pipeline::event::select_token
+emel::sampler::pipeline::selecting_token --> emel::sampler::pipeline::done : emel::sampler::pipeline::events::select_token_done
+emel::sampler::pipeline::selecting_token --> emel::sampler::pipeline::errored : emel::sampler::pipeline::events::select_token_error
+emel::sampler::pipeline::done --> boost::sml::front::internal : on_entry
+emel::sampler::pipeline::done --> emel::sampler::pipeline::initialized : emel::sampler::pipeline::events::sampling_done
+emel::sampler::pipeline::done --> emel::sampler::pipeline::initialized : emel::sampler::pipeline::events::sampling_error
+emel::sampler::pipeline::errored --> boost::sml::front::internal : on_entry
+emel::sampler::pipeline::errored --> emel::sampler::pipeline::initialized : emel::sampler::pipeline::events::sampling_error
+
+@enduml

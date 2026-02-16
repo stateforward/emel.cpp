@@ -15,6 +15,43 @@
 
 namespace emel {
 
+namespace detail {
+
+template <class Event>
+constexpr bool normalize_event_result(const Event & ev, const bool accepted) noexcept {
+  if (!accepted) {
+    return false;
+  }
+  if constexpr (requires { ev.error_out; }) {
+    if (ev.error_out != nullptr && *ev.error_out != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <class Owner, class Process>
+struct process_support {
+  struct immediate_queue {
+    using container_type = void;
+    Owner * owner = nullptr;
+
+    template <class Event>
+    void push(const Event & ev) noexcept {
+      if (owner != nullptr) {
+        owner->process_event(ev);
+      }
+    }
+  };
+
+  explicit process_support(Owner * owner) : queue_{owner}, process_{queue_} {}
+
+  immediate_queue queue_{};
+  Process process_;
+};
+
+}  // namespace detail
+
 namespace policy {
 
 struct inline_scheduler {
@@ -308,7 +345,8 @@ class sm {
 
   template <class Event>
   bool process_event(const Event & ev) {
-    return state_machine_.process_event(ev);
+    const bool accepted = state_machine_.process_event(ev);
+    return detail::normalize_event_result(ev, accepted);
   }
 
   template <class State>
@@ -612,18 +650,20 @@ class co_sm {
 
   template <class Event>
   bool process_event(const Event & ev) {
-    return state_machine_.process_event(ev);
+    const bool accepted = state_machine_.process_event(ev);
+    return detail::normalize_event_result(ev, accepted);
   }
 
   template <class Event>
   bool_task process_event_async(const Event & ev) {
     if constexpr (std::is_same_v<scheduler_type, policy::inline_scheduler>) {
-      return bool_task::from_value(state_machine_.process_event(ev));
+      const bool accepted = detail::normalize_event_result(ev, state_machine_.process_event(ev));
+      return bool_task::from_value(accepted);
     }
     if constexpr (policy::has_try_run_immediate<scheduler_type>) {
       bool accepted = false;
       if (scheduler_.try_run_immediate([this, &ev, &accepted]() {
-            accepted = state_machine_.process_event(ev);
+            accepted = detail::normalize_event_result(ev, state_machine_.process_event(ev));
           })) {
         return bool_task::from_value(accepted);
       }
@@ -666,7 +706,7 @@ class co_sm {
 
     bool await_ready() noexcept {
       if constexpr (std::is_same_v<scheduler_type, policy::inline_scheduler>) {
-        accepted = self.state_machine_.process_event(event);
+        accepted = detail::normalize_event_result(event, self.state_machine_.process_event(event));
         return true;
       }
       return false;
@@ -674,7 +714,7 @@ class co_sm {
 
     void await_suspend(std::coroutine_handle<> handle) {
       self.scheduler_.schedule([this, handle]() mutable {
-        accepted = self.state_machine_.process_event(event);
+        accepted = detail::normalize_event_result(event, self.state_machine_.process_event(event));
         handle.resume();
       });
     }

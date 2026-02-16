@@ -35,6 +35,8 @@ struct context {
   uint64_t pending_max_chunk_size = k_max_chunk_limit;
 
   uint64_t request_size = 0;
+  uint64_t request_alignment = k_default_alignment;
+  uint64_t request_max_chunk_size = k_max_chunk_limit;
   uint64_t aligned_request_size = 0;
   int32_t request_chunk = -1;
   uint64_t request_offset = 0;
@@ -45,14 +47,6 @@ struct context {
   int32_t result_chunk = -1;
   uint64_t result_offset = 0;
   uint64_t result_size = 0;
-
-  int32_t * request_error_out = nullptr;
-  int32_t * request_chunk_out = nullptr;
-  uint64_t * request_offset_out = nullptr;
-  uint64_t * request_aligned_size_out = nullptr;
-
-  int32_t pending_error = EMEL_OK;
-  int32_t last_error = EMEL_OK;
   uint32_t step = 0;
 };
 
@@ -192,7 +186,8 @@ inline bool create_chunk(context & c, const uint64_t min_size, int32_t & out_chu
     return false;
   }
 
-  uint64_t chunk_size = min_size > c.max_chunk_size ? min_size : c.max_chunk_size;
+  uint64_t chunk_size =
+    min_size > c.request_max_chunk_size ? min_size : c.request_max_chunk_size;
   if (c.chunk_count == k_max_chunks - 1) {
     chunk_size = k_max_chunk_limit;
   }
@@ -295,9 +290,7 @@ struct begin_configure {
   void operator()(const event::configure & ev, context & c) const noexcept {
     c.pending_alignment = ev.alignment;
     c.pending_max_chunk_size = ev.max_chunk_size;
-    c.request_error_out = ev.error_out;
-    c.pending_error = EMEL_OK;
-    if (c.request_error_out != nullptr) *c.request_error_out = EMEL_OK;
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -308,7 +301,6 @@ struct run_validate_configure {
     if (!detail::valid_alignment(c.pending_alignment) || c.pending_max_chunk_size == 0) {
       err = EMEL_ERR_INVALID_ARGUMENT;
     }
-    c.pending_error = err;
     if (ev.error_out != nullptr) *ev.error_out = err;
     c.step += 1;
   }
@@ -319,7 +311,6 @@ struct run_apply_configure {
     c.alignment = c.pending_alignment;
     c.max_chunk_size = detail::clamp_chunk_size_limit(c.pending_max_chunk_size);
     detail::reset_chunks(c);
-    c.pending_error = EMEL_OK;
     if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
@@ -328,22 +319,25 @@ struct run_apply_configure {
 struct begin_allocate {
   void operator()(const event::allocate & ev, context & c) const noexcept {
     c.request_size = ev.size;
-    c.request_chunk_out = ev.chunk_out;
-    c.request_offset_out = ev.offset_out;
-    c.request_aligned_size_out = ev.aligned_size_out;
-    c.request_error_out = ev.error_out;
-
-    c.pending_error = EMEL_OK;
+    c.request_alignment = ev.alignment != 0 ? ev.alignment : c.alignment;
+    c.request_max_chunk_size = ev.max_chunk_size != 0
+      ? detail::clamp_chunk_size_limit(ev.max_chunk_size)
+      : c.max_chunk_size;
     c.result_chunk = -1;
     c.result_offset = 0;
     c.result_size = 0;
     c.selected_chunk = -1;
     c.selected_block = -1;
-
-    if (c.request_chunk_out != nullptr) *c.request_chunk_out = -1;
-    if (c.request_offset_out != nullptr) *c.request_offset_out = 0;
-    if (c.request_aligned_size_out != nullptr) *c.request_aligned_size_out = 0;
-    if (c.request_error_out != nullptr) *c.request_error_out = EMEL_OK;
+    if (ev.chunk_out != nullptr) {
+      *ev.chunk_out = -1;
+    }
+    if (ev.offset_out != nullptr) {
+      *ev.offset_out = 0;
+    }
+    if (ev.aligned_size_out != nullptr) {
+      *ev.aligned_size_out = 0;
+    }
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -351,14 +345,13 @@ struct begin_allocate {
 struct run_validate_allocate {
   void operator()(const event::validate_allocate & ev, context & c) const noexcept {
     int32_t err = EMEL_OK;
-    if (c.request_size == 0 || c.request_chunk_out == nullptr || c.request_offset_out == nullptr) {
+    if (c.request_size == 0) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (!detail::valid_alignment(c.alignment) || c.max_chunk_size == 0) {
+    } else if (!detail::valid_alignment(c.request_alignment) || c.request_max_chunk_size == 0) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (!detail::align_up(c.request_size, c.alignment, c.aligned_request_size)) {
+    } else if (!detail::align_up(c.request_size, c.request_alignment, c.aligned_request_size)) {
       err = EMEL_ERR_INVALID_ARGUMENT;
     }
-    c.pending_error = err;
     if (ev.error_out != nullptr) *ev.error_out = err;
     c.step += 1;
   }
@@ -372,7 +365,6 @@ struct run_select_block {
     if (c.selected_chunk < 0) {
       detail::select_best_last(c);
     }
-    c.pending_error = EMEL_OK;
     if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
@@ -390,7 +382,6 @@ struct run_ensure_chunk {
         c.selected_block = 0;
       }
     }
-    c.pending_error = err;
     if (ev.error_out != nullptr) *ev.error_out = err;
     c.step += 1;
   }
@@ -402,7 +393,6 @@ struct run_commit_allocate {
     if (!detail::allocate_from_selected(c)) {
       err = EMEL_ERR_BACKEND;
     }
-    c.pending_error = err;
     if (ev.error_out != nullptr) *ev.error_out = err;
     c.step += 1;
   }
@@ -413,10 +403,9 @@ struct begin_release {
     c.request_chunk = ev.chunk;
     c.request_offset = ev.offset;
     c.request_size = ev.size;
-    c.request_error_out = ev.error_out;
-    c.pending_error = EMEL_OK;
+    c.request_alignment = ev.alignment != 0 ? ev.alignment : c.alignment;
     c.aligned_request_size = 0;
-    if (c.request_error_out != nullptr) *c.request_error_out = EMEL_OK;
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -426,7 +415,7 @@ struct run_validate_release {
     int32_t err = EMEL_OK;
     if (c.request_chunk < 0 || c.request_chunk >= c.chunk_count || c.request_size == 0) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (!detail::align_up(c.request_size, c.alignment, c.aligned_request_size)) {
+    } else if (!detail::align_up(c.request_size, c.request_alignment, c.aligned_request_size)) {
       err = EMEL_ERR_INVALID_ARGUMENT;
     } else {
       uint64_t end = 0;
@@ -435,7 +424,6 @@ struct run_validate_release {
         err = EMEL_ERR_INVALID_ARGUMENT;
       }
     }
-    c.pending_error = err;
     if (ev.error_out != nullptr) *ev.error_out = err;
     c.step += 1;
   }
@@ -447,7 +435,6 @@ struct run_merge_release {
     if (!detail::free_bytes(c)) {
       err = EMEL_ERR_BACKEND;
     }
-    c.pending_error = err;
     if (ev.error_out != nullptr) *ev.error_out = err;
     c.step += 1;
   }
@@ -455,9 +442,7 @@ struct run_merge_release {
 
 struct begin_reset {
   void operator()(const event::reset & ev, context & c) const noexcept {
-    c.request_error_out = ev.error_out;
-    c.pending_error = EMEL_OK;
-    if (c.request_error_out != nullptr) *c.request_error_out = EMEL_OK;
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -465,16 +450,14 @@ struct begin_reset {
 struct run_apply_reset {
   void operator()(const event::apply_reset & ev, context & c) const noexcept {
     detail::reset_chunks(c);
-    c.pending_error = EMEL_OK;
     if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
 
 struct on_configure_done {
-  void operator()(const events::configure_done &, context & c) const noexcept {
-    c.last_error = EMEL_OK;
-    if (c.request_error_out != nullptr) *c.request_error_out = EMEL_OK;
+  void operator()(const events::configure_done & ev, context & c) const noexcept {
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -482,19 +465,14 @@ struct on_configure_done {
 struct on_configure_error {
   void operator()(const events::configure_error & ev, context & c) const noexcept {
     const int32_t err = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
-    c.last_error = err;
-    if (c.request_error_out != nullptr) *c.request_error_out = err;
+    if (ev.error_out != nullptr) *ev.error_out = err;
     c.step += 1;
   }
 };
 
 struct on_allocate_done {
   void operator()(const events::allocate_done & ev, context & c) const noexcept {
-    c.last_error = EMEL_OK;
-    if (c.request_chunk_out != nullptr) *c.request_chunk_out = ev.chunk;
-    if (c.request_offset_out != nullptr) *c.request_offset_out = ev.offset;
-    if (c.request_aligned_size_out != nullptr) *c.request_aligned_size_out = ev.size;
-    if (c.request_error_out != nullptr) *c.request_error_out = EMEL_OK;
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -502,16 +480,14 @@ struct on_allocate_done {
 struct on_allocate_error {
   void operator()(const events::allocate_error & ev, context & c) const noexcept {
     const int32_t err = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
-    c.last_error = err;
-    if (c.request_error_out != nullptr) *c.request_error_out = err;
+    if (ev.error_out != nullptr) *ev.error_out = err;
     c.step += 1;
   }
 };
 
 struct on_release_done {
-  void operator()(const events::release_done &, context & c) const noexcept {
-    c.last_error = EMEL_OK;
-    if (c.request_error_out != nullptr) *c.request_error_out = EMEL_OK;
+  void operator()(const events::release_done & ev, context & c) const noexcept {
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -519,16 +495,14 @@ struct on_release_done {
 struct on_release_error {
   void operator()(const events::release_error & ev, context & c) const noexcept {
     const int32_t err = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
-    c.last_error = err;
-    if (c.request_error_out != nullptr) *c.request_error_out = err;
+    if (ev.error_out != nullptr) *ev.error_out = err;
     c.step += 1;
   }
 };
 
 struct on_reset_done {
-  void operator()(const events::reset_done &, context & c) const noexcept {
-    c.last_error = EMEL_OK;
-    if (c.request_error_out != nullptr) *c.request_error_out = EMEL_OK;
+  void operator()(const events::reset_done & ev, context & c) const noexcept {
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -536,8 +510,19 @@ struct on_reset_done {
 struct on_reset_error {
   void operator()(const events::reset_error & ev, context & c) const noexcept {
     const int32_t err = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
-    c.last_error = err;
-    if (c.request_error_out != nullptr) *c.request_error_out = err;
+    if (ev.error_out != nullptr) *ev.error_out = err;
+    c.step += 1;
+  }
+};
+
+struct on_unexpected {
+  template <class Event>
+  void operator()(const Event & ev, context & c) const noexcept {
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+      }
+    }
     c.step += 1;
   }
 };
@@ -563,6 +548,6 @@ inline constexpr on_release_done on_release_done{};
 inline constexpr on_release_error on_release_error{};
 inline constexpr on_reset_done on_reset_done{};
 inline constexpr on_reset_error on_reset_error{};
+inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::buffer::chunk_allocator::action
-

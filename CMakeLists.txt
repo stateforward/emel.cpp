@@ -79,21 +79,76 @@ if(EMEL_ENABLE_TESTS)
   add_executable(emel_tests_bin
     tests/model/loader_tests.cpp
     tests/model/weight_loader_tests.cpp
+    tests/sm/sm_policy_tests.cpp
+    tests/sm/branch_boost_tests.cpp
     tests/decoder/decoder_tests.cpp
+    tests/decoder/decoder_sm_transition_tests.cpp
+    tests/decoder/decoder_sm_intent_event_tests.cpp
+    tests/decoder/decoder_action_branch_tests.cpp
+    tests/decoder/decoder_sm_on_entry_branch_tests.cpp
     tests/decoder/compute_executor_tests.cpp
+    tests/decoder/compute_executor_sm_transition_tests.cpp
+    tests/decoder/compute_executor_action_branch_tests.cpp
     tests/decoder/ubatch_executor_tests.cpp
+    tests/decoder/ubatch_executor_sm_transition_tests.cpp
+    tests/decoder/ubatch_executor_action_branch_tests.cpp
+    tests/decoder/ubatch_executor_sm_on_entry_branch_tests.cpp
     tests/batch/splitter_tests.cpp
     tests/batch/splitter_actions_tests.cpp
+    tests/batch/splitter_additional_tests.cpp
+    tests/batch/splitter_action_branch_tests.cpp
+    tests/batch/splitter_sm_transition_tests.cpp
+    tests/batch/splitter_sm_flow_tests.cpp
     tests/memory/coordinator_tests.cpp
+    tests/memory/coordinator_sm_transition_tests.cpp
+    tests/memory/coordinator_sm_transition_more_tests.cpp
+    tests/memory/coordinator_sm_testing_policy_tests.cpp
+    tests/memory/coordinator_action_branch_tests.cpp
     tests/kv/cache_tests.cpp
+    tests/kv/cache_sm_transition_tests.cpp
+    tests/kv/cache_sm_testing_policy_tests.cpp
+    tests/kv/cache_action_branch_tests.cpp
     tests/buffer/allocator_tests.cpp
+    tests/buffer/allocator_error_tests.cpp
+    tests/buffer/allocator_detail_tests.cpp
+    tests/buffer/allocator_sm_transition_tests.cpp
+    tests/buffer/allocator_action_branch_tests.cpp
     tests/buffer/planner_tests.cpp
+    tests/buffer/planner_error_tests.cpp
+    tests/buffer/planner_sm_transition_tests.cpp
     tests/buffer/allocator_actions_tests.cpp
+    tests/buffer/allocator_actions_more_tests.cpp
+    tests/buffer/allocator_action_line_targets_tests.cpp
+    tests/buffer/allocator_action_branch_more_tests.cpp
+    tests/buffer/allocator_parity_tests.cpp
     tests/buffer/planner_actions_tests.cpp
+    tests/buffer/planner_actions_branch_targets_tests.cpp
+    tests/buffer/planner_action_branch_tests.cpp
     tests/buffer/chunk_allocator_tests.cpp
+    tests/buffer/chunk_allocator_error_tests.cpp
+    tests/buffer/chunk_allocator_sm_transition_tests.cpp
+    tests/buffer/chunk_allocator_sm_testing_policy_tests.cpp
+    tests/buffer/chunk_allocator_action_branch_tests.cpp
+    tests/buffer/chunk_allocator_parity_tests.cpp
     tests/buffer/realloc_analyzer_tests.cpp
+    tests/buffer/realloc_analyzer_error_tests.cpp
+    tests/buffer/realloc_analyzer_sm_transition_tests.cpp
+    tests/buffer/realloc_analyzer_sm_flow_tests.cpp
+    tests/buffer/realloc_analyzer_action_branch_tests.cpp
     tests/tensor/allocator_tests.cpp
+    tests/tensor/allocator_error_tests.cpp
+    tests/tensor/allocator_branch_tests.cpp
+    tests/tensor/allocator_action_branch_targets_tests.cpp
+    tests/tensor/allocator_sm_transition_tests.cpp
+    tests/tensor/allocator_sm_transition_more_tests.cpp
+    tests/tensor/allocator_sm_testing_policy_tests.cpp
+    tests/tensor/allocator_action_branch_tests.cpp
+    tests/tensor/allocator_action_branch_more_tests.cpp
     tests/tensor/lifetime_analyzer_tests.cpp
+    tests/tensor/lifetime_analyzer_error_tests.cpp
+    tests/tensor/lifetime_analyzer_sm_error_tests.cpp
+    tests/tensor/lifetime_analyzer_sm_transition_tests.cpp
+    tests/tensor/lifetime_analyzer_action_branch_tests.cpp
   )
 
   target_link_libraries(emel_tests_bin

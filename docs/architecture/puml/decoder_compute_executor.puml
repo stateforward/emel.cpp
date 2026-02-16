@@ -1,0 +1,27 @@
+@startuml
+
+[*] --> emel::decoder::compute_executor::initialized
+emel::decoder::compute_executor::initialized --> emel::decoder::compute_executor::validating : emel::decoder::compute_executor::event::execute
+emel::decoder::compute_executor::validating --> boost::sml::front::internal : on_entry
+emel::decoder::compute_executor::validating --> emel::decoder::compute_executor::validating : emel::decoder::compute_executor::event::validate
+emel::decoder::compute_executor::validating --> emel::decoder::compute_executor::binding_inputs : emel::decoder::compute_executor::events::validate_done
+emel::decoder::compute_executor::validating --> emel::decoder::compute_executor::errored : emel::decoder::compute_executor::events::validate_error
+emel::decoder::compute_executor::binding_inputs --> boost::sml::front::internal : on_entry
+emel::decoder::compute_executor::binding_inputs --> emel::decoder::compute_executor::binding_inputs : emel::decoder::compute_executor::event::bind_inputs
+emel::decoder::compute_executor::binding_inputs --> emel::decoder::compute_executor::running_backend : emel::decoder::compute_executor::events::bind_inputs_done
+emel::decoder::compute_executor::binding_inputs --> emel::decoder::compute_executor::errored : emel::decoder::compute_executor::events::bind_inputs_error
+emel::decoder::compute_executor::running_backend --> boost::sml::front::internal : on_entry
+emel::decoder::compute_executor::running_backend --> emel::decoder::compute_executor::running_backend : emel::decoder::compute_executor::event::run_backend
+emel::decoder::compute_executor::running_backend --> emel::decoder::compute_executor::extracting_outputs : emel::decoder::compute_executor::events::run_backend_done
+emel::decoder::compute_executor::running_backend --> emel::decoder::compute_executor::errored : emel::decoder::compute_executor::events::run_backend_error
+emel::decoder::compute_executor::extracting_outputs --> boost::sml::front::internal : on_entry
+emel::decoder::compute_executor::extracting_outputs --> emel::decoder::compute_executor::extracting_outputs : emel::decoder::compute_executor::event::extract_outputs
+emel::decoder::compute_executor::extracting_outputs --> emel::decoder::compute_executor::done : emel::decoder::compute_executor::events::extract_outputs_done
+emel::decoder::compute_executor::extracting_outputs --> emel::decoder::compute_executor::errored : emel::decoder::compute_executor::events::extract_outputs_error
+emel::decoder::compute_executor::done --> boost::sml::front::internal : on_entry
+emel::decoder::compute_executor::done --> emel::decoder::compute_executor::initialized : emel::decoder::compute_executor::events::compute_done
+emel::decoder::compute_executor::done --> emel::decoder::compute_executor::initialized : emel::decoder::compute_executor::events::compute_error
+emel::decoder::compute_executor::errored --> boost::sml::front::internal : on_entry
+emel::decoder::compute_executor::errored --> emel::decoder::compute_executor::initialized : emel::decoder::compute_executor::events::compute_error
+
+@enduml

@@ -2,24 +2,31 @@
 
 [*] --> idle
 idle --> validating : emel::tensor::lifetime_analyzer::event::analyze
+validating --> boost::sml::front::internal : on_entry
 validating --> validating : emel::tensor::lifetime_analyzer::event::validate
 validating --> collecting_ranges : emel::tensor::lifetime_analyzer::events::validate_done
 validating --> failed : emel::tensor::lifetime_analyzer::events::validate_error
+collecting_ranges --> boost::sml::front::internal : on_entry
 collecting_ranges --> collecting_ranges : emel::tensor::lifetime_analyzer::event::collect_ranges
 collecting_ranges --> publishing : emel::tensor::lifetime_analyzer::events::collect_ranges_done
 collecting_ranges --> failed : emel::tensor::lifetime_analyzer::events::collect_ranges_error
+publishing --> boost::sml::front::internal : on_entry
 publishing --> publishing : emel::tensor::lifetime_analyzer::event::publish
 publishing --> done : emel::tensor::lifetime_analyzer::events::publish_done
 publishing --> failed : emel::tensor::lifetime_analyzer::events::publish_error
+done --> boost::sml::front::internal : on_entry
 done --> idle : emel::tensor::lifetime_analyzer::events::analyze_done
-failed --> idle : emel::tensor::lifetime_analyzer::events::analyze_error
+done --> idle : emel::tensor::lifetime_analyzer::events::analyze_error
 idle --> resetting : emel::tensor::lifetime_analyzer::event::reset
 validating --> resetting : emel::tensor::lifetime_analyzer::event::reset
 collecting_ranges --> resetting : emel::tensor::lifetime_analyzer::event::reset
 publishing --> resetting : emel::tensor::lifetime_analyzer::event::reset
 done --> resetting : emel::tensor::lifetime_analyzer::event::reset
 failed --> resetting : emel::tensor::lifetime_analyzer::event::reset
+resetting --> boost::sml::front::internal : on_entry
 resetting --> idle : emel::tensor::lifetime_analyzer::events::reset_done
 resetting --> failed : emel::tensor::lifetime_analyzer::events::reset_error
+failed --> boost::sml::front::internal : on_entry
+failed --> idle : emel::tensor::lifetime_analyzer::events::analyze_error
 
 @enduml

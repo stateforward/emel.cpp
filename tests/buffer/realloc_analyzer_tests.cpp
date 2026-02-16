@@ -295,8 +295,8 @@ TEST_CASE("buffer_realloc_analyzer_action_detail_helpers_cover_fallbacks") {
         EMEL_ERR_INVALID_ARGUMENT);
   CHECK(action::detail::normalize_error(EMEL_OK, EMEL_OK) == EMEL_ERR_BACKEND);
 
-  CHECK(action::detail::align_up_16(0) == 0);
-  CHECK(action::detail::align_up_16(std::numeric_limits<int32_t>::max()) ==
+  CHECK(action::detail::align_up(0, 16) == 0);
+  CHECK(action::detail::align_up(std::numeric_limits<int32_t>::max(), 16) ==
         std::numeric_limits<int32_t>::max());
 
   std::array<tensor_desc, 1> nodes = {{
@@ -349,18 +349,22 @@ TEST_CASE("buffer_realloc_analyzer_action_validate_leaf_alloc_pointer_branch") {
       .has_external_data = false,
     },
   }};
-  c.graph = graph_view{
+  const auto graph = graph_view{
     .nodes = nullptr,
     .n_nodes = 0,
     .leafs = leafs.data(),
     .n_leafs = static_cast<int32_t>(leafs.size()),
   };
-  c.node_alloc_count = 0;
-  c.leaf_alloc_count = static_cast<int32_t>(leafs.size());
-  c.leaf_allocs = nullptr;
 
   int32_t err = EMEL_OK;
-  action::run_validate(emel::buffer::realloc_analyzer::event::validate{.error_out = &err}, c);
+  action::run_validate(emel::buffer::realloc_analyzer::event::validate{
+    .graph = graph,
+    .node_allocs = nullptr,
+    .node_alloc_count = 0,
+    .leaf_allocs = nullptr,
+    .leaf_alloc_count = static_cast<int32_t>(leafs.size()),
+    .error_out = &err,
+  }, c);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
@@ -381,15 +385,19 @@ TEST_CASE("buffer_realloc_analyzer_action_evaluate_handles_leaf_mismatch_and_src
         .has_external_data = false,
       },
     }};
-    c.graph = graph_view{
+    const auto graph = graph_view{
       .nodes = nullptr,
       .n_nodes = 0,
       .leafs = leafs.data(),
       .n_leafs = static_cast<int32_t>(leafs.size()),
     };
-    c.node_alloc_count = 0;
-    c.leaf_alloc_count = 0;
-    action::run_evaluate(emel::buffer::realloc_analyzer::event::evaluate{}, c);
+    action::run_evaluate(emel::buffer::realloc_analyzer::event::evaluate{
+      .graph = graph,
+      .node_allocs = nullptr,
+      .node_alloc_count = 0,
+      .leaf_allocs = nullptr,
+      .leaf_alloc_count = 0,
+    }, c);
     CHECK(c.needs_realloc);
   }
 
@@ -428,18 +436,21 @@ TEST_CASE("buffer_realloc_analyzer_action_evaluate_handles_leaf_mismatch_and_src
     std::array<leaf_alloc, 1> leaf_allocs = {{
       leaf_alloc{.leaf = {.buffer_id = 0, .size_max = 32}},
     }};
-    c.graph = graph_view{
+    const auto graph = graph_view{
       .nodes = nodes.data(),
       .n_nodes = static_cast<int32_t>(nodes.size()),
       .leafs = leafs.data(),
       .n_leafs = static_cast<int32_t>(leafs.size()),
     };
-    c.node_allocs = node_allocs.data();
-    c.node_alloc_count = static_cast<int32_t>(node_allocs.size());
-    c.leaf_allocs = leaf_allocs.data();
-    c.leaf_alloc_count = static_cast<int32_t>(leaf_allocs.size());
     int32_t err = EMEL_ERR_BACKEND;
-    action::run_evaluate(emel::buffer::realloc_analyzer::event::evaluate{.error_out = &err}, c);
+    action::run_evaluate(emel::buffer::realloc_analyzer::event::evaluate{
+      .graph = graph,
+      .node_allocs = node_allocs.data(),
+      .node_alloc_count = static_cast<int32_t>(node_allocs.size()),
+      .leaf_allocs = leaf_allocs.data(),
+      .leaf_alloc_count = static_cast<int32_t>(leaf_allocs.size()),
+      .error_out = &err,
+    }, c);
     CHECK(err == EMEL_OK);
     CHECK(c.needs_realloc);
   }
@@ -450,13 +461,22 @@ TEST_CASE("buffer_realloc_analyzer_error_handlers_cover_with_and_without_output"
 
   action::context c{};
   int32_t err = EMEL_OK;
-  c.error_out = &err;
-  action::on_analyze_error(emel::buffer::realloc_analyzer::events::analyze_error{.err = EMEL_OK}, c);
+  action::on_analyze_error(
+      emel::buffer::realloc_analyzer::events::analyze_error{
+          .err = EMEL_OK,
+          .error_out = &err,
+      },
+      c);
   CHECK(err == EMEL_ERR_BACKEND);
-  action::on_reset_error(emel::buffer::realloc_analyzer::events::reset_error{.err = EMEL_OK}, c);
+  action::on_reset_error(
+      emel::buffer::realloc_analyzer::events::reset_error{
+          .err = EMEL_OK,
+          .error_out = &err,
+      },
+      c);
   CHECK(err == EMEL_ERR_BACKEND);
 
-  c.error_out = nullptr;
+  err = EMEL_OK;
   const auto step_before = c.step;
   action::on_analyze_error(
       emel::buffer::realloc_analyzer::events::analyze_error{.err = EMEL_ERR_INVALID_ARGUMENT}, c);

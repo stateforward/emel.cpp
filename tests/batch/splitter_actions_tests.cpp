@@ -37,7 +37,12 @@ TEST_CASE("batch_splitter_actions_validate_and_normalize_boundaries") {
 
   ctx.token_ids = tokens.data();
   ctx.n_tokens = static_cast<int32_t>(tokens.size());
-  ctx.ubatch_sizes_capacity = -1;
+  emel::batch::splitter::action::run_validate(
+    emel::batch::splitter::event::validate{.error_out = &err},
+    ctx);
+  CHECK(err == EMEL_OK);
+
+  ctx.n_tokens = emel::batch::splitter::action::MAX_UBATCHES + 1;
   emel::batch::splitter::action::run_validate(
     emel::batch::splitter::event::validate{.error_out = &err},
     ctx);
@@ -131,22 +136,91 @@ TEST_CASE("batch_splitter_actions_publish_paths_without_buffer_copy") {
   ctx.ubatch_sizes[0] = 3;
   ctx.ubatch_sizes[1] = 1;
   ctx.total_outputs = 4;
-  ctx.ubatch_sizes_out = nullptr;
-  ctx.ubatch_count_out = &ubatch_count;
-  ctx.total_outputs_out = &total_outputs;
 
   emel::batch::splitter::action::run_publish(
     emel::batch::splitter::event::publish{.error_out = &err},
     ctx);
   CHECK(err == EMEL_OK);
-  CHECK(ubatch_count == 2);
-  CHECK(total_outputs == 4);
 
-  ctx.ubatch_sizes_out = sizes_small.data();
-  ctx.ubatch_sizes_capacity = static_cast<int32_t>(sizes_small.size());
+  (void)ubatch_count;
+  (void)total_outputs;
+  (void)sizes_small;
   err = EMEL_OK;
   emel::batch::splitter::action::run_publish(
     emel::batch::splitter::event::publish{.error_out = &err},
     ctx);
+  CHECK(err == EMEL_OK);
+}
+
+TEST_CASE("batch_splitter_actions_validate_rejects_invalid_mode") {
+  emel::batch::splitter::action::context ctx{};
+  std::array<int32_t, 2> tokens = {{1, 2}};
+  int32_t err = EMEL_OK;
+
+  ctx.token_ids = tokens.data();
+  ctx.n_tokens = static_cast<int32_t>(tokens.size());
+  ctx.mode = static_cast<emel::batch::splitter::event::split_mode>(99);
+
+  emel::batch::splitter::action::run_validate(
+    emel::batch::splitter::event::validate{.error_out = &err},
+    ctx);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("batch_splitter_actions_normalized_seq_mask_defaults_to_index") {
+  emel::batch::splitter::action::context ctx{};
+  CHECK(
+    emel::batch::splitter::action::normalized_seq_mask(ctx, 3) ==
+    (uint64_t{1} << 3));
+}
+
+TEST_CASE("batch_splitter_actions_push_ubatch_size_success") {
+  emel::batch::splitter::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  CHECK(emel::batch::splitter::action::push_ubatch_size(ctx, 2, &err));
+  CHECK(err == EMEL_OK);
+  CHECK(ctx.ubatch_count == 1);
+  CHECK(ctx.ubatch_sizes[0] == 2);
+}
+
+TEST_CASE("batch_splitter_actions_create_ubatches_simple_success") {
+  emel::batch::splitter::action::context ctx{};
+  std::array<int32_t, 4> tokens = {{1, 2, 3, 4}};
+  int32_t err = EMEL_OK;
+
+  ctx.token_ids = tokens.data();
+  ctx.n_tokens = static_cast<int32_t>(tokens.size());
+  ctx.mode = emel::batch::splitter::event::split_mode::simple;
+  ctx.effective_n_ubatch = 2;
+
+  emel::batch::splitter::action::run_create_ubatches(
+    emel::batch::splitter::event::create_ubatches{.error_out = &err},
+    ctx);
+  CHECK(err == EMEL_OK);
+  CHECK(ctx.ubatch_count == 2);
+  CHECK(ctx.ubatch_sizes[0] == 2);
+  CHECK(ctx.ubatch_sizes[1] == 2);
+}
+
+TEST_CASE("batch_splitter_actions_create_ubatches_equal_without_masks") {
+  emel::batch::splitter::action::context ctx{};
+  std::array<int32_t, 5> tokens = {{1, 2, 3, 4, 5}};
+  int32_t err = EMEL_OK;
+
+  ctx.token_ids = tokens.data();
+  ctx.n_tokens = static_cast<int32_t>(tokens.size());
+  ctx.mode = emel::batch::splitter::event::split_mode::equal;
+  ctx.effective_n_ubatch = 2;
+  ctx.seq_masks = nullptr;
+  ctx.seq_primary_ids = nullptr;
+
+  emel::batch::splitter::action::run_create_ubatches(
+    emel::batch::splitter::event::create_ubatches{.error_out = &err},
+    ctx);
+  CHECK(err == EMEL_OK);
+  CHECK(ctx.ubatch_count == 3);
+  CHECK(ctx.ubatch_sizes[0] == 2);
+  CHECK(ctx.ubatch_sizes[1] == 2);
+  CHECK(ctx.ubatch_sizes[2] == 1);
 }

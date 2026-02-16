@@ -10,6 +10,28 @@
 
 namespace emel::decoder::ubatch_executor {
 
+using Process = boost::sml::back::process<
+  event::validate,
+  events::validate_done,
+  events::validate_error,
+  event::prepare_memory,
+  events::prepare_memory_done,
+  events::prepare_memory_error,
+  event::prepare_kv,
+  events::prepare_kv_done,
+  events::prepare_kv_error,
+  event::run_compute,
+  events::run_compute_done,
+  events::run_compute_error,
+  event::extract_outputs,
+  events::extract_outputs_done,
+  events::extract_outputs_error,
+  event::rollback,
+  events::rollback_done,
+  events::rollback_error,
+  events::ubatch_execution_done,
+  events::ubatch_execution_error>;
+
 struct initialized {};
 struct validating {};
 struct preparing_memory {};
@@ -23,16 +45,74 @@ struct errored {};
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
+    using process_t = Process;
 
     return sml::make_transition_table(
       *sml::state<initialized> + sml::event<event::execute> / action::begin_execute =
           sml::state<validating>,
+      sml::state<validating> + sml::on_entry<event::execute> /
+          [](const event::execute & ev, action::context &, process_t & process) noexcept {
+            if (ev.rollback_attempted_out != nullptr) {
+              *ev.rollback_attempted_out = false;
+            }
+            if (ev.memory_coordinator_sm == nullptr || ev.kv_cache_sm == nullptr) {
+              if (ev.error_out != nullptr) {
+                *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+              }
+              process(events::validate_error{
+                .err = EMEL_ERR_INVALID_ARGUMENT,
+                .request = &ev,
+              });
+              return;
+            }
+            int32_t phase_error = EMEL_OK;
+            event::validate validate{
+              .error_out = &phase_error,
+            };
+            process(validate);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::validate_error{
+                .err = phase_error,
+                .request = &ev,
+              });
+              return;
+            }
+            process(events::validate_done{
+              .request = &ev,
+            });
+          },
 
       sml::state<validating> + sml::event<event::validate> / action::run_validate =
           sml::state<validating>,
       sml::state<validating> + sml::event<events::validate_done> = sml::state<preparing_memory>,
       sml::state<validating> + sml::event<events::validate_error> = sml::state<errored>,
 
+      sml::state<preparing_memory> + sml::on_entry<events::validate_done> /
+          [](const events::validate_done & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            const event::execute * request = ev.request;
+            event::prepare_memory prepare{
+              .memory_coordinator_sm = request != nullptr ? request->memory_coordinator_sm : nullptr,
+              .error_out = &phase_error,
+            };
+            process(prepare);
+            if (request != nullptr && request->error_out != nullptr) {
+              *request->error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::prepare_memory_error{
+                .err = phase_error,
+                .request = request,
+              });
+              return;
+            }
+            process(events::prepare_memory_done{
+              .request = request,
+            });
+          },
       sml::state<preparing_memory> + sml::event<event::prepare_memory> / action::run_prepare_memory =
           sml::state<preparing_memory>,
       sml::state<preparing_memory> + sml::event<events::prepare_memory_done> =
@@ -40,12 +120,58 @@ struct model {
       sml::state<preparing_memory> + sml::event<events::prepare_memory_error> =
           sml::state<errored>,
 
+      sml::state<preparing_kv> + sml::on_entry<events::prepare_memory_done> /
+          [](const events::prepare_memory_done & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            const event::execute * request = ev.request;
+            event::prepare_kv prepare{
+              .kv_cache_sm = request != nullptr ? request->kv_cache_sm : nullptr,
+              .error_out = &phase_error,
+            };
+            process(prepare);
+            if (request != nullptr && request->error_out != nullptr) {
+              *request->error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::prepare_kv_error{
+                .err = phase_error,
+                .request = request,
+              });
+              return;
+            }
+            process(events::prepare_kv_done{
+              .request = request,
+            });
+          },
       sml::state<preparing_kv> + sml::event<event::prepare_kv> / action::run_prepare_kv =
           sml::state<preparing_kv>,
       sml::state<preparing_kv> + sml::event<events::prepare_kv_done> =
           sml::state<running_compute>,
       sml::state<preparing_kv> + sml::event<events::prepare_kv_error> = sml::state<errored>,
 
+      sml::state<running_compute> + sml::on_entry<events::prepare_kv_done> /
+          [](const events::prepare_kv_done & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            const event::execute * request = ev.request;
+            event::run_compute compute{
+              .kv_cache_sm = request != nullptr ? request->kv_cache_sm : nullptr,
+              .error_out = &phase_error,
+            };
+            process(compute);
+            if (request != nullptr && request->error_out != nullptr) {
+              *request->error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::run_compute_error{
+                .err = phase_error,
+                .request = request,
+              });
+              return;
+            }
+            process(events::run_compute_done{
+              .request = request,
+            });
+          },
       sml::state<running_compute> + sml::event<event::run_compute> / action::run_compute =
           sml::state<running_compute>,
       sml::state<running_compute> + sml::event<events::run_compute_done> =
@@ -53,6 +179,28 @@ struct model {
       sml::state<running_compute> + sml::event<events::run_compute_error> =
           sml::state<rolling_back>,
 
+      sml::state<extracting_outputs> + sml::on_entry<events::run_compute_done> /
+          [](const events::run_compute_done & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::extract_outputs extract{
+              .error_out = &phase_error,
+            };
+            process(extract);
+            const event::execute * request = ev.request;
+            if (request != nullptr && request->error_out != nullptr) {
+              *request->error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::extract_outputs_error{
+                .err = phase_error,
+                .request = request,
+              });
+              return;
+            }
+            process(events::extract_outputs_done{
+              .request = request,
+            });
+          },
       sml::state<extracting_outputs> + sml::event<event::extract_outputs> /
           action::run_extract_outputs = sml::state<extracting_outputs>,
       sml::state<extracting_outputs> + sml::event<events::extract_outputs_done> =
@@ -60,98 +208,130 @@ struct model {
       sml::state<extracting_outputs> + sml::event<events::extract_outputs_error> =
           sml::state<rolling_back>,
 
+      sml::state<rolling_back> + sml::on_entry<events::run_compute_error> /
+          [](const events::run_compute_error & ev, action::context &, process_t & process) noexcept {
+            const event::execute * request = ev.request;
+            if (request != nullptr && request->rollback_attempted_out != nullptr) {
+              *request->rollback_attempted_out = true;
+            }
+            int32_t phase_error = EMEL_OK;
+            event::rollback rollback{
+              .kv_cache_sm = request != nullptr ? request->kv_cache_sm : nullptr,
+              .error_out = &phase_error,
+            };
+            process(rollback);
+            if (request != nullptr && request->error_out != nullptr) {
+              *request->error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::rollback_error{
+                .err = phase_error,
+                .request = request,
+              });
+              return;
+            }
+            process(events::rollback_done{
+              .request = request,
+            });
+          },
+      sml::state<rolling_back> + sml::on_entry<events::extract_outputs_error> /
+          [](const events::extract_outputs_error & ev, action::context &, process_t & process) noexcept {
+            const event::execute * request = ev.request;
+            if (request != nullptr && request->rollback_attempted_out != nullptr) {
+              *request->rollback_attempted_out = true;
+            }
+            int32_t phase_error = EMEL_OK;
+            event::rollback rollback{
+              .kv_cache_sm = request != nullptr ? request->kv_cache_sm : nullptr,
+              .error_out = &phase_error,
+            };
+            process(rollback);
+            if (request != nullptr && request->error_out != nullptr) {
+              *request->error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::rollback_error{
+                .err = phase_error,
+                .request = request,
+              });
+              return;
+            }
+            process(events::rollback_done{
+              .request = request,
+            });
+          },
       sml::state<rolling_back> + sml::event<event::rollback> / action::run_rollback =
           sml::state<rolling_back>,
       sml::state<rolling_back> + sml::event<events::rollback_done> = sml::state<errored>,
       sml::state<rolling_back> + sml::event<events::rollback_error> = sml::state<errored>,
 
+      sml::state<done> + sml::on_entry<events::extract_outputs_done> /
+          [](const events::extract_outputs_done & ev, action::context & ctx,
+             process_t & process) noexcept {
+            const event::execute * request = ev.request;
+            if (request != nullptr && request->outputs_produced_out != nullptr) {
+              *request->outputs_produced_out = ctx.outputs_produced;
+            }
+            if (request != nullptr && request->kv_tokens_out != nullptr) {
+              *request->kv_tokens_out = ctx.kv_tokens;
+            }
+            if (request != nullptr && request->rollback_attempted_out != nullptr) {
+              *request->rollback_attempted_out = false;
+            }
+            if (request != nullptr && request->error_out != nullptr) {
+              *request->error_out = EMEL_OK;
+            }
+            process(events::ubatch_execution_done{
+              .outputs_produced = ctx.outputs_produced,
+              .kv_tokens = ctx.kv_tokens,
+              .error_out = request != nullptr ? request->error_out : nullptr,
+              .request = request,
+            });
+          },
       sml::state<done> + sml::event<events::ubatch_execution_done> / action::on_ubatch_execution_done =
           sml::state<initialized>,
+      sml::state<done> + sml::event<events::ubatch_execution_error> /
+          action::on_ubatch_execution_error = sml::state<initialized>,
+
+      sml::state<errored> + sml::on_entry<sml::_> /
+          [](const auto & ev, action::context &, process_t & process) noexcept {
+            int32_t err = EMEL_ERR_BACKEND;
+            const event::execute * request = nullptr;
+            if constexpr (requires { ev.err; }) {
+              err = ev.err;
+            }
+            if constexpr (requires { ev.request; }) {
+              request = ev.request;
+            }
+            if (request != nullptr && request->error_out != nullptr) {
+              *request->error_out = err;
+            }
+            if (request != nullptr && request->rollback_attempted_out != nullptr) {
+              *request->rollback_attempted_out = true;
+            }
+            process(events::ubatch_execution_error{
+              .err = err,
+              .error_out = request != nullptr ? request->error_out : nullptr,
+              .request = request,
+            });
+          },
       sml::state<errored> + sml::event<events::ubatch_execution_error> /
           action::on_ubatch_execution_error = sml::state<initialized>
     );
   }
 };
 
-struct sm : emel::sm<model> {
-  using base_type = emel::sm<model>;
+struct sm : private emel::detail::process_support<sm, Process>, public emel::sm<model, Process> {
+  using base_type = emel::sm<model, Process>;
 
-  sm() : base_type(context_) {}
+  sm() : emel::detail::process_support<sm, Process>(this), base_type(context_, this->process_) {}
 
   using base_type::process_event;
 
-  bool process_event(const event::execute & ev) {
-    if (!base_type::process_event(ev)) return false;
-
-    int32_t phase_error = EMEL_OK;
-    if (!run_phase<event::validate, events::validate_done, events::validate_error>(phase_error)) {
-      return finalize_error(phase_error);
-    }
-    if (!run_phase<
-            event::prepare_memory,
-            events::prepare_memory_done,
-            events::prepare_memory_error>(phase_error)) {
-      return finalize_error(phase_error);
-    }
-    if (!run_phase<event::prepare_kv, events::prepare_kv_done, events::prepare_kv_error>(
-            phase_error)) {
-      return finalize_error(phase_error);  // GCOVR_EXCL_LINE
-    }
-
-    if (!run_phase<event::run_compute, events::run_compute_done, events::run_compute_error>(
-            phase_error)) {
-      const int32_t compute_err = phase_error;
-      (void)run_phase<event::rollback, events::rollback_done, events::rollback_error>(phase_error);
-      return finalize_error(compute_err);
-    }
-
-    if (!run_phase<
-            event::extract_outputs,
-            events::extract_outputs_done,
-            events::extract_outputs_error>(phase_error)) {
-      const int32_t extract_err = phase_error;  // GCOVR_EXCL_LINE
-      (void)run_phase<event::rollback, events::rollback_done, events::rollback_error>(phase_error);  // GCOVR_EXCL_LINE
-      return finalize_error(extract_err);  // GCOVR_EXCL_LINE
-    }
-
-    return base_type::process_event(events::ubatch_execution_done{
-      .outputs_produced = context_.outputs_produced,
-      .kv_tokens = context_.kv_tokens,
-    });
-  }
-
-  int32_t status_code() const noexcept { return context_.status_code; }
   int32_t outputs_produced() const noexcept { return context_.outputs_produced; }
   int32_t kv_tokens() const noexcept { return context_.kv_tokens; }
-  bool rollback_attempted() const noexcept { return context_.rollback_attempted; }
 
  private:
-  template <class TriggerEvent, class DoneEvent, class ErrorEvent>
-  bool run_phase(int32_t & error_out) {
-    error_out = EMEL_OK;
-    TriggerEvent trigger{};
-    trigger.error_out = &error_out;
-    if (!base_type::process_event(trigger)) {  // GCOVR_EXCL_BR_LINE
-      error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      return false;  // GCOVR_EXCL_LINE
-    }
-    if (error_out == EMEL_OK) {
-      return base_type::process_event(DoneEvent{});
-    }
-    (void)base_type::process_event(ErrorEvent{
-      .err = error_out,
-    });
-    return false;
-  }
-
-  bool finalize_error(const int32_t error_code) {
-    const int32_t err = error_code == EMEL_OK ? EMEL_ERR_BACKEND : error_code;
-    (void)base_type::process_event(events::ubatch_execution_error{
-      .err = err,
-    });
-    return false;
-  }
-
   action::context context_{};
 };
 

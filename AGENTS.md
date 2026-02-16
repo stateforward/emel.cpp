@@ -1,4 +1,5 @@
 ALWAYS build a deterministic, production-grade C++ inference engine.
+ALWAYS treat performance as a top-level priority in design and implementation decisions.
 ALWAYS use Boost.SML state machines as first-class orchestration.
 ALWAYS keep public APIs C-compatible and enforce quality gates in CI.
 ALWAYS keep public API headers in include/emel/.
@@ -20,6 +21,8 @@ ALWAYS keep guards pure and deterministic.
 ALWAYS keep side effects in actions only.
 ALWAYS model orchestration decisions with transitions and guards instead of ad-hoc control flow.
 ALWAYS process events with run-to-completion semantics.
+ALWAYS use boost::sml::back::process for same-machine event chaining from actions, and avoid overriding process_event for internal orchestration.
+NEVER call sm.process_event from actions for same-machine dispatch; use boost::sml::back::process instead.
 NEVER silently drop unexpected events.
 ALWAYS define explicit behavior for unexpected events.
 ALWAYS keep machine coupling event-based.
@@ -33,6 +36,8 @@ NEVER call another state machine's guards directly.
 NEVER call another state machine's functions directly.
 ALWAYS communicate with another state machine only by dispatching events through that machine's `process_event(...)` boundary (directly or via an explicit event sink/mailbox interface).
 ALWAYS communicate between state machines through events and explicit interfaces only.
+ALWAYS allow passing `process_event` function pointers (or equivalent callable wrappers) through event payloads or context dispatch tables when direct `sm` pointers are unavailable.
+ALWAYS prefer boost::sml::back::process for same-machine dispatch and keep sm.process_event at external boundaries or cross-machine calls.
 ALWAYS pass explicit machine pointers/references in event payloads for internal machine-to-machine
 coordination when ownership/lifetime is guaranteed, and dispatch only via `machine->process_event(...)`.
 ALWAYS keep child-machine `data` owned by the parent-machine `data` when composing machines, and inject parent context into children by reference.
@@ -48,6 +53,10 @@ ALWAYS use snake_case for internal SML state type identifiers.
 ALWAYS put per-invocation external inputs (other machine pointers, target model pointers, capability
 flags, policy flags) on the triggering event payload, not in persistent machine `data`.
 ALWAYS keep machine `data` focused on machine-owned runtime state and stable status fields.
+NEVER add redundant `status_code` fields to machine context when error is already modeled by explicit error states/events and can be reported through triggering-event outputs (for example `event::...::error_out`).
+NEVER store per-invocation API output pointers in machine context (for example `error_out`, `*_out` result pointers, or callback outputs); keep them on triggering event payloads and handle boundary write-back in `sm::process_event(...)`.
+NEVER mirror explicit state/event outcomes into context members (for example `is_initialized`, `had_error`, `last_error_recoverable`, phase enums, or duplicated error/result codes) when states and `_done`/`_error` events already represent that information.
+ALWAYS use context only for machine-owned runtime data required by actions across internal phase events (for example working buffers, counters, and owned child machines), not for duplicating orchestration status.
 NEVER store orchestration phase/attempt/failure flags in machine context (for example `*_state`, `*_attempt`, `*_failure`) when they can be represented by explicit states and events.
 ALWAYS encode orchestration retries and one-shot attempts in the transition graph (states + `_done`/`_error` events), not in mutable context flags.
 NEVER add string/pointer `error` members to machine `data`; represent failures with explicit error states and `_error` events, and expose boundary status through error codes.
@@ -120,6 +129,12 @@ ALWAYS proceed when implementing state machines and do not ask to continue.
 NEVER use scaffolding logic for inference core behavior.
 NEVER link llama.cpp.
 NEVER link ggml.
+ALWAYS treat `tmp/llama.cpp` and ggml sources as numerical/instruction references, not orchestration specifications.
+ALWAYS port math, tensor arithmetic, and low-level instruction behavior from references when implementing equivalent EMEL functionality.
+NEVER port reference control flow, branching structure, lifecycle semantics, or orchestration decisions verbatim from llama.cpp/ggml.
+ALWAYS define EMEL behavior and orchestration semantics in Boost.SML state machines (states, events, guards, actions) as the source of truth.
+ALWAYS prioritize EMEL state-machine semantics over branch-for-branch parity with reference implementations.
+ALWAYS target numerical and functional outcome parity where applicable, without mirroring reference branching patterns.
 ALWAYS port llama.cpp and ggml arithmetic into this codebase.
 ALWAYS port llama.cpp and ggml instruction behavior into this codebase.
 ALWAYS port arithmetic, kernels, and inference instructions directly from tmp/llama.cpp into this codebase.

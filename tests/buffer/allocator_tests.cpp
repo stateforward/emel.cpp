@@ -28,9 +28,12 @@ graph_view as_view(const graph_storage & g) {
 }
 
 void initialize_ready(emel::buffer::allocator::sm & machine, const int32_t buffers = 1) {
+  int32_t error = EMEL_OK;
   CHECK(machine.process_event(emel::buffer::allocator::event::initialize{
     .buffer_count = buffers,
+    .error_out = &error,
   }));
+  CHECK(error == EMEL_OK);
 }
 
 graph_storage make_chain_graph(
@@ -241,9 +244,12 @@ TEST_CASE("buffer_allocator_starts_uninitialized") {
 
 TEST_CASE("buffer_allocator_rejects_invalid_initialize") {
   emel::buffer::allocator::sm machine{};
+  int32_t error = EMEL_OK;
   CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::initialize{
     .buffer_count = 0,
+    .error_out = &error,
   }));
+  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("buffer_allocator_reserve_n_size_and_commit_reserve") {
@@ -373,10 +379,12 @@ TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_requires_explicit_reserve")
     .graph = as_view(small),
   }));
 
+  int32_t error = EMEL_OK;
   CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(large),
+    .error_out = &error,
   }));
-  CHECK(machine.last_error() == EMEL_ERR_BACKEND);
+  CHECK(error == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_rejects_unreserved_shape") {
@@ -384,10 +392,12 @@ TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_rejects_unreserved_shape") 
   initialize_ready(machine, 2);
   const graph_storage g = make_chain_graph(64, 128, 128);
 
+  int32_t error = EMEL_OK;
   CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(g),
+    .error_out = &error,
   }));
-  CHECK(machine.last_error() == EMEL_ERR_BACKEND);
+  CHECK(error == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_rejects_changed_assignment_snapshot") {
@@ -408,10 +418,12 @@ TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_rejects_changed_assignment_
     .graph = as_view(baseline),
   }));
 
+  int32_t error = EMEL_OK;
   CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(shifted),
+    .error_out = &error,
   }));
-  CHECK(machine.last_error() == EMEL_ERR_BACKEND);
+  CHECK(error == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("buffer_allocator_reserve_n_size_tracks_per_buffer_assignments") {
@@ -440,10 +452,12 @@ TEST_CASE("buffer_allocator_invalid_source_reports_error") {
   initialize_ready(machine, 1);
   const graph_storage g = make_invalid_source_graph();
 
+  int32_t error = EMEL_OK;
   CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::reserve{
     .graph = as_view(g),
+    .error_out = &error,
   }));
-  CHECK(machine.last_error() == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("buffer_allocator_external_input_is_not_reserved") {
@@ -483,6 +497,7 @@ TEST_CASE("buffer_allocator_reserve_n_size_rejects_output_count_mismatch") {
   initialize_ready(machine, 2);
   const graph_storage g = make_chain_graph(128, 256, 512);
   std::array<int32_t, 1> sizes = {{0}};
+  int32_t error_out = EMEL_OK;
 
   CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::reserve_n_size{
     .graph = as_view(g),
@@ -490,7 +505,9 @@ TEST_CASE("buffer_allocator_reserve_n_size_rejects_output_count_mismatch") {
     .leaf_buffer_ids = nullptr,
     .sizes_out = sizes.data(),
     .sizes_out_count = static_cast<int32_t>(sizes.size()),
+    .error_out = &error_out,
   }));
+  CHECK(error_out != EMEL_OK);
 }
 
 TEST_CASE("buffer_allocator_chunk_placement_tracks_reserved_bytes") {

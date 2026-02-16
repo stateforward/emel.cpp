@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <vector>
 
 #include "emel/batch/splitter/events.hpp"
 #include "emel/emel.h"
@@ -25,14 +24,18 @@ struct context {
   std::array<int32_t, MAX_UBATCHES> ubatch_sizes = {};
   int32_t ubatch_count = 0;
   int32_t total_outputs = 0;
-
-  int32_t * ubatch_sizes_out = nullptr;
-  int32_t ubatch_sizes_capacity = 0;
-  int32_t * ubatch_count_out = nullptr;
-  int32_t * total_outputs_out = nullptr;
 };
 
 inline constexpr auto begin_split = [](const event::split & ev, context & ctx) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+  if (ev.ubatch_count_out != nullptr) {
+    *ev.ubatch_count_out = 0;
+  }
+  if (ev.total_outputs_out != nullptr) {
+    *ev.total_outputs_out = 0;
+  }
   ctx.token_ids = ev.token_ids;
   ctx.n_tokens = ev.n_tokens;
   ctx.requested_n_ubatch = ev.n_ubatch;
@@ -44,10 +47,6 @@ inline constexpr auto begin_split = [](const event::split & ev, context & ctx) {
   ctx.ubatch_count = 0;
   ctx.total_outputs = 0;
   ctx.ubatch_sizes.fill(0);
-  ctx.ubatch_sizes_out = ev.ubatch_sizes_out;
-  ctx.ubatch_sizes_capacity = ev.ubatch_sizes_capacity;
-  ctx.ubatch_count_out = ev.ubatch_count_out;
-  ctx.total_outputs_out = ev.total_outputs_out;
 };
 
 inline constexpr auto run_validate = [](const event::validate & ev, context & ctx) {
@@ -59,7 +58,7 @@ inline constexpr auto run_validate = [](const event::validate & ev, context & ct
     return;
   }
 
-  if (ctx.ubatch_sizes_capacity < 0) {
+  if (ctx.n_tokens > MAX_UBATCHES) {
     *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
     return;
   }
@@ -135,7 +134,7 @@ inline constexpr auto run_create_ubatches = [](const event::create_ubatches & ev
     }
     case event::split_mode::equal: {
       if (ctx.seq_masks != nullptr) {
-        std::vector<bool> used(static_cast<size_t>(ctx.n_tokens), false);
+        std::array<uint8_t, MAX_UBATCHES> used = {};
         int32_t used_count = 0;
 
         while (used_count < ctx.n_tokens) {
@@ -143,18 +142,19 @@ inline constexpr auto run_create_ubatches = [](const event::create_ubatches & ev
             uint64_t mask = 0;
             int32_t next_idx = -1;
           };
-          std::vector<group_state> groups;
+          std::array<group_state, MAX_UBATCHES> groups = {};
+          int32_t group_count = 0;
           int32_t last_primary = -1;
 
           for (int32_t i = 0; i < ctx.n_tokens; ++i) {
-            if (used[static_cast<size_t>(i)]) {
+            if (used[static_cast<size_t>(i)] != 0) {
               continue;
             }
 
             const uint64_t mask = normalized_seq_mask(ctx, i);
             bool overlap = false;
-            for (const auto & group : groups) {
-              if ((group.mask & mask) != 0) {
+            for (int32_t g = 0; g < group_count; ++g) {
+              if ((groups[g].mask & mask) != 0) {
                 overlap = true;
                 break;
               }
@@ -165,44 +165,45 @@ inline constexpr auto run_create_ubatches = [](const event::create_ubatches & ev
 
             if (ctx.equal_sequential && ctx.seq_primary_ids != nullptr) {
               const int32_t primary = ctx.seq_primary_ids[i];
-              if (!groups.empty() && primary != last_primary + 1) {
+              if (group_count > 0 && primary != last_primary + 1) {
                 continue;
               }
               last_primary = primary;
             }
 
-            groups.push_back(group_state{
+            groups[group_count] = group_state{
               .mask = mask,
               .next_idx = -1,
-            });
-            if (static_cast<int32_t>(groups.size()) >= ctx.effective_n_ubatch) {
+            };
+            group_count += 1;
+            if (group_count >= ctx.effective_n_ubatch) {
               break;
             }
           }
 
-          if (groups.empty()) {
+          if (group_count == 0) {
             *ev.error_out = EMEL_ERR_BACKEND;
             return;
           }
 
-          for (auto & group : groups) {
+          for (int32_t g = 0; g < group_count; ++g) {
             int32_t idx = 0;
             while (idx < ctx.n_tokens) {
-              if (!used[static_cast<size_t>(idx)] &&
-                  normalized_seq_mask(ctx, idx) == group.mask) {
+              if (used[static_cast<size_t>(idx)] == 0 &&
+                  normalized_seq_mask(ctx, idx) == groups[g].mask) {
                 break;
               }
               ++idx;
             }
-            group.next_idx = idx;
+            groups[g].next_idx = idx;
           }
 
           int32_t n_seq_tokens = 0;
           int32_t added = 0;
           while (true) {
             bool can_expand = true;
-            for (const auto & group : groups) {
-              if (group.next_idx >= ctx.n_tokens) {
+            for (int32_t g = 0; g < group_count; ++g) {
+              if (groups[g].next_idx >= ctx.n_tokens) {
                 can_expand = false;
                 break;
               }
@@ -211,25 +212,25 @@ inline constexpr auto run_create_ubatches = [](const event::create_ubatches & ev
               break;
             }
 
-            for (auto & group : groups) {
-              const int32_t idx = group.next_idx;
-              used[static_cast<size_t>(idx)] = true;
+            for (int32_t g = 0; g < group_count; ++g) {
+              const int32_t idx = groups[g].next_idx;
+              used[static_cast<size_t>(idx)] = 1;
               used_count += 1;
               added += 1;
 
               int32_t next = idx + 1;
               while (next < ctx.n_tokens) {
-                if (!used[static_cast<size_t>(next)] &&
-                    normalized_seq_mask(ctx, next) == group.mask) {
+                if (used[static_cast<size_t>(next)] == 0 &&
+                    normalized_seq_mask(ctx, next) == groups[g].mask) {
                   break;
                 }
                 ++next;
               }
-              group.next_idx = next;
+              groups[g].next_idx = next;
             }
 
             n_seq_tokens += 1;
-            if ((n_seq_tokens + 1) * static_cast<int32_t>(groups.size()) > ctx.effective_n_ubatch) {
+            if ((n_seq_tokens + 1) * group_count > ctx.effective_n_ubatch) {
               break;
             }
           }
@@ -269,12 +270,12 @@ inline constexpr auto run_create_ubatches = [](const event::create_ubatches & ev
         break;
       }
 
-      std::vector<bool> used(static_cast<size_t>(ctx.n_tokens), false);
+      std::array<uint8_t, MAX_UBATCHES> used = {};
       int32_t used_count = 0;
 
       while (used_count < ctx.n_tokens) {
         int32_t cur_idx = 0;
-        while (cur_idx < ctx.n_tokens && used[static_cast<size_t>(cur_idx)]) {
+        while (cur_idx < ctx.n_tokens && used[static_cast<size_t>(cur_idx)] != 0) {
           ++cur_idx;
         }
         if (cur_idx >= ctx.n_tokens) {
@@ -284,7 +285,7 @@ inline constexpr auto run_create_ubatches = [](const event::create_ubatches & ev
         int32_t chunk = 0;
         uint64_t cur_mask = normalized_seq_mask(ctx, cur_idx);
         while (true) {
-          used[static_cast<size_t>(cur_idx)] = true;
+          used[static_cast<size_t>(cur_idx)] = 1;
           used_count += 1;
           chunk += 1;
 
@@ -294,7 +295,7 @@ inline constexpr auto run_create_ubatches = [](const event::create_ubatches & ev
 
           int32_t next_idx = cur_idx + 1;
           while (next_idx < ctx.n_tokens) {
-            if (!used[static_cast<size_t>(next_idx)]) {
+            if (used[static_cast<size_t>(next_idx)] == 0) {
               const uint64_t next_mask = normalized_seq_mask(ctx, next_idx);
               if ((cur_mask & next_mask) == next_mask) {
                 break;
@@ -323,28 +324,36 @@ inline constexpr auto run_create_ubatches = [](const event::create_ubatches & ev
 };
 
 inline constexpr auto run_publish = [](const event::publish & ev, context & ctx) {
+  (void)ctx;
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
-
-  if (ctx.ubatch_sizes_out != nullptr) {
-    if (ctx.ubatch_sizes_capacity < ctx.ubatch_count) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-    for (int32_t i = 0; i < ctx.ubatch_count; ++i) {
-      ctx.ubatch_sizes_out[i] = ctx.ubatch_sizes[i];
-    }
-  }
-
-  if (ctx.ubatch_count_out != nullptr) {
-    *ctx.ubatch_count_out = ctx.ubatch_count;
-  }
-  if (ctx.total_outputs_out != nullptr) {
-    *ctx.total_outputs_out = ctx.total_outputs;
-  }
 };
 
-inline constexpr auto on_splitting_done = [](const events::splitting_done &, context &) {};
-inline constexpr auto on_splitting_error = [](const events::splitting_error &, context &) {};
+inline constexpr auto on_splitting_done = [](const events::splitting_done & ev, context & ctx) {
+  const event::split * request = ev.request;
+  if (request == nullptr) {
+    return;
+  }
+  if (request->ubatch_sizes_out != nullptr) {
+    for (int32_t i = 0; i < ctx.ubatch_count; ++i) {
+      request->ubatch_sizes_out[i] = ctx.ubatch_sizes[i];
+    }
+  }
+  if (request->ubatch_count_out != nullptr) {
+    *request->ubatch_count_out = ctx.ubatch_count;
+  }
+  if (request->total_outputs_out != nullptr) {
+    *request->total_outputs_out = ctx.total_outputs;
+  }
+  if (request->error_out != nullptr) {
+    *request->error_out = EMEL_OK;
+  }
+};
+inline constexpr auto on_splitting_error = [](const events::splitting_error & ev, context &) {
+  const event::split * request = ev.request;
+  if (request != nullptr && request->error_out != nullptr) {
+    *request->error_out = ev.err;
+  }
+};
 
 }  // namespace emel::batch::splitter::action

@@ -1,0 +1,38 @@
+@startuml
+
+[*] --> emel::telemetry::exporter::initialized
+emel::telemetry::exporter::initialized --> emel::telemetry::exporter::configuring : emel::telemetry::exporter::event::configure
+emel::telemetry::exporter::configuring --> boost::sml::front::internal : on_entry
+emel::telemetry::exporter::configuring --> emel::telemetry::exporter::configuring : emel::telemetry::exporter::event::validate_config
+emel::telemetry::exporter::configuring --> emel::telemetry::exporter::initialized : emel::telemetry::exporter::events::configure_done
+emel::telemetry::exporter::configuring --> emel::telemetry::exporter::errored : emel::telemetry::exporter::events::configure_error
+emel::telemetry::exporter::initialized --> emel::telemetry::exporter::starting : emel::telemetry::exporter::event::start
+emel::telemetry::exporter::starting --> boost::sml::front::internal : on_entry
+emel::telemetry::exporter::starting --> emel::telemetry::exporter::starting : emel::telemetry::exporter::event::run_start
+emel::telemetry::exporter::starting --> emel::telemetry::exporter::running : emel::telemetry::exporter::events::start_done
+emel::telemetry::exporter::starting --> emel::telemetry::exporter::errored : emel::telemetry::exporter::events::start_error
+emel::telemetry::exporter::running --> emel::telemetry::exporter::collecting : emel::telemetry::exporter::event::tick
+emel::telemetry::exporter::collecting --> boost::sml::front::internal : on_entry
+emel::telemetry::exporter::collecting --> emel::telemetry::exporter::collecting : emel::telemetry::exporter::event::collect_batch
+emel::telemetry::exporter::collecting --> emel::telemetry::exporter::flushing : emel::telemetry::exporter::events::collect_batch_done\n [boost::sml::aux::zero_wrapper<emel::telemetry::exporter::guard::has_batch>]
+emel::telemetry::exporter::collecting --> emel::telemetry::exporter::running : emel::telemetry::exporter::events::collect_batch_done\n [boost::sml::aux::zero_wrapper<emel::telemetry::exporter::guard::no_batch>]
+emel::telemetry::exporter::collecting --> emel::telemetry::exporter::errored : emel::telemetry::exporter::events::collect_batch_error
+emel::telemetry::exporter::flushing --> boost::sml::front::internal : on_entry
+emel::telemetry::exporter::flushing --> emel::telemetry::exporter::flushing : emel::telemetry::exporter::event::flush_batch
+emel::telemetry::exporter::flushing --> emel::telemetry::exporter::running : emel::telemetry::exporter::events::flush_batch_done
+emel::telemetry::exporter::flushing --> emel::telemetry::exporter::backing_off : emel::telemetry::exporter::events::flush_batch_error
+emel::telemetry::exporter::backing_off --> boost::sml::front::internal : on_entry
+emel::telemetry::exporter::backing_off --> emel::telemetry::exporter::backing_off : emel::telemetry::exporter::event::run_backoff
+emel::telemetry::exporter::backing_off --> emel::telemetry::exporter::running : emel::telemetry::exporter::events::backoff_done
+emel::telemetry::exporter::backing_off --> emel::telemetry::exporter::errored : emel::telemetry::exporter::events::backoff_error
+emel::telemetry::exporter::running --> emel::telemetry::exporter::stopping : emel::telemetry::exporter::event::stop
+emel::telemetry::exporter::initialized --> emel::telemetry::exporter::stopping : emel::telemetry::exporter::event::stop
+emel::telemetry::exporter::errored --> emel::telemetry::exporter::stopping : emel::telemetry::exporter::event::stop
+emel::telemetry::exporter::stopping --> boost::sml::front::internal : on_entry
+emel::telemetry::exporter::stopping --> emel::telemetry::exporter::stopping : emel::telemetry::exporter::event::run_stop
+emel::telemetry::exporter::stopping --> emel::telemetry::exporter::initialized : emel::telemetry::exporter::events::stop_done
+emel::telemetry::exporter::stopping --> emel::telemetry::exporter::errored : emel::telemetry::exporter::events::stop_error
+emel::telemetry::exporter::initialized --> emel::telemetry::exporter::initialized : emel::telemetry::exporter::event::reset
+emel::telemetry::exporter::errored --> emel::telemetry::exporter::initialized : emel::telemetry::exporter::event::reset
+
+@enduml

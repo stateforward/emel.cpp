@@ -23,6 +23,7 @@ struct split {
   int32_t ubatch_sizes_capacity = 0;
   int32_t * ubatch_count_out = nullptr;
   int32_t * total_outputs_out = nullptr;
+  int32_t * error_out = nullptr;
 };
 
 struct validate {
@@ -45,33 +46,47 @@ struct publish {
 
 namespace emel::batch::splitter::events {
 
-struct validate_done {};
+struct validate_done {
+  const event::split * request = nullptr;
+};
 struct validate_error {
   int32_t err = 0;
+  const event::split * request = nullptr;
 };
 
-struct normalize_done {};
+struct normalize_done {
+  const event::split * request = nullptr;
+};
 struct normalize_error {
   int32_t err = 0;
+  const event::split * request = nullptr;
 };
 
-struct split_done {};
+struct split_done {
+  const event::split * request = nullptr;
+};
 struct split_error {
   int32_t err = 0;
+  const event::split * request = nullptr;
 };
 
-struct publish_done {};
+struct publish_done {
+  const event::split * request = nullptr;
+};
 struct publish_error {
   int32_t err = 0;
+  const event::split * request = nullptr;
 };
 
 struct splitting_done {
+  const event::split * request = nullptr;
   int32_t ubatch_count = 0;
   int32_t total_outputs = 0;
 };
 
 struct splitting_error {
   int32_t err = 0;
+  const event::split * request = nullptr;
 };
 
 }  // namespace emel::batch::splitter::events

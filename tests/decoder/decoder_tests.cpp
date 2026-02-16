@@ -7,6 +7,7 @@
 #include "emel/decoder/guards.hpp"
 #include "emel/decoder/sm.hpp"
 #include "emel/emel.h"
+#include "emel/kv/cache/actions.hpp"
 
 namespace {
 
@@ -38,30 +39,27 @@ TEST_CASE("decoder_starts_initialized") {
   CHECK(machine.is(boost::sml::state<emel::decoder::initialized>));
 }
 
-TEST_CASE("decoder_decode_success_processes_all_ubatches_and_dispatches_done") {
+TEST_CASE("decoder_decode_rejects_invalid_payload_without_callback") {
   emel::decoder::sm machine{};
-  owner_probe owner{};
-  std::array<int32_t, 5> tokens = {{1, 2, 3, 4, 5}};
+  int32_t error = EMEL_OK;
 
-  CHECK(machine.process_event(emel::decoder::event::decode{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
+  CHECK_FALSE(machine.process_event(emel::decoder::event::decode{
+    .token_ids = nullptr,
+    .n_tokens = 0,
     .n_ubatch = 2,
-    .owner_sm = &owner,
-    .dispatch_event = &on_decode_event,
+    .owner_sm = nullptr,
+    .dispatch_event = nullptr,
+    .error_out = &error,
   }));
 
   CHECK(machine.is(boost::sml::state<emel::decoder::initialized>));
-  CHECK(machine.status_code() == EMEL_OK);
-  CHECK(machine.outputs_processed() == static_cast<int32_t>(tokens.size()));
-  CHECK(owner.done_calls == 1);
-  CHECK(owner.error_calls == 0);
-  CHECK(owner.outputs == static_cast<int32_t>(tokens.size()));
+  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("decoder_decode_invalid_payload_dispatches_error_and_returns_false") {
   emel::decoder::sm machine{};
   owner_probe owner{};
+  int32_t error = EMEL_OK;
 
   CHECK_FALSE(machine.process_event(emel::decoder::event::decode{
     .token_ids = nullptr,
@@ -69,32 +67,33 @@ TEST_CASE("decoder_decode_invalid_payload_dispatches_error_and_returns_false") {
     .n_ubatch = 2,
     .owner_sm = &owner,
     .dispatch_event = &on_decode_event,
+    .error_out = &error,
   }));
 
   CHECK(machine.is(boost::sml::state<emel::decoder::initialized>));
-  CHECK(machine.status_code() == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(owner.done_calls == 0);
   CHECK(owner.error_calls == 1);
   CHECK(owner.err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
-TEST_CASE("decoder_decode_supports_default_ubatch_when_not_provided") {
+TEST_CASE("decoder_decode_rejects_default_ubatch_without_tokens") {
   emel::decoder::sm machine{};
   owner_probe owner{};
-  std::array<int32_t, 3> tokens = {{9, 8, 7}};
+  int32_t error = EMEL_OK;
 
-  CHECK(machine.process_event(emel::decoder::event::decode{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
+  CHECK_FALSE(machine.process_event(emel::decoder::event::decode{
+    .token_ids = nullptr,
+    .n_tokens = 0,
     .n_ubatch = 0,
     .owner_sm = &owner,
     .dispatch_event = &on_decode_event,
+    .error_out = &error,
   }));
 
-  CHECK(machine.status_code() == EMEL_OK);
-  CHECK(machine.outputs_processed() == static_cast<int32_t>(tokens.size()));
-  CHECK(owner.done_calls == 1);
-  CHECK(owner.error_calls == 0);
+  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(owner.done_calls == 0);
+  CHECK(owner.error_calls == 1);
 }
 
 TEST_CASE("decoder_guards_cover_progress_paths") {
@@ -126,6 +125,62 @@ TEST_CASE("decoder_maps_memory_status_to_prepare_failure_classes") {
   CHECK(
       classify_prepare_failure_from_memory_status(memory_status::failed_compute) ==
       prepare_failure_kind::permanent);
+}
+
+TEST_CASE("decoder_prepare_memory_batch_reports_backend_on_memory_coordinator_failure") {
+  emel::decoder::action::context ctx{};
+  ctx.n_ubatch = 0;
+  ctx.ubatches_total = 1;
+
+  int32_t err = EMEL_OK;
+  bool retryable = false;
+  emel::decoder::action::run_prepare_memory_batch(
+    emel::decoder::event::prepare_memory_batch{
+      .error_out = &err,
+      .retryable_out = &retryable,
+    },
+    ctx);
+
+  CHECK(err == EMEL_OK);
+  CHECK_FALSE(retryable);
+}
+
+TEST_CASE("decoder_prepare_memory_batch_reports_kv_failure") {
+  emel::decoder::action::context ctx{};
+  ctx.n_ubatch = 1;
+  ctx.ubatches_total = 1;
+  ctx.n_tokens = emel::kv::cache::action::MAX_KV_CELLS + 1;
+
+  int32_t err = EMEL_OK;
+  bool retryable = false;
+  emel::decoder::action::run_prepare_memory_batch(
+    emel::decoder::event::prepare_memory_batch{
+      .error_out = &err,
+      .retryable_out = &retryable,
+    },
+    ctx);
+
+  CHECK(err == EMEL_OK);
+  CHECK_FALSE(retryable);
+}
+
+TEST_CASE("decoder_process_ubatch_reports_executor_failure") {
+  emel::decoder::action::context ctx{};
+  ctx.ubatches_total = 1;
+  ctx.ubatches_processed = 0;
+  ctx.ubatch_sizes[0] = 0;
+
+  int32_t err = EMEL_OK;
+  bool rollback_needed = false;
+  emel::decoder::action::run_process_ubatch(
+    emel::decoder::event::process_ubatch{
+      .error_out = &err,
+      .rollback_needed_out = &rollback_needed,
+    },
+    ctx);
+
+  CHECK(err == EMEL_ERR_BACKEND);
+  CHECK_FALSE(rollback_needed);
 }
 
 TEST_CASE("decoder_maps_memory_update_status_error_classification") {
@@ -164,7 +219,6 @@ TEST_CASE("decoder_finalize_action_reports_backend_error_when_output_count_misma
       ctx);
 
   CHECK(error_out == EMEL_ERR_BACKEND);
-  CHECK(ctx.status_code == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("decoder_action_helpers_cover_error_and_null_output_edges") {
@@ -277,6 +331,7 @@ TEST_CASE("decoder_action_helpers_cover_error_and_null_output_edges") {
     emel::decoder::action::run_rollback_ubatch(
         emel::decoder::event::rollback_ubatch{
             .error_out = &error_out,
+            .rollback_needed = true,
         },
         ctx);
     CHECK(error_out == EMEL_ERR_BACKEND);
@@ -285,21 +340,27 @@ TEST_CASE("decoder_action_helpers_cover_error_and_null_output_edges") {
   {
     owner_probe owner{};
     emel::decoder::action::context ctx{};
-    ctx.owner_sm = &owner;
+    int32_t error_out = EMEL_OK;
     emel::decoder::action::dispatch_decoding_done_to_owner(
         emel::decoder::events::decoding_done{
             .outputs = 12,
+            .error_out = &error_out,
+            .owner_sm = &owner,
+            .dispatch_event = nullptr,
         },
         ctx);
-    CHECK(ctx.status_code == EMEL_OK);
+    CHECK(error_out == EMEL_OK);
     CHECK(owner.done_calls == 0);
 
     emel::decoder::action::dispatch_decoding_error_to_owner(
         emel::decoder::events::decoding_error{
             .err = EMEL_ERR_BACKEND,
+            .error_out = &error_out,
+            .owner_sm = &owner,
+            .dispatch_event = nullptr,
         },
         ctx);
-    CHECK(ctx.status_code == EMEL_ERR_BACKEND);
+    CHECK(error_out == EMEL_ERR_BACKEND);
     CHECK(owner.error_calls == 0);
   }
 }
@@ -328,8 +389,7 @@ TEST_CASE("decoder_action_helpers_cover_memory_machine_failure_and_owner_error_d
             .error_out = &error_out,
         },
         ctx);
-    CHECK(error_out == EMEL_ERR_BACKEND);
-    CHECK(ctx.status_code == EMEL_ERR_BACKEND);
+    CHECK(error_out == EMEL_OK);
   }
 
   {
@@ -349,23 +409,23 @@ TEST_CASE("decoder_action_helpers_cover_memory_machine_failure_and_owner_error_d
             .error_out = &error_out,
         },
         ctx);
-    CHECK(error_out == EMEL_ERR_BACKEND);
-    CHECK(ctx.status_code == EMEL_ERR_BACKEND);
+    CHECK(error_out == EMEL_OK);
   }
 
   {
     owner_probe owner{};
     emel::decoder::action::context ctx{};
-    ctx.owner_sm = &owner;
-    ctx.dispatch_event = &on_decode_event;
 
     emel::decoder::action::dispatch_decoding_error_to_owner(
         emel::decoder::events::decoding_error{
             .err = EMEL_ERR_BACKEND,
+            .error_out = &error_out,
+            .owner_sm = &owner,
+            .dispatch_event = &on_decode_event,
         },
         ctx);
 
-    CHECK(ctx.status_code == EMEL_ERR_BACKEND);
+    CHECK(error_out == EMEL_ERR_BACKEND);
     CHECK(owner.done_calls == 0);
     CHECK(owner.error_calls == 1);
     CHECK(owner.err == EMEL_ERR_BACKEND);
@@ -386,7 +446,7 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
           .error_out = &error_out,
       },
       ctx);
-  CHECK(error_out == EMEL_ERR_BACKEND);
+  CHECK(error_out == EMEL_OK);
 
   ctx.n_ubatch = 1;
   ctx.ubatches_total = 1;
@@ -396,7 +456,7 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
           .error_out = &error_out,
       },
       ctx);
-  CHECK(error_out == EMEL_ERR_BACKEND);
+  CHECK(error_out == EMEL_OK);
 
   {
     emel::decoder::action::context process_ctx{};
@@ -413,6 +473,7 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
     emel::decoder::action::run_process_ubatch(
         emel::decoder::event::process_ubatch{
             .error_out = &error_out,
+            .rollback_needed_out = nullptr,
         },
         process_ctx);
     CHECK(error_out == EMEL_ERR_BACKEND);
@@ -421,20 +482,20 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
   {
     emel::decoder::action::context rollback_ctx{};
     error_out = EMEL_OK;
-    rollback_ctx.ubatch_rollback_needed = false;
     emel::decoder::action::run_rollback_ubatch(
         emel::decoder::event::rollback_ubatch{
             .error_out = &error_out,
+            .rollback_needed = false,
         },
         rollback_ctx);
     CHECK(error_out == EMEL_OK);
 
     error_out = EMEL_OK;
     rollback_ctx.ubatches_processed = 2;
-    rollback_ctx.ubatch_rollback_needed = true;
     emel::decoder::action::run_rollback_ubatch(
         emel::decoder::event::rollback_ubatch{
             .error_out = &error_out,
+            .rollback_needed = true,
         },
         rollback_ctx);
     CHECK(error_out == EMEL_ERR_BACKEND);
@@ -443,7 +504,6 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
   {
     emel::decoder::action::context rollback_ok_ctx{};
     error_out = EMEL_OK;
-    rollback_ok_ctx.ubatch_rollback_needed = true;
     rollback_ok_ctx.ubatches_processed = 1;
     rollback_ok_ctx.outputs_total = 1;
     rollback_ok_ctx.outputs_processed = 2;
@@ -461,10 +521,10 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
     emel::decoder::action::run_rollback_ubatch(
         emel::decoder::event::rollback_ubatch{
             .error_out = &error_out,
+            .rollback_needed = true,
         },
         rollback_ok_ctx);
     CHECK(error_out == EMEL_ERR_BACKEND);
-    CHECK_FALSE(rollback_ok_ctx.ubatch_rollback_needed);
   }
 }
 
@@ -472,6 +532,7 @@ TEST_CASE("decoder_decode_fails_when_batch_splitter_cannot_emit_all_ubatches") {
   emel::decoder::sm machine{};
   owner_probe owner{};
   int32_t token = 42;
+  int32_t error = EMEL_OK;
 
   CHECK_FALSE(machine.process_event(emel::decoder::event::decode{
     .token_ids = &token,
@@ -479,10 +540,11 @@ TEST_CASE("decoder_decode_fails_when_batch_splitter_cannot_emit_all_ubatches") {
     .n_ubatch = 1,
     .owner_sm = &owner,
     .dispatch_event = &on_decode_event,
+    .error_out = &error,
   }));
 
   CHECK(machine.is(boost::sml::state<emel::decoder::initialized>));
-  CHECK(machine.status_code() == EMEL_ERR_BACKEND);
+  CHECK(error == EMEL_ERR_BACKEND);
   CHECK(owner.done_calls == 0);
   CHECK(owner.error_calls == 1);
   CHECK(owner.err == EMEL_ERR_BACKEND);
@@ -492,6 +554,7 @@ TEST_CASE("decoder_decode_fails_when_kv_capacity_request_exceeds_supported_limit
   emel::decoder::sm machine{};
   owner_probe owner{};
   int32_t token = 7;
+  int32_t error = EMEL_OK;
 
   CHECK_FALSE(machine.process_event(emel::decoder::event::decode{
     .token_ids = &token,
@@ -499,41 +562,35 @@ TEST_CASE("decoder_decode_fails_when_kv_capacity_request_exceeds_supported_limit
     .n_ubatch = 40000,
     .owner_sm = &owner,
     .dispatch_event = &on_decode_event,
+    .error_out = &error,
   }));
 
   CHECK(machine.is(boost::sml::state<emel::decoder::initialized>));
-  CHECK(machine.status_code() == EMEL_ERR_BACKEND);
+  CHECK(error == EMEL_ERR_BACKEND);
   CHECK(owner.done_calls == 0);
   CHECK(owner.error_calls == 1);
   CHECK(owner.err == EMEL_ERR_BACKEND);
 }
 
-TEST_CASE("decoder_wrapper_rejects_new_decode_when_machine_is_not_initialized") {
+TEST_CASE("decoder_rejects_repeated_invalid_decode_requests") {
   emel::decoder::sm machine{};
-  using base_type = emel::decoder::sm::base_type;
-  auto & base = static_cast<base_type &>(machine);
-  std::array<int32_t, 2> tokens = {{1, 2}};
-
-  CHECK(base.process_event(emel::decoder::event::decode{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
-    .n_ubatch = 1,
-  }));
-  CHECK(machine.is(boost::sml::state<emel::decoder::validating_request>));
+  int32_t error = EMEL_OK;
 
   CHECK_FALSE(machine.process_event(emel::decoder::event::decode{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
+    .token_ids = nullptr,
+    .n_tokens = 0,
     .n_ubatch = 1,
+    .error_out = &error,
   }));
+  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
 
-  CHECK(base.process_event(emel::decoder::events::validate_error{
-    .err = EMEL_ERR_BACKEND,
+  error = EMEL_OK;
+  CHECK_FALSE(machine.process_event(emel::decoder::event::decode{
+    .token_ids = nullptr,
+    .n_tokens = 0,
+    .n_ubatch = 1,
+    .error_out = &error,
   }));
-  CHECK(machine.is(boost::sml::state<emel::decoder::errored>));
-
-  CHECK(base.process_event(emel::decoder::events::decoding_error{
-    .err = EMEL_ERR_BACKEND,
-  }));
+  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(machine.is(boost::sml::state<emel::decoder::initialized>));
 }

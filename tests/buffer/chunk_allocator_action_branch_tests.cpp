@@ -1,0 +1,201 @@
+#include <limits>
+#include <doctest/doctest.h>
+
+#include "emel/buffer/chunk_allocator/actions.hpp"
+#include "emel/buffer/chunk_allocator/events.hpp"
+#include "emel/emel.h"
+
+TEST_CASE("chunk_allocator_detail_helpers_cover_branches") {
+  uint64_t out = 0;
+  CHECK_FALSE(emel::buffer::chunk_allocator::action::detail::align_up(1, 0, out));
+  CHECK(emel::buffer::chunk_allocator::action::detail::align_up(8, 4, out));
+  CHECK(out == 8);
+
+  uint64_t sum = 0;
+  CHECK(emel::buffer::chunk_allocator::action::detail::add_overflow(
+    std::numeric_limits<uint64_t>::max(), 1, sum));
+
+  CHECK(
+    emel::buffer::chunk_allocator::action::detail::clamp_chunk_size_limit(
+      std::numeric_limits<uint64_t>::max()) ==
+    emel::buffer::chunk_allocator::action::k_max_chunk_limit);
+
+  emel::buffer::chunk_allocator::action::chunk_data chunk{};
+  chunk.free_block_count = emel::buffer::chunk_allocator::action::k_max_free_blocks;
+  CHECK_FALSE(emel::buffer::chunk_allocator::action::detail::insert_block(chunk, 0, 1));
+  CHECK(emel::buffer::chunk_allocator::action::detail::insert_block(chunk, 0, 0));
+}
+
+TEST_CASE("chunk_allocator_configure_actions_validate_alignment") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  emel::buffer::chunk_allocator::action::begin_configure(
+    emel::buffer::chunk_allocator::event::configure{
+      .alignment = 0,
+      .max_chunk_size = 1,
+      .error_out = &err,
+    },
+    ctx);
+  CHECK(err == EMEL_OK);
+
+  err = EMEL_OK;
+  emel::buffer::chunk_allocator::action::run_validate_configure(
+    emel::buffer::chunk_allocator::event::validate_configure{.error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("chunk_allocator_allocate_actions_handle_invalid_request") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  emel::buffer::chunk_allocator::action::begin_allocate(
+    emel::buffer::chunk_allocator::event::allocate{
+      .size = 0,
+      .error_out = &err,
+    },
+    ctx);
+  CHECK(err == EMEL_OK);
+
+  err = EMEL_OK;
+  emel::buffer::chunk_allocator::action::run_validate_allocate(
+    emel::buffer::chunk_allocator::event::validate_allocate{.error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("chunk_allocator_run_ensure_chunk_reports_backend") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  ctx.selected_chunk = -1;
+  ctx.aligned_request_size = 64;
+  ctx.chunk_count = emel::buffer::chunk_allocator::action::k_max_chunks;
+  emel::buffer::chunk_allocator::action::run_ensure_chunk(
+    emel::buffer::chunk_allocator::event::ensure_chunk{.error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("chunk_allocator_run_commit_allocate_reports_backend") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  ctx.selected_chunk = -1;
+  emel::buffer::chunk_allocator::action::run_commit_allocate(
+    emel::buffer::chunk_allocator::event::commit_allocate{.error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("chunk_allocator_release_actions_validate_request") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  emel::buffer::chunk_allocator::action::begin_release(
+    emel::buffer::chunk_allocator::event::release{
+      .chunk = -1,
+      .size = 0,
+      .error_out = &err,
+    },
+    ctx);
+  CHECK(err == EMEL_OK);
+
+  err = EMEL_OK;
+  emel::buffer::chunk_allocator::action::run_validate_release(
+    emel::buffer::chunk_allocator::event::validate_release{.error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("chunk_allocator_run_merge_release_reports_backend") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  ctx.request_chunk = -1;
+  emel::buffer::chunk_allocator::action::run_merge_release(
+    emel::buffer::chunk_allocator::event::merge_release{.error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("chunk_allocator_detail_allocate_from_selected_paths") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  ctx.chunk_count = 1;
+  ctx.aligned_request_size = 8;
+  ctx.selected_chunk = 0;
+  ctx.selected_block = 0;
+  ctx.chunks[0].free_block_count = 1;
+  ctx.chunks[0].free_blocks[0] = emel::buffer::chunk_allocator::action::free_block{
+    .offset = 0,
+    .size = 8,
+  };
+
+  CHECK(emel::buffer::chunk_allocator::action::detail::allocate_from_selected(ctx));
+  CHECK(ctx.result_chunk == 0);
+  CHECK(ctx.result_offset == 0);
+
+  ctx.selected_chunk = -1;
+  CHECK_FALSE(emel::buffer::chunk_allocator::action::detail::allocate_from_selected(ctx));
+}
+
+TEST_CASE("chunk_allocator_detail_create_chunk_paths") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  int32_t chunk = -1;
+
+  ctx.chunk_count = emel::buffer::chunk_allocator::action::k_max_chunks;
+  CHECK_FALSE(emel::buffer::chunk_allocator::action::detail::create_chunk(ctx, 64, chunk));
+
+  ctx.chunk_count = 0;
+  CHECK(emel::buffer::chunk_allocator::action::detail::create_chunk(ctx, 64, chunk));
+  CHECK(chunk == 0);
+  CHECK(ctx.chunk_count == 1);
+}
+
+TEST_CASE("chunk_allocator_detail_free_bytes_paths") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  ctx.chunk_count = 1;
+  ctx.request_chunk = 0;
+  ctx.request_offset = 0;
+  ctx.aligned_request_size = 8;
+  ctx.chunks[0].max_size = 16;
+
+  CHECK(emel::buffer::chunk_allocator::action::detail::free_bytes(ctx));
+
+  ctx.request_chunk = -1;
+  CHECK_FALSE(emel::buffer::chunk_allocator::action::detail::free_bytes(ctx));
+}
+
+TEST_CASE("chunk_allocator_detail_allocate_from_selected_splits_block") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  ctx.chunk_count = 1;
+  ctx.aligned_request_size = 8;
+  ctx.selected_chunk = 0;
+  ctx.selected_block = 0;
+  ctx.chunks[0].free_block_count = 1;
+  ctx.chunks[0].free_blocks[0] = emel::buffer::chunk_allocator::action::free_block{
+    .offset = 0,
+    .size = 16,
+  };
+
+  CHECK(emel::buffer::chunk_allocator::action::detail::allocate_from_selected(ctx));
+  CHECK(ctx.result_chunk == 0);
+  CHECK(ctx.result_offset == 0);
+  CHECK(ctx.chunks[0].free_block_count == 1);
+  CHECK(ctx.chunks[0].free_blocks[0].offset == 8);
+  CHECK(ctx.chunks[0].free_blocks[0].size == 8);
+}
+
+TEST_CASE("chunk_allocator_detail_insert_block_inserts_between_blocks") {
+  emel::buffer::chunk_allocator::action::chunk_data chunk{};
+  chunk.free_block_count = 2;
+  chunk.free_blocks[0] = emel::buffer::chunk_allocator::action::free_block{
+    .offset = 0,
+    .size = 8,
+  };
+  chunk.free_blocks[1] = emel::buffer::chunk_allocator::action::free_block{
+    .offset = 16,
+    .size = 8,
+  };
+
+  CHECK(emel::buffer::chunk_allocator::action::detail::insert_block(chunk, 8, 8));
+  CHECK(chunk.free_block_count == 3);
+  CHECK(chunk.free_blocks[0].offset == 0);
+  CHECK(chunk.free_blocks[1].offset == 8);
+  CHECK(chunk.free_blocks[2].offset == 16);
+}

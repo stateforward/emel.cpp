@@ -1,0 +1,95 @@
+# kv_cache
+
+Source: `emel/kv/cache/sm.hpp`
+
+## Mermaid
+
+```mermaid
+stateDiagram-v2
+  [*] --> emel::kv::cache::initialized
+  emel::kv::cache::initialized --> emel::kv::cache::preparing : emel::kv::cache::event::prepare [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:107:39)>
+  emel::kv::cache::prepared --> emel::kv::cache::preparing : emel::kv::cache::event::prepare [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:107:39)>
+  emel::kv::cache::preparing --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:53:11)>
+  emel::kv::cache::preparing --> emel::kv::cache::preparing : emel::kv::cache::event::validate [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:155:38)>
+  emel::kv::cache::preparing --> emel::kv::cache::preparing : emel::kv::cache::events::validate_done [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::preparing --> emel::kv::cache::errored : emel::kv::cache::events::validate_error [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::preparing --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:78:11)>
+  emel::kv::cache::preparing --> emel::kv::cache::preparing : emel::kv::cache::event::prepare_slots [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:202:43)>
+  emel::kv::cache::preparing --> emel::kv::cache::publishing : emel::kv::cache::events::prepare_slots_done [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::preparing --> emel::kv::cache::errored : emel::kv::cache::events::prepare_slots_error [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::prepared --> emel::kv::cache::applying_ubatch : emel::kv::cache::event::apply_ubatch [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:136:37)>
+  emel::kv::cache::applying_ubatch --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:107:11)>
+  emel::kv::cache::applying_ubatch --> emel::kv::cache::applying_ubatch : emel::kv::cache::event::validate [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:155:38)>
+  emel::kv::cache::applying_ubatch --> emel::kv::cache::applying_ubatch : emel::kv::cache::events::validate_done [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::applying_ubatch --> emel::kv::cache::errored : emel::kv::cache::events::validate_error [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::applying_ubatch --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:132:11)>
+  emel::kv::cache::applying_ubatch --> emel::kv::cache::applying_ubatch : emel::kv::cache::event::apply_step [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:244:40)>
+  emel::kv::cache::applying_ubatch --> emel::kv::cache::publishing : emel::kv::cache::events::apply_done [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::applying_ubatch --> emel::kv::cache::errored : emel::kv::cache::events::apply_error [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::prepared --> emel::kv::cache::rolling_back : emel::kv::cache::event::rollback [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:147:40)>
+  emel::kv::cache::errored --> emel::kv::cache::rolling_back : emel::kv::cache::event::rollback [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:147:40)>
+  emel::kv::cache::rolling_back --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:163:11)>
+  emel::kv::cache::rolling_back --> emel::kv::cache::rolling_back : emel::kv::cache::event::validate [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:155:38)>
+  emel::kv::cache::rolling_back --> emel::kv::cache::rolling_back : emel::kv::cache::events::validate_done [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::rolling_back --> emel::kv::cache::errored : emel::kv::cache::events::validate_error [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::rolling_back --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:188:11)>
+  emel::kv::cache::rolling_back --> emel::kv::cache::rolling_back : emel::kv::cache::event::rollback_step [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:282:43)>
+  emel::kv::cache::rolling_back --> emel::kv::cache::publishing : emel::kv::cache::events::rollback_done [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::rolling_back --> emel::kv::cache::errored : emel::kv::cache::events::rollback_error [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::publishing --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:215:11)>
+  emel::kv::cache::publishing --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:237:11)>
+  emel::kv::cache::publishing --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:259:11)>
+  emel::kv::cache::publishing --> emel::kv::cache::publishing : emel::kv::cache::event::publish [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:314:37)>
+  emel::kv::cache::publishing --> emel::kv::cache::done : emel::kv::cache::events::publish_done [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::publishing --> emel::kv::cache::errored : emel::kv::cache::events::publish_error [boost::sml::front::always] / boost::sml::front::none
+  emel::kv::cache::done --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:285:11)>
+  emel::kv::cache::done --> emel::kv::cache::prepared : emel::kv::cache::events::kv_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:320:36)>
+  emel::kv::cache::done --> emel::kv::cache::prepared : emel::kv::cache::events::kv_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:325:37)>
+  emel::kv::cache::errored --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:328:11)>
+  emel::kv::cache::errored --> emel::kv::cache::prepared : emel::kv::cache::events::kv_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:325:37)>
+```
+
+## Transitions
+
+| Source | Event | Guard | Action | Target |
+| --- | --- | --- | --- | --- |
+| `emel::kv::cache::initialized` | `emel::kv::cache::event::prepare` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:107:39)>` | `emel::kv::cache::preparing` |
+| `emel::kv::cache::prepared` | `emel::kv::cache::event::prepare` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:107:39)>` | `emel::kv::cache::preparing` |
+| `emel::kv::cache::preparing` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:53:11)>` | `boost::sml::front::internal` |
+| `emel::kv::cache::preparing` | `emel::kv::cache::event::validate` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:155:38)>` | `emel::kv::cache::preparing` |
+| `emel::kv::cache::preparing` | `emel::kv::cache::events::validate_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::preparing` |
+| `emel::kv::cache::preparing` | `emel::kv::cache::events::validate_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::errored` |
+| `emel::kv::cache::preparing` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:78:11)>` | `boost::sml::front::internal` |
+| `emel::kv::cache::preparing` | `emel::kv::cache::event::prepare_slots` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:202:43)>` | `emel::kv::cache::preparing` |
+| `emel::kv::cache::preparing` | `emel::kv::cache::events::prepare_slots_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::publishing` |
+| `emel::kv::cache::preparing` | `emel::kv::cache::events::prepare_slots_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::errored` |
+| `emel::kv::cache::prepared` | `emel::kv::cache::event::apply_ubatch` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:136:37)>` | `emel::kv::cache::applying_ubatch` |
+| `emel::kv::cache::applying_ubatch` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:107:11)>` | `boost::sml::front::internal` |
+| `emel::kv::cache::applying_ubatch` | `emel::kv::cache::event::validate` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:155:38)>` | `emel::kv::cache::applying_ubatch` |
+| `emel::kv::cache::applying_ubatch` | `emel::kv::cache::events::validate_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::applying_ubatch` |
+| `emel::kv::cache::applying_ubatch` | `emel::kv::cache::events::validate_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::errored` |
+| `emel::kv::cache::applying_ubatch` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:132:11)>` | `boost::sml::front::internal` |
+| `emel::kv::cache::applying_ubatch` | `emel::kv::cache::event::apply_step` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:244:40)>` | `emel::kv::cache::applying_ubatch` |
+| `emel::kv::cache::applying_ubatch` | `emel::kv::cache::events::apply_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::publishing` |
+| `emel::kv::cache::applying_ubatch` | `emel::kv::cache::events::apply_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::errored` |
+| `emel::kv::cache::prepared` | `emel::kv::cache::event::rollback` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:147:40)>` | `emel::kv::cache::rolling_back` |
+| `emel::kv::cache::errored` | `emel::kv::cache::event::rollback` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:147:40)>` | `emel::kv::cache::rolling_back` |
+| `emel::kv::cache::rolling_back` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:163:11)>` | `boost::sml::front::internal` |
+| `emel::kv::cache::rolling_back` | `emel::kv::cache::event::validate` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:155:38)>` | `emel::kv::cache::rolling_back` |
+| `emel::kv::cache::rolling_back` | `emel::kv::cache::events::validate_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::rolling_back` |
+| `emel::kv::cache::rolling_back` | `emel::kv::cache::events::validate_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::errored` |
+| `emel::kv::cache::rolling_back` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:188:11)>` | `boost::sml::front::internal` |
+| `emel::kv::cache::rolling_back` | `emel::kv::cache::event::rollback_step` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:282:43)>` | `emel::kv::cache::rolling_back` |
+| `emel::kv::cache::rolling_back` | `emel::kv::cache::events::rollback_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::publishing` |
+| `emel::kv::cache::rolling_back` | `emel::kv::cache::events::rollback_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::errored` |
+| `emel::kv::cache::publishing` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:215:11)>` | `boost::sml::front::internal` |
+| `emel::kv::cache::publishing` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:237:11)>` | `boost::sml::front::internal` |
+| `emel::kv::cache::publishing` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:259:11)>` | `boost::sml::front::internal` |
+| `emel::kv::cache::publishing` | `emel::kv::cache::event::publish` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:314:37)>` | `emel::kv::cache::publishing` |
+| `emel::kv::cache::publishing` | `emel::kv::cache::events::publish_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::done` |
+| `emel::kv::cache::publishing` | `emel::kv::cache::events::publish_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::kv::cache::errored` |
+| `emel::kv::cache::done` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:285:11)>` | `boost::sml::front::internal` |
+| `emel::kv::cache::done` | `emel::kv::cache::events::kv_done` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:320:36)>` | `emel::kv::cache::prepared` |
+| `emel::kv::cache::done` | `emel::kv::cache::events::kv_error` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:325:37)>` | `emel::kv::cache::prepared` |
+| `emel::kv::cache::errored` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/sm.hpp:328:11)>` | `boost::sml::front::internal` |
+| `emel::kv::cache::errored` | `emel::kv::cache::events::kv_error` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::kv::cache::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/kv/cache/actions.hpp:325:37)>` | `emel::kv::cache::prepared` |

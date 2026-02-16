@@ -7,7 +7,39 @@ namespace emel::buffer::allocator::guard {
 
 struct valid_initialize {
   bool operator()(const event::initialize & ev) const noexcept {
-    return ev.buffer_count > 0 && ev.buffer_count <= action::k_max_buffers;
+    if (ev.buffer_count <= 0 || ev.buffer_count > action::k_max_buffers) {
+      return false;
+    }
+    if (ev.buffer_alignments != nullptr) {
+      for (int32_t i = 0; i < ev.buffer_count; ++i) {
+        if (!action::detail::valid_alignment(ev.buffer_alignments[i])) {
+          return false;
+        }
+      }
+    }
+    if (ev.buffer_max_sizes != nullptr) {
+      for (int32_t i = 0; i < ev.buffer_count; ++i) {
+        if (ev.buffer_max_sizes[i] < 0) {
+          return false;
+        }
+        if (ev.buffer_max_sizes[i] == 0 ||
+            ev.buffer_max_sizes[i] == action::k_default_max_size) {
+          continue;
+        }
+        const int32_t alignment =
+          ev.buffer_alignments != nullptr ? ev.buffer_alignments[i] : action::k_default_alignment;
+        if (!action::detail::valid_alignment(alignment)) {
+          return false;
+        }
+        if (ev.buffer_max_sizes[i] < alignment) {
+          return false;
+        }
+        if ((ev.buffer_max_sizes[i] % alignment) != 0) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 };
 

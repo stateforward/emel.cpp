@@ -12,6 +12,18 @@
 
 namespace emel::buffer::allocator {
 
+using Process = boost::sml::back::process<
+  events::initialize_done,
+  events::initialize_error,
+  events::reserve_n_size_done,
+  events::reserve_n_size_error,
+  events::reserve_done,
+  events::reserve_error,
+  events::alloc_graph_done,
+  events::alloc_graph_error,
+  events::release_done,
+  events::release_error>;
+
 /*
 Buffer allocator architecture notes (single source of truth)
 
@@ -75,6 +87,7 @@ Production completion checklist (open)
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
+    using process_t = Process;
 
     struct uninitialized {};
     struct initializing {};
@@ -87,39 +100,84 @@ struct model {
     struct failed {};
 
     return sml::make_transition_table(
-      *sml::state<uninitialized> + sml::event<event::initialize>[guard::valid_initialize{}] /
+      *sml::state<uninitialized> + sml::event<event::initialize> /
           action::begin_initialize = sml::state<initializing>,
+      sml::state<initializing> + sml::on_entry<event::initialize> /
+          [](const event::initialize & ev, action::context &, process_t & process) noexcept {
+            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
+            if (err == EMEL_OK) {
+              process(events::initialize_done{.error_out = ev.error_out});
+            } else {
+              process(events::initialize_error{.err = err, .error_out = ev.error_out});
+            }
+          },
       sml::state<initializing> + sml::event<events::initialize_done> / action::on_initialize_done =
           sml::state<ready>,
       sml::state<initializing> + sml::event<events::initialize_error> /
           action::on_initialize_error = sml::state<failed>,
 
-      sml::state<ready> + sml::event<event::reserve_n_size>[guard::can_reserve_n_size{}] /
+      sml::state<ready> + sml::event<event::reserve_n_size> /
           action::begin_reserve_n_size = sml::state<reserving_n_size>,
-      sml::state<allocated> + sml::event<event::reserve_n_size>[guard::can_reserve_n_size{}] /
+      sml::state<allocated> + sml::event<event::reserve_n_size> /
           action::begin_reserve_n_size = sml::state<reserving_n_size>,
+      sml::state<reserving_n_size> + sml::on_entry<event::reserve_n_size> /
+          [](const event::reserve_n_size & ev, action::context &, process_t & process) noexcept {
+            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
+            if (err == EMEL_OK) {
+              process(events::reserve_n_size_done{.error_out = ev.error_out});
+            } else {
+              process(events::reserve_n_size_error{.err = err, .error_out = ev.error_out});
+            }
+          },
       sml::state<reserving_n_size> + sml::event<events::reserve_n_size_done> /
           action::on_reserve_n_size_done = sml::state<ready>,
       sml::state<reserving_n_size> + sml::event<events::reserve_n_size_error> /
           action::on_reserve_n_size_error = sml::state<failed>,
 
-      sml::state<ready> + sml::event<event::reserve_n>[guard::can_reserve_n{}] /
+      sml::state<ready> + sml::event<event::reserve_n> /
           action::begin_reserve_n = sml::state<reserving>,
-      sml::state<allocated> + sml::event<event::reserve_n>[guard::can_reserve_n{}] /
+      sml::state<allocated> + sml::event<event::reserve_n> /
           action::begin_reserve_n = sml::state<reserving>,
-      sml::state<ready> + sml::event<event::reserve>[guard::can_reserve{}] /
+      sml::state<ready> + sml::event<event::reserve> /
           action::begin_reserve = sml::state<reserving>,
-      sml::state<allocated> + sml::event<event::reserve>[guard::can_reserve{}] /
+      sml::state<allocated> + sml::event<event::reserve> /
           action::begin_reserve = sml::state<reserving>,
+      sml::state<reserving> + sml::on_entry<event::reserve_n> /
+          [](const event::reserve_n & ev, action::context &, process_t & process) noexcept {
+            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
+            if (err == EMEL_OK) {
+              process(events::reserve_done{.error_out = ev.error_out});
+            } else {
+              process(events::reserve_error{.err = err, .error_out = ev.error_out});
+            }
+          },
+      sml::state<reserving> + sml::on_entry<event::reserve> /
+          [](const event::reserve & ev, action::context &, process_t & process) noexcept {
+            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
+            if (err == EMEL_OK) {
+              process(events::reserve_done{.error_out = ev.error_out});
+            } else {
+              process(events::reserve_error{.err = err, .error_out = ev.error_out});
+            }
+          },
       sml::state<reserving> + sml::event<events::reserve_done> / action::on_reserve_done =
           sml::state<ready>,
       sml::state<reserving> + sml::event<events::reserve_error> / action::on_reserve_error =
           sml::state<failed>,
 
-      sml::state<ready> + sml::event<event::alloc_graph>[guard::can_alloc_graph{}] /
+      sml::state<ready> + sml::event<event::alloc_graph> /
           action::begin_alloc_graph = sml::state<allocating_graph>,
-      sml::state<allocated> + sml::event<event::alloc_graph>[guard::can_alloc_graph{}] /
+      sml::state<allocated> + sml::event<event::alloc_graph> /
           action::begin_alloc_graph = sml::state<allocating_graph>,
+      sml::state<allocating_graph> + sml::on_entry<event::alloc_graph> /
+          [](const event::alloc_graph & ev, action::context &, process_t & process) noexcept {
+            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
+            if (err == EMEL_OK) {
+              process(events::alloc_graph_done{.error_out = ev.error_out});
+            } else {
+              process(events::alloc_graph_error{.err = err, .error_out = ev.error_out});
+            }
+          },
       sml::state<allocating_graph> + sml::event<events::alloc_graph_done> /
           action::on_alloc_graph_done = sml::state<allocated>,
       sml::state<allocating_graph> + sml::event<events::alloc_graph_error> /
@@ -141,91 +199,54 @@ struct model {
           sml::state<releasing>,
       sml::state<failed> + sml::event<event::release> / action::begin_release =
           sml::state<releasing>,
+      sml::state<releasing> + sml::on_entry<event::release> /
+          [](const event::release & ev, action::context &, process_t & process) noexcept {
+            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
+            if (err == EMEL_OK) {
+              process(events::release_done{.error_out = ev.error_out});
+            } else {
+              process(events::release_error{.err = err, .error_out = ev.error_out});
+            }
+          },
       sml::state<releasing> + sml::event<events::release_done> / action::on_release_done =
           sml::state<uninitialized>,
       sml::state<releasing> + sml::event<events::release_error> / action::on_release_error =
+          sml::state<failed>,
+
+      sml::state<uninitialized> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<initializing> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<ready> + sml::event<sml::_> / action::on_unexpected = sml::state<failed>,
+      sml::state<reserving_n_size> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<reserving> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<allocating_graph> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<allocated> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<releasing> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<failed> + sml::event<sml::_> / action::on_unexpected =
           sml::state<failed>
     );
   }
 };
 
-struct sm : emel::sm<model> {
-  using base_type = emel::sm<model>;
+struct sm : private emel::detail::process_support<sm, Process>, public emel::sm<model, Process> {
+  using base_type = emel::sm<model, Process>;
 
-  sm() : base_type(context_) {}
+  sm()
+      : emel::detail::process_support<sm, Process>(this),
+        base_type(
+          context_,
+          buffer_planner_sm_,
+          buffer_chunk_allocator_sm_,
+          buffer_realloc_analyzer_sm_,
+          this->process_) {}
 
   using base_type::process_event;
-
-  bool process_event(const event::initialize & ev) {
-    auto wired = ev;
-    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
-    if (!base_type::process_event(wired)) {
-      return false;
-    }
-    return finalize_request<events::initialize_done, events::initialize_error>();
-  }
-
-  bool process_event(const event::reserve_n_size & ev) {
-    auto wired = ev;
-    wired.buffer_planner_sm = &buffer_planner_sm_;
-    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
-    if (wired.strategy == nullptr) {
-      wired.strategy = &emel::buffer::planner::default_strategies::reserve_n_size;
-    }
-    if (!base_type::process_event(wired)) {
-      return false;
-    }
-    return finalize_request<events::reserve_n_size_done, events::reserve_n_size_error>();
-  }
-
-  bool process_event(const event::reserve_n & ev) {
-    auto wired = ev;
-    wired.buffer_planner_sm = &buffer_planner_sm_;
-    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
-    if (wired.strategy == nullptr) {
-      wired.strategy = &emel::buffer::planner::default_strategies::reserve_n;
-    }
-    if (!base_type::process_event(wired)) {
-      return false;
-    }
-    return finalize_request<events::reserve_done, events::reserve_error>();
-  }
-
-  bool process_event(const event::reserve & ev) {
-    auto wired = ev;
-    wired.buffer_planner_sm = &buffer_planner_sm_;
-    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
-    if (wired.strategy == nullptr) {
-      wired.strategy = &emel::buffer::planner::default_strategies::reserve;
-    }
-    if (!base_type::process_event(wired)) {
-      return false;
-    }
-    return finalize_request<events::reserve_done, events::reserve_error>();
-  }
-
-  bool process_event(const event::alloc_graph & ev) {
-    auto wired = ev;
-    wired.buffer_planner_sm = &buffer_planner_sm_;
-    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
-    wired.buffer_realloc_analyzer_sm = &buffer_realloc_analyzer_sm_;
-    if (wired.strategy == nullptr) {
-      wired.strategy = &emel::buffer::planner::default_strategies::alloc_graph;
-    }
-    if (!base_type::process_event(wired)) {
-      return false;
-    }
-    return finalize_request<events::alloc_graph_done, events::alloc_graph_error>();
-  }
-
-  bool process_event(const event::release & ev) {
-    auto wired = ev;
-    wired.chunk_allocator_sm = &buffer_chunk_allocator_sm_;
-    if (!base_type::process_event(wired)) {
-      return false;
-    }
-    return finalize_request<events::release_done, events::release_error>();
-  }
 
   int32_t get_buffer_size(const int32_t buffer_id) const noexcept {
     if (buffer_id < 0 || buffer_id >= context_.buffer_count) {
@@ -234,27 +255,39 @@ struct sm : emel::sm<model> {
     return context_.committed_sizes[buffer_id];
   }
 
-  int32_t last_error() const noexcept { return context_.last_error; }
-
   int32_t get_buffer_chunk_id(const int32_t buffer_id) const noexcept {
     if (buffer_id < 0 || buffer_id >= context_.buffer_count) {
       return -1;
     }
-    return context_.committed_chunk_ids[buffer_id];
+    if (context_.committed_chunk_counts[buffer_id] <= 0) {
+      return -1;
+    }
+    return context_.committed_chunk_ids[action::detail::chunk_binding_index(buffer_id, 0)];
   }
 
   uint64_t get_buffer_chunk_offset(const int32_t buffer_id) const noexcept {
     if (buffer_id < 0 || buffer_id >= context_.buffer_count) {
       return 0;
     }
-    return context_.committed_chunk_offsets[buffer_id];
+    if (context_.committed_chunk_counts[buffer_id] <= 0) {
+      return 0;
+    }
+    return context_.committed_chunk_offsets[action::detail::chunk_binding_index(buffer_id, 0)];
   }
 
   uint64_t get_buffer_alloc_size(const int32_t buffer_id) const noexcept {
     if (buffer_id < 0 || buffer_id >= context_.buffer_count) {
       return 0;
     }
-    return context_.committed_chunk_sizes[buffer_id];
+    if (context_.committed_chunk_counts[buffer_id] <= 0) {
+      return 0;
+    }
+    uint64_t total = 0;
+    const int32_t count = context_.committed_chunk_counts[buffer_id];
+    for (int32_t i = 0; i < count; ++i) {
+      total += context_.committed_chunk_sizes[action::detail::chunk_binding_index(buffer_id, i)];
+    }
+    return total;
   }
 
   int32_t chunk_count() const noexcept { return buffer_chunk_allocator_sm_.chunk_count(); }
@@ -262,17 +295,6 @@ struct sm : emel::sm<model> {
   emel::buffer::planner::sm & planner_sm() noexcept { return buffer_planner_sm_; }
 
  private:
-  template <class DoneEvent, class ErrorEvent>
-  bool finalize_request() {
-    if (context_.pending_error == EMEL_OK) {
-      return base_type::process_event(DoneEvent{});
-    }
-    (void)base_type::process_event(ErrorEvent{
-      .err = context_.pending_error,
-    });
-    return false;
-  }
-
   action::context context_{};
   emel::buffer::planner::sm buffer_planner_sm_{};
   emel::buffer::chunk_allocator::sm buffer_chunk_allocator_sm_{};

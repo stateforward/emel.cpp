@@ -1,11 +1,28 @@
 #pragma once
 
+#include <type_traits>
+
 #include "emel/buffer/realloc_analyzer/actions.hpp"
 #include "emel/buffer/realloc_analyzer/events.hpp"
 #include "emel/buffer/realloc_analyzer/guards.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::buffer::realloc_analyzer {
+
+using Process = boost::sml::back::process<
+  event::validate,
+  events::validate_done,
+  events::validate_error,
+  event::evaluate,
+  events::evaluate_done,
+  events::evaluate_error,
+  event::publish,
+  events::publish_done,
+  events::publish_error,
+  events::analyze_done,
+  events::analyze_error,
+  events::reset_done,
+  events::reset_error>;
 
 /**
  * Buffer realloc analyzer orchestration model.
@@ -32,6 +49,7 @@ namespace emel::buffer::realloc_analyzer {
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
+    using process_t = Process;
 
     struct idle {};
     struct validating {};
@@ -43,25 +61,102 @@ struct model {
 
     return sml::make_transition_table(
       *sml::state<idle> + sml::event<event::analyze> / action::begin_analyze = sml::state<validating>,
+      sml::state<validating> + sml::on_entry<event::analyze> /
+          [](const event::analyze & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::validate validate{
+              .graph = ev.graph,
+              .node_allocs = ev.node_allocs,
+              .node_alloc_count = ev.node_alloc_count,
+              .leaf_allocs = ev.leaf_allocs,
+              .leaf_alloc_count = ev.leaf_alloc_count,
+              .error_out = &phase_error,
+            };
+            process(validate);
+            if (phase_error != EMEL_OK) {
+              process(events::validate_error{
+                .err = phase_error,
+                .request = &ev,
+              });
+              return;
+            }
+            process(events::validate_done{
+              .request = &ev,
+            });
+          },
 
       sml::state<validating> + sml::event<event::validate> / action::run_validate =
           sml::state<validating>,
       sml::state<validating> + sml::event<events::validate_done> = sml::state<evaluating>,
       sml::state<validating> + sml::event<events::validate_error> = sml::state<failed>,
 
+      sml::state<evaluating> + sml::on_entry<events::validate_done> /
+          [](const events::validate_done & ev, action::context & ctx, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::evaluate evaluate{
+              .graph = ev.request != nullptr ? ev.request->graph : event::graph_view{},
+              .node_allocs = ev.request != nullptr ? ev.request->node_allocs : nullptr,
+              .node_alloc_count = ev.request != nullptr ? ev.request->node_alloc_count : 0,
+              .leaf_allocs = ev.request != nullptr ? ev.request->leaf_allocs : nullptr,
+              .leaf_alloc_count = ev.request != nullptr ? ev.request->leaf_alloc_count : 0,
+              .error_out = &phase_error,
+            };
+            process(evaluate);
+            if (phase_error != EMEL_OK) {
+              process(events::evaluate_error{
+                .err = phase_error,
+                .request = ev.request,
+              });
+              return;
+            }
+            process(events::evaluate_done{
+              .request = ev.request,
+            });
+            (void)ctx;
+          },
       sml::state<evaluating> + sml::event<event::evaluate> / action::run_evaluate =
           sml::state<evaluating>,
       sml::state<evaluating> + sml::event<events::evaluate_done> = sml::state<publishing>,
       sml::state<evaluating> + sml::event<events::evaluate_error> = sml::state<failed>,
 
+      sml::state<publishing> + sml::on_entry<events::evaluate_done> /
+          [](const events::evaluate_done & ev, action::context & ctx, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::publish publish{
+              .needs_realloc_out = ev.request != nullptr ? ev.request->needs_realloc_out : nullptr,
+              .error_out = &phase_error,
+            };
+            process(publish);
+            if (phase_error != EMEL_OK) {
+              process(events::publish_error{
+                .err = phase_error,
+                .request = ev.request,
+              });
+              return;
+            }
+            process(events::publish_done{
+              .request = ev.request,
+            });
+            (void)ctx;
+          },
       sml::state<publishing> + sml::event<event::publish> / action::run_publish =
           sml::state<publishing>,
       sml::state<publishing> + sml::event<events::publish_done> = sml::state<done>,
       sml::state<publishing> + sml::event<events::publish_error> = sml::state<failed>,
 
+      sml::state<done> + sml::on_entry<events::publish_done> /
+          [](const events::publish_done & ev, action::context & ctx, process_t & process) noexcept {
+            const event::analyze * request = ev.request;
+            process(events::analyze_done{
+              .needs_realloc = ctx.needs_realloc ? 1 : 0,
+              .needs_realloc_out = request != nullptr ? request->needs_realloc_out : nullptr,
+              .error_out = request != nullptr ? request->error_out : nullptr,
+              .request = request,
+            });
+          },
       sml::state<done> + sml::event<events::analyze_done> / action::on_analyze_done =
           sml::state<idle>,
-      sml::state<failed> + sml::event<events::analyze_error> / action::on_analyze_error =
+      sml::state<done> + sml::event<events::analyze_error> / action::on_analyze_error =
           sml::state<idle>,
 
       sml::state<idle> + sml::event<event::reset> / action::begin_reset = sml::state<resetting>,
@@ -73,85 +168,66 @@ struct model {
           sml::state<resetting>,
       sml::state<done> + sml::event<event::reset> / action::begin_reset = sml::state<resetting>,
       sml::state<failed> + sml::event<event::reset> / action::begin_reset = sml::state<resetting>,
+      sml::state<resetting> + sml::on_entry<event::reset> /
+          [](const event::reset & ev, action::context &, process_t & process) noexcept {
+            process(events::reset_done{
+              .error_out = ev.error_out,
+              .request = &ev,
+            });
+          },
       sml::state<resetting> + sml::event<events::reset_done> / action::on_reset_done =
           sml::state<idle>,
       sml::state<resetting> + sml::event<events::reset_error> / action::on_reset_error =
+          sml::state<failed>,
+
+      sml::state<failed> + sml::on_entry<sml::_> /
+          [](const auto & ev, action::context &, process_t & process) noexcept {
+            int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+            const event::analyze * request = nullptr;
+            if constexpr (requires { ev.err; }) {
+              err = ev.err;
+            }
+            if constexpr (requires { ev.request; }) {
+              using request_type = std::decay_t<decltype(ev.request)>;
+              if constexpr (std::is_same_v<request_type, const event::analyze *>) {
+                request = ev.request;
+              }
+            }
+            process(events::analyze_error{
+              .err = err,
+              .error_out = request != nullptr ? request->error_out : nullptr,
+              .request = request,
+            });
+          },
+      sml::state<failed> + sml::event<events::analyze_error> / action::on_analyze_error =
+          sml::state<idle>,
+
+      sml::state<idle> + sml::event<sml::_> / action::on_unexpected = sml::state<failed>,
+      sml::state<validating> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<evaluating> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<publishing> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<done> + sml::event<sml::_> / action::on_unexpected = sml::state<failed>,
+      sml::state<resetting> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<failed> + sml::event<sml::_> / action::on_unexpected =
           sml::state<failed>
     );
   }
 };
 
-struct sm : emel::sm<model> {
-  using base_type = emel::sm<model>;
+struct sm : private emel::detail::process_support<sm, Process>, public emel::sm<model, Process> {
+  using base_type = emel::sm<model, Process>;
 
-  sm() : base_type(context_) {}
+  sm() : emel::detail::process_support<sm, Process>(this), base_type(context_, this->process_) {}
 
   using base_type::process_event;
-
-  bool process_event(const event::analyze & ev) {
-    if (!base_type::process_event(ev)) return false;
-
-    int32_t phase_error = EMEL_OK;
-    if (!run_phase<event::validate, events::validate_done, events::validate_error>(phase_error)) {
-      return finalize_analyze_error(phase_error);
-    }
-    if (!run_phase<event::evaluate, events::evaluate_done, events::evaluate_error>(
-            phase_error)) {  // GCOVR_EXCL_BR_LINE
-      return finalize_analyze_error(phase_error);  // GCOVR_EXCL_LINE
-    }
-    if (!run_phase<event::publish, events::publish_done, events::publish_error>(
-            phase_error)) {  // GCOVR_EXCL_BR_LINE
-      return finalize_analyze_error(phase_error);  // GCOVR_EXCL_LINE
-    }
-
-    return base_type::process_event(events::analyze_done{
-      .needs_realloc = context_.needs_realloc ? 1 : 0,
-    });
-  }
-
-  bool process_event(const event::reset & ev) {
-    int32_t phase_error = EMEL_OK;
-    event::reset reset_ev = ev;
-    reset_ev.error_out = &phase_error;
-    if (!base_type::process_event(reset_ev)) return false;
-    if (phase_error == EMEL_OK) {  // GCOVR_EXCL_BR_LINE
-      return base_type::process_event(events::reset_done{});
-    }
-    (void)base_type::process_event(events::reset_error{
-      .err = phase_error,  // GCOVR_EXCL_LINE
-    });
-    return false;  // GCOVR_EXCL_LINE
-  }
 
   bool needs_realloc() const noexcept { return context_.needs_realloc; }
 
  private:
-  template <class TriggerEvent, class DoneEvent, class ErrorEvent>
-  bool run_phase(int32_t & error_out) {
-    error_out = EMEL_OK;
-    TriggerEvent trigger{};
-    trigger.error_out = &error_out;
-    if (!base_type::process_event(trigger)) {  // GCOVR_EXCL_BR_LINE
-      error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      return false;  // GCOVR_EXCL_LINE
-    }
-    if (error_out == EMEL_OK) {  // GCOVR_EXCL_BR_LINE
-      return base_type::process_event(DoneEvent{});
-    }
-    (void)base_type::process_event(ErrorEvent{
-      .err = error_out,
-    });
-    return false;
-  }
-
-  bool finalize_analyze_error(const int32_t error_code) {
-    const int32_t err = error_code == EMEL_OK ? EMEL_ERR_BACKEND : error_code;
-    (void)base_type::process_event(events::analyze_error{
-      .err = err,
-    });
-    return false;
-  }
-
   action::context context_{};
 };
 

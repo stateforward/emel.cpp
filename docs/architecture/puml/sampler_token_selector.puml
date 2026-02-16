@@ -1,0 +1,20 @@
+@startuml
+
+[*] --> emel::sampler::token_selector::initialized
+emel::sampler::token_selector::initialized --> emel::sampler::token_selector::validating : emel::sampler::token_selector::event::select_token
+emel::sampler::token_selector::validating --> boost::sml::front::internal : on_entry
+emel::sampler::token_selector::validating --> emel::sampler::token_selector::validating : emel::sampler::token_selector::event::validate
+emel::sampler::token_selector::validating --> emel::sampler::token_selector::selecting_token : emel::sampler::token_selector::events::validate_done\n [boost::sml::aux::zero_wrapper<emel::sampler::token_selector::guard::has_candidates>]
+emel::sampler::token_selector::validating --> emel::sampler::token_selector::errored : emel::sampler::token_selector::events::validate_done\n [boost::sml::aux::zero_wrapper<emel::sampler::token_selector::guard::no_candidates>]
+emel::sampler::token_selector::validating --> emel::sampler::token_selector::errored : emel::sampler::token_selector::events::validate_error
+emel::sampler::token_selector::selecting_token --> boost::sml::front::internal : on_entry
+emel::sampler::token_selector::selecting_token --> emel::sampler::token_selector::selecting_token : emel::sampler::token_selector::event::select
+emel::sampler::token_selector::selecting_token --> emel::sampler::token_selector::done : emel::sampler::token_selector::events::select_done
+emel::sampler::token_selector::selecting_token --> emel::sampler::token_selector::errored : emel::sampler::token_selector::events::select_error
+emel::sampler::token_selector::done --> boost::sml::front::internal : on_entry
+emel::sampler::token_selector::done --> emel::sampler::token_selector::initialized : emel::sampler::token_selector::events::token_selection_done
+emel::sampler::token_selector::done --> emel::sampler::token_selector::initialized : emel::sampler::token_selector::events::token_selection_error
+emel::sampler::token_selector::errored --> boost::sml::front::internal : on_entry
+emel::sampler::token_selector::errored --> emel::sampler::token_selector::initialized : emel::sampler::token_selector::events::token_selection_error
+
+@enduml

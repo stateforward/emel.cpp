@@ -139,6 +139,7 @@ TEST_CASE("batch_splitter_reports_invalid_arguments") {
   emel::batch::splitter::sm machine{};
   std::array<int32_t, 4> ubatch_sizes = {{0, 0, 0, 0}};
   int32_t ubatch_count = 0;
+  int32_t error_out = EMEL_OK;
 
   CHECK_FALSE(machine.process_event(emel::batch::splitter::event::split{
     .token_ids = nullptr,
@@ -147,9 +148,12 @@ TEST_CASE("batch_splitter_reports_invalid_arguments") {
     .ubatch_sizes_out = ubatch_sizes.data(),
     .ubatch_sizes_capacity = static_cast<int32_t>(ubatch_sizes.size()),
     .ubatch_count_out = &ubatch_count,
+    .error_out = &error_out,
   }));
+  CHECK(error_out != EMEL_OK);
 
   std::array<int32_t, 3> tokens = {{1, 2, 3}};
+  error_out = EMEL_OK;
   CHECK_FALSE(machine.process_event(emel::batch::splitter::event::split{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
@@ -158,13 +162,16 @@ TEST_CASE("batch_splitter_reports_invalid_arguments") {
     .ubatch_sizes_out = ubatch_sizes.data(),
     .ubatch_sizes_capacity = static_cast<int32_t>(ubatch_sizes.size()),
     .ubatch_count_out = &ubatch_count,
+    .error_out = &error_out,
   }));
+  CHECK(error_out != EMEL_OK);
 }
 
 TEST_CASE("batch_splitter_reports_publish_capacity_checks") {
   emel::batch::splitter::sm machine{};
   std::array<int32_t, 3> tokens = {{7, 8, 9}};
   std::array<int32_t, 1> ubatch_sizes_small = {{0}};
+  int32_t error_out = EMEL_OK;
 
   CHECK_FALSE(machine.process_event(emel::batch::splitter::event::split{
     .token_ids = tokens.data(),
@@ -172,5 +179,7 @@ TEST_CASE("batch_splitter_reports_publish_capacity_checks") {
     .n_ubatch = 1,
     .ubatch_sizes_out = ubatch_sizes_small.data(),
     .ubatch_sizes_capacity = static_cast<int32_t>(ubatch_sizes_small.size()),
+    .error_out = &error_out,
   }));
+  CHECK(error_out != EMEL_OK);
 }

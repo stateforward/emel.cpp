@@ -36,11 +36,6 @@ struct context {
   int32_t current_ubatch_index = 0;
   int32_t applied_ubatches = 0;
   int32_t kv_tokens = 0;
-
-  int32_t * slot_offsets_out = nullptr;
-  int32_t slot_offsets_capacity = 0;
-  int32_t * ubatch_count_out = nullptr;
-  int32_t * kv_tokens_out = nullptr;
 };
 
 inline int32_t count_used_cells(const context & ctx) {
@@ -110,14 +105,16 @@ inline int32_t find_contiguous_slot(
 }
 
 inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ctx) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+  if (ev.ubatch_count_out != nullptr) {
+    *ev.ubatch_count_out = 0;
+  }
   ctx.op = operation::prepare;
   ctx.ubatch_count = ev.ubatch_count;
   ctx.planned_ubatch_count = 0;
   ctx.requested_capacity = ev.requested_capacity;
-  ctx.slot_offsets_out = ev.slot_offsets_out;
-  ctx.slot_offsets_capacity = ev.slot_offsets_capacity;
-  ctx.ubatch_count_out = ev.ubatch_count_out;
-  ctx.kv_tokens_out = nullptr;
   ctx.current_ubatch_index = 0;
 
   ctx.ubatch_sizes.fill(0);
@@ -137,15 +134,22 @@ inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ct
 };
 
 inline constexpr auto begin_apply = [](const event::apply_ubatch & ev, context & ctx) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+  if (ev.kv_tokens_out != nullptr) {
+    *ev.kv_tokens_out = 0;
+  }
   ctx.op = operation::apply;
   ctx.current_ubatch_index = ev.ubatch_index;
-  ctx.kv_tokens_out = ev.kv_tokens_out;
 };
 
 inline constexpr auto begin_rollback = [](const event::rollback & ev, context & ctx) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
   ctx.op = operation::rollback;
   ctx.current_ubatch_index = ev.from_ubatch_index;
-  ctx.kv_tokens_out = nullptr;
 };
 
 inline constexpr auto run_validate = [](const event::validate & ev, context & ctx) {
@@ -273,9 +277,6 @@ inline constexpr auto run_apply_step = [](const event::apply_step & ev, context 
 
   ctx.applied_ubatches = ctx.current_ubatch_index + 1;
   ctx.kv_tokens = used_max_p1(ctx);
-  if (ctx.kv_tokens_out != nullptr) {
-    *ctx.kv_tokens_out = ctx.kv_tokens;
-  }
 };
 
 inline constexpr auto run_rollback_step = [](const event::rollback_step & ev, context & ctx) {
@@ -311,35 +312,19 @@ inline constexpr auto run_rollback_step = [](const event::rollback_step & ev, co
 };
 
 inline constexpr auto run_publish = [](const event::publish & ev, context & ctx) {
+  (void)ctx;
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
-
-  if (ctx.op == operation::prepare) {
-    if (ctx.slot_offsets_out != nullptr) {
-      if (ctx.slot_offsets_capacity < ctx.planned_ubatch_count) {
-        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-        return;
-      }
-      for (int32_t i = 0; i < ctx.planned_ubatch_count; ++i) {
-        ctx.slot_offsets_out[i] = ctx.slot_offsets[i];
-      }
-    }
-    if (ctx.ubatch_count_out != nullptr) {
-      *ctx.ubatch_count_out = ctx.planned_ubatch_count;
-    }
-  }
 };
 
 inline constexpr auto on_kv_done = [](const events::kv_done &, context & ctx) {
   ctx.op = operation::none;
   ctx.current_ubatch_index = 0;
-  ctx.kv_tokens_out = nullptr;
 };
 
 inline constexpr auto on_kv_error = [](const events::kv_error &, context & ctx) {
   ctx.op = operation::none;
   ctx.current_ubatch_index = 0;
-  ctx.kv_tokens_out = nullptr;
 };
 
 }  // namespace emel::kv::cache::action

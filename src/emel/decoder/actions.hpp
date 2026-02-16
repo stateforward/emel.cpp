@@ -32,12 +32,6 @@ struct context {
   int32_t ubatches_total = 0;
   int32_t ubatches_processed = 0;
 
-  int32_t status_code = EMEL_OK;
-  bool ubatch_rollback_needed = false;
-
-  void * owner_sm = nullptr;
-  bool (*dispatch_event)(void * owner_sm, const events::owner_event &) = nullptr;
-
   emel::batch::splitter::sm batch_splitter = {};
   emel::memory::coordinator::sm memory_coordinator = {};
   emel::kv::cache::sm kv_cache = {};
@@ -82,11 +76,6 @@ inline constexpr auto begin_decode = [](const event::decode & ev, context & ctx)
   ctx.ubatches_processed = 0;
   ctx.ubatch_sizes.fill(0);
   ctx.slot_offsets.fill(0);
-
-  ctx.status_code = EMEL_OK;
-  ctx.ubatch_rollback_needed = false;
-  ctx.owner_sm = ev.owner_sm;
-  ctx.dispatch_event = ev.dispatch_event;
 };
 
 inline constexpr auto run_validate = [](const event::validate & ev, context & ctx) {
@@ -95,7 +84,6 @@ inline constexpr auto run_validate = [](const event::validate & ev, context & ct
 
   if (ctx.n_tokens <= 0 || ctx.token_ids == nullptr) {
     *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    ctx.status_code = *ev.error_out;
   }
 };
 
@@ -119,13 +107,11 @@ inline constexpr auto run_initialize_batch = [](const event::initialize_batch & 
 
   if (!ok) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
     return;
   }
 
   if (ubatch_count <= 0 || outputs_total <= 0) {
     *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-    ctx.status_code = *ev.error_out;  // GCOVR_EXCL_LINE
     return;  // GCOVR_EXCL_LINE
   }
 
@@ -151,7 +137,6 @@ inline constexpr auto run_update_memory = [](const event::update_memory & ev, co
 
   if (!ok || update_status_is_error(status)) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
     return;
   }
 };
@@ -173,14 +158,12 @@ inline constexpr auto run_prepare_memory_batch = [](const event::prepare_memory_
 
   if (!memory_ok) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
     return;
   }
 
   const prepare_failure_kind prepare_failure = classify_prepare_failure_from_memory_status(status);
   if (prepare_failure == prepare_failure_kind::retryable) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
     if (ev.retryable_out != nullptr) {
       *ev.retryable_out = true;
     }
@@ -188,7 +171,6 @@ inline constexpr auto run_prepare_memory_batch = [](const event::prepare_memory_
   }
   if (prepare_failure == prepare_failure_kind::permanent) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
     return;
   }
 
@@ -203,7 +185,6 @@ inline constexpr auto run_prepare_memory_batch = [](const event::prepare_memory_
 
   if (!kv_ok) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
     return;
   }
 };
@@ -221,7 +202,6 @@ inline constexpr auto run_optimize_memory = [](const event::optimize_memory & ev
 
   if (!ok) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
     return;
   }
 };
@@ -231,7 +211,6 @@ inline constexpr auto run_reserve_output = [](const event::reserve_output & ev, 
   *ev.error_out = EMEL_OK;
   if (ctx.outputs_total < 0) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
   }
 };
 
@@ -241,13 +220,14 @@ inline constexpr auto run_process_ubatch = [](const event::process_ubatch & ev, 
 
   if (ctx.ubatches_processed >= ctx.ubatches_total) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
     return;
   }
 
   const int32_t current = ctx.ubatch_sizes[ctx.ubatches_processed];
   int32_t produced = 0;
   int32_t kv_tokens = 0;
+  bool rollback_attempted = false;
+  int32_t ubatch_error = EMEL_OK;
   const bool ok = ctx.ubatch_executor.process_event(emel::decoder::ubatch_executor::event::execute{
     .ubatch_index = ctx.ubatches_processed,
     .ubatch_size = current,
@@ -255,24 +235,28 @@ inline constexpr auto run_process_ubatch = [](const event::process_ubatch & ev, 
     .kv_cache_sm = &ctx.kv_cache,
     .outputs_produced_out = &produced,
     .kv_tokens_out = &kv_tokens,
+    .rollback_attempted_out = &rollback_attempted,
+    .error_out = &ubatch_error,
   });
-  if (!ok) {
-    *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = ctx.ubatch_executor.status_code();
-    if (ctx.status_code == EMEL_OK) {
-      ctx.status_code = *ev.error_out;  // GCOVR_EXCL_LINE
+  if (!ok || ubatch_error != EMEL_OK) {
+    const int32_t normalized = (ubatch_error == EMEL_OK || ubatch_error == EMEL_ERR_INVALID_ARGUMENT)
+        ? EMEL_ERR_BACKEND
+        : ubatch_error;
+    *ev.error_out = normalized;
+    if (ev.rollback_needed_out != nullptr) {
+      *ev.rollback_needed_out = !rollback_attempted;
     }
-    ctx.ubatch_rollback_needed = !ctx.ubatch_executor.rollback_attempted();
     return;
   }
 
   if (produced <= 0) {
     *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-    ctx.status_code = *ev.error_out;  // GCOVR_EXCL_LINE
     return;  // GCOVR_EXCL_LINE
   }
 
-  ctx.ubatch_rollback_needed = false;
+  if (ev.rollback_needed_out != nullptr) {
+    *ev.rollback_needed_out = false;
+  }
   ctx.outputs_processed += produced;
   ctx.ubatches_processed += 1;
 };
@@ -281,7 +265,7 @@ inline constexpr auto run_rollback_ubatch = [](const event::rollback_ubatch & ev
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
 
-  if (!ctx.ubatch_rollback_needed) {
+  if (!ev.rollback_needed) {
     return;
   }
 
@@ -291,15 +275,11 @@ inline constexpr auto run_rollback_ubatch = [](const event::rollback_ubatch & ev
   });
   if (!kv_ok) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
     return;
   }
 
-  ctx.ubatch_rollback_needed = false;
-
   if (ctx.outputs_processed > ctx.outputs_total) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
   }
 };
 
@@ -308,27 +288,32 @@ inline constexpr auto run_finalize_outputs = [](const event::finalize_outputs & 
   *ev.error_out = EMEL_OK;
   if (ctx.outputs_processed != ctx.outputs_total) {
     *ev.error_out = EMEL_ERR_BACKEND;
-    ctx.status_code = *ev.error_out;
   }
 };
 
 inline constexpr auto dispatch_decoding_done_to_owner = [](const events::decoding_done & ev, context & ctx) {
-  ctx.status_code = EMEL_OK;
-  if (ctx.dispatch_event != nullptr) {
-    (void)ctx.dispatch_event(ctx.owner_sm, events::owner_event{
-                                            .type = events::owner_event::kind::done,
-                                            .done = ev,
-                                        });
+  (void)ctx;
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+  if (ev.dispatch_event != nullptr) {
+    (void)ev.dispatch_event(ev.owner_sm, events::owner_event{
+                                             .type = events::owner_event::kind::done,
+                                             .done = ev,
+                                         });
   }
 };
 
 inline constexpr auto dispatch_decoding_error_to_owner = [](const events::decoding_error & ev, context & ctx) {
-  ctx.status_code = ev.err;
-  if (ctx.dispatch_event != nullptr) {
-    (void)ctx.dispatch_event(ctx.owner_sm, events::owner_event{
-                                            .type = events::owner_event::kind::error,
-                                            .error = ev,
-                                        });
+  (void)ctx;
+  if (ev.error_out != nullptr) {
+    *ev.error_out = ev.err == EMEL_OK ? EMEL_ERR_BACKEND : ev.err;
+  }
+  if (ev.dispatch_event != nullptr) {
+    (void)ev.dispatch_event(ev.owner_sm, events::owner_event{
+                                             .type = events::owner_event::kind::error,
+                                             .error = ev,
+                                         });
   }
 };
 

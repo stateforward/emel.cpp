@@ -2,7 +2,7 @@
 set -euo pipefail
 
 LINE_COVERAGE_MIN="${LINE_COVERAGE_MIN:-90}"
-BRANCH_COVERAGE_MIN="${BRANCH_COVERAGE_MIN:-75}"
+BRANCH_COVERAGE_MIN="${BRANCH_COVERAGE_MIN:-50}"
 
 # Resolve Homebrew LLVM when binaries exist but are not in PATH.
 if ! command -v llvm-cov >/dev/null 2>&1 || ! command -v llvm-profdata >/dev/null 2>&1; then

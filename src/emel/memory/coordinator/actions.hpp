@@ -14,9 +14,21 @@ struct context {
   int32_t full_prepare_count = 0;
 };
 
-inline constexpr auto begin_prepare_update = [](const event::prepare_update &, context &) {};
-inline constexpr auto begin_prepare_batch = [](const event::prepare_batch &, context &) {};
-inline constexpr auto begin_prepare_full = [](const event::prepare_full &, context &) {};
+inline constexpr auto begin_prepare_update = [](const event::prepare_update & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+};
+inline constexpr auto begin_prepare_batch = [](const event::prepare_batch & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+};
+inline constexpr auto begin_prepare_full = [](const event::prepare_full & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+};
 
 inline constexpr auto run_validate_update = [](const event::validate_update & ev, context &) {
   if (ev.error_out == nullptr) return;

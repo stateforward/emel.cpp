@@ -1,22 +1,29 @@
 stateDiagram-v2
   [*] --> idle
   idle --> validating : emel::tensor::lifetime_analyzer::event::analyze [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::begin_analyze>
+  validating --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/lifetime_analyzer/sm.hpp:62:11)>
   validating --> validating : emel::tensor::lifetime_analyzer::event::validate [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::run_validate>
   validating --> collecting_ranges : emel::tensor::lifetime_analyzer::events::validate_done [boost::sml::front::always] / boost::sml::front::none
   validating --> failed : emel::tensor::lifetime_analyzer::events::validate_error [boost::sml::front::always] / boost::sml::front::none
+  collecting_ranges --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/lifetime_analyzer/sm.hpp:96:11)>
   collecting_ranges --> collecting_ranges : emel::tensor::lifetime_analyzer::event::collect_ranges [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::run_collect_ranges>
   collecting_ranges --> publishing : emel::tensor::lifetime_analyzer::events::collect_ranges_done [boost::sml::front::always] / boost::sml::front::none
   collecting_ranges --> failed : emel::tensor::lifetime_analyzer::events::collect_ranges_error [boost::sml::front::always] / boost::sml::front::none
+  publishing --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/lifetime_analyzer/sm.hpp:127:11)>
   publishing --> publishing : emel::tensor::lifetime_analyzer::event::publish [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::run_publish>
   publishing --> done : emel::tensor::lifetime_analyzer::events::publish_done [boost::sml::front::always] / boost::sml::front::none
   publishing --> failed : emel::tensor::lifetime_analyzer::events::publish_error [boost::sml::front::always] / boost::sml::front::none
+  done --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/lifetime_analyzer/sm.hpp:159:11)>
   done --> idle : emel::tensor::lifetime_analyzer::events::analyze_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::on_analyze_done>
-  failed --> idle : emel::tensor::lifetime_analyzer::events::analyze_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::on_analyze_error>
+  done --> idle : emel::tensor::lifetime_analyzer::events::analyze_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::on_analyze_error>
   idle --> resetting : emel::tensor::lifetime_analyzer::event::reset [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::begin_reset>
   validating --> resetting : emel::tensor::lifetime_analyzer::event::reset [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::begin_reset>
   collecting_ranges --> resetting : emel::tensor::lifetime_analyzer::event::reset [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::begin_reset>
   publishing --> resetting : emel::tensor::lifetime_analyzer::event::reset [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::begin_reset>
   done --> resetting : emel::tensor::lifetime_analyzer::event::reset [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::begin_reset>
   failed --> resetting : emel::tensor::lifetime_analyzer::event::reset [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::begin_reset>
+  resetting --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/lifetime_analyzer/sm.hpp:179:11)>
   resetting --> idle : emel::tensor::lifetime_analyzer::events::reset_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::on_reset_done>
   resetting --> failed : emel::tensor::lifetime_analyzer::events::reset_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::on_reset_error>
+  failed --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/tensor/lifetime_analyzer/sm.hpp:190:11)>
+  failed --> idle : emel::tensor::lifetime_analyzer::events::analyze_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::tensor::lifetime_analyzer::action::on_analyze_error>

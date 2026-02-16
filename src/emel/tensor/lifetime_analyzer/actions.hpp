@@ -11,12 +11,7 @@ namespace emel::tensor::lifetime_analyzer::action {
 inline constexpr int32_t k_max_tensors = 2048;
 
 struct context {
-  const event::tensor_desc * tensors = nullptr;
   int32_t tensor_count = 0;
-  int32_t * first_use_out = nullptr;
-  int32_t * last_use_out = nullptr;
-  int32_t ranges_out_count = 0;
-  int32_t * error_out = nullptr;
 
   uint32_t step = 0;
 
@@ -61,13 +56,7 @@ inline bool has_duplicate_ids(const context & c, const int32_t upto_inclusive) n
 struct begin_analyze {
   void operator()(const event::analyze & ev, context & c) const noexcept {
     c = {};
-    c.tensors = ev.tensors;
     c.tensor_count = ev.tensor_count;
-    c.first_use_out = ev.first_use_out;
-    c.last_use_out = ev.last_use_out;
-    c.ranges_out_count = ev.ranges_out_count;
-    c.error_out = ev.error_out;
-    if (c.error_out != nullptr) *c.error_out = EMEL_OK;
     c.first_use.fill(-1);
     c.last_use.fill(-1);
     c.tensor_ids.fill(-1);
@@ -84,22 +73,25 @@ struct begin_analyze {
 struct run_validate {
   void operator()(const event::validate & ev, context & c) const noexcept {
     int32_t err = EMEL_OK;
-    if (c.tensor_count < 0 || c.tensor_count > k_max_tensors) {
+    if (ev.tensor_count < 0 || ev.tensor_count > k_max_tensors) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (c.tensor_count > 0 && c.tensors == nullptr) {
+    } else if (ev.tensor_count > 0 && ev.tensors == nullptr) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (c.ranges_out_count < 0) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (
-        (c.first_use_out == nullptr || c.last_use_out == nullptr) && c.ranges_out_count != 0) {
+    } else if (ev.ranges_out_count < 0) {
       err = EMEL_ERR_INVALID_ARGUMENT;
     } else if (
-        c.first_use_out != nullptr && c.last_use_out != nullptr &&
-        c.ranges_out_count < c.tensor_count) {
+        (ev.first_use_out == nullptr || ev.last_use_out == nullptr) && ev.ranges_out_count != 0) {
+      err = EMEL_ERR_INVALID_ARGUMENT;
+    } else if (
+        ev.first_use_out != nullptr && ev.last_use_out != nullptr &&
+        ev.ranges_out_count < ev.tensor_count) {
       err = EMEL_ERR_INVALID_ARGUMENT;
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
+    }
+    if (err == EMEL_OK) {
+      c.tensor_count = ev.tensor_count;
     }
     c.step += 1;
   }
@@ -120,7 +112,7 @@ struct run_collect_ranges {
 
     // register tensors
     for (int32_t i = 0; i < c.tensor_count; ++i) {
-      const auto & t = c.tensors[i];
+      const auto & t = ev.tensors[i];
       if (t.tensor_id < 0) {
         err = EMEL_ERR_INVALID_ARGUMENT;
         break;
@@ -143,7 +135,7 @@ struct run_collect_ranges {
 
     // count children and views (ggml_gallocr_alloc_graph_impl parity model)
     for (int32_t i = 0; i < c.tensor_count && err == EMEL_OK; ++i) {
-      const auto & t = c.tensors[i];
+      const auto & t = ev.tensors[i];
       if (!t.is_exec_node) {
         continue;
       }
@@ -171,7 +163,7 @@ struct run_collect_ranges {
 
     // simulate graph execution and infer release points
     for (int32_t i = 0; i < c.tensor_count && err == EMEL_OK; ++i) {
-      const auto & t = c.tensors[i];
+      const auto & t = ev.tensors[i];
       if (!t.is_exec_node) {
         continue;
       }
@@ -223,10 +215,10 @@ struct run_collect_ranges {
 
 struct run_publish {
   void operator()(const event::publish & ev, context & c) const noexcept {
-    if (c.first_use_out != nullptr && c.last_use_out != nullptr) {
+    if (ev.first_use_out != nullptr && ev.last_use_out != nullptr) {
       for (int32_t i = 0; i < c.tensor_count; ++i) {
-        c.first_use_out[i] = c.first_use[i];
-        c.last_use_out[i] = c.last_use[i];
+        ev.first_use_out[i] = c.first_use[i];
+        ev.last_use_out[i] = c.last_use[i];
       }
     }
     if (ev.error_out != nullptr) {
@@ -238,23 +230,20 @@ struct run_publish {
 
 struct begin_reset {
   void operator()(const event::reset & ev, context & c) const noexcept {
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
+    (void)ev;
     c.step += 1;
   }
 };
 
 struct on_analyze_done {
   void operator()(const events::analyze_done &, context & c) const noexcept {
-    if (c.error_out != nullptr) *c.error_out = EMEL_OK;
     c.step += 1;
   }
 };
 
 struct on_analyze_error {
   void operator()(const events::analyze_error & ev, context & c) const noexcept {
-    if (c.error_out != nullptr) *c.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
+    (void)ev;
     c.step += 1;
   }
 };
@@ -268,7 +257,7 @@ struct on_reset_done {
 
 struct on_reset_error {
   void operator()(const events::reset_error & ev, context & c) const noexcept {
-    if (c.error_out != nullptr) *c.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
+    (void)ev;
     c.step += 1;
   }
 };
@@ -276,9 +265,8 @@ struct on_reset_error {
 struct record_phase_error {
   template <class ErrorEvent>
   void operator()(const ErrorEvent & ev, context & c) const noexcept {
-    if (c.error_out != nullptr) {
-      *c.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
-    }
+    (void)ev;
+    c.step += 1;
   }
 };
 

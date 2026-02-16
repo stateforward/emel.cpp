@@ -4,7 +4,7 @@
 #include <doctest/doctest.h>
 
 #include "emel/buffer/allocator/events.hpp"
-#include "emel/buffer/planner/guards.hpp"
+#include "emel/buffer/planner/actions.hpp"
 #include "emel/buffer/planner/sm.hpp"
 #include "emel/emel.h"
 
@@ -203,6 +203,23 @@ graph_view as_view(const graph_storage & g) {
   };
 }
 
+bool dispatch_plan_done(
+    void *, const emel::buffer::planner::events::plan_done &) noexcept {
+  return true;
+}
+
+bool dispatch_plan_error(
+    void *, const emel::buffer::planner::events::plan_error &) noexcept {
+  return true;
+}
+
+struct noop_queue {
+  using container_type = void;
+
+  template <class Event>
+  void push(const Event &) noexcept {}
+};
+
 }  // namespace
 
 TEST_CASE("buffer_planner_starts_idle") {
@@ -227,10 +244,83 @@ TEST_CASE("buffer_planner_plans_sizes_successfully") {
     .sizes_out = sizes.data(),
     .sizes_out_count = static_cast<int32_t>(sizes.size()),
     .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
   }));
   CHECK(error_code == EMEL_OK);
   CHECK(sizes[0] > 0);
   CHECK(planner.total_bytes() > 0);
+}
+
+TEST_CASE("buffer_planner_allocates_leaf_inputs") {
+  emel::buffer::planner::sm planner{};
+  graph_storage g{};
+  g.n_leafs = 1;
+  g.n_nodes = 0;
+  g.leafs[0] = tensor_desc{
+    .tensor_id = 1,
+    .alloc_size = 64,
+    .src_ids = {{-1, -1, -1, -1}},
+    .is_view = false,
+    .view_src_id = -1,
+    .is_input = true,
+    .is_output = false,
+    .has_external_data = false,
+  };
+  std::array<int32_t, 1> sizes = {{0}};
+  int32_t error_code = -1;
+
+  CHECK(planner.process_event(emel::buffer::planner::event::plan{
+    .graph = as_view(g),
+    .node_buffer_ids = nullptr,
+    .leaf_buffer_ids = nullptr,
+    .buffer_count = 1,
+    .size_only = false,
+    .sizes_out = sizes.data(),
+    .sizes_out_count = static_cast<int32_t>(sizes.size()),
+    .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
+  }));
+  CHECK(error_code == EMEL_OK);
+  CHECK(sizes[0] >= 64);
+}
+
+TEST_CASE("buffer_planner_splits_by_max_size") {
+  emel::buffer::planner::sm planner{};
+  graph_storage g = make_valid_graph();
+  std::array<int32_t, 1> sizes = {{0}};
+  std::array<int32_t, 1> chunk_counts = {{0}};
+  std::array<int32_t, emel::buffer::planner::action::k_max_chunk_plan_entries> chunk_sizes = {};
+  std::array<int32_t, 1> leaf_buffer_ids = {{0}};
+  std::array<int32_t, 1> max_sizes = {{64}};
+  std::array<int32_t, 1> alignments = {{64}};
+  int32_t error_code = 0;
+
+  CHECK(planner.process_event(emel::buffer::planner::event::plan{
+    .graph = as_view(g),
+    .node_buffer_ids = nullptr,
+    .leaf_buffer_ids = leaf_buffer_ids.data(),
+    .buffer_count = 1,
+    .buffer_alignments = alignments.data(),
+    .buffer_max_sizes = max_sizes.data(),
+    .size_only = false,
+    .sizes_out = sizes.data(),
+    .sizes_out_count = static_cast<int32_t>(sizes.size()),
+    .chunk_sizes_out = chunk_sizes.data(),
+    .chunk_sizes_out_count = static_cast<int32_t>(chunk_sizes.size()),
+    .chunk_counts_out = chunk_counts.data(),
+    .chunk_counts_out_count = static_cast<int32_t>(chunk_counts.size()),
+    .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
+  }));
+  CHECK(error_code == EMEL_OK);
+  CHECK(chunk_counts[0] > 1);
+  CHECK(chunk_sizes[0] == 64);
 }
 
 TEST_CASE("buffer_planner_reports_invalid_arguments") {
@@ -248,6 +338,9 @@ TEST_CASE("buffer_planner_reports_invalid_arguments") {
     .sizes_out = sizes.data(),
     .sizes_out_count = static_cast<int32_t>(sizes.size()),
     .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
   }));
   CHECK(error_code == EMEL_ERR_INVALID_ARGUMENT);
 
@@ -260,6 +353,9 @@ TEST_CASE("buffer_planner_reports_invalid_arguments") {
     .sizes_out = sizes.data(),
     .sizes_out_count = static_cast<int32_t>(sizes.size()),
     .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
   }));
   CHECK(error_code == EMEL_ERR_INVALID_ARGUMENT);
 }
@@ -279,6 +375,9 @@ TEST_CASE("buffer_planner_reports_invalid_sources") {
     .sizes_out = sizes.data(),
     .sizes_out_count = static_cast<int32_t>(sizes.size()),
     .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
   }));
   CHECK(error_code == EMEL_ERR_INVALID_ARGUMENT);
 }
@@ -298,6 +397,9 @@ TEST_CASE("buffer_planner_reuses_parent_storage_for_inplace_chain") {
     .sizes_out = sizes.data(),
     .sizes_out_count = static_cast<int32_t>(sizes.size()),
     .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
   }));
   CHECK(error_code == EMEL_OK);
   CHECK(sizes[0] == 512);
@@ -318,6 +420,9 @@ TEST_CASE("buffer_planner_prefers_freed_blocks_over_growth") {
     .sizes_out = sizes.data(),
     .sizes_out_count = static_cast<int32_t>(sizes.size()),
     .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
   }));
   CHECK(error_code == EMEL_OK);
   CHECK(sizes[0] == 192);
@@ -338,6 +443,9 @@ TEST_CASE("buffer_planner_handles_view_parent_inplace_reuse") {
     .sizes_out = sizes.data(),
     .sizes_out_count = static_cast<int32_t>(sizes.size()),
     .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
   }));
   CHECK(error_code == EMEL_OK);
   CHECK(sizes[0] == 512);
@@ -360,27 +468,23 @@ TEST_CASE("buffer_planner_reports_zero_for_unused_secondary_buffer") {
     .sizes_out = sizes.data(),
     .sizes_out_count = static_cast<int32_t>(sizes.size()),
     .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
   }));
   CHECK(error_code == EMEL_OK);
   CHECK(sizes[0] > 0);
   CHECK(sizes[1] == 0);
 }
 
-TEST_CASE("buffer_planner_guards_reflect_pending_error") {
-  emel::buffer::planner::action::context ctx{};
-  emel::buffer::planner::event::reset_done ev{};
-
-  CHECK(emel::buffer::planner::guard::no_error{}(ev, ctx));
-  CHECK_FALSE(emel::buffer::planner::guard::has_error{}(ev, ctx));
-
-  ctx.pending_error = EMEL_ERR_BACKEND;
-  CHECK_FALSE(emel::buffer::planner::guard::no_error{}(ev, ctx));
-  CHECK(emel::buffer::planner::guard::has_error{}(ev, ctx));
-}
-
 TEST_CASE("buffer_planner_testing_sm_can_target_error_and_recovery_paths") {
   emel::buffer::planner::action::context ctx{};
-  boost::sml::sm<emel::buffer::planner::model, boost::sml::testing> machine{ctx};
+  noop_queue queue{};
+  emel::buffer::planner::Process process{queue};
+  boost::sml::sm<
+    emel::buffer::planner::model,
+    boost::sml::testing,
+    emel::buffer::planner::Process> machine{ctx, process};
 
   const emel::buffer::planner::event::plan plan_event{
     .graph = graph_view{},
@@ -391,6 +495,9 @@ TEST_CASE("buffer_planner_testing_sm_can_target_error_and_recovery_paths") {
     .sizes_out = nullptr,
     .sizes_out_count = 0,
     .error_out = nullptr,
+    .owner_sm = &machine,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
   };
 
   CHECK(machine.process_event(plan_event));
@@ -404,8 +511,10 @@ TEST_CASE("buffer_planner_testing_sm_can_target_error_and_recovery_paths") {
   CHECK(machine.process_event(emel::buffer::planner::events::plan_done{}));
 
   CHECK(machine.process_event(plan_event));
-  ctx.pending_error = EMEL_ERR_BACKEND;
   CHECK(machine.process_event(emel::buffer::planner::event::reset_done{}));
+  CHECK(machine.process_event(emel::buffer::planner::event::seed_leafs_error{
+    .err = EMEL_ERR_BACKEND,
+  }));
   CHECK(machine.process_event(emel::buffer::planner::events::plan_error{
     .err = EMEL_ERR_BACKEND,
   }));

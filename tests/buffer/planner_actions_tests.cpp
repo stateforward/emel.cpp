@@ -55,6 +55,16 @@ graph_view as_view(const graph_storage & g) {
   };
 }
 
+bool dispatch_plan_done(
+    void *, const emel::buffer::planner::events::plan_done &) noexcept {
+  return true;
+}
+
+bool dispatch_plan_error(
+    void *, const emel::buffer::planner::events::plan_error &) noexcept {
+  return true;
+}
+
 }  // namespace
 
 TEST_CASE("buffer_planner_action_math_helpers_handle_edges") {
@@ -64,11 +74,11 @@ TEST_CASE("buffer_planner_action_math_helpers_handle_edges") {
   CHECK(
     emel::buffer::planner::action::detail::sat_add(std::numeric_limits<int32_t>::min(), -1) ==
     std::numeric_limits<int32_t>::min());
-  CHECK(emel::buffer::planner::action::detail::align_up(0) == 0);
-  CHECK(emel::buffer::planner::action::detail::align_up(-8) == 0);
+  CHECK(emel::buffer::planner::action::detail::align_up(0, 16) == 0);
+  CHECK(emel::buffer::planner::action::detail::align_up(-8, 16) == 0);
   CHECK(emel::buffer::planner::action::detail::sat_sub_floor_zero(17, 0) == 17);
   CHECK(
-    emel::buffer::planner::action::detail::align_up(std::numeric_limits<int32_t>::max()) ==
+    emel::buffer::planner::action::detail::align_up(std::numeric_limits<int32_t>::max(), 16) ==
     std::numeric_limits<int32_t>::max());
 }
 
@@ -158,10 +168,12 @@ TEST_CASE("buffer_planner_layout_and_strategy_error_edges") {
         .sizes_out = nullptr,
         .sizes_out_count = 0,
         .error_out = &error_code,
+        .owner_sm = &ctx,
+        .dispatch_done = &dispatch_plan_done,
+        .dispatch_error = &dispatch_plan_error,
         .strategy = &bad_strategy,
       },
       ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
     CHECK(error_code == EMEL_ERR_INVALID_ARGUMENT);
   }
 }
@@ -209,135 +221,182 @@ TEST_CASE("buffer_planner_low_level_layout_edges_and_reset_failures") {
     graph_storage g = make_graph();
     g.nodes[0].tensor_id = g.leafs[0].tensor_id;
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
-    emel::buffer::planner::action::on_reset_done(emel::buffer::planner::event::reset_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(g),
+            .node_buffer_ids = nullptr,
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = &emel::buffer::planner::default_strategies::gallocr_parity,
+        },
+        ctx);
+    int32_t error_out = EMEL_OK;
+    emel::buffer::planner::action::on_reset_done(
+        emel::buffer::planner::event::reset_done{.error_out = &error_out}, ctx);
+    CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
   }
 }
 
 TEST_CASE("buffer_planner_phase_actions_validate_strategy_callbacks") {
   const graph_storage g = make_graph();
   emel::buffer::planner::strategy base = emel::buffer::planner::default_strategies::gallocr_parity;
+  const auto seed_context = [&](emel::buffer::planner::action::context & ctx,
+                                const emel::buffer::planner::strategy * strategy) {
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(g),
+            .node_buffer_ids = nullptr,
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = strategy,
+        },
+        ctx);
+  };
 
   {
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
-    ctx.strategy = &base;
-    emel::buffer::planner::action::on_reset_done(emel::buffer::planner::event::reset_done{}, ctx);
+    seed_context(ctx, &base);
+    int32_t reset_err = EMEL_OK;
+    emel::buffer::planner::action::on_reset_done(
+        emel::buffer::planner::event::reset_done{.error_out = &reset_err}, ctx);
+    CHECK(reset_err == EMEL_OK);
 
     emel::buffer::planner::strategy broken = base;
     broken.seed_leafs = nullptr;
-    ctx.strategy = &broken;
+    ctx.strategy = broken;
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_seed_leafs_done(
-      emel::buffer::planner::event::seed_leafs_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+      emel::buffer::planner::event::seed_leafs_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 
   {
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
-    ctx.strategy = &base;
-    emel::buffer::planner::action::on_reset_done(emel::buffer::planner::event::reset_done{}, ctx);
+    seed_context(ctx, &base);
+    int32_t reset_err = EMEL_OK;
+    emel::buffer::planner::action::on_reset_done(
+        emel::buffer::planner::event::reset_done{.error_out = &reset_err}, ctx);
+    CHECK(reset_err == EMEL_OK);
     emel::buffer::planner::action::on_seed_leafs_done(
-      emel::buffer::planner::event::seed_leafs_done{}, ctx);
+      emel::buffer::planner::event::seed_leafs_done{.error_out = &reset_err}, ctx);
 
     emel::buffer::planner::strategy broken = base;
     broken.count_references = nullptr;
-    ctx.strategy = &broken;
+    ctx.strategy = broken;
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_count_references_done(
-      emel::buffer::planner::event::count_references_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+      emel::buffer::planner::event::count_references_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 
   {
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
-    ctx.strategy = &base;
-    emel::buffer::planner::action::on_reset_done(emel::buffer::planner::event::reset_done{}, ctx);
+    seed_context(ctx, &base);
+    int32_t reset_err = EMEL_OK;
+    emel::buffer::planner::action::on_reset_done(
+        emel::buffer::planner::event::reset_done{.error_out = &reset_err}, ctx);
+    CHECK(reset_err == EMEL_OK);
     emel::buffer::planner::action::on_seed_leafs_done(
-      emel::buffer::planner::event::seed_leafs_done{}, ctx);
+      emel::buffer::planner::event::seed_leafs_done{.error_out = &reset_err}, ctx);
     emel::buffer::planner::action::on_count_references_done(
-      emel::buffer::planner::event::count_references_done{}, ctx);
+      emel::buffer::planner::event::count_references_done{.error_out = &reset_err}, ctx);
 
     emel::buffer::planner::strategy broken = base;
     broken.alloc_explicit_inputs = nullptr;
-    ctx.strategy = &broken;
+    ctx.strategy = broken;
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_alloc_explicit_inputs_done(
-      emel::buffer::planner::event::alloc_explicit_inputs_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+      emel::buffer::planner::event::alloc_explicit_inputs_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 
   {
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
-    ctx.strategy = &base;
-    emel::buffer::planner::action::on_reset_done(emel::buffer::planner::event::reset_done{}, ctx);
+    seed_context(ctx, &base);
+    int32_t reset_err = EMEL_OK;
+    emel::buffer::planner::action::on_reset_done(
+        emel::buffer::planner::event::reset_done{.error_out = &reset_err}, ctx);
+    CHECK(reset_err == EMEL_OK);
     emel::buffer::planner::action::on_seed_leafs_done(
-      emel::buffer::planner::event::seed_leafs_done{}, ctx);
+      emel::buffer::planner::event::seed_leafs_done{.error_out = &reset_err}, ctx);
     emel::buffer::planner::action::on_count_references_done(
-      emel::buffer::planner::event::count_references_done{}, ctx);
+      emel::buffer::planner::event::count_references_done{.error_out = &reset_err}, ctx);
     emel::buffer::planner::action::on_alloc_explicit_inputs_done(
-      emel::buffer::planner::event::alloc_explicit_inputs_done{}, ctx);
+      emel::buffer::planner::event::alloc_explicit_inputs_done{.error_out = &reset_err}, ctx);
 
     emel::buffer::planner::strategy broken = base;
     broken.plan_nodes = nullptr;
-    ctx.strategy = &broken;
+    ctx.strategy = broken;
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_plan_nodes_done(
-      emel::buffer::planner::event::plan_nodes_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+      emel::buffer::planner::event::plan_nodes_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 
   {
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
-    ctx.strategy = &base;
-    emel::buffer::planner::action::on_reset_done(emel::buffer::planner::event::reset_done{}, ctx);
+    seed_context(ctx, &base);
+    int32_t reset_err = EMEL_OK;
+    emel::buffer::planner::action::on_reset_done(
+        emel::buffer::planner::event::reset_done{.error_out = &reset_err}, ctx);
+    CHECK(reset_err == EMEL_OK);
     emel::buffer::planner::action::on_seed_leafs_done(
-      emel::buffer::planner::event::seed_leafs_done{}, ctx);
+      emel::buffer::planner::event::seed_leafs_done{.error_out = &reset_err}, ctx);
     emel::buffer::planner::action::on_count_references_done(
-      emel::buffer::planner::event::count_references_done{}, ctx);
+      emel::buffer::planner::event::count_references_done{.error_out = &reset_err}, ctx);
     emel::buffer::planner::action::on_alloc_explicit_inputs_done(
-      emel::buffer::planner::event::alloc_explicit_inputs_done{}, ctx);
+      emel::buffer::planner::event::alloc_explicit_inputs_done{.error_out = &reset_err}, ctx);
     emel::buffer::planner::action::on_plan_nodes_done(
-      emel::buffer::planner::event::plan_nodes_done{}, ctx);
+      emel::buffer::planner::event::plan_nodes_done{.error_out = &reset_err}, ctx);
 
     emel::buffer::planner::strategy broken = base;
     broken.release_expired = nullptr;
-    ctx.strategy = &broken;
+    ctx.strategy = broken;
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_release_expired_done(
-      emel::buffer::planner::event::release_expired_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+      emel::buffer::planner::event::release_expired_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 
   {
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
-    ctx.strategy = &base;
-    emel::buffer::planner::action::on_reset_done(emel::buffer::planner::event::reset_done{}, ctx);
+    seed_context(ctx, &base);
+    int32_t reset_err = EMEL_OK;
+    emel::buffer::planner::action::on_reset_done(
+        emel::buffer::planner::event::reset_done{.error_out = &reset_err}, ctx);
+    CHECK(reset_err == EMEL_OK);
     emel::buffer::planner::action::on_seed_leafs_done(
-      emel::buffer::planner::event::seed_leafs_done{}, ctx);
+      emel::buffer::planner::event::seed_leafs_done{.error_out = &reset_err}, ctx);
     emel::buffer::planner::action::on_count_references_done(
-      emel::buffer::planner::event::count_references_done{}, ctx);
+      emel::buffer::planner::event::count_references_done{.error_out = &reset_err}, ctx);
     emel::buffer::planner::action::on_alloc_explicit_inputs_done(
-      emel::buffer::planner::event::alloc_explicit_inputs_done{}, ctx);
+      emel::buffer::planner::event::alloc_explicit_inputs_done{.error_out = &reset_err}, ctx);
     emel::buffer::planner::action::on_plan_nodes_done(
-      emel::buffer::planner::event::plan_nodes_done{}, ctx);
+      emel::buffer::planner::event::plan_nodes_done{.error_out = &reset_err}, ctx);
     emel::buffer::planner::action::on_release_expired_done(
-      emel::buffer::planner::event::release_expired_done{}, ctx);
+      emel::buffer::planner::event::release_expired_done{.error_out = &reset_err}, ctx);
 
     emel::buffer::planner::strategy broken = base;
     broken.finalize = nullptr;
-    ctx.strategy = &broken;
+    ctx.strategy = broken;
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_finalize_done(
-      emel::buffer::planner::event::finalize_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+      emel::buffer::planner::event::finalize_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 }
 
@@ -397,6 +456,7 @@ TEST_CASE("buffer_planner_additional_branch_edges_for_coverage_gate") {
 
   {
     const graph_storage g = make_graph();
+    int dummy_owner = 0;
     auto ev = emel::buffer::planner::event::plan{
       .graph = as_view(g),
       .node_buffer_ids = nullptr,
@@ -406,6 +466,9 @@ TEST_CASE("buffer_planner_additional_branch_edges_for_coverage_gate") {
       .sizes_out = nullptr,
       .sizes_out_count = 0,
       .error_out = nullptr,
+      .owner_sm = &dummy_owner,
+      .dispatch_done = &dispatch_plan_done,
+      .dispatch_error = &dispatch_plan_error,
       .strategy = nullptr,
     };
     CHECK(detail::valid_plan_event(ev));
@@ -425,12 +488,26 @@ TEST_CASE("buffer_planner_additional_branch_edges_for_coverage_gate") {
   {
     context ctx{};
     const graph_storage g = make_graph();
-    ctx.graph = as_view(g);
-    ctx.pending_error = EMEL_ERR_BACKEND;
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(g),
+            .node_buffer_ids = nullptr,
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = nullptr,
+        },
+        ctx);
     const int32_t leafs_before = ctx.planned_leafs;
     const int32_t refs_before = ctx.reference_edges;
-    detail::default_seed_leafs(ctx);
-    detail::default_count_references(ctx);
+    CHECK(detail::default_seed_leafs(ctx) == EMEL_ERR_INVALID_ARGUMENT);
+    CHECK(detail::default_count_references(ctx) == EMEL_ERR_INVALID_ARGUMENT);
     CHECK(ctx.planned_leafs == leafs_before);
     CHECK(ctx.reference_edges == refs_before);
   }
@@ -451,9 +528,11 @@ TEST_CASE("buffer_planner_begin_plan_rejects_invalid_event_shapes") {
       .sizes_out = nullptr,
       .sizes_out_count = 0,
       .error_out = &error_code,
+      .owner_sm = &ctx,
+      .dispatch_done = &dispatch_plan_done,
+      .dispatch_error = &dispatch_plan_error,
     },
     ctx);
-  CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(error_code == EMEL_ERR_INVALID_ARGUMENT);
 
   emel::buffer::planner::action::begin_plan(
@@ -472,9 +551,11 @@ TEST_CASE("buffer_planner_begin_plan_rejects_invalid_event_shapes") {
       .sizes_out = nullptr,
       .sizes_out_count = 0,
       .error_out = &error_code,
+      .owner_sm = &ctx,
+      .dispatch_done = &dispatch_plan_done,
+      .dispatch_error = &dispatch_plan_error,
     },
     ctx);
-  CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(error_code == EMEL_ERR_INVALID_ARGUMENT);
 
   emel::buffer::planner::action::begin_plan(
@@ -487,9 +568,11 @@ TEST_CASE("buffer_planner_begin_plan_rejects_invalid_event_shapes") {
       .sizes_out = nullptr,
       .sizes_out_count = -1,
       .error_out = &error_code,
+      .owner_sm = &ctx,
+      .dispatch_done = &dispatch_plan_done,
+      .dispatch_error = &dispatch_plan_error,
     },
     ctx);
-  CHECK(ctx.pending_error == EMEL_OK);
   CHECK(error_code == EMEL_OK);
 }
 
@@ -498,11 +581,26 @@ TEST_CASE("buffer_planner_leaf_and_reference_actions_cover_error_paths") {
 
   {
     emel::buffer::planner::action::context ctx{};
-    ctx.pending_error = EMEL_ERR_INVALID_ARGUMENT;
-    ctx.graph = as_view(base_graph);
-    ctx.buffer_count = 1;
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(base_graph),
+            .node_buffer_ids = nullptr,
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = nullptr,
+        },
+        ctx);
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_seed_leafs_done(
-      emel::buffer::planner::event::seed_leafs_done{}, ctx);
+      emel::buffer::planner::event::seed_leafs_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
     CHECK(ctx.planned_leafs == 0);
   }
 
@@ -510,31 +608,76 @@ TEST_CASE("buffer_planner_leaf_and_reference_actions_cover_error_paths") {
     graph_storage g = make_graph();
     g.leafs[0].tensor_id = -1;
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(g),
+            .node_buffer_ids = nullptr,
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = nullptr,
+        },
+        ctx);
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_seed_leafs_done(
-      emel::buffer::planner::event::seed_leafs_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+      emel::buffer::planner::event::seed_leafs_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 
   {
     graph_storage g = make_graph();
     std::array<int32_t, 1> leaf_ids = {{2}};
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
-    ctx.leaf_buffer_ids = leaf_ids.data();
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(g),
+            .node_buffer_ids = nullptr,
+            .leaf_buffer_ids = leaf_ids.data(),
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = nullptr,
+        },
+        ctx);
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_seed_leafs_done(
-      emel::buffer::planner::event::seed_leafs_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+      emel::buffer::planner::event::seed_leafs_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 
   {
     emel::buffer::planner::action::context ctx{};
-    ctx.pending_error = EMEL_ERR_INVALID_ARGUMENT;
-    ctx.graph = as_view(base_graph);
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(base_graph),
+            .node_buffer_ids = nullptr,
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = nullptr,
+        },
+        ctx);
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_count_references_done(
-      emel::buffer::planner::event::count_references_done{}, ctx);
+      emel::buffer::planner::event::count_references_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
     CHECK(ctx.reference_edges == 0);
   }
 
@@ -542,10 +685,26 @@ TEST_CASE("buffer_planner_leaf_and_reference_actions_cover_error_paths") {
     graph_storage g = make_graph();
     g.nodes[0].tensor_id = -1;
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(g),
+            .node_buffer_ids = nullptr,
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = nullptr,
+        },
+        ctx);
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_count_references_done(
-      emel::buffer::planner::event::count_references_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+      emel::buffer::planner::event::count_references_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 }
 
@@ -554,10 +713,26 @@ TEST_CASE("buffer_planner_node_allocation_actions_cover_error_paths") {
 
   {
     emel::buffer::planner::action::context ctx{};
-    ctx.pending_error = EMEL_ERR_INVALID_ARGUMENT;
-    ctx.graph = as_view(base_graph);
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(base_graph),
+            .node_buffer_ids = nullptr,
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = nullptr,
+        },
+        ctx);
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_alloc_explicit_inputs_done(
-      emel::buffer::planner::event::alloc_explicit_inputs_done{}, ctx);
+      emel::buffer::planner::event::alloc_explicit_inputs_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
     CHECK(ctx.planned_nodes == 0);
   }
 
@@ -565,36 +740,86 @@ TEST_CASE("buffer_planner_node_allocation_actions_cover_error_paths") {
     graph_storage g = make_graph();
     std::array<int32_t, 1> node_ids = {{2}};
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
-    ctx.node_buffer_ids = node_ids.data();
-    emel::buffer::planner::action::on_reset_done(emel::buffer::planner::event::reset_done{}, ctx);
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(g),
+            .node_buffer_ids = node_ids.data(),
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = nullptr,
+        },
+        ctx);
+    int32_t reset_err = EMEL_OK;
+    emel::buffer::planner::action::on_reset_done(
+        emel::buffer::planner::event::reset_done{.error_out = &reset_err}, ctx);
+    CHECK(reset_err == EMEL_OK);
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_alloc_explicit_inputs_done(
-      emel::buffer::planner::event::alloc_explicit_inputs_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+      emel::buffer::planner::event::alloc_explicit_inputs_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 
   {
     graph_storage g = make_graph();
     std::array<int32_t, 1> node_ids = {{0}};
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
-    ctx.node_buffer_ids = node_ids.data();
-    emel::buffer::planner::action::on_reset_done(emel::buffer::planner::event::reset_done{}, ctx);
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(g),
+            .node_buffer_ids = node_ids.data(),
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = nullptr,
+        },
+        ctx);
+    int32_t reset_err = EMEL_OK;
+    emel::buffer::planner::action::on_reset_done(
+        emel::buffer::planner::event::reset_done{.error_out = &reset_err}, ctx);
+    CHECK(reset_err == EMEL_OK);
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_alloc_explicit_inputs_done(
-      emel::buffer::planner::event::alloc_explicit_inputs_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_OK);
-    CHECK(ctx.planned_nodes == 2);
+      emel::buffer::planner::event::alloc_explicit_inputs_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_OK);
+    CHECK(ctx.planned_nodes == 1);
     CHECK(ctx.bytes_by_buffer[0] > 0);
   }
 
   {
     emel::buffer::planner::action::context ctx{};
-    ctx.pending_error = EMEL_ERR_INVALID_ARGUMENT;
-    ctx.graph = as_view(base_graph);
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(base_graph),
+            .node_buffer_ids = nullptr,
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = nullptr,
+        },
+        ctx);
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_plan_nodes_done(
-      emel::buffer::planner::event::plan_nodes_done{}, ctx);
+      emel::buffer::planner::event::plan_nodes_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
     CHECK(ctx.planned_nodes == 0);
   }
 
@@ -603,32 +828,73 @@ TEST_CASE("buffer_planner_node_allocation_actions_cover_error_paths") {
     g.nodes[0].is_input = false;
     std::array<int32_t, 1> node_ids = {{2}};
     emel::buffer::planner::action::context ctx{};
-    ctx.graph = as_view(g);
-    ctx.buffer_count = 1;
-    ctx.node_buffer_ids = node_ids.data();
-    emel::buffer::planner::action::on_reset_done(emel::buffer::planner::event::reset_done{}, ctx);
+    emel::buffer::planner::action::begin_plan(
+        emel::buffer::planner::event::plan{
+            .graph = as_view(g),
+            .node_buffer_ids = node_ids.data(),
+            .leaf_buffer_ids = nullptr,
+            .buffer_count = 1,
+            .size_only = false,
+            .sizes_out = nullptr,
+            .sizes_out_count = 0,
+            .error_out = nullptr,
+            .owner_sm = &ctx,
+            .dispatch_done = &dispatch_plan_done,
+            .dispatch_error = &dispatch_plan_error,
+            .strategy = nullptr,
+        },
+        ctx);
+    int32_t reset_err = EMEL_OK;
+    emel::buffer::planner::action::on_reset_done(
+        emel::buffer::planner::event::reset_done{.error_out = &reset_err}, ctx);
+    CHECK(reset_err == EMEL_OK);
+    int32_t err = EMEL_OK;
     emel::buffer::planner::action::on_plan_nodes_done(
-      emel::buffer::planner::event::plan_nodes_done{}, ctx);
-    CHECK(ctx.pending_error == EMEL_ERR_INVALID_ARGUMENT);
+      emel::buffer::planner::event::plan_nodes_done{.error_out = &err}, ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 }
 
 TEST_CASE("buffer_planner_finalize_and_error_actions_update_outputs") {
   emel::buffer::planner::action::context ctx{};
   int32_t error_code = EMEL_OK;
-  ctx.error_out = &error_code;
-  ctx.pending_error = EMEL_ERR_INVALID_ARGUMENT;
-  ctx.total_bytes = 123;
-  emel::buffer::planner::action::on_finalize_done(emel::buffer::planner::event::finalize_done{}, ctx);
+  ctx.buffer_count = 1;
+  ctx.bytes_by_buffer[0] = 123;
+  ctx.strategy = emel::buffer::planner::default_strategies::gallocr_parity;
+  emel::buffer::planner::action::on_finalize_done(
+      emel::buffer::planner::event::finalize_done{.error_out = &error_code}, ctx);
   CHECK(ctx.total_bytes == 123);
+  CHECK(error_code == EMEL_OK);
 
   emel::buffer::planner::action::on_plan_error(
-    emel::buffer::planner::events::plan_error{.err = 0}, ctx);
-  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
+    emel::buffer::planner::events::plan_error{.err = 0, .error_out = &error_code}, ctx);
   CHECK(error_code == EMEL_ERR_BACKEND);
 }
 
-TEST_CASE("buffer_planner_wrapper_rejects_plan_while_busy") {
+TEST_CASE("buffer_planner_split_required_populates_chunk_plan") {
+  emel::buffer::planner::action::context ctx{};
+  ctx.buffer_count = 1;
+  ctx.bytes_by_buffer[0] = 96;
+  ctx.buffer_alignments[0] = 16;
+  ctx.buffer_max_sizes[0] = 32;
+
+  std::array<int32_t, emel::buffer::planner::action::k_max_chunk_plan_entries> chunk_sizes = {};
+  std::array<int32_t, emel::buffer::planner::action::k_max_buffers> chunk_counts = {};
+  emel::buffer::planner::event::plan plan{};
+  plan.chunk_sizes_out = chunk_sizes.data();
+  plan.chunk_sizes_out_count = static_cast<int32_t>(chunk_sizes.size());
+  plan.chunk_counts_out = chunk_counts.data();
+  plan.chunk_counts_out_count = static_cast<int32_t>(chunk_counts.size());
+
+  const int32_t err = emel::buffer::planner::action::detail::run_split_required(ctx, &plan);
+  CHECK(err == EMEL_OK);
+  CHECK(chunk_counts[0] == 3);
+  CHECK(chunk_sizes[0] == 32);
+  CHECK(chunk_sizes[1] == 32);
+  CHECK(chunk_sizes[2] == 32);
+}
+
+TEST_CASE("buffer_planner_allows_sequential_plans") {
   emel::buffer::planner::sm planner{};
   const graph_storage g = make_graph();
   int32_t error_code = EMEL_OK;
@@ -641,9 +907,12 @@ TEST_CASE("buffer_planner_wrapper_rejects_plan_while_busy") {
     .sizes_out = nullptr,
     .sizes_out_count = 0,
     .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
   };
 
   auto & base = static_cast<emel::buffer::planner::sm::base_type &>(planner);
   CHECK(base.process_event(plan_event));
-  CHECK_FALSE(planner.process_event(plan_event));
+  CHECK(planner.process_event(plan_event));
 }

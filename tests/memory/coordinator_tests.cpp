@@ -35,15 +35,16 @@ TEST_CASE("memory_coordinator_prepare_update_without_output_pointer_is_valid") {
 TEST_CASE("memory_coordinator_prepare_batch_reports_invalid_arguments") {
   emel::memory::coordinator::sm machine{};
 
-  CHECK_FALSE(machine.process_event(emel::memory::coordinator::event::prepare_batch{
+  CHECK(machine.process_event(emel::memory::coordinator::event::prepare_batch{
     .n_ubatch = 0,
     .n_ubatches_total = 2,
   }));
 
-  CHECK_FALSE(machine.process_event(emel::memory::coordinator::event::prepare_batch{
+  CHECK(machine.process_event(emel::memory::coordinator::event::prepare_batch{
     .n_ubatch = 4,
     .n_ubatches_total = 0,
   }));
+  CHECK(machine.is(boost::sml::state<emel::memory::coordinator::initialized>));
 }
 
 TEST_CASE("memory_coordinator_prepare_full_success") {
@@ -290,16 +291,15 @@ TEST_CASE("memory_coordinator_action_helpers_cover_validation_prepare_apply_publ
 
 TEST_CASE("memory_coordinator_wrapper_rejects_new_request_when_not_initialized") {
   emel::memory::coordinator::sm machine{};
-  using base_type = emel::memory::coordinator::sm::base_type;
-  auto & base = static_cast<base_type &>(machine);
 
-  CHECK(base.process_event(emel::memory::coordinator::event::prepare_batch{
+  CHECK(machine.process_event(emel::memory::coordinator::event::prepare_batch{
     .n_ubatch = 1,
     .n_ubatches_total = 1,
   }));
-  CHECK(machine.is(boost::sml::state<emel::memory::coordinator::validating_batch>));
+  CHECK(machine.is(boost::sml::state<emel::memory::coordinator::initialized>));
 
-  CHECK_FALSE(machine.process_event(emel::memory::coordinator::event::prepare_update{
+  CHECK(machine.process_event(emel::memory::coordinator::event::prepare_update{
     .optimize = false,
   }));
+  CHECK(machine.is(boost::sml::state<emel::memory::coordinator::initialized>));
 }

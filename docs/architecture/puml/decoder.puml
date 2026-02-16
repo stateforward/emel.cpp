@@ -1,8 +1,53 @@
 @startuml
 
-[*] --> initialized
-initialized --> detokenizing : emel::decoder::event::decode
-detokenizing --> done : emel::decoder::event::detokenized_done
-detokenizing --> errored : emel::decoder::event::detokenized_error
+[*] --> emel::decoder::initialized
+emel::decoder::initialized --> emel::decoder::validating_request : emel::decoder::event::decode
+emel::decoder::validating_request --> boost::sml::front::internal : on_entry
+emel::decoder::validating_request --> emel::decoder::validating_request : emel::decoder::event::validate
+emel::decoder::validating_request --> emel::decoder::initializing_batch : emel::decoder::events::validate_done
+emel::decoder::validating_request --> emel::decoder::errored : emel::decoder::events::validate_error
+emel::decoder::initializing_batch --> boost::sml::front::internal : on_entry
+emel::decoder::initializing_batch --> emel::decoder::initializing_batch : emel::decoder::event::initialize_batch
+emel::decoder::initializing_batch --> emel::decoder::updating_memory_pre : emel::decoder::events::initialize_batch_done
+emel::decoder::initializing_batch --> emel::decoder::errored : emel::decoder::events::initialize_batch_error
+emel::decoder::updating_memory_pre --> boost::sml::front::internal : on_entry
+emel::decoder::updating_memory_pre --> emel::decoder::updating_memory_pre : emel::decoder::event::update_memory
+emel::decoder::updating_memory_pre --> emel::decoder::preparing_memory_batch_initial : emel::decoder::events::update_memory_done
+emel::decoder::updating_memory_pre --> emel::decoder::errored : emel::decoder::events::update_memory_error
+emel::decoder::preparing_memory_batch_initial --> boost::sml::front::internal : on_entry
+emel::decoder::preparing_memory_batch_initial --> emel::decoder::preparing_memory_batch_initial : emel::decoder::event::prepare_memory_batch
+emel::decoder::preparing_memory_batch_initial --> emel::decoder::reserving_output : emel::decoder::events::prepare_memory_batch_done
+emel::decoder::preparing_memory_batch_initial --> emel::decoder::optimizing_memory : emel::decoder::events::prepare_memory_batch_retryable_error
+emel::decoder::preparing_memory_batch_initial --> emel::decoder::errored : emel::decoder::events::prepare_memory_batch_permanent_error
+emel::decoder::optimizing_memory --> boost::sml::front::internal : on_entry
+emel::decoder::optimizing_memory --> emel::decoder::optimizing_memory : emel::decoder::event::optimize_memory
+emel::decoder::optimizing_memory --> emel::decoder::preparing_memory_batch_retry : emel::decoder::events::optimize_memory_done
+emel::decoder::optimizing_memory --> emel::decoder::errored : emel::decoder::events::optimize_memory_error
+emel::decoder::preparing_memory_batch_retry --> boost::sml::front::internal : on_entry
+emel::decoder::preparing_memory_batch_retry --> emel::decoder::preparing_memory_batch_retry : emel::decoder::event::prepare_memory_batch
+emel::decoder::preparing_memory_batch_retry --> emel::decoder::reserving_output : emel::decoder::events::prepare_memory_batch_done
+emel::decoder::preparing_memory_batch_retry --> emel::decoder::errored : emel::decoder::events::prepare_memory_batch_retryable_error
+emel::decoder::preparing_memory_batch_retry --> emel::decoder::errored : emel::decoder::events::prepare_memory_batch_permanent_error
+emel::decoder::reserving_output --> boost::sml::front::internal : on_entry
+emel::decoder::reserving_output --> emel::decoder::reserving_output : emel::decoder::event::reserve_output
+emel::decoder::reserving_output --> emel::decoder::processing_ubatch : emel::decoder::events::reserve_output_done
+emel::decoder::reserving_output --> emel::decoder::errored : emel::decoder::events::reserve_output_error
+emel::decoder::processing_ubatch --> boost::sml::front::internal : on_entry
+emel::decoder::processing_ubatch --> emel::decoder::processing_ubatch : emel::decoder::event::process_ubatch
+emel::decoder::processing_ubatch --> emel::decoder::processing_ubatch : emel::decoder::events::ubatch_done\n [boost::sml::aux::zero_wrapper<emel::decoder::guard::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/decoder/guards.hpp:7:43)>]
+emel::decoder::processing_ubatch --> emel::decoder::finalizing_outputs : emel::decoder::events::ubatch_done\n [boost::sml::aux::zero_wrapper<emel::decoder::guard::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/decoder/guards.hpp:11:42)>]
+emel::decoder::processing_ubatch --> emel::decoder::handling_ubatch_failure : emel::decoder::events::ubatch_error
+emel::decoder::handling_ubatch_failure --> boost::sml::front::internal : on_entry
+emel::decoder::handling_ubatch_failure --> emel::decoder::handling_ubatch_failure : emel::decoder::event::rollback_ubatch
+emel::decoder::handling_ubatch_failure --> emel::decoder::errored : emel::decoder::events::rollback_done
+emel::decoder::handling_ubatch_failure --> emel::decoder::errored : emel::decoder::events::rollback_error
+emel::decoder::finalizing_outputs --> boost::sml::front::internal : on_entry
+emel::decoder::finalizing_outputs --> emel::decoder::finalizing_outputs : emel::decoder::event::finalize_outputs
+emel::decoder::finalizing_outputs --> emel::decoder::done : emel::decoder::events::finalize_outputs_done
+emel::decoder::finalizing_outputs --> emel::decoder::errored : emel::decoder::events::finalize_outputs_error
+emel::decoder::done --> boost::sml::front::internal : on_entry
+emel::decoder::done --> emel::decoder::initialized : emel::decoder::events::decoding_done
+emel::decoder::errored --> boost::sml::front::internal : on_entry
+emel::decoder::errored --> emel::decoder::initialized : emel::decoder::events::decoding_error
 
 @enduml

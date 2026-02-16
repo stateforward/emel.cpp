@@ -2,26 +2,33 @@
 
 [*] --> idle
 idle --> validating : emel::tensor::allocator::event::allocate_tensors
+validating --> boost::sml::front::internal : on_entry
 validating --> validating : emel::tensor::allocator::event::validate
 validating --> scanning_tensors : emel::tensor::allocator::events::validate_done
 validating --> failed : emel::tensor::allocator::events::validate_error
+scanning_tensors --> boost::sml::front::internal : on_entry
 scanning_tensors --> scanning_tensors : emel::tensor::allocator::event::scan_tensors
 scanning_tensors --> partitioning_ranges : emel::tensor::allocator::events::scan_done
 scanning_tensors --> failed : emel::tensor::allocator::events::scan_error
+partitioning_ranges --> boost::sml::front::internal : on_entry
 partitioning_ranges --> partitioning_ranges : emel::tensor::allocator::event::partition_ranges
 partitioning_ranges --> allocating_ranges : emel::tensor::allocator::events::partition_done
 partitioning_ranges --> failed : emel::tensor::allocator::events::partition_error
+allocating_ranges --> boost::sml::front::internal : on_entry
 allocating_ranges --> allocating_ranges : emel::tensor::allocator::event::allocate_ranges
 allocating_ranges --> initializing_tensors : emel::tensor::allocator::events::allocate_ranges_done
 allocating_ranges --> failed : emel::tensor::allocator::events::allocate_ranges_error
+initializing_tensors --> boost::sml::front::internal : on_entry
 initializing_tensors --> initializing_tensors : emel::tensor::allocator::event::initialize_tensors
 initializing_tensors --> assembling_result : emel::tensor::allocator::events::initialize_tensors_done
 initializing_tensors --> failed : emel::tensor::allocator::events::initialize_tensors_error
+assembling_result --> boost::sml::front::internal : on_entry
 assembling_result --> assembling_result : emel::tensor::allocator::event::assemble
 assembling_result --> done : emel::tensor::allocator::events::assemble_done
 assembling_result --> failed : emel::tensor::allocator::events::assemble_error
+done --> boost::sml::front::internal : on_entry
 done --> idle : emel::tensor::allocator::events::allocate_done
-failed --> idle : emel::tensor::allocator::events::allocate_error
+done --> idle : emel::tensor::allocator::events::allocate_error
 idle --> releasing : emel::tensor::allocator::event::release
 validating --> releasing : emel::tensor::allocator::event::release
 scanning_tensors --> releasing : emel::tensor::allocator::event::release
@@ -31,7 +38,11 @@ initializing_tensors --> releasing : emel::tensor::allocator::event::release
 assembling_result --> releasing : emel::tensor::allocator::event::release
 done --> releasing : emel::tensor::allocator::event::release
 failed --> releasing : emel::tensor::allocator::event::release
+releasing --> boost::sml::front::internal : on_entry
 releasing --> idle : emel::tensor::allocator::events::release_done
 releasing --> failed : emel::tensor::allocator::events::release_error
+failed --> boost::sml::front::internal : on_entry
+failed --> idle : emel::tensor::allocator::events::allocate_error
+failed --> idle : emel::tensor::allocator::events::release_error
 
 @enduml

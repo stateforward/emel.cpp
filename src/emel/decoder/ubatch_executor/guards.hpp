@@ -5,7 +5,8 @@
 namespace emel::decoder::ubatch_executor::guard {
 
 inline constexpr auto rollback_required = [](const action::context & ctx) {
-  return !ctx.rollback_attempted;
+  (void)ctx;
+  return true;
 };
 
 }  // namespace emel::decoder::ubatch_executor::guard

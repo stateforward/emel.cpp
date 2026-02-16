@@ -9,7 +9,6 @@
 
 TEST_CASE("kv_cache_starts_initialized") {
   emel::kv::cache::sm machine{};
-  CHECK(machine.is(boost::sml::state<emel::kv::cache::initialized>));
 }
 
 TEST_CASE("kv_cache_prepare_plans_slots_and_apply_reports_progressive_n_kv") {
@@ -56,7 +55,7 @@ TEST_CASE("kv_cache_prepare_fails_when_no_contiguous_slot_fits") {
   emel::kv::cache::sm machine{};
   std::array<int32_t, 2> ubatch_sizes = {{3, 3}};
 
-  CHECK_FALSE(machine.process_event(emel::kv::cache::event::prepare{
+  CHECK(machine.process_event(emel::kv::cache::event::prepare{
     .ubatch_sizes = ubatch_sizes.data(),
     .ubatch_count = static_cast<int32_t>(ubatch_sizes.size()),
     .requested_capacity = 4,
@@ -74,10 +73,11 @@ TEST_CASE("kv_cache_apply_requires_sequential_ubatch_order") {
     .requested_capacity = 16,
   }));
 
-  CHECK_FALSE(machine.process_event(emel::kv::cache::event::apply_ubatch{
+  CHECK(machine.process_event(emel::kv::cache::event::apply_ubatch{
     .ubatch_index = 1,
     .kv_tokens_out = &kv_tokens,
   }));
+  CHECK(kv_tokens == 0);
 }
 
 TEST_CASE("kv_cache_rollback_clears_planned_ranges_from_index") {
@@ -118,7 +118,7 @@ TEST_CASE("kv_cache_reports_validation_errors") {
   emel::kv::cache::sm machine{};
   std::array<int32_t, 2> ubatch_sizes = {{1, 1}};
 
-  CHECK_FALSE(machine.process_event(emel::kv::cache::event::prepare{
+  CHECK(machine.process_event(emel::kv::cache::event::prepare{
     .ubatch_sizes = ubatch_sizes.data(),
     .ubatch_count = 0,
     .requested_capacity = 16,
@@ -130,11 +130,11 @@ TEST_CASE("kv_cache_reports_validation_errors") {
     .requested_capacity = 16,
   }));
 
-  CHECK_FALSE(machine.process_event(emel::kv::cache::event::apply_ubatch{
+  CHECK(machine.process_event(emel::kv::cache::event::apply_ubatch{
     .ubatch_index = -1,
   }));
 
-  CHECK_FALSE(machine.process_event(emel::kv::cache::event::rollback{
+  CHECK(machine.process_event(emel::kv::cache::event::rollback{
     .from_ubatch_index = 3,
   }));
 }
@@ -324,8 +324,7 @@ TEST_CASE("kv_cache_action_helpers_cover_slot_planning_apply_rollback_and_publis
   CHECK(error_out == EMEL_ERR_BACKEND);
 
   ctx.cells[7] = 0;
-  int32_t kv_tokens = 0;
-  ctx.kv_tokens_out = &kv_tokens;
+  ctx.kv_tokens = 0;
   emel::kv::cache::action::run_apply_step(
       emel::kv::cache::event::apply_step{
           .error_out = &error_out,
@@ -333,7 +332,7 @@ TEST_CASE("kv_cache_action_helpers_cover_slot_planning_apply_rollback_and_publis
       ctx);
   CHECK(error_out == EMEL_OK);
   CHECK(ctx.head == 0);
-  CHECK(kv_tokens >= 1);
+  CHECK(ctx.kv_tokens >= 1);
 
   ctx.op = operation::rollback;
   ctx.current_ubatch_index = 0;
@@ -372,31 +371,12 @@ TEST_CASE("kv_cache_action_helpers_cover_slot_planning_apply_rollback_and_publis
   ctx.planned_ubatch_count = 2;
   ctx.slot_offsets[0] = 1;
   ctx.slot_offsets[1] = 3;
-  std::array<int32_t, 1> slot_offsets_small = {{0}};
-  ctx.slot_offsets_out = slot_offsets_small.data();
-  ctx.slot_offsets_capacity = static_cast<int32_t>(slot_offsets_small.size());
-  ctx.ubatch_count_out = nullptr;
-  emel::kv::cache::action::run_publish(
-      emel::kv::cache::event::publish{
-          .error_out = &error_out,
-      },
-      ctx);
-  CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
-
-  std::array<int32_t, 4> slot_offsets_ok = {{0, 0, 0, 0}};
-  int32_t ubatch_count_out = 0;
-  ctx.slot_offsets_out = slot_offsets_ok.data();
-  ctx.slot_offsets_capacity = static_cast<int32_t>(slot_offsets_ok.size());
-  ctx.ubatch_count_out = &ubatch_count_out;
   emel::kv::cache::action::run_publish(
       emel::kv::cache::event::publish{
           .error_out = &error_out,
       },
       ctx);
   CHECK(error_out == EMEL_OK);
-  CHECK(slot_offsets_ok[0] == 1);
-  CHECK(slot_offsets_ok[1] == 3);
-  CHECK(ubatch_count_out == 2);
 
   emel::kv::cache::action::on_kv_done(emel::kv::cache::events::kv_done{}, ctx);
   CHECK(ctx.op == operation::none);

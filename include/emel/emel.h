@@ -17,6 +17,19 @@ typedef enum emel_status {
   EMEL_ERR_BACKEND = 6
 } emel_status;
 
+// Error detail domains for machine-level diagnostics.
+#define EMEL_ERROR_DOMAIN_NONE 0u
+#define EMEL_ERROR_DOMAIN_TENSOR_ALLOCATOR 1u
+
+typedef struct emel_error_detail {
+  int32_t status;
+  uint32_t domain;
+  uint32_t phase;
+  uint32_t reason;
+  int32_t index;
+  int32_t aux;
+} emel_error_detail;
+
 #ifdef __cplusplus
 }
 #endif

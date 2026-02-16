@@ -2,24 +2,38 @@
 
 [*] --> idle
 idle --> validating : emel::buffer::realloc_analyzer::event::analyze
+validating --> boost::sml::front::internal : on_entry
 validating --> validating : emel::buffer::realloc_analyzer::event::validate
 validating --> evaluating : emel::buffer::realloc_analyzer::events::validate_done
 validating --> failed : emel::buffer::realloc_analyzer::events::validate_error
+evaluating --> boost::sml::front::internal : on_entry
 evaluating --> evaluating : emel::buffer::realloc_analyzer::event::evaluate
 evaluating --> publishing : emel::buffer::realloc_analyzer::events::evaluate_done
 evaluating --> failed : emel::buffer::realloc_analyzer::events::evaluate_error
+publishing --> boost::sml::front::internal : on_entry
 publishing --> publishing : emel::buffer::realloc_analyzer::event::publish
 publishing --> done : emel::buffer::realloc_analyzer::events::publish_done
 publishing --> failed : emel::buffer::realloc_analyzer::events::publish_error
+done --> boost::sml::front::internal : on_entry
 done --> idle : emel::buffer::realloc_analyzer::events::analyze_done
-failed --> idle : emel::buffer::realloc_analyzer::events::analyze_error
+done --> idle : emel::buffer::realloc_analyzer::events::analyze_error
 idle --> resetting : emel::buffer::realloc_analyzer::event::reset
 validating --> resetting : emel::buffer::realloc_analyzer::event::reset
 evaluating --> resetting : emel::buffer::realloc_analyzer::event::reset
 publishing --> resetting : emel::buffer::realloc_analyzer::event::reset
 done --> resetting : emel::buffer::realloc_analyzer::event::reset
 failed --> resetting : emel::buffer::realloc_analyzer::event::reset
+resetting --> boost::sml::front::internal : on_entry
 resetting --> idle : emel::buffer::realloc_analyzer::events::reset_done
 resetting --> failed : emel::buffer::realloc_analyzer::events::reset_error
+failed --> boost::sml::front::internal : on_entry
+failed --> idle : emel::buffer::realloc_analyzer::events::analyze_error
+idle --> failed : boost::sml::back::_
+validating --> failed : boost::sml::back::_
+evaluating --> failed : boost::sml::back::_
+publishing --> failed : boost::sml::back::_
+done --> failed : boost::sml::back::_
+resetting --> failed : boost::sml::back::_
+failed --> failed : boost::sml::back::_
 
 @enduml

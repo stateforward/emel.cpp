@@ -1,0 +1,55 @@
+@startuml
+
+[*] --> emel::memory::coordinator::initialized
+emel::memory::coordinator::initialized --> emel::memory::coordinator::validating_update : emel::memory::coordinator::event::prepare_update
+emel::memory::coordinator::initialized --> emel::memory::coordinator::validating_batch : emel::memory::coordinator::event::prepare_batch
+emel::memory::coordinator::initialized --> emel::memory::coordinator::validating_full : emel::memory::coordinator::event::prepare_full
+emel::memory::coordinator::validating_update --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::validating_update --> emel::memory::coordinator::validating_update : emel::memory::coordinator::event::validate_update
+emel::memory::coordinator::validating_update --> emel::memory::coordinator::preparing_update : emel::memory::coordinator::events::validate_done
+emel::memory::coordinator::validating_update --> emel::memory::coordinator::errored : emel::memory::coordinator::events::validate_error
+emel::memory::coordinator::validating_batch --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::validating_batch --> emel::memory::coordinator::validating_batch : emel::memory::coordinator::event::validate_batch
+emel::memory::coordinator::validating_batch --> emel::memory::coordinator::preparing_batch : emel::memory::coordinator::events::validate_done
+emel::memory::coordinator::validating_batch --> emel::memory::coordinator::errored : emel::memory::coordinator::events::validate_error
+emel::memory::coordinator::validating_full --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::validating_full --> emel::memory::coordinator::validating_full : emel::memory::coordinator::event::validate_full
+emel::memory::coordinator::validating_full --> emel::memory::coordinator::preparing_full : emel::memory::coordinator::events::validate_done
+emel::memory::coordinator::validating_full --> emel::memory::coordinator::errored : emel::memory::coordinator::events::validate_error
+emel::memory::coordinator::preparing_update --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::preparing_update --> emel::memory::coordinator::preparing_update : emel::memory::coordinator::event::prepare_update_step
+emel::memory::coordinator::preparing_update --> emel::memory::coordinator::applying_update : emel::memory::coordinator::events::prepare_done\n [boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/memory/coordinator/sm.hpp:53:31)>]
+emel::memory::coordinator::preparing_update --> emel::memory::coordinator::publishing_update : emel::memory::coordinator::events::prepare_done\n [boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/memory/coordinator/sm.hpp:56:33)>]
+emel::memory::coordinator::preparing_update --> emel::memory::coordinator::errored : emel::memory::coordinator::events::prepare_error
+emel::memory::coordinator::preparing_batch --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::preparing_batch --> emel::memory::coordinator::preparing_batch : emel::memory::coordinator::event::prepare_batch_step
+emel::memory::coordinator::preparing_batch --> emel::memory::coordinator::publishing_batch : emel::memory::coordinator::events::prepare_done
+emel::memory::coordinator::preparing_batch --> emel::memory::coordinator::errored : emel::memory::coordinator::events::prepare_error
+emel::memory::coordinator::preparing_full --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::preparing_full --> emel::memory::coordinator::preparing_full : emel::memory::coordinator::event::prepare_full_step
+emel::memory::coordinator::preparing_full --> emel::memory::coordinator::publishing_full : emel::memory::coordinator::events::prepare_done
+emel::memory::coordinator::preparing_full --> emel::memory::coordinator::errored : emel::memory::coordinator::events::prepare_error
+emel::memory::coordinator::applying_update --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::applying_update --> emel::memory::coordinator::applying_update : emel::memory::coordinator::event::apply_update_step
+emel::memory::coordinator::applying_update --> emel::memory::coordinator::publishing_update : emel::memory::coordinator::events::apply_done
+emel::memory::coordinator::applying_update --> emel::memory::coordinator::errored : emel::memory::coordinator::events::apply_error
+emel::memory::coordinator::publishing_update --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::publishing_update --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::publishing_update --> emel::memory::coordinator::publishing_update : emel::memory::coordinator::event::publish_update
+emel::memory::coordinator::publishing_update --> emel::memory::coordinator::done : emel::memory::coordinator::events::publish_done
+emel::memory::coordinator::publishing_update --> emel::memory::coordinator::errored : emel::memory::coordinator::events::publish_error
+emel::memory::coordinator::publishing_batch --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::publishing_batch --> emel::memory::coordinator::publishing_batch : emel::memory::coordinator::event::publish_batch
+emel::memory::coordinator::publishing_batch --> emel::memory::coordinator::done : emel::memory::coordinator::events::publish_done
+emel::memory::coordinator::publishing_batch --> emel::memory::coordinator::errored : emel::memory::coordinator::events::publish_error
+emel::memory::coordinator::publishing_full --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::publishing_full --> emel::memory::coordinator::publishing_full : emel::memory::coordinator::event::publish_full
+emel::memory::coordinator::publishing_full --> emel::memory::coordinator::done : emel::memory::coordinator::events::publish_done
+emel::memory::coordinator::publishing_full --> emel::memory::coordinator::errored : emel::memory::coordinator::events::publish_error
+emel::memory::coordinator::done --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::done --> emel::memory::coordinator::initialized : emel::memory::coordinator::events::memory_done
+emel::memory::coordinator::done --> emel::memory::coordinator::initialized : emel::memory::coordinator::events::memory_error
+emel::memory::coordinator::errored --> boost::sml::front::internal : on_entry
+emel::memory::coordinator::errored --> emel::memory::coordinator::initialized : emel::memory::coordinator::events::memory_error
+
+@enduml

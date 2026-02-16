@@ -1,0 +1,55 @@
+# sampler_pipeline
+
+Source: `emel/sampler/pipeline/sm.hpp`
+
+## Mermaid
+
+```mermaid
+stateDiagram-v2
+  [*] --> emel::sampler::pipeline::initialized
+  emel::sampler::pipeline::initialized --> emel::sampler::pipeline::preparing_candidates : emel::sampler::pipeline::event::sample [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:19:38)>
+  emel::sampler::pipeline::preparing_candidates --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:48:11)>
+  emel::sampler::pipeline::preparing_candidates --> emel::sampler::pipeline::preparing_candidates : emel::sampler::pipeline::event::prepare_candidates [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:28:48)>
+  emel::sampler::pipeline::preparing_candidates --> emel::sampler::pipeline::sampling : emel::sampler::pipeline::events::prepare_candidates_done [boost::sml::front::always] / boost::sml::front::none
+  emel::sampler::pipeline::preparing_candidates --> emel::sampler::pipeline::errored : emel::sampler::pipeline::events::prepare_candidates_error [boost::sml::front::always] / boost::sml::front::none
+  emel::sampler::pipeline::sampling --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:82:11)>
+  emel::sampler::pipeline::sampling --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:115:11)>
+  emel::sampler::pipeline::sampling --> emel::sampler::pipeline::sampling : emel::sampler::pipeline::event::apply_sampling [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:50:44)>
+  emel::sampler::pipeline::sampling --> emel::sampler::pipeline::sampling : emel::sampler::pipeline::events::apply_sampling_done [boost::sml::aux::zero_wrapper<emel::sampler::pipeline::guard::has_more_samplers>] / boost::sml::front::none
+  emel::sampler::pipeline::sampling --> emel::sampler::pipeline::selecting_token : emel::sampler::pipeline::events::apply_sampling_done [boost::sml::aux::zero_wrapper<emel::sampler::pipeline::guard::no_more_samplers>] / boost::sml::front::none
+  emel::sampler::pipeline::sampling --> emel::sampler::pipeline::errored : emel::sampler::pipeline::events::apply_sampling_error [boost::sml::front::always] / boost::sml::front::none
+  emel::sampler::pipeline::selecting_token --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:155:11)>
+  emel::sampler::pipeline::selecting_token --> emel::sampler::pipeline::selecting_token : emel::sampler::pipeline::event::select_token [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:84:42)>
+  emel::sampler::pipeline::selecting_token --> emel::sampler::pipeline::done : emel::sampler::pipeline::events::select_token_done [boost::sml::front::always] / boost::sml::front::none
+  emel::sampler::pipeline::selecting_token --> emel::sampler::pipeline::errored : emel::sampler::pipeline::events::select_token_error [boost::sml::front::always] / boost::sml::front::none
+  emel::sampler::pipeline::done --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:187:11)>
+  emel::sampler::pipeline::done --> emel::sampler::pipeline::initialized : emel::sampler::pipeline::events::sampling_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:108:42)>
+  emel::sampler::pipeline::done --> emel::sampler::pipeline::initialized : emel::sampler::pipeline::events::sampling_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:112:43)>
+  emel::sampler::pipeline::errored --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:204:11)>
+  emel::sampler::pipeline::errored --> emel::sampler::pipeline::initialized : emel::sampler::pipeline::events::sampling_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:112:43)>
+```
+
+## Transitions
+
+| Source | Event | Guard | Action | Target |
+| --- | --- | --- | --- | --- |
+| `emel::sampler::pipeline::initialized` | `emel::sampler::pipeline::event::sample` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:19:38)>` | `emel::sampler::pipeline::preparing_candidates` |
+| `emel::sampler::pipeline::preparing_candidates` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:48:11)>` | `boost::sml::front::internal` |
+| `emel::sampler::pipeline::preparing_candidates` | `emel::sampler::pipeline::event::prepare_candidates` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:28:48)>` | `emel::sampler::pipeline::preparing_candidates` |
+| `emel::sampler::pipeline::preparing_candidates` | `emel::sampler::pipeline::events::prepare_candidates_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::sampler::pipeline::sampling` |
+| `emel::sampler::pipeline::preparing_candidates` | `emel::sampler::pipeline::events::prepare_candidates_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::sampler::pipeline::errored` |
+| `emel::sampler::pipeline::sampling` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:82:11)>` | `boost::sml::front::internal` |
+| `emel::sampler::pipeline::sampling` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:115:11)>` | `boost::sml::front::internal` |
+| `emel::sampler::pipeline::sampling` | `emel::sampler::pipeline::event::apply_sampling` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:50:44)>` | `emel::sampler::pipeline::sampling` |
+| `emel::sampler::pipeline::sampling` | `emel::sampler::pipeline::events::apply_sampling_done` | `boost::sml::aux::zero_wrapper<emel::sampler::pipeline::guard::has_more_samplers>` | `boost::sml::front::none` | `emel::sampler::pipeline::sampling` |
+| `emel::sampler::pipeline::sampling` | `emel::sampler::pipeline::events::apply_sampling_done` | `boost::sml::aux::zero_wrapper<emel::sampler::pipeline::guard::no_more_samplers>` | `boost::sml::front::none` | `emel::sampler::pipeline::selecting_token` |
+| `emel::sampler::pipeline::sampling` | `emel::sampler::pipeline::events::apply_sampling_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::sampler::pipeline::errored` |
+| `emel::sampler::pipeline::selecting_token` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:155:11)>` | `boost::sml::front::internal` |
+| `emel::sampler::pipeline::selecting_token` | `emel::sampler::pipeline::event::select_token` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:84:42)>` | `emel::sampler::pipeline::selecting_token` |
+| `emel::sampler::pipeline::selecting_token` | `emel::sampler::pipeline::events::select_token_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::sampler::pipeline::done` |
+| `emel::sampler::pipeline::selecting_token` | `emel::sampler::pipeline::events::select_token_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::sampler::pipeline::errored` |
+| `emel::sampler::pipeline::done` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:187:11)>` | `boost::sml::front::internal` |
+| `emel::sampler::pipeline::done` | `emel::sampler::pipeline::events::sampling_done` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:108:42)>` | `emel::sampler::pipeline::initialized` |
+| `emel::sampler::pipeline::done` | `emel::sampler::pipeline::events::sampling_error` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:112:43)>` | `emel::sampler::pipeline::initialized` |
+| `emel::sampler::pipeline::errored` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/sm.hpp:204:11)>` | `boost::sml::front::internal` |
+| `emel::sampler::pipeline::errored` | `emel::sampler::pipeline::events::sampling_error` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::sampler::pipeline::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/sampler/pipeline/actions.hpp:112:43)>` | `emel::sampler::pipeline::initialized` |

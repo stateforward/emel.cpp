@@ -7,6 +7,43 @@
 
 namespace emel::buffer::chunk_allocator {
 
+using Process = boost::sml::back::process<
+  event::validate_configure,
+  events::validate_configure_done,
+  events::validate_configure_error,
+  event::apply_configure,
+  events::apply_configure_done,
+  events::apply_configure_error,
+  events::configure_done,
+  events::configure_error,
+  event::validate_allocate,
+  events::validate_allocate_done,
+  events::validate_allocate_error,
+  event::select_block,
+  events::select_block_done,
+  events::select_block_error,
+  event::ensure_chunk,
+  events::ensure_chunk_done,
+  events::ensure_chunk_error,
+  event::commit_allocate,
+  events::commit_allocate_done,
+  events::commit_allocate_error,
+  events::allocate_done,
+  events::allocate_error,
+  event::validate_release,
+  events::validate_release_done,
+  events::validate_release_error,
+  event::merge_release,
+  events::merge_release_done,
+  events::merge_release_error,
+  events::release_done,
+  events::release_error,
+  event::apply_reset,
+  events::apply_reset_done,
+  events::apply_reset_error,
+  events::reset_done,
+  events::reset_error>;
+
 /**
  * Dynamic chunk allocator orchestration model.
  *
@@ -27,6 +64,7 @@ namespace emel::buffer::chunk_allocator {
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
+    using process_t = Process;
 
     struct ready {};
     struct configuring {};
@@ -47,60 +85,255 @@ struct model {
     return sml::make_transition_table(
       *sml::state<ready> + sml::event<event::configure> / action::begin_configure =
           sml::state<configuring>,
+      sml::state<configuring> + sml::on_entry<event::configure> /
+          [](const event::configure & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::validate_configure validate{
+              .error_out = &phase_error,
+            };
+            process(validate);
+            if (phase_error != EMEL_OK) {
+              process(events::validate_configure_error{
+                .err = phase_error,
+                .request = &ev,
+              });
+              return;
+            }
+            process(events::validate_configure_done{
+              .request = &ev,
+            });
+          },
       sml::state<configuring> + sml::event<event::validate_configure> /
           action::run_validate_configure = sml::state<configuring>,
       sml::state<configuring> + sml::event<events::validate_configure_done> =
           sml::state<applying_configure>,
       sml::state<configuring> + sml::event<events::validate_configure_error> = sml::state<failed>,
+      sml::state<applying_configure> + sml::on_entry<events::validate_configure_done> /
+          [](const events::validate_configure_done & ev, action::context &,
+             process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::apply_configure apply{
+              .error_out = &phase_error,
+            };
+            process(apply);
+            if (phase_error != EMEL_OK) {
+              process(events::apply_configure_error{
+                .err = phase_error,
+                .request = ev.request,
+              });
+              return;
+            }
+            process(events::apply_configure_done{
+              .request = ev.request,
+            });
+          },
       sml::state<applying_configure> + sml::event<event::apply_configure> /
           action::run_apply_configure = sml::state<applying_configure>,
       sml::state<applying_configure> + sml::event<events::apply_configure_done> =
           sml::state<configure_done>,
       sml::state<applying_configure> + sml::event<events::apply_configure_error> =
           sml::state<failed>,
+      sml::state<configure_done> + sml::on_entry<events::apply_configure_done> /
+          [](const events::apply_configure_done & ev, action::context &,
+             process_t & process) noexcept {
+            const event::configure * request = ev.request;
+            process(events::configure_done{
+              .error_out = request != nullptr ? request->error_out : nullptr,
+              .request = request,
+            });
+          },
       sml::state<configure_done> + sml::event<events::configure_done> / action::on_configure_done =
           sml::state<ready>,
 
       sml::state<ready> + sml::event<event::allocate> / action::begin_allocate =
           sml::state<validating_allocate>,
+      sml::state<validating_allocate> + sml::on_entry<event::allocate> /
+          [](const event::allocate & ev, action::context &, process_t & process) noexcept {
+            if (ev.chunk_out == nullptr || ev.offset_out == nullptr) {
+              process(events::validate_allocate_error{
+                .err = EMEL_ERR_INVALID_ARGUMENT,
+                .request = &ev,
+              });
+              return;
+            }
+            int32_t phase_error = EMEL_OK;
+            event::validate_allocate validate{
+              .error_out = &phase_error,
+            };
+            process(validate);
+            if (phase_error != EMEL_OK) {
+              process(events::validate_allocate_error{
+                .err = phase_error,
+                .request = &ev,
+              });
+              return;
+            }
+            process(events::validate_allocate_done{
+              .request = &ev,
+            });
+          },
       sml::state<validating_allocate> + sml::event<event::validate_allocate> /
           action::run_validate_allocate = sml::state<validating_allocate>,
       sml::state<validating_allocate> + sml::event<events::validate_allocate_done> =
           sml::state<selecting_block>,
       sml::state<validating_allocate> + sml::event<events::validate_allocate_error> =
           sml::state<failed>,
+      sml::state<selecting_block> + sml::on_entry<events::validate_allocate_done> /
+          [](const events::validate_allocate_done & ev, action::context &,
+             process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::select_block select{
+              .error_out = &phase_error,
+            };
+            process(select);
+            if (phase_error != EMEL_OK) {
+              process(events::select_block_error{
+                .err = phase_error,
+                .request = ev.request,
+              });
+              return;
+            }
+            process(events::select_block_done{
+              .request = ev.request,
+            });
+          },
       sml::state<selecting_block> + sml::event<event::select_block> / action::run_select_block =
           sml::state<selecting_block>,
       sml::state<selecting_block> + sml::event<events::select_block_done> =
           sml::state<ensuring_chunk>,
       sml::state<selecting_block> + sml::event<events::select_block_error> = sml::state<failed>,
+      sml::state<ensuring_chunk> + sml::on_entry<events::select_block_done> /
+          [](const events::select_block_done & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::ensure_chunk ensure{
+              .error_out = &phase_error,
+            };
+            process(ensure);
+            if (phase_error != EMEL_OK) {
+              process(events::ensure_chunk_error{
+                .err = phase_error,
+                .request = ev.request,
+              });
+              return;
+            }
+            process(events::ensure_chunk_done{
+              .request = ev.request,
+            });
+          },
       sml::state<ensuring_chunk> + sml::event<event::ensure_chunk> / action::run_ensure_chunk =
           sml::state<ensuring_chunk>,
       sml::state<ensuring_chunk> + sml::event<events::ensure_chunk_done> =
           sml::state<committing_allocate>,
       sml::state<ensuring_chunk> + sml::event<events::ensure_chunk_error> = sml::state<failed>,
+      sml::state<committing_allocate> + sml::on_entry<events::ensure_chunk_done> /
+          [](const events::ensure_chunk_done & ev, action::context &,
+             process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::commit_allocate commit{
+              .error_out = &phase_error,
+            };
+            process(commit);
+            if (phase_error != EMEL_OK) {
+              process(events::commit_allocate_error{
+                .err = phase_error,
+                .request = ev.request,
+              });
+              return;
+            }
+            process(events::commit_allocate_done{
+              .request = ev.request,
+            });
+          },
       sml::state<committing_allocate> + sml::event<event::commit_allocate> /
           action::run_commit_allocate = sml::state<committing_allocate>,
       sml::state<committing_allocate> + sml::event<events::commit_allocate_done> =
           sml::state<allocate_done>,
       sml::state<committing_allocate> + sml::event<events::commit_allocate_error> =
           sml::state<failed>,
+      sml::state<allocate_done> + sml::on_entry<events::commit_allocate_done> /
+          [](const events::commit_allocate_done & ev, action::context & ctx,
+             process_t & process) noexcept {
+            const event::allocate * request = ev.request;
+            if (request != nullptr) {
+              if (request->chunk_out != nullptr) {
+                *request->chunk_out = ctx.result_chunk;
+              }
+              if (request->offset_out != nullptr) {
+                *request->offset_out = ctx.result_offset;
+              }
+              if (request->aligned_size_out != nullptr) {
+                *request->aligned_size_out = ctx.result_size;
+              }
+            }
+            process(events::allocate_done{
+              .chunk = ctx.result_chunk,
+              .offset = ctx.result_offset,
+              .size = ctx.result_size,
+              .error_out = request != nullptr ? request->error_out : nullptr,
+              .request = request,
+            });
+          },
       sml::state<allocate_done> + sml::event<events::allocate_done> / action::on_allocate_done =
           sml::state<ready>,
 
       sml::state<ready> + sml::event<event::release> / action::begin_release =
           sml::state<validating_release>,
+      sml::state<validating_release> + sml::on_entry<event::release> /
+          [](const event::release & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::validate_release validate{
+              .error_out = &phase_error,
+            };
+            process(validate);
+            if (phase_error != EMEL_OK) {
+              process(events::validate_release_error{
+                .err = phase_error,
+                .request = &ev,
+              });
+              return;
+            }
+            process(events::validate_release_done{
+              .request = &ev,
+            });
+          },
       sml::state<validating_release> + sml::event<event::validate_release> /
           action::run_validate_release = sml::state<validating_release>,
       sml::state<validating_release> + sml::event<events::validate_release_done> =
           sml::state<merging_release>,
       sml::state<validating_release> + sml::event<events::validate_release_error> =
           sml::state<failed>,
+      sml::state<merging_release> + sml::on_entry<events::validate_release_done> /
+          [](const events::validate_release_done & ev, action::context &,
+             process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::merge_release merge{
+              .error_out = &phase_error,
+            };
+            process(merge);
+            if (phase_error != EMEL_OK) {
+              process(events::merge_release_error{
+                .err = phase_error,
+                .request = ev.request,
+              });
+              return;
+            }
+            process(events::merge_release_done{
+              .request = ev.request,
+            });
+          },
       sml::state<merging_release> + sml::event<event::merge_release> / action::run_merge_release =
           sml::state<merging_release>,
       sml::state<merging_release> + sml::event<events::merge_release_done> =
           sml::state<release_done>,
       sml::state<merging_release> + sml::event<events::merge_release_error> = sml::state<failed>,
+      sml::state<release_done> + sml::on_entry<events::merge_release_done> /
+          [](const events::merge_release_done & ev, action::context &, process_t & process) noexcept {
+            const event::release * request = ev.request;
+            process(events::release_done{
+              .error_out = request != nullptr ? request->error_out : nullptr,
+              .request = request,
+            });
+          },
       sml::state<release_done> + sml::event<events::release_done> / action::on_release_done =
           sml::state<ready>,
 
@@ -132,9 +365,77 @@ struct model {
           sml::state<resetting>,
       sml::state<resetting> + sml::event<events::apply_reset_done> = sml::state<reset_done>,
       sml::state<resetting> + sml::event<events::apply_reset_error> = sml::state<failed>,
+      sml::state<resetting> + sml::on_entry<event::reset> /
+          [](const event::reset & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::apply_reset apply{
+              .error_out = &phase_error,
+            };
+            process(apply);
+            if (phase_error != EMEL_OK) {
+              process(events::apply_reset_error{
+                .err = phase_error,
+                .request = &ev,
+              });
+              return;
+            }
+            process(events::apply_reset_done{
+              .request = &ev,
+            });
+          },
+      sml::state<reset_done> + sml::on_entry<events::apply_reset_done> /
+          [](const events::apply_reset_done & ev, action::context &, process_t & process) noexcept {
+            const event::reset * request = ev.request;
+            process(events::reset_done{
+              .error_out = request != nullptr ? request->error_out : nullptr,
+              .request = request,
+            });
+          },
       sml::state<reset_done> + sml::event<events::reset_done> / action::on_reset_done =
           sml::state<ready>,
 
+      sml::state<failed> + sml::on_entry<sml::_> /
+          [](const auto & ev, action::context &, process_t & process) noexcept {
+            int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+            if constexpr (requires { ev.err; }) {
+              err = ev.err;
+            }
+            if constexpr (requires { ev.request; }) {
+              if constexpr (std::is_same_v<decltype(ev.request), const event::configure *>) {
+                const event::configure * request = ev.request;
+                process(events::configure_error{
+                  .err = err,
+                  .error_out = request != nullptr ? request->error_out : nullptr,
+                  .request = request,
+                });
+                return;
+              } else if constexpr (std::is_same_v<decltype(ev.request), const event::allocate *>) {
+                const event::allocate * request = ev.request;
+                process(events::allocate_error{
+                  .err = err,
+                  .error_out = request != nullptr ? request->error_out : nullptr,
+                  .request = request,
+                });
+                return;
+              } else if constexpr (std::is_same_v<decltype(ev.request), const event::release *>) {
+                const event::release * request = ev.request;
+                process(events::release_error{
+                  .err = err,
+                  .error_out = request != nullptr ? request->error_out : nullptr,
+                  .request = request,
+                });
+                return;
+              } else if constexpr (std::is_same_v<decltype(ev.request), const event::reset *>) {
+                const event::reset * request = ev.request;
+                process(events::reset_error{
+                  .err = err,
+                  .error_out = request != nullptr ? request->error_out : nullptr,
+                  .request = request,
+                });
+                return;
+              }
+            }
+          },
       sml::state<failed> + sml::event<events::configure_error> / action::on_configure_error =
           sml::state<ready>,
       sml::state<failed> + sml::event<events::allocate_error> / action::on_allocate_error =
@@ -142,91 +443,47 @@ struct model {
       sml::state<failed> + sml::event<events::release_error> / action::on_release_error =
           sml::state<ready>,
       sml::state<failed> + sml::event<events::reset_error> / action::on_reset_error =
-          sml::state<ready>
+          sml::state<ready>,
+
+      sml::state<ready> + sml::event<sml::_> / action::on_unexpected = sml::state<failed>,
+      sml::state<configuring> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<applying_configure> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<configure_done> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<validating_allocate> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<selecting_block> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<ensuring_chunk> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<committing_allocate> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<allocate_done> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<validating_release> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<merging_release> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<release_done> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<resetting> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<reset_done> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<failed> + sml::event<sml::_> / action::on_unexpected =
+          sml::state<failed>
     );
   }
 };
 
-struct sm : emel::sm<model> {
-  using base_type = emel::sm<model>;
+struct sm : private emel::detail::process_support<sm, Process>, public emel::sm<model, Process> {
+  using base_type = emel::sm<model, Process>;
 
-  sm() : base_type(context_) {}
+  sm() : emel::detail::process_support<sm, Process>(this), base_type(context_, this->process_) {}
 
   using base_type::process_event;
-
-  bool process_event(const event::configure & ev) {
-    if (!base_type::process_event(ev)) return false;
-
-    int32_t phase_error = EMEL_OK;
-    if (!run_phase<
-            event::validate_configure, events::validate_configure_done,
-            events::validate_configure_error>(phase_error)) {
-      return finalize_configure_error(phase_error);
-    }
-    if (!run_phase<event::apply_configure, events::apply_configure_done, events::apply_configure_error>(
-            phase_error)) {
-      return finalize_configure_error(phase_error);
-    }
-    return base_type::process_event(events::configure_done{});
-  }
-
-  bool process_event(const event::allocate & ev) {
-    if (!base_type::process_event(ev)) return false;
-
-    int32_t phase_error = EMEL_OK;
-    if (!run_phase<
-            event::validate_allocate, events::validate_allocate_done,
-            events::validate_allocate_error>(phase_error)) {
-      return finalize_allocate_error(phase_error);
-    }
-    if (!run_phase<event::select_block, events::select_block_done, events::select_block_error>(
-            phase_error)) {
-      return finalize_allocate_error(phase_error);
-    }
-    if (!run_phase<event::ensure_chunk, events::ensure_chunk_done, events::ensure_chunk_error>(
-            phase_error)) {
-      return finalize_allocate_error(phase_error);
-    }
-    if (!run_phase<
-            event::commit_allocate, events::commit_allocate_done,
-            events::commit_allocate_error>(phase_error)) {
-      return finalize_allocate_error(phase_error);
-    }
-
-    return base_type::process_event(events::allocate_done{
-      .chunk = context_.result_chunk,
-      .offset = context_.result_offset,
-      .size = context_.result_size,
-    });
-  }
-
-  bool process_event(const event::release & ev) {
-    if (!base_type::process_event(ev)) return false;
-
-    int32_t phase_error = EMEL_OK;
-    if (!run_phase<
-            event::validate_release, events::validate_release_done,
-            events::validate_release_error>(phase_error)) {
-      return finalize_release_error(phase_error);
-    }
-    if (!run_phase<event::merge_release, events::merge_release_done, events::merge_release_error>(
-            phase_error)) {
-      return finalize_release_error(phase_error);
-    }
-
-    return base_type::process_event(events::release_done{});
-  }
-
-  bool process_event(const event::reset & ev) {
-    if (!base_type::process_event(ev)) return false;
-
-    int32_t phase_error = EMEL_OK;
-    if (!run_phase<event::apply_reset, events::apply_reset_done, events::apply_reset_error>(
-            phase_error)) {
-      return finalize_reset_error(phase_error);
-    }
-    return base_type::process_event(events::reset_done{});
-  }
 
   uint64_t alignment() const noexcept { return context_.alignment; }
 
@@ -239,61 +496,8 @@ struct sm : emel::sm<model> {
     return context_.chunks[chunk].max_size;
   }
 
-  int32_t last_error() const noexcept { return context_.last_error; }
-
  private:
-  template <class TriggerEvent, class DoneEvent, class ErrorEvent>
-  bool run_phase(int32_t & error_out) {
-    error_out = EMEL_OK;
-    TriggerEvent trigger{};
-    trigger.error_out = &error_out;
-    if (!base_type::process_event(trigger)) {
-      error_out = EMEL_ERR_BACKEND;
-      return false;
-    }
-    if (error_out == EMEL_OK) {
-      return base_type::process_event(DoneEvent{});
-    }
-    (void)base_type::process_event(ErrorEvent{
-      .err = error_out,
-    });
-    return false;
-  }
-
-  bool finalize_configure_error(const int32_t error_code) {
-    const int32_t err = error_code == EMEL_OK ? EMEL_ERR_BACKEND : error_code;
-    (void)base_type::process_event(events::configure_error{
-      .err = err,
-    });
-    return false;
-  }
-
-  bool finalize_allocate_error(const int32_t error_code) {
-    const int32_t err = error_code == EMEL_OK ? EMEL_ERR_BACKEND : error_code;
-    (void)base_type::process_event(events::allocate_error{
-      .err = err,
-    });
-    return false;
-  }
-
-  bool finalize_release_error(const int32_t error_code) {
-    const int32_t err = error_code == EMEL_OK ? EMEL_ERR_BACKEND : error_code;
-    (void)base_type::process_event(events::release_error{
-      .err = err,
-    });
-    return false;
-  }
-
-  bool finalize_reset_error(const int32_t error_code) {
-    const int32_t err = error_code == EMEL_OK ? EMEL_ERR_BACKEND : error_code;
-    (void)base_type::process_event(events::reset_error{
-      .err = err,
-    });
-    return false;
-  }
-
   action::context context_{};
 };
 
 }  // namespace emel::buffer::chunk_allocator
-

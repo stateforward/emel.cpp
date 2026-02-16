@@ -14,6 +14,8 @@
 #include "emel/model/loader/sm.hpp"
 #include "emel/model/parser/sm.hpp"
 #include "emel/model/weight_loader/sm.hpp"
+#include "emel/telemetry/exporter/sm.hpp"
+#include "emel/telemetry/provider/sm.hpp"
 #include "emel/tensor/allocator/sm.hpp"
 #include "emel/tensor/lifetime_analyzer/sm.hpp"
 #include "emel/tokenizer/sm.hpp"
@@ -34,6 +36,8 @@ using MemoryCoordinator = emel::memory::coordinator::sm;
 using ModelLoader = emel::model::loader::sm;
 using Model = emel::model::loader::sm;
 using Parser = emel::model::parser::sm;
+using TelemetryExporter = emel::telemetry::exporter::sm;
+using TelemetryProvider = emel::telemetry::provider::sm;
 using TensorAllocator = emel::tensor::allocator::sm;
 using TensorLifetimeAnalyzer = emel::tensor::lifetime_analyzer::sm;
 using Tokenizer = emel::tokenizer::sm;

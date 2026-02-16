@@ -407,31 +407,49 @@ TEST_CASE("buffer_chunk_allocator_action_error_handlers_cover_null_outputs") {
   namespace action = emel::buffer::chunk_allocator::action;
   action::context c{};
   int32_t err = EMEL_OK;
-  c.request_error_out = &err;
 
-  action::on_configure_error(emel::buffer::chunk_allocator::events::configure_error{.err = EMEL_OK}, c);
+  action::on_configure_error(
+      emel::buffer::chunk_allocator::events::configure_error{.err = EMEL_OK, .error_out = &err}, c);
   CHECK(err == EMEL_ERR_BACKEND);
-  action::on_allocate_error(emel::buffer::chunk_allocator::events::allocate_error{.err = EMEL_OK}, c);
+  action::on_allocate_error(
+      emel::buffer::chunk_allocator::events::allocate_error{.err = EMEL_OK, .error_out = &err}, c);
   CHECK(err == EMEL_ERR_BACKEND);
-  action::on_release_error(emel::buffer::chunk_allocator::events::release_error{.err = EMEL_OK}, c);
+  action::on_release_error(
+      emel::buffer::chunk_allocator::events::release_error{.err = EMEL_OK, .error_out = &err}, c);
   CHECK(err == EMEL_ERR_BACKEND);
-  action::on_reset_error(emel::buffer::chunk_allocator::events::reset_error{.err = EMEL_OK}, c);
+  action::on_reset_error(
+      emel::buffer::chunk_allocator::events::reset_error{.err = EMEL_OK, .error_out = &err}, c);
   CHECK(err == EMEL_ERR_BACKEND);
 
-  c.request_error_out = nullptr;
   const auto step_before = c.step;
   action::on_configure_error(
-      emel::buffer::chunk_allocator::events::configure_error{.err = EMEL_ERR_INVALID_ARGUMENT}, c);
+      emel::buffer::chunk_allocator::events::configure_error{
+          .err = EMEL_ERR_INVALID_ARGUMENT,
+          .error_out = nullptr,
+      },
+      c);
   action::on_allocate_error(
-      emel::buffer::chunk_allocator::events::allocate_error{.err = EMEL_ERR_INVALID_ARGUMENT}, c);
+      emel::buffer::chunk_allocator::events::allocate_error{
+          .err = EMEL_ERR_INVALID_ARGUMENT,
+          .error_out = nullptr,
+      },
+      c);
   action::on_release_error(
-      emel::buffer::chunk_allocator::events::release_error{.err = EMEL_ERR_INVALID_ARGUMENT}, c);
+      emel::buffer::chunk_allocator::events::release_error{
+          .err = EMEL_ERR_INVALID_ARGUMENT,
+          .error_out = nullptr,
+      },
+      c);
   action::on_reset_error(
-      emel::buffer::chunk_allocator::events::reset_error{.err = EMEL_ERR_INVALID_ARGUMENT}, c);
+      emel::buffer::chunk_allocator::events::reset_error{
+          .err = EMEL_ERR_INVALID_ARGUMENT,
+          .error_out = nullptr,
+      },
+      c);
   CHECK(c.step == step_before + 4);
 }
 
-TEST_CASE("buffer_chunk_allocator_sm_error_paths_update_last_error") {
+TEST_CASE("buffer_chunk_allocator_sm_error_paths_report_error_out") {
   emel::buffer::chunk_allocator::sm machine{};
   int32_t error = EMEL_OK;
 
@@ -441,7 +459,6 @@ TEST_CASE("buffer_chunk_allocator_sm_error_paths_update_last_error") {
     .error_out = &error,
   }));
   CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(machine.last_error() == EMEL_ERR_INVALID_ARGUMENT);
 
   int32_t chunk = -1;
   uint64_t offset = 0;
@@ -452,7 +469,6 @@ TEST_CASE("buffer_chunk_allocator_sm_error_paths_update_last_error") {
     .error_out = &error,
   }));
   CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(machine.last_error() == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("buffer_chunk_allocator_additional_action_branch_coverage") {
@@ -480,19 +496,16 @@ TEST_CASE("buffer_chunk_allocator_additional_action_branch_coverage") {
 
   c = {};
   c.request_size = 32;
-  int32_t chunk_out = -1;
-  uint64_t offset_out = 0;
-  c.request_chunk_out = &chunk_out;
-  c.request_offset_out = &offset_out;
-  c.alignment = 0;
-  c.max_chunk_size = 64;
+  c.request_alignment = 0;
+  c.request_max_chunk_size = 64;
   int32_t err = EMEL_OK;
   action::run_validate_allocate(
       emel::buffer::chunk_allocator::event::validate_allocate{.error_out = &err}, c);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
-  c.alignment = 16;
+  c.request_alignment = 16;
   c.request_size = std::numeric_limits<uint64_t>::max();
+  c.request_max_chunk_size = 64;
   action::run_validate_allocate(
       emel::buffer::chunk_allocator::event::validate_allocate{.error_out = &err}, c);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);

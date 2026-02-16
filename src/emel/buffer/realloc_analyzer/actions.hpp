@@ -10,13 +10,6 @@
 namespace emel::buffer::realloc_analyzer::action {
 
 struct context {
-  event::graph_view graph = {};
-  const event::node_alloc * node_allocs = nullptr;
-  int32_t node_alloc_count = 0;
-  const event::leaf_alloc * leaf_allocs = nullptr;
-  int32_t leaf_alloc_count = 0;
-  int32_t * needs_realloc_out = nullptr;
-  int32_t * error_out = nullptr;
   bool needs_realloc = false;
   uint32_t step = 0;
 };
@@ -41,9 +34,12 @@ inline bool valid_graph_tensors(const event::graph_view & g) noexcept {
   return true;
 }
 
-inline int32_t align_up_16(const int32_t value) noexcept {
+inline int32_t align_up(const int32_t value, const int32_t alignment) noexcept {
   if (value <= 0) return 0;
-  const int64_t aligned = (static_cast<int64_t>(value) + 15LL) & ~15LL;
+  const int32_t align = alignment > 0 ? alignment : 1;
+  const int64_t aligned =
+    (static_cast<int64_t>(value) + static_cast<int64_t>(align) - 1) &
+    ~static_cast<int64_t>(align - 1);
   if (aligned > std::numeric_limits<int32_t>::max()) {
     return std::numeric_limits<int32_t>::max();
   }
@@ -68,22 +64,29 @@ inline bool tensor_snapshot_valid(
     if (alloc.buffer_id < 0) {
       return false;
     }
-    tensor_size = align_up_16(tensor.alloc_size);
+    const int32_t alignment = alloc.alignment > 0 ? alloc.alignment : 16;
+    tensor_size = align_up(tensor.alloc_size, alignment);
   }
   return alloc.size_max >= tensor_size;
 }
 
-inline bool graph_needs_realloc(const context & c) noexcept {
-  if (c.node_alloc_count != c.graph.n_nodes) {
+inline bool graph_needs_realloc(
+    const event::graph_view & graph,
+    const event::node_alloc * node_allocs,
+    const int32_t node_alloc_count,
+    const event::leaf_alloc * leaf_allocs,
+    const int32_t leaf_alloc_count) noexcept {
+  (void)leaf_allocs;
+  if (node_alloc_count != graph.n_nodes) {
     return true;
   }
-  if (c.leaf_alloc_count != c.graph.n_leafs) {
+  if (leaf_alloc_count != graph.n_leafs) {
     return true;
   }
 
-  for (int32_t i = 0; i < c.graph.n_nodes; ++i) {
-    const auto & node = c.graph.nodes[i];
-    const auto & node_alloc = c.node_allocs[i];
+  for (int32_t i = 0; i < graph.n_nodes; ++i) {
+    const auto & node = graph.nodes[i];
+    const auto & node_alloc = node_allocs[i];
 
     if (node_alloc.dst.tensor_id >= 0 && node_alloc.dst.tensor_id != node.tensor_id) {
       return true;
@@ -105,7 +108,7 @@ inline bool graph_needs_realloc(const context & c) noexcept {
       if (src_alloc.tensor_id >= 0 && src_alloc.tensor_id != src_id) {
         return true;
       }
-      const auto * src = find_tensor(c.graph, src_id);
+      const auto * src = find_tensor(graph, src_id);
       if (src == nullptr) {
         return true;
       }
@@ -123,16 +126,9 @@ inline bool graph_needs_realloc(const context & c) noexcept {
 struct begin_analyze {
   void operator()(const event::analyze & ev, context & c) const noexcept {
     c = {};
-    c.graph = ev.graph;
-    c.node_allocs = ev.node_allocs;
-    c.node_alloc_count = ev.node_alloc_count;
-    c.leaf_allocs = ev.leaf_allocs;
-    c.leaf_alloc_count = ev.leaf_alloc_count;
-    c.needs_realloc_out = ev.needs_realloc_out;
-    c.error_out = ev.error_out;
     c.needs_realloc = false;
-    if (c.needs_realloc_out != nullptr) *c.needs_realloc_out = 0;
-    if (c.error_out != nullptr) *c.error_out = EMEL_OK;
+    if (ev.needs_realloc_out != nullptr) *ev.needs_realloc_out = 0;
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -140,13 +136,13 @@ struct begin_analyze {
 struct run_validate {
   void operator()(const event::validate & ev, context & c) const noexcept {
     int32_t err = EMEL_OK;
-    if (!detail::valid_graph_tensors(c.graph)) {
+    if (!detail::valid_graph_tensors(ev.graph)) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (c.node_alloc_count < 0 || c.leaf_alloc_count < 0) {
+    } else if (ev.node_alloc_count < 0 || ev.leaf_alloc_count < 0) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (c.graph.n_nodes > 0 && c.node_allocs == nullptr) {
+    } else if (ev.graph.n_nodes > 0 && ev.node_allocs == nullptr) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (c.graph.n_leafs > 0 && c.leaf_allocs == nullptr) {
+    } else if (ev.graph.n_leafs > 0 && ev.leaf_allocs == nullptr) {
       err = EMEL_ERR_INVALID_ARGUMENT;
     }
     if (ev.error_out != nullptr) {
@@ -158,7 +154,8 @@ struct run_validate {
 
 struct run_evaluate {
   void operator()(const event::evaluate & ev, context & c) const noexcept {
-    c.needs_realloc = detail::graph_needs_realloc(c);
+    c.needs_realloc = detail::graph_needs_realloc(
+        ev.graph, ev.node_allocs, ev.node_alloc_count, ev.leaf_allocs, ev.leaf_alloc_count);
     if (ev.error_out != nullptr) {
       *ev.error_out = EMEL_OK;
     }
@@ -168,8 +165,8 @@ struct run_evaluate {
 
 struct run_publish {
   void operator()(const event::publish & ev, context & c) const noexcept {
-    if (c.needs_realloc_out != nullptr) {
-      *c.needs_realloc_out = c.needs_realloc ? 1 : 0;
+    if (ev.needs_realloc_out != nullptr) {
+      *ev.needs_realloc_out = c.needs_realloc ? 1 : 0;
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = EMEL_OK;
@@ -190,17 +187,19 @@ struct begin_reset {
 struct on_analyze_done {
   void operator()(const events::analyze_done & ev, context & c) const noexcept {
     c.needs_realloc = ev.needs_realloc != 0;
-    if (c.needs_realloc_out != nullptr) {
-      *c.needs_realloc_out = ev.needs_realloc;
+    if (ev.needs_realloc_out != nullptr) {
+      *ev.needs_realloc_out = ev.needs_realloc;
     }
-    if (c.error_out != nullptr) *c.error_out = EMEL_OK;
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
 
 struct on_analyze_error {
   void operator()(const events::analyze_error & ev, context & c) const noexcept {
-    if (c.error_out != nullptr) *c.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
+    if (ev.error_out != nullptr) {
+      *ev.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
+    }
     c.step += 1;
   }
 };
@@ -214,7 +213,21 @@ struct on_reset_done {
 
 struct on_reset_error {
   void operator()(const events::reset_error & ev, context & c) const noexcept {
-    if (c.error_out != nullptr) *c.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
+    if (ev.error_out != nullptr) {
+      *ev.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
+    }
+    c.step += 1;
+  }
+};
+
+struct on_unexpected {
+  template <class Event>
+  void operator()(const Event & ev, context & c) const noexcept {
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+      }
+    }
     c.step += 1;
   }
 };
@@ -228,5 +241,6 @@ inline constexpr on_analyze_done on_analyze_done{};
 inline constexpr on_analyze_error on_analyze_error{};
 inline constexpr on_reset_done on_reset_done{};
 inline constexpr on_reset_error on_reset_error{};
+inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::buffer::realloc_analyzer::action

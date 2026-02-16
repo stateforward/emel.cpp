@@ -28,6 +28,7 @@ struct tensor_desc {
   int32_t view_src_id = -1;
   bool is_input = false;
   bool is_output = false;
+  bool can_inplace = true;
   bool has_external_data = false;
 };
 
@@ -40,7 +41,10 @@ struct graph_view {
 
 struct initialize {
   int32_t buffer_count = 1;
+  const int32_t * buffer_alignments = nullptr;
+  const int32_t * buffer_max_sizes = nullptr;
   emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
+  int32_t * error_out = nullptr;
 };
 
 struct reserve_n_size {
@@ -52,6 +56,7 @@ struct reserve_n_size {
   emel::buffer::planner::sm * buffer_planner_sm = nullptr;
   emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
   const emel::buffer::planner::strategy * strategy = nullptr;
+  int32_t * error_out = nullptr;
 };
 
 struct reserve_n {
@@ -61,6 +66,7 @@ struct reserve_n {
   emel::buffer::planner::sm * buffer_planner_sm = nullptr;
   emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
   const emel::buffer::planner::strategy * strategy = nullptr;
+  int32_t * error_out = nullptr;
 };
 
 struct reserve {
@@ -68,6 +74,7 @@ struct reserve {
   emel::buffer::planner::sm * buffer_planner_sm = nullptr;
   emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
   const emel::buffer::planner::strategy * strategy = nullptr;
+  int32_t * error_out = nullptr;
 };
 
 struct alloc_graph {
@@ -76,39 +83,56 @@ struct alloc_graph {
   emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
   emel::buffer::realloc_analyzer::sm * buffer_realloc_analyzer_sm = nullptr;
   const emel::buffer::planner::strategy * strategy = nullptr;
+  int32_t * error_out = nullptr;
 };
 
 struct release {
   emel::buffer::chunk_allocator::sm * chunk_allocator_sm = nullptr;
+  int32_t * error_out = nullptr;
 };
 
 }  // namespace emel::buffer::allocator::event
 
 namespace emel::buffer::allocator::events {
 
-struct initialize_done {};
+struct initialize_done {
+  int32_t * error_out = nullptr;
+};
 struct initialize_error {
   int32_t err = 0;
+  int32_t * error_out = nullptr;
 };
 
-struct reserve_n_size_done {};
+struct reserve_n_size_done {
+  int32_t * error_out = nullptr;
+};
 struct reserve_n_size_error {
   int32_t err = 0;
+  int32_t * error_out = nullptr;
 };
 
-struct reserve_done {};
+struct reserve_done {
+  int32_t * error_out = nullptr;
+};
 struct reserve_error {
   int32_t err = 0;
+  int32_t * error_out = nullptr;
 };
 
-struct alloc_graph_done {};
+struct alloc_graph_done {
+  int32_t * error_out = nullptr;
+};
 struct alloc_graph_error {
   int32_t err = 0;
+  int32_t * error_out = nullptr;
 };
 
-struct release_done {};
+struct release_done {
+  int32_t * error_out = nullptr;
+};
 struct release_error {
   int32_t err = 0;
+  int32_t * error_out = nullptr;
 };
 
 using bootstrap_event = event::initialize;

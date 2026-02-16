@@ -19,6 +19,8 @@ struct execute {
   emel::kv::cache::sm * kv_cache_sm = nullptr;
   int32_t * outputs_produced_out = nullptr;
   int32_t * kv_tokens_out = nullptr;
+  bool * rollback_attempted_out = nullptr;
+  int32_t * error_out = nullptr;
 };
 
 struct validate {
@@ -26,14 +28,17 @@ struct validate {
 };
 
 struct prepare_memory {
+  emel::memory::coordinator::sm * memory_coordinator_sm = nullptr;
   int32_t * error_out = nullptr;
 };
 
 struct prepare_kv {
+  emel::kv::cache::sm * kv_cache_sm = nullptr;
   int32_t * error_out = nullptr;
 };
 
 struct run_compute {
+  emel::kv::cache::sm * kv_cache_sm = nullptr;
   int32_t * error_out = nullptr;
 };
 
@@ -42,6 +47,7 @@ struct extract_outputs {
 };
 
 struct rollback {
+  emel::kv::cache::sm * kv_cache_sm = nullptr;
   int32_t * error_out = nullptr;
 };
 
@@ -49,43 +55,65 @@ struct rollback {
 
 namespace emel::decoder::ubatch_executor::events {
 
-struct validate_done {};
+struct validate_done {
+  const event::execute * request = nullptr;
+};
 struct validate_error {
   int32_t err = 0;
+  const event::execute * request = nullptr;
 };
 
-struct prepare_memory_done {};
+struct prepare_memory_done {
+  const event::execute * request = nullptr;
+};
 struct prepare_memory_error {
   int32_t err = 0;
+  const event::execute * request = nullptr;
 };
 
-struct prepare_kv_done {};
+struct prepare_kv_done {
+  const event::execute * request = nullptr;
+};
 struct prepare_kv_error {
   int32_t err = 0;
+  const event::execute * request = nullptr;
 };
 
-struct run_compute_done {};
+struct run_compute_done {
+  const event::execute * request = nullptr;
+};
 struct run_compute_error {
   int32_t err = 0;
+  const event::execute * request = nullptr;
 };
 
-struct extract_outputs_done {};
+struct extract_outputs_done {
+  const event::execute * request = nullptr;
+};
 struct extract_outputs_error {
   int32_t err = 0;
+  const event::execute * request = nullptr;
 };
 
-struct rollback_done {};
+struct rollback_done {
+  const event::execute * request = nullptr;
+};
 struct rollback_error {
   int32_t err = 0;
+  const event::execute * request = nullptr;
 };
 
 struct ubatch_execution_done {
   int32_t outputs_produced = 0;
   int32_t kv_tokens = 0;
+  int32_t * error_out = nullptr;
+  const event::execute * request = nullptr;
 };
 
 struct ubatch_execution_error {
   int32_t err = 0;
+  int32_t * error_out = nullptr;
+  const event::execute * request = nullptr;
 };
 
 }  // namespace emel::decoder::ubatch_executor::events

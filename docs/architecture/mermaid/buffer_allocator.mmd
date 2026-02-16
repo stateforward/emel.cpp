@@ -1,20 +1,25 @@
 stateDiagram-v2
   [*] --> uninitialized
-  uninitialized --> initializing : emel::buffer::allocator::event::initialize [boost::sml::aux::zero_wrapper<emel::buffer::allocator::guard::valid_initialize>] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_initialize>
+  uninitialized --> initializing : emel::buffer::allocator::event::initialize [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_initialize>
+  initializing --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/allocator/sm.hpp:106:11)>
   initializing --> ready : emel::buffer::allocator::events::initialize_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_initialize_done>
   initializing --> failed : emel::buffer::allocator::events::initialize_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_initialize_error>
-  ready --> reserving_n_size : emel::buffer::allocator::event::reserve_n_size [boost::sml::aux::zero_wrapper<emel::buffer::allocator::guard::can_reserve_n_size>] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve_n_size>
-  allocated --> reserving_n_size : emel::buffer::allocator::event::reserve_n_size [boost::sml::aux::zero_wrapper<emel::buffer::allocator::guard::can_reserve_n_size>] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve_n_size>
+  ready --> reserving_n_size : emel::buffer::allocator::event::reserve_n_size [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve_n_size>
+  allocated --> reserving_n_size : emel::buffer::allocator::event::reserve_n_size [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve_n_size>
+  reserving_n_size --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/allocator/sm.hpp:124:11)>
   reserving_n_size --> ready : emel::buffer::allocator::events::reserve_n_size_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_reserve_n_size_done>
   reserving_n_size --> failed : emel::buffer::allocator::events::reserve_n_size_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_reserve_n_size_error>
-  ready --> reserving : emel::buffer::allocator::event::reserve_n [boost::sml::aux::zero_wrapper<emel::buffer::allocator::guard::can_reserve_n>] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve_n>
-  allocated --> reserving : emel::buffer::allocator::event::reserve_n [boost::sml::aux::zero_wrapper<emel::buffer::allocator::guard::can_reserve_n>] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve_n>
-  ready --> reserving : emel::buffer::allocator::event::reserve [boost::sml::aux::zero_wrapper<emel::buffer::allocator::guard::can_reserve>] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve>
-  allocated --> reserving : emel::buffer::allocator::event::reserve [boost::sml::aux::zero_wrapper<emel::buffer::allocator::guard::can_reserve>] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve>
+  ready --> reserving : emel::buffer::allocator::event::reserve_n [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve_n>
+  allocated --> reserving : emel::buffer::allocator::event::reserve_n [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve_n>
+  ready --> reserving : emel::buffer::allocator::event::reserve [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve>
+  allocated --> reserving : emel::buffer::allocator::event::reserve [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_reserve>
+  reserving --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/allocator/sm.hpp:146:11)>
+  reserving --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/allocator/sm.hpp:155:11)>
   reserving --> ready : emel::buffer::allocator::events::reserve_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_reserve_done>
   reserving --> failed : emel::buffer::allocator::events::reserve_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_reserve_error>
-  ready --> allocating_graph : emel::buffer::allocator::event::alloc_graph [boost::sml::aux::zero_wrapper<emel::buffer::allocator::guard::can_alloc_graph>] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_alloc_graph>
-  allocated --> allocating_graph : emel::buffer::allocator::event::alloc_graph [boost::sml::aux::zero_wrapper<emel::buffer::allocator::guard::can_alloc_graph>] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_alloc_graph>
+  ready --> allocating_graph : emel::buffer::allocator::event::alloc_graph [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_alloc_graph>
+  allocated --> allocating_graph : emel::buffer::allocator::event::alloc_graph [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_alloc_graph>
+  allocating_graph --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/allocator/sm.hpp:173:11)>
   allocating_graph --> allocated : emel::buffer::allocator::events::alloc_graph_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_alloc_graph_done>
   allocating_graph --> failed : emel::buffer::allocator::events::alloc_graph_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_alloc_graph_error>
   uninitialized --> releasing : emel::buffer::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_release>
@@ -25,5 +30,15 @@ stateDiagram-v2
   allocating_graph --> releasing : emel::buffer::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_release>
   allocated --> releasing : emel::buffer::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_release>
   failed --> releasing : emel::buffer::allocator::event::release [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::begin_release>
+  releasing --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/buffer/allocator/sm.hpp:203:11)>
   releasing --> uninitialized : emel::buffer::allocator::events::release_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_release_done>
   releasing --> failed : emel::buffer::allocator::events::release_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_release_error>
+  uninitialized --> failed : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_unexpected>
+  initializing --> failed : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_unexpected>
+  ready --> failed : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_unexpected>
+  reserving_n_size --> failed : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_unexpected>
+  reserving --> failed : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_unexpected>
+  allocating_graph --> failed : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_unexpected>
+  allocated --> failed : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_unexpected>
+  releasing --> failed : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_unexpected>
+  failed --> failed : boost::sml::back::_ [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::buffer::allocator::action::on_unexpected>

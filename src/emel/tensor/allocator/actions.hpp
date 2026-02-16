@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdlib>
 #include <cstdint>
 #include <limits>
 
@@ -19,20 +20,6 @@ struct context {
   int32_t max_buffer_size = 0;
   bool no_alloc = false;
 
-  void * backend_ctx = nullptr;
-  event::alloc_buffer_fn alloc_buffer = nullptr;
-  event::free_buffer_fn free_buffer = nullptr;
-  event::init_tensor_fn init_tensor = nullptr;
-  event::init_view_tensor_fn init_view_tensor = nullptr;
-  event::assemble_buffers_fn assemble_buffers = nullptr;
-
-  void ** result_buffer_out = nullptr;
-  int32_t * total_size_out = nullptr;
-  int32_t * chunk_sizes_out = nullptr;
-  int32_t chunk_sizes_out_count = 0;
-  int32_t * chunk_count_out = nullptr;
-  int32_t * error_out = nullptr;
-
   uint32_t step = 0;
 
   std::array<int32_t, k_max_tensors> tensor_ids = {};
@@ -41,6 +28,7 @@ struct context {
   std::array<int32_t, k_max_tensors> tensor_offsets = {};
   std::array<int32_t, k_max_chunks> chunk_sizes = {};
   std::array<void *, k_max_chunks> allocated_buffers = {};
+  std::array<void *, k_max_chunks> assembled_buffers = {};
   void * result_buffer = nullptr;
   int32_t chunk_count = 0;
   int32_t total_bytes = 0;
@@ -52,6 +40,22 @@ inline int32_t normalize_error(const int32_t err, const int32_t fallback) noexce
   if (err != 0) return err;
   if (fallback != 0) return fallback;
   return EMEL_ERR_BACKEND;
+}
+
+inline void set_error_detail(
+    emel_error_detail * detail,
+    const int32_t status,
+    const event::error_phase phase,
+    const event::error_reason reason,
+    const int32_t index,
+    const int32_t aux) noexcept {
+  if (detail == nullptr) return;
+  detail->status = status;
+  detail->domain = EMEL_ERROR_DOMAIN_TENSOR_ALLOCATOR;
+  detail->phase = static_cast<uint32_t>(phase);
+  detail->reason = static_cast<uint32_t>(reason);
+  detail->index = index;
+  detail->aux = aux;
 }
 
 inline bool is_power_of_two(const int32_t v) noexcept {
@@ -88,25 +92,15 @@ inline bool has_tensor_id(const context & c, const int32_t tensor_id) noexcept {
 }
 
 inline bool release_allocated_buffers(context & c) noexcept {
-  bool has_allocated = false;
+  bool released_any = false;
   for (int32_t i = 0; i < k_max_chunks; ++i) {
     if (c.allocated_buffers[i] != nullptr) {
-      has_allocated = true;
-      break;
-    }
-  }
-  if (!has_allocated) {
-    return true;
-  }
-  if (c.free_buffer == nullptr) {
-    return false;
-  }
-  for (int32_t i = 0; i < k_max_chunks; ++i) {
-    if (c.allocated_buffers[i] != nullptr) {
-      c.free_buffer(c.backend_ctx, c.allocated_buffers[i]);
+      std::free(c.allocated_buffers[i]);
       c.allocated_buffers[i] = nullptr;
+      released_any = true;
     }
   }
+  (void)released_any;
   return true;
 }
 
@@ -114,30 +108,36 @@ inline bool release_allocated_buffers(context & c) noexcept {
 
 struct begin_allocate_tensors {
   void operator()(const event::allocate_tensors & ev, context & c) const noexcept {
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_OK;
+    }
+    if (ev.result_buffer_out != nullptr) {
+      *ev.result_buffer_out = nullptr;
+    }
+    if (ev.total_size_out != nullptr) {
+      *ev.total_size_out = 0;
+    }
+    if (ev.chunk_count_out != nullptr) {
+      *ev.chunk_count_out = 0;
+    }
+    if (ev.detail_out != nullptr) {
+      ev.detail_out->status = EMEL_OK;
+      ev.detail_out->domain = EMEL_ERROR_DOMAIN_TENSOR_ALLOCATOR;
+      ev.detail_out->phase = static_cast<uint32_t>(event::error_phase::none);
+      ev.detail_out->reason = static_cast<uint32_t>(event::error_reason::none);
+      ev.detail_out->index = -1;
+      ev.detail_out->aux = 0;
+    }
     c = {};
     c.tensors = ev.tensors;
     c.tensor_count = ev.tensor_count;
     c.alignment = ev.alignment;
     c.max_buffer_size = ev.max_buffer_size;
     c.no_alloc = ev.no_alloc;
-    c.backend_ctx = ev.backend_ctx;
-    c.alloc_buffer = ev.alloc_buffer;
-    c.free_buffer = ev.free_buffer;
-    c.init_tensor = ev.init_tensor;
-    c.init_view_tensor = ev.init_view_tensor;
-    c.assemble_buffers = ev.assemble_buffers;
-    c.result_buffer_out = ev.result_buffer_out;
-    c.total_size_out = ev.total_size_out;
-    c.chunk_sizes_out = ev.chunk_sizes_out;
-    c.chunk_sizes_out_count = ev.chunk_sizes_out_count;
-    c.chunk_count_out = ev.chunk_count_out;
-    c.error_out = ev.error_out;
     c.tensor_chunk_ids.fill(-1);
     c.tensor_offsets.fill(-1);
     c.allocated_buffers.fill(nullptr);
     c.result_buffer = nullptr;
-    if (c.result_buffer_out != nullptr) *c.result_buffer_out = nullptr;
-    if (c.error_out != nullptr) *c.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -149,17 +149,22 @@ struct run_validate {
       err = EMEL_ERR_INVALID_ARGUMENT;
     } else if ((c.tensor_count > 0 && c.tensors == nullptr) || !detail::is_power_of_two(c.alignment)) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (c.max_buffer_size <= 0 || c.chunk_sizes_out_count < 0) {
+    } else if (c.max_buffer_size <= 0 || ev.chunk_sizes_out_count < 0) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (c.chunk_sizes_out == nullptr && c.chunk_sizes_out_count != 0) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (
-        !c.no_alloc &&
-        (c.alloc_buffer == nullptr || c.free_buffer == nullptr || c.init_tensor == nullptr)) {
+    } else if (ev.chunk_sizes_out == nullptr && ev.chunk_sizes_out_count != 0) {
       err = EMEL_ERR_INVALID_ARGUMENT;
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
+    }
+    if (err != EMEL_OK) {
+      detail::set_error_detail(
+          ev.detail_out,
+          err,
+          event::error_phase::validate,
+          event::error_reason::invalid_argument,
+          -1,
+          0);
     }
     c.step += 1;
   }
@@ -172,12 +177,30 @@ struct run_scan_tensors {
       const auto & t = c.tensors[i];
       if (t.tensor_id < 0 || t.alloc_size < 0 || detail::has_tensor_id(c, t.tensor_id)) {
         err = EMEL_ERR_INVALID_ARGUMENT;
+        const event::error_reason reason =
+            detail::has_tensor_id(c, t.tensor_id)
+                ? event::error_reason::duplicate_tensor_id
+                : event::error_reason::invalid_argument;
+        detail::set_error_detail(
+            ev.detail_out,
+            err,
+            event::error_phase::scan_tensors,
+            reason,
+            i,
+            t.tensor_id);
         break;
       }
       c.tensor_ids[i] = t.tensor_id;
 
       if (t.is_view && t.view_src_id < 0) {
         err = EMEL_ERR_INVALID_ARGUMENT;
+        detail::set_error_detail(
+            ev.detail_out,
+            err,
+            event::error_phase::scan_tensors,
+            event::error_reason::invalid_view_source,
+            i,
+            t.view_src_id);
         break;
       }
       if (t.has_external_data || t.is_view || t.alloc_size == 0) {
@@ -188,6 +211,13 @@ struct run_scan_tensors {
       int32_t aligned = 0;
       if (!detail::align_up(t.alloc_size, c.alignment, aligned)) {
         err = EMEL_ERR_BACKEND;
+        detail::set_error_detail(
+            ev.detail_out,
+            err,
+            event::error_phase::scan_tensors,
+            event::error_reason::alignment_overflow,
+            i,
+            t.alloc_size);
         break;
       }
       c.effective_sizes[i] = aligned;
@@ -263,11 +293,25 @@ struct run_allocate_ranges {
     for (int32_t i = 0; i < c.chunk_count; ++i) {
       if (c.chunk_sizes[i] <= 0) {
         err = EMEL_ERR_BACKEND;
+        detail::set_error_detail(
+            ev.detail_out,
+            err,
+            event::error_phase::allocate_ranges,
+            event::error_reason::invalid_argument,
+            i,
+            c.chunk_sizes[i]);
         break;
       }
-      void * buffer = c.alloc_buffer(c.backend_ctx, c.chunk_sizes[i]);
+      void * buffer = std::malloc(static_cast<size_t>(c.chunk_sizes[i]));
       if (buffer == nullptr) {
         err = EMEL_ERR_BACKEND;
+        detail::set_error_detail(
+            ev.detail_out,
+            err,
+            event::error_phase::allocate_ranges,
+            event::error_reason::allocation_failed,
+            i,
+            c.chunk_sizes[i]);
         break;
       }
       c.allocated_buffers[i] = buffer;
@@ -299,14 +343,13 @@ struct run_initialize_tensors {
       if (t.is_view) {
         if (!detail::has_tensor_id(c, t.view_src_id)) {
           err = EMEL_ERR_INVALID_ARGUMENT;
-          break;
-        }
-        if (c.init_view_tensor != nullptr) {
-          const int32_t rc = c.init_view_tensor(c.backend_ctx, &t);
-          if (rc != EMEL_OK) {
-            err = detail::normalize_error(rc, EMEL_ERR_BACKEND);
-            break;
-          }
+          detail::set_error_detail(
+              ev.detail_out,
+              err,
+              event::error_phase::initialize_tensors,
+              event::error_reason::invalid_view_source,
+              i,
+              t.view_src_id);
         }
         continue;
       }
@@ -318,16 +361,37 @@ struct run_initialize_tensors {
       const int32_t offset = c.tensor_offsets[i];
       if (chunk_id < 0 || chunk_id >= c.chunk_count || offset < 0) {
         err = EMEL_ERR_BACKEND;
+        detail::set_error_detail(
+            ev.detail_out,
+            err,
+            event::error_phase::initialize_tensors,
+            event::error_reason::offset_out_of_range,
+            i,
+            offset);
         break;
       }
       void * buffer = c.allocated_buffers[chunk_id];
       if (buffer == nullptr) {
         err = EMEL_ERR_BACKEND;
+        detail::set_error_detail(
+            ev.detail_out,
+            err,
+            event::error_phase::initialize_tensors,
+            event::error_reason::allocation_failed,
+            i,
+            chunk_id);
         break;
       }
-      const int32_t rc = c.init_tensor(c.backend_ctx, &t, buffer, offset);
-      if (rc != EMEL_OK) {
-        err = detail::normalize_error(rc, EMEL_ERR_BACKEND);
+      const int32_t end_offset = detail::sat_add(offset, c.effective_sizes[i]);
+      if (end_offset <= 0 || end_offset > c.chunk_sizes[chunk_id]) {
+        err = EMEL_ERR_BACKEND;
+        detail::set_error_detail(
+            ev.detail_out,
+            err,
+            event::error_phase::initialize_tensors,
+            event::error_reason::offset_out_of_range,
+            i,
+            end_offset);
         break;
       }
     }
@@ -344,39 +408,58 @@ struct run_initialize_tensors {
 struct run_assemble {
   void operator()(const event::assemble & ev, context & c) const noexcept {
     int32_t err = EMEL_OK;
-    if (c.chunk_sizes_out != nullptr && c.chunk_sizes_out_count < c.chunk_count) {
+    c.result_buffer = nullptr;
+    if (ev.chunk_sizes_out != nullptr && ev.chunk_sizes_out_count < c.chunk_count) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else {
-      if (c.total_size_out != nullptr) *c.total_size_out = c.total_bytes;
-      if (c.chunk_count_out != nullptr) *c.chunk_count_out = c.chunk_count;
-      for (int32_t i = 0; i < c.chunk_count && c.chunk_sizes_out != nullptr; ++i) {
-        c.chunk_sizes_out[i] = c.chunk_sizes[i];
+      detail::set_error_detail(
+          ev.detail_out,
+          err,
+          event::error_phase::assemble,
+          event::error_reason::invalid_argument,
+          -1,
+          ev.chunk_sizes_out_count);
+    }
+    if (err == EMEL_OK) {
+      if (ev.total_size_out != nullptr) *ev.total_size_out = c.total_bytes;
+      if (ev.chunk_count_out != nullptr) *ev.chunk_count_out = c.chunk_count;
+      for (int32_t i = 0; i < c.chunk_count && ev.chunk_sizes_out != nullptr; ++i) {
+        ev.chunk_sizes_out[i] = c.chunk_sizes[i];
       }
-
-      if (c.result_buffer_out != nullptr) {
-        *c.result_buffer_out = nullptr;
-        if (!c.no_alloc) {
-          if (c.chunk_count == 1) {
-            c.result_buffer = c.allocated_buffers[0];
-            *c.result_buffer_out = c.result_buffer;
-          } else if (c.chunk_count > 1) {
-            if (c.assemble_buffers == nullptr) {
-              err = EMEL_ERR_INVALID_ARGUMENT;
-            } else {
-              c.result_buffer = c.assemble_buffers(c.backend_ctx, c.allocated_buffers.data(), c.chunk_count);
-              if (c.result_buffer == nullptr) {
-                err = EMEL_ERR_BACKEND;
-              } else {
-                *c.result_buffer_out = c.result_buffer;
-              }
-            }
-          }
+      if (ev.result_buffer_out != nullptr) {
+        *ev.result_buffer_out = nullptr;
+      }
+    }
+    if (err == EMEL_OK && !c.no_alloc) {
+      if (c.chunk_count == 1) {
+        c.result_buffer = c.allocated_buffers[0];
+        if (ev.result_buffer_out != nullptr) {
+          *ev.result_buffer_out = c.result_buffer;
+        }
+      } else if (c.chunk_count > 1) {
+        c.assembled_buffers.fill(nullptr);
+        for (int32_t i = 0; i < c.chunk_count; ++i) {
+          c.assembled_buffers[i] = c.allocated_buffers[i];
+        }
+        c.result_buffer = static_cast<void *>(c.assembled_buffers.data());
+        if (c.result_buffer == nullptr) {
+          err = EMEL_ERR_BACKEND;
+          detail::set_error_detail(
+              ev.detail_out,
+              err,
+              event::error_phase::assemble,
+              event::error_reason::assemble_failed,
+              -1,
+              c.chunk_count);
+        } else if (ev.result_buffer_out != nullptr) {
+          *ev.result_buffer_out = c.result_buffer;
         }
       }
     }
     if (err != EMEL_OK) {
       (void)detail::release_allocated_buffers(c);
-      if (c.result_buffer_out != nullptr) *c.result_buffer_out = nullptr;
+      if (ev.result_buffer_out != nullptr) {
+        *ev.result_buffer_out = nullptr;
+      }
       c.result_buffer = nullptr;
     }
     if (ev.error_out != nullptr) {
@@ -388,11 +471,30 @@ struct run_assemble {
 
 struct begin_release {
   void operator()(const event::release & ev, context & c) const noexcept {
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_OK;
+    }
+    if (ev.detail_out != nullptr) {
+      ev.detail_out->status = EMEL_OK;
+      ev.detail_out->domain = EMEL_ERROR_DOMAIN_TENSOR_ALLOCATOR;
+      ev.detail_out->phase = static_cast<uint32_t>(event::error_phase::none);
+      ev.detail_out->reason = static_cast<uint32_t>(event::error_reason::none);
+      ev.detail_out->index = -1;
+      ev.detail_out->aux = 0;
+    }
     const int32_t err = detail::release_allocated_buffers(c) ? EMEL_OK : EMEL_ERR_BACKEND;
     c.result_buffer = nullptr;
-    if (c.result_buffer_out != nullptr) *c.result_buffer_out = nullptr;
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
+    }
+    if (err != EMEL_OK) {
+      detail::set_error_detail(
+          ev.detail_out,
+          err,
+          event::error_phase::release,
+          event::error_reason::unknown,
+          -1,
+          0);
     }
     c.step += 1;
   }
@@ -400,14 +502,13 @@ struct begin_release {
 
 struct on_allocate_done {
   void operator()(const events::allocate_done &, context & c) const noexcept {
-    if (c.error_out != nullptr) *c.error_out = EMEL_OK;
     c.step += 1;
   }
 };
 
 struct on_allocate_error {
   void operator()(const events::allocate_error & ev, context & c) const noexcept {
-    if (c.error_out != nullptr) *c.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
+    (void)ev;
     c.step += 1;
   }
 };
@@ -421,7 +522,7 @@ struct on_release_done {
 
 struct on_release_error {
   void operator()(const events::release_error & ev, context & c) const noexcept {
-    if (c.error_out != nullptr) *c.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
+    (void)ev;
     c.step += 1;
   }
 };
@@ -429,9 +530,8 @@ struct on_release_error {
 struct record_phase_error {
   template <class ErrorEvent>
   void operator()(const ErrorEvent & ev, context & c) const noexcept {
-    if (c.error_out != nullptr) {
-      *c.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
-    }
+    (void)ev;
+    (void)c;
   }
 };
 

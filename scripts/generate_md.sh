@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_MD_DIR="$ROOT_DIR/docs/architecture/md"
+OUT_MD_DIR="$ROOT_DIR/docs/architecture"
 OUT_MERMAID_DIR="$ROOT_DIR/docs/architecture/mermaid"
 BUILD_DIR="$ROOT_DIR/build/debug"
 TMP_DIR="$(mktemp -d)"

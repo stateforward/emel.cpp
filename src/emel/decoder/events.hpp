@@ -18,6 +18,7 @@ struct decode {
   int32_t n_ubatch = 0;
   void * owner_sm = nullptr;
   bool (*dispatch_event)(void * owner_sm, const events::owner_event &) = nullptr;
+  int32_t * error_out = nullptr;
 };
 
 struct validate {
@@ -47,10 +48,12 @@ struct reserve_output {
 
 struct process_ubatch {
   int32_t * error_out = nullptr;
+  bool * rollback_needed_out = nullptr;
 };
 
 struct rollback_ubatch {
   int32_t * error_out = nullptr;
+  bool rollback_needed = false;
 };
 
 struct finalize_outputs {
@@ -61,61 +64,98 @@ struct finalize_outputs {
 
 namespace emel::decoder::events {
 
-struct validate_done {};
+struct validate_done {
+  const event::decode * request = nullptr;
+};
 struct validate_error {
   int32_t err = 0;
+  const event::decode * request = nullptr;
 };
 
-struct initialize_batch_done {};
+struct initialize_batch_done {
+  const event::decode * request = nullptr;
+};
 struct initialize_batch_error {
   int32_t err = 0;
+  const event::decode * request = nullptr;
 };
 
-struct update_memory_done {};
+struct update_memory_done {
+  const event::decode * request = nullptr;
+};
 struct update_memory_error {
   int32_t err = 0;
+  const event::decode * request = nullptr;
 };
 
-struct prepare_memory_batch_done {};
+struct prepare_memory_batch_done {
+  const event::decode * request = nullptr;
+};
 struct prepare_memory_batch_retryable_error {
   int32_t err = 0;
+  const event::decode * request = nullptr;
 };
-
 struct prepare_memory_batch_permanent_error {
   int32_t err = 0;
+  const event::decode * request = nullptr;
 };
 
-struct optimize_memory_done {};
+struct optimize_memory_done {
+  const event::decode * request = nullptr;
+};
 struct optimize_memory_error {
   int32_t err = 0;
+  const event::decode * request = nullptr;
 };
 
-struct reserve_output_done {};
+struct reserve_output_done {
+  const event::decode * request = nullptr;
+};
 struct reserve_output_error {
   int32_t err = 0;
+  const event::decode * request = nullptr;
 };
 
-struct ubatch_done {};
+struct ubatch_done {
+  const event::decode * request = nullptr;
+};
 struct ubatch_error {
   int32_t err = 0;
+  bool rollback_needed = false;
+  const event::decode * request = nullptr;
 };
 
-struct rollback_done {};
+struct rollback_done {
+  int32_t err = 0;
+  const event::decode * request = nullptr;
+};
 struct rollback_error {
   int32_t err = 0;
+  const event::decode * request = nullptr;
 };
 
-struct finalize_outputs_done {};
+struct finalize_outputs_done {
+  const event::decode * request = nullptr;
+};
 struct finalize_outputs_error {
   int32_t err = 0;
+  const event::decode * request = nullptr;
 };
 
 struct decoding_done {
   int32_t outputs = 0;
+  int32_t * error_out = nullptr;
+  void * owner_sm = nullptr;
+  bool (*dispatch_event)(void * owner_sm, const events::owner_event &) = nullptr;
+  const event::decode * request = nullptr;
 };
 
 struct decoding_error {
   int32_t err = 0;
+  int32_t * error_out = nullptr;
+  void * owner_sm = nullptr;
+  bool (*dispatch_event)(void * owner_sm, const events::owner_event &) = nullptr;
+  const event::decode * request = nullptr;
 };
 
 struct owner_event {

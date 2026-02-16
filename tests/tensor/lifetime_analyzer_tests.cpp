@@ -186,47 +186,74 @@ TEST_CASE("lifetime_analyzer_action_validate_covers_error_combinations") {
     },
   }};
 
-  c.tensors = tensors.data();
-  c.tensor_count = 1;
-  c.ranges_out_count = 1;
   int32_t first = -1;
   int32_t last = -1;
-  c.first_use_out = &first;
-  c.last_use_out = &last;
 
   int32_t err = EMEL_OK;
   emel::tensor::lifetime_analyzer::action::run_validate(
-      emel::tensor::lifetime_analyzer::event::validate{.error_out = &err}, c);
+      emel::tensor::lifetime_analyzer::event::validate{
+        .tensors = tensors.data(),
+        .tensor_count = 1,
+        .first_use_out = &first,
+        .last_use_out = &last,
+        .ranges_out_count = 1,
+        .error_out = &err,
+      }, c);
   CHECK(err == EMEL_OK);
 
-  c.tensor_count = -1;
   emel::tensor::lifetime_analyzer::action::run_validate(
-      emel::tensor::lifetime_analyzer::event::validate{.error_out = &err}, c);
+      emel::tensor::lifetime_analyzer::event::validate{
+        .tensors = tensors.data(),
+        .tensor_count = -1,
+        .first_use_out = &first,
+        .last_use_out = &last,
+        .ranges_out_count = 1,
+        .error_out = &err,
+      }, c);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
-  c.tensor_count = 1;
-  c.tensors = nullptr;
   emel::tensor::lifetime_analyzer::action::run_validate(
-      emel::tensor::lifetime_analyzer::event::validate{.error_out = &err}, c);
+      emel::tensor::lifetime_analyzer::event::validate{
+        .tensors = nullptr,
+        .tensor_count = 1,
+        .first_use_out = &first,
+        .last_use_out = &last,
+        .ranges_out_count = 1,
+        .error_out = &err,
+      }, c);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
-  c.tensors = tensors.data();
-  c.ranges_out_count = -1;
   emel::tensor::lifetime_analyzer::action::run_validate(
-      emel::tensor::lifetime_analyzer::event::validate{.error_out = &err}, c);
+      emel::tensor::lifetime_analyzer::event::validate{
+        .tensors = tensors.data(),
+        .tensor_count = 1,
+        .first_use_out = &first,
+        .last_use_out = &last,
+        .ranges_out_count = -1,
+        .error_out = &err,
+      }, c);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
-  c.ranges_out_count = 1;
-  c.first_use_out = nullptr;
   emel::tensor::lifetime_analyzer::action::run_validate(
-      emel::tensor::lifetime_analyzer::event::validate{.error_out = &err}, c);
+      emel::tensor::lifetime_analyzer::event::validate{
+        .tensors = tensors.data(),
+        .tensor_count = 1,
+        .first_use_out = nullptr,
+        .last_use_out = &last,
+        .ranges_out_count = 1,
+        .error_out = &err,
+      }, c);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
-  c.first_use_out = &first;
-  c.last_use_out = &last;
-  c.ranges_out_count = 0;
   emel::tensor::lifetime_analyzer::action::run_validate(
-      emel::tensor::lifetime_analyzer::event::validate{.error_out = &err}, c);
+      emel::tensor::lifetime_analyzer::event::validate{
+        .tensors = tensors.data(),
+        .tensor_count = 1,
+        .first_use_out = &first,
+        .last_use_out = &last,
+        .ranges_out_count = 0,
+        .error_out = &err,
+      }, c);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
@@ -244,10 +271,22 @@ TEST_CASE("lifetime_analyzer_action_collect_ranges_error_paths") {
     },
   }};
   emel::tensor::lifetime_analyzer::action::context c{};
-  c.tensors = missing_src.data();
-  c.tensor_count = 1;
+  emel::tensor::lifetime_analyzer::action::run_validate(
+      emel::tensor::lifetime_analyzer::event::validate{
+        .tensors = missing_src.data(),
+        .tensor_count = 1,
+        .first_use_out = nullptr,
+        .last_use_out = nullptr,
+        .ranges_out_count = 0,
+        .error_out = &err,
+      }, c);
+  CHECK(err == EMEL_OK);
   emel::tensor::lifetime_analyzer::action::run_collect_ranges(
-      emel::tensor::lifetime_analyzer::event::collect_ranges{.error_out = &err}, c);
+      emel::tensor::lifetime_analyzer::event::collect_ranges{
+        .tensors = missing_src.data(),
+        .tensor_count = 1,
+        .error_out = &err,
+      }, c);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   std::array<tensor_desc, 2> duplicate_ids = {{
@@ -269,10 +308,23 @@ TEST_CASE("lifetime_analyzer_action_collect_ranges_error_paths") {
     },
   }};
   c = {};
-  c.tensors = duplicate_ids.data();
-  c.tensor_count = static_cast<int32_t>(duplicate_ids.size());
+  err = EMEL_OK;
+  emel::tensor::lifetime_analyzer::action::run_validate(
+      emel::tensor::lifetime_analyzer::event::validate{
+        .tensors = duplicate_ids.data(),
+        .tensor_count = static_cast<int32_t>(duplicate_ids.size()),
+        .first_use_out = nullptr,
+        .last_use_out = nullptr,
+        .ranges_out_count = 0,
+        .error_out = &err,
+      }, c);
+  CHECK(err == EMEL_OK);
   emel::tensor::lifetime_analyzer::action::run_collect_ranges(
-      emel::tensor::lifetime_analyzer::event::collect_ranges{.error_out = &err}, c);
+      emel::tensor::lifetime_analyzer::event::collect_ranges{
+        .tensors = duplicate_ids.data(),
+        .tensor_count = static_cast<int32_t>(duplicate_ids.size()),
+        .error_out = &err,
+      }, c);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   std::array<tensor_desc, 2> non_exec_view_parent = {{
@@ -294,10 +346,23 @@ TEST_CASE("lifetime_analyzer_action_collect_ranges_error_paths") {
     },
   }};
   c = {};
-  c.tensors = non_exec_view_parent.data();
-  c.tensor_count = static_cast<int32_t>(non_exec_view_parent.size());
+  err = EMEL_OK;
+  emel::tensor::lifetime_analyzer::action::run_validate(
+      emel::tensor::lifetime_analyzer::event::validate{
+        .tensors = non_exec_view_parent.data(),
+        .tensor_count = static_cast<int32_t>(non_exec_view_parent.size()),
+        .first_use_out = nullptr,
+        .last_use_out = nullptr,
+        .ranges_out_count = 0,
+        .error_out = &err,
+      }, c);
+  CHECK(err == EMEL_OK);
   emel::tensor::lifetime_analyzer::action::run_collect_ranges(
-      emel::tensor::lifetime_analyzer::event::collect_ranges{.error_out = &err}, c);
+      emel::tensor::lifetime_analyzer::event::collect_ranges{
+        .tensors = non_exec_view_parent.data(),
+        .tensor_count = static_cast<int32_t>(non_exec_view_parent.size()),
+        .error_out = &err,
+      }, c);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
@@ -310,37 +375,40 @@ TEST_CASE("lifetime_analyzer_action_publish_and_outcome_handlers") {
   c.last_use[1] = 4;
   int32_t first[2] = {-1, -1};
   int32_t last[2] = {-1, -1};
-  c.first_use_out = first;
-  c.last_use_out = last;
 
   int32_t err = -1;
   emel::tensor::lifetime_analyzer::action::run_publish(
-      emel::tensor::lifetime_analyzer::event::publish{.error_out = &err}, c);
+      emel::tensor::lifetime_analyzer::event::publish{
+        .first_use_out = first,
+        .last_use_out = last,
+        .ranges_out_count = 2,
+        .error_out = &err,
+      }, c);
   CHECK(err == EMEL_OK);
   CHECK(first[0] == 1);
   CHECK(last[1] == 4);
 
-  int32_t boundary_err = -1;
-  c.error_out = &boundary_err;
+  const uint32_t step = c.step;
   emel::tensor::lifetime_analyzer::action::on_analyze_done(
       emel::tensor::lifetime_analyzer::events::analyze_done{}, c);
-  CHECK(boundary_err == EMEL_OK);
+  CHECK(c.step == step + 1);
 
   emel::tensor::lifetime_analyzer::action::on_analyze_error(
       emel::tensor::lifetime_analyzer::events::analyze_error{.err = EMEL_ERR_INVALID_ARGUMENT}, c);
-  CHECK(boundary_err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(c.step == step + 2);
 
   emel::tensor::lifetime_analyzer::action::on_reset_error(
       emel::tensor::lifetime_analyzer::events::reset_error{.err = EMEL_ERR_BACKEND}, c);
-  CHECK(boundary_err == EMEL_ERR_BACKEND);
+  CHECK(c.step == step + 3);
 
   emel::tensor::lifetime_analyzer::action::record_phase_error(
       emel::tensor::lifetime_analyzer::events::collect_ranges_error{.err = EMEL_ERR_INVALID_ARGUMENT}, c);
-  CHECK(boundary_err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(c.step == step + 4);
 
   emel::tensor::lifetime_analyzer::action::on_reset_done(
       emel::tensor::lifetime_analyzer::events::reset_done{}, c);
   CHECK(c.tensor_count == 0);
+  CHECK(c.step == 1);
 }
 
 TEST_CASE("lifetime_analyzer_reports_missing_dependency") {

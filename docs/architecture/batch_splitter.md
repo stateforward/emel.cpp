@@ -1,0 +1,59 @@
+# batch_splitter
+
+Source: `emel/batch/splitter/sm.hpp`
+
+## Mermaid
+
+```mermaid
+stateDiagram-v2
+  [*] --> emel::batch::splitter::initialized
+  emel::batch::splitter::initialized --> emel::batch::splitter::validating : emel::batch::splitter::event::split [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:29:37)>
+  emel::batch::splitter::validating --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:45:11)>
+  emel::batch::splitter::validating --> emel::batch::splitter::validating : emel::batch::splitter::event::validate [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:52:38)>
+  emel::batch::splitter::validating --> emel::batch::splitter::normalizing_batch : emel::batch::splitter::events::validate_done [boost::sml::front::always] / boost::sml::front::none
+  emel::batch::splitter::validating --> emel::batch::splitter::errored : emel::batch::splitter::events::validate_error [boost::sml::front::always] / boost::sml::front::none
+  emel::batch::splitter::normalizing_batch --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:80:11)>
+  emel::batch::splitter::normalizing_batch --> emel::batch::splitter::normalizing_batch : emel::batch::splitter::event::normalize_batch [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:77:45)>
+  emel::batch::splitter::normalizing_batch --> emel::batch::splitter::splitting : emel::batch::splitter::events::normalize_done [boost::sml::front::always] / boost::sml::front::none
+  emel::batch::splitter::normalizing_batch --> emel::batch::splitter::errored : emel::batch::splitter::events::normalize_error [boost::sml::front::always] / boost::sml::front::none
+  emel::batch::splitter::splitting --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:103:11)>
+  emel::batch::splitter::splitting --> emel::batch::splitter::splitting : emel::batch::splitter::event::create_ubatches [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:110:45)>
+  emel::batch::splitter::splitting --> emel::batch::splitter::publishing : emel::batch::splitter::events::split_done [boost::sml::front::always] / boost::sml::front::none
+  emel::batch::splitter::splitting --> emel::batch::splitter::errored : emel::batch::splitter::events::split_error [boost::sml::front::always] / boost::sml::front::none
+  emel::batch::splitter::publishing --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:126:11)>
+  emel::batch::splitter::publishing --> emel::batch::splitter::publishing : emel::batch::splitter::event::publish [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:326:37)>
+  emel::batch::splitter::publishing --> emel::batch::splitter::done : emel::batch::splitter::events::publish_done [boost::sml::front::always] / boost::sml::front::none
+  emel::batch::splitter::publishing --> emel::batch::splitter::errored : emel::batch::splitter::events::publish_error [boost::sml::front::always] / boost::sml::front::none
+  emel::batch::splitter::done --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:148:11)>
+  emel::batch::splitter::done --> emel::batch::splitter::initialized : emel::batch::splitter::events::splitting_done [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:332:43)>
+  emel::batch::splitter::done --> emel::batch::splitter::initialized : emel::batch::splitter::events::splitting_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:352:44)>
+  emel::batch::splitter::errored --> boost::sml::front::internal : on_entry [boost::sml::front::always] / boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:175:11)>
+  emel::batch::splitter::errored --> emel::batch::splitter::initialized : emel::batch::splitter::events::splitting_error [boost::sml::front::always] / boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:352:44)>
+```
+
+## Transitions
+
+| Source | Event | Guard | Action | Target |
+| --- | --- | --- | --- | --- |
+| `emel::batch::splitter::initialized` | `emel::batch::splitter::event::split` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:29:37)>` | `emel::batch::splitter::validating` |
+| `emel::batch::splitter::validating` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:45:11)>` | `boost::sml::front::internal` |
+| `emel::batch::splitter::validating` | `emel::batch::splitter::event::validate` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:52:38)>` | `emel::batch::splitter::validating` |
+| `emel::batch::splitter::validating` | `emel::batch::splitter::events::validate_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::batch::splitter::normalizing_batch` |
+| `emel::batch::splitter::validating` | `emel::batch::splitter::events::validate_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::batch::splitter::errored` |
+| `emel::batch::splitter::normalizing_batch` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:80:11)>` | `boost::sml::front::internal` |
+| `emel::batch::splitter::normalizing_batch` | `emel::batch::splitter::event::normalize_batch` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:77:45)>` | `emel::batch::splitter::normalizing_batch` |
+| `emel::batch::splitter::normalizing_batch` | `emel::batch::splitter::events::normalize_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::batch::splitter::splitting` |
+| `emel::batch::splitter::normalizing_batch` | `emel::batch::splitter::events::normalize_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::batch::splitter::errored` |
+| `emel::batch::splitter::splitting` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:103:11)>` | `boost::sml::front::internal` |
+| `emel::batch::splitter::splitting` | `emel::batch::splitter::event::create_ubatches` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:110:45)>` | `emel::batch::splitter::splitting` |
+| `emel::batch::splitter::splitting` | `emel::batch::splitter::events::split_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::batch::splitter::publishing` |
+| `emel::batch::splitter::splitting` | `emel::batch::splitter::events::split_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::batch::splitter::errored` |
+| `emel::batch::splitter::publishing` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:126:11)>` | `boost::sml::front::internal` |
+| `emel::batch::splitter::publishing` | `emel::batch::splitter::event::publish` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:326:37)>` | `emel::batch::splitter::publishing` |
+| `emel::batch::splitter::publishing` | `emel::batch::splitter::events::publish_done` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::batch::splitter::done` |
+| `emel::batch::splitter::publishing` | `emel::batch::splitter::events::publish_error` | `boost::sml::front::always` | `boost::sml::front::none` | `emel::batch::splitter::errored` |
+| `emel::batch::splitter::done` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:148:11)>` | `boost::sml::front::internal` |
+| `emel::batch::splitter::done` | `emel::batch::splitter::events::splitting_done` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:332:43)>` | `emel::batch::splitter::initialized` |
+| `emel::batch::splitter::done` | `emel::batch::splitter::events::splitting_error` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:352:44)>` | `emel::batch::splitter::initialized` |
+| `emel::batch::splitter::errored` | `on_entry` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/sm.hpp:175:11)>` | `boost::sml::front::internal` |
+| `emel::batch::splitter::errored` | `emel::batch::splitter::events::splitting_error` | `boost::sml::front::always` | `boost::sml::aux::zero_wrapper<emel::batch::splitter::action::(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/src/emel/batch/splitter/actions.hpp:352:44)>` | `emel::batch::splitter::initialized` |

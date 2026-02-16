@@ -1,0 +1,29 @@
+@startuml
+
+[*] --> emel::telemetry::provider::initialized
+emel::telemetry::provider::initialized --> emel::telemetry::provider::configuring : emel::telemetry::provider::event::configure
+emel::telemetry::provider::configuring --> boost::sml::front::internal : on_entry
+emel::telemetry::provider::configuring --> emel::telemetry::provider::configuring : emel::telemetry::provider::event::validate_config
+emel::telemetry::provider::configuring --> emel::telemetry::provider::initialized : emel::telemetry::provider::events::configure_done
+emel::telemetry::provider::configuring --> emel::telemetry::provider::errored : emel::telemetry::provider::events::configure_error
+emel::telemetry::provider::initialized --> emel::telemetry::provider::starting : emel::telemetry::provider::event::start
+emel::telemetry::provider::starting --> boost::sml::front::internal : on_entry
+emel::telemetry::provider::starting --> emel::telemetry::provider::starting : emel::telemetry::provider::event::run_start
+emel::telemetry::provider::starting --> emel::telemetry::provider::running : emel::telemetry::provider::events::start_done
+emel::telemetry::provider::starting --> emel::telemetry::provider::errored : emel::telemetry::provider::events::start_error
+emel::telemetry::provider::running --> emel::telemetry::provider::publishing : emel::telemetry::provider::event::publish
+emel::telemetry::provider::publishing --> boost::sml::front::internal : on_entry
+emel::telemetry::provider::publishing --> emel::telemetry::provider::publishing : emel::telemetry::provider::event::publish_record
+emel::telemetry::provider::publishing --> emel::telemetry::provider::running : emel::telemetry::provider::events::publish_record_done
+emel::telemetry::provider::publishing --> emel::telemetry::provider::errored : emel::telemetry::provider::events::publish_record_error
+emel::telemetry::provider::running --> emel::telemetry::provider::stopping : emel::telemetry::provider::event::stop
+emel::telemetry::provider::initialized --> emel::telemetry::provider::stopping : emel::telemetry::provider::event::stop
+emel::telemetry::provider::errored --> emel::telemetry::provider::stopping : emel::telemetry::provider::event::stop
+emel::telemetry::provider::stopping --> boost::sml::front::internal : on_entry
+emel::telemetry::provider::stopping --> emel::telemetry::provider::stopping : emel::telemetry::provider::event::run_stop
+emel::telemetry::provider::stopping --> emel::telemetry::provider::initialized : emel::telemetry::provider::events::stop_done
+emel::telemetry::provider::stopping --> emel::telemetry::provider::errored : emel::telemetry::provider::events::stop_error
+emel::telemetry::provider::initialized --> emel::telemetry::provider::initialized : emel::telemetry::provider::event::reset
+emel::telemetry::provider::errored --> emel::telemetry::provider::initialized : emel::telemetry::provider::event::reset
+
+@enduml
