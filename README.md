@@ -54,29 +54,29 @@ environments, while Zig remains the default for day-to-day builds.
 
 ## State machine reference
 
-- `docs/architecture/batch_splitter.md`
-- `docs/architecture/buffer_allocator.md`
-- `docs/architecture/buffer_chunk_allocator.md`
-- `docs/architecture/buffer_planner.md`
-- `docs/architecture/buffer_realloc_analyzer.md`
-- `docs/architecture/decoder_compute_executor.md`
-- `docs/architecture/decoder.md`
-- `docs/architecture/decoder_ubatch_executor.md`
-- `docs/architecture/encoder.md`
-- `docs/architecture/generator.md`
-- `docs/architecture/kv_cache.md`
-- `docs/architecture/memory_coordinator.md`
-- `docs/architecture/model_loader.md`
-- `docs/architecture/model_parser.md`
-- `docs/architecture/model_weight_loader.md`
-- `docs/architecture/sampler_candidate_builder.md`
-- `docs/architecture/sampler_pipeline.md`
-- `docs/architecture/sampler_token_selector.md`
-- `docs/architecture/telemetry_exporter.md`
-- `docs/architecture/telemetry_provider.md`
-- `docs/architecture/tensor_allocator.md`
-- `docs/architecture/tensor_lifetime_analyzer.md`
-- `docs/architecture/tokenizer.md`
+- [`docs/architecture/batch_splitter.md`](docs/architecture/batch_splitter.md)
+- [`docs/architecture/buffer_allocator.md`](docs/architecture/buffer_allocator.md)
+- [`docs/architecture/buffer_chunk_allocator.md`](docs/architecture/buffer_chunk_allocator.md)
+- [`docs/architecture/buffer_planner.md`](docs/architecture/buffer_planner.md)
+- [`docs/architecture/buffer_realloc_analyzer.md`](docs/architecture/buffer_realloc_analyzer.md)
+- [`docs/architecture/decoder_compute_executor.md`](docs/architecture/decoder_compute_executor.md)
+- [`docs/architecture/decoder.md`](docs/architecture/decoder.md)
+- [`docs/architecture/decoder_ubatch_executor.md`](docs/architecture/decoder_ubatch_executor.md)
+- [`docs/architecture/encoder.md`](docs/architecture/encoder.md)
+- [`docs/architecture/generator.md`](docs/architecture/generator.md)
+- [`docs/architecture/kv_cache.md`](docs/architecture/kv_cache.md)
+- [`docs/architecture/memory_coordinator.md`](docs/architecture/memory_coordinator.md)
+- [`docs/architecture/model_loader.md`](docs/architecture/model_loader.md)
+- [`docs/architecture/model_parser.md`](docs/architecture/model_parser.md)
+- [`docs/architecture/model_weight_loader.md`](docs/architecture/model_weight_loader.md)
+- [`docs/architecture/sampler_candidate_builder.md`](docs/architecture/sampler_candidate_builder.md)
+- [`docs/architecture/sampler_pipeline.md`](docs/architecture/sampler_pipeline.md)
+- [`docs/architecture/sampler_token_selector.md`](docs/architecture/sampler_token_selector.md)
+- [`docs/architecture/telemetry_exporter.md`](docs/architecture/telemetry_exporter.md)
+- [`docs/architecture/telemetry_provider.md`](docs/architecture/telemetry_provider.md)
+- [`docs/architecture/tensor_allocator.md`](docs/architecture/tensor_allocator.md)
+- [`docs/architecture/tensor_lifetime_analyzer.md`](docs/architecture/tensor_lifetime_analyzer.md)
+- [`docs/architecture/tokenizer.md`](docs/architecture/tokenizer.md)
 
 ## Regenerating docs
 

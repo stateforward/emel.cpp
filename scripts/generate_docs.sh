@@ -23,7 +23,7 @@ machine_toc() {
     local rel_emel="${h#"$ROOT_DIR/src/emel/"}"
     local dir="${rel_emel%/sm.hpp}"
     local name="${dir//\//_}"
-    echo "- \`docs/architecture/$name.md\`"
+    echo "- [\`docs/architecture/$name.md\`](docs/architecture/$name.md)"
   done
 }
 
