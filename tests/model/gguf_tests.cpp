@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -318,6 +319,82 @@ bool write_header(std::FILE * file, const uint32_t version, const int64_t n_tens
   if (!write_i64(file, n_tensors) || !write_i64(file, n_kv)) {
     return false;
   }
+  return true;
+}
+
+bool write_tensor_info(std::FILE * file, const char * name, const int32_t type,
+                       const std::array<int64_t, 4> & dims, const uint64_t offset);
+
+bool write_split_gguf(const char * path, const uint32_t split_count, const uint32_t split_no,
+                      const uint32_t split_tensors_count) {
+  std::FILE * file = std::fopen(path, "wb");
+  if (file == nullptr) {
+    return false;
+  }
+  const int64_t n_tensors = 1;
+  const int64_t n_kv = 3;
+  if (!write_header(file, emel::model::gguf::k_gguf_version, n_tensors, n_kv)) {
+    std::fclose(file);
+    return false;
+  }
+  if (!write_kv_u32(file, emel::model::gguf::k_key_split_count, split_count)) {
+    std::fclose(file);
+    return false;
+  }
+  if (!write_kv_u32(file, emel::model::gguf::k_key_split_no, split_no)) {
+    std::fclose(file);
+    return false;
+  }
+  if (!write_kv_u32(file, emel::model::gguf::k_key_split_tensors, split_tensors_count)) {
+    std::fclose(file);
+    return false;
+  }
+  std::array<int64_t, 4> dims = {1, 1, 1, 1};
+  const int32_t type_raw = static_cast<int32_t>(emel::model::gguf::tensor_type::k_f32);
+  if (!write_tensor_info(file, "weight", type_raw, dims, 0)) {
+    std::fclose(file);
+    return false;
+  }
+  const long pos = std::ftell(file);
+  if (pos < 0) {
+    std::fclose(file);
+    return false;
+  }
+  const uint64_t aligned =
+    emel::model::gguf::align_up_u64(static_cast<uint64_t>(pos),
+                                    emel::model::gguf::k_default_alignment);
+  const uint64_t padding = aligned - static_cast<uint64_t>(pos);
+  if (padding > 0) {
+    std::array<uint8_t, 64> zeros = {};
+    uint64_t remaining = padding;
+    while (remaining > 0) {
+      const size_t chunk = static_cast<size_t>(std::min<uint64_t>(remaining, zeros.size()));
+      if (std::fwrite(zeros.data(), 1, chunk, file) != chunk) {
+        std::fclose(file);
+        return false;
+      }
+      remaining -= chunk;
+    }
+  }
+  uint64_t tensor_bytes = 0;
+  if (!emel::model::gguf::compute_tensor_size(dims,
+                                              emel::model::gguf::tensor_type::k_f32,
+                                              tensor_bytes)) {
+    std::fclose(file);
+    return false;
+  }
+  uint64_t data_bytes =
+    emel::model::gguf::align_up_u64(tensor_bytes, emel::model::gguf::k_default_alignment);
+  std::array<uint8_t, 64> zeros = {};
+  while (data_bytes > 0) {
+    const size_t chunk = static_cast<size_t>(std::min<uint64_t>(data_bytes, zeros.size()));
+    if (std::fwrite(zeros.data(), 1, chunk, file) != chunk) {
+      std::fclose(file);
+      return false;
+    }
+    data_bytes -= chunk;
+  }
+  std::fclose(file);
   return true;
 }
 
@@ -1036,6 +1113,138 @@ TEST_CASE("gguf loader reports upload end failure") {
   CHECK(err == EMEL_ERR_BACKEND);
 
   std::remove(path);
+}
+
+TEST_CASE("gguf validate_split_metadata rejects invalid values") {
+  using emel::model::gguf::validate_split_metadata;
+
+  emel::model::gguf::context ctx{};
+  int32_t err = EMEL_OK;
+
+  ctx.split_count = 0;
+  ctx.split_no = 0;
+  ctx.split_tensors_count = 0;
+  CHECK(!validate_split_metadata(ctx, 1, err));
+  CHECK(err == EMEL_ERR_MODEL_INVALID);
+
+  ctx.split_count = 2;
+  ctx.split_no = 2;
+  ctx.split_tensors_count = 1;
+  err = EMEL_OK;
+  CHECK(!validate_split_metadata(ctx, 1, err));
+  CHECK(err == EMEL_ERR_MODEL_INVALID);
+
+  ctx.split_count = 1;
+  ctx.split_no = 1;
+  ctx.split_tensors_count = 1;
+  err = EMEL_OK;
+  CHECK(!validate_split_metadata(ctx, 1, err));
+  CHECK(err == EMEL_ERR_MODEL_INVALID);
+
+  ctx.split_count = 1;
+  ctx.split_no = 0;
+  ctx.split_tensors_count = 2;
+  err = EMEL_OK;
+  CHECK(!validate_split_metadata(ctx, 1, err));
+  CHECK(err == EMEL_ERR_MODEL_INVALID);
+
+  ctx.split_count = 1;
+  ctx.split_no = 0;
+  ctx.split_tensors_count = 1;
+  err = EMEL_OK;
+  CHECK(validate_split_metadata(ctx, 1, err));
+  CHECK(err == EMEL_OK);
+
+  CHECK(emel::model::gguf::is_little_endian());
+}
+
+TEST_CASE("gguf map_parser rejects negative kv count") {
+  char path[1024] = {};
+  CHECK(make_temp_path(path, sizeof(path)));
+
+  std::FILE * file = std::fopen(path, "wb");
+  REQUIRE(file != nullptr);
+  CHECK(write_header(file, emel::model::gguf::k_gguf_version, 0, -1));
+  std::fclose(file);
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_ERR_MODEL_INVALID);
+
+  std::remove(path);
+}
+
+TEST_CASE("gguf map_parser rejects negative tensor count") {
+  char path[1024] = {};
+  CHECK(make_temp_path(path, sizeof(path)));
+
+  std::FILE * file = std::fopen(path, "wb");
+  REQUIRE(file != nullptr);
+  CHECK(write_header(file, emel::model::gguf::k_gguf_version, -1, 0));
+  std::fclose(file);
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_ERR_MODEL_INVALID);
+
+  std::remove(path);
+}
+
+TEST_CASE("gguf map_parser rejects invalid split metadata") {
+  char base_path[1024] = {};
+  CHECK(make_temp_path(base_path, sizeof(base_path)));
+  char path[1024] = {};
+  std::snprintf(path, sizeof(path), "%s.gguf", base_path);
+  CHECK(write_split_gguf(path, 1, 1, 1));
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_ERR_MODEL_INVALID);
+
+  std::remove(path);
+}
+
+TEST_CASE("gguf map_parser rejects mismatched split metadata") {
+  char base_path[1024] = {};
+  CHECK(make_temp_path(base_path, sizeof(base_path)));
+  char path[1024] = {};
+  std::snprintf(path, sizeof(path), "%s.gguf", base_path);
+  CHECK(write_split_gguf(path, 2, 0, 1));
+
+  char split_path[1024] = {};
+  CHECK(emel::model::gguf::format_split_path(path, 1, 2, split_path, sizeof(split_path)));
+  CHECK(write_split_gguf(split_path, 2, 0, 1));
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_ERR_MODEL_INVALID);
+
+  std::remove(path);
+  std::remove(split_path);
 }
 
 #if !defined(__linux__)

@@ -385,6 +385,11 @@ inline bool add_overflow_u64(const uint64_t lhs, const uint64_t rhs, uint64_t & 
   return false;
 }
 
+inline bool is_little_endian() noexcept {
+  const uint16_t value = 0x1;
+  return *reinterpret_cast<const uint8_t *>(&value) == 1;
+}
+
 inline bool key_equals(const char * key, const uint64_t len, const char * literal) noexcept {
   const size_t lit_len = std::strlen(literal);
   if (len != lit_len) {
@@ -958,6 +963,32 @@ inline bool parse_header(
     return false;
   }
   if (!r.read(n_kv)) {
+    return false;
+  }
+  return true;
+}
+
+inline bool validate_split_metadata(const context & ctx, const int64_t n_tensors,
+                                    int32_t & out_error) noexcept {
+  if (n_tensors < 0) {
+    out_error = EMEL_ERR_MODEL_INVALID;
+    return false;
+  }
+  if (ctx.split_count == 0 || ctx.split_count > emel::model::data::k_max_split_files) {
+    out_error = EMEL_ERR_MODEL_INVALID;
+    return false;
+  }
+  if (ctx.split_no >= ctx.split_count) {
+    out_error = EMEL_ERR_MODEL_INVALID;
+    return false;
+  }
+  if (ctx.split_count == 1 && ctx.split_no != 0) {
+    out_error = EMEL_ERR_MODEL_INVALID;
+    return false;
+  }
+  if (ctx.split_tensors_count != 0 &&
+      ctx.split_tensors_count != static_cast<uint16_t>(n_tensors)) {
+    out_error = EMEL_ERR_MODEL_INVALID;
     return false;
   }
   return true;
@@ -1788,6 +1819,12 @@ inline bool map_parser(const emel::model::loader::event::load & ev, int32_t * er
   if (err_out != nullptr) {
     *err_out = EMEL_OK;
   }
+  if (!is_little_endian()) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_FORMAT_UNSUPPORTED;
+    }
+    return false;
+  }
   context * ctx = get_context(ev.format_ctx);
   if (ctx == nullptr) {
     if (err_out != nullptr) {
@@ -1831,8 +1868,22 @@ inline bool map_parser(const emel::model::loader::event::load & ev, int32_t * er
     reset_context(*ctx);
     return false;
   }
+  if (n_tensors < 0 || n_kv < 0) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_MODEL_INVALID;
+    }
+    reset_context(*ctx);
+    return false;
+  }
   int32_t parse_error = EMEL_OK;
   if (!parse_kv(r, *ctx, ev.model_data, n_kv, parse_error)) {
+    if (err_out != nullptr) {
+      *err_out = parse_error;
+    }
+    reset_context(*ctx);
+    return false;
+  }
+  if (!validate_split_metadata(*ctx, n_tensors, parse_error)) {
     if (err_out != nullptr) {
       *err_out = parse_error;
     }
@@ -1919,6 +1970,16 @@ inline bool map_parser(const emel::model::loader::event::load & ev, int32_t * er
         std::fclose(split_ctx.file);
         if (err_out != nullptr) {
           *err_out = parse_error;
+        }
+        reset_context(*ctx);
+        return false;
+      }
+      if (!validate_split_metadata(split_ctx, split_tensors, parse_error) ||
+          split_ctx.split_count != ctx->split_count ||
+          split_ctx.split_no != split_idx) {
+        std::fclose(split_ctx.file);
+        if (err_out != nullptr) {
+          *err_out = parse_error == EMEL_OK ? EMEL_ERR_MODEL_INVALID : parse_error;
         }
         reset_context(*ctx);
         return false;

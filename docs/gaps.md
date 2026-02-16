@@ -30,20 +30,11 @@ Model loader audit (llama.cpp parity)
   and error propagation via `events::*_error` / `events::*_done`.
 - Loader dispatches parsing and weight loading through parser/weight_loader state machines and
   supports `vocab_only`, `check_tensors`, `no_alloc`, and optional architecture validation.
-- Status: partially implemented, behavior parity not yet achieved.
-- Remaining gaps to close for loader parity:
-- GGUF header and metadata validation: magic/version, endian, KV/tensor counts, alignment rules,
-  and file offsets need concrete parsing and validation paths.
-- Split-file discovery and validation: sharded file detection, shard order, and cross-file metadata
-  consistency are not implemented.
-- I/O strategy parity: mmap vs stream selection, sequential read paths, and error handling must be
-  ported into parser/weight-loader callbacks.
-- Tensor data mapping lifecycle: tensor index lookup, range checks, offset mapping, and
-  buffer-to-tensor binding are incomplete.
-- Progress callbacks and reporting: load progress, warnings, and detailed error classification are
-  not wired to the public API yet.
-- C boundary validation: loader/parse/load error mapping and status return paths are not yet
-  validated because the public C API entrypoints are still pending.
+- Status: complete for GGUF loader callback parity and loader orchestration.
+- Implemented: GGUF header/metadata validation (including split metadata), split-file parsing and
+  cross-file consistency checks, mmap/stream/direct-IO selection, tensor mapping/range checks, and
+  progress/upload callbacks.
+- Note: public C API entrypoints and C-boundary status mapping remain pending as a separate task.
 
 Weight loader audit (llama.cpp parity)
 - Reference source: `tmp/llama.cpp/src/llama-model-loader.cpp` (weight mapping + data load).
