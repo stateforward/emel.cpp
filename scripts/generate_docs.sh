@@ -13,8 +13,24 @@ README_FILE="$ROOT_DIR/README.md"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+machine_toc() {
+  local headers=()
+  while IFS= read -r h; do
+    headers+=("$h")
+  done < <(find "$ROOT_DIR/src/emel" -type f -name 'sm.hpp' \
+    ! -path "$ROOT_DIR/src/emel/sm.hpp" | sort)
+  for h in "${headers[@]}"; do
+    local rel_emel="${h#"$ROOT_DIR/src/emel/"}"
+    local dir="${rel_emel%/sm.hpp}"
+    local name="${dir//\//_}"
+    echo "- \`docs/architecture/$name.md\`"
+  done
+}
+
 generate_readme() {
-  cat <<'MD'
+  local toc_file="$TMP_DIR/machine_toc.txt"
+  machine_toc > "$toc_file"
+  sed -e "/__MACHINE_TOC__/r $toc_file" -e "/__MACHINE_TOC__/d" <<'MD'
 # EMEL
 
 Deterministic, production-grade C++ inference engine built around Boost.SML orchestration.
@@ -24,6 +40,8 @@ Deterministic, production-grade C++ inference engine built around Boost.SML orch
 This repository is under active development. APIs, state machines, and formats will change.
 If you’re evaluating EMEL, expect fast iteration and breaking changes until the core loader,
 allocator, and execution pipelines stabilize.
+
+This inference engine is being implemented by AI under human engineering and architecture direction.
 
 ## Why EMEL
 
@@ -66,6 +84,10 @@ environments, while Zig remains the default for day-to-day builds.
 - `docs/architecture/` (generated state-machine diagrams)
 - `docs/sml.md` (Boost.SML conventions and usage)
 - `docs/gaps.md` (parity audit status)
+
+## State machine reference
+
+__MACHINE_TOC__
 
 ## Regenerating docs
 

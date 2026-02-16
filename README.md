@@ -8,6 +8,8 @@ This repository is under active development. APIs, state machines, and formats w
 If you’re evaluating EMEL, expect fast iteration and breaking changes until the core loader,
 allocator, and execution pipelines stabilize.
 
+This inference engine is being implemented by AI under human engineering and architecture direction.
+
 ## Why EMEL
 
 EMEL exists to make inference behavior explicit and verifiable. Instead of ad-hoc control flow,
@@ -49,6 +51,32 @@ environments, while Zig remains the default for day-to-day builds.
 - `docs/architecture/` (generated state-machine diagrams)
 - `docs/sml.md` (Boost.SML conventions and usage)
 - `docs/gaps.md` (parity audit status)
+
+## State machine reference
+
+- `docs/architecture/batch_splitter.md`
+- `docs/architecture/buffer_allocator.md`
+- `docs/architecture/buffer_chunk_allocator.md`
+- `docs/architecture/buffer_planner.md`
+- `docs/architecture/buffer_realloc_analyzer.md`
+- `docs/architecture/decoder_compute_executor.md`
+- `docs/architecture/decoder.md`
+- `docs/architecture/decoder_ubatch_executor.md`
+- `docs/architecture/encoder.md`
+- `docs/architecture/generator.md`
+- `docs/architecture/kv_cache.md`
+- `docs/architecture/memory_coordinator.md`
+- `docs/architecture/model_loader.md`
+- `docs/architecture/model_parser.md`
+- `docs/architecture/model_weight_loader.md`
+- `docs/architecture/sampler_candidate_builder.md`
+- `docs/architecture/sampler_pipeline.md`
+- `docs/architecture/sampler_token_selector.md`
+- `docs/architecture/telemetry_exporter.md`
+- `docs/architecture/telemetry_provider.md`
+- `docs/architecture/tensor_allocator.md`
+- `docs/architecture/tensor_lifetime_analyzer.md`
+- `docs/architecture/tokenizer.md`
 
 ## Regenerating docs
 
