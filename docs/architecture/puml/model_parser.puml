@@ -1,16 +1,24 @@
 @startuml
 
-[*] --> initialized
-initialized --> parsing_architecture : emel::model::parser::event::parse_model
-parsing_architecture --> mapping_architecture : emel::model::parser::event::parse_architecture_done
-parsing_architecture --> errored : emel::model::parser::event::parse_architecture_error
-mapping_architecture --> parsing_hparams : emel::model::parser::event::map_architecture_done
-mapping_architecture --> errored : emel::model::parser::event::map_architecture_error
-parsing_hparams --> parsing_vocab : emel::model::parser::event::parse_hparams_done
-parsing_hparams --> errored : emel::model::parser::event::parse_hparams_error
-parsing_vocab --> mapping_tensors : emel::model::parser::event::parse_vocab_done
-parsing_vocab --> errored : emel::model::parser::event::parse_vocab_error
-mapping_tensors --> done : emel::model::parser::event::map_tensors_done
-mapping_tensors --> errored : emel::model::parser::event::map_tensors_error
+[*] --> emel::model::parser::initialized
+emel::model::parser::initialized --> emel::model::parser::parsing_architecture : emel::model::parser::event::parse_model
+emel::model::parser::parsing_architecture --> emel::model::parser::mapping_architecture : emel::model::parser::events::parse_architecture_done
+emel::model::parser::parsing_architecture --> emel::model::parser::errored : emel::model::parser::events::parse_architecture_error
+emel::model::parser::mapping_architecture --> emel::model::parser::parsing_hparams : emel::model::parser::events::map_architecture_done
+emel::model::parser::mapping_architecture --> emel::model::parser::errored : emel::model::parser::events::map_architecture_error
+emel::model::parser::parsing_hparams --> emel::model::parser::parsing_vocab : emel::model::parser::events::parse_hparams_done
+emel::model::parser::parsing_hparams --> emel::model::parser::errored : emel::model::parser::events::parse_hparams_error
+emel::model::parser::parsing_vocab --> emel::model::parser::mapping_tensors : emel::model::parser::events::parse_vocab_done
+emel::model::parser::parsing_vocab --> emel::model::parser::errored : emel::model::parser::events::parse_vocab_error
+emel::model::parser::mapping_tensors --> emel::model::parser::done : emel::model::parser::events::map_tensors_done
+emel::model::parser::mapping_tensors --> emel::model::parser::errored : emel::model::parser::events::map_tensors_error
+emel::model::parser::initialized --> emel::model::parser::errored : boost::sml::back::_
+emel::model::parser::parsing_architecture --> emel::model::parser::errored : boost::sml::back::_
+emel::model::parser::mapping_architecture --> emel::model::parser::errored : boost::sml::back::_
+emel::model::parser::parsing_hparams --> emel::model::parser::errored : boost::sml::back::_
+emel::model::parser::parsing_vocab --> emel::model::parser::errored : boost::sml::back::_
+emel::model::parser::mapping_tensors --> emel::model::parser::errored : boost::sml::back::_
+emel::model::parser::done --> emel::model::parser::errored : boost::sml::back::_
+emel::model::parser::errored --> emel::model::parser::errored : boost::sml::back::_
 
 @enduml

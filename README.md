@@ -1,7 +1,23 @@
 # EMEL
 
-Deterministic, production-grade C++ inference engine with Boost.SML orchestration.
-WARNING: Documentation is under active development and may change frequently.
+Deterministic, production-grade C++ inference engine built around Boost.SML orchestration.
+
+## Status: WIP
+
+This repository is under active development. APIs, state machines, and formats will change.
+If you’re evaluating EMEL, expect fast iteration and breaking changes until the core loader,
+allocator, and execution pipelines stabilize.
+
+## Why EMEL
+
+EMEL exists to make inference behavior explicit and verifiable. Instead of ad-hoc control flow,
+orchestration is modeled as Boost.SML state machines with deterministic, testable transitions.
+That enables:
+
+1. Clear operational semantics and failure modes.
+2. Deterministic, reproducible inference paths.
+3. High-performance, C-compatible boundaries without dynamic dispatch in hot paths.
+4. Auditable parity work against reference implementations without copying their control flow.
 
 ## Build and test
 
