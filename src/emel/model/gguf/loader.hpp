@@ -36,6 +36,46 @@ inline constexpr uint32_t k_direct_io_chunk_size = 256 * 1024;
 
 inline constexpr char k_magic[] = "GGUF";
 inline constexpr char k_key_architecture[] = "general.architecture";
+inline constexpr char k_key_general_type[] = "general.type";
+inline constexpr char k_key_general_quant_version[] = "general.quantization_version";
+inline constexpr char k_key_general_file_type[] = "general.file_type";
+inline constexpr char k_key_general_sampling_sequence[] = "general.sampling.sequence";
+inline constexpr char k_key_general_sampling_top_k[] = "general.sampling.top_k";
+inline constexpr char k_key_general_sampling_top_p[] = "general.sampling.top_p";
+inline constexpr char k_key_general_sampling_min_p[] = "general.sampling.min_p";
+inline constexpr char k_key_general_sampling_xtc_prob[] = "general.sampling.xtc_probability";
+inline constexpr char k_key_general_sampling_xtc_threshold[] = "general.sampling.xtc_threshold";
+inline constexpr char k_key_general_sampling_temp[] = "general.sampling.temp";
+inline constexpr char k_key_general_sampling_penalty_last_n[] = "general.sampling.penalty_last_n";
+inline constexpr char k_key_general_sampling_penalty_repeat[] = "general.sampling.penalty_repeat";
+inline constexpr char k_key_general_sampling_mirostat[] = "general.sampling.mirostat";
+inline constexpr char k_key_general_sampling_mirostat_tau[] = "general.sampling.mirostat_tau";
+inline constexpr char k_key_general_sampling_mirostat_eta[] = "general.sampling.mirostat_eta";
+inline constexpr char k_key_general_name[] = "general.name";
+inline constexpr char k_key_general_author[] = "general.author";
+inline constexpr char k_key_general_version[] = "general.version";
+inline constexpr char k_key_general_organization[] = "general.organization";
+inline constexpr char k_key_general_finetune[] = "general.finetune";
+inline constexpr char k_key_general_basename[] = "general.basename";
+inline constexpr char k_key_general_description[] = "general.description";
+inline constexpr char k_key_general_quantized_by[] = "general.quantized_by";
+inline constexpr char k_key_general_size_label[] = "general.size_label";
+inline constexpr char k_key_general_license[] = "general.license";
+inline constexpr char k_key_general_license_name[] = "general.license.name";
+inline constexpr char k_key_general_license_link[] = "general.license.link";
+inline constexpr char k_key_general_url[] = "general.url";
+inline constexpr char k_key_general_doi[] = "general.doi";
+inline constexpr char k_key_general_uuid[] = "general.uuid";
+inline constexpr char k_key_general_repo_url[] = "general.repo_url";
+inline constexpr char k_key_general_source_url[] = "general.source.url";
+inline constexpr char k_key_general_source_doi[] = "general.source.doi";
+inline constexpr char k_key_general_source_uuid[] = "general.source.uuid";
+inline constexpr char k_key_general_source_repo_url[] = "general.source.repo_url";
+inline constexpr char k_key_general_source_hf_repo[] = "general.source.huggingface.repository";
+inline constexpr char k_key_general_base_model_count[] = "general.base_model.count";
+inline constexpr char k_key_general_dataset_count[] = "general.dataset.count";
+inline constexpr char k_key_general_tags[] = "general.tags";
+inline constexpr char k_key_general_languages[] = "general.languages";
 inline constexpr char k_key_alignment[] = "general.alignment";
 inline constexpr char k_key_split_count[] = "split.count";
 inline constexpr char k_key_split_no[] = "split.no";
@@ -412,6 +452,74 @@ inline bool key_has_suffix(const char * key, const uint64_t len, const char * su
   return true;
 }
 
+inline bool prefix_is_primary_arch(const context & ctx, const char * key,
+                                   const uint64_t prefix_len) noexcept {
+  if (ctx.architecture_len > 0) {
+    return prefix_len == ctx.architecture_len &&
+           std::memcmp(key, ctx.architecture.data(), ctx.architecture_len) == 0;
+  }
+  for (uint64_t i = 0; i < prefix_len; ++i) {
+    if (key[i] == '.') {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool key_has_suffix_primary(const context & ctx, const char * key, const uint64_t len,
+                                   const char * suffix, uint64_t & prefix_len) noexcept {
+  if (!key_has_suffix(key, len, suffix, prefix_len)) {
+    return false;
+  }
+  return prefix_is_primary_arch(ctx, key, prefix_len);
+}
+
+inline bool parse_indexed_key(const char * key, const uint64_t len, const char * prefix,
+                              const char * suffix, uint32_t & index) noexcept {
+  const size_t prefix_len = std::strlen(prefix);
+  const size_t suffix_len = std::strlen(suffix);
+  if (len <= prefix_len + suffix_len) {
+    return false;
+  }
+  if (std::memcmp(key, prefix, prefix_len) != 0) {
+    return false;
+  }
+  const uint64_t suffix_start = len - suffix_len;
+  if (std::memcmp(key + suffix_start, suffix, suffix_len) != 0) {
+    return false;
+  }
+  const uint64_t idx_len = len - prefix_len - suffix_len;
+  if (idx_len == 0 || idx_len > 10) {
+    return false;
+  }
+  uint32_t value = 0;
+  for (uint64_t i = 0; i < idx_len; ++i) {
+    const char c = key[prefix_len + i];
+    if (c < '0' || c > '9') {
+      return false;
+    }
+    value = value * 10u + static_cast<uint32_t>(c - '0');
+  }
+  index = value;
+  return true;
+}
+
+inline bool metadata_string_equals(const emel::model::data::metadata & meta,
+                                   const emel::model::data::metadata::string_view & view,
+                                   const char * text, const uint64_t len) noexcept {
+  if (view.length != len) {
+    return false;
+  }
+  if (view.length == 0) {
+    return len == 0;
+  }
+  if (view.offset + view.length > meta.blob_bytes_used) {
+    return false;
+  }
+  return std::memcmp(meta.blob.data() + view.offset, text,
+                     static_cast<size_t>(len)) == 0;
+}
+
 inline bool read_and_discard_string(const reader & r) {
   uint64_t len = 0;
   if (!r.read(len)) {
@@ -519,6 +627,325 @@ inline bool parse_bool_value(const reader & r, const value_type type, bool & out
     return true;
   }
   return false;
+}
+
+inline bool store_metadata_string(emel::model::data::metadata & meta, const char * src,
+                                  const uint64_t len,
+                                  emel::model::data::metadata::string_view & out) {
+  if (len == 0) {
+    out.offset = 0;
+    out.length = 0;
+    return true;
+  }
+  if (len > emel::model::data::k_max_metadata_blob_bytes) {
+    return false;
+  }
+  if (meta.blob_bytes_used > emel::model::data::k_max_metadata_blob_bytes - len) {
+    return false;
+  }
+  const uint32_t offset = meta.blob_bytes_used;
+  std::memcpy(meta.blob.data() + offset, src, static_cast<size_t>(len));
+  meta.blob_bytes_used = offset + static_cast<uint32_t>(len);
+  out.offset = offset;
+  out.length = static_cast<uint32_t>(len);
+  return true;
+}
+
+inline bool read_metadata_string(const reader & r, const value_type type,
+                                 emel::model::data::metadata & meta,
+                                 emel::model::data::metadata::string_view & out) {
+  if (type != value_type::k_string) {
+    return false;
+  }
+  uint64_t len = 0;
+  if (!r.read(len)) {
+    return false;
+  }
+  if (len == 0) {
+    out.offset = 0;
+    out.length = 0;
+    return true;
+  }
+  if (len > emel::model::data::k_max_metadata_blob_bytes) {
+    return false;
+  }
+  if (meta.blob_bytes_used > emel::model::data::k_max_metadata_blob_bytes - len) {
+    return false;
+  }
+  const uint32_t offset = meta.blob_bytes_used;
+  if (!r.read_raw(meta.blob.data() + offset, static_cast<size_t>(len))) {
+    return false;
+  }
+  meta.blob_bytes_used = offset + static_cast<uint32_t>(len);
+  out.offset = offset;
+  out.length = static_cast<uint32_t>(len);
+  return true;
+}
+
+inline bool read_metadata_string_array(const reader & r, const value_type type,
+                                       emel::model::data::metadata & meta,
+                                       std::array<emel::model::data::metadata::string_view,
+                                                  emel::model::data::k_max_metadata_list> & out,
+                                       uint32_t & out_count) {
+  if (type != value_type::k_array) {
+    return false;
+  }
+  value_type elem_type = value_type::k_count;
+  if (!r.read(elem_type)) {
+    return false;
+  }
+  if (elem_type != value_type::k_string) {
+    return false;
+  }
+  uint64_t count = 0;
+  if (!r.read(count)) {
+    return false;
+  }
+  if (count > out.size()) {
+    return false;
+  }
+  out_count = static_cast<uint32_t>(count);
+  for (uint64_t i = 0; i < count; ++i) {
+    if (!read_metadata_string(r, value_type::k_string, meta, out[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool read_u32_array(const reader & r, const value_type type,
+                           std::array<uint32_t, emel::model::data::k_max_metadata_arrays> & out,
+                           uint32_t & out_count) {
+  if (type != value_type::k_array) {
+    return false;
+  }
+  value_type elem_type = value_type::k_count;
+  if (!r.read(elem_type)) {
+    return false;
+  }
+  if (elem_type != value_type::k_u32 && elem_type != value_type::k_i32 &&
+      elem_type != value_type::k_u16) {
+    return false;
+  }
+  uint64_t count = 0;
+  if (!r.read(count)) {
+    return false;
+  }
+  if (count > out.size()) {
+    return false;
+  }
+  out_count = static_cast<uint32_t>(count);
+  for (uint64_t i = 0; i < count; ++i) {
+    uint32_t value = 0;
+    if (!parse_u32_value(r, elem_type, value)) {
+      return false;
+    }
+    out[i] = value;
+  }
+  return true;
+}
+
+template <size_t N>
+inline bool read_i32_array(const reader & r, const value_type type,
+                           std::array<int32_t, N> & out, int32_t & out_count) {
+  if (type != value_type::k_array) {
+    return false;
+  }
+  value_type elem_type = value_type::k_count;
+  if (!r.read(elem_type)) {
+    return false;
+  }
+  if (elem_type != value_type::k_i32 && elem_type != value_type::k_u32 &&
+      elem_type != value_type::k_u16) {
+    return false;
+  }
+  uint64_t count = 0;
+  if (!r.read(count)) {
+    return false;
+  }
+  if (count > out.size()) {
+    return false;
+  }
+  out_count = static_cast<int32_t>(count);
+  for (uint64_t i = 0; i < count; ++i) {
+    int32_t value = 0;
+    if (!parse_i32_value(r, elem_type, value)) {
+      return false;
+    }
+    out[i] = value;
+  }
+  return true;
+}
+
+template <size_t N>
+inline bool read_f32_array(const reader & r, const value_type type,
+                           std::array<float, N> & out, uint32_t & out_count) {
+  if (type != value_type::k_array) {
+    return false;
+  }
+  value_type elem_type = value_type::k_count;
+  if (!r.read(elem_type)) {
+    return false;
+  }
+  if (elem_type != value_type::k_f32) {
+    return false;
+  }
+  uint64_t count = 0;
+  if (!r.read(count)) {
+    return false;
+  }
+  if (count > out.size()) {
+    return false;
+  }
+  out_count = static_cast<uint32_t>(count);
+  for (uint64_t i = 0; i < count; ++i) {
+    float value = 0.0f;
+    if (!r.read(value)) {
+      return false;
+    }
+    out[i] = value;
+  }
+  return true;
+}
+
+template <size_t N>
+inline bool read_bool_array(const reader & r, const value_type type,
+                            std::array<uint8_t, N> & out, uint32_t & out_count) {
+  if (type != value_type::k_array) {
+    return false;
+  }
+  value_type elem_type = value_type::k_count;
+  if (!r.read(elem_type)) {
+    return false;
+  }
+  if (elem_type != value_type::k_bool && elem_type != value_type::k_u8 &&
+      elem_type != value_type::k_i8) {
+    return false;
+  }
+  uint64_t count = 0;
+  if (!r.read(count)) {
+    return false;
+  }
+  if (count > out.size()) {
+    return false;
+  }
+  out_count = static_cast<uint32_t>(count);
+  for (uint64_t i = 0; i < count; ++i) {
+    bool value = false;
+    if (!parse_bool_value(r, elem_type, value)) {
+      return false;
+    }
+    out[i] = static_cast<uint8_t>(value ? 1 : 0);
+  }
+  return true;
+}
+
+inline bool read_metadata_string_array_values(
+    const reader & r, const value_type elem_type, const uint64_t count,
+    emel::model::data::metadata & meta,
+    std::array<emel::model::data::metadata::string_view,
+               emel::model::data::k_max_metadata_list> & out,
+    uint32_t & out_count) {
+  if (elem_type != value_type::k_string) {
+    return false;
+  }
+  if (count > out.size()) {
+    return false;
+  }
+  out_count = static_cast<uint32_t>(count);
+  for (uint64_t i = 0; i < count; ++i) {
+    if (!read_metadata_string(r, value_type::k_string, meta, out[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool read_u32_array_values(
+    const reader & r, const value_type elem_type, const uint64_t count,
+    std::array<uint32_t, emel::model::data::k_max_metadata_arrays> & out,
+    uint32_t & out_count) {
+  if (elem_type != value_type::k_u32 && elem_type != value_type::k_i32 &&
+      elem_type != value_type::k_u16) {
+    return false;
+  }
+  if (count > out.size()) {
+    return false;
+  }
+  out_count = static_cast<uint32_t>(count);
+  for (uint64_t i = 0; i < count; ++i) {
+    uint32_t value = 0;
+    if (!parse_u32_value(r, elem_type, value)) {
+      return false;
+    }
+    out[i] = value;
+  }
+  return true;
+}
+
+template <size_t N>
+inline bool read_i32_array_values(const reader & r, const value_type elem_type,
+                                  const uint64_t count, std::array<int32_t, N> & out,
+                                  int32_t & out_count) {
+  if (elem_type != value_type::k_i32 && elem_type != value_type::k_u32 &&
+      elem_type != value_type::k_u16) {
+    return false;
+  }
+  if (count > out.size()) {
+    return false;
+  }
+  out_count = static_cast<int32_t>(count);
+  for (uint64_t i = 0; i < count; ++i) {
+    int32_t value = 0;
+    if (!parse_i32_value(r, elem_type, value)) {
+      return false;
+    }
+    out[i] = value;
+  }
+  return true;
+}
+
+template <size_t N>
+inline bool read_f32_array_values(const reader & r, const value_type elem_type,
+                                  const uint64_t count, std::array<float, N> & out,
+                                  uint32_t & out_count) {
+  if (elem_type != value_type::k_f32) {
+    return false;
+  }
+  if (count > out.size()) {
+    return false;
+  }
+  out_count = static_cast<uint32_t>(count);
+  for (uint64_t i = 0; i < count; ++i) {
+    float value = 0.0f;
+    if (!r.read(value)) {
+      return false;
+    }
+    out[i] = value;
+  }
+  return true;
+}
+
+template <size_t N>
+inline bool read_bool_array_values(const reader & r, const value_type elem_type,
+                                   const uint64_t count, std::array<uint8_t, N> & out,
+                                   uint32_t & out_count) {
+  if (elem_type != value_type::k_bool && elem_type != value_type::k_u8 &&
+      elem_type != value_type::k_i8) {
+    return false;
+  }
+  if (count > out.size()) {
+    return false;
+  }
+  out_count = static_cast<uint32_t>(count);
+  for (uint64_t i = 0; i < count; ++i) {
+    bool value = false;
+    if (!parse_bool_value(r, elem_type, value)) {
+      return false;
+    }
+    out[i] = static_cast<uint8_t>(value ? 1 : 0);
+  }
+  return true;
 }
 
 inline int32_t blck_size_for(const tensor_type type) noexcept {
@@ -1012,6 +1439,7 @@ inline bool parse_kv(
     bool is_array = false;
     uint64_t count = 1;
     value_type type = static_cast<value_type>(type_raw);
+    uint64_t prefix_len = 0;
     if (type == value_type::k_array) {
       is_array = true;
       int32_t arr_type_raw = -1;
@@ -1131,6 +1559,281 @@ inline bool parse_kv(
         }
         continue;
       }
+      if (key_equals(key, key_len, k_key_general_tags)) {
+        if (type != value_type::k_string ||
+            count > static_cast<uint64_t>(model.meta.general_data.tags.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_metadata_string_array_values(r, type, count, model.meta,
+                                               model.meta.general_data.tags,
+                                               model.meta.general_data.tag_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, k_key_general_languages)) {
+        if (type != value_type::k_string ||
+            count > static_cast<uint64_t>(model.meta.general_data.languages.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_metadata_string_array_values(r, type, count, model.meta,
+                                               model.meta.general_data.languages,
+                                               model.meta.general_data.language_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, "tokenizer.chat_templates")) {
+        if (type != value_type::k_string ||
+            count > static_cast<uint64_t>(
+              model.meta.tokenizer_data.chat_template_names.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_metadata_string_array_values(
+              r, type, count, model.meta,
+              model.meta.tokenizer_data.chat_template_names,
+              model.meta.tokenizer_data.chat_template_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        for (uint32_t idx = 0; idx < model.meta.tokenizer_data.chat_template_count; ++idx) {
+          model.meta.tokenizer_data.chat_template_values[idx].offset = 0;
+          model.meta.tokenizer_data.chat_template_values[idx].length = 0;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, "imatrix.datasets")) {
+        if (type != value_type::k_string ||
+            count > static_cast<uint64_t>(model.meta.imatrix_data.datasets.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_metadata_string_array_values(r, type, count, model.meta,
+                                               model.meta.imatrix_data.datasets,
+                                               model.meta.imatrix_data.dataset_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, "adapter.alora.invocation_tokens")) {
+        if (type != value_type::k_u32 && type != value_type::k_i32 &&
+            type != value_type::k_u16) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (count > static_cast<uint64_t>(
+              model.meta.adapter_data.alora_invocation_tokens.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_u32_array_values(r, type, count,
+                                   model.meta.adapter_data.alora_invocation_tokens,
+                                   model.meta.adapter_data.alora_invocation_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_has_suffix_primary(ctx, key, key_len, ".rope.dimension_sections", prefix_len)) {
+        if (type != value_type::k_i32 && type != value_type::k_u32 &&
+            type != value_type::k_u16) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (count > model.params.rope_dimension_sections.size()) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_i32_array_values(r, type, count,
+                                   model.params.rope_dimension_sections,
+                                   model.params.rope_dimension_sections_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_has_suffix_primary(ctx, key, key_len, ".classifier.output_labels", prefix_len)) {
+        if (type != value_type::k_string ||
+            count > static_cast<uint64_t>(model.meta.classifier_data.labels.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_metadata_string_array_values(r, type, count, model.meta,
+                                               model.meta.classifier_data.labels,
+                                               model.meta.classifier_data.label_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, "clip.vision.image_mean")) {
+        if (type != value_type::k_f32 ||
+            count > static_cast<uint64_t>(model.meta.clip_vision_data.image_mean.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_f32_array_values(r, type, count, model.meta.clip_vision_data.image_mean,
+                                   model.meta.clip_vision_data.image_mean_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, "clip.vision.image_std")) {
+        if (type != value_type::k_f32 ||
+            count > static_cast<uint64_t>(model.meta.clip_vision_data.image_std.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_f32_array_values(r, type, count, model.meta.clip_vision_data.image_std,
+                                   model.meta.clip_vision_data.image_std_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, "clip.vision.wa_layer_indexes")) {
+        if (type != value_type::k_u32 && type != value_type::k_i32 &&
+            type != value_type::k_u16) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (count > static_cast<uint64_t>(
+              model.meta.clip_vision_data.wa_layer_indexes.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_u32_array_values(r, type, count,
+                                   model.meta.clip_vision_data.wa_layer_indexes,
+                                   model.meta.clip_vision_data.wa_layer_index_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, "clip.vision.is_deepstack_layers")) {
+        if (type != value_type::k_bool && type != value_type::k_u8 &&
+            type != value_type::k_i8) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (count > static_cast<uint64_t>(
+              model.meta.clip_vision_data.deepstack_layers.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_bool_array_values(r, type, count,
+                                    model.meta.clip_vision_data.deepstack_layers,
+                                    model.meta.clip_vision_data.deepstack_layer_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_has_suffix_primary(ctx, key, key_len, ".attention.sliding_window_pattern",
+                                 prefix_len)) {
+        if (type != value_type::k_bool && type != value_type::k_u8 &&
+            type != value_type::k_i8) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (count > static_cast<uint64_t>(
+              model.params.attention_sliding_window_pattern_flags.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_bool_array_values(r, type, count,
+                                    model.params.attention_sliding_window_pattern_flags,
+                                    model.params.attention_sliding_window_pattern_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_has_suffix_primary(ctx, key, key_len, ".swiglu_clamp_exp", prefix_len)) {
+        if (type != value_type::k_f32 ||
+            count > static_cast<uint64_t>(model.params.swiglu_clamp_exp.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_f32_array_values(r, type, count, model.params.swiglu_clamp_exp,
+                                   model.params.swiglu_clamp_exp_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_has_suffix_primary(ctx, key, key_len, ".swiglu_clamp_shexp", prefix_len)) {
+        if (type != value_type::k_f32 ||
+            count > static_cast<uint64_t>(model.params.swiglu_clamp_shexp.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_f32_array_values(r, type, count, model.params.swiglu_clamp_shexp,
+                                   model.params.swiglu_clamp_shexp_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, "xielu.alpha_p")) {
+        if (type != value_type::k_f32 ||
+            count > static_cast<uint64_t>(model.meta.xielu_data.alpha_p.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_f32_array_values(r, type, count, model.meta.xielu_data.alpha_p,
+                                   model.meta.xielu_data.alpha_p_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, "xielu.alpha_n")) {
+        if (type != value_type::k_f32 ||
+            count > static_cast<uint64_t>(model.meta.xielu_data.alpha_n.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_f32_array_values(r, type, count, model.meta.xielu_data.alpha_n,
+                                   model.meta.xielu_data.alpha_n_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, "xielu.beta")) {
+        if (type != value_type::k_f32 ||
+            count > static_cast<uint64_t>(model.meta.xielu_data.beta.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_f32_array_values(r, type, count, model.meta.xielu_data.beta,
+                                   model.meta.xielu_data.beta_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
+      if (key_equals(key, key_len, "xielu.eps")) {
+        if (type != value_type::k_f32 ||
+            count > static_cast<uint64_t>(model.meta.xielu_data.eps.size())) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!read_f32_array_values(r, type, count, model.meta.xielu_data.eps,
+                                   model.meta.xielu_data.eps_count)) {
+          out_error = EMEL_ERR_PARSE_FAILED;
+          return false;
+        }
+        continue;
+      }
       if (!skip_value(r, type, count)) {
         out_error = EMEL_ERR_PARSE_FAILED;
         return false;
@@ -1154,6 +1857,583 @@ inline bool parse_kv(
           std::memcmp(ctx.pending_arch.data(), ctx.architecture.data(), ctx.architecture_len) == 0) {
         ctx.block_count = ctx.pending_block_count;
       }
+      continue;
+    }
+
+    if (key_equals(key, key_len, k_key_general_type)) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.general_data.type)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_quant_version)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.quantization_version = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_file_type)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.file_type = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_sequence)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.sampling_data.sequence)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_top_k)) {
+      int32_t value = 0;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.sampling_data.top_k = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_top_p)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.sampling_data.top_p = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_min_p)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.sampling_data.min_p = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_xtc_prob)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.sampling_data.xtc_probability = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_xtc_threshold)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.sampling_data.xtc_threshold = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_temp)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.sampling_data.temp = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_penalty_last_n)) {
+      int32_t value = 0;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.sampling_data.penalty_last_n = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_penalty_repeat)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.sampling_data.penalty_repeat = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_mirostat)) {
+      int32_t value = 0;
+      if (!parse_i32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.sampling_data.mirostat = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_mirostat_tau)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.sampling_data.mirostat_tau = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_sampling_mirostat_eta)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.sampling_data.mirostat_eta = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_name)) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.general_data.name)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_author)) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.general_data.author)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_version)) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.general_data.version)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_organization)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.organization)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_finetune)) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.general_data.finetune)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_basename)) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.general_data.basename)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_description)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.description)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_quantized_by)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.quantized_by)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_size_label)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.size_label)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_license)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.license)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_license_name)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.license_name)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_license_link)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.license_link)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_url)) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.general_data.url)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_doi)) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.general_data.doi)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_uuid)) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.general_data.uuid)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_repo_url)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.repo_url)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_source_url)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.source_url)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_source_doi)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.source_doi)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_source_uuid)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.source_uuid)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_source_repo_url)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.source_repo_url)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_source_hf_repo)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.source_hf_repo)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_base_model_count)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      if (value > model.meta.general_data.base_models.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      model.meta.general_data.base_model_count = value;
+      continue;
+    }
+    if (key_equals(key, key_len, k_key_general_dataset_count)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      if (value > model.meta.general_data.datasets.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      model.meta.general_data.dataset_count = value;
+      continue;
+    }
+    uint32_t indexed_id = 0;
+    if (parse_indexed_key(key, key_len, "general.base_model.", ".name", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.base_models.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.base_models[indexed_id].name)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.base_model_count =
+        std::max(model.meta.general_data.base_model_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.base_model.", ".author", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.base_models.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.base_models[indexed_id].author)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.base_model_count =
+        std::max(model.meta.general_data.base_model_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.base_model.", ".version", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.base_models.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.base_models[indexed_id].version)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.base_model_count =
+        std::max(model.meta.general_data.base_model_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.base_model.", ".organization", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.base_models.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(
+            r, type, model.meta,
+            model.meta.general_data.base_models[indexed_id].organization)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.base_model_count =
+        std::max(model.meta.general_data.base_model_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.base_model.", ".description", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.base_models.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(
+            r, type, model.meta,
+            model.meta.general_data.base_models[indexed_id].description)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.base_model_count =
+        std::max(model.meta.general_data.base_model_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.base_model.", ".url", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.base_models.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.base_models[indexed_id].url)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.base_model_count =
+        std::max(model.meta.general_data.base_model_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.base_model.", ".doi", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.base_models.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.base_models[indexed_id].doi)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.base_model_count =
+        std::max(model.meta.general_data.base_model_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.base_model.", ".uuid", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.base_models.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.base_models[indexed_id].uuid)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.base_model_count =
+        std::max(model.meta.general_data.base_model_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.base_model.", ".repo_url", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.base_models.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(
+            r, type, model.meta,
+            model.meta.general_data.base_models[indexed_id].repo_url)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.base_model_count =
+        std::max(model.meta.general_data.base_model_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.dataset.", ".name", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.datasets.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.datasets[indexed_id].name)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.dataset_count =
+        std::max(model.meta.general_data.dataset_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.dataset.", ".author", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.datasets.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.datasets[indexed_id].author)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.dataset_count =
+        std::max(model.meta.general_data.dataset_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.dataset.", ".version", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.datasets.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.datasets[indexed_id].version)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.dataset_count =
+        std::max(model.meta.general_data.dataset_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.dataset.", ".organization", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.datasets.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(
+            r, type, model.meta,
+            model.meta.general_data.datasets[indexed_id].organization)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.dataset_count =
+        std::max(model.meta.general_data.dataset_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.dataset.", ".description", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.datasets.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(
+            r, type, model.meta,
+            model.meta.general_data.datasets[indexed_id].description)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.dataset_count =
+        std::max(model.meta.general_data.dataset_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.dataset.", ".url", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.datasets.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.datasets[indexed_id].url)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.dataset_count =
+        std::max(model.meta.general_data.dataset_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.dataset.", ".doi", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.datasets.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.datasets[indexed_id].doi)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.dataset_count =
+        std::max(model.meta.general_data.dataset_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.dataset.", ".uuid", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.datasets.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.datasets[indexed_id].uuid)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.dataset_count =
+        std::max(model.meta.general_data.dataset_count, indexed_id + 1);
+      continue;
+    }
+    if (parse_indexed_key(key, key_len, "general.dataset.", ".repo_url", indexed_id)) {
+      if (indexed_id >= model.meta.general_data.datasets.size()) {
+        out_error = EMEL_ERR_MODEL_INVALID;
+        return false;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.general_data.datasets[indexed_id].repo_url)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.general_data.dataset_count =
+        std::max(model.meta.general_data.dataset_count, indexed_id + 1);
       continue;
     }
 
@@ -1185,6 +2465,61 @@ inline bool parse_kv(
       continue;
     }
 
+    if (key_equals(key, key_len, "tokenizer.huggingface.json")) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.tokenizer_data.hf_json)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.rwkv.world")) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.tokenizer_data.rwkv_world)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.chat_template")) {
+      if (!read_metadata_string(
+            r, type, model.meta, model.meta.tokenizer_data.chat_template)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_len > 24 && std::memcmp(key, "tokenizer.chat_template.", 24) == 0) {
+      const char * name = key + 24;
+      const uint64_t name_len = key_len - 24;
+      uint32_t slot = model.meta.tokenizer_data.chat_template_count;
+      for (uint32_t idx = 0; idx < model.meta.tokenizer_data.chat_template_count; ++idx) {
+        if (metadata_string_equals(model.meta,
+                                   model.meta.tokenizer_data.chat_template_names[idx],
+                                   name, name_len)) {
+          slot = idx;
+          break;
+        }
+      }
+      if (slot == model.meta.tokenizer_data.chat_template_count) {
+        if (slot >= model.meta.tokenizer_data.chat_template_names.size()) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        if (!store_metadata_string(
+              model.meta, name, name_len,
+              model.meta.tokenizer_data.chat_template_names[slot])) {
+          out_error = EMEL_ERR_MODEL_INVALID;
+          return false;
+        }
+        model.meta.tokenizer_data.chat_template_count++;
+      }
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.tokenizer_data.chat_template_values[slot])) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+
     if (key_equals(key, key_len, k_key_alignment)) {
       uint32_t alignment = 0;
       if (!parse_u32_value(r, type, alignment)) {
@@ -1196,11 +2531,11 @@ inline bool parse_kv(
         return false;
       }
       ctx.alignment = alignment;
+      model.meta.general_data.alignment = static_cast<int32_t>(alignment);
       continue;
     }
 
-    uint64_t prefix_len = 0;
-    if (key_has_suffix(key, key_len, ".context_length", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len, ".context_length", prefix_len)) {
       uint32_t value = 0;
       if (!parse_u32_value(r, type, value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
@@ -1209,7 +2544,16 @@ inline bool parse_kv(
       model.params.n_ctx = static_cast<int32_t>(value);
       continue;
     }
-    if (key_has_suffix(key, key_len, ".embedding_length", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len, ".vocab_size", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_vocab = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".embedding_length", prefix_len)) {
       uint32_t value = 0;
       if (!parse_u32_value(r, type, value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
@@ -1218,7 +2562,7 @@ inline bool parse_kv(
       model.params.n_embd = static_cast<int32_t>(value);
       continue;
     }
-    if (key_has_suffix(key, key_len, ".embedding_length_out", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len, ".embedding_length_out", prefix_len)) {
       uint32_t value = 0;
       if (!parse_u32_value(r, type, value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
@@ -1227,7 +2571,16 @@ inline bool parse_kv(
       model.params.n_embd_out = static_cast<int32_t>(value);
       continue;
     }
-    if (key_has_suffix(key, key_len, ".feed_forward_length", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len, ".features_length", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_features = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".feed_forward_length", prefix_len)) {
       uint32_t value = 0;
       if (!parse_u32_value(r, type, value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
@@ -1236,7 +2589,396 @@ inline bool parse_kv(
       model.params.n_ff = static_cast<int32_t>(value);
       continue;
     }
-    if (key_has_suffix(key, key_len, ".attention.head_count", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len, ".leading_dense_block_count", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_leading_dense_block = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_feed_forward_length", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_expert_ff = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_shared_feed_forward_length",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_expert_shared_ff = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_chunk_feed_forward_length",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_expert_chunk_ff = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".use_parallel_residual", prefix_len)) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.use_parallel_residual = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".tensor_data_layout", prefix_len)) {
+      if (!read_metadata_string(r, type, model.meta,
+                                model.meta.llm_strings_data.tensor_data_layout)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_count", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_expert = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_used_count", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_expert_used = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_shared_count", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_expert_shared = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_group_count", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_expert_group = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_group_used_count", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_expert_group_used = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_weights_scale", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.expert_weights_scale = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_weights_norm", prefix_len)) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.expert_weights_norm = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_gating_func", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.expert_gating_func = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".expert_group_scale", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.expert_group_scale = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".experts_per_group", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.experts_per_group = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".moe_every_n_layers", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.moe_every_n_layers = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".nextn_predict_layers", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.nextn_predict_layers = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".n_deepstack_layers", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.n_deepstack_layers = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".pooling_type", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.pooling_type = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".logit_scale", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.logit_scale = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".decoder_start_token_id", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.decoder_start_token_id = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".decoder_block_count", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.decoder_block_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attn_logit_softcapping", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attn_logit_softcapping = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".router_logit_softcapping", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.router_logit_softcapping = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".final_logit_softcapping", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.final_logit_softcapping = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".swin_norm", prefix_len)) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.swin_norm = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".rescale_every_n_layers", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.rescale_every_n_layers = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".time_mix_extra_dim", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.time_mix_extra_dim = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".time_decay_extra_dim", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.time_decay_extra_dim = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".residual_scale", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.residual_scale = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".embedding_scale", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.embedding_scale = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".token_shift_count", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.token_shift_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".interleave_moe_layer_step", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.interleave_moe_layer_step = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".full_attention_interval", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.full_attention_interval = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".activation_sparsity_scale", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.activation_sparsity_scale = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".altup.active_idx", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.altup_active_idx = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".altup.num_inputs", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.altup_num_inputs = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".embedding_length_per_layer_input",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.embd_length_per_layer_input = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".dense_2_feat_in", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.dense_2_feat_in = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".dense_2_feat_out", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.dense_2_feat_out = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".dense_3_feat_in", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.dense_3_feat_in = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".dense_3_feat_out", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.dense_3_feat_out = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.head_count", prefix_len)) {
       uint32_t value = 0;
       if (!parse_u32_value(r, type, value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
@@ -1245,7 +2987,7 @@ inline bool parse_kv(
       model.params.n_head = static_cast<int32_t>(value);
       continue;
     }
-    if (key_has_suffix(key, key_len, ".attention.head_count_kv", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.head_count_kv", prefix_len)) {
       uint32_t value = 0;
       if (!parse_u32_value(r, type, value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
@@ -1254,7 +2996,272 @@ inline bool parse_kv(
       model.params.n_head_kv = static_cast<int32_t>(value);
       continue;
     }
-    if (key_has_suffix(key, key_len, ".rope.dimension_count", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.max_alibi_bias", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_max_alibi_bias = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.clamp_kqv", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_clamp_kqv = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.key_length", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_key_length = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.value_length", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_value_length = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.layer_norm_epsilon", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_layer_norm_epsilon = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.layer_norm_rms_epsilon",
+                               prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_layer_norm_rms_epsilon = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.group_norm_epsilon",
+                               prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_group_norm_epsilon = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.group_norm_groups",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_group_norm_groups = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.causal", prefix_len)) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_causal = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.q_lora_rank", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_q_lora_rank = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.kv_lora_rank", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_kv_lora_rank = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.decay_lora_rank", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_decay_lora_rank = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.iclr_lora_rank", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_iclr_lora_rank = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len,
+                               ".attention.value_residual_mix_lora_rank", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_value_residual_mix_lora_rank = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.gate_lora_rank", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_gate_lora_rank = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.relative_buckets_count",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_relative_buckets_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.sliding_window", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_sliding_window = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.sliding_window_pattern",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_sliding_window_pattern = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.scale", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_scale = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.output_scale", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_output_scale = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.temperature_length",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_temperature_length = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.temperature_scale",
+                               prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_temperature_scale = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.key_length_mla", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_key_length_mla = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.value_length_mla",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_value_length_mla = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.indexer.head_count",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_indexer_head_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.indexer.key_length",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_indexer_key_length = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.indexer.top_k",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_indexer_top_k = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".attention.shared_kv_layers",
+                               prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.attention_shared_kv_layers = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".rope.dimension_count", prefix_len)) {
       uint32_t value = 0;
       if (!parse_u32_value(r, type, value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
@@ -1263,7 +3270,7 @@ inline bool parse_kv(
       model.params.n_rot = static_cast<int32_t>(value);
       continue;
     }
-    if (key_has_suffix(key, key_len, ".rope.freq_base", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len, ".rope.freq_base", prefix_len)) {
       float value = 0.0f;
       if (type != value_type::k_f32 || !r.read(value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
@@ -1272,7 +3279,16 @@ inline bool parse_kv(
       model.params.rope_freq_base = value;
       continue;
     }
-    if (key_has_suffix(key, key_len, ".rope.scale_linear", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len, ".rope.freq_base_swa", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.rope_freq_base_swa = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".rope.scale_linear", prefix_len)) {
       float value = 0.0f;
       if (type != value_type::k_f32 || !r.read(value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
@@ -1281,7 +3297,14 @@ inline bool parse_kv(
       model.params.rope_scale_linear = value;
       continue;
     }
-    if (key_has_suffix(key, key_len, ".rope.scaling.factor", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len, ".rope.scaling.type", prefix_len)) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.rope_data.scaling_type)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".rope.scaling.factor", prefix_len)) {
       float value = 0.0f;
       if (type != value_type::k_f32 || !r.read(value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
@@ -1290,7 +3313,7 @@ inline bool parse_kv(
       model.params.rope_scaling_factor = value;
       continue;
     }
-    if (key_has_suffix(key, key_len, ".rope.scaling.attn_factor", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len, ".rope.scaling.attn_factor", prefix_len)) {
       float value = 0.0f;
       if (type != value_type::k_f32 || !r.read(value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
@@ -1299,13 +3322,190 @@ inline bool parse_kv(
       model.params.rope_scaling_attn_factor = value;
       continue;
     }
-    if (key_has_suffix(key, key_len, ".rope.scaling.original_context_length", prefix_len)) {
+    if (key_has_suffix_primary(ctx, key, key_len,
+                               ".rope.scaling.original_context_length", prefix_len)) {
       uint32_t value = 0;
       if (!parse_u32_value(r, type, value)) {
         out_error = EMEL_ERR_PARSE_FAILED;
         return false;
       }
       model.params.rope_scaling_orig_ctx_len = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".rope.scaling.finetuned", prefix_len)) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.rope_scaling_finetuned = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len,
+                               ".rope.scaling.yarn_log_multiplier", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.rope_scaling_yarn_log_multiplier = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len,
+                               ".rope.scaling.yarn_ext_factor", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.rope_scaling_yarn_ext_factor = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len,
+                               ".rope.scaling.yarn_attn_factor", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.rope_scaling_yarn_attn_factor = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len,
+                               ".rope.scaling.yarn_beta_fast", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.rope_scaling_yarn_beta_fast = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len,
+                               ".rope.scaling.yarn_beta_slow", prefix_len)) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.rope_scaling_yarn_beta_slow = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".ssm.conv_kernel", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.ssm_conv_kernel = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".ssm.inner_size", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.ssm_inner_size = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".ssm.state_size", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.ssm_state_size = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".ssm.time_step_rank", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.ssm_time_step_rank = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".ssm.group_count", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.ssm_group_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".ssm.dt_b_c_rms", prefix_len)) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.ssm_dt_b_c_rms = value;
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".kda.head_dim", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.kda_head_dim = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".wkv.head_size", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.wkv_head_size = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".posnet.embedding_length", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.posnet_embd = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".posnet.block_count", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.posnet_block_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".convnext.embedding_length", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.convnext_embd = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".convnext.block_count", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.convnext_block_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_has_suffix_primary(ctx, key, key_len, ".shortconv.l_cache", prefix_len)) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.params.shortconv_l_cache = static_cast<int32_t>(value);
       continue;
     }
 
@@ -1336,6 +3536,341 @@ inline bool parse_kv(
         return false;
       }
       ctx.split_tensors_count = static_cast<uint16_t>(split);
+      continue;
+    }
+
+    if (key_equals(key, key_len, "adapter.type")) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.adapter_data.type)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, "adapter.lora.alpha")) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.adapter_data.lora_alpha = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "adapter.lora.task_name")) {
+      if (!read_metadata_string(
+            r, type, model.meta, model.meta.adapter_data.lora_task_name)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, "adapter.lora.prompt_prefix")) {
+      if (!read_metadata_string(
+            r, type, model.meta, model.meta.adapter_data.lora_prompt_prefix)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, "imatrix.chunk_count")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.imatrix_data.chunk_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "imatrix.chunk_size")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.imatrix_data.chunk_size = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.has_vision_encoder")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_data.has_vision_encoder = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.has_audio_encoder")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_data.has_audio_encoder = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.has_llava_projector")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_data.has_llava_projector = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.projector_type")) {
+      if (!read_metadata_string(r, type, model.meta, model.meta.clip_data.projector_type)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.use_gelu")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_data.use_gelu = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.use_silu")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_data.use_silu = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.projector_type")) {
+      if (!read_metadata_string(
+            r, type, model.meta, model.meta.clip_vision_data.projector_type)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.image_size")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.image_size = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.image_min_pixels")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.image_min_pixels = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.image_max_pixels")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.image_max_pixels = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.preproc_image_size")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.preproc_image_size = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.patch_size")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.patch_size = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.embedding_length")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.embedding_length = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.feed_forward_length")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.feed_forward_length = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.projection_dim")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.projection_dim = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.block_count")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.block_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.spatial_merge_size")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.spatial_merge_size = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.n_wa_pattern")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.n_wa_pattern = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.window_size")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.window_size = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.attention.head_count")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.attention_head_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.attention.layer_norm_epsilon")) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.attention_layer_norm_epsilon = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.vision.projector.scale_factor")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_vision_data.projector_scale_factor = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.audio.projector_type")) {
+      if (!read_metadata_string(
+            r, type, model.meta, model.meta.clip_audio_data.projector_type)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.audio.num_mel_bins")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_audio_data.num_mel_bins = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.audio.embedding_length")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_audio_data.embedding_length = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.audio.feed_forward_length")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_audio_data.feed_forward_length = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.audio.projection_dim")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_audio_data.projection_dim = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.audio.block_count")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_audio_data.block_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.audio.attention.head_count")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_audio_data.attention_head_count = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.audio.attention.layer_norm_epsilon")) {
+      float value = 0.0f;
+      if (type != value_type::k_f32 || !r.read(value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_audio_data.attention_layer_norm_epsilon = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "clip.audio.projector.stack_factor")) {
+      uint32_t value = 0;
+      if (!parse_u32_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.clip_audio_data.projector_stack_factor = static_cast<int32_t>(value);
+      continue;
+    }
+    if (key_equals(key, key_len, "diffusion.shift_logits")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.meta.diffusion_data.shift_logits = value;
       continue;
     }
 

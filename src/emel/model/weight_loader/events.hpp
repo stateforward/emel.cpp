@@ -58,6 +58,13 @@ using load_streamed_fn = bool (*)(const load_weights &,
 using init_mappings_fn = bool (*)(const load_weights &, int32_t * err_out);
 using validate_fn = bool (*)(const load_weights &, int32_t * err_out);
 using clean_up_fn = bool (*)(const load_weights &, int32_t * err_out);
+using upload_begin_fn = bool (*)(void * upload_ctx, uint64_t total_bytes, int32_t * err_out);
+using upload_chunk_fn = bool (*)(void * upload_ctx,
+                                 const void * data,
+                                 uint64_t size,
+                                 uint64_t offset,
+                                 int32_t * err_out);
+using upload_end_fn = bool (*)(void * upload_ctx, int32_t * err_out);
 
 struct load_weights {
   bool request_mmap = true;
@@ -74,6 +81,10 @@ struct load_weights {
   load_streamed_fn load_streamed = nullptr;
   validate_fn validate = nullptr;
   clean_up_fn clean_up = nullptr;
+  void * upload_ctx = nullptr;
+  upload_begin_fn upload_begin = nullptr;
+  upload_chunk_fn upload_chunk = nullptr;
+  upload_end_fn upload_end = nullptr;
   bool (*progress_callback)(float progress, void * user_data) = nullptr;
   void * progress_user_data = nullptr;
 

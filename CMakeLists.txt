@@ -89,6 +89,7 @@ if(EMEL_ENABLE_TESTS)
     tests/doctest_main.cpp
     tests/model/gguf_tests.cpp
     tests/model/gguf_parser_tests.cpp
+    tests/model/gguf_loader_tests.cpp
     tests/model/loader_tests.cpp
     tests/model/weight_loader_tests.cpp
     tests/sm/sm_policy_tests.cpp
