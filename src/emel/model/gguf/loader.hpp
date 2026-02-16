@@ -4848,7 +4848,17 @@ inline bool map_layers(const emel::model::loader::event::load & ev, int32_t * er
   if (err_out != nullptr) {
     *err_out = EMEL_OK;
   }
+  if (ev.model_data.n_layers <= 0 && ev.model_data.params.n_layer > 0) {
+    ev.model_data.n_layers = ev.model_data.params.n_layer;
+  }
   if (ev.model_data.n_layers <= 0) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_MODEL_INVALID;
+    }
+    return false;
+  }
+  if (ev.model_data.params.n_layer > 0 &&
+      ev.model_data.params.n_layer != ev.model_data.n_layers) {
     if (err_out != nullptr) {
       *err_out = EMEL_ERR_MODEL_INVALID;
     }
@@ -4868,13 +4878,49 @@ inline bool validate_structure(const emel::model::loader::event::load & ev, int3
     }
     return false;
   }
+  const uint16_t split_count = ev.model_data.weights_split_count;
+  if (split_count == 0 || split_count > emel::model::data::k_max_split_files) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_MODEL_INVALID;
+    }
+    return false;
+  }
   if (ev.model_data.n_tensors == 0 || ev.model_data.weights_size == 0) {
     if (err_out != nullptr) {
       *err_out = EMEL_ERR_MODEL_INVALID;
     }
     return false;
   }
+  if (split_count == 1) {
+    if (ev.model_data.weights_split_sizes[0] == 0 && ev.model_data.weights_size > 0) {
+      ev.model_data.weights_split_sizes[0] = ev.model_data.weights_size;
+    }
+    if (ev.model_data.weights_split_offsets[0] == 0 && ctx->data_offset > 0) {
+      ev.model_data.weights_split_offsets[0] = ctx->data_offset;
+    }
+  }
   if (ctx->data_offset == 0) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_MODEL_INVALID;
+    }
+    return false;
+  }
+  uint64_t total_weights = 0;
+  bool sizes_known = true;
+  for (uint16_t split_idx = 0; split_idx < split_count; ++split_idx) {
+    const uint64_t split_size = ev.model_data.weights_split_sizes[split_idx];
+    if (split_size == 0) {
+      sizes_known = false;
+      break;
+    }
+    if (add_overflow_u64(total_weights, split_size, total_weights)) {
+      if (err_out != nullptr) {
+        *err_out = EMEL_ERR_MODEL_INVALID;
+      }
+      return false;
+    }
+  }
+  if (sizes_known && total_weights != ev.model_data.weights_size) {
     if (err_out != nullptr) {
       *err_out = EMEL_ERR_MODEL_INVALID;
     }
