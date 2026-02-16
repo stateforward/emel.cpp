@@ -4926,6 +4926,40 @@ inline bool validate_structure(const emel::model::loader::event::load & ev, int3
     }
     return false;
   }
+  const uint64_t weights_size = ev.model_data.weights_size;
+  for (uint32_t i = 0; i < ev.model_data.n_tensors; ++i) {
+    const auto & record = ev.model_data.tensors[i];
+    if (record.data_size == 0) {
+      if (err_out != nullptr) {
+        *err_out = EMEL_ERR_MODEL_INVALID;
+      }
+      return false;
+    }
+    if (record.file_index >= split_count) {
+      if (err_out != nullptr) {
+        *err_out = EMEL_ERR_MODEL_INVALID;
+      }
+      return false;
+    }
+    uint64_t end = 0;
+    if (add_overflow_u64(record.data_offset, record.data_size, end) ||
+        end > weights_size) {
+      if (err_out != nullptr) {
+        *err_out = EMEL_ERR_MODEL_INVALID;
+      }
+      return false;
+    }
+    if (sizes_known) {
+      const uint64_t split_size = ev.model_data.weights_split_sizes[record.file_index];
+      if (add_overflow_u64(record.file_offset, record.data_size, end) ||
+          end > split_size) {
+        if (err_out != nullptr) {
+          *err_out = EMEL_ERR_MODEL_INVALID;
+        }
+        return false;
+      }
+    }
+  }
   return true;
 }
 
