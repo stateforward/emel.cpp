@@ -63,6 +63,7 @@ mkdir -p "$GEN_MD_DIR" "$GEN_MERMAID_DIR"
   sed "s|REPO_URL_PLACEHOLDER|$REPO_URL|g" <<'CPP'
 
 constexpr const char * k_repo_url = "REPO_URL_PLACEHOLDER";
+constexpr const char * k_repo_src_prefix = "src/";
 
 template <class T>
 std::string sml_name() noexcept {
@@ -116,6 +117,7 @@ inline std::string md_link(const std::string & name, const std::string & source_
   link.append("`](");
   link.append(k_repo_url);
   link.append("/blob/main/");
+  link.append(k_repo_src_prefix);
   link.append(source_header);
   link.append(")");
   return link;
@@ -131,10 +133,6 @@ void dump_transition(std::ostream & md, std::ostream & mermaid,
 
   if (dst_state == "X" || dst_state == "terminate") {
     dst_state = "[*]";
-  }
-
-  if (T::initial) {
-    mermaid << "  [*] --> " << src_state << "\n";
   }
 
   auto event = sml_name<typename T::event>();
@@ -156,6 +154,10 @@ void dump_transition(std::ostream & md, std::ostream & mermaid,
   const auto event_label = sanitize_mermaid(event);
   const auto guard_label = sanitize_mermaid(guard);
   const auto action_label = sanitize_mermaid(action);
+
+  if (T::initial) {
+    mermaid << "  [*] --> " << src_id << "\n";
+  }
 
   mermaid << "  " << src_id << " --> " << dst_id;
   if (!event.empty() || !guard.empty() || !action.empty()) {
@@ -217,7 +219,7 @@ void dump_machine_doc(
 
   md << "# " << machine_name << "\n\n";
   md << "Source: [`" << source_header << "`](" << k_repo_url << "/blob/main/"
-     << source_header << ")\n\n";
+     << k_repo_src_prefix << source_header << ")\n\n";
   md << "## Mermaid\n\n";
   md << "```mermaid\n";
   md << "stateDiagram-v2\n";

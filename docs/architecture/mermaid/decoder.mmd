@@ -1,5 +1,5 @@
 stateDiagram-v2
-  [*] --> emel::decoder::initialized
+  [*] --> emel__decoder__initialized
   emel__decoder__initialized --> emel__decoder__validating_request : emel__decoder__event__decode [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_decoder_actions_hpp_68_38__
   emel__decoder__validating_request --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_decoder_sm_hpp_69_11__
   emel__decoder__validating_request --> emel__decoder__validating_request : emel__decoder__event__validate [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_decoder_actions_hpp_81_38__

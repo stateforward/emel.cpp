@@ -1,5 +1,5 @@
 stateDiagram-v2
-  [*] --> emel::kv::cache::initialized
+  [*] --> emel__kv__cache__initialized
   emel__kv__cache__initialized --> emel__kv__cache__preparing : emel__kv__cache__event__prepare [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_kv_cache_actions_hpp_107_39__
   emel__kv__cache__prepared --> emel__kv__cache__preparing : emel__kv__cache__event__prepare [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_kv_cache_actions_hpp_107_39__
   emel__kv__cache__preparing --> boost__sml__front__internal : on_entry [boost__sml__front__always] / boost__sml__aux__zero_wrapper__lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_src_emel_kv_cache_sm_hpp_53_11__
