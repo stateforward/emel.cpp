@@ -1,13 +1,22 @@
 #pragma once
 
+#include "emel/emel.h"
+#include "emel/model/parser/events.hpp"
+
 namespace emel::model::parser::guard {
 
-inline constexpr auto no_error = [] { return true; };
-inline constexpr auto error = [] { return false; };
-inline constexpr auto has_error = [] { return error(); };
+struct no_error {
+  template <class Event>
+  bool operator()(const Event & ev) const {
+    return ev.err == EMEL_OK;
+  }
+};
 
-// Kept as explicit parser validation hooks used by step actions to emit _done/_error.
-inline constexpr auto arch_supported = [] { return true; };
-inline constexpr auto hparams_valid = [] { return true; };
+struct has_error {
+  template <class Event>
+  bool operator()(const Event & ev) const {
+    return ev.err != EMEL_OK;
+  }
+};
 
 }  // namespace emel::model::parser::guard

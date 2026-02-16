@@ -7,7 +7,7 @@ Scope of this audit
 - Date: 2026-02-16.
 - All other machines are not yet validated against `tmp/llama.cpp` behavior.
 
-Allocator cluster gaps (ggml-alloc parity)
+Allocator cluster status (ggml-alloc parity)
 - Unexpected-event handling is now explicit for allocator cluster machines via wildcard transitions
   to error states (`buffer::allocator`, `buffer::planner`, `buffer::chunk_allocator`,
   `buffer::realloc_analyzer`).
@@ -23,9 +23,22 @@ Allocator cluster gaps (ggml-alloc parity)
 - Public C API allocator-path tests for exact error/status mapping are implemented.
 - C API equivalents of `ggml_backend_alloc_ctx_tensors_from_buft[_size]` and
   `ggml_backend_alloc_ctx_tensors` are available via EMEL allocator wrappers (without `ctx`).
+- Allocator cluster audit is complete against `ggml-alloc.c`.
+
+Model loader audit (llama.cpp parity)
+- Loader, parser, and weight loader orchestration is now implemented with explicit actions, guards,
+  and error propagation via `events::*_error` / `events::*_done`.
+- Loader dispatches parsing and weight loading through parser/weight_loader state machines and
+  supports `vocab_only`, `check_tensors`, `no_alloc`, and optional architecture validation.
+- Parsing and weight loading logic is callback-driven and still needs concrete GGUF file I/O,
+  metadata validation (magic/version, KV/tensor counts, alignment, offsets), and progress callbacks
+  ported from `tmp/llama.cpp`.
+- Split-file discovery/validation, mmap/direct I/O behavior, and tensor mapping lifecycle remain
+  to be implemented inside parser/weight-loader callbacks.
+- Loader/parse/load error mapping to public C API remains to be validated once the C boundary is
+  added.
 
 Unvalidated machines (no parity audit performed yet)
-- `src/emel/model/loader/sm.hpp`
 - `src/emel/model/weight_loader/sm.hpp`
 - `src/emel/model/parser/sm.hpp`
 - `src/emel/tokenizer/sm.hpp`
@@ -49,5 +62,3 @@ Unvalidated machines (no parity audit performed yet)
 Recommended next steps
 - Decide which component to audit next against `tmp/llama.cpp` and identify the exact reference
   files and functions to map.
-- For the allocator cluster, decide whether to lift alignment and max-size into event payloads,
-  and whether to add an explicit EMEL equivalent of the ggml context tensor allocators.

@@ -2,15 +2,37 @@
 
 #include <cstdint>
 
-namespace emel::buffer::allocator {
-struct sm;
-}  // namespace emel::buffer::allocator
-
-namespace emel::model::loader {
-struct sm;
-}  // namespace emel::model::loader
+#include "emel/emel.h"
+#include "emel/model/loader/events.hpp"
 
 namespace emel::model::weight_loader::event {
+struct load_weights;
+}  // namespace emel::model::weight_loader::event
+
+namespace emel::model::weight_loader::events {
+
+struct weights_loaded {
+  const event::load_weights * request = nullptr;
+  int32_t err = EMEL_OK;
+  bool used_mmap = false;
+  uint64_t bytes_total = 0;
+  uint64_t bytes_done = 0;
+};
+
+}  // namespace emel::model::weight_loader::events
+
+namespace emel::model::weight_loader::event {
+
+struct load_weights;
+
+using map_mmap_fn = bool (*)(const load_weights &,
+                             uint64_t * bytes_done,
+                             uint64_t * bytes_total,
+                             int32_t * err_out);
+using load_streamed_fn = bool (*)(const load_weights &,
+                                  uint64_t * bytes_done,
+                                  uint64_t * bytes_total,
+                                  int32_t * err_out);
 
 struct load_weights {
   bool request_mmap = true;
@@ -19,32 +41,16 @@ struct load_weights {
   bool no_alloc = false;
   bool mmap_supported = true;
   bool direct_io_supported = false;
-  emel::buffer::allocator::sm * buffer_allocator_sm = nullptr;
-  emel::model::loader::sm * model_loader_sm = nullptr;
-};
 
-struct transport_selected {};
-struct weights_loaded {
-  bool success = true;
-  int32_t status_code = 0;
-  bool used_mmap = false;
-  uint64_t bytes_total = 0;
-  uint64_t bytes_done = 0;
+  void * buffer_allocator_sm = nullptr;
+
+  map_mmap_fn map_mmap = nullptr;
+  load_streamed_fn load_streamed = nullptr;
+
+  const emel::model::loader::event::load * loader_request = nullptr;
+  void * owner_sm = nullptr;
+  bool (*dispatch_done)(void * owner_sm, const emel::model::loader::events::loading_done &) = nullptr;
+  bool (*dispatch_error)(void * owner_sm, const emel::model::loader::events::loading_error &) = nullptr;
 };
 
 }  // namespace emel::model::weight_loader::event
-
-namespace emel::model::weight_loader::events {
-
-struct loading_done {
-  int32_t status_code = 0;
-  uint64_t bytes_total = 0;
-  uint64_t bytes_done = 0;
-};
-
-struct loading_error {
-  int32_t status_code = 0;
-  bool used_mmap = false;
-};
-
-}  // namespace emel::model::weight_loader::events

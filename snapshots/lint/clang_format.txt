@@ -155,6 +155,7 @@ tests/memory/coordinator_sm_transition_more_tests.cpp
 tests/memory/coordinator_sm_transition_tests.cpp
 tests/memory/coordinator_tests.cpp
 tests/model/loader_tests.cpp
+tests/model/parser_tests.cpp
 tests/model/weight_loader_tests.cpp
 tests/sm/sm_policy_tests.cpp
 tests/tensor/allocator_action_branch_more_tests.cpp

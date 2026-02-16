@@ -1,72 +1,102 @@
 #pragma once
 
-#include "emel/sm.hpp"
+#include "boost/sml.hpp"
 #include "emel/model/loader/actions.hpp"
 #include "emel/model/loader/events.hpp"
 #include "emel/model/loader/guards.hpp"
-#include "emel/model/parser/events.hpp"
-#include "emel/model/weight_loader/events.hpp"
+#include "emel/sm.hpp"
 
 namespace emel::model::loader {
 
+struct initialized {};
+struct mapping_parser {};
+struct parsing {};
+struct loading_weights {};
+struct mapping_layers {};
+struct validating_structure {};
+struct validating_architecture {};
+struct done {};
+struct errored {};
+
 struct model {
+  using context = action::context;
+
   auto operator()() const {
     namespace sml = boost::sml;
-
-    struct initialized {};
-    struct mapping_parser {};
-    struct parsing {};
-    struct loading_weights {};
-    struct mapping_layers {};
-    struct validating_structure {};
-    struct validating_architecture {};
-    struct done {};
-    struct errored {};
-
     return sml::make_transition_table(
-      *sml::state<initialized> + sml::event<event::load> = sml::state<mapping_parser>,
+      *sml::state<initialized> + sml::event<event::load>
+        / action::start_map_parser{} = sml::state<mapping_parser>,
 
-      sml::state<mapping_parser> + sml::event<event::mapping_parser_done> = sml::state<parsing>,
-      sml::state<mapping_parser> + sml::event<event::unsupported_format_error> = sml::state<errored>,
+      sml::state<mapping_parser> + sml::event<events::mapping_parser_done>
+        / action::parse{} = sml::state<parsing>,
+      sml::state<mapping_parser> + sml::event<events::mapping_parser_error>
+        / action::dispatch_error{} = sml::state<errored>,
 
-      sml::state<parsing> + sml::event<emel::model::parser::events::parsing_done> =
-        sml::state<loading_weights>,
-      sml::state<parsing> + sml::event<emel::model::parser::events::parsing_error> =
+      sml::state<parsing> + sml::event<events::parsing_done> [guard::should_load_weights{}]
+        / action::load_weights{} = sml::state<loading_weights>,
+      sml::state<parsing> + sml::event<events::parsing_done> [guard::skip_weights{}]
+        / action::validate_structure{} = sml::state<validating_structure>,
+      sml::state<parsing> + sml::event<events::parsing_error>
+        / action::dispatch_error{} = sml::state<errored>,
+
+      sml::state<loading_weights> + sml::event<events::loading_done>
+        / action::store_and_map_layers{} = sml::state<mapping_layers>,
+      sml::state<loading_weights> + sml::event<events::loading_error>
+        / action::dispatch_error{} = sml::state<errored>,
+
+      sml::state<mapping_layers> + sml::event<events::layers_mapped>
+        / action::validate_structure{} = sml::state<validating_structure>,
+      sml::state<mapping_layers> + sml::event<events::layers_map_error>
+        / action::dispatch_error{} = sml::state<errored>,
+
+      sml::state<validating_structure> + sml::event<events::structure_validated>
+        [guard::has_arch_validate{}] / action::validate_architecture{}
+          = sml::state<validating_architecture>,
+      sml::state<validating_structure> + sml::event<events::structure_validated>
+        [guard::no_arch_validate{}] / action::dispatch_done{} = sml::state<done>,
+      sml::state<validating_structure> + sml::event<events::structure_error>
+        / action::dispatch_error{} = sml::state<errored>,
+
+      sml::state<validating_architecture> + sml::event<events::architecture_validated>
+        / action::dispatch_done{} = sml::state<done>,
+      sml::state<validating_architecture> + sml::event<events::architecture_error>
+        / action::dispatch_error{} = sml::state<errored>,
+
+      sml::state<initialized> + sml::event<sml::_> / action::on_unexpected{} =
         sml::state<errored>,
-
-      sml::state<loading_weights> + sml::event<emel::model::weight_loader::events::loading_done> =
-        sml::state<mapping_layers>,
-      sml::state<loading_weights> + sml::event<emel::model::weight_loader::events::loading_error> =
+      sml::state<mapping_parser> + sml::event<sml::_> / action::on_unexpected{} =
         sml::state<errored>,
-
-      sml::state<mapping_layers> + sml::event<event::layers_mapped>[guard::no_error] =
-        sml::state<validating_structure>,
-      sml::state<mapping_layers> + sml::event<event::layers_mapped>[guard::has_error] =
+      sml::state<parsing> + sml::event<sml::_> / action::on_unexpected{} =
         sml::state<errored>,
-
-      sml::state<validating_structure> +
-          sml::event<event::structure_validated>[guard::no_error_and_has_arch_validate] =
-        sml::state<validating_architecture>,
-      sml::state<validating_structure> +
-          sml::event<event::structure_validated>[guard::no_error_and_no_arch_validate] =
-        sml::state<done>,
-      sml::state<validating_structure> + sml::event<event::structure_validated>[guard::has_error] =
+      sml::state<loading_weights> + sml::event<sml::_> / action::on_unexpected{} =
         sml::state<errored>,
-
-      sml::state<validating_architecture> +
-          sml::event<event::architecture_validated>[guard::no_error] = sml::state<done>,
-      sml::state<validating_architecture> +
-          sml::event<event::architecture_validated>[guard::has_error] = sml::state<errored>
+      sml::state<mapping_layers> + sml::event<sml::_> / action::on_unexpected{} =
+        sml::state<errored>,
+      sml::state<validating_structure> + sml::event<sml::_> / action::on_unexpected{} =
+        sml::state<errored>,
+      sml::state<validating_architecture> + sml::event<sml::_> / action::on_unexpected{} =
+        sml::state<errored>,
+      sml::state<done> + sml::event<sml::_> / action::on_unexpected{} =
+        sml::state<errored>,
+      sml::state<errored> + sml::event<sml::_> / action::on_unexpected{} =
+        sml::state<errored>
     );
   }
 };
 
-struct sm : emel::sm<model> {
-  using emel::sm<model>::sm;
-};
+using Process = process_t;
 
-inline bool load(sm & state_machine, const event::load & ev) {
-  return state_machine.process_event(ev);
-}
+struct sm : private emel::detail::process_support<sm, Process>, public emel::sm<model, Process> {
+  using base_type = emel::sm<model, Process>;
+
+  sm()
+      : emel::detail::process_support<sm, Process>(this),
+        base_type(context_, this->process_) {}
+
+  using base_type::process_event;
+
+ private:
+  action::context context_{};
+};
 
 }  // namespace emel::model::loader

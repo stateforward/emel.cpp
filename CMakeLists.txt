@@ -86,6 +86,7 @@ if(EMEL_ENABLE_TESTS)
   endif()
 
   add_executable(emel_tests_bin
+    tests/doctest_main.cpp
     tests/model/loader_tests.cpp
     tests/model/weight_loader_tests.cpp
     tests/sm/sm_policy_tests.cpp
