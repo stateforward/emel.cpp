@@ -30,13 +30,20 @@ Model loader audit (llama.cpp parity)
   and error propagation via `events::*_error` / `events::*_done`.
 - Loader dispatches parsing and weight loading through parser/weight_loader state machines and
   supports `vocab_only`, `check_tensors`, `no_alloc`, and optional architecture validation.
-- Parsing and weight loading logic is callback-driven and still needs concrete GGUF file I/O,
-  metadata validation (magic/version, KV/tensor counts, alignment, offsets), and progress callbacks
-  ported from `tmp/llama.cpp`.
-- Split-file discovery/validation, mmap/direct I/O behavior, and tensor mapping lifecycle remain
-  to be implemented inside parser/weight-loader callbacks.
-- Loader/parse/load error mapping to public C API remains to be validated once the C boundary is
-  added.
+- Status: partially implemented, behavior parity not yet achieved.
+- Remaining gaps to close for loader parity:
+- GGUF header and metadata validation: magic/version, endian, KV/tensor counts, alignment rules,
+  and file offsets need concrete parsing and validation paths.
+- Split-file discovery and validation: sharded file detection, shard order, and cross-file metadata
+  consistency are not implemented.
+- I/O strategy parity: mmap vs stream selection, sequential read paths, and error handling must be
+  ported into parser/weight-loader callbacks.
+- Tensor data mapping lifecycle: tensor index lookup, range checks, offset mapping, and
+  buffer-to-tensor binding are incomplete.
+- Progress callbacks and reporting: load progress, warnings, and detailed error classification are
+  not wired to the public API yet.
+- C boundary validation: loader/parse/load error mapping and status return paths are not yet
+  validated because the public C API entrypoints are still pending.
 
 Unvalidated machines (no parity audit performed yet)
 - `src/emel/model/weight_loader/sm.hpp`

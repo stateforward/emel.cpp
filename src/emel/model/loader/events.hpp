@@ -117,6 +117,8 @@ struct load {
   uint64_t weights_buffer_size = 0;
   void * file_handle = nullptr;
   void * format_ctx = nullptr;
+  bool (*progress_callback)(float progress, void * user_data) = nullptr;
+  void * progress_user_data = nullptr;
 
   map_parser_fn map_parser = nullptr;
   bool (*parse_architecture)(const emel::model::parser::event::parse_model &, int32_t * err_out) = nullptr;

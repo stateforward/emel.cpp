@@ -46,6 +46,8 @@ struct load_weights {
 
   map_mmap_fn map_mmap = nullptr;
   load_streamed_fn load_streamed = nullptr;
+  bool (*progress_callback)(float progress, void * user_data) = nullptr;
+  void * progress_user_data = nullptr;
 
   const emel::model::loader::event::load * loader_request = nullptr;
   void * owner_sm = nullptr;

@@ -125,6 +125,8 @@ struct load_weights {
       .buffer_allocator_sm = request->buffer_allocator_sm,
       .map_mmap = request->map_mmap,
       .load_streamed = request->load_streamed,
+      .progress_callback = request->progress_callback,
+      .progress_user_data = request->progress_user_data,
       .loader_request = request,
       .owner_sm = request->loader_sm,
       .dispatch_done = request->dispatch_loading_done,
