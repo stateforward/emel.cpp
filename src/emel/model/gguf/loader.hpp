@@ -2140,6 +2140,137 @@ inline bool validate_architecture(
 }
 
 #if defined(_WIN32)
+inline bool ensure_mapped(
+    const emel::model::loader::event::load &, context &, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_ERR_FORMAT_UNSUPPORTED;
+  }
+  return false;
+}
+#else
+inline bool ensure_mapped(
+    const emel::model::loader::event::load & request, context & ctx, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  const uint16_t split_count = request.model_data.weights_split_count;
+  if (split_count == 0 || split_count > emel::model::data::k_max_split_files) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_MODEL_INVALID;
+    }
+    return false;
+  }
+  if (split_count == 1 && request.model_data.weights_split_sizes[0] == 0) {
+    request.model_data.weights_split_sizes[0] = ctx.data_size;
+    request.model_data.weights_split_offsets[0] = ctx.data_offset;
+    request.model_data.weights_size = ctx.data_size;
+  }
+  if (ctx.mapped_count != 0) {
+    return true;
+  }
+  for (uint16_t split_idx = 0; split_idx < split_count; ++split_idx) {
+    std::FILE * file = nullptr;
+    bool owns_file = false;
+    if (split_idx == 0 && ctx.file != nullptr && request.model_path.empty()) {
+      file = ctx.file;
+    } else {
+      if (request.model_path.empty() || request.model_path.size() >= k_max_path_length) {
+        if (err_out != nullptr) {
+          *err_out = EMEL_ERR_INVALID_ARGUMENT;
+        }
+        return false;
+      }
+      char path[k_max_path_length] = {};
+      if (split_count == 1) {
+        std::memcpy(path, request.model_path.data(), request.model_path.size());
+        path[request.model_path.size()] = '\0';
+      } else if (!format_split_path(request.model_path, split_idx, split_count,
+                                    path, sizeof(path))) {
+        if (err_out != nullptr) {
+          *err_out = EMEL_ERR_INVALID_ARGUMENT;
+        }
+        return false;
+      }
+      file = std::fopen(path, "rb");
+      if (file == nullptr) {
+        if (err_out != nullptr) {
+          *err_out = EMEL_ERR_IO;
+        }
+        return false;
+      }
+      owns_file = true;
+    }
+    if (std::fseek(file, 0, SEEK_END) != 0) {
+      if (owns_file) {
+        std::fclose(file);
+      }
+      if (err_out != nullptr) {
+        *err_out = EMEL_ERR_IO;  // GCOVR_EXCL_LINE
+      }
+      return false;  // GCOVR_EXCL_LINE
+    }
+    const long file_size = std::ftell(file);
+    if (file_size < 0) {
+      if (owns_file) {
+        std::fclose(file);
+      }
+      if (err_out != nullptr) {
+        *err_out = EMEL_ERR_IO;  // GCOVR_EXCL_LINE
+      }
+      return false;  // GCOVR_EXCL_LINE
+    }
+    std::rewind(file);
+    const int fd = fileno(file);
+    void * data = mmap(nullptr, static_cast<size_t>(file_size), PROT_READ, MAP_PRIVATE, fd, 0);
+    if (owns_file) {
+      std::fclose(file);
+    }
+    if (data == MAP_FAILED) {
+      if (err_out != nullptr) {
+        *err_out = EMEL_ERR_IO;  // GCOVR_EXCL_LINE
+      }
+      return false;  // GCOVR_EXCL_LINE
+    }
+    ctx.mapped_splits[split_idx] = data;
+    ctx.mapped_sizes[split_idx] = static_cast<uint64_t>(file_size);
+  }
+  ctx.mapped_count = split_count;
+  ctx.mapped_data = ctx.mapped_splits[0];
+  ctx.mapped_size = ctx.mapped_sizes[0];
+  return true;
+}
+#endif
+
+inline bool init_mappings(const emel::model::weight_loader::event::load_weights & ev,
+                          int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  const emel::model::loader::event::load * request = ev.loader_request;
+  if (request == nullptr) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+    return false;
+  }
+  context * ctx = get_context(request->format_ctx);
+  if (ctx == nullptr) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+    return false;
+  }
+#if defined(_WIN32)
+  if (err_out != nullptr) {
+    *err_out = EMEL_ERR_FORMAT_UNSUPPORTED;
+  }
+  return false;
+#else
+  return ensure_mapped(*request, *ctx, err_out);
+#endif
+}
+
+#if defined(_WIN32)
 inline bool map_mmap(
     const emel::model::weight_loader::event::load_weights &,
     uint64_t *, uint64_t *, int32_t * err_out) {
@@ -2190,76 +2321,8 @@ inline bool map_mmap(
     }
     return true;
   }
-  if (ctx->mapped_count == 0) {
-    for (uint16_t split_idx = 0; split_idx < split_count; ++split_idx) {
-      std::FILE * file = nullptr;
-      bool owns_file = false;
-      if (split_idx == 0 && ctx->file != nullptr && request->model_path.empty()) {
-        file = ctx->file;
-      } else {
-        if (request->model_path.empty() || request->model_path.size() >= k_max_path_length) {
-          if (err_out != nullptr) {
-            *err_out = EMEL_ERR_INVALID_ARGUMENT;
-          }
-          return false;
-        }
-        char path[k_max_path_length] = {};
-        if (split_count == 1) {
-          std::memcpy(path, request->model_path.data(), request->model_path.size());
-          path[request->model_path.size()] = '\0';
-        } else if (!format_split_path(request->model_path, split_idx, split_count,
-                                      path, sizeof(path))) {
-          if (err_out != nullptr) {
-            *err_out = EMEL_ERR_INVALID_ARGUMENT;
-          }
-          return false;
-        }
-        file = std::fopen(path, "rb");
-        if (file == nullptr) {
-          if (err_out != nullptr) {
-            *err_out = EMEL_ERR_IO;
-          }
-          return false;
-        }
-        owns_file = true;
-      }
-      if (std::fseek(file, 0, SEEK_END) != 0) {
-        if (owns_file) {
-          std::fclose(file);
-        }
-        if (err_out != nullptr) {
-          *err_out = EMEL_ERR_IO;  // GCOVR_EXCL_LINE
-        }
-        return false;  // GCOVR_EXCL_LINE
-      }
-      const long file_size = std::ftell(file);
-      if (file_size < 0) {
-        if (owns_file) {
-          std::fclose(file);
-        }
-        if (err_out != nullptr) {
-          *err_out = EMEL_ERR_IO;  // GCOVR_EXCL_LINE
-        }
-        return false;  // GCOVR_EXCL_LINE
-      }
-      std::rewind(file);
-      const int fd = fileno(file);
-      void * data = mmap(nullptr, static_cast<size_t>(file_size), PROT_READ, MAP_PRIVATE, fd, 0);
-      if (owns_file) {
-        std::fclose(file);
-      }
-      if (data == MAP_FAILED) {
-        if (err_out != nullptr) {
-          *err_out = EMEL_ERR_IO;  // GCOVR_EXCL_LINE
-        }
-        return false;  // GCOVR_EXCL_LINE
-      }
-      ctx->mapped_splits[split_idx] = data;
-      ctx->mapped_sizes[split_idx] = static_cast<uint64_t>(file_size);
-    }
-    ctx->mapped_count = split_count;
-    ctx->mapped_data = ctx->mapped_splits[0];
-    ctx->mapped_size = ctx->mapped_sizes[0];
+  if (!ensure_mapped(*request, *ctx, err_out)) {
+    return false;
   }
   for (uint16_t split_idx = 0; split_idx < split_count; ++split_idx) {
     const uint64_t mapped_size = ctx->mapped_sizes[split_idx];
@@ -2295,7 +2358,12 @@ inline bool map_mmap(
     *bytes_done = request->model_data.weights_size;
   }
   if (ev.progress_callback != nullptr) {
-    (void)ev.progress_callback(1.0f, ev.progress_user_data);
+    if (!ev.progress_callback(1.0f, ev.progress_user_data)) {
+      if (err_out != nullptr) {
+        *err_out = EMEL_ERR_BACKEND;
+      }
+      return false;
+    }
   }
   return true;
 }
@@ -2466,6 +2534,98 @@ inline bool load_streamed(
     *bytes_done = done;
   }
   return true;
+}
+
+inline bool validate_weights(const emel::model::weight_loader::event::load_weights & ev,
+                             int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  const emel::model::loader::event::load * request = ev.loader_request;
+  if (request == nullptr) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+    return false;
+  }
+  if (!ev.check_tensors) {
+    return true;
+  }
+  return validate_tensor_data(request->model_data, err_out);
+}
+
+inline bool clean_up_weights(const emel::model::weight_loader::event::load_weights & ev,
+                             int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  const emel::model::loader::event::load * request = ev.loader_request;
+  if (request == nullptr) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+    return false;
+  }
+  context * ctx = get_context(request->format_ctx);
+  if (ctx == nullptr) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+    return false;
+  }
+#if defined(_WIN32)
+  (void)ctx;
+  return true;
+#else
+  if (ctx->mapped_count == 0) {
+    return true;
+  }
+  const uint16_t split_count = request->model_data.weights_split_count;
+  for (uint16_t split_idx = 0; split_idx < split_count; ++split_idx) {
+    const uint64_t mapped_size = ctx->mapped_sizes[split_idx];
+    if (mapped_size == 0 || ctx->mapped_splits[split_idx] == nullptr) {
+      continue;
+    }
+    uint64_t min_offset = mapped_size;
+    uint64_t max_offset = 0;
+    const uint64_t base_offset = request->model_data.weights_split_offsets[split_idx];
+    for (uint32_t i = 0; i < request->model_data.n_tensors; ++i) {
+      const auto & record = request->model_data.tensors[i];
+      if (record.data_size == 0 || record.file_index != split_idx) {
+        continue;
+      }
+      uint64_t start = 0;
+      if (add_overflow_u64(base_offset, record.file_offset, start)) {
+        if (err_out != nullptr) {
+          *err_out = EMEL_ERR_MODEL_INVALID;
+        }
+        return false;
+      }
+      uint64_t end = 0;
+      if (add_overflow_u64(start, record.data_size, end)) {
+        if (err_out != nullptr) {
+          *err_out = EMEL_ERR_MODEL_INVALID;
+        }
+        return false;
+      }
+      min_offset = std::min(min_offset, start);
+      max_offset = std::max(max_offset, end);
+    }
+    if (min_offset == mapped_size) {
+      continue;
+    }
+    if (min_offset > 0) {
+      (void)munmap(const_cast<void *>(ctx->mapped_splits[split_idx]),
+                   static_cast<size_t>(min_offset));
+    }
+    if (max_offset < mapped_size) {
+      uint8_t * base = static_cast<uint8_t *>(
+        const_cast<void *>(ctx->mapped_splits[split_idx]));
+      (void)munmap(base + max_offset, static_cast<size_t>(mapped_size - max_offset));
+    }
+  }
+  return true;
+#endif
 }
 
 }  // namespace emel::model::gguf

@@ -5,7 +5,11 @@
 #include <string>
 
 #if !defined(_WIN32)
+#include <sys/mman.h>
 #include <unistd.h>
+#ifndef MAP_ANON
+#define MAP_ANON MAP_ANONYMOUS
+#endif
 #endif
 
 #include "doctest/doctest.h"
@@ -2538,6 +2542,141 @@ TEST_CASE("gguf load_streamed handles owned files") {
 
   std::remove(path);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("gguf init_mappings maps files") {
+  char path[1024] = {};
+  CHECK(make_temp_path(path, sizeof(path)));
+  CHECK(write_minimal_gguf(path));
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+
+  int32_t err = EMEL_OK;
+  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_OK);
+
+  emel::model::weight_loader::event::load_weights load_req{
+    .loader_request = &request
+  };
+  CHECK(emel::model::gguf::init_mappings(load_req, &err));
+  CHECK(err == EMEL_OK);
+  CHECK(ctx.mapped_count == request.model_data.weights_split_count);
+
+  std::remove(path);
+}
+
+TEST_CASE("gguf clean_up_weights unmaps unused ranges") {
+  const long page = sysconf(_SC_PAGESIZE);
+  REQUIRE(page > 0);
+  const size_t map_size = static_cast<size_t>(page) * 3;
+  void * mapping = mmap(nullptr, map_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+  REQUIRE(mapping != MAP_FAILED);
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  ctx.mapped_splits[0] = mapping;
+  ctx.mapped_sizes[0] = map_size;
+  ctx.mapped_count = 1;
+
+  model.weights_split_count = 1;
+  model.weights_split_offsets[0] = 0;
+  model.weights_split_sizes[0] = map_size;
+  model.weights_size = map_size;
+  model.n_tensors = 1;
+  model.tensors[0].file_index = 0;
+  model.tensors[0].file_offset = static_cast<uint64_t>(page);
+  model.tensors[0].data_size = static_cast<uint64_t>(page);
+
+  emel::model::loader::event::load request{model};
+  request.format_ctx = &ctx;
+
+  emel::model::weight_loader::event::load_weights load_req{
+    .loader_request = &request
+  };
+  int32_t err = EMEL_OK;
+  CHECK(emel::model::gguf::clean_up_weights(load_req, &err));
+  CHECK(err == EMEL_OK);
+}
+
+TEST_CASE("gguf init_mappings reports invalid requests") {
+  emel::model::weight_loader::event::load_weights load_req{};
+  int32_t err = EMEL_OK;
+  CHECK(!emel::model::gguf::init_mappings(load_req, &err));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  emel::model::data model{};
+  emel::model::loader::event::load request{model};
+  load_req.loader_request = &request;
+  err = EMEL_OK;
+  CHECK(!emel::model::gguf::init_mappings(load_req, &err));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("gguf validate_weights handles request errors") {
+  emel::model::weight_loader::event::load_weights load_req{};
+  int32_t err = EMEL_OK;
+  CHECK(!emel::model::gguf::validate_weights(load_req, &err));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  emel::model::data model{};
+  emel::model::gguf::context ctx{};
+  emel::model::loader::event::load request{model};
+  request.format_ctx = &ctx;
+  request.check_tensors = false;
+  load_req.loader_request = &request;
+  load_req.check_tensors = false;
+  err = EMEL_OK;
+  CHECK(emel::model::gguf::validate_weights(load_req, &err));
+  CHECK(err == EMEL_OK);
+}
+
+TEST_CASE("gguf clean_up_weights reports invalid requests") {
+  emel::model::weight_loader::event::load_weights load_req{};
+  int32_t err = EMEL_OK;
+  CHECK(!emel::model::gguf::clean_up_weights(load_req, &err));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  emel::model::data model{};
+  emel::model::loader::event::load request{model};
+  load_req.loader_request = &request;
+  err = EMEL_OK;
+  CHECK(!emel::model::gguf::clean_up_weights(load_req, &err));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("gguf map_mmap reports progress cancellation") {
+  char path[1024] = {};
+  CHECK(make_temp_path(path, sizeof(path)));
+  CHECK(write_minimal_gguf(path));
+
+  emel::model::data model = {};
+  emel::model::gguf::context ctx = {};
+  emel::model::loader::event::load request{model};
+  request.model_path = path;
+  request.format_ctx = &ctx;
+  int32_t err = EMEL_OK;
+  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(err == EMEL_OK);
+
+  emel::model::weight_loader::event::load_weights load_req{
+    .loader_request = &request
+  };
+  load_req.progress_callback = [](float, void *) {
+    return false;
+  };
+  uint64_t done = 0;
+  uint64_t total = 0;
+  err = EMEL_OK;
+  CHECK(!emel::model::gguf::map_mmap(load_req, &done, &total, &err));
+  CHECK(err == EMEL_ERR_BACKEND);
+
+  std::remove(path);
+}
+#endif
 
 TEST_CASE("gguf validate_row_data covers quant types") {
   using namespace emel::model::gguf;

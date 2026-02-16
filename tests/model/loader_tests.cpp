@@ -960,7 +960,8 @@ TEST_CASE("weight loader actions cover branches") {
   emel::model::weight_loader::action::context ctx{};
 
   emel::model::weight_loader::event::load_weights request{};
-  emel::model::weight_loader::action::load_mmap{}(request, ctx, process);
+  emel::model::weight_loader::events::mappings_ready ready{&request, EMEL_OK};
+  emel::model::weight_loader::action::load_mmap{}(ready, ctx, process);
   CHECK(sink.weights_loaded == 1);
   CHECK(sink.last_err == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(sink.used_mmap);
@@ -971,7 +972,7 @@ TEST_CASE("weight loader actions cover branches") {
     }
     return false;
   };
-  emel::model::weight_loader::action::load_mmap{}(request, ctx, process);
+  emel::model::weight_loader::action::load_mmap{}(ready, ctx, process);
   CHECK(sink.weights_loaded == 2);
   CHECK(sink.last_err == EMEL_ERR_BACKEND);
 
@@ -987,7 +988,7 @@ TEST_CASE("weight loader actions cover branches") {
     }
     return true;
   };
-  emel::model::weight_loader::action::load_mmap{}(request, ctx, process);
+  emel::model::weight_loader::action::load_mmap{}(ready, ctx, process);
   CHECK(sink.weights_loaded == 3);
   CHECK(sink.last_err == EMEL_ERR_BACKEND);
 
@@ -1003,12 +1004,13 @@ TEST_CASE("weight loader actions cover branches") {
     }
     return true;
   };
-  emel::model::weight_loader::action::load_mmap{}(request, ctx, process);
+  emel::model::weight_loader::action::load_mmap{}(ready, ctx, process);
   CHECK(sink.weights_loaded == 4);
   CHECK(sink.last_err == EMEL_OK);
 
   emel::model::weight_loader::event::load_weights stream_request{};
-  emel::model::weight_loader::action::load_streamed{}(stream_request, ctx, process);
+  emel::model::weight_loader::events::strategy_selected stream_selected{&stream_request, false, false, EMEL_OK};
+  emel::model::weight_loader::action::load_streamed{}(stream_selected, ctx, process);
   CHECK(sink.weights_loaded == 5);
   CHECK(sink.used_mmap == false);
   CHECK(sink.last_err == EMEL_ERR_INVALID_ARGUMENT);
@@ -1019,7 +1021,8 @@ TEST_CASE("weight loader actions cover branches") {
     }
     return false;
   };
-  emel::model::weight_loader::action::load_streamed{}(stream_request, ctx, process);
+  stream_selected.request = &stream_request;
+  emel::model::weight_loader::action::load_streamed{}(stream_selected, ctx, process);
   CHECK(sink.weights_loaded == 6);
   CHECK(sink.last_err == EMEL_ERR_BACKEND);
 
@@ -1035,19 +1038,30 @@ TEST_CASE("weight loader actions cover branches") {
     }
     return true;
   };
-  emel::model::weight_loader::action::load_streamed{}(stream_request, ctx, process);
+  emel::model::weight_loader::action::load_streamed{}(stream_selected, ctx, process);
   CHECK(sink.weights_loaded == 7);
   CHECK(sink.last_err == EMEL_OK);
 
   emel::model::weight_loader::events::weights_loaded done{&stream_request, EMEL_OK, false, 2, 1};
-  emel::model::weight_loader::action::store_and_dispatch_done{}(done, ctx, process);
+  emel::model::weight_loader::action::store_and_validate{}(done, ctx, process);
+  emel::model::weight_loader::action::cleaning_up{}(
+    emel::model::weight_loader::events::validation_done{&stream_request, EMEL_OK},
+    ctx,
+    process);
+  emel::model::weight_loader::action::dispatch_done{}(
+    emel::model::weight_loader::events::cleaning_up_done{&stream_request, EMEL_OK},
+    ctx,
+    process);
   emel::model::weight_loader::action::store_and_dispatch_error{}(
     emel::model::weight_loader::events::weights_loaded{&stream_request, EMEL_ERR_BACKEND, false, 0, 0},
     ctx,
     process);
 
   stream_request.owner_sm = nullptr;
-  emel::model::weight_loader::action::dispatch_done{}(done, ctx, process);
+  emel::model::weight_loader::action::dispatch_done{}(
+    emel::model::weight_loader::events::cleaning_up_done{&stream_request, EMEL_OK},
+    ctx,
+    process);
   emel::model::weight_loader::action::dispatch_error{}(done, process);
 }
 

@@ -9,8 +9,12 @@
 namespace emel::model::weight_loader {
 
 struct initialized {};
+struct selecting {};
+struct initializing {};
 struct loading_mmap {};
 struct loading_streamed {};
+struct validating {};
+struct cleaning_up {};
 struct done {};
 struct errored {};
 
@@ -20,26 +24,54 @@ struct model {
   auto operator()() const {
     namespace sml = boost::sml;
     return sml::make_transition_table(
-      *sml::state<initialized> + sml::event<event::load_weights>[guard::use_mmap{}]
-        / action::load_mmap{} = sml::state<loading_mmap>,
-      sml::state<initialized> + sml::event<event::load_weights>[guard::use_stream{}]
+      *sml::state<initialized> + sml::event<event::load_weights> / action::select_strategy{} =
+        sml::state<selecting>,
+
+      sml::state<selecting> + sml::event<events::strategy_selected>[guard::use_mmap_selected{}]
+        / action::init_mappings{} = sml::state<initializing>,
+      sml::state<selecting> + sml::event<events::strategy_selected>[guard::use_stream_selected{}]
         / action::load_streamed{} = sml::state<loading_streamed>,
+      sml::state<selecting> + sml::event<events::strategy_selected>[guard::has_error{}]
+        / action::dispatch_error{} = sml::state<errored>,
+
+      sml::state<initializing> + sml::event<events::mappings_ready>[guard::no_error{}]
+        / action::load_mmap{} = sml::state<loading_mmap>,
+      sml::state<initializing> + sml::event<events::mappings_ready>[guard::has_error{}]
+        / action::dispatch_error{} = sml::state<errored>,
 
       sml::state<loading_mmap> + sml::event<events::weights_loaded>[guard::no_error{}]
-        / action::store_and_dispatch_done{} = sml::state<done>,
+        / action::store_and_validate{} = sml::state<validating>,
       sml::state<loading_mmap> + sml::event<events::weights_loaded>[guard::has_error{}]
         / action::store_and_dispatch_error{} = sml::state<errored>,
 
       sml::state<loading_streamed> + sml::event<events::weights_loaded>[guard::no_error{}]
-        / action::store_and_dispatch_done{} = sml::state<done>,
+        / action::store_and_validate{} = sml::state<validating>,
       sml::state<loading_streamed> + sml::event<events::weights_loaded>[guard::has_error{}]
         / action::store_and_dispatch_error{} = sml::state<errored>,
 
+      sml::state<validating> + sml::event<events::validation_done>[guard::no_error{}]
+        / action::cleaning_up{} = sml::state<cleaning_up>,
+      sml::state<validating> + sml::event<events::validation_done>[guard::has_error{}]
+        / action::dispatch_error{} = sml::state<errored>,
+
+      sml::state<cleaning_up> + sml::event<events::cleaning_up_done>[guard::no_error{}]
+        / action::dispatch_done{} = sml::state<done>,
+      sml::state<cleaning_up> + sml::event<events::cleaning_up_done>[guard::has_error{}]
+        / action::dispatch_error{} = sml::state<errored>,
+
       sml::state<initialized> + sml::event<sml::_> / action::on_unexpected{} =
+        sml::state<errored>,
+      sml::state<selecting> + sml::event<sml::_> / action::on_unexpected{} =
+        sml::state<errored>,
+      sml::state<initializing> + sml::event<sml::_> / action::on_unexpected{} =
         sml::state<errored>,
       sml::state<loading_mmap> + sml::event<sml::_> / action::on_unexpected{} =
         sml::state<errored>,
       sml::state<loading_streamed> + sml::event<sml::_> / action::on_unexpected{} =
+        sml::state<errored>,
+      sml::state<validating> + sml::event<sml::_> / action::on_unexpected{} =
+        sml::state<errored>,
+      sml::state<cleaning_up> + sml::event<sml::_> / action::on_unexpected{} =
         sml::state<errored>,
       sml::state<done> + sml::event<sml::_> / action::on_unexpected{} =
         sml::state<errored>,

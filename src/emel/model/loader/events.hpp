@@ -99,6 +99,12 @@ using map_parser_fn = bool (*)(const load &, int32_t * err_out);
 using map_layers_fn = bool (*)(const load &, int32_t * err_out);
 using validate_structure_fn = bool (*)(const load &, int32_t * err_out);
 using validate_architecture_fn = bool (*)(const load &, int32_t * err_out);
+using init_mappings_fn = bool (*)(const emel::model::weight_loader::event::load_weights &,
+                                  int32_t * err_out);
+using validate_weights_fn = bool (*)(const emel::model::weight_loader::event::load_weights &,
+                                     int32_t * err_out);
+using clean_up_weights_fn = bool (*)(const emel::model::weight_loader::event::load_weights &,
+                                     int32_t * err_out);
 
 struct load {
   emel::model::data & model_data;
@@ -134,6 +140,9 @@ struct load {
                         uint64_t * bytes_done,
                         uint64_t * bytes_total,
                         int32_t * err_out) = nullptr;
+  init_mappings_fn init_mappings = nullptr;
+  validate_weights_fn validate_weights = nullptr;
+  clean_up_weights_fn clean_up_weights = nullptr;
   map_layers_fn map_layers = nullptr;
   validate_structure_fn validate_structure = nullptr;
   validate_architecture_fn validate_architecture_impl = nullptr;

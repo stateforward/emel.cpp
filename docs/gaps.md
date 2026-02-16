@@ -45,6 +45,14 @@ Model loader audit (llama.cpp parity)
 - C boundary validation: loader/parse/load error mapping and status return paths are not yet
   validated because the public C API entrypoints are still pending.
 
+Weight loader audit (llama.cpp parity)
+- Reference source: `tmp/llama.cpp/src/llama-model-loader.cpp` (weight mapping + data load).
+- Status: implemented for EMEL loader callbacks (strategy selection, mappings init, mmap/stream
+  load, validation, and cleanup).
+- Notes:
+  - Direct I/O handling and async upload are backend-specific and are exposed through
+    loader callbacks rather than embedded in the state machine.
+
 Unvalidated machines (no parity audit performed yet)
 - `src/emel/model/weight_loader/sm.hpp`
 - `src/emel/model/parser/sm.hpp`
