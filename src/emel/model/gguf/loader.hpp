@@ -1368,6 +1368,158 @@ inline bool store_name(
   return true;
 }
 
+inline std::string_view metadata_view(
+    const emel::model::data::metadata & meta,
+    const emel::model::data::metadata::string_view & view) {
+  if (view.length == 0) {
+    return {};
+  }
+  if (view.offset + view.length > meta.blob_bytes_used) {
+    return {};
+  }
+  return std::string_view(meta.blob.data() + view.offset, view.length);
+}
+
+template <size_t N>
+inline std::string_view array_view(const std::array<char, N> & data) {
+  size_t len = 0;
+  while (len < N && data[len] != '\0') {
+    ++len;
+  }
+  return std::string_view(data.data(), len);
+}
+
+inline bool token_type_is_special(const int32_t type) {
+  return type == 2 || type == 3 || type == 4;
+}
+
+inline int32_t find_token_id_by_text(
+    const emel::model::data::vocab & vocab,
+    const std::string_view token) {
+  if (token.empty()) {
+    return -1;
+  }
+  for (uint32_t i = 0; i < vocab.n_tokens; ++i) {
+    const auto & entry = vocab.entries[i];
+    if (entry.text_length != token.size()) {
+      continue;
+    }
+    if (entry.text_length == 0) {
+      continue;
+    }
+    const char * text = vocab.token_storage.data() + entry.text_offset;
+    if (std::memcmp(text, token.data(), token.size()) == 0) {
+      return static_cast<int32_t>(i);
+    }
+  }
+  return -1;
+}
+
+inline void set_vocab_flag(
+    emel::model::data::vocab & vocab,
+    std::array<uint8_t, emel::model::data::vocab::k_attr_flag_bytes> & flags,
+    const int32_t id,
+    const bool value) {
+  if (id < 0 || id >= static_cast<int32_t>(vocab.n_tokens)) {
+    return;
+  }
+  const uint32_t idx = static_cast<uint32_t>(id);
+  const uint32_t byte = idx >> 3;
+  const uint8_t mask = static_cast<uint8_t>(1u << (idx & 7u));
+  if (value) {
+    flags[byte] = static_cast<uint8_t>(flags[byte] | mask);
+  } else {
+    flags[byte] = static_cast<uint8_t>(flags[byte] & static_cast<uint8_t>(~mask));
+  }
+}
+
+inline bool contains_any(
+    const std::string & value,
+    const std::string_view * tokens,
+    const size_t count) {
+  for (size_t i = 0; i < count; ++i) {
+    const std::string_view token = tokens[i];
+    if (token.empty()) {
+      continue;
+    }
+    if (value.find(token) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+inline void finalize_vocab_attrs(emel::model::data & model) {
+  emel::model::data::vocab & vocab = model.vocab_data;
+  if (vocab.n_tokens == 0) {
+    return;
+  }
+  std::fill(vocab.lstrip_flags.begin(), vocab.lstrip_flags.end(), 0);
+  std::fill(vocab.rstrip_flags.begin(), vocab.rstrip_flags.end(), 0);
+  bool has_token_type = false;
+  for (uint32_t i = 0; i < vocab.n_tokens; ++i) {
+    if (vocab.entries[i].type != 0) {
+      has_token_type = true;
+      break;
+    }
+  }
+  if (!has_token_type) {
+    for (uint32_t i = 0; i < vocab.n_tokens; ++i) {
+      vocab.entries[i].type = 1;
+    }
+  }
+
+  std::string model_name(metadata_view(model.meta, model.meta.general_data.name));
+  std::string tokenizer_pre(array_view(vocab.tokenizer_pre));
+  std::string general_arch(array_view(model.architecture_name));
+
+  auto to_lower_ascii = [](const char c) {
+    if (c >= 'A' && c <= 'Z') {
+      return static_cast<char>(c - 'A' + 'a');
+    }
+    return c;
+  };
+  std::transform(model_name.begin(), model_name.end(), model_name.begin(), to_lower_ascii);
+  std::transform(tokenizer_pre.begin(), tokenizer_pre.end(), tokenizer_pre.begin(), to_lower_ascii);
+  std::transform(general_arch.begin(), general_arch.end(), general_arch.begin(), to_lower_ascii);
+
+  const std::array<std::string_view, 3> jina_tokens = {
+    "jina-v2-de", "jina-v2-es", "jina-v2-code",
+  };
+  const std::array<std::string_view, 2> jina_arch = {
+    "nomic-bert-moe", "jina-bert-v3",
+  };
+  const std::array<std::string_view, 2> phi_tokens = {
+    "phi-3", "phi3",
+  };
+  const std::array<std::string_view, 1> modern_bert_tokens = {
+    "modern-bert",
+  };
+
+  if (contains_any(tokenizer_pre, jina_tokens.data(), jina_tokens.size()) ||
+      contains_any(general_arch, jina_arch.data(), jina_arch.size())) {
+    const int32_t mask_id = find_token_id_by_text(vocab, "<mask>");
+    if (mask_id >= 0) {
+      set_vocab_flag(vocab, vocab.lstrip_flags, mask_id, true);
+    }
+  } else if (contains_any(model_name, phi_tokens.data(), phi_tokens.size())) {
+    for (uint32_t i = 0; i < vocab.n_tokens; ++i) {
+      if (token_type_is_special(vocab.entries[i].type)) {
+        set_vocab_flag(vocab, vocab.rstrip_flags, static_cast<int32_t>(i), true);
+      }
+    }
+    set_vocab_flag(vocab, vocab.rstrip_flags, find_token_id_by_text(vocab, "</s>"), true);
+    set_vocab_flag(vocab, vocab.rstrip_flags, find_token_id_by_text(vocab, "<unk>"), false);
+    set_vocab_flag(vocab, vocab.rstrip_flags, find_token_id_by_text(vocab, "<s>"), false);
+    set_vocab_flag(vocab, vocab.rstrip_flags, find_token_id_by_text(vocab, "<|endoftext|>"), false);
+  } else if (contains_any(model_name, modern_bert_tokens.data(), modern_bert_tokens.size())) {
+    const int32_t mask_id = find_token_id_by_text(vocab, "[MASK]");
+    if (mask_id >= 0) {
+      set_vocab_flag(vocab, vocab.lstrip_flags, mask_id, true);
+    }
+  }
+}
+
 inline bool parse_header(
     const reader & r, context & ctx, int64_t & n_tensors, int64_t & n_kv) {
   char magic[5] = {};
@@ -4091,6 +4243,33 @@ inline bool parse_kv(
       model.vocab_data.remove_extra_whitespaces = value;
       continue;
     }
+    if (key_equals(key, key_len, "tokenizer.ggml.escape_whitespaces")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.escape_whitespaces = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.treat_whitespace_as_suffix")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.treat_whitespace_as_suffix = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.ignore_merges")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.ignore_merges = value;
+      continue;
+    }
     if (key_equals(key, key_len, "tokenizer.ggml.padding_token_id")) {
       int32_t value = -1;
       if (!parse_i32_value(r, type, value)) {
@@ -4242,6 +4421,33 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.remove_extra_whitespaces = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.escape_whitespaces")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.escape_whitespaces = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.treat_whitespace_as_suffix")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.treat_whitespace_as_suffix = value;
+      continue;
+    }
+    if (key_equals(key, key_len, "tokenizer.ggml.ignore_merges")) {
+      bool value = false;
+      if (!parse_bool_value(r, type, value)) {
+        out_error = EMEL_ERR_PARSE_FAILED;
+        return false;
+      }
+      model.vocab_data.ignore_merges = value;
       continue;
     }
 
@@ -4808,6 +5014,7 @@ inline bool parse_vocab(const emel::model::parser::event::parse_model & ev, int3
     }
     return false;
   }
+  finalize_vocab_attrs(*ev.model);
   if (ev.model->vocab_data.n_tokens == 0) {
     if (err_out != nullptr) {
       *err_out = EMEL_ERR_MODEL_INVALID;

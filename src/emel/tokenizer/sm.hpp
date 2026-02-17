@@ -3,130 +3,217 @@
 #include <cstdint>
 
 #include "emel/sm.hpp"
-#include "emel/encoder/sm.hpp"
 #include "emel/tokenizer/actions.hpp"
 #include "emel/tokenizer/events.hpp"
 #include "emel/tokenizer/guards.hpp"
 
 namespace emel::tokenizer {
 
+using Process = process_t;
+
+/*
+Tokenizer architecture notes (single source of truth)
+
+Scope
+- Component boundary: tokenizer
+- Goal: tokenize text into token ids with special-token partitioning and model-aware encoding.
+
+State purpose
+- initialized: idle, accepts tokenize requests.
+- building_special_tokens: builds token inventory for special-token parsing.
+- partitioning_raw: treats entire text as a single raw fragment when no special tokens apply.
+- partitioning_with_specials: splits raw text around special tokens when enabled.
+- selecting_backend: binds the encoder context to the current vocab.
+- encoding_fragments: encodes raw fragments and appends literal special tokens.
+- finalizing: writes final outputs and transitions to done.
+- done: last request completed successfully.
+- errored: last request failed with an error code.
+- unexpected: sequencing contract violation (event not valid in current state).
+
+Key invariants
+- Per-request outputs are written only through the triggering event payload.
+- Context owns only runtime data (fragments, encoder context, counters).
+- Internal dispatch uses boost::sml::back::process exclusively.
+
+Guard semantics
+- can_tokenize: validates request pointers and capacity.
+- has_special_tokens: indicates whether special-token inventory is available.
+- has_capacity: checks remaining output capacity before encoding.
+- should_add_bos/sep/eos: determines prefix/suffix requirements.
+- has_more_fragments: indicates more fragments to encode.
+
+Action side effects
+- begin_tokenize: resets request outputs and context runtime state.
+- partition_special: builds special-token inventory.
+- partition_raw/partition_with_specials: builds fragment list, honoring parse_special.
+- append_bos/sep/eos: appends prefix/suffix tokens as configured by vocab.
+- encode_fragment: encodes one fragment or appends a literal token.
+- dispatch_capacity_error: reports insufficient output capacity.
+- finalize: writes final counts and completes the request.
+- dispatch_done/dispatch_error: forwards terminal outcome to owner machine.
+- dispatch_unexpected: reports sequencing violations to owner.
+*/
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
 
     struct initialized {};
-    struct partitioning_special {};
+    struct building_special_tokens {};
+    struct partitioning_raw {};
+    struct partitioning_with_specials {};
     struct selecting_backend {};
-    struct applying_special_prefix {};
     struct encoding_fragments {};
-    struct applying_special_suffix {};
     struct finalizing {};
     struct done {};
     struct errored {};
+    struct unexpected {};
 
     return sml::make_transition_table(
-      *sml::state<initialized> + sml::event<event::tokenize>[guard::can_tokenize] /
-          action::on_tokenize_requested = sml::state<partitioning_special>,
+      *sml::state<initialized> + sml::event<event::tokenize>[guard::can_tokenize{}] /
+          action::begin_tokenize = sml::state<building_special_tokens>,
+      sml::state<initialized> + sml::event<event::tokenize> / action::reject_invalid =
+          sml::state<errored>,
 
-      sml::state<partitioning_special> + sml::event<event::partitioning_special_done> /
-          action::on_partitioning_special_done = sml::state<selecting_backend>,
-      sml::state<partitioning_special> + sml::event<event::partitioning_special_error> /
-          action::on_partitioning_special_error = sml::state<errored>,
+      sml::state<done> + sml::event<event::tokenize>[guard::can_tokenize{}] / action::begin_tokenize =
+          sml::state<building_special_tokens>,
+      sml::state<done> + sml::event<event::tokenize> / action::reject_invalid =
+          sml::state<errored>,
 
-      sml::state<selecting_backend> + sml::event<event::selecting_backend_done> /
-          action::on_selecting_backend_done = sml::state<applying_special_prefix>,
-      sml::state<selecting_backend> + sml::event<event::selecting_backend_error> /
-          action::on_selecting_backend_error = sml::state<errored>,
+      sml::state<errored> + sml::event<event::tokenize>[guard::can_tokenize{}] / action::begin_tokenize =
+          sml::state<building_special_tokens>,
+      sml::state<errored> + sml::event<event::tokenize> / action::reject_invalid =
+          sml::state<errored>,
 
-      sml::state<applying_special_prefix> + sml::event<event::applying_special_prefix_done> /
-          action::on_applying_special_prefix_done = sml::state<encoding_fragments>,
-      sml::state<applying_special_prefix> + sml::event<event::applying_special_prefix_error> /
-          action::on_applying_special_prefix_error = sml::state<errored>,
+      sml::state<unexpected> + sml::event<event::tokenize>[guard::can_tokenize{}] / action::begin_tokenize =
+          sml::state<building_special_tokens>,
+      sml::state<unexpected> + sml::event<event::tokenize> / action::reject_invalid =
+          sml::state<unexpected>,
 
-      sml::state<encoding_fragments> + sml::event<emel::encoder::event::tokenized_done> /
-          action::on_encoding_fragment_done = sml::state<encoding_fragments>,
-      sml::state<encoding_fragments> + sml::event<emel::encoder::event::tokenized_error> /
-          action::on_encoding_fragment_error = sml::state<errored>,
+      sml::state<building_special_tokens> + sml::on_entry<event::tokenize> / action::partition_special,
+      sml::state<building_special_tokens> + sml::event<event::special_tokens_ready>[guard::has_special_tokens{}] =
+          sml::state<partitioning_with_specials>,
+      sml::state<building_special_tokens> + sml::event<event::special_tokens_ready>[guard::no_special_tokens{}] =
+          sml::state<partitioning_raw>,
+      sml::state<building_special_tokens> + sml::event<event::partitioning_special_error> =
+          sml::state<errored>,
 
-      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_done>[guard::has_more_fragments] /
-          action::on_encoding_fragment_done = sml::state<encoding_fragments>,
-      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_done>[guard::no_more_fragments] /
-          action::on_encoding_fragment_done = sml::state<applying_special_suffix>,
-      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_error> /
-          action::on_encoding_fragment_error = sml::state<errored>,
+      sml::state<partitioning_raw> + sml::on_entry<event::special_tokens_ready> / action::partition_raw,
+      sml::state<partitioning_raw> + sml::event<event::partitioning_special_done> =
+          sml::state<selecting_backend>,
+      sml::state<partitioning_raw> + sml::event<event::partitioning_special_error> =
+          sml::state<errored>,
 
-      sml::state<applying_special_suffix> + sml::event<event::applying_special_suffix_done> /
-          action::on_applying_special_suffix_done = sml::state<finalizing>,
-      sml::state<applying_special_suffix> + sml::event<event::applying_special_suffix_error> /
-          action::on_applying_special_suffix_error = sml::state<errored>,
+      sml::state<partitioning_with_specials> + sml::on_entry<event::special_tokens_ready> /
+          action::partition_with_specials,
+      sml::state<partitioning_with_specials> + sml::event<event::partitioning_special_done> =
+          sml::state<selecting_backend>,
+      sml::state<partitioning_with_specials> + sml::event<event::partitioning_special_error> =
+          sml::state<errored>,
 
-      sml::state<finalizing> + sml::event<event::finalizing_done> / action::on_finalizing_done =
-          sml::state<done>,
-      sml::state<finalizing> + sml::event<event::finalizing_error> /
-          action::on_finalizing_error = sml::state<errored>
+      sml::state<selecting_backend> + sml::on_entry<event::partitioning_special_done> /
+          action::select_backend,
+      sml::state<selecting_backend> + sml::event<event::selecting_backend_done>
+          [guard::should_add_bos{} && guard::bos_id_valid{} && guard::has_capacity{}] /
+          action::append_bos = sml::state<encoding_fragments>,
+      sml::state<selecting_backend> + sml::event<event::selecting_backend_done>
+          [guard::should_add_bos{} && guard::bos_id_valid{} && guard::no_capacity{}] /
+          action::emit_prefix_capacity_error,
+      sml::state<selecting_backend> + sml::event<event::selecting_backend_done>
+          [guard::should_add_bos{} && guard::bos_id_invalid{}] /
+          action::emit_prefix_invalid_id_error,
+      sml::state<selecting_backend> + sml::event<event::selecting_backend_done>
+          [guard::no_prefix{}] = sml::state<encoding_fragments>,
+      sml::state<selecting_backend> + sml::event<event::applying_special_prefix_error> =
+          sml::state<errored>,
+      sml::state<selecting_backend> + sml::event<event::selecting_backend_error> =
+          sml::state<errored>,
+
+      sml::state<encoding_fragments> + sml::on_entry<sml::_> / action::dispatch_next_fragment,
+      sml::state<encoding_fragments> + sml::event<event::next_fragment>[guard::has_more_fragments{} && guard::has_capacity{}] /
+          action::encode_fragment,
+      sml::state<encoding_fragments> + sml::event<event::next_fragment>[guard::has_more_fragments{} && guard::no_capacity{}] /
+          action::dispatch_capacity_error,
+      sml::state<encoding_fragments> + sml::event<event::next_fragment>[guard::no_more_fragments{}] /
+          action::dispatch_no_fragment_done,
+      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_done>[guard::has_more_fragments{}] =
+          sml::state<encoding_fragments>,
+      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_done>
+          [guard::no_more_fragments{} && guard::should_add_sep{} && guard::sep_id_valid{} &&
+           guard::has_capacity{}] / action::append_sep = sml::state<finalizing>,
+      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_done>
+          [guard::no_more_fragments{} && guard::should_add_sep{} && guard::sep_id_valid{} &&
+           guard::no_capacity{}] / action::emit_suffix_capacity_error,
+      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_done>
+          [guard::no_more_fragments{} && guard::should_add_sep{} && guard::sep_id_invalid{}] /
+          action::emit_suffix_invalid_id_error,
+      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_done>
+          [guard::no_more_fragments{} && guard::should_add_eos{} && guard::eos_id_valid{} &&
+           guard::has_capacity{}] / action::append_eos = sml::state<finalizing>,
+      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_done>
+          [guard::no_more_fragments{} && guard::should_add_eos{} && guard::eos_id_valid{} &&
+           guard::no_capacity{}] / action::emit_suffix_capacity_error,
+      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_done>
+          [guard::no_more_fragments{} && guard::should_add_eos{} && guard::eos_id_invalid{}] /
+          action::emit_suffix_invalid_id_error,
+      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_done>
+          [guard::no_more_fragments{} && guard::no_suffix{}] = sml::state<finalizing>,
+      sml::state<encoding_fragments> + sml::event<event::encoding_fragment_error> =
+          sml::state<errored>,
+      sml::state<encoding_fragments> + sml::event<event::applying_special_suffix_error> =
+          sml::state<errored>,
+
+      sml::state<finalizing> + sml::on_entry<event::encoding_fragment_done> / action::finalize,
+      sml::state<finalizing> + sml::event<event::finalizing_done> = sml::state<done>,
+      sml::state<finalizing> + sml::event<event::finalizing_error> = sml::state<errored>,
+
+      sml::state<done> + sml::on_entry<event::finalizing_done> / action::dispatch_done,
+      sml::state<errored> + sml::on_entry<event::tokenize> / action::dispatch_reject,
+      sml::state<errored> + sml::on_entry<event::partitioning_special_error> /
+          action::dispatch_error,
+      sml::state<errored> + sml::on_entry<event::selecting_backend_error> /
+          action::dispatch_error,
+      sml::state<errored> + sml::on_entry<event::encoding_fragment_error> /
+          action::dispatch_error,
+      sml::state<errored> + sml::on_entry<event::applying_special_prefix_error> /
+          action::dispatch_error,
+      sml::state<errored> + sml::on_entry<event::applying_special_suffix_error> /
+          action::dispatch_error,
+      sml::state<errored> + sml::on_entry<event::finalizing_error> / action::dispatch_error,
+
+      sml::state<initialized> + sml::event<sml::_> / action::dispatch_unexpected =
+          sml::state<unexpected>,
+      sml::state<building_special_tokens> + sml::event<sml::_> / action::dispatch_unexpected =
+          sml::state<unexpected>,
+      sml::state<partitioning_raw> + sml::event<sml::_> / action::dispatch_unexpected =
+          sml::state<unexpected>,
+      sml::state<partitioning_with_specials> + sml::event<sml::_> / action::dispatch_unexpected =
+          sml::state<unexpected>,
+      sml::state<selecting_backend> + sml::event<sml::_> / action::dispatch_unexpected =
+          sml::state<unexpected>,
+      sml::state<encoding_fragments> + sml::event<sml::_> / action::dispatch_unexpected =
+          sml::state<unexpected>,
+      sml::state<finalizing> + sml::event<sml::_> / action::dispatch_unexpected =
+          sml::state<unexpected>,
+      sml::state<done> + sml::event<sml::_> / action::dispatch_unexpected =
+          sml::state<unexpected>,
+      sml::state<errored> + sml::event<sml::_> / action::dispatch_unexpected =
+          sml::state<unexpected>,
+      sml::state<unexpected> + sml::event<sml::_> / action::dispatch_unexpected =
+          sml::state<unexpected>
     );
   }
 };
 
-struct sm : emel::sm<model> {
-  using emel::sm<model>::sm;
+struct sm : private emel::detail::process_support<sm, Process>, public emel::sm<model, Process> {
+  using base_type = emel::sm<model, Process>;
 
- private:
-  // Tokenizer metadata/state mirrored from llama.cpp vocab internals.
-  uint32_t n_token_types = 0;
-  int32_t max_token_len = 0;
+  explicit sm(action::context & ctx)
+      : emel::detail::process_support<sm, Process>(this),
+        base_type(ctx, this->process_) {}
 
-  int32_t special_bos_id = 1;
-  int32_t special_eos_id = 2;
-  int32_t special_eot_id = -1;
-  int32_t special_eom_id = -1;
-  int32_t special_unk_id = 0;
-  int32_t special_sep_id = -1;
-  int32_t special_pad_id = -1;
-  int32_t special_mask_id = -1;
-  int32_t linefeed_id = 13;
-
-  int32_t special_fim_pre_id = -1;
-  int32_t special_fim_suf_id = -1;
-  int32_t special_fim_mid_id = -1;
-  int32_t special_fim_pad_id = -1;
-  int32_t special_fim_rep_id = -1;
-  int32_t special_fim_sep_id = -1;
-
-  bool add_space_prefix = false;
-  bool add_bos = false;
-  bool add_eos = false;
-  bool add_sep = false;
-  bool ignore_merges = false;
-  bool clean_spaces = false;
-  bool remove_extra_whitespaces = false;
-  bool escape_whitespaces = true;
-  bool treat_whitespace_as_suffix = false;
-
-  uint32_t cache_special_tokens_count = 0;
-  uint32_t cache_token_to_piece_count = 0;
-  uint32_t bpe_rank_count = 0;
-  uint32_t precompiled_charsmap_size = 0;
-
-  enum class vocab_type : uint8_t {
-    none = 0,
-    spm = 1,
-    bpe = 2,
-    wpm = 3,
-    ugm = 4,
-    rwkv = 5,
-    plamo2 = 6,
-  };
-
-  enum class vocab_pre_type : uint8_t {
-    default_pre = 0,
-  };
-
-  vocab_type type = vocab_type::spm;
-  vocab_pre_type pre_type = vocab_pre_type::default_pre;
-
-  emel::encoder::sm encoder = {};
-  int32_t n_tokens = 0;
+  using base_type::is;
+  using base_type::process_event;
+  using base_type::visit_current_states;
 };
 
 }  // namespace emel::tokenizer

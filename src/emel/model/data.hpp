@@ -180,6 +180,9 @@ struct data {
     std::array<uint32_t, k_max_merges> merge_offsets = {};
     std::array<uint32_t, k_max_merges> merge_lengths = {};
     std::array<uint8_t, k_max_precompiled_charsmap_bytes> precompiled_charsmap = {};
+    static constexpr uint32_t k_attr_flag_bytes = (k_max_vocab_tokens + 7) / 8;
+    std::array<uint8_t, k_attr_flag_bytes> lstrip_flags = {};
+    std::array<uint8_t, k_attr_flag_bytes> rstrip_flags = {};
 
     int32_t bos_id = -1;
     int32_t eos_id = -1;
@@ -205,6 +208,9 @@ struct data {
     bool add_sep = false;
     bool add_space_prefix = false;
     bool remove_extra_whitespaces = false;
+    bool escape_whitespaces = true;
+    bool treat_whitespace_as_suffix = false;
+    bool ignore_merges = false;
   };
 
   struct metadata {
