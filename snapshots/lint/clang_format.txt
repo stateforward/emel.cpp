@@ -95,6 +95,8 @@ src/emel/tensor/lifetime_analyzer/actions.hpp
 src/emel/tensor/lifetime_analyzer/events.hpp
 src/emel/tensor/lifetime_analyzer/guards.hpp
 src/emel/tensor/lifetime_analyzer/sm.hpp
+src/emel/text/unicode.hpp
+src/emel/text/unicode_data.hpp
 src/emel/tokenizer/actions.hpp
 src/emel/tokenizer/events.hpp
 src/emel/tokenizer/guards.hpp
@@ -145,6 +147,8 @@ tests/decoder/ubatch_executor_action_branch_tests.cpp
 tests/decoder/ubatch_executor_sm_on_entry_branch_tests.cpp
 tests/decoder/ubatch_executor_sm_transition_tests.cpp
 tests/decoder/ubatch_executor_tests.cpp
+tests/encoder/encoder_tests.cpp
+tests/encoder/encoder_unicode_tests.cpp
 tests/kv/cache_action_branch_tests.cpp
 tests/kv/cache_guard_tests.cpp
 tests/kv/cache_sm_testing_policy_tests.cpp
