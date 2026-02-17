@@ -13,6 +13,7 @@ struct configure {
 
 struct validate_configure {
   int32_t * error_out = nullptr;
+  const event::configure * request = nullptr;
 };
 
 struct apply_configure {
@@ -31,6 +32,7 @@ struct allocate {
 
 struct validate_allocate {
   int32_t * error_out = nullptr;
+  const event::allocate * request = nullptr;
 };
 
 struct select_block {
@@ -55,6 +57,7 @@ struct release {
 
 struct validate_release {
   int32_t * error_out = nullptr;
+  const event::release * request = nullptr;
 };
 
 struct merge_release {

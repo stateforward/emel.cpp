@@ -43,6 +43,7 @@ struct validate {
   const leaf_alloc * leaf_allocs = nullptr;
   int32_t leaf_alloc_count = 0;
   int32_t * error_out = nullptr;
+  const event::analyze * request = nullptr;
 };
 struct evaluate {
   graph_view graph = {};

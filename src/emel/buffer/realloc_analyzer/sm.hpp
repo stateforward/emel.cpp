@@ -63,30 +63,36 @@ struct model {
       *sml::state<idle> + sml::event<event::analyze> / action::begin_analyze = sml::state<validating>,
       sml::state<validating> + sml::on_entry<event::analyze> /
           [](const event::analyze & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            event::validate validate{
+            process(event::validate{
               .graph = ev.graph,
               .node_allocs = ev.node_allocs,
               .node_alloc_count = ev.node_alloc_count,
               .leaf_allocs = ev.leaf_allocs,
               .leaf_alloc_count = ev.leaf_alloc_count,
-              .error_out = &phase_error,
-            };
-            process(validate);
-            if (phase_error != EMEL_OK) {
-              process(events::validate_error{
-                .err = phase_error,
-                .request = &ev,
-              });
-              return;
-            }
-            process(events::validate_done{
+              .error_out = ev.error_out,
               .request = &ev,
             });
           },
 
-      sml::state<validating> + sml::event<event::validate> / action::run_validate =
-          sml::state<validating>,
+      sml::state<validating> + sml::event<event::validate> [guard::valid_analyze_request{}] /
+          [](const event::validate & ev, action::context & ctx, process_t & process) noexcept {
+            if (ev.error_out != nullptr) {
+              *ev.error_out = EMEL_OK;
+            }
+            ctx.step += 1;
+            process(events::validate_done{.request = ev.request});
+          } = sml::state<validating>,
+      sml::state<validating> + sml::event<event::validate> [guard::invalid_analyze_request{}] /
+          [](const event::validate & ev, action::context & ctx, process_t & process) noexcept {
+            if (ev.error_out != nullptr) {
+              *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+            }
+            ctx.step += 1;
+            process(events::validate_error{
+              .err = EMEL_ERR_INVALID_ARGUMENT,
+              .request = ev.request,
+            });
+          } = sml::state<validating>,
       sml::state<validating> + sml::event<events::validate_done> = sml::state<evaluating>,
       sml::state<validating> + sml::event<events::validate_error> = sml::state<failed>,
 

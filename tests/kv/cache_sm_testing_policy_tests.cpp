@@ -21,7 +21,9 @@ struct validate_error_queue {
 
   template <class Event>
   void push(const Event & ev) noexcept {
-    if constexpr (std::is_same_v<Event, emel::kv::cache::event::validate>) {
+    if constexpr (std::is_same_v<Event, emel::kv::cache::event::validate_prepare> ||
+                  std::is_same_v<Event, emel::kv::cache::event::validate_apply> ||
+                  std::is_same_v<Event, emel::kv::cache::event::validate_rollback>) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_BACKEND;
       }

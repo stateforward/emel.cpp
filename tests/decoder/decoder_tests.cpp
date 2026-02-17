@@ -164,7 +164,7 @@ TEST_CASE("decoder_prepare_memory_batch_reports_kv_failure") {
   CHECK_FALSE(retryable);
 }
 
-TEST_CASE("decoder_process_ubatch_reports_executor_failure") {
+TEST_CASE("decoder_process_ubatch_reports_invalid_ubatch_size") {
   emel::decoder::action::context ctx{};
   ctx.ubatches_total = 1;
   ctx.ubatches_processed = 0;
@@ -172,7 +172,7 @@ TEST_CASE("decoder_process_ubatch_reports_executor_failure") {
 
   int32_t err = EMEL_OK;
   bool rollback_needed = false;
-  emel::decoder::action::run_process_ubatch(
+  emel::decoder::action::on_invalid_ubatch_size(
     emel::decoder::event::process_ubatch{
       .error_out = &err,
       .rollback_needed_out = &rollback_needed,
@@ -234,7 +234,7 @@ TEST_CASE("decoder_action_helpers_cover_error_and_null_output_edges") {
 
     ctx.n_tokens = 0;
     ctx.token_ids = nullptr;
-    emel::decoder::action::run_validate(
+    emel::decoder::action::reject_invalid_validate(
         emel::decoder::event::validate{
             .error_out = &error_out,
         },
@@ -294,7 +294,7 @@ TEST_CASE("decoder_action_helpers_cover_error_and_null_output_edges") {
 
     error_out = EMEL_OK;
     ctx.outputs_total = -1;
-    emel::decoder::action::run_reserve_output(
+    emel::decoder::action::reject_invalid_reserve_output(
         emel::decoder::event::reserve_output{
             .error_out = &error_out,
         },
@@ -304,7 +304,7 @@ TEST_CASE("decoder_action_helpers_cover_error_and_null_output_edges") {
     error_out = EMEL_OK;
     ctx.ubatches_total = 1;
     ctx.ubatches_processed = 1;
-    emel::decoder::action::run_process_ubatch(
+    emel::decoder::action::on_invalid_ubatch_size(
         emel::decoder::event::process_ubatch{
             .error_out = &error_out,
         },
@@ -318,7 +318,7 @@ TEST_CASE("decoder_action_helpers_cover_error_and_null_output_edges") {
     ctx.n_tokens = 0;
     ctx.n_ubatch = 1;
     ctx.ubatches_total = 1;
-    emel::decoder::action::run_process_ubatch(
+    emel::decoder::action::on_invalid_ubatch_size(
         emel::decoder::event::process_ubatch{
             .error_out = &error_out,
         },
@@ -461,16 +461,10 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
   {
     emel::decoder::action::context process_ctx{};
     process_ctx.ubatches_total = 1;
-    process_ctx.ubatches_processed = 0;
-    process_ctx.ubatch_sizes[0] = 0;
+    process_ctx.ubatches_processed = 1;
+    process_ctx.ubatch_sizes[0] = 1;
 
-    CHECK(process_ctx.kv_cache.process_event(emel::kv::cache::event::prepare{
-      .ubatch_sizes = &process_ctx.ubatches_total,
-      .ubatch_count = 1,
-      .requested_capacity = 4,
-    }));
-
-    emel::decoder::action::run_process_ubatch(
+    emel::decoder::action::on_invalid_ubatch_size(
         emel::decoder::event::process_ubatch{
             .error_out = &error_out,
             .rollback_needed_out = nullptr,

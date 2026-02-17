@@ -357,15 +357,24 @@ TEST_CASE("buffer_realloc_analyzer_action_validate_leaf_alloc_pointer_branch") {
   };
 
   int32_t err = EMEL_OK;
-  action::run_validate(emel::buffer::realloc_analyzer::event::validate{
+  emel::buffer::realloc_analyzer::event::analyze request{
     .graph = graph,
     .node_allocs = nullptr,
     .node_alloc_count = 0,
     .leaf_allocs = nullptr,
     .leaf_alloc_count = static_cast<int32_t>(leafs.size()),
+  };
+  emel::buffer::realloc_analyzer::event::validate validate{
+    .graph = request.graph,
+    .node_allocs = request.node_allocs,
+    .node_alloc_count = request.node_alloc_count,
+    .leaf_allocs = request.leaf_allocs,
+    .leaf_alloc_count = request.leaf_alloc_count,
     .error_out = &err,
-  }, c);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+    .request = &request,
+  };
+  CHECK(emel::buffer::realloc_analyzer::guard::invalid_analyze_request{}(validate, c));
+  CHECK(err == EMEL_OK);
 }
 
 TEST_CASE("buffer_realloc_analyzer_action_evaluate_handles_leaf_mismatch_and_src_snapshot_size") {

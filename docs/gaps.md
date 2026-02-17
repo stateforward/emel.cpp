@@ -49,6 +49,15 @@ Weight loader audit (llama.cpp parity)
   - Direct I/O handling and async upload are backend-specific and are exposed through
     loader callbacks rather than embedded in the state machine.
 
+KV cache audit (llama.cpp parity)
+- Reference source: `tmp/llama.cpp/src/llama-kv-cache.cpp`.
+- Status: partial. Slot planning, apply, and rollback are modeled, but multi-stream support and
+  sequence-aware operations are not yet represented in the state machine.
+- Gaps to close:
+  - Stream-aware cell tracking (`n_stream`, `seq_to_stream`, per-stream heads) and stream selection.
+  - Sequence operations (`seq_rm`, `seq_cp`, `seq_keep`, `seq_add`, `seq_div`) and copy scheduling.
+  - Shift/defrag handling and sliding-window behaviors.
+
 Unvalidated machines (no parity audit performed yet)
 - `src/emel/model/weight_loader/sm.hpp`
 - `src/emel/tokenizer/sm.hpp`
@@ -57,7 +66,6 @@ Unvalidated machines (no parity audit performed yet)
 - `src/emel/decoder/ubatch_executor/sm.hpp`
 - `src/emel/decoder/compute_executor/sm.hpp`
 - `src/emel/generator/sm.hpp`
-- `src/emel/kv/cache/sm.hpp`
 - `src/emel/memory/coordinator/sm.hpp`
 - `src/emel/sampler/pipeline/sm.hpp`
 - `src/emel/sampler/candidate_builder/sm.hpp`

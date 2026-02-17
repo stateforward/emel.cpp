@@ -79,12 +79,14 @@ inline constexpr auto begin_decode = [](const event::decode & ev, context & ctx)
 };
 
 inline constexpr auto run_validate = [](const event::validate & ev, context & ctx) {
+  (void)ctx;
   if (ev.error_out == nullptr) return;  // GCOVR_EXCL_LINE
   *ev.error_out = EMEL_OK;
+};
 
-  if (ctx.n_tokens <= 0 || ctx.token_ids == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-  }
+inline constexpr auto reject_invalid_validate = [](const event::validate & ev, context &) {
+  if (ev.error_out == nullptr) return;
+  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
 };
 
 inline constexpr auto run_initialize_batch = [](const event::initialize_batch & ev, context & ctx) {
@@ -207,21 +209,19 @@ inline constexpr auto run_optimize_memory = [](const event::optimize_memory & ev
 };
 
 inline constexpr auto run_reserve_output = [](const event::reserve_output & ev, context & ctx) {
+  (void)ctx;
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
-  if (ctx.outputs_total < 0) {
-    *ev.error_out = EMEL_ERR_BACKEND;
-  }
+};
+
+inline constexpr auto reject_invalid_reserve_output = [](const event::reserve_output & ev, context &) {
+  if (ev.error_out == nullptr) return;
+  *ev.error_out = EMEL_ERR_BACKEND;
 };
 
 inline constexpr auto run_process_ubatch = [](const event::process_ubatch & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
-
-  if (ctx.ubatches_processed >= ctx.ubatches_total) {
-    *ev.error_out = EMEL_ERR_BACKEND;
-    return;
-  }
 
   const int32_t current = ctx.ubatch_sizes[ctx.ubatches_processed];
   int32_t produced = 0;
@@ -261,6 +261,15 @@ inline constexpr auto run_process_ubatch = [](const event::process_ubatch & ev, 
   ctx.ubatches_processed += 1;
 };
 
+inline constexpr auto on_invalid_ubatch_size = [](const event::process_ubatch & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_ERR_BACKEND;
+  }
+  if (ev.rollback_needed_out != nullptr) {
+    *ev.rollback_needed_out = false;
+  }
+};
+
 inline constexpr auto run_rollback_ubatch = [](const event::rollback_ubatch & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
@@ -270,11 +279,13 @@ inline constexpr auto run_rollback_ubatch = [](const event::rollback_ubatch & ev
   }
 
   const int32_t rollback_to = std::max<int32_t>(0, ctx.ubatches_processed - 1);
+  int32_t kv_error = EMEL_OK;
   const bool kv_ok = ctx.kv_cache.process_event(emel::kv::cache::event::rollback{
     .from_ubatch_index = rollback_to,
+    .error_out = &kv_error,
   });
-  if (!kv_ok) {
-    *ev.error_out = EMEL_ERR_BACKEND;
+  if (!kv_ok || kv_error != EMEL_OK) {
+    *ev.error_out = kv_error == EMEL_OK ? EMEL_ERR_BACKEND : kv_error;
     return;  // GCOVR_EXCL_LINE
   }
 

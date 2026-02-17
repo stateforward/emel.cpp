@@ -30,4 +30,18 @@ struct valid_plan {
   }
 };
 
+struct has_request {
+  template <class Event>
+  bool operator()(const Event & ev, const action::context &) const noexcept {
+    return ev.request != nullptr;
+  }
+};
+
+struct missing_request {
+  template <class Event>
+  bool operator()(const Event & ev, const action::context &) const noexcept {
+    return ev.request == nullptr;
+  }
+};
+
 }  // namespace emel::buffer::planner::guard

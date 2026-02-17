@@ -87,24 +87,28 @@ struct model {
           sml::state<configuring>,
       sml::state<configuring> + sml::on_entry<event::configure> /
           [](const event::configure & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            event::validate_configure validate{
-              .error_out = &phase_error,
-            };
-            process(validate);
-            if (phase_error != EMEL_OK) {
-              process(events::validate_configure_error{
-                .err = phase_error,
-                .request = &ev,
-              });
-              return;
-            }
-            process(events::validate_configure_done{
+            process(event::validate_configure{
+              .error_out = ev.error_out,
               .request = &ev,
             });
           },
-      sml::state<configuring> + sml::event<event::validate_configure> /
-          action::run_validate_configure = sml::state<configuring>,
+      sml::state<configuring> + sml::event<event::validate_configure> [guard::valid_configure{}] /
+          [](const event::validate_configure & ev, action::context & ctx,
+             process_t & process) noexcept {
+            if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
+            ctx.step += 1;
+            process(events::validate_configure_done{.request = ev.request});
+          } = sml::state<configuring>,
+      sml::state<configuring> + sml::event<event::validate_configure> [guard::invalid_configure{}] /
+          [](const event::validate_configure & ev, action::context & ctx,
+             process_t & process) noexcept {
+            if (ev.error_out != nullptr) *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+            ctx.step += 1;
+            process(events::validate_configure_error{
+              .err = EMEL_ERR_INVALID_ARGUMENT,
+              .request = ev.request,
+            });
+          } = sml::state<configuring>,
       sml::state<configuring> + sml::event<events::validate_configure_done> =
           sml::state<applying_configure>,
       sml::state<configuring> + sml::event<events::validate_configure_error> = sml::state<failed>,
@@ -149,31 +153,35 @@ struct model {
           sml::state<validating_allocate>,
       sml::state<validating_allocate> + sml::on_entry<event::allocate> /
           [](const event::allocate & ev, action::context &, process_t & process) noexcept {
-            if (ev.chunk_out == nullptr || ev.offset_out == nullptr) {
-              process(events::validate_allocate_error{
-                .err = EMEL_ERR_INVALID_ARGUMENT,
-                .request = &ev,
-              });
-              return;
-            }
-            int32_t phase_error = EMEL_OK;
-            event::validate_allocate validate{
-              .error_out = &phase_error,
-            };
-            process(validate);
-            if (phase_error != EMEL_OK) {
-              process(events::validate_allocate_error{
-                .err = phase_error,
-                .request = &ev,
-              });
-              return;
-            }
-            process(events::validate_allocate_done{
+            process(event::validate_allocate{
+              .error_out = ev.error_out,
               .request = &ev,
             });
           },
-      sml::state<validating_allocate> + sml::event<event::validate_allocate> /
-          action::run_validate_allocate = sml::state<validating_allocate>,
+      sml::state<validating_allocate> + sml::event<event::validate_allocate>
+          [guard::valid_allocate_request{}] /
+          [](const event::validate_allocate & ev, action::context & ctx,
+             process_t & process) noexcept {
+            uint64_t aligned = 0;
+            action::detail::align_up(ctx.request_size, ctx.request_alignment, aligned);
+            ctx.aligned_request_size = aligned;
+            if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
+            ctx.step += 1;
+            process(events::validate_allocate_done{.request = ev.request});
+          } =
+          sml::state<validating_allocate>,
+      sml::state<validating_allocate> + sml::event<event::validate_allocate>
+          [guard::invalid_allocate_request{}] /
+          [](const event::validate_allocate & ev, action::context & ctx,
+             process_t & process) noexcept {
+            if (ev.error_out != nullptr) *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+            ctx.step += 1;
+            process(events::validate_allocate_error{
+              .err = EMEL_ERR_INVALID_ARGUMENT,
+              .request = ev.request,
+            });
+          } =
+          sml::state<validating_allocate>,
       sml::state<validating_allocate> + sml::event<events::validate_allocate_done> =
           sml::state<selecting_block>,
       sml::state<validating_allocate> + sml::event<events::validate_allocate_error> =
@@ -280,24 +288,35 @@ struct model {
           sml::state<validating_release>,
       sml::state<validating_release> + sml::on_entry<event::release> /
           [](const event::release & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            event::validate_release validate{
-              .error_out = &phase_error,
-            };
-            process(validate);
-            if (phase_error != EMEL_OK) {
-              process(events::validate_release_error{
-                .err = phase_error,
-                .request = &ev,
-              });
-              return;
-            }
-            process(events::validate_release_done{
+            process(event::validate_release{
+              .error_out = ev.error_out,
               .request = &ev,
             });
           },
-      sml::state<validating_release> + sml::event<event::validate_release> /
-          action::run_validate_release = sml::state<validating_release>,
+      sml::state<validating_release> + sml::event<event::validate_release>
+          [guard::valid_release_request{}] /
+          [](const event::validate_release & ev, action::context & ctx,
+             process_t & process) noexcept {
+            uint64_t aligned = 0;
+            action::detail::align_up(ctx.request_size, ctx.request_alignment, aligned);
+            ctx.aligned_request_size = aligned;
+            if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
+            ctx.step += 1;
+            process(events::validate_release_done{.request = ev.request});
+          } =
+          sml::state<validating_release>,
+      sml::state<validating_release> + sml::event<event::validate_release>
+          [guard::invalid_release_request{}] /
+          [](const event::validate_release & ev, action::context & ctx,
+             process_t & process) noexcept {
+            if (ev.error_out != nullptr) *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+            ctx.step += 1;
+            process(events::validate_release_error{
+              .err = EMEL_ERR_INVALID_ARGUMENT,
+              .request = ev.request,
+            });
+          } =
+          sml::state<validating_release>,
       sml::state<validating_release> + sml::event<events::validate_release_done> =
           sml::state<merging_release>,
       sml::state<validating_release> + sml::event<events::validate_release_error> =

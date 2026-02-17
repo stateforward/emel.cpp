@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <doctest/doctest.h>
 
+#include "emel/decoder/ubatch_executor/guards.hpp"
 #include "emel/decoder/ubatch_executor/sm.hpp"
 #include "emel/emel.h"
 #include "emel/kv/cache/sm.hpp"
@@ -253,49 +254,57 @@ TEST_CASE("ubatch_executor_action_helpers_cover_error_branches") {
     context ctx{};
     int32_t error_out = EMEL_OK;
     emel::memory::coordinator::sm memory_coordinator{};
+    emel::kv::cache::sm kv_cache{};
     ctx.ubatch_index = -1;
     ctx.ubatch_size = 1;
-    emel::decoder::ubatch_executor::action::run_validate(
-        emel::decoder::ubatch_executor::event::validate{
-            .error_out = &error_out,
-        },
-        ctx);
+    emel::decoder::ubatch_executor::event::execute request{
+      .ubatch_index = 0,
+      .ubatch_size = 1,
+      .memory_coordinator_sm = &memory_coordinator,
+      .kv_cache_sm = &kv_cache,
+    };
+    emel::decoder::ubatch_executor::event::validate validate{
+      .request = &request,
+      .error_out = &error_out,
+    };
+    CHECK(emel::decoder::ubatch_executor::guard::invalid_execute_request{}(validate, ctx));
+    emel::decoder::ubatch_executor::action::reject_invalid_validate(validate, ctx);
     CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
   }
 
   {
     context ctx{};
     int32_t error_out = EMEL_OK;
-    emel::decoder::ubatch_executor::action::run_prepare_memory(
-        emel::decoder::ubatch_executor::event::prepare_memory{
-            .memory_coordinator_sm = nullptr,
-            .error_out = &error_out,
-        },
-        ctx);
+    emel::decoder::ubatch_executor::event::prepare_memory prepare{
+      .memory_coordinator_sm = nullptr,
+      .error_out = &error_out,
+    };
+    CHECK(emel::decoder::ubatch_executor::guard::invalid_prepare_memory_request{}(prepare, ctx));
+    emel::decoder::ubatch_executor::action::reject_invalid_prepare_memory(prepare, ctx);
     CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
   }
 
   {
     context ctx{};
     int32_t error_out = EMEL_OK;
-    emel::decoder::ubatch_executor::action::run_prepare_kv(
-        emel::decoder::ubatch_executor::event::prepare_kv{
-            .kv_cache_sm = nullptr,
-            .error_out = &error_out,
-        },
-        ctx);
+    emel::decoder::ubatch_executor::event::prepare_kv prepare{
+      .kv_cache_sm = nullptr,
+      .error_out = &error_out,
+    };
+    CHECK(emel::decoder::ubatch_executor::guard::invalid_prepare_kv_request{}(prepare, ctx));
+    emel::decoder::ubatch_executor::action::reject_invalid_prepare_kv(prepare, ctx);
     CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
   }
 
   {
     context ctx{};
     int32_t error_out = EMEL_OK;
-    ctx.ubatch_size = 0;
-    emel::decoder::ubatch_executor::action::run_extract_outputs(
-        emel::decoder::ubatch_executor::event::extract_outputs{
-            .error_out = &error_out,
-        },
-        ctx);
+    ctx.outputs_produced = 0;
+    emel::decoder::ubatch_executor::event::extract_outputs extract{
+      .error_out = &error_out,
+    };
+    CHECK(emel::decoder::ubatch_executor::guard::invalid_extract_outputs_request{}(extract, ctx));
+    emel::decoder::ubatch_executor::action::reject_invalid_extract_outputs(extract, ctx);
     CHECK(error_out != EMEL_OK);
   }
 
@@ -322,12 +331,12 @@ TEST_CASE("ubatch_executor_action_helpers_cover_error_branches") {
   {
     context ctx{};
     int32_t error_out = EMEL_OK;
-    emel::decoder::ubatch_executor::action::run_compute(
-        emel::decoder::ubatch_executor::event::run_compute{
-            .kv_cache_sm = nullptr,
-            .error_out = &error_out,
-        },
-        ctx);
+    emel::decoder::ubatch_executor::event::run_compute compute{
+      .kv_cache_sm = nullptr,
+      .error_out = &error_out,
+    };
+    CHECK(emel::decoder::ubatch_executor::guard::invalid_run_compute_request{}(compute, ctx));
+    emel::decoder::ubatch_executor::action::reject_invalid_run_compute(compute, ctx);
     CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
   }
 
@@ -368,12 +377,12 @@ TEST_CASE("ubatch_executor_action_helpers_cover_error_branches") {
   {
     context ctx{};
     int32_t error_out = EMEL_OK;
-    emel::decoder::ubatch_executor::action::run_rollback(
-        emel::decoder::ubatch_executor::event::rollback{
-            .kv_cache_sm = nullptr,
-            .error_out = &error_out,
-        },
-        ctx);
+    emel::decoder::ubatch_executor::event::rollback rollback{
+      .kv_cache_sm = nullptr,
+      .error_out = &error_out,
+    };
+    CHECK(emel::decoder::ubatch_executor::guard::invalid_rollback_request{}(rollback, ctx));
+    emel::decoder::ubatch_executor::action::reject_invalid_rollback(rollback, ctx);
     CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
   }
 }

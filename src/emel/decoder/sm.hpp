@@ -86,8 +86,11 @@ struct model {
               .request = &ev,
             });
           },
-      sml::state<validating_request> + sml::event<event::validate> / action::run_validate =
-          sml::state<validating_request>,
+      sml::state<validating_request> + sml::event<event::validate>
+          [guard::valid_token_inputs] / action::run_validate = sml::state<validating_request>,
+      sml::state<validating_request> + sml::event<event::validate>
+          [guard::invalid_token_inputs] / action::reject_invalid_validate =
+            sml::state<validating_request>,
       sml::state<validating_request> + sml::event<events::validate_done> =
           sml::state<initializing_batch>,
       sml::state<validating_request> + sml::event<events::validate_error> = sml::state<errored>,
@@ -286,8 +289,11 @@ struct model {
               .request = request,
             });
           },
-      sml::state<reserving_output> + sml::event<event::reserve_output> / action::run_reserve_output =
-          sml::state<reserving_output>,
+      sml::state<reserving_output> + sml::event<event::reserve_output>
+          [guard::valid_outputs_total] / action::run_reserve_output = sml::state<reserving_output>,
+      sml::state<reserving_output> + sml::event<event::reserve_output>
+          [guard::invalid_outputs_total] / action::reject_invalid_reserve_output =
+            sml::state<reserving_output>,
       sml::state<reserving_output> + sml::event<events::reserve_output_done> =
           sml::state<processing_ubatch>,
       sml::state<reserving_output> + sml::event<events::reserve_output_error> =
@@ -321,8 +327,12 @@ struct model {
               .request = request,
             });
           },
-      sml::state<processing_ubatch> + sml::event<event::process_ubatch> /
-          action::run_process_ubatch = sml::state<processing_ubatch>,
+      sml::state<processing_ubatch> + sml::event<event::process_ubatch>
+          [guard::can_process_ubatch] / action::run_process_ubatch =
+          sml::state<processing_ubatch>,
+      sml::state<processing_ubatch> + sml::event<event::process_ubatch>
+          [guard::cannot_process_ubatch] / action::on_invalid_ubatch_size =
+          sml::state<processing_ubatch>,
       sml::state<processing_ubatch> + sml::event<events::ubatch_done>[guard::has_more_ubatches] =
           sml::state<processing_ubatch>,
       sml::state<processing_ubatch> + sml::event<events::ubatch_done>[guard::no_more_ubatches] =

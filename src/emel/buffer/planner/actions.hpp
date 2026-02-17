@@ -835,49 +835,31 @@ inline int32_t run_reset(context & ctx) noexcept {
 
 inline int32_t run_seed_leafs(context & ctx) noexcept {
   const auto * strategy = resolve_strategy(ctx);
-  if (strategy == nullptr || strategy->seed_leafs == nullptr) {
-    return EMEL_ERR_INVALID_ARGUMENT;
-  }
   return strategy->seed_leafs(ctx);
 }
 
 inline int32_t run_count_references(context & ctx) noexcept {
   const auto * strategy = resolve_strategy(ctx);
-  if (strategy == nullptr || strategy->count_references == nullptr) {
-    return EMEL_ERR_INVALID_ARGUMENT;
-  }
   return strategy->count_references(ctx);
 }
 
 inline int32_t run_alloc_explicit_inputs(context & ctx) noexcept {
   const auto * strategy = resolve_strategy(ctx);
-  if (strategy == nullptr || strategy->alloc_explicit_inputs == nullptr) {
-    return EMEL_ERR_INVALID_ARGUMENT;
-  }
   return strategy->alloc_explicit_inputs(ctx);
 }
 
 inline int32_t run_plan_nodes(context & ctx) noexcept {
   const auto * strategy = resolve_strategy(ctx);
-  if (strategy == nullptr || strategy->plan_nodes == nullptr) {
-    return EMEL_ERR_INVALID_ARGUMENT;
-  }
   return strategy->plan_nodes(ctx);
 }
 
 inline int32_t run_release_expired(context & ctx) noexcept {
   const auto * strategy = resolve_strategy(ctx);
-  if (strategy == nullptr || strategy->release_expired == nullptr) {
-    return EMEL_ERR_INVALID_ARGUMENT;
-  }
   return strategy->release_expired(ctx);
 }
 
 inline int32_t run_finalize(context & ctx, const event::plan * request) noexcept {
   const auto * strategy = resolve_strategy(ctx);
-  if (strategy == nullptr || strategy->finalize == nullptr) {
-    return EMEL_ERR_INVALID_ARGUMENT;
-  }
   const int32_t err = strategy->finalize(ctx);
   if (err == EMEL_OK && request != nullptr && request->sizes_out != nullptr) {
     for (int32_t i = 0; i < ctx.buffer_count && i < request->sizes_out_count; ++i) {
@@ -970,33 +952,29 @@ struct begin_plan {
   void operator()(const event::plan & ev, context & ctx) const noexcept {
     ctx = {};
     ctx.buffer_count = ev.buffer_count;
-    const bool valid = detail::valid_plan_event(ev) && detail::valid_strategy(ev.strategy);
-    const int32_t err = valid ? EMEL_OK : EMEL_ERR_INVALID_ARGUMENT;
-    if (valid) {
-      for (int32_t i = 0; i < ctx.buffer_count; ++i) {
-        const int32_t alignment =
-          ev.buffer_alignments != nullptr ? ev.buffer_alignments[i] : k_default_alignment;
-        const int32_t max_size =
-          ev.buffer_max_sizes != nullptr ? ev.buffer_max_sizes[i] : k_default_max_size;
-        ctx.buffer_alignments[i] = detail::sanitize_alignment(alignment);
-        ctx.buffer_max_sizes[i] = detail::sanitize_max_size(max_size);
-      }
-      ctx.node_count = ev.graph.n_nodes;
-      ctx.leaf_count = ev.graph.n_leafs;
-      for (int32_t i = 0; i < ctx.leaf_count; ++i) {
-        ctx.leafs[i] = ev.graph.leafs[i];
-        ctx.leaf_buffer_ids[i] = detail::buffer_id_for(ev.leaf_buffer_ids, i);
-      }
-      for (int32_t i = 0; i < ctx.node_count; ++i) {
-        ctx.nodes[i] = ev.graph.nodes[i];
-        ctx.node_buffer_ids[i] = detail::buffer_id_for(ev.node_buffer_ids, i);
-      }
-      ctx.strategy = ev.strategy == nullptr
-          ? emel::buffer::planner::default_strategies::gallocr_parity
-          : *ev.strategy;
+    for (int32_t i = 0; i < ctx.buffer_count; ++i) {
+      const int32_t alignment =
+        ev.buffer_alignments != nullptr ? ev.buffer_alignments[i] : k_default_alignment;
+      const int32_t max_size =
+        ev.buffer_max_sizes != nullptr ? ev.buffer_max_sizes[i] : k_default_max_size;
+      ctx.buffer_alignments[i] = detail::sanitize_alignment(alignment);
+      ctx.buffer_max_sizes[i] = detail::sanitize_max_size(max_size);
     }
+    ctx.node_count = ev.graph.n_nodes;
+    ctx.leaf_count = ev.graph.n_leafs;
+    for (int32_t i = 0; i < ctx.leaf_count; ++i) {
+      ctx.leafs[i] = ev.graph.leafs[i];
+      ctx.leaf_buffer_ids[i] = detail::buffer_id_for(ev.leaf_buffer_ids, i);
+    }
+    for (int32_t i = 0; i < ctx.node_count; ++i) {
+      ctx.nodes[i] = ev.graph.nodes[i];
+      ctx.node_buffer_ids[i] = detail::buffer_id_for(ev.node_buffer_ids, i);
+    }
+    ctx.strategy = ev.strategy == nullptr
+        ? emel::buffer::planner::default_strategies::gallocr_parity
+        : *ev.strategy;
     if (ev.error_out != nullptr) {
-      *ev.error_out = err;
+      *ev.error_out = EMEL_OK;
     }
   }
 };

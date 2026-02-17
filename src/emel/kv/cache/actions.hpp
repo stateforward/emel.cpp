@@ -12,28 +12,17 @@ namespace emel::kv::cache::action {
 inline constexpr int32_t MAX_UBATCHES = 4096;
 inline constexpr int32_t MAX_KV_CELLS = 32768;
 
-enum class operation : int32_t {
-  none = 0,
-  prepare,
-  apply,
-  rollback,
-};
-
 struct context {
-  operation op = operation::none;
-
   std::array<int32_t, MAX_UBATCHES> ubatch_sizes = {};
   std::array<int32_t, MAX_UBATCHES> slot_offsets = {};
   int32_t ubatch_count = 0;
   int32_t planned_ubatch_count = 0;
-  int32_t requested_capacity = 0;
   int32_t kv_size = 0;
   int32_t head = 0;
 
   std::array<int32_t, MAX_KV_CELLS> cells = {};
   int32_t next_pos = 1;
 
-  int32_t current_ubatch_index = 0;
   int32_t applied_ubatches = 0;
   int32_t kv_tokens = 0;
 };
@@ -111,11 +100,8 @@ inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ct
   if (ev.ubatch_count_out != nullptr) {
     *ev.ubatch_count_out = 0;
   }
-  ctx.op = operation::prepare;
   ctx.ubatch_count = ev.ubatch_count;
   ctx.planned_ubatch_count = 0;
-  ctx.requested_capacity = ev.requested_capacity;
-  ctx.current_ubatch_index = 0;
 
   ctx.ubatch_sizes.fill(0);
   ctx.slot_offsets.fill(0);
@@ -134,68 +120,82 @@ inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ct
 };
 
 inline constexpr auto begin_apply = [](const event::apply_ubatch & ev, context & ctx) {
+  (void)ctx;
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
   if (ev.kv_tokens_out != nullptr) {
     *ev.kv_tokens_out = 0;
   }
-  ctx.op = operation::apply;
-  ctx.current_ubatch_index = ev.ubatch_index;
 };
 
 inline constexpr auto begin_rollback = [](const event::rollback & ev, context & ctx) {
+  (void)ctx;
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
-  ctx.op = operation::rollback;
-  ctx.current_ubatch_index = ev.from_ubatch_index;
 };
 
-inline constexpr auto run_validate = [](const event::validate & ev, context & ctx) {
+inline constexpr auto run_validate_prepare = [](const event::validate_prepare & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
 
-  switch (ctx.op) {
-    case operation::prepare:
-      if (ctx.ubatch_count <= 0 || ctx.ubatch_count > MAX_UBATCHES) {
-        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-        return;
-      }
-      if (ctx.requested_capacity > MAX_KV_CELLS) {
-        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-        return;
-      }
-      if (ctx.kv_size <= 0 || ctx.kv_size > MAX_KV_CELLS) {
-        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-        return;
-      }
-      break;
-    case operation::apply:
-      if (ctx.planned_ubatch_count <= 0) {
-        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-        return;
-      }
-      if (ctx.current_ubatch_index < 0 || ctx.current_ubatch_index >= ctx.planned_ubatch_count) {
-        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-        return;
-      }
-      if (ctx.current_ubatch_index != ctx.applied_ubatches) {
-        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-        return;
-      }
-      break;
-    case operation::rollback:
-      if (ctx.current_ubatch_index < 0 ||
-          ctx.current_ubatch_index > ctx.applied_ubatches ||
-          ctx.current_ubatch_index > ctx.planned_ubatch_count) {
-        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-        return;
-      }
-      break;
-    case operation::none:
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      return;
+  const event::prepare * request = ev.request;
+  if (request == nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (request->ubatch_count <= 0 || request->ubatch_count > MAX_UBATCHES) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (request->requested_capacity > MAX_KV_CELLS) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (ctx.kv_size <= 0 || ctx.kv_size > MAX_KV_CELLS) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+};
+
+inline constexpr auto run_validate_apply = [](const event::validate_apply & ev, context & ctx) {
+  if (ev.error_out == nullptr) return;
+  *ev.error_out = EMEL_OK;
+
+  const event::apply_ubatch * request = ev.request;
+  if (request == nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (ctx.planned_ubatch_count <= 0) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (request->ubatch_index < 0 || request->ubatch_index >= ctx.planned_ubatch_count) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (request->ubatch_index != ctx.applied_ubatches) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+};
+
+inline constexpr auto run_validate_rollback = [](const event::validate_rollback & ev, context & ctx) {
+  if (ev.error_out == nullptr) return;
+  *ev.error_out = EMEL_OK;
+
+  const event::rollback * request = ev.request;
+  if (request == nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (request->from_ubatch_index < 0 ||
+      request->from_ubatch_index > ctx.applied_ubatches ||
+      request->from_ubatch_index > ctx.planned_ubatch_count) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
   }
 };
 
@@ -245,18 +245,24 @@ inline constexpr auto run_apply_step = [](const event::apply_step & ev, context 
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
 
-  if (ctx.op != operation::apply) {
+  const event::apply_ubatch * request = ev.request;
+  if (request == nullptr) {
     *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
     return;
   }
 
-  if (ctx.current_ubatch_index >= ctx.planned_ubatch_count) {
+  const int32_t ubatch_index = request->ubatch_index;
+  if (ubatch_index < 0 || ubatch_index >= ctx.planned_ubatch_count) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (ubatch_index != ctx.applied_ubatches) {
     *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
     return;
   }
 
-  const int32_t size = ctx.ubatch_sizes[ctx.current_ubatch_index];
-  const int32_t start = ctx.slot_offsets[ctx.current_ubatch_index];
+  const int32_t size = ctx.ubatch_sizes[ubatch_index];
+  const int32_t start = ctx.slot_offsets[ubatch_index];
   if (size <= 0 || start < 0 || start + size > ctx.kv_size) {
     *ev.error_out = EMEL_ERR_BACKEND;
     return;
@@ -275,7 +281,7 @@ inline constexpr auto run_apply_step = [](const event::apply_step & ev, context 
     ctx.head %= ctx.kv_size;
   }
 
-  ctx.applied_ubatches = ctx.current_ubatch_index + 1;
+  ctx.applied_ubatches = ubatch_index + 1;
   ctx.kv_tokens = used_max_p1(ctx);
 };
 
@@ -283,13 +289,22 @@ inline constexpr auto run_rollback_step = [](const event::rollback_step & ev, co
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
 
-  if (ctx.op != operation::rollback) {
+  const event::rollback * request = ev.request;
+  if (request == nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+
+  const int32_t from_index = request->from_ubatch_index;
+  if (from_index < 0 ||
+      from_index > ctx.applied_ubatches ||
+      from_index > ctx.planned_ubatch_count) {
     *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
     return;
   }
 
   int32_t new_head = ctx.kv_size;
-  for (int32_t i = ctx.current_ubatch_index; i < ctx.applied_ubatches; ++i) {
+  for (int32_t i = from_index; i < ctx.applied_ubatches; ++i) {
     const int32_t size = ctx.ubatch_sizes[i];
     const int32_t start = ctx.slot_offsets[i];
     if (size <= 0 || start < 0 || start + size > ctx.kv_size) {
@@ -307,7 +322,7 @@ inline constexpr auto run_rollback_step = [](const event::rollback_step & ev, co
     ctx.head = new_head;
   }
 
-  ctx.applied_ubatches = ctx.current_ubatch_index;
+  ctx.applied_ubatches = from_index;
   ctx.kv_tokens = used_max_p1(ctx);
 };
 
@@ -317,14 +332,19 @@ inline constexpr auto run_publish = [](const event::publish & ev, context & ctx)
   *ev.error_out = EMEL_OK;
 };
 
-inline constexpr auto on_kv_done = [](const events::kv_done &, context & ctx) {
-  ctx.op = operation::none;
-  ctx.current_ubatch_index = 0;
-};
+inline constexpr auto on_kv_done = [](const events::kv_done &, context &) {};
 
-inline constexpr auto on_kv_error = [](const events::kv_error &, context & ctx) {
-  ctx.op = operation::none;
-  ctx.current_ubatch_index = 0;
+inline constexpr auto on_kv_error = [](const events::kv_error &, context &) {};
+
+struct on_unexpected {
+  template <class Event>
+  void operator()(const Event & ev, context &) const {
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = EMEL_ERR_BACKEND;
+      }
+    }
+  }
 };
 
 }  // namespace emel::kv::cache::action

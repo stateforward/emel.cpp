@@ -5,6 +5,7 @@
 #include <doctest/doctest.h>
 
 #include "emel/buffer/chunk_allocator/actions.hpp"
+#include "emel/buffer/chunk_allocator/guards.hpp"
 #include "emel/buffer/chunk_allocator/sm.hpp"
 #include "emel/emel.h"
 
@@ -355,25 +356,38 @@ TEST_CASE("buffer_chunk_allocator_release_validation_and_merge_error_paths") {
   c.request_offset = 0;
   c.request_size = 16;
   int32_t err = EMEL_OK;
-  action::run_validate_release(emel::buffer::chunk_allocator::event::validate_release{.error_out = &err}, c);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  emel::buffer::chunk_allocator::event::release request{
+    .chunk = c.request_chunk,
+    .offset = c.request_offset,
+    .size = c.request_size,
+    .alignment = c.request_alignment,
+    .error_out = &err,
+  };
+  emel::buffer::chunk_allocator::event::validate_release validate{
+    .request = &request,
+  };
+  CHECK(emel::buffer::chunk_allocator::guard::invalid_release_request{}(validate, c));
 
   c.alignment = 16;
   c.request_chunk = 1;
-  action::run_validate_release(emel::buffer::chunk_allocator::event::validate_release{.error_out = &err}, c);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  request.chunk = c.request_chunk;
+  request.alignment = c.request_alignment;
+  CHECK(emel::buffer::chunk_allocator::guard::invalid_release_request{}(validate, c));
 
   c.request_chunk = 0;
   c.request_offset = std::numeric_limits<uint64_t>::max();
   c.request_size = 16;
-  action::run_validate_release(emel::buffer::chunk_allocator::event::validate_release{.error_out = &err}, c);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  request.chunk = c.request_chunk;
+  request.offset = c.request_offset;
+  request.size = c.request_size;
+  CHECK(emel::buffer::chunk_allocator::guard::invalid_release_request{}(validate, c));
 
   c.request_offset = 0;
   c.request_size = 16;
   c.chunks[0].max_size = 8;
-  action::run_validate_release(emel::buffer::chunk_allocator::event::validate_release{.error_out = &err}, c);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  request.offset = c.request_offset;
+  request.size = c.request_size;
+  CHECK(emel::buffer::chunk_allocator::guard::invalid_release_request{}(validate, c));
 
   c = {};
   c.request_chunk = 2;
@@ -499,16 +513,28 @@ TEST_CASE("buffer_chunk_allocator_additional_action_branch_coverage") {
   c.request_alignment = 0;
   c.request_max_chunk_size = 64;
   int32_t err = EMEL_OK;
-  action::run_validate_allocate(
-      emel::buffer::chunk_allocator::event::validate_allocate{.error_out = &err}, c);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  int32_t chunk_out = -1;
+  uint64_t offset = 0;
+  emel::buffer::chunk_allocator::event::allocate request{
+    .size = c.request_size,
+    .alignment = c.request_alignment,
+    .max_chunk_size = c.request_max_chunk_size,
+    .chunk_out = &chunk_out,
+    .offset_out = &offset,
+    .error_out = &err,
+  };
+  emel::buffer::chunk_allocator::event::validate_allocate validate{
+    .request = &request,
+  };
+  CHECK(emel::buffer::chunk_allocator::guard::invalid_allocate_request{}(validate, c));
 
   c.request_alignment = 16;
   c.request_size = std::numeric_limits<uint64_t>::max();
   c.request_max_chunk_size = 64;
-  action::run_validate_allocate(
-      emel::buffer::chunk_allocator::event::validate_allocate{.error_out = &err}, c);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  request.size = c.request_size;
+  request.alignment = c.request_alignment;
+  request.max_chunk_size = c.request_max_chunk_size;
+  CHECK(emel::buffer::chunk_allocator::guard::invalid_allocate_request{}(validate, c));
 
   c = {};
   c.chunk_count = action::k_max_chunks;

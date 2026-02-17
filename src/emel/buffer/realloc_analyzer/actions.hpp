@@ -135,22 +135,13 @@ struct begin_analyze {
 
 struct run_validate {
   void operator()(const event::validate & ev, context & c) const noexcept {
-    int32_t err = EMEL_OK;
-    if (!detail::valid_graph_tensors(ev.graph)) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (ev.node_alloc_count < 0 || ev.leaf_alloc_count < 0) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (ev.graph.n_nodes > 0 && ev.node_allocs == nullptr) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (ev.graph.n_leafs > 0 && ev.leaf_allocs == nullptr) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    }
     if (ev.error_out != nullptr) {
-      *ev.error_out = err;
+      *ev.error_out = EMEL_OK;
     }
     c.step += 1;
   }
 };
+
 
 struct run_evaluate {
   void operator()(const event::evaluate & ev, context & c) const noexcept {

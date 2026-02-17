@@ -142,7 +142,7 @@ TEST_CASE("buffer_planner_valid_plan_event_and_strategy_checks") {
   CHECK(emel::buffer::planner::action::detail::valid_strategy(nullptr));
 }
 
-TEST_CASE("buffer_planner_begin_plan_sets_error_for_invalid") {
+TEST_CASE("buffer_planner_begin_plan_sets_ok_without_validation") {
   emel::buffer::planner::action::context ctx{};
   int32_t err = EMEL_OK;
   emel::buffer::planner::event::plan plan{};
@@ -150,7 +150,7 @@ TEST_CASE("buffer_planner_begin_plan_sets_error_for_invalid") {
   plan.error_out = &err;
 
   emel::buffer::planner::action::begin_plan(plan, ctx);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == EMEL_OK);
 }
 
 TEST_CASE("buffer_planner_finalize_copies_sizes") {
@@ -192,11 +192,10 @@ TEST_CASE("buffer_planner_default_phase_helpers_report_errors") {
 
 TEST_CASE("buffer_planner_run_helpers_validate_strategy") {
   emel::buffer::planner::action::context ctx{};
-  CHECK(emel::buffer::planner::action::detail::run_seed_leafs(ctx) == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(emel::buffer::planner::action::detail::run_count_references(ctx) == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(emel::buffer::planner::action::detail::run_alloc_explicit_inputs(ctx) == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(emel::buffer::planner::action::detail::run_plan_nodes(ctx) == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(emel::buffer::planner::action::detail::run_release_expired(ctx) == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK_FALSE(emel::buffer::planner::action::detail::valid_strategy(&ctx.strategy));
+
+  ctx.strategy = emel::buffer::planner::default_strategies::gallocr_parity;
+  CHECK(emel::buffer::planner::action::detail::valid_strategy(&ctx.strategy));
 }
 
 TEST_CASE("buffer_planner_default_plan_nodes_reuses_parent_allocation") {

@@ -73,8 +73,10 @@ struct model {
             });
           },
 
-      sml::state<validating> + sml::event<event::validate> / action::run_validate =
-          sml::state<validating>,
+      sml::state<validating> + sml::event<event::validate> [guard::valid_execute_request{}] /
+          action::run_validate = sml::state<validating>,
+      sml::state<validating> + sml::event<event::validate> [guard::invalid_execute_request{}] /
+          action::reject_invalid_validate = sml::state<validating>,
       sml::state<validating> + sml::event<events::validate_done> =
           sml::state<preparing_graph>,
       sml::state<validating> + sml::event<events::validate_error> = sml::state<errored>,
@@ -105,8 +107,12 @@ struct model {
               .reused = reused,
             });
           },
-      sml::state<preparing_graph> + sml::event<event::prepare_graph> /
-          action::run_prepare_graph = sml::state<preparing_graph>,
+      sml::state<preparing_graph> + sml::event<event::prepare_graph>
+          [guard::valid_prepare_graph_request{}] / action::run_prepare_graph =
+          sml::state<preparing_graph>,
+      sml::state<preparing_graph> + sml::event<event::prepare_graph>
+          [guard::invalid_prepare_graph_request{}] / action::reject_invalid_prepare_graph =
+          sml::state<preparing_graph>,
       sml::state<preparing_graph> + sml::event<events::prepare_graph_done>
           [guard::graph_reused] = sml::state<binding_inputs>,
       sml::state<preparing_graph> + sml::event<events::prepare_graph_done>
@@ -137,8 +143,12 @@ struct model {
               .request = request,
             });
           },
-      sml::state<allocating_graph> + sml::event<event::alloc_graph> /
-          action::run_alloc_graph = sml::state<allocating_graph>,
+      sml::state<allocating_graph> + sml::event<event::alloc_graph>
+          [guard::valid_alloc_graph_request{}] / action::run_alloc_graph =
+          sml::state<allocating_graph>,
+      sml::state<allocating_graph> + sml::event<event::alloc_graph>
+          [guard::invalid_alloc_graph_request{}] / action::reject_invalid_alloc_graph =
+          sml::state<allocating_graph>,
       sml::state<allocating_graph> + sml::event<events::alloc_graph_done> =
           sml::state<binding_inputs>,
       sml::state<allocating_graph> + sml::event<events::alloc_graph_error> =
@@ -190,7 +200,11 @@ struct model {
               .request = request,
             });
           },
-      sml::state<binding_inputs> + sml::event<event::bind_inputs> / action::run_bind_inputs =
+      sml::state<binding_inputs> + sml::event<event::bind_inputs>
+          [guard::valid_bind_inputs_request{}] / action::run_bind_inputs =
+          sml::state<binding_inputs>,
+      sml::state<binding_inputs> + sml::event<event::bind_inputs>
+          [guard::invalid_bind_inputs_request{}] / action::reject_invalid_bind_inputs =
           sml::state<binding_inputs>,
       sml::state<binding_inputs> + sml::event<events::bind_inputs_done> = sml::state<running_backend>,
       sml::state<binding_inputs> + sml::event<events::bind_inputs_error> = sml::state<errored>,
@@ -218,7 +232,11 @@ struct model {
               .request = request,
             });
           },
-      sml::state<running_backend> + sml::event<event::run_backend> / action::run_backend =
+      sml::state<running_backend> + sml::event<event::run_backend>
+          [guard::valid_run_backend_request{}] / action::run_backend =
+          sml::state<running_backend>,
+      sml::state<running_backend> + sml::event<event::run_backend>
+          [guard::invalid_run_backend_request{}] / action::reject_invalid_run_backend =
           sml::state<running_backend>,
       sml::state<running_backend> + sml::event<events::run_backend_done> =
           sml::state<extracting_outputs>,
@@ -247,8 +265,12 @@ struct model {
               .request = request,
             });
           },
-      sml::state<extracting_outputs> + sml::event<event::extract_outputs> /
-          action::run_extract_outputs = sml::state<extracting_outputs>,
+      sml::state<extracting_outputs> + sml::event<event::extract_outputs>
+          [guard::valid_extract_outputs_request{}] / action::run_extract_outputs =
+          sml::state<extracting_outputs>,
+      sml::state<extracting_outputs> + sml::event<event::extract_outputs>
+          [guard::invalid_extract_outputs_request{}] / action::reject_invalid_extract_outputs =
+          sml::state<extracting_outputs>,
       sml::state<extracting_outputs> + sml::event<events::extract_outputs_done> = sml::state<done>,
       sml::state<extracting_outputs> + sml::event<events::extract_outputs_error> =
           sml::state<errored>,

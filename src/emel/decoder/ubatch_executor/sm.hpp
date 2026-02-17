@@ -55,18 +55,9 @@ struct model {
             if (ev.rollback_attempted_out != nullptr) {
               *ev.rollback_attempted_out = false;
             }
-            if (ev.memory_coordinator_sm == nullptr || ev.kv_cache_sm == nullptr) {
-              if (ev.error_out != nullptr) {
-                *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-              }
-              process(events::validate_error{
-                .err = EMEL_ERR_INVALID_ARGUMENT,
-                .request = &ev,
-              });
-              return;
-            }
             int32_t phase_error = EMEL_OK;
             event::validate validate{
+              .request = &ev,
               .error_out = &phase_error,
             };
             process(validate);
@@ -85,8 +76,10 @@ struct model {
             });
           },
 
-      sml::state<validating> + sml::event<event::validate> / action::run_validate =
-          sml::state<validating>,
+      sml::state<validating> + sml::event<event::validate>[guard::valid_execute_request{}] /
+          action::run_validate = sml::state<validating>,
+      sml::state<validating> + sml::event<event::validate>[guard::invalid_execute_request{}] /
+          action::reject_invalid_validate = sml::state<validating>,
       sml::state<validating> + sml::event<events::validate_done> = sml::state<preparing_memory>,
       sml::state<validating> + sml::event<events::validate_error> = sml::state<errored>,
 
@@ -113,8 +106,12 @@ struct model {
               .request = request,
             });
           },
-      sml::state<preparing_memory> + sml::event<event::prepare_memory> / action::run_prepare_memory =
-          sml::state<preparing_memory>,
+      sml::state<preparing_memory> +
+              sml::event<event::prepare_memory>[guard::valid_prepare_memory_request{}] /
+          action::run_prepare_memory = sml::state<preparing_memory>,
+      sml::state<preparing_memory> +
+              sml::event<event::prepare_memory>[guard::invalid_prepare_memory_request{}] /
+          action::reject_invalid_prepare_memory = sml::state<preparing_memory>,
       sml::state<preparing_memory> + sml::event<events::prepare_memory_done> =
           sml::state<preparing_kv>,
       sml::state<preparing_memory> + sml::event<events::prepare_memory_error> =
@@ -143,8 +140,11 @@ struct model {
               .request = request,
             });
           },
-      sml::state<preparing_kv> + sml::event<event::prepare_kv> / action::run_prepare_kv =
-          sml::state<preparing_kv>,
+      sml::state<preparing_kv> + sml::event<event::prepare_kv>[guard::valid_prepare_kv_request{}] /
+          action::run_prepare_kv = sml::state<preparing_kv>,
+      sml::state<preparing_kv> +
+              sml::event<event::prepare_kv>[guard::invalid_prepare_kv_request{}] /
+          action::reject_invalid_prepare_kv = sml::state<preparing_kv>,
       sml::state<preparing_kv> + sml::event<events::prepare_kv_done> =
           sml::state<running_compute>,
       sml::state<preparing_kv> + sml::event<events::prepare_kv_error> = sml::state<errored>,
@@ -173,8 +173,12 @@ struct model {
               .request = request,
             });
           },
-      sml::state<running_compute> + sml::event<event::run_compute> / action::run_compute =
-          sml::state<running_compute>,
+      sml::state<running_compute> +
+              sml::event<event::run_compute>[guard::valid_run_compute_request{}] /
+          action::run_compute = sml::state<running_compute>,
+      sml::state<running_compute> +
+              sml::event<event::run_compute>[guard::invalid_run_compute_request{}] /
+          action::reject_invalid_run_compute = sml::state<running_compute>,
       sml::state<running_compute> + sml::event<events::run_compute_done> =
           sml::state<extracting_outputs>,
       sml::state<running_compute> + sml::event<events::run_compute_error> =
@@ -202,8 +206,12 @@ struct model {
               .request = request,
             });
           },
-      sml::state<extracting_outputs> + sml::event<event::extract_outputs> /
+      sml::state<extracting_outputs> +
+              sml::event<event::extract_outputs>[guard::valid_extract_outputs_request{}] /
           action::run_extract_outputs = sml::state<extracting_outputs>,
+      sml::state<extracting_outputs> +
+              sml::event<event::extract_outputs>[guard::invalid_extract_outputs_request{}] /
+          action::reject_invalid_extract_outputs = sml::state<extracting_outputs>,
       sml::state<extracting_outputs> + sml::event<events::extract_outputs_done> =
           sml::state<done>,
       sml::state<extracting_outputs> + sml::event<events::extract_outputs_error> =
@@ -261,8 +269,10 @@ struct model {
               .request = request,
             });
           },
-      sml::state<rolling_back> + sml::event<event::rollback> / action::run_rollback =
-          sml::state<rolling_back>,
+      sml::state<rolling_back> + sml::event<event::rollback>[guard::valid_rollback_request{}] /
+          action::run_rollback = sml::state<rolling_back>,
+      sml::state<rolling_back> + sml::event<event::rollback>[guard::invalid_rollback_request{}] /
+          action::reject_invalid_rollback = sml::state<rolling_back>,
       sml::state<rolling_back> + sml::event<events::rollback_done> = sml::state<errored>,
       sml::state<rolling_back> + sml::event<events::rollback_error> = sml::state<errored>,
 

@@ -42,14 +42,23 @@ Model weight loader
 - Owner dispatch preconditions.
 
 Progress
-- Decoder: moved ubatch-size precondition to guards; actions no longer early-return for invalid sizes.
+- Decoder: moved token input, outputs_total, and ubatch index/size preconditions into guards with
+  explicit reject actions; tests updated.
 - Buffer planner: moved request-null preconditions into guards + error transitions; removed strategy checks from
   run helpers; begin_plan no longer performs validation. Tests updated. Gates green.
 - Buffer allocator: moved reserve/alloc/initialize preconditions into guards and explicit reject transitions;
   removed planner/analyzer/chunk allocator null preconditions in action helpers. Tests updated.
 
 Current status
-- Next up: model loader / parser / weight_loader guard migration.
+- Buffer chunk allocator: moved configure/allocate/release preconditions into guards and
+  dispatch actions; tests updated.
+- Buffer realloc analyzer: moved analyze validation preconditions into guards and dispatch
+  actions; tests updated.
+- Decoder compute executor: moved execute/phase preconditions into guards and invalid reject
+  actions; tests updated.
+- Decoder ubatch executor: moved execute/phase preconditions into guards and invalid reject
+  actions; tests updated.
+- Next up: gate runs.
 
 Proposed approach
 1. For each machine, define guard predicates covering the preconditions currently enforced in actions.

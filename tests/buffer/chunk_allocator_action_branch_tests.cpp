@@ -3,6 +3,7 @@
 
 #include "emel/buffer/chunk_allocator/actions.hpp"
 #include "emel/buffer/chunk_allocator/events.hpp"
+#include "emel/buffer/chunk_allocator/guards.hpp"
 #include "emel/emel.h"
 
 TEST_CASE("chunk_allocator_detail_helpers_cover_branches") {
@@ -30,37 +31,69 @@ TEST_CASE("chunk_allocator_configure_actions_validate_alignment") {
   emel::buffer::chunk_allocator::action::context ctx{};
   int32_t err = EMEL_OK;
 
-  emel::buffer::chunk_allocator::action::begin_configure(
-    emel::buffer::chunk_allocator::event::configure{
-      .alignment = 0,
-      .max_chunk_size = 1,
-      .error_out = &err,
-    },
-    ctx);
+  emel::buffer::chunk_allocator::event::configure request{
+    .alignment = 0,
+    .max_chunk_size = 1,
+    .error_out = &err,
+  };
+  emel::buffer::chunk_allocator::action::begin_configure(request, ctx);
   CHECK(err == EMEL_OK);
 
   err = EMEL_OK;
-  emel::buffer::chunk_allocator::action::run_validate_configure(
-    emel::buffer::chunk_allocator::event::validate_configure{.error_out = &err}, ctx);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  emel::buffer::chunk_allocator::event::validate_configure validate{
+    .error_out = &err,
+    .request = &request,
+  };
+  CHECK(emel::buffer::chunk_allocator::guard::invalid_configure{}(validate, ctx));
+  CHECK(err == EMEL_OK);
+
+  request.alignment = 16;
+  request.max_chunk_size = 64;
+  emel::buffer::chunk_allocator::action::begin_configure(request, ctx);
+  err = EMEL_OK;
+  emel::buffer::chunk_allocator::event::validate_configure ok_validate{
+    .error_out = &err,
+    .request = &request,
+  };
+  CHECK(emel::buffer::chunk_allocator::guard::valid_configure{}(ok_validate, ctx));
+  emel::buffer::chunk_allocator::action::run_validate_configure(ok_validate, ctx);
+  CHECK(err == EMEL_OK);
 }
 
 TEST_CASE("chunk_allocator_allocate_actions_handle_invalid_request") {
   emel::buffer::chunk_allocator::action::context ctx{};
   int32_t err = EMEL_OK;
+  int32_t chunk = -1;
+  uint64_t offset = 0;
 
-  emel::buffer::chunk_allocator::action::begin_allocate(
-    emel::buffer::chunk_allocator::event::allocate{
-      .size = 0,
-      .error_out = &err,
-    },
-    ctx);
+  emel::buffer::chunk_allocator::event::allocate request{
+    .size = 0,
+    .chunk_out = &chunk,
+    .offset_out = &offset,
+    .error_out = &err,
+  };
+  emel::buffer::chunk_allocator::action::begin_allocate(request, ctx);
   CHECK(err == EMEL_OK);
 
   err = EMEL_OK;
-  emel::buffer::chunk_allocator::action::run_validate_allocate(
-    emel::buffer::chunk_allocator::event::validate_allocate{.error_out = &err}, ctx);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  emel::buffer::chunk_allocator::event::validate_allocate validate{
+    .error_out = &err,
+    .request = &request,
+  };
+  CHECK(emel::buffer::chunk_allocator::guard::invalid_allocate_request{}(validate, ctx));
+  CHECK(err == EMEL_OK);
+
+  request.size = 32;
+  emel::buffer::chunk_allocator::action::begin_allocate(request, ctx);
+  err = EMEL_OK;
+  emel::buffer::chunk_allocator::event::validate_allocate ok_validate{
+    .error_out = &err,
+    .request = &request,
+  };
+  CHECK(emel::buffer::chunk_allocator::guard::valid_allocate_request{}(ok_validate, ctx));
+  emel::buffer::chunk_allocator::action::run_validate_allocate(ok_validate, ctx);
+  CHECK(err == EMEL_OK);
+  CHECK(ctx.aligned_request_size != 0);
 }
 
 TEST_CASE("chunk_allocator_run_ensure_chunk_reports_backend") {
@@ -89,19 +122,35 @@ TEST_CASE("chunk_allocator_release_actions_validate_request") {
   emel::buffer::chunk_allocator::action::context ctx{};
   int32_t err = EMEL_OK;
 
-  emel::buffer::chunk_allocator::action::begin_release(
-    emel::buffer::chunk_allocator::event::release{
-      .chunk = -1,
-      .size = 0,
-      .error_out = &err,
-    },
-    ctx);
+  emel::buffer::chunk_allocator::event::release request{
+    .chunk = -1,
+    .size = 0,
+    .error_out = &err,
+  };
+  emel::buffer::chunk_allocator::action::begin_release(request, ctx);
   CHECK(err == EMEL_OK);
 
   err = EMEL_OK;
-  emel::buffer::chunk_allocator::action::run_validate_release(
-    emel::buffer::chunk_allocator::event::validate_release{.error_out = &err}, ctx);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  emel::buffer::chunk_allocator::event::validate_release validate{
+    .error_out = &err,
+    .request = &request,
+  };
+  CHECK(emel::buffer::chunk_allocator::guard::invalid_release_request{}(validate, ctx));
+  CHECK(err == EMEL_OK);
+
+  request.chunk = 0;
+  request.size = 16;
+  ctx.chunk_count = 1;
+  ctx.chunks[0].max_size = 32;
+  emel::buffer::chunk_allocator::action::begin_release(request, ctx);
+  err = EMEL_OK;
+  emel::buffer::chunk_allocator::event::validate_release ok_validate{
+    .error_out = &err,
+    .request = &request,
+  };
+  CHECK(emel::buffer::chunk_allocator::guard::valid_release_request{}(ok_validate, ctx));
+  emel::buffer::chunk_allocator::action::run_validate_release(ok_validate, ctx);
+  CHECK(err == EMEL_OK);
 }
 
 TEST_CASE("chunk_allocator_run_merge_release_reports_backend") {

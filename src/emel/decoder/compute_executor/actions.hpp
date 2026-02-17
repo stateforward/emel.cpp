@@ -22,28 +22,6 @@ inline constexpr auto run_validate = [](const event::validate & ev, context & ct
   *ev.error_out = EMEL_OK;
 
   const event::execute * request = ev.request;
-  if (request == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
-  if (request->prepare_graph == nullptr ||
-      request->bind_inputs == nullptr ||
-      request->run_backend == nullptr ||
-      request->extract_outputs == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
-  if (request->ubatch_index < 0 || request->ubatch_size <= 0) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-  if (request->kv_tokens < 0) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
   if (request->validate == nullptr) {
     return;
   }
@@ -61,11 +39,6 @@ inline constexpr auto run_prepare_graph = [](const event::prepare_graph & ev, co
   *ev.error_out = EMEL_OK;
 
   const event::execute * request = ev.request;
-  if (request == nullptr || request->prepare_graph == nullptr || ev.reused_out == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
   bool reused = false;
   int32_t err = EMEL_OK;
   const bool ok = request->prepare_graph(*request, &reused, &err);
@@ -82,11 +55,6 @@ inline constexpr auto run_alloc_graph = [](const event::alloc_graph & ev, contex
   *ev.error_out = EMEL_OK;
 
   const event::execute * request = ev.request;
-  if (request == nullptr || request->alloc_graph == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
   int32_t err = EMEL_OK;
   const bool ok = request->alloc_graph(*request, &err);
   if (!ok || err != EMEL_OK) {
@@ -99,11 +67,6 @@ inline constexpr auto run_bind_inputs = [](const event::bind_inputs & ev, contex
   *ev.error_out = EMEL_OK;
 
   const event::execute * request = ev.request;
-  if (request == nullptr || request->bind_inputs == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
   int32_t err = EMEL_OK;
   const bool ok = request->bind_inputs(*request, &err);
   if (!ok || err != EMEL_OK) {
@@ -117,11 +80,6 @@ inline constexpr auto run_backend = [](const event::run_backend & ev, context & 
   *ev.error_out = EMEL_OK;
 
   const event::execute * request = ev.request;
-  if (request == nullptr || request->run_backend == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
   int32_t err = EMEL_OK;
   const bool ok = request->run_backend(*request, &err);
   if (!ok || err != EMEL_OK) {
@@ -134,11 +92,6 @@ inline constexpr auto run_extract_outputs = [](const event::extract_outputs & ev
   *ev.error_out = EMEL_OK;
 
   const event::execute * request = ev.request;
-  if (request == nullptr || request->extract_outputs == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
   int32_t outputs_produced = 0;
   int32_t err = EMEL_OK;
   const bool ok = request->extract_outputs(*request, &outputs_produced, &err);
@@ -171,5 +124,43 @@ struct on_unexpected {
     }
   }
 };
+
+inline constexpr auto reject_invalid_validate = [](const event::validate & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+  }
+};
+
+inline constexpr auto reject_invalid_prepare_graph =
+  [](const event::prepare_graph & ev, context &) {
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+  };
+
+inline constexpr auto reject_invalid_alloc_graph = [](const event::alloc_graph & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+  }
+};
+
+inline constexpr auto reject_invalid_bind_inputs = [](const event::bind_inputs & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+  }
+};
+
+inline constexpr auto reject_invalid_run_backend = [](const event::run_backend & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+  }
+};
+
+inline constexpr auto reject_invalid_extract_outputs =
+  [](const event::extract_outputs & ev, context &) {
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+  };
 
 }  // namespace emel::decoder::compute_executor::action

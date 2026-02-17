@@ -41,22 +41,13 @@ inline constexpr auto begin_execute = [](const event::execute & ev, context & ct
 inline constexpr auto run_validate = [](const event::validate & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
-
-  if (ctx.ubatch_index < 0 || ctx.ubatch_size <= 0) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
+  (void)ctx;
 };
 
 inline constexpr auto run_prepare_memory = [](const event::prepare_memory & ev, context & ctx) {
   (void)ctx;
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
-
-  if (ev.memory_coordinator_sm == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
 
   emel::memory::coordinator::event::memory_status status =
       emel::memory::coordinator::event::memory_status::success;
@@ -74,32 +65,21 @@ inline constexpr auto run_prepare_kv = [](const event::prepare_kv & ev, context 
   (void)ctx;
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
-
-  if (ev.kv_cache_sm == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-  }
 };
 
 inline constexpr auto run_compute = [](const event::run_compute & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
-
-  if (ev.kv_cache_sm == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
   const event::execute * request = ev.request;
-  if (request == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
 
+  int32_t kv_error = EMEL_OK;
   const bool ok = ev.kv_cache_sm->process_event(emel::kv::cache::event::apply_ubatch{
     .ubatch_index = ctx.ubatch_index,
     .kv_tokens_out = &ctx.kv_tokens,
+    .error_out = &kv_error,
   });
-  if (!ok) {
-    *ev.error_out = EMEL_ERR_BACKEND;
+  if (!ok || kv_error != EMEL_OK) {
+    *ev.error_out = kv_error == EMEL_OK ? EMEL_ERR_BACKEND : kv_error;
     return;
   }
 
@@ -130,22 +110,12 @@ inline constexpr auto run_compute = [](const event::run_compute & ev, context & 
 inline constexpr auto run_extract_outputs = [](const event::extract_outputs & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
-
-  if (ctx.outputs_produced <= 0) {
-    *ev.error_out = EMEL_ERR_BACKEND;
-    return;
-  }
-
+  (void)ctx;
 };
 
 inline constexpr auto run_rollback = [](const event::rollback & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
-  if (ev.kv_cache_sm == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
   const bool ok = ev.kv_cache_sm->process_event(emel::kv::cache::event::rollback{
     .from_ubatch_index = ctx.ubatch_index,
   });
@@ -163,6 +133,44 @@ inline constexpr auto on_ubatch_execution_done = [](const events::ubatch_executi
 inline constexpr auto on_ubatch_execution_error = [](const events::ubatch_execution_error & ev, context &) {
   if (ev.error_out != nullptr) {
     *ev.error_out = ev.err == EMEL_OK ? EMEL_ERR_BACKEND : ev.err;
+  }
+};
+
+inline constexpr auto reject_invalid_validate = [](const event::validate & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+  }
+};
+
+inline constexpr auto reject_invalid_prepare_memory =
+  [](const event::prepare_memory & ev, context &) {
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+  };
+
+inline constexpr auto reject_invalid_prepare_kv = [](const event::prepare_kv & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+  }
+};
+
+inline constexpr auto reject_invalid_run_compute = [](const event::run_compute & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+  }
+};
+
+inline constexpr auto reject_invalid_extract_outputs =
+  [](const event::extract_outputs & ev, context &) {
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_ERR_BACKEND;
+    }
+  };
+
+inline constexpr auto reject_invalid_rollback = [](const event::rollback & ev, context &) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
   }
 };
 

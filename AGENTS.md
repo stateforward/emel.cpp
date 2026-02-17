@@ -20,6 +20,7 @@ ALWAYS treat `tmp/llama.cpp` as the functional logic reference for allocator/beh
 ALWAYS keep guards pure and deterministic.
 ALWAYS keep side effects in actions only.
 ALWAYS model orchestration decisions with transitions and guards instead of ad-hoc control flow.
+NEVER add precondition checks or early-return validation logic inside actions; model those checks as guards with explicit transitions.
 ALWAYS process events with run-to-completion semantics.
 ALWAYS use boost::sml::back::process for same-machine event chaining from actions, and avoid overriding process_event for internal orchestration.
 NEVER call sm.process_event from actions for same-machine dispatch; use boost::sml::back::process instead.

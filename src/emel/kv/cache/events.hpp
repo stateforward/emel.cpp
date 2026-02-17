@@ -26,7 +26,18 @@ struct rollback {
   int32_t * error_out = nullptr;
 };
 
-struct validate {
+struct validate_prepare {
+  const prepare * request = nullptr;
+  int32_t * error_out = nullptr;
+};
+
+struct validate_apply {
+  const apply_ubatch * request = nullptr;
+  int32_t * error_out = nullptr;
+};
+
+struct validate_rollback {
+  const rollback * request = nullptr;
   int32_t * error_out = nullptr;
 };
 
@@ -35,10 +46,12 @@ struct prepare_slots {
 };
 
 struct apply_step {
+  const apply_ubatch * request = nullptr;
   int32_t * error_out = nullptr;
 };
 
 struct rollback_step {
+  const rollback * request = nullptr;
   int32_t * error_out = nullptr;
 };
 

@@ -42,7 +42,6 @@ src/emel/generator/guards.hpp
 src/emel/generator/sm.hpp
 src/emel/kv/cache/actions.hpp
 src/emel/kv/cache/events.hpp
-src/emel/kv/cache/guards.hpp
 src/emel/kv/cache/sm.hpp
 src/emel/machines.hpp
 src/emel/memory/coordinator/actions.hpp

@@ -5,13 +5,14 @@
 #include "emel/emel.h"
 #include "emel/kv/cache/actions.hpp"
 #include "emel/kv/cache/events.hpp"
-#include "emel/kv/cache/guards.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::kv::cache {
 
 using Process = boost::sml::back::process<
-  event::validate,
+  event::validate_prepare,
+  event::validate_apply,
+  event::validate_rollback,
   events::validate_done,
   events::validate_error,
   event::prepare_slots,
@@ -52,7 +53,8 @@ struct model {
       sml::state<preparing> + sml::on_entry<event::prepare> /
           [](const event::prepare & ev, action::context &, process_t & process) noexcept {
             int32_t phase_error = EMEL_OK;
-            event::validate validate{
+            event::validate_prepare validate{
+              .request = &ev,
               .error_out = &phase_error,
             };
             process(validate);
@@ -70,7 +72,7 @@ struct model {
               .request = {.prepare = &ev},
             });
           },
-      sml::state<preparing> + sml::event<event::validate> / action::run_validate =
+      sml::state<preparing> + sml::event<event::validate_prepare> / action::run_validate_prepare =
           sml::state<preparing>,
       sml::state<preparing> + sml::event<events::validate_done> = sml::state<preparing>,
       sml::state<preparing> + sml::event<events::validate_error> = sml::state<errored>,
@@ -106,7 +108,8 @@ struct model {
       sml::state<applying_ubatch> + sml::on_entry<event::apply_ubatch> /
           [](const event::apply_ubatch & ev, action::context &, process_t & process) noexcept {
             int32_t phase_error = EMEL_OK;
-            event::validate validate{
+            event::validate_apply validate{
+              .request = &ev,
               .error_out = &phase_error,
             };
             process(validate);
@@ -124,7 +127,7 @@ struct model {
               .request = {.apply = &ev},
             });
           },
-      sml::state<applying_ubatch> + sml::event<event::validate> / action::run_validate =
+      sml::state<applying_ubatch> + sml::event<event::validate_apply> / action::run_validate_apply =
           sml::state<applying_ubatch>,
       sml::state<applying_ubatch> + sml::event<events::validate_done> = sml::state<applying_ubatch>,
       sml::state<applying_ubatch> + sml::event<events::validate_error> = sml::state<errored>,
@@ -132,6 +135,7 @@ struct model {
           [](const events::validate_done & ev, action::context &, process_t & process) noexcept {
             int32_t phase_error = EMEL_OK;
             event::apply_step apply_step{
+              .request = ev.request.apply,
               .error_out = &phase_error,
             };
             process(apply_step);
@@ -162,7 +166,8 @@ struct model {
       sml::state<rolling_back> + sml::on_entry<event::rollback> /
           [](const event::rollback & ev, action::context &, process_t & process) noexcept {
             int32_t phase_error = EMEL_OK;
-            event::validate validate{
+            event::validate_rollback validate{
+              .request = &ev,
               .error_out = &phase_error,
             };
             process(validate);
@@ -180,7 +185,7 @@ struct model {
               .request = {.rollback = &ev},
             });
           },
-      sml::state<rolling_back> + sml::event<event::validate> / action::run_validate =
+      sml::state<rolling_back> + sml::event<event::validate_rollback> / action::run_validate_rollback =
           sml::state<rolling_back>,
       sml::state<rolling_back> + sml::event<events::validate_done> = sml::state<rolling_back>,
       sml::state<rolling_back> + sml::event<events::validate_error> = sml::state<errored>,
@@ -188,6 +193,7 @@ struct model {
           [](const events::validate_done & ev, action::context &, process_t & process) noexcept {
             int32_t phase_error = EMEL_OK;
             event::rollback_step rollback_step{
+              .request = ev.request.rollback,
               .error_out = &phase_error,
             };
             process(rollback_step);
@@ -324,6 +330,18 @@ struct model {
       sml::state<done> + sml::event<events::kv_done> / action::on_kv_done = sml::state<prepared>,
       sml::state<done> + sml::event<events::kv_error> / action::on_kv_error = sml::state<prepared>,
 
+      sml::state<initialized> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<preparing> + sml::event<sml::_> / action::on_unexpected{} = sml::state<errored>,
+      sml::state<prepared> + sml::event<sml::_> / action::on_unexpected{} = sml::state<errored>,
+      sml::state<applying_ubatch> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<rolling_back> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<publishing> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<done> + sml::event<sml::_> / action::on_unexpected{} = sml::state<errored>,
+
       sml::state<errored> + sml::on_entry<sml::_> /
           [](const auto & ev, action::context &, process_t & process) noexcept {
             int32_t err = EMEL_ERR_BACKEND;
@@ -333,7 +351,8 @@ struct model {
             process(events::kv_error{.err = err});
           },
       sml::state<errored> + sml::event<events::kv_error> / action::on_kv_error =
-          sml::state<prepared>
+          sml::state<prepared>,
+      sml::state<errored> + sml::event<sml::_> / action::on_unexpected{} = sml::state<errored>
     );
   }
 };

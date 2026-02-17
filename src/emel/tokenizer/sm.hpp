@@ -126,7 +126,6 @@ struct sm : emel::sm<model> {
   vocab_pre_type pre_type = vocab_pre_type::default_pre;
 
   emel::encoder::sm encoder = {};
-  int32_t status_code = 0;
   int32_t n_tokens = 0;
 };
 

@@ -45,7 +45,6 @@ struct sm : emel::sm<model> {
  private:
   emel::model::data & model_;
   emel::tokenizer::sm tokenizer_ = {};
-  int32_t status_code = 0;
   int32_t tokens_generated = 0;
   int32_t max_tokens = 0;
 };

@@ -6,6 +6,7 @@
 #include "emel/buffer/allocator/events.hpp"
 #include "emel/buffer/realloc_analyzer/actions.hpp"
 #include "emel/buffer/realloc_analyzer/events.hpp"
+#include "emel/buffer/realloc_analyzer/guards.hpp"
 #include "emel/emel.h"
 
 namespace {
@@ -191,17 +192,25 @@ TEST_CASE("buffer_realloc_analyzer_actions_cover_validation_and_publish") {
   emel::buffer::realloc_analyzer::action::context ctx{};
   int32_t err = EMEL_OK;
 
-  emel::buffer::realloc_analyzer::action::run_validate(
-    emel::buffer::realloc_analyzer::event::validate{
-      .graph = {},
-      .node_allocs = nullptr,
-      .node_alloc_count = -1,
-      .leaf_allocs = nullptr,
-      .leaf_alloc_count = 0,
-      .error_out = &err,
-    },
-    ctx);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  emel::buffer::realloc_analyzer::event::analyze invalid_request{
+    .graph = {},
+    .node_allocs = nullptr,
+    .node_alloc_count = -1,
+    .leaf_allocs = nullptr,
+    .leaf_alloc_count = 0,
+  };
+  emel::buffer::realloc_analyzer::event::validate invalid_validate{
+    .graph = invalid_request.graph,
+    .node_allocs = invalid_request.node_allocs,
+    .node_alloc_count = invalid_request.node_alloc_count,
+    .leaf_allocs = invalid_request.leaf_allocs,
+    .leaf_alloc_count = invalid_request.leaf_alloc_count,
+    .error_out = &err,
+    .request = &invalid_request,
+  };
+  CHECK(emel::buffer::realloc_analyzer::guard::invalid_analyze_request{}(
+    invalid_validate, ctx));
+  CHECK(err == EMEL_OK);
 
   graph_storage g = make_graph();
   std::array<node_alloc, 1> nodes = {{
@@ -211,16 +220,25 @@ TEST_CASE("buffer_realloc_analyzer_actions_cover_validation_and_publish") {
     make_leaf_alloc(2, 0, 32),
   }};
   err = EMEL_OK;
-  emel::buffer::realloc_analyzer::action::run_validate(
-    emel::buffer::realloc_analyzer::event::validate{
-      .graph = as_view(g),
-      .node_allocs = nodes.data(),
-      .node_alloc_count = 1,
-      .leaf_allocs = leafs.data(),
-      .leaf_alloc_count = 1,
-      .error_out = &err,
-    },
-    ctx);
+  emel::buffer::realloc_analyzer::event::analyze valid_request{
+    .graph = as_view(g),
+    .node_allocs = nodes.data(),
+    .node_alloc_count = 1,
+    .leaf_allocs = leafs.data(),
+    .leaf_alloc_count = 1,
+  };
+  emel::buffer::realloc_analyzer::event::validate valid_validate{
+    .graph = valid_request.graph,
+    .node_allocs = valid_request.node_allocs,
+    .node_alloc_count = valid_request.node_alloc_count,
+    .leaf_allocs = valid_request.leaf_allocs,
+    .leaf_alloc_count = valid_request.leaf_alloc_count,
+    .error_out = &err,
+    .request = &valid_request,
+  };
+  CHECK(emel::buffer::realloc_analyzer::guard::valid_analyze_request{}(
+    valid_validate, ctx));
+  emel::buffer::realloc_analyzer::action::run_validate(valid_validate, ctx);
   CHECK(err == EMEL_OK);
 
   ctx.needs_realloc = true;

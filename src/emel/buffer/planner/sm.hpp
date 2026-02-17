@@ -87,14 +87,16 @@ struct model {
               .error_out = ev.error_out,
             });
           },
-      sml::state<resetting> + sml::event<event::reset_done> = sml::state<seeding_leafs>,
+      sml::state<resetting> + sml::event<event::reset_done>[guard::has_request{}] =
+          sml::state<seeding_leafs>,
+      sml::state<resetting> + sml::event<event::reset_done>[guard::missing_request{}] =
+          sml::state<errored>,
       sml::state<resetting> + sml::event<event::reset_error> = sml::state<errored>,
 
       sml::state<seeding_leafs> + sml::on_entry<event::reset_done> /
           [](const event::reset_done & ev, action::context & ctx, process_t & process) noexcept {
             const event::plan * request = ev.request;
-            const int32_t err =
-              request == nullptr ? EMEL_ERR_INVALID_ARGUMENT : action::detail::run_seed_leafs(ctx);
+            const int32_t err = action::detail::run_seed_leafs(ctx);
             if (err != EMEL_OK) {
               process(event::seed_leafs_error{
                 .err = err,
@@ -108,15 +110,16 @@ struct model {
               .error_out = ev.error_out,
             });
           },
-      sml::state<seeding_leafs> + sml::event<event::seed_leafs_done> =
+      sml::state<seeding_leafs> + sml::event<event::seed_leafs_done>[guard::has_request{}] =
           sml::state<counting_references>,
+      sml::state<seeding_leafs> + sml::event<event::seed_leafs_done>[guard::missing_request{}] =
+          sml::state<errored>,
       sml::state<seeding_leafs> + sml::event<event::seed_leafs_error> = sml::state<errored>,
 
       sml::state<counting_references> + sml::on_entry<event::seed_leafs_done> /
           [](const event::seed_leafs_done & ev, action::context & ctx, process_t & process) noexcept {
             const event::plan * request = ev.request;
-            const int32_t err = request == nullptr ? EMEL_ERR_INVALID_ARGUMENT
-                                                   : action::detail::run_count_references(ctx);
+            const int32_t err = action::detail::run_count_references(ctx);
             if (err != EMEL_OK) {
               process(event::count_references_error{
                 .err = err,
@@ -130,8 +133,12 @@ struct model {
               .error_out = ev.error_out,
             });
           },
-      sml::state<counting_references> + sml::event<event::count_references_done> =
+      sml::state<counting_references> +
+              sml::event<event::count_references_done>[guard::has_request{}] =
           sml::state<allocating_explicit_inputs>,
+      sml::state<counting_references> +
+              sml::event<event::count_references_done>[guard::missing_request{}] =
+          sml::state<errored>,
       sml::state<counting_references> + sml::event<event::count_references_error> =
           sml::state<errored>,
 
@@ -139,8 +146,7 @@ struct model {
           [](const event::count_references_done & ev, action::context & ctx,
              process_t & process) noexcept {
             const event::plan * request = ev.request;
-            const int32_t err = request == nullptr ? EMEL_ERR_INVALID_ARGUMENT
-                                                   : action::detail::run_alloc_explicit_inputs(ctx);
+            const int32_t err = action::detail::run_alloc_explicit_inputs(ctx);
             if (err != EMEL_OK) {
               process(event::alloc_explicit_inputs_error{
                 .err = err,
@@ -154,8 +160,12 @@ struct model {
               .error_out = ev.error_out,
             });
           },
-      sml::state<allocating_explicit_inputs> + sml::event<event::alloc_explicit_inputs_done> =
+      sml::state<allocating_explicit_inputs> +
+              sml::event<event::alloc_explicit_inputs_done>[guard::has_request{}] =
           sml::state<planning_nodes>,
+      sml::state<allocating_explicit_inputs> +
+              sml::event<event::alloc_explicit_inputs_done>[guard::missing_request{}] =
+          sml::state<errored>,
       sml::state<allocating_explicit_inputs> + sml::event<event::alloc_explicit_inputs_error> =
           sml::state<errored>,
 
@@ -163,8 +173,7 @@ struct model {
           [](const event::alloc_explicit_inputs_done & ev, action::context & ctx,
              process_t & process) noexcept {
             const event::plan * request = ev.request;
-            const int32_t err = request == nullptr ? EMEL_ERR_INVALID_ARGUMENT
-                                                   : action::detail::run_plan_nodes(ctx);
+            const int32_t err = action::detail::run_plan_nodes(ctx);
             if (err != EMEL_OK) {
               process(event::plan_nodes_error{
                 .err = err,
@@ -178,8 +187,10 @@ struct model {
               .error_out = ev.error_out,
             });
           },
-      sml::state<planning_nodes> + sml::event<event::plan_nodes_done> =
+      sml::state<planning_nodes> + sml::event<event::plan_nodes_done>[guard::has_request{}] =
           sml::state<releasing_expired>,
+      sml::state<planning_nodes> + sml::event<event::plan_nodes_done>[guard::missing_request{}] =
+          sml::state<errored>,
       sml::state<planning_nodes> + sml::event<event::plan_nodes_error> =
           sml::state<errored>,
 
@@ -187,8 +198,7 @@ struct model {
           [](const event::plan_nodes_done & ev, action::context & ctx,
              process_t & process) noexcept {
             const event::plan * request = ev.request;
-            const int32_t err = request == nullptr ? EMEL_ERR_INVALID_ARGUMENT
-                                                   : action::detail::run_release_expired(ctx);
+            const int32_t err = action::detail::run_release_expired(ctx);
             if (err != EMEL_OK) {
               process(event::release_expired_error{
                 .err = err,
@@ -202,8 +212,12 @@ struct model {
               .error_out = ev.error_out,
             });
           },
-      sml::state<releasing_expired> + sml::event<event::release_expired_done> =
+      sml::state<releasing_expired> +
+              sml::event<event::release_expired_done>[guard::has_request{}] =
           sml::state<finalizing>,
+      sml::state<releasing_expired> +
+              sml::event<event::release_expired_done>[guard::missing_request{}] =
+          sml::state<errored>,
       sml::state<releasing_expired> + sml::event<event::release_expired_error> =
           sml::state<errored>,
 
@@ -211,8 +225,7 @@ struct model {
           [](const event::release_expired_done & ev, action::context & ctx,
              process_t & process) noexcept {
             const event::plan * request = ev.request;
-            const int32_t err = request == nullptr ? EMEL_ERR_INVALID_ARGUMENT
-                                                   : action::detail::run_finalize(ctx, request);
+            const int32_t err = action::detail::run_finalize(ctx, request);
             if (err != EMEL_OK) {
               process(event::finalize_error{
                 .err = err,
@@ -226,17 +239,17 @@ struct model {
               .error_out = ev.error_out,
             });
           },
-      sml::state<finalizing> + sml::event<event::finalize_done> =
+      sml::state<finalizing> + sml::event<event::finalize_done>[guard::has_request{}] =
           sml::state<splitting_required>,
+      sml::state<finalizing> + sml::event<event::finalize_done>[guard::missing_request{}] =
+          sml::state<errored>,
       sml::state<finalizing> + sml::event<event::finalize_error> = sml::state<errored>,
 
       sml::state<splitting_required> + sml::on_entry<event::finalize_done> /
           [](const event::finalize_done & ev, action::context & ctx,
              process_t & process) noexcept {
             const event::plan * request = ev.request;
-            const int32_t err = request == nullptr
-                                  ? EMEL_ERR_INVALID_ARGUMENT
-                                  : action::detail::run_split_required(ctx, request);
+            const int32_t err = action::detail::run_split_required(ctx, request);
             if (err != EMEL_OK) {
               process(event::split_required_error{
                 .err = err,
@@ -250,8 +263,11 @@ struct model {
               .error_out = ev.error_out,
             });
           },
-      sml::state<splitting_required> + sml::event<event::split_required_done> =
-          sml::state<done>,
+      sml::state<splitting_required> +
+              sml::event<event::split_required_done>[guard::has_request{}] = sml::state<done>,
+      sml::state<splitting_required> +
+              sml::event<event::split_required_done>[guard::missing_request{}] =
+          sml::state<errored>,
       sml::state<splitting_required> + sml::event<event::split_required_error> =
           sml::state<errored>,
 

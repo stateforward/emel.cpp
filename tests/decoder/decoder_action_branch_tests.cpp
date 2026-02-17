@@ -48,7 +48,8 @@ TEST_CASE("decoder_run_validate_checks_token_inputs") {
 
   ctx.token_ids = nullptr;
   ctx.n_tokens = 0;
-  emel::decoder::action::run_validate(emel::decoder::event::validate{.error_out = &err}, ctx);
+  emel::decoder::action::reject_invalid_validate(
+    emel::decoder::event::validate{.error_out = &err}, ctx);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   std::array<int32_t, 1> tokens = {{1}};
@@ -64,7 +65,8 @@ TEST_CASE("decoder_run_reserve_output_reports_negative_total") {
   int32_t err = EMEL_OK;
 
   ctx.outputs_total = -1;
-  emel::decoder::action::run_reserve_output(emel::decoder::event::reserve_output{.error_out = &err}, ctx);
+  emel::decoder::action::reject_invalid_reserve_output(
+    emel::decoder::event::reserve_output{.error_out = &err}, ctx);
   CHECK(err == EMEL_ERR_BACKEND);
 }
 
@@ -75,7 +77,7 @@ TEST_CASE("decoder_run_process_ubatch_reports_bounds_error") {
 
   ctx.ubatches_total = 1;
   ctx.ubatches_processed = 1;
-  emel::decoder::action::run_process_ubatch(
+  emel::decoder::action::on_invalid_ubatch_size(
     emel::decoder::event::process_ubatch{
       .error_out = &err,
       .rollback_needed_out = &rollback_needed,

@@ -40,6 +40,7 @@ struct execute {
 };
 
 struct validate {
+  const execute * request = nullptr;
   int32_t * error_out = nullptr;
 };
 

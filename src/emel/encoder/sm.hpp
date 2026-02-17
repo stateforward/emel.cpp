@@ -93,7 +93,6 @@ struct sm : emel::sm<model> {
   bool had_unknown_fallback = false;
   bool had_byte_fallback = false;
 
-  int32_t status_code = 0;
   int32_t n_tokens = 0;
 };
 

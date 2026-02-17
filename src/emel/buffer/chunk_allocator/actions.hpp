@@ -297,11 +297,7 @@ struct begin_configure {
 
 struct run_validate_configure {
   void operator()(const event::validate_configure & ev, context & c) const noexcept {
-    int32_t err = EMEL_OK;
-    if (!detail::valid_alignment(c.pending_alignment) || c.pending_max_chunk_size == 0) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    }
-    if (ev.error_out != nullptr) *ev.error_out = err;
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -344,15 +340,10 @@ struct begin_allocate {
 
 struct run_validate_allocate {
   void operator()(const event::validate_allocate & ev, context & c) const noexcept {
-    int32_t err = EMEL_OK;
-    if (c.request_size == 0) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (!detail::valid_alignment(c.request_alignment) || c.request_max_chunk_size == 0) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (!detail::align_up(c.request_size, c.request_alignment, c.aligned_request_size)) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    }
-    if (ev.error_out != nullptr) *ev.error_out = err;
+    uint64_t aligned = 0;
+    detail::align_up(c.request_size, c.request_alignment, aligned);
+    c.aligned_request_size = aligned;
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
@@ -412,22 +403,14 @@ struct begin_release {
 
 struct run_validate_release {
   void operator()(const event::validate_release & ev, context & c) const noexcept {
-    int32_t err = EMEL_OK;
-    if (c.request_chunk < 0 || c.request_chunk >= c.chunk_count || c.request_size == 0) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (!detail::align_up(c.request_size, c.request_alignment, c.aligned_request_size)) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else {
-      uint64_t end = 0;
-      if (detail::add_overflow(c.request_offset, c.aligned_request_size, end) ||
-          end > c.chunks[c.request_chunk].max_size) {
-        err = EMEL_ERR_INVALID_ARGUMENT;
-      }
-    }
-    if (ev.error_out != nullptr) *ev.error_out = err;
+    uint64_t aligned = 0;
+    detail::align_up(c.request_size, c.request_alignment, aligned);
+    c.aligned_request_size = aligned;
+    if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
 };
+
 
 struct run_merge_release {
   void operator()(const event::merge_release & ev, context & c) const noexcept {
