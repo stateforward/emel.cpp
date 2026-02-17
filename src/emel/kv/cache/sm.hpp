@@ -1,10 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include "emel/emel.h"
 #include "emel/kv/cache/actions.hpp"
 #include "emel/kv/cache/events.hpp"
+#include "emel/kv/cache/guards.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::kv::cache {
@@ -13,6 +15,12 @@ using Process = boost::sml::back::process<
   event::validate_prepare,
   event::validate_apply,
   event::validate_rollback,
+  event::validate_seq_remove,
+  event::validate_seq_copy,
+  event::validate_seq_keep,
+  event::validate_seq_add,
+  event::validate_seq_div,
+  event::validate_updates,
   events::validate_done,
   events::validate_error,
   event::prepare_slots,
@@ -24,6 +32,24 @@ using Process = boost::sml::back::process<
   event::rollback_step,
   events::rollback_done,
   events::rollback_error,
+  event::seq_remove_step,
+  events::seq_remove_done,
+  events::seq_remove_error,
+  event::seq_copy_step,
+  events::seq_copy_done,
+  events::seq_copy_error,
+  event::seq_keep_step,
+  events::seq_keep_done,
+  events::seq_keep_error,
+  event::seq_add_step,
+  events::seq_add_done,
+  events::seq_add_error,
+  event::seq_div_step,
+  events::seq_div_done,
+  events::seq_div_error,
+  event::apply_updates_step,
+  events::updates_done,
+  events::updates_error,
   event::publish,
   events::publish_done,
   events::publish_error,
@@ -35,6 +61,8 @@ struct preparing {};
 struct prepared {};
 struct applying_ubatch {};
 struct rolling_back {};
+struct sequencing {};
+struct updating {};
 struct publishing {};
 struct done {};
 struct errored {};
@@ -72,7 +100,10 @@ struct model {
               .request = {.prepare = &ev},
             });
           },
-      sml::state<preparing> + sml::event<event::validate_prepare> / action::run_validate_prepare =
+      sml::state<preparing> + sml::event<event::validate_prepare>
+          [guard::valid_prepare_request] / action::run_validate_prepare = sml::state<preparing>,
+      sml::state<preparing> + sml::event<event::validate_prepare>
+          [guard::invalid_prepare_request] / action::reject_invalid_prepare =
           sml::state<preparing>,
       sml::state<preparing> + sml::event<events::validate_done> = sml::state<preparing>,
       sml::state<preparing> + sml::event<events::validate_error> = sml::state<errored>,
@@ -98,7 +129,11 @@ struct model {
               .request = ev.request,
             });
           },
-      sml::state<preparing> + sml::event<event::prepare_slots> / action::run_prepare_slots =
+      sml::state<preparing> + sml::event<event::prepare_slots>
+          [guard::valid_prepare_slots_request] / action::run_prepare_slots =
+          sml::state<preparing>,
+      sml::state<preparing> + sml::event<event::prepare_slots>
+          [guard::invalid_prepare_slots_request] / action::reject_invalid_prepare_slots =
           sml::state<preparing>,
       sml::state<preparing> + sml::event<events::prepare_slots_done> = sml::state<publishing>,
       sml::state<preparing> + sml::event<events::prepare_slots_error> = sml::state<errored>,
@@ -127,7 +162,11 @@ struct model {
               .request = {.apply = &ev},
             });
           },
-      sml::state<applying_ubatch> + sml::event<event::validate_apply> / action::run_validate_apply =
+      sml::state<applying_ubatch> + sml::event<event::validate_apply>
+          [guard::valid_apply_request] / action::run_validate_apply =
+          sml::state<applying_ubatch>,
+      sml::state<applying_ubatch> + sml::event<event::validate_apply>
+          [guard::invalid_apply_request] / action::reject_invalid_apply =
           sml::state<applying_ubatch>,
       sml::state<applying_ubatch> + sml::event<events::validate_done> = sml::state<applying_ubatch>,
       sml::state<applying_ubatch> + sml::event<events::validate_error> = sml::state<errored>,
@@ -154,7 +193,11 @@ struct model {
               .request = ev.request,
             });
           },
-      sml::state<applying_ubatch> + sml::event<event::apply_step> / action::run_apply_step =
+      sml::state<applying_ubatch> + sml::event<event::apply_step>
+          [guard::valid_apply_step_request] / action::run_apply_step =
+          sml::state<applying_ubatch>,
+      sml::state<applying_ubatch> + sml::event<event::apply_step>
+          [guard::invalid_apply_step_request] / action::reject_invalid_apply_step =
           sml::state<applying_ubatch>,
       sml::state<applying_ubatch> + sml::event<events::apply_done> = sml::state<publishing>,
       sml::state<applying_ubatch> + sml::event<events::apply_error> = sml::state<errored>,
@@ -185,7 +228,11 @@ struct model {
               .request = {.rollback = &ev},
             });
           },
-      sml::state<rolling_back> + sml::event<event::validate_rollback> / action::run_validate_rollback =
+      sml::state<rolling_back> + sml::event<event::validate_rollback>
+          [guard::valid_rollback_request] / action::run_validate_rollback =
+          sml::state<rolling_back>,
+      sml::state<rolling_back> + sml::event<event::validate_rollback>
+          [guard::invalid_rollback_request] / action::reject_invalid_rollback =
           sml::state<rolling_back>,
       sml::state<rolling_back> + sml::event<events::validate_done> = sml::state<rolling_back>,
       sml::state<rolling_back> + sml::event<events::validate_error> = sml::state<errored>,
@@ -212,10 +259,291 @@ struct model {
               .request = ev.request,
             });
           },
-      sml::state<rolling_back> + sml::event<event::rollback_step> / action::run_rollback_step =
+      sml::state<rolling_back> + sml::event<event::rollback_step>
+          [guard::valid_rollback_step_request] / action::run_rollback_step =
+          sml::state<rolling_back>,
+      sml::state<rolling_back> + sml::event<event::rollback_step>
+          [guard::invalid_rollback_step_request] / action::reject_invalid_rollback_step =
           sml::state<rolling_back>,
       sml::state<rolling_back> + sml::event<events::rollback_done> = sml::state<publishing>,
       sml::state<rolling_back> + sml::event<events::rollback_error> = sml::state<errored>,
+
+      sml::state<prepared> + sml::event<event::seq_remove> / action::begin_seq_remove =
+          sml::state<sequencing>,
+      sml::state<prepared> + sml::event<event::seq_copy> / action::begin_seq_copy =
+          sml::state<sequencing>,
+      sml::state<prepared> + sml::event<event::seq_keep> / action::begin_seq_keep =
+          sml::state<sequencing>,
+      sml::state<prepared> + sml::event<event::seq_add> / action::begin_seq_add =
+          sml::state<sequencing>,
+      sml::state<prepared> + sml::event<event::seq_div> / action::begin_seq_div =
+          sml::state<sequencing>,
+
+      sml::state<sequencing> + sml::on_entry<event::seq_remove> /
+          [](const event::seq_remove & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::validate_seq_remove validate{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(validate);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::seq_remove_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            event::seq_remove_step step{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(step);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::seq_remove_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            process(events::seq_remove_done{.request = &ev});
+          },
+      sml::state<sequencing> + sml::event<event::validate_seq_remove>
+          [guard::valid_seq_remove_request] / action::run_validate_seq_remove =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::validate_seq_remove>
+          [guard::invalid_seq_remove_request] / action::reject_invalid_seq_remove =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::seq_remove_step>
+          [guard::valid_seq_remove_step_request] / action::run_seq_remove_step =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::seq_remove_step>
+          [guard::invalid_seq_remove_step_request] / action::reject_invalid_seq_remove =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<events::seq_remove_done> = sml::state<done>,
+      sml::state<sequencing> + sml::event<events::seq_remove_error> = sml::state<errored>,
+
+      sml::state<sequencing> + sml::on_entry<event::seq_copy> /
+          [](const event::seq_copy & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::validate_seq_copy validate{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(validate);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::seq_copy_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            event::seq_copy_step step{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(step);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::seq_copy_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            process(events::seq_copy_done{.request = &ev});
+          },
+      sml::state<sequencing> + sml::event<event::validate_seq_copy>
+          [guard::valid_seq_copy_request] / action::run_validate_seq_copy =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::validate_seq_copy>
+          [guard::invalid_seq_copy_request] / action::reject_invalid_seq_copy =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::seq_copy_step>
+          [guard::valid_seq_copy_step_request] / action::run_seq_copy_step =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::seq_copy_step>
+          [guard::invalid_seq_copy_step_request] / action::reject_invalid_seq_copy =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<events::seq_copy_done> = sml::state<done>,
+      sml::state<sequencing> + sml::event<events::seq_copy_error> = sml::state<errored>,
+
+      sml::state<sequencing> + sml::on_entry<event::seq_keep> /
+          [](const event::seq_keep & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::validate_seq_keep validate{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(validate);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::seq_keep_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            event::seq_keep_step step{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(step);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::seq_keep_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            process(events::seq_keep_done{.request = &ev});
+          },
+      sml::state<sequencing> + sml::event<event::validate_seq_keep>
+          [guard::valid_seq_keep_request] / action::run_validate_seq_keep =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::validate_seq_keep>
+          [guard::invalid_seq_keep_request] / action::reject_invalid_seq_keep =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::seq_keep_step>
+          [guard::valid_seq_keep_step_request] / action::run_seq_keep_step =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::seq_keep_step>
+          [guard::invalid_seq_keep_step_request] / action::reject_invalid_seq_keep =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<events::seq_keep_done> = sml::state<done>,
+      sml::state<sequencing> + sml::event<events::seq_keep_error> = sml::state<errored>,
+
+      sml::state<sequencing> + sml::on_entry<event::seq_add> /
+          [](const event::seq_add & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::validate_seq_add validate{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(validate);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::seq_add_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            event::seq_add_step step{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(step);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::seq_add_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            process(events::seq_add_done{.request = &ev});
+          },
+      sml::state<sequencing> + sml::event<event::validate_seq_add>
+          [guard::valid_seq_add_request] / action::run_validate_seq_add =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::validate_seq_add>
+          [guard::invalid_seq_add_request] / action::reject_invalid_seq_add =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::seq_add_step>
+          [guard::valid_seq_add_step_request] / action::run_seq_add_step =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::seq_add_step>
+          [guard::invalid_seq_add_step_request] / action::reject_invalid_seq_add =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<events::seq_add_done> = sml::state<done>,
+      sml::state<sequencing> + sml::event<events::seq_add_error> = sml::state<errored>,
+
+      sml::state<sequencing> + sml::on_entry<event::seq_div> /
+          [](const event::seq_div & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::validate_seq_div validate{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(validate);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::seq_div_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            event::seq_div_step step{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(step);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::seq_div_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            process(events::seq_div_done{.request = &ev});
+          },
+      sml::state<sequencing> + sml::event<event::validate_seq_div>
+          [guard::valid_seq_div_request] / action::run_validate_seq_div =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::validate_seq_div>
+          [guard::invalid_seq_div_request] / action::reject_invalid_seq_div =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::seq_div_step>
+          [guard::valid_seq_div_step_request] / action::run_seq_div_step =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<event::seq_div_step>
+          [guard::invalid_seq_div_step_request] / action::reject_invalid_seq_div =
+          sml::state<sequencing>,
+      sml::state<sequencing> + sml::event<events::seq_div_done> = sml::state<done>,
+      sml::state<sequencing> + sml::event<events::seq_div_error> = sml::state<errored>,
+
+      sml::state<prepared> + sml::event<event::apply_updates> / action::begin_apply_updates =
+          sml::state<updating>,
+      sml::state<updating> + sml::on_entry<event::apply_updates> /
+          [](const event::apply_updates & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::validate_updates validate{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(validate);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::updates_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            event::apply_updates_step step{
+              .request = &ev,
+              .error_out = &phase_error,
+            };
+            process(step);
+            if (ev.error_out != nullptr) {
+              *ev.error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::updates_error{.err = phase_error, .request = &ev});
+              return;
+            }
+            process(events::updates_done{.request = &ev});
+          },
+      sml::state<updating> + sml::event<event::validate_updates>
+          [guard::valid_updates_request] / action::run_validate_updates =
+          sml::state<updating>,
+      sml::state<updating> + sml::event<event::validate_updates>
+          [guard::invalid_updates_request] / action::reject_invalid_updates =
+          sml::state<updating>,
+      sml::state<updating> + sml::event<event::apply_updates_step>
+          [guard::valid_updates_step_request] / action::run_apply_updates =
+          sml::state<updating>,
+      sml::state<updating> + sml::event<event::apply_updates_step>
+          [guard::invalid_updates_step_request] / action::reject_invalid_updates =
+          sml::state<updating>,
+      sml::state<updating> + sml::event<events::updates_done> = sml::state<done>,
+      sml::state<updating> + sml::event<events::updates_error> = sml::state<errored>,
 
       sml::state<publishing> + sml::on_entry<events::prepare_slots_done> /
           [](const events::prepare_slots_done & ev, action::context &, process_t & process) noexcept {
@@ -327,6 +655,48 @@ struct model {
             }
             process(events::kv_done{});
           },
+      sml::state<done> + sml::on_entry<events::seq_remove_done> /
+          [](const events::seq_remove_done & ev, action::context &, process_t & process) noexcept {
+            if (ev.request != nullptr && ev.request->error_out != nullptr) {
+              *ev.request->error_out = EMEL_OK;
+            }
+            process(events::kv_done{});
+          },
+      sml::state<done> + sml::on_entry<events::seq_copy_done> /
+          [](const events::seq_copy_done & ev, action::context &, process_t & process) noexcept {
+            if (ev.request != nullptr && ev.request->error_out != nullptr) {
+              *ev.request->error_out = EMEL_OK;
+            }
+            process(events::kv_done{});
+          },
+      sml::state<done> + sml::on_entry<events::seq_keep_done> /
+          [](const events::seq_keep_done & ev, action::context &, process_t & process) noexcept {
+            if (ev.request != nullptr && ev.request->error_out != nullptr) {
+              *ev.request->error_out = EMEL_OK;
+            }
+            process(events::kv_done{});
+          },
+      sml::state<done> + sml::on_entry<events::seq_add_done> /
+          [](const events::seq_add_done & ev, action::context &, process_t & process) noexcept {
+            if (ev.request != nullptr && ev.request->error_out != nullptr) {
+              *ev.request->error_out = EMEL_OK;
+            }
+            process(events::kv_done{});
+          },
+      sml::state<done> + sml::on_entry<events::seq_div_done> /
+          [](const events::seq_div_done & ev, action::context &, process_t & process) noexcept {
+            if (ev.request != nullptr && ev.request->error_out != nullptr) {
+              *ev.request->error_out = EMEL_OK;
+            }
+            process(events::kv_done{});
+          },
+      sml::state<done> + sml::on_entry<events::updates_done> /
+          [](const events::updates_done & ev, action::context &, process_t & process) noexcept {
+            if (ev.request != nullptr && ev.request->error_out != nullptr) {
+              *ev.request->error_out = EMEL_OK;
+            }
+            process(events::kv_done{});
+          },
       sml::state<done> + sml::event<events::kv_done> / action::on_kv_done = sml::state<prepared>,
       sml::state<done> + sml::event<events::kv_error> / action::on_kv_error = sml::state<prepared>,
 
@@ -337,6 +707,10 @@ struct model {
       sml::state<applying_ubatch> + sml::event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
       sml::state<rolling_back> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<sequencing> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<updating> + sml::event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
       sml::state<publishing> + sml::event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
@@ -357,14 +731,38 @@ struct model {
   }
 };
 
-struct sm : private emel::detail::process_support<sm, Process>, public emel::sm<model, Process> {
+struct sm_deps {
+  std::unique_ptr<action::context> context_;
+  event::validate_seq_remove validate_seq_remove_{};
+  event::validate_seq_copy validate_seq_copy_{};
+  event::validate_seq_keep validate_seq_keep_{};
+  event::validate_seq_add validate_seq_add_{};
+  event::validate_seq_div validate_seq_div_{};
+  event::validate_updates validate_updates_{};
+
+  sm_deps() : context_(std::make_unique<action::context>()) {
+    // One-time heap allocation keeps kv cache context off the stack.
+  }
+};
+
+struct sm : private sm_deps,
+            private emel::detail::process_support<sm, Process>,
+            public emel::sm<model, Process> {
   using base_type = emel::sm<model, Process>;
 
-  sm() : emel::detail::process_support<sm, Process>(this), base_type(context_, this->process_) {}
+  sm()
+      : sm_deps(),
+        emel::detail::process_support<sm, Process>(this),
+        base_type(*context_,
+                  this->process_,
+                  validate_seq_remove_,
+                  validate_seq_copy_,
+                  validate_seq_keep_,
+                  validate_seq_add_,
+                  validate_seq_div_,
+                  validate_updates_) {}
 
   using base_type::process_event;
- private:
-  action::context context_{};
 };
 
 }  // namespace emel::kv::cache

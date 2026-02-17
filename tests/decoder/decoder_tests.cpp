@@ -376,7 +376,7 @@ TEST_CASE("decoder_action_helpers_cover_memory_machine_failure_and_owner_error_d
     ctx.n_ubatch = 1;
 
     using mem_base_t = emel::memory::coordinator::sm::base_type;
-    auto & mem_base = static_cast<mem_base_t &>(ctx.memory_coordinator);
+    auto & mem_base = static_cast<mem_base_t &>(*ctx.memory_coordinator);
     emel::memory::coordinator::event::memory_status status =
         emel::memory::coordinator::event::memory_status::success;
     CHECK(mem_base.process_event(emel::memory::coordinator::event::prepare_update{
@@ -395,7 +395,7 @@ TEST_CASE("decoder_action_helpers_cover_memory_machine_failure_and_owner_error_d
   {
     emel::decoder::action::context ctx{};
     using mem_base_t = emel::memory::coordinator::sm::base_type;
-    auto & mem_base = static_cast<mem_base_t &>(ctx.memory_coordinator);
+    auto & mem_base = static_cast<mem_base_t &>(*ctx.memory_coordinator);
     emel::memory::coordinator::event::memory_status status =
         emel::memory::coordinator::event::memory_status::success;
     CHECK(mem_base.process_event(emel::memory::coordinator::event::prepare_update{
@@ -503,12 +503,12 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
     rollback_ok_ctx.outputs_processed = 2;
     int32_t ubatch_size = 1;
     int32_t kv_tokens = 0;
-    CHECK(rollback_ok_ctx.kv_cache.process_event(emel::kv::cache::event::prepare{
+    CHECK(rollback_ok_ctx.kv_cache->process_event(emel::kv::cache::event::prepare{
       .ubatch_sizes = &ubatch_size,
       .ubatch_count = 1,
       .requested_capacity = 4,
     }));
-    CHECK(rollback_ok_ctx.kv_cache.process_event(emel::kv::cache::event::apply_ubatch{
+    CHECK(rollback_ok_ctx.kv_cache->process_event(emel::kv::cache::event::apply_ubatch{
       .ubatch_index = 0,
       .kv_tokens_out = &kv_tokens,
     }));

@@ -15,12 +15,40 @@ bool validate_ok(const execute_t &, int32_t * err_out) {
   return true;
 }
 
+bool validate_backend_fail(const execute_t &, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return false;
+}
+
+bool validate_error_code(const execute_t &, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_ERR_INVALID_ARGUMENT;
+  }
+  return true;
+}
+
 bool prepare_graph_reuse(const execute_t &, bool * reused_out, int32_t * err_out) {
   if (err_out != nullptr) {
     *err_out = EMEL_OK;
   }
   if (reused_out != nullptr) {
     *reused_out = true;
+  }
+  return true;
+}
+
+bool prepare_graph_fail(const execute_t &, bool *, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return false;
+}
+
+bool prepare_graph_error_code(const execute_t &, bool *, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_ERR_INVALID_ARGUMENT;
   }
   return true;
 }
@@ -32,11 +60,25 @@ bool alloc_graph_ok(const execute_t &, int32_t * err_out) {
   return true;
 }
 
+bool alloc_graph_fail(const execute_t &, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return false;
+}
+
 bool bind_inputs_ok(const execute_t &, int32_t * err_out) {
   if (err_out != nullptr) {
     *err_out = EMEL_OK;
   }
   return true;
+}
+
+bool bind_inputs_fail(const execute_t &, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return false;
 }
 
 bool run_backend_kv_gate(const execute_t & ev, int32_t * err_out) {
@@ -221,6 +263,165 @@ TEST_CASE("compute_executor_run_extract_outputs_checks_kv_tokens") {
   emel::decoder::compute_executor::action::run_extract_outputs(
     emel::decoder::compute_executor::event::extract_outputs{
       .request = &request,
+      .error_out = &err,
+    }, ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("compute_executor_run_validate_handles_null_callback_and_errors") {
+  emel::decoder::compute_executor::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  execute_t request{
+    .ubatch_index = 0,
+    .ubatch_size = 1,
+    .kv_tokens = 1,
+  };
+  emel::decoder::compute_executor::event::validate validate{
+    .request = &request,
+    .error_out = &err,
+  };
+
+  emel::decoder::compute_executor::action::run_validate(validate, ctx);
+  CHECK(err == EMEL_OK);
+
+  request.validate = validate_backend_fail;
+  emel::decoder::compute_executor::action::run_validate(validate, ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+
+  request.validate = validate_error_code;
+  emel::decoder::compute_executor::action::run_validate(validate, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("compute_executor_prepare_graph_and_alloc_graph_report_failures") {
+  emel::decoder::compute_executor::action::context ctx{};
+  int32_t err = EMEL_OK;
+  bool reused = false;
+
+  execute_t request{
+    .ubatch_index = 0,
+    .ubatch_size = 1,
+    .kv_tokens = 1,
+    .prepare_graph = prepare_graph_reuse,
+    .alloc_graph = alloc_graph_ok,
+  };
+
+  emel::decoder::compute_executor::action::run_prepare_graph(
+    emel::decoder::compute_executor::event::prepare_graph{
+      .request = &request,
+      .reused_out = &reused,
+      .error_out = &err,
+    }, ctx);
+  CHECK(err == EMEL_OK);
+  CHECK(reused);
+
+  request.prepare_graph = prepare_graph_fail;
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::run_prepare_graph(
+    emel::decoder::compute_executor::event::prepare_graph{
+      .request = &request,
+      .reused_out = &reused,
+      .error_out = &err,
+    }, ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+
+  request.prepare_graph = prepare_graph_error_code;
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::run_prepare_graph(
+    emel::decoder::compute_executor::event::prepare_graph{
+      .request = &request,
+      .reused_out = &reused,
+      .error_out = &err,
+    }, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  request.alloc_graph = alloc_graph_fail;
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::run_alloc_graph(
+    emel::decoder::compute_executor::event::alloc_graph{
+      .request = &request,
+      .error_out = &err,
+    }, ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("compute_executor_bind_inputs_reports_failures") {
+  emel::decoder::compute_executor::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  execute_t request{
+    .ubatch_index = 0,
+    .ubatch_size = 1,
+    .kv_tokens = 1,
+    .bind_inputs = bind_inputs_fail,
+  };
+
+  emel::decoder::compute_executor::action::run_bind_inputs(
+    emel::decoder::compute_executor::event::bind_inputs{
+      .request = &request,
+      .error_out = &err,
+    }, ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("compute_executor_reject_invalid_requests_sets_error") {
+  emel::decoder::compute_executor::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  execute_t request{
+    .ubatch_index = 0,
+    .ubatch_size = 1,
+    .kv_tokens = 1,
+  };
+
+  emel::decoder::compute_executor::action::reject_invalid_prepare_graph(
+    emel::decoder::compute_executor::event::prepare_graph{
+      .request = &request,
+      .error_out = &err,
+    }, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::reject_invalid_alloc_graph(
+    emel::decoder::compute_executor::event::alloc_graph{
+      .request = &request,
+      .error_out = &err,
+    }, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::reject_invalid_bind_inputs(
+    emel::decoder::compute_executor::event::bind_inputs{
+      .request = &request,
+      .error_out = &err,
+    }, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::reject_invalid_run_backend(
+    emel::decoder::compute_executor::event::run_backend{
+      .request = &request,
+      .error_out = &err,
+    }, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::reject_invalid_extract_outputs(
+    emel::decoder::compute_executor::event::extract_outputs{
+      .request = &request,
+      .error_out = &err,
+    }, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("compute_executor_on_unexpected_sets_backend_error") {
+  emel::decoder::compute_executor::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  emel::decoder::compute_executor::action::on_unexpected{}(
+    emel::decoder::compute_executor::event::bind_inputs{
+      .request = nullptr,
       .error_out = &err,
     }, ctx);
   CHECK(err == EMEL_ERR_BACKEND);

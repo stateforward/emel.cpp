@@ -104,6 +104,7 @@ NEVER use dynamic dispatch in inference hot paths unless explicitly justified.
 NEVER allocate in token-generation hot paths.
 NEVER use heap allocation by default.
 NEVER use heap allocations unless authorized by the user.
+ALWAYS allow one-time heap allocation at construction or initialization time.
 ALWAYS prefer stack storage, fixed-capacity containers, or preallocated buffers.
 ALWAYS move unavoidable heap allocation outside hot paths.
 ALWAYS reuse unavoidable heap allocation.

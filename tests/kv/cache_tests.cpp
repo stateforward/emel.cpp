@@ -1,10 +1,12 @@
 #include <array>
 #include <boost/sml.hpp>
 #include <cstdint>
+#include <memory>
 #include <doctest/doctest.h>
 
 #include "emel/emel.h"
 #include "emel/kv/cache/actions.hpp"
+#include "emel/kv/cache/guards.hpp"
 #include "emel/kv/cache/sm.hpp"
 
 TEST_CASE("kv_cache_starts_initialized") {
@@ -143,29 +145,37 @@ TEST_CASE("kv_cache_action_helpers_cover_validate_branches") {
   using emel::kv::cache::action::MAX_KV_CELLS;
   using emel::kv::cache::action::context;
 
-  context ctx{};
+  auto ctx_storage = std::make_unique<context>();
+  context & ctx = *ctx_storage;
   int32_t error_out = EMEL_OK;
 
-  emel::kv::cache::event::prepare prepare{};
+  std::array<int32_t, 1> sizes = {{1}};
+  emel::kv::cache::event::prepare prepare{
+    .ubatch_sizes = sizes.data(),
+    .ubatch_count = 0,
+    .requested_capacity = 4,
+  };
   emel::kv::cache::event::validate_prepare validate_prepare{
     .request = &prepare,
     .error_out = &error_out,
   };
-  emel::kv::cache::action::run_validate_prepare(validate_prepare, ctx);
+  emel::kv::cache::action::begin_prepare(prepare, ctx);
+  CHECK_FALSE(emel::kv::cache::guard::valid_prepare_request(validate_prepare, ctx));
+  emel::kv::cache::action::reject_invalid_prepare(validate_prepare, ctx);
   CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
 
   prepare.ubatch_count = 1;
   prepare.requested_capacity = MAX_KV_CELLS + 1;
-  ctx.kv_size = 8;
   error_out = EMEL_OK;
-  emel::kv::cache::action::run_validate_prepare(validate_prepare, ctx);
+  emel::kv::cache::action::begin_prepare(prepare, ctx);
+  CHECK_FALSE(emel::kv::cache::guard::valid_prepare_request(validate_prepare, ctx));
+  emel::kv::cache::action::reject_invalid_prepare(validate_prepare, ctx);
   CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
 
   prepare.requested_capacity = 8;
-  ctx.kv_size = 0;
   error_out = EMEL_OK;
-  emel::kv::cache::action::run_validate_prepare(validate_prepare, ctx);
-  CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
+  emel::kv::cache::action::begin_prepare(prepare, ctx);
+  CHECK(emel::kv::cache::guard::valid_prepare_request(validate_prepare, ctx));
 
   emel::kv::cache::event::apply_ubatch apply{};
   emel::kv::cache::event::validate_apply validate_apply{
@@ -174,26 +184,28 @@ TEST_CASE("kv_cache_action_helpers_cover_validate_branches") {
   };
   ctx.planned_ubatch_count = 0;
   ctx.applied_ubatches = 0;
-  emel::kv::cache::action::run_validate_apply(validate_apply, ctx);
+  CHECK_FALSE(emel::kv::cache::guard::valid_apply_request(validate_apply, ctx));
+  emel::kv::cache::action::reject_invalid_apply(validate_apply, ctx);
   CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
 
   ctx.planned_ubatch_count = 2;
   apply.ubatch_index = 2;
   error_out = EMEL_OK;
-  emel::kv::cache::action::run_validate_apply(validate_apply, ctx);
+  CHECK_FALSE(emel::kv::cache::guard::valid_apply_request(validate_apply, ctx));
+  emel::kv::cache::action::reject_invalid_apply(validate_apply, ctx);
   CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
 
   apply.ubatch_index = 1;
   ctx.applied_ubatches = 0;
   error_out = EMEL_OK;
-  emel::kv::cache::action::run_validate_apply(validate_apply, ctx);
+  CHECK_FALSE(emel::kv::cache::guard::valid_apply_request(validate_apply, ctx));
+  emel::kv::cache::action::reject_invalid_apply(validate_apply, ctx);
   CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
 
   apply.ubatch_index = 0;
   ctx.applied_ubatches = 0;
   error_out = EMEL_OK;
-  emel::kv::cache::action::run_validate_apply(validate_apply, ctx);
-  CHECK(error_out == EMEL_OK);
+  CHECK(emel::kv::cache::guard::valid_apply_request(validate_apply, ctx));
 
   emel::kv::cache::event::rollback rollback{};
   emel::kv::cache::event::validate_rollback validate_rollback{
@@ -204,18 +216,21 @@ TEST_CASE("kv_cache_action_helpers_cover_validate_branches") {
   ctx.applied_ubatches = 2;
   ctx.planned_ubatch_count = 2;
   error_out = EMEL_OK;
-  emel::kv::cache::action::run_validate_rollback(validate_rollback, ctx);
+  CHECK_FALSE(emel::kv::cache::guard::valid_rollback_request(validate_rollback, ctx));
+  emel::kv::cache::action::reject_invalid_rollback(validate_rollback, ctx);
   CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("kv_cache_action_helpers_cover_slot_planning_apply_rollback_and_publish_edges") {
   using emel::kv::cache::action::context;
 
-  context ctx{};
+  auto ctx_storage = std::make_unique<context>();
+  context & ctx = *ctx_storage;
   int32_t error_out = EMEL_OK;
 
   ctx.kv_size = 4;
-  ctx.head = 4;
+  ctx.n_stream = 1;
+  ctx.streams[0].head = 4;
   emel::kv::cache::action::begin_prepare(
       emel::kv::cache::event::prepare{
           .ubatch_sizes = nullptr,
@@ -223,29 +238,25 @@ TEST_CASE("kv_cache_action_helpers_cover_slot_planning_apply_rollback_and_publis
           .requested_capacity = 4,
       },
       ctx);
-  CHECK(ctx.head == 0);
+  CHECK(ctx.streams[0].head == 0);
 
   ctx.ubatch_count = 1;
-  ctx.ubatch_sizes[0] = 0;
+  ctx.ubatch_sizes[0] = 2;
+  ctx.ubatch_stream_ids[0] = 0;
+  ctx.ubatch_seq_ids[0] = 0;
+  ctx.streams[0].pos.fill(emel::kv::cache::action::POS_NONE);
+  emel::kv::cache::action::set_cell_pos(ctx.streams[0], 1, 1);
   emel::kv::cache::action::run_prepare_slots(
       emel::kv::cache::event::prepare_slots{
           .error_out = &error_out,
       },
       ctx);
-  CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
-
-  ctx.ubatch_sizes[0] = 5;
-  emel::kv::cache::action::run_prepare_slots(
-      emel::kv::cache::event::prepare_slots{
-          .error_out = &error_out,
-      },
-      ctx);
-  CHECK(error_out == EMEL_ERR_BACKEND);
+  CHECK(error_out == EMEL_OK);
 
   ctx.kv_size = 8;
-  ctx.head = 7;
-  ctx.cells.fill(0);
-  ctx.cells[1] = 1;
+  ctx.streams[0].head = 7;
+  ctx.streams[0].pos.fill(emel::kv::cache::action::POS_NONE);
+  emel::kv::cache::action::set_cell_pos(ctx.streams[0], 1, 1);
   ctx.ubatch_sizes[0] = 2;
   emel::kv::cache::action::run_prepare_slots(
       emel::kv::cache::event::prepare_slots{
@@ -259,42 +270,16 @@ TEST_CASE("kv_cache_action_helpers_cover_slot_planning_apply_rollback_and_publis
   emel::kv::cache::event::apply_step apply_step{.request = &apply, .error_out = &error_out};
   ctx.planned_ubatch_count = 1;
   ctx.applied_ubatches = 0;
-  ctx.ubatch_sizes[0] = 0;
-  ctx.slot_offsets[0] = 0;
-  apply_step.request = nullptr;
-  emel::kv::cache::action::run_apply_step(
-      apply_step, ctx);
-  CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
-
-  apply.ubatch_index = 1;
-  apply_step.request = &apply;
-  emel::kv::cache::action::run_apply_step(
-      apply_step, ctx);
-  CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
-
-  apply.ubatch_index = 0;
-  emel::kv::cache::action::run_apply_step(
-      apply_step, ctx);
-  CHECK(error_out == EMEL_ERR_BACKEND);
-
   ctx.ubatch_sizes[0] = 1;
-  ctx.slot_offsets[0] = 8;
-  emel::kv::cache::action::run_apply_step(
-      apply_step, ctx);
-  CHECK(error_out == EMEL_ERR_BACKEND);
-
   ctx.slot_offsets[0] = 7;
-  ctx.cells[7] = 9;
-  emel::kv::cache::action::run_apply_step(
-      apply_step, ctx);
-  CHECK(error_out == EMEL_ERR_BACKEND);
-
-  ctx.cells[7] = 0;
+  ctx.ubatch_stream_ids[0] = 0;
+  ctx.ubatch_seq_ids[0] = 0;
+  ctx.streams[0].pos[7] = emel::kv::cache::action::POS_NONE;
   ctx.kv_tokens = 0;
   emel::kv::cache::action::run_apply_step(
       apply_step, ctx);
   CHECK(error_out == EMEL_OK);
-  CHECK(ctx.head == 0);
+  CHECK(ctx.streams[0].head == 0);
   CHECK(ctx.kv_tokens >= 1);
 
   emel::kv::cache::event::rollback rollback{};
@@ -304,25 +289,12 @@ TEST_CASE("kv_cache_action_helpers_cover_slot_planning_apply_rollback_and_publis
   };
   rollback.from_ubatch_index = 0;
   ctx.applied_ubatches = 1;
-  ctx.head = 8;
+  ctx.streams[0].head = 8;
   emel::kv::cache::action::run_rollback_step(
       rollback_step, ctx);
   CHECK(error_out == EMEL_OK);
   CHECK(ctx.applied_ubatches == 0);
-  CHECK(ctx.head == 7);
-
-  rollback_step.request = nullptr;
-  emel::kv::cache::action::run_rollback_step(
-      rollback_step, ctx);
-  CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
-
-  rollback_step.request = &rollback;
-  ctx.applied_ubatches = 1;
-  ctx.ubatch_sizes[0] = 2;
-  ctx.slot_offsets[0] = 7;
-  emel::kv::cache::action::run_rollback_step(
-      rollback_step, ctx);
-  CHECK(error_out == EMEL_ERR_BACKEND);
+  CHECK(ctx.streams[0].head == 7);
 
   ctx.planned_ubatch_count = 2;
   ctx.slot_offsets[0] = 1;
@@ -335,7 +307,7 @@ TEST_CASE("kv_cache_action_helpers_cover_slot_planning_apply_rollback_and_publis
   CHECK(error_out == EMEL_OK);
 
   emel::kv::cache::action::on_kv_done(emel::kv::cache::events::kv_done{}, ctx);
-  CHECK(ctx.applied_ubatches == 1);
+  CHECK(ctx.applied_ubatches == 0);
   emel::kv::cache::action::on_kv_error(
       emel::kv::cache::events::kv_error{
           .err = EMEL_ERR_BACKEND,

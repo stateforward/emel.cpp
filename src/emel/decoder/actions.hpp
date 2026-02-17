@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <memory>
 
 #include "emel/batch/splitter/sm.hpp"
 #include "emel/decoder/events.hpp"
@@ -32,11 +33,21 @@ struct context {
   int32_t ubatches_total = 0;
   int32_t ubatches_processed = 0;
 
-  emel::batch::splitter::sm batch_splitter = {};
-  emel::memory::coordinator::sm memory_coordinator = {};
-  emel::kv::cache::sm kv_cache = {};
-  emel::decoder::ubatch_executor::sm ubatch_executor = {};
+  std::unique_ptr<emel::batch::splitter::sm> batch_splitter;
+  std::unique_ptr<emel::memory::coordinator::sm> memory_coordinator;
+  std::unique_ptr<emel::kv::cache::sm> kv_cache;
+  std::unique_ptr<emel::decoder::ubatch_executor::sm> ubatch_executor;
+
+  context();
 };
+
+inline context::context()
+    : batch_splitter(std::make_unique<emel::batch::splitter::sm>()),
+      memory_coordinator(std::make_unique<emel::memory::coordinator::sm>()),
+      kv_cache(std::make_unique<emel::kv::cache::sm>()),
+      ubatch_executor(std::make_unique<emel::decoder::ubatch_executor::sm>()) {
+  // One-time heap allocation keeps decoder context small on the stack.
+}
 
 inline prepare_failure_kind classify_prepare_failure_from_memory_status(
     const emel::memory::coordinator::event::memory_status status) {
@@ -96,7 +107,7 @@ inline constexpr auto run_initialize_batch = [](const event::initialize_batch & 
   int32_t outputs_total = 0;
   int32_t ubatch_count = 0;
 
-  const bool ok = ctx.batch_splitter.process_event(emel::batch::splitter::event::split{
+  const bool ok = ctx.batch_splitter->process_event(emel::batch::splitter::event::split{
     .token_ids = ctx.token_ids,
     .n_tokens = ctx.n_tokens,
     .n_ubatch = ctx.n_ubatch,
@@ -132,7 +143,8 @@ inline constexpr auto run_update_memory = [](const event::update_memory & ev, co
 
   emel::memory::coordinator::event::memory_status status =
       emel::memory::coordinator::event::memory_status::success;
-  const bool ok = ctx.memory_coordinator.process_event(emel::memory::coordinator::event::prepare_update{
+  const bool ok =
+      ctx.memory_coordinator->process_event(emel::memory::coordinator::event::prepare_update{
     .optimize = false,
     .status_out = &status,
   });
@@ -152,7 +164,8 @@ inline constexpr auto run_prepare_memory_batch = [](const event::prepare_memory_
 
   emel::memory::coordinator::event::memory_status status =
       emel::memory::coordinator::event::memory_status::success;
-  const bool memory_ok = ctx.memory_coordinator.process_event(emel::memory::coordinator::event::prepare_batch{
+  const bool memory_ok =
+      ctx.memory_coordinator->process_event(emel::memory::coordinator::event::prepare_batch{
     .n_ubatch = ctx.n_ubatch,
     .n_ubatches_total = ctx.ubatches_total,
     .status_out = &status,
@@ -176,7 +189,7 @@ inline constexpr auto run_prepare_memory_batch = [](const event::prepare_memory_
     return;  // GCOVR_EXCL_LINE
   }
 
-  const bool kv_ok = ctx.kv_cache.process_event(emel::kv::cache::event::prepare{
+  const bool kv_ok = ctx.kv_cache->process_event(emel::kv::cache::event::prepare{
     .ubatch_sizes = ctx.ubatch_sizes.data(),
     .ubatch_count = ctx.ubatches_total,
     .requested_capacity = ctx.n_tokens,
@@ -197,7 +210,8 @@ inline constexpr auto run_optimize_memory = [](const event::optimize_memory & ev
 
   emel::memory::coordinator::event::memory_status status =
       emel::memory::coordinator::event::memory_status::success;
-  const bool ok = ctx.memory_coordinator.process_event(emel::memory::coordinator::event::prepare_update{
+  const bool ok =
+      ctx.memory_coordinator->process_event(emel::memory::coordinator::event::prepare_update{
     .optimize = true,
     .status_out = &status,
   });
@@ -228,11 +242,11 @@ inline constexpr auto run_process_ubatch = [](const event::process_ubatch & ev, 
   int32_t kv_tokens = 0;
   bool rollback_attempted = false;
   int32_t ubatch_error = EMEL_OK;
-  const bool ok = ctx.ubatch_executor.process_event(emel::decoder::ubatch_executor::event::execute{
+  const bool ok = ctx.ubatch_executor->process_event(emel::decoder::ubatch_executor::event::execute{
     .ubatch_index = ctx.ubatches_processed,
     .ubatch_size = current,
-    .memory_coordinator_sm = &ctx.memory_coordinator,
-    .kv_cache_sm = &ctx.kv_cache,
+    .memory_coordinator_sm = ctx.memory_coordinator.get(),
+    .kv_cache_sm = ctx.kv_cache.get(),
     .outputs_produced_out = &produced,
     .kv_tokens_out = &kv_tokens,
     .rollback_attempted_out = &rollback_attempted,
@@ -280,7 +294,7 @@ inline constexpr auto run_rollback_ubatch = [](const event::rollback_ubatch & ev
 
   const int32_t rollback_to = std::max<int32_t>(0, ctx.ubatches_processed - 1);
   int32_t kv_error = EMEL_OK;
-  const bool kv_ok = ctx.kv_cache.process_event(emel::kv::cache::event::rollback{
+  const bool kv_ok = ctx.kv_cache->process_event(emel::kv::cache::event::rollback{
     .from_ubatch_index = rollback_to,
     .error_out = &kv_error,
   });
