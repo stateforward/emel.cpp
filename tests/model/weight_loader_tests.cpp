@@ -169,7 +169,8 @@ TEST_CASE("weight loader init_mappings handles failures") {
 
   emel::model::weight_loader::action::context ctx{};
   emel::model::weight_loader::events::strategy_selected selection{&request, true, false, EMEL_OK};
-  emel::model::weight_loader::action::init_mappings{}(selection, ctx, support.process_);
+  CHECK(emel::model::weight_loader::guard::use_mmap_no_error_skip_init_mappings{}(selection));
+  emel::model::weight_loader::action::skip_init_mappings{}(selection, ctx, support.process_);
   CHECK(sink.called);
   CHECK(sink.captured.err == EMEL_OK);
 
@@ -181,6 +182,7 @@ TEST_CASE("weight loader init_mappings handles failures") {
     }
     return false;
   };
+  CHECK(emel::model::weight_loader::guard::use_mmap_no_error_can_init_mappings{}(selection));
   emel::model::weight_loader::action::init_mappings{}(selection, ctx, support.process_);
   CHECK(sink.called);
   CHECK(sink.captured.err == EMEL_ERR_BACKEND);

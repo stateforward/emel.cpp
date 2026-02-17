@@ -26,10 +26,6 @@ namespace emel::model::parser::action {
 
 struct parse_architecture {
   void operator()(const event::parse_model & ev, process_t & process) const {
-    if (ev.parse_architecture == nullptr) {
-      process(events::parse_architecture_error{&ev, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
     int32_t err = EMEL_OK;
     const bool ok = ev.parse_architecture(ev, &err);
     if (!ok || err != EMEL_OK) {
@@ -46,10 +42,6 @@ struct parse_architecture {
 struct map_architecture {
   void operator()(const events::parse_architecture_done & ev, process_t & process) const {
     const event::parse_model * request = ev.request;
-    if (request == nullptr || request->map_architecture == nullptr) {
-      process(events::map_architecture_error{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
     int32_t err = EMEL_OK;
     const bool ok = request->map_architecture(*request, &err);
     if (!ok || err != EMEL_OK) {
@@ -66,10 +58,6 @@ struct map_architecture {
 struct parse_hparams {
   void operator()(const events::map_architecture_done & ev, process_t & process) const {
     const event::parse_model * request = ev.request;
-    if (request == nullptr || request->parse_hparams == nullptr) {
-      process(events::parse_hparams_error{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
     int32_t err = EMEL_OK;
     const bool ok = request->parse_hparams(*request, &err);
     if (!ok || err != EMEL_OK) {
@@ -86,10 +74,6 @@ struct parse_hparams {
 struct parse_vocab {
   void operator()(const events::parse_hparams_done & ev, process_t & process) const {
     const event::parse_model * request = ev.request;
-    if (request == nullptr || request->parse_vocab == nullptr) {
-      process(events::parse_vocab_error{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
     int32_t err = EMEL_OK;
     const bool ok = request->parse_vocab(*request, &err);
     if (!ok || err != EMEL_OK) {
@@ -106,18 +90,6 @@ struct parse_vocab {
 struct map_tensors {
   void operator()(const events::parse_vocab_done & ev, process_t & process) const {
     const event::parse_model * request = ev.request;
-    if (request == nullptr) {
-      process(events::map_tensors_error{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
-    if (!request->map_tensors) {
-      process(events::map_tensors_done{request});
-      return;
-    }
-    if (request->map_tensors_impl == nullptr) {
-      process(events::map_tensors_error{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
     int32_t err = EMEL_OK;
     const bool ok = request->map_tensors_impl(*request, &err);
     if (!ok || err != EMEL_OK) {
@@ -154,6 +126,25 @@ struct dispatch_error {
     request->dispatch_error(request->owner_sm, emel::model::loader::events::parsing_error{
       request->loader_request,
       ev.err
+    });
+  }
+};
+
+struct reject_invalid {
+  template <class Event>
+  void operator()(const Event & ev, process_t &) const {
+    const event::parse_model * request = nullptr;
+    if constexpr (std::is_same_v<Event, event::parse_model>) {
+      request = &ev;
+    } else if constexpr (requires { ev.request; }) {
+      request = ev.request;
+    }
+    if (request == nullptr || request->dispatch_error == nullptr || request->owner_sm == nullptr) {
+      return;
+    }
+    request->dispatch_error(request->owner_sm, emel::model::loader::events::parsing_error{
+      request->loader_request,
+      EMEL_ERR_INVALID_ARGUMENT
     });
   }
 };

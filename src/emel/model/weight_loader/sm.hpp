@@ -27,30 +27,66 @@ struct model {
       *sml::state<initialized> + sml::event<event::load_weights> / action::select_strategy{} =
         sml::state<selecting>,
 
-      sml::state<selecting> + sml::event<events::strategy_selected>[guard::use_mmap_selected{}]
-        / action::init_mappings{} = sml::state<initializing>,
-      sml::state<selecting> + sml::event<events::strategy_selected>[guard::use_stream_selected{}]
-        / action::load_streamed{} = sml::state<loading_streamed>,
+      sml::state<selecting> + sml::event<events::strategy_selected>
+        [guard::use_mmap_no_error_can_init_mappings{}] / action::init_mappings{} =
+          sml::state<initializing>,
+      sml::state<selecting> + sml::event<events::strategy_selected>
+        [guard::use_mmap_no_error_skip_init_mappings{}] / action::skip_init_mappings{} =
+          sml::state<initializing>,
+      sml::state<selecting> + sml::event<events::strategy_selected>
+        [guard::use_mmap_no_error_cannot_init_mappings{}] / action::reject_invalid_mappings{} =
+          sml::state<initializing>,
+      sml::state<selecting> + sml::event<events::strategy_selected>
+        [guard::use_stream_no_error_can_load_streamed{}] / action::load_streamed{} =
+          sml::state<loading_streamed>,
+      sml::state<selecting> + sml::event<events::strategy_selected>
+        [guard::use_stream_no_error_cannot_load_streamed{}] / action::reject_invalid_streamed{} =
+          sml::state<loading_streamed>,
       sml::state<selecting> + sml::event<events::strategy_selected>[guard::has_error{}]
         / action::dispatch_error{} = sml::state<errored>,
 
-      sml::state<initializing> + sml::event<events::mappings_ready>[guard::no_error{}]
-        / action::load_mmap{} = sml::state<loading_mmap>,
+      sml::state<initializing> + sml::event<events::mappings_ready>
+        [guard::mappings_ready_no_error_can_load_mmap{}] / action::load_mmap{} =
+          sml::state<loading_mmap>,
+      sml::state<initializing> + sml::event<events::mappings_ready>
+        [guard::mappings_ready_no_error_cannot_load_mmap{}] / action::reject_invalid_mmap{} =
+          sml::state<loading_mmap>,
       sml::state<initializing> + sml::event<events::mappings_ready>[guard::has_error{}]
         / action::dispatch_error{} = sml::state<errored>,
 
-      sml::state<loading_mmap> + sml::event<events::weights_loaded>[guard::no_error{}]
-        / action::store_and_validate{} = sml::state<validating>,
+      sml::state<loading_mmap> + sml::event<events::weights_loaded>
+        [guard::weights_loaded_no_error_can_validate{}] / action::store_and_validate{} =
+          sml::state<validating>,
+      sml::state<loading_mmap> + sml::event<events::weights_loaded>
+        [guard::weights_loaded_no_error_skip_validate{}] / action::store_and_skip_validate{} =
+          sml::state<validating>,
+      sml::state<loading_mmap> + sml::event<events::weights_loaded>
+        [guard::weights_loaded_no_error_cannot_validate{}]
+          / action::store_and_reject_validate{} = sml::state<validating>,
       sml::state<loading_mmap> + sml::event<events::weights_loaded>[guard::has_error{}]
         / action::store_and_dispatch_error{} = sml::state<errored>,
 
-      sml::state<loading_streamed> + sml::event<events::weights_loaded>[guard::no_error{}]
-        / action::store_and_validate{} = sml::state<validating>,
+      sml::state<loading_streamed> + sml::event<events::weights_loaded>
+        [guard::weights_loaded_no_error_can_validate{}] / action::store_and_validate{} =
+          sml::state<validating>,
+      sml::state<loading_streamed> + sml::event<events::weights_loaded>
+        [guard::weights_loaded_no_error_skip_validate{}] / action::store_and_skip_validate{} =
+          sml::state<validating>,
+      sml::state<loading_streamed> + sml::event<events::weights_loaded>
+        [guard::weights_loaded_no_error_cannot_validate{}]
+          / action::store_and_reject_validate{} = sml::state<validating>,
       sml::state<loading_streamed> + sml::event<events::weights_loaded>[guard::has_error{}]
         / action::store_and_dispatch_error{} = sml::state<errored>,
 
-      sml::state<validating> + sml::event<events::validation_done>[guard::no_error{}]
-        / action::cleaning_up{} = sml::state<cleaning_up>,
+      sml::state<validating> + sml::event<events::validation_done>
+        [guard::validation_done_no_error_can_clean_up{}] / action::cleaning_up{} =
+          sml::state<cleaning_up>,
+      sml::state<validating> + sml::event<events::validation_done>
+        [guard::validation_done_no_error_skip_clean_up{}] / action::skip_cleaning_up{} =
+          sml::state<cleaning_up>,
+      sml::state<validating> + sml::event<events::validation_done>
+        [guard::validation_done_no_error_cannot_clean_up{}] / action::reject_invalid_cleaning{} =
+          sml::state<cleaning_up>,
       sml::state<validating> + sml::event<events::validation_done>[guard::has_error{}]
         / action::dispatch_error{} = sml::state<errored>,
 

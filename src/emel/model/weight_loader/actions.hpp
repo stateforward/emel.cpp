@@ -41,14 +41,6 @@ struct select_strategy {
 struct init_mappings {
   void operator()(const events::strategy_selected & ev, context &, process_t & process) const {
     const event::load_weights * request = ev.request;
-    if (request == nullptr) {
-      process(events::mappings_ready{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
-    if (!ev.use_mmap || request->init_mappings == nullptr) {
-      process(events::mappings_ready{request, EMEL_OK});
-      return;
-    }
     int32_t err = EMEL_OK;
     const bool ok = request->init_mappings(*request, &err);
     if (!ok || err != EMEL_OK) {
@@ -65,10 +57,6 @@ struct init_mappings {
 struct load_mmap {
   void operator()(const events::mappings_ready & ev, context &, process_t & process) const {
     const event::load_weights * request = ev.request;
-    if (request == nullptr || request->map_mmap == nullptr) {
-      process(events::weights_loaded{request, EMEL_ERR_INVALID_ARGUMENT, true});
-      return;
-    }
     uint64_t bytes_done = 0;
     uint64_t bytes_total = 0;
     int32_t err = EMEL_OK;
@@ -87,10 +75,6 @@ struct load_mmap {
 struct load_streamed {
   void operator()(const events::strategy_selected & ev, context &, process_t & process) const {
     const event::load_weights * request = ev.request;
-    if (request == nullptr || request->load_streamed == nullptr) {
-      process(events::weights_loaded{request, EMEL_ERR_INVALID_ARGUMENT, false});
-      return;
-    }
     uint64_t bytes_done = 0;
     uint64_t bytes_total = 0;
     int32_t err = EMEL_OK;
@@ -146,14 +130,6 @@ struct dispatch_error {
 struct validate {
   void operator()(const events::weights_loaded & ev, context &, process_t & process) const {
     const event::load_weights * request = ev.request;
-    if (request == nullptr) {
-      process(events::validation_done{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
-    if (!request->check_tensors || request->validate == nullptr) {
-      process(events::validation_done{request, EMEL_OK});
-      return;
-    }
     int32_t err = EMEL_OK;
     const bool ok = request->validate(*request, &err);
     if (!ok || err != EMEL_OK) {
@@ -168,16 +144,8 @@ struct validate {
 };
 
 struct cleaning_up {
-  void operator()(const events::validation_done & ev, context & ctx, process_t & process) const {
+  void operator()(const events::validation_done & ev, context &, process_t & process) const {
     const event::load_weights * request = ev.request;
-    if (request == nullptr) {
-      process(events::cleaning_up_done{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
-    if (!ctx.used_mmap || request->clean_up == nullptr) {
-      process(events::cleaning_up_done{request, EMEL_OK});
-      return;
-    }
     int32_t err = EMEL_OK;
     const bool ok = request->clean_up(*request, &err);
     if (!ok || err != EMEL_OK) {
@@ -195,6 +163,68 @@ struct store_and_validate {
   void operator()(const events::weights_loaded & ev, context & ctx, process_t & process) const {
     store_result{}(ev, ctx);
     validate{}(ev, ctx, process);
+  }
+};
+
+struct skip_init_mappings {
+  void operator()(const events::strategy_selected & ev, context &, process_t & process) const {
+    process(events::mappings_ready{ev.request, EMEL_OK});
+  }
+};
+
+struct reject_invalid_mappings {
+  void operator()(const events::strategy_selected & ev, context &, process_t & process) const {
+    process(events::mappings_ready{ev.request, EMEL_ERR_INVALID_ARGUMENT});
+  }
+};
+
+struct reject_invalid_mmap {
+  void operator()(const events::mappings_ready & ev, context &, process_t & process) const {
+    process(events::weights_loaded{ev.request, EMEL_ERR_INVALID_ARGUMENT, true});
+  }
+};
+
+struct reject_invalid_streamed {
+  void operator()(const events::strategy_selected & ev, context &, process_t & process) const {
+    process(events::weights_loaded{ev.request, EMEL_ERR_INVALID_ARGUMENT, false});
+  }
+};
+
+struct skip_validate {
+  void operator()(const events::weights_loaded & ev, context &, process_t & process) const {
+    process(events::validation_done{ev.request, EMEL_OK});
+  }
+};
+
+struct reject_invalid_validate {
+  void operator()(const events::weights_loaded & ev, context &, process_t & process) const {
+    process(events::validation_done{ev.request, EMEL_ERR_INVALID_ARGUMENT});
+  }
+};
+
+struct store_and_skip_validate {
+  void operator()(const events::weights_loaded & ev, context & ctx, process_t & process) const {
+    store_result{}(ev, ctx);
+    skip_validate{}(ev, ctx, process);
+  }
+};
+
+struct store_and_reject_validate {
+  void operator()(const events::weights_loaded & ev, context & ctx, process_t & process) const {
+    store_result{}(ev, ctx);
+    reject_invalid_validate{}(ev, ctx, process);
+  }
+};
+
+struct skip_cleaning_up {
+  void operator()(const events::validation_done & ev, context &, process_t & process) const {
+    process(events::cleaning_up_done{ev.request, EMEL_OK});
+  }
+};
+
+struct reject_invalid_cleaning {
+  void operator()(const events::validation_done & ev, context &, process_t & process) const {
+    process(events::cleaning_up_done{ev.request, EMEL_ERR_INVALID_ARGUMENT});
   }
 };
 

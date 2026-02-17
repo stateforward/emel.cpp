@@ -22,25 +22,41 @@ struct model {
     namespace sml = boost::sml;
     return sml::make_transition_table(
       *sml::state<initialized> + sml::event<event::parse_model>
-        / action::parse_architecture{} = sml::state<parsing_architecture>,
+        [guard::can_parse_architecture{}] / action::parse_architecture{} =
+          sml::state<parsing_architecture>,
+      sml::state<initialized> + sml::event<event::parse_model>
+        [guard::cannot_parse_architecture{}] / action::reject_invalid{} =
+          sml::state<errored>,
 
       sml::state<parsing_architecture> + sml::event<events::parse_architecture_done>
-        / action::map_architecture{} = sml::state<mapping_architecture>,
+        [guard::can_map_architecture{}] / action::map_architecture{} =
+          sml::state<mapping_architecture>,
+      sml::state<parsing_architecture> + sml::event<events::parse_architecture_done>
+        [guard::cannot_map_architecture{}] / action::reject_invalid{} =
+          sml::state<errored>,
       sml::state<parsing_architecture> + sml::event<events::parse_architecture_error>
         / action::dispatch_error{} = sml::state<errored>,
 
       sml::state<mapping_architecture> + sml::event<events::map_architecture_done>
-        / action::parse_hparams{} = sml::state<parsing_hparams>,
+        [guard::can_parse_hparams{}] / action::parse_hparams{} = sml::state<parsing_hparams>,
+      sml::state<mapping_architecture> + sml::event<events::map_architecture_done>
+        [guard::cannot_parse_hparams{}] / action::reject_invalid{} = sml::state<errored>,
       sml::state<mapping_architecture> + sml::event<events::map_architecture_error>
         / action::dispatch_error{} = sml::state<errored>,
 
       sml::state<parsing_hparams> + sml::event<events::parse_hparams_done>
-        / action::parse_vocab{} = sml::state<parsing_vocab>,
+        [guard::can_parse_vocab{}] / action::parse_vocab{} = sml::state<parsing_vocab>,
+      sml::state<parsing_hparams> + sml::event<events::parse_hparams_done>
+        [guard::cannot_parse_vocab{}] / action::reject_invalid{} = sml::state<errored>,
       sml::state<parsing_hparams> + sml::event<events::parse_hparams_error>
         / action::dispatch_error{} = sml::state<errored>,
 
       sml::state<parsing_vocab> + sml::event<events::parse_vocab_done>
-        / action::map_tensors{} = sml::state<mapping_tensors>,
+        [guard::skip_map_tensors{}] / action::dispatch_done{} = sml::state<done>,
+      sml::state<parsing_vocab> + sml::event<events::parse_vocab_done>
+        [guard::can_map_tensors{}] / action::map_tensors{} = sml::state<mapping_tensors>,
+      sml::state<parsing_vocab> + sml::event<events::parse_vocab_done>
+        [guard::cannot_map_tensors{}] / action::reject_invalid{} = sml::state<errored>,
       sml::state<parsing_vocab> + sml::event<events::parse_vocab_error>
         / action::dispatch_error{} = sml::state<errored>,
 

@@ -852,9 +852,7 @@ TEST_CASE("parser actions cover error and success branches") {
   auto & process = support.process_;
 
   emel::model::parser::event::parse_model request{};
-  emel::model::parser::action::parse_architecture{}(request, process);
-  CHECK(sink.parse_arch_error == 1);
-  CHECK(sink.last_err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(!emel::model::parser::guard::can_parse_architecture{}(request));
 
   request.parse_architecture = [](const emel::model::parser::event::parse_model &, int32_t * err_out) {
     if (err_out != nullptr) {
@@ -863,21 +861,15 @@ TEST_CASE("parser actions cover error and success branches") {
     return false;
   };
   emel::model::parser::action::parse_architecture{}(request, process);
-  CHECK(sink.parse_arch_error == 2);
+  CHECK(sink.parse_arch_error == 1);
   CHECK(sink.last_err == EMEL_ERR_PARSE_FAILED);
 
-  request.parse_architecture = [](const emel::model::parser::event::parse_model &, int32_t * err_out) {
-    if (err_out != nullptr) {
-      *err_out = EMEL_OK;
-    }
-    return true;
-  };
+  request.parse_architecture = parse_architecture_ok;
   emel::model::parser::action::parse_architecture{}(request, process);
   CHECK(sink.parse_arch_done == 1);
 
   emel::model::parser::events::parse_architecture_done parsed{&request};
-  emel::model::parser::action::map_architecture{}(parsed, process);
-  CHECK(sink.map_arch_error == 1);
+  CHECK(!emel::model::parser::guard::can_map_architecture{}(parsed));
 
   request.map_architecture = [](const emel::model::parser::event::parse_model &, int32_t * err_out) {
     if (err_out != nullptr) {
@@ -885,22 +877,17 @@ TEST_CASE("parser actions cover error and success branches") {
     }
     return false;
   };
+  CHECK(emel::model::parser::guard::can_map_architecture{}(parsed));
   emel::model::parser::action::map_architecture{}(parsed, process);
-  CHECK(sink.map_arch_error == 2);
+  CHECK(sink.map_arch_error == 1);
   CHECK(sink.last_err == EMEL_ERR_MODEL_INVALID);
 
-  request.map_architecture = [](const emel::model::parser::event::parse_model &, int32_t * err_out) {
-    if (err_out != nullptr) {
-      *err_out = EMEL_OK;
-    }
-    return true;
-  };
+  request.map_architecture = map_architecture_ok;
   emel::model::parser::action::map_architecture{}(parsed, process);
   CHECK(sink.map_arch_done == 1);
 
   emel::model::parser::events::map_architecture_done mapped{&request};
-  emel::model::parser::action::parse_hparams{}(mapped, process);
-  CHECK(sink.parse_hparams_error == 1);
+  CHECK(!emel::model::parser::guard::can_parse_hparams{}(mapped));
 
   request.parse_hparams = [](const emel::model::parser::event::parse_model &, int32_t * err_out) {
     if (err_out != nullptr) {
@@ -908,22 +895,17 @@ TEST_CASE("parser actions cover error and success branches") {
     }
     return false;
   };
+  CHECK(emel::model::parser::guard::can_parse_hparams{}(mapped));
   emel::model::parser::action::parse_hparams{}(mapped, process);
-  CHECK(sink.parse_hparams_error == 2);
+  CHECK(sink.parse_hparams_error == 1);
   CHECK(sink.last_err == EMEL_ERR_PARSE_FAILED);
 
-  request.parse_hparams = [](const emel::model::parser::event::parse_model &, int32_t * err_out) {
-    if (err_out != nullptr) {
-      *err_out = EMEL_OK;
-    }
-    return true;
-  };
+  request.parse_hparams = parse_hparams_ok;
   emel::model::parser::action::parse_hparams{}(mapped, process);
   CHECK(sink.parse_hparams_done == 1);
 
   emel::model::parser::events::parse_hparams_done hp{&request};
-  emel::model::parser::action::parse_vocab{}(hp, process);
-  CHECK(sink.parse_vocab_error == 1);
+  CHECK(!emel::model::parser::guard::can_parse_vocab{}(hp));
 
   request.parse_vocab = [](const emel::model::parser::event::parse_model &, int32_t * err_out) {
     if (err_out != nullptr) {
@@ -931,28 +913,22 @@ TEST_CASE("parser actions cover error and success branches") {
     }
     return false;
   };
+  CHECK(emel::model::parser::guard::can_parse_vocab{}(hp));
   emel::model::parser::action::parse_vocab{}(hp, process);
-  CHECK(sink.parse_vocab_error == 2);
+  CHECK(sink.parse_vocab_error == 1);
   CHECK(sink.last_err == EMEL_ERR_PARSE_FAILED);
 
-  request.parse_vocab = [](const emel::model::parser::event::parse_model &, int32_t * err_out) {
-    if (err_out != nullptr) {
-      *err_out = EMEL_OK;
-    }
-    return true;
-  };
+  request.parse_vocab = parse_vocab_ok;
   emel::model::parser::action::parse_vocab{}(hp, process);
   CHECK(sink.parse_vocab_done == 1);
 
   emel::model::parser::events::parse_vocab_done vocab{&request};
   request.map_tensors = false;
-  emel::model::parser::action::map_tensors{}(vocab, process);
-  CHECK(sink.map_tensors_done == 1);
+  CHECK(emel::model::parser::guard::skip_map_tensors{}(vocab));
 
   request.map_tensors = true;
-  emel::model::parser::action::map_tensors{}(vocab, process);
-  CHECK(sink.map_tensors_error == 1);
-  CHECK(sink.last_err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(!emel::model::parser::guard::can_map_tensors{}(vocab));
+  CHECK(emel::model::parser::guard::cannot_map_tensors{}(vocab));
 
   request.map_tensors_impl = [](const emel::model::parser::event::parse_model &, int32_t * err_out) {
     if (err_out != nullptr) {
@@ -960,18 +936,14 @@ TEST_CASE("parser actions cover error and success branches") {
     }
     return false;
   };
+  CHECK(emel::model::parser::guard::can_map_tensors{}(vocab));
   emel::model::parser::action::map_tensors{}(vocab, process);
-  CHECK(sink.map_tensors_error == 2);
+  CHECK(sink.map_tensors_error == 1);
   CHECK(sink.last_err == EMEL_ERR_BACKEND);
 
-  request.map_tensors_impl = [](const emel::model::parser::event::parse_model &, int32_t * err_out) {
-    if (err_out != nullptr) {
-      *err_out = EMEL_OK;
-    }
-    return true;
-  };
+  request.map_tensors_impl = map_tensors_ok;
   emel::model::parser::action::map_tensors{}(vocab, process);
-  CHECK(sink.map_tensors_done == 2);
+  CHECK(sink.map_tensors_done == 1);
 }
 
 TEST_CASE("weight loader actions cover branches") {
@@ -982,7 +954,8 @@ TEST_CASE("weight loader actions cover branches") {
 
   emel::model::weight_loader::event::load_weights request{};
   emel::model::weight_loader::events::mappings_ready ready{&request, EMEL_OK};
-  emel::model::weight_loader::action::load_mmap{}(ready, ctx, process);
+  CHECK(emel::model::weight_loader::guard::mappings_ready_no_error_cannot_load_mmap{}(ready));
+  emel::model::weight_loader::action::reject_invalid_mmap{}(ready, ctx, process);
   CHECK(sink.weights_loaded == 1);
   CHECK(sink.last_err == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(sink.used_mmap);
@@ -993,6 +966,7 @@ TEST_CASE("weight loader actions cover branches") {
     }
     return false;
   };
+  CHECK(emel::model::weight_loader::guard::mappings_ready_no_error_can_load_mmap{}(ready));
   emel::model::weight_loader::action::load_mmap{}(ready, ctx, process);
   CHECK(sink.weights_loaded == 2);
   CHECK(sink.last_err == EMEL_ERR_BACKEND);
@@ -1009,6 +983,7 @@ TEST_CASE("weight loader actions cover branches") {
     }
     return true;
   };
+  CHECK(emel::model::weight_loader::guard::mappings_ready_no_error_can_load_mmap{}(ready));
   emel::model::weight_loader::action::load_mmap{}(ready, ctx, process);
   CHECK(sink.weights_loaded == 3);
   CHECK(sink.last_err == EMEL_ERR_BACKEND);
@@ -1025,13 +1000,15 @@ TEST_CASE("weight loader actions cover branches") {
     }
     return true;
   };
+  CHECK(emel::model::weight_loader::guard::mappings_ready_no_error_can_load_mmap{}(ready));
   emel::model::weight_loader::action::load_mmap{}(ready, ctx, process);
   CHECK(sink.weights_loaded == 4);
   CHECK(sink.last_err == EMEL_OK);
 
   emel::model::weight_loader::event::load_weights stream_request{};
   emel::model::weight_loader::events::strategy_selected stream_selected{&stream_request, false, false, EMEL_OK};
-  emel::model::weight_loader::action::load_streamed{}(stream_selected, ctx, process);
+  CHECK(emel::model::weight_loader::guard::use_stream_no_error_cannot_load_streamed{}(stream_selected));
+  emel::model::weight_loader::action::reject_invalid_streamed{}(stream_selected, ctx, process);
   CHECK(sink.weights_loaded == 5);
   CHECK(sink.used_mmap == false);
   CHECK(sink.last_err == EMEL_ERR_INVALID_ARGUMENT);
@@ -1043,6 +1020,7 @@ TEST_CASE("weight loader actions cover branches") {
     return false;
   };
   stream_selected.request = &stream_request;
+  CHECK(emel::model::weight_loader::guard::use_stream_no_error_can_load_streamed{}(stream_selected));
   emel::model::weight_loader::action::load_streamed{}(stream_selected, ctx, process);
   CHECK(sink.weights_loaded == 6);
   CHECK(sink.last_err == EMEL_ERR_BACKEND);
@@ -1059,11 +1037,24 @@ TEST_CASE("weight loader actions cover branches") {
     }
     return true;
   };
+  CHECK(emel::model::weight_loader::guard::use_stream_no_error_can_load_streamed{}(stream_selected));
   emel::model::weight_loader::action::load_streamed{}(stream_selected, ctx, process);
   CHECK(sink.weights_loaded == 7);
   CHECK(sink.last_err == EMEL_OK);
 
-  emel::model::weight_loader::events::weights_loaded done{&stream_request, EMEL_OK, false, 2, 1};
+  stream_request.validate = [](const emel::model::weight_loader::event::load_weights &, int32_t * err_out) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return true;
+  };
+  stream_request.clean_up = [](const emel::model::weight_loader::event::load_weights &, int32_t * err_out) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return true;
+  };
+  emel::model::weight_loader::events::weights_loaded done{&stream_request, EMEL_OK, true, 2, 1};
   emel::model::weight_loader::action::store_and_validate{}(done, ctx, process);
   emel::model::weight_loader::action::cleaning_up{}(
     emel::model::weight_loader::events::validation_done{&stream_request, EMEL_OK},

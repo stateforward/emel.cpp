@@ -69,3 +69,5 @@ Open decisions
 - Whether to add explicit `*_invalid` events vs reusing existing `_error` events with `EMEL_ERR_INVALID_ARGUMENT`.
 
 - model/loader: moved request validation into guards (map_parser/parse/load_weights/map_layers/structure/architecture), added explicit invalid transitions, and updated loader action tests to assert guards.
+- model/parser: moved precondition checks into guards, added explicit invalid transitions, and updated parser action tests to assert guards.
+- model/weight_loader: moved precondition checks into guards, added explicit invalid transitions/actions, and updated weight loader action tests to assert guards.
