@@ -3,28 +3,108 @@
 #include "emel/decoder/compute_executor/actions.hpp"
 #include "emel/decoder/compute_executor/events.hpp"
 
+namespace {
+
+using execute_t = emel::decoder::compute_executor::event::execute;
+
+bool validate_ok(const execute_t &, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return true;
+}
+
+bool prepare_graph_reuse(const execute_t &, bool * reused_out, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  if (reused_out != nullptr) {
+    *reused_out = true;
+  }
+  return true;
+}
+
+bool alloc_graph_ok(const execute_t &, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return true;
+}
+
+bool bind_inputs_ok(const execute_t &, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return true;
+}
+
+bool run_backend_kv_gate(const execute_t & ev, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = ev.kv_tokens > 0 ? EMEL_OK : EMEL_ERR_BACKEND;
+  }
+  return ev.kv_tokens > 0;
+}
+
+bool extract_outputs_kv_gate(const execute_t & ev, int32_t * outputs_out, int32_t * err_out) {
+  if (ev.kv_tokens < ev.ubatch_size) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_BACKEND;
+    }
+    return false;
+  }
+  if (outputs_out != nullptr) {
+    *outputs_out = ev.ubatch_size;
+  }
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return true;
+}
+
+}  // namespace
+
 TEST_CASE("compute_executor_actions_return_early_when_error_out_is_null") {
   emel::decoder::compute_executor::action::context ctx{};
+  execute_t request{
+    .validate = validate_ok,
+    .prepare_graph = prepare_graph_reuse,
+    .alloc_graph = alloc_graph_ok,
+    .bind_inputs = bind_inputs_ok,
+    .run_backend = run_backend_kv_gate,
+    .extract_outputs = extract_outputs_kv_gate,
+  };
 
   emel::decoder::compute_executor::action::run_validate(
-    emel::decoder::compute_executor::event::validate{}, ctx);
+    emel::decoder::compute_executor::event::validate{.request = &request}, ctx);
+  emel::decoder::compute_executor::action::run_prepare_graph(
+    emel::decoder::compute_executor::event::prepare_graph{.request = &request}, ctx);
+  emel::decoder::compute_executor::action::run_alloc_graph(
+    emel::decoder::compute_executor::event::alloc_graph{.request = &request}, ctx);
   emel::decoder::compute_executor::action::run_bind_inputs(
-    emel::decoder::compute_executor::event::bind_inputs{}, ctx);
+    emel::decoder::compute_executor::event::bind_inputs{.request = &request}, ctx);
   emel::decoder::compute_executor::action::run_backend(
-    emel::decoder::compute_executor::event::run_backend{}, ctx);
+    emel::decoder::compute_executor::event::run_backend{.request = &request}, ctx);
   emel::decoder::compute_executor::action::run_extract_outputs(
-    emel::decoder::compute_executor::event::extract_outputs{}, ctx);
+    emel::decoder::compute_executor::event::extract_outputs{.request = &request}, ctx);
 }
 
 TEST_CASE("compute_executor_run_validate_reports_invalid_values") {
   emel::decoder::compute_executor::action::context ctx{};
   int32_t err = EMEL_OK;
 
-  ctx.ubatch_index = -1;
-  ctx.ubatch_size = 0;
-  ctx.kv_tokens = -1;
+  execute_t request{
+    .ubatch_index = -1,
+    .ubatch_size = 0,
+    .kv_tokens = -1,
+    .validate = validate_ok,
+    .prepare_graph = prepare_graph_reuse,
+    .alloc_graph = alloc_graph_ok,
+    .bind_inputs = bind_inputs_ok,
+    .run_backend = run_backend_kv_gate,
+    .extract_outputs = extract_outputs_kv_gate,
+  };
   emel::decoder::compute_executor::action::run_validate(
-    emel::decoder::compute_executor::event::validate{.error_out = &err}, ctx);
+    emel::decoder::compute_executor::event::validate{.request = &request, .error_out = &err}, ctx);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
@@ -32,9 +112,20 @@ TEST_CASE("compute_executor_run_backend_requires_tokens") {
   emel::decoder::compute_executor::action::context ctx{};
   int32_t err = EMEL_OK;
 
-  ctx.kv_tokens = 0;
+  execute_t request{
+    .kv_tokens = 0,
+    .validate = validate_ok,
+    .prepare_graph = prepare_graph_reuse,
+    .alloc_graph = alloc_graph_ok,
+    .bind_inputs = bind_inputs_ok,
+    .run_backend = run_backend_kv_gate,
+    .extract_outputs = extract_outputs_kv_gate,
+  };
   emel::decoder::compute_executor::action::run_backend(
-    emel::decoder::compute_executor::event::run_backend{.error_out = &err}, ctx);
+    emel::decoder::compute_executor::event::run_backend{
+      .request = &request,
+      .error_out = &err,
+    }, ctx);
   CHECK(err == EMEL_ERR_BACKEND);
 }
 
@@ -42,9 +133,20 @@ TEST_CASE("compute_executor_run_extract_outputs_checks_kv_tokens") {
   emel::decoder::compute_executor::action::context ctx{};
   int32_t err = EMEL_OK;
 
-  ctx.kv_tokens = 1;
-  ctx.ubatch_size = 2;
+  execute_t request{
+    .ubatch_size = 2,
+    .kv_tokens = 1,
+    .validate = validate_ok,
+    .prepare_graph = prepare_graph_reuse,
+    .alloc_graph = alloc_graph_ok,
+    .bind_inputs = bind_inputs_ok,
+    .run_backend = run_backend_kv_gate,
+    .extract_outputs = extract_outputs_kv_gate,
+  };
   emel::decoder::compute_executor::action::run_extract_outputs(
-    emel::decoder::compute_executor::event::extract_outputs{.error_out = &err}, ctx);
+    emel::decoder::compute_executor::event::extract_outputs{
+      .request = &request,
+      .error_out = &err,
+    }, ctx);
   CHECK(err == EMEL_ERR_BACKEND);
 }

@@ -14,6 +14,12 @@ using Process = boost::sml::back::process<
   event::validate,
   events::validate_done,
   events::validate_error,
+  event::prepare_graph,
+  events::prepare_graph_done,
+  events::prepare_graph_error,
+  event::alloc_graph,
+  events::alloc_graph_done,
+  events::alloc_graph_error,
   event::bind_inputs,
   events::bind_inputs_done,
   events::bind_inputs_error,
@@ -28,6 +34,8 @@ using Process = boost::sml::back::process<
 
 struct initialized {};
 struct validating {};
+struct preparing_graph {};
+struct allocating_graph {};
 struct binding_inputs {};
 struct running_backend {};
 struct extracting_outputs {};
@@ -46,6 +54,7 @@ struct model {
           [](const event::execute & ev, action::context &, process_t & process) noexcept {
             int32_t phase_error = EMEL_OK;
             event::validate validate{
+              .request = &ev,
               .error_out = &phase_error,
             };
             process(validate);
@@ -66,13 +75,103 @@ struct model {
 
       sml::state<validating> + sml::event<event::validate> / action::run_validate =
           sml::state<validating>,
-      sml::state<validating> + sml::event<events::validate_done> = sml::state<binding_inputs>,
+      sml::state<validating> + sml::event<events::validate_done> =
+          sml::state<preparing_graph>,
       sml::state<validating> + sml::event<events::validate_error> = sml::state<errored>,
 
-      sml::state<binding_inputs> + sml::on_entry<events::validate_done> /
+      sml::state<preparing_graph> + sml::on_entry<events::validate_done> /
           [](const events::validate_done & ev, action::context &, process_t & process) noexcept {
             int32_t phase_error = EMEL_OK;
+            bool reused = false;
+            event::prepare_graph prepare{
+              .request = ev.request,
+              .reused_out = &reused,
+              .error_out = &phase_error,
+            };
+            process(prepare);
+            const event::execute * request = ev.request;
+            if (request != nullptr && request->error_out != nullptr) {
+              *request->error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::prepare_graph_error{
+                .err = phase_error,
+                .request = request,
+              });
+              return;
+            }
+            process(events::prepare_graph_done{
+              .request = request,
+              .reused = reused,
+            });
+          },
+      sml::state<preparing_graph> + sml::event<event::prepare_graph> /
+          action::run_prepare_graph = sml::state<preparing_graph>,
+      sml::state<preparing_graph> + sml::event<events::prepare_graph_done>
+          [guard::graph_reused] = sml::state<binding_inputs>,
+      sml::state<preparing_graph> + sml::event<events::prepare_graph_done>
+          [guard::graph_needs_allocation] = sml::state<allocating_graph>,
+      sml::state<preparing_graph> + sml::event<events::prepare_graph_error> =
+          sml::state<errored>,
+
+      sml::state<allocating_graph> + sml::on_entry<events::prepare_graph_done> /
+          [](const events::prepare_graph_done & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::alloc_graph alloc{
+              .request = ev.request,
+              .error_out = &phase_error,
+            };
+            process(alloc);
+            const event::execute * request = ev.request;
+            if (request != nullptr && request->error_out != nullptr) {
+              *request->error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::alloc_graph_error{
+                .err = phase_error,
+                .request = request,
+              });
+              return;
+            }
+            process(events::alloc_graph_done{
+              .request = request,
+            });
+          },
+      sml::state<allocating_graph> + sml::event<event::alloc_graph> /
+          action::run_alloc_graph = sml::state<allocating_graph>,
+      sml::state<allocating_graph> + sml::event<events::alloc_graph_done> =
+          sml::state<binding_inputs>,
+      sml::state<allocating_graph> + sml::event<events::alloc_graph_error> =
+          sml::state<errored>,
+
+      sml::state<binding_inputs> + sml::on_entry<events::alloc_graph_done> /
+          [](const events::alloc_graph_done & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
             event::bind_inputs bind{
+              .request = ev.request,
+              .error_out = &phase_error,
+            };
+            process(bind);
+            const event::execute * request = ev.request;
+            if (request != nullptr && request->error_out != nullptr) {
+              *request->error_out = phase_error;
+            }
+            if (phase_error != EMEL_OK) {
+              process(events::bind_inputs_error{
+                .err = phase_error,
+                .request = request,
+              });
+              return;
+            }
+            process(events::bind_inputs_done{
+              .request = request,
+            });
+          },
+      sml::state<binding_inputs> + sml::on_entry<events::prepare_graph_done> /
+          [](const events::prepare_graph_done & ev, action::context &, process_t & process) noexcept {
+            int32_t phase_error = EMEL_OK;
+            event::bind_inputs bind{
+              .request = ev.request,
               .error_out = &phase_error,
             };
             process(bind);
@@ -100,6 +199,7 @@ struct model {
           [](const events::bind_inputs_done & ev, action::context &, process_t & process) noexcept {
             int32_t phase_error = EMEL_OK;
             event::run_backend run{
+              .request = ev.request,
               .error_out = &phase_error,
             };
             process(run);
@@ -128,6 +228,7 @@ struct model {
           [](const events::run_backend_done & ev, action::context &, process_t & process) noexcept {
             int32_t phase_error = EMEL_OK;
             event::extract_outputs extract{
+              .request = ev.request,
               .error_out = &phase_error,
             };
             process(extract);
@@ -194,6 +295,26 @@ struct model {
           },
       sml::state<errored> + sml::event<events::compute_error> / action::on_compute_error =
           sml::state<initialized>
+
+      ,
+      sml::state<initialized> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<validating> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<preparing_graph> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<allocating_graph> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<binding_inputs> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<running_backend> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<extracting_outputs> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<done> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<errored> + sml::event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>
     );
   }
 };

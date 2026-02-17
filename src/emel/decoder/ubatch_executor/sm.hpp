@@ -155,6 +155,7 @@ struct model {
             const event::execute * request = ev.request;
             event::run_compute compute{
               .kv_cache_sm = request != nullptr ? request->kv_cache_sm : nullptr,
+              .request = request,
               .error_out = &phase_error,
             };
             process(compute);

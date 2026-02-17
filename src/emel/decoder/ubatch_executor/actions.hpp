@@ -88,6 +88,11 @@ inline constexpr auto run_compute = [](const event::run_compute & ev, context & 
     *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
     return;
   }
+  const event::execute * request = ev.request;
+  if (request == nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
 
   const bool ok = ev.kv_cache_sm->process_event(emel::kv::cache::event::apply_ubatch{
     .ubatch_index = ctx.ubatch_index,
@@ -104,6 +109,13 @@ inline constexpr auto run_compute = [](const event::run_compute & ev, context & 
     .ubatch_index = ctx.ubatch_index,
     .ubatch_size = ctx.ubatch_size,
     .kv_tokens = ctx.kv_tokens,
+    .compute_ctx = request->compute_ctx,
+    .validate = request->compute_validate,
+    .prepare_graph = request->compute_prepare_graph,
+    .alloc_graph = request->compute_alloc_graph,
+    .bind_inputs = request->compute_bind_inputs,
+    .run_backend = request->compute_run_backend,
+    .extract_outputs = request->compute_extract_outputs,
     .outputs_produced_out = &outputs_produced,
     .error_out = &compute_error,
   });

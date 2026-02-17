@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "emel/decoder/compute_executor/events.hpp"
+
 namespace emel::kv::cache {
 struct sm;
 }  // namespace emel::kv::cache
@@ -12,11 +14,25 @@ struct sm;
 
 namespace emel::decoder::ubatch_executor::event {
 
+using compute_validate_fn = emel::decoder::compute_executor::event::validate_fn;
+using compute_prepare_graph_fn = emel::decoder::compute_executor::event::prepare_graph_fn;
+using compute_alloc_graph_fn = emel::decoder::compute_executor::event::alloc_graph_fn;
+using compute_bind_inputs_fn = emel::decoder::compute_executor::event::bind_inputs_fn;
+using compute_run_backend_fn = emel::decoder::compute_executor::event::run_backend_fn;
+using compute_extract_outputs_fn = emel::decoder::compute_executor::event::extract_outputs_fn;
+
 struct execute {
   int32_t ubatch_index = 0;
   int32_t ubatch_size = 0;
   emel::memory::coordinator::sm * memory_coordinator_sm = nullptr;
   emel::kv::cache::sm * kv_cache_sm = nullptr;
+  void * compute_ctx = nullptr;
+  compute_validate_fn compute_validate = nullptr;
+  compute_prepare_graph_fn compute_prepare_graph = nullptr;
+  compute_alloc_graph_fn compute_alloc_graph = nullptr;
+  compute_bind_inputs_fn compute_bind_inputs = nullptr;
+  compute_run_backend_fn compute_run_backend = nullptr;
+  compute_extract_outputs_fn compute_extract_outputs = nullptr;
   int32_t * outputs_produced_out = nullptr;
   int32_t * kv_tokens_out = nullptr;
   bool * rollback_attempted_out = nullptr;
@@ -39,6 +55,7 @@ struct prepare_kv {
 
 struct run_compute {
   emel::kv::cache::sm * kv_cache_sm = nullptr;
+  const execute * request = nullptr;
   int32_t * error_out = nullptr;
 };
 

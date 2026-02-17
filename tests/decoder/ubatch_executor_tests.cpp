@@ -10,6 +10,87 @@
 
 namespace {
 
+using compute_execute_t = emel::decoder::compute_executor::event::execute;
+
+bool compute_validate(const compute_execute_t & ev, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  if (ev.ubatch_index < 0 || ev.ubatch_size <= 0 || ev.kv_tokens < 0) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_INVALID_ARGUMENT;
+    }
+    return false;
+  }
+  return true;
+}
+
+bool compute_prepare_graph(const compute_execute_t &, bool * reused_out, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  if (reused_out != nullptr) {
+    *reused_out = true;
+  }
+  return true;
+}
+
+bool compute_alloc_graph(const compute_execute_t &, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return true;
+}
+
+bool compute_bind_inputs(const compute_execute_t &, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return true;
+}
+
+bool compute_run_backend(const compute_execute_t & ev, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = ev.kv_tokens > 0 ? EMEL_OK : EMEL_ERR_BACKEND;
+  }
+  return ev.kv_tokens > 0;
+}
+
+bool compute_extract_outputs(
+    const compute_execute_t & ev, int32_t * outputs_out, int32_t * err_out) {
+  if (ev.kv_tokens < ev.ubatch_size) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_BACKEND;
+    }
+    return false;
+  }
+  if (outputs_out != nullptr) {
+    *outputs_out = ev.ubatch_size;
+  }
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return true;
+}
+
+void apply_compute_callbacks(emel::decoder::ubatch_executor::event::execute & ev) {
+  ev.compute_validate = compute_validate;
+  ev.compute_prepare_graph = compute_prepare_graph;
+  ev.compute_alloc_graph = compute_alloc_graph;
+  ev.compute_bind_inputs = compute_bind_inputs;
+  ev.compute_run_backend = compute_run_backend;
+  ev.compute_extract_outputs = compute_extract_outputs;
+}
+
+void apply_compute_callbacks(emel::decoder::compute_executor::event::execute & ev) {
+  ev.validate = compute_validate;
+  ev.prepare_graph = compute_prepare_graph;
+  ev.alloc_graph = compute_alloc_graph;
+  ev.bind_inputs = compute_bind_inputs;
+  ev.run_backend = compute_run_backend;
+  ev.extract_outputs = compute_extract_outputs;
+}
+
 bool prepare_kv(
     emel::kv::cache::sm & kv_cache,
     const int32_t * ubatch_sizes,
@@ -44,7 +125,7 @@ TEST_CASE("ubatch_executor_execute_success_path") {
   int32_t kv_tokens = 0;
   bool rollback_attempted = false;
   int32_t error = EMEL_OK;
-  CHECK(machine.process_event(emel::decoder::ubatch_executor::event::execute{
+  emel::decoder::ubatch_executor::event::execute execute{
     .ubatch_index = 0,
     .ubatch_size = ubatch_size,
     .memory_coordinator_sm = &memory_coordinator,
@@ -53,7 +134,9 @@ TEST_CASE("ubatch_executor_execute_success_path") {
     .kv_tokens_out = &kv_tokens,
     .rollback_attempted_out = &rollback_attempted,
     .error_out = &error,
-  }));
+  };
+  apply_compute_callbacks(execute);
+  CHECK(machine.process_event(execute));
 
   CHECK(machine.is(boost::sml::state<emel::decoder::ubatch_executor::initialized>));
   CHECK(error == EMEL_OK);
@@ -70,31 +153,37 @@ TEST_CASE("ubatch_executor_execute_rejects_invalid_payload") {
   emel::kv::cache::sm kv_cache{};
   int32_t error = EMEL_OK;
 
-  CHECK_FALSE(machine.process_event(emel::decoder::ubatch_executor::event::execute{
+  emel::decoder::ubatch_executor::event::execute missing_ubatch{
     .ubatch_index = -1,
     .ubatch_size = 2,
     .memory_coordinator_sm = &memory_coordinator,
     .kv_cache_sm = &kv_cache,
     .error_out = &error,
-  }));
+  };
+  apply_compute_callbacks(missing_ubatch);
+  CHECK_FALSE(machine.process_event(missing_ubatch));
   CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
 
-  CHECK_FALSE(machine.process_event(emel::decoder::ubatch_executor::event::execute{
+  emel::decoder::ubatch_executor::event::execute zero_size{
     .ubatch_index = 0,
     .ubatch_size = 0,
     .memory_coordinator_sm = &memory_coordinator,
     .kv_cache_sm = &kv_cache,
     .error_out = &error,
-  }));
+  };
+  apply_compute_callbacks(zero_size);
+  CHECK_FALSE(machine.process_event(zero_size));
   CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
 
-  CHECK_FALSE(machine.process_event(emel::decoder::ubatch_executor::event::execute{
+  emel::decoder::ubatch_executor::event::execute missing_memory{
     .ubatch_index = 0,
     .ubatch_size = 1,
     .memory_coordinator_sm = nullptr,
     .kv_cache_sm = &kv_cache,
     .error_out = &error,
-  }));
+  };
+  apply_compute_callbacks(missing_memory);
+  CHECK_FALSE(machine.process_event(missing_memory));
   CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
@@ -105,14 +194,16 @@ TEST_CASE("ubatch_executor_compute_failure_attempts_rollback") {
   bool rollback_attempted = false;
   int32_t error = EMEL_OK;
 
-  CHECK_FALSE(machine.process_event(emel::decoder::ubatch_executor::event::execute{
+  emel::decoder::ubatch_executor::event::execute execute{
     .ubatch_index = 0,
     .ubatch_size = 2,
     .memory_coordinator_sm = &memory_coordinator,
     .kv_cache_sm = &kv_cache,
     .rollback_attempted_out = &rollback_attempted,
     .error_out = &error,
-  }));
+  };
+  apply_compute_callbacks(execute);
+  CHECK_FALSE(machine.process_event(execute));
 
   CHECK(machine.is(boost::sml::state<emel::decoder::ubatch_executor::initialized>));
   CHECK(error == EMEL_ERR_BACKEND);
@@ -126,26 +217,24 @@ TEST_CASE("ubatch_executor_rejects_reentrant_execute_when_not_initialized") {
 
   int32_t error_out = EMEL_OK;
   bool rollback_attempted = false;
-  CHECK_FALSE(machine.process_event(emel::decoder::ubatch_executor::event::execute{
+  emel::decoder::ubatch_executor::event::execute execute{
     .ubatch_index = 0,
     .ubatch_size = 1,
     .memory_coordinator_sm = &memory_coordinator,
     .kv_cache_sm = &kv_cache,
     .rollback_attempted_out = &rollback_attempted,
     .error_out = &error_out,
-  }));
+  };
+  apply_compute_callbacks(execute);
+  CHECK_FALSE(machine.process_event(execute));
   CHECK(error_out != EMEL_OK);
 
   error_out = EMEL_OK;
   rollback_attempted = false;
-  CHECK_FALSE(machine.process_event(emel::decoder::ubatch_executor::event::execute{
-    .ubatch_index = 0,
-    .ubatch_size = 1,
-    .memory_coordinator_sm = &memory_coordinator,
-    .kv_cache_sm = &kv_cache,
-    .rollback_attempted_out = &rollback_attempted,
-    .error_out = &error_out,
-  }));
+  emel::decoder::ubatch_executor::event::execute again = execute;
+  again.error_out = &error_out;
+  again.rollback_attempted_out = &rollback_attempted;
+  CHECK_FALSE(machine.process_event(again));
   CHECK(error_out != EMEL_OK);
 }
 
@@ -252,15 +341,24 @@ TEST_CASE("ubatch_executor_action_helpers_cover_error_branches") {
     ctx.ubatch_size = ubatch_size;
     using compute_base_t = emel::decoder::compute_executor::sm::base_type;
     auto & compute_base = static_cast<compute_base_t &>(ctx.compute_executor);
-    CHECK(compute_base.process_event(emel::decoder::compute_executor::event::execute{
+    emel::decoder::compute_executor::event::execute compute_execute{
       .ubatch_index = 0,
       .ubatch_size = 1,
       .kv_tokens = 1,
-    }));
+    };
+    apply_compute_callbacks(compute_execute);
+    CHECK(compute_base.process_event(compute_execute));
 
+    emel::decoder::ubatch_executor::event::execute compute_request{
+      .ubatch_index = 0,
+      .ubatch_size = ubatch_size,
+      .kv_cache_sm = &kv_cache,
+    };
+    apply_compute_callbacks(compute_request);
     emel::decoder::ubatch_executor::action::run_compute(
         emel::decoder::ubatch_executor::event::run_compute{
             .kv_cache_sm = &kv_cache,
+            .request = &compute_request,
             .error_out = &error_out,
         },
         ctx);
@@ -290,14 +388,16 @@ TEST_CASE("ubatch_executor_execute_handles_compute_executor_extract_failure") {
   const int32_t prepared_size = 1;
   CHECK(prepare_kv(kv_cache, &prepared_size, 1, 16));
 
-  CHECK_FALSE(machine.process_event(emel::decoder::ubatch_executor::event::execute{
+  emel::decoder::ubatch_executor::event::execute execute{
     .ubatch_index = 0,
     .ubatch_size = 2,
     .memory_coordinator_sm = &memory_coordinator,
     .kv_cache_sm = &kv_cache,
     .rollback_attempted_out = &rollback_attempted,
     .error_out = &error,
-  }));
+  };
+  apply_compute_callbacks(execute);
+  CHECK_FALSE(machine.process_event(execute));
   CHECK(error == EMEL_ERR_BACKEND);
   CHECK(rollback_attempted);
 }

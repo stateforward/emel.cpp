@@ -4,8 +4,12 @@
 
 namespace emel::decoder::compute_executor::guard {
 
-inline constexpr auto has_outputs = [](const action::context & ctx) {
-  return ctx.outputs_produced > 0;
+inline constexpr auto graph_reused = [](const events::prepare_graph_done & ev) {
+  return ev.reused;
+};
+
+inline constexpr auto graph_needs_allocation = [](const events::prepare_graph_done & ev) {
+  return !ev.reused;
 };
 
 }  // namespace emel::decoder::compute_executor::guard
