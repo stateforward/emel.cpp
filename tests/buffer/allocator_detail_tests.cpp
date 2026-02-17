@@ -154,26 +154,7 @@ TEST_CASE("buffer_allocator_detail_run_planner_and_realloc_analyzer") {
   emel::buffer::allocator::action::context ctx{};
   std::array<int32_t, emel::buffer::allocator::action::k_max_buffers> sizes = {};
   int32_t err = EMEL_OK;
-  CHECK_FALSE(emel::buffer::allocator::action::detail::run_planner(
-    nullptr,
-    view,
-    nullptr,
-    nullptr,
-    1,
-    true,
-    sizes.data(),
-    1,
-    nullptr,
-    0,
-    nullptr,
-    0,
-    nullptr,
-    ctx,
-    err));
-  CHECK(err != EMEL_OK);
-
   emel::buffer::planner::sm planner{};
-  err = EMEL_OK;
   CHECK(emel::buffer::allocator::action::detail::run_planner(
     &planner,
     view,

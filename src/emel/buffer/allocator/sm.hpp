@@ -100,8 +100,11 @@ struct model {
     struct failed {};
 
     return sml::make_transition_table(
-      *sml::state<uninitialized> + sml::event<event::initialize> /
-          action::begin_initialize = sml::state<initializing>,
+      *sml::state<uninitialized> +
+              sml::event<event::initialize>[guard::valid_initialize{}] / action::begin_initialize =
+          sml::state<initializing>,
+      sml::state<uninitialized> + sml::event<event::initialize> / action::reject_invalid =
+          sml::state<failed>,
       sml::state<initializing> + sml::on_entry<event::initialize> /
           [](const event::initialize & ev, action::context &, process_t & process) noexcept {
             const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
@@ -116,10 +119,14 @@ struct model {
       sml::state<initializing> + sml::event<events::initialize_error> /
           action::on_initialize_error = sml::state<failed>,
 
-      sml::state<ready> + sml::event<event::reserve_n_size> /
+      sml::state<ready> + sml::event<event::reserve_n_size>[guard::can_reserve_n_size{}] /
           action::begin_reserve_n_size = sml::state<reserving_n_size>,
-      sml::state<allocated> + sml::event<event::reserve_n_size> /
+      sml::state<ready> + sml::event<event::reserve_n_size> / action::reject_invalid =
+          sml::state<failed>,
+      sml::state<allocated> + sml::event<event::reserve_n_size>[guard::can_reserve_n_size{}] /
           action::begin_reserve_n_size = sml::state<reserving_n_size>,
+      sml::state<allocated> + sml::event<event::reserve_n_size> / action::reject_invalid =
+          sml::state<failed>,
       sml::state<reserving_n_size> + sml::on_entry<event::reserve_n_size> /
           [](const event::reserve_n_size & ev, action::context &, process_t & process) noexcept {
             const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
@@ -134,14 +141,22 @@ struct model {
       sml::state<reserving_n_size> + sml::event<events::reserve_n_size_error> /
           action::on_reserve_n_size_error = sml::state<failed>,
 
-      sml::state<ready> + sml::event<event::reserve_n> /
+      sml::state<ready> + sml::event<event::reserve_n>[guard::can_reserve_n{}] /
           action::begin_reserve_n = sml::state<reserving>,
-      sml::state<allocated> + sml::event<event::reserve_n> /
+      sml::state<ready> + sml::event<event::reserve_n> / action::reject_invalid =
+          sml::state<failed>,
+      sml::state<allocated> + sml::event<event::reserve_n>[guard::can_reserve_n{}] /
           action::begin_reserve_n = sml::state<reserving>,
-      sml::state<ready> + sml::event<event::reserve> /
+      sml::state<allocated> + sml::event<event::reserve_n> / action::reject_invalid =
+          sml::state<failed>,
+      sml::state<ready> + sml::event<event::reserve>[guard::can_reserve{}] /
           action::begin_reserve = sml::state<reserving>,
-      sml::state<allocated> + sml::event<event::reserve> /
+      sml::state<ready> + sml::event<event::reserve> / action::reject_invalid =
+          sml::state<failed>,
+      sml::state<allocated> + sml::event<event::reserve>[guard::can_reserve{}] /
           action::begin_reserve = sml::state<reserving>,
+      sml::state<allocated> + sml::event<event::reserve> / action::reject_invalid =
+          sml::state<failed>,
       sml::state<reserving> + sml::on_entry<event::reserve_n> /
           [](const event::reserve_n & ev, action::context &, process_t & process) noexcept {
             const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
@@ -165,10 +180,14 @@ struct model {
       sml::state<reserving> + sml::event<events::reserve_error> / action::on_reserve_error =
           sml::state<failed>,
 
-      sml::state<ready> + sml::event<event::alloc_graph> /
+      sml::state<ready> + sml::event<event::alloc_graph>[guard::can_alloc_graph{}] /
           action::begin_alloc_graph = sml::state<allocating_graph>,
-      sml::state<allocated> + sml::event<event::alloc_graph> /
+      sml::state<ready> + sml::event<event::alloc_graph> / action::reject_invalid =
+          sml::state<failed>,
+      sml::state<allocated> + sml::event<event::alloc_graph>[guard::can_alloc_graph{}] /
           action::begin_alloc_graph = sml::state<allocating_graph>,
+      sml::state<allocated> + sml::event<event::alloc_graph> / action::reject_invalid =
+          sml::state<failed>,
       sml::state<allocating_graph> + sml::on_entry<event::alloc_graph> /
           [](const event::alloc_graph & ev, action::context &, process_t & process) noexcept {
             const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;

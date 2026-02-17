@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 
 #include "emel/buffer/allocator/actions.hpp"
+#include "emel/buffer/allocator/guards.hpp"
 #include "emel/buffer/chunk_allocator/sm.hpp"
 #include "emel/buffer/allocator/sm.hpp"
 #include "emel/buffer/planner/sm.hpp"
@@ -97,149 +98,65 @@ TEST_CASE("buffer_allocator_actions_error_handlers_set_backend_fallback") {
 TEST_CASE("buffer_allocator_actions_validate_graph_and_planner_presence") {
   const graph_storage g = make_graph();
   std::array<int32_t, 1> sizes = {{0}};
-  emel::buffer::planner::sm planner{};
-  emel::buffer::chunk_allocator::sm chunk_allocator{};
-  emel::buffer::realloc_analyzer::sm realloc_analyzer{};
 
-  {
-    emel::buffer::allocator::action::context ctx{};
-    ctx.buffer_count = 1;
-    int32_t error_out = EMEL_OK;
-    emel::buffer::allocator::action::begin_reserve_n_size(
-      emel::buffer::allocator::event::reserve_n_size{
-        .graph = invalid_view(),
-        .node_buffer_ids = nullptr,
-        .leaf_buffer_ids = nullptr,
-        .sizes_out = sizes.data(),
-        .sizes_out_count = static_cast<int32_t>(sizes.size()),
-        .buffer_planner_sm = nullptr,
-        .error_out = &error_out,
-      },
-      ctx,
-      planner);
-    CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
-  }
+  emel::buffer::allocator::action::context ctx{};
+  ctx.buffer_count = 1;
 
-  {
-    emel::buffer::allocator::action::context ctx{};
-    ctx.buffer_count = 1;
-    int32_t error_out = EMEL_OK;
-    emel::buffer::allocator::action::begin_reserve_n_size(
-      emel::buffer::allocator::event::reserve_n_size{
-        .graph = as_view(g),
-        .node_buffer_ids = nullptr,
-        .leaf_buffer_ids = nullptr,
-        .sizes_out = sizes.data(),
-        .sizes_out_count = static_cast<int32_t>(sizes.size()),
-        .buffer_planner_sm = nullptr,
-        .error_out = &error_out,
-      },
-      ctx,
-      planner);
-    CHECK(error_out == EMEL_OK);
-  }
+  CHECK_FALSE(emel::buffer::allocator::guard::can_reserve_n_size{}(
+    emel::buffer::allocator::event::reserve_n_size{
+      .graph = invalid_view(),
+      .node_buffer_ids = nullptr,
+      .leaf_buffer_ids = nullptr,
+      .sizes_out = sizes.data(),
+      .sizes_out_count = static_cast<int32_t>(sizes.size()),
+    },
+    ctx));
+  CHECK(emel::buffer::allocator::guard::can_reserve_n_size{}(
+    emel::buffer::allocator::event::reserve_n_size{
+      .graph = as_view(g),
+      .node_buffer_ids = nullptr,
+      .leaf_buffer_ids = nullptr,
+      .sizes_out = sizes.data(),
+      .sizes_out_count = static_cast<int32_t>(sizes.size()),
+    },
+    ctx));
 
-  {
-    emel::buffer::allocator::action::context ctx{};
-    ctx.buffer_count = 1;
-    int32_t error_out = EMEL_OK;
-    emel::buffer::allocator::action::begin_reserve_n(
-      emel::buffer::allocator::event::reserve_n{
-        .graph = invalid_view(),
-        .node_buffer_ids = nullptr,
-        .leaf_buffer_ids = nullptr,
-        .buffer_planner_sm = nullptr,
-        .error_out = &error_out,
-      },
-      ctx,
-      planner,
-      chunk_allocator);
-    CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
-  }
+  CHECK_FALSE(emel::buffer::allocator::guard::can_reserve_n{}(
+    emel::buffer::allocator::event::reserve_n{
+      .graph = invalid_view(),
+      .node_buffer_ids = nullptr,
+      .leaf_buffer_ids = nullptr,
+    },
+    ctx));
+  CHECK(emel::buffer::allocator::guard::can_reserve_n{}(
+    emel::buffer::allocator::event::reserve_n{
+      .graph = as_view(g),
+      .node_buffer_ids = nullptr,
+      .leaf_buffer_ids = nullptr,
+    },
+    ctx));
 
-  {
-    emel::buffer::allocator::action::context ctx{};
-    ctx.buffer_count = 1;
-    int32_t error_out = EMEL_OK;
-    emel::buffer::allocator::action::begin_reserve_n(
-      emel::buffer::allocator::event::reserve_n{
-        .graph = as_view(g),
-        .node_buffer_ids = nullptr,
-        .leaf_buffer_ids = nullptr,
-        .buffer_planner_sm = nullptr,
-        .error_out = &error_out,
-      },
-      ctx,
-      planner,
-      chunk_allocator);
-    CHECK(error_out == EMEL_OK);
-  }
+  CHECK_FALSE(emel::buffer::allocator::guard::can_reserve{}(
+    emel::buffer::allocator::event::reserve{
+      .graph = invalid_view(),
+    },
+    ctx));
+  CHECK(emel::buffer::allocator::guard::can_reserve{}(
+    emel::buffer::allocator::event::reserve{
+      .graph = as_view(g),
+    },
+    ctx));
 
-  {
-    emel::buffer::allocator::action::context ctx{};
-    ctx.buffer_count = 1;
-    int32_t error_out = EMEL_OK;
-    emel::buffer::allocator::action::begin_reserve(
-      emel::buffer::allocator::event::reserve{
-        .graph = invalid_view(),
-        .buffer_planner_sm = nullptr,
-        .error_out = &error_out,
-      },
-      ctx,
-      planner,
-      chunk_allocator);
-    CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
-  }
-
-  {
-    emel::buffer::allocator::action::context ctx{};
-    ctx.buffer_count = 1;
-    int32_t error_out = EMEL_OK;
-    emel::buffer::allocator::action::begin_reserve(
-      emel::buffer::allocator::event::reserve{
-        .graph = as_view(g),
-        .buffer_planner_sm = nullptr,
-        .error_out = &error_out,
-      },
-      ctx,
-      planner,
-      chunk_allocator);
-    CHECK(error_out == EMEL_OK);
-  }
-
-  {
-    emel::buffer::allocator::action::context ctx{};
-    ctx.buffer_count = 1;
-    int32_t error_out = EMEL_OK;
-    emel::buffer::allocator::action::begin_alloc_graph(
-      emel::buffer::allocator::event::alloc_graph{
-        .graph = invalid_view(),
-        .buffer_planner_sm = nullptr,
-        .error_out = &error_out,
-      },
-      ctx,
-      planner,
-      chunk_allocator,
-      realloc_analyzer);
-    CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
-  }
-
-  {
-    emel::buffer::allocator::action::context ctx{};
-    ctx.buffer_count = 1;
-    int32_t error_out = EMEL_OK;
-    emel::buffer::allocator::action::begin_alloc_graph(
-      emel::buffer::allocator::event::alloc_graph{
-        .graph = as_view(g),
-        .buffer_planner_sm = nullptr,
-        .error_out = &error_out,
-      },
-      ctx,
-      planner,
-      chunk_allocator,
-      realloc_analyzer);
-    CHECK(error_out == EMEL_OK);
-  }
+  CHECK_FALSE(emel::buffer::allocator::guard::can_alloc_graph{}(
+    emel::buffer::allocator::event::alloc_graph{
+      .graph = invalid_view(),
+    },
+    ctx));
+  CHECK(emel::buffer::allocator::guard::can_alloc_graph{}(
+    emel::buffer::allocator::event::alloc_graph{
+      .graph = as_view(g),
+    },
+    ctx));
 }
 
 TEST_CASE("buffer_allocator_actions_detail_alignment_and_tensor_alloc") {
@@ -347,11 +264,6 @@ TEST_CASE("buffer_allocator_actions_apply_required_sizes_and_release_bindings") 
   std::array<int32_t, emel::buffer::allocator::action::k_max_buffers> required = {};
   required[0] = 0;
   CHECK(emel::buffer::allocator::action::detail::apply_required_sizes_to_chunks(
-    c, required, nullptr, nullptr, nullptr, err) == false);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
-
-  err = EMEL_OK;
-  CHECK(emel::buffer::allocator::action::detail::apply_required_sizes_to_chunks(
     c, required, nullptr, nullptr, &chunk_allocator, err));
   CHECK(err == EMEL_OK);
   CHECK(c.committed_chunk_counts[0] == 0);
@@ -421,15 +333,11 @@ TEST_CASE("buffer_allocator_actions_begin_initialize_and_release_errors") {
   emel::buffer::chunk_allocator::sm chunk_allocator{};
   int32_t err = EMEL_OK;
 
-  emel::buffer::allocator::action::begin_initialize(
+  CHECK_FALSE(emel::buffer::allocator::guard::valid_initialize{}(
     emel::buffer::allocator::event::initialize{
       .buffer_count = 0,
       .chunk_allocator_sm = nullptr,
-      .error_out = &err,
-    },
-    c,
-    chunk_allocator);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+    }));
 
   emel::buffer::allocator::action::begin_release(
     emel::buffer::allocator::event::release{
@@ -444,25 +352,11 @@ TEST_CASE("buffer_allocator_actions_begin_initialize_and_release_errors") {
 TEST_CASE("buffer_allocator_actions_begin_alloc_graph_rejects_invalid_graph") {
   emel::buffer::allocator::action::context c{};
   c.buffer_count = 1;
-  int32_t err = EMEL_OK;
-  emel::buffer::planner::sm planner{};
-  emel::buffer::chunk_allocator::sm chunk_allocator{};
-  emel::buffer::realloc_analyzer::sm analyzer{};
-
-  emel::buffer::allocator::action::begin_alloc_graph(
+  CHECK_FALSE(emel::buffer::allocator::guard::can_alloc_graph{}(
     emel::buffer::allocator::event::alloc_graph{
       .graph = invalid_view(),
-      .buffer_planner_sm = nullptr,
-      .chunk_allocator_sm = nullptr,
-      .buffer_realloc_analyzer_sm = nullptr,
-      .strategy = nullptr,
-      .error_out = &err,
     },
-    c,
-    planner,
-    chunk_allocator,
-    analyzer);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+    c));
 }
 
 TEST_CASE("buffer_allocator_wrapper_rejects_reserve_calls_when_uninitialized") {
@@ -486,17 +380,11 @@ TEST_CASE("buffer_allocator_actions_chunk_allocator_helper_paths") {
   emel::buffer::allocator::action::context ctx{};
   int32_t err = EMEL_OK;
 
-  CHECK_FALSE(emel::buffer::allocator::action::detail::configure_chunk_allocator(nullptr, err));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
-
   std::array<int32_t, emel::buffer::allocator::action::k_max_buffers> required = {};
   required[0] = 64;
-  CHECK_FALSE(
-      emel::buffer::allocator::action::detail::apply_required_sizes_to_chunks(
-          ctx, required, nullptr, nullptr, nullptr, err));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
-
   emel::buffer::chunk_allocator::sm chunk_machine{};
+  CHECK(emel::buffer::allocator::action::detail::configure_chunk_allocator(&chunk_machine, err));
+  CHECK(err == EMEL_OK);
   ctx.buffer_count = 1;
   CHECK(
       emel::buffer::allocator::action::detail::apply_required_sizes_to_chunks(
@@ -538,17 +426,11 @@ TEST_CASE("buffer_allocator_actions_require_chunk_allocator_in_initialize_reserv
   ctx = {};
   ctx.buffer_count = 1;
   error_out = EMEL_OK;
-  emel::buffer::allocator::action::begin_reserve(
-      emel::buffer::allocator::event::reserve{
-        .graph = invalid_view(),
-        .buffer_planner_sm = &planner,
-        .chunk_allocator_sm = nullptr,
-        .error_out = &error_out,
-      },
-      ctx,
-      planner,
-      chunk_machine);
-  CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK_FALSE(emel::buffer::allocator::guard::can_reserve{}(
+    emel::buffer::allocator::event::reserve{
+      .graph = invalid_view(),
+    },
+    ctx));
 
   ctx = {};
   ctx.buffer_count = 1;
@@ -580,19 +462,11 @@ TEST_CASE("buffer_allocator_actions_require_chunk_allocator_in_initialize_reserv
   ctx = {};
   ctx.buffer_count = 1;
   error_out = EMEL_OK;
-  emel::buffer::allocator::action::begin_alloc_graph(
-      emel::buffer::allocator::event::alloc_graph{
-        .graph = invalid_view(),
-        .buffer_planner_sm = &planner,
-        .chunk_allocator_sm = &chunk_machine,
-        .buffer_realloc_analyzer_sm = nullptr,
-        .error_out = &error_out,
-      },
-      ctx,
-      planner,
-      chunk_machine,
-      analyzer);
-  CHECK(error_out == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK_FALSE(emel::buffer::allocator::guard::can_alloc_graph{}(
+    emel::buffer::allocator::event::alloc_graph{
+      .graph = invalid_view(),
+    },
+    ctx));
 
   ctx = {};
   ctx.buffer_count = 1;

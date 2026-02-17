@@ -653,13 +653,13 @@ TEST_CASE("loader actions map_parser and parse handle failures") {
   emel::model::data model{};
   emel::model::loader::event::load request{model};
   emel::model::loader::action::context ctx{};
+  emel::model::parser::sm parser_machine{};
+  emel::model::loader::sm loader_machine{};
   loader_sink sink{};
   emel::detail::process_support<loader_sink, emel::model::loader::process_t> support{&sink};
   auto & process = support.process_;
 
-  emel::model::loader::action::map_parser{}(request, ctx, process);
-  CHECK(sink.mapping_error == 1);
-  CHECK(sink.last_err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(!emel::model::loader::guard::can_map_parser{}(request));
 
   request.map_parser = [](const emel::model::loader::event::load &, int32_t * err_out) {
     if (err_out != nullptr) {
@@ -668,7 +668,7 @@ TEST_CASE("loader actions map_parser and parse handle failures") {
     return false;
   };
   emel::model::loader::action::map_parser{}(request, ctx, process);
-  CHECK(sink.mapping_error == 2);
+  CHECK(sink.mapping_error == 1);
   CHECK(sink.last_err == EMEL_ERR_BACKEND);
 
   request.map_parser = [](const emel::model::loader::event::load &, int32_t * err_out) {
@@ -681,28 +681,48 @@ TEST_CASE("loader actions map_parser and parse handle failures") {
   CHECK(sink.mapping_done == 1);
 
   emel::model::loader::events::mapping_parser_done done{&request};
+  CHECK(!emel::model::loader::guard::can_parse{}(done));
+
+  request.parser_sm = &parser_machine;
+  request.loader_sm = &loader_machine;
+  request.dispatch_parsing_done = dispatch_parsing_done;
+  request.dispatch_parsing_error = dispatch_parsing_error;
+  request.dispatch_parse_model = [](void *, const emel::model::parser::event::parse_model &) {
+    return false;
+  };
+  CHECK(emel::model::loader::guard::can_parse{}(done));
   emel::model::loader::action::parse{}(done, ctx, process);
   CHECK(sink.parsing_error == 1);
-  CHECK(sink.last_err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(sink.last_err == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("loader actions load_weights and map_layers cover branches") {
   emel::model::data model{};
   emel::model::loader::event::load request{model};
   emel::model::loader::action::context ctx{};
+  emel::model::weight_loader::sm weight_machine{};
+  emel::model::loader::sm loader_machine{};
   loader_sink sink{};
   emel::detail::process_support<loader_sink, emel::model::loader::process_t> support{&sink};
   auto & process = support.process_;
 
   emel::model::loader::events::parsing_done parsed{&request};
+  CHECK(!emel::model::loader::guard::can_load_weights{}(parsed));
+
+  request.weight_loader_sm = &weight_machine;
+  request.loader_sm = &loader_machine;
+  request.dispatch_loading_done = dispatch_loading_done;
+  request.dispatch_loading_error = dispatch_loading_error;
+  request.dispatch_load_weights = [](void *, const emel::model::weight_loader::event::load_weights &) {
+    return false;
+  };
+  CHECK(emel::model::loader::guard::can_load_weights{}(parsed));
   emel::model::loader::action::load_weights{}(parsed, ctx, process);
   CHECK(sink.loading_error == 1);
-  CHECK(sink.last_err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(sink.last_err == EMEL_ERR_BACKEND);
 
   emel::model::loader::events::loading_done loaded{&request};
-  emel::model::loader::action::store_and_map_layers{}(loaded, ctx, process);
-  CHECK(sink.layers_error == 1);
-  CHECK(sink.last_err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(!emel::model::loader::guard::can_map_layers{}(loaded));
 
   request.map_layers = [](const emel::model::loader::event::load &, int32_t * err_out) {
     if (err_out != nullptr) {
@@ -711,7 +731,7 @@ TEST_CASE("loader actions load_weights and map_layers cover branches") {
     return false;
   };
   emel::model::loader::action::store_and_map_layers{}(loaded, ctx, process);
-  CHECK(sink.layers_error == 2);
+  CHECK(sink.layers_error == 1);
   CHECK(sink.last_err == EMEL_ERR_BACKEND);
 
   request.map_layers = [](const emel::model::loader::event::load &, int32_t * err_out) {
@@ -720,6 +740,7 @@ TEST_CASE("loader actions load_weights and map_layers cover branches") {
     }
     return true;
   };
+  CHECK(emel::model::loader::guard::can_map_layers{}(loaded));
   emel::model::loader::action::store_and_map_layers{}(loaded, ctx, process);
   CHECK(sink.layers_done == 1);
 }
@@ -733,17 +754,15 @@ TEST_CASE("loader actions validate_structure and validate_architecture") {
   auto & process = support.process_;
 
   emel::model::loader::events::layers_mapped mapped{&request};
-  emel::model::loader::action::validate_structure{}(mapped, ctx, process);
-  CHECK(sink.structure_error == 1);
-  CHECK(sink.last_err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(!emel::model::loader::guard::can_validate_structure{}(mapped));
 
   request.check_tensors = false;
+  CHECK(emel::model::loader::guard::can_validate_structure{}(mapped));
   emel::model::loader::action::validate_structure{}(mapped, ctx, process);
   CHECK(sink.structure_done == 1);
 
   request.check_tensors = true;
-  emel::model::loader::action::validate_structure{}(mapped, ctx, process);
-  CHECK(sink.structure_error == 2);
+  CHECK(!emel::model::loader::guard::can_validate_structure{}(mapped));
 
   request.validate_structure = [](const emel::model::loader::event::load &, int32_t * err_out) {
     if (err_out != nullptr) {
@@ -751,8 +770,9 @@ TEST_CASE("loader actions validate_structure and validate_architecture") {
     }
     return false;
   };
+  CHECK(emel::model::loader::guard::can_validate_structure{}(mapped));
   emel::model::loader::action::validate_structure{}(mapped, ctx, process);
-  CHECK(sink.structure_error == 3);
+  CHECK(sink.structure_error == 1);
   CHECK(sink.last_err == EMEL_ERR_MODEL_INVALID);
 
   request.validate_structure = [](const emel::model::loader::event::load &, int32_t * err_out) {
@@ -764,9 +784,9 @@ TEST_CASE("loader actions validate_structure and validate_architecture") {
   emel::model::loader::action::validate_structure{}(mapped, ctx, process);
   CHECK(sink.structure_done == 2);
 
+  request.validate_architecture = true;
   emel::model::loader::events::structure_validated validated{&request};
-  emel::model::loader::action::validate_architecture{}(validated, ctx, process);
-  CHECK(sink.architecture_error == 1);
+  CHECK(!emel::model::loader::guard::can_validate_architecture{}(validated));
 
   request.validate_architecture_impl = [](const emel::model::loader::event::load &, int32_t * err_out) {
     if (err_out != nullptr) {
@@ -774,8 +794,9 @@ TEST_CASE("loader actions validate_structure and validate_architecture") {
     }
     return false;
   };
+  CHECK(emel::model::loader::guard::can_validate_architecture{}(validated));
   emel::model::loader::action::validate_architecture{}(validated, ctx, process);
-  CHECK(sink.architecture_error == 2);
+  CHECK(sink.architecture_error == 1);
   CHECK(sink.last_err == EMEL_ERR_MODEL_INVALID);
 
   request.validate_architecture_impl = [](const emel::model::loader::event::load &, int32_t * err_out) {

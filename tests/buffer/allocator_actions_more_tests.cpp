@@ -5,6 +5,7 @@
 
 #include "emel/buffer/allocator/actions.hpp"
 #include "emel/buffer/chunk_allocator/sm.hpp"
+#include "emel/buffer/realloc_analyzer/sm.hpp"
 #include "emel/emel.h"
 
 namespace {
@@ -95,7 +96,7 @@ TEST_CASE("buffer_allocator_actions_valid_graph_rejects_negative_counts") {
   CHECK_FALSE(emel::buffer::allocator::action::detail::valid_graph_tensors(graph));
 }
 
-TEST_CASE("buffer_allocator_actions_rejects_null_realloc_analyzer") {
+TEST_CASE("buffer_allocator_actions_realloc_analyzer_accepts_empty_graph") {
   emel::buffer::allocator::action::context c{};
   int32_t err = EMEL_OK;
   bool needs_realloc = false;
@@ -107,11 +108,12 @@ TEST_CASE("buffer_allocator_actions_rejects_null_realloc_analyzer") {
     .n_leafs = 0,
   };
 
-  CHECK_FALSE(emel::buffer::allocator::action::detail::run_realloc_analyzer(
-    nullptr,
+  emel::buffer::realloc_analyzer::sm analyzer{};
+  CHECK(emel::buffer::allocator::action::detail::run_realloc_analyzer(
+    &analyzer,
     graph,
     c,
     needs_realloc,
     err));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == EMEL_OK);
 }

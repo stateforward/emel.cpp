@@ -48,10 +48,6 @@ struct reset {
 
 struct map_parser {
   void operator()(const event::load & ev, context &, process_t & process) const {
-    if (ev.map_parser == nullptr) {
-      process(events::mapping_parser_error{&ev, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
     int32_t err = EMEL_OK;
     const bool ok = ev.map_parser(ev, &err);
     if (!ok || err != EMEL_OK) {
@@ -75,12 +71,6 @@ struct start_map_parser {
 struct parse {
   void operator()(const events::mapping_parser_done & ev, context &, process_t & process) const {
     const event::load * request = ev.request;
-    if (request == nullptr || request->dispatch_parse_model == nullptr || request->parser_sm == nullptr
-        || request->loader_sm == nullptr || request->dispatch_parsing_done == nullptr
-        || request->dispatch_parsing_error == nullptr) {
-      process(events::parsing_error{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
     emel::model::parser::event::parse_model parse_request{
       .model = &request->model_data,
       .model_path = request->model_path,
@@ -109,12 +99,6 @@ struct parse {
 struct load_weights {
   void operator()(const events::parsing_done & ev, context &, process_t & process) const {
     const event::load * request = ev.request;
-    if (request == nullptr || request->dispatch_load_weights == nullptr || request->weight_loader_sm == nullptr
-        || request->loader_sm == nullptr || request->dispatch_loading_done == nullptr
-        || request->dispatch_loading_error == nullptr) {
-      process(events::loading_error{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
     emel::model::weight_loader::event::load_weights load_request{
       .request_mmap = request->request_mmap,
       .request_direct_io = request->request_direct_io,
@@ -152,10 +136,6 @@ struct store_and_map_layers {
     ctx.bytes_done = ev.bytes_done;
     ctx.used_mmap = ev.used_mmap;
     const event::load * request = ev.request;
-    if (request == nullptr || request->map_layers == nullptr) {
-      process(events::layers_map_error{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
     int32_t err = EMEL_OK;
     const bool ok = request->map_layers(*request, &err);
     if (!ok || err != EMEL_OK) {
@@ -180,16 +160,8 @@ struct validate_structure {
     } else {
       return;
     }
-    if (request == nullptr) {
-      process(events::structure_error{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
     if (!request->check_tensors) {
       process(events::structure_validated{request});
-      return;
-    }
-    if (request->validate_structure == nullptr) {
-      process(events::structure_error{request, EMEL_ERR_INVALID_ARGUMENT});
       return;
     }
     int32_t err = EMEL_OK;
@@ -209,10 +181,6 @@ struct validate_architecture {
   void operator()(const events::structure_validated & ev, context &, process_t & process) const {
     const event::load * request = ev.request;
     int32_t err = EMEL_OK;
-    if (request == nullptr || request->validate_architecture_impl == nullptr) {
-      process(events::architecture_error{request, EMEL_ERR_INVALID_ARGUMENT});
-      return;
-    }
     const bool ok = request->validate_architecture_impl(*request, &err);
     if (!ok || err != EMEL_OK) {
       if (err == EMEL_OK) {
@@ -222,6 +190,39 @@ struct validate_architecture {
       return;
     }
     process(events::architecture_validated{request});
+  }
+};
+
+struct reject_invalid {
+  template <class Event>
+  void operator()(const Event & ev, context &, process_t & process) const {
+    if constexpr (std::is_same_v<Event, event::load>) {
+      process(events::mapping_parser_error{&ev, EMEL_ERR_INVALID_ARGUMENT});
+    } else if constexpr (std::is_same_v<Event, events::mapping_parser_done>) {
+      process(events::parsing_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
+    } else if constexpr (std::is_same_v<Event, events::parsing_done>) {
+      process(events::loading_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
+    } else if constexpr (std::is_same_v<Event, events::loading_done>) {
+      process(events::layers_map_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
+    } else if constexpr (std::is_same_v<Event, events::layers_mapped>) {
+      process(events::structure_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
+    } else if constexpr (std::is_same_v<Event, events::structure_validated>) {
+      process(events::architecture_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
+    } else {
+      static_assert(!std::is_same_v<Event, Event>, "reject_invalid unsupported event");
+    }
+  }
+};
+
+struct reject_invalid_structure {
+  template <class Event>
+  void operator()(const Event & ev, context &, process_t & process) const {
+    if constexpr (std::is_same_v<Event, events::parsing_done> ||
+                  std::is_same_v<Event, events::layers_mapped>) {
+      process(events::structure_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
+    } else {
+      static_assert(!std::is_same_v<Event, Event>, "reject_invalid_structure unsupported event");
+    }
   }
 };
 

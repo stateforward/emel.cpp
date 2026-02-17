@@ -24,34 +24,56 @@ struct model {
   auto operator()() const {
     namespace sml = boost::sml;
     return sml::make_transition_table(
-      *sml::state<initialized> + sml::event<event::load>
+      *sml::state<initialized> + sml::event<event::load> [guard::can_map_parser{}]
         / action::start_map_parser{} = sml::state<mapping_parser>,
+      sml::state<initialized> + sml::event<event::load> [guard::cannot_map_parser{}]
+        / action::reject_invalid{} = sml::state<errored>,
 
-      sml::state<mapping_parser> + sml::event<events::mapping_parser_done>
+      sml::state<mapping_parser> + sml::event<events::mapping_parser_done> [guard::can_parse{}]
         / action::parse{} = sml::state<parsing>,
+      sml::state<mapping_parser> + sml::event<events::mapping_parser_done> [guard::cannot_parse{}]
+        / action::reject_invalid{} = sml::state<errored>,
       sml::state<mapping_parser> + sml::event<events::mapping_parser_error>
         / action::dispatch_error{} = sml::state<errored>,
 
-      sml::state<parsing> + sml::event<events::parsing_done> [guard::should_load_weights{}]
+      sml::state<parsing> + sml::event<events::parsing_done>
+        [guard::should_load_weights_and_can_load{}]
         / action::load_weights{} = sml::state<loading_weights>,
-      sml::state<parsing> + sml::event<events::parsing_done> [guard::skip_weights{}]
+      sml::state<parsing> + sml::event<events::parsing_done>
+        [guard::should_load_weights_and_cannot_load{}]
+        / action::reject_invalid{} = sml::state<errored>,
+      sml::state<parsing> + sml::event<events::parsing_done>
+        [guard::skip_weights_and_can_validate_structure{}]
         / action::validate_structure{} = sml::state<validating_structure>,
+      sml::state<parsing> + sml::event<events::parsing_done>
+        [guard::skip_weights_and_cannot_validate_structure{}]
+        / action::reject_invalid_structure{} = sml::state<errored>,
       sml::state<parsing> + sml::event<events::parsing_error>
         / action::dispatch_error{} = sml::state<errored>,
 
-      sml::state<loading_weights> + sml::event<events::loading_done>
+      sml::state<loading_weights> + sml::event<events::loading_done> [guard::can_map_layers{}]
         / action::store_and_map_layers{} = sml::state<mapping_layers>,
+      sml::state<loading_weights> + sml::event<events::loading_done> [guard::cannot_map_layers{}]
+        / action::reject_invalid{} = sml::state<errored>,
       sml::state<loading_weights> + sml::event<events::loading_error>
         / action::dispatch_error{} = sml::state<errored>,
 
       sml::state<mapping_layers> + sml::event<events::layers_mapped>
-        / action::validate_structure{} = sml::state<validating_structure>,
+        [guard::can_validate_structure{}] / action::validate_structure{}
+          = sml::state<validating_structure>,
+      sml::state<mapping_layers> + sml::event<events::layers_mapped>
+        [guard::cannot_validate_structure{}] / action::reject_invalid_structure{}
+          = sml::state<errored>,
       sml::state<mapping_layers> + sml::event<events::layers_map_error>
         / action::dispatch_error{} = sml::state<errored>,
 
       sml::state<validating_structure> + sml::event<events::structure_validated>
-        [guard::has_arch_validate{}] / action::validate_architecture{}
+        [guard::has_arch_validate_and_can_validate_architecture{}]
+          / action::validate_architecture{}
           = sml::state<validating_architecture>,
+      sml::state<validating_structure> + sml::event<events::structure_validated>
+        [guard::has_arch_validate_and_cannot_validate_architecture{}]
+          / action::reject_invalid{} = sml::state<errored>,
       sml::state<validating_structure> + sml::event<events::structure_validated>
         [guard::no_arch_validate{}] / action::dispatch_done{} = sml::state<done>,
       sml::state<validating_structure> + sml::event<events::structure_error>

@@ -329,11 +329,6 @@ inline bool run_planner(
     int32_t * chunk_sizes_out, const int32_t chunk_sizes_out_count,
     const emel::buffer::planner::strategy * planner_strategy, const context & c,
     int32_t & out_error) noexcept {
-  if (planner == nullptr) {
-    out_error = EMEL_ERR_INVALID_ARGUMENT;
-    return false;
-  }
-
   const int32_t * buffer_alignments = nullptr;
   const int32_t * buffer_max_sizes = nullptr;
   for (int32_t i = 0; i < buffer_count; ++i) {
@@ -383,11 +378,6 @@ inline bool run_planner(
 inline bool run_realloc_analyzer(
     emel::buffer::realloc_analyzer::sm * analyzer, const event::graph_view & graph,
     const context & c, bool & out_needs_realloc, int32_t & out_error) noexcept {
-  if (analyzer == nullptr) {
-    out_error = EMEL_ERR_INVALID_ARGUMENT;
-    return false;
-  }
-
   int32_t analyze_error = EMEL_OK;
   int32_t needs_realloc = 0;
   const bool ok = analyzer->process_event(emel::buffer::realloc_analyzer::event::analyze{
@@ -485,11 +475,6 @@ inline bool chunk_bindings_cover_required(
 
 inline bool configure_chunk_allocator(
     emel::buffer::chunk_allocator::sm * chunk_allocator_sm, int32_t & out_error) noexcept {
-  if (chunk_allocator_sm == nullptr) {
-    out_error = EMEL_ERR_INVALID_ARGUMENT;
-    return false;  // GCOVR_EXCL_LINE
-  }
-
   int32_t reset_error = EMEL_OK;
   if (!chunk_allocator_sm->process_event(emel::buffer::chunk_allocator::event::reset{
         .error_out = &reset_error,
@@ -518,11 +503,6 @@ inline bool apply_required_sizes_to_chunks(
     context & c, const std::array<int32_t, k_max_buffers> & required,
     const int32_t * planned_chunk_counts, const int32_t * planned_chunk_sizes,
     emel::buffer::chunk_allocator::sm * chunk_allocator_sm, int32_t & out_error) noexcept {
-  if (chunk_allocator_sm == nullptr) {
-    out_error = EMEL_ERR_INVALID_ARGUMENT;
-    return false;
-  }
-
   for (int32_t i = 0; i < c.buffer_count; ++i) {
     const int32_t target_size = required[i] > c.committed_sizes[i] ? required[i] : c.committed_sizes[i];
     if (target_size <= 0) {
@@ -658,11 +638,6 @@ inline bool apply_required_sizes_to_chunks(
 
 inline bool release_all_chunk_bindings(
     context & c, emel::buffer::chunk_allocator::sm * chunk_allocator_sm, int32_t & out_error) noexcept {
-  if (chunk_allocator_sm == nullptr) {
-    out_error = EMEL_ERR_INVALID_ARGUMENT;
-    return false;
-  }
-
   for (int32_t i = 0; i < c.buffer_count; ++i) {
     if (c.committed_chunk_counts[i] <= 0) {
       continue;
@@ -712,11 +687,8 @@ struct begin_initialize {
       const event::initialize & ev,
       context & c,
       emel::buffer::chunk_allocator::sm & chunk_allocator) const noexcept {
-    int32_t err = (ev.buffer_count > 0 && ev.buffer_count <= k_max_buffers)
-                    ? EMEL_OK
-                    : EMEL_ERR_INVALID_ARGUMENT;
-    if (err == EMEL_OK) {
-      c = {};
+    int32_t err = EMEL_OK;
+    c = {};
     c.buffer_count = ev.buffer_count;
     for (int32_t i = 0; i < k_max_buffers; ++i) {
       c.buffer_alignments[i] = k_default_alignment;
@@ -730,13 +702,12 @@ struct begin_initialize {
       c.buffer_alignments[i] = detail::sanitize_alignment(alignment);
       c.buffer_max_sizes[i] = detail::sanitize_max_size(max_size);
     }
-      detail::reset_chunk_bindings(c);
-      int32_t chunk_error = EMEL_OK;
-      emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
-          ev.chunk_allocator_sm != nullptr ? ev.chunk_allocator_sm : &chunk_allocator;
-      if (!detail::configure_chunk_allocator(chunk_allocator_sm, chunk_error)) {
-        err = chunk_error;
-      }
+    detail::reset_chunk_bindings(c);
+    int32_t chunk_error = EMEL_OK;
+    emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
+        ev.chunk_allocator_sm != nullptr ? ev.chunk_allocator_sm : &chunk_allocator;
+    if (!detail::configure_chunk_allocator(chunk_allocator_sm, chunk_error)) {
+      err = chunk_error;
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
@@ -770,30 +741,19 @@ struct begin_reserve_n_size {
       context & c,
       emel::buffer::planner::sm & planner) const noexcept {
     int32_t err = EMEL_OK;
-    if (c.buffer_count <= 0) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (!detail::valid_graph_tensors(ev.graph)) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (!detail::valid_buffer_ids_for_graph(
-                 ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids, c.buffer_count)) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (ev.sizes_out == nullptr || ev.sizes_out_count < c.buffer_count) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
+    emel::buffer::planner::sm * planner_sm =
+        ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
+    const emel::buffer::planner::strategy * strategy =
+        ev.strategy != nullptr ? ev.strategy : &emel::buffer::planner::default_strategies::reserve_n_size;
+    int32_t planner_err = EMEL_OK;
+    if (!detail::run_planner(
+          planner_sm, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids, c.buffer_count, true,
+          ev.sizes_out, ev.sizes_out_count, nullptr, 0, nullptr, 0, strategy, c, planner_err)) {
+      err = planner_err;  // GCOVR_EXCL_LINE
     } else {
-      emel::buffer::planner::sm * planner_sm =
-          ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
-      const emel::buffer::planner::strategy * strategy =
-          ev.strategy != nullptr ? ev.strategy : &emel::buffer::planner::default_strategies::reserve_n_size;
-      int32_t planner_err = EMEL_OK;
-      if (!detail::run_planner(
-            planner_sm, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids, c.buffer_count, true,
-            ev.sizes_out, ev.sizes_out_count, nullptr, 0, nullptr, 0, strategy, c, planner_err)) {
-        err = planner_err;  // GCOVR_EXCL_LINE
-      } else {
-        detail::capture_buffer_map(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids);
-        if (!detail::capture_alloc_snapshot(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids)) {
-          err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
-        }
+      detail::capture_buffer_map(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids);
+      if (!detail::capture_alloc_snapshot(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids)) {
+        err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
       }
     }
     if (ev.error_out != nullptr) {
@@ -829,39 +789,30 @@ struct begin_reserve_n {
       emel::buffer::planner::sm & planner,
       emel::buffer::chunk_allocator::sm & chunk_allocator) const noexcept {
     int32_t err = EMEL_OK;
-    if (c.buffer_count <= 0) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (!detail::valid_graph_tensors(ev.graph)) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (!detail::valid_buffer_ids_for_graph(
-                 ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids, c.buffer_count)) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
+    emel::buffer::planner::sm * planner_sm =
+        ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
+    emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
+        ev.chunk_allocator_sm != nullptr ? ev.chunk_allocator_sm : &chunk_allocator;
+    const emel::buffer::planner::strategy * strategy =
+        ev.strategy != nullptr ? ev.strategy : &emel::buffer::planner::default_strategies::reserve_n;
+    std::array<int32_t, k_max_buffers> required = {};
+    std::array<int32_t, k_max_buffers> chunk_counts = {};
+    std::array<int32_t, k_max_chunk_bindings> chunk_sizes = {};
+    int32_t planner_err = EMEL_OK;
+    if (!detail::run_planner(
+          planner_sm, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids, c.buffer_count, false,
+          required.data(), c.buffer_count,
+          chunk_counts.data(), c.buffer_count,
+          chunk_sizes.data(), static_cast<int32_t>(chunk_sizes.size()),
+          strategy, c, planner_err)) {
+      err = planner_err;
     } else {
-      emel::buffer::planner::sm * planner_sm =
-          ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
-      emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
-          ev.chunk_allocator_sm != nullptr ? ev.chunk_allocator_sm : &chunk_allocator;
-      const emel::buffer::planner::strategy * strategy =
-          ev.strategy != nullptr ? ev.strategy : &emel::buffer::planner::default_strategies::reserve_n;
-      std::array<int32_t, k_max_buffers> required = {};
-      std::array<int32_t, k_max_buffers> chunk_counts = {};
-      std::array<int32_t, k_max_chunk_bindings> chunk_sizes = {};
-      int32_t planner_err = EMEL_OK;
-      if (!detail::run_planner(
-            planner_sm, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids, c.buffer_count, false,
-            required.data(), c.buffer_count,
-            chunk_counts.data(), c.buffer_count,
-            chunk_sizes.data(), static_cast<int32_t>(chunk_sizes.size()),
-            strategy, c, planner_err)) {
-        err = planner_err;
-      } else {
-        detail::capture_buffer_map(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids);
-        if (!detail::capture_alloc_snapshot(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids)) {
-          err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
-        } else if (!detail::apply_required_sizes_to_chunks(
-                     c, required, chunk_counts.data(), chunk_sizes.data(), chunk_allocator_sm, planner_err)) {
-          err = planner_err;  // GCOVR_EXCL_LINE
-        }
+      detail::capture_buffer_map(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids);
+      if (!detail::capture_alloc_snapshot(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids)) {
+        err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+      } else if (!detail::apply_required_sizes_to_chunks(
+                   c, required, chunk_counts.data(), chunk_sizes.data(), chunk_allocator_sm, planner_err)) {
+        err = planner_err;  // GCOVR_EXCL_LINE
       }
     }
     if (ev.error_out != nullptr) {
@@ -878,38 +829,30 @@ struct begin_reserve {
       emel::buffer::planner::sm & planner,
       emel::buffer::chunk_allocator::sm & chunk_allocator) const noexcept {
     int32_t err = EMEL_OK;
-    if (c.buffer_count <= 0) {
-      err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
-    } else if (!detail::valid_graph_tensors(ev.graph)) {
-      err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
-    } else if (!detail::valid_buffer_ids_for_graph(ev.graph, nullptr, nullptr, c.buffer_count)) {
-      err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+    emel::buffer::planner::sm * planner_sm =
+        ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
+    emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
+        ev.chunk_allocator_sm != nullptr ? ev.chunk_allocator_sm : &chunk_allocator;
+    const emel::buffer::planner::strategy * strategy =
+        ev.strategy != nullptr ? ev.strategy : &emel::buffer::planner::default_strategies::reserve;
+    std::array<int32_t, k_max_buffers> required = {};
+    std::array<int32_t, k_max_buffers> chunk_counts = {};
+    std::array<int32_t, k_max_chunk_bindings> chunk_sizes = {};
+    int32_t planner_err = EMEL_OK;
+    if (!detail::run_planner(
+          planner_sm, ev.graph, nullptr, nullptr, c.buffer_count, false, required.data(),
+          c.buffer_count,
+          chunk_counts.data(), c.buffer_count,
+          chunk_sizes.data(), static_cast<int32_t>(chunk_sizes.size()),
+          strategy, c, planner_err)) {
+      err = planner_err;  // GCOVR_EXCL_LINE
     } else {
-      emel::buffer::planner::sm * planner_sm =
-          ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
-      emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
-          ev.chunk_allocator_sm != nullptr ? ev.chunk_allocator_sm : &chunk_allocator;
-      const emel::buffer::planner::strategy * strategy =
-          ev.strategy != nullptr ? ev.strategy : &emel::buffer::planner::default_strategies::reserve;
-      std::array<int32_t, k_max_buffers> required = {};
-      std::array<int32_t, k_max_buffers> chunk_counts = {};
-      std::array<int32_t, k_max_chunk_bindings> chunk_sizes = {};
-      int32_t planner_err = EMEL_OK;
-      if (!detail::run_planner(
-            planner_sm, ev.graph, nullptr, nullptr, c.buffer_count, false, required.data(),
-            c.buffer_count,
-            chunk_counts.data(), c.buffer_count,
-            chunk_sizes.data(), static_cast<int32_t>(chunk_sizes.size()),
-            strategy, c, planner_err)) {
+      detail::capture_buffer_map(c, ev.graph, nullptr, nullptr);
+      if (!detail::capture_alloc_snapshot(c, ev.graph, nullptr, nullptr)) {
+        err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+      } else if (!detail::apply_required_sizes_to_chunks(
+                   c, required, chunk_counts.data(), chunk_sizes.data(), chunk_allocator_sm, planner_err)) {
         err = planner_err;  // GCOVR_EXCL_LINE
-      } else {
-        detail::capture_buffer_map(c, ev.graph, nullptr, nullptr);
-        if (!detail::capture_alloc_snapshot(c, ev.graph, nullptr, nullptr)) {
-          err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
-        } else if (!detail::apply_required_sizes_to_chunks(
-                     c, required, chunk_counts.data(), chunk_sizes.data(), chunk_allocator_sm, planner_err)) {
-          err = planner_err;  // GCOVR_EXCL_LINE
-        }
       }
     }
     if (ev.error_out != nullptr) {
@@ -946,61 +889,55 @@ struct begin_alloc_graph {
       emel::buffer::chunk_allocator::sm & chunk_allocator,
       emel::buffer::realloc_analyzer::sm & realloc_analyzer) const noexcept {
     int32_t err = EMEL_OK;
-    if (c.buffer_count <= 0) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (!detail::valid_graph_tensors(ev.graph)) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
+    emel::buffer::planner::sm * planner_sm =
+        ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
+    emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
+        ev.chunk_allocator_sm != nullptr ? ev.chunk_allocator_sm : &chunk_allocator;
+    emel::buffer::realloc_analyzer::sm * realloc_analyzer_sm =
+        ev.buffer_realloc_analyzer_sm != nullptr ? ev.buffer_realloc_analyzer_sm : &realloc_analyzer;
+    const emel::buffer::planner::strategy * strategy =
+        ev.strategy != nullptr ? ev.strategy : &emel::buffer::planner::default_strategies::alloc_graph;
+    int32_t analyze_err = EMEL_OK;
+    bool needs_realloc = false;
+    if (!detail::run_realloc_analyzer(
+          realloc_analyzer_sm, ev.graph, c, needs_realloc, analyze_err)) {
+      err = analyze_err;  // GCOVR_EXCL_LINE
+    } else if (needs_realloc && c.buffer_count > 1) {
+      err = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
     } else {
-      emel::buffer::planner::sm * planner_sm =
-          ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
-      emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
-          ev.chunk_allocator_sm != nullptr ? ev.chunk_allocator_sm : &chunk_allocator;
-      emel::buffer::realloc_analyzer::sm * realloc_analyzer_sm =
-          ev.buffer_realloc_analyzer_sm != nullptr ? ev.buffer_realloc_analyzer_sm : &realloc_analyzer;
-      const emel::buffer::planner::strategy * strategy =
-          ev.strategy != nullptr ? ev.strategy : &emel::buffer::planner::default_strategies::alloc_graph;
-      int32_t analyze_err = EMEL_OK;
-      bool needs_realloc = false;
-      if (!detail::run_realloc_analyzer(
-            realloc_analyzer_sm, ev.graph, c, needs_realloc, analyze_err)) {
-        err = analyze_err;  // GCOVR_EXCL_LINE
-      } else if (needs_realloc && c.buffer_count > 1) {
-        err = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      } else {
-        const int32_t * node_ids = nullptr;
-        const int32_t * leaf_ids = nullptr;
-        if (!needs_realloc) {
-          node_ids = c.last_node_buffer_ids.data();
-          leaf_ids = c.last_leaf_buffer_ids.data();
-        }
+      const int32_t * node_ids = nullptr;
+      const int32_t * leaf_ids = nullptr;
+      if (!needs_realloc) {
+        node_ids = c.last_node_buffer_ids.data();
+        leaf_ids = c.last_leaf_buffer_ids.data();
+      }
 
-        std::array<int32_t, k_max_buffers> required = {};
-        std::array<int32_t, k_max_buffers> chunk_counts = {};
-        std::array<int32_t, k_max_chunk_bindings> chunk_sizes = {};
-        int32_t planner_err = EMEL_OK;
-        if (!detail::run_planner(
-              planner_sm, ev.graph, node_ids, leaf_ids, c.buffer_count, true, required.data(),
-              c.buffer_count,
-              chunk_counts.data(), c.buffer_count,
-              chunk_sizes.data(), static_cast<int32_t>(chunk_sizes.size()),
-              strategy, c, planner_err)) {
-          err = planner_err;  // GCOVR_EXCL_LINE
+      std::array<int32_t, k_max_buffers> required = {};
+      std::array<int32_t, k_max_buffers> chunk_counts = {};
+      std::array<int32_t, k_max_chunk_bindings> chunk_sizes = {};
+      int32_t planner_err = EMEL_OK;
+      if (!detail::run_planner(
+            planner_sm, ev.graph, node_ids, leaf_ids, c.buffer_count, true, required.data(),
+            c.buffer_count,
+            chunk_counts.data(), c.buffer_count,
+            chunk_sizes.data(), static_cast<int32_t>(chunk_sizes.size()),
+            strategy, c, planner_err)) {
+        err = planner_err;  // GCOVR_EXCL_LINE
+      } else {
+        detail::capture_buffer_map(c, ev.graph, node_ids, leaf_ids);
+        if (!detail::capture_alloc_snapshot(c, ev.graph, node_ids, leaf_ids)) {
+          err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
         } else {
-          detail::capture_buffer_map(c, ev.graph, node_ids, leaf_ids);
-          if (!detail::capture_alloc_snapshot(c, ev.graph, node_ids, leaf_ids)) {
-            err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
-          } else {
-            const bool needs_growth = detail::requires_growth(c.committed_sizes, required, c.buffer_count);
-            const bool missing_chunk_bindings =
-                !detail::chunk_bindings_cover_required(c, required, c.buffer_count);
-            if (needs_growth || missing_chunk_bindings) {
-              if (c.buffer_count > 1) {
-                err = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-              } else if (!detail::apply_required_sizes_to_chunks(
-                           c, required, chunk_counts.data(), chunk_sizes.data(),
-                           chunk_allocator_sm, planner_err)) {
-                err = planner_err;  // GCOVR_EXCL_LINE
-              }
+          const bool needs_growth = detail::requires_growth(c.committed_sizes, required, c.buffer_count);
+          const bool missing_chunk_bindings =
+              !detail::chunk_bindings_cover_required(c, required, c.buffer_count);
+          if (needs_growth || missing_chunk_bindings) {
+            if (c.buffer_count > 1) {
+              err = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+            } else if (!detail::apply_required_sizes_to_chunks(
+                         c, required, chunk_counts.data(), chunk_sizes.data(),
+                         chunk_allocator_sm, planner_err)) {
+              err = planner_err;  // GCOVR_EXCL_LINE
             }
           }
         }
@@ -1075,6 +1012,18 @@ struct on_release_error {
   }
 };
 
+struct reject_invalid {
+  template <class Event>
+  void operator()(const Event & ev, context & c) const noexcept {
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+      }
+    }
+    c.step += 1;
+  }
+};
+
 struct on_unexpected {
   template <class Event>
   void operator()(const Event & ev, context & c) const noexcept {
@@ -1103,6 +1052,7 @@ inline constexpr on_alloc_graph_error on_alloc_graph_error{};
 inline constexpr begin_release begin_release{};
 inline constexpr on_release_done on_release_done{};
 inline constexpr on_release_error on_release_error{};
+inline constexpr reject_invalid reject_invalid{};
 inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::buffer::allocator::action
