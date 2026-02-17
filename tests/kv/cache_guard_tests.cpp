@@ -21,6 +21,9 @@ std::unique_ptr<context> make_context() {
   ctx->applied_ubatches = 0;
   ctx->ubatch_sizes[0] = 1;
   ctx->slot_offsets[0] = 0;
+  ctx->slot_index_count = 1;
+  ctx->slot_indices[0] = 0;
+  ctx->slot_stream_ids[0] = 0;
   ctx->ubatch_stream_ids[0] = 0;
   ctx->ubatch_seq_ids[0] = 0;
   ctx->seq_to_stream[0] = 0;
@@ -237,6 +240,7 @@ TEST_CASE("kv_cache_guard_apply_step_request_branches") {
   ctx.applied_ubatches = 0;
   ctx.ubatch_sizes[0] = 2;
   ctx.slot_offsets[0] = 0;
+  ctx.slot_index_count = 2;
   ctx.ubatch_stream_ids[0] = 0;
   ctx.ubatch_seq_ids[0] = 0;
 
@@ -280,6 +284,13 @@ TEST_CASE("kv_cache_guard_apply_step_request_branches") {
   ctx.ubatch_stream_ids[0] = 0;
   ctx.ubatch_seq_ids[0] = emel::kv::cache::action::MAX_SEQ;
   CHECK_FALSE(emel::kv::cache::guard::valid_apply_step_request(step, ctx));
+
+  ctx.ubatch_seq_ids[0] = 0;
+  std::array<int32_t, 1> bad_positions = {{0}};
+  apply.positions = bad_positions.data();
+  apply.positions_count = 1;
+  ctx.ubatch_sizes[0] = 2;
+  CHECK_FALSE(emel::kv::cache::guard::valid_apply_step_request(step, ctx));
 }
 
 TEST_CASE("kv_cache_guard_rollback_request_branches") {
@@ -315,6 +326,7 @@ TEST_CASE("kv_cache_guard_rollback_step_request_branches") {
   ctx.kv_size = 4;
   ctx.ubatch_sizes[0] = 1;
   ctx.slot_offsets[0] = 0;
+  ctx.slot_index_count = 1;
   ctx.ubatch_stream_ids[0] = 0;
   ctx.ubatch_seq_ids[0] = 0;
 
@@ -372,6 +384,9 @@ TEST_CASE("kv_cache_guard_seq_requests") {
 
   emel::kv::cache::event::validate_seq_remove null_remove{.request = nullptr};
   CHECK_FALSE(emel::kv::cache::guard::valid_seq_remove_request(null_remove, ctx));
+
+  remove.seq_id = -1;
+  CHECK(emel::kv::cache::guard::valid_seq_remove_request(remove_validate, ctx));
 
   remove.seq_id = emel::kv::cache::action::MAX_SEQ;
   CHECK_FALSE(emel::kv::cache::guard::valid_seq_remove_request(remove_validate, ctx));
@@ -494,10 +509,13 @@ TEST_CASE("kv_cache_guard_seq_copy_requests") {
   CHECK_FALSE(emel::kv::cache::guard::valid_seq_copy_request(copy_validate, ctx));
 
   ctx.pending_copy_count = 0;
-  emel::kv::cache::action::set_cell_pos(ctx.streams[1], 0, 1);
+  ctx.kv_size = 4;
+  copy.pos_start = 1;
+  copy.pos_end = 1;
   CHECK_FALSE(emel::kv::cache::guard::valid_seq_copy_request(copy_validate, ctx));
 
-  ctx.streams[1].pos[0] = emel::kv::cache::action::POS_NONE;
+  copy.pos_start = 0;
+  copy.pos_end = 3;
   copy.seq_id_dst = 0;
   CHECK(emel::kv::cache::guard::valid_seq_copy_request(copy_validate, ctx));
 }
@@ -519,4 +537,93 @@ TEST_CASE("kv_cache_guard_updates_requests") {
   emel::kv::cache::event::apply_updates_step null_step{.request = nullptr};
   CHECK_FALSE(emel::kv::cache::guard::valid_updates_request(null_validate, ctx));
   CHECK_FALSE(emel::kv::cache::guard::valid_updates_step_request(null_step, ctx));
+
+  ctx.pending_copy_count = 1;
+  CHECK_FALSE(emel::kv::cache::guard::valid_updates_request(validate, ctx));
+
+  ctx.pending_copy_count = 0;
+  ctx.streams[0].has_shift = true;
+  CHECK_FALSE(emel::kv::cache::guard::valid_updates_request(validate, ctx));
+}
+
+TEST_CASE("kv_cache_guard_apply_step_positions_valid") {
+  auto ctx_storage = make_context();
+  context & ctx = *ctx_storage;
+
+  ctx.kv_size = 8;
+  ctx.planned_ubatch_count = 1;
+  ctx.applied_ubatches = 0;
+  ctx.ubatch_sizes[0] = 2;
+  ctx.slot_offsets[0] = 0;
+  ctx.slot_index_count = 2;
+  ctx.ubatch_stream_ids[0] = 0;
+  ctx.ubatch_seq_ids[0] = 0;
+
+  std::array<int32_t, 2> positions = {{1, 2}};
+  emel::kv::cache::event::apply_ubatch apply{
+    .ubatch_index = 0,
+    .positions = positions.data(),
+    .positions_count = static_cast<int32_t>(positions.size()),
+  };
+  emel::kv::cache::event::apply_step step{.request = &apply};
+  CHECK(emel::kv::cache::guard::valid_apply_step_request(step, ctx));
+}
+
+TEST_CASE("kv_cache_guard_seq_copy_pending_pair_is_valid") {
+  auto ctx_storage = make_context();
+  context & ctx = *ctx_storage;
+
+  ctx.kv_size = 4;
+  ctx.n_stream = 2;
+  ctx.seq_to_stream[0] = 0;
+  ctx.seq_to_stream[1] = 1;
+  ctx.pending_copy_count = 1;
+  ctx.pending_copy_src[0] = 0;
+  ctx.pending_copy_dst[0] = 1;
+
+  emel::kv::cache::event::seq_copy copy{
+    .seq_id_src = 0,
+    .seq_id_dst = 1,
+    .pos_start = 0,
+    .pos_end = 3,
+  };
+  emel::kv::cache::event::validate_seq_copy validate{.request = &copy};
+  emel::kv::cache::event::seq_copy_step step{.request = &copy};
+  CHECK(emel::kv::cache::guard::valid_seq_copy_request(validate, ctx));
+  CHECK(emel::kv::cache::guard::valid_seq_copy_step_request(step, ctx));
+
+  ctx.pending_copy_count = emel::kv::cache::action::MAX_STREAM_COPY;
+  CHECK(emel::kv::cache::guard::valid_seq_copy_request(validate, ctx));
+  CHECK(emel::kv::cache::guard::valid_seq_copy_step_request(step, ctx));
+}
+
+TEST_CASE("kv_cache_guard_updates_valid_when_callbacks_present") {
+  auto ctx_storage = make_context();
+  context & ctx = *ctx_storage;
+
+  ctx.pending_copy_count = 1;
+  ctx.pending_copy_src[0] = 0;
+  ctx.pending_copy_dst[0] = 0;
+  auto stream_copy_ok = [](int32_t, int32_t, void *, int32_t * err_out) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return true;
+  };
+  emel::kv::cache::event::apply_updates updates{
+    .stream_copy = stream_copy_ok,
+  };
+  emel::kv::cache::event::validate_updates validate{.request = &updates};
+  CHECK(emel::kv::cache::guard::valid_updates_request(validate, ctx));
+
+  ctx.pending_copy_count = 0;
+  ctx.streams[0].has_shift = true;
+  auto apply_shift_ok = [](int32_t, const int32_t *, int32_t, void *, int32_t * err_out) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return true;
+  };
+  updates.apply_shift = apply_shift_ok;
+  CHECK(emel::kv::cache::guard::valid_updates_request(validate, ctx));
 }

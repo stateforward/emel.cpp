@@ -21,6 +21,10 @@ struct prepare {
   int32_t ubatch_stream_ids_count = 0;
   const int32_t * ubatch_seq_ids = nullptr;
   int32_t ubatch_seq_ids_count = 0;
+
+  int32_t n_pad = 1;
+  int32_t n_swa = 0;
+  int32_t swa_type = 0;
 };
 
 struct apply_ubatch {

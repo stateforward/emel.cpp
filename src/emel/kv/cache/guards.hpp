@@ -18,6 +18,20 @@ inline bool valid_pos_range(int32_t pos0, int32_t pos1) noexcept {
   return pos0 <= pos1;
 }
 
+inline bool is_full_copy_range(int32_t pos0, int32_t pos1, int32_t kv_size) noexcept {
+  if (kv_size <= 0) {
+    return false;
+  }
+  bool full = true;
+  if (pos0 > 0 && pos0 + 1 < kv_size) {
+    full = false;
+  }
+  if (pos1 > 0 && pos1 + 1 < kv_size) {
+    full = false;
+  }
+  return full;
+}
+
 inline bool valid_stream_id(const action::context & ctx, int32_t stream_id) noexcept {
   return stream_id >= 0 && stream_id < ctx.n_stream;
 }
@@ -80,6 +94,13 @@ inline constexpr auto valid_prepare_request = [](
       return false;
     }
     if (ctx.seq_to_stream[ctx.ubatch_seq_ids[i]] != ctx.ubatch_stream_ids[i]) {
+      return false;
+    }
+  }
+  int32_t total = 0;
+  for (int32_t i = 0; i < ctx.ubatch_count; ++i) {
+    total += ctx.ubatch_sizes[i];
+    if (total > kv_size) {
       return false;
     }
   }
@@ -171,13 +192,17 @@ inline constexpr auto valid_apply_step_request = [](
   }
   const int32_t size = ctx.ubatch_sizes[ubatch_index];
   const int32_t start = ctx.slot_offsets[ubatch_index];
-  if (ctx.kv_size <= 0 || size <= 0 || start < 0 || start + size > ctx.kv_size) {
+  if (ctx.kv_size <= 0 || size <= 0 || start < 0 ||
+      start + size > ctx.slot_index_count) {
     return false;
   }
   if (!valid_stream_id(ctx, ctx.ubatch_stream_ids[ubatch_index])) {
     return false;
   }
   if (!valid_seq_id(ctx.ubatch_seq_ids[ubatch_index])) {
+    return false;
+  }
+  if (request->positions != nullptr && request->positions_count < size) {
     return false;
   }
   return true;
@@ -227,7 +252,7 @@ inline constexpr auto valid_rollback_step_request = [](
   for (int32_t i = from_index; i < ctx.applied_ubatches; ++i) {
     const int32_t size = ctx.ubatch_sizes[i];
     const int32_t start = ctx.slot_offsets[i];
-    if (size <= 0 || start < 0 || start + size > ctx.kv_size) {
+    if (size <= 0 || start < 0 || start + size > ctx.slot_index_count) {
       return false;
     }
     if (!valid_stream_id(ctx, ctx.ubatch_stream_ids[i])) {
@@ -253,12 +278,14 @@ inline constexpr auto valid_seq_remove_request = [](
   if (request == nullptr) {
     return false;
   }
-  if (!valid_seq_id(request->seq_id)) {
-    return false;
-  }
-  const int32_t stream_id = ctx.seq_to_stream[request->seq_id];
-  if (!valid_stream_id(ctx, stream_id)) {
-    return false;
+  if (request->seq_id != -1) {
+    if (!valid_seq_id(request->seq_id)) {
+      return false;
+    }
+    const int32_t stream_id = ctx.seq_to_stream[request->seq_id];
+    if (!valid_stream_id(ctx, stream_id)) {
+      return false;
+    }
   }
   if (!valid_pos_range(request->pos_start, request->pos_end)) {
     return false;
@@ -279,12 +306,14 @@ inline constexpr auto valid_seq_remove_step_request = [](
   if (request == nullptr) {
     return false;
   }
-  if (!valid_seq_id(request->seq_id)) {
-    return false;
-  }
-  const int32_t stream_id = ctx.seq_to_stream[request->seq_id];
-  if (!valid_stream_id(ctx, stream_id)) {
-    return false;
+  if (request->seq_id != -1) {
+    if (!valid_seq_id(request->seq_id)) {
+      return false;
+    }
+    const int32_t stream_id = ctx.seq_to_stream[request->seq_id];
+    if (!valid_stream_id(ctx, stream_id)) {
+      return false;
+    }
   }
   if (!valid_pos_range(request->pos_start, request->pos_end)) {
     return false;
@@ -319,6 +348,9 @@ inline constexpr auto valid_seq_copy_request = [](
   if (src_stream == dst_stream) {
     return true;
   }
+  if (!is_full_copy_range(request->pos_start, request->pos_end, ctx.kv_size)) {
+    return false;
+  }
   bool has_pair = false;
   for (int32_t i = 0; i < ctx.pending_copy_count; ++i) {
     if (ctx.pending_copy_src[i] == src_stream && ctx.pending_copy_dst[i] == dst_stream) {
@@ -328,22 +360,6 @@ inline constexpr auto valid_seq_copy_request = [](
   }
   if (!has_pair && ctx.pending_copy_count >= action::MAX_STREAM_COPY) {
     return false;
-  }
-  const action::stream_state & src = ctx.streams[src_stream];
-  const action::stream_state & dst = ctx.streams[dst_stream];
-  for (int32_t i = 0; i < ctx.kv_size; ++i) {
-    if (src.pos[i] == action::POS_NONE) {
-      continue;
-    }
-    if (!action::cell_has_seq(src, i, request->seq_id_src)) {
-      continue;
-    }
-    if (!action::pos_in_range(src.pos[i], request->pos_start, request->pos_end)) {
-      continue;
-    }
-    if (dst.pos[i] != action::POS_NONE) {
-      return false;
-    }
   }
   return true;
 };
@@ -375,6 +391,9 @@ inline constexpr auto valid_seq_copy_step_request = [](
   if (src_stream == dst_stream) {
     return true;
   }
+  if (!is_full_copy_range(request->pos_start, request->pos_end, ctx.kv_size)) {
+    return false;
+  }
   bool has_pair = false;
   for (int32_t i = 0; i < ctx.pending_copy_count; ++i) {
     if (ctx.pending_copy_src[i] == src_stream && ctx.pending_copy_dst[i] == dst_stream) {
@@ -384,22 +403,6 @@ inline constexpr auto valid_seq_copy_step_request = [](
   }
   if (!has_pair && ctx.pending_copy_count >= action::MAX_STREAM_COPY) {
     return false;
-  }
-  const action::stream_state & src = ctx.streams[src_stream];
-  const action::stream_state & dst = ctx.streams[dst_stream];
-  for (int32_t i = 0; i < ctx.kv_size; ++i) {
-    if (src.pos[i] == action::POS_NONE) {
-      continue;
-    }
-    if (!action::cell_has_seq(src, i, request->seq_id_src)) {
-      continue;
-    }
-    if (!action::pos_in_range(src.pos[i], request->pos_start, request->pos_end)) {
-      continue;
-    }
-    if (dst.pos[i] != action::POS_NONE) {
-      return false;
-    }
   }
   return true;
 };
@@ -568,14 +571,38 @@ inline constexpr auto invalid_seq_div_step_request = [](
 
 inline constexpr auto valid_updates_request = [](
     const event::validate_updates & ev,
-    const action::context &) noexcept {
-  return ev.request != nullptr;
+    const action::context & ctx) noexcept {
+  const event::apply_updates * request = ev.request;
+  if (request == nullptr) {
+    return false;
+  }
+  if (ctx.pending_copy_count > 0 && request->stream_copy == nullptr) {
+    return false;
+  }
+  for (int32_t s = 0; s < ctx.n_stream; ++s) {
+    if (ctx.streams[s].has_shift && request->apply_shift == nullptr) {
+      return false;
+    }
+  }
+  return true;
 };
 
 inline constexpr auto valid_updates_step_request = [](
     const event::apply_updates_step & ev,
-    const action::context &) noexcept {
-  return ev.request != nullptr;
+    const action::context & ctx) noexcept {
+  const event::apply_updates * request = ev.request;
+  if (request == nullptr) {
+    return false;
+  }
+  if (ctx.pending_copy_count > 0 && request->stream_copy == nullptr) {
+    return false;
+  }
+  for (int32_t s = 0; s < ctx.n_stream; ++s) {
+    if (ctx.streams[s].has_shift && request->apply_shift == nullptr) {
+      return false;
+    }
+  }
+  return true;
 };
 
 inline constexpr auto invalid_updates_request = [](

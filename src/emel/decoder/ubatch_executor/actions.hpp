@@ -77,6 +77,8 @@ inline constexpr auto run_compute = [](const event::run_compute & ev, context & 
     .ubatch_index = ctx.ubatch_index,
     .kv_tokens_out = &ctx.kv_tokens,
     .error_out = &kv_error,
+    .positions = request->positions,
+    .positions_count = request->positions_count,
   });
   if (!ok || kv_error != EMEL_OK) {
     *ev.error_out = kv_error == EMEL_OK ? EMEL_ERR_BACKEND : kv_error;

@@ -37,6 +37,8 @@ struct execute {
   int32_t * kv_tokens_out = nullptr;
   bool * rollback_attempted_out = nullptr;
   int32_t * error_out = nullptr;
+  const int32_t * positions = nullptr;
+  int32_t positions_count = 0;
 };
 
 struct validate {

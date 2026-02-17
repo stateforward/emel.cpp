@@ -54,7 +54,7 @@ TEST_CASE("kv_cache_sm_prepare_apply_rollback_optional_outputs") {
     .error_out = &err,
   });
   CHECK(err == EMEL_OK);
-  CHECK(kv_tokens == 1);
+  CHECK(kv_tokens == 8);
 
   machine.process_event(emel::kv::cache::event::apply_ubatch{
     .ubatch_index = 1,

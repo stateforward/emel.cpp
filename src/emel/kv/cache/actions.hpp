@@ -35,9 +35,33 @@ struct stream_state {
   std::array<uint16_t, MAX_SEQ> seq_pos_max_count = {};
 };
 
+struct cell_snapshot {
+  int32_t pos = POS_NONE;
+  int32_t shift = 0;
+  int32_t ext_x = 0;
+  int32_t ext_y = 0;
+  uint16_t seq_count = 0;
+  std::array<uint64_t, SEQ_WORDS> seq_mask = {};
+};
+
+struct stream_snapshot {
+  int32_t head = 0;
+  int32_t used_count = 0;
+  int32_t used_max_p1 = 0;
+  bool has_shift = false;
+  std::array<int32_t, MAX_SEQ> seq_pos_min = {};
+  std::array<int32_t, MAX_SEQ> seq_pos_max = {};
+  std::array<uint16_t, MAX_SEQ> seq_pos_min_count = {};
+  std::array<uint16_t, MAX_SEQ> seq_pos_max_count = {};
+};
+
 struct context {
   std::array<int32_t, MAX_UBATCHES> ubatch_sizes = {};
   std::array<int32_t, MAX_UBATCHES> slot_offsets = {};
+  std::array<int32_t, MAX_KV_CELLS> slot_indices = {};
+  std::array<int32_t, MAX_KV_CELLS> slot_stream_ids = {};
+  std::array<cell_snapshot, MAX_KV_CELLS> slot_snapshots = {};
+  int32_t slot_index_count = 0;
   std::array<int32_t, MAX_UBATCHES> ubatch_stream_ids = {};
   std::array<int32_t, MAX_UBATCHES> ubatch_seq_ids = {};
   int32_t ubatch_count = 0;
@@ -46,11 +70,13 @@ struct context {
 
   int32_t kv_size = 0;
   int32_t n_stream = 1;
+  int32_t n_pad = 1;
   int32_t n_swa = 0;
   int32_t swa_type = 0;
   std::array<int32_t, MAX_SEQ> seq_to_stream = {};
   std::array<int32_t, MAX_SEQ> next_pos = {};
   std::array<stream_state, MAX_STREAMS> streams = {};
+  std::array<stream_snapshot, MAX_STREAMS> prepare_snapshot = {};
 
   std::array<int32_t, MAX_STREAM_COPY> pending_copy_src = {};
   std::array<int32_t, MAX_STREAM_COPY> pending_copy_dst = {};
@@ -83,6 +109,9 @@ inline void reset_stream(stream_state & s) {
 inline void reset_context_state(context & ctx) {
   ctx.ubatch_sizes.fill(0);
   ctx.slot_offsets.fill(0);
+  ctx.slot_indices.fill(0);
+  ctx.slot_stream_ids.fill(0);
+  ctx.slot_index_count = 0;
   ctx.ubatch_stream_ids.fill(0);
   ctx.ubatch_seq_ids.fill(0);
   ctx.ubatch_count = 0;
@@ -90,6 +119,7 @@ inline void reset_context_state(context & ctx) {
   ctx.applied_ubatches = 0;
   ctx.kv_size = 0;
   ctx.n_stream = 1;
+  ctx.n_pad = 1;
   ctx.n_swa = 0;
   ctx.swa_type = 0;
   ctx.seq_to_stream.fill(0);
@@ -115,6 +145,68 @@ inline int32_t used_max_p1(const stream_state & s) {
   return s.used_max_p1;
 }
 
+inline void snapshot_cell(const stream_state & s, int32_t idx, cell_snapshot & snap) {
+  snap.pos = s.pos[idx];
+  snap.shift = s.shift[idx];
+  snap.ext_x = s.ext_x[idx];
+  snap.ext_y = s.ext_y[idx];
+  snap.seq_count = s.seq_count[idx];
+  snap.seq_mask = s.seq_mask[idx];
+}
+
+inline void restore_cell(stream_state & s, int32_t idx, const cell_snapshot & snap) {
+  s.pos[idx] = snap.pos;
+  s.shift[idx] = snap.shift;
+  s.ext_x[idx] = snap.ext_x;
+  s.ext_y[idx] = snap.ext_y;
+  s.seq_count[idx] = snap.seq_count;
+  s.seq_mask[idx] = snap.seq_mask;
+}
+
+inline void snapshot_stream_state(const stream_state & s, stream_snapshot & snap) {
+  snap.head = s.head;
+  snap.used_count = s.used_count;
+  snap.used_max_p1 = s.used_max_p1;
+  snap.has_shift = s.has_shift;
+  snap.seq_pos_min = s.seq_pos_min;
+  snap.seq_pos_max = s.seq_pos_max;
+  snap.seq_pos_min_count = s.seq_pos_min_count;
+  snap.seq_pos_max_count = s.seq_pos_max_count;
+}
+
+inline void restore_stream_state(stream_state & s, const stream_snapshot & snap) {
+  s.head = snap.head;
+  s.used_count = snap.used_count;
+  s.used_max_p1 = snap.used_max_p1;
+  s.has_shift = snap.has_shift;
+  s.seq_pos_min = snap.seq_pos_min;
+  s.seq_pos_max = snap.seq_pos_max;
+  s.seq_pos_min_count = snap.seq_pos_min_count;
+  s.seq_pos_max_count = snap.seq_pos_max_count;
+}
+
+inline int32_t single_seq_id(const stream_state & s, int32_t idx) {
+  if (s.seq_count[idx] != 1) {
+    return POS_NONE;
+  }
+  for (int32_t word = 0; word < SEQ_WORDS; ++word) {
+    const uint64_t mask = s.seq_mask[idx][word];
+    if (mask == 0) {
+      continue;
+    }
+    const int32_t bit = __builtin_ctzll(mask);
+    return word * 64 + bit;
+  }
+  return POS_NONE;
+}
+
+inline int32_t pad_to(int32_t value, int32_t pad) {
+  if (pad <= 0) {
+    return value;
+  }
+  return ((value + pad - 1) / pad) * pad;
+}
+
 inline bool ranges_overlap(int32_t start_a, int32_t size_a, int32_t start_b, int32_t size_b) {
   return start_a < start_b + size_b && start_b < start_a + size_a;
 }
@@ -130,6 +222,20 @@ inline bool pos_in_range(int32_t pos, int32_t p0, int32_t p1) {
     return pos >= p0;
   }
   return pos >= p0 && pos < p1;
+}
+
+inline bool is_full_copy_range(int32_t pos0, int32_t pos1, int32_t kv_size) {
+  if (kv_size <= 0) {
+    return false;
+  }
+  bool full = true;
+  if (pos0 > 0 && pos0 + 1 < kv_size) {
+    full = false;
+  }
+  if (pos1 > 0 && pos1 + 1 < kv_size) {
+    full = false;
+  }
+  return full;
 }
 
 inline bool cell_has_seq(const stream_state & s, int32_t idx, int32_t seq_id) {
@@ -408,14 +514,31 @@ inline int32_t max_used_max_p1(const context & ctx) {
   return max_used;
 }
 
-inline bool is_masked_swa(int32_t n_swa, int32_t pos_cell, int32_t pos_max) {
-  if (n_swa <= 0) {
+inline int32_t compute_kv_tokens(const context & ctx) {
+  if (ctx.kv_size <= 0) {
+    return 0;
+  }
+  const int32_t n_pad_cur = std::max(ctx.n_pad, 256);
+  int32_t result = 0;
+  for (int32_t s = 0; s < ctx.n_stream; ++s) {
+    const int32_t used = ctx.streams[s].used_max_p1;
+    int32_t padded = std::max(n_pad_cur, pad_to(used, n_pad_cur));
+    if (padded > ctx.kv_size) {
+      padded = ctx.kv_size;
+    }
+    result = std::max(result, padded);
+  }
+  return result;
+}
+
+inline bool is_masked_swa(int32_t n_swa, int32_t swa_type, int32_t pos_cell, int32_t pos_max_p1) {
+  if (n_swa <= 0 || swa_type == 0) {
     return false;
   }
-  if (pos_max < 0) {
+  if (pos_max_p1 <= 0) {
     return false;
   }
-  return pos_cell + n_swa < pos_max;
+  return pos_cell + n_swa < pos_max_p1;
 }
 
 inline bool range_overlaps_planned(
@@ -489,6 +612,57 @@ inline int32_t find_contiguous_slot(
   return -1;
 }
 
+inline bool find_slot_indices(
+    const context & ctx,
+    const stream_state & s,
+    int32_t kv_size,
+    int32_t n_tokens,
+    int32_t * indices_out) {
+  if (kv_size <= 0 || n_tokens <= 0 || n_tokens > kv_size) {
+    return false;
+  }
+
+  int32_t head_cur = s.head;
+  if (head_cur > s.used_count + 2 * n_tokens) {
+    head_cur = 0;
+  }
+
+  int32_t n_tested = 0;
+  int32_t found = 0;
+  while (n_tested < kv_size) {
+    if (head_cur + 1 > kv_size) {
+      n_tested += kv_size - head_cur;
+      head_cur = 0;
+      continue;
+    }
+
+    bool can_use = s.pos[head_cur] == POS_NONE;
+    if (!can_use && s.seq_count[head_cur] == 1) {
+      const int32_t seq_id_cell = single_seq_id(s, head_cur);
+      if (seq_id_cell != POS_NONE) {
+        const int32_t pos_cell = s.pos[head_cur];
+        const int32_t pos_max = s.seq_pos_max[seq_id_cell];
+        if (pos_max != POS_NONE &&
+            is_masked_swa(ctx.n_swa, ctx.swa_type, pos_cell, pos_max + 1)) {
+          can_use = true;
+        }
+      }
+    }
+
+    if (can_use) {
+      indices_out[found++] = head_cur;
+      if (found == n_tokens) {
+        return true;
+      }
+    }
+
+    ++head_cur;
+    ++n_tested;
+  }
+
+  return false;
+}
+
 inline void ensure_next_pos_for_seq(context & ctx, int32_t seq_id, const stream_state & s) {
   if (seq_id < 0 || seq_id >= MAX_SEQ) {
     return;
@@ -526,6 +700,139 @@ inline void add_pending_copy(context & ctx, int32_t src_stream, int32_t dst_stre
   }
 }
 
+inline bool apply_slots(
+    context & ctx,
+    int32_t slot_offset,
+    int32_t slot_count,
+    int32_t seq_id,
+    const int32_t * positions,
+    int32_t positions_count,
+    bool update_next_pos) {
+  if (slot_offset < 0 || slot_count <= 0) {
+    return false;
+  }
+  if (slot_offset + slot_count > ctx.slot_index_count) {
+    return false;
+  }
+  if (positions != nullptr && positions_count < slot_count) {
+    return false;
+  }
+
+  std::array<int32_t, MAX_SEQ> seq_pos_max_rm = {};
+  seq_pos_max_rm.fill(POS_NONE);
+
+  const bool has_positions = positions != nullptr && positions_count >= slot_count;
+  const bool has_pos_2d = positions != nullptr && positions_count >= slot_count * 3;
+
+  int32_t next_pos = 0;
+  if (!has_positions) {
+    const int32_t stream_id = ctx.seq_to_stream[seq_id];
+    if (stream_id >= 0 && stream_id < ctx.n_stream) {
+      ensure_next_pos_for_seq(ctx, seq_id, ctx.streams[stream_id]);
+    }
+    next_pos = ctx.next_pos[seq_id];
+  }
+
+  std::array<int32_t, MAX_STREAMS> last_idx = {};
+  last_idx.fill(POS_NONE);
+
+  for (int32_t i = 0; i < slot_count; ++i) {
+    const int32_t slot = slot_offset + i;
+    const int32_t idx = ctx.slot_indices[slot];
+    const int32_t stream_id = ctx.slot_stream_ids[slot];
+    if (stream_id < 0 || stream_id >= ctx.n_stream) {
+      return false;
+    }
+    if (idx < 0 || idx >= ctx.kv_size) {
+      return false;
+    }
+    stream_state & stream = ctx.streams[stream_id];
+
+    if (stream.pos[idx] != POS_NONE) {
+      for (int32_t word = 0; word < SEQ_WORDS; ++word) {
+        uint64_t mask = stream.seq_mask[idx][word];
+        while (mask != 0) {
+          const int32_t bit = __builtin_ctzll(mask);
+          const int32_t seq_over = word * 64 + bit;
+          seq_pos_max_rm[seq_over] =
+              std::max(seq_pos_max_rm[seq_over], stream.pos[idx]);
+          mask &= (mask - 1);
+        }
+      }
+      set_cell_empty(stream, idx);
+    }
+
+    const int32_t pos = has_positions ? positions[i] : next_pos++;
+    set_cell_pos(stream, idx, pos);
+    if (has_pos_2d) {
+      stream.ext_y[idx] = positions[i + slot_count];
+      stream.ext_x[idx] = positions[i + slot_count * 2];
+    }
+    add_seq_to_cell(stream, idx, seq_id);
+
+    if (last_idx[stream_id] == POS_NONE || idx > last_idx[stream_id]) {
+      last_idx[stream_id] = idx;
+    }
+  }
+
+  if (has_positions && update_next_pos) {
+    int32_t max_pos = ctx.next_pos[seq_id];
+    for (int32_t i = 0; i < slot_count; ++i) {
+      if (positions[i] >= max_pos) {
+        max_pos = positions[i] + 1;
+      }
+    }
+    ctx.next_pos[seq_id] = max_pos;
+  } else if (update_next_pos) {
+    ctx.next_pos[seq_id] = next_pos;
+  }
+
+  for (int32_t seq = 0; seq < MAX_SEQ; ++seq) {
+    if (seq_pos_max_rm[seq] == POS_NONE) {
+      continue;
+    }
+    const int32_t stream_id = ctx.seq_to_stream[seq];
+    if (stream_id < 0 || stream_id >= ctx.n_stream) {
+      continue;
+    }
+    stream_state & stream = ctx.streams[stream_id];
+    const int32_t min_pos = stream.seq_pos_min[seq];
+    if (min_pos == POS_NONE) {
+      continue;
+    }
+    if (min_pos > seq_pos_max_rm[seq]) {
+      continue;
+    }
+    const int32_t end_pos = seq_pos_max_rm[seq] + 1;
+    for (int32_t i = 0; i < ctx.kv_size; ++i) {
+      if (stream.pos[i] == POS_NONE) {
+        continue;
+      }
+      if (!cell_has_seq(stream, i, seq)) {
+        continue;
+      }
+      if (!pos_in_range(stream.pos[i], min_pos, end_pos)) {
+        continue;
+      }
+      remove_seq_from_cell(stream, i, seq);
+    }
+    reset_next_pos_for_seq(ctx, seq, stream);
+  }
+
+  for (int32_t s = 0; s < ctx.n_stream; ++s) {
+    if (last_idx[s] == POS_NONE) {
+      continue;
+    }
+    int32_t head = last_idx[s] + 1;
+    if (head >= ctx.kv_size) {
+      head = 0;
+    }
+    ctx.streams[s].head = head;
+  }
+
+  return true;
+}
+
 inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ctx) {
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
@@ -538,6 +845,7 @@ inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ct
 
   ctx.ubatch_sizes.fill(0);
   ctx.slot_offsets.fill(0);
+  ctx.slot_index_count = 0;
   ctx.ubatch_stream_ids.fill(0);
   ctx.ubatch_seq_ids.fill(0);
 
@@ -569,6 +877,16 @@ inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ct
   } else if (ctx.n_stream <= 0) {
     ctx.n_stream = 1;
   }
+
+  if (ev.n_pad > 0) {
+    ctx.n_pad = ev.n_pad;
+  } else if (ctx.n_pad <= 0) {
+    ctx.n_pad = 1;
+  }
+  if (ev.n_swa >= 0) {
+    ctx.n_swa = ev.n_swa;
+  }
+  ctx.swa_type = ev.swa_type;
 
   if (ev.seq_to_stream != nullptr && ev.seq_to_stream_count > 0) {
     const int32_t count = std::min(ev.seq_to_stream_count, MAX_SEQ);
@@ -625,7 +943,7 @@ inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ct
     }
   }
 
-  ctx.kv_tokens = max_used_max_p1(ctx);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
 inline constexpr auto begin_apply = [](const event::apply_ubatch & ev, context & ctx) {
@@ -667,42 +985,80 @@ inline constexpr auto run_prepare_slots = [](const event::prepare_slots & ev, co
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
 
-  std::array<int32_t, MAX_STREAMS> head_sim = {};
-  std::array<int32_t, MAX_STREAMS> used_sim = {};
+  ctx.slot_index_count = 0;
+  std::array<int32_t, MAX_SEQ> next_pos_snapshot = ctx.next_pos;
   for (int32_t s = 0; s < ctx.n_stream; ++s) {
-    head_sim[s] = ctx.streams[s].head;
-    used_sim[s] = ctx.streams[s].used_count;
+    snapshot_stream_state(ctx.streams[s], ctx.prepare_snapshot[s]);
   }
 
+  bool success = true;
   for (int32_t i = 0; i < ctx.ubatch_count; ++i) {
     const int32_t size = ctx.ubatch_sizes[i];
     const int32_t stream_id = ctx.ubatch_stream_ids[i];
-    const stream_state & stream = ctx.streams[stream_id];
-
-    int32_t head_after = head_sim[stream_id];
-    const int32_t slot = find_contiguous_slot(
-        ctx,
-        stream,
-        ctx.kv_size,
-        head_sim[stream_id],
-        size,
-        used_sim[stream_id],
-        stream_id,
-        i,
-        head_after);
-    if (slot < 0) {
+    const int32_t seq_id = ctx.ubatch_seq_ids[i];
+    if (size <= 0 || stream_id < 0 || stream_id >= ctx.n_stream) {
       *ev.error_out = EMEL_ERR_BACKEND;
-      return;
+      success = false;
+      break;
+    }
+    const int32_t slot_offset = ctx.slot_index_count;
+    ctx.slot_index_count += size;
+    if (ctx.slot_index_count > ctx.kv_size || ctx.slot_index_count > MAX_KV_CELLS) {
+      *ev.error_out = EMEL_ERR_BACKEND;
+      success = false;
+      break;
     }
 
-    ctx.slot_offsets[i] = slot;
-    head_sim[stream_id] = head_after;
-    used_sim[stream_id] = std::min(ctx.kv_size, used_sim[stream_id] + size);
+    ctx.slot_offsets[i] = slot_offset;
+    if (!find_slot_indices(
+          ctx,
+          ctx.streams[stream_id],
+          ctx.kv_size,
+          size,
+          &ctx.slot_indices[slot_offset])) {
+      *ev.error_out = EMEL_ERR_BACKEND;
+      success = false;
+      break;
+    }
+
+    for (int32_t j = 0; j < size; ++j) {
+      const int32_t slot = slot_offset + j;
+      const int32_t idx = ctx.slot_indices[slot];
+      ctx.slot_stream_ids[slot] = stream_id;
+      snapshot_cell(ctx.streams[stream_id], idx, ctx.slot_snapshots[slot]);
+    }
+
+    if (!apply_slots(ctx, slot_offset, size, seq_id, nullptr, 0, true)) {
+      *ev.error_out = EMEL_ERR_BACKEND;
+      success = false;
+      break;
+    }
+  }
+
+  for (int32_t slot = 0; slot < ctx.slot_index_count; ++slot) {
+    const int32_t stream_id = ctx.slot_stream_ids[slot];
+    const int32_t idx = ctx.slot_indices[slot];
+    if (stream_id < 0 || stream_id >= ctx.n_stream) {
+      continue;
+    }
+    restore_cell(ctx.streams[stream_id], idx, ctx.slot_snapshots[slot]);
+  }
+  for (int32_t s = 0; s < ctx.n_stream; ++s) {
+    restore_stream_state(ctx.streams[s], ctx.prepare_snapshot[s]);
+  }
+  ctx.next_pos = next_pos_snapshot;
+
+  if (!success) {
+    ctx.slot_index_count = 0;
+    ctx.planned_ubatch_count = 0;
+    ctx.applied_ubatches = 0;
+    ctx.slot_offsets.fill(0);
+    return;
   }
 
   ctx.planned_ubatch_count = ctx.ubatch_count;
   ctx.applied_ubatches = 0;
-  ctx.kv_tokens = max_used_max_p1(ctx);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
 inline constexpr auto run_apply_step = [](const event::apply_step & ev, context & ctx) {
@@ -713,31 +1069,17 @@ inline constexpr auto run_apply_step = [](const event::apply_step & ev, context 
   const int32_t ubatch_index = request->ubatch_index;
   const int32_t size = ctx.ubatch_sizes[ubatch_index];
   const int32_t start = ctx.slot_offsets[ubatch_index];
-  const int32_t stream_id = ctx.ubatch_stream_ids[ubatch_index];
   const int32_t seq_id = ctx.ubatch_seq_ids[ubatch_index];
-  stream_state & stream = ctx.streams[stream_id];
-  ensure_next_pos_for_seq(ctx, seq_id, stream);
-  int32_t next_pos = ctx.next_pos[seq_id];
+  const int32_t * positions = request->positions;
+  const int32_t positions_count = request->positions_count;
 
-  for (int32_t i = 0; i < size; ++i) {
-    const int32_t idx = start + i;
-    if (stream.pos[idx] != POS_NONE) {
-      *ev.error_out = EMEL_ERR_BACKEND;
-      return;
-    }
-    set_cell_pos(stream, idx, next_pos);
-    add_seq_to_cell(stream, idx, seq_id);
-    ++next_pos;
-  }
-
-  ctx.next_pos[seq_id] = next_pos;
-  stream.head = start + size;
-  if (stream.head >= ctx.kv_size) {
-    stream.head %= ctx.kv_size;
+  if (!apply_slots(ctx, start, size, seq_id, positions, positions_count, true)) {
+    *ev.error_out = EMEL_ERR_BACKEND;
+    return;
   }
 
   ctx.applied_ubatches = ubatch_index + 1;
-  ctx.kv_tokens = max_used_max_p1(ctx);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
 inline constexpr auto run_rollback_step = [](const event::rollback_step & ev, context & ctx) {
@@ -752,16 +1094,29 @@ inline constexpr auto run_rollback_step = [](const event::rollback_step & ev, co
   }
   for (int32_t i = from_index; i < ctx.applied_ubatches; ++i) {
     const int32_t size = ctx.ubatch_sizes[i];
-    const int32_t start = ctx.slot_offsets[i];
-    const int32_t stream_id = ctx.ubatch_stream_ids[i];
     const int32_t seq_id = ctx.ubatch_seq_ids[i];
-    stream_state & stream = ctx.streams[stream_id];
-
-    for (int32_t j = 0; j < size; ++j) {
-      remove_seq_from_cell(stream, start + j, seq_id);
+    const int32_t start = ctx.slot_offsets[i];
+    if (start < 0 || start + size > ctx.slot_index_count) {
+      *ev.error_out = EMEL_ERR_BACKEND;
+      return;
     }
-    new_head[stream_id] = std::min(new_head[stream_id], start);
-    reset_next_pos_for_seq(ctx, seq_id, stream);
+    for (int32_t j = 0; j < size; ++j) {
+      const int32_t slot = start + j;
+      const int32_t stream_id = ctx.slot_stream_ids[slot];
+      const int32_t idx = ctx.slot_indices[slot];
+      if (stream_id < 0 || stream_id >= ctx.n_stream) {
+        *ev.error_out = EMEL_ERR_BACKEND;
+        return;
+      }
+      if (idx < 0 || idx >= ctx.kv_size) {
+        *ev.error_out = EMEL_ERR_BACKEND;
+        return;
+      }
+      stream_state & stream = ctx.streams[stream_id];
+      remove_seq_from_cell(stream, idx, seq_id);
+      new_head[stream_id] = std::min(new_head[stream_id], idx);
+      reset_next_pos_for_seq(ctx, seq_id, stream);
+    }
   }
 
   for (int32_t s = 0; s < ctx.n_stream; ++s) {
@@ -771,7 +1126,7 @@ inline constexpr auto run_rollback_step = [](const event::rollback_step & ev, co
   }
 
   ctx.applied_ubatches = from_index;
-  ctx.kv_tokens = max_used_max_p1(ctx);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
 inline constexpr auto begin_seq_remove = [](const event::seq_remove & ev, context &) {
@@ -906,26 +1261,47 @@ inline constexpr auto run_seq_remove_step = [](const event::seq_remove_step & ev
 
   const event::seq_remove * request = ev.request;
   const int32_t seq_id = request->seq_id;
-  const int32_t stream_id = ctx.seq_to_stream[seq_id];
-  stream_state & stream = ctx.streams[stream_id];
   const int32_t pos0 = request->pos_start;
   const int32_t pos1 = request->pos_end;
 
-  for (int32_t i = 0; i < ctx.kv_size; ++i) {
-    if (stream.pos[i] == POS_NONE) {
-      continue;
+  if (seq_id == -1) {
+    for (int32_t s = 0; s < ctx.n_stream; ++s) {
+      stream_state & stream = ctx.streams[s];
+      for (int32_t i = 0; i < ctx.kv_size; ++i) {
+        if (stream.pos[i] == POS_NONE) {
+          continue;
+        }
+        if (!pos_in_range(stream.pos[i], pos0, pos1)) {
+          continue;
+        }
+        set_cell_empty(stream, i);
+      }
+      for (int32_t seq = 0; seq < MAX_SEQ; ++seq) {
+        if (ctx.seq_to_stream[seq] != s) {
+          continue;
+        }
+        reset_next_pos_for_seq(ctx, seq, stream);
+      }
     }
-    if (!cell_has_seq(stream, i, seq_id)) {
-      continue;
+  } else {
+    const int32_t stream_id = ctx.seq_to_stream[seq_id];
+    stream_state & stream = ctx.streams[stream_id];
+    for (int32_t i = 0; i < ctx.kv_size; ++i) {
+      if (stream.pos[i] == POS_NONE) {
+        continue;
+      }
+      if (!cell_has_seq(stream, i, seq_id)) {
+        continue;
+      }
+      if (!pos_in_range(stream.pos[i], pos0, pos1)) {
+        continue;
+      }
+      remove_seq_from_cell(stream, i, seq_id);
     }
-    if (!pos_in_range(stream.pos[i], pos0, pos1)) {
-      continue;
-    }
-    remove_seq_from_cell(stream, i, seq_id);
+    reset_next_pos_for_seq(ctx, seq_id, stream);
   }
 
-  reset_next_pos_for_seq(ctx, seq_id, stream);
-  ctx.kv_tokens = max_used_max_p1(ctx);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
 inline constexpr auto run_seq_copy_step = [](const event::seq_copy_step & ev, context & ctx) {
@@ -947,6 +1323,12 @@ inline constexpr auto run_seq_copy_step = [](const event::seq_copy_step & ev, co
   const int32_t pos0 = request->pos_start;
   const int32_t pos1 = request->pos_end;
 
+  if (src_stream_id != dst_stream_id &&
+      !is_full_copy_range(pos0, pos1, ctx.kv_size)) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+
   if (src_stream_id != dst_stream_id) {
     bool found_pair = false;
     for (int32_t i = 0; i < ctx.pending_copy_count; ++i) {
@@ -963,6 +1345,7 @@ inline constexpr auto run_seq_copy_step = [](const event::seq_copy_step & ev, co
     if (!found_pair) {
       add_pending_copy(ctx, src_stream_id, dst_stream_id);
     }
+    reset_stream(dst_stream);
   }
 
   for (int32_t i = 0; i < ctx.kv_size; ++i) {
@@ -981,16 +1364,21 @@ inline constexpr auto run_seq_copy_step = [](const event::seq_copy_step & ev, co
       continue;
     }
 
-    if (dst_stream.pos[i] != POS_NONE) {
-      *ev.error_out = EMEL_ERR_BACKEND;
-      return;
-    }
     set_cell_pos(dst_stream, i, src_stream.pos[i]);
+    dst_stream.shift[i] = src_stream.shift[i];
+    dst_stream.ext_x[i] = src_stream.ext_x[i];
+    dst_stream.ext_y[i] = src_stream.ext_y[i];
+    if (dst_stream.shift[i] != 0) {
+      dst_stream.has_shift = true;
+    }
     add_seq_to_cell(dst_stream, i, dst_seq);
   }
 
+  if (src_stream_id != dst_stream_id) {
+    dst_stream.head = src_stream.head;
+  }
   reset_next_pos_for_seq(ctx, dst_seq, dst_stream);
-  ctx.kv_tokens = max_used_max_p1(ctx);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
 inline constexpr auto run_seq_keep_step = [](const event::seq_keep_step & ev, context & ctx) {
@@ -1024,7 +1412,7 @@ inline constexpr auto run_seq_keep_step = [](const event::seq_keep_step & ev, co
   }
 
   reset_next_pos_for_seq(ctx, seq_id, stream);
-  ctx.kv_tokens = max_used_max_p1(ctx);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
 inline constexpr auto run_seq_add_step = [](const event::seq_add_step & ev, context & ctx) {
@@ -1038,6 +1426,13 @@ inline constexpr auto run_seq_add_step = [](const event::seq_add_step & ev, cont
   const int32_t pos0 = request->pos_start;
   const int32_t pos1 = request->pos_end;
   const int32_t delta = request->shift;
+
+  if (delta == 0) {
+    return;
+  }
+  if (pos0 == pos1) {
+    return;
+  }
 
   for (int32_t i = 0; i < ctx.kv_size; ++i) {
     if (stream.pos[i] == POS_NONE) {
@@ -1053,7 +1448,7 @@ inline constexpr auto run_seq_add_step = [](const event::seq_add_step & ev, cont
   }
 
   reset_next_pos_for_seq(ctx, seq_id, stream);
-  ctx.kv_tokens = max_used_max_p1(ctx);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
 inline constexpr auto run_seq_div_step = [](const event::seq_div_step & ev, context & ctx) {
@@ -1067,6 +1462,13 @@ inline constexpr auto run_seq_div_step = [](const event::seq_div_step & ev, cont
   const int32_t pos0 = request->pos_start;
   const int32_t pos1 = request->pos_end;
   const int32_t divisor = request->divisor;
+
+  if (divisor == 1) {
+    return;
+  }
+  if (pos0 == pos1) {
+    return;
+  }
 
   for (int32_t i = 0; i < ctx.kv_size; ++i) {
     if (stream.pos[i] == POS_NONE) {
@@ -1082,23 +1484,70 @@ inline constexpr auto run_seq_div_step = [](const event::seq_div_step & ev, cont
   }
 
   reset_next_pos_for_seq(ctx, seq_id, stream);
-  ctx.kv_tokens = max_used_max_p1(ctx);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
 inline constexpr auto run_apply_updates = [](const event::apply_updates_step & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
 
+  const event::apply_updates * request = ev.request;
+  if (request == nullptr) {
+    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+
   if (ctx.pending_copy_count > 0) {
+    if (request->stream_copy == nullptr) {
+      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+      return;
+    }
+    for (int32_t i = 0; i < ctx.pending_copy_count; ++i) {
+      int32_t err = EMEL_OK;
+      const bool ok = request->stream_copy(
+          ctx.pending_copy_src[i],
+          ctx.pending_copy_dst[i],
+          request->user_data,
+          &err);
+      if (!ok || err != EMEL_OK) {
+        *ev.error_out = err == EMEL_OK ? EMEL_ERR_BACKEND : err;
+        return;
+      }
+    }
     ctx.pending_copy_count = 0;
   }
+
+  bool needs_shift = false;
   for (int32_t s = 0; s < ctx.n_stream; ++s) {
-    stream_state & stream = ctx.streams[s];
-    if (!stream.has_shift) {
-      continue;
+    if (ctx.streams[s].has_shift) {
+      needs_shift = true;
+      break;
     }
-    stream.has_shift = false;
-    stream.shift.fill(0);
+  }
+  if (needs_shift) {
+    if (request->apply_shift == nullptr) {
+      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+      return;
+    }
+    for (int32_t s = 0; s < ctx.n_stream; ++s) {
+      stream_state & stream = ctx.streams[s];
+      if (!stream.has_shift) {
+        continue;
+      }
+      int32_t err = EMEL_OK;
+      const bool ok = request->apply_shift(
+          s,
+          stream.shift.data(),
+          ctx.kv_size,
+          request->user_data,
+          &err);
+      if (!ok || err != EMEL_OK) {
+        *ev.error_out = err == EMEL_OK ? EMEL_ERR_BACKEND : err;
+        return;
+      }
+      stream.has_shift = false;
+      stream.shift.fill(0);
+    }
   }
 };
 

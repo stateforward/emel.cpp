@@ -38,19 +38,19 @@ TEST_CASE("kv_cache_prepare_plans_slots_and_apply_reports_progressive_n_kv") {
     .ubatch_index = 0,
     .kv_tokens_out = &kv_tokens,
   }));
-  CHECK(kv_tokens == 2);
+  CHECK(kv_tokens == 16);
 
   CHECK(machine.process_event(emel::kv::cache::event::apply_ubatch{
     .ubatch_index = 1,
     .kv_tokens_out = &kv_tokens,
   }));
-  CHECK(kv_tokens == 4);
+  CHECK(kv_tokens == 16);
 
   CHECK(machine.process_event(emel::kv::cache::event::apply_ubatch{
     .ubatch_index = 2,
     .kv_tokens_out = &kv_tokens,
   }));
-  CHECK(kv_tokens == 5);
+  CHECK(kv_tokens == 16);
 }
 
 TEST_CASE("kv_cache_prepare_fails_when_no_contiguous_slot_fits") {
@@ -97,13 +97,13 @@ TEST_CASE("kv_cache_rollback_clears_planned_ranges_from_index") {
     .ubatch_index = 0,
     .kv_tokens_out = &kv_tokens,
   }));
-  CHECK(kv_tokens == 2);
+  CHECK(kv_tokens == 16);
 
   CHECK(machine.process_event(emel::kv::cache::event::apply_ubatch{
     .ubatch_index = 1,
     .kv_tokens_out = &kv_tokens,
   }));
-  CHECK(kv_tokens == 4);
+  CHECK(kv_tokens == 16);
 
   CHECK(machine.process_event(emel::kv::cache::event::rollback{
     .from_ubatch_index = 0,
@@ -113,7 +113,7 @@ TEST_CASE("kv_cache_rollback_clears_planned_ranges_from_index") {
     .ubatch_index = 0,
     .kv_tokens_out = &kv_tokens,
   }));
-  CHECK(kv_tokens == 2);
+  CHECK(kv_tokens == 16);
 }
 
 TEST_CASE("kv_cache_reports_validation_errors") {
@@ -264,14 +264,17 @@ TEST_CASE("kv_cache_action_helpers_cover_slot_planning_apply_rollback_and_publis
       },
       ctx);
   CHECK(error_out == EMEL_OK);
-  CHECK(ctx.slot_offsets[0] == 2);
+  CHECK(ctx.slot_offsets[0] == 0);
 
   emel::kv::cache::event::apply_ubatch apply{};
   emel::kv::cache::event::apply_step apply_step{.request = &apply, .error_out = &error_out};
   ctx.planned_ubatch_count = 1;
   ctx.applied_ubatches = 0;
   ctx.ubatch_sizes[0] = 1;
-  ctx.slot_offsets[0] = 7;
+  ctx.slot_offsets[0] = 0;
+  ctx.slot_index_count = 1;
+  ctx.slot_indices[0] = 7;
+  ctx.slot_stream_ids[0] = 0;
   ctx.ubatch_stream_ids[0] = 0;
   ctx.ubatch_seq_ids[0] = 0;
   ctx.streams[0].pos[7] = emel::kv::cache::action::POS_NONE;
@@ -290,6 +293,9 @@ TEST_CASE("kv_cache_action_helpers_cover_slot_planning_apply_rollback_and_publis
   rollback.from_ubatch_index = 0;
   ctx.applied_ubatches = 1;
   ctx.streams[0].head = 8;
+  ctx.slot_index_count = 1;
+  ctx.slot_indices[0] = 7;
+  ctx.slot_stream_ids[0] = 0;
   emel::kv::cache::action::run_rollback_step(
       rollback_step, ctx);
   CHECK(error_out == EMEL_OK);

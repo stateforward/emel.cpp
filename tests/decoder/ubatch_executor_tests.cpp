@@ -395,7 +395,7 @@ TEST_CASE("ubatch_executor_execute_handles_compute_executor_extract_failure") {
   int32_t error = EMEL_OK;
 
   const int32_t prepared_size = 1;
-  CHECK(prepare_kv(kv_cache, &prepared_size, 1, 16));
+  CHECK(prepare_kv(kv_cache, &prepared_size, 1, 1));
 
   emel::decoder::ubatch_executor::event::execute execute{
     .ubatch_index = 0,
