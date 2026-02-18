@@ -5,6 +5,18 @@
 
 namespace emel::buffer::allocator::guard {
 
+inline constexpr auto phase_ok = [](const action::context & c) {
+  return c.phase_error == EMEL_OK;
+};
+
+inline constexpr auto phase_failed = [](const action::context & c) {
+  return c.phase_error != EMEL_OK;
+};
+
+inline constexpr auto always = [](const action::context &) {
+  return true;
+};
+
 struct valid_initialize {
   bool operator()(const event::initialize & ev) const noexcept {
     if (ev.buffer_count <= 0 || ev.buffer_count > action::k_max_buffers) {

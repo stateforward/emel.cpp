@@ -33,6 +33,7 @@ struct context {
   int32_t alloc_epoch = 0;
   int32_t release_epoch = 0;
   uint32_t step = 0;
+  int32_t phase_error = EMEL_OK;
   int32_t last_n_nodes = 0;
   int32_t last_n_leafs = 0;
   bool has_reserve_snapshot = false;
@@ -688,6 +689,7 @@ struct begin_initialize {
       context & c,
       emel::buffer::chunk_allocator::sm & chunk_allocator) const noexcept {
     int32_t err = EMEL_OK;
+    c.phase_error = EMEL_OK;
     c = {};
     c.buffer_count = ev.buffer_count;
     for (int32_t i = 0; i < k_max_buffers; ++i) {
@@ -712,6 +714,7 @@ struct begin_initialize {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    c.phase_error = err;
     c.step += 1;
   }
 };
@@ -724,6 +727,12 @@ struct on_initialize_done {
     }
     c.step += 1;
   }
+
+  template <class Ev>
+  void operator()(const Ev &, context & c) const noexcept {
+    c.init_epoch += 1;
+    c.step += 1;
+  }
 };
 
 struct on_initialize_error {
@@ -731,6 +740,11 @@ struct on_initialize_error {
     if (ev.error_out != nullptr) {
       *ev.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
     }
+    c.step += 1;
+  }
+
+  template <class Ev>
+  void operator()(const Ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -741,6 +755,7 @@ struct begin_reserve_n_size {
       context & c,
       emel::buffer::planner::sm & planner) const noexcept {
     int32_t err = EMEL_OK;
+    c.phase_error = EMEL_OK;
     emel::buffer::planner::sm * planner_sm =
         ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
     const emel::buffer::planner::strategy * strategy =
@@ -759,6 +774,7 @@ struct begin_reserve_n_size {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    c.phase_error = err;
     c.step += 1;
   }
 };
@@ -771,6 +787,12 @@ struct on_reserve_n_size_done {
     }
     c.step += 1;
   }
+
+  template <class Ev>
+  void operator()(const Ev &, context & c) const noexcept {
+    c.reserve_epoch += 1;
+    c.step += 1;
+  }
 };
 
 struct on_reserve_n_size_error {
@@ -778,6 +800,11 @@ struct on_reserve_n_size_error {
     if (ev.error_out != nullptr) {
       *ev.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
     }
+    c.step += 1;
+  }
+
+  template <class Ev>
+  void operator()(const Ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -789,6 +816,7 @@ struct begin_reserve_n {
       emel::buffer::planner::sm & planner,
       emel::buffer::chunk_allocator::sm & chunk_allocator) const noexcept {
     int32_t err = EMEL_OK;
+    c.phase_error = EMEL_OK;
     emel::buffer::planner::sm * planner_sm =
         ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
     emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
@@ -818,6 +846,7 @@ struct begin_reserve_n {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    c.phase_error = err;
     c.step += 1;
   }
 };
@@ -829,6 +858,7 @@ struct begin_reserve {
       emel::buffer::planner::sm & planner,
       emel::buffer::chunk_allocator::sm & chunk_allocator) const noexcept {
     int32_t err = EMEL_OK;
+    c.phase_error = EMEL_OK;
     emel::buffer::planner::sm * planner_sm =
         ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
     emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
@@ -858,6 +888,7 @@ struct begin_reserve {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    c.phase_error = err;
     c.step += 1;
   }
 };
@@ -870,6 +901,12 @@ struct on_reserve_done {
     }
     c.step += 1;
   }
+
+  template <class Ev>
+  void operator()(const Ev &, context & c) const noexcept {
+    c.reserve_epoch += 1;
+    c.step += 1;
+  }
 };
 
 struct on_reserve_error {
@@ -877,6 +914,11 @@ struct on_reserve_error {
     if (ev.error_out != nullptr) {
       *ev.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
     }
+    c.step += 1;
+  }
+
+  template <class Ev>
+  void operator()(const Ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -889,6 +931,7 @@ struct begin_alloc_graph {
       emel::buffer::chunk_allocator::sm & chunk_allocator,
       emel::buffer::realloc_analyzer::sm & realloc_analyzer) const noexcept {
     int32_t err = EMEL_OK;
+    c.phase_error = EMEL_OK;
     emel::buffer::planner::sm * planner_sm =
         ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
     emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
@@ -946,6 +989,7 @@ struct begin_alloc_graph {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    c.phase_error = err;
     c.step += 1;
   }
 };
@@ -958,6 +1002,12 @@ struct on_alloc_graph_done {
     }
     c.step += 1;
   }
+
+  template <class Ev>
+  void operator()(const Ev &, context & c) const noexcept {
+    c.alloc_epoch += 1;
+    c.step += 1;
+  }
 };
 
 struct on_alloc_graph_error {
@@ -965,6 +1015,11 @@ struct on_alloc_graph_error {
     if (ev.error_out != nullptr) {
       *ev.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
     }
+    c.step += 1;
+  }
+
+  template <class Ev>
+  void operator()(const Ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -975,18 +1030,21 @@ struct begin_release {
       context & c,
       emel::buffer::chunk_allocator::sm & chunk_allocator) const noexcept {
     int32_t err = EMEL_OK;
+    c.phase_error = EMEL_OK;
     emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
         ev.chunk_allocator_sm != nullptr ? ev.chunk_allocator_sm : &chunk_allocator;
     if (!detail::release_all_chunk_bindings(c, chunk_allocator_sm, err)) {
       if (ev.error_out != nullptr) {
         *ev.error_out = err;
       }
+      c.phase_error = err;
       c.step += 1;
       return;
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = EMEL_OK;
     }
+    c.phase_error = EMEL_OK;
     c.step += 1;
   }
 };
@@ -1001,6 +1059,14 @@ struct on_release_done {
     }
     c.step = 1;
   }
+
+  template <class Ev>
+  void operator()(const Ev &, context & c) const noexcept {
+    const int32_t releases = c.release_epoch + 1;
+    c = {};
+    c.release_epoch = releases;
+    c.step = 1;
+  }
 };
 
 struct on_release_error {
@@ -1008,6 +1074,11 @@ struct on_release_error {
     if (ev.error_out != nullptr) {
       *ev.error_out = detail::normalize_error(ev.err, EMEL_ERR_BACKEND);
     }
+    c.step += 1;
+  }
+
+  template <class Ev>
+  void operator()(const Ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -1020,6 +1091,7 @@ struct reject_invalid {
         *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
       }
     }
+    c.phase_error = EMEL_ERR_INVALID_ARGUMENT;
     c.step += 1;
   }
 };
@@ -1032,6 +1104,7 @@ struct on_unexpected {
         *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
       }
     }
+    c.phase_error = EMEL_ERR_INVALID_ARGUMENT;
     c.step += 1;
   }
 };

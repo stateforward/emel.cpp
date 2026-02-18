@@ -12,18 +12,6 @@
 
 namespace emel::buffer::allocator {
 
-using Process = boost::sml::back::process<
-  events::initialize_done,
-  events::initialize_error,
-  events::reserve_n_size_done,
-  events::reserve_n_size_error,
-  events::reserve_done,
-  events::reserve_error,
-  events::alloc_graph_done,
-  events::alloc_graph_error,
-  events::release_done,
-  events::release_error>;
-
 /*
 Buffer allocator architecture notes (single source of truth)
 
@@ -57,16 +45,15 @@ Multi-buffer mismatch error contract
 - This includes shape drift, source wiring drift, and growth beyond reserved assignment capacity.
 
 Unexpected-event policy intent
-- Unexpected event = known event type with no valid transition from current state.
+- Unexpected event = known intent event type with no valid transition from current state.
 - This is a sequencing contract violation (not an unknown type).
 - Concrete examples:
   - reserve/reserve_n/reserve_n_size/alloc_graph before initialize.
   - initialize while already ready/allocated.
-  - reserve_done/alloc_graph_done injected when not in reserving/allocating_graph.
-  - plan or phase *_done/_error delivered while planner is in the wrong phase.
+  - re-entrant callers dispatching intent events during in-flight phases.
 
 Why unexpected events can still happen
-- out-of-order internal dispatch from integration bugs,
+- out-of-order integration calls,
 - re-entrant/concurrent callers violating sequencing,
 - future state/event additions without explicit handling.
 
@@ -87,8 +74,6 @@ Production completion checklist (open)
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
-    using process_t = Process;
-
     struct uninitialized {};
     struct initializing {};
     struct ready {};
@@ -105,19 +90,10 @@ struct model {
           sml::state<initializing>,
       sml::state<uninitialized> + sml::event<event::initialize> / action::reject_invalid =
           sml::state<failed>,
-      sml::state<initializing> + sml::on_entry<event::initialize> /
-          [](const event::initialize & ev, action::context &, process_t & process) noexcept {
-            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
-            if (err == EMEL_OK) {
-              process(events::initialize_done{.error_out = ev.error_out});
-            } else {
-              process(events::initialize_error{.err = err, .error_out = ev.error_out});
-            }
-          },
-      sml::state<initializing> + sml::event<events::initialize_done> / action::on_initialize_done =
+      sml::state<initializing> [guard::phase_failed] / action::on_initialize_error =
+          sml::state<failed>,
+      sml::state<initializing> [guard::phase_ok] / action::on_initialize_done =
           sml::state<ready>,
-      sml::state<initializing> + sml::event<events::initialize_error> /
-          action::on_initialize_error = sml::state<failed>,
 
       sml::state<ready> + sml::event<event::reserve_n_size>[guard::can_reserve_n_size{}] /
           action::begin_reserve_n_size = sml::state<reserving_n_size>,
@@ -127,19 +103,10 @@ struct model {
           action::begin_reserve_n_size = sml::state<reserving_n_size>,
       sml::state<allocated> + sml::event<event::reserve_n_size> / action::reject_invalid =
           sml::state<failed>,
-      sml::state<reserving_n_size> + sml::on_entry<event::reserve_n_size> /
-          [](const event::reserve_n_size & ev, action::context &, process_t & process) noexcept {
-            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
-            if (err == EMEL_OK) {
-              process(events::reserve_n_size_done{.error_out = ev.error_out});
-            } else {
-              process(events::reserve_n_size_error{.err = err, .error_out = ev.error_out});
-            }
-          },
-      sml::state<reserving_n_size> + sml::event<events::reserve_n_size_done> /
-          action::on_reserve_n_size_done = sml::state<ready>,
-      sml::state<reserving_n_size> + sml::event<events::reserve_n_size_error> /
-          action::on_reserve_n_size_error = sml::state<failed>,
+      sml::state<reserving_n_size> [guard::phase_failed] / action::on_reserve_n_size_error =
+          sml::state<failed>,
+      sml::state<reserving_n_size> [guard::phase_ok] / action::on_reserve_n_size_done =
+          sml::state<ready>,
 
       sml::state<ready> + sml::event<event::reserve_n>[guard::can_reserve_n{}] /
           action::begin_reserve_n = sml::state<reserving>,
@@ -157,28 +124,10 @@ struct model {
           action::begin_reserve = sml::state<reserving>,
       sml::state<allocated> + sml::event<event::reserve> / action::reject_invalid =
           sml::state<failed>,
-      sml::state<reserving> + sml::on_entry<event::reserve_n> /
-          [](const event::reserve_n & ev, action::context &, process_t & process) noexcept {
-            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
-            if (err == EMEL_OK) {
-              process(events::reserve_done{.error_out = ev.error_out});
-            } else {
-              process(events::reserve_error{.err = err, .error_out = ev.error_out});
-            }
-          },
-      sml::state<reserving> + sml::on_entry<event::reserve> /
-          [](const event::reserve & ev, action::context &, process_t & process) noexcept {
-            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
-            if (err == EMEL_OK) {
-              process(events::reserve_done{.error_out = ev.error_out});
-            } else {
-              process(events::reserve_error{.err = err, .error_out = ev.error_out});
-            }
-          },
-      sml::state<reserving> + sml::event<events::reserve_done> / action::on_reserve_done =
-          sml::state<ready>,
-      sml::state<reserving> + sml::event<events::reserve_error> / action::on_reserve_error =
+      sml::state<reserving> [guard::phase_failed] / action::on_reserve_error =
           sml::state<failed>,
+      sml::state<reserving> [guard::phase_ok] / action::on_reserve_done =
+          sml::state<ready>,
 
       sml::state<ready> + sml::event<event::alloc_graph>[guard::can_alloc_graph{}] /
           action::begin_alloc_graph = sml::state<allocating_graph>,
@@ -188,19 +137,10 @@ struct model {
           action::begin_alloc_graph = sml::state<allocating_graph>,
       sml::state<allocated> + sml::event<event::alloc_graph> / action::reject_invalid =
           sml::state<failed>,
-      sml::state<allocating_graph> + sml::on_entry<event::alloc_graph> /
-          [](const event::alloc_graph & ev, action::context &, process_t & process) noexcept {
-            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
-            if (err == EMEL_OK) {
-              process(events::alloc_graph_done{.error_out = ev.error_out});
-            } else {
-              process(events::alloc_graph_error{.err = err, .error_out = ev.error_out});
-            }
-          },
-      sml::state<allocating_graph> + sml::event<events::alloc_graph_done> /
-          action::on_alloc_graph_done = sml::state<allocated>,
-      sml::state<allocating_graph> + sml::event<events::alloc_graph_error> /
-          action::on_alloc_graph_error = sml::state<failed>,
+      sml::state<allocating_graph> [guard::phase_failed] / action::on_alloc_graph_error =
+          sml::state<failed>,
+      sml::state<allocating_graph> [guard::phase_ok] / action::on_alloc_graph_done =
+          sml::state<allocated>,
 
       sml::state<uninitialized> + sml::event<event::release> / action::begin_release =
           sml::state<releasing>,
@@ -218,52 +158,106 @@ struct model {
           sml::state<releasing>,
       sml::state<failed> + sml::event<event::release> / action::begin_release =
           sml::state<releasing>,
-      sml::state<releasing> + sml::on_entry<event::release> /
-          [](const event::release & ev, action::context &, process_t & process) noexcept {
-            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
-            if (err == EMEL_OK) {
-              process(events::release_done{.error_out = ev.error_out});
-            } else {
-              process(events::release_error{.err = err, .error_out = ev.error_out});
-            }
-          },
-      sml::state<releasing> + sml::event<events::release_done> / action::on_release_done =
+      sml::state<releasing> [guard::phase_failed] / action::on_release_error =
+          sml::state<failed>,
+      sml::state<releasing> [guard::phase_ok] / action::on_release_done =
           sml::state<uninitialized>,
-      sml::state<releasing> + sml::event<events::release_error> / action::on_release_error =
+
+      sml::state<uninitialized> + sml::event<event::reserve_n_size> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<uninitialized> + sml::event<event::reserve_n> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<uninitialized> + sml::event<event::reserve> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<uninitialized> + sml::event<event::alloc_graph> / action::on_unexpected =
           sml::state<failed>,
 
-      sml::state<uninitialized> + sml::event<sml::_> / action::on_unexpected =
+      sml::state<initializing> + sml::event<event::initialize> / action::on_unexpected =
           sml::state<failed>,
-      sml::state<initializing> + sml::event<sml::_> / action::on_unexpected =
+      sml::state<initializing> + sml::event<event::reserve_n_size> / action::on_unexpected =
           sml::state<failed>,
-      sml::state<ready> + sml::event<sml::_> / action::on_unexpected = sml::state<failed>,
-      sml::state<reserving_n_size> + sml::event<sml::_> / action::on_unexpected =
+      sml::state<initializing> + sml::event<event::reserve_n> / action::on_unexpected =
           sml::state<failed>,
-      sml::state<reserving> + sml::event<sml::_> / action::on_unexpected =
+      sml::state<initializing> + sml::event<event::reserve> / action::on_unexpected =
           sml::state<failed>,
-      sml::state<allocating_graph> + sml::event<sml::_> / action::on_unexpected =
+      sml::state<initializing> + sml::event<event::alloc_graph> / action::on_unexpected =
           sml::state<failed>,
-      sml::state<allocated> + sml::event<sml::_> / action::on_unexpected =
+
+      sml::state<ready> + sml::event<event::initialize> / action::on_unexpected =
           sml::state<failed>,
-      sml::state<releasing> + sml::event<sml::_> / action::on_unexpected =
+
+      sml::state<reserving_n_size> + sml::event<event::initialize> / action::on_unexpected =
           sml::state<failed>,
-      sml::state<failed> + sml::event<sml::_> / action::on_unexpected =
+      sml::state<reserving_n_size> + sml::event<event::reserve_n_size> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<reserving_n_size> + sml::event<event::reserve_n> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<reserving_n_size> + sml::event<event::reserve> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<reserving_n_size> + sml::event<event::alloc_graph> / action::on_unexpected =
+          sml::state<failed>,
+
+      sml::state<reserving> + sml::event<event::initialize> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<reserving> + sml::event<event::reserve_n_size> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<reserving> + sml::event<event::reserve_n> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<reserving> + sml::event<event::reserve> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<reserving> + sml::event<event::alloc_graph> / action::on_unexpected =
+          sml::state<failed>,
+
+      sml::state<allocating_graph> + sml::event<event::initialize> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<allocating_graph> + sml::event<event::reserve_n_size> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<allocating_graph> + sml::event<event::reserve_n> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<allocating_graph> + sml::event<event::reserve> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<allocating_graph> + sml::event<event::alloc_graph> / action::on_unexpected =
+          sml::state<failed>,
+
+      sml::state<allocated> + sml::event<event::initialize> / action::on_unexpected =
+          sml::state<failed>,
+
+      sml::state<releasing> + sml::event<event::initialize> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<releasing> + sml::event<event::reserve_n_size> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<releasing> + sml::event<event::reserve_n> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<releasing> + sml::event<event::reserve> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<releasing> + sml::event<event::alloc_graph> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<releasing> + sml::event<event::release> / action::on_unexpected =
+          sml::state<failed>,
+
+      sml::state<failed> + sml::event<event::initialize> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<failed> + sml::event<event::reserve_n_size> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<failed> + sml::event<event::reserve_n> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<failed> + sml::event<event::reserve> / action::on_unexpected =
+          sml::state<failed>,
+      sml::state<failed> + sml::event<event::alloc_graph> / action::on_unexpected =
           sml::state<failed>
     );
   }
 };
 
-struct sm : private emel::detail::process_support<sm, Process>, public emel::sm<model, Process> {
-  using base_type = emel::sm<model, Process>;
+struct sm : public emel::sm<model> {
+  using base_type = emel::sm<model>;
 
   sm()
-      : emel::detail::process_support<sm, Process>(this),
-        base_type(
+      : base_type(
           context_,
           buffer_planner_sm_,
           buffer_chunk_allocator_sm_,
-          buffer_realloc_analyzer_sm_,
-          this->process_) {}
+          buffer_realloc_analyzer_sm_) {}
 
   using base_type::process_event;
 
