@@ -4,6 +4,18 @@
 
 namespace emel::buffer::realloc_analyzer::guard {
 
+inline constexpr auto phase_ok = [](const action::context & c) {
+  return c.phase_error == EMEL_OK;
+};
+
+inline constexpr auto phase_failed = [](const action::context & c) {
+  return c.phase_error != EMEL_OK;
+};
+
+inline constexpr auto always = [](const action::context &) {
+  return true;
+};
+
 struct no_error {
   template <class Event>
   bool operator()(const Event & ev, const action::context &) const noexcept {
@@ -24,24 +36,20 @@ struct has_error {
   }
 };
 
+struct can_analyze {
+  bool operator()(const event::analyze & ev) const noexcept {
+    return action::detail::valid_analyze_payload(
+        ev.graph, ev.node_allocs, ev.node_alloc_count, ev.leaf_allocs, ev.leaf_alloc_count);
+  }
+};
+
 struct valid_analyze_request {
   bool operator()(const event::validate & ev, const action::context &) const noexcept {
     if (ev.request == nullptr) {
       return false;
     }
-    if (!action::detail::valid_graph_tensors(ev.graph)) {
-      return false;
-    }
-    if (ev.node_alloc_count < 0 || ev.leaf_alloc_count < 0) {
-      return false;
-    }
-    if (ev.graph.n_nodes > 0 && ev.node_allocs == nullptr) {
-      return false;
-    }
-    if (ev.graph.n_leafs > 0 && ev.leaf_allocs == nullptr) {
-      return false;
-    }
-    return true;
+    return action::detail::valid_analyze_payload(
+        ev.graph, ev.node_allocs, ev.node_alloc_count, ev.leaf_allocs, ev.leaf_alloc_count);
   }
 };
 
