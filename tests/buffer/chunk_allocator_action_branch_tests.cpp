@@ -96,6 +96,43 @@ TEST_CASE("chunk_allocator_allocate_actions_handle_invalid_request") {
   CHECK(ctx.aligned_request_size != 0);
 }
 
+TEST_CASE("chunk_allocator_guards_reject_null_and_invalid_release_requests") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+
+  emel::buffer::chunk_allocator::event::validate_allocate allocate_validate{
+    .request = nullptr,
+  };
+  CHECK_FALSE(emel::buffer::chunk_allocator::guard::valid_allocate_request{}(
+    allocate_validate, ctx));
+
+  emel::buffer::chunk_allocator::event::validate_release release_validate{
+    .request = nullptr,
+  };
+  CHECK_FALSE(emel::buffer::chunk_allocator::guard::valid_release_request{}(
+    release_validate, ctx));
+
+  emel::buffer::chunk_allocator::event::release request{
+    .chunk = 0,
+    .offset = 0,
+    .size = 16,
+    .alignment = 0,
+  };
+  release_validate.request = &request;
+  ctx.chunk_count = 1;
+  ctx.request_chunk = 0;
+  ctx.request_offset = 0;
+  ctx.request_size = 16;
+  ctx.request_alignment = 0;
+  ctx.chunks[0].max_size = 32;
+  CHECK_FALSE(emel::buffer::chunk_allocator::guard::valid_release_request{}(
+    release_validate, ctx));
+
+  ctx.request_alignment = 16;
+  ctx.request_size = std::numeric_limits<uint64_t>::max();
+  CHECK_FALSE(emel::buffer::chunk_allocator::guard::valid_release_request{}(
+    release_validate, ctx));
+}
+
 TEST_CASE("chunk_allocator_run_ensure_chunk_reports_backend") {
   emel::buffer::chunk_allocator::action::context ctx{};
   int32_t err = EMEL_OK;
@@ -161,6 +198,20 @@ TEST_CASE("chunk_allocator_run_merge_release_reports_backend") {
   emel::buffer::chunk_allocator::action::run_merge_release(
     emel::buffer::chunk_allocator::event::merge_release{.error_out = &err}, ctx);
   CHECK(err == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("chunk_allocator_action_on_unexpected_reports_invalid_argument") {
+  emel::buffer::chunk_allocator::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  emel::buffer::chunk_allocator::events::allocate_error ev{
+    .err = EMEL_ERR_BACKEND,
+    .error_out = &err,
+  };
+
+  emel::buffer::chunk_allocator::action::on_unexpected(ev, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(ctx.step == 1);
 }
 
 TEST_CASE("chunk_allocator_detail_allocate_from_selected_paths") {

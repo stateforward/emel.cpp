@@ -254,6 +254,35 @@ TEST_CASE("buffer_realloc_analyzer_actions_cover_validation_and_publish") {
   CHECK(err == EMEL_OK);
 }
 
+TEST_CASE("buffer_realloc_analyzer_guard_rejects_missing_request") {
+  emel::buffer::realloc_analyzer::action::context ctx{};
+  emel::buffer::realloc_analyzer::event::validate validate{
+    .graph = {},
+    .node_allocs = nullptr,
+    .node_alloc_count = 0,
+    .leaf_allocs = nullptr,
+    .leaf_alloc_count = 0,
+    .error_out = nullptr,
+    .request = nullptr,
+  };
+  CHECK_FALSE(emel::buffer::realloc_analyzer::guard::valid_analyze_request{}(
+    validate, ctx));
+}
+
+TEST_CASE("buffer_realloc_analyzer_action_on_unexpected_reports_invalid_argument") {
+  emel::buffer::realloc_analyzer::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  emel::buffer::realloc_analyzer::events::analyze_error ev{
+    .err = EMEL_ERR_BACKEND,
+    .error_out = &err,
+  };
+
+  emel::buffer::realloc_analyzer::action::on_unexpected(ev, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(ctx.step == 1);
+}
+
 TEST_CASE("buffer_realloc_analyzer_action_error_handlers_normalize") {
   emel::buffer::realloc_analyzer::action::context ctx{};
   int32_t err_out = EMEL_OK;

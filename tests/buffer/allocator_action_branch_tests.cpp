@@ -492,6 +492,39 @@ TEST_CASE("buffer_allocator_begin_initialize_validates_buffer_count") {
     }));
 }
 
+TEST_CASE("buffer_allocator_begin_initialize_rejects_alignment_and_size_errors") {
+  std::array<int32_t, 1> alignments = {{3}};
+  CHECK_FALSE(emel::buffer::allocator::guard::valid_initialize{}(
+    emel::buffer::allocator::event::initialize{
+      .buffer_count = 1,
+      .buffer_alignments = alignments.data(),
+    }));
+
+  std::array<int32_t, 1> max_sizes = {{-1}};
+  CHECK_FALSE(emel::buffer::allocator::guard::valid_initialize{}(
+    emel::buffer::allocator::event::initialize{
+      .buffer_count = 1,
+      .buffer_max_sizes = max_sizes.data(),
+    }));
+
+  alignments[0] = 16;
+  max_sizes[0] = 8;
+  CHECK_FALSE(emel::buffer::allocator::guard::valid_initialize{}(
+    emel::buffer::allocator::event::initialize{
+      .buffer_count = 1,
+      .buffer_alignments = alignments.data(),
+      .buffer_max_sizes = max_sizes.data(),
+    }));
+
+  max_sizes[0] = 24;
+  CHECK_FALSE(emel::buffer::allocator::guard::valid_initialize{}(
+    emel::buffer::allocator::event::initialize{
+      .buffer_count = 1,
+      .buffer_alignments = alignments.data(),
+      .buffer_max_sizes = max_sizes.data(),
+    }));
+}
+
 TEST_CASE("buffer_allocator_begin_reserve_n_size_validates_inputs") {
   emel::buffer::allocator::action::context ctx{};
   ctx.buffer_count = 1;

@@ -126,6 +126,11 @@ TEST_CASE("buffer_allocator_c_api_init_rejects_bad_storage") {
   CHECK(emel_buffer_allocator_init(storage.data() + 1, storage.size() - 1) == nullptr);
 }
 
+TEST_CASE("buffer_allocator_c_api_init_rejects_misaligned_storage") {
+  alignas(64) std::array<std::byte, 1024> storage = {};
+  CHECK(emel_buffer_allocator_init(storage.data() + 1, storage.size() - 1) == nullptr);
+}
+
 TEST_CASE("buffer_allocator_c_api_graph_validation_paths") {
   alignas(64) std::array<std::byte, 524288> storage = {};
   emel_buffer_allocator * allocator =
@@ -171,6 +176,29 @@ TEST_CASE("buffer_allocator_c_api_alloc_tensors_error_paths") {
 
   CHECK(emel_buffer_allocator_alloc_tensors(allocator, &graph) ==
         EMEL_ERR_INVALID_ARGUMENT);
+
+  emel_buffer_allocator_destroy(allocator);
+}
+
+TEST_CASE("buffer_allocator_c_api_release_and_query_paths") {
+  alignas(64) std::array<std::byte, 524288> storage = {};
+  emel_buffer_allocator * allocator =
+    emel_buffer_allocator_init(storage.data(), storage.size());
+  REQUIRE(allocator != nullptr);
+
+  std::array<int32_t, 1> alignments = {{16}};
+  std::array<int32_t, 1> max_sizes = {{0}};
+  REQUIRE(emel_buffer_allocator_initialize(
+            allocator,
+            1,
+            alignments.data(),
+            max_sizes.data()) == EMEL_OK);
+
+  CHECK(emel_buffer_allocator_buffer_size(allocator, 0) == 0);
+  CHECK(emel_buffer_allocator_buffer_chunk_id(allocator, 0) == -1);
+  CHECK(emel_buffer_allocator_buffer_chunk_offset(allocator, 0) == 0);
+  CHECK(emel_buffer_allocator_buffer_alloc_size(allocator, 0) == 0);
+  CHECK(emel_buffer_allocator_release(allocator) == EMEL_OK);
 
   emel_buffer_allocator_destroy(allocator);
 }

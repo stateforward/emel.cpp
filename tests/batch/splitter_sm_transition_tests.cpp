@@ -3,64 +3,95 @@
 #include <cstdint>
 #include <doctest/doctest.h>
 
-#include "emel/emel.h"
 #include "emel/batch/splitter/sm.hpp"
+#include "emel/callback.hpp"
+#include "emel/emel.h"
 
 namespace {
+
+struct split_capture {
+  int32_t err = EMEL_OK;
+  bool done_called = false;
+  bool error_called = false;
+
+  void on_done(const emel::batch::splitter::events::splitting_done &) noexcept {
+    done_called = true;
+    err = EMEL_OK;
+  }
+
+  void on_error(const emel::batch::splitter::events::splitting_error & ev) noexcept {
+    error_called = true;
+    err = ev.err;
+  }
+};
+
+inline emel::callback<void(const emel::batch::splitter::events::splitting_done &)> make_done(
+    split_capture * capture) {
+  return emel::callback<void(const emel::batch::splitter::events::splitting_done &)>::from<
+    split_capture,
+    &split_capture::on_done>(capture);
+}
+
+inline emel::callback<void(const emel::batch::splitter::events::splitting_error &)> make_error(
+    split_capture * capture) {
+  return emel::callback<void(const emel::batch::splitter::events::splitting_error &)>::from<
+    split_capture,
+    &split_capture::on_error>(capture);
+}
+
+}  // namespace
 
 TEST_CASE("batch_splitter_sm_successful_split") {
   emel::batch::splitter::sm machine{};
   std::array<int32_t, 2> tokens = {{1, 2}};
-  std::array<int32_t, 2> ubatch_sizes = {{0, 0}};
-  int32_t ubatch_count = 0;
-  int32_t total_outputs = 0;
-  int32_t err = EMEL_OK;
+  split_capture capture{};
 
   machine.process_event(emel::batch::splitter::event::split{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 1,
     .mode = emel::batch::splitter::event::split_mode::simple,
-    .ubatch_sizes_out = ubatch_sizes.data(),
-    .ubatch_sizes_capacity = static_cast<int32_t>(ubatch_sizes.size()),
-    .ubatch_count_out = &ubatch_count,
-    .total_outputs_out = &total_outputs,
-    .error_out = &err,
+    .on_done = make_done(&capture),
+    .on_error = make_error(&capture),
   });
-  CHECK(err == EMEL_OK);
-  CHECK(ubatch_count == 2);
+
+  CHECK(capture.done_called);
+  CHECK(machine.is(boost::sml::state<emel::batch::splitter::done>));
 }
 
-TEST_CASE("batch_splitter_sm_reports_capacity_error") {
+TEST_CASE("batch_splitter_sm_reports_callback_contract_error") {
   emel::batch::splitter::sm machine{};
   std::array<int32_t, 2> tokens = {{1, 2}};
-  std::array<int32_t, 1> ubatch_sizes = {{0}};
-  int32_t err = EMEL_OK;
+  split_capture capture{};
 
   machine.process_event(emel::batch::splitter::event::split{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 1,
     .mode = emel::batch::splitter::event::split_mode::simple,
-    .ubatch_sizes_out = ubatch_sizes.data(),
-    .ubatch_sizes_capacity = 0,
-    .error_out = &err,
+    .on_done = {},
+    .on_error = make_error(&capture),
   });
-  CHECK(err != EMEL_OK);
+
+  CHECK(capture.error_called);
+  CHECK(capture.err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(machine.is(boost::sml::state<emel::batch::splitter::invalid_request>));
 }
 
 TEST_CASE("batch_splitter_sm_validation_error_path") {
   emel::batch::splitter::sm machine{};
-  int32_t err = EMEL_OK;
+  split_capture capture{};
 
   machine.process_event(emel::batch::splitter::event::split{
     .token_ids = nullptr,
     .n_tokens = 0,
     .n_ubatch = 1,
     .mode = emel::batch::splitter::event::split_mode::simple,
-    .error_out = &err,
+    .on_done = make_done(&capture),
+    .on_error = make_error(&capture),
   });
-  CHECK(err != EMEL_OK);
-}
 
-}  // namespace
+  CHECK(capture.error_called);
+  CHECK(capture.err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(machine.is(boost::sml::state<emel::batch::splitter::invalid_request>));
+}

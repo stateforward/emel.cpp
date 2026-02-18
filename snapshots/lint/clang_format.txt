@@ -1,3 +1,4 @@
+include/emel/callback.hpp
 include/emel/emel.h
 src/emel/batch/splitter/actions.hpp
 src/emel/batch/splitter/events.hpp
@@ -139,13 +140,9 @@ tests/decoder/compute_executor_action_branch_tests.cpp
 tests/decoder/compute_executor_sm_transition_tests.cpp
 tests/decoder/compute_executor_tests.cpp
 tests/decoder/decoder_action_branch_tests.cpp
-tests/decoder/decoder_sm_intent_event_tests.cpp
-tests/decoder/decoder_sm_on_entry_branch_tests.cpp
 tests/decoder/decoder_sm_transition_tests.cpp
 tests/decoder/decoder_tests.cpp
 tests/decoder/ubatch_executor_action_branch_tests.cpp
-tests/decoder/ubatch_executor_sm_on_entry_branch_tests.cpp
-tests/decoder/ubatch_executor_sm_transition_tests.cpp
 tests/decoder/ubatch_executor_tests.cpp
 tests/encoder/encoder_tests.cpp
 tests/encoder/encoder_unicode_tests.cpp

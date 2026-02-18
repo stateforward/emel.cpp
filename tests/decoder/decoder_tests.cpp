@@ -108,6 +108,15 @@ TEST_CASE("decoder_guards_cover_progress_paths") {
   CHECK(emel::decoder::guard::no_more_ubatches(ctx));
 }
 
+TEST_CASE("decoder_guard_reports_invalid_outputs_total") {
+  emel::decoder::action::context ctx{};
+  ctx.outputs_total = -1;
+  CHECK(emel::decoder::guard::invalid_outputs_total(ctx));
+
+  ctx.outputs_total = 0;
+  CHECK_FALSE(emel::decoder::guard::invalid_outputs_total(ctx));
+}
+
 TEST_CASE("decoder_maps_memory_status_to_prepare_failure_classes") {
   using emel::decoder::action::classify_prepare_failure_from_memory_status;
   using emel::decoder::action::prepare_failure_kind;

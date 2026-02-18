@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "emel/batch/splitter/sm.hpp"
+#include "emel/callback.hpp"
 #include "emel/decoder/events.hpp"
 #include "emel/decoder/ubatch_executor/sm.hpp"
 #include "emel/emel.h"
@@ -37,6 +38,12 @@ struct context {
   std::unique_ptr<emel::memory::coordinator::sm> memory_coordinator;
   std::unique_ptr<emel::kv::cache::sm> kv_cache;
   std::unique_ptr<emel::decoder::ubatch_executor::sm> ubatch_executor;
+
+  int32_t phase_error = EMEL_OK;
+  int32_t ubatch_error = EMEL_OK;
+  int32_t last_error = EMEL_OK;
+  bool phase_retryable = false;
+  bool rollback_needed = false;
 
   context();
 };
@@ -87,6 +94,11 @@ inline constexpr auto begin_decode = [](const event::decode & ev, context & ctx)
   ctx.ubatches_processed = 0;
   ctx.ubatch_sizes.fill(0);
   ctx.slot_offsets.fill(0);
+  ctx.phase_error = EMEL_OK;
+  ctx.ubatch_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  ctx.phase_retryable = false;
+  ctx.rollback_needed = false;
 };
 
 inline constexpr auto run_validate = [](const event::validate & ev, context & ctx) {
@@ -100,41 +112,100 @@ inline constexpr auto reject_invalid_validate = [](const event::validate & ev, c
   *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
 };
 
+inline constexpr auto run_validate_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  event::validate validate{
+    .error_out = &ctx.phase_error,
+  };
+  run_validate(validate, ctx);
+};
+
+inline constexpr auto reject_invalid_validate_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  event::validate validate{
+    .error_out = &ctx.phase_error,
+  };
+  reject_invalid_validate(validate, ctx);
+};
+
 inline constexpr auto run_initialize_batch = [](const event::initialize_batch & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
 
-  int32_t outputs_total = 0;
-  int32_t ubatch_count = 0;
+  struct split_reply {
+    int32_t * ubatch_sizes_out = nullptr;
+    int32_t ubatch_sizes_capacity = 0;
+    int32_t ubatch_count = 0;
+    int32_t total_outputs = 0;
+    int32_t err = EMEL_OK;
+
+    void on_done(const emel::batch::splitter::events::splitting_done & reply) noexcept {
+      err = EMEL_OK;
+      ubatch_count = reply.ubatch_count;
+      total_outputs = reply.total_outputs;
+      if (ubatch_sizes_out == nullptr) {
+        return;
+      }
+      if (ubatch_sizes_capacity < reply.ubatch_count || reply.ubatch_sizes == nullptr) {
+        err = EMEL_ERR_INVALID_ARGUMENT;
+        return;
+      }
+      for (int32_t i = 0; i < reply.ubatch_count; ++i) {
+        ubatch_sizes_out[i] = reply.ubatch_sizes[i];
+      }
+    }
+
+    void on_error(const emel::batch::splitter::events::splitting_error & reply) noexcept {
+      err = reply.err;
+    }
+  };
+
+  split_reply reply{
+    .ubatch_sizes_out = ctx.ubatch_sizes.data(),
+    .ubatch_sizes_capacity = static_cast<int32_t>(ctx.ubatch_sizes.size()),
+  };
+
+  const auto on_done =
+      emel::callback<void(const emel::batch::splitter::events::splitting_done &)>::from<
+          split_reply, &split_reply::on_done>(&reply);
+  const auto on_error =
+      emel::callback<void(const emel::batch::splitter::events::splitting_error &)>::from<
+          split_reply, &split_reply::on_error>(&reply);
 
   const bool ok = ctx.batch_splitter->process_event(emel::batch::splitter::event::split{
     .token_ids = ctx.token_ids,
     .n_tokens = ctx.n_tokens,
     .n_ubatch = ctx.n_ubatch,
     .mode = emel::batch::splitter::event::split_mode::simple,
-    .ubatch_sizes_out = ctx.ubatch_sizes.data(),
-    .ubatch_sizes_capacity = static_cast<int32_t>(ctx.ubatch_sizes.size()),
-    .ubatch_count_out = &ubatch_count,
-    .total_outputs_out = &outputs_total,
+    .on_done = on_done,
+    .on_error = on_error,
   });
 
-  if (!ok) {
+  if (!ok || reply.err != EMEL_OK) {
+    *ev.error_out = EMEL_ERR_BACKEND;
+    return;
+  }
+
+  if (reply.ubatch_count <= 0 || reply.total_outputs <= 0) {
     *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
     return;  // GCOVR_EXCL_LINE
   }
 
-  if (ubatch_count <= 0 || outputs_total <= 0) {
-    *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-    return;  // GCOVR_EXCL_LINE
-  }
-
-  ctx.ubatches_total = ubatch_count;
+  ctx.ubatches_total = reply.ubatch_count;
   ctx.ubatches_processed = 0;
-  ctx.outputs_total = outputs_total;
+  ctx.outputs_total = reply.total_outputs;
   ctx.outputs_processed = 0;
   if (ctx.n_ubatch <= 0) {
     ctx.n_ubatch = ctx.n_tokens;
   }
+};
+
+inline constexpr auto run_initialize_batch_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  event::initialize_batch initialize{
+    .error_out = &ctx.phase_error,
+  };
+  run_initialize_batch(initialize, ctx);
 };
 
 inline constexpr auto run_update_memory = [](const event::update_memory & ev, context & ctx) {
@@ -153,6 +224,14 @@ inline constexpr auto run_update_memory = [](const event::update_memory & ev, co
     *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
     return;  // GCOVR_EXCL_LINE
   }
+};
+
+inline constexpr auto run_update_memory_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  event::update_memory update{
+    .error_out = &ctx.phase_error,
+  };
+  run_update_memory(update, ctx);
 };
 
 inline constexpr auto run_prepare_memory_batch = [](const event::prepare_memory_batch & ev, context & ctx) {
@@ -204,6 +283,16 @@ inline constexpr auto run_prepare_memory_batch = [](const event::prepare_memory_
   }
 };
 
+inline constexpr auto run_prepare_memory_batch_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  ctx.phase_retryable = false;
+  event::prepare_memory_batch prepare{
+    .error_out = &ctx.phase_error,
+    .retryable_out = &ctx.phase_retryable,
+  };
+  run_prepare_memory_batch(prepare, ctx);
+};
+
 inline constexpr auto run_optimize_memory = [](const event::optimize_memory & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
@@ -222,6 +311,14 @@ inline constexpr auto run_optimize_memory = [](const event::optimize_memory & ev
   }
 };
 
+inline constexpr auto run_optimize_memory_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  event::optimize_memory optimize{
+    .error_out = &ctx.phase_error,
+  };
+  run_optimize_memory(optimize, ctx);
+};
+
 inline constexpr auto run_reserve_output = [](const event::reserve_output & ev, context & ctx) {
   (void)ctx;
   if (ev.error_out == nullptr) return;
@@ -231,6 +328,22 @@ inline constexpr auto run_reserve_output = [](const event::reserve_output & ev, 
 inline constexpr auto reject_invalid_reserve_output = [](const event::reserve_output & ev, context &) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_ERR_BACKEND;
+};
+
+inline constexpr auto run_reserve_output_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  event::reserve_output reserve{
+    .error_out = &ctx.phase_error,
+  };
+  run_reserve_output(reserve, ctx);
+};
+
+inline constexpr auto reject_invalid_reserve_output_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  event::reserve_output reserve{
+    .error_out = &ctx.phase_error,
+  };
+  reject_invalid_reserve_output(reserve, ctx);
 };
 
 inline constexpr auto run_process_ubatch = [](const event::process_ubatch & ev, context & ctx) {
@@ -284,6 +397,32 @@ inline constexpr auto on_invalid_ubatch_size = [](const event::process_ubatch & 
   }
 };
 
+inline constexpr auto run_process_ubatch_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  ctx.rollback_needed = false;
+  event::process_ubatch process{
+    .error_out = &ctx.phase_error,
+    .rollback_needed_out = &ctx.rollback_needed,
+  };
+  run_process_ubatch(process, ctx);
+  if (ctx.phase_error != EMEL_OK) {
+    ctx.ubatch_error = ctx.phase_error;
+  }
+};
+
+inline constexpr auto on_invalid_ubatch_size_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  ctx.rollback_needed = false;
+  event::process_ubatch process{
+    .error_out = &ctx.phase_error,
+    .rollback_needed_out = &ctx.rollback_needed,
+  };
+  on_invalid_ubatch_size(process, ctx);
+  if (ctx.phase_error != EMEL_OK) {
+    ctx.ubatch_error = ctx.phase_error;
+  }
+};
+
 inline constexpr auto run_rollback_ubatch = [](const event::rollback_ubatch & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
@@ -308,12 +447,29 @@ inline constexpr auto run_rollback_ubatch = [](const event::rollback_ubatch & ev
   }
 };
 
+inline constexpr auto run_rollback_ubatch_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  event::rollback_ubatch rollback{
+    .error_out = &ctx.phase_error,
+    .rollback_needed = ctx.rollback_needed,
+  };
+  run_rollback_ubatch(rollback, ctx);
+};
+
 inline constexpr auto run_finalize_outputs = [](const event::finalize_outputs & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
   if (ctx.outputs_processed != ctx.outputs_total) {
     *ev.error_out = EMEL_ERR_BACKEND;
   }
+};
+
+inline constexpr auto run_finalize_outputs_phase = [](context & ctx) noexcept {
+  ctx.phase_error = EMEL_OK;
+  event::finalize_outputs finalize{
+    .error_out = &ctx.phase_error,
+  };
+  run_finalize_outputs(finalize, ctx);
 };
 
 inline constexpr auto dispatch_decoding_done_to_owner = [](const events::decoding_done & ev, context & ctx) {
@@ -339,6 +495,37 @@ inline constexpr auto dispatch_decoding_error_to_owner = [](const events::decodi
                                              .type = events::owner_event::kind::error,
                                              .error = ev,
                                          });
+  }
+};
+
+inline constexpr auto mark_done = [](context & ctx) noexcept {
+  ctx.last_error = EMEL_OK;
+};
+
+inline constexpr auto capture_rollback_error = [](context & ctx) noexcept {
+  ctx.last_error = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
+};
+
+inline constexpr auto capture_ubatch_error = [](context & ctx) noexcept {
+  ctx.last_error = ctx.ubatch_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.ubatch_error;
+};
+
+inline constexpr auto ensure_last_error = [](context & ctx) noexcept {
+  if (ctx.last_error != EMEL_OK) {
+    return;
+  }
+  ctx.last_error = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
+};
+
+struct on_unexpected {
+  template <class Event>
+  void operator()(const Event & ev, context & ctx) const noexcept {
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = EMEL_ERR_BACKEND;
+      }
+    }
+    ctx.phase_error = EMEL_ERR_BACKEND;
   }
 };
 

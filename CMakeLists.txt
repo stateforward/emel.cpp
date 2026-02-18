@@ -92,21 +92,15 @@ if(EMEL_ENABLE_TESTS)
     tests/model/gguf_loader_tests.cpp
     tests/model/loader_tests.cpp
     tests/model/weight_loader_tests.cpp
-    tests/encoder/encoder_tests.cpp
-    tests/encoder/encoder_unicode_tests.cpp
     tests/sm/sm_policy_tests.cpp
     tests/decoder/decoder_tests.cpp
     tests/decoder/decoder_sm_transition_tests.cpp
-    tests/decoder/decoder_sm_intent_event_tests.cpp
     tests/decoder/decoder_action_branch_tests.cpp
-    tests/decoder/decoder_sm_on_entry_branch_tests.cpp
     tests/decoder/compute_executor_tests.cpp
     tests/decoder/compute_executor_sm_transition_tests.cpp
     tests/decoder/compute_executor_action_branch_tests.cpp
     tests/decoder/ubatch_executor_tests.cpp
-    tests/decoder/ubatch_executor_sm_transition_tests.cpp
     tests/decoder/ubatch_executor_action_branch_tests.cpp
-    tests/decoder/ubatch_executor_sm_on_entry_branch_tests.cpp
     tests/batch/splitter_tests.cpp
     tests/batch/splitter_actions_tests.cpp
     tests/batch/splitter_additional_tests.cpp

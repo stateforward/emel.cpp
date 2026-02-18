@@ -63,4 +63,32 @@ inline constexpr auto outputs_mismatch = [](const action::context & ctx) {
   return !outputs_match(ctx);
 };
 
+inline constexpr auto phase_ok = [](const action::context & ctx) {
+  return ctx.phase_error == EMEL_OK;
+};
+
+inline constexpr auto phase_failed = [](const action::context & ctx) {
+  return ctx.phase_error != EMEL_OK;
+};
+
+inline constexpr auto phase_retryable = [](const action::context & ctx) {
+  return ctx.phase_retryable;
+};
+
+inline constexpr auto phase_not_retryable = [](const action::context & ctx) {
+  return !ctx.phase_retryable;
+};
+
+inline constexpr auto phase_failed_retryable = [](const action::context & ctx) {
+  return ctx.phase_error != EMEL_OK && ctx.phase_retryable;
+};
+
+inline constexpr auto phase_failed_permanent = [](const action::context & ctx) {
+  return ctx.phase_error != EMEL_OK && !ctx.phase_retryable;
+};
+
+inline constexpr auto always = [](const action::context &) {
+  return true;
+};
+
 }  // namespace emel::decoder::guard
