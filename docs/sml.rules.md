@@ -78,10 +78,17 @@ Primary sources consulted (non-exhaustive)
    - return values from `ActorB` non-SML methods, or
    - context fields exposed as read-only snapshots after `dispatch` returns.
 3. Publish-subscribe (no queue): The orchestrator MAY fan out an input event to multiple actors by deterministic ordering. Each actor MUST treat the event as read-only input.
+4. Synchronous callbacks (allowed): Events MAY carry `emel::callback`-style functors for
+   immediate notification within the same RTC chain (e.g., request-reply without storing
+   results in context). Callbacks MUST be invoked before `dispatch` returns, MUST be bounded
+   and non-allocating, MUST NOT call back into `process_event`, and MUST NOT be stored in
+   actor context or retained for later.
 
 ### Forbidden interaction patterns
-4. Actors MUST NOT store “callback handles” that later re-enter `process_event` asynchronously (this becomes a mailbox by another name).
-5. Actors MUST NOT enqueue follow-up work for later (no `sml::process_queue`, no `sml::defer_queue`, no user mailbox).
+5. Actors MUST NOT store “callback handles” that later re-enter `process_event` asynchronously
+   (this becomes a mailbox by another name).
+6. Actors MUST NOT enqueue follow-up work for later (no `sml::process_queue`,
+   no `sml::defer_queue`, no user mailbox).
 
 ### Deterministic ordering rules
 6. Cross-actor calls MUST have a single total order defined by the orchestrator. The order MUST be deterministic and testable (e.g., fixed actor ID ordering).

@@ -27,6 +27,9 @@ NEVER rely on constructor parameter order; prefer a single context aggregate.
 ALWAYS use `visit_current_states` or `is(...)` for state inspection.
 NEVER allow re-entrancy into the same actor within one RTC chain.
 ALWAYS keep cross-actor synchronous calls acyclic and deterministically ordered.
+Callbacks (`emel::callback`) are allowed only for immediate synchronous replies within the
+same RTC chain; invoke before dispatch returns, never store in context, and never call
+`process_event` inside the callback.
 ALWAYS define explicit behavior for unexpected events; NEVER drop them silently.
 ALWAYS keep tracing deterministic, bounded, and allocation-free; use
 `sml::logger<...>` when needed.

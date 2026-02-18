@@ -12,11 +12,16 @@ namespace emel::decoder::compute_executor {
 
 struct initialized {};
 struct validating {};
-struct preparing_graph {};
 struct allocating_graph {};
 struct binding_inputs {};
 struct running_backend {};
 struct extracting_outputs {};
+struct validate_decision {};
+struct prepare_decision {};
+struct alloc_decision {};
+struct bind_decision {};
+struct backend_decision {};
+struct extract_decision {};
 struct done {};
 struct errored {};
 
@@ -25,19 +30,20 @@ struct errored {};
  *
  * State purposes:
  * - `initialized`: idle state awaiting execute intent.
- * - `validating`: validate callbacks and ubatch inputs.
- * - `preparing_graph`/`allocating_graph`: build or reuse compute graphs.
- * - `binding_inputs`: bind tensors for backend execution.
- * - `running_backend`: execute compute backend.
- * - `extracting_outputs`: read outputs for this ubatch.
+ * - `validating`/`validate_decision`: validate callbacks and ubatch inputs.
+ * - `prepare_decision`: build or reuse compute graphs.
+ * - `allocating_graph`/`alloc_decision`: allocate compute graph memory when required.
+ * - `binding_inputs`/`bind_decision`: bind tensors for backend execution.
+ * - `running_backend`/`backend_decision`: execute compute backend.
+ * - `extracting_outputs`/`extract_decision`: read outputs for this ubatch.
  * - `done`/`errored`: terminal outcomes, immediately return to initialized.
  *
  * Guard semantics:
  * - `valid_execute_request` is a pure predicate on the execute payload.
- * - `phase_*` guards observe errors set by entry actions.
+ * - `phase_*` guards observe errors set by actions.
  *
  * Action side effects:
- * - Entry actions run bounded compute steps and update context fields.
+ * - Actions run bounded compute steps and update context fields.
  */
 struct model {
   auto operator()() const {
@@ -49,55 +55,61 @@ struct model {
       sml::state<initialized> + sml::event<event::execute> [guard::invalid_execute_request{}] /
           action::reject_invalid_execute = sml::state<errored>,
 
-      sml::state<validating> + sml::on_entry<sml::_> / action::run_validate_phase,
-      sml::state<validating> [guard::phase_failed] = sml::state<errored>,
-      sml::state<validating> [guard::phase_ok] = sml::state<preparing_graph>,
+      sml::state<validating> / action::run_validate = sml::state<validate_decision>,
+      sml::state<validate_decision> [guard::phase_failed] = sml::state<errored>,
+      sml::state<validate_decision> [guard::phase_ok] / action::run_prepare_graph =
+          sml::state<prepare_decision>,
 
-      sml::state<preparing_graph> + sml::on_entry<sml::_> / action::run_prepare_graph_phase,
-      sml::state<preparing_graph> [guard::phase_failed] = sml::state<errored>,
-      sml::state<preparing_graph> [guard::graph_reused] = sml::state<binding_inputs>,
-      sml::state<preparing_graph> [guard::graph_needs_allocation] =
+      sml::state<prepare_decision> [guard::phase_failed] = sml::state<errored>,
+      sml::state<prepare_decision> [guard::graph_reused] = sml::state<binding_inputs>,
+      sml::state<prepare_decision> [guard::graph_needs_allocation] =
           sml::state<allocating_graph>,
 
-      sml::state<allocating_graph> + sml::on_entry<sml::_> / action::run_alloc_graph_phase,
-      sml::state<allocating_graph> [guard::phase_failed] = sml::state<errored>,
-      sml::state<allocating_graph> [guard::phase_ok] = sml::state<binding_inputs>,
+      sml::state<allocating_graph> / action::run_alloc_graph = sml::state<alloc_decision>,
+      sml::state<alloc_decision> [guard::phase_failed] = sml::state<errored>,
+      sml::state<alloc_decision> [guard::phase_ok] = sml::state<binding_inputs>,
 
-      sml::state<binding_inputs> + sml::on_entry<sml::_> / action::run_bind_inputs_phase,
-      sml::state<binding_inputs> [guard::phase_failed] = sml::state<errored>,
-      sml::state<binding_inputs> [guard::phase_ok] = sml::state<running_backend>,
+      sml::state<binding_inputs> / action::run_bind_inputs = sml::state<bind_decision>,
+      sml::state<bind_decision> [guard::phase_failed] = sml::state<errored>,
+      sml::state<bind_decision> [guard::phase_ok] = sml::state<running_backend>,
 
-      sml::state<running_backend> + sml::on_entry<sml::_> / action::run_backend_phase,
-      sml::state<running_backend> [guard::phase_failed] = sml::state<errored>,
-      sml::state<running_backend> [guard::phase_ok] = sml::state<extracting_outputs>,
+      sml::state<running_backend> / action::run_backend = sml::state<backend_decision>,
+      sml::state<backend_decision> [guard::phase_failed] = sml::state<errored>,
+      sml::state<backend_decision> [guard::phase_ok] = sml::state<extracting_outputs>,
 
-      sml::state<extracting_outputs> + sml::on_entry<sml::_> / action::run_extract_outputs_phase,
-      sml::state<extracting_outputs> [guard::phase_failed] = sml::state<errored>,
-      sml::state<extracting_outputs> [guard::phase_ok] = sml::state<done>,
+      sml::state<extracting_outputs> / action::run_extract_outputs = sml::state<extract_decision>,
+      sml::state<extract_decision> [guard::phase_failed] = sml::state<errored>,
+      sml::state<extract_decision> [guard::phase_ok] = sml::state<done>,
 
-      sml::state<done> + sml::on_entry<sml::_> / action::mark_done,
-      sml::state<done> [guard::always] = sml::state<initialized>,
+      sml::state<done> / action::mark_done = sml::state<initialized>,
 
-      sml::state<errored> + sml::on_entry<sml::_> / action::ensure_last_error,
-      sml::state<errored> [guard::always] = sml::state<initialized>,
+      sml::state<errored> / action::ensure_last_error = sml::state<initialized>,
 
-      sml::state<initialized> + sml::event<event::execute> / action::on_unexpected{} =
+      sml::state<validating> + sml::event<event::execute> / action::on_unexpected =
           sml::state<errored>,
-      sml::state<validating> + sml::event<event::execute> / action::on_unexpected{} =
+      sml::state<validate_decision> + sml::event<event::execute> / action::on_unexpected =
           sml::state<errored>,
-      sml::state<preparing_graph> + sml::event<event::execute> / action::on_unexpected{} =
+      sml::state<prepare_decision> + sml::event<event::execute> / action::on_unexpected =
           sml::state<errored>,
-      sml::state<allocating_graph> + sml::event<event::execute> / action::on_unexpected{} =
+      sml::state<allocating_graph> + sml::event<event::execute> / action::on_unexpected =
           sml::state<errored>,
-      sml::state<binding_inputs> + sml::event<event::execute> / action::on_unexpected{} =
+      sml::state<alloc_decision> + sml::event<event::execute> / action::on_unexpected =
           sml::state<errored>,
-      sml::state<running_backend> + sml::event<event::execute> / action::on_unexpected{} =
+      sml::state<binding_inputs> + sml::event<event::execute> / action::on_unexpected =
           sml::state<errored>,
-      sml::state<extracting_outputs> + sml::event<event::execute> / action::on_unexpected{} =
+      sml::state<bind_decision> + sml::event<event::execute> / action::on_unexpected =
           sml::state<errored>,
-      sml::state<done> + sml::event<event::execute> / action::on_unexpected{} =
+      sml::state<running_backend> + sml::event<event::execute> / action::on_unexpected =
           sml::state<errored>,
-      sml::state<errored> + sml::event<event::execute> / action::on_unexpected{} =
+      sml::state<backend_decision> + sml::event<event::execute> / action::on_unexpected =
+          sml::state<errored>,
+      sml::state<extracting_outputs> + sml::event<event::execute> / action::on_unexpected =
+          sml::state<errored>,
+      sml::state<extract_decision> + sml::event<event::execute> / action::on_unexpected =
+          sml::state<errored>,
+      sml::state<done> + sml::event<event::execute> / action::on_unexpected =
+          sml::state<errored>,
+      sml::state<errored> + sml::event<event::execute> / action::on_unexpected =
           sml::state<errored>
     );
   }

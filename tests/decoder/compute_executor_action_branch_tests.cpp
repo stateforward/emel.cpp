@@ -243,12 +243,110 @@ TEST_CASE("compute_executor_run_phase_actions_report_callback_failures") {
   CHECK(err == EMEL_ERR_BACKEND);
 }
 
+TEST_CASE("compute_executor_actions_reject_null_requests") {
+  emel::decoder::compute_executor::action::context ctx{};
+  int32_t err = EMEL_OK;
+  bool reused = false;
+
+  emel::decoder::compute_executor::action::run_validate(
+    emel::decoder::compute_executor::event::validate{.request = nullptr, .error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
+
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::run_prepare_graph(
+    emel::decoder::compute_executor::event::prepare_graph{
+      .request = nullptr,
+      .reused_out = &reused,
+      .error_out = &err,
+    },
+    ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::run_alloc_graph(
+    emel::decoder::compute_executor::event::alloc_graph{.request = nullptr, .error_out = &err},
+    ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::run_bind_inputs(
+    emel::decoder::compute_executor::event::bind_inputs{.request = nullptr, .error_out = &err},
+    ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::run_backend(
+    emel::decoder::compute_executor::event::run_backend{.request = nullptr, .error_out = &err},
+    ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  err = EMEL_OK;
+  emel::decoder::compute_executor::action::run_extract_outputs(
+    emel::decoder::compute_executor::event::extract_outputs{.request = nullptr, .error_out = &err},
+    ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("compute_executor_actions_handle_missing_callbacks_in_phase_helpers") {
+  emel::decoder::compute_executor::action::context ctx{};
+
+  ctx.validate = nullptr;
+  emel::decoder::compute_executor::action::run_validate(
+    emel::decoder::compute_executor::event::execute{}, ctx);
+  CHECK(ctx.phase_error == EMEL_OK);
+
+  ctx.prepare_graph = nullptr;
+  emel::decoder::compute_executor::action::run_prepare_graph(
+    emel::decoder::compute_executor::event::execute{}, ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
+
+  ctx.alloc_graph = nullptr;
+  emel::decoder::compute_executor::action::run_alloc_graph(
+    emel::decoder::compute_executor::event::execute{}, ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
+
+  ctx.bind_inputs = nullptr;
+  emel::decoder::compute_executor::action::run_bind_inputs(
+    emel::decoder::compute_executor::event::execute{}, ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
+
+  ctx.run_backend = nullptr;
+  emel::decoder::compute_executor::action::run_backend(
+    emel::decoder::compute_executor::event::execute{}, ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
+
+  ctx.extract_outputs = nullptr;
+  emel::decoder::compute_executor::action::run_extract_outputs(
+    emel::decoder::compute_executor::event::execute{}, ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("compute_executor_run_extract_outputs_updates_outputs") {
+  emel::decoder::compute_executor::action::context ctx{};
+  int32_t err = EMEL_OK;
+  execute_t request{
+    .extract_outputs = extract_outputs_ok,
+  };
+
+  emel::decoder::compute_executor::action::run_extract_outputs(
+    emel::decoder::compute_executor::event::extract_outputs{
+      .request = &request,
+      .error_out = &err,
+    },
+    ctx);
+  CHECK(err == EMEL_OK);
+  CHECK(ctx.outputs_produced == 1);
+  CHECK(ctx.phase_error == EMEL_OK);
+}
+
 TEST_CASE("compute_executor_phase_helpers_cover_alloc_graph_path") {
   emel::decoder::compute_executor::action::context ctx{};
   ctx.alloc_graph = alloc_graph_ok;
   ctx.phase_error = EMEL_ERR_BACKEND;
 
-  emel::decoder::compute_executor::action::run_alloc_graph_phase(ctx);
+  emel::decoder::compute_executor::action::run_alloc_graph(
+    emel::decoder::compute_executor::event::execute{}, ctx);
   CHECK(ctx.phase_error == EMEL_OK);
 }
 
@@ -256,7 +354,7 @@ TEST_CASE("compute_executor_on_unexpected_sets_error") {
   emel::decoder::compute_executor::action::context ctx{};
   int32_t err = EMEL_OK;
 
-  emel::decoder::compute_executor::action::on_unexpected{}(
+  emel::decoder::compute_executor::action::on_unexpected(
     emel::decoder::compute_executor::event::execute{.error_out = &err},
     ctx);
 
