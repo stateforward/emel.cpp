@@ -84,6 +84,7 @@ struct context {
   int32_t planned_nodes = 0;
   int32_t planned_leafs = 0;
   int32_t reference_edges = 0;
+  int32_t phase_error = EMEL_OK;
 };
 
 namespace detail {
@@ -858,9 +859,13 @@ inline int32_t run_release_expired(context & ctx) noexcept {
   return strategy->release_expired(ctx);
 }
 
-inline int32_t run_finalize(context & ctx, const event::plan * request) noexcept {
+inline int32_t run_finalize(context & ctx) noexcept {
   const auto * strategy = resolve_strategy(ctx);
-  const int32_t err = strategy->finalize(ctx);
+  return strategy->finalize(ctx);
+}
+
+inline int32_t run_finalize(context & ctx, const event::plan * request) noexcept {
+  const int32_t err = run_finalize(ctx);
   if (err == EMEL_OK && request != nullptr && request->sizes_out != nullptr) {
     for (int32_t i = 0; i < ctx.buffer_count && i < request->sizes_out_count; ++i) {
       request->sizes_out[i] = ctx.bytes_by_buffer[i];
@@ -869,7 +874,7 @@ inline int32_t run_finalize(context & ctx, const event::plan * request) noexcept
   return err;
 }
 
-inline int32_t run_split_required(context & ctx, const event::plan * request) noexcept {
+inline int32_t run_split_required(context & ctx) noexcept {
   ctx.chunk_counts.fill(0);
   ctx.chunk_sizes.fill(0);
   ctx.total_chunk_count = 0;
@@ -921,6 +926,14 @@ inline int32_t run_split_required(context & ctx, const event::plan * request) no
     }
   }
 
+  return EMEL_OK;
+}
+
+inline int32_t run_split_required(context & ctx, const event::plan * request) noexcept {
+  const int32_t err = run_split_required(ctx);
+  if (err != EMEL_OK) {
+    return err;
+  }
   if (request != nullptr) {
     if (request->chunk_sizes_out != nullptr &&
         request->chunk_sizes_out_count >= k_max_chunk_plan_entries) {
@@ -935,8 +948,30 @@ inline int32_t run_split_required(context & ctx, const event::plan * request) no
       }
     }
   }
-
   return EMEL_OK;
+}
+
+inline void copy_plan_outputs(const context & ctx, const event::plan & request) noexcept {
+  if (request.sizes_out != nullptr) {
+    const int32_t count = request.sizes_out_count < ctx.buffer_count
+      ? request.sizes_out_count
+      : ctx.buffer_count;
+    for (int32_t i = 0; i < count; ++i) {
+      request.sizes_out[i] = ctx.bytes_by_buffer[i];
+    }
+  }
+  if (request.chunk_sizes_out != nullptr &&
+      request.chunk_sizes_out_count >= k_max_chunk_plan_entries) {
+    for (int32_t i = 0; i < k_max_chunk_plan_entries; ++i) {
+      request.chunk_sizes_out[i] = ctx.chunk_sizes[i];
+    }
+  }
+  if (request.chunk_counts_out != nullptr &&
+      request.chunk_counts_out_count >= ctx.buffer_count) {
+    for (int32_t i = 0; i < ctx.buffer_count; ++i) {
+      request.chunk_counts_out[i] = ctx.chunk_counts[i];
+    }
+  }
 }
 
 }  // namespace detail
@@ -976,14 +1011,72 @@ struct begin_plan {
     if (ev.error_out != nullptr) {
       *ev.error_out = EMEL_OK;
     }
+    ctx.phase_error = EMEL_OK;
   }
 };
 
 struct reject_plan {
-  void operator()(const event::plan & ev, context &) const noexcept {
+  void operator()(const event::plan & ev, context & ctx) const noexcept {
     if (ev.error_out != nullptr) {
       *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
     }
+    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
+  }
+};
+
+struct run_reset {
+  template <class Event>
+  void operator()(const Event &, context & ctx) const noexcept {
+    ctx.phase_error = detail::run_reset(ctx);
+  }
+};
+
+struct run_seed_leafs {
+  template <class Event>
+  void operator()(const Event &, context & ctx) const noexcept {
+    ctx.phase_error = detail::run_seed_leafs(ctx);
+  }
+};
+
+struct run_count_references {
+  template <class Event>
+  void operator()(const Event &, context & ctx) const noexcept {
+    ctx.phase_error = detail::run_count_references(ctx);
+  }
+};
+
+struct run_alloc_explicit_inputs {
+  template <class Event>
+  void operator()(const Event &, context & ctx) const noexcept {
+    ctx.phase_error = detail::run_alloc_explicit_inputs(ctx);
+  }
+};
+
+struct run_plan_nodes {
+  template <class Event>
+  void operator()(const Event &, context & ctx) const noexcept {
+    ctx.phase_error = detail::run_plan_nodes(ctx);
+  }
+};
+
+struct run_release_expired {
+  template <class Event>
+  void operator()(const Event &, context & ctx) const noexcept {
+    ctx.phase_error = detail::run_release_expired(ctx);
+  }
+};
+
+struct run_finalize {
+  template <class Event>
+  void operator()(const Event &, context & ctx) const noexcept {
+    ctx.phase_error = detail::run_finalize(ctx);
+  }
+};
+
+struct run_split_required {
+  template <class Event>
+  void operator()(const Event &, context & ctx) const noexcept {
+    ctx.phase_error = detail::run_split_required(ctx);
   }
 };
 
@@ -993,6 +1086,7 @@ struct on_reset_done {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    ctx.phase_error = err;
   }
 };
 
@@ -1002,6 +1096,7 @@ struct on_seed_leafs_done {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    ctx.phase_error = err;
   }
 };
 
@@ -1011,6 +1106,7 @@ struct on_count_references_done {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    ctx.phase_error = err;
   }
 };
 
@@ -1020,6 +1116,7 @@ struct on_alloc_explicit_inputs_done {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    ctx.phase_error = err;
   }
 };
 
@@ -1029,6 +1126,7 @@ struct on_plan_nodes_done {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    ctx.phase_error = err;
   }
 };
 
@@ -1038,6 +1136,7 @@ struct on_release_expired_done {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    ctx.phase_error = err;
   }
 };
 
@@ -1047,6 +1146,7 @@ struct on_finalize_done {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    ctx.phase_error = err;
   }
 };
 
@@ -1056,6 +1156,7 @@ struct on_split_required_done {
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
+    ctx.phase_error = err;
   }
 };
 
@@ -1072,6 +1173,9 @@ struct on_plan_done {
       *ev.error_out = EMEL_OK;
     }
   }
+
+  template <class Event>
+  void operator()(const Event &, context &) const noexcept {}
 };
 
 struct on_plan_error {
@@ -1080,22 +1184,34 @@ struct on_plan_error {
       *ev.error_out = detail::normalize_error(ev.err);
     }
   }
+
+  template <class Event>
+  void operator()(const Event &, context &) const noexcept {}
 };
 
 struct on_unexpected {
   template <class Event>
-  void operator()(const Event & ev, context &) const noexcept {
+  void operator()(const Event & ev, context & ctx) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
       }
     }
+    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
   }
 };
 
 inline constexpr no_op no_op{};
 inline constexpr begin_plan begin_plan{};
 inline constexpr reject_plan reject_plan{};
+inline constexpr run_reset run_reset{};
+inline constexpr run_seed_leafs run_seed_leafs{};
+inline constexpr run_count_references run_count_references{};
+inline constexpr run_alloc_explicit_inputs run_alloc_explicit_inputs{};
+inline constexpr run_plan_nodes run_plan_nodes{};
+inline constexpr run_release_expired run_release_expired{};
+inline constexpr run_finalize run_finalize{};
+inline constexpr run_split_required run_split_required{};
 inline constexpr on_reset_done on_reset_done{};
 inline constexpr on_seed_leafs_done on_seed_leafs_done{};
 inline constexpr on_count_references_done on_count_references_done{};

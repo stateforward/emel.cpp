@@ -4,6 +4,18 @@
 
 namespace emel::buffer::planner::guard {
 
+inline constexpr auto phase_ok = [](const action::context & ctx) {
+  return ctx.phase_error == EMEL_OK;
+};
+
+inline constexpr auto phase_failed = [](const action::context & ctx) {
+  return ctx.phase_error != EMEL_OK;
+};
+
+inline constexpr auto always = [](const action::context &) {
+  return true;
+};
+
 struct no_error {
   template <class Event>
   bool operator()(const Event & ev, const action::context &) const noexcept {

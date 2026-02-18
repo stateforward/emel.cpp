@@ -1,5 +1,4 @@
 #include <array>
-#include <boost/sml.hpp>
 #include <cstdint>
 #include <doctest/doctest.h>
 
@@ -212,13 +211,6 @@ bool dispatch_plan_error(
     void *, const emel::buffer::planner::events::plan_error &) noexcept {
   return true;
 }
-
-struct noop_queue {
-  using container_type = void;
-
-  template <class Event>
-  void push(const Event &) noexcept {}
-};
 
 }  // namespace
 
@@ -478,44 +470,46 @@ TEST_CASE("buffer_planner_reports_zero_for_unused_secondary_buffer") {
 }
 
 TEST_CASE("buffer_planner_testing_sm_can_target_error_and_recovery_paths") {
-  emel::buffer::planner::action::context ctx{};
-  noop_queue queue{};
-  emel::buffer::planner::Process process{queue};
-  boost::sml::sm<
-    emel::buffer::planner::model,
-    boost::sml::testing,
-    emel::buffer::planner::Process> machine{ctx, process};
+  emel::buffer::planner::sm planner{};
+  const graph_storage g = make_valid_graph();
+  std::array<int32_t, 1> sizes = {{0}};
+  int32_t error_code = EMEL_OK;
 
-  const emel::buffer::planner::event::plan plan_event{
-    .graph = graph_view{},
+  emel::buffer::planner::strategy failing = emel::buffer::planner::default_strategies::gallocr_parity;
+  failing.seed_leafs = +[](emel::buffer::planner::action::context &) noexcept -> int32_t {
+    return EMEL_ERR_BACKEND;
+  };
+
+  CHECK_FALSE(planner.process_event(emel::buffer::planner::event::plan{
+    .graph = as_view(g),
     .node_buffer_ids = nullptr,
     .leaf_buffer_ids = nullptr,
     .buffer_count = 1,
-    .size_only = true,
-    .sizes_out = nullptr,
-    .sizes_out_count = 0,
-    .error_out = nullptr,
-    .owner_sm = &machine,
+    .size_only = false,
+    .sizes_out = sizes.data(),
+    .sizes_out_count = static_cast<int32_t>(sizes.size()),
+    .error_out = &error_code,
+    .owner_sm = &planner,
     .dispatch_done = &dispatch_plan_done,
     .dispatch_error = &dispatch_plan_error,
-  };
-
-  CHECK(machine.process_event(plan_event));
-  CHECK(machine.process_event(emel::buffer::planner::event::reset_done{}));
-  CHECK(machine.process_event(emel::buffer::planner::event::seed_leafs_done{}));
-  CHECK(machine.process_event(emel::buffer::planner::event::count_references_done{}));
-  CHECK(machine.process_event(emel::buffer::planner::event::alloc_explicit_inputs_done{}));
-  CHECK(machine.process_event(emel::buffer::planner::event::plan_nodes_done{}));
-  CHECK(machine.process_event(emel::buffer::planner::event::release_expired_done{}));
-  CHECK(machine.process_event(emel::buffer::planner::event::finalize_done{}));
-  CHECK(machine.process_event(emel::buffer::planner::events::plan_done{}));
-
-  CHECK(machine.process_event(plan_event));
-  CHECK(machine.process_event(emel::buffer::planner::event::reset_done{}));
-  CHECK(machine.process_event(emel::buffer::planner::event::seed_leafs_error{
-    .err = EMEL_ERR_BACKEND,
+    .strategy = &failing,
   }));
-  CHECK(machine.process_event(emel::buffer::planner::events::plan_error{
-    .err = EMEL_ERR_BACKEND,
+  CHECK(error_code == EMEL_ERR_BACKEND);
+
+  error_code = EMEL_OK;
+  CHECK(planner.process_event(emel::buffer::planner::event::plan{
+    .graph = as_view(g),
+    .node_buffer_ids = nullptr,
+    .leaf_buffer_ids = nullptr,
+    .buffer_count = 1,
+    .size_only = false,
+    .sizes_out = sizes.data(),
+    .sizes_out_count = static_cast<int32_t>(sizes.size()),
+    .error_out = &error_code,
+    .owner_sm = &planner,
+    .dispatch_done = &dispatch_plan_done,
+    .dispatch_error = &dispatch_plan_error,
+    .strategy = &emel::buffer::planner::default_strategies::gallocr_parity,
   }));
+  CHECK(error_code == EMEL_OK);
 }
