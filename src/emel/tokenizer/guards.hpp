@@ -5,191 +5,153 @@
 namespace emel::tokenizer::guard {
 
 struct can_tokenize {
-  bool operator()(const event::tokenize & ev) const {
-    if (ev.vocab == nullptr || ev.token_ids_out == nullptr || ev.token_count_out == nullptr) {
+  bool operator()(const event::tokenize &ev) const noexcept {
+    if (ev.vocab == nullptr || ev.token_ids_out == nullptr ||
+        ev.token_count_out == nullptr) {
       return false;
     }
     return ev.token_capacity > 0;
   }
 };
 
-struct has_request {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return ev.request != nullptr;
+struct phase_ok {
+  bool operator()(const action::context &ctx) const noexcept {
+    return ctx.phase_error == EMEL_OK;
   }
 };
 
-struct has_text {
-  bool operator()(const event::tokenize & ev) const {
-    return !ev.text.empty();
-  }
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return ev.request != nullptr && !ev.request->text.empty();
-  }
-};
-
-struct no_text {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return !has_text{}(ev);
+struct phase_failed {
+  bool operator()(const action::context &ctx) const noexcept {
+    return ctx.phase_error != EMEL_OK;
   }
 };
 
 struct has_special_tokens {
-  template <class Event>
-  bool operator()(const Event &, const action::context & ctx) const {
+  bool operator()(const action::context &ctx) const noexcept {
     return ctx.special_token_count > 0;
   }
 };
 
 struct no_special_tokens {
-  template <class Event>
-  bool operator()(const Event & ev, const action::context & ctx) const {
-    return !has_special_tokens{}(ev, ctx);
+  bool operator()(const action::context &ctx) const noexcept {
+    return ctx.special_token_count == 0;
   }
 };
 
 struct has_capacity {
-  template <class Event>
-  bool operator()(const Event & ev, const action::context & ctx) const {
-    const event::tokenize * request = detail::request_from(ev);
-    if (request == nullptr) {
-      return false;
-    }
-    return ctx.token_count < request->token_capacity;
+  bool operator()(const action::context &ctx) const noexcept {
+    return ctx.token_count < ctx.token_capacity;
   }
 };
 
 struct no_capacity {
-  template <class Event>
-  bool operator()(const Event & ev, const action::context & ctx) const {
-    return !has_capacity{}(ev, ctx);
+  bool operator()(const action::context &ctx) const noexcept {
+    return !has_capacity{}(ctx);
   }
 };
 
 struct should_add_bos {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    const event::tokenize * request = detail::request_from(ev);
-    if (request == nullptr || request->vocab == nullptr) {
-      return false;
-    }
-    return request->add_special && request->vocab->add_bos;
+  bool operator()(const action::context &ctx) const noexcept {
+    return ctx.add_special && ctx.vocab != nullptr && ctx.vocab->add_bos;
   }
 };
 
 struct no_prefix {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return !should_add_bos{}(ev);
+  bool operator()(const action::context &ctx) const noexcept {
+    return !should_add_bos{}(ctx);
   }
 };
 
 struct bos_id_valid {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    const event::tokenize * request = detail::request_from(ev);
-    if (request == nullptr || request->vocab == nullptr) {
-      return false;
-    }
-    return request->vocab->bos_id >= 0;
+  bool operator()(const action::context &ctx) const noexcept {
+    return ctx.vocab != nullptr && ctx.vocab->bos_id >= 0;
   }
 };
 
 struct bos_id_invalid {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return !bos_id_valid{}(ev);
+  bool operator()(const action::context &ctx) const noexcept {
+    return !bos_id_valid{}(ctx);
   }
 };
 
 struct should_add_sep {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    const event::tokenize * request = detail::request_from(ev);
-    if (request == nullptr || request->vocab == nullptr) {
+  bool operator()(const action::context &ctx) const noexcept {
+    if (!ctx.add_special || ctx.vocab == nullptr) {
       return false;
     }
-    if (!request->add_special) {
-      return false;
-    }
-    const auto model_type = detail::detect_model(*request->vocab);
-    return model_type == detail::tokenizer_model::wpm && request->vocab->add_sep;
+    return ctx.model_slot == action::encoder_slot::wpm && ctx.vocab->add_sep;
   }
 };
 
 struct should_add_eos {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    const event::tokenize * request = detail::request_from(ev);
-    if (request == nullptr || request->vocab == nullptr) {
+  bool operator()(const action::context &ctx) const noexcept {
+    if (!ctx.add_special || ctx.vocab == nullptr) {
       return false;
     }
-    if (!request->add_special) {
-      return false;
-    }
-    const auto model_type = detail::detect_model(*request->vocab);
-    return model_type != detail::tokenizer_model::wpm && request->vocab->add_eos;
+    return ctx.model_slot != action::encoder_slot::wpm && ctx.vocab->add_eos;
   }
 };
 
 struct no_suffix {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return !should_add_sep{}(ev) && !should_add_eos{}(ev);
+  bool operator()(const action::context &ctx) const noexcept {
+    return !should_add_sep{}(ctx) && !should_add_eos{}(ctx);
   }
 };
 
 struct sep_id_valid {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    const event::tokenize * request = detail::request_from(ev);
-    if (request == nullptr || request->vocab == nullptr) {
-      return false;
-    }
-    return request->vocab->sep_id >= 0;
+  bool operator()(const action::context &ctx) const noexcept {
+    return ctx.vocab != nullptr && ctx.vocab->sep_id >= 0;
   }
 };
 
 struct sep_id_invalid {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return !sep_id_valid{}(ev);
+  bool operator()(const action::context &ctx) const noexcept {
+    return !sep_id_valid{}(ctx);
   }
 };
 
 struct eos_id_valid {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    const event::tokenize * request = detail::request_from(ev);
-    if (request == nullptr || request->vocab == nullptr) {
-      return false;
-    }
-    return request->vocab->eos_id >= 0;
+  bool operator()(const action::context &ctx) const noexcept {
+    return ctx.vocab != nullptr && ctx.vocab->eos_id >= 0;
   }
 };
 
 struct eos_id_invalid {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return !eos_id_valid{}(ev);
+  bool operator()(const action::context &ctx) const noexcept {
+    return !eos_id_valid{}(ctx);
   }
 };
 
 struct has_more_fragments {
-  template <class Event>
-  bool operator()(const Event &, const action::context & ctx) const {
+  bool operator()(const action::context &ctx) const noexcept {
     return ctx.fragment_index < ctx.fragment_count;
   }
 };
 
 struct no_more_fragments {
-  template <class Event>
-  bool operator()(const Event & ev, const action::context & ctx) const {
-    return !has_more_fragments{}(ev, ctx);
+  bool operator()(const action::context &ctx) const noexcept {
+    return !has_more_fragments{}(ctx);
   }
 };
 
-}  // namespace emel::tokenizer::guard
+struct fragment_is_token {
+  bool operator()(const action::context &ctx) const noexcept {
+    if (!has_more_fragments{}(ctx)) {
+      return false;
+    }
+    return ctx.fragments[ctx.fragment_index].kind ==
+           action::fragment_kind::token;
+  }
+};
+
+struct fragment_is_raw {
+  bool operator()(const action::context &ctx) const noexcept {
+    if (!has_more_fragments{}(ctx)) {
+      return false;
+    }
+    return ctx.fragments[ctx.fragment_index].kind ==
+           action::fragment_kind::raw_text;
+  }
+};
+
+} // namespace emel::tokenizer::guard

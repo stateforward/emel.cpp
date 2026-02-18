@@ -36,7 +36,6 @@ src/emel/decoder/ubatch_executor/sm.hpp
 src/emel/encoder/actions.hpp
 src/emel/encoder/events.hpp
 src/emel/encoder/guards.hpp
-src/emel/encoder/sm.hpp
 src/emel/generator/actions.hpp
 src/emel/generator/events.hpp
 src/emel/generator/guards.hpp
@@ -98,10 +97,7 @@ src/emel/tensor/lifetime_analyzer/guards.hpp
 src/emel/tensor/lifetime_analyzer/sm.hpp
 src/emel/text/unicode.hpp
 src/emel/text/unicode_data.hpp
-src/emel/tokenizer/actions.hpp
 src/emel/tokenizer/events.hpp
-src/emel/tokenizer/guards.hpp
-src/emel/tokenizer/sm.hpp
 tests/batch/splitter_action_branch_tests.cpp
 tests/batch/splitter_actions_tests.cpp
 tests/batch/splitter_additional_tests.cpp

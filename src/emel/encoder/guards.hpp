@@ -1,19 +1,44 @@
 #pragma once
 
+#include "emel/encoder/actions.hpp"
 #include "emel/encoder/events.hpp"
 
 namespace emel::encoder::guard {
 
-inline constexpr auto no_error = [] { return true; };
-inline constexpr auto error = [] { return false; };
-inline constexpr auto use_merging = [](const event::algorithm_selected & ev) {
-  return ev.backend == event::backend_type::merging;
+struct valid_encode {
+  bool operator()(const event::encode & ev, const action::context & ctx) const noexcept {
+    if (ctx.vocab == nullptr) {
+      return false;
+    }
+    if (ev.token_count_out == nullptr || ev.error_out == nullptr) {
+      return false;
+    }
+    if (ev.token_capacity < 0) {
+      return false;
+    }
+    if (ev.token_capacity > 0 && ev.token_ids == nullptr) {
+      return false;
+    }
+    return true;
+  }
 };
-inline constexpr auto use_searching = [](const event::algorithm_selected & ev) {
-  return ev.backend == event::backend_type::searching;
+
+struct invalid_encode {
+  bool operator()(const event::encode & ev, const action::context & ctx) const noexcept {
+    return !valid_encode{}(ev, ctx);
+  }
 };
-inline constexpr auto use_scanning = [](const event::algorithm_selected & ev) {
-  return ev.backend == event::backend_type::scanning;
+
+struct phase_ok {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error == EMEL_OK;
+  }
+};
+
+struct phase_failed {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error != EMEL_OK;
+  }
 };
 
 }  // namespace emel::encoder::guard

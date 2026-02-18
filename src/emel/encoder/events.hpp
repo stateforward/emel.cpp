@@ -3,42 +3,38 @@
 #include <cstdint>
 #include <string_view>
 
-namespace emel::encoder::event {
+namespace emel::encoder::events {
 
-enum class backend_type : uint8_t {
-  merging = 0,
-  searching = 1,
-  scanning = 2,
-};
+struct encoding_done;
+struct encoding_error;
+
+}  // namespace emel::encoder::events
+
+namespace emel::encoder::event {
 
 struct encode {
   std::string_view text = {};
+  int32_t * token_ids = nullptr;
+  int32_t token_capacity = 0;
+  int32_t * token_count_out = nullptr;
+  int32_t * error_out = nullptr;
+  void * owner_sm = nullptr;
+  bool (*dispatch_done)(void * owner_sm, const events::encoding_done &) = nullptr;
+  bool (*dispatch_error)(void * owner_sm, const events::encoding_error &) = nullptr;
 };
-
-struct pretokenizing_done {};
-struct pretokenizing_error {};
-
-struct algorithm_selected {
-  backend_type backend = backend_type::merging;
-};
-
-struct algorithm_step_done {};
-struct algorithm_step_error {};
-
-struct emission_done {};
-struct emission_error {};
-
-struct postrules_done {};
-struct postrules_error {};
-
-struct tokenized_done {};
-struct tokenized_error {};
 
 }  // namespace emel::encoder::event
 
 namespace emel::encoder::events {
 
-struct encoding_done {};
-struct encoding_error {};
+struct encoding_done {
+  const event::encode * request = nullptr;
+  int32_t token_count = 0;
+};
+
+struct encoding_error {
+  const event::encode * request = nullptr;
+  int32_t err = 0;
+};
 
 }  // namespace emel::encoder::events

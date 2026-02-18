@@ -3,6 +3,7 @@
 
 #include "emel/decoder/actions.hpp"
 #include "emel/decoder/events.hpp"
+#include "emel/decoder/guards.hpp"
 #include "emel/emel.h"
 #include "emel/kv/cache/actions.hpp"
 
@@ -32,14 +33,25 @@ TEST_CASE("decoder_actions_return_early_when_error_out_is_null") {
   emel::decoder::action::context ctx{};
 
   emel::decoder::action::run_validate(emel::decoder::event::validate{}, ctx);
+  emel::decoder::action::reject_invalid_validate(emel::decoder::event::validate{}, ctx);
   emel::decoder::action::run_initialize_batch(emel::decoder::event::initialize_batch{}, ctx);
   emel::decoder::action::run_update_memory(emel::decoder::event::update_memory{}, ctx);
   emel::decoder::action::run_prepare_memory_batch(emel::decoder::event::prepare_memory_batch{}, ctx);
   emel::decoder::action::run_optimize_memory(emel::decoder::event::optimize_memory{}, ctx);
   emel::decoder::action::run_reserve_output(emel::decoder::event::reserve_output{}, ctx);
+  emel::decoder::action::reject_invalid_reserve_output(emel::decoder::event::reserve_output{}, ctx);
   emel::decoder::action::run_process_ubatch(emel::decoder::event::process_ubatch{}, ctx);
   emel::decoder::action::run_rollback_ubatch(emel::decoder::event::rollback_ubatch{}, ctx);
   emel::decoder::action::run_finalize_outputs(emel::decoder::event::finalize_outputs{}, ctx);
+}
+
+TEST_CASE("decoder_action_detail_normalizes_errors") {
+  using emel::decoder::action::detail::normalize_error;
+  using emel::decoder::action::detail::normalize_ubatch_error;
+
+  CHECK(normalize_error(false, EMEL_OK) == EMEL_ERR_BACKEND);
+  CHECK(normalize_ubatch_error(true, EMEL_OK) == EMEL_OK);
+  CHECK(normalize_ubatch_error(false, EMEL_ERR_BACKEND) == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("decoder_run_validate_checks_token_inputs") {
@@ -48,6 +60,7 @@ TEST_CASE("decoder_run_validate_checks_token_inputs") {
 
   ctx.token_ids = nullptr;
   ctx.n_tokens = 0;
+  CHECK(emel::decoder::guard::invalid_token_inputs(ctx));
   emel::decoder::action::reject_invalid_validate(
     emel::decoder::event::validate{.error_out = &err}, ctx);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
@@ -55,6 +68,7 @@ TEST_CASE("decoder_run_validate_checks_token_inputs") {
   std::array<int32_t, 1> tokens = {{1}};
   ctx.token_ids = tokens.data();
   ctx.n_tokens = 1;
+  CHECK(emel::decoder::guard::valid_token_inputs(ctx));
   err = EMEL_OK;
   emel::decoder::action::run_validate(emel::decoder::event::validate{.error_out = &err}, ctx);
   CHECK(err == EMEL_OK);
@@ -220,21 +234,30 @@ TEST_CASE("decoder_update_status_error_paths") {
 
 TEST_CASE("decoder_phase_helpers_cover_optimize_and_reserve_paths") {
   emel::decoder::action::context ctx{};
+  int32_t err = EMEL_OK;
 
-  emel::decoder::action::run_optimize_memory_phase(ctx);
+  emel::decoder::action::run_optimize_memory(
+    emel::decoder::event::optimize_memory{.error_out = &err}, ctx);
+  CHECK(err == EMEL_OK);
   CHECK(ctx.phase_error == EMEL_OK);
 
-  emel::decoder::action::run_reserve_output_phase(ctx);
+  err = EMEL_OK;
+  emel::decoder::action::run_reserve_output(
+    emel::decoder::event::reserve_output{.error_out = &err}, ctx);
+  CHECK(err == EMEL_OK);
   CHECK(ctx.phase_error == EMEL_OK);
 
-  emel::decoder::action::reject_invalid_reserve_output_phase(ctx);
+  err = EMEL_OK;
+  emel::decoder::action::reject_invalid_reserve_output(
+    emel::decoder::event::reserve_output{.error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
   CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
 }
 
-TEST_CASE("decoder_on_invalid_ubatch_size_phase_sets_error") {
+TEST_CASE("decoder_on_invalid_ubatch_size_sets_error") {
   emel::decoder::action::context ctx{};
 
-  emel::decoder::action::on_invalid_ubatch_size_phase(ctx);
+  emel::decoder::action::on_invalid_ubatch_size(emel::decoder::event::decode{}, ctx);
   CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
   CHECK(ctx.ubatch_error == EMEL_ERR_BACKEND);
 }
@@ -244,11 +267,11 @@ TEST_CASE("decoder_finalize_outputs_phase_updates_status") {
 
   ctx.outputs_processed = 1;
   ctx.outputs_total = 1;
-  emel::decoder::action::run_finalize_outputs_phase(ctx);
+  emel::decoder::action::run_finalize_outputs(emel::decoder::event::decode{}, ctx);
   CHECK(ctx.phase_error == EMEL_OK);
 
   ctx.outputs_total = 2;
-  emel::decoder::action::run_finalize_outputs_phase(ctx);
+  emel::decoder::action::run_finalize_outputs(emel::decoder::event::decode{}, ctx);
   CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
 }
 
@@ -275,7 +298,7 @@ TEST_CASE("decoder_action_markers_cover_error_paths") {
   emel::decoder::action::ensure_last_error(ctx);
   CHECK(ctx.last_error == EMEL_ERR_BACKEND);
 
-  emel::decoder::action::on_unexpected{}(
+  emel::decoder::action::on_unexpected(
     emel::decoder::event::finalize_outputs{.error_out = &err},
     ctx);
   CHECK(err == EMEL_ERR_BACKEND);
@@ -344,6 +367,94 @@ TEST_CASE("decoder_run_process_ubatch_reports_executor_errors") {
     emel::decoder::event::process_ubatch{
       .error_out = &err,
       .rollback_needed_out = &rollback_needed,
+    },
+    ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("decoder_actions_use_context_for_phase_runs") {
+  emel::decoder::action::context ctx{};
+
+  ctx.n_tokens = 1;
+  ctx.n_ubatch = 1;
+  ctx.ubatches_total = 1;
+  ctx.ubatch_sizes[0] = 1;
+
+  emel::decoder::action::run_update_memory(emel::decoder::event::decode{}, ctx);
+  CHECK(ctx.phase_error == EMEL_OK);
+
+  emel::decoder::action::run_prepare_memory_batch(emel::decoder::event::decode{}, ctx);
+  CHECK(ctx.phase_error == EMEL_OK);
+
+  emel::decoder::action::run_optimize_memory(emel::decoder::event::decode{}, ctx);
+  CHECK(ctx.phase_error == EMEL_OK);
+
+  emel::decoder::action::run_reserve_output(emel::decoder::event::decode{}, ctx);
+  CHECK(ctx.phase_error == EMEL_OK);
+
+  emel::decoder::action::reject_invalid_reserve_output(emel::decoder::event::decode{}, ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+
+  ctx.ubatches_total = 0;
+  emel::decoder::action::run_process_ubatch(emel::decoder::event::decode{}, ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+
+  ctx.rollback_needed = false;
+  emel::decoder::action::run_rollback_ubatch(emel::decoder::event::decode{}, ctx);
+  CHECK(ctx.phase_error == EMEL_OK);
+}
+
+TEST_CASE("decoder_actions_report_missing_dependencies") {
+  emel::decoder::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  ctx.memory_coordinator.reset();
+  emel::decoder::action::run_update_memory(
+    emel::decoder::event::update_memory{.error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  err = EMEL_OK;
+  ctx.kv_cache.reset();
+  emel::decoder::action::run_prepare_memory_batch(
+    emel::decoder::event::prepare_memory_batch{.error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+
+  err = EMEL_OK;
+  ctx.memory_coordinator.reset();
+  emel::decoder::action::run_optimize_memory(
+    emel::decoder::event::optimize_memory{.error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("decoder_run_process_ubatch_reports_missing_executor") {
+  emel::decoder::action::context ctx{};
+  int32_t err = EMEL_OK;
+  bool rollback_needed = false;
+
+  ctx.ubatch_executor.reset();
+  ctx.ubatches_total = 1;
+  ctx.ubatches_processed = 0;
+  ctx.ubatch_sizes[0] = 1;
+
+  emel::decoder::action::run_process_ubatch(
+    emel::decoder::event::process_ubatch{
+      .error_out = &err,
+      .rollback_needed_out = &rollback_needed,
+    },
+    ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+  CHECK(rollback_needed);
+}
+
+TEST_CASE("decoder_run_rollback_ubatch_reports_missing_kv_cache") {
+  emel::decoder::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  ctx.kv_cache.reset();
+  emel::decoder::action::run_rollback_ubatch(
+    emel::decoder::event::rollback_ubatch{
+      .error_out = &err,
+      .rollback_needed = true,
     },
     ctx);
   CHECK(err == EMEL_ERR_BACKEND);
