@@ -4,6 +4,7 @@
 #include "doctest/doctest.h"
 
 #include "emel/buffer/allocator/sm.hpp"
+#include "emel/buffer/chunk_allocator/actions.hpp"
 #include "emel/emel.h"
 
 namespace {
@@ -120,6 +121,80 @@ TEST_CASE("allocator_max_size_tensor_too_large") {
   }));
   CHECK_EQ(err, EMEL_OK);
   CHECK_EQ(allocator.get_buffer_alloc_size(0), 24);
+}
+
+TEST_CASE("allocator_max_size_tensor_too_large_with_leftover") {
+  emel::buffer::allocator::sm allocator;
+  std::array<int32_t, 1> alignments = {{8}};
+  std::array<int32_t, 1> max_sizes = {{32}};
+  int32_t err = EMEL_OK;
+
+  CHECK(allocator.process_event(emel::buffer::allocator::event::initialize{
+    .buffer_count = 1,
+    .buffer_alignments = alignments.data(),
+    .buffer_max_sizes = max_sizes.data(),
+    .error_out = &err,
+  }));
+  CHECK_EQ(err, EMEL_OK);
+
+  std::array<tensor_desc, 2> leafs = {{
+    make_tensor(0, 16, true, false, false, -1, false, false, {}),
+    make_tensor(1, 8, true, false, false, -1, false, false, {}),
+  }};
+  std::array<tensor_desc, 1> nodes = {{
+    make_tensor(2, 24, false, true, false, -1, false, false, {0, 1}),
+  }};
+  graph_view graph{
+    .nodes = nodes.data(),
+    .n_nodes = static_cast<int32_t>(nodes.size()),
+    .leafs = leafs.data(),
+    .n_leafs = static_cast<int32_t>(leafs.size()),
+  };
+
+  err = EMEL_OK;
+  CHECK(allocator.process_event(emel::buffer::allocator::event::alloc_graph{
+    .graph = graph,
+    .error_out = &err,
+  }));
+  CHECK_EQ(err, EMEL_OK);
+  CHECK(allocator.get_buffer_alloc_size(0) <= 56);
+}
+
+TEST_CASE("allocator_fill_leftover_space") {
+  emel::buffer::allocator::sm allocator;
+  std::array<int32_t, 1> alignments = {{8}};
+  std::array<int32_t, 1> max_sizes = {{16}};
+  int32_t err = EMEL_OK;
+
+  CHECK(allocator.process_event(emel::buffer::allocator::event::initialize{
+    .buffer_count = 1,
+    .buffer_alignments = alignments.data(),
+    .buffer_max_sizes = max_sizes.data(),
+    .error_out = &err,
+  }));
+  CHECK_EQ(err, EMEL_OK);
+
+  std::array<tensor_desc, 1> leafs = {{
+    make_tensor(0, 8, true, false, false, -1, false, false, {}),
+  }};
+  std::array<tensor_desc, 2> nodes = {{
+    make_tensor(1, 12, false, false, false, -1, false, false, {0}),
+    make_tensor(2, 4, false, true, false, -1, false, false, {1}),
+  }};
+  graph_view graph{
+    .nodes = nodes.data(),
+    .n_nodes = static_cast<int32_t>(nodes.size()),
+    .leafs = leafs.data(),
+    .n_leafs = static_cast<int32_t>(leafs.size()),
+  };
+
+  err = EMEL_OK;
+  CHECK(allocator.process_event(emel::buffer::allocator::event::alloc_graph{
+    .graph = graph,
+    .error_out = &err,
+  }));
+  CHECK_EQ(err, EMEL_OK);
+  CHECK(allocator.get_buffer_alloc_size(0) <= 28);
 }
 
 TEST_CASE("allocator_view_inplace") {
@@ -395,6 +470,56 @@ TEST_CASE("allocator_buffer_size_zero") {
   CHECK_EQ(err, EMEL_OK);
 
   CHECK_EQ(allocator.get_buffer_alloc_size(1), 0);
+}
+
+TEST_CASE("allocator_not_enough_chunks") {
+  emel::buffer::allocator::sm allocator;
+  std::array<int32_t, 1> alignments = {{8}};
+  std::array<int32_t, 1> max_sizes = {{8}};
+  int32_t err = EMEL_OK;
+
+  CHECK(allocator.process_event(emel::buffer::allocator::event::initialize{
+    .buffer_count = 1,
+    .buffer_alignments = alignments.data(),
+    .buffer_max_sizes = max_sizes.data(),
+    .error_out = &err,
+  }));
+  CHECK_EQ(err, EMEL_OK);
+
+  constexpr int32_t k_max_chunks = emel::buffer::chunk_allocator::action::k_max_chunks;
+  std::array<tensor_desc, k_max_chunks + 1> leafs = {};
+  for (int32_t i = 0; i < static_cast<int32_t>(leafs.size()); ++i) {
+    leafs[static_cast<size_t>(i)] =
+      make_tensor(i, 8, true, false, false, -1, false, false, {});
+  }
+
+  std::array<tensor_desc, k_max_chunks> nodes = {};
+  for (int32_t i = 0; i < static_cast<int32_t>(nodes.size()); ++i) {
+    const int32_t node_id = 100 + i;
+    if (i == 0) {
+      nodes[static_cast<size_t>(i)] =
+        make_tensor(node_id, 8, false, false, false, -1, true, false, {0, 1});
+    } else {
+      nodes[static_cast<size_t>(i)] =
+        make_tensor(node_id, 8, false, false, false, -1, true, false, {100 + i - 1, i + 1});
+    }
+  }
+  nodes.back().is_output = true;
+
+  graph_view graph{
+    .nodes = nodes.data(),
+    .n_nodes = static_cast<int32_t>(nodes.size()),
+    .leafs = leafs.data(),
+    .n_leafs = static_cast<int32_t>(leafs.size()),
+  };
+
+  err = EMEL_OK;
+  CHECK(allocator.process_event(emel::buffer::allocator::event::alloc_graph{
+    .graph = graph,
+    .error_out = &err,
+  }));
+  CHECK_EQ(err, EMEL_OK);
+  CHECK(allocator.get_buffer_alloc_size(0) > static_cast<uint64_t>(k_max_chunks) * 8u);
 }
 
 TEST_CASE("allocator_reallocation") {

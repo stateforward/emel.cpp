@@ -926,6 +926,16 @@ inline int32_t run_split_required(context & ctx) noexcept {
           if (count >= k_max_chunks_per_buffer) {
             return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
           }
+          if (count == k_max_chunks_per_buffer - 1 && remaining > max_size) {
+            int32_t aligned = 0;
+            if (!align_up_checked(remaining, alignment, aligned)) {
+              return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+            }
+            ctx.chunk_sizes[chunk_plan_index(i, count)] = aligned;
+            remaining = 0;
+            count += 1;
+            break;
+          }
           const int32_t chunk_size = remaining > max_size ? max_size : remaining;
           int32_t aligned = 0;
           if (!align_up_checked(chunk_size, alignment, aligned)) {

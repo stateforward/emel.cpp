@@ -376,7 +376,10 @@ TEST_CASE("planner_run_split_required_error_paths") {
     ctx.buffer_max_sizes[0] = 1;
     ctx.bytes_by_buffer[0] =
       (emel::buffer::planner::action::k_max_chunks_per_buffer + 1);
-    CHECK(run_split_required(ctx, nullptr) == EMEL_ERR_INVALID_ARGUMENT);
+    CHECK(run_split_required(ctx, nullptr) == EMEL_OK);
+    CHECK(ctx.chunk_counts[0] == emel::buffer::planner::action::k_max_chunks_per_buffer);
+    CHECK(ctx.chunk_sizes[emel::buffer::planner::action::detail::chunk_plan_index(
+      0, emel::buffer::planner::action::k_max_chunks_per_buffer - 1)] == 2);
   }
 
   {
