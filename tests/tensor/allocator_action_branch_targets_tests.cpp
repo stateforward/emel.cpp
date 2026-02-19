@@ -314,11 +314,18 @@ TEST_CASE("tensor_allocator_actions_release_reports_error_detail") {
   CHECK(detail.phase == 0);
 }
 
-TEST_CASE("tensor_allocator_actions_on_release_error_increments_step") {
+TEST_CASE("tensor_allocator_actions_on_unexpected_sets_error") {
   emel::tensor::allocator::action::context c{};
-  const int32_t start = c.step;
-  emel::tensor::allocator::action::on_release_error(
-    emel::tensor::allocator::events::release_error{.err = EMEL_ERR_BACKEND},
+  emel_error_detail detail{};
+  int32_t err = EMEL_OK;
+
+  emel::tensor::allocator::action::on_unexpected(
+    emel::tensor::allocator::event::allocate_tensors{
+      .error_out = &err,
+      .detail_out = &detail,
+    },
     c);
-  CHECK(c.step == start + 1);
+
+  CHECK(err == EMEL_ERR_BACKEND);
+  CHECK(detail.status == EMEL_ERR_BACKEND);
 }

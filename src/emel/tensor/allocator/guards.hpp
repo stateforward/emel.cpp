@@ -1,27 +1,18 @@
 #pragma once
 
 #include "emel/tensor/allocator/actions.hpp"
-#include "emel/tensor/allocator/events.hpp"
 
 namespace emel::tensor::allocator::guard {
 
-struct no_error {
-  template <class Event>
-  bool operator()(const Event & ev, const action::context &) const noexcept {
-    if constexpr (requires { ev.err; }) {
-      return ev.err == EMEL_OK;
-    }
-    return true;
+struct phase_ok {
+  bool operator()(const action::context & c) const noexcept {
+    return c.phase_error == EMEL_OK;
   }
 };
 
-struct has_error {
-  template <class Event>
-  bool operator()(const Event & ev, const action::context &) const noexcept {
-    if constexpr (requires { ev.err; }) {
-      return ev.err != EMEL_OK;
-    }
-    return false;
+struct phase_failed {
+  bool operator()(const action::context & c) const noexcept {
+    return c.phase_error != EMEL_OK;
   }
 };
 

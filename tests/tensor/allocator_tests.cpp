@@ -606,10 +606,12 @@ TEST_CASE("tensor_allocator_rejects_reentrant_allocate_and_release") {
 
 TEST_CASE("tensor_allocator_guard_and_detail_helpers_cover_edges") {
   emel::tensor::allocator::action::context c{};
-  CHECK(emel::tensor::allocator::guard::no_error{}(emel::tensor::allocator::events::validate_done{}, c));
-  CHECK(
-      emel::tensor::allocator::guard::has_error{}(
-          emel::tensor::allocator::events::validate_error{.err = EMEL_ERR_BACKEND}, c));
+  c.phase_error = EMEL_OK;
+  CHECK(emel::tensor::allocator::guard::phase_ok{}(c));
+  CHECK_FALSE(emel::tensor::allocator::guard::phase_failed{}(c));
+
+  c.phase_error = EMEL_ERR_BACKEND;
+  CHECK(emel::tensor::allocator::guard::phase_failed{}(c));
 
   CHECK(emel::tensor::allocator::action::detail::normalize_error(7, 9) == 7);
   CHECK(

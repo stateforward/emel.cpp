@@ -1,12 +1,19 @@
 #pragma once
 
-namespace emel::telemetry::provider::action {
-struct context;
-}  // namespace emel::telemetry::provider::action
+#include "emel/telemetry/provider/actions.hpp"
 
 namespace emel::telemetry::provider::guard {
 
-bool is_configured(const action::context & ctx);
+struct phase_ok {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error == EMEL_OK;
+  }
+};
+
+struct phase_failed {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error != EMEL_OK;
+  }
+};
 
 }  // namespace emel::telemetry::provider::guard
-

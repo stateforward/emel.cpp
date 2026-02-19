@@ -164,6 +164,8 @@ tests/sampler/candidate_builder_tests.cpp
 tests/sampler/pipeline_tests.cpp
 tests/sampler/token_selector_tests.cpp
 tests/sm/sm_policy_tests.cpp
+tests/telemetry/exporter_tests.cpp
+tests/telemetry/provider_tests.cpp
 tests/tensor/allocator_action_branch_more_tests.cpp
 tests/tensor/allocator_action_branch_targets_tests.cpp
 tests/tensor/allocator_action_branch_tests.cpp

@@ -1,3 +1,5 @@
+#include <array>
+
 #include <boost/sml.hpp>
 #include <doctest/doctest.h>
 
@@ -6,93 +8,53 @@
 
 namespace {
 
-struct noop_queue {
-  using container_type = void;
-
-  template <class Event>
-  void push(const Event &) noexcept {}
-};
+using tensor_desc = emel::tensor::allocator::event::tensor_desc;
 
 }  // namespace
 
-TEST_CASE("tensor_allocator_testing_policy_allocate_success_path") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process> machine{ctx, process};
+TEST_CASE("tensor_allocator_sm_reports_idle_after_success") {
+  emel::tensor::allocator::sm machine{};
+  std::array<tensor_desc, 1> tensors = {{
+    tensor_desc{
+      .tensor_id = 1,
+      .alloc_size = 16,
+      .src_ids = {{-1, -1, -1, -1}},
+      .is_view = false,
+      .view_src_id = -1,
+      .has_external_data = false,
+    },
+  }};
 
-  emel::tensor::allocator::event::allocate_tensors allocate{};
+  int32_t err = EMEL_OK;
+  emel_error_detail detail{};
+  CHECK(machine.process_event(emel::tensor::allocator::event::allocate_tensors{
+    .tensors = tensors.data(),
+    .tensor_count = static_cast<int32_t>(tensors.size()),
+    .alignment = 16,
+    .max_buffer_size = 64,
+    .no_alloc = true,
+    .error_out = &err,
+    .detail_out = &detail,
+  }));
+  CHECK(err == EMEL_OK);
 
-  CHECK(machine.process_event(allocate));
-  CHECK(machine.process_event(emel::tensor::allocator::events::validate_done{
-    .request = &allocate,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::scan_done{
-    .request = &allocate,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::partition_done{
-    .request = &allocate,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::allocate_ranges_done{
-    .request = &allocate,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::initialize_tensors_done{
-    .request = &allocate,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::assemble_done{
-    .request = &allocate,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::allocate_done{
-    .total_bytes = 0,
-    .chunk_count = 0,
-    .request = &allocate,
-  }));
+  int32_t state_count = 0;
+  machine.visit_current_states([&](auto) { state_count += 1; });
+  CHECK(state_count == 1);
 }
 
-TEST_CASE("tensor_allocator_testing_policy_allocate_error_path") {
+TEST_CASE("tensor_allocator_sm_testing_policy_handles_release_from_mid_state") {
+  namespace sml = boost::sml;
   emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process> machine{ctx, process};
+  sml::sm<emel::tensor::allocator::model, sml::testing> machine{ctx};
+  machine.set_current_states(sml::state<emel::tensor::allocator::Validating>);
 
-  emel::tensor::allocator::event::allocate_tensors allocate{};
-
-  CHECK(machine.process_event(allocate));
-  CHECK(machine.process_event(emel::tensor::allocator::events::validate_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &allocate,
+  int32_t err = EMEL_OK;
+  emel_error_detail detail{};
+  CHECK(machine.process_event(emel::tensor::allocator::event::release{
+    .error_out = &err,
+    .detail_out = &detail,
   }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::allocate_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &allocate,
-  }));
-}
-
-TEST_CASE("tensor_allocator_testing_policy_release_paths") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process> machine{ctx, process};
-
-  emel::tensor::allocator::event::release release{};
-
-  CHECK(machine.process_event(release));
-  CHECK(machine.process_event(emel::tensor::allocator::events::release_done{
-    .request = &release,
-  }));
-
-  CHECK(machine.process_event(release));
-  CHECK(machine.process_event(emel::tensor::allocator::events::release_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &release,
-  }));
+  CHECK(err == EMEL_OK);
+  CHECK(detail.status == EMEL_OK);
 }

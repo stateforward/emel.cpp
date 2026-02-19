@@ -7,363 +7,219 @@
 
 namespace emel::tensor::allocator {
 
-using Process = boost::sml::back::process<
-  event::validate,
-  events::validate_done,
-  events::validate_error,
-  event::scan_tensors,
-  events::scan_done,
-  events::scan_error,
-  event::partition_ranges,
-  events::partition_done,
-  events::partition_error,
-  event::allocate_ranges,
-  events::allocate_ranges_done,
-  events::allocate_ranges_error,
-  event::initialize_tensors,
-  events::initialize_tensors_done,
-  events::initialize_tensors_error,
-  event::assemble,
-  events::assemble_done,
-  events::assemble_error,
-  events::allocate_done,
-  events::allocate_error,
-  events::release_done,
-  events::release_error>;
+struct Idle {};
+struct Validating {};
+struct ValidateDecision {};
+struct ScanningTensors {};
+struct ScanDecision {};
+struct PartitioningRanges {};
+struct PartitionDecision {};
+struct AllocatingRanges {};
+struct AllocateDecision {};
+struct InitializingTensors {};
+struct InitializeDecision {};
+struct AssemblingResult {};
+struct AssembleDecision {};
+struct Done {};
+struct Errored {};
+struct ReleaseDecision {};
 
-/**
- * Tensor allocator orchestration model.
- *
- * Runtime invariants:
- * - All orchestration runs through events on this machine boundary.
- * - Phase outcomes route through explicit `_done` / `_error` events only.
- * - Side effects (allocation, backend init, assemble, release) occur in actions only.
- * - Completion is explicit: `events::allocate_done`, `events::allocate_error`,
- *   `events::release_done`, `events::release_error`.
- *
- * State purposes:
- * - `idle`: accepts top-level `event::allocate_tensors` and `event::release`.
- * - `validating`: validates input/event payload and callback contract.
- * - `scanning_tensors`: normalizes tensor metadata and effective sizes.
- * - `partitioning_ranges`: builds chunk assignments and byte offsets.
- * - `allocating_ranges`: allocates per-chunk backing buffers when `no_alloc == false`.
- * - `initializing_tensors`: initializes regular/view tensors via backend callbacks.
- * - `assembling_result`: publishes chunk sizes/total size and assembled result buffer.
- * - `done`: successful terminal for allocate flow (before final completion emission).
- * - `failed`: error terminal for allocate flow (before final error emission).
- * - `releasing`: teardown flow that releases owned allocated buffers.
- */
 struct model {
+  using context = action::context;
+
   auto operator()() const {
     namespace sml = boost::sml;
-    using process_t = Process;
-
-    struct idle {};
-    struct validating {};
-    struct scanning_tensors {};
-    struct partitioning_ranges {};
-    struct allocating_ranges {};
-    struct initializing_tensors {};
-    struct assembling_result {};
-    struct done {};
-    struct failed {};
-    struct releasing {};
-
+    const auto not_anonymous = [](const auto & ev) {
+      using event_type = std::decay_t<decltype(ev)>;
+      return !std::is_same_v<event_type, boost::sml::anonymous>;
+    };
     return sml::make_transition_table(
-      *sml::state<idle> + sml::event<event::allocate_tensors> / action::begin_allocate_tensors =
-          sml::state<validating>,
-      sml::state<validating> + sml::on_entry<event::allocate_tensors> /
-          [](const event::allocate_tensors & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            event::validate validate{
-              .error_out = &phase_error,
-              .detail_out = ev.detail_out,
-              .chunk_sizes_out = ev.chunk_sizes_out,
-              .chunk_sizes_out_count = ev.chunk_sizes_out_count,
-            };
-            process(validate);
-            if (ev.error_out != nullptr) {
-              *ev.error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::validate_error{
-                .err = phase_error,
-                .request = &ev,
-              });
-              return;
-            }
-            process(events::validate_done{
-              .request = &ev,
-            });
-          },
+      *sml::state<Idle> + sml::event<event::allocate_tensors> /
+        action::begin_allocate_tensors = sml::state<Validating>,
+      sml::state<Validating> / action::run_validate = sml::state<ValidateDecision>,
+      sml::state<ValidateDecision> [guard::phase_failed{}] = sml::state<Errored>,
+      sml::state<ValidateDecision> [guard::phase_ok{}] = sml::state<ScanningTensors>,
 
-      sml::state<validating> + sml::event<event::validate> / action::run_validate =
-          sml::state<validating>,
-      sml::state<validating> + sml::event<events::validate_done> =
-          sml::state<scanning_tensors>,
-      sml::state<validating> + sml::event<events::validate_error> =
-          sml::state<failed>,
+      sml::state<ScanningTensors> / action::run_scan_tensors = sml::state<ScanDecision>,
+      sml::state<ScanDecision> [guard::phase_failed{}] = sml::state<Errored>,
+      sml::state<ScanDecision> [guard::phase_ok{}] = sml::state<PartitioningRanges>,
 
-      sml::state<scanning_tensors> + sml::on_entry<events::validate_done> /
-          [](const events::validate_done & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            const event::allocate_tensors * request = ev.request;
-            event::scan_tensors scan{
-              .error_out = &phase_error,
-              .detail_out = request != nullptr ? request->detail_out : nullptr,
-            };
-            process(scan);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::scan_error{
-                .err = phase_error,
-                .request = request,
-              });
-              return;
-            }
-            process(events::scan_done{
-              .request = request,
-            });
-          },
-      sml::state<scanning_tensors> + sml::event<event::scan_tensors> / action::run_scan_tensors =
-          sml::state<scanning_tensors>,
-      sml::state<scanning_tensors> + sml::event<events::scan_done> =
-          sml::state<partitioning_ranges>,
-      sml::state<scanning_tensors> + sml::event<events::scan_error> =
-          sml::state<failed>,
+      sml::state<PartitioningRanges> / action::run_partition_ranges =
+        sml::state<PartitionDecision>,
+      sml::state<PartitionDecision> [guard::phase_failed{}] = sml::state<Errored>,
+      sml::state<PartitionDecision> [guard::phase_ok{}] = sml::state<AllocatingRanges>,
 
-      sml::state<partitioning_ranges> + sml::on_entry<events::scan_done> /
-          [](const events::scan_done & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            const event::allocate_tensors * request = ev.request;
-            event::partition_ranges partition{
-              .error_out = &phase_error,
-              .detail_out = request != nullptr ? request->detail_out : nullptr,
-            };
-            process(partition);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::partition_error{
-                .err = phase_error,
-                .request = request,
-              });
-              return;
-            }
-            process(events::partition_done{
-              .request = request,
-            });
-          },
-      sml::state<partitioning_ranges> + sml::event<event::partition_ranges> /
-          action::run_partition_ranges = sml::state<partitioning_ranges>,
-      sml::state<partitioning_ranges> + sml::event<events::partition_done> =
-          sml::state<allocating_ranges>,
-      sml::state<partitioning_ranges> + sml::event<events::partition_error> =
-          sml::state<failed>,
+      sml::state<AllocatingRanges> / action::run_allocate_ranges =
+        sml::state<AllocateDecision>,
+      sml::state<AllocateDecision> [guard::phase_failed{}] = sml::state<Errored>,
+      sml::state<AllocateDecision> [guard::phase_ok{}] = sml::state<InitializingTensors>,
 
-      sml::state<allocating_ranges> + sml::on_entry<events::partition_done> /
-          [](const events::partition_done & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            const event::allocate_tensors * request = ev.request;
-            event::allocate_ranges allocate{
-              .error_out = &phase_error,
-              .detail_out = request != nullptr ? request->detail_out : nullptr,
-            };
-            process(allocate);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::allocate_ranges_error{
-                .err = phase_error,
-                .request = request,
-              });
-              return;
-            }
-            process(events::allocate_ranges_done{
-              .request = request,
-            });
-          },
-      sml::state<allocating_ranges> + sml::event<event::allocate_ranges> /
-          action::run_allocate_ranges = sml::state<allocating_ranges>,
-      sml::state<allocating_ranges> + sml::event<events::allocate_ranges_done> =
-          sml::state<initializing_tensors>,
-      sml::state<allocating_ranges> + sml::event<events::allocate_ranges_error> =
-          sml::state<failed>,
+      sml::state<InitializingTensors> / action::run_initialize_tensors =
+        sml::state<InitializeDecision>,
+      sml::state<InitializeDecision> [guard::phase_failed{}] = sml::state<Errored>,
+      sml::state<InitializeDecision> [guard::phase_ok{}] = sml::state<AssemblingResult>,
 
-      sml::state<initializing_tensors> + sml::on_entry<events::allocate_ranges_done> /
-          [](const events::allocate_ranges_done & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            const event::allocate_tensors * request = ev.request;
-            event::initialize_tensors init{
-              .error_out = &phase_error,
-              .detail_out = request != nullptr ? request->detail_out : nullptr,
-            };
-            process(init);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::initialize_tensors_error{
-                .err = phase_error,
-                .request = request,
-              });
-              return;
-            }
-            process(events::initialize_tensors_done{
-              .request = request,
-            });
-          },
-      sml::state<initializing_tensors> + sml::event<event::initialize_tensors> /
-          action::run_initialize_tensors = sml::state<initializing_tensors>,
-      sml::state<initializing_tensors> + sml::event<events::initialize_tensors_done> =
-          sml::state<assembling_result>,
-      sml::state<initializing_tensors> + sml::event<events::initialize_tensors_error> =
-          sml::state<failed>,
+      sml::state<AssemblingResult> / action::run_assemble = sml::state<AssembleDecision>,
+      sml::state<AssembleDecision> [guard::phase_failed{}] = sml::state<Errored>,
+      sml::state<AssembleDecision> [guard::phase_ok{}] = sml::state<Done>,
 
-      sml::state<assembling_result> + sml::on_entry<events::initialize_tensors_done> /
-          [](const events::initialize_tensors_done & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            const event::allocate_tensors * request = ev.request;
-            event::assemble assemble{
-              .error_out = &phase_error,
-              .detail_out = request != nullptr ? request->detail_out : nullptr,
-              .result_buffer_out = request != nullptr ? request->result_buffer_out : nullptr,
-              .total_size_out = request != nullptr ? request->total_size_out : nullptr,
-              .chunk_sizes_out = request != nullptr ? request->chunk_sizes_out : nullptr,
-              .chunk_sizes_out_count = request != nullptr ? request->chunk_sizes_out_count : 0,
-              .chunk_count_out = request != nullptr ? request->chunk_count_out : nullptr,
-            };
-            process(assemble);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::assemble_error{
-                .err = phase_error,
-                .request = request,
-              });
-              return;
-            }
-            process(events::assemble_done{
-              .request = request,
-            });
-          },
-      sml::state<assembling_result> + sml::event<event::assemble> / action::run_assemble =
-          sml::state<assembling_result>,
-      sml::state<assembling_result> + sml::event<events::assemble_done> =
-          sml::state<done>,
-      sml::state<assembling_result> + sml::event<events::assemble_error> =
-          sml::state<failed>,
+      sml::state<Done> = sml::state<Idle>,
+      sml::state<Errored> = sml::state<Idle>,
 
-      sml::state<done> + sml::on_entry<events::assemble_done> /
-          [](const events::assemble_done & ev, action::context & ctx,
-             process_t & process) noexcept {
-            const event::allocate_tensors * request = ev.request;
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = EMEL_OK;
-            }
-            process(events::allocate_done{
-              .total_bytes = ctx.total_bytes,
-              .chunk_count = ctx.chunk_count,
-              .request = request,
-            });
-          },
-      sml::state<done> + sml::event<events::allocate_done> / action::on_allocate_done =
-          sml::state<idle>,
-      sml::state<done> + sml::event<events::allocate_error> / action::on_allocate_error =
-          sml::state<idle>,
+      sml::state<Idle> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<Validating> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<ValidateDecision> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<ScanningTensors> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<ScanDecision> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<PartitioningRanges> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<PartitionDecision> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<AllocatingRanges> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<AllocateDecision> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<InitializingTensors> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<InitializeDecision> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<AssemblingResult> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<AssembleDecision> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<Done> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<Errored> + sml::event<event::release> / action::begin_release =
+        sml::state<ReleaseDecision>,
+      sml::state<ReleaseDecision> [guard::phase_failed{}] = sml::state<Errored>,
+      sml::state<ReleaseDecision> [guard::phase_ok{}] = sml::state<Idle>,
 
-      sml::state<idle> + sml::event<event::release> / action::begin_release = sml::state<releasing>,
-      sml::state<validating> + sml::event<event::release> / action::begin_release =
-          sml::state<releasing>,
-      sml::state<scanning_tensors> + sml::event<event::release> / action::begin_release =
-          sml::state<releasing>,
-      sml::state<partitioning_ranges> + sml::event<event::release> / action::begin_release =
-          sml::state<releasing>,
-      sml::state<allocating_ranges> + sml::event<event::release> / action::begin_release =
-          sml::state<releasing>,
-      sml::state<initializing_tensors> + sml::event<event::release> / action::begin_release =
-          sml::state<releasing>,
-      sml::state<assembling_result> + sml::event<event::release> / action::begin_release =
-          sml::state<releasing>,
-      sml::state<done> + sml::event<event::release> / action::begin_release =
-          sml::state<releasing>,
-      sml::state<failed> + sml::event<event::release> / action::begin_release =
-          sml::state<releasing>,
-      sml::state<releasing> + sml::on_entry<event::release> /
-          [](const event::release & ev, action::context &, process_t & process) noexcept {
-            const int32_t err = ev.error_out != nullptr ? *ev.error_out : EMEL_OK;
-            if (err == EMEL_OK) {
-              process(events::release_done{.request = &ev});
-            } else {
-              process(events::release_error{.err = err, .request = &ev});
-            }
-          },
-      sml::state<releasing> + sml::event<events::release_done> / action::on_release_done =
-          sml::state<idle>,
-      sml::state<releasing> + sml::event<events::release_error> / action::on_release_error =
-          sml::state<failed>,
-
-      sml::state<failed> + sml::on_entry<sml::_> /
-          [](const auto & ev, action::context &, process_t & process) noexcept {
-            int32_t err = EMEL_ERR_BACKEND;
-            if constexpr (requires { ev.err; }) {
-              err = ev.err;
-            }
-            if constexpr (requires { ev.request; }) {
-              if constexpr (std::is_same_v<decltype(ev.request), const event::allocate_tensors *>) {
-                const event::allocate_tensors * request = ev.request;
-                if (request != nullptr && request->error_out != nullptr) {
-                  *request->error_out = err;
-                }
-                if (request != nullptr && request->detail_out != nullptr &&
-                    request->detail_out->status == EMEL_OK) {
-                  request->detail_out->status = err;
-                  request->detail_out->phase = static_cast<uint32_t>(event::error_phase::none);
-                  request->detail_out->reason = static_cast<uint32_t>(event::error_reason::unknown);
-                }
-                process(events::allocate_error{
-                  .err = err,
-                  .request = request,
-                });
-                return;
-              } else if constexpr (std::is_same_v<decltype(ev.request), const event::release *>) {
-                const event::release * request = ev.request;
-                if (request != nullptr && request->error_out != nullptr) {
-                  *request->error_out = err;
-                }
-                if (request != nullptr && request->detail_out != nullptr &&
-                    request->detail_out->status == EMEL_OK) {
-                  request->detail_out->status = err;
-                  request->detail_out->phase = static_cast<uint32_t>(event::error_phase::release);
-                  request->detail_out->reason = static_cast<uint32_t>(event::error_reason::unknown);
-                }
-                process(events::release_error{
-                  .err = err,
-                  .request = request,
-                });
-                return;
-              }
-            }
-          },
-      sml::state<failed> + sml::event<events::allocate_error> / action::on_allocate_error =
-          sml::state<idle>,
-      sml::state<failed> + sml::event<events::release_error> / action::on_release_error =
-          sml::state<idle>
+      sml::state<Idle> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+        sml::state<Errored>,
+      sml::state<Validating> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+        sml::state<Errored>,
+      sml::state<ValidateDecision> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+        sml::state<Errored>,
+      sml::state<ScanningTensors> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+        sml::state<Errored>,
+      sml::state<ScanDecision> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+        sml::state<Errored>,
+      sml::state<PartitioningRanges> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<Errored>,
+      sml::state<PartitionDecision> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<Errored>,
+      sml::state<AllocatingRanges> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<Errored>,
+      sml::state<AllocateDecision> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<Errored>,
+      sml::state<InitializingTensors> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<Errored>,
+      sml::state<InitializeDecision> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<Errored>,
+      sml::state<AssemblingResult> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<Errored>,
+      sml::state<AssembleDecision> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<Errored>,
+      sml::state<Done> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+        sml::state<Errored>,
+      sml::state<Errored> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+        sml::state<Errored>,
+      sml::state<ReleaseDecision> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<Errored>
     );
   }
 };
 
-struct sm : private emel::detail::process_support<sm, Process>, public emel::sm<model, Process> {
-  using base_type = emel::sm<model, Process>;
+struct sm : public emel::sm<model> {
+  using base_type = emel::sm<model>;
 
-  sm() : emel::detail::process_support<sm, Process>(this), base_type(context_, this->process_) {}
+  sm() : base_type(context_) {}
 
   using base_type::process_event;
+  using base_type::visit_current_states;
+
+  bool process_event(const event::allocate_tensors & ev) {
+    const bool accepted = this->raw_sm().process_event(ev);
+    int32_t err = context_.phase_error;
+    if (!accepted && err == EMEL_OK) {
+      err = EMEL_ERR_BACKEND;
+    }
+    if (err == EMEL_OK) {
+      if (ev.total_size_out != nullptr) {
+        *ev.total_size_out = context_.total_bytes;
+      }
+      if (ev.chunk_count_out != nullptr) {
+        *ev.chunk_count_out = context_.chunk_count;
+      }
+      if (ev.chunk_sizes_out != nullptr &&
+          ev.chunk_sizes_out_count >= context_.chunk_count) {
+        for (int32_t i = 0; i < context_.chunk_count; ++i) {
+          ev.chunk_sizes_out[i] = context_.chunk_sizes[i];
+        }
+      }
+      if (ev.result_buffer_out != nullptr) {
+        *ev.result_buffer_out = context_.result_buffer;
+      }
+    } else {
+      if (ev.total_size_out != nullptr) {
+        *ev.total_size_out = 0;
+      }
+      if (ev.chunk_count_out != nullptr) {
+        *ev.chunk_count_out = 0;
+      }
+      if (ev.result_buffer_out != nullptr) {
+        *ev.result_buffer_out = nullptr;
+      }
+    }
+
+    if (err != EMEL_OK && context_.detail.status == EMEL_OK) {
+      action::detail::set_error_detail(
+          &context_.detail,
+          err,
+          event::error_phase::none,
+          event::error_reason::unknown,
+          -1,
+          0);
+    }
+    if (ev.error_out != nullptr) {
+      *ev.error_out = err;
+    }
+    if (ev.detail_out != nullptr) {
+      *ev.detail_out = context_.detail;
+    }
+    action::reset_phase(context_);
+    return emel::detail::normalize_event_result(ev, accepted);
+  }
+
+  bool process_event(const event::release & ev) {
+    const bool accepted = this->raw_sm().process_event(ev);
+    int32_t err = context_.phase_error;
+    if (!accepted && err == EMEL_OK) {
+      err = EMEL_ERR_BACKEND;
+    }
+    if (err != EMEL_OK && context_.detail.status == EMEL_OK) {
+      action::detail::set_error_detail(
+          &context_.detail,
+          err,
+          event::error_phase::release,
+          event::error_reason::unknown,
+          -1,
+          0);
+    }
+    if (ev.error_out != nullptr) {
+      *ev.error_out = err;
+    }
+    if (ev.detail_out != nullptr) {
+      *ev.detail_out = context_.detail;
+    }
+    action::reset_phase(context_);
+    return emel::detail::normalize_event_result(ev, accepted);
+  }
 
   int32_t total_bytes() const noexcept { return context_.total_bytes; }
   int32_t chunk_count() const noexcept { return context_.chunk_count; }

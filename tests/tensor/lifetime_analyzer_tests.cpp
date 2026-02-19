@@ -366,7 +366,7 @@ TEST_CASE("lifetime_analyzer_action_collect_ranges_error_paths") {
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
-TEST_CASE("lifetime_analyzer_action_publish_and_outcome_handlers") {
+TEST_CASE("lifetime_analyzer_action_publish_and_unexpected_handler") {
   emel::tensor::lifetime_analyzer::action::context c{};
   c.tensor_count = 2;
   c.first_use[0] = 1;
@@ -388,27 +388,11 @@ TEST_CASE("lifetime_analyzer_action_publish_and_outcome_handlers") {
   CHECK(first[0] == 1);
   CHECK(last[1] == 4);
 
-  const uint32_t step = c.step;
-  emel::tensor::lifetime_analyzer::action::on_analyze_done(
-      emel::tensor::lifetime_analyzer::events::analyze_done{}, c);
-  CHECK(c.step == step + 1);
-
-  emel::tensor::lifetime_analyzer::action::on_analyze_error(
-      emel::tensor::lifetime_analyzer::events::analyze_error{.err = EMEL_ERR_INVALID_ARGUMENT}, c);
-  CHECK(c.step == step + 2);
-
-  emel::tensor::lifetime_analyzer::action::on_reset_error(
-      emel::tensor::lifetime_analyzer::events::reset_error{.err = EMEL_ERR_BACKEND}, c);
-  CHECK(c.step == step + 3);
-
-  emel::tensor::lifetime_analyzer::action::record_phase_error(
-      emel::tensor::lifetime_analyzer::events::collect_ranges_error{.err = EMEL_ERR_INVALID_ARGUMENT}, c);
-  CHECK(c.step == step + 4);
-
-  emel::tensor::lifetime_analyzer::action::on_reset_done(
-      emel::tensor::lifetime_analyzer::events::reset_done{}, c);
-  CHECK(c.tensor_count == 0);
-  CHECK(c.step == 1);
+  err = EMEL_OK;
+  emel::tensor::lifetime_analyzer::action::on_unexpected(
+      emel::tensor::lifetime_analyzer::event::reset{.error_out = &err}, c);
+  CHECK(err == EMEL_ERR_BACKEND);
+  CHECK(c.phase_error == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("lifetime_analyzer_reports_missing_dependency") {

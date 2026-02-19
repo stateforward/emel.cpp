@@ -19,8 +19,8 @@ struct context {
   int32_t alignment = 16;
   int32_t max_buffer_size = 0;
   bool no_alloc = false;
-
-  uint32_t step = 0;
+  int32_t chunk_sizes_out_count = 0;
+  bool has_chunk_sizes_out = false;
 
   std::array<int32_t, k_max_tensors> tensor_ids = {};
   std::array<int32_t, k_max_tensors> effective_sizes = {};
@@ -32,6 +32,10 @@ struct context {
   void * result_buffer = nullptr;
   int32_t chunk_count = 0;
   int32_t total_bytes = 0;
+
+  emel_error_detail detail = {};
+  int32_t phase_error = EMEL_OK;
+  int32_t last_error = EMEL_OK;
 };
 
 namespace detail {
@@ -106,6 +110,30 @@ inline bool release_allocated_buffers(context & c) noexcept {
 
 }  // namespace detail
 
+inline void reset_phase(context & c) noexcept {
+  c.phase_error = EMEL_OK;
+  c.last_error = EMEL_OK;
+  detail::set_error_detail(
+      &c.detail,
+      EMEL_OK,
+      event::error_phase::none,
+      event::error_reason::none,
+      -1,
+      0);
+}
+
+inline void set_error(
+    context & c,
+    const int32_t err,
+    const event::error_phase phase,
+    const event::error_reason reason,
+    const int32_t index,
+    const int32_t aux) noexcept {
+  c.phase_error = err;
+  c.last_error = err;
+  detail::set_error_detail(&c.detail, err, phase, reason, index, aux);
+}
+
 struct begin_allocate_tensors {
   void operator()(const event::allocate_tensors & ev, context & c) const noexcept {
     if (ev.error_out != nullptr) {
@@ -134,46 +162,86 @@ struct begin_allocate_tensors {
     c.alignment = ev.alignment;
     c.max_buffer_size = ev.max_buffer_size;
     c.no_alloc = ev.no_alloc;
+    c.chunk_sizes_out_count = ev.chunk_sizes_out_count;
+    c.has_chunk_sizes_out = ev.chunk_sizes_out != nullptr;
     c.tensor_chunk_ids.fill(-1);
     c.tensor_offsets.fill(-1);
+    c.tensor_ids.fill(-1);
     c.allocated_buffers.fill(nullptr);
     c.result_buffer = nullptr;
-    c.step += 1;
+    reset_phase(c);
   }
 };
 
 struct run_validate {
-  void operator()(const event::validate & ev, context & c) const noexcept {
+  template <class Ev>
+  void operator()(const Ev & ev, context & c) const noexcept {
+    reset_phase(c);
+    int32_t chunk_sizes_out_count = c.chunk_sizes_out_count;
+    bool has_chunk_sizes_out = c.has_chunk_sizes_out;
+    if constexpr (requires { ev.chunk_sizes_out_count; }) {
+      chunk_sizes_out_count = ev.chunk_sizes_out_count;
+      c.chunk_sizes_out_count = ev.chunk_sizes_out_count;
+    }
+    if constexpr (requires { ev.chunk_sizes_out; }) {
+      has_chunk_sizes_out = ev.chunk_sizes_out != nullptr;
+      c.has_chunk_sizes_out = has_chunk_sizes_out;
+    }
+
     int32_t err = EMEL_OK;
     if (c.tensor_count < 0 || c.tensor_count > k_max_tensors) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if ((c.tensor_count > 0 && c.tensors == nullptr) || !detail::is_power_of_two(c.alignment)) {
+    } else if ((c.tensor_count > 0 && c.tensors == nullptr) ||
+               !detail::is_power_of_two(c.alignment)) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (c.max_buffer_size <= 0 || ev.chunk_sizes_out_count < 0) {
+    } else if (c.max_buffer_size <= 0 || chunk_sizes_out_count < 0) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-    } else if (ev.chunk_sizes_out == nullptr && ev.chunk_sizes_out_count != 0) {
+    } else if (!has_chunk_sizes_out && chunk_sizes_out_count != 0) {
       err = EMEL_ERR_INVALID_ARGUMENT;
     }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = err;
-    }
+
     if (err != EMEL_OK) {
-      detail::set_error_detail(
-          ev.detail_out,
+      set_error(
+          c,
           err,
           event::error_phase::validate,
           event::error_reason::invalid_argument,
           -1,
           0);
     }
-    c.step += 1;
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = c.phase_error;
+      }
+    }
+    if constexpr (requires { ev.detail_out; }) {
+      if (ev.detail_out != nullptr) {
+        *ev.detail_out = c.detail;
+      }
+    }
   }
 };
 
 struct run_scan_tensors {
-  void operator()(const event::scan_tensors & ev, context & c) const noexcept {
+  template <class Ev>
+  void operator()(const Ev & ev, context & c) const noexcept {
+    reset_phase(c);
+    c.tensor_ids.fill(-1);
+    c.effective_sizes.fill(0);
+
     int32_t err = EMEL_OK;
-    for (int32_t i = 0; i < c.tensor_count; ++i) {
+    if (c.tensor_count < 0 || c.tensor_count > k_max_tensors || c.tensors == nullptr) {
+      err = EMEL_ERR_INVALID_ARGUMENT;
+      set_error(
+          c,
+          err,
+          event::error_phase::scan_tensors,
+          event::error_reason::invalid_argument,
+          -1,
+          0);
+    }
+
+    for (int32_t i = 0; i < c.tensor_count && err == EMEL_OK; ++i) {
       const auto & t = c.tensors[i];
       if (t.tensor_id < 0 || t.alloc_size < 0 || detail::has_tensor_id(c, t.tensor_id)) {
         err = EMEL_ERR_INVALID_ARGUMENT;
@@ -181,21 +249,15 @@ struct run_scan_tensors {
             detail::has_tensor_id(c, t.tensor_id)
                 ? event::error_reason::duplicate_tensor_id
                 : event::error_reason::invalid_argument;
-        detail::set_error_detail(
-            ev.detail_out,
-            err,
-            event::error_phase::scan_tensors,
-            reason,
-            i,
-            t.tensor_id);
+        set_error(c, err, event::error_phase::scan_tensors, reason, i, t.tensor_id);
         break;
       }
       c.tensor_ids[i] = t.tensor_id;
 
       if (t.is_view && t.view_src_id < 0) {
         err = EMEL_ERR_INVALID_ARGUMENT;
-        detail::set_error_detail(
-            ev.detail_out,
+        set_error(
+            c,
             err,
             event::error_phase::scan_tensors,
             event::error_reason::invalid_view_source,
@@ -211,8 +273,8 @@ struct run_scan_tensors {
       int32_t aligned = 0;
       if (!detail::align_up(t.alloc_size, c.alignment, aligned)) {
         err = EMEL_ERR_BACKEND;
-        detail::set_error_detail(
-            ev.detail_out,
+        set_error(
+            c,
             err,
             event::error_phase::scan_tensors,
             event::error_reason::alignment_overflow,
@@ -222,16 +284,24 @@ struct run_scan_tensors {
       }
       c.effective_sizes[i] = aligned;
     }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = err;
+
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = c.phase_error;
+      }
     }
-    c.step += 1;
+    if constexpr (requires { ev.detail_out; }) {
+      if (ev.detail_out != nullptr) {
+        *ev.detail_out = c.detail;
+      }
+    }
   }
 };
 
 struct run_partition_ranges {
-  void operator()(const event::partition_ranges & ev, context & c) const noexcept {
-    int32_t err = EMEL_OK;
+  template <class Ev>
+  void operator()(const Ev & ev, context & c) const noexcept {
+    reset_phase(c);
     c.chunk_sizes.fill(0);
     c.chunk_count = 0;
     c.total_bytes = 0;
@@ -249,7 +319,7 @@ struct run_partition_ranges {
     };
 
     int32_t current_chunk = -1;
-    for (int32_t i = 0; i < c.tensor_count && err == EMEL_OK; ++i) {
+    for (int32_t i = 0; i < c.tensor_count; ++i) {
       const int32_t sz = c.effective_sizes[i];
       if (sz <= 0) continue;
 
@@ -258,7 +328,8 @@ struct run_partition_ranges {
       }
 
       int32_t cur_bytes = c.chunk_sizes[current_chunk];
-      const bool overflow_current = cur_bytes > 0 && detail::sat_add(cur_bytes, sz) > c.max_buffer_size;
+      const bool overflow_current =
+          cur_bytes > 0 && detail::sat_add(cur_bytes, sz) > c.max_buffer_size;
       if (overflow_current) {
         current_chunk = begin_next_chunk();
         cur_bytes = c.chunk_sizes[current_chunk];
@@ -269,32 +340,46 @@ struct run_partition_ranges {
       c.chunk_sizes[current_chunk] = detail::sat_add(cur_bytes, sz);
       c.total_bytes = detail::sat_add(c.total_bytes, sz);
     }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = err;
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = c.phase_error;
+      }
     }
-    c.step += 1;
+    if constexpr (requires { ev.detail_out; }) {
+      if (ev.detail_out != nullptr) {
+        *ev.detail_out = c.detail;
+      }
+    }
   }
 };
 
 struct run_allocate_ranges {
-  void operator()(const event::allocate_ranges & ev, context & c) const noexcept {
-    int32_t err = EMEL_OK;
+  template <class Ev>
+  void operator()(const Ev & ev, context & c) const noexcept {
+    reset_phase(c);
     c.allocated_buffers.fill(nullptr);
     c.result_buffer = nullptr;
 
     if (c.no_alloc || c.chunk_count == 0) {
-      if (ev.error_out != nullptr) {
-        *ev.error_out = EMEL_OK;
+      if constexpr (requires { ev.error_out; }) {
+        if (ev.error_out != nullptr) {
+          *ev.error_out = EMEL_OK;
+        }
       }
-      c.step += 1;
+      if constexpr (requires { ev.detail_out; }) {
+        if (ev.detail_out != nullptr) {
+          *ev.detail_out = c.detail;
+        }
+      }
       return;
     }
 
+    int32_t err = EMEL_OK;
     for (int32_t i = 0; i < c.chunk_count; ++i) {
       if (c.chunk_sizes[i] <= 0) {
         err = EMEL_ERR_BACKEND;
-        detail::set_error_detail(
-            ev.detail_out,
+        set_error(
+            c,
             err,
             event::error_phase::allocate_ranges,
             event::error_reason::invalid_argument,
@@ -305,8 +390,8 @@ struct run_allocate_ranges {
       void * buffer = std::malloc(static_cast<size_t>(c.chunk_sizes[i]));
       if (buffer == nullptr) {
         err = EMEL_ERR_BACKEND;
-        detail::set_error_detail(
-            ev.detail_out,
+        set_error(
+            c,
             err,
             event::error_phase::allocate_ranges,
             event::error_reason::allocation_failed,
@@ -320,31 +405,74 @@ struct run_allocate_ranges {
     if (err != EMEL_OK) {
       (void)detail::release_allocated_buffers(c);
     }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = err;
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = c.phase_error;
+      }
     }
-    c.step += 1;
+    if constexpr (requires { ev.detail_out; }) {
+      if (ev.detail_out != nullptr) {
+        *ev.detail_out = c.detail;
+      }
+    }
   }
 };
 
 struct run_initialize_tensors {
-  void operator()(const event::initialize_tensors & ev, context & c) const noexcept {
+  template <class Ev>
+  void operator()(const Ev & ev, context & c) const noexcept {
+    reset_phase(c);
     int32_t err = EMEL_OK;
     if (c.no_alloc) {
-      if (ev.error_out != nullptr) {
-        *ev.error_out = EMEL_OK;
+      if constexpr (requires { ev.error_out; }) {
+        if (ev.error_out != nullptr) {
+          *ev.error_out = EMEL_OK;
+        }
       }
-      c.step += 1;
+      if constexpr (requires { ev.detail_out; }) {
+        if (ev.detail_out != nullptr) {
+          *ev.detail_out = c.detail;
+        }
+      }
       return;
+    }
+
+    if (c.tensors == nullptr || c.tensor_count < 0) {
+      err = EMEL_ERR_INVALID_ARGUMENT;
+      set_error(
+          c,
+          err,
+          event::error_phase::initialize_tensors,
+          event::error_reason::invalid_argument,
+          -1,
+          0);
+      if constexpr (requires { ev.error_out; }) {
+        if (ev.error_out != nullptr) {
+          *ev.error_out = c.phase_error;
+        }
+      }
+      if constexpr (requires { ev.detail_out; }) {
+        if (ev.detail_out != nullptr) {
+          *ev.detail_out = c.detail;
+        }
+      }
+      return;
+    }
+
+    if (c.tensor_count > 0 && c.tensors != nullptr) {
+      c.tensor_ids.fill(-1);
+      for (int32_t i = 0; i < c.tensor_count; ++i) {
+        c.tensor_ids[i] = c.tensors[i].tensor_id;
+      }
     }
 
     for (int32_t i = 0; i < c.tensor_count; ++i) {
       const auto & t = c.tensors[i];
       if (t.is_view) {
-        if (!detail::has_tensor_id(c, t.view_src_id)) {
+        if (t.view_src_id < 0 || !detail::has_tensor_id(c, t.view_src_id)) {
           err = EMEL_ERR_INVALID_ARGUMENT;
-          detail::set_error_detail(
-              ev.detail_out,
+          set_error(
+              c,
               err,
               event::error_phase::initialize_tensors,
               event::error_reason::invalid_view_source,
@@ -361,8 +489,8 @@ struct run_initialize_tensors {
       const int32_t offset = c.tensor_offsets[i];
       if (chunk_id < 0 || chunk_id >= c.chunk_count || offset < 0) {
         err = EMEL_ERR_BACKEND;
-        detail::set_error_detail(
-            ev.detail_out,
+        set_error(
+            c,
             err,
             event::error_phase::initialize_tensors,
             event::error_reason::offset_out_of_range,
@@ -373,8 +501,8 @@ struct run_initialize_tensors {
       void * buffer = c.allocated_buffers[chunk_id];
       if (buffer == nullptr) {
         err = EMEL_ERR_BACKEND;
-        detail::set_error_detail(
-            ev.detail_out,
+        set_error(
+            c,
             err,
             event::error_phase::initialize_tensors,
             event::error_reason::allocation_failed,
@@ -385,8 +513,8 @@ struct run_initialize_tensors {
       const int32_t end_offset = detail::sat_add(offset, c.effective_sizes[i]);
       if (end_offset <= 0 || end_offset > c.chunk_sizes[chunk_id]) {
         err = EMEL_ERR_BACKEND;
-        detail::set_error_detail(
-            ev.detail_out,
+        set_error(
+            c,
             err,
             event::error_phase::initialize_tensors,
             event::error_reason::offset_out_of_range,
@@ -398,42 +526,74 @@ struct run_initialize_tensors {
     if (err != EMEL_OK) {
       (void)detail::release_allocated_buffers(c);
     }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = err;
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = c.phase_error;
+      }
     }
-    c.step += 1;
+    if constexpr (requires { ev.detail_out; }) {
+      if (ev.detail_out != nullptr) {
+        *ev.detail_out = c.detail;
+      }
+    }
   }
 };
 
 struct run_assemble {
-  void operator()(const event::assemble & ev, context & c) const noexcept {
+  template <class Ev>
+  void operator()(const Ev & ev, context & c) const noexcept {
+    reset_phase(c);
     int32_t err = EMEL_OK;
     c.result_buffer = nullptr;
-    if (ev.chunk_sizes_out != nullptr && ev.chunk_sizes_out_count < c.chunk_count) {
+    int32_t chunk_sizes_out_count = c.chunk_sizes_out_count;
+    bool has_chunk_sizes_out = c.has_chunk_sizes_out;
+    if constexpr (requires { ev.chunk_sizes_out_count; }) {
+      chunk_sizes_out_count = ev.chunk_sizes_out_count;
+      c.chunk_sizes_out_count = ev.chunk_sizes_out_count;
+    }
+    if constexpr (requires { ev.chunk_sizes_out; }) {
+      has_chunk_sizes_out = ev.chunk_sizes_out != nullptr;
+      c.has_chunk_sizes_out = has_chunk_sizes_out;
+    }
+    if (has_chunk_sizes_out && chunk_sizes_out_count < c.chunk_count) {
       err = EMEL_ERR_INVALID_ARGUMENT;
-      detail::set_error_detail(
-          ev.detail_out,
+      set_error(
+          c,
           err,
           event::error_phase::assemble,
           event::error_reason::invalid_argument,
           -1,
-          ev.chunk_sizes_out_count);
+          chunk_sizes_out_count);
     }
     if (err == EMEL_OK) {
-      if (ev.total_size_out != nullptr) *ev.total_size_out = c.total_bytes;
-      if (ev.chunk_count_out != nullptr) *ev.chunk_count_out = c.chunk_count;
-      for (int32_t i = 0; i < c.chunk_count && ev.chunk_sizes_out != nullptr; ++i) {
-        ev.chunk_sizes_out[i] = c.chunk_sizes[i];
+      if constexpr (requires { ev.total_size_out; }) {
+        if (ev.total_size_out != nullptr) {
+          *ev.total_size_out = c.total_bytes;
+        }
       }
-      if (ev.result_buffer_out != nullptr) {
-        *ev.result_buffer_out = nullptr;
+      if constexpr (requires { ev.chunk_count_out; }) {
+        if (ev.chunk_count_out != nullptr) {
+          *ev.chunk_count_out = c.chunk_count;
+        }
+      }
+      if constexpr (requires { ev.chunk_sizes_out; }) {
+        for (int32_t i = 0; i < c.chunk_count && ev.chunk_sizes_out != nullptr; ++i) {
+          ev.chunk_sizes_out[i] = c.chunk_sizes[i];
+        }
+      }
+      if constexpr (requires { ev.result_buffer_out; }) {
+        if (ev.result_buffer_out != nullptr) {
+          *ev.result_buffer_out = nullptr;
+        }
       }
     }
     if (err == EMEL_OK && !c.no_alloc) {
       if (c.chunk_count == 1) {
         c.result_buffer = c.allocated_buffers[0];
-        if (ev.result_buffer_out != nullptr) {
-          *ev.result_buffer_out = c.result_buffer;
+        if constexpr (requires { ev.result_buffer_out; }) {
+          if (ev.result_buffer_out != nullptr) {
+            *ev.result_buffer_out = c.result_buffer;
+          }
         }
       } else if (c.chunk_count > 1) {
         c.assembled_buffers.fill(nullptr);
@@ -443,97 +603,99 @@ struct run_assemble {
         c.result_buffer = static_cast<void *>(c.assembled_buffers.data());
         if (c.result_buffer == nullptr) {
           err = EMEL_ERR_BACKEND;
-          detail::set_error_detail(
-              ev.detail_out,
+          set_error(
+              c,
               err,
               event::error_phase::assemble,
               event::error_reason::assemble_failed,
               -1,
               c.chunk_count);
-        } else if (ev.result_buffer_out != nullptr) {
-          *ev.result_buffer_out = c.result_buffer;
+        } else if constexpr (requires { ev.result_buffer_out; }) {
+          if (ev.result_buffer_out != nullptr) {
+            *ev.result_buffer_out = c.result_buffer;
+          }
         }
       }
     }
     if (err != EMEL_OK) {
       (void)detail::release_allocated_buffers(c);
-      if (ev.result_buffer_out != nullptr) {
-        *ev.result_buffer_out = nullptr;
+      if constexpr (requires { ev.result_buffer_out; }) {
+        if (ev.result_buffer_out != nullptr) {
+          *ev.result_buffer_out = nullptr;
+        }
       }
       c.result_buffer = nullptr;
     }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = err;
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = c.phase_error;
+      }
     }
-    c.step += 1;
+    if constexpr (requires { ev.detail_out; }) {
+      if (ev.detail_out != nullptr) {
+        *ev.detail_out = c.detail;
+      }
+    }
   }
 };
 
 struct begin_release {
-  void operator()(const event::release & ev, context & c) const noexcept {
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-    if (ev.detail_out != nullptr) {
-      ev.detail_out->status = EMEL_OK;
-      ev.detail_out->domain = EMEL_ERROR_DOMAIN_TENSOR_ALLOCATOR;
-      ev.detail_out->phase = static_cast<uint32_t>(event::error_phase::none);
-      ev.detail_out->reason = static_cast<uint32_t>(event::error_reason::none);
-      ev.detail_out->index = -1;
-      ev.detail_out->aux = 0;
-    }
+  template <class Ev>
+  void operator()(const Ev & ev, context & c) const noexcept {
+    reset_phase(c);
     const int32_t err = detail::release_allocated_buffers(c) ? EMEL_OK : EMEL_ERR_BACKEND;
-    c.result_buffer = nullptr;
-    if (ev.error_out != nullptr) {
-      *ev.error_out = err;
-    }
     if (err != EMEL_OK) {
-      detail::set_error_detail(
-          ev.detail_out,
+      set_error(
+          c,
           err,
           event::error_phase::release,
           event::error_reason::unknown,
           -1,
           0);
+    } else {
+      c = {};
+      c.tensor_ids.fill(-1);
+      c.tensor_chunk_ids.fill(-1);
+      c.tensor_offsets.fill(-1);
+      reset_phase(c);
     }
-    c.step += 1;
+    c.result_buffer = nullptr;
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = c.phase_error;
+      }
+    }
+    if constexpr (requires { ev.detail_out; }) {
+      if (ev.detail_out != nullptr) {
+        *ev.detail_out = c.detail;
+      }
+    }
   }
 };
 
-struct on_allocate_done {
-  void operator()(const events::allocate_done &, context & c) const noexcept {
-    c.step += 1;
+struct on_unexpected {
+  template <class Ev>
+  void operator()(const Ev & ev, context & c) const noexcept {
+    set_error(
+        c,
+        EMEL_ERR_BACKEND,
+        event::error_phase::none,
+        event::error_reason::unknown,
+        -1,
+        0);
+    if constexpr (requires { ev.error_out; }) {
+      if (ev.error_out != nullptr) {
+        *ev.error_out = c.phase_error;
+      }
+    }
+    if constexpr (requires { ev.detail_out; }) {
+      if (ev.detail_out != nullptr) {
+        *ev.detail_out = c.detail;
+      }
+    }
   }
 };
 
-struct on_allocate_error {
-  void operator()(const events::allocate_error & ev, context & c) const noexcept {
-    (void)ev;
-    c.step += 1;
-  }
-};
-
-struct on_release_done {
-  void operator()(const events::release_done &, context & c) const noexcept {
-    c = {};
-    c.step = 1;
-  }
-};
-
-struct on_release_error {
-  void operator()(const events::release_error & ev, context & c) const noexcept {
-    (void)ev;
-    c.step += 1;
-  }
-};
-
-struct record_phase_error {
-  template <class ErrorEvent>
-  void operator()(const ErrorEvent & ev, context & c) const noexcept {
-    (void)ev;
-    (void)c;
-  }
-};
 
 inline constexpr begin_allocate_tensors begin_allocate_tensors{};
 inline constexpr run_validate run_validate{};
@@ -543,10 +705,6 @@ inline constexpr run_allocate_ranges run_allocate_ranges{};
 inline constexpr run_initialize_tensors run_initialize_tensors{};
 inline constexpr run_assemble run_assemble{};
 inline constexpr begin_release begin_release{};
-inline constexpr on_allocate_done on_allocate_done{};
-inline constexpr on_allocate_error on_allocate_error{};
-inline constexpr on_release_done on_release_done{};
-inline constexpr on_release_error on_release_error{};
-inline constexpr record_phase_error record_phase_error{};
+inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::tensor::allocator::action

@@ -1,4 +1,5 @@
-#include <boost/sml.hpp>
+#include <array>
+
 #include <doctest/doctest.h>
 
 #include "emel/emel.h"
@@ -6,387 +7,135 @@
 
 namespace {
 
-struct noop_queue {
-  using container_type = void;
+using tensor_desc = emel::tensor::allocator::event::tensor_desc;
 
-  template <class Event>
-  void push(const Event &) noexcept {}
-};
+}  // namespace
 
-TEST_CASE("tensor_allocator_sm_success_path") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process>
-    machine{ctx, process};
-  emel::tensor::allocator::event::tensor_desc tensor{
-    .tensor_id = 0,
-    .alloc_size = 4,
-  };
-  emel_error_detail detail{};
+TEST_CASE("tensor_allocator_sm_success_path_sets_outputs") {
+  emel::tensor::allocator::sm machine{};
+  std::array<tensor_desc, 2> tensors = {{
+    tensor_desc{
+      .tensor_id = 0,
+      .alloc_size = 16,
+      .src_ids = {{-1, -1, -1, -1}},
+      .is_view = false,
+      .view_src_id = -1,
+      .has_external_data = false,
+    },
+    tensor_desc{
+      .tensor_id = 1,
+      .alloc_size = 16,
+      .src_ids = {{-1, -1, -1, -1}},
+      .is_view = false,
+      .view_src_id = -1,
+      .has_external_data = false,
+    },
+  }};
+
+  int32_t total_size = 0;
+  int32_t chunk_count = 0;
+  std::array<int32_t, 4> chunk_sizes = {{0, 0, 0, 0}};
   int32_t err = EMEL_OK;
+  emel_error_detail detail{};
 
-  emel::tensor::allocator::event::allocate_tensors request{
-    .tensors = &tensor,
-    .tensor_count = 1,
+  CHECK(machine.process_event(emel::tensor::allocator::event::allocate_tensors{
+    .tensors = tensors.data(),
+    .tensor_count = static_cast<int32_t>(tensors.size()),
     .alignment = 16,
-    .max_buffer_size = 1024,
-    .no_alloc = false,
+    .max_buffer_size = 64,
+    .no_alloc = true,
+    .total_size_out = &total_size,
+    .chunk_sizes_out = chunk_sizes.data(),
+    .chunk_sizes_out_count = static_cast<int32_t>(chunk_sizes.size()),
+    .chunk_count_out = &chunk_count,
     .error_out = &err,
     .detail_out = &detail,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::tensor::allocator::events::validate_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::scan_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::partition_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::allocate_ranges_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::initialize_tensors_done{
-    .request = &request,
   }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::assemble_done{.request = &request}));
-  (void)machine.process_event(emel::tensor::allocator::events::allocate_done{
-    .total_bytes = 4,
-    .chunk_count = 1,
-    .request = &request,
-  });
+
+  CHECK(err == EMEL_OK);
+  CHECK(chunk_count >= 1);
+  CHECK(total_size >= 32);
 }
 
-TEST_CASE("tensor_allocator_sm_validate_error_path") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process>
-    machine{ctx, process};
-  emel::tensor::allocator::event::tensor_desc tensor{
-    .tensor_id = 0,
-    .alloc_size = 4,
-  };
-  emel_error_detail detail{};
+TEST_CASE("tensor_allocator_sm_duplicate_ids_report_scan_error") {
+  emel::tensor::allocator::sm machine{};
+  std::array<tensor_desc, 2> tensors = {{
+    tensor_desc{
+      .tensor_id = 2,
+      .alloc_size = 16,
+      .src_ids = {{-1, -1, -1, -1}},
+      .is_view = false,
+      .view_src_id = -1,
+      .has_external_data = false,
+    },
+    tensor_desc{
+      .tensor_id = 2,
+      .alloc_size = 16,
+      .src_ids = {{-1, -1, -1, -1}},
+      .is_view = false,
+      .view_src_id = -1,
+      .has_external_data = false,
+    },
+  }};
+
   int32_t err = EMEL_OK;
-
-  emel::tensor::allocator::event::allocate_tensors request{
-    .tensors = &tensor,
-    .tensor_count = 1,
-    .alignment = 16,
-    .max_buffer_size = 1024,
-    .no_alloc = false,
-    .error_out = &err,
-    .detail_out = &detail,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::tensor::allocator::events::validate_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  }));
-  (void)machine.process_event(emel::tensor::allocator::events::allocate_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  });
-}
-
-TEST_CASE("tensor_allocator_sm_scan_error_path") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process>
-    machine{ctx, process};
-  emel::tensor::allocator::event::tensor_desc tensor{
-    .tensor_id = 0,
-    .alloc_size = 4,
-  };
   emel_error_detail detail{};
-  int32_t err = EMEL_OK;
 
-  emel::tensor::allocator::event::allocate_tensors request{
-    .tensors = &tensor,
-    .tensor_count = 1,
+  CHECK_FALSE(machine.process_event(emel::tensor::allocator::event::allocate_tensors{
+    .tensors = tensors.data(),
+    .tensor_count = static_cast<int32_t>(tensors.size()),
     .alignment = 16,
-    .max_buffer_size = 1024,
-    .no_alloc = false,
-    .error_out = &err,
-    .detail_out = &detail,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::tensor::allocator::events::validate_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::scan_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  }));
-  (void)machine.process_event(emel::tensor::allocator::events::allocate_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  });
-}
-
-TEST_CASE("tensor_allocator_sm_partition_error_path") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process>
-    machine{ctx, process};
-  emel::tensor::allocator::event::tensor_desc tensor{
-    .tensor_id = 0,
-    .alloc_size = 4,
-  };
-  emel_error_detail detail{};
-  int32_t err = EMEL_OK;
-
-  emel::tensor::allocator::event::allocate_tensors request{
-    .tensors = &tensor,
-    .tensor_count = 1,
-    .alignment = 16,
-    .max_buffer_size = 1024,
-    .no_alloc = false,
-    .error_out = &err,
-    .detail_out = &detail,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::tensor::allocator::events::validate_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::scan_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::partition_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  }));
-  (void)machine.process_event(emel::tensor::allocator::events::allocate_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  });
-}
-
-TEST_CASE("tensor_allocator_sm_allocate_ranges_error_path") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process>
-    machine{ctx, process};
-  emel::tensor::allocator::event::tensor_desc tensor{
-    .tensor_id = 0,
-    .alloc_size = 4,
-  };
-  emel_error_detail detail{};
-  int32_t err = EMEL_OK;
-
-  emel::tensor::allocator::event::allocate_tensors request{
-    .tensors = &tensor,
-    .tensor_count = 1,
-    .alignment = 16,
-    .max_buffer_size = 1024,
-    .no_alloc = false,
-    .error_out = &err,
-    .detail_out = &detail,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::tensor::allocator::events::validate_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::scan_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::partition_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::allocate_ranges_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  }));
-  (void)machine.process_event(emel::tensor::allocator::events::allocate_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  });
-}
-
-TEST_CASE("tensor_allocator_sm_initialize_error_path") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process>
-    machine{ctx, process};
-  emel::tensor::allocator::event::tensor_desc tensor{
-    .tensor_id = 0,
-    .alloc_size = 4,
-  };
-  emel_error_detail detail{};
-  int32_t err = EMEL_OK;
-
-  emel::tensor::allocator::event::allocate_tensors request{
-    .tensors = &tensor,
-    .tensor_count = 1,
-    .alignment = 16,
-    .max_buffer_size = 1024,
-    .no_alloc = false,
-    .error_out = &err,
-    .detail_out = &detail,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::tensor::allocator::events::validate_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::scan_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::partition_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::allocate_ranges_done{
-    .request = &request,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::initialize_tensors_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  }));
-  (void)machine.process_event(emel::tensor::allocator::events::allocate_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  });
-}
-
-TEST_CASE("tensor_allocator_sm_assemble_error_path") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process>
-    machine{ctx, process};
-  emel::tensor::allocator::event::tensor_desc tensor{
-    .tensor_id = 0,
-    .alloc_size = 4,
-  };
-  emel_error_detail detail{};
-  int32_t err = EMEL_OK;
-
-  emel::tensor::allocator::event::allocate_tensors request{
-    .tensors = &tensor,
-    .tensor_count = 1,
-    .alignment = 16,
-    .max_buffer_size = 1024,
-    .no_alloc = false,
-    .error_out = &err,
-    .detail_out = &detail,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::tensor::allocator::events::validate_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::scan_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::partition_done{.request = &request}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::allocate_ranges_done{
-    .request = &request,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::initialize_tensors_done{
-    .request = &request,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::assemble_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  }));
-  (void)machine.process_event(emel::tensor::allocator::events::allocate_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &request,
-  });
-}
-
-TEST_CASE("tensor_allocator_sm_manual_null_request_path") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process>
-    machine{ctx, process};
-  emel_error_detail detail{};
-  int32_t err = EMEL_OK;
-
-  emel::tensor::allocator::event::allocate_tensors request{
-    .tensors = nullptr,
-    .tensor_count = 0,
-    .alignment = 16,
-    .max_buffer_size = 1024,
+    .max_buffer_size = 64,
     .no_alloc = true,
     .error_out = &err,
     .detail_out = &detail,
-  };
+  }));
 
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::tensor::allocator::events::validate_done{.request = nullptr}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::scan_done{.request = nullptr}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::partition_done{.request = nullptr}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::allocate_ranges_done{
-    .request = nullptr,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::initialize_tensors_done{
-    .request = nullptr,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::assemble_done{.request = nullptr}));
-  CHECK(machine.process_event(emel::tensor::allocator::events::allocate_done{
-    .total_bytes = 0,
-    .chunk_count = 0,
-    .request = nullptr,
-  }));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(detail.phase ==
+        static_cast<uint32_t>(emel::tensor::allocator::event::error_phase::scan_tensors));
+  CHECK(detail.reason ==
+        static_cast<uint32_t>(emel::tensor::allocator::event::error_reason::duplicate_tensor_id));
 }
 
-TEST_CASE("tensor_allocator_sm_release_done_path") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process>
-    machine{ctx, process};
-  emel_error_detail detail{};
+TEST_CASE("tensor_allocator_sm_assemble_reports_chunk_size_capacity_error") {
+  emel::tensor::allocator::sm machine{};
+  std::array<tensor_desc, 2> tensors = {{
+    tensor_desc{
+      .tensor_id = 10,
+      .alloc_size = 32,
+      .src_ids = {{-1, -1, -1, -1}},
+      .is_view = false,
+      .view_src_id = -1,
+      .has_external_data = false,
+    },
+    tensor_desc{
+      .tensor_id = 11,
+      .alloc_size = 32,
+      .src_ids = {{-1, -1, -1, -1}},
+      .is_view = false,
+      .view_src_id = -1,
+      .has_external_data = false,
+    },
+  }};
+
+  std::array<int32_t, 1> chunk_sizes = {{0}};
   int32_t err = EMEL_OK;
-
-  emel::tensor::allocator::event::release release{
-    .error_out = &err,
-    .detail_out = &detail,
-  };
-
-  CHECK(machine.process_event(release));
-  CHECK(machine.process_event(emel::tensor::allocator::events::release_done{
-    .request = &release,
-  }));
-}
-
-TEST_CASE("tensor_allocator_sm_release_error_path") {
-  emel::tensor::allocator::action::context ctx{};
-  noop_queue queue{};
-  emel::tensor::allocator::Process process{queue};
-  boost::sml::sm<
-    emel::tensor::allocator::model,
-    boost::sml::testing,
-    emel::tensor::allocator::Process>
-    machine{ctx, process};
   emel_error_detail detail{};
-  int32_t err = EMEL_ERR_BACKEND;
 
-  emel::tensor::allocator::event::release release{
+  CHECK_FALSE(machine.process_event(emel::tensor::allocator::event::allocate_tensors{
+    .tensors = tensors.data(),
+    .tensor_count = static_cast<int32_t>(tensors.size()),
+    .alignment = 16,
+    .max_buffer_size = 64,
+    .no_alloc = true,
+    .chunk_sizes_out = chunk_sizes.data(),
+    .chunk_sizes_out_count = 0,
     .error_out = &err,
     .detail_out = &detail,
-  };
+  }));
 
-  CHECK(machine.process_event(release));
-  CHECK(machine.process_event(emel::tensor::allocator::events::release_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &release,
-  }));
-  CHECK(machine.process_event(emel::tensor::allocator::events::release_error{
-    .err = EMEL_ERR_BACKEND,
-    .request = &release,
-  }));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(detail.phase ==
+        static_cast<uint32_t>(emel::tensor::allocator::event::error_phase::assemble));
 }
-
-}  // namespace
