@@ -16,7 +16,7 @@ tensor_desc make_leaf(const int32_t id) {
   return tensor_desc{
     .tensor_id = id,
     .alloc_size = 16,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -29,7 +29,11 @@ tensor_desc make_node(const int32_t id, const int32_t src_id) {
   return tensor_desc{
     .tensor_id = id,
     .alloc_size = 16,
-    .src_ids = {{src_id, -1, -1, -1}},
+    .src_ids = [src_id] {
+      auto ids = emel::buffer::allocator::event::make_src_ids();
+      ids[0] = src_id;
+      return ids;
+    }(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,

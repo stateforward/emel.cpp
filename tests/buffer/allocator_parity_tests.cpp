@@ -32,7 +32,7 @@ tensor_desc make_tensor(
   t.view_src_id = view_src_id;
   t.can_inplace = can_inplace;
   t.has_external_data = has_external_data;
-  t.src_ids = {{-1, -1, -1, -1}};
+  t.src_ids = emel::buffer::allocator::event::make_src_ids();
   int32_t idx = 0;
   for (const int32_t src : srcs) {
     if (idx >= k_max_sources) {

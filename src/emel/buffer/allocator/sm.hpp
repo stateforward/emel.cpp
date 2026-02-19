@@ -31,9 +31,9 @@ Design overview
 
 `needs_realloc` parity contract
 - Reserve operations persist allocation assignment snapshots per node destination and per-node
-  sources (`tensor_id`, `buffer_id`, `size_max`).
+  sources (`buffer_id`, `size_max`, `alignment`).
 - `alloc_graph` checks snapshot validity before deciding behavior:
-  - snapshot missing, node/leaf count changed, tensor identity changed, source identity changed,
+  - snapshot missing, node/leaf count changed, source tensor id not found in the graph,
     or `size_max < required_size` for allocatable tensors => `needs_realloc = true`.
   - external-data and view tensors bypass size/buffer checks (matching gallocr semantics).
 - If `needs_realloc = true`:
@@ -42,7 +42,7 @@ Design overview
 
 Multi-buffer mismatch error contract
 - Any `needs_realloc` condition in multi-buffer mode returns allocator-path backend error.
-- This includes shape drift, source wiring drift, and growth beyond reserved assignment capacity.
+- This includes shape drift, missing sources, and growth beyond reserved assignment capacity.
 
 Unexpected-event policy intent
 - Unexpected event = known intent event type with no valid transition from current state.

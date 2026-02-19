@@ -32,7 +32,7 @@ graph_storage make_direct_graph() {
   g.leafs[0] = tensor_desc{
     .tensor_id = 5,
     .alloc_size = 64,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -42,7 +42,11 @@ graph_storage make_direct_graph() {
   g.nodes[0] = tensor_desc{
     .tensor_id = 6,
     .alloc_size = 64,
-    .src_ids = {{5, -1, -1, -1}},
+    .src_ids = [] {
+      auto ids = emel::buffer::allocator::event::make_src_ids();
+      ids[0] = 5;
+      return ids;
+    }(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,

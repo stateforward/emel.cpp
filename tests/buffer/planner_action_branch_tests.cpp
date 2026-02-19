@@ -207,7 +207,8 @@ TEST_CASE("buffer_planner_default_plan_nodes_reuses_parent_allocation") {
   ctx.leafs[0].alloc_size = 64;
   ctx.nodes[0].tensor_id = 1;
   ctx.nodes[0].alloc_size = 32;
-  ctx.nodes[0].src_ids = {{0, -1, -1, -1}};
+  ctx.nodes[0].src_ids = emel::buffer::allocator::event::make_src_ids();
+  ctx.nodes[0].src_ids[0] = 0;
   ctx.leaf_buffer_ids[0] = 0;
   ctx.node_buffer_ids[0] = 0;
   ctx.strategy = emel::buffer::planner::default_strategies::gallocr_parity;

@@ -115,10 +115,6 @@ inline bool graph_needs_realloc(
     const auto & node = graph.nodes[i];
     const auto & node_alloc = node_allocs[i];
 
-    if (node_alloc.dst.tensor_id >= 0 && node_alloc.dst.tensor_id != node.tensor_id) {
-      return true;
-    }
-
     if (!tensor_snapshot_valid(node, node_alloc.dst)) {
       return true;
     }
@@ -127,13 +123,7 @@ inline bool graph_needs_realloc(
       const int32_t src_id = node.src_ids[j];
       const auto & src_alloc = node_alloc.src[j];
       if (src_id < 0) {
-        if (src_alloc.tensor_id >= 0) {
-          return true;
-        }
         continue;
-      }
-      if (src_alloc.tensor_id >= 0 && src_alloc.tensor_id != src_id) {
-        return true;
       }
       const auto * src = find_tensor(graph, src_id);
       if (src == nullptr) {

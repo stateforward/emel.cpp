@@ -22,7 +22,7 @@ graph_storage make_valid_graph() {
   graph_storage g{};
   g.nodes[0].tensor_id = 0;
   g.nodes[0].alloc_size = 64;
-  g.nodes[0].src_ids = {{-1, -1, -1, -1}};
+  g.nodes[0].src_ids = emel::buffer::allocator::event::make_src_ids();
   g.leafs[0].tensor_id = 1;
   g.leafs[0].alloc_size = 32;
   g.view = emel::buffer::allocator::event::graph_view{

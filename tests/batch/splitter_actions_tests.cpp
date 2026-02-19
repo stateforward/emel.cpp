@@ -91,15 +91,22 @@ TEST_CASE("batch_splitter_actions_normalize_batch_clamps_requested") {
 
 TEST_CASE("batch_splitter_actions_sequence_mask_normalization_variants") {
   emel::batch::splitter::action::context ctx{};
-  std::array<uint64_t, 3> seq_masks = {{7U, 0U, 0U}};
-  std::array<int32_t, 3> seq_primary_ids = {{2, -1, 5}};
+  std::array<uint64_t, 3> seq_masks = {{7U, 1U, 2U}};
+  std::array<int32_t, 3> seq_primary_ids = {{2, 1, 5}};
 
   ctx.seq_masks = seq_masks.data();
+  ctx.seq_primary_ids = nullptr;
+
+  CHECK(emel::batch::splitter::action::normalized_seq_mask(ctx, 0)[0] == 7U);
+  CHECK(emel::batch::splitter::action::normalized_seq_mask(ctx, 1)[0] == 1U);
+  CHECK(emel::batch::splitter::action::normalized_seq_mask(ctx, 2)[0] == 2U);
+
+  ctx.seq_masks = nullptr;
   ctx.seq_primary_ids = seq_primary_ids.data();
 
-  CHECK(emel::batch::splitter::action::normalized_seq_mask(ctx, 0) == 7U);
-  CHECK(emel::batch::splitter::action::normalized_seq_mask(ctx, 1) == (uint64_t{1} << 1));
-  CHECK(emel::batch::splitter::action::normalized_seq_mask(ctx, 2) == (uint64_t{1} << 5));
+  CHECK(emel::batch::splitter::action::normalized_seq_mask(ctx, 0)[0] == (uint64_t{1} << 2));
+  CHECK(emel::batch::splitter::action::normalized_seq_mask(ctx, 1)[0] == (uint64_t{1} << 1));
+  CHECK(emel::batch::splitter::action::normalized_seq_mask(ctx, 2)[0] == (uint64_t{1} << 5));
 }
 
 TEST_CASE("batch_splitter_actions_push_ubatch_size_limits") {

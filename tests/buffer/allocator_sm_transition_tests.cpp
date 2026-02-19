@@ -36,7 +36,7 @@ TEST_CASE("buffer_allocator_sm_initialize_and_reserve_sizes") {
   emel::buffer::allocator::event::tensor_desc node{
     .tensor_id = 1,
     .alloc_size = 16,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,

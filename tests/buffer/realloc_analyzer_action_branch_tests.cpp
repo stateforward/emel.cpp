@@ -26,7 +26,11 @@ graph_storage make_graph() {
   g.nodes[0] = tensor_desc{
     .tensor_id = 1,
     .alloc_size = 16,
-    .src_ids = {{2, -1, -1, -1}},
+    .src_ids = [] {
+      auto ids = emel::buffer::allocator::event::make_src_ids();
+      ids[0] = 2;
+      return ids;
+    }(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -36,7 +40,7 @@ graph_storage make_graph() {
   g.leafs[0] = tensor_desc{
     .tensor_id = 2,
     .alloc_size = 32,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -111,7 +115,7 @@ TEST_CASE("buffer_realloc_analyzer_detail_tensor_snapshot_valid_branches") {
   tensor_desc tensor{
     .tensor_id = 1,
     .alloc_size = 16,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -156,7 +160,7 @@ TEST_CASE("buffer_realloc_analyzer_detail_graph_needs_realloc_paths") {
   CHECK(graph_needs_realloc(view, nodes.data(), 1, leafs.data(), 0));
 
   nodes[0].dst.tensor_id = 99;
-  CHECK(graph_needs_realloc(view, nodes.data(), 1, leafs.data(), 1));
+  CHECK_FALSE(graph_needs_realloc(view, nodes.data(), 1, leafs.data(), 1));
   nodes[0].dst.tensor_id = 1;
 
   nodes[0].dst.buffer_id = -1;
@@ -166,12 +170,12 @@ TEST_CASE("buffer_realloc_analyzer_detail_graph_needs_realloc_paths") {
   g.nodes[0].src_ids[0] = -1;
   view = as_view(g);
   nodes[0].src[0].tensor_id = 5;
-  CHECK(graph_needs_realloc(view, nodes.data(), 1, leafs.data(), 1));
+  CHECK_FALSE(graph_needs_realloc(view, nodes.data(), 1, leafs.data(), 1));
 
   g.nodes[0].src_ids[0] = 2;
   view = as_view(g);
   nodes[0].src[0].tensor_id = 3;
-  CHECK(graph_needs_realloc(view, nodes.data(), 1, leafs.data(), 1));
+  CHECK_FALSE(graph_needs_realloc(view, nodes.data(), 1, leafs.data(), 1));
 
   nodes[0].src[0].tensor_id = 99;
   g.nodes[0].src_ids[0] = 99;

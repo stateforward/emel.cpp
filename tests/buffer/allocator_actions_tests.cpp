@@ -28,7 +28,7 @@ graph_storage make_graph() {
   g.leafs[0] = tensor_desc{
     .tensor_id = 1,
     .alloc_size = 64,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -38,7 +38,11 @@ graph_storage make_graph() {
   g.nodes[0] = tensor_desc{
     .tensor_id = 2,
     .alloc_size = 128,
-    .src_ids = {{1, -1, -1, -1}},
+    .src_ids = [] {
+      auto ids = emel::buffer::allocator::event::make_src_ids();
+      ids[0] = 1;
+      return ids;
+    }(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -168,7 +172,7 @@ TEST_CASE("buffer_allocator_actions_detail_alignment_and_tensor_alloc") {
   tensor_desc tensor{
     .tensor_id = 9,
     .alloc_size = 33,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -507,7 +511,7 @@ TEST_CASE("buffer_allocator_actions_helper_edges_for_branch_coverage") {
   tensor_desc external_tensor{
     .tensor_id = 7,
     .alloc_size = 4096,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,

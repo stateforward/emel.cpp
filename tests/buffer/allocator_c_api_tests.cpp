@@ -1,6 +1,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <initializer_list>
+#include <memory>
 
 #include <doctest/doctest.h>
 
@@ -9,13 +12,44 @@
 
 namespace {
 
+struct aligned_storage {
+  std::unique_ptr<std::byte, decltype(&std::free)> data{nullptr, &std::free};
+  size_t size = 0;
+  size_t alignment = 0;
+};
+
+aligned_storage make_allocator_storage() {
+  const size_t size = emel_buffer_allocator_storage_size();
+  const size_t alignment = emel_buffer_allocator_storage_alignment();
+  const size_t padded = (size + alignment - 1) / alignment * alignment;
+  void * raw = std::aligned_alloc(alignment, padded);
+  return aligned_storage{
+    std::unique_ptr<std::byte, decltype(&std::free)>(static_cast<std::byte *>(raw), &std::free),
+    padded,
+    alignment,
+  };
+}
+
+void fill_src_ids(emel_buffer_tensor_desc & tensor, std::initializer_list<int32_t> srcs) {
+  for (size_t i = 0; i < EMEL_BUFFER_MAX_SOURCES; ++i) {
+    tensor.src_ids[i] = -1;
+  }
+  size_t idx = 0;
+  for (const int32_t src : srcs) {
+    if (idx >= EMEL_BUFFER_MAX_SOURCES) {
+      break;
+    }
+    tensor.src_ids[idx++] = src;
+  }
+}
+
 emel_buffer_graph_view make_valid_graph(
     std::array<emel_buffer_tensor_desc, 2> & nodes,
     std::array<emel_buffer_tensor_desc, 1> & leafs) {
   leafs[0] = emel_buffer_tensor_desc{
     .tensor_id = 100,
     .alloc_size = 128,
-    .src_ids = {-1, -1, -1, -1},
+    .src_ids = {},
     .is_view = 0,
     ._pad0 = {0, 0, 0},
     .view_src_id = -1,
@@ -24,10 +58,11 @@ emel_buffer_graph_view make_valid_graph(
     .can_inplace = 1,
     .has_external_data = 0,
   };
+  fill_src_ids(leafs[0], {});
   nodes[0] = emel_buffer_tensor_desc{
     .tensor_id = 200,
     .alloc_size = 256,
-    .src_ids = {100, -1, -1, -1},
+    .src_ids = {},
     .is_view = 0,
     ._pad0 = {0, 0, 0},
     .view_src_id = -1,
@@ -36,10 +71,11 @@ emel_buffer_graph_view make_valid_graph(
     .can_inplace = 1,
     .has_external_data = 0,
   };
+  fill_src_ids(nodes[0], {100});
   nodes[1] = emel_buffer_tensor_desc{
     .tensor_id = 201,
     .alloc_size = 512,
-    .src_ids = {200, -1, -1, -1},
+    .src_ids = {},
     .is_view = 0,
     ._pad0 = {0, 0, 0},
     .view_src_id = -1,
@@ -48,6 +84,7 @@ emel_buffer_graph_view make_valid_graph(
     .can_inplace = 0,
     .has_external_data = 0,
   };
+  fill_src_ids(nodes[1], {200});
 
   return emel_buffer_graph_view{
     .nodes = nodes.data(),
@@ -60,14 +97,14 @@ emel_buffer_graph_view make_valid_graph(
 }  // namespace
 
 TEST_CASE("buffer_allocator_c_api_reports_invalid_arguments") {
-  alignas(64) static std::array<std::byte, 524288> storage = {};
-  CHECK(emel_buffer_allocator_storage_size() <= storage.size());
-  const size_t alignment = emel_buffer_allocator_storage_alignment();
-  const std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(storage.data());
-  CHECK((addr % alignment) == 0);
+  auto storage = make_allocator_storage();
+  REQUIRE(storage.data != nullptr);
+  CHECK(emel_buffer_allocator_storage_size() <= storage.size);
+  const std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(storage.data.get());
+  CHECK((addr % storage.alignment) == 0);
 
   emel_buffer_allocator * allocator =
-    emel_buffer_allocator_init(storage.data(), storage.size());
+    emel_buffer_allocator_init(storage.data.get(), storage.size);
   REQUIRE(allocator != nullptr);
 
   CHECK(emel_buffer_allocator_initialize(allocator, 0, nullptr, nullptr) ==
@@ -81,9 +118,10 @@ TEST_CASE("buffer_allocator_c_api_reports_invalid_arguments") {
 }
 
 TEST_CASE("buffer_allocator_c_api_alloc_tensors_wrappers") {
-  alignas(64) static std::array<std::byte, 524288> storage = {};
+  auto storage = make_allocator_storage();
+  REQUIRE(storage.data != nullptr);
   emel_buffer_allocator * allocator =
-    emel_buffer_allocator_init(storage.data(), storage.size());
+    emel_buffer_allocator_init(storage.data.get(), storage.size);
   REQUIRE(allocator != nullptr);
 
   std::array<int32_t, 1> alignments = {{16}};
@@ -132,9 +170,10 @@ TEST_CASE("buffer_allocator_c_api_init_rejects_misaligned_storage") {
 }
 
 TEST_CASE("buffer_allocator_c_api_graph_validation_paths") {
-  alignas(64) std::array<std::byte, 524288> storage = {};
+  auto storage = make_allocator_storage();
+  REQUIRE(storage.data != nullptr);
   emel_buffer_allocator * allocator =
-    emel_buffer_allocator_init(storage.data(), storage.size());
+    emel_buffer_allocator_init(storage.data.get(), storage.size);
   REQUIRE(allocator != nullptr);
 
   emel_buffer_graph_view graph{};
@@ -161,9 +200,10 @@ TEST_CASE("buffer_allocator_c_api_graph_validation_paths") {
 }
 
 TEST_CASE("buffer_allocator_c_api_alloc_tensors_error_paths") {
-  alignas(64) std::array<std::byte, 524288> storage = {};
+  auto storage = make_allocator_storage();
+  REQUIRE(storage.data != nullptr);
   emel_buffer_allocator * allocator =
-    emel_buffer_allocator_init(storage.data(), storage.size());
+    emel_buffer_allocator_init(storage.data.get(), storage.size);
   REQUIRE(allocator != nullptr);
 
   emel_buffer_graph_view graph{};
@@ -181,9 +221,10 @@ TEST_CASE("buffer_allocator_c_api_alloc_tensors_error_paths") {
 }
 
 TEST_CASE("buffer_allocator_c_api_release_and_query_paths") {
-  alignas(64) std::array<std::byte, 524288> storage = {};
+  auto storage = make_allocator_storage();
+  REQUIRE(storage.data != nullptr);
   emel_buffer_allocator * allocator =
-    emel_buffer_allocator_init(storage.data(), storage.size());
+    emel_buffer_allocator_init(storage.data.get(), storage.size);
   REQUIRE(allocator != nullptr);
 
   std::array<int32_t, 1> alignments = {{16}};

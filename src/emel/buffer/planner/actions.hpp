@@ -74,6 +74,7 @@ struct context {
   std::array<int32_t, k_max_buffers> buffer_max_sizes = {};
   std::array<int32_t, k_max_buffers> current_bytes_by_buffer = {};
   std::array<int32_t, k_max_buffers> bytes_by_buffer = {};
+  std::array<int32_t, k_max_buffers> max_alloc_by_buffer = {};
   std::array<buffer_layout, k_max_buffers> buffer_layouts = {};
   std::array<int32_t, k_max_buffers> chunk_counts = {};
   std::array<int32_t, k_max_chunk_plan_entries> chunk_sizes = {};
@@ -408,6 +409,9 @@ inline bool allocate_record(context & ctx, tensor_record & rec, const int32_t bu
   rec.alloc_offset = offset;
   rec.alloc_reserved = aligned_size;
   rec.allocated = true;
+  if (aligned_size > ctx.max_alloc_by_buffer[buffer_id]) {
+    ctx.max_alloc_by_buffer[buffer_id] = aligned_size;
+  }
   ctx.current_bytes_by_buffer[buffer_id] =
     sat_add(ctx.current_bytes_by_buffer[buffer_id], aligned_size);
   return true;
@@ -818,6 +822,7 @@ inline const emel::buffer::planner::strategy * resolve_strategy(const context & 
 inline int32_t run_reset(context & ctx) noexcept {
   ctx.current_bytes_by_buffer.fill(0);
   ctx.bytes_by_buffer.fill(0);
+  ctx.max_alloc_by_buffer.fill(0);
   reset_layouts(ctx);
   ctx.chunk_counts.fill(0);
   ctx.chunk_sizes.fill(0);
@@ -887,36 +892,55 @@ inline int32_t run_split_required(context & ctx) noexcept {
 
     const int32_t alignment = alignment_for_buffer(ctx, i);
     const int32_t max_size = max_size_for_buffer(ctx, i);
-    if (max_size <= 0 || max_size == k_default_max_size || max_size >= remaining) {
-      int32_t aligned = 0;
-      if (!align_up_checked(remaining, alignment, aligned)) {
-        return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
-      }
-      ctx.chunk_sizes[chunk_plan_index(i, 0)] = aligned;
-      ctx.chunk_counts[i] = 1;
-      if (!add_checked(ctx.total_chunk_count, 1, ctx.total_chunk_count)) {
-        return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
-      }
-      continue;
-    }
-
+    const bool has_max = max_size > 0 && max_size != k_default_max_size;
     int32_t count = 0;
-    while (remaining > 0) {
+    if (has_max && ctx.max_alloc_by_buffer[i] > max_size) {
       if (count >= k_max_chunks_per_buffer) {
         return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
       }
-      const int32_t chunk_size = remaining > max_size ? max_size : remaining;
       int32_t aligned = 0;
-      if (!align_up_checked(chunk_size, alignment, aligned)) {
-        return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
-      }
-      if (aligned > max_size) {
+      if (!align_up_checked(ctx.max_alloc_by_buffer[i], alignment, aligned)) {
         return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
       }
       ctx.chunk_sizes[chunk_plan_index(i, count)] = aligned;
       remaining = sat_sub_floor_zero(remaining, aligned);
       count += 1;
     }
+
+    if (remaining > 0) {
+      if (!has_max || max_size >= remaining) {
+        int32_t aligned = 0;
+        if (!align_up_checked(remaining, alignment, aligned)) {
+          return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+        }
+        if (has_max && aligned > max_size) {
+          return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+        }
+        if (count >= k_max_chunks_per_buffer) {
+          return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+        }
+        ctx.chunk_sizes[chunk_plan_index(i, count)] = aligned;
+        count += 1;
+      } else {
+        while (remaining > 0) {
+          if (count >= k_max_chunks_per_buffer) {
+            return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+          }
+          const int32_t chunk_size = remaining > max_size ? max_size : remaining;
+          int32_t aligned = 0;
+          if (!align_up_checked(chunk_size, alignment, aligned)) {
+            return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+          }
+          if (aligned > max_size) {
+            return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+          }
+          ctx.chunk_sizes[chunk_plan_index(i, count)] = aligned;
+          remaining = sat_sub_floor_zero(remaining, aligned);
+          count += 1;
+        }
+      }
+    }
+
     ctx.chunk_counts[i] = count;
     if (!add_checked(ctx.total_chunk_count, count, ctx.total_chunk_count)) {
       return EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE

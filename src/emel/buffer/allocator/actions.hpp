@@ -16,7 +16,7 @@
 namespace emel::buffer::allocator::action {
 
 inline constexpr int32_t k_max_buffers = 16;
-inline constexpr int32_t k_max_graph_tensors = 1024;
+inline constexpr int32_t k_max_graph_tensors = 2048;
 inline constexpr int32_t k_max_chunks_per_buffer = 16;
 inline constexpr int32_t k_max_chunk_bindings = k_max_buffers * k_max_chunks_per_buffer;
 inline constexpr int32_t k_default_alignment = 16;
@@ -278,8 +278,7 @@ inline bool graph_needs_realloc(const event::graph_view & graph, const context &
   for (int32_t i = 0; i < graph.n_nodes; ++i) {
     const auto & node = graph.nodes[i];
     const auto & node_alloc = c.node_allocs[i];
-    if (node_alloc.dst.tensor_id != node.tensor_id ||
-        tensor_needs_realloc(c, node, node_alloc.dst)) {
+    if (tensor_needs_realloc(c, node, node_alloc.dst)) {
       return true;
     }
 
@@ -287,13 +286,7 @@ inline bool graph_needs_realloc(const event::graph_view & graph, const context &
       const int32_t src_id = node.src_ids[j];
       const auto & src_alloc = node_alloc.src[j];
       if (src_id < 0) {
-        if (src_alloc.tensor_id != -1) {
-          return true;
-        }
         continue;
-      }
-      if (src_alloc.tensor_id != src_id) {
-        return true;
       }
       bool src_is_node = false;
       int32_t src_index = -1;

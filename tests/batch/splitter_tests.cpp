@@ -84,7 +84,7 @@ TEST_CASE("batch_splitter_splits_tokens_into_ubatches") {
   CHECK(capture.sizes[2] == 1);
 }
 
-TEST_CASE("batch_splitter_equal_mode_balances_chunk_sizes") {
+TEST_CASE("batch_splitter_equal_mode_fills_single_sequence_ubatches") {
   emel::batch::splitter::sm machine{};
   std::array<int32_t, 10> tokens = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}};
   split_capture capture{};
@@ -94,6 +94,7 @@ TEST_CASE("batch_splitter_equal_mode_balances_chunk_sizes") {
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 4,
     .mode = emel::batch::splitter::event::split_mode::equal,
+    .equal_sequential = false,
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
   }));
@@ -101,8 +102,8 @@ TEST_CASE("batch_splitter_equal_mode_balances_chunk_sizes") {
   CHECK(capture.done_called);
   CHECK(capture.ubatch_count == 3);
   CHECK(capture.sizes[0] == 4);
-  CHECK(capture.sizes[1] == 3);
-  CHECK(capture.sizes[2] == 3);
+  CHECK(capture.sizes[1] == 4);
+  CHECK(capture.sizes[2] == 2);
 }
 
 TEST_CASE("batch_splitter_seq_mode_uses_sequential_chunking") {
@@ -175,6 +176,26 @@ TEST_CASE("batch_splitter_seq_mode_supports_sequence_masks") {
   CHECK(capture.total_outputs == 4);
 }
 
+TEST_CASE("batch_splitter_counts_outputs_with_output_mask") {
+  emel::batch::splitter::sm machine{};
+  std::array<int32_t, 4> tokens = {{1, 2, 3, 4}};
+  std::array<int8_t, 4> outputs = {{1, 0, 1, 0}};
+  split_capture capture{};
+
+  CHECK(machine.process_event(emel::batch::splitter::event::split{
+    .token_ids = tokens.data(),
+    .n_tokens = static_cast<int32_t>(tokens.size()),
+    .n_ubatch = 2,
+    .mode = emel::batch::splitter::event::split_mode::simple,
+    .output_mask = outputs.data(),
+    .on_done = make_done(&capture),
+    .on_error = make_error(&capture),
+  }));
+
+  CHECK(capture.done_called);
+  CHECK(capture.total_outputs == 2);
+}
+
 TEST_CASE("batch_splitter_reports_invalid_arguments") {
   emel::batch::splitter::sm machine{};
   split_capture capture{};
@@ -197,6 +218,7 @@ TEST_CASE("batch_splitter_reports_invalid_arguments") {
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 1,
     .mode = static_cast<emel::batch::splitter::event::split_mode>(99),
+    .equal_sequential = false,
     .on_done = make_done(&mode_capture),
     .on_error = make_error(&mode_capture),
   }));

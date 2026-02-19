@@ -21,7 +21,7 @@ typedef enum emel_status {
 // Error detail domains for machine-level diagnostics.
 #define EMEL_ERROR_DOMAIN_NONE 0u
 #define EMEL_ERROR_DOMAIN_TENSOR_ALLOCATOR 1u
-#define EMEL_BUFFER_MAX_SOURCES 4u
+#define EMEL_BUFFER_MAX_SOURCES 10u
 
 typedef struct emel_error_detail {
   int32_t status;

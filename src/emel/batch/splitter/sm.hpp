@@ -9,6 +9,21 @@
 
 namespace emel::batch::splitter {
 
+// Batch splitter contract (llama parity):
+// - `event::split` requires `on_done` and `on_error` callbacks on every request.
+// - Sequence sets are provided via `seq_masks` with `seq_mask_words` 64-bit words per token.
+//   The layout is `[n_tokens * seq_mask_words]`. Supported width is 1..SEQ_WORDS (up to 256 seqs).
+//   Example (`seq_mask_words = 2`):
+//     token 0 mask words at indices [0,1], token 1 at [2,3], etc.
+//     uint64_t masks[] = {t0_w0, t0_w1, t1_w0, t1_w1, ...};
+// - If `seq_masks` is null, `seq_primary_ids` may provide the single sequence id per token.
+//   If both are null, all tokens are treated as belonging to sequence 0.
+// - `equal_sequential == true` requires `seq_primary_ids` and rejects coupled sequences
+//   (masks with more than one bit set), matching llama's sequential split restriction.
+// - `total_outputs` is derived from `output_mask` when provided, otherwise `n_tokens`.
+// - Equal mode groups non-overlapping sequence sets and fills ubatches up to `n_ubatch`.
+// - Seq mode builds one sequence-set ubatch at a time using subset expansion.
+
 // Ready state. Invariant: no active split in progress.
 struct initialized {};
 // Validates inputs copied into context by begin_split.

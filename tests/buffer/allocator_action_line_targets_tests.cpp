@@ -36,7 +36,7 @@ graph_storage make_graph(bool with_src) {
   g.leafs[0] = tensor_desc{
     .tensor_id = 1,
     .alloc_size = 16,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -46,7 +46,13 @@ graph_storage make_graph(bool with_src) {
   g.nodes[0] = tensor_desc{
     .tensor_id = 2,
     .alloc_size = 16,
-    .src_ids = {{with_src ? 1 : -1, -1, -1, -1}},
+    .src_ids = [with_src] {
+      auto ids = emel::buffer::allocator::event::make_src_ids();
+      if (with_src) {
+        ids[0] = 1;
+      }
+      return ids;
+    }(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -292,7 +298,7 @@ TEST_CASE("buffer_allocator_capture_snapshot_rejects_oversized_graph") {
     nodes[i] = tensor_desc{
       .tensor_id = static_cast<int32_t>(i),
       .alloc_size = 16,
-      .src_ids = {{-1, -1, -1, -1}},
+      .src_ids = emel::buffer::allocator::event::make_src_ids(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = false,

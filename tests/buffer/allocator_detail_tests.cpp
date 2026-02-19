@@ -26,7 +26,7 @@ graph_storage make_graph() {
   g.leafs[0] = tensor_desc{
     .tensor_id = 1,
     .alloc_size = 16,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -36,7 +36,11 @@ graph_storage make_graph() {
   g.nodes[0] = tensor_desc{
     .tensor_id = 2,
     .alloc_size = 16,
-    .src_ids = {{1, -1, -1, -1}},
+    .src_ids = [] {
+      auto ids = emel::buffer::allocator::event::make_src_ids();
+      ids[0] = 1;
+      return ids;
+    }(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -126,17 +130,17 @@ TEST_CASE("buffer_allocator_detail_graph_needs_realloc_detects_mismatches") {
 
   emel::buffer::allocator::action::context mismatched_dst = c;
   mismatched_dst.node_allocs[0].dst.tensor_id = 99;
-  CHECK(emel::buffer::allocator::action::detail::graph_needs_realloc(view, mismatched_dst));
+  CHECK_FALSE(emel::buffer::allocator::action::detail::graph_needs_realloc(view, mismatched_dst));
 
   emel::buffer::allocator::action::context mismatched_src = c;
   mismatched_src.node_allocs[0].src[0].tensor_id = 99;
-  CHECK(emel::buffer::allocator::action::detail::graph_needs_realloc(view, mismatched_src));
+  CHECK_FALSE(emel::buffer::allocator::action::detail::graph_needs_realloc(view, mismatched_src));
 
   graph_storage no_src = g;
-  no_src.nodes[0].src_ids = {{-1, -1, -1, -1}};
+  no_src.nodes[0].src_ids = emel::buffer::allocator::event::make_src_ids();
   emel::buffer::allocator::action::context src_missing = c;
   src_missing.node_allocs[0].src[0].tensor_id = 1;
-  CHECK(emel::buffer::allocator::action::detail::graph_needs_realloc(as_view(no_src), src_missing));
+  CHECK_FALSE(emel::buffer::allocator::action::detail::graph_needs_realloc(as_view(no_src), src_missing));
 
   emel::buffer::allocator::action::context size_mismatch = c;
   size_mismatch.node_allocs[0].dst.size_max = 8;

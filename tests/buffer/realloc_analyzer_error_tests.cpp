@@ -37,7 +37,7 @@ graph_storage make_graph() {
   g.leafs[0] = tensor_desc{
     .tensor_id = 1,
     .alloc_size = 16,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -47,7 +47,11 @@ graph_storage make_graph() {
   g.nodes[0] = tensor_desc{
     .tensor_id = 2,
     .alloc_size = 16,
-    .src_ids = {{1, -1, -1, -1}},
+    .src_ids = [] {
+      auto ids = emel::buffer::allocator::event::make_src_ids();
+      ids[0] = 1;
+      return ids;
+    }(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -101,7 +105,7 @@ TEST_CASE("buffer_realloc_analyzer_rejects_missing_alloc_arrays") {
   CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
-TEST_CASE("buffer_realloc_analyzer_flags_mismatched_allocations") {
+TEST_CASE("buffer_realloc_analyzer_ignores_mismatched_allocations") {
   emel::buffer::realloc_analyzer::sm machine{};
   int32_t needs_realloc = 0;
   int32_t error = EMEL_OK;
@@ -112,6 +116,8 @@ TEST_CASE("buffer_realloc_analyzer_flags_mismatched_allocations") {
   node_allocs[0].dst.tensor_id = 99;
   node_allocs[0].dst.buffer_id = 0;
   node_allocs[0].dst.size_max = 16;
+  node_allocs[0].src[0].buffer_id = 0;
+  node_allocs[0].src[0].size_max = 16;
   leaf_allocs[0].leaf.tensor_id = 1;
   leaf_allocs[0].leaf.buffer_id = 0;
   leaf_allocs[0].leaf.size_max = 16;
@@ -127,12 +133,12 @@ TEST_CASE("buffer_realloc_analyzer_flags_mismatched_allocations") {
   }));
 
   CHECK(error == EMEL_OK);
-  CHECK(needs_realloc == 1);
+  CHECK(needs_realloc == 0);
 }
 
-TEST_CASE("buffer_realloc_analyzer_graph_needs_realloc_flags_src_id_without_alloc") {
+TEST_CASE("buffer_realloc_analyzer_graph_needs_realloc_ignores_src_id_without_alloc") {
   graph_storage g = make_graph();
-  g.nodes[0].src_ids = {{-1, -1, -1, -1}};
+  g.nodes[0].src_ids = emel::buffer::allocator::event::make_src_ids();
 
   std::array<node_alloc, 1> node_allocs = {};
   std::array<leaf_alloc, 1> leaf_allocs = {};
@@ -144,7 +150,7 @@ TEST_CASE("buffer_realloc_analyzer_graph_needs_realloc_flags_src_id_without_allo
   leaf_allocs[0].leaf.buffer_id = 0;
   leaf_allocs[0].leaf.size_max = 16;
 
-  CHECK(emel::buffer::realloc_analyzer::action::detail::graph_needs_realloc(
+  CHECK_FALSE(emel::buffer::realloc_analyzer::action::detail::graph_needs_realloc(
     as_view(g),
     node_allocs.data(),
     static_cast<int32_t>(node_allocs.size()),
@@ -154,7 +160,8 @@ TEST_CASE("buffer_realloc_analyzer_graph_needs_realloc_flags_src_id_without_allo
 
 TEST_CASE("buffer_realloc_analyzer_graph_needs_realloc_flags_missing_src_tensor") {
   graph_storage g = make_graph();
-  g.nodes[0].src_ids = {{99, -1, -1, -1}};
+  g.nodes[0].src_ids = emel::buffer::allocator::event::make_src_ids();
+  g.nodes[0].src_ids[0] = 99;
 
   std::array<node_alloc, 1> node_allocs = {};
   std::array<leaf_alloc, 1> leaf_allocs = {};

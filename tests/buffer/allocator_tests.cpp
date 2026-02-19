@@ -2,6 +2,7 @@
 #include <boost/sml.hpp>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <initializer_list>
 
 #include "emel/buffer/allocator/sm.hpp"
 #include "emel/emel.h"
@@ -10,6 +11,19 @@ namespace {
 
 using tensor_desc = emel::buffer::allocator::event::tensor_desc;
 using graph_view = emel::buffer::allocator::event::graph_view;
+
+std::array<int32_t, emel::buffer::allocator::event::k_max_sources> make_src_ids(
+    std::initializer_list<int32_t> srcs) {
+  auto ids = emel::buffer::allocator::event::make_src_ids();
+  int32_t idx = 0;
+  for (const int32_t src : srcs) {
+    if (idx >= static_cast<int32_t>(ids.size())) {
+      break;
+    }
+    ids[idx++] = src;
+  }
+  return ids;
+}
 
 struct graph_storage {
   std::array<tensor_desc, 3> nodes = {};
@@ -44,7 +58,7 @@ graph_storage make_chain_graph(
   g.leafs[0] = tensor_desc{
     .tensor_id = 10,
     .alloc_size = leaf_size,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -54,7 +68,7 @@ graph_storage make_chain_graph(
   g.nodes[0] = tensor_desc{
     .tensor_id = 20,
     .alloc_size = node0_size,
-    .src_ids = {{10, -1, -1, -1}},
+    .src_ids = make_src_ids({10}),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -64,7 +78,7 @@ graph_storage make_chain_graph(
   g.nodes[1] = tensor_desc{
     .tensor_id = 21,
     .alloc_size = node1_size,
-    .src_ids = {{20, -1, -1, -1}},
+    .src_ids = make_src_ids({20}),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -82,7 +96,7 @@ graph_storage make_chain_graph_with_shifted_ids(
   g.leafs[0] = tensor_desc{
     .tensor_id = 110,
     .alloc_size = leaf_size,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -92,7 +106,7 @@ graph_storage make_chain_graph_with_shifted_ids(
   g.nodes[0] = tensor_desc{
     .tensor_id = 120,
     .alloc_size = node0_size,
-    .src_ids = {{110, -1, -1, -1}},
+    .src_ids = make_src_ids({110}),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -102,7 +116,7 @@ graph_storage make_chain_graph_with_shifted_ids(
   g.nodes[1] = tensor_desc{
     .tensor_id = 121,
     .alloc_size = node1_size,
-    .src_ids = {{120, -1, -1, -1}},
+    .src_ids = make_src_ids({120}),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -119,7 +133,7 @@ graph_storage make_view_graph() {
   g.leafs[0] = tensor_desc{
     .tensor_id = 30,
     .alloc_size = 256,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -129,7 +143,7 @@ graph_storage make_view_graph() {
   g.nodes[0] = tensor_desc{
     .tensor_id = 31,
     .alloc_size = 0,
-    .src_ids = {{30, -1, -1, -1}},
+    .src_ids = make_src_ids({30}),
     .is_view = true,
     .view_src_id = 30,
     .is_input = false,
@@ -139,7 +153,7 @@ graph_storage make_view_graph() {
   g.nodes[1] = tensor_desc{
     .tensor_id = 32,
     .alloc_size = 256,
-    .src_ids = {{31, -1, -1, -1}},
+    .src_ids = make_src_ids({31}),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -156,7 +170,7 @@ graph_storage make_direct_graph() {
   g.leafs[0] = tensor_desc{
     .tensor_id = 33,
     .alloc_size = 256,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -166,7 +180,7 @@ graph_storage make_direct_graph() {
   g.nodes[0] = tensor_desc{
     .tensor_id = 34,
     .alloc_size = 256,
-    .src_ids = {{33, -1, -1, -1}},
+    .src_ids = make_src_ids({33}),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -183,7 +197,7 @@ graph_storage make_invalid_source_graph() {
   g.leafs[0] = tensor_desc{
     .tensor_id = 40,
     .alloc_size = 64,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -193,7 +207,7 @@ graph_storage make_invalid_source_graph() {
   g.nodes[0] = tensor_desc{
     .tensor_id = 41,
     .alloc_size = 64,
-    .src_ids = {{999, -1, -1, -1}},
+    .src_ids = make_src_ids({999}),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -210,7 +224,7 @@ graph_storage make_external_input_graph() {
   g.leafs[0] = tensor_desc{
     .tensor_id = 50,
     .alloc_size = 2048,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -220,7 +234,7 @@ graph_storage make_external_input_graph() {
   g.nodes[0] = tensor_desc{
     .tensor_id = 51,
     .alloc_size = 128,
-    .src_ids = {{50, -1, -1, -1}},
+    .src_ids = make_src_ids({50}),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -400,7 +414,7 @@ TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_rejects_unreserved_shape") 
   CHECK(error == EMEL_ERR_BACKEND);
 }
 
-TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_rejects_changed_assignment_snapshot") {
+TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_allows_changed_assignment_snapshot") {
   emel::buffer::allocator::sm machine{};
   initialize_ready(machine, 2);
 
@@ -419,11 +433,11 @@ TEST_CASE("buffer_allocator_multi_buffer_alloc_graph_rejects_changed_assignment_
   }));
 
   int32_t error = EMEL_OK;
-  CHECK_FALSE(machine.process_event(emel::buffer::allocator::event::alloc_graph{
+  CHECK(machine.process_event(emel::buffer::allocator::event::alloc_graph{
     .graph = as_view(shifted),
     .error_out = &error,
   }));
-  CHECK(error == EMEL_ERR_BACKEND);
+  CHECK(error == EMEL_OK);
 }
 
 TEST_CASE("buffer_allocator_reserve_n_size_tracks_per_buffer_assignments") {

@@ -119,6 +119,53 @@ TEST_CASE("batch_splitter_seq_mode_with_seq_masks") {
   CHECK(capture.total_outputs == static_cast<int32_t>(tokens.size()));
 }
 
+TEST_CASE("batch_splitter_equal_mode_rejects_coupled_sequences_when_sequential") {
+  emel::batch::splitter::sm machine{};
+  std::array<int32_t, 2> tokens = {{1, 2}};
+  std::array<uint64_t, 2> masks = {{3U, 1U}};
+  std::array<int32_t, 2> primary_ids = {{0, 1}};
+  split_capture capture{};
+
+  CHECK(machine.process_event(emel::batch::splitter::event::split{
+    .token_ids = tokens.data(),
+    .n_tokens = static_cast<int32_t>(tokens.size()),
+    .n_ubatch = 2,
+    .mode = emel::batch::splitter::event::split_mode::equal,
+    .seq_masks = masks.data(),
+    .seq_primary_ids = primary_ids.data(),
+    .equal_sequential = true,
+    .on_done = make_done(&capture),
+    .on_error = make_error(&capture),
+  }));
+  CHECK(capture.error_called);
+  CHECK(capture.err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("batch_splitter_supports_multiword_sequence_masks") {
+  emel::batch::splitter::sm machine{};
+  std::array<int32_t, 2> tokens = {{1, 2}};
+  std::array<uint64_t, 4> masks = {{
+    0U, 1U,
+    0U, 2U,
+  }};
+  split_capture capture{};
+
+  CHECK(machine.process_event(emel::batch::splitter::event::split{
+    .token_ids = tokens.data(),
+    .n_tokens = static_cast<int32_t>(tokens.size()),
+    .n_ubatch = 2,
+    .mode = emel::batch::splitter::event::split_mode::equal,
+    .seq_masks = masks.data(),
+    .equal_sequential = false,
+    .seq_mask_words = 2,
+    .on_done = make_done(&capture),
+    .on_error = make_error(&capture),
+  }));
+  CHECK(capture.done_called);
+  CHECK(capture.ubatch_count == 1);
+  CHECK(capture.sizes[0] == 2);
+}
+
 TEST_CASE("batch_splitter_rejects_unknown_mode") {
   emel::batch::splitter::sm machine{};
   std::array<int32_t, 2> tokens = {{1, 2}};

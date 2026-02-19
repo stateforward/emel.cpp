@@ -18,12 +18,21 @@ struct sm;
 
 namespace emel::buffer::allocator::event {
 
-inline constexpr int32_t k_max_sources = 4;
+inline constexpr int32_t k_max_sources = 10;
+
+inline constexpr std::array<int32_t, k_max_sources> make_src_ids(
+    const int32_t value = -1) noexcept {
+  std::array<int32_t, k_max_sources> ids = {};
+  for (int32_t i = 0; i < k_max_sources; ++i) {
+    ids[i] = value;
+  }
+  return ids;
+}
 
 struct tensor_desc {
   int32_t tensor_id = -1;
   int32_t alloc_size = 0;
-  std::array<int32_t, k_max_sources> src_ids = {{-1, -1, -1, -1}};
+  std::array<int32_t, k_max_sources> src_ids = make_src_ids();
   bool is_view = false;
   int32_t view_src_id = -1;
   bool is_input = false;

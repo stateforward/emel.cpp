@@ -38,7 +38,7 @@ TEST_CASE("buffer_allocator_detail_tensor_needs_realloc_skips_view_and_external"
   tensor_desc view_tensor{
     .tensor_id = 1,
     .alloc_size = 16,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = true,
     .view_src_id = 0,
     .is_input = false,
@@ -60,7 +60,7 @@ TEST_CASE("buffer_allocator_capture_snapshot_success") {
   g.leafs[0] = tensor_desc{
     .tensor_id = 1,
     .alloc_size = 16,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -70,7 +70,11 @@ TEST_CASE("buffer_allocator_capture_snapshot_success") {
   g.nodes[0] = tensor_desc{
     .tensor_id = 2,
     .alloc_size = 16,
-    .src_ids = {{1, -1, -1, -1}},
+    .src_ids = [] {
+      auto ids = emel::buffer::allocator::event::make_src_ids();
+      ids[0] = 1;
+      return ids;
+    }(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = false,
@@ -98,7 +102,7 @@ TEST_CASE("buffer_allocator_graph_needs_realloc_ignores_view_and_external") {
   g.leafs[0] = tensor_desc{
     .tensor_id = 1,
     .alloc_size = 0,
-    .src_ids = {{-1, -1, -1, -1}},
+    .src_ids = emel::buffer::allocator::event::make_src_ids(),
     .is_view = false,
     .view_src_id = -1,
     .is_input = true,
@@ -108,7 +112,11 @@ TEST_CASE("buffer_allocator_graph_needs_realloc_ignores_view_and_external") {
   g.nodes[0] = tensor_desc{
     .tensor_id = 2,
     .alloc_size = 0,
-    .src_ids = {{1, -1, -1, -1}},
+    .src_ids = [] {
+      auto ids = emel::buffer::allocator::event::make_src_ids();
+      ids[0] = 1;
+      return ids;
+    }(),
     .is_view = true,
     .view_src_id = 1,
     .is_input = false,

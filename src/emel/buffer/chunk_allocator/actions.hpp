@@ -63,7 +63,9 @@ inline uint64_t clamp_chunk_size_limit(const uint64_t value) noexcept {
   return value > k_max_chunk_limit ? k_max_chunk_limit : value;
 }
 
-inline bool valid_alignment(const uint64_t alignment) noexcept { return alignment > 0; }
+inline bool valid_alignment(const uint64_t alignment) noexcept {
+  return alignment > 0 && (alignment & (alignment - 1)) == 0;
+}
 
 inline bool add_overflow(const uint64_t lhs, const uint64_t rhs, uint64_t & out) noexcept {
   if (rhs > std::numeric_limits<uint64_t>::max() - lhs) {

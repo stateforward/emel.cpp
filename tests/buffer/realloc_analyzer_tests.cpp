@@ -31,7 +31,11 @@ TEST_CASE("buffer_realloc_analyzer_reports_no_realloc_for_valid_snapshot") {
     tensor_desc{
       .tensor_id = 2,
       .alloc_size = 64,
-      .src_ids = {{1, -1, -1, -1}},
+      .src_ids = [] {
+        auto ids = emel::buffer::allocator::event::make_src_ids();
+        ids[0] = 1;
+        return ids;
+      }(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = false,
@@ -43,7 +47,7 @@ TEST_CASE("buffer_realloc_analyzer_reports_no_realloc_for_valid_snapshot") {
     tensor_desc{
       .tensor_id = 1,
       .alloc_size = 32,
-      .src_ids = {{-1, -1, -1, -1}},
+      .src_ids = emel::buffer::allocator::event::make_src_ids(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = true,
@@ -83,14 +87,14 @@ TEST_CASE("buffer_realloc_analyzer_reports_no_realloc_for_valid_snapshot") {
   CHECK_FALSE(machine.needs_realloc());
 }
 
-TEST_CASE("buffer_realloc_analyzer_requires_realloc_on_snapshot_shape_mismatch") {
+TEST_CASE("buffer_realloc_analyzer_requires_realloc_on_snapshot_count_mismatch") {
   emel::buffer::realloc_analyzer::sm machine{};
 
   std::array<tensor_desc, 1> nodes = {{
     tensor_desc{
       .tensor_id = 10,
       .alloc_size = 16,
-      .src_ids = {{-1, -1, -1, -1}},
+      .src_ids = emel::buffer::allocator::event::make_src_ids(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = false,
@@ -155,7 +159,11 @@ TEST_CASE("buffer_realloc_analyzer_requires_realloc_for_missing_src_or_small_sna
     tensor_desc{
       .tensor_id = 20,
       .alloc_size = 64,
-      .src_ids = {{999, -1, -1, -1}},
+      .src_ids = [] {
+        auto ids = emel::buffer::allocator::event::make_src_ids();
+        ids[0] = 999;
+        return ids;
+      }(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = false,
@@ -198,7 +206,7 @@ TEST_CASE("buffer_realloc_analyzer_treats_external_or_view_as_no_size_requiremen
     tensor_desc{
       .tensor_id = 30,
       .alloc_size = 4096,
-      .src_ids = {{-1, -1, -1, -1}},
+      .src_ids = emel::buffer::allocator::event::make_src_ids(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = false,
@@ -241,7 +249,7 @@ TEST_CASE("buffer_realloc_analyzer_reset_and_guards") {
     tensor_desc{
       .tensor_id = 40,
       .alloc_size = 16,
-      .src_ids = {{-1, -1, -1, -1}},
+      .src_ids = emel::buffer::allocator::event::make_src_ids(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = false,
@@ -303,7 +311,7 @@ TEST_CASE("buffer_realloc_analyzer_action_detail_helpers_cover_fallbacks") {
     tensor_desc{
       .tensor_id = 50,
       .alloc_size = 16,
-      .src_ids = {{-1, -1, -1, -1}},
+      .src_ids = emel::buffer::allocator::event::make_src_ids(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = false,
@@ -315,7 +323,7 @@ TEST_CASE("buffer_realloc_analyzer_action_detail_helpers_cover_fallbacks") {
     tensor_desc{
       .tensor_id = 51,
       .alloc_size = 16,
-      .src_ids = {{-1, -1, -1, -1}},
+      .src_ids = emel::buffer::allocator::event::make_src_ids(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = true,
@@ -341,7 +349,7 @@ TEST_CASE("buffer_realloc_analyzer_action_validate_leaf_alloc_pointer_branch") {
     tensor_desc{
       .tensor_id = 60,
       .alloc_size = 32,
-      .src_ids = {{-1, -1, -1, -1}},
+      .src_ids = emel::buffer::allocator::event::make_src_ids(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = true,
@@ -386,7 +394,7 @@ TEST_CASE("buffer_realloc_analyzer_action_evaluate_handles_leaf_mismatch_and_src
       tensor_desc{
         .tensor_id = 70,
         .alloc_size = 16,
-        .src_ids = {{-1, -1, -1, -1}},
+        .src_ids = emel::buffer::allocator::event::make_src_ids(),
         .is_view = false,
         .view_src_id = -1,
         .is_input = true,
@@ -416,7 +424,11 @@ TEST_CASE("buffer_realloc_analyzer_action_evaluate_handles_leaf_mismatch_and_src
       tensor_desc{
         .tensor_id = 71,
         .alloc_size = 64,
-        .src_ids = {{72, -1, -1, -1}},
+        .src_ids = [] {
+          auto ids = emel::buffer::allocator::event::make_src_ids();
+          ids[0] = 72;
+          return ids;
+        }(),
         .is_view = false,
         .view_src_id = -1,
         .is_input = false,
@@ -428,7 +440,7 @@ TEST_CASE("buffer_realloc_analyzer_action_evaluate_handles_leaf_mismatch_and_src
       tensor_desc{
         .tensor_id = 72,
         .alloc_size = 32,
-        .src_ids = {{-1, -1, -1, -1}},
+        .src_ids = emel::buffer::allocator::event::make_src_ids(),
         .is_view = false,
         .view_src_id = -1,
         .is_input = true,
@@ -494,14 +506,14 @@ TEST_CASE("buffer_realloc_analyzer_error_handlers_cover_with_and_without_output"
   CHECK(c.step == step_before + 2);
 }
 
-TEST_CASE("buffer_realloc_analyzer_requires_realloc_on_snapshot_tensor_id_drift") {
+TEST_CASE("buffer_realloc_analyzer_ignores_snapshot_tensor_id_drift") {
   emel::buffer::realloc_analyzer::sm machine{};
 
   std::array<tensor_desc, 1> nodes = {{
     tensor_desc{
       .tensor_id = 200,
       .alloc_size = 64,
-      .src_ids = {{-1, -1, -1, -1}},
+      .src_ids = emel::buffer::allocator::event::make_src_ids(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = false,
@@ -534,17 +546,21 @@ TEST_CASE("buffer_realloc_analyzer_requires_realloc_on_snapshot_tensor_id_drift"
   }));
 
   CHECK(error == EMEL_OK);
-  CHECK(needs_realloc == 1);
+  CHECK(needs_realloc == 0);
 }
 
-TEST_CASE("buffer_realloc_analyzer_requires_realloc_on_source_id_drift") {
+TEST_CASE("buffer_realloc_analyzer_ignores_source_id_drift") {
   emel::buffer::realloc_analyzer::sm machine{};
 
   std::array<tensor_desc, 1> nodes = {{
     tensor_desc{
       .tensor_id = 210,
       .alloc_size = 64,
-      .src_ids = {{211, -1, -1, -1}},
+      .src_ids = [] {
+        auto ids = emel::buffer::allocator::event::make_src_ids();
+        ids[0] = 211;
+        return ids;
+      }(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = false,
@@ -556,7 +572,7 @@ TEST_CASE("buffer_realloc_analyzer_requires_realloc_on_source_id_drift") {
     tensor_desc{
       .tensor_id = 211,
       .alloc_size = 32,
-      .src_ids = {{-1, -1, -1, -1}},
+      .src_ids = emel::buffer::allocator::event::make_src_ids(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = true,
@@ -592,7 +608,7 @@ TEST_CASE("buffer_realloc_analyzer_requires_realloc_on_source_id_drift") {
   }));
 
   CHECK(error == EMEL_OK);
-  CHECK(needs_realloc == 1);
+  CHECK(needs_realloc == 0);
 }
 
 }  // namespace

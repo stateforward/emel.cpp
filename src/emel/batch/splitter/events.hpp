@@ -25,6 +25,8 @@ struct split {
   const uint64_t * seq_masks = nullptr;
   const int32_t * seq_primary_ids = nullptr;
   bool equal_sequential = true;
+  int32_t seq_mask_words = 1;
+  const int8_t * output_mask = nullptr;
 
   emel::callback<void(const events::splitting_done &)> on_done = {};
   emel::callback<void(const events::splitting_error &)> on_error = {};

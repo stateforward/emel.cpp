@@ -66,7 +66,7 @@ TEST_CASE("buffer_allocator_actions_capture_snapshot_rejects_excessive_counts") 
     tensor_desc{
       .tensor_id = 1,
       .alloc_size = 16,
-      .src_ids = {{-1, -1, -1, -1}},
+      .src_ids = emel::buffer::allocator::event::make_src_ids(),
       .is_view = false,
       .view_src_id = -1,
       .is_input = false,
