@@ -57,7 +57,7 @@ TEST_CASE("kv_cache_prepare_fails_when_no_contiguous_slot_fits") {
   emel::kv::cache::sm machine{};
   std::array<int32_t, 2> ubatch_sizes = {{3, 3}};
 
-  CHECK(machine.process_event(emel::kv::cache::event::prepare{
+  CHECK_FALSE(machine.process_event(emel::kv::cache::event::prepare{
     .ubatch_sizes = ubatch_sizes.data(),
     .ubatch_count = static_cast<int32_t>(ubatch_sizes.size()),
     .requested_capacity = 4,
@@ -75,7 +75,7 @@ TEST_CASE("kv_cache_apply_requires_sequential_ubatch_order") {
     .requested_capacity = 16,
   }));
 
-  CHECK(machine.process_event(emel::kv::cache::event::apply_ubatch{
+  CHECK_FALSE(machine.process_event(emel::kv::cache::event::apply_ubatch{
     .ubatch_index = 1,
     .kv_tokens_out = &kv_tokens,
   }));
@@ -120,7 +120,7 @@ TEST_CASE("kv_cache_reports_validation_errors") {
   emel::kv::cache::sm machine{};
   std::array<int32_t, 2> ubatch_sizes = {{1, 1}};
 
-  CHECK(machine.process_event(emel::kv::cache::event::prepare{
+  CHECK_FALSE(machine.process_event(emel::kv::cache::event::prepare{
     .ubatch_sizes = ubatch_sizes.data(),
     .ubatch_count = 0,
     .requested_capacity = 16,
@@ -132,11 +132,11 @@ TEST_CASE("kv_cache_reports_validation_errors") {
     .requested_capacity = 16,
   }));
 
-  CHECK(machine.process_event(emel::kv::cache::event::apply_ubatch{
+  CHECK_FALSE(machine.process_event(emel::kv::cache::event::apply_ubatch{
     .ubatch_index = -1,
   }));
 
-  CHECK(machine.process_event(emel::kv::cache::event::rollback{
+  CHECK_FALSE(machine.process_event(emel::kv::cache::event::rollback{
     .from_ubatch_index = 3,
   }));
 }

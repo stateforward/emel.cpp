@@ -63,12 +63,12 @@ TEST_CASE("memory_coordinator_sm_prepare_full_and_validation_error") {
   CHECK(status == emel::memory::coordinator::event::memory_status::success);
 
   err = EMEL_OK;
-  machine.process_event(emel::memory::coordinator::event::prepare_batch{
+  CHECK_FALSE(machine.process_event(emel::memory::coordinator::event::prepare_batch{
     .n_ubatch = 0,
     .n_ubatches_total = 1,
     .error_out = &err,
-  });
-  CHECK(err != EMEL_OK);
+  }));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 }  // namespace

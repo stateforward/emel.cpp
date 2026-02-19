@@ -6,44 +6,6 @@
 #include "emel/model/loader/events.hpp"
 
 namespace emel::model::weight_loader::event {
-struct load_weights;
-}  // namespace emel::model::weight_loader::event
-
-namespace emel::model::weight_loader::events {
-
-struct strategy_selected {
-  const event::load_weights * request = nullptr;
-  bool use_mmap = false;
-  bool use_direct_io = false;
-  int32_t err = EMEL_OK;
-};
-
-struct mappings_ready {
-  const event::load_weights * request = nullptr;
-  int32_t err = EMEL_OK;
-};
-
-struct weights_loaded {
-  const event::load_weights * request = nullptr;
-  int32_t err = EMEL_OK;
-  bool used_mmap = false;
-  uint64_t bytes_total = 0;
-  uint64_t bytes_done = 0;
-};
-
-struct validation_done {
-  const event::load_weights * request = nullptr;
-  int32_t err = EMEL_OK;
-};
-
-struct cleaning_up_done {
-  const event::load_weights * request = nullptr;
-  int32_t err = EMEL_OK;
-};
-
-}  // namespace emel::model::weight_loader::events
-
-namespace emel::model::weight_loader::event {
 
 struct load_weights;
 

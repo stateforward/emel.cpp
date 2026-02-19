@@ -339,7 +339,7 @@ TEST_CASE("decoder_run_prepare_memory_batch_reports_errors") {
       .retryable_out = &retryable,
     },
     ctx);
-  CHECK(err == EMEL_OK);
+  CHECK(err == EMEL_ERR_BACKEND);
 
   ctx.n_ubatch = 1;
   ctx.ubatches_total = 1;
@@ -352,7 +352,7 @@ TEST_CASE("decoder_run_prepare_memory_batch_reports_errors") {
       .retryable_out = &retryable,
     },
     ctx);
-  CHECK(err == EMEL_OK);
+  CHECK(err == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("decoder_run_process_ubatch_reports_executor_errors") {

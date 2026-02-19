@@ -1,77 +1,156 @@
 #pragma once
 
 #include <cstdint>
-#include <type_traits>
-
-#include "boost/sml.hpp"
 #include "emel/emel.h"
 #include "emel/model/loader/events.hpp"
-#include "emel/model/parser/events.hpp"
+#include "emel/parser/dispatch.hpp"
 #include "emel/model/weight_loader/events.hpp"
-
-namespace emel::model::loader {
-
-using process_t = boost::sml::back::process<
-  events::mapping_parser_done,
-  events::mapping_parser_error,
-  events::parsing_done,
-  events::parsing_error,
-  events::loading_done,
-  events::loading_error,
-  events::layers_mapped,
-  events::layers_map_error,
-  events::structure_validated,
-  events::structure_error,
-  events::architecture_validated,
-  events::architecture_error>;
-
-}  // namespace emel::model::loader
 
 namespace emel::model::loader::action {
 
 struct context {
+  const event::load * request = nullptr;
   uint64_t bytes_total = 0;
   uint64_t bytes_done = 0;
   bool used_mmap = false;
+  emel::parser::kind parser_kind = emel::parser::kind::count;
+  void * parser_sm = nullptr;
+  emel::parser::dispatch_parse_fn parser_dispatch = nullptr;
+  int32_t phase_error = EMEL_OK;
+  int32_t last_error = EMEL_OK;
 };
 
-struct reset {
-  void operator()(const event::load & ev, context & ctx) const {
+inline void clear_request(context & ctx) noexcept {
+  ctx.request = nullptr;
+}
+
+inline void set_error(context & ctx, const int32_t err) noexcept {
+  ctx.phase_error = err;
+  ctx.last_error = err;
+}
+
+inline bool store_parsing_done(void * owner_sm,
+                               const emel::model::loader::events::parsing_done &) {
+  auto * ctx = static_cast<context *>(owner_sm);
+  if (ctx == nullptr) {
+    return false;
+  }
+  ctx->phase_error = EMEL_OK;
+  ctx->last_error = EMEL_OK;
+  return true;
+}
+
+inline bool store_parsing_error(void * owner_sm,
+                                const emel::model::loader::events::parsing_error & ev) {
+  auto * ctx = static_cast<context *>(owner_sm);
+  if (ctx == nullptr) {
+    return false;
+  }
+  ctx->phase_error = ev.err;
+  ctx->last_error = ev.err;
+  return true;
+}
+
+inline bool store_loading_done(void * owner_sm,
+                               const emel::model::loader::events::loading_done & ev) {
+  auto * ctx = static_cast<context *>(owner_sm);
+  if (ctx == nullptr) {
+    return false;
+  }
+  ctx->bytes_total = ev.bytes_total;
+  ctx->bytes_done = ev.bytes_done;
+  ctx->used_mmap = ev.used_mmap;
+  ctx->phase_error = EMEL_OK;
+  ctx->last_error = EMEL_OK;
+  return true;
+}
+
+inline bool store_loading_error(void * owner_sm,
+                                const emel::model::loader::events::loading_error & ev) {
+  auto * ctx = static_cast<context *>(owner_sm);
+  if (ctx == nullptr) {
+    return false;
+  }
+  ctx->phase_error = ev.err;
+  ctx->last_error = ev.err;
+  return true;
+}
+
+struct begin_load {
+  void operator()(const event::load & ev, context & ctx) const noexcept {
+    ctx.request = &ev;
     ctx.bytes_total = 0;
     ctx.bytes_done = 0;
     ctx.used_mmap = false;
+    ctx.parser_kind = emel::parser::kind::count;
+    ctx.parser_sm = nullptr;
+    ctx.parser_dispatch = nullptr;
+    ctx.phase_error = EMEL_OK;
+    ctx.last_error = EMEL_OK;
     if (ev.error_out != nullptr) {
       *ev.error_out = EMEL_OK;
     }
   }
 };
 
-struct map_parser {
-  void operator()(const event::load & ev, context &, process_t & process) const {
+struct set_invalid_argument {
+  void operator()(context & ctx) const noexcept { set_error(ctx, EMEL_ERR_INVALID_ARGUMENT); }
+};
+
+struct set_backend_error {
+  void operator()(context & ctx) const noexcept { set_error(ctx, EMEL_ERR_BACKEND); }
+};
+
+struct run_map_parser {
+  void operator()(context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    ctx.last_error = EMEL_OK;
+    const event::load * request = ctx.request;
+    if (request == nullptr) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
+    const emel::parser::selection selection = emel::parser::select(request->parser_map, *request);
+    if (selection.entry == nullptr) {
+      set_error(ctx, EMEL_ERR_FORMAT_UNSUPPORTED);
+      return;
+    }
+    if (selection.entry->map_parser == nullptr || selection.entry->parser_sm == nullptr) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
+    ctx.parser_kind = selection.kind_id;
+    ctx.parser_sm = selection.entry->parser_sm;
+    ctx.parser_dispatch = selection.entry->dispatch_parse;
+    if (ctx.parser_dispatch == nullptr) {
+      ctx.parser_dispatch = emel::parser::dispatch_for_kind(ctx.parser_kind);
+    }
+    if (ctx.parser_dispatch == nullptr) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
     int32_t err = EMEL_OK;
-    const bool ok = ev.map_parser(ev, &err);
+    const bool ok = selection.entry->map_parser(*request, &err);
     if (!ok || err != EMEL_OK) {
       if (err == EMEL_OK) {
         err = EMEL_ERR_BACKEND;
       }
-      process(events::mapping_parser_error{&ev, err});
+      set_error(ctx, err);
       return;
     }
-    process(events::mapping_parser_done{&ev});
   }
 };
 
-struct start_map_parser {
-  void operator()(const event::load & ev, context & ctx, process_t & process) const {
-    reset{}(ev, ctx);
-    map_parser{}(ev, ctx, process);
-  }
-};
-
-struct parse {
-  void operator()(const events::mapping_parser_done & ev, context &, process_t & process) const {
-    const event::load * request = ev.request;
-    emel::model::parser::event::parse_model parse_request{
+struct run_parse {
+  void operator()(context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    ctx.last_error = EMEL_OK;
+    const event::load * request = ctx.request;
+    if (request == nullptr || ctx.parser_sm == nullptr || ctx.parser_dispatch == nullptr) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
+    emel::parser::event::parse_model parse_request{
       .model = &request->model_data,
       .model_path = request->model_path,
       .architectures = request->architectures,
@@ -79,26 +158,31 @@ struct parse {
       .file_handle = request->file_handle,
       .format_ctx = request->format_ctx,
       .map_tensors = !request->vocab_only,
-      .parse_architecture = request->parse_architecture,
-      .map_architecture = request->map_architecture,
-      .parse_hparams = request->parse_hparams,
-      .parse_vocab = request->parse_vocab,
-      .map_tensors_impl = request->map_tensors,
       .loader_request = request,
-      .owner_sm = request->loader_sm,
-      .dispatch_done = request->dispatch_parsing_done,
-      .dispatch_error = request->dispatch_parsing_error
+      .owner_sm = &ctx,
+      .dispatch_done = store_parsing_done,
+      .dispatch_error = store_parsing_error
     };
-    const bool ok = request->dispatch_parse_model(request->parser_sm, parse_request);
-    if (!ok) {
-      process(events::parsing_error{request, EMEL_ERR_BACKEND});
+    const bool ok = ctx.parser_dispatch(ctx.parser_sm, parse_request);
+    if (!ok && ctx.phase_error == EMEL_OK) {
+      set_error(ctx, EMEL_ERR_BACKEND);
     }
   }
 };
 
-struct load_weights {
-  void operator()(const events::parsing_done & ev, context &, process_t & process) const {
-    const event::load * request = ev.request;
+struct run_load_weights {
+  void operator()(context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    ctx.last_error = EMEL_OK;
+    ctx.bytes_total = 0;
+    ctx.bytes_done = 0;
+    ctx.used_mmap = false;
+    const event::load * request = ctx.request;
+    if (request == nullptr || request->dispatch_load_weights == nullptr ||
+        request->weight_loader_sm == nullptr) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
     emel::model::weight_loader::event::load_weights load_request{
       .request_mmap = request->request_mmap,
       .request_direct_io = request->request_direct_io,
@@ -119,49 +203,44 @@ struct load_weights {
       .progress_callback = request->progress_callback,
       .progress_user_data = request->progress_user_data,
       .loader_request = request,
-      .owner_sm = request->loader_sm,
-      .dispatch_done = request->dispatch_loading_done,
-      .dispatch_error = request->dispatch_loading_error
+      .owner_sm = &ctx,
+      .dispatch_done = store_loading_done,
+      .dispatch_error = store_loading_error
     };
     const bool ok = request->dispatch_load_weights(request->weight_loader_sm, load_request);
-    if (!ok) {
-      process(events::loading_error{request, EMEL_ERR_BACKEND});
+    if (!ok && ctx.phase_error == EMEL_OK) {
+      set_error(ctx, EMEL_ERR_BACKEND);
     }
   }
 };
 
-struct store_and_map_layers {
-  void operator()(const events::loading_done & ev, context & ctx, process_t & process) const {
-    ctx.bytes_total = ev.bytes_total;
-    ctx.bytes_done = ev.bytes_done;
-    ctx.used_mmap = ev.used_mmap;
-    const event::load * request = ev.request;
+struct run_map_layers {
+  void operator()(context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    ctx.last_error = EMEL_OK;
+    const event::load * request = ctx.request;
+    if (request == nullptr || request->map_layers == nullptr) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
     int32_t err = EMEL_OK;
     const bool ok = request->map_layers(*request, &err);
     if (!ok || err != EMEL_OK) {
       if (err == EMEL_OK) {
         err = EMEL_ERR_BACKEND;
       }
-      process(events::layers_map_error{request, err});
-      return;
+      set_error(ctx, err);
     }
-    process(events::layers_mapped{request});
   }
 };
 
-struct validate_structure {
-  template <class Event>
-  void operator()(const Event & ev, context &, process_t & process) const {
-    const event::load * request = nullptr;
-    if constexpr (std::is_same_v<Event, events::layers_mapped>) {
-      request = ev.request;
-    } else if constexpr (std::is_same_v<Event, events::parsing_done>) {
-      request = ev.request;
-    } else {
-      return;
-    }
-    if (!request->check_tensors) {
-      process(events::structure_validated{request});
+struct run_validate_structure {
+  void operator()(context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    ctx.last_error = EMEL_OK;
+    const event::load * request = ctx.request;
+    if (request == nullptr || request->validate_structure == nullptr) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
     }
     int32_t err = EMEL_OK;
@@ -170,66 +249,41 @@ struct validate_structure {
       if (err == EMEL_OK) {
         err = EMEL_ERR_MODEL_INVALID;
       }
-      process(events::structure_error{request, err});
-      return;
+      set_error(ctx, err);
     }
-    process(events::structure_validated{request});
   }
 };
 
-struct validate_architecture {
-  void operator()(const events::structure_validated & ev, context &, process_t & process) const {
-    const event::load * request = ev.request;
+struct skip_validate_structure {
+  void operator()(context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    ctx.last_error = EMEL_OK;
+  }
+};
+
+struct run_validate_architecture {
+  void operator()(context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    ctx.last_error = EMEL_OK;
+    const event::load * request = ctx.request;
+    if (request == nullptr || request->validate_architecture_impl == nullptr) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
     int32_t err = EMEL_OK;
     const bool ok = request->validate_architecture_impl(*request, &err);
     if (!ok || err != EMEL_OK) {
       if (err == EMEL_OK) {
         err = EMEL_ERR_MODEL_INVALID;
       }
-      process(events::architecture_error{request, err});
-      return;
-    }
-    process(events::architecture_validated{request});
-  }
-};
-
-struct reject_invalid {
-  template <class Event>
-  void operator()(const Event & ev, context &, process_t & process) const {
-    if constexpr (std::is_same_v<Event, event::load>) {
-      process(events::mapping_parser_error{&ev, EMEL_ERR_INVALID_ARGUMENT});
-    } else if constexpr (std::is_same_v<Event, events::mapping_parser_done>) {
-      process(events::parsing_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
-    } else if constexpr (std::is_same_v<Event, events::parsing_done>) {
-      process(events::loading_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
-    } else if constexpr (std::is_same_v<Event, events::loading_done>) {
-      process(events::layers_map_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
-    } else if constexpr (std::is_same_v<Event, events::layers_mapped>) {
-      process(events::structure_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
-    } else if constexpr (std::is_same_v<Event, events::structure_validated>) {
-      process(events::architecture_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
-    } else {
-      static_assert(!std::is_same_v<Event, Event>, "reject_invalid unsupported event");
+      set_error(ctx, err);
     }
   }
 };
 
-struct reject_invalid_structure {
-  template <class Event>
-  void operator()(const Event & ev, context &, process_t & process) const {
-    if constexpr (std::is_same_v<Event, events::parsing_done> ||
-                  std::is_same_v<Event, events::layers_mapped>) {
-      process(events::structure_error{ev.request, EMEL_ERR_INVALID_ARGUMENT});
-    } else {
-      static_assert(!std::is_same_v<Event, Event>, "reject_invalid_structure unsupported event");
-    }
-  }
-};
-
-struct dispatch_done {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx, process_t &) const {
-    const event::load * request = ev.request;
+struct publish_done {
+  void operator()(context & ctx) const noexcept {
+    const event::load * request = ctx.request;
     if (request == nullptr) {
       return;
     }
@@ -244,44 +298,47 @@ struct dispatch_done {
         ctx.used_mmap
       });
     }
+    clear_request(ctx);
   }
 };
 
-struct dispatch_error {
-  template <class Event>
-  void operator()(const Event & ev, context &, process_t &) const {
-    const event::load * request = ev.request;
+struct publish_error {
+  void operator()(context & ctx) const noexcept {
+    const event::load * request = ctx.request;
     if (request == nullptr) {
       return;
     }
+    int32_t err = ctx.last_error;
+    if (err == EMEL_OK) {
+      err = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
+    }
+    ctx.last_error = err;
     if (request->error_out != nullptr) {
-      *request->error_out = ev.err;
+      *request->error_out = err;
     }
     if (request->dispatch_error != nullptr && request->owner_sm != nullptr) {
-      request->dispatch_error(request->owner_sm, events::load_error{request, ev.err});
+      request->dispatch_error(request->owner_sm, events::load_error{request, err});
     }
+    clear_request(ctx);
   }
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context &, process_t &) const {
-    const event::load * request = nullptr;
-    if constexpr (requires { ev.request; }) {
-      request = ev.request;
-    } else if constexpr (std::is_same_v<Event, event::load>) {
-      request = &ev;
-    }
-    if (request == nullptr) {
-      return;
-    }
-    if (request->error_out != nullptr) {
-      *request->error_out = EMEL_ERR_BACKEND;
-    }
-    if (request->dispatch_error != nullptr && request->owner_sm != nullptr) {
-      request->dispatch_error(request->owner_sm, events::load_error{request, EMEL_ERR_BACKEND});
-    }
-  }
+  void operator()(context & ctx) const noexcept { set_error(ctx, EMEL_ERR_BACKEND); }
 };
+
+inline constexpr begin_load begin_load{};
+inline constexpr set_invalid_argument set_invalid_argument{};
+inline constexpr set_backend_error set_backend_error{};
+inline constexpr run_map_parser run_map_parser{};
+inline constexpr run_parse run_parse{};
+inline constexpr run_load_weights run_load_weights{};
+inline constexpr run_map_layers run_map_layers{};
+inline constexpr run_validate_structure run_validate_structure{};
+inline constexpr skip_validate_structure skip_validate_structure{};
+inline constexpr run_validate_architecture run_validate_architecture{};
+inline constexpr publish_done publish_done{};
+inline constexpr publish_error publish_error{};
+inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::model::loader::action

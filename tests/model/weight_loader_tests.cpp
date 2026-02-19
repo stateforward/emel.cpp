@@ -1,16 +1,11 @@
 #include "doctest/doctest.h"
 
 #include "emel/model/loader/events.hpp"
-#include "emel/sm.hpp"
+#include "emel/model/weight_loader/actions.hpp"
 #include "emel/model/weight_loader/guards.hpp"
 #include "emel/model/weight_loader/sm.hpp"
 
 namespace {
-
-struct sink_base {
-  template <class Event>
-  void process_event(const Event &) {}
-};
 
 struct owner_state {
   bool done = false;
@@ -102,79 +97,124 @@ TEST_CASE("weight loader dispatches loading errors") {
 }
 
 TEST_CASE("weight loader guard selection covers branches") {
+  emel::model::weight_loader::action::context ctx{};
   emel::model::weight_loader::guard::use_mmap_selected use_mmap{};
   emel::model::weight_loader::guard::use_stream_selected use_stream{};
 
-  emel::model::weight_loader::events::strategy_selected ev{};
-  ev.use_mmap = true;
-  CHECK(use_mmap(ev));
-  CHECK(!use_stream(ev));
+  ctx.use_mmap = true;
+  CHECK(use_mmap(ctx));
+  CHECK(!use_stream(ctx));
 
-  ev.use_mmap = false;
-  CHECK(!use_mmap(ev));
-  CHECK(use_stream(ev));
+  ctx.use_mmap = false;
+  CHECK(!use_mmap(ctx));
+  CHECK(use_stream(ctx));
 }
 
 TEST_CASE("weight loader guard error predicates") {
-  emel::model::weight_loader::guard::no_error no_error{};
-  emel::model::weight_loader::guard::has_error has_error{};
-  emel::model::weight_loader::events::weights_loaded ok{.err = EMEL_OK};
-  emel::model::weight_loader::events::weights_loaded bad{.err = EMEL_ERR_BACKEND};
+  emel::model::weight_loader::action::context ctx{};
+  emel::model::weight_loader::guard::phase_ok phase_ok{};
+  emel::model::weight_loader::guard::phase_failed phase_failed{};
 
-  CHECK(no_error(ok));
-  CHECK(!has_error(ok));
-  CHECK(!no_error(bad));
-  CHECK(has_error(bad));
+  ctx.phase_error = EMEL_OK;
+  CHECK(phase_ok(ctx));
+  CHECK(!phase_failed(ctx));
+
+  ctx.phase_error = EMEL_ERR_BACKEND;
+  CHECK(!phase_ok(ctx));
+  CHECK(phase_failed(ctx));
 }
 
-TEST_CASE("weight loader select_strategy emits selection") {
+TEST_CASE("weight loader guards cover capability paths") {
+  emel::model::weight_loader::action::context ctx{};
+  emel::model::weight_loader::event::load_weights request{};
+  ctx.request = &request;
+
+  CHECK(emel::model::weight_loader::guard::has_request{}(ctx));
+  CHECK(!emel::model::weight_loader::guard::can_init_mappings{}(ctx));
+  CHECK(emel::model::weight_loader::guard::skip_init_mappings{}(ctx));
+
+  request.init_mappings = [](const emel::model::weight_loader::event::load_weights &,
+                             int32_t * err_out) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return true;
+  };
+  CHECK(emel::model::weight_loader::guard::can_init_mappings{}(ctx));
+  CHECK(!emel::model::weight_loader::guard::skip_init_mappings{}(ctx));
+
+  request.load_streamed = nullptr;
+  CHECK(emel::model::weight_loader::guard::cannot_load_streamed{}(ctx));
+
+  request.load_streamed = [](const emel::model::weight_loader::event::load_weights &,
+                             uint64_t *,
+                             uint64_t *,
+                             int32_t * err_out) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return true;
+  };
+  CHECK(emel::model::weight_loader::guard::can_load_streamed{}(ctx));
+
+  request.map_mmap = nullptr;
+  CHECK(emel::model::weight_loader::guard::cannot_load_mmap{}(ctx));
+  request.map_mmap = map_mmap_ok;
+  CHECK(emel::model::weight_loader::guard::can_load_mmap{}(ctx));
+
+  request.check_tensors = true;
+  request.validate = nullptr;
+  CHECK(emel::model::weight_loader::guard::skip_validate{}(ctx));
+  CHECK(!emel::model::weight_loader::guard::can_validate{}(ctx));
+
+  request.validate = [](const emel::model::weight_loader::event::load_weights &,
+                        int32_t * err_out) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return true;
+  };
+  CHECK(emel::model::weight_loader::guard::can_validate{}(ctx));
+
+  request.clean_up = nullptr;
+  ctx.used_mmap = true;
+  CHECK(emel::model::weight_loader::guard::skip_clean_up{}(ctx));
+
+  request.clean_up = [](const emel::model::weight_loader::event::load_weights &,
+                        int32_t * err_out) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return true;
+  };
+  CHECK(emel::model::weight_loader::guard::can_clean_up{}(ctx));
+}
+
+TEST_CASE("weight loader strategy selection handles mmap and direct io") {
   emel::model::weight_loader::event::load_weights request{};
   request.request_mmap = true;
   request.mmap_supported = true;
   request.request_direct_io = false;
   request.direct_io_supported = true;
 
-  struct owner : sink_base {
-    using sink_base::process_event;
-    bool called = false;
-    emel::model::weight_loader::events::strategy_selected captured{};
-    void process_event(const emel::model::weight_loader::events::strategy_selected & ev) {
-      called = true;
-      captured = ev;
-    }
-  };
-  owner sink{};
-  emel::detail::process_support<owner, emel::model::weight_loader::process_t> support{&sink};
-
   emel::model::weight_loader::action::context ctx{};
-  emel::model::weight_loader::action::select_strategy{}(request, ctx, support.process_);
-  CHECK(sink.called);
-  CHECK(sink.captured.use_mmap);
-  CHECK(!sink.captured.use_direct_io);
+  emel::model::weight_loader::action::begin_load(request, ctx);
+  emel::model::weight_loader::action::select_strategy(ctx);
+  CHECK(ctx.use_mmap);
+  CHECK(!ctx.use_direct_io);
+
+  request.request_direct_io = true;
+  emel::model::weight_loader::action::begin_load(request, ctx);
+  emel::model::weight_loader::action::select_strategy(ctx);
+  CHECK(!ctx.use_mmap);
+  CHECK(ctx.use_direct_io);
 }
 
-TEST_CASE("weight loader init_mappings handles failures") {
-  emel::model::weight_loader::event::load_weights request{};
-  struct owner : sink_base {
-    using sink_base::process_event;
-    bool called = false;
-    emel::model::weight_loader::events::mappings_ready captured{};
-    void process_event(const emel::model::weight_loader::events::mappings_ready & ev) {
-      called = true;
-      captured = ev;
-    }
-  };
-  owner sink{};
-  emel::detail::process_support<owner, emel::model::weight_loader::process_t> support{&sink};
-
+TEST_CASE("weight loader actions handle init and load failures") {
   emel::model::weight_loader::action::context ctx{};
-  emel::model::weight_loader::events::strategy_selected selection{&request, true, false, EMEL_OK};
-  CHECK(emel::model::weight_loader::guard::use_mmap_no_error_skip_init_mappings{}(selection));
-  emel::model::weight_loader::action::skip_init_mappings{}(selection, ctx, support.process_);
-  CHECK(sink.called);
-  CHECK(sink.captured.err == EMEL_OK);
+  emel::model::weight_loader::event::load_weights request{};
+  ctx.request = &request;
 
-  sink.called = false;
   request.init_mappings = [](const emel::model::weight_loader::event::load_weights &,
                              int32_t * err_out) {
     if (err_out != nullptr) {
@@ -182,15 +222,70 @@ TEST_CASE("weight loader init_mappings handles failures") {
     }
     return false;
   };
-  CHECK(emel::model::weight_loader::guard::use_mmap_no_error_can_init_mappings{}(selection));
-  emel::model::weight_loader::action::init_mappings{}(selection, ctx, support.process_);
-  CHECK(sink.called);
-  CHECK(sink.captured.err == EMEL_ERR_BACKEND);
+  emel::model::weight_loader::action::run_init_mappings(ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+
+  request.init_mappings = [](const emel::model::weight_loader::event::load_weights &,
+                             int32_t * err_out) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return true;
+  };
+  emel::model::weight_loader::action::run_init_mappings(ctx);
+  CHECK(ctx.phase_error == EMEL_OK);
+
+  request.map_mmap = [](const emel::model::weight_loader::event::load_weights &,
+                        uint64_t *,
+                        uint64_t *,
+                        int32_t * err_out) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return false;
+  };
+  emel::model::weight_loader::action::run_load_mmap(ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+
+  request.map_mmap = [](const emel::model::weight_loader::event::load_weights &,
+                        uint64_t * done,
+                        uint64_t * total,
+                        int32_t * err_out) {
+    if (done != nullptr) {
+      *done = 2;
+    }
+    if (total != nullptr) {
+      *total = 4;
+    }
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return true;
+  };
+  emel::model::weight_loader::action::run_load_mmap(ctx);
+  CHECK(ctx.phase_error == EMEL_OK);
+  CHECK(ctx.bytes_done == 2);
+  CHECK(ctx.bytes_total == 4);
+  CHECK(ctx.used_mmap);
+
+  request.load_streamed = [](const emel::model::weight_loader::event::load_weights &,
+                             uint64_t *,
+                             uint64_t *,
+                             int32_t * err_out) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_OK;
+    }
+    return false;
+  };
+  emel::model::weight_loader::action::run_load_streamed(ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
 }
 
-TEST_CASE("weight loader validate and cleaning_up handle failures") {
+TEST_CASE("weight loader validate and cleanup handle failures") {
+  emel::model::weight_loader::action::context ctx{};
   emel::model::weight_loader::event::load_weights request{};
-  request.check_tensors = true;
+  ctx.request = &request;
+
   request.validate = [](const emel::model::weight_loader::event::load_weights &,
                         int32_t * err_out) {
     if (err_out != nullptr) {
@@ -198,6 +293,9 @@ TEST_CASE("weight loader validate and cleaning_up handle failures") {
     }
     return false;
   };
+  emel::model::weight_loader::action::run_validate(ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_MODEL_INVALID);
+
   request.clean_up = [](const emel::model::weight_loader::event::load_weights &,
                         int32_t * err_out) {
     if (err_out != nullptr) {
@@ -205,41 +303,41 @@ TEST_CASE("weight loader validate and cleaning_up handle failures") {
     }
     return false;
   };
+  emel::model::weight_loader::action::run_clean_up(ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+}
 
-  struct vowner : sink_base {
-    using sink_base::process_event;
-    bool called = false;
-    emel::model::weight_loader::events::validation_done captured{};
-    void process_event(const emel::model::weight_loader::events::validation_done & ev) {
-      called = true;
-      captured = ev;
-    }
-  };
-  vowner vsink{};
-  emel::detail::process_support<vowner, emel::model::weight_loader::process_t> vsupport{&vsink};
+TEST_CASE("weight loader publish_done and publish_error notify owners") {
+  owner_state owner{};
+  emel::model::weight_loader::event::load_weights request{};
+  request.owner_sm = &owner;
+  request.dispatch_done = dispatch_done;
+  request.dispatch_error = dispatch_error;
 
   emel::model::weight_loader::action::context ctx{};
-  emel::model::weight_loader::events::weights_loaded loaded{&request, EMEL_OK, false, 0, 0};
-  emel::model::weight_loader::action::validate{}(loaded, ctx, vsupport.process_);
-  CHECK(vsink.called);
-  CHECK(vsink.captured.err == EMEL_ERR_MODEL_INVALID);
-
-  struct cowner : sink_base {
-    using sink_base::process_event;
-    bool called = false;
-    emel::model::weight_loader::events::cleaning_up_done captured{};
-    void process_event(const emel::model::weight_loader::events::cleaning_up_done & ev) {
-      called = true;
-      captured = ev;
-    }
-  };
-  cowner csink{};
-  emel::detail::process_support<cowner, emel::model::weight_loader::process_t> csupport{&csink};
+  ctx.request = &request;
+  ctx.bytes_total = 10;
+  ctx.bytes_done = 5;
   ctx.used_mmap = true;
-  emel::model::weight_loader::action::cleaning_up{}(
-    emel::model::weight_loader::events::validation_done{&request, EMEL_OK},
-    ctx,
-    csupport.process_);
-  CHECK(csink.called);
-  CHECK(csink.captured.err == EMEL_ERR_BACKEND);
+
+  emel::model::weight_loader::action::publish_done(ctx);
+  CHECK(owner.done);
+  CHECK(owner.done_event.bytes_total == 10);
+  CHECK(owner.done_event.bytes_done == 5);
+  CHECK(owner.done_event.used_mmap);
+  CHECK(ctx.request == nullptr);
+
+  ctx.request = &request;
+  ctx.phase_error = EMEL_ERR_BACKEND;
+  ctx.last_error = EMEL_OK;
+  emel::model::weight_loader::action::publish_error(ctx);
+  CHECK(owner.error);
+  CHECK(owner.error_event.err == EMEL_ERR_BACKEND);
+  CHECK(ctx.request == nullptr);
+}
+
+TEST_CASE("weight loader on_unexpected sets backend error") {
+  emel::model::weight_loader::action::context ctx{};
+  emel::model::weight_loader::action::on_unexpected(ctx);
+  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
 }

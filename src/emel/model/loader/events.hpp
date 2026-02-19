@@ -6,9 +6,13 @@
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
 
-namespace emel::model::parser::event {
+namespace emel::parser::event {
 struct parse_model;
-}  // namespace emel::model::parser::event
+}  // namespace emel::parser::event
+
+namespace emel::parser {
+struct map;
+}  // namespace emel::parser
 
 namespace emel::model::weight_loader::event {
 struct load_weights;
@@ -95,7 +99,6 @@ struct load_error {
 
 namespace emel::model::loader::event {
 
-using map_parser_fn = bool (*)(const load &, int32_t * err_out);
 using map_layers_fn = bool (*)(const load &, int32_t * err_out);
 using validate_structure_fn = bool (*)(const load &, int32_t * err_out);
 using validate_architecture_fn = bool (*)(const load &, int32_t * err_out);
@@ -137,12 +140,7 @@ struct load {
   upload_chunk_fn upload_chunk = nullptr;
   upload_end_fn upload_end = nullptr;
 
-  map_parser_fn map_parser = nullptr;
-  bool (*parse_architecture)(const emel::model::parser::event::parse_model &, int32_t * err_out) = nullptr;
-  bool (*map_architecture)(const emel::model::parser::event::parse_model &, int32_t * err_out) = nullptr;
-  bool (*parse_hparams)(const emel::model::parser::event::parse_model &, int32_t * err_out) = nullptr;
-  bool (*parse_vocab)(const emel::model::parser::event::parse_model &, int32_t * err_out) = nullptr;
-  bool (*map_tensors)(const emel::model::parser::event::parse_model &, int32_t * err_out) = nullptr;
+  const emel::parser::map * parser_map = nullptr;
   bool (*map_mmap)(const emel::model::weight_loader::event::load_weights &,
                    uint64_t * bytes_done,
                    uint64_t * bytes_total,
@@ -158,9 +156,6 @@ struct load {
   validate_structure_fn validate_structure = nullptr;
   validate_architecture_fn validate_architecture_impl = nullptr;
 
-  void * parser_sm = nullptr;
-  bool (*dispatch_parse_model)(void * parser_sm,
-                               const emel::model::parser::event::parse_model &) = nullptr;
   void * weight_loader_sm = nullptr;
   bool (*dispatch_load_weights)(void * weight_loader_sm,
                                 const emel::model::weight_loader::event::load_weights &) = nullptr;

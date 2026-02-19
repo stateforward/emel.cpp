@@ -1,7 +1,8 @@
 #include <cstdio>
 
 #include "emel/model/loader/sm.hpp"
-#include "emel/model/parser/sm.hpp"
+#include "emel/parser/map.hpp"
+#include "emel/parser/sm.hpp"
 #include "emel/model/weight_loader/sm.hpp"
 
 namespace {
@@ -17,39 +18,20 @@ bool map_parser_ok(const emel::model::loader::event::load &, int32_t * err_out) 
   return true;
 }
 
-bool parse_architecture_ok(const emel::model::parser::event::parse_model &, int32_t * err_out) {
-  if (err_out != nullptr) {
-    *err_out = EMEL_OK;
-  }
+bool can_handle_any(const emel::model::loader::event::load &) {
   return true;
 }
 
-bool map_architecture_ok(const emel::model::parser::event::parse_model &, int32_t * err_out) {
-  if (err_out != nullptr) {
-    *err_out = EMEL_OK;
-  }
-  return true;
+bool can_handle_none(const emel::model::loader::event::load &) {
+  return false;
 }
 
-bool parse_hparams_ok(const emel::model::parser::event::parse_model &, int32_t * err_out) {
-  if (err_out != nullptr) {
-    *err_out = EMEL_OK;
+bool dispatch_parse_ok(void *, const emel::parser::event::parse_model & ev) {
+  if (ev.dispatch_done == nullptr) {
+    return false;
   }
-  return true;
-}
-
-bool parse_vocab_ok(const emel::model::parser::event::parse_model &, int32_t * err_out) {
-  if (err_out != nullptr) {
-    *err_out = EMEL_OK;
-  }
-  return true;
-}
-
-bool map_tensors_ok(const emel::model::parser::event::parse_model &, int32_t * err_out) {
-  if (err_out != nullptr) {
-    *err_out = EMEL_OK;
-  }
-  return true;
+  return ev.dispatch_done(ev.owner_sm,
+                          emel::model::loader::events::parsing_done{ev.loader_request});
 }
 
 bool map_mmap_ok(const emel::model::weight_loader::event::load_weights &,
@@ -130,10 +112,19 @@ bool dispatch_loading_error(void * loader_sm, const emel::model::loader::events:
 int main() {
   {
     std::printf("=== model_load happy path ===\n");
-    emel::model::parser::sm parser_sm;
     emel::model::weight_loader::sm weight_sm;
     emel::model::loader::sm loader_sm;
     emel::model::data model_data = {};
+    emel::parser::entry parser_entries[] = {
+      emel::parser::entry{
+        emel::parser::kind::gguf,
+        &loader_sm,
+        map_parser_ok,
+        can_handle_any,
+        dispatch_parse_ok
+      }
+    };
+    emel::parser::map parser_map{parser_entries, 1};
 
     int32_t err = EMEL_OK;
     print_step(
@@ -143,19 +134,12 @@ int main() {
         .model_path = "mock.gguf",
         .request_mmap = true,
         .request_direct_io = false,
-        .map_parser = map_parser_ok,
-        .parse_architecture = parse_architecture_ok,
-        .map_architecture = map_architecture_ok,
-        .parse_hparams = parse_hparams_ok,
-        .parse_vocab = parse_vocab_ok,
-        .map_tensors = map_tensors_ok,
+        .parser_map = &parser_map,
         .map_mmap = map_mmap_ok,
         .load_streamed = load_streamed_ok,
         .map_layers = map_layers_ok,
         .validate_structure = validate_structure_ok,
         .validate_architecture_impl = validate_architecture_ok,
-        .parser_sm = &parser_sm,
-        .dispatch_parse_model = emel::model::parser::dispatch_parse_model,
         .weight_loader_sm = &weight_sm,
         .dispatch_load_weights = emel::model::weight_loader::dispatch_load_weights,
         .loader_sm = &loader_sm,
@@ -171,10 +155,19 @@ int main() {
 
   {
     std::printf("=== model_load unsupported format ===\n");
-    emel::model::parser::sm parser_sm;
     emel::model::weight_loader::sm weight_sm;
     emel::model::loader::sm loader_sm;
     emel::model::data model_data = {};
+    emel::parser::entry parser_entries[] = {
+      emel::parser::entry{
+        emel::parser::kind::gguf,
+        &loader_sm,
+        map_parser_ok,
+        can_handle_none,
+        dispatch_parse_ok
+      }
+    };
+    emel::parser::map parser_map{parser_entries, 1};
 
     int32_t err = EMEL_OK;
     print_step(
@@ -184,24 +177,12 @@ int main() {
         .model_path = "unsupported.bin",
         .request_mmap = false,
         .request_direct_io = true,
-        .map_parser = [](const emel::model::loader::event::load &, int32_t * err_out) {
-          if (err_out != nullptr) {
-            *err_out = EMEL_ERR_FORMAT_UNSUPPORTED;
-          }
-          return false;
-        },
-        .parse_architecture = parse_architecture_ok,
-        .map_architecture = map_architecture_ok,
-        .parse_hparams = parse_hparams_ok,
-        .parse_vocab = parse_vocab_ok,
-        .map_tensors = map_tensors_ok,
+        .parser_map = &parser_map,
         .map_mmap = map_mmap_ok,
         .load_streamed = load_streamed_ok,
         .map_layers = map_layers_ok,
         .validate_structure = validate_structure_ok,
         .validate_architecture_impl = validate_architecture_ok,
-        .parser_sm = &parser_sm,
-        .dispatch_parse_model = emel::model::parser::dispatch_parse_model,
         .weight_loader_sm = &weight_sm,
         .dispatch_load_weights = emel::model::weight_loader::dispatch_load_weights,
         .loader_sm = &loader_sm,

@@ -12,7 +12,7 @@
 #endif
 
 #include "doctest/doctest.h"
-#include "emel/model/gguf/loader.hpp"
+#include "emel/parser/gguf/actions.hpp"
 
 namespace {
 
@@ -89,7 +89,7 @@ bool write_kv_bool(std::FILE * file, const char * key, const bool value) {
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_bool);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_bool);
   if (!write_i32(file, type)) {
     return false;
   }
@@ -101,7 +101,7 @@ bool write_kv_i32(std::FILE * file, const char * key, const int32_t value) {
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_i32);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_i32);
   if (!write_i32(file, type)) {
     return false;
   }
@@ -112,7 +112,7 @@ bool write_kv_u32(std::FILE * file, const char * key, const uint32_t value) {
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_u32);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_u32);
   if (!write_i32(file, type)) {
     return false;
   }
@@ -123,7 +123,7 @@ bool write_kv_f32(std::FILE * file, const char * key, const float value) {
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_f32);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_f32);
   if (!write_i32(file, type)) {
     return false;
   }
@@ -134,7 +134,7 @@ bool write_kv_string(std::FILE * file, const char * key, const char * value) {
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_string);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_string);
   if (!write_i32(file, type)) {
     return false;
   }
@@ -146,11 +146,11 @@ bool write_kv_string_array(std::FILE * file, const char * key,
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (!write_i32(file, type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_string);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_string);
   if (!write_i32(file, elem_type)) {
     return false;
   }
@@ -170,11 +170,11 @@ bool write_kv_string_array3(std::FILE * file, const char * key,
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (!write_i32(file, type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_string);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_string);
   if (!write_i32(file, elem_type)) {
     return false;
   }
@@ -194,11 +194,11 @@ bool write_kv_u32_array(std::FILE * file, const char * key,
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (!write_i32(file, type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_u32);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_u32);
   if (!write_i32(file, elem_type)) {
     return false;
   }
@@ -218,11 +218,11 @@ bool write_kv_i32_array(std::FILE * file, const char * key,
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (!write_i32(file, type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_i32);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_i32);
   if (!write_i32(file, elem_type)) {
     return false;
   }
@@ -242,11 +242,11 @@ bool write_kv_f32_array(std::FILE * file, const char * key,
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (!write_i32(file, type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_f32);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_f32);
   if (!write_i32(file, elem_type)) {
     return false;
   }
@@ -266,11 +266,11 @@ bool write_kv_f32_array2(std::FILE * file, const char * key,
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (!write_i32(file, type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_f32);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_f32);
   if (!write_i32(file, elem_type)) {
     return false;
   }
@@ -290,11 +290,11 @@ bool write_kv_bool_array(std::FILE * file, const char * key,
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (!write_i32(file, type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_bool);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_bool);
   if (!write_i32(file, elem_type)) {
     return false;
   }
@@ -337,7 +337,7 @@ bool write_vocab_gguf(const char * path) {
   }
   const int64_t n_tensors = 1;
   const int64_t n_kv = 29;
-  if (!write_header(file, emel::model::gguf::k_gguf_version, n_tensors, n_kv)) {
+  if (!write_header(file, emel::parser::gguf::k_gguf_version, n_tensors, n_kv)) {
     std::fclose(file);
     return false;
   }
@@ -375,7 +375,7 @@ bool write_vocab_gguf(const char * path) {
   }
 
   std::array<int64_t, 4> dims = {1, 1, 1, 1};
-  const int32_t type_raw = static_cast<int32_t>(emel::model::gguf::tensor_type::k_f32);
+  const int32_t type_raw = static_cast<int32_t>(emel::parser::gguf::tensor_type::k_f32);
   if (!write_tensor_info(file, "weight", type_raw, dims, 0)) {
     std::fclose(file);
     return false;
@@ -399,7 +399,7 @@ bool write_metadata_gguf(const char * path) {
   }
   constexpr int64_t n_tensors = 1;
   constexpr int64_t n_kv = 222;
-  if (!write_header(file, emel::model::gguf::k_gguf_version, n_tensors, n_kv)) {
+  if (!write_header(file, emel::parser::gguf::k_gguf_version, n_tensors, n_kv)) {
     std::fclose(file);
     return false;
   }
@@ -649,7 +649,7 @@ bool write_metadata_gguf(const char * path) {
   }
 
   std::array<int64_t, 4> dims = {1, 1, 1, 1};
-  const int32_t type_raw = static_cast<int32_t>(emel::model::gguf::tensor_type::k_f32);
+  const int32_t type_raw = static_cast<int32_t>(emel::parser::gguf::tensor_type::k_f32);
   if (!write_tensor_info(file, "weight", type_raw, dims, 0)) {
     std::fclose(file);
     return false;
@@ -666,13 +666,13 @@ TEST_CASE("gguf parser reads tokenizer flags and ids") {
   CHECK(write_vocab_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   CHECK(model.vocab_data.add_bos);
@@ -714,13 +714,13 @@ TEST_CASE("gguf parser reads extended metadata") {
   CHECK(write_metadata_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   CHECK(meta_view(model.meta, model.meta.general_data.type) == "model");

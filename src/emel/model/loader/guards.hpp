@@ -1,181 +1,230 @@
 #pragma once
 
-#include <type_traits>
-
 #include "emel/emel.h"
+#include "emel/model/loader/actions.hpp"
 #include "emel/model/loader/events.hpp"
 
 namespace emel::model::loader::guard {
 
-struct no_error {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return ev.err == EMEL_OK;
-  }
-};
-
-struct has_error {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return ev.err != EMEL_OK;
-  }
-};
-
-struct has_arch_validate {
-  bool operator()(const events::structure_validated & ev) const {
-    return ev.request != nullptr && ev.request->validate_architecture;
-  }
-};
-
-struct no_arch_validate {
-  bool operator()(const events::structure_validated & ev) const {
-    return ev.request != nullptr && !ev.request->validate_architecture;
-  }
-};
-
-struct should_load_weights {
-  bool operator()(const events::parsing_done & ev) const {
-    return ev.request != nullptr && !ev.request->vocab_only;
-  }
-};
-
-struct skip_weights {
-  bool operator()(const events::parsing_done & ev) const {
-    return ev.request != nullptr && ev.request->vocab_only;
-  }
-};
-
 struct can_map_parser {
-  bool operator()(const event::load & ev) const { return ev.map_parser != nullptr; }
+  bool operator()(const event::load & ev) const {
+    return ev.parser_map != nullptr &&
+           ev.parser_map->entries != nullptr &&
+           ev.parser_map->count > 0;
+  }
 };
 
 struct cannot_map_parser {
   bool operator()(const event::load & ev) const { return !can_map_parser{}(ev); }
 };
 
+struct phase_ok {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error == EMEL_OK;
+  }
+};
+
+struct phase_failed {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error != EMEL_OK;
+  }
+};
+
+struct has_request {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr;
+  }
+};
+
 struct can_parse {
-  bool operator()(const events::mapping_parser_done & ev) const {
-    if (ev.request == nullptr) {
-      return false;
-    }
-    return ev.request->dispatch_parse_model != nullptr &&
-           ev.request->parser_sm != nullptr &&
-           ev.request->loader_sm != nullptr &&
-           ev.request->dispatch_parsing_done != nullptr &&
-           ev.request->dispatch_parsing_error != nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr &&
+           ctx.parser_sm != nullptr &&
+           ctx.parser_dispatch != nullptr;
   }
 };
 
 struct cannot_parse {
-  bool operator()(const events::mapping_parser_done & ev) const { return !can_parse{}(ev); }
+  bool operator()(const action::context & ctx) const noexcept {
+    return !can_parse{}(ctx);
+  }
+};
+
+struct should_load_weights {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && !ctx.request->vocab_only;
+  }
+};
+
+struct skip_weights {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && ctx.request->vocab_only;
+  }
 };
 
 struct can_load_weights {
-  bool operator()(const events::parsing_done & ev) const {
-    if (ev.request == nullptr) {
-      return false;
-    }
-    return ev.request->dispatch_load_weights != nullptr &&
-           ev.request->weight_loader_sm != nullptr &&
-           ev.request->loader_sm != nullptr &&
-           ev.request->dispatch_loading_done != nullptr &&
-           ev.request->dispatch_loading_error != nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr &&
+           ctx.request->dispatch_load_weights != nullptr &&
+           ctx.request->weight_loader_sm != nullptr;
   }
 };
 
 struct cannot_load_weights {
-  bool operator()(const events::parsing_done & ev) const { return !can_load_weights{}(ev); }
+  bool operator()(const action::context & ctx) const noexcept {
+    return !can_load_weights{}(ctx);
+  }
 };
 
 struct can_map_layers {
-  bool operator()(const events::loading_done & ev) const {
-    return ev.request != nullptr && ev.request->map_layers != nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && ctx.request->map_layers != nullptr;
   }
 };
 
 struct cannot_map_layers {
-  bool operator()(const events::loading_done & ev) const { return !can_map_layers{}(ev); }
+  bool operator()(const action::context & ctx) const noexcept {
+    return !can_map_layers{}(ctx);
+  }
+};
+
+struct skip_validate_structure {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && !ctx.request->check_tensors;
+  }
 };
 
 struct can_validate_structure {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    const event::load * request = nullptr;
-    if constexpr (std::is_same_v<Event, events::layers_mapped>) {
-      request = ev.request;
-    } else if constexpr (std::is_same_v<Event, events::parsing_done>) {
-      request = ev.request;
-    } else {
-      return false;
-    }
-    if (request == nullptr) {
-      return false;
-    }
-    if (!request->check_tensors) {
-      return true;
-    }
-    return request->validate_structure != nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr &&
+           ctx.request->check_tensors &&
+           ctx.request->validate_structure != nullptr;
   }
 };
 
 struct cannot_validate_structure {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return !can_validate_structure{}(ev);
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr &&
+           ctx.request->check_tensors &&
+           ctx.request->validate_structure == nullptr;
   }
 };
 
-struct can_validate_architecture {
-  bool operator()(const events::structure_validated & ev) const {
-    if (ev.request == nullptr) {
-      return false;
-    }
-    if (!ev.request->validate_architecture) {
-      return true;
-    }
-    return ev.request->validate_architecture_impl != nullptr;
+struct has_arch_validate {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && ctx.request->validate_architecture;
   }
 };
 
-struct cannot_validate_architecture {
-  bool operator()(const events::structure_validated & ev) const {
-    return !can_validate_architecture{}(ev);
-  }
-};
-
-struct should_load_weights_and_can_load {
-  bool operator()(const events::parsing_done & ev) const {
-    return should_load_weights{}(ev) && can_load_weights{}(ev);
-  }
-};
-
-struct should_load_weights_and_cannot_load {
-  bool operator()(const events::parsing_done & ev) const {
-    return should_load_weights{}(ev) && cannot_load_weights{}(ev);
-  }
-};
-
-struct skip_weights_and_can_validate_structure {
-  bool operator()(const events::parsing_done & ev) const {
-    return skip_weights{}(ev) && can_validate_structure{}(ev);
-  }
-};
-
-struct skip_weights_and_cannot_validate_structure {
-  bool operator()(const events::parsing_done & ev) const {
-    return skip_weights{}(ev) && cannot_validate_structure{}(ev);
+struct no_arch_validate {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && !ctx.request->validate_architecture;
   }
 };
 
 struct has_arch_validate_and_can_validate_architecture {
-  bool operator()(const events::structure_validated & ev) const {
-    return has_arch_validate{}(ev) && can_validate_architecture{}(ev);
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr &&
+           ctx.request->validate_architecture &&
+           ctx.request->validate_architecture_impl != nullptr;
   }
 };
 
 struct has_arch_validate_and_cannot_validate_architecture {
-  bool operator()(const events::structure_validated & ev) const {
-    return has_arch_validate{}(ev) && cannot_validate_architecture{}(ev);
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr &&
+           ctx.request->validate_architecture &&
+           ctx.request->validate_architecture_impl == nullptr;
+  }
+};
+
+struct phase_ok_and_can_parse {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && can_parse{}(ctx);
+  }
+};
+
+struct phase_ok_and_cannot_parse {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && cannot_parse{}(ctx);
+  }
+};
+
+struct phase_ok_and_should_load_weights_and_can_load {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && should_load_weights{}(ctx) && can_load_weights{}(ctx);
+  }
+};
+
+struct phase_ok_and_should_load_weights_and_cannot_load {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && should_load_weights{}(ctx) && cannot_load_weights{}(ctx);
+  }
+};
+
+struct phase_ok_and_skip_weights_and_skip_structure {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && skip_weights{}(ctx) && skip_validate_structure{}(ctx);
+  }
+};
+
+struct phase_ok_and_skip_weights_and_can_validate_structure {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && skip_weights{}(ctx) && can_validate_structure{}(ctx);
+  }
+};
+
+struct phase_ok_and_skip_weights_and_cannot_validate_structure {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && skip_weights{}(ctx) && cannot_validate_structure{}(ctx);
+  }
+};
+
+struct phase_ok_and_can_map_layers {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && can_map_layers{}(ctx);
+  }
+};
+
+struct phase_ok_and_cannot_map_layers {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && cannot_map_layers{}(ctx);
+  }
+};
+
+struct phase_ok_and_skip_structure {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && skip_validate_structure{}(ctx);
+  }
+};
+
+struct phase_ok_and_can_validate_structure {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && can_validate_structure{}(ctx);
+  }
+};
+
+struct phase_ok_and_cannot_validate_structure {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && cannot_validate_structure{}(ctx);
+  }
+};
+
+struct phase_ok_and_has_arch_validate_and_can_validate_architecture {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && has_arch_validate_and_can_validate_architecture{}(ctx);
+  }
+};
+
+struct phase_ok_and_has_arch_validate_and_cannot_validate_architecture {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && has_arch_validate_and_cannot_validate_architecture{}(ctx);
+  }
+};
+
+struct phase_ok_and_no_arch_validate {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && no_arch_validate{}(ctx);
   }
 };
 

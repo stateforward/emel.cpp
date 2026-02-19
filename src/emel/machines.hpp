@@ -12,7 +12,7 @@
 #include "emel/kv/cache/sm.hpp"
 #include "emel/memory/coordinator/sm.hpp"
 #include "emel/model/loader/sm.hpp"
-#include "emel/model/parser/sm.hpp"
+#include "emel/parser/sm.hpp"
 #include "emel/model/weight_loader/sm.hpp"
 #include "emel/telemetry/exporter/sm.hpp"
 #include "emel/telemetry/provider/sm.hpp"
@@ -41,7 +41,7 @@ using KvCache = emel::kv::cache::sm;
 using MemoryCoordinator = emel::memory::coordinator::sm;
 using ModelLoader = emel::model::loader::sm;
 using Model = emel::model::loader::sm;
-using Parser = emel::model::parser::sm;
+using Parser = emel::parser::gguf::sm;
 using TelemetryExporter = emel::telemetry::exporter::sm;
 using TelemetryProvider = emel::telemetry::provider::sm;
 using TensorAllocator = emel::tensor::allocator::sm;

@@ -15,7 +15,7 @@
 
 #include "doctest/doctest.h"
 #include "emel/emel.h"
-#include "emel/model/gguf/loader.hpp"
+#include "emel/parser/gguf/actions.hpp"
 
 namespace {
 
@@ -155,7 +155,7 @@ bool write_kv_string(std::FILE * file, const char * key, const char * value) {
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_string);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_string);
   if (std::fwrite(&type, 1, sizeof(type), file) != sizeof(type)) {
     return false;
   }
@@ -166,7 +166,7 @@ bool write_kv_u32(std::FILE * file, const char * key, const uint32_t value) {
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_u32);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_u32);
   if (std::fwrite(&type, 1, sizeof(type), file) != sizeof(type)) {
     return false;
   }
@@ -177,7 +177,7 @@ bool write_kv_i32(std::FILE * file, const char * key, const int32_t value) {
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_i32);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_i32);
   if (std::fwrite(&type, 1, sizeof(type), file) != sizeof(type)) {
     return false;
   }
@@ -188,7 +188,7 @@ bool write_kv_bool(std::FILE * file, const char * key, const bool value) {
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_bool);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_bool);
   if (std::fwrite(&type, 1, sizeof(type), file) != sizeof(type)) {
     return false;
   }
@@ -200,11 +200,11 @@ bool write_kv_array_u32(std::FILE * file, const char * key, const uint32_t * val
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (std::fwrite(&type, 1, sizeof(type), file) != sizeof(type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_u32);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_u32);
   if (std::fwrite(&elem_type, 1, sizeof(elem_type), file) != sizeof(elem_type)) {
     return false;
   }
@@ -218,11 +218,11 @@ bool write_kv_array_f32(std::FILE * file, const char * key, const float * values
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (std::fwrite(&type, 1, sizeof(type), file) != sizeof(type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_f32);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_f32);
   if (std::fwrite(&elem_type, 1, sizeof(elem_type), file) != sizeof(elem_type)) {
     return false;
   }
@@ -236,11 +236,11 @@ bool write_kv_array_i32(std::FILE * file, const char * key, const int32_t * valu
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (std::fwrite(&type, 1, sizeof(type), file) != sizeof(type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_i32);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_i32);
   if (std::fwrite(&elem_type, 1, sizeof(elem_type), file) != sizeof(elem_type)) {
     return false;
   }
@@ -254,11 +254,11 @@ bool write_kv_array_u8(std::FILE * file, const char * key, const uint8_t * value
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (std::fwrite(&type, 1, sizeof(type), file) != sizeof(type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_u8);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_u8);
   if (std::fwrite(&elem_type, 1, sizeof(elem_type), file) != sizeof(elem_type)) {
     return false;
   }
@@ -273,11 +273,11 @@ bool write_kv_array_string(std::FILE * file, const char * key, const char * cons
   if (!write_string(file, key)) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_array);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_array);
   if (std::fwrite(&type, 1, sizeof(type), file) != sizeof(type)) {
     return false;
   }
-  const int32_t elem_type = static_cast<int32_t>(emel::model::gguf::value_type::k_string);
+  const int32_t elem_type = static_cast<int32_t>(emel::parser::gguf::value_type::k_string);
   if (std::fwrite(&elem_type, 1, sizeof(elem_type), file) != sizeof(elem_type)) {
     return false;
   }
@@ -301,7 +301,7 @@ bool write_long_key_kv(std::FILE * file, const uint64_t key_len, const uint32_t 
   if (std::fwrite(key.data(), 1, key_len, file) != key_len) {
     return false;
   }
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::value_type::k_u32);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::value_type::k_u32);
   if (std::fwrite(&type, 1, sizeof(type), file) != sizeof(type)) {
     return false;
   }
@@ -333,24 +333,24 @@ bool write_split_gguf(const char * path, const uint32_t split_count, const uint3
   }
   const int64_t n_tensors = 1;
   const int64_t n_kv = 3;
-  if (!write_header(file, emel::model::gguf::k_gguf_version, n_tensors, n_kv)) {
+  if (!write_header(file, emel::parser::gguf::k_gguf_version, n_tensors, n_kv)) {
     std::fclose(file);
     return false;
   }
-  if (!write_kv_u32(file, emel::model::gguf::k_key_split_count, split_count)) {
+  if (!write_kv_u32(file, emel::parser::gguf::k_key_split_count, split_count)) {
     std::fclose(file);
     return false;
   }
-  if (!write_kv_u32(file, emel::model::gguf::k_key_split_no, split_no)) {
+  if (!write_kv_u32(file, emel::parser::gguf::k_key_split_no, split_no)) {
     std::fclose(file);
     return false;
   }
-  if (!write_kv_u32(file, emel::model::gguf::k_key_split_tensors, split_tensors_count)) {
+  if (!write_kv_u32(file, emel::parser::gguf::k_key_split_tensors, split_tensors_count)) {
     std::fclose(file);
     return false;
   }
   std::array<int64_t, 4> dims = {1, 1, 1, 1};
-  const int32_t type_raw = static_cast<int32_t>(emel::model::gguf::tensor_type::k_f32);
+  const int32_t type_raw = static_cast<int32_t>(emel::parser::gguf::tensor_type::k_f32);
   if (!write_tensor_info(file, "weight", type_raw, dims, 0)) {
     std::fclose(file);
     return false;
@@ -361,8 +361,8 @@ bool write_split_gguf(const char * path, const uint32_t split_count, const uint3
     return false;
   }
   const uint64_t aligned =
-    emel::model::gguf::align_up_u64(static_cast<uint64_t>(pos),
-                                    emel::model::gguf::k_default_alignment);
+    emel::parser::gguf::align_up_u64(static_cast<uint64_t>(pos),
+                                    emel::parser::gguf::k_default_alignment);
   const uint64_t padding = aligned - static_cast<uint64_t>(pos);
   if (padding > 0) {
     std::array<uint8_t, 64> zeros = {};
@@ -377,14 +377,14 @@ bool write_split_gguf(const char * path, const uint32_t split_count, const uint3
     }
   }
   uint64_t tensor_bytes = 0;
-  if (!emel::model::gguf::compute_tensor_size(dims,
-                                              emel::model::gguf::tensor_type::k_f32,
+  if (!emel::parser::gguf::compute_tensor_size(dims,
+                                              emel::parser::gguf::tensor_type::k_f32,
                                               tensor_bytes)) {
     std::fclose(file);
     return false;
   }
   uint64_t data_bytes =
-    emel::model::gguf::align_up_u64(tensor_bytes, emel::model::gguf::k_default_alignment);
+    emel::parser::gguf::align_up_u64(tensor_bytes, emel::parser::gguf::k_default_alignment);
   std::array<uint8_t, 64> zeros = {};
   while (data_bytes > 0) {
     const size_t chunk = static_cast<size_t>(std::min<uint64_t>(data_bytes, zeros.size()));
@@ -426,12 +426,12 @@ bool write_minimal_gguf(const char * path) {
   }
   const int64_t n_tensors = 1;
   const int64_t n_kv = 4;
-  const uint32_t version = emel::model::gguf::k_gguf_version;
+  const uint32_t version = emel::parser::gguf::k_gguf_version;
   if (!write_header(file, version, n_tensors, n_kv)) {
     std::fclose(file);
     return false;
   }
-  if (!write_kv_string(file, emel::model::gguf::k_key_architecture, "llama")) {
+  if (!write_kv_string(file, emel::parser::gguf::k_key_architecture, "llama")) {
     std::fclose(file);
     return false;
   }
@@ -448,7 +448,7 @@ bool write_minimal_gguf(const char * path) {
     return false;
   }
   const std::array<int64_t, 4> dims = {32, 1, 1, 1};
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::tensor_type::k_f32);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::tensor_type::k_f32);
   if (!write_tensor_info(file, "tensor.weight", type, dims, 0)) {
     std::fclose(file);
     return false;
@@ -458,12 +458,12 @@ bool write_minimal_gguf(const char * path) {
     std::fclose(file);
     return false;
   }
-  const uint64_t alignment = emel::model::gguf::k_default_alignment;
+  const uint64_t alignment = emel::parser::gguf::k_default_alignment;
   const uint64_t aligned =
-    emel::model::gguf::align_up_u64(static_cast<uint64_t>(meta_end), alignment);
+    emel::parser::gguf::align_up_u64(static_cast<uint64_t>(meta_end), alignment);
   const uint64_t padding = aligned - static_cast<uint64_t>(meta_end);
   if (padding > 0) {
-    std::array<uint8_t, emel::model::gguf::k_default_alignment> zeros = {};
+    std::array<uint8_t, emel::parser::gguf::k_default_alignment> zeros = {};
     if (std::fwrite(zeros.data(), 1, static_cast<size_t>(padding), file) != padding) {
       std::fclose(file);
       return false;
@@ -486,12 +486,12 @@ bool write_minimal_split_gguf(const char * path, const uint16_t split_count,
   }
   const int64_t n_tensors = 1;
   const int64_t n_kv = 5;
-  const uint32_t version = emel::model::gguf::k_gguf_version;
+  const uint32_t version = emel::parser::gguf::k_gguf_version;
   if (!write_header(file, version, n_tensors, n_kv)) {
     std::fclose(file);
     return false;
   }
-  if (!write_kv_string(file, emel::model::gguf::k_key_architecture, "llama")) {
+  if (!write_kv_string(file, emel::parser::gguf::k_key_architecture, "llama")) {
     std::fclose(file);
     return false;
   }
@@ -499,20 +499,20 @@ bool write_minimal_split_gguf(const char * path, const uint16_t split_count,
     std::fclose(file);
     return false;
   }
-  if (!write_kv_u32(file, emel::model::gguf::k_key_split_count, split_count)) {
+  if (!write_kv_u32(file, emel::parser::gguf::k_key_split_count, split_count)) {
     std::fclose(file);
     return false;
   }
-  if (!write_kv_u32(file, emel::model::gguf::k_key_split_no, split_no)) {
+  if (!write_kv_u32(file, emel::parser::gguf::k_key_split_no, split_no)) {
     std::fclose(file);
     return false;
   }
-  if (!write_kv_u32(file, emel::model::gguf::k_key_split_tensors, 1)) {
+  if (!write_kv_u32(file, emel::parser::gguf::k_key_split_tensors, 1)) {
     std::fclose(file);
     return false;
   }
   const std::array<int64_t, 4> dims = {32, 1, 1, 1};
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::tensor_type::k_f32);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::tensor_type::k_f32);
   if (!write_tensor_info(file, "tensor.weight", type, dims, 0)) {
     std::fclose(file);
     return false;
@@ -522,9 +522,9 @@ bool write_minimal_split_gguf(const char * path, const uint16_t split_count,
     std::fclose(file);
     return false;
   }
-  const uint64_t alignment = emel::model::gguf::k_default_alignment;
+  const uint64_t alignment = emel::parser::gguf::k_default_alignment;
   const uint64_t aligned =
-    emel::model::gguf::align_up_u64(static_cast<uint64_t>(meta_end), alignment);
+    emel::parser::gguf::align_up_u64(static_cast<uint64_t>(meta_end), alignment);
   const uint64_t padding = aligned - static_cast<uint64_t>(meta_end);
   std::array<uint8_t, 64> pad = {};
   if (padding > pad.size() || std::fwrite(pad.data(), 1, padding, file) != padding) {
@@ -549,7 +549,7 @@ bool write_gguf_without_arch(const char * path) {
   }
   const int64_t n_tensors = 1;
   const int64_t n_kv = 1;
-  const uint32_t version = emel::model::gguf::k_gguf_version;
+  const uint32_t version = emel::parser::gguf::k_gguf_version;
   if (!write_header(file, version, n_tensors, n_kv)) {
     std::fclose(file);
     return false;
@@ -559,7 +559,7 @@ bool write_gguf_without_arch(const char * path) {
     return false;
   }
   const std::array<int64_t, 4> dims = {32, 1, 1, 1};
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::tensor_type::k_f32);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::tensor_type::k_f32);
   if (!write_tensor_info(file, "tensor.weight", type, dims, 0)) {
     std::fclose(file);
     return false;
@@ -569,12 +569,12 @@ bool write_gguf_without_arch(const char * path) {
     std::fclose(file);
     return false;
   }
-  const uint64_t alignment = emel::model::gguf::k_default_alignment;
+  const uint64_t alignment = emel::parser::gguf::k_default_alignment;
   const uint64_t aligned =
-    emel::model::gguf::align_up_u64(static_cast<uint64_t>(meta_end), alignment);
+    emel::parser::gguf::align_up_u64(static_cast<uint64_t>(meta_end), alignment);
   const uint64_t padding = aligned - static_cast<uint64_t>(meta_end);
   if (padding > 0) {
-    std::array<uint8_t, emel::model::gguf::k_default_alignment> zeros = {};
+    std::array<uint8_t, emel::parser::gguf::k_default_alignment> zeros = {};
     if (std::fwrite(zeros.data(), 1, static_cast<size_t>(padding), file) != padding) {
       std::fclose(file);
       return false;
@@ -596,12 +596,12 @@ bool write_bad_alignment_gguf(const char * path) {
   }
   const int64_t n_tensors = 0;
   const int64_t n_kv = 1;
-  const uint32_t version = emel::model::gguf::k_gguf_version;
+  const uint32_t version = emel::parser::gguf::k_gguf_version;
   if (!write_header(file, version, n_tensors, n_kv)) {
     std::fclose(file);
     return false;
   }
-  if (!write_kv_u32(file, emel::model::gguf::k_key_alignment, 3)) {
+  if (!write_kv_u32(file, emel::parser::gguf::k_key_alignment, 3)) {
     std::fclose(file);
     return false;
   }
@@ -616,12 +616,12 @@ bool write_bad_tensor_type_gguf(const char * path) {
   }
   const int64_t n_tensors = 1;
   const int64_t n_kv = 2;
-  const uint32_t version = emel::model::gguf::k_gguf_version;
+  const uint32_t version = emel::parser::gguf::k_gguf_version;
   if (!write_header(file, version, n_tensors, n_kv)) {
     std::fclose(file);
     return false;
   }
-  if (!write_kv_string(file, emel::model::gguf::k_key_architecture, "llama")) {
+  if (!write_kv_string(file, emel::parser::gguf::k_key_architecture, "llama")) {
     std::fclose(file);
     return false;
   }
@@ -646,12 +646,12 @@ bool write_bad_tensor_offset_gguf(const char * path) {
   }
   const int64_t n_tensors = 1;
   const int64_t n_kv = 2;
-  const uint32_t version = emel::model::gguf::k_gguf_version;
+  const uint32_t version = emel::parser::gguf::k_gguf_version;
   if (!write_header(file, version, n_tensors, n_kv)) {
     std::fclose(file);
     return false;
   }
-  if (!write_kv_string(file, emel::model::gguf::k_key_architecture, "llama")) {
+  if (!write_kv_string(file, emel::parser::gguf::k_key_architecture, "llama")) {
     std::fclose(file);
     return false;
   }
@@ -660,7 +660,7 @@ bool write_bad_tensor_offset_gguf(const char * path) {
     return false;
   }
   const std::array<int64_t, 4> dims = {32, 1, 1, 1};
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::tensor_type::k_f32);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::tensor_type::k_f32);
   if (!write_tensor_info(file, "tensor.weight", type, dims, 128)) {
     std::fclose(file);
     return false;
@@ -694,31 +694,31 @@ TEST_CASE("gguf loader parses metadata and tensors") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
-  emel::model::parser::event::parse_model parse_request{
+  emel::parser::event::parse_model parse_request{
     .model = &model,
     .model_path = path,
     .format_ctx = &ctx
   };
 
-  CHECK(emel::model::gguf::parse_architecture(parse_request, &err));
+  CHECK(emel::parser::gguf::parse_architecture(parse_request, &err));
   CHECK(err == EMEL_OK);
   CHECK(std::strcmp(model.architecture_name.data(), "llama") == 0);
 
-  CHECK(emel::model::gguf::parse_hparams(parse_request, &err));
+  CHECK(emel::parser::gguf::parse_hparams(parse_request, &err));
   CHECK(err == EMEL_OK);
   CHECK(model.n_layers == 2);
 
-  CHECK(emel::model::gguf::map_tensors(parse_request, &err));
+  CHECK(emel::parser::gguf::map_tensors(parse_request, &err));
   CHECK(err == EMEL_OK);
   CHECK(model.n_tensors == 1);
   CHECK(model.tensors[0].data_size == 128);
@@ -733,23 +733,23 @@ TEST_CASE("gguf loader rejects missing architecture") {
   CHECK(write_gguf_without_arch(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
-  emel::model::parser::event::parse_model parse_request{
+  emel::parser::event::parse_model parse_request{
     .model = &model,
     .model_path = path,
     .format_ctx = &ctx
   };
 
-  CHECK(!emel::model::gguf::parse_architecture(parse_request, &err));
+  CHECK(!emel::parser::gguf::parse_architecture(parse_request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   std::remove(path);
@@ -761,14 +761,14 @@ TEST_CASE("gguf loader rejects invalid alignment") {
   CHECK(write_bad_alignment_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(!emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   std::remove(path);
@@ -780,14 +780,14 @@ TEST_CASE("gguf loader rejects invalid tensor type") {
   CHECK(write_bad_tensor_type_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(!emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   std::remove(path);
@@ -799,14 +799,14 @@ TEST_CASE("gguf loader rejects invalid tensor offsets") {
   CHECK(write_bad_tensor_offset_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(!emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   std::remove(path);
@@ -820,24 +820,24 @@ TEST_CASE("gguf loader accepts long key and array kv") {
   REQUIRE(file != nullptr);
   const int64_t n_tensors = 1;
   const int64_t n_kv = 4;
-  const uint32_t version = emel::model::gguf::k_gguf_version;
+  const uint32_t version = emel::parser::gguf::k_gguf_version;
   REQUIRE(write_header(file, version, n_tensors, n_kv));
-  REQUIRE(write_kv_string(file, emel::model::gguf::k_key_architecture, "llama"));
+  REQUIRE(write_kv_string(file, emel::parser::gguf::k_key_architecture, "llama"));
   REQUIRE(write_kv_u32(file, "llama.block_count", 2));
   const uint32_t arr[2] = {1, 2};
   REQUIRE(write_kv_array_u32(file, "dummy.array", arr, 2));
   REQUIRE(write_long_key_kv(file, 260, 7));
   const std::array<int64_t, 4> dims = {32, 1, 1, 1};
-  const int32_t type = static_cast<int32_t>(emel::model::gguf::tensor_type::k_f32);
+  const int32_t type = static_cast<int32_t>(emel::parser::gguf::tensor_type::k_f32);
   REQUIRE(write_tensor_info(file, "tensor.weight", type, dims, 0));
   const long meta_end = std::ftell(file);
   REQUIRE(meta_end >= 0);
   const uint64_t aligned =
-    emel::model::gguf::align_up_u64(static_cast<uint64_t>(meta_end),
-                                    emel::model::gguf::k_default_alignment);
+    emel::parser::gguf::align_up_u64(static_cast<uint64_t>(meta_end),
+                                    emel::parser::gguf::k_default_alignment);
   const uint64_t padding = aligned - static_cast<uint64_t>(meta_end);
   if (padding > 0) {
-    std::array<uint8_t, emel::model::gguf::k_default_alignment> zeros = {};
+    std::array<uint8_t, emel::parser::gguf::k_default_alignment> zeros = {};
     REQUIRE(std::fwrite(zeros.data(), 1, static_cast<size_t>(padding), file) == padding);
   }
   std::array<uint8_t, 128> weights = {};
@@ -845,14 +845,14 @@ TEST_CASE("gguf loader accepts long key and array kv") {
   std::fclose(file);
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   std::remove(path);
@@ -864,7 +864,7 @@ TEST_CASE("gguf loader checks architecture list") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
@@ -874,10 +874,10 @@ TEST_CASE("gguf loader checks architecture list") {
   request.architectures = archs;
   request.n_architectures = 1;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
-  emel::model::parser::event::parse_model parse_request{
+  emel::parser::event::parse_model parse_request{
     .model = &model,
     .model_path = path,
     .architectures = archs,
@@ -885,8 +885,8 @@ TEST_CASE("gguf loader checks architecture list") {
     .format_ctx = &ctx
   };
 
-  CHECK(emel::model::gguf::parse_architecture(parse_request, &err));
-  CHECK(emel::model::gguf::map_architecture(parse_request, &err));
+  CHECK(emel::parser::gguf::parse_architecture(parse_request, &err));
+  CHECK(emel::parser::gguf::map_architecture(parse_request, &err));
   CHECK(err == EMEL_OK);
 
   std::remove(path);
@@ -898,14 +898,14 @@ TEST_CASE("gguf loader streams weights into provided buffer") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   std::array<uint8_t, 128> buffer = {};
@@ -918,7 +918,7 @@ TEST_CASE("gguf loader streams weights into provided buffer") {
 
   uint64_t done = 0;
   uint64_t total = 0;
-  CHECK(emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_OK);
   CHECK(done == 128);
   CHECK(total == 128);
@@ -933,14 +933,14 @@ TEST_CASE("gguf loader streams weights with upload callbacks") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   std::array<uint8_t, 128> buffer = {};
@@ -958,7 +958,7 @@ TEST_CASE("gguf loader streams weights with upload callbacks") {
 
   uint64_t done = 0;
   uint64_t total = 0;
-  CHECK(emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_OK);
   CHECK(done == total);
   CHECK(probe.begin_calls == 1);
@@ -976,14 +976,14 @@ TEST_CASE("gguf loader rejects partial upload callbacks") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   std::array<uint8_t, 128> buffer = {};
@@ -999,7 +999,7 @@ TEST_CASE("gguf loader rejects partial upload callbacks") {
 
   uint64_t done = 0;
   uint64_t total = 0;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   std::remove(path);
@@ -1011,14 +1011,14 @@ TEST_CASE("gguf loader reports upload begin failure") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   std::array<uint8_t, 128> buffer = {};
@@ -1035,7 +1035,7 @@ TEST_CASE("gguf loader reports upload begin failure") {
 
   uint64_t done = 0;
   uint64_t total = 0;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_BACKEND);
 
   std::remove(path);
@@ -1047,14 +1047,14 @@ TEST_CASE("gguf loader reports upload chunk failure") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   std::array<uint8_t, 128> buffer = {};
@@ -1072,7 +1072,7 @@ TEST_CASE("gguf loader reports upload chunk failure") {
 
   uint64_t done = 0;
   uint64_t total = 0;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_BACKEND);
 
   std::remove(path);
@@ -1084,14 +1084,14 @@ TEST_CASE("gguf loader reports upload end failure") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   std::array<uint8_t, 128> buffer = {};
@@ -1109,16 +1109,16 @@ TEST_CASE("gguf loader reports upload end failure") {
 
   uint64_t done = 0;
   uint64_t total = 0;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_BACKEND);
 
   std::remove(path);
 }
 
 TEST_CASE("gguf validate_split_metadata rejects invalid values") {
-  using emel::model::gguf::validate_split_metadata;
+  using emel::parser::gguf::validate_split_metadata;
 
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   int32_t err = EMEL_OK;
 
   ctx.split_count = 0;
@@ -1155,7 +1155,7 @@ TEST_CASE("gguf validate_split_metadata rejects invalid values") {
   CHECK(validate_split_metadata(ctx, 1, err));
   CHECK(err == EMEL_OK);
 
-  CHECK(emel::model::gguf::is_little_endian());
+  CHECK(emel::parser::gguf::is_little_endian());
 }
 
 TEST_CASE("gguf map_parser rejects negative kv count") {
@@ -1164,17 +1164,17 @@ TEST_CASE("gguf map_parser rejects negative kv count") {
 
   std::FILE * file = std::fopen(path, "wb");
   REQUIRE(file != nullptr);
-  CHECK(write_header(file, emel::model::gguf::k_gguf_version, 0, -1));
+  CHECK(write_header(file, emel::parser::gguf::k_gguf_version, 0, -1));
   std::fclose(file);
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(!emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   std::remove(path);
@@ -1186,17 +1186,17 @@ TEST_CASE("gguf map_parser rejects negative tensor count") {
 
   std::FILE * file = std::fopen(path, "wb");
   REQUIRE(file != nullptr);
-  CHECK(write_header(file, emel::model::gguf::k_gguf_version, -1, 0));
+  CHECK(write_header(file, emel::parser::gguf::k_gguf_version, -1, 0));
   std::fclose(file);
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(!emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   std::remove(path);
@@ -1210,13 +1210,13 @@ TEST_CASE("gguf map_parser rejects invalid split metadata") {
   CHECK(write_split_gguf(path, 1, 1, 1));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(!emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   std::remove(path);
@@ -1230,17 +1230,17 @@ TEST_CASE("gguf map_parser rejects mismatched split metadata") {
   CHECK(write_split_gguf(path, 2, 0, 1));
 
   char split_path[1024] = {};
-  CHECK(emel::model::gguf::format_split_path(path, 1, 2, split_path, sizeof(split_path)));
+  CHECK(emel::parser::gguf::format_split_path(path, 1, 2, split_path, sizeof(split_path)));
   CHECK(write_split_gguf(split_path, 2, 0, 1));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(!emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   std::remove(path);
@@ -1254,14 +1254,14 @@ TEST_CASE("gguf loader rejects direct io on unsupported platforms") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   std::array<uint8_t, 128> buffer = {};
@@ -1276,7 +1276,7 @@ TEST_CASE("gguf loader rejects direct io on unsupported platforms") {
 
   uint64_t done = 0;
   uint64_t total = 0;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_FORMAT_UNSUPPORTED);
 
   std::remove(path);
@@ -1290,19 +1290,19 @@ TEST_CASE("gguf loader streams weights with direct io") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   const uint64_t padded_size =
-    emel::model::gguf::align_up_u64(ctx.data_offset + ctx.data_size,
-                                    emel::model::gguf::k_direct_io_alignment);
+    emel::parser::gguf::align_up_u64(ctx.data_offset + ctx.data_size,
+                                    emel::parser::gguf::k_direct_io_alignment);
   std::FILE * pad = std::fopen(path, "ab");
   REQUIRE(pad != nullptr);
   if (padded_size > 0) {
@@ -1324,7 +1324,7 @@ TEST_CASE("gguf loader streams weights with direct io") {
 
   uint64_t done = 0;
   uint64_t total = 0;
-  CHECK(emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_OK);
   CHECK(done == total);
   CHECK(model.tensors[0].data == buffer.data());
@@ -1339,14 +1339,14 @@ TEST_CASE("gguf loader rejects too-small weight buffer") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   std::array<uint8_t, 64> buffer = {};
@@ -1359,7 +1359,7 @@ TEST_CASE("gguf loader rejects too-small weight buffer") {
 
   uint64_t done = 0;
   uint64_t total = 0;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   std::remove(path);
@@ -1371,21 +1371,21 @@ TEST_CASE("gguf loader validates structure") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
-  CHECK(emel::model::gguf::validate_structure(request, &err));
+  CHECK(emel::parser::gguf::validate_structure(request, &err));
   CHECK(err == EMEL_OK);
 
   ctx.data_offset = 0;
-  CHECK(!emel::model::gguf::validate_structure(request, &err));
+  CHECK(!emel::parser::gguf::validate_structure(request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   std::remove(path);
@@ -1399,14 +1399,14 @@ TEST_CASE("gguf loader maps weights via mmap") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   emel::model::weight_loader::event::load_weights load_req{
@@ -1415,21 +1415,21 @@ TEST_CASE("gguf loader maps weights via mmap") {
 
   uint64_t done = 0;
   uint64_t total = 0;
-  CHECK(emel::model::gguf::map_mmap(load_req, &done, &total, &err));
+  CHECK(emel::parser::gguf::map_mmap(load_req, &done, &total, &err));
   CHECK(err == EMEL_OK);
   CHECK(done == 128);
   CHECK(total == 128);
   CHECK(model.tensors[0].data != nullptr);
 
-  emel::model::gguf::reset_context(ctx);
+  emel::parser::gguf::reset_context(ctx);
   std::remove(path);
 }
 #endif
 
 TEST_CASE("gguf tensor type helpers cover switch cases") {
-  using emel::model::gguf::blck_size_for;
-  using emel::model::gguf::tensor_type;
-  using emel::model::gguf::type_size_for;
+  using emel::parser::gguf::blck_size_for;
+  using emel::parser::gguf::tensor_type;
+  using emel::parser::gguf::type_size_for;
 
   for (int32_t i = 0; i < static_cast<int32_t>(tensor_type::k_count); ++i) {
     const auto type = static_cast<tensor_type>(i);
@@ -1450,9 +1450,9 @@ TEST_CASE("gguf tensor type helpers cover switch cases") {
 }
 
 TEST_CASE("gguf parses u32 values across types") {
-  using emel::model::gguf::parse_u32_value;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::parse_u32_value;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   {
     std::FILE * file = std::tmpfile();
@@ -1519,11 +1519,11 @@ TEST_CASE("gguf parses u32 values across types") {
 }
 
 TEST_CASE("gguf compute_tensor_size handles invalid dimensions") {
-  using emel::model::gguf::compute_tensor_size;
-  using emel::model::gguf::tensor_type;
+  using emel::parser::gguf::compute_tensor_size;
+  using emel::parser::gguf::tensor_type;
 
   uint64_t out = 0;
-  std::array<int64_t, emel::model::gguf::k_max_dims> dims = {32, 1, 1, 1};
+  std::array<int64_t, emel::parser::gguf::k_max_dims> dims = {32, 1, 1, 1};
   CHECK(compute_tensor_size(dims, tensor_type::k_f32, out));
   CHECK(out > 0);
 
@@ -1538,10 +1538,10 @@ TEST_CASE("gguf compute_tensor_size handles invalid dimensions") {
 }
 
 TEST_CASE("gguf read_key and skip_value cover branches") {
-  using emel::model::gguf::read_key;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::skip_value;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::read_key;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::skip_value;
+  using emel::parser::gguf::value_type;
 
   {
     std::FILE * file = std::tmpfile();
@@ -1610,8 +1610,8 @@ TEST_CASE("gguf read_key and skip_value cover branches") {
 }
 
 TEST_CASE("gguf parse_header rejects invalid versions") {
-  using emel::model::gguf::parse_header;
-  using emel::model::gguf::reader;
+  using emel::parser::gguf::parse_header;
+  using emel::parser::gguf::reader;
 
   {
     std::FILE * file = std::tmpfile();
@@ -1620,7 +1620,7 @@ TEST_CASE("gguf parse_header rejects invalid versions") {
     REQUIRE(std::fwrite(bad_magic, 1, sizeof(bad_magic), file) == sizeof(bad_magic));
     std::rewind(file);
     reader r{file};
-    emel::model::gguf::context ctx{};
+    emel::parser::gguf::context ctx{};
     int64_t n_tensors = 0;
     int64_t n_kv = 0;
     CHECK(!parse_header(r, ctx, n_tensors, n_kv));
@@ -1633,7 +1633,7 @@ TEST_CASE("gguf parse_header rejects invalid versions") {
     REQUIRE(write_header(file, 0, 0, 0));
     std::rewind(file);
     reader r{file};
-    emel::model::gguf::context ctx{};
+    emel::parser::gguf::context ctx{};
     int64_t n_tensors = 0;
     int64_t n_kv = 0;
     CHECK(!parse_header(r, ctx, n_tensors, n_kv));
@@ -1643,11 +1643,11 @@ TEST_CASE("gguf parse_header rejects invalid versions") {
   {
     std::FILE * file = std::tmpfile();
     REQUIRE(file != nullptr);
-    const uint32_t bad_version = emel::model::gguf::k_gguf_version + 1;
+    const uint32_t bad_version = emel::parser::gguf::k_gguf_version + 1;
     REQUIRE(write_header(file, bad_version, 0, 0));
     std::rewind(file);
     reader r{file};
-    emel::model::gguf::context ctx{};
+    emel::parser::gguf::context ctx{};
     int64_t n_tensors = 0;
     int64_t n_kv = 0;
     CHECK(!parse_header(r, ctx, n_tensors, n_kv));
@@ -1656,14 +1656,14 @@ TEST_CASE("gguf parse_header rejects invalid versions") {
 }
 
 TEST_CASE("gguf parse_kv binds pending block count") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
   REQUIRE(write_kv_u32(file, "llama.block_count", 7));
-  REQUIRE(write_kv_string(file, emel::model::gguf::k_key_architecture, "llama"));
+  REQUIRE(write_kv_string(file, emel::parser::gguf::k_key_architecture, "llama"));
   std::rewind(file);
 
   reader r{file};
@@ -1675,11 +1675,11 @@ TEST_CASE("gguf parse_kv binds pending block count") {
 }
 
 TEST_CASE("gguf parser reports missing model data") {
-  using emel::model::gguf::map_architecture;
-  using emel::model::gguf::map_tensors;
-  using emel::model::gguf::parse_hparams;
+  using emel::parser::gguf::map_architecture;
+  using emel::parser::gguf::map_tensors;
+  using emel::parser::gguf::parse_hparams;
 
-  emel::model::parser::event::parse_model parse_request{};
+  emel::parser::event::parse_model parse_request{};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
   CHECK(!map_tensors(parse_request, &err));
@@ -1699,21 +1699,21 @@ TEST_CASE("gguf map_architecture rejects mismatched list") {
   std::memcpy(model.architecture_name.data(), "llama", 6);
 
   const char * list[] = {"gpt", "other"};
-  emel::model::parser::event::parse_model parse_request{};
+  emel::parser::event::parse_model parse_request{};
   parse_request.model = &model;
   parse_request.architectures = list;
   parse_request.n_architectures = 2;
 
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::map_architecture(parse_request, &err));
+  CHECK(!emel::parser::gguf::map_architecture(parse_request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 }
 
 TEST_CASE("gguf parse_kv handles arrays and alignment") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   {
     std::FILE * file = std::tmpfile();
@@ -1732,7 +1732,7 @@ TEST_CASE("gguf parse_kv handles arrays and alignment") {
   {
     std::FILE * file = std::tmpfile();
     REQUIRE(file != nullptr);
-    REQUIRE(write_string(file, emel::model::gguf::k_key_alignment));
+    REQUIRE(write_string(file, emel::parser::gguf::k_key_alignment));
     const int32_t type = static_cast<int32_t>(value_type::k_u32);
     REQUIRE(std::fwrite(&type, 1, sizeof(type), file) == sizeof(type));
     const uint32_t alignment = 3;
@@ -1769,15 +1769,15 @@ TEST_CASE("gguf parse_kv handles arrays and alignment") {
 }
 
 TEST_CASE("gguf parse_kv handles split metadata") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
-  REQUIRE(write_kv_u32(file, emel::model::gguf::k_key_split_count, 2));
-  REQUIRE(write_kv_u32(file, emel::model::gguf::k_key_split_no, 1));
-  REQUIRE(write_kv_u32(file, emel::model::gguf::k_key_split_tensors, 4));
+  REQUIRE(write_kv_u32(file, emel::parser::gguf::k_key_split_count, 2));
+  REQUIRE(write_kv_u32(file, emel::parser::gguf::k_key_split_no, 1));
+  REQUIRE(write_kv_u32(file, emel::parser::gguf::k_key_split_tensors, 4));
   std::rewind(file);
 
   reader r{file};
@@ -1791,9 +1791,9 @@ TEST_CASE("gguf parse_kv handles split metadata") {
 }
 
 TEST_CASE("gguf parse_kv loads tokenizer metadata and arrays") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
@@ -1837,14 +1837,14 @@ TEST_CASE("gguf parse_kv loads tokenizer metadata and arrays") {
 }
 
 TEST_CASE("gguf parse_hparams loads core fields") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_hparams;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_hparams;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
-  REQUIRE(write_kv_string(file, emel::model::gguf::k_key_architecture, "llama"));
+  REQUIRE(write_kv_string(file, emel::parser::gguf::k_key_architecture, "llama"));
   REQUIRE(write_kv_u32(file, "llama.block_count", 2));
   REQUIRE(write_kv_u32(file, "llama.context_length", 2048));
   REQUIRE(write_kv_u32(file, "llama.embedding_length", 4096));
@@ -1858,7 +1858,7 @@ TEST_CASE("gguf parse_hparams loads core fields") {
   emel::model::data local_model{};
   int32_t err = EMEL_OK;
   CHECK(parse_kv(r, ctx, local_model, 7, err));
-  emel::model::parser::event::parse_model request{};
+  emel::parser::event::parse_model request{};
   request.model = &local_model;
   request.format_ctx = &ctx;
   CHECK(parse_hparams(request, &err));
@@ -1872,8 +1872,8 @@ TEST_CASE("gguf parse_hparams loads core fields") {
 }
 
 TEST_CASE("gguf load_streamed supports split weights") {
-  using emel::model::gguf::map_parser;
-  using emel::model::gguf::load_streamed;
+  using emel::parser::gguf::map_parser;
+  using emel::parser::gguf::load_streamed;
 
 #if defined(_WIN32)
   return;
@@ -1890,7 +1890,7 @@ TEST_CASE("gguf load_streamed supports split weights") {
   REQUIRE(write_minimal_split_gguf(path1.c_str(), 2, 1, 2.0f));
 
   emel::model::data local_model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{local_model};
   request.model_path = path0;
   request.format_ctx = &ctx;
@@ -1928,10 +1928,10 @@ TEST_CASE("gguf load_streamed supports split weights") {
 }
 
 TEST_CASE("gguf parse_tensors rejects oversize name") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_tensors;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::tensor_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_tensors;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::tensor_type;
 
   emel::model::data model{};
   context ctx{};
@@ -1939,9 +1939,9 @@ TEST_CASE("gguf parse_tensors rejects oversize name") {
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
 
-  const uint64_t name_len = emel::model::gguf::k_max_key_length;
+  const uint64_t name_len = emel::parser::gguf::k_max_key_length;
   REQUIRE(std::fwrite(&name_len, 1, sizeof(name_len), file) == sizeof(name_len));
-  std::array<char, emel::model::gguf::k_max_key_length> name = {};
+  std::array<char, emel::parser::gguf::k_max_key_length> name = {};
   std::memset(name.data(), 'a', name.size());
   REQUIRE(std::fwrite(name.data(), 1, name.size(), file) == name.size());
   REQUIRE(write_u32(file, 1));
@@ -1957,11 +1957,11 @@ TEST_CASE("gguf parse_tensors rejects oversize name") {
 }
 
 TEST_CASE("gguf helper functions cover branch paths") {
-  using emel::model::gguf::add_overflow_u64;
-  using emel::model::gguf::align_up_u64;
-  using emel::model::gguf::key_equals;
-  using emel::model::gguf::key_has_suffix;
-  using emel::model::gguf::mul_overflow_u64;
+  using emel::parser::gguf::add_overflow_u64;
+  using emel::parser::gguf::align_up_u64;
+  using emel::parser::gguf::key_equals;
+  using emel::parser::gguf::key_has_suffix;
+  using emel::parser::gguf::mul_overflow_u64;
 
   CHECK(align_up_u64(64, 32) == 64);
   CHECK(align_up_u64(65, 32) == 96);
@@ -1987,9 +1987,9 @@ TEST_CASE("gguf helper functions cover branch paths") {
 }
 
 TEST_CASE("gguf read_string and skip_value cover branches") {
-  using emel::model::gguf::reader;
-  using emel::model::gguf::skip_value;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::skip_value;
+  using emel::parser::gguf::value_type;
 
   {
     std::FILE * file = std::tmpfile();
@@ -2061,22 +2061,22 @@ TEST_CASE("gguf read_string and skip_value cover branches") {
 
 TEST_CASE("gguf parse_tensors validates counts") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   int32_t err = EMEL_OK;
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
-  emel::model::gguf::reader r{file};
-  CHECK(!emel::model::gguf::parse_tensors(r, ctx, model, -1, 0, 0, 0, err));
+  emel::parser::gguf::reader r{file};
+  CHECK(!emel::parser::gguf::parse_tensors(r, ctx, model, -1, 0, 0, 0, err));
   std::fclose(file);
 }
 
 TEST_CASE("gguf parse_tensors rejects invalid entries") {
-  using emel::model::gguf::parse_tensors;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::tensor_type;
+  using emel::parser::gguf::parse_tensors;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::tensor_type;
 
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   int32_t err = EMEL_OK;
 
   {
@@ -2098,7 +2098,7 @@ TEST_CASE("gguf parse_tensors rejects invalid entries") {
     std::FILE * file = std::tmpfile();
     REQUIRE(file != nullptr);
     REQUIRE(write_string(file, "tensor"));
-    REQUIRE(write_u32(file, emel::model::gguf::k_max_dims + 1));
+    REQUIRE(write_u32(file, emel::parser::gguf::k_max_dims + 1));
     std::rewind(file);
     reader r{file};
     CHECK(!parse_tensors(r, ctx, model, 1, 0, 0, 0, err));
@@ -2165,12 +2165,12 @@ TEST_CASE("gguf parse_tensors rejects invalid entries") {
 
 TEST_CASE("gguf map_parser handles invalid inputs") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
 
   {
     emel::model::loader::event::load request{model};
     int32_t err = EMEL_OK;
-    CHECK(!emel::model::gguf::map_parser(request, &err));
+    CHECK(!emel::parser::gguf::map_parser(request, &err));
     CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 
@@ -2179,7 +2179,7 @@ TEST_CASE("gguf map_parser handles invalid inputs") {
     request.format_ctx = &ctx;
     request.model_path = "";
     int32_t err = EMEL_OK;
-    CHECK(!emel::model::gguf::map_parser(request, &err));
+    CHECK(!emel::parser::gguf::map_parser(request, &err));
     CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   }
 
@@ -2194,7 +2194,7 @@ TEST_CASE("gguf map_parser handles invalid inputs") {
     request.format_ctx = &ctx;
     request.file_handle = file;
     int32_t err = EMEL_OK;
-    CHECK(!emel::model::gguf::map_parser(request, &err));
+    CHECK(!emel::parser::gguf::map_parser(request, &err));
     CHECK(err == EMEL_ERR_FORMAT_UNSUPPORTED);
     std::fclose(file);
   }
@@ -2202,35 +2202,35 @@ TEST_CASE("gguf map_parser handles invalid inputs") {
 
 TEST_CASE("gguf parse_architecture and hparams handle invalid ctx") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
-  emel::model::parser::event::parse_model parse_request{};
+  emel::parser::gguf::context ctx{};
+  emel::parser::event::parse_model parse_request{};
   parse_request.model = &model;
   parse_request.format_ctx = &ctx;
 
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::parse_architecture(parse_request, &err));
+  CHECK(!emel::parser::gguf::parse_architecture(parse_request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   std::memcpy(ctx.architecture.data(), "llama", 5);
   ctx.architecture_len = static_cast<uint32_t>(model.architecture_name.size());
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::parse_architecture(parse_request, &err));
+  CHECK(!emel::parser::gguf::parse_architecture(parse_request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   ctx.architecture_len = 5;
   err = EMEL_OK;
-  CHECK(emel::model::gguf::parse_architecture(parse_request, &err));
+  CHECK(emel::parser::gguf::parse_architecture(parse_request, &err));
   CHECK(std::strcmp(model.architecture_name.data(), "llama") == 0);
 
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::parse_hparams(parse_request, &err));
+  CHECK(!emel::parser::gguf::parse_hparams(parse_request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   ctx.block_count = 3;
   model.params.n_ctx = 1;
   model.params.n_embd = 1;
   err = EMEL_OK;
-  CHECK(emel::model::gguf::parse_hparams(parse_request, &err));
+  CHECK(emel::parser::gguf::parse_hparams(parse_request, &err));
   CHECK(model.n_layers == 3);
 }
 
@@ -2239,38 +2239,38 @@ TEST_CASE("gguf map_tensors and map_layers validate counts") {
   emel::model::loader::event::load request{model};
   int32_t err = EMEL_OK;
 
-  CHECK(!emel::model::gguf::map_tensors({.model = nullptr}, &err));
+  CHECK(!emel::parser::gguf::map_tensors({.model = nullptr}, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
-  emel::model::parser::event::parse_model parse_request{};
+  emel::parser::event::parse_model parse_request{};
   parse_request.model = &model;
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::map_tensors(parse_request, &err));
+  CHECK(!emel::parser::gguf::map_tensors(parse_request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   model.n_tensors = 1;
   err = EMEL_OK;
-  CHECK(emel::model::gguf::map_tensors(parse_request, &err));
+  CHECK(emel::parser::gguf::map_tensors(parse_request, &err));
 
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::map_layers(request, &err));
+  CHECK(!emel::parser::gguf::map_layers(request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 
   model.n_layers = 2;
   err = EMEL_OK;
-  CHECK(emel::model::gguf::map_layers(request, &err));
+  CHECK(emel::parser::gguf::map_layers(request, &err));
 }
 
 TEST_CASE("gguf parse_kv handles i32 alignment and string arrays") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   {
     std::FILE * file = std::tmpfile();
     REQUIRE(file != nullptr);
-    REQUIRE(write_string(file, emel::model::gguf::k_key_alignment));
+    REQUIRE(write_string(file, emel::parser::gguf::k_key_alignment));
     const int32_t type = static_cast<int32_t>(value_type::k_i32);
     REQUIRE(std::fwrite(&type, 1, sizeof(type), file) == sizeof(type));
     const int32_t alignment = 64;
@@ -2309,41 +2309,41 @@ TEST_CASE("gguf parse_kv handles i32 alignment and string arrays") {
 
 TEST_CASE("gguf map_parser rejects long path") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{model};
   request.format_ctx = &ctx;
 
-  std::array<char, emel::model::gguf::k_max_path_length + 1> buf = {};
+  std::array<char, emel::parser::gguf::k_max_path_length + 1> buf = {};
   std::memset(buf.data(), 'a', buf.size());
   request.model_path = std::string_view{buf.data(), buf.size()};
 
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(!emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("gguf parse_tensors rejects oversize tensor count") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   int32_t err = EMEL_OK;
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
-  emel::model::gguf::reader r{file};
-  CHECK(!emel::model::gguf::parse_tensors(r, ctx, model,
+  emel::parser::gguf::reader r{file};
+  CHECK(!emel::parser::gguf::parse_tensors(r, ctx, model,
     emel::model::data::k_max_tensors + 1, 0, 0, 0, err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
   std::fclose(file);
 }
 
 TEST_CASE("gguf parse_kv handles architecture type errors") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
-  REQUIRE(write_string(file, emel::model::gguf::k_key_architecture));
+  REQUIRE(write_string(file, emel::parser::gguf::k_key_architecture));
   const int32_t type = static_cast<int32_t>(value_type::k_u32);
   REQUIRE(std::fwrite(&type, 1, sizeof(type), file) == sizeof(type));
   const uint32_t value = 7;
@@ -2359,8 +2359,8 @@ TEST_CASE("gguf parse_kv handles architecture type errors") {
 }
 
 TEST_CASE("gguf parse_header rejects zero low bits") {
-  using emel::model::gguf::parse_header;
-  using emel::model::gguf::reader;
+  using emel::parser::gguf::parse_header;
+  using emel::parser::gguf::reader;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
@@ -2375,7 +2375,7 @@ TEST_CASE("gguf parse_header rejects zero low bits") {
   std::rewind(file);
 
   reader r{file};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   int64_t out_tensors = 0;
   int64_t out_kv = 0;
   CHECK(!parse_header(r, ctx, out_tensors, out_kv));
@@ -2383,19 +2383,19 @@ TEST_CASE("gguf parse_header rejects zero low bits") {
 }
 
 TEST_CASE("gguf parse_kv reports invalid architecture string length") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
-  REQUIRE(write_string(file, emel::model::gguf::k_key_architecture));
+  REQUIRE(write_string(file, emel::parser::gguf::k_key_architecture));
   const int32_t type = static_cast<int32_t>(value_type::k_string);
   REQUIRE(std::fwrite(&type, 1, sizeof(type), file) == sizeof(type));
-  const uint64_t len = emel::model::gguf::k_max_architecture;
+  const uint64_t len = emel::parser::gguf::k_max_architecture;
   REQUIRE(std::fwrite(&len, 1, sizeof(len), file) == sizeof(len));
-  std::array<char, emel::model::gguf::k_max_architecture> name = {};
+  std::array<char, emel::parser::gguf::k_max_architecture> name = {};
   REQUIRE(std::fwrite(name.data(), 1, name.size(), file) == name.size());
   std::rewind(file);
 
@@ -2408,10 +2408,10 @@ TEST_CASE("gguf parse_kv reports invalid architecture string length") {
 }
 
 TEST_CASE("gguf parse_kv handles array string read failure") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
@@ -2433,10 +2433,10 @@ TEST_CASE("gguf parse_kv handles array string read failure") {
 }
 
 TEST_CASE("gguf parse_kv ignores oversize block_count prefix") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
@@ -2465,26 +2465,26 @@ TEST_CASE("gguf parse_kv ignores oversize block_count prefix") {
 #if !defined(_WIN32)
 TEST_CASE("gguf map_mmap handles invalid requests") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
 
   emel::model::weight_loader::event::load_weights load_req{};
   uint64_t done = 0;
   uint64_t total = 0;
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::map_mmap(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::map_mmap(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   emel::model::loader::event::load request{model};
   request.format_ctx = nullptr;
   load_req.loader_request = &request;
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::map_mmap(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::map_mmap(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   request.format_ctx = &ctx;
   request.model_path = "";
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::map_mmap(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::map_mmap(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   ctx.mapped_data = &ctx;
@@ -2495,7 +2495,7 @@ TEST_CASE("gguf map_mmap handles invalid requests") {
   ctx.data_offset = 8;
   ctx.data_size = 16;
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::map_mmap(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::map_mmap(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
   ctx.mapped_data = nullptr;
   ctx.mapped_size = 0;
@@ -2507,33 +2507,33 @@ TEST_CASE("gguf map_mmap handles invalid requests") {
 
 TEST_CASE("gguf load_streamed reports invalid requests") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
 
   emel::model::weight_loader::event::load_weights load_req{};
   uint64_t done = 0;
   uint64_t total = 0;
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   emel::model::loader::event::load request{model};
   request.format_ctx = nullptr;
   load_req.loader_request = &request;
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   request.format_ctx = &ctx;
   request.weights_buffer = nullptr;
   request.weights_buffer_size = 0;
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("gguf load_streamed handles fseek and fread failures") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
@@ -2555,7 +2555,7 @@ TEST_CASE("gguf load_streamed handles fseek and fread failures") {
   uint64_t done = 0;
   uint64_t total = 0;
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_IO);
 
   ctx.file = std::tmpfile();
@@ -2564,15 +2564,15 @@ TEST_CASE("gguf load_streamed handles fseek and fread failures") {
   REQUIRE(std::fwrite(small_data.data(), 1, small_data.size(), ctx.file) == small_data.size());
   std::rewind(ctx.file);
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_IO);
   std::fclose(ctx.file);
   ctx.file = nullptr;
 }
 
 TEST_CASE("gguf reader rejects null file") {
-  using emel::model::gguf::read_key;
-  using emel::model::gguf::reader;
+  using emel::parser::gguf::read_key;
+  using emel::parser::gguf::reader;
 
   reader r{};
   uint32_t value = 0;
@@ -2585,8 +2585,8 @@ TEST_CASE("gguf reader rejects null file") {
 }
 
 TEST_CASE("gguf reader handles short strings") {
-  using emel::model::gguf::read_key;
-  using emel::model::gguf::reader;
+  using emel::parser::gguf::read_key;
+  using emel::parser::gguf::reader;
 
   {
     std::FILE * file = std::tmpfile();
@@ -2620,9 +2620,9 @@ TEST_CASE("gguf reader handles short strings") {
 }
 
 TEST_CASE("gguf parse_u32_value handles read failures") {
-  using emel::model::gguf::parse_u32_value;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::parse_u32_value;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
@@ -2635,14 +2635,14 @@ TEST_CASE("gguf parse_u32_value handles read failures") {
 }
 
 TEST_CASE("gguf parse_header handles short reads") {
-  using emel::model::gguf::parse_header;
-  using emel::model::gguf::reader;
+  using emel::parser::gguf::parse_header;
+  using emel::parser::gguf::reader;
 
   {
     std::FILE * file = std::tmpfile();
     REQUIRE(file != nullptr);
     reader r{file};
-    emel::model::gguf::context ctx{};
+    emel::parser::gguf::context ctx{};
     int64_t n_tensors = 0;
     int64_t n_kv = 0;
     CHECK(!parse_header(r, ctx, n_tensors, n_kv));
@@ -2656,7 +2656,7 @@ TEST_CASE("gguf parse_header handles short reads") {
     REQUIRE(std::fwrite(magic, 1, sizeof(magic), file) == sizeof(magic));
     std::rewind(file);
     reader r{file};
-    emel::model::gguf::context ctx{};
+    emel::parser::gguf::context ctx{};
     int64_t n_tensors = 0;
     int64_t n_kv = 0;
     CHECK(!parse_header(r, ctx, n_tensors, n_kv));
@@ -2668,11 +2668,11 @@ TEST_CASE("gguf parse_header handles short reads") {
     REQUIRE(file != nullptr);
     const char magic[4] = {'G', 'G', 'U', 'F'};
     REQUIRE(std::fwrite(magic, 1, sizeof(magic), file) == sizeof(magic));
-    const uint32_t version = emel::model::gguf::k_gguf_version;
+    const uint32_t version = emel::parser::gguf::k_gguf_version;
     REQUIRE(std::fwrite(&version, 1, sizeof(version), file) == sizeof(version));
     std::rewind(file);
     reader r{file};
-    emel::model::gguf::context ctx{};
+    emel::parser::gguf::context ctx{};
     int64_t n_tensors = 0;
     int64_t n_kv = 0;
     CHECK(!parse_header(r, ctx, n_tensors, n_kv));
@@ -2684,13 +2684,13 @@ TEST_CASE("gguf parse_header handles short reads") {
     REQUIRE(file != nullptr);
     const char magic[4] = {'G', 'G', 'U', 'F'};
     REQUIRE(std::fwrite(magic, 1, sizeof(magic), file) == sizeof(magic));
-    const uint32_t version = emel::model::gguf::k_gguf_version;
+    const uint32_t version = emel::parser::gguf::k_gguf_version;
     REQUIRE(std::fwrite(&version, 1, sizeof(version), file) == sizeof(version));
     const int64_t n_tensors = 1;
     REQUIRE(std::fwrite(&n_tensors, 1, sizeof(n_tensors), file) == sizeof(n_tensors));
     std::rewind(file);
     reader r{file};
-    emel::model::gguf::context ctx{};
+    emel::parser::gguf::context ctx{};
     int64_t out_tensors = 0;
     int64_t out_kv = 0;
     CHECK(!parse_header(r, ctx, out_tensors, out_kv));
@@ -2699,7 +2699,7 @@ TEST_CASE("gguf parse_header handles short reads") {
 }
 
 TEST_CASE("gguf store_name rejects overflow conditions") {
-  using emel::model::gguf::store_name;
+  using emel::parser::gguf::store_name;
 
   emel::model::data model{};
   uint32_t offset = 0;
@@ -2711,7 +2711,7 @@ TEST_CASE("gguf store_name rejects overflow conditions") {
 }
 
 TEST_CASE("gguf helper functions cover zero multiplication") {
-  using emel::model::gguf::mul_overflow_u64;
+  using emel::parser::gguf::mul_overflow_u64;
 
   uint64_t out = 1;
   CHECK(!mul_overflow_u64(0, 10, out));
@@ -2721,10 +2721,10 @@ TEST_CASE("gguf helper functions cover zero multiplication") {
 }
 
 TEST_CASE("gguf parse_kv handles read failures") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   {
     std::FILE * file = std::tmpfile();
@@ -2784,15 +2784,15 @@ TEST_CASE("gguf parse_kv handles read failures") {
 }
 
 TEST_CASE("gguf parse_kv reports split metadata parse failures") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   {
     std::FILE * file = std::tmpfile();
     REQUIRE(file != nullptr);
-    REQUIRE(write_string(file, emel::model::gguf::k_key_split_count));
+    REQUIRE(write_string(file, emel::parser::gguf::k_key_split_count));
     const int32_t type = static_cast<int32_t>(value_type::k_f32);
     REQUIRE(std::fwrite(&type, 1, sizeof(type), file) == sizeof(type));
     std::rewind(file);
@@ -2807,7 +2807,7 @@ TEST_CASE("gguf parse_kv reports split metadata parse failures") {
   {
     std::FILE * file = std::tmpfile();
     REQUIRE(file != nullptr);
-    REQUIRE(write_string(file, emel::model::gguf::k_key_split_no));
+    REQUIRE(write_string(file, emel::parser::gguf::k_key_split_no));
     const int32_t type = static_cast<int32_t>(value_type::k_f32);
     REQUIRE(std::fwrite(&type, 1, sizeof(type), file) == sizeof(type));
     std::rewind(file);
@@ -2822,7 +2822,7 @@ TEST_CASE("gguf parse_kv reports split metadata parse failures") {
   {
     std::FILE * file = std::tmpfile();
     REQUIRE(file != nullptr);
-    REQUIRE(write_string(file, emel::model::gguf::k_key_split_tensors));
+    REQUIRE(write_string(file, emel::parser::gguf::k_key_split_tensors));
     const int32_t type = static_cast<int32_t>(value_type::k_f32);
     REQUIRE(std::fwrite(&type, 1, sizeof(type), file) == sizeof(type));
     std::rewind(file);
@@ -2836,10 +2836,10 @@ TEST_CASE("gguf parse_kv reports split metadata parse failures") {
 }
 
 TEST_CASE("gguf parse_kv reports block_count parse failures") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
@@ -2856,14 +2856,14 @@ TEST_CASE("gguf parse_kv reports block_count parse failures") {
 }
 
 TEST_CASE("gguf parse_kv reports alignment parse failures") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
-  REQUIRE(write_string(file, emel::model::gguf::k_key_alignment));
+  REQUIRE(write_string(file, emel::parser::gguf::k_key_alignment));
   const int32_t type = static_cast<int32_t>(value_type::k_f32);
   REQUIRE(std::fwrite(&type, 1, sizeof(type), file) == sizeof(type));
   std::rewind(file);
@@ -2877,10 +2877,10 @@ TEST_CASE("gguf parse_kv reports alignment parse failures") {
 }
 
 TEST_CASE("gguf parse_kv reports unknown skip failures") {
-  using emel::model::gguf::context;
-  using emel::model::gguf::parse_kv;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::value_type;
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::value_type;
 
   std::FILE * file = std::tmpfile();
   REQUIRE(file != nullptr);
@@ -2897,12 +2897,12 @@ TEST_CASE("gguf parse_kv reports unknown skip failures") {
 }
 
 TEST_CASE("gguf parse_tensors handles read failures") {
-  using emel::model::gguf::parse_tensors;
-  using emel::model::gguf::reader;
-  using emel::model::gguf::tensor_type;
+  using emel::parser::gguf::parse_tensors;
+  using emel::parser::gguf::reader;
+  using emel::parser::gguf::tensor_type;
 
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   int32_t err = EMEL_OK;
 
   {
@@ -2954,18 +2954,18 @@ TEST_CASE("gguf parse_tensors handles read failures") {
 }
 
 TEST_CASE("gguf compute_tensor_size rejects invalid type") {
-  using emel::model::gguf::compute_tensor_size;
-  using emel::model::gguf::tensor_type;
+  using emel::parser::gguf::compute_tensor_size;
+  using emel::parser::gguf::tensor_type;
 
   uint64_t out = 0;
-  std::array<int64_t, emel::model::gguf::k_max_dims> dims = {1, 1, 1, 1};
+  std::array<int64_t, emel::parser::gguf::k_max_dims> dims = {1, 1, 1, 1};
   const auto invalid = static_cast<tensor_type>(static_cast<int32_t>(tensor_type::k_count));
   CHECK(!compute_tensor_size(dims, invalid, out));
 }
 
 TEST_CASE("gguf map_parser reports file open failure") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{model};
   request.format_ctx = &ctx;
 
@@ -2975,7 +2975,7 @@ TEST_CASE("gguf map_parser reports file open failure") {
   request.model_path = path;
 
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::map_parser(request, &err));
+  CHECK(!emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_ERR_IO);
 }
 
@@ -2983,48 +2983,48 @@ TEST_CASE("gguf validate_structure handles null context") {
   emel::model::data model{};
   emel::model::loader::event::load request{model};
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::validate_structure(request, &err));
+  CHECK(!emel::parser::gguf::validate_structure(request, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("gguf parse_architecture handles null model") {
-  emel::model::gguf::context ctx{};
-  emel::model::parser::event::parse_model parse_request{
+  emel::parser::gguf::context ctx{};
+  emel::parser::event::parse_model parse_request{
     .model = nullptr,
     .format_ctx = &ctx
   };
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::parse_architecture(parse_request, &err));
+  CHECK(!emel::parser::gguf::parse_architecture(parse_request, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("gguf map_architecture accepts empty whitelist") {
   emel::model::data model{};
   std::memcpy(model.architecture_name.data(), "llama", 6);
-  emel::model::parser::event::parse_model parse_request{
+  emel::parser::event::parse_model parse_request{
     .model = &model,
     .architectures = nullptr,
     .n_architectures = 0
   };
   int32_t err = EMEL_OK;
-  CHECK(emel::model::gguf::map_architecture(parse_request, &err));
+  CHECK(emel::parser::gguf::map_architecture(parse_request, &err));
   CHECK(err == EMEL_OK);
 }
 
 TEST_CASE("gguf validate_structure rejects empty weights") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{model};
   request.format_ctx = &ctx;
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::validate_structure(request, &err));
+  CHECK(!emel::parser::gguf::validate_structure(request, &err));
   CHECK(err == EMEL_ERR_MODEL_INVALID);
 }
 
 #if !defined(_WIN32)
 TEST_CASE("gguf map_mmap reports file open failure") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{model};
   request.format_ctx = &ctx;
 
@@ -3040,14 +3040,14 @@ TEST_CASE("gguf map_mmap reports file open failure") {
   uint64_t done = 0;
   uint64_t total = 0;
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::map_mmap(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::map_mmap(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_IO);
 }
 #endif
 
 TEST_CASE("gguf load_streamed reports path errors") {
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   ctx.data_size = 0;
 
   emel::model::loader::event::load request{model};
@@ -3064,7 +3064,7 @@ TEST_CASE("gguf load_streamed reports path errors") {
   uint64_t total = 0;
   int32_t err = EMEL_OK;
   request.model_path = "";
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   char path[128] = {};
@@ -3072,7 +3072,7 @@ TEST_CASE("gguf load_streamed reports path errors") {
   std::remove(path);
   request.model_path = path;
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_IO);
 }
 
@@ -3082,14 +3082,14 @@ TEST_CASE("gguf load_streamed handles owned files") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_OK;
 
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
   ctx.file = nullptr;
 
@@ -3102,7 +3102,7 @@ TEST_CASE("gguf load_streamed handles owned files") {
   };
   uint64_t done = 0;
   uint64_t total = 0;
-  CHECK(emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_OK);
   CHECK(done == 128);
   CHECK(total == 128);
@@ -3128,7 +3128,7 @@ TEST_CASE("gguf load_streamed handles owned files") {
   model.weights_split_offsets[0] = 0;
   ctx.split_count = 1;
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::load_streamed(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::load_streamed(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_IO);
 
   std::remove(short_path);
@@ -3143,19 +3143,19 @@ TEST_CASE("gguf init_mappings maps files") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
 
   int32_t err = EMEL_OK;
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   emel::model::weight_loader::event::load_weights load_req{
     .loader_request = &request
   };
-  CHECK(emel::model::gguf::init_mappings(load_req, &err));
+  CHECK(emel::parser::gguf::init_mappings(load_req, &err));
   CHECK(err == EMEL_OK);
   CHECK(ctx.mapped_count == request.model_data.weights_split_count);
 
@@ -3170,7 +3170,7 @@ TEST_CASE("gguf clean_up_weights unmaps unused ranges") {
   REQUIRE(mapping != MAP_FAILED);
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   ctx.mapped_splits[0] = mapping;
   ctx.mapped_sizes[0] = map_size;
   ctx.mapped_count = 1;
@@ -3191,53 +3191,53 @@ TEST_CASE("gguf clean_up_weights unmaps unused ranges") {
     .loader_request = &request
   };
   int32_t err = EMEL_OK;
-  CHECK(emel::model::gguf::clean_up_weights(load_req, &err));
+  CHECK(emel::parser::gguf::clean_up_weights(load_req, &err));
   CHECK(err == EMEL_OK);
 }
 
 TEST_CASE("gguf init_mappings reports invalid requests") {
   emel::model::weight_loader::event::load_weights load_req{};
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::init_mappings(load_req, &err));
+  CHECK(!emel::parser::gguf::init_mappings(load_req, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   emel::model::data model{};
   emel::model::loader::event::load request{model};
   load_req.loader_request = &request;
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::init_mappings(load_req, &err));
+  CHECK(!emel::parser::gguf::init_mappings(load_req, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("gguf validate_weights handles request errors") {
   emel::model::weight_loader::event::load_weights load_req{};
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::validate_weights(load_req, &err));
+  CHECK(!emel::parser::gguf::validate_weights(load_req, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   emel::model::data model{};
-  emel::model::gguf::context ctx{};
+  emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{model};
   request.format_ctx = &ctx;
   request.check_tensors = false;
   load_req.loader_request = &request;
   load_req.check_tensors = false;
   err = EMEL_OK;
-  CHECK(emel::model::gguf::validate_weights(load_req, &err));
+  CHECK(emel::parser::gguf::validate_weights(load_req, &err));
   CHECK(err == EMEL_OK);
 }
 
 TEST_CASE("gguf clean_up_weights reports invalid requests") {
   emel::model::weight_loader::event::load_weights load_req{};
   int32_t err = EMEL_OK;
-  CHECK(!emel::model::gguf::clean_up_weights(load_req, &err));
+  CHECK(!emel::parser::gguf::clean_up_weights(load_req, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   emel::model::data model{};
   emel::model::loader::event::load request{model};
   load_req.loader_request = &request;
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::clean_up_weights(load_req, &err));
+  CHECK(!emel::parser::gguf::clean_up_weights(load_req, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
@@ -3247,12 +3247,12 @@ TEST_CASE("gguf map_mmap reports progress cancellation") {
   CHECK(write_minimal_gguf(path));
 
   emel::model::data model = {};
-  emel::model::gguf::context ctx = {};
+  emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;
   request.format_ctx = &ctx;
   int32_t err = EMEL_OK;
-  CHECK(emel::model::gguf::map_parser(request, &err));
+  CHECK(emel::parser::gguf::map_parser(request, &err));
   CHECK(err == EMEL_OK);
 
   emel::model::weight_loader::event::load_weights load_req{
@@ -3264,7 +3264,7 @@ TEST_CASE("gguf map_mmap reports progress cancellation") {
   uint64_t done = 0;
   uint64_t total = 0;
   err = EMEL_OK;
-  CHECK(!emel::model::gguf::map_mmap(load_req, &done, &total, &err));
+  CHECK(!emel::parser::gguf::map_mmap(load_req, &done, &total, &err));
   CHECK(err == EMEL_ERR_BACKEND);
 
   std::remove(path);
@@ -3272,7 +3272,7 @@ TEST_CASE("gguf map_mmap reports progress cancellation") {
 #endif
 
 TEST_CASE("gguf validate_row_data covers quant types") {
-  using namespace emel::model::gguf;
+  using namespace emel::parser::gguf;
 
   CHECK(!validate_row_data(tensor_type::k_f32, nullptr, 4));
 
@@ -3373,7 +3373,7 @@ TEST_CASE("gguf validate_row_data covers quant types") {
 }
 
 TEST_CASE("gguf parse_i32_value handles multiple input types") {
-  using namespace emel::model::gguf;
+  using namespace emel::parser::gguf;
 
   char path[128] = {};
   CHECK(make_temp_path(path, sizeof(path)));

@@ -6,243 +6,63 @@
 
 namespace {
 
-struct noop_queue {
-  using container_type = void;
-
-  template <class Event>
-  void push(const Event &) noexcept {}
-};
-
-TEST_CASE("memory_coordinator_sm_update_success_path") {
+TEST_CASE("memory_coordinator_sm_update_success_path_updates_counts") {
   emel::memory::coordinator::action::context ctx{};
-  noop_queue queue{};
-  emel::memory::coordinator::Process process{queue};
   boost::sml::sm<
     emel::memory::coordinator::model,
-    boost::sml::testing,
-    emel::memory::coordinator::Process>
-    machine{ctx, process};
-  emel::memory::coordinator::event::memory_status status =
-    emel::memory::coordinator::event::memory_status::success;
-  int32_t err = EMEL_OK;
-
-  emel::memory::coordinator::event::prepare_update request{
-    .optimize = false,
-    .status_out = &status,
-    .error_out = &err,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::memory::coordinator::events::validate_done{
-    .update_request = &request,
+    boost::sml::testing>
+    machine{ctx};
+  CHECK(machine.process_event(emel::memory::coordinator::event::prepare_update{
+    .optimize = true,
   }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::prepare_done{
-    .prepared_status = emel::memory::coordinator::event::memory_status::success,
-    .update_request = &request,
-  }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::apply_done{
-    .prepared_status = emel::memory::coordinator::event::memory_status::success,
-    .update_request = &request,
-  }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::publish_done{
-    .prepared_status = emel::memory::coordinator::event::memory_status::success,
-    .update_request = &request,
-  }));
-  (void)machine.process_event(emel::memory::coordinator::events::memory_done{
-    .status = emel::memory::coordinator::event::memory_status::success,
-    .update_request = &request,
-  });
+  CHECK(ctx.prepared_status == emel::memory::coordinator::event::memory_status::success);
+  CHECK(ctx.update_apply_count == 1);
+  CHECK_FALSE(ctx.has_pending_update);
+  CHECK(machine.is(boost::sml::state<emel::memory::coordinator::initialized>));
 }
 
-TEST_CASE("memory_coordinator_sm_update_prepare_error_path") {
+TEST_CASE("memory_coordinator_sm_update_no_update_skips_apply") {
   emel::memory::coordinator::action::context ctx{};
-  noop_queue queue{};
-  emel::memory::coordinator::Process process{queue};
   boost::sml::sm<
     emel::memory::coordinator::model,
-    boost::sml::testing,
-    emel::memory::coordinator::Process>
-    machine{ctx, process};
-  emel::memory::coordinator::event::memory_status status =
-    emel::memory::coordinator::event::memory_status::success;
-  int32_t err = EMEL_OK;
-
-  emel::memory::coordinator::event::prepare_update request{
+    boost::sml::testing>
+    machine{ctx};
+  CHECK(machine.process_event(emel::memory::coordinator::event::prepare_update{
     .optimize = false,
-    .status_out = &status,
-    .error_out = &err,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::memory::coordinator::events::validate_done{
-    .update_request = &request,
   }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::prepare_error{
-    .err = EMEL_ERR_BACKEND,
-    .prepared_status = emel::memory::coordinator::event::memory_status::failed_prepare,
-    .update_request = &request,
-  }));
-  (void)machine.process_event(emel::memory::coordinator::events::memory_error{
-    .err = EMEL_ERR_BACKEND,
-    .status = emel::memory::coordinator::event::memory_status::failed_prepare,
-    .update_request = &request,
-  });
+  CHECK(ctx.prepared_status == emel::memory::coordinator::event::memory_status::no_update);
+  CHECK(ctx.update_apply_count == 0);
+  CHECK(machine.is(boost::sml::state<emel::memory::coordinator::initialized>));
 }
 
-TEST_CASE("memory_coordinator_sm_update_apply_error_path") {
+TEST_CASE("memory_coordinator_sm_batch_prepare_sets_pending") {
   emel::memory::coordinator::action::context ctx{};
-  noop_queue queue{};
-  emel::memory::coordinator::Process process{queue};
   boost::sml::sm<
     emel::memory::coordinator::model,
-    boost::sml::testing,
-    emel::memory::coordinator::Process>
-    machine{ctx, process};
-  emel::memory::coordinator::event::memory_status status =
-    emel::memory::coordinator::event::memory_status::success;
-  int32_t err = EMEL_OK;
-
-  emel::memory::coordinator::event::prepare_update request{
-    .optimize = false,
-    .status_out = &status,
-    .error_out = &err,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::memory::coordinator::events::validate_done{
-    .update_request = &request,
-  }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::prepare_done{
-    .prepared_status = emel::memory::coordinator::event::memory_status::success,
-    .update_request = &request,
-  }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::apply_error{
-    .err = EMEL_ERR_BACKEND,
-    .prepared_status = emel::memory::coordinator::event::memory_status::failed_prepare,
-    .update_request = &request,
-  }));
-  (void)machine.process_event(emel::memory::coordinator::events::memory_error{
-    .err = EMEL_ERR_BACKEND,
-    .status = emel::memory::coordinator::event::memory_status::failed_prepare,
-    .update_request = &request,
-  });
-}
-
-TEST_CASE("memory_coordinator_sm_update_publish_error_path") {
-  emel::memory::coordinator::action::context ctx{};
-  noop_queue queue{};
-  emel::memory::coordinator::Process process{queue};
-  boost::sml::sm<
-    emel::memory::coordinator::model,
-    boost::sml::testing,
-    emel::memory::coordinator::Process>
-    machine{ctx, process};
-  emel::memory::coordinator::event::memory_status status =
-    emel::memory::coordinator::event::memory_status::success;
-  int32_t err = EMEL_OK;
-
-  emel::memory::coordinator::event::prepare_update request{
-    .optimize = false,
-    .status_out = &status,
-    .error_out = &err,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::memory::coordinator::events::validate_done{
-    .update_request = &request,
-  }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::prepare_done{
-    .prepared_status = emel::memory::coordinator::event::memory_status::success,
-    .update_request = &request,
-  }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::apply_done{
-    .prepared_status = emel::memory::coordinator::event::memory_status::success,
-    .update_request = &request,
-  }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::publish_error{
-    .err = EMEL_ERR_BACKEND,
-    .prepared_status = emel::memory::coordinator::event::memory_status::failed_prepare,
-    .update_request = &request,
-  }));
-  (void)machine.process_event(emel::memory::coordinator::events::memory_error{
-    .err = EMEL_ERR_BACKEND,
-    .status = emel::memory::coordinator::event::memory_status::failed_prepare,
-    .update_request = &request,
-  });
-}
-
-TEST_CASE("memory_coordinator_sm_batch_success_path") {
-  emel::memory::coordinator::action::context ctx{};
-  noop_queue queue{};
-  emel::memory::coordinator::Process process{queue};
-  boost::sml::sm<
-    emel::memory::coordinator::model,
-    boost::sml::testing,
-    emel::memory::coordinator::Process>
-    machine{ctx, process};
-  emel::memory::coordinator::event::memory_status status =
-    emel::memory::coordinator::event::memory_status::success;
-  int32_t err = EMEL_OK;
-
-  emel::memory::coordinator::event::prepare_batch request{
+    boost::sml::testing>
+    machine{ctx};
+  CHECK(machine.process_event(emel::memory::coordinator::event::prepare_batch{
     .n_ubatch = 1,
-    .n_ubatches_total = 1,
-    .status_out = &status,
-    .error_out = &err,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::memory::coordinator::events::validate_done{
-    .batch_request = &request,
+    .n_ubatches_total = 2,
   }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::prepare_done{
-    .prepared_status = emel::memory::coordinator::event::memory_status::success,
-    .batch_request = &request,
-  }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::publish_done{
-    .prepared_status = emel::memory::coordinator::event::memory_status::success,
-    .batch_request = &request,
-  }));
-  (void)machine.process_event(emel::memory::coordinator::events::memory_done{
-    .status = emel::memory::coordinator::event::memory_status::success,
-    .batch_request = &request,
-  });
+  CHECK(ctx.prepared_status == emel::memory::coordinator::event::memory_status::success);
+  CHECK(ctx.batch_prepare_count == 1);
+  CHECK(ctx.has_pending_update);
+  CHECK(machine.is(boost::sml::state<emel::memory::coordinator::initialized>));
 }
 
-TEST_CASE("memory_coordinator_sm_full_success_path") {
+TEST_CASE("memory_coordinator_sm_full_prepare_sets_pending") {
   emel::memory::coordinator::action::context ctx{};
-  noop_queue queue{};
-  emel::memory::coordinator::Process process{queue};
   boost::sml::sm<
     emel::memory::coordinator::model,
-    boost::sml::testing,
-    emel::memory::coordinator::Process>
-    machine{ctx, process};
-  emel::memory::coordinator::event::memory_status status =
-    emel::memory::coordinator::event::memory_status::success;
-  int32_t err = EMEL_OK;
-
-  emel::memory::coordinator::event::prepare_full request{
-    .status_out = &status,
-    .error_out = &err,
-  };
-
-  CHECK(machine.process_event(request));
-  CHECK(machine.process_event(emel::memory::coordinator::events::validate_done{
-    .full_request = &request,
+    boost::sml::testing>
+    machine{ctx};
+  CHECK(machine.process_event(emel::memory::coordinator::event::prepare_full{
   }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::prepare_done{
-    .prepared_status = emel::memory::coordinator::event::memory_status::success,
-    .full_request = &request,
-  }));
-  CHECK(machine.process_event(emel::memory::coordinator::events::publish_done{
-    .prepared_status = emel::memory::coordinator::event::memory_status::success,
-    .full_request = &request,
-  }));
-  (void)machine.process_event(emel::memory::coordinator::events::memory_done{
-    .status = emel::memory::coordinator::event::memory_status::success,
-    .full_request = &request,
-  });
+  CHECK(ctx.prepared_status == emel::memory::coordinator::event::memory_status::success);
+  CHECK(ctx.full_prepare_count == 1);
+  CHECK(ctx.has_pending_update);
+  CHECK(machine.is(boost::sml::state<emel::memory::coordinator::initialized>));
 }
 
 }  // namespace

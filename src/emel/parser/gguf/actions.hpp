@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <string>
 
 #if !defined(_WIN32)
 #include <sys/mman.h>
@@ -21,10 +22,11 @@
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
 #include "emel/model/loader/events.hpp"
-#include "emel/model/parser/events.hpp"
+#include "emel/parser/actions.hpp"
+#include "emel/parser/events.hpp"
 #include "emel/model/weight_loader/events.hpp"
 
-namespace emel::model::gguf {
+namespace emel::parser::gguf {
 
 inline constexpr uint32_t k_gguf_version = 3;
 inline constexpr uint32_t k_default_alignment = 32;
@@ -4709,6 +4711,54 @@ inline bool format_split_path(const std::string_view path, const uint16_t index,
   return written > 0 && static_cast<size_t>(written) < capacity;
 }
 
+inline bool has_gguf_extension(const std::string_view path) {
+  size_t prefix_len = 0;
+  if (has_split_suffix(path, prefix_len)) {
+    return true;
+  }
+  if (path.size() < 5) {
+    return false;
+  }
+  return std::memcmp(path.data() + path.size() - 5, ".gguf", 5) == 0;
+}
+
+inline bool match_magic(std::FILE * file, bool & checked) {
+  checked = false;
+  if (file == nullptr) {
+    return false;
+  }
+  const long offset = std::ftell(file);
+  if (offset < 0) {
+    return false;
+  }
+  if (std::fseek(file, 0, SEEK_SET) != 0) {
+    return false;
+  }
+  checked = true;
+  std::array<char, sizeof(k_magic) - 1> magic = {};
+  const size_t read = std::fread(magic.data(), 1, magic.size(), file);
+  (void)std::fseek(file, offset, SEEK_SET);
+  if (read != magic.size()) {
+    return false;
+  }
+  return std::memcmp(magic.data(), k_magic, magic.size()) == 0;
+}
+
+inline bool can_handle(const emel::model::loader::event::load & ev) {
+  if (ev.file_handle != nullptr) {
+    auto * file = static_cast<std::FILE *>(ev.file_handle);
+    bool checked = false;
+    const bool magic_ok = match_magic(file, checked);
+    if (checked) {
+      return magic_ok;
+    }
+  }
+  if (ev.model_path.empty()) {
+    return false;
+  }
+  return has_gguf_extension(ev.model_path);
+}
+
 inline bool map_parser(const emel::model::loader::event::load & ev, int32_t * err_out) {
   if (err_out != nullptr) {
     *err_out = EMEL_OK;
@@ -4918,7 +4968,7 @@ inline bool map_parser(const emel::model::loader::event::load & ev, int32_t * er
   return true;
 }
 
-inline bool parse_architecture(const emel::model::parser::event::parse_model & ev, int32_t * err_out) {
+inline bool parse_architecture(const emel::parser::event::parse_model & ev, int32_t * err_out) {
   if (err_out != nullptr) {
     *err_out = EMEL_OK;
   }
@@ -4946,7 +4996,7 @@ inline bool parse_architecture(const emel::model::parser::event::parse_model & e
   return true;
 }
 
-inline bool map_architecture(const emel::model::parser::event::parse_model & ev, int32_t * err_out) {
+inline bool map_architecture(const emel::parser::event::parse_model & ev, int32_t * err_out) {
   if (err_out != nullptr) {
     *err_out = EMEL_OK;
   }
@@ -4972,7 +5022,7 @@ inline bool map_architecture(const emel::model::parser::event::parse_model & ev,
   return false;
 }
 
-inline bool parse_hparams(const emel::model::parser::event::parse_model & ev, int32_t * err_out) {
+inline bool parse_hparams(const emel::parser::event::parse_model & ev, int32_t * err_out) {
   if (err_out != nullptr) {
     *err_out = EMEL_OK;
   }
@@ -5004,7 +5054,7 @@ inline bool parse_hparams(const emel::model::parser::event::parse_model & ev, in
   return true;
 }
 
-inline bool parse_vocab(const emel::model::parser::event::parse_model & ev, int32_t * err_out) {
+inline bool parse_vocab(const emel::parser::event::parse_model & ev, int32_t * err_out) {
   if (err_out != nullptr) {
     *err_out = EMEL_OK;
   }
@@ -5032,7 +5082,7 @@ inline bool parse_vocab(const emel::model::parser::event::parse_model & ev, int3
   return true;
 }
 
-inline bool map_tensors(const emel::model::parser::event::parse_model & ev, int32_t * err_out) {
+inline bool map_tensors(const emel::parser::event::parse_model & ev, int32_t * err_out) {
   if (err_out != nullptr) {
     *err_out = EMEL_OK;
   }
@@ -5172,7 +5222,7 @@ inline bool validate_structure(const emel::model::loader::event::load & ev, int3
 
 inline bool validate_architecture(
     const emel::model::loader::event::load & ev, int32_t * err_out) {
-  emel::model::parser::event::parse_model request{
+  emel::parser::event::parse_model request{
     .model = &ev.model_data,
     .architectures = ev.architectures,
     .n_architectures = ev.n_architectures,
@@ -5790,4 +5840,84 @@ inline bool clean_up_weights(const emel::model::weight_loader::event::load_weigh
 #endif
 }
 
-}  // namespace emel::model::gguf
+namespace action {
+
+struct run_parse_architecture {
+  void operator()(emel::parser::action::context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    int32_t err = EMEL_OK;
+    const bool ok = emel::parser::gguf::parse_architecture(ctx.request, &err);
+    if (!ok || err != EMEL_OK) {
+      if (err == EMEL_OK) {
+        err = EMEL_ERR_PARSE_FAILED;
+      }
+      ctx.phase_error = err;
+    }
+  }
+};
+
+struct run_map_architecture {
+  void operator()(emel::parser::action::context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    int32_t err = EMEL_OK;
+    const bool ok = emel::parser::gguf::map_architecture(ctx.request, &err);
+    if (!ok || err != EMEL_OK) {
+      if (err == EMEL_OK) {
+        err = EMEL_ERR_MODEL_INVALID;
+      }
+      ctx.phase_error = err;
+    }
+  }
+};
+
+struct run_parse_hparams {
+  void operator()(emel::parser::action::context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    int32_t err = EMEL_OK;
+    const bool ok = emel::parser::gguf::parse_hparams(ctx.request, &err);
+    if (!ok || err != EMEL_OK) {
+      if (err == EMEL_OK) {
+        err = EMEL_ERR_PARSE_FAILED;
+      }
+      ctx.phase_error = err;
+    }
+  }
+};
+
+struct run_parse_vocab {
+  void operator()(emel::parser::action::context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    int32_t err = EMEL_OK;
+    const bool ok = emel::parser::gguf::parse_vocab(ctx.request, &err);
+    if (!ok || err != EMEL_OK) {
+      if (err == EMEL_OK) {
+        err = EMEL_ERR_PARSE_FAILED;
+      }
+      ctx.phase_error = err;
+    }
+  }
+};
+
+struct run_map_tensors {
+  void operator()(emel::parser::action::context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    int32_t err = EMEL_OK;
+    const bool ok = emel::parser::gguf::map_tensors(ctx.request, &err);
+    if (!ok || err != EMEL_OK) {
+      if (err == EMEL_OK) {
+        err = EMEL_ERR_BACKEND;
+      }
+      ctx.phase_error = err;
+    }
+  }
+};
+
+inline constexpr run_parse_architecture run_parse_architecture{};
+inline constexpr run_map_architecture run_map_architecture{};
+inline constexpr run_parse_hparams run_parse_hparams{};
+inline constexpr run_parse_vocab run_parse_vocab{};
+inline constexpr run_map_tensors run_map_tensors{};
+
+}  // namespace action
+
+}  // namespace emel::parser::gguf

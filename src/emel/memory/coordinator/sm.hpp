@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <type_traits>
 
 #include "emel/emel.h"
 #include "emel/memory/coordinator/actions.hpp"
@@ -10,461 +11,240 @@
 
 namespace emel::memory::coordinator {
 
-using Process = boost::sml::back::process<
-  event::validate_update,
-  event::validate_batch,
-  event::validate_full,
-  events::validate_done,
-  events::validate_error,
-  event::prepare_update_step,
-  event::prepare_batch_step,
-  event::prepare_full_step,
-  events::prepare_done,
-  events::prepare_error,
-  event::apply_update_step,
-  events::apply_done,
-  events::apply_error,
-  event::publish_update,
-  event::publish_batch,
-  event::publish_full,
-  events::publish_done,
-  events::publish_error,
-  events::memory_done,
-  events::memory_error>;
-
 struct initialized {};
+
 struct validating_update {};
 struct validating_batch {};
 struct validating_full {};
+
 struct preparing_update {};
+struct prepare_update_decision {};
+
 struct preparing_batch {};
+struct prepare_batch_decision {};
+
 struct preparing_full {};
+struct prepare_full_decision {};
+
 struct applying_update {};
+struct apply_update_decision {};
+
 struct publishing_update {};
+struct publish_update_decision {};
 struct publishing_batch {};
+struct publish_batch_decision {};
 struct publishing_full {};
+struct publish_full_decision {};
+
 struct done {};
 struct errored {};
 
+/**
+ * Memory coordination orchestration model.
+ *
+ * State purposes:
+ * - `initialized`: idle state awaiting a prepare request.
+ * - `validating_*`: request validation via guards.
+ * - `preparing_*`: compute prepared status and update context.
+ * - `apply_*`: apply pending updates for update requests.
+ * - `publishing_*`: publish final status.
+ * - `*_decision`: branch on `phase_error` and prepared status.
+ * - `done`/`errored`: terminal outcomes that return to initialized.
+ *
+ * Guard semantics:
+ * - `valid_*` guards are pure predicates over `(context)`.
+ * - `phase_*` guards observe `context.phase_error`.
+ * - `prepare_update_*` guards inspect `context.prepared_status`.
+ *
+ * Action side effects:
+ * - Actions update context counters and `prepared_status`.
+ * - Errors are recorded in `phase_error`/`last_error`.
+ */
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
-    using process_t = Process;
-    auto is_prepare_success = [](const events::prepare_done & ev) noexcept {
-      return ev.prepared_status == event::memory_status::success;
-    };
-    auto is_prepare_no_update = [](const events::prepare_done & ev) noexcept {
-      return ev.prepared_status == event::memory_status::no_update;
+    const auto not_anonymous = [](const auto & ev) {
+      using event_type = std::decay_t<decltype(ev)>;
+      return !std::is_same_v<event_type, boost::sml::anonymous>;
     };
 
     return sml::make_transition_table(
-      *sml::state<initialized> + sml::event<event::prepare_update> / action::begin_prepare_update =
-          sml::state<validating_update>,
-      sml::state<initialized> + sml::event<event::prepare_batch> / action::begin_prepare_batch =
-          sml::state<validating_batch>,
-      sml::state<initialized> + sml::event<event::prepare_full> / action::begin_prepare_full =
-          sml::state<validating_full>,
+      *sml::state<initialized> + sml::event<event::prepare_update> /
+          action::begin_prepare_update = sml::state<validating_update>,
+      sml::state<initialized> + sml::event<event::prepare_batch> /
+          action::begin_prepare_batch = sml::state<validating_batch>,
+      sml::state<initialized> + sml::event<event::prepare_full> /
+          action::begin_prepare_full = sml::state<validating_full>,
 
-      sml::state<validating_update> + sml::on_entry<event::prepare_update> /
-          [](const event::prepare_update & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            event::validate_update validate{
-              .request = &ev,
-              .error_out = &phase_error,
-            };
-            process(validate);
-            if (ev.error_out != nullptr) {
-              *ev.error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::validate_error{
-                .err = phase_error,
-                .update_request = &ev,
-              });
-              return;
-            }
-            process(events::validate_done{
-              .update_request = &ev,
-            });
-          },
-      sml::state<validating_update> + sml::event<event::validate_update> / action::run_validate_update =
-          sml::state<validating_update>,
-      sml::state<validating_update> + sml::event<events::validate_done> = sml::state<preparing_update>,
-      sml::state<validating_update> + sml::event<events::validate_error> = sml::state<errored>,
-
-      sml::state<validating_batch> + sml::on_entry<event::prepare_batch> /
-          [](const event::prepare_batch & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            event::validate_batch validate{
-              .request = &ev,
-              .error_out = &phase_error,
-            };
-            process(validate);
-            if (ev.error_out != nullptr) {
-              *ev.error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::validate_error{
-                .err = phase_error,
-                .batch_request = &ev,
-              });
-              return;
-            }
-            process(events::validate_done{
-              .batch_request = &ev,
-            });
-          },
-      sml::state<validating_batch> + sml::event<event::validate_batch> / action::run_validate_batch =
-          sml::state<validating_batch>,
-      sml::state<validating_batch> + sml::event<events::validate_done> = sml::state<preparing_batch>,
-      sml::state<validating_batch> + sml::event<events::validate_error> = sml::state<errored>,
-
-      sml::state<validating_full> + sml::on_entry<event::prepare_full> /
-          [](const event::prepare_full & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            event::validate_full validate{
-              .request = &ev,
-              .error_out = &phase_error,
-            };
-            process(validate);
-            if (ev.error_out != nullptr) {
-              *ev.error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::validate_error{
-                .err = phase_error,
-                .full_request = &ev,
-              });
-              return;
-            }
-            process(events::validate_done{
-              .full_request = &ev,
-            });
-          },
-      sml::state<validating_full> + sml::event<event::validate_full> / action::run_validate_full =
-          sml::state<validating_full>,
-      sml::state<validating_full> + sml::event<events::validate_done> = sml::state<preparing_full>,
-      sml::state<validating_full> + sml::event<events::validate_error> = sml::state<errored>,
-
-      sml::state<preparing_update> + sml::on_entry<events::validate_done> /
-          [](const events::validate_done & ev, action::context &, process_t & process) noexcept {
-            const event::prepare_update * request = ev.update_request;
-            int32_t phase_error = EMEL_OK;
-            event::memory_status prepared_status = event::memory_status::success;
-            event::prepare_update_step step{
-              .request = request,
-              .prepared_status_out = &prepared_status,
-              .error_out = &phase_error,
-            };
-            process(step);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::prepare_error{
-                .err = phase_error,
-                .prepared_status = event::memory_status::failed_prepare,
-                .update_request = request,
-              });
-              return;
-            }
-            if (prepared_status != event::memory_status::success &&
-                prepared_status != event::memory_status::no_update) {
-              process(events::prepare_error{
-                .err = EMEL_ERR_BACKEND,
-                .prepared_status = prepared_status,
-                .update_request = request,
-              });
-              return;
-            }
-            process(events::prepare_done{
-              .prepared_status = prepared_status,
-              .update_request = request,
-            });
-          },
-      sml::state<preparing_update> + sml::event<event::prepare_update_step> / action::run_prepare_update_step =
+      sml::state<validating_update> [guard::valid_update_context{}] =
           sml::state<preparing_update>,
-      sml::state<preparing_update> + sml::event<events::prepare_done>[is_prepare_success] =
-          sml::state<applying_update>,
-      sml::state<preparing_update> + sml::event<events::prepare_done>[is_prepare_no_update] =
-          sml::state<publishing_update>,
-      sml::state<preparing_update> + sml::event<events::prepare_error> = sml::state<errored>,
+      sml::state<validating_update> [guard::invalid_update_context{}] /
+          action::set_invalid_argument = sml::state<errored>,
 
-      sml::state<preparing_batch> + sml::on_entry<events::validate_done> /
-          [](const events::validate_done & ev, action::context &, process_t & process) noexcept {
-            const event::prepare_batch * request = ev.batch_request;
-            int32_t phase_error = EMEL_OK;
-            event::memory_status prepared_status = event::memory_status::success;
-            event::prepare_batch_step step{
-              .request = request,
-              .prepared_status_out = &prepared_status,
-              .error_out = &phase_error,
-            };
-            process(step);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::prepare_error{
-                .err = phase_error,
-                .prepared_status = event::memory_status::failed_prepare,
-                .batch_request = request,
-              });
-              return;
-            }
-            process(events::prepare_done{
-              .prepared_status = prepared_status,
-              .batch_request = request,
-            });
-          },
-      sml::state<preparing_batch> + sml::event<event::prepare_batch_step> / action::run_prepare_batch_step =
+      sml::state<validating_batch> [guard::valid_batch_context{}] =
           sml::state<preparing_batch>,
-      sml::state<preparing_batch> + sml::event<events::prepare_done> = sml::state<publishing_batch>,
-      sml::state<preparing_batch> + sml::event<events::prepare_error> = sml::state<errored>,
+      sml::state<validating_batch> [guard::invalid_batch_context{}] /
+          action::set_invalid_argument = sml::state<errored>,
 
-      sml::state<preparing_full> + sml::on_entry<events::validate_done> /
-          [](const events::validate_done & ev, action::context &, process_t & process) noexcept {
-            const event::prepare_full * request = ev.full_request;
-            int32_t phase_error = EMEL_OK;
-            event::memory_status prepared_status = event::memory_status::success;
-            event::prepare_full_step step{
-              .request = request,
-              .prepared_status_out = &prepared_status,
-              .error_out = &phase_error,
-            };
-            process(step);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::prepare_error{
-                .err = phase_error,
-                .prepared_status = event::memory_status::failed_prepare,
-                .full_request = request,
-              });
-              return;
-            }
-            process(events::prepare_done{
-              .prepared_status = prepared_status,
-              .full_request = request,
-            });
-          },
-      sml::state<preparing_full> + sml::event<event::prepare_full_step> / action::run_prepare_full_step =
+      sml::state<validating_full> [guard::valid_full_context{}] =
           sml::state<preparing_full>,
-      sml::state<preparing_full> + sml::event<events::prepare_done> = sml::state<publishing_full>,
-      sml::state<preparing_full> + sml::event<events::prepare_error> = sml::state<errored>,
+      sml::state<validating_full> [guard::invalid_full_context{}] /
+          action::set_invalid_argument = sml::state<errored>,
 
-      sml::state<applying_update> + sml::on_entry<events::prepare_done> /
-          [](const events::prepare_done & ev, action::context &, process_t & process) noexcept {
-            const event::prepare_update * request = ev.update_request;
-            int32_t phase_error = EMEL_OK;
-            event::apply_update_step step{
-              .request = request,
-              .prepared_status = ev.prepared_status,
-              .error_out = &phase_error,
-            };
-            process(step);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::apply_error{
-                .err = phase_error,
-                .prepared_status = ev.prepared_status,
-                .update_request = request,
-              });
-              return;
-            }
-            process(events::apply_done{
-              .prepared_status = ev.prepared_status,
-              .update_request = request,
-            });
-          },
-      sml::state<applying_update> + sml::event<event::apply_update_step> / action::run_apply_update_step =
+      sml::state<preparing_update> / action::run_prepare_update_phase =
+          sml::state<prepare_update_decision>,
+      sml::state<prepare_update_decision> [guard::phase_failed{}] =
+          sml::state<errored>,
+      sml::state<prepare_update_decision> [guard::prepare_update_success{}] =
           sml::state<applying_update>,
-      sml::state<applying_update> + sml::event<events::apply_done> = sml::state<publishing_update>,
-      sml::state<applying_update> + sml::event<events::apply_error> = sml::state<errored>,
-
-      sml::state<publishing_update> + sml::on_entry<events::apply_done> /
-          [](const events::apply_done & ev, action::context &, process_t & process) noexcept {
-            const event::prepare_update * request = ev.update_request;
-            int32_t phase_error = EMEL_OK;
-            event::publish_update publish{
-              .request = request,
-              .prepared_status = ev.prepared_status,
-              .error_out = &phase_error,
-            };
-            process(publish);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::publish_error{
-                .err = phase_error,
-                .prepared_status = ev.prepared_status,
-                .update_request = request,
-              });
-              return;
-            }
-            process(events::publish_done{
-              .prepared_status = ev.prepared_status,
-              .update_request = request,
-            });
-          },
-      sml::state<publishing_update> + sml::on_entry<events::prepare_done> /
-          [](const events::prepare_done & ev, action::context &, process_t & process) noexcept {
-            const event::prepare_update * request = ev.update_request;
-            int32_t phase_error = EMEL_OK;
-            event::publish_update publish{
-              .request = request,
-              .prepared_status = ev.prepared_status,
-              .error_out = &phase_error,
-            };
-            process(publish);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::publish_error{
-                .err = phase_error,
-                .prepared_status = ev.prepared_status,
-                .update_request = request,
-              });
-              return;
-            }
-            process(events::publish_done{
-              .prepared_status = ev.prepared_status,
-              .update_request = request,
-            });
-          },
-      sml::state<publishing_update> + sml::event<event::publish_update> / action::run_publish_update =
+      sml::state<prepare_update_decision> [guard::prepare_update_no_update{}] =
           sml::state<publishing_update>,
-      sml::state<publishing_update> + sml::event<events::publish_done> = sml::state<done>,
-      sml::state<publishing_update> + sml::event<events::publish_error> = sml::state<errored>,
+      sml::state<prepare_update_decision> [guard::prepare_update_invalid_status{}] /
+          action::set_backend_error = sml::state<errored>,
 
-      sml::state<publishing_batch> + sml::on_entry<events::prepare_done> /
-          [](const events::prepare_done & ev, action::context &, process_t & process) noexcept {
-            const event::prepare_batch * request = ev.batch_request;
-            int32_t phase_error = EMEL_OK;
-            event::publish_batch publish{
-              .request = request,
-              .prepared_status = ev.prepared_status,
-              .error_out = &phase_error,
-            };
-            process(publish);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::publish_error{
-                .err = phase_error,
-                .prepared_status = ev.prepared_status,
-                .batch_request = request,
-              });
-              return;
-            }
-            process(events::publish_done{
-              .prepared_status = ev.prepared_status,
-              .batch_request = request,
-            });
-          },
-      sml::state<publishing_batch> + sml::event<event::publish_batch> / action::run_publish_batch =
+      sml::state<preparing_batch> / action::run_prepare_batch_phase =
+          sml::state<prepare_batch_decision>,
+      sml::state<prepare_batch_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<prepare_batch_decision> [guard::phase_ok{}] =
           sml::state<publishing_batch>,
-      sml::state<publishing_batch> + sml::event<events::publish_done> = sml::state<done>,
-      sml::state<publishing_batch> + sml::event<events::publish_error> = sml::state<errored>,
 
-      sml::state<publishing_full> + sml::on_entry<events::prepare_done> /
-          [](const events::prepare_done & ev, action::context &, process_t & process) noexcept {
-            const event::prepare_full * request = ev.full_request;
-            int32_t phase_error = EMEL_OK;
-            event::publish_full publish{
-              .request = request,
-              .prepared_status = ev.prepared_status,
-              .error_out = &phase_error,
-            };
-            process(publish);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::publish_error{
-                .err = phase_error,
-                .prepared_status = ev.prepared_status,
-                .full_request = request,
-              });
-              return;
-            }
-            process(events::publish_done{
-              .prepared_status = ev.prepared_status,
-              .full_request = request,
-            });
-          },
-      sml::state<publishing_full> + sml::event<event::publish_full> / action::run_publish_full =
+      sml::state<preparing_full> / action::run_prepare_full_phase =
+          sml::state<prepare_full_decision>,
+      sml::state<prepare_full_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<prepare_full_decision> [guard::phase_ok{}] =
           sml::state<publishing_full>,
-      sml::state<publishing_full> + sml::event<events::publish_done> = sml::state<done>,
-      sml::state<publishing_full> + sml::event<events::publish_error> = sml::state<errored>,
 
-      sml::state<done> + sml::on_entry<events::publish_done> /
-          [](const events::publish_done & ev, action::context &, process_t & process) noexcept {
-            process(events::memory_done{
-              .status = ev.prepared_status,
-              .update_request = ev.update_request,
-              .batch_request = ev.batch_request,
-              .full_request = ev.full_request,
-            });
-          },
-      sml::state<done> + sml::event<events::memory_done> / action::on_memory_done =
-          sml::state<initialized>,
-      sml::state<done> + sml::event<events::memory_error> / action::on_memory_error =
-          sml::state<initialized>,
+      sml::state<applying_update> [guard::apply_update_ready{}] /
+          action::run_apply_update_phase = sml::state<apply_update_decision>,
+      sml::state<applying_update> [guard::apply_update_backend_failed{}] /
+          action::set_backend_error = sml::state<errored>,
+      sml::state<applying_update> [guard::apply_update_invalid_context{}] /
+          action::set_invalid_argument = sml::state<errored>,
+      sml::state<apply_update_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<apply_update_decision> [guard::phase_ok{}] =
+          sml::state<publishing_update>,
 
-      sml::state<errored> + sml::on_entry<sml::_> /
-          [](const auto & ev, action::context &, process_t & process) noexcept {
-            int32_t err = EMEL_ERR_BACKEND;
-            event::memory_status status = event::memory_status::failed_prepare;
-            const event::prepare_update * update_request = nullptr;
-            const event::prepare_batch * batch_request = nullptr;
-            const event::prepare_full * full_request = nullptr;
-            if constexpr (requires { ev.err; }) {
-              err = ev.err;
-            }
-            if constexpr (requires { ev.prepared_status; }) {
-              status = ev.prepared_status;
-            } else if constexpr (requires { ev.status; }) {
-              status = ev.status;
-            }
-            if constexpr (requires { ev.update_request; }) {
-              update_request = ev.update_request;
-            }
-            if constexpr (requires { ev.batch_request; }) {
-              batch_request = ev.batch_request;
-            }
-            if constexpr (requires { ev.full_request; }) {
-              full_request = ev.full_request;
-            }
-            if (update_request != nullptr || batch_request != nullptr || full_request != nullptr) {
-              process(events::memory_error{
-                .err = err,
-                .status = status,
-                .update_request = update_request,
-                .batch_request = batch_request,
-                .full_request = full_request,
-              });
-            }
-          },
-      sml::state<errored> + sml::event<events::memory_error> / action::on_memory_error =
-          sml::state<initialized>
+      sml::state<publishing_update> [guard::valid_publish_update_context{}] /
+          action::run_publish_update_phase = sml::state<publish_update_decision>,
+      sml::state<publishing_update> [guard::invalid_publish_update_context{}] /
+          action::set_invalid_argument = sml::state<errored>,
+      sml::state<publish_update_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<publish_update_decision> [guard::phase_ok{}] = sml::state<done>,
+
+      sml::state<publishing_batch> [guard::valid_publish_batch_context{}] /
+          action::run_publish_batch_phase = sml::state<publish_batch_decision>,
+      sml::state<publishing_batch> [guard::invalid_publish_batch_context{}] /
+          action::set_invalid_argument = sml::state<errored>,
+      sml::state<publish_batch_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<publish_batch_decision> [guard::phase_ok{}] = sml::state<done>,
+
+      sml::state<publishing_full> [guard::valid_publish_full_context{}] /
+          action::run_publish_full_phase = sml::state<publish_full_decision>,
+      sml::state<publishing_full> [guard::invalid_publish_full_context{}] /
+          action::set_invalid_argument = sml::state<errored>,
+      sml::state<publish_full_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<publish_full_decision> [guard::phase_ok{}] = sml::state<done>,
+
+      sml::state<done> / action::mark_done = sml::state<initialized>,
+      sml::state<errored> / action::ensure_last_error = sml::state<initialized>,
+
+      sml::state<initialized> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<validating_update> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<validating_batch> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<validating_full> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<preparing_update> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<prepare_update_decision> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<preparing_batch> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<prepare_batch_decision> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<preparing_full> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<prepare_full_decision> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<applying_update> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<apply_update_decision> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<publishing_update> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<publish_update_decision> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<publishing_batch> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<publish_batch_decision> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<publishing_full> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<publish_full_decision> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<done> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>,
+      sml::state<errored> + sml::event<sml::_> [not_anonymous] /
+          action::on_unexpected = sml::state<errored>
     );
   }
 };
 
-struct sm : private emel::detail::process_support<sm, Process>, public emel::sm<model, Process> {
-  using base_type = emel::sm<model, Process>;
+struct sm : public emel::sm<model> {
+  using base_type = emel::sm<model>;
 
-  sm() : emel::detail::process_support<sm, Process>(this), base_type(context_, this->process_) {}
+  sm() : base_type(context_) {}
+
+  bool process_event(const event::prepare_update & ev) {
+    const bool accepted = this->raw_sm().process_event(ev);
+    const int32_t err = context_.last_error;
+    if (err == EMEL_OK && ev.status_out != nullptr) {
+      *ev.status_out = context_.prepared_status;
+    }
+    if (ev.error_out != nullptr) {
+      *ev.error_out = err;
+    }
+    action::clear_request(context_);
+    return accepted && err == EMEL_OK;
+  }
+
+  bool process_event(const event::prepare_batch & ev) {
+    const bool accepted = this->raw_sm().process_event(ev);
+    const int32_t err = context_.last_error;
+    if (err == EMEL_OK && ev.status_out != nullptr) {
+      *ev.status_out = context_.prepared_status;
+    }
+    if (ev.error_out != nullptr) {
+      *ev.error_out = err;
+    }
+    action::clear_request(context_);
+    return accepted && err == EMEL_OK;
+  }
+
+  bool process_event(const event::prepare_full & ev) {
+    const bool accepted = this->raw_sm().process_event(ev);
+    const int32_t err = context_.last_error;
+    if (err == EMEL_OK && ev.status_out != nullptr) {
+      *ev.status_out = context_.prepared_status;
+    }
+    if (ev.error_out != nullptr) {
+      *ev.error_out = err;
+    }
+    action::clear_request(context_);
+    return accepted && err == EMEL_OK;
+  }
 
   using base_type::process_event;
+  using base_type::visit_current_states;
+
+  int32_t last_error() const noexcept { return context_.last_error; }
+  event::memory_status last_status() const noexcept { return context_.prepared_status; }
+
  private:
+  using base_type::raw_sm;
+
   action::context context_{};
 };
 

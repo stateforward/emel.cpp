@@ -8,6 +8,18 @@
 
 namespace emel::kv::cache::guard {
 
+struct phase_ok {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error == EMEL_OK;
+  }
+};
+
+struct phase_failed {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error != EMEL_OK;
+  }
+};
+
 inline bool valid_pos_range(int32_t pos0, int32_t pos1) noexcept {
   if (pos0 < 0 && pos1 < 0) {
     return true;
@@ -615,6 +627,240 @@ inline constexpr auto invalid_updates_step_request = [](
     const event::apply_updates_step & ev,
     const action::context & ctx) noexcept {
   return !valid_updates_step_request(ev, ctx);
+};
+
+struct valid_prepare_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::validate_prepare validate{.request = &ctx.prepare_request};
+    return valid_prepare_request(validate, ctx);
+  }
+};
+
+struct invalid_prepare_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_prepare_context{}(ctx);
+  }
+};
+
+struct valid_prepare_slots_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::prepare_slots slots{};
+    return valid_prepare_slots_request(slots, ctx);
+  }
+};
+
+struct invalid_prepare_slots_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_prepare_slots_context{}(ctx);
+  }
+};
+
+struct valid_apply_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::validate_apply validate{.request = &ctx.apply_request};
+    return valid_apply_request(validate, ctx);
+  }
+};
+
+struct invalid_apply_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_apply_context{}(ctx);
+  }
+};
+
+struct valid_apply_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::apply_step step{.request = &ctx.apply_request};
+    return valid_apply_step_request(step, ctx);
+  }
+};
+
+struct invalid_apply_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_apply_step_context{}(ctx);
+  }
+};
+
+struct valid_rollback_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::validate_rollback validate{.request = &ctx.rollback_request};
+    return valid_rollback_request(validate, ctx);
+  }
+};
+
+struct invalid_rollback_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_rollback_context{}(ctx);
+  }
+};
+
+struct valid_rollback_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::rollback_step step{.request = &ctx.rollback_request};
+    return valid_rollback_step_request(step, ctx);
+  }
+};
+
+struct invalid_rollback_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_rollback_step_context{}(ctx);
+  }
+};
+
+struct valid_seq_remove_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::validate_seq_remove validate{.request = &ctx.seq_remove_request};
+    return valid_seq_remove_request(validate, ctx);
+  }
+};
+
+struct invalid_seq_remove_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_seq_remove_context{}(ctx);
+  }
+};
+
+struct valid_seq_remove_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::seq_remove_step step{.request = &ctx.seq_remove_request};
+    return valid_seq_remove_step_request(step, ctx);
+  }
+};
+
+struct invalid_seq_remove_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_seq_remove_step_context{}(ctx);
+  }
+};
+
+struct valid_seq_copy_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::validate_seq_copy validate{.request = &ctx.seq_copy_request};
+    return valid_seq_copy_request(validate, ctx);
+  }
+};
+
+struct invalid_seq_copy_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_seq_copy_context{}(ctx);
+  }
+};
+
+struct valid_seq_copy_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::seq_copy_step step{.request = &ctx.seq_copy_request};
+    return valid_seq_copy_step_request(step, ctx);
+  }
+};
+
+struct invalid_seq_copy_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_seq_copy_step_context{}(ctx);
+  }
+};
+
+struct valid_seq_keep_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::validate_seq_keep validate{.request = &ctx.seq_keep_request};
+    return valid_seq_keep_request(validate, ctx);
+  }
+};
+
+struct invalid_seq_keep_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_seq_keep_context{}(ctx);
+  }
+};
+
+struct valid_seq_keep_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::seq_keep_step step{.request = &ctx.seq_keep_request};
+    return valid_seq_keep_step_request(step, ctx);
+  }
+};
+
+struct invalid_seq_keep_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_seq_keep_step_context{}(ctx);
+  }
+};
+
+struct valid_seq_add_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::validate_seq_add validate{.request = &ctx.seq_add_request};
+    return valid_seq_add_request(validate, ctx);
+  }
+};
+
+struct invalid_seq_add_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_seq_add_context{}(ctx);
+  }
+};
+
+struct valid_seq_add_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::seq_add_step step{.request = &ctx.seq_add_request};
+    return valid_seq_add_step_request(step, ctx);
+  }
+};
+
+struct invalid_seq_add_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_seq_add_step_context{}(ctx);
+  }
+};
+
+struct valid_seq_div_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::validate_seq_div validate{.request = &ctx.seq_div_request};
+    return valid_seq_div_request(validate, ctx);
+  }
+};
+
+struct invalid_seq_div_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_seq_div_context{}(ctx);
+  }
+};
+
+struct valid_seq_div_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::seq_div_step step{.request = &ctx.seq_div_request};
+    return valid_seq_div_step_request(step, ctx);
+  }
+};
+
+struct invalid_seq_div_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_seq_div_step_context{}(ctx);
+  }
+};
+
+struct valid_updates_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::validate_updates validate{.request = &ctx.updates_request};
+    return valid_updates_request(validate, ctx);
+  }
+};
+
+struct invalid_updates_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_updates_context{}(ctx);
+  }
+};
+
+struct valid_updates_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    event::apply_updates_step step{.request = &ctx.updates_request};
+    return valid_updates_step_request(step, ctx);
+  }
+};
+
+struct invalid_updates_step_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_updates_step_context{}(ctx);
+  }
 };
 
 }  // namespace emel::kv::cache::guard

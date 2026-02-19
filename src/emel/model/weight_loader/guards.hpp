@@ -2,180 +2,192 @@
 
 #include "emel/emel.h"
 #include "emel/model/weight_loader/actions.hpp"
-#include "emel/model/weight_loader/events.hpp"
 
 namespace emel::model::weight_loader::guard {
 
+struct has_request {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr;
+  }
+};
+
+struct phase_ok {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error == EMEL_OK;
+  }
+};
+
+struct phase_failed {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error != EMEL_OK;
+  }
+};
+
 struct use_mmap_selected {
-  bool operator()(const events::strategy_selected & ev) const {
-    return ev.use_mmap;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.use_mmap;
   }
 };
 
 struct use_stream_selected {
-  bool operator()(const events::strategy_selected & ev) const {
-    return !ev.use_mmap;
-  }
-};
-
-struct no_error {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return ev.err == EMEL_OK;
-  }
-};
-
-struct has_error {
-  template <class Event>
-  bool operator()(const Event & ev) const {
-    return ev.err != EMEL_OK;
+  bool operator()(const action::context & ctx) const noexcept {
+    return !ctx.use_mmap;
   }
 };
 
 struct can_init_mappings {
-  bool operator()(const events::strategy_selected & ev) const {
-    return ev.request != nullptr && ev.request->init_mappings != nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && ctx.request->init_mappings != nullptr;
   }
 };
 
 struct skip_init_mappings {
-  bool operator()(const events::strategy_selected & ev) const {
-    return ev.request != nullptr && ev.request->init_mappings == nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && ctx.request->init_mappings == nullptr;
+  }
+};
+
+struct cannot_init_mappings {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request == nullptr;
   }
 };
 
 struct can_load_streamed {
-  bool operator()(const events::strategy_selected & ev) const {
-    return ev.request != nullptr && ev.request->load_streamed != nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && ctx.request->load_streamed != nullptr;
   }
 };
 
 struct cannot_load_streamed {
-  bool operator()(const events::strategy_selected & ev) const {
-    return ev.request == nullptr || ev.request->load_streamed == nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request == nullptr || ctx.request->load_streamed == nullptr;
   }
 };
 
 struct can_load_mmap {
-  bool operator()(const events::mappings_ready & ev) const {
-    return ev.request != nullptr && ev.request->map_mmap != nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && ctx.request->map_mmap != nullptr;
   }
 };
 
 struct cannot_load_mmap {
-  bool operator()(const events::mappings_ready & ev) const {
-    return ev.request == nullptr || ev.request->map_mmap == nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request == nullptr || ctx.request->map_mmap == nullptr;
   }
 };
 
 struct can_validate {
-  bool operator()(const events::weights_loaded & ev) const {
-    return ev.request != nullptr && ev.request->check_tensors && ev.request->validate != nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && ctx.request->check_tensors && ctx.request->validate != nullptr;
   }
 };
 
 struct skip_validate {
-  bool operator()(const events::weights_loaded & ev) const {
-    return ev.request != nullptr && (!ev.request->check_tensors || ev.request->validate == nullptr);
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && (!ctx.request->check_tensors || ctx.request->validate == nullptr);
   }
 };
 
 struct cannot_validate {
-  bool operator()(const events::weights_loaded & ev) const { return ev.request == nullptr; }
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request == nullptr;
+  }
 };
 
 struct can_clean_up {
-  bool operator()(const events::validation_done & ev, const action::context & ctx) const {
-    return ev.request != nullptr && ctx.used_mmap && ev.request->clean_up != nullptr;
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && ctx.used_mmap && ctx.request->clean_up != nullptr;
   }
 };
 
 struct skip_clean_up {
-  bool operator()(const events::validation_done & ev, const action::context & ctx) const {
-    return ev.request != nullptr && (!ctx.used_mmap || ev.request->clean_up == nullptr);
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request != nullptr && (!ctx.used_mmap || ctx.request->clean_up == nullptr);
   }
 };
 
 struct cannot_clean_up {
-  bool operator()(const events::validation_done & ev) const { return ev.request == nullptr; }
-};
-
-struct use_mmap_no_error_can_init_mappings {
-  bool operator()(const events::strategy_selected & ev) const {
-    return use_mmap_selected{}(ev) && no_error{}(ev) && can_init_mappings{}(ev);
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.request == nullptr;
   }
 };
 
-struct use_mmap_no_error_skip_init_mappings {
-  bool operator()(const events::strategy_selected & ev) const {
-    return use_mmap_selected{}(ev) && no_error{}(ev) && skip_init_mappings{}(ev);
+struct phase_ok_and_use_mmap_and_can_init_mappings {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && use_mmap_selected{}(ctx) && can_init_mappings{}(ctx);
   }
 };
 
-struct use_mmap_no_error_cannot_init_mappings {
-  bool operator()(const events::strategy_selected & ev) const {
-    return use_mmap_selected{}(ev) && no_error{}(ev) && !skip_init_mappings{}(ev) &&
-           !can_init_mappings{}(ev);
+struct phase_ok_and_use_mmap_and_skip_init_mappings {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && use_mmap_selected{}(ctx) && skip_init_mappings{}(ctx);
   }
 };
 
-struct use_stream_no_error_can_load_streamed {
-  bool operator()(const events::strategy_selected & ev) const {
-    return use_stream_selected{}(ev) && no_error{}(ev) && can_load_streamed{}(ev);
+struct phase_ok_and_use_mmap_and_cannot_init_mappings {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && use_mmap_selected{}(ctx) && cannot_init_mappings{}(ctx);
   }
 };
 
-struct use_stream_no_error_cannot_load_streamed {
-  bool operator()(const events::strategy_selected & ev) const {
-    return use_stream_selected{}(ev) && no_error{}(ev) && cannot_load_streamed{}(ev);
+struct phase_ok_and_use_stream_and_can_load_streamed {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && use_stream_selected{}(ctx) && can_load_streamed{}(ctx);
   }
 };
 
-struct mappings_ready_no_error_can_load_mmap {
-  bool operator()(const events::mappings_ready & ev) const {
-    return no_error{}(ev) && can_load_mmap{}(ev);
+struct phase_ok_and_use_stream_and_cannot_load_streamed {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && use_stream_selected{}(ctx) && cannot_load_streamed{}(ctx);
   }
 };
 
-struct mappings_ready_no_error_cannot_load_mmap {
-  bool operator()(const events::mappings_ready & ev) const {
-    return no_error{}(ev) && cannot_load_mmap{}(ev);
+struct phase_ok_and_can_load_mmap {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && can_load_mmap{}(ctx);
   }
 };
 
-struct weights_loaded_no_error_can_validate {
-  bool operator()(const events::weights_loaded & ev) const {
-    return no_error{}(ev) && can_validate{}(ev);
+struct phase_ok_and_cannot_load_mmap {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && cannot_load_mmap{}(ctx);
   }
 };
 
-struct weights_loaded_no_error_skip_validate {
-  bool operator()(const events::weights_loaded & ev) const {
-    return no_error{}(ev) && skip_validate{}(ev);
+struct phase_ok_and_can_validate {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && can_validate{}(ctx);
   }
 };
 
-struct weights_loaded_no_error_cannot_validate {
-  bool operator()(const events::weights_loaded & ev) const {
-    return no_error{}(ev) && cannot_validate{}(ev);
+struct phase_ok_and_skip_validate {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && skip_validate{}(ctx);
   }
 };
 
-struct validation_done_no_error_can_clean_up {
-  bool operator()(const events::validation_done & ev, const action::context & ctx) const {
-    return no_error{}(ev) && can_clean_up{}(ev, ctx);
+struct phase_ok_and_cannot_validate {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && cannot_validate{}(ctx);
   }
 };
 
-struct validation_done_no_error_skip_clean_up {
-  bool operator()(const events::validation_done & ev, const action::context & ctx) const {
-    return no_error{}(ev) && skip_clean_up{}(ev, ctx);
+struct phase_ok_and_can_clean_up {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && can_clean_up{}(ctx);
   }
 };
 
-struct validation_done_no_error_cannot_clean_up {
-  bool operator()(const events::validation_done & ev) const {
-    return no_error{}(ev) && cannot_clean_up{}(ev);
+struct phase_ok_and_skip_clean_up {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && skip_clean_up{}(ctx);
+  }
+};
+
+struct phase_ok_and_cannot_clean_up {
+  bool operator()(const action::context & ctx) const noexcept {
+    return phase_ok{}(ctx) && cannot_clean_up{}(ctx);
   }
 };
 

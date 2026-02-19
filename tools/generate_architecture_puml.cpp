@@ -5,7 +5,7 @@
 #include <string>
 
 #include "emel/model/loader/sm.hpp"
-#include "emel/model/parser/sm.hpp"
+#include "emel/parser/gguf/sm.hpp"
 #include "emel/model/weight_loader/sm.hpp"
 
 namespace sml = boost::sml;
@@ -71,7 +71,7 @@ int main(int argc, char ** argv) {
   }
   {
     std::ofstream f(argv[2]);
-    dump_model<emel::model::parser::model>(f);
+    dump_model<emel::parser::gguf::model>(f);
   }
   {
     std::ofstream f(argv[3]);

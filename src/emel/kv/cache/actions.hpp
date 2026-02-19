@@ -83,6 +83,18 @@ struct context {
   int32_t pending_copy_count = 0;
 
   int32_t kv_tokens = 0;
+  int32_t phase_error = EMEL_OK;
+  int32_t last_error = EMEL_OK;
+
+  event::prepare prepare_request = {};
+  event::apply_ubatch apply_request = {};
+  event::rollback rollback_request = {};
+  event::seq_remove seq_remove_request = {};
+  event::seq_copy seq_copy_request = {};
+  event::seq_keep seq_keep_request = {};
+  event::seq_add seq_add_request = {};
+  event::seq_div seq_div_request = {};
+  event::apply_updates updates_request = {};
 
   context();
 };
@@ -131,6 +143,17 @@ inline void reset_context_state(context & ctx) {
   ctx.pending_copy_dst.fill(0);
   ctx.pending_copy_count = 0;
   ctx.kv_tokens = 0;
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  ctx.prepare_request = {};
+  ctx.apply_request = {};
+  ctx.rollback_request = {};
+  ctx.seq_remove_request = {};
+  ctx.seq_copy_request = {};
+  ctx.seq_keep_request = {};
+  ctx.seq_add_request = {};
+  ctx.seq_div_request = {};
+  ctx.updates_request = {};
 }
 
 inline context::context() {
@@ -833,6 +856,66 @@ inline bool apply_slots(
   return true;
 }
 
+inline void store_prepare_request(const event::prepare & ev, context & ctx) noexcept {
+  ctx.prepare_request = ev;
+  ctx.prepare_request.slot_offsets_out = nullptr;
+  ctx.prepare_request.ubatch_count_out = nullptr;
+  ctx.prepare_request.error_out = nullptr;
+}
+
+inline void store_apply_request(const event::apply_ubatch & ev, context & ctx) noexcept {
+  ctx.apply_request = ev;
+  ctx.apply_request.kv_tokens_out = nullptr;
+  ctx.apply_request.error_out = nullptr;
+}
+
+inline void store_rollback_request(const event::rollback & ev, context & ctx) noexcept {
+  ctx.rollback_request = ev;
+  ctx.rollback_request.error_out = nullptr;
+}
+
+inline void store_seq_remove_request(const event::seq_remove & ev, context & ctx) noexcept {
+  ctx.seq_remove_request = ev;
+  ctx.seq_remove_request.error_out = nullptr;
+}
+
+inline void store_seq_copy_request(const event::seq_copy & ev, context & ctx) noexcept {
+  ctx.seq_copy_request = ev;
+  ctx.seq_copy_request.error_out = nullptr;
+}
+
+inline void store_seq_keep_request(const event::seq_keep & ev, context & ctx) noexcept {
+  ctx.seq_keep_request = ev;
+  ctx.seq_keep_request.error_out = nullptr;
+}
+
+inline void store_seq_add_request(const event::seq_add & ev, context & ctx) noexcept {
+  ctx.seq_add_request = ev;
+  ctx.seq_add_request.error_out = nullptr;
+}
+
+inline void store_seq_div_request(const event::seq_div & ev, context & ctx) noexcept {
+  ctx.seq_div_request = ev;
+  ctx.seq_div_request.error_out = nullptr;
+}
+
+inline void store_updates_request(const event::apply_updates & ev, context & ctx) noexcept {
+  ctx.updates_request = ev;
+  ctx.updates_request.error_out = nullptr;
+}
+
+inline void clear_requests(context & ctx) noexcept {
+  ctx.prepare_request = {};
+  ctx.apply_request = {};
+  ctx.rollback_request = {};
+  ctx.seq_remove_request = {};
+  ctx.seq_copy_request = {};
+  ctx.seq_keep_request = {};
+  ctx.seq_add_request = {};
+  ctx.seq_div_request = {};
+  ctx.updates_request = {};
+}
+
 inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ctx) {
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
@@ -840,6 +923,9 @@ inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ct
   if (ev.ubatch_count_out != nullptr) {
     *ev.ubatch_count_out = 0;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_prepare_request(ev, ctx);
   ctx.ubatch_count = ev.ubatch_count;
   ctx.planned_ubatch_count = 0;
 
@@ -947,20 +1033,24 @@ inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ct
 };
 
 inline constexpr auto begin_apply = [](const event::apply_ubatch & ev, context & ctx) {
-  (void)ctx;
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
   if (ev.kv_tokens_out != nullptr) {
     *ev.kv_tokens_out = 0;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_apply_request(ev, ctx);
 };
 
 inline constexpr auto begin_rollback = [](const event::rollback & ev, context & ctx) {
-  (void)ctx;
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_rollback_request(ev, ctx);
 };
 
 inline constexpr auto run_validate_prepare = [](const event::validate_prepare & ev, context & ctx) {
@@ -1129,40 +1219,58 @@ inline constexpr auto run_rollback_step = [](const event::rollback_step & ev, co
   ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
-inline constexpr auto begin_seq_remove = [](const event::seq_remove & ev, context &) {
+inline constexpr auto begin_seq_remove = [](const event::seq_remove & ev, context & ctx) {
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_seq_remove_request(ev, ctx);
 };
 
-inline constexpr auto begin_seq_copy = [](const event::seq_copy & ev, context &) {
+inline constexpr auto begin_seq_copy = [](const event::seq_copy & ev, context & ctx) {
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_seq_copy_request(ev, ctx);
 };
 
-inline constexpr auto begin_seq_keep = [](const event::seq_keep & ev, context &) {
+inline constexpr auto begin_seq_keep = [](const event::seq_keep & ev, context & ctx) {
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_seq_keep_request(ev, ctx);
 };
 
-inline constexpr auto begin_seq_add = [](const event::seq_add & ev, context &) {
+inline constexpr auto begin_seq_add = [](const event::seq_add & ev, context & ctx) {
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_seq_add_request(ev, ctx);
 };
 
-inline constexpr auto begin_seq_div = [](const event::seq_div & ev, context &) {
+inline constexpr auto begin_seq_div = [](const event::seq_div & ev, context & ctx) {
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_seq_div_request(ev, ctx);
 };
 
-inline constexpr auto begin_apply_updates = [](const event::apply_updates & ev, context &) {
+inline constexpr auto begin_apply_updates = [](const event::apply_updates & ev, context & ctx) {
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_updates_request(ev, ctx);
 };
 
 inline constexpr auto run_validate_seq_remove = [](const event::validate_seq_remove & ev, context &) {
@@ -1557,19 +1665,154 @@ inline constexpr auto run_publish = [](const event::publish & ev, context & ctx)
   *ev.error_out = EMEL_OK;
 };
 
+struct set_invalid_argument {
+  void operator()(context & ctx) const noexcept {
+    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
+    ctx.last_error = EMEL_ERR_INVALID_ARGUMENT;
+  }
+};
+
+struct run_prepare_slots_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    event::prepare_slots ev{.error_out = &err};
+    run_prepare_slots(ev, ctx);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_apply_step_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    event::apply_step ev{.request = &ctx.apply_request, .error_out = &err};
+    run_apply_step(ev, ctx);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_rollback_step_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    event::rollback_step ev{.request = &ctx.rollback_request, .error_out = &err};
+    run_rollback_step(ev, ctx);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_seq_remove_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    event::seq_remove_step ev{.request = &ctx.seq_remove_request, .error_out = &err};
+    run_seq_remove_step(ev, ctx);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_seq_copy_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    event::seq_copy_step ev{.request = &ctx.seq_copy_request, .error_out = &err};
+    run_seq_copy_step(ev, ctx);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_seq_keep_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    event::seq_keep_step ev{.request = &ctx.seq_keep_request, .error_out = &err};
+    run_seq_keep_step(ev, ctx);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_seq_add_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    event::seq_add_step ev{.request = &ctx.seq_add_request, .error_out = &err};
+    run_seq_add_step(ev, ctx);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_seq_div_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    event::seq_div_step ev{.request = &ctx.seq_div_request, .error_out = &err};
+    run_seq_div_step(ev, ctx);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_updates_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    event::apply_updates_step ev{.request = &ctx.updates_request, .error_out = &err};
+    run_apply_updates(ev, ctx);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_publish_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    event::publish ev{.error_out = &err};
+    run_publish(ev, ctx);
+    ctx.phase_error = err;
+  }
+};
+
+struct mark_done {
+  void operator()(context & ctx) const noexcept {
+    ctx.last_error = EMEL_OK;
+  }
+};
+
+struct ensure_last_error {
+  void operator()(context & ctx) const noexcept {
+    if (ctx.last_error != EMEL_OK) {
+      return;
+    }
+    ctx.last_error = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
+  }
+};
+
+struct clear_request {
+  void operator()(context & ctx) const noexcept {
+    clear_requests(ctx);
+  }
+};
+
 inline constexpr auto on_kv_done = [](const events::kv_done &, context &) {};
 
 inline constexpr auto on_kv_error = [](const events::kv_error &, context &) {};
 
 struct on_unexpected {
   template <class Event>
-  void operator()(const Event & ev, context &) const {
+  void operator()(const Event & ev, context & ctx) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_BACKEND;
       }
     }
+    ctx.phase_error = EMEL_ERR_BACKEND;
+    ctx.last_error = EMEL_ERR_BACKEND;
   }
 };
+
+inline constexpr set_invalid_argument set_invalid_argument{};
+inline constexpr run_prepare_slots_phase run_prepare_slots_phase{};
+inline constexpr run_apply_step_phase run_apply_step_phase{};
+inline constexpr run_rollback_step_phase run_rollback_step_phase{};
+inline constexpr run_seq_remove_phase run_seq_remove_phase{};
+inline constexpr run_seq_copy_phase run_seq_copy_phase{};
+inline constexpr run_seq_keep_phase run_seq_keep_phase{};
+inline constexpr run_seq_add_phase run_seq_add_phase{};
+inline constexpr run_seq_div_phase run_seq_div_phase{};
+inline constexpr run_updates_phase run_updates_phase{};
+inline constexpr run_publish_phase run_publish_phase{};
+inline constexpr mark_done mark_done{};
+inline constexpr ensure_last_error ensure_last_error{};
+inline constexpr clear_request clear_request{};
 
 }  // namespace emel::kv::cache::action

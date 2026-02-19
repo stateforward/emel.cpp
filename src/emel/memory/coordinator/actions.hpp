@@ -7,142 +7,164 @@
 
 namespace emel::memory::coordinator::action {
 
+enum class request_kind : int32_t {
+  none = 0,
+  update = 1,
+  batch = 2,
+  full = 3,
+};
+
 struct context {
   bool has_pending_update = false;
   int32_t update_apply_count = 0;
   int32_t batch_prepare_count = 0;
   int32_t full_prepare_count = 0;
+
+  request_kind active_request = request_kind::none;
+  event::prepare_update update_request = {};
+  event::prepare_batch batch_request = {};
+  event::prepare_full full_request = {};
+
+  event::memory_status prepared_status = event::memory_status::success;
+  int32_t phase_error = EMEL_OK;
+  int32_t last_error = EMEL_OK;
 };
 
-inline constexpr auto begin_prepare_update = [](const event::prepare_update & ev, context &) {
+inline void store_update_request(const event::prepare_update & ev, context & ctx) noexcept {
+  ctx.update_request = ev;
+  ctx.update_request.status_out = nullptr;
+  ctx.update_request.error_out = nullptr;
+}
+
+inline void store_batch_request(const event::prepare_batch & ev, context & ctx) noexcept {
+  ctx.batch_request = ev;
+  ctx.batch_request.status_out = nullptr;
+  ctx.batch_request.error_out = nullptr;
+}
+
+inline void store_full_request(const event::prepare_full & ev, context & ctx) noexcept {
+  ctx.full_request = ev;
+  ctx.full_request.status_out = nullptr;
+  ctx.full_request.error_out = nullptr;
+}
+
+inline void clear_requests(context & ctx) noexcept {
+  ctx.active_request = request_kind::none;
+  ctx.update_request = {};
+  ctx.batch_request = {};
+  ctx.full_request = {};
+  ctx.prepared_status = event::memory_status::success;
+}
+
+inline constexpr auto begin_prepare_update = [](const event::prepare_update & ev, context & ctx) {
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  ctx.prepared_status = event::memory_status::success;
+  ctx.active_request = request_kind::update;
+  store_update_request(ev, ctx);
 };
-inline constexpr auto begin_prepare_batch = [](const event::prepare_batch & ev, context &) {
+
+inline constexpr auto begin_prepare_batch = [](const event::prepare_batch & ev, context & ctx) {
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  ctx.prepared_status = event::memory_status::success;
+  ctx.active_request = request_kind::batch;
+  store_batch_request(ev, ctx);
 };
-inline constexpr auto begin_prepare_full = [](const event::prepare_full & ev, context &) {
+
+inline constexpr auto begin_prepare_full = [](const event::prepare_full & ev, context & ctx) {
   if (ev.error_out != nullptr) {
     *ev.error_out = EMEL_OK;
   }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  ctx.prepared_status = event::memory_status::success;
+  ctx.active_request = request_kind::full;
+  store_full_request(ev, ctx);
 };
 
-inline constexpr auto run_validate_update = [](const event::validate_update & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-  if (ev.request == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-  }
+inline constexpr auto set_invalid_argument = [](context & ctx) {
+  ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
+  ctx.last_error = EMEL_ERR_INVALID_ARGUMENT;
 };
 
-inline constexpr auto run_validate_batch = [](const event::validate_batch & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-  if (ev.request == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-  if (ev.request->n_ubatch <= 0 || ev.request->n_ubatches_total <= 0) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-  }
+inline constexpr auto set_backend_error = [](context & ctx) {
+  ctx.phase_error = EMEL_ERR_BACKEND;
+  ctx.last_error = EMEL_ERR_BACKEND;
 };
 
-inline constexpr auto run_validate_full = [](const event::validate_full & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-  if (ev.request == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-  }
+inline constexpr auto run_prepare_update_phase = [](context & ctx) {
+  ctx.phase_error = EMEL_OK;
+  ctx.prepared_status = (ctx.update_request.optimize || ctx.has_pending_update)
+    ? event::memory_status::success
+    : event::memory_status::no_update;
 };
 
-inline constexpr auto run_prepare_update_step = [](const event::prepare_update_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-  if (ev.request == nullptr || ev.prepared_status_out == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
-  *ev.prepared_status_out = (ev.request->optimize || ctx.has_pending_update) ?
-      event::memory_status::success : event::memory_status::no_update;
-};
-
-inline constexpr auto run_prepare_batch_step = [](const event::prepare_batch_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-  if (ev.request == nullptr || ev.prepared_status_out == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
+inline constexpr auto run_prepare_batch_phase = [](context & ctx) {
+  ctx.phase_error = EMEL_OK;
   ctx.batch_prepare_count += 1;
   ctx.has_pending_update = true;
-  *ev.prepared_status_out = event::memory_status::success;
+  ctx.prepared_status = event::memory_status::success;
 };
 
-inline constexpr auto run_prepare_full_step = [](const event::prepare_full_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-  if (ev.request == nullptr || ev.prepared_status_out == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
+inline constexpr auto run_prepare_full_phase = [](context & ctx) {
+  ctx.phase_error = EMEL_OK;
   ctx.full_prepare_count += 1;
   ctx.has_pending_update = true;
-  *ev.prepared_status_out = event::memory_status::success;
+  ctx.prepared_status = event::memory_status::success;
 };
 
-inline constexpr auto run_apply_update_step = [](const event::apply_update_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-  if (ev.request == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
-  if (ev.prepared_status != event::memory_status::success) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
-  if (!ctx.has_pending_update && !ev.request->optimize) {
-    *ev.error_out = EMEL_ERR_BACKEND;
-    return;
-  }
-
+inline constexpr auto run_apply_update_phase = [](context & ctx) {
+  ctx.phase_error = EMEL_OK;
   ctx.has_pending_update = false;
   ctx.update_apply_count += 1;
 };
 
-inline constexpr auto run_publish_update = [](const event::publish_update & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-  if (ev.request != nullptr && ev.request->status_out != nullptr) {
-    *ev.request->status_out = ev.prepared_status;
+inline constexpr auto run_publish_update_phase = [](context & ctx) {
+  ctx.phase_error = EMEL_OK;
+};
+
+inline constexpr auto run_publish_batch_phase = [](context & ctx) {
+  ctx.phase_error = EMEL_OK;
+};
+
+inline constexpr auto run_publish_full_phase = [](context & ctx) {
+  ctx.phase_error = EMEL_OK;
+};
+
+inline constexpr auto mark_done = [](context & ctx) {
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+};
+
+struct ensure_last_error {
+  void operator()(context & ctx) const noexcept {
+    if (ctx.last_error != EMEL_OK) {
+      return;
+    }
+    ctx.last_error = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
   }
 };
 
-inline constexpr auto run_publish_batch = [](const event::publish_batch & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-  if (ev.request != nullptr && ev.request->status_out != nullptr) {
-    *ev.request->status_out = ev.prepared_status;
+struct clear_request {
+  void operator()(context & ctx) const noexcept { clear_requests(ctx); }
+};
+
+struct on_unexpected {
+  void operator()(context & ctx) const noexcept {
+    ctx.phase_error = EMEL_ERR_BACKEND;
+    ctx.last_error = EMEL_ERR_BACKEND;
   }
 };
 
-inline constexpr auto run_publish_full = [](const event::publish_full & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-  if (ev.request != nullptr && ev.request->status_out != nullptr) {
-    *ev.request->status_out = ev.prepared_status;
-  }
-};
-
-inline constexpr auto on_memory_done = [](const events::memory_done &, context &) {};
-inline constexpr auto on_memory_error = [](const events::memory_error &, context &) {};
+inline constexpr ensure_last_error ensure_last_error{};
+inline constexpr clear_request clear_request{};
+inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::memory::coordinator::action

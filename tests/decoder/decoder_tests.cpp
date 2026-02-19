@@ -150,7 +150,7 @@ TEST_CASE("decoder_prepare_memory_batch_reports_backend_on_memory_coordinator_fa
     },
     ctx);
 
-  CHECK(err == EMEL_OK);
+  CHECK(err == EMEL_ERR_BACKEND);
   CHECK_FALSE(retryable);
 }
 
@@ -169,7 +169,7 @@ TEST_CASE("decoder_prepare_memory_batch_reports_kv_failure") {
     },
     ctx);
 
-  CHECK(err == EMEL_OK);
+  CHECK(err == EMEL_ERR_BACKEND);
   CHECK_FALSE(retryable);
 }
 
@@ -455,7 +455,7 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
           .error_out = &error_out,
       },
       ctx);
-  CHECK(error_out == EMEL_OK);
+  CHECK(error_out == EMEL_ERR_BACKEND);
 
   ctx.n_ubatch = 1;
   ctx.ubatches_total = 1;
@@ -465,7 +465,7 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
           .error_out = &error_out,
       },
       ctx);
-  CHECK(error_out == EMEL_OK);
+  CHECK(error_out == EMEL_ERR_BACKEND);
 
   {
     emel::decoder::action::context process_ctx{};
