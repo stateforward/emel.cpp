@@ -26,6 +26,7 @@ struct execute {
   int32_t ubatch_size = 0;
   emel::memory::coordinator::sm * memory_coordinator_sm = nullptr;
   emel::kv::cache::sm * kv_cache_sm = nullptr;
+  int32_t expected_outputs = 0;
   void * compute_ctx = nullptr;
   compute_validate_fn compute_validate = nullptr;
   compute_prepare_graph_fn compute_prepare_graph = nullptr;

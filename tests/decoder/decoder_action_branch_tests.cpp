@@ -66,12 +66,39 @@ TEST_CASE("decoder_run_validate_checks_token_inputs") {
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
   std::array<int32_t, 1> tokens = {{1}};
+  std::array<int8_t, 1> output_mask = {{1}};
+  std::array<int32_t, 1> seq_ids = {{0}};
+  std::array<int32_t, 1> positions = {{0}};
+
   ctx.token_ids = tokens.data();
   ctx.n_tokens = 1;
   CHECK(emel::decoder::guard::valid_token_inputs(ctx));
   err = EMEL_OK;
   emel::decoder::action::run_validate(emel::decoder::event::validate{.error_out = &err}, ctx);
   CHECK(err == EMEL_OK);
+
+  ctx.output_mask = output_mask.data();
+  ctx.output_mask_count = 0;
+  CHECK(emel::decoder::guard::invalid_token_inputs(ctx));
+  ctx.output_mask_count = 1;
+  CHECK(emel::decoder::guard::valid_token_inputs(ctx));
+
+  ctx.seq_primary_ids = seq_ids.data();
+  ctx.seq_primary_ids_count = 0;
+  CHECK(emel::decoder::guard::invalid_token_inputs(ctx));
+  ctx.seq_primary_ids_count = 1;
+  CHECK(emel::decoder::guard::valid_token_inputs(ctx));
+
+  ctx.positions = positions.data();
+  ctx.positions_count = 0;
+  CHECK(emel::decoder::guard::invalid_token_inputs(ctx));
+  ctx.positions_count = 1;
+  CHECK(emel::decoder::guard::valid_token_inputs(ctx));
+
+  ctx.outputs_capacity = -1;
+  CHECK(emel::decoder::guard::invalid_token_inputs(ctx));
+  ctx.outputs_capacity = 0;
+  CHECK(emel::decoder::guard::valid_token_inputs(ctx));
 }
 
 TEST_CASE("decoder_run_reserve_output_reports_negative_total") {
@@ -80,6 +107,17 @@ TEST_CASE("decoder_run_reserve_output_reports_negative_total") {
 
   ctx.outputs_total = -1;
   emel::decoder::action::reject_invalid_reserve_output(
+    emel::decoder::event::reserve_output{.error_out = &err}, ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("decoder_run_reserve_output_enforces_capacity") {
+  emel::decoder::action::context ctx{};
+  int32_t err = EMEL_OK;
+
+  ctx.outputs_total = 5;
+  ctx.outputs_capacity = 4;
+  emel::decoder::action::run_reserve_output(
     emel::decoder::event::reserve_output{.error_out = &err}, ctx);
   CHECK(err == EMEL_ERR_BACKEND);
 }

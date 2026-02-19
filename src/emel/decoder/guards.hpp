@@ -24,7 +24,25 @@ inline constexpr auto invalid_ubatch_size = [](const action::context & ctx) {
 };
 
 inline constexpr auto valid_token_inputs = [](const action::context & ctx) {
-  return ctx.n_tokens > 0 && ctx.token_ids != nullptr;
+  if (ctx.n_tokens <= 0 || ctx.token_ids == nullptr) {
+    return false;
+  }
+  if (ctx.n_ubatch < 0) {
+    return false;
+  }
+  if (ctx.outputs_capacity < 0) {
+    return false;
+  }
+  if (ctx.output_mask != nullptr && ctx.output_mask_count < ctx.n_tokens) {
+    return false;
+  }
+  if (ctx.seq_primary_ids != nullptr && ctx.seq_primary_ids_count < ctx.n_tokens) {
+    return false;
+  }
+  if (ctx.positions != nullptr && ctx.positions_count < ctx.n_tokens) {
+    return false;
+  }
+  return true;
 };
 
 inline constexpr auto invalid_token_inputs = [](const action::context & ctx) {

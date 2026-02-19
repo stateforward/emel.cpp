@@ -114,6 +114,7 @@ TEST_CASE("ubatch_executor_execute_success_path") {
     .ubatch_size = ubatch_size,
     .memory_coordinator_sm = &memory_coordinator,
     .kv_cache_sm = &kv_cache,
+    .expected_outputs = ubatch_size,
     .outputs_produced_out = &outputs_produced,
     .kv_tokens_out = &kv_tokens,
     .rollback_attempted_out = &rollback_attempted,
@@ -140,6 +141,7 @@ TEST_CASE("ubatch_executor_execute_rejects_invalid_payload") {
     .ubatch_size = 2,
     .memory_coordinator_sm = &memory_coordinator,
     .kv_cache_sm = &kv_cache,
+    .expected_outputs = 2,
     .error_out = &error,
   };
   apply_compute_callbacks(missing_ubatch);
@@ -159,6 +161,7 @@ TEST_CASE("ubatch_executor_compute_failure_attempts_rollback") {
     .ubatch_size = 2,
     .memory_coordinator_sm = &memory_coordinator,
     .kv_cache_sm = &kv_cache,
+    .expected_outputs = 2,
     .rollback_attempted_out = &rollback_attempted,
     .error_out = &error,
   };

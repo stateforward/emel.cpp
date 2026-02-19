@@ -42,6 +42,7 @@ struct errored {};
  * Guard semantics:
  * - `valid_execute_request` is a pure predicate on the execute payload.
  * - `phase_*` guards observe errors set by actions.
+ * - `outputs_produced_invalid` enforces the expected per-ubatch output count.
  *
  * Action side effects:
  * - Actions run bounded submachine calls and update context fields.

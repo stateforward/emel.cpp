@@ -13,6 +13,7 @@ namespace emel::decoder::ubatch_executor::action {
 struct context {
   int32_t ubatch_index = 0;
   int32_t ubatch_size = 0;
+  int32_t expected_outputs = 0;
 
   int32_t outputs_produced = 0;
   int32_t kv_tokens = 0;
@@ -52,6 +53,7 @@ inline event::execute make_request(const context & ctx) noexcept {
     .ubatch_size = ctx.ubatch_size,
     .memory_coordinator_sm = ctx.memory_coordinator_sm,
     .kv_cache_sm = ctx.kv_cache_sm,
+    .expected_outputs = ctx.expected_outputs,
     .compute_ctx = ctx.compute_ctx,
     .compute_validate = ctx.compute_validate,
     .compute_prepare_graph = ctx.compute_prepare_graph,
@@ -86,6 +88,7 @@ struct begin_execute {
   void operator()(const event::execute & ev, context & ctx) const noexcept {
     ctx.ubatch_index = ev.ubatch_index;
     ctx.ubatch_size = ev.ubatch_size;
+    ctx.expected_outputs = ev.expected_outputs;
     ctx.outputs_produced = 0;
     ctx.kv_tokens = 0;
     ctx.memory_coordinator_sm = ev.memory_coordinator_sm;
@@ -132,18 +135,7 @@ struct run_prepare_memory {
       ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
       return;
     }
-
-    emel::memory::coordinator::event::memory_status status =
-        emel::memory::coordinator::event::memory_status::success;
-    const bool ok = ev.memory_coordinator_sm->process_event(
-      emel::memory::coordinator::event::prepare_update{
-        .optimize = false,
-        .status_out = &status,
-      });
-    const bool failed = !ok || prepare_status_is_error(status);
-    const int32_t err = failed ? EMEL_ERR_BACKEND : EMEL_OK;
-    *ev.error_out = err;
-    ctx.phase_error = err;
+    ctx.phase_error = EMEL_OK;
   }
 
   template <class Ev>
@@ -152,16 +144,6 @@ struct run_prepare_memory {
     if (ctx.memory_coordinator_sm == nullptr) {
       ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
       return;
-    }
-    emel::memory::coordinator::event::memory_status status =
-        emel::memory::coordinator::event::memory_status::success;
-    const bool ok = ctx.memory_coordinator_sm->process_event(
-      emel::memory::coordinator::event::prepare_update{
-        .optimize = false,
-        .status_out = &status,
-      });
-    if (!ok || prepare_status_is_error(status)) {  // GCOVR_EXCL_LINE
-      ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
     }
   }
 };
@@ -343,6 +325,7 @@ struct reject_invalid_execute {
     }
     ctx.outputs_produced = 0;
     ctx.kv_tokens = 0;
+    ctx.expected_outputs = 0;
     ctx.rollback_attempted = false;
     ctx.execution_error = EMEL_OK;
     ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;

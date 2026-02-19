@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "emel/decoder/ubatch_executor/events.hpp"
+
 namespace emel::decoder::events {
 
 struct decoding_done;
@@ -12,10 +14,31 @@ struct owner_event;
 
 namespace emel::decoder::event {
 
+using compute_validate_fn = ubatch_executor::event::compute_validate_fn;
+using compute_prepare_graph_fn = ubatch_executor::event::compute_prepare_graph_fn;
+using compute_alloc_graph_fn = ubatch_executor::event::compute_alloc_graph_fn;
+using compute_bind_inputs_fn = ubatch_executor::event::compute_bind_inputs_fn;
+using compute_run_backend_fn = ubatch_executor::event::compute_run_backend_fn;
+using compute_extract_outputs_fn = ubatch_executor::event::compute_extract_outputs_fn;
+
 struct decode {
   const int32_t * token_ids = nullptr;
   int32_t n_tokens = 0;
   int32_t n_ubatch = 0;
+  const int8_t * output_mask = nullptr;
+  int32_t output_mask_count = 0;
+  const int32_t * seq_primary_ids = nullptr;
+  int32_t seq_primary_ids_count = 0;
+  const int32_t * positions = nullptr;
+  int32_t positions_count = 0;
+  void * compute_ctx = nullptr;
+  ubatch_executor::event::compute_validate_fn compute_validate = nullptr;
+  ubatch_executor::event::compute_prepare_graph_fn compute_prepare_graph = nullptr;
+  ubatch_executor::event::compute_alloc_graph_fn compute_alloc_graph = nullptr;
+  ubatch_executor::event::compute_bind_inputs_fn compute_bind_inputs = nullptr;
+  ubatch_executor::event::compute_run_backend_fn compute_run_backend = nullptr;
+  ubatch_executor::event::compute_extract_outputs_fn compute_extract_outputs = nullptr;
+  int32_t outputs_capacity = 0;
   void * owner_sm = nullptr;
   bool (*dispatch_event)(void * owner_sm, const events::owner_event &) = nullptr;
   int32_t * error_out = nullptr;

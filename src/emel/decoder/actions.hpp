@@ -23,14 +23,24 @@ enum class prepare_failure_kind : uint8_t {
 
 struct context {
   const int32_t * token_ids = nullptr;
+  const int8_t * output_mask = nullptr;
+  const int32_t * seq_primary_ids = nullptr;
+  const int32_t * positions = nullptr;
   int32_t n_tokens = 0;
   int32_t n_ubatch = 0;
+  int32_t output_mask_count = 0;
+  int32_t seq_primary_ids_count = 0;
+  int32_t positions_count = 0;
+  int32_t outputs_capacity = 0;
 
   int32_t outputs_total = 0;
   int32_t outputs_processed = 0;
 
   std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_sizes = {};
   std::array<int32_t, emel::kv::cache::action::MAX_UBATCHES> slot_offsets = {};
+  std::array<int32_t, emel::kv::cache::action::MAX_UBATCHES> ubatch_seq_ids = {};
+  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_token_offsets = {};
+  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_outputs = {};
   int32_t ubatches_total = 0;
   int32_t ubatches_processed = 0;
 
@@ -38,6 +48,14 @@ struct context {
   std::unique_ptr<emel::memory::coordinator::sm> memory_coordinator;
   std::unique_ptr<emel::kv::cache::sm> kv_cache;
   std::unique_ptr<emel::decoder::ubatch_executor::sm> ubatch_executor;
+
+  void * compute_ctx = nullptr;
+  event::compute_validate_fn compute_validate = nullptr;
+  event::compute_prepare_graph_fn compute_prepare_graph = nullptr;
+  event::compute_alloc_graph_fn compute_alloc_graph = nullptr;
+  event::compute_bind_inputs_fn compute_bind_inputs = nullptr;
+  event::compute_run_backend_fn compute_run_backend = nullptr;
+  event::compute_extract_outputs_fn compute_extract_outputs = nullptr;
 
   int32_t phase_error = EMEL_OK;
   int32_t ubatch_error = EMEL_OK;
@@ -110,8 +128,22 @@ inline bool update_status_is_error(
 struct begin_decode {
   void operator()(const event::decode & ev, context & ctx) const noexcept {
     ctx.token_ids = ev.token_ids;
+    ctx.output_mask = ev.output_mask;
+    ctx.seq_primary_ids = ev.seq_primary_ids;
+    ctx.positions = ev.positions;
     ctx.n_tokens = ev.n_tokens;
     ctx.n_ubatch = ev.n_ubatch;
+    ctx.output_mask_count = ev.output_mask_count;
+    ctx.seq_primary_ids_count = ev.seq_primary_ids_count;
+    ctx.positions_count = ev.positions_count;
+    ctx.outputs_capacity = ev.outputs_capacity;
+    ctx.compute_ctx = ev.compute_ctx;
+    ctx.compute_validate = ev.compute_validate;
+    ctx.compute_prepare_graph = ev.compute_prepare_graph;
+    ctx.compute_alloc_graph = ev.compute_alloc_graph;
+    ctx.compute_bind_inputs = ev.compute_bind_inputs;
+    ctx.compute_run_backend = ev.compute_run_backend;
+    ctx.compute_extract_outputs = ev.compute_extract_outputs;
 
     ctx.outputs_total = 0;
     ctx.outputs_processed = 0;
@@ -119,6 +151,9 @@ struct begin_decode {
     ctx.ubatches_processed = 0;
     ctx.ubatch_sizes.fill(0);
     ctx.slot_offsets.fill(0);
+    ctx.ubatch_seq_ids.fill(0);
+    ctx.ubatch_token_offsets.fill(0);
+    ctx.ubatch_outputs.fill(0);
     ctx.phase_error = EMEL_OK;
     ctx.ubatch_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
@@ -212,6 +247,8 @@ struct run_initialize_batch {
       .n_tokens = ctx.n_tokens,
       .n_ubatch = ctx.n_ubatch,
       .mode = emel::batch::splitter::event::split_mode::simple,
+      .seq_primary_ids = ctx.seq_primary_ids,
+      .output_mask = ctx.output_mask,
       .on_done = on_done,
       .on_error = on_error,
     });
@@ -222,7 +259,7 @@ struct run_initialize_batch {
       return;
     }
 
-    if (reply.ubatch_count <= 0 || reply.total_outputs <= 0) {
+    if (reply.ubatch_count <= 0 || reply.total_outputs < 0) {
       *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
       ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
       return;  // GCOVR_EXCL_LINE
@@ -230,8 +267,58 @@ struct run_initialize_batch {
 
     ctx.ubatches_total = reply.ubatch_count;
     ctx.ubatches_processed = 0;
-    ctx.outputs_total = reply.total_outputs;
     ctx.outputs_processed = 0;
+
+    int32_t token_offset = 0;
+    int32_t outputs_total = 0;
+    const bool has_output_mask = ctx.output_mask != nullptr && ctx.output_mask_count >= ctx.n_tokens;
+    const bool has_seq_ids =
+        ctx.seq_primary_ids != nullptr && ctx.seq_primary_ids_count >= ctx.n_tokens;
+    for (int32_t i = 0; i < ctx.ubatches_total; ++i) {
+      const int32_t size = ctx.ubatch_sizes[i];
+      if (size <= 0 || token_offset + size > ctx.n_tokens) {
+        *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+        ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+        return;  // GCOVR_EXCL_LINE
+      }
+
+      ctx.ubatch_token_offsets[i] = token_offset;
+
+      int32_t outputs = 0;
+      if (has_output_mask) {
+        for (int32_t t = 0; t < size; ++t) {
+          outputs += (ctx.output_mask[token_offset + t] != 0);
+        }
+      } else {
+        outputs = size;
+      }
+      ctx.ubatch_outputs[i] = outputs;
+      outputs_total += outputs;
+
+      if (has_seq_ids) {
+        const int32_t seq_id = ctx.seq_primary_ids[token_offset];
+        for (int32_t t = 1; t < size; ++t) {
+          if (ctx.seq_primary_ids[token_offset + t] != seq_id) {
+            *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+            ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+            return;  // GCOVR_EXCL_LINE
+          }
+        }
+        ctx.ubatch_seq_ids[i] = seq_id;
+      } else {
+        ctx.ubatch_seq_ids[i] = 0;
+      }
+
+      token_offset += size;
+    }
+
+    if (token_offset != ctx.n_tokens) {
+      *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+      ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+      return;  // GCOVR_EXCL_LINE
+    }
+
+    ctx.outputs_total = outputs_total;
     if (ctx.n_ubatch <= 0) {
       ctx.n_ubatch = ctx.n_tokens;
     }
@@ -342,6 +429,8 @@ struct run_prepare_memory_batch {
       .slot_offsets_out = ctx.slot_offsets.data(),
       .slot_offsets_capacity = static_cast<int32_t>(ctx.slot_offsets.size()),
       .ubatch_count_out = nullptr,
+      .ubatch_seq_ids = ctx.ubatch_seq_ids.data(),
+      .ubatch_seq_ids_count = ctx.ubatches_total,
     });
 
     if (!kv_ok) {
@@ -409,6 +498,10 @@ struct run_reserve_output {
     }
     *ev.error_out = EMEL_OK;
     ctx.phase_error = EMEL_OK;
+    if (ctx.outputs_capacity > 0 && ctx.outputs_total > ctx.outputs_capacity) {
+      *ev.error_out = EMEL_ERR_BACKEND;
+      ctx.phase_error = EMEL_ERR_BACKEND;
+    }
   }
 
   template <class Ev>
@@ -463,6 +556,12 @@ struct run_process_ubatch {
     }
 
     const int32_t current = ctx.ubatch_sizes[ctx.ubatches_processed];
+    const int32_t expected_outputs = ctx.ubatch_outputs[ctx.ubatches_processed];
+    const int32_t token_offset = ctx.ubatch_token_offsets[ctx.ubatches_processed];
+    const bool has_positions =
+        ctx.positions != nullptr && ctx.positions_count >= ctx.n_tokens;
+    const int32_t * positions = has_positions ? ctx.positions + token_offset : nullptr;
+    const int32_t positions_count = has_positions ? current : 0;
     int32_t produced = 0;
     int32_t kv_tokens = 0;
     bool rollback_attempted = false;
@@ -472,10 +571,20 @@ struct run_process_ubatch {
       .ubatch_size = current,
       .memory_coordinator_sm = ctx.memory_coordinator.get(),
       .kv_cache_sm = ctx.kv_cache.get(),
+      .expected_outputs = expected_outputs,
+      .compute_ctx = ctx.compute_ctx,
+      .compute_validate = ctx.compute_validate,
+      .compute_prepare_graph = ctx.compute_prepare_graph,
+      .compute_alloc_graph = ctx.compute_alloc_graph,
+      .compute_bind_inputs = ctx.compute_bind_inputs,
+      .compute_run_backend = ctx.compute_run_backend,
+      .compute_extract_outputs = ctx.compute_extract_outputs,
       .outputs_produced_out = &produced,
       .kv_tokens_out = &kv_tokens,
       .rollback_attempted_out = &rollback_attempted,
       .error_out = &ubatch_error,
+      .positions = positions,
+      .positions_count = positions_count,
     });
 
     const int32_t normalized = detail::normalize_ubatch_error(ok, ubatch_error);
@@ -491,7 +600,7 @@ struct run_process_ubatch {
       return;  // GCOVR_EXCL_LINE
     }
 
-    if (produced <= 0) {  // GCOVR_EXCL_LINE
+    if (produced < 0) {  // GCOVR_EXCL_LINE
       *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
       ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
       ctx.ubatch_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE

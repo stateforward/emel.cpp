@@ -13,7 +13,7 @@ inline constexpr auto phase_failed = [](const action::context & ctx) {
 };
 
 inline constexpr auto outputs_produced_invalid = [](const action::context & ctx) {
-  return ctx.phase_error == EMEL_OK && ctx.outputs_produced <= 0;
+  return ctx.phase_error == EMEL_OK && ctx.outputs_produced != ctx.expected_outputs;
 };
 
 inline constexpr auto always = [](const action::context &) {
@@ -26,6 +26,9 @@ struct valid_execute_request {
       return false;
     }
     if (ev.ubatch_index < 0 || ev.ubatch_size <= 0) {
+      return false;
+    }
+    if (ev.expected_outputs < 0 || ev.expected_outputs > ev.ubatch_size) {
       return false;
     }
     return true;
