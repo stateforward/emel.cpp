@@ -4,17 +4,15 @@
 
 namespace emel::sampler::token_selector::guard {
 
-struct has_candidates {
-  template <class TEvent>
-  bool operator()(const TEvent &, const action::context & ctx) const noexcept {
-    return ctx.candidate_count > 0;
+struct phase_ok {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error == EMEL_OK;
   }
 };
 
-struct no_candidates {
-  template <class TEvent>
-  bool operator()(const TEvent &, const action::context & ctx) const noexcept {
-    return ctx.candidate_count <= 0;
+struct phase_failed {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.phase_error != EMEL_OK;
   }
 };
 

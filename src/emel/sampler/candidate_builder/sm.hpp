@@ -1,195 +1,82 @@
 #pragma once
 
-#include <cstdint>
-
-#include "emel/emel.h"
 #include "emel/sampler/candidate_builder/actions.hpp"
 #include "emel/sampler/candidate_builder/events.hpp"
 #include "emel/sampler/candidate_builder/guards.hpp"
 #include "emel/sm.hpp"
+#include "emel/sm.hpp"
 
 namespace emel::sampler::candidate_builder {
 
-using Process = boost::sml::back::process<
-  event::validate,
-  events::validate_done,
-  events::validate_error,
-  event::build_candidates,
-  events::build_candidates_done,
-  events::build_candidates_error,
-  event::normalize_scores,
-  events::normalize_scores_done,
-  events::normalize_scores_error,
-  events::build_done,
-  events::build_error>;
-
-// Ready state. Accepts one build request at a time.
 struct initialized {};
-// Validates build payload and output buffers.
 struct validating {};
-// Builds candidate id/score arrays from logits.
+struct validate_decision {};
 struct building_candidates {};
-// Normalizes candidate scores for downstream sampling.
+struct build_decision {};
 struct normalizing_scores {};
-// Terminal success state.
+struct normalize_decision {};
 struct done {};
-// Terminal error state.
 struct errored {};
 
 struct model {
+  using context = action::context;
+
   auto operator()() const {
     namespace sml = boost::sml;
-    using process_t = Process;
-
+    const auto not_anonymous = [](const auto & ev) {
+      using event_type = std::decay_t<decltype(ev)>;
+      return !std::is_same_v<event_type, boost::sml::anonymous>;
+    };
     return sml::make_transition_table(
       *sml::state<initialized> + sml::event<event::build> / action::begin_build =
-          sml::state<validating>,
-      sml::state<validating> + sml::on_entry<event::build> /
-          [](const event::build & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            event::validate validate{
-              .logits = ev.logits,
-              .vocab_size = ev.vocab_size,
-              .candidate_ids_out = ev.candidate_ids_out,
-              .candidate_scores_out = ev.candidate_scores_out,
-              .candidate_capacity = ev.candidate_capacity,
-              .candidate_count_out = ev.candidate_count_out,
-              .error_out = &phase_error,
-            };
-            process(validate);
-            if (ev.error_out != nullptr) {
-              *ev.error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::validate_error{
-                .err = phase_error,
-                .request = &ev,
-              });
-              return;
-            }
-            process(events::validate_done{
-              .request = &ev,
-            });
-          },
+        sml::state<validating>,
 
-      sml::state<validating> + sml::event<event::validate> / action::run_validate =
-          sml::state<validating>,
-      sml::state<validating> + sml::event<events::validate_done> = sml::state<building_candidates>,
-      sml::state<validating> + sml::event<events::validate_error> = sml::state<errored>,
+      sml::state<validating> / action::run_validate = sml::state<validate_decision>,
+      sml::state<validate_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<validate_decision> [guard::phase_ok{}] = sml::state<building_candidates>,
 
-      sml::state<building_candidates> + sml::on_entry<events::validate_done> /
-          [](const events::validate_done & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            const event::build * request = ev.request;
-            event::build_candidates build_candidates{
-              .logits = request != nullptr ? request->logits : nullptr,
-              .vocab_size = request != nullptr ? request->vocab_size : 0,
-              .candidate_ids_out = request != nullptr ? request->candidate_ids_out : nullptr,
-              .candidate_scores_out = request != nullptr ? request->candidate_scores_out : nullptr,
-              .error_out = &phase_error,
-            };
-            process(build_candidates);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::build_candidates_error{
-                .err = phase_error,
-                .request = request,
-              });
-              return;
-            }
-            process(events::build_candidates_done{
-              .request = request,
-            });
-          },
-      sml::state<building_candidates> + sml::event<event::build_candidates> /
-          action::run_build_candidates = sml::state<building_candidates>,
-      sml::state<building_candidates> + sml::event<events::build_candidates_done> =
-          sml::state<normalizing_scores>,
-      sml::state<building_candidates> + sml::event<events::build_candidates_error> =
-          sml::state<errored>,
+      sml::state<building_candidates> / action::run_build_candidates =
+        sml::state<build_decision>,
+      sml::state<build_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<build_decision> [guard::phase_ok{}] = sml::state<normalizing_scores>,
 
-      sml::state<normalizing_scores> + sml::on_entry<events::build_candidates_done> /
-          [](const events::build_candidates_done & ev, action::context &, process_t & process) noexcept {
-            int32_t phase_error = EMEL_OK;
-            const event::build * request = ev.request;
-            event::normalize_scores normalize{
-              .candidate_scores_out = request != nullptr ? request->candidate_scores_out : nullptr,
-              .error_out = &phase_error,
-            };
-            process(normalize);
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = phase_error;
-            }
-            if (phase_error != EMEL_OK) {
-              process(events::normalize_scores_error{
-                .err = phase_error,
-                .request = request,
-              });
-              return;
-            }
-            process(events::normalize_scores_done{
-              .request = request,
-            });
-          },
-      sml::state<normalizing_scores> + sml::event<event::normalize_scores> /
-          action::run_normalize_scores = sml::state<normalizing_scores>,
-      sml::state<normalizing_scores> +
-          sml::event<events::normalize_scores_done>[guard::has_candidates{}] =
-          sml::state<done>,
-      sml::state<normalizing_scores> +
-          sml::event<events::normalize_scores_done>[guard::no_candidates{}] =
-          sml::state<errored>,
-      sml::state<normalizing_scores> + sml::event<events::normalize_scores_error> =
-          sml::state<errored>,
+      sml::state<normalizing_scores> / action::run_normalize_scores =
+        sml::state<normalize_decision>,
+      sml::state<normalize_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<normalize_decision> [guard::phase_ok{}] = sml::state<done>,
 
-      sml::state<done> + sml::on_entry<events::normalize_scores_done> /
-          [](const events::normalize_scores_done & ev, action::context & ctx,
-             process_t & process) noexcept {
-            const event::build * request = ev.request;
-            process(events::build_done{
-              .candidate_count = ctx.candidate_count,
-              .candidate_count_out = request != nullptr ? request->candidate_count_out : nullptr,
-              .request = request,
-            });
-          },
-      sml::state<done> + sml::event<events::build_done> / action::on_build_done =
-          sml::state<initialized>,
-      sml::state<done> + sml::event<events::build_error> / action::on_build_error =
-          sml::state<initialized>,
+      sml::state<done> / action::publish_done = sml::state<initialized>,
+      sml::state<errored> / action::publish_error = sml::state<initialized>,
 
-      sml::state<errored> + sml::on_entry<sml::_> /
-          [](const auto & ev, action::context &, process_t & process) noexcept {
-            int32_t err = EMEL_ERR_BACKEND;
-            const event::build * request = nullptr;
-            if constexpr (requires { ev.err; }) {
-              err = ev.err;
-            }
-            if constexpr (requires { ev.request; }) {
-              request = ev.request;
-            }
-            if (request != nullptr && request->error_out != nullptr) {
-              *request->error_out = err;
-            }
-            process(events::build_error{
-              .err = err,
-              .candidate_count_out = request != nullptr ? request->candidate_count_out : nullptr,
-              .request = request,
-            });
-          },
-      sml::state<errored> + sml::event<events::build_error> / action::on_build_error =
-          sml::state<initialized>
+      sml::state<initialized> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<validating> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<validate_decision> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<building_candidates> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<build_decision> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<normalizing_scores> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<normalize_decision> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<done> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<errored> + sml::event<sml::_> [not_anonymous] /
+        action::on_unexpected = sml::state<errored>
     );
   }
 };
 
-struct sm : private emel::detail::process_support<sm, Process>, public emel::sm<model, Process> {
-  using base_type = emel::sm<model, Process>;
+struct sm : public emel::sm<model> {
+  using base_type = emel::sm<model>;
 
-  sm() : emel::detail::process_support<sm, Process>(this), base_type(context_, this->process_) {}
+  sm() : base_type(context_) {}
 
   using base_type::process_event;
+  using base_type::visit_current_states;
 
   int32_t candidate_count() const noexcept { return context_.candidate_count; }
 

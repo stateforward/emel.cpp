@@ -93,6 +93,9 @@ if(EMEL_ENABLE_TESTS)
     tests/model/loader_tests.cpp
     tests/model/parser_tests.cpp
     tests/model/weight_loader_tests.cpp
+    tests/sampler/candidate_builder_tests.cpp
+    tests/sampler/pipeline_tests.cpp
+    tests/sampler/token_selector_tests.cpp
     tests/sm/sm_policy_tests.cpp
     tests/decoder/decoder_tests.cpp
     tests/decoder/decoder_sm_transition_tests.cpp
