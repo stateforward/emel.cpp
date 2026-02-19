@@ -1,3 +1,4 @@
+#include <array>
 #include <doctest/doctest.h>
 
 #include "emel/decoder/ubatch_executor/actions.hpp"
@@ -141,6 +142,56 @@ TEST_CASE("ubatch_executor_guard_validates_execute_request") {
 
   request.ubatch_size = 0;
   CHECK(emel::decoder::ubatch_executor::guard::invalid_execute_request{}(request, ctx));
+}
+
+TEST_CASE("ubatch_executor_guard_rejects_invalid_execute_fields") {
+  emel::decoder::ubatch_executor::action::context ctx{};
+  emel::memory::coordinator::sm memory_coordinator{};
+  emel::kv::cache::sm kv_cache{};
+  std::array<int32_t, 3> positions = {{0, 1, 2}};
+  std::array<uint64_t, emel::kv::cache::action::SEQ_WORDS> masks = {};
+  std::array<int32_t, 2> primary_ids = {{0, 1}};
+
+  emel::decoder::ubatch_executor::event::execute request{
+    .ubatch_index = 0,
+    .ubatch_size = 2,
+    .memory_coordinator_sm = &memory_coordinator,
+    .kv_cache_sm = &kv_cache,
+    .expected_outputs = 1,
+  };
+  CHECK(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
+
+  request.expected_outputs = -1;
+  CHECK_FALSE(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
+  request.expected_outputs = 3;
+  CHECK_FALSE(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
+  request.expected_outputs = 1;
+
+  request.positions = positions.data();
+  request.positions_count = 1;
+  CHECK_FALSE(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
+  request.positions_count = 4;
+  CHECK_FALSE(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
+  request.positions_count = 2;
+  CHECK(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
+
+  request.seq_masks = masks.data();
+  request.seq_mask_words = 0;
+  request.seq_masks_count = 2;
+  CHECK_FALSE(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
+  request.seq_mask_words = emel::kv::cache::action::SEQ_WORDS + 1;
+  CHECK_FALSE(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
+  request.seq_mask_words = emel::kv::cache::action::SEQ_WORDS;
+  request.seq_masks_count = 1;
+  CHECK_FALSE(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
+  request.seq_masks_count = 2;
+  CHECK(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
+
+  request.seq_primary_ids = primary_ids.data();
+  request.seq_primary_ids_count = 1;
+  CHECK_FALSE(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
+  request.seq_primary_ids_count = 2;
+  CHECK(emel::decoder::ubatch_executor::guard::valid_execute_request{}(request, ctx));
 }
 
 TEST_CASE("ubatch_executor_guard_rejects_missing_dependencies") {

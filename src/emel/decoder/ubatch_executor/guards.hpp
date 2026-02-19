@@ -1,6 +1,7 @@
 #pragma once
 
 #include "emel/decoder/ubatch_executor/actions.hpp"
+#include "emel/kv/cache/actions.hpp"
 
 namespace emel::decoder::ubatch_executor::guard {
 
@@ -29,6 +30,27 @@ struct valid_execute_request {
       return false;
     }
     if (ev.expected_outputs < 0 || ev.expected_outputs > ev.ubatch_size) {
+      return false;
+    }
+    if (ev.positions != nullptr) {
+      if (ev.positions_count < ev.ubatch_size) {
+        return false;
+      }
+      if (ev.positions_count > ev.ubatch_size &&
+          ev.positions_count < ev.ubatch_size * 3) {
+        return false;
+      }
+    }
+    if (ev.seq_masks != nullptr) {
+      if (ev.seq_mask_words <= 0 ||
+          ev.seq_mask_words > emel::kv::cache::action::SEQ_WORDS) {
+        return false;
+      }
+      if (ev.seq_masks_count < ev.ubatch_size) {
+        return false;
+      }
+    }
+    if (ev.seq_primary_ids != nullptr && ev.seq_primary_ids_count < ev.ubatch_size) {
       return false;
     }
     return true;

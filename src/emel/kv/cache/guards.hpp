@@ -177,6 +177,28 @@ inline constexpr auto valid_apply_request = [](
   if (ubatch_index != ctx.applied_ubatches) {
     return false;
   }
+  const int32_t size = ctx.ubatch_sizes[ubatch_index];
+  if (request->positions != nullptr) {
+    if (request->positions_count < size) {
+      return false;
+    }
+    if (request->positions_count > size && request->positions_count < size * 3) {
+      return false;
+    }
+  }
+  if (request->seq_masks != nullptr) {
+    if (request->seq_mask_words <= 0 ||
+        request->seq_mask_words > action::SEQ_WORDS) {
+      return false;
+    }
+    if (request->seq_masks_count < size) {
+      return false;
+    }
+  }
+  if (request->seq_primary_ids != nullptr &&
+      request->seq_primary_ids_count < size) {
+    return false;
+  }
   return true;
 };
 
@@ -214,7 +236,25 @@ inline constexpr auto valid_apply_step_request = [](
   if (!valid_seq_id(ctx.ubatch_seq_ids[ubatch_index])) {
     return false;
   }
-  if (request->positions != nullptr && request->positions_count < size) {
+  if (request->positions != nullptr) {
+    if (request->positions_count < size) {
+      return false;
+    }
+    if (request->positions_count > size && request->positions_count < size * 3) {
+      return false;
+    }
+  }
+  if (request->seq_masks != nullptr) {
+    if (request->seq_mask_words <= 0 ||
+        request->seq_mask_words > action::SEQ_WORDS) {
+      return false;
+    }
+    if (request->seq_masks_count < size) {
+      return false;
+    }
+  }
+  if (request->seq_primary_ids != nullptr &&
+      request->seq_primary_ids_count < size) {
     return false;
   }
   return true;

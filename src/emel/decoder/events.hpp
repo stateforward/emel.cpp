@@ -25,8 +25,12 @@ struct decode {
   const int32_t * token_ids = nullptr;
   int32_t n_tokens = 0;
   int32_t n_ubatch = 0;
+  bool output_all = false;
   const int8_t * output_mask = nullptr;
   int32_t output_mask_count = 0;
+  const uint64_t * seq_masks = nullptr;
+  int32_t seq_mask_words = 1;
+  int32_t seq_masks_count = 0;
   const int32_t * seq_primary_ids = nullptr;
   int32_t seq_primary_ids_count = 0;
   const int32_t * positions = nullptr;

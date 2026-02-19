@@ -23,11 +23,18 @@ struct context {
   bool equal_sequential = true;
   int32_t seq_mask_words = 1;
   const int8_t * output_mask = nullptr;
+  int32_t seq_masks_count = 0;
+  int32_t seq_primary_ids_count = 0;
+  int32_t output_mask_count = 0;
+  bool output_all = false;
 
   int32_t effective_n_ubatch = 0;
   std::array<int32_t, MAX_UBATCHES> ubatch_sizes = {};
   int32_t ubatch_count = 0;
   int32_t total_outputs = 0;
+  std::array<int32_t, MAX_UBATCHES> ubatch_token_indices = {};
+  std::array<int32_t, MAX_UBATCHES + 1> ubatch_token_offsets = {};
+  int32_t token_indices_count = 0;
 };
 
 // Initializes context for a new split request.
@@ -41,11 +48,18 @@ inline constexpr auto begin_split = [](const event::split & ev, context & ctx) n
   ctx.equal_sequential = ev.equal_sequential;
   ctx.seq_mask_words = ev.seq_mask_words;
   ctx.output_mask = ev.output_mask;
+  ctx.seq_masks_count = ev.seq_masks_count;
+  ctx.seq_primary_ids_count = ev.seq_primary_ids_count;
+  ctx.output_mask_count = ev.output_mask_count;
+  ctx.output_all = ev.output_all;
 
   ctx.effective_n_ubatch = 0;
   ctx.ubatch_count = 0;
   ctx.total_outputs = 0;
   ctx.ubatch_sizes.fill(0);
+  ctx.ubatch_token_indices.fill(0);
+  ctx.ubatch_token_offsets.fill(0);
+  ctx.token_indices_count = 0;
 };
 
 // Normalizes the requested micro-batch size.
@@ -135,14 +149,40 @@ inline bool mask_has_multiple_bits(const seq_mask_t & mask) noexcept {
 }
 
 inline int32_t count_total_outputs(const context & ctx) noexcept {
-  if (ctx.output_mask == nullptr) {
+  if (ctx.output_all) {
     return ctx.n_tokens;
+  }
+  if (ctx.output_mask == nullptr) {
+    return ctx.n_tokens > 0 ? 1 : 0;
   }
   int32_t total = 0;
   for (int32_t i = 0; i < ctx.n_tokens; ++i) {
     total += (ctx.output_mask[i] != 0);
   }
   return total;
+}
+
+inline bool append_token_index(context & ctx, const int32_t idx) noexcept {
+  if (ctx.token_indices_count >= MAX_UBATCHES) {
+    return false;
+  }
+  ctx.ubatch_token_indices[ctx.token_indices_count] = idx;
+  ctx.token_indices_count += 1;
+  return true;
+}
+
+inline bool begin_ubatch(context & ctx) noexcept {
+  if (ctx.ubatch_count >= MAX_UBATCHES) {
+    return false;
+  }
+  ctx.ubatch_token_offsets[ctx.ubatch_count] = ctx.token_indices_count;
+  return true;
+}
+
+inline void finalize_token_offsets(context & ctx) noexcept {
+  if (ctx.ubatch_count <= MAX_UBATCHES) {
+    ctx.ubatch_token_offsets[ctx.ubatch_count] = ctx.token_indices_count;
+  }
 }
 
 inline bool push_ubatch_size(context & ctx, const int32_t size) noexcept {
@@ -161,27 +201,43 @@ inline void fail_split(context & ctx) noexcept {
   ctx.ubatch_sizes.fill(0);
   ctx.ubatch_count = 0;
   ctx.total_outputs = 0;
+  ctx.token_indices_count = 0;
+  ctx.ubatch_token_offsets.fill(0);
 }
 
 inline void prepare_split(context & ctx) noexcept {
   ctx.ubatch_sizes.fill(0);
   ctx.ubatch_count = 0;
   ctx.total_outputs = count_total_outputs(ctx);
+  ctx.token_indices_count = 0;
+  ctx.ubatch_token_offsets.fill(0);
 }
 
 // Materializes micro-batch boundaries in simple mode. On failure, leaves ubatch_count == 0.
 inline auto create_ubatches_simple = [](context & ctx) noexcept {
   prepare_split(ctx);
 
-  int32_t remaining = ctx.n_tokens;
-  while (remaining > 0) {
-    const int32_t chunk = std::min<int32_t>(remaining, ctx.effective_n_ubatch);
+  int32_t next_token = 0;
+  while (next_token < ctx.n_tokens) {
+    if (!begin_ubatch(ctx)) {
+      fail_split(ctx);
+      return;
+    }
+    const int32_t chunk =
+        std::min<int32_t>(ctx.effective_n_ubatch, ctx.n_tokens - next_token);
+    for (int32_t i = 0; i < chunk; ++i) {
+      if (!append_token_index(ctx, next_token + i)) {
+        fail_split(ctx);
+        return;
+      }
+    }
+    next_token += chunk;
     if (!push_ubatch_size(ctx, chunk)) {
       fail_split(ctx);
       return;
     }
-    remaining -= chunk;
   }
+  finalize_token_offsets(ctx);
 };
 
 // Materializes micro-batch boundaries in equal mode. On failure, leaves ubatch_count == 0.
@@ -245,60 +301,62 @@ inline auto create_ubatches_equal = [](context & ctx) noexcept {
       return;
     }
 
+    int32_t min_avail = ctx.n_tokens + 1;
     for (int32_t g = 0; g < group_count; ++g) {
-      int32_t idx = 0;
-      while (idx < ctx.n_tokens) {
-        if (used[static_cast<size_t>(idx)] == 0 &&
-            mask_equal(normalized_seq_mask(ctx, idx), groups[g].mask)) {
-          break;
+      int32_t avail = 0;
+      for (int32_t i = 0; i < ctx.n_tokens; ++i) {
+        if (used[static_cast<size_t>(i)] != 0) {
+          continue;
         }
-        ++idx;
+        if (mask_equal(normalized_seq_mask(ctx, i), groups[g].mask)) {
+          avail += 1;
+        }
       }
-      groups[g].next_idx = idx;
+      min_avail = std::min(min_avail, avail);
     }
 
-    int32_t n_seq_tokens = 0;
-    int32_t added = 0;
-    while (true) {
-      bool can_expand = true;
-      for (int32_t g = 0; g < group_count; ++g) {
-        if (groups[g].next_idx >= ctx.n_tokens) {
-          can_expand = false;
-          break;
-        }
-      }
-      if (!can_expand) {
-        break;
-      }
+    const int32_t max_rows = ctx.effective_n_ubatch / group_count;
+    const int32_t n_seq_tokens = std::min(max_rows, min_avail);
+    if (n_seq_tokens <= 0) {
+      fail_split(ctx);
+      return;
+    }
 
-      for (int32_t g = 0; g < group_count; ++g) {
-        const int32_t idx = groups[g].next_idx;
-        used[static_cast<size_t>(idx)] = 1;
+    if (!begin_ubatch(ctx)) {
+      fail_split(ctx);
+      return;
+    }
+
+    for (int32_t g = 0; g < group_count; ++g) {
+      int32_t remaining = n_seq_tokens;
+      for (int32_t i = 0; i < ctx.n_tokens && remaining > 0; ++i) {
+        if (used[static_cast<size_t>(i)] != 0) {
+          continue;
+        }
+        if (!mask_equal(normalized_seq_mask(ctx, i), groups[g].mask)) {
+          continue;
+        }
+        used[static_cast<size_t>(i)] = 1;
         used_count += 1;
-        added += 1;
-
-        int32_t next = idx + 1;
-        while (next < ctx.n_tokens) {
-          if (used[static_cast<size_t>(next)] == 0 &&
-              mask_equal(normalized_seq_mask(ctx, next), groups[g].mask)) {
-            break;
-          }
-          ++next;
+        if (!append_token_index(ctx, i)) {
+          fail_split(ctx);
+          return;
         }
-        groups[g].next_idx = next;
+        remaining -= 1;
       }
-
-      n_seq_tokens += 1;
-      if ((n_seq_tokens + 1) * group_count > ctx.effective_n_ubatch) {
-        break;
+      if (remaining != 0) {
+        fail_split(ctx);
+        return;
       }
     }
 
+    const int32_t added = n_seq_tokens * group_count;
     if (!push_ubatch_size(ctx, added)) {
       fail_split(ctx);
       return;
     }
   }
+  finalize_token_offsets(ctx);
 };
 
 // Materializes micro-batch boundaries in seq mode. On failure, leaves ubatch_count == 0.
@@ -324,10 +382,18 @@ inline auto create_ubatches_seq = [](context & ctx) noexcept {
 
     int32_t chunk = 0;
     seq_mask_t cur_mask = normalized_seq_mask(ctx, cur_idx);
+    if (!begin_ubatch(ctx)) {
+      fail_split(ctx);
+      return;
+    }
     while (true) {
       used[static_cast<size_t>(cur_idx)] = 1;
       used_count += 1;
       chunk += 1;
+      if (!append_token_index(ctx, cur_idx)) {
+        fail_split(ctx);
+        return;
+      }
 
       if (chunk >= ctx.effective_n_ubatch) {
         break;
@@ -356,6 +422,7 @@ inline auto create_ubatches_seq = [](context & ctx) noexcept {
       return;
     }
   }
+  finalize_token_offsets(ctx);
 };
 
 // Publishes split outputs (output write-back happens in caller via callbacks).
@@ -371,6 +438,10 @@ inline constexpr auto dispatch_done = [](const event::split & ev, const context 
     .ubatch_sizes = ctx.ubatch_sizes.data(),
     .ubatch_count = ctx.ubatch_count,
     .total_outputs = ctx.total_outputs,
+    .ubatch_token_indices = ctx.ubatch_token_indices.data(),
+    .ubatch_token_indices_count = ctx.token_indices_count,
+    .ubatch_token_offsets = ctx.ubatch_token_offsets.data(),
+    .ubatch_token_offsets_count = ctx.ubatch_count + 1,
   });
 };
 

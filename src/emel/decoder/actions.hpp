@@ -23,12 +23,16 @@ enum class prepare_failure_kind : uint8_t {
 
 struct context {
   const int32_t * token_ids = nullptr;
+  bool output_all = false;
   const int8_t * output_mask = nullptr;
+  const uint64_t * seq_masks = nullptr;
   const int32_t * seq_primary_ids = nullptr;
   const int32_t * positions = nullptr;
   int32_t n_tokens = 0;
   int32_t n_ubatch = 0;
   int32_t output_mask_count = 0;
+  int32_t seq_mask_words = 1;
+  int32_t seq_masks_count = 0;
   int32_t seq_primary_ids_count = 0;
   int32_t positions_count = 0;
   int32_t outputs_capacity = 0;
@@ -39,8 +43,17 @@ struct context {
   std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_sizes = {};
   std::array<int32_t, emel::kv::cache::action::MAX_UBATCHES> slot_offsets = {};
   std::array<int32_t, emel::kv::cache::action::MAX_UBATCHES> ubatch_seq_ids = {};
-  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_token_offsets = {};
+  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_token_indices = {};
+  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES + 1> ubatch_token_offsets =
+      {};
   std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_outputs = {};
+  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES * 3> ubatch_positions = {};
+  std::array<uint64_t,
+             emel::batch::splitter::action::MAX_UBATCHES *
+                 emel::batch::splitter::action::SEQ_WORDS>
+      ubatch_seq_masks = {};
+  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_seq_primary_ids = {};
+  int32_t token_indices_count = 0;
   int32_t ubatches_total = 0;
   int32_t ubatches_processed = 0;
 
@@ -96,6 +109,26 @@ inline int32_t normalize_ubatch_error(const bool ok, const int32_t err) noexcept
   return err;
 }
 
+inline int32_t primary_seq_from_mask(
+    const uint64_t * seq_masks,
+    const int32_t seq_mask_words,
+    const int32_t token_idx) noexcept {
+  if (seq_masks == nullptr || seq_mask_words <= 0) {
+    return 0;
+  }
+  const size_t base =
+      static_cast<size_t>(token_idx) * static_cast<size_t>(seq_mask_words);
+  for (int32_t w = 0; w < seq_mask_words; ++w) {
+    const uint64_t mask = seq_masks[base + static_cast<size_t>(w)];
+    if (mask == 0) {
+      continue;
+    }
+    const int32_t bit = __builtin_ctzll(mask);
+    return w * 64 + bit;
+  }
+  return 0;
+}
+
 }  // namespace detail
 
 inline prepare_failure_kind classify_prepare_failure_from_memory_status(
@@ -128,12 +161,16 @@ inline bool update_status_is_error(
 struct begin_decode {
   void operator()(const event::decode & ev, context & ctx) const noexcept {
     ctx.token_ids = ev.token_ids;
+    ctx.output_all = ev.output_all;
     ctx.output_mask = ev.output_mask;
+    ctx.seq_masks = ev.seq_masks;
     ctx.seq_primary_ids = ev.seq_primary_ids;
     ctx.positions = ev.positions;
     ctx.n_tokens = ev.n_tokens;
     ctx.n_ubatch = ev.n_ubatch;
     ctx.output_mask_count = ev.output_mask_count;
+    ctx.seq_mask_words = ev.seq_mask_words;
+    ctx.seq_masks_count = ev.seq_masks_count;
     ctx.seq_primary_ids_count = ev.seq_primary_ids_count;
     ctx.positions_count = ev.positions_count;
     ctx.outputs_capacity = ev.outputs_capacity;
@@ -152,8 +189,13 @@ struct begin_decode {
     ctx.ubatch_sizes.fill(0);
     ctx.slot_offsets.fill(0);
     ctx.ubatch_seq_ids.fill(0);
+    ctx.ubatch_token_indices.fill(0);
     ctx.ubatch_token_offsets.fill(0);
     ctx.ubatch_outputs.fill(0);
+    ctx.ubatch_positions.fill(0);
+    ctx.ubatch_seq_masks.fill(0);
+    ctx.ubatch_seq_primary_ids.fill(0);
+    ctx.token_indices_count = 0;
     ctx.phase_error = EMEL_OK;
     ctx.ubatch_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
@@ -205,14 +247,22 @@ struct run_initialize_batch {
     struct split_reply {
       int32_t * ubatch_sizes_out = nullptr;
       int32_t ubatch_sizes_capacity = 0;
+      int32_t * token_indices_out = nullptr;
+      int32_t token_indices_capacity = 0;
+      int32_t * token_offsets_out = nullptr;
+      int32_t token_offsets_capacity = 0;
       int32_t ubatch_count = 0;
       int32_t total_outputs = 0;
+      int32_t token_indices_count = 0;
+      int32_t token_offsets_count = 0;
       int32_t err = EMEL_OK;
 
       void on_done(const emel::batch::splitter::events::splitting_done & reply) noexcept {
         err = EMEL_OK;
         ubatch_count = reply.ubatch_count;
         total_outputs = reply.total_outputs;
+        token_indices_count = reply.ubatch_token_indices_count;
+        token_offsets_count = reply.ubatch_token_offsets_count;
         if (ubatch_sizes_out == nullptr) {
           return;  // GCOVR_EXCL_LINE
         }
@@ -220,8 +270,28 @@ struct run_initialize_batch {
           err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
           return;  // GCOVR_EXCL_LINE
         }
+        if (token_indices_out == nullptr || token_offsets_out == nullptr) {
+          err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+          return;  // GCOVR_EXCL_LINE
+        }
+        if (token_indices_capacity < reply.ubatch_token_indices_count ||
+            reply.ubatch_token_indices == nullptr) {
+          err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+          return;  // GCOVR_EXCL_LINE
+        }
+        if (token_offsets_capacity < reply.ubatch_token_offsets_count ||
+            reply.ubatch_token_offsets == nullptr) {
+          err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+          return;  // GCOVR_EXCL_LINE
+        }
         for (int32_t i = 0; i < reply.ubatch_count; ++i) {
           ubatch_sizes_out[i] = reply.ubatch_sizes[i];
+        }
+        for (int32_t i = 0; i < reply.ubatch_token_indices_count; ++i) {
+          token_indices_out[i] = reply.ubatch_token_indices[i];
+        }
+        for (int32_t i = 0; i < reply.ubatch_token_offsets_count; ++i) {
+          token_offsets_out[i] = reply.ubatch_token_offsets[i];
         }
       }
 
@@ -233,6 +303,10 @@ struct run_initialize_batch {
     split_reply reply{
       .ubatch_sizes_out = ctx.ubatch_sizes.data(),
       .ubatch_sizes_capacity = static_cast<int32_t>(ctx.ubatch_sizes.size()),
+      .token_indices_out = ctx.ubatch_token_indices.data(),
+      .token_indices_capacity = static_cast<int32_t>(ctx.ubatch_token_indices.size()),
+      .token_offsets_out = ctx.ubatch_token_offsets.data(),
+      .token_offsets_capacity = static_cast<int32_t>(ctx.ubatch_token_offsets.size()),
     };
 
     const auto on_done =
@@ -242,13 +316,23 @@ struct run_initialize_batch {
         emel::callback<void(const emel::batch::splitter::events::splitting_error &)>::from<
             split_reply, &split_reply::on_error>(&reply);
 
+    const emel::batch::splitter::event::split_mode split_mode =
+        ctx.output_all ? emel::batch::splitter::event::split_mode::seq
+                       : emel::batch::splitter::event::split_mode::equal;
     const bool ok = ctx.batch_splitter->process_event(emel::batch::splitter::event::split{
       .token_ids = ctx.token_ids,
       .n_tokens = ctx.n_tokens,
       .n_ubatch = ctx.n_ubatch,
-      .mode = emel::batch::splitter::event::split_mode::simple,
+      .mode = split_mode,
+      .seq_masks = ctx.seq_masks,
+      .seq_masks_count = ctx.seq_masks_count,
       .seq_primary_ids = ctx.seq_primary_ids,
+      .seq_primary_ids_count = ctx.seq_primary_ids_count,
+      .equal_sequential = true,
+      .seq_mask_words = ctx.seq_mask_words,
       .output_mask = ctx.output_mask,
+      .output_mask_count = ctx.output_mask_count,
+      .output_all = ctx.output_all,
       .on_done = on_done,
       .on_error = on_error,
     });
@@ -264,55 +348,77 @@ struct run_initialize_batch {
       ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
       return;  // GCOVR_EXCL_LINE
     }
+    if (reply.token_indices_count != ctx.n_tokens) {
+      *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+      ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+      return;  // GCOVR_EXCL_LINE
+    }
+    if (reply.token_offsets_count != reply.ubatch_count + 1) {
+      *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+      ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+      return;  // GCOVR_EXCL_LINE
+    }
 
     ctx.ubatches_total = reply.ubatch_count;
     ctx.ubatches_processed = 0;
     ctx.outputs_processed = 0;
+    ctx.token_indices_count = reply.token_indices_count;
 
-    int32_t token_offset = 0;
     int32_t outputs_total = 0;
-    const bool has_output_mask = ctx.output_mask != nullptr && ctx.output_mask_count >= ctx.n_tokens;
+    const bool use_output_mask =
+        !ctx.output_all && ctx.output_mask != nullptr && ctx.output_mask_count >= ctx.n_tokens;
+    const bool output_last_only = !ctx.output_all && ctx.output_mask == nullptr;
+    const bool has_seq_masks =
+        ctx.seq_masks != nullptr && ctx.seq_masks_count >= ctx.n_tokens;
     const bool has_seq_ids =
         ctx.seq_primary_ids != nullptr && ctx.seq_primary_ids_count >= ctx.n_tokens;
+    const int32_t last_token = ctx.n_tokens - 1;
+
     for (int32_t i = 0; i < ctx.ubatches_total; ++i) {
       const int32_t size = ctx.ubatch_sizes[i];
-      if (size <= 0 || token_offset + size > ctx.n_tokens) {
+      const int32_t start = ctx.ubatch_token_offsets[i];
+      const int32_t end = ctx.ubatch_token_offsets[i + 1];
+      if (size <= 0 || start < 0 || end < start || end > ctx.token_indices_count) {
+        *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+        ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+        return;  // GCOVR_EXCL_LINE
+      }
+      if (end - start != size) {
         *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
         ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
         return;  // GCOVR_EXCL_LINE
       }
 
-      ctx.ubatch_token_offsets[i] = token_offset;
-
       int32_t outputs = 0;
-      if (has_output_mask) {
-        for (int32_t t = 0; t < size; ++t) {
-          outputs += (ctx.output_mask[token_offset + t] != 0);
+      for (int32_t t = start; t < end; ++t) {
+        const int32_t token_idx = ctx.ubatch_token_indices[t];
+        if (token_idx < 0 || token_idx >= ctx.n_tokens) {
+          *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+          ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+          return;  // GCOVR_EXCL_LINE
         }
-      } else {
-        outputs = size;
+        if (ctx.output_all) {
+          outputs += 1;
+        } else if (use_output_mask) {
+          outputs += (ctx.output_mask[token_idx] != 0);
+        } else if (output_last_only) {
+          outputs += (token_idx == last_token);
+        }
       }
       ctx.ubatch_outputs[i] = outputs;
       outputs_total += outputs;
 
+      const int32_t first_token = ctx.ubatch_token_indices[start];
+      int32_t seq_id = 0;
       if (has_seq_ids) {
-        const int32_t seq_id = ctx.seq_primary_ids[token_offset];
-        for (int32_t t = 1; t < size; ++t) {
-          if (ctx.seq_primary_ids[token_offset + t] != seq_id) {
-            *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-            ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-            return;  // GCOVR_EXCL_LINE
-          }
-        }
-        ctx.ubatch_seq_ids[i] = seq_id;
-      } else {
-        ctx.ubatch_seq_ids[i] = 0;
+        seq_id = ctx.seq_primary_ids[first_token];
+      } else if (has_seq_masks) {
+        seq_id = detail::primary_seq_from_mask(ctx.seq_masks, ctx.seq_mask_words, first_token);
       }
-
-      token_offset += size;
+      ctx.ubatch_seq_ids[i] = seq_id;
     }
 
-    if (token_offset != ctx.n_tokens) {
+    if (outputs_total != reply.total_outputs) {
       *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
       ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
       return;  // GCOVR_EXCL_LINE
@@ -557,11 +663,81 @@ struct run_process_ubatch {
 
     const int32_t current = ctx.ubatch_sizes[ctx.ubatches_processed];
     const int32_t expected_outputs = ctx.ubatch_outputs[ctx.ubatches_processed];
-    const int32_t token_offset = ctx.ubatch_token_offsets[ctx.ubatches_processed];
-    const bool has_positions =
-        ctx.positions != nullptr && ctx.positions_count >= ctx.n_tokens;
-    const int32_t * positions = has_positions ? ctx.positions + token_offset : nullptr;
-    const int32_t positions_count = has_positions ? current : 0;
+    const int32_t token_start = ctx.ubatch_token_offsets[ctx.ubatches_processed];
+    const int32_t token_end = ctx.ubatch_token_offsets[ctx.ubatches_processed + 1];
+    if (token_start < 0 || token_end < token_start ||
+        token_end > ctx.token_indices_count || token_end - token_start != current) {
+      *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+      ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+      ctx.ubatch_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
+      return;  // GCOVR_EXCL_LINE
+    }
+
+    const bool has_seq_masks =
+        ctx.seq_masks != nullptr && ctx.seq_masks_count >= ctx.n_tokens;
+    const bool has_seq_ids =
+        ctx.seq_primary_ids != nullptr && ctx.seq_primary_ids_count >= ctx.n_tokens;
+
+    int32_t pos_stride = 0;
+    if (ctx.positions != nullptr) {
+      if (ctx.positions_count >= ctx.n_tokens * 3) {
+        pos_stride = 3;
+      } else if (ctx.positions_count >= ctx.n_tokens) {
+        pos_stride = 1;
+      }
+    }
+
+    const int32_t * positions = nullptr;
+    int32_t positions_count = 0;
+    if (pos_stride > 0) {
+      if (pos_stride == 1) {
+        for (int32_t i = 0; i < current; ++i) {
+          const int32_t token_idx = ctx.ubatch_token_indices[token_start + i];
+          ctx.ubatch_positions[i] = ctx.positions[token_idx];
+        }
+      } else {
+        for (int32_t i = 0; i < current; ++i) {
+          const int32_t token_idx = ctx.ubatch_token_indices[token_start + i];
+          ctx.ubatch_positions[i] = ctx.positions[token_idx];
+          ctx.ubatch_positions[i + current] = ctx.positions[ctx.n_tokens + token_idx];
+          ctx.ubatch_positions[i + current * 2] =
+              ctx.positions[ctx.n_tokens * 2 + token_idx];
+        }
+      }
+      positions = ctx.ubatch_positions.data();
+      positions_count = current * pos_stride;
+    }
+
+    const uint64_t * seq_masks = nullptr;
+    int32_t seq_mask_words = 0;
+    int32_t seq_masks_count = 0;
+    if (has_seq_masks) {
+      seq_mask_words = ctx.seq_mask_words;
+      for (int32_t i = 0; i < current; ++i) {
+        const int32_t token_idx = ctx.ubatch_token_indices[token_start + i];
+        const size_t src_base =
+            static_cast<size_t>(token_idx) * static_cast<size_t>(seq_mask_words);
+        const size_t dst_base =
+            static_cast<size_t>(i) * static_cast<size_t>(seq_mask_words);
+        for (int32_t w = 0; w < seq_mask_words; ++w) {
+          ctx.ubatch_seq_masks[dst_base + static_cast<size_t>(w)] =
+              ctx.seq_masks[src_base + static_cast<size_t>(w)];
+        }
+      }
+      seq_masks = ctx.ubatch_seq_masks.data();
+      seq_masks_count = current;
+    }
+
+    const int32_t * seq_primary_ids = nullptr;
+    int32_t seq_primary_ids_count = 0;
+    if (has_seq_ids) {
+      for (int32_t i = 0; i < current; ++i) {
+        const int32_t token_idx = ctx.ubatch_token_indices[token_start + i];
+        ctx.ubatch_seq_primary_ids[i] = ctx.seq_primary_ids[token_idx];
+      }
+      seq_primary_ids = ctx.ubatch_seq_primary_ids.data();
+      seq_primary_ids_count = current;
+    }
     int32_t produced = 0;
     int32_t kv_tokens = 0;
     bool rollback_attempted = false;
@@ -585,6 +761,11 @@ struct run_process_ubatch {
       .error_out = &ubatch_error,
       .positions = positions,
       .positions_count = positions_count,
+      .seq_masks = seq_masks,
+      .seq_mask_words = seq_mask_words,
+      .seq_masks_count = seq_masks_count,
+      .seq_primary_ids = seq_primary_ids,
+      .seq_primary_ids_count = seq_primary_ids_count,
     });
 
     const int32_t normalized = detail::normalize_ubatch_error(ok, ubatch_error);

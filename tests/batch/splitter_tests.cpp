@@ -71,6 +71,7 @@ TEST_CASE("batch_splitter_splits_tokens_into_ubatches") {
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 2,
     .mode = emel::batch::splitter::event::split_mode::simple,
+    .output_all = true,
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
   }));
@@ -95,6 +96,7 @@ TEST_CASE("batch_splitter_equal_mode_fills_single_sequence_ubatches") {
     .n_ubatch = 4,
     .mode = emel::batch::splitter::event::split_mode::equal,
     .equal_sequential = false,
+    .output_all = true,
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
   }));
@@ -116,6 +118,7 @@ TEST_CASE("batch_splitter_seq_mode_uses_sequential_chunking") {
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 3,
     .mode = emel::batch::splitter::event::split_mode::seq,
+    .output_all = true,
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
   }));
@@ -140,8 +143,11 @@ TEST_CASE("batch_splitter_equal_mode_supports_sequence_masks") {
     .n_ubatch = 4,
     .mode = emel::batch::splitter::event::split_mode::equal,
     .seq_masks = seq_masks.data(),
+    .seq_masks_count = static_cast<int32_t>(seq_masks.size()),
     .seq_primary_ids = seq_primary_ids.data(),
+    .seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size()),
     .equal_sequential = true,
+    .output_all = true,
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
   }));
@@ -165,6 +171,8 @@ TEST_CASE("batch_splitter_seq_mode_supports_sequence_masks") {
     .n_ubatch = 3,
     .mode = emel::batch::splitter::event::split_mode::seq,
     .seq_masks = seq_masks.data(),
+    .seq_masks_count = static_cast<int32_t>(seq_masks.size()),
+    .output_all = true,
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
   }));
@@ -188,6 +196,7 @@ TEST_CASE("batch_splitter_counts_outputs_with_output_mask") {
     .n_ubatch = 2,
     .mode = emel::batch::splitter::event::split_mode::simple,
     .output_mask = outputs.data(),
+    .output_mask_count = static_cast<int32_t>(outputs.size()),
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
   }));

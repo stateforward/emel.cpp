@@ -1035,7 +1035,13 @@ TEST_CASE("kv_cache_internal_helpers_cover_more_branches") {
   std::array<int32_t, 6> positions = {{2, 3, 10, 11, 20, 21}};
   CHECK(emel::kv::cache::action::apply_slots(
     ctx_apply, 0, 2, 0, positions.data(),
-    static_cast<int32_t>(positions.size()), true));
+    static_cast<int32_t>(positions.size()),
+    nullptr,
+    0,
+    0,
+    nullptr,
+    0,
+    true));
   CHECK(ctx_apply.streams[0].ext_y[0] == 10);
   CHECK(ctx_apply.streams[0].ext_x[0] == 20);
   CHECK(ctx_apply.next_pos[0] == 4);

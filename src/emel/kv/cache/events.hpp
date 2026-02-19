@@ -33,6 +33,11 @@ struct apply_ubatch {
   int32_t * error_out = nullptr;
   const int32_t * positions = nullptr;
   int32_t positions_count = 0;
+  const uint64_t * seq_masks = nullptr;
+  int32_t seq_mask_words = 0;
+  int32_t seq_masks_count = 0;
+  const int32_t * seq_primary_ids = nullptr;
+  int32_t seq_primary_ids_count = 0;
 };
 
 struct rollback {

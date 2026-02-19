@@ -20,7 +20,13 @@ namespace emel::batch::splitter {
 //   If both are null, all tokens are treated as belonging to sequence 0.
 // - `equal_sequential == true` requires `seq_primary_ids` and rejects coupled sequences
 //   (masks with more than one bit set), matching llama's sequential split restriction.
-// - `total_outputs` is derived from `output_mask` when provided, otherwise `n_tokens`.
+// - Output selection:
+//   - `output_all == true` marks all tokens as outputs (overrides `output_mask`).
+//   - When `output_mask` is null and `output_all == false`, only the last token is output.
+//   - Otherwise `output_mask` marks per-token outputs.
+// - `total_outputs` is derived from the output selection rules above.
+// - `splitting_done` includes `ubatch_token_indices` and `ubatch_token_offsets` so callers can
+//   reconstruct per-ubatch token ordering (matching llama's split ordering).
 // - Equal mode groups non-overlapping sequence sets and fills ubatches up to `n_ubatch`.
 // - Seq mode builds one sequence-set ubatch at a time using subset expansion.
 

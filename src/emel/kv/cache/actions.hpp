@@ -727,9 +727,14 @@ inline bool apply_slots(
     context & ctx,
     int32_t slot_offset,
     int32_t slot_count,
-    int32_t seq_id,
+    int32_t default_seq_id,
     const int32_t * positions,
     int32_t positions_count,
+    const uint64_t * seq_masks,
+    int32_t seq_mask_words,
+    int32_t seq_masks_count,
+    const int32_t * seq_primary_ids,
+    int32_t seq_primary_ids_count,
     bool update_next_pos) {
   if (slot_offset < 0 || slot_count <= 0) {
     return false;
@@ -740,21 +745,92 @@ inline bool apply_slots(
   if (positions != nullptr && positions_count < slot_count) {
     return false;
   }
+  if (seq_masks != nullptr) {
+    if (seq_mask_words <= 0 || seq_mask_words > SEQ_WORDS) {
+      return false;
+    }
+    if (seq_masks_count < slot_count) {
+      return false;
+    }
+  }
+  if (seq_primary_ids != nullptr && seq_primary_ids_count < slot_count) {
+    return false;
+  }
+  if (seq_masks == nullptr && seq_primary_ids == nullptr) {
+    if (default_seq_id < 0 || default_seq_id >= MAX_SEQ) {
+      return false;
+    }
+  }
 
   std::array<int32_t, MAX_SEQ> seq_pos_max_rm = {};
   seq_pos_max_rm.fill(POS_NONE);
+  std::array<int32_t, MAX_SEQ> seq_pos_max_add = {};
+  seq_pos_max_add.fill(POS_NONE);
+  std::array<uint8_t, MAX_SEQ> seq_touched = {};
+  std::array<int32_t, MAX_SEQ> next_pos_local = ctx.next_pos;
 
   const bool has_positions = positions != nullptr && positions_count >= slot_count;
   const bool has_pos_2d = positions != nullptr && positions_count >= slot_count * 3;
 
-  int32_t next_pos = 0;
-  if (!has_positions) {
-    const int32_t stream_id = ctx.seq_to_stream[seq_id];
-    if (stream_id >= 0 && stream_id < ctx.n_stream) {
-      ensure_next_pos_for_seq(ctx, seq_id, ctx.streams[stream_id]);
+  auto ensure_next_pos_local = [&](int32_t seq_id) {
+    if (seq_id < 0 || seq_id >= MAX_SEQ) {
+      return;
     }
-    next_pos = ctx.next_pos[seq_id];
-  }
+    const int32_t stream_id = ctx.seq_to_stream[seq_id];
+    if (stream_id < 0 || stream_id >= ctx.n_stream) {
+      return;
+    }
+    const stream_state & stream = ctx.streams[stream_id];
+    if (stream.seq_pos_max[seq_id] != POS_NONE &&
+        next_pos_local[seq_id] <= stream.seq_pos_max[seq_id]) {
+      next_pos_local[seq_id] = stream.seq_pos_max[seq_id] + 1;
+    }
+  };
+
+  auto load_mask = [&](int32_t token_idx, std::array<uint64_t, SEQ_WORDS> & mask) -> bool {
+    mask.fill(0);
+    if (seq_masks != nullptr) {
+      const size_t base =
+          static_cast<size_t>(token_idx) * static_cast<size_t>(seq_mask_words);
+      for (int32_t w = 0; w < seq_mask_words; ++w) {
+        mask[static_cast<size_t>(w)] = seq_masks[base + static_cast<size_t>(w)];
+      }
+    } else if (seq_primary_ids != nullptr) {
+      const int32_t seq_id = seq_primary_ids[token_idx];
+      if (seq_id < 0 || seq_id >= MAX_SEQ) {
+        return false;
+      }
+      mask[static_cast<size_t>(seq_id / 64)] = (uint64_t{1} << (seq_id % 64));
+    } else {
+      mask[static_cast<size_t>(default_seq_id / 64)] =
+          (uint64_t{1} << (default_seq_id % 64));
+    }
+    for (const uint64_t word : mask) {
+      if (word != 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  auto primary_seq_from_mask =
+      [&](const std::array<uint64_t, SEQ_WORDS> & mask, int32_t token_idx) -> int32_t {
+    if (seq_primary_ids != nullptr) {
+      const int32_t seq_id = seq_primary_ids[token_idx];
+      if (seq_id >= 0 && seq_id < MAX_SEQ) {
+        return seq_id;
+      }
+    }
+    for (int32_t w = 0; w < SEQ_WORDS; ++w) {
+      uint64_t word = mask[static_cast<size_t>(w)];
+      if (word == 0) {
+        continue;
+      }
+      const int32_t bit = __builtin_ctzll(word);
+      return w * 64 + bit;
+    }
+    return default_seq_id;
+  };
 
   std::array<int32_t, MAX_STREAMS> last_idx = {};
   last_idx.fill(POS_NONE);
@@ -771,43 +847,128 @@ inline bool apply_slots(
     }
     stream_state & stream = ctx.streams[stream_id];
 
+    std::array<uint64_t, SEQ_WORDS> mask = {};
+    if (!load_mask(i, mask)) {
+      return false;
+    }
+
+    if (seq_masks != nullptr && seq_primary_ids != nullptr) {
+      const int32_t seq_id = seq_primary_ids[i];
+      if (seq_id < 0 || seq_id >= MAX_SEQ) {
+        return false;
+      }
+      const int32_t word = seq_id / 64;
+      const int32_t bit = seq_id % 64;
+      if ((mask[static_cast<size_t>(word)] & (uint64_t{1} << bit)) == 0) {
+        return false;
+      }
+    }
+
+    int32_t token_stream = POS_NONE;
+    for (int32_t word = 0; word < SEQ_WORDS; ++word) {
+      uint64_t word_mask = mask[static_cast<size_t>(word)];
+      while (word_mask != 0) {
+        const int32_t bit = __builtin_ctzll(word_mask);
+        const int32_t seq_id = word * 64 + bit;
+        if (seq_id < 0 || seq_id >= MAX_SEQ) {
+          return false;
+        }
+        const int32_t seq_stream = ctx.seq_to_stream[seq_id];
+        if (seq_stream < 0 || seq_stream >= ctx.n_stream) {
+          return false;
+        }
+        if (token_stream == POS_NONE) {
+          token_stream = seq_stream;
+        } else if (token_stream != seq_stream) {
+          return false;
+        }
+        seq_touched[seq_id] = 1;
+        word_mask &= (word_mask - 1);
+      }
+    }
+    if (token_stream != stream_id) {
+      return false;
+    }
+
     if (stream.pos[idx] != POS_NONE) {
       for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-        uint64_t mask = stream.seq_mask[idx][word];
-        while (mask != 0) {
-          const int32_t bit = __builtin_ctzll(mask);
+        uint64_t word_mask = stream.seq_mask[idx][word];
+        while (word_mask != 0) {
+          const int32_t bit = __builtin_ctzll(word_mask);
           const int32_t seq_over = word * 64 + bit;
           seq_pos_max_rm[seq_over] =
               std::max(seq_pos_max_rm[seq_over], stream.pos[idx]);
-          mask &= (mask - 1);
+          word_mask &= (word_mask - 1);
         }
       }
       set_cell_empty(stream, idx);
     }
 
-    const int32_t pos = has_positions ? positions[i] : next_pos++;
+    int32_t pos = 0;
+    if (has_positions) {
+      pos = positions[i];
+    } else {
+      const int32_t primary_seq = primary_seq_from_mask(mask, i);
+      if (primary_seq < 0 || primary_seq >= MAX_SEQ) {
+        return false;
+      }
+      ensure_next_pos_local(primary_seq);
+      pos = next_pos_local[primary_seq];
+      next_pos_local[primary_seq] = pos + 1;
+      for (int32_t word = 0; word < SEQ_WORDS; ++word) {
+        uint64_t word_mask = mask[static_cast<size_t>(word)];
+        while (word_mask != 0) {
+          const int32_t bit = __builtin_ctzll(word_mask);
+          const int32_t seq_id = word * 64 + bit;
+          if (next_pos_local[seq_id] < pos + 1) {
+            next_pos_local[seq_id] = pos + 1;
+          }
+          word_mask &= (word_mask - 1);
+        }
+      }
+    }
+
     set_cell_pos(stream, idx, pos);
     if (has_pos_2d) {
       stream.ext_y[idx] = positions[i + slot_count];
       stream.ext_x[idx] = positions[i + slot_count * 2];
     }
-    add_seq_to_cell(stream, idx, seq_id);
+    for (int32_t word = 0; word < SEQ_WORDS; ++word) {
+      uint64_t word_mask = mask[static_cast<size_t>(word)];
+      while (word_mask != 0) {
+        const int32_t bit = __builtin_ctzll(word_mask);
+        const int32_t seq_id = word * 64 + bit;
+        add_seq_to_cell(stream, idx, seq_id);
+        if (seq_pos_max_add[seq_id] == POS_NONE || pos > seq_pos_max_add[seq_id]) {
+          seq_pos_max_add[seq_id] = pos;
+        }
+        word_mask &= (word_mask - 1);
+      }
+    }
 
     if (last_idx[stream_id] == POS_NONE || idx > last_idx[stream_id]) {
       last_idx[stream_id] = idx;
     }
   }
 
-  if (has_positions && update_next_pos) {
-    int32_t max_pos = ctx.next_pos[seq_id];
-    for (int32_t i = 0; i < slot_count; ++i) {
-      if (positions[i] >= max_pos) {
-        max_pos = positions[i] + 1;
+  if (update_next_pos) {
+    if (has_positions) {
+      for (int32_t seq = 0; seq < MAX_SEQ; ++seq) {
+        if (seq_pos_max_add[seq] == POS_NONE) {
+          continue;
+        }
+        if (ctx.next_pos[seq] <= seq_pos_max_add[seq]) {
+          ctx.next_pos[seq] = seq_pos_max_add[seq] + 1;
+        }
+      }
+    } else {
+      for (int32_t seq = 0; seq < MAX_SEQ; ++seq) {
+        if (seq_touched[seq] == 0) {
+          continue;
+        }
+        ctx.next_pos[seq] = next_pos_local[seq];
       }
     }
-    ctx.next_pos[seq_id] = max_pos;
-  } else if (update_next_pos) {
-    ctx.next_pos[seq_id] = next_pos;
   }
 
   for (int32_t seq = 0; seq < MAX_SEQ; ++seq) {
@@ -1118,7 +1279,19 @@ inline constexpr auto run_prepare_slots = [](const event::prepare_slots & ev, co
       snapshot_cell(ctx.streams[stream_id], idx, ctx.slot_snapshots[slot]);
     }
 
-    if (!apply_slots(ctx, slot_offset, size, seq_id, nullptr, 0, true)) {
+    if (!apply_slots(
+          ctx,
+          slot_offset,
+          size,
+          seq_id,
+          nullptr,
+          0,
+          nullptr,
+          0,
+          0,
+          nullptr,
+          0,
+          true)) {
       *ev.error_out = EMEL_ERR_BACKEND;
       success = false;
       break;
@@ -1163,7 +1336,19 @@ inline constexpr auto run_apply_step = [](const event::apply_step & ev, context 
   const int32_t * positions = request->positions;
   const int32_t positions_count = request->positions_count;
 
-  if (!apply_slots(ctx, start, size, seq_id, positions, positions_count, true)) {
+  if (!apply_slots(
+        ctx,
+        start,
+        size,
+        seq_id,
+        positions,
+        positions_count,
+        request->seq_masks,
+        request->seq_mask_words,
+        request->seq_masks_count,
+        request->seq_primary_ids,
+        request->seq_primary_ids_count,
+        true)) {
     *ev.error_out = EMEL_ERR_BACKEND;
     return;
   }
@@ -1184,7 +1369,6 @@ inline constexpr auto run_rollback_step = [](const event::rollback_step & ev, co
   }
   for (int32_t i = from_index; i < ctx.applied_ubatches; ++i) {
     const int32_t size = ctx.ubatch_sizes[i];
-    const int32_t seq_id = ctx.ubatch_seq_ids[i];
     const int32_t start = ctx.slot_offsets[i];
     if (start < 0 || start + size > ctx.slot_index_count) {
       *ev.error_out = EMEL_ERR_BACKEND;
@@ -1203,9 +1387,18 @@ inline constexpr auto run_rollback_step = [](const event::rollback_step & ev, co
         return;
       }
       stream_state & stream = ctx.streams[stream_id];
-      remove_seq_from_cell(stream, idx, seq_id);
+      std::array<uint64_t, SEQ_WORDS> mask = stream.seq_mask[idx];
+      set_cell_empty(stream, idx);
+      for (int32_t word = 0; word < SEQ_WORDS; ++word) {
+        uint64_t word_mask = mask[static_cast<size_t>(word)];
+        while (word_mask != 0) {
+          const int32_t bit = __builtin_ctzll(word_mask);
+          const int32_t seq_id = word * 64 + bit;
+          reset_next_pos_for_seq(ctx, seq_id, stream);
+          word_mask &= (word_mask - 1);
+        }
+      }
       new_head[stream_id] = std::min(new_head[stream_id], idx);
-      reset_next_pos_for_seq(ctx, seq_id, stream);
     }
   }
 

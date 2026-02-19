@@ -23,10 +23,14 @@ struct split {
   int32_t n_ubatch = 0;
   split_mode mode = split_mode::simple;
   const uint64_t * seq_masks = nullptr;
+  int32_t seq_masks_count = 0;
   const int32_t * seq_primary_ids = nullptr;
+  int32_t seq_primary_ids_count = 0;
   bool equal_sequential = true;
   int32_t seq_mask_words = 1;
   const int8_t * output_mask = nullptr;
+  int32_t output_mask_count = 0;
+  bool output_all = false;
 
   emel::callback<void(const events::splitting_done &)> on_done = {};
   emel::callback<void(const events::splitting_error &)> on_error = {};
@@ -41,6 +45,10 @@ struct splitting_done {
   const int32_t * ubatch_sizes = nullptr;
   int32_t ubatch_count = 0;
   int32_t total_outputs = 0;
+  const int32_t * ubatch_token_indices = nullptr;
+  int32_t ubatch_token_indices_count = 0;
+  const int32_t * ubatch_token_offsets = nullptr;
+  int32_t ubatch_token_offsets_count = 0;
 };
 
 struct splitting_error {

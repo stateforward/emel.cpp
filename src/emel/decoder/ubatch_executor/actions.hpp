@@ -29,6 +29,11 @@ struct context {
   event::compute_extract_outputs_fn compute_extract_outputs = nullptr;
   const int32_t * positions = nullptr;
   int32_t positions_count = 0;
+  const uint64_t * seq_masks = nullptr;
+  int32_t seq_mask_words = 0;
+  int32_t seq_masks_count = 0;
+  const int32_t * seq_primary_ids = nullptr;
+  int32_t seq_primary_ids_count = 0;
   int32_t phase_error = EMEL_OK;
   int32_t execution_error = EMEL_OK;
   int32_t last_error = EMEL_OK;
@@ -67,6 +72,11 @@ inline event::execute make_request(const context & ctx) noexcept {
     .error_out = nullptr,
     .positions = ctx.positions,
     .positions_count = ctx.positions_count,
+    .seq_masks = ctx.seq_masks,
+    .seq_mask_words = ctx.seq_mask_words,
+    .seq_masks_count = ctx.seq_masks_count,
+    .seq_primary_ids = ctx.seq_primary_ids,
+    .seq_primary_ids_count = ctx.seq_primary_ids_count,
   };
 }
 
@@ -102,6 +112,11 @@ struct begin_execute {
     ctx.compute_extract_outputs = ev.compute_extract_outputs;
     ctx.positions = ev.positions;
     ctx.positions_count = ev.positions_count;
+    ctx.seq_masks = ev.seq_masks;
+    ctx.seq_mask_words = ev.seq_mask_words;
+    ctx.seq_masks_count = ev.seq_masks_count;
+    ctx.seq_primary_ids = ev.seq_primary_ids;
+    ctx.seq_primary_ids_count = ev.seq_primary_ids_count;
     ctx.phase_error = EMEL_OK;
     ctx.execution_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
@@ -189,6 +204,11 @@ struct run_compute {
       .error_out = &kv_error,
       .positions = request->positions,
       .positions_count = request->positions_count,
+      .seq_masks = request->seq_masks,
+      .seq_mask_words = request->seq_mask_words,
+      .seq_masks_count = request->seq_masks_count,
+      .seq_primary_ids = request->seq_primary_ids,
+      .seq_primary_ids_count = request->seq_primary_ids_count,
     });
     if (!ok || kv_error != EMEL_OK) {
       const int32_t err = kv_error == EMEL_OK ? EMEL_ERR_BACKEND : kv_error;
