@@ -132,30 +132,22 @@ struct model {
         sml::state<selecting_backend_decision>[guard::phase_ok{}] =
             sml::state<prefix_decision>,
 
-        sml::state<prefix_decision>[guard::should_add_bos{} &&
-                                    guard::bos_id_valid{} &&
-                                    guard::has_capacity{}] /
+        sml::state<prefix_decision>[guard::bos_ready{}] /
             action::append_bos = sml::state<encoding_ready>,
-        sml::state<prefix_decision>[guard::should_add_bos{} &&
-                                    guard::bos_id_valid{} &&
-                                    guard::no_capacity{}] /
+        sml::state<prefix_decision>[guard::bos_no_capacity{}] /
             action::set_capacity_error = sml::state<errored>,
-        sml::state<prefix_decision>[guard::should_add_bos{} &&
-                                    guard::bos_id_invalid{}] /
+        sml::state<prefix_decision>[guard::bos_invalid_id{}] /
             action::set_invalid_id_error = sml::state<errored>,
         sml::state<prefix_decision>[guard::no_prefix{}] =
             sml::state<encoding_ready>,
 
         sml::state<encoding_ready>[guard::no_more_fragments{}] =
             sml::state<suffix_decision>,
-        sml::state<encoding_ready>[guard::has_more_fragments{} &&
-                                   guard::no_capacity{}] /
+        sml::state<encoding_ready>[guard::more_fragments_no_capacity{}] /
             action::set_capacity_error = sml::state<errored>,
-        sml::state<encoding_ready>[guard::has_more_fragments{} &&
-                                   guard::fragment_is_token{}] =
+        sml::state<encoding_ready>[guard::more_fragments_token{}] =
             sml::state<encoding_token_fragment>,
-        sml::state<encoding_ready>[guard::has_more_fragments{} &&
-                                   guard::fragment_is_raw{}] =
+        sml::state<encoding_ready>[guard::more_fragments_raw{}] =
             sml::state<encoding_raw_fragment>,
 
         sml::state<encoding_token_fragment> / action::append_fragment_token =
@@ -167,27 +159,17 @@ struct model {
         sml::state<encoding_decision>[guard::phase_ok{}] =
             sml::state<encoding_ready>,
 
-        sml::state<suffix_decision>[guard::should_add_sep{} &&
-                                    guard::sep_id_valid{} &&
-                                    guard::has_capacity{}] /
+        sml::state<suffix_decision>[guard::sep_ready{}] /
             action::append_sep = sml::state<finalizing>,
-        sml::state<suffix_decision>[guard::should_add_sep{} &&
-                                    guard::sep_id_valid{} &&
-                                    guard::no_capacity{}] /
+        sml::state<suffix_decision>[guard::sep_no_capacity{}] /
             action::set_capacity_error = sml::state<errored>,
-        sml::state<suffix_decision>[guard::should_add_sep{} &&
-                                    guard::sep_id_invalid{}] /
+        sml::state<suffix_decision>[guard::sep_invalid_id{}] /
             action::set_invalid_id_error = sml::state<errored>,
-        sml::state<suffix_decision>[guard::should_add_eos{} &&
-                                    guard::eos_id_valid{} &&
-                                    guard::has_capacity{}] /
+        sml::state<suffix_decision>[guard::eos_ready{}] /
             action::append_eos = sml::state<finalizing>,
-        sml::state<suffix_decision>[guard::should_add_eos{} &&
-                                    guard::eos_id_valid{} &&
-                                    guard::no_capacity{}] /
+        sml::state<suffix_decision>[guard::eos_no_capacity{}] /
             action::set_capacity_error = sml::state<errored>,
-        sml::state<suffix_decision>[guard::should_add_eos{} &&
-                                    guard::eos_id_invalid{}] /
+        sml::state<suffix_decision>[guard::eos_invalid_id{}] /
             action::set_invalid_id_error = sml::state<errored>,
         sml::state<suffix_decision>[guard::no_suffix{}] =
             sml::state<finalizing>,

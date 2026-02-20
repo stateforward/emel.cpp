@@ -44,22 +44,6 @@ target_link_libraries(emel
 )
 
 
-add_executable(generate_architecture_puml
-  tools/generate_architecture_puml.cpp
-)
-
-target_link_libraries(generate_architecture_puml
-  PRIVATE
-    emel_core
-)
-
-target_include_directories(generate_architecture_puml
-  PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${boost_sml_SOURCE_DIR}/include
-)
-
 add_executable(mock_model_load
   tools/mock_main.cpp
 )
@@ -194,8 +178,8 @@ if(EMEL_ENABLE_TESTS)
   )
 
   add_test(
-    NAME architecture_puml
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_puml.sh --check
+    NAME generate_docs
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_docs.sh --check
   )
 
 endif()

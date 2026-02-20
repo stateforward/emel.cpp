@@ -32,8 +32,8 @@ assumptions or baggage. It’s intentionally low-ceremony while we iterate on th
 scripts/quality_gates.sh
 ```
 
-See `scripts/build_with_zig.sh`, `scripts/test_with_coverage.sh`,
-`scripts/lint_snapshot.sh`, and `scripts/bench.sh` for individual gates.
+Individual gates live in `scripts/build_with_zig.sh`, `scripts/test_with_coverage.sh`,
+`scripts/lint_snapshot.sh`, and `scripts/bench.sh`.
 
 ### Why Zig for builds
 
@@ -49,12 +49,14 @@ environments, while Zig remains the default for day-to-day builds.
 
 ## Documentation
 
-- `docs/architecture/` (generated state-machine diagrams)
+- `docs/architecture/` (generated state-machine docs + Mermaid diagrams)
+- `docs/benchmarks.md` (generated benchmark snapshot table)
 - `docs/sml.md` (Boost.SML conventions and usage)
 - `docs/gaps.md` (parity audit status)
 
-## State machine reference
+## Docs index
 
+- [`docs/benchmarks.md`](docs/benchmarks.md)
 - [`docs/architecture/batch_splitter.md`](docs/architecture/batch_splitter.md)
 - [`docs/architecture/buffer_allocator.md`](docs/architecture/buffer_allocator.md)
 - [`docs/architecture/buffer_chunk_allocator.md`](docs/architecture/buffer_chunk_allocator.md)
@@ -63,13 +65,22 @@ environments, while Zig remains the default for day-to-day builds.
 - [`docs/architecture/decoder_compute_executor.md`](docs/architecture/decoder_compute_executor.md)
 - [`docs/architecture/decoder.md`](docs/architecture/decoder.md)
 - [`docs/architecture/decoder_ubatch_executor.md`](docs/architecture/decoder_ubatch_executor.md)
+- [`docs/architecture/encoder_bpe.md`](docs/architecture/encoder_bpe.md)
+- [`docs/architecture/encoder_fallback.md`](docs/architecture/encoder_fallback.md)
+- [`docs/architecture/encoder_plamo2.md`](docs/architecture/encoder_plamo2.md)
+- [`docs/architecture/encoder_rwkv.md`](docs/architecture/encoder_rwkv.md)
 - [`docs/architecture/encoder.md`](docs/architecture/encoder.md)
+- [`docs/architecture/encoder_spm.md`](docs/architecture/encoder_spm.md)
+- [`docs/architecture/encoder_ugm.md`](docs/architecture/encoder_ugm.md)
+- [`docs/architecture/encoder_wpm.md`](docs/architecture/encoder_wpm.md)
+- [`docs/architecture/gbnf_parser.md`](docs/architecture/gbnf_parser.md)
 - [`docs/architecture/generator.md`](docs/architecture/generator.md)
 - [`docs/architecture/kv_cache.md`](docs/architecture/kv_cache.md)
 - [`docs/architecture/memory_coordinator.md`](docs/architecture/memory_coordinator.md)
 - [`docs/architecture/model_loader.md`](docs/architecture/model_loader.md)
-- [`docs/architecture/model_parser.md`](docs/architecture/model_parser.md)
 - [`docs/architecture/model_weight_loader.md`](docs/architecture/model_weight_loader.md)
+- [`docs/architecture/parser_gguf.md`](docs/architecture/parser_gguf.md)
+- [`docs/architecture/parser.md`](docs/architecture/parser.md)
 - [`docs/architecture/sampler_candidate_builder.md`](docs/architecture/sampler_candidate_builder.md)
 - [`docs/architecture/sampler_pipeline.md`](docs/architecture/sampler_pipeline.md)
 - [`docs/architecture/sampler_token_selector.md`](docs/architecture/sampler_token_selector.md)

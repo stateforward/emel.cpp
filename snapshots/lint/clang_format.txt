@@ -123,6 +123,7 @@ src/emel/parser/gguf/context.hpp
 src/emel/parser/gguf/sm.hpp
 src/emel/parser/guards.hpp
 src/emel/parser/map.hpp
+src/emel/parser/sm.hpp
 src/emel/sampler/candidate_builder/actions.hpp
 src/emel/sampler/candidate_builder/context.hpp
 src/emel/sampler/candidate_builder/events.hpp
@@ -165,6 +166,7 @@ src/emel/text/unicode_data.hpp
 src/emel/tokenizer/actions.hpp
 src/emel/tokenizer/context.hpp
 src/emel/tokenizer/events.hpp
+src/emel/tokenizer/sm.hpp
 tests/batch/splitter_action_branch_tests.cpp
 tests/batch/splitter_actions_tests.cpp
 tests/batch/splitter_additional_tests.cpp

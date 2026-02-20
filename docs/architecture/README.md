@@ -1,6 +1,6 @@
 # Architecture Decisions
 
-This directory stores generated architecture artifacts (for example PUML) derived from `src/`.
+This directory stores generated architecture artifacts (markdown + Mermaid) derived from `src/`.
 The source of truth for orchestration architecture is the Boost.SML code in `src/`.
 WARNING: This architecture documentation is under active development and may change frequently.
 
@@ -43,5 +43,6 @@ When changing a machine structure, update all of:
 
 - the corresponding Boost.SML machine files under `src/`
 - related parent/child machine code that consumes its events
-- generated PUML outputs under `docs/architecture/puml/`
+- generated markdown under `docs/architecture/*.md`
+- generated Mermaid diagrams under `docs/architecture/mermaid/*.mmd`
 - `AGENTS.md` rules if a new cross-machine pattern is introduced

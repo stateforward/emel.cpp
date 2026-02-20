@@ -50,6 +50,11 @@ inline context::context()
 
 namespace emel::tokenizer::detail {
 
+using action::encoder_slot;
+using action::fragment;
+using action::fragment_kind;
+using action::special_token;
+
 constexpr int32_t k_token_type_unknown = 2;
 constexpr int32_t k_token_type_control = 3;
 constexpr int32_t k_token_type_user_defined = 4;

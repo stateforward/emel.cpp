@@ -74,6 +74,24 @@ struct bos_id_invalid {
   }
 };
 
+struct bos_ready {
+  bool operator()(const action::context &ctx) const noexcept {
+    return should_add_bos{}(ctx) && bos_id_valid{}(ctx) && has_capacity{}(ctx);
+  }
+};
+
+struct bos_no_capacity {
+  bool operator()(const action::context &ctx) const noexcept {
+    return should_add_bos{}(ctx) && bos_id_valid{}(ctx) && no_capacity{}(ctx);
+  }
+};
+
+struct bos_invalid_id {
+  bool operator()(const action::context &ctx) const noexcept {
+    return should_add_bos{}(ctx) && bos_id_invalid{}(ctx);
+  }
+};
+
 struct should_add_sep {
   bool operator()(const action::context &ctx) const noexcept {
     if (!ctx.add_special || ctx.vocab == nullptr) {
@@ -110,6 +128,24 @@ struct sep_id_invalid {
   }
 };
 
+struct sep_ready {
+  bool operator()(const action::context &ctx) const noexcept {
+    return should_add_sep{}(ctx) && sep_id_valid{}(ctx) && has_capacity{}(ctx);
+  }
+};
+
+struct sep_no_capacity {
+  bool operator()(const action::context &ctx) const noexcept {
+    return should_add_sep{}(ctx) && sep_id_valid{}(ctx) && no_capacity{}(ctx);
+  }
+};
+
+struct sep_invalid_id {
+  bool operator()(const action::context &ctx) const noexcept {
+    return should_add_sep{}(ctx) && sep_id_invalid{}(ctx);
+  }
+};
+
 struct eos_id_valid {
   bool operator()(const action::context &ctx) const noexcept {
     return ctx.vocab != nullptr && ctx.vocab->eos_id >= 0;
@@ -119,6 +155,24 @@ struct eos_id_valid {
 struct eos_id_invalid {
   bool operator()(const action::context &ctx) const noexcept {
     return !eos_id_valid{}(ctx);
+  }
+};
+
+struct eos_ready {
+  bool operator()(const action::context &ctx) const noexcept {
+    return should_add_eos{}(ctx) && eos_id_valid{}(ctx) && has_capacity{}(ctx);
+  }
+};
+
+struct eos_no_capacity {
+  bool operator()(const action::context &ctx) const noexcept {
+    return should_add_eos{}(ctx) && eos_id_valid{}(ctx) && no_capacity{}(ctx);
+  }
+};
+
+struct eos_invalid_id {
+  bool operator()(const action::context &ctx) const noexcept {
+    return should_add_eos{}(ctx) && eos_id_invalid{}(ctx);
   }
 };
 
@@ -151,6 +205,24 @@ struct fragment_is_raw {
     }
     return ctx.fragments[ctx.fragment_index].kind ==
            action::fragment_kind::raw_text;
+  }
+};
+
+struct more_fragments_no_capacity {
+  bool operator()(const action::context &ctx) const noexcept {
+    return has_more_fragments{}(ctx) && no_capacity{}(ctx);
+  }
+};
+
+struct more_fragments_token {
+  bool operator()(const action::context &ctx) const noexcept {
+    return has_more_fragments{}(ctx) && fragment_is_token{}(ctx);
+  }
+};
+
+struct more_fragments_raw {
+  bool operator()(const action::context &ctx) const noexcept {
+    return has_more_fragments{}(ctx) && fragment_is_raw{}(ctx);
   }
 };
 
