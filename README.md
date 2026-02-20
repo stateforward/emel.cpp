@@ -49,10 +49,10 @@ environments, while Zig remains the default for day-to-day builds.
 
 ## Documentation
 
-- `docs/architecture/` (generated state-machine docs + Mermaid diagrams)
-- `docs/benchmarks.md` (generated benchmark snapshot table)
-- `docs/sml.md` (Boost.SML conventions and usage)
-- `docs/gaps.md` (parity audit status)
+- [Architecture](docs/architecture/) (generated state-machine docs + Mermaid diagrams)
+- [Benchmarks](docs/benchmarks.md) (generated benchmark snapshot table)
+- [SML Conventions](docs/third_party/sml.md) (Boost.SML conventions and usage)
+- [Parity Audit](docs/gaps.md) (parity audit status)
 
 ## Docs index
 
