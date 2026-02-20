@@ -329,6 +329,131 @@ inline auto create_ubatches_equal = [](context & ctx) noexcept {
   finalize_token_offsets(ctx);
 };
 
+// Materializes micro-batch boundaries in equal mode (primary-id fast path).
+inline auto create_ubatches_equal_primary = [](context & ctx) noexcept {
+  prepare_split(ctx);
+
+  if (ctx.effective_n_ubatch <= 0) {
+    fail_split(ctx);
+    return;
+  }
+  if (ctx.seq_primary_ids == nullptr) {
+    fail_split(ctx);
+    return;
+  }
+
+  const int32_t max_seq = ctx.seq_mask_words * 64;
+  std::array<int32_t, MAX_SEQ> seq_counts = {};
+  std::array<int32_t, MAX_SEQ + 1> seq_offsets = {};
+  std::array<int32_t, MAX_SEQ> seq_used = {};
+  std::array<int32_t, MAX_SEQ> seq_cursor = {};
+  std::array<int32_t, MAX_UBATCHES> seq_indices = {};
+
+  for (int32_t i = 0; i < ctx.n_tokens; ++i) {
+    const int32_t seq_id = ctx.seq_primary_ids[i];
+    if (seq_id < 0 || seq_id >= max_seq) {
+      fail_split(ctx);
+      return;
+    }
+    seq_counts[static_cast<size_t>(seq_id)] += 1;
+  }
+
+  for (int32_t s = 0; s < max_seq; ++s) {
+    seq_offsets[static_cast<size_t>(s + 1)] =
+        seq_offsets[static_cast<size_t>(s)] + seq_counts[static_cast<size_t>(s)];
+    seq_cursor[static_cast<size_t>(s)] = seq_offsets[static_cast<size_t>(s)];
+  }
+
+  for (int32_t i = 0; i < ctx.n_tokens; ++i) {
+    const int32_t seq_id = ctx.seq_primary_ids[i];
+    const size_t slot = static_cast<size_t>(seq_id);
+    const int32_t pos = seq_cursor[slot];
+    if (pos < 0 || pos >= ctx.n_tokens) {
+      fail_split(ctx);
+      return;
+    }
+    seq_indices[static_cast<size_t>(pos)] = i;
+    seq_cursor[slot] = pos + 1;
+  }
+
+  int32_t remaining = ctx.n_tokens;
+  while (remaining > 0) {
+    std::array<uint8_t, MAX_SEQ> group_used = {};
+    std::array<int32_t, MAX_SEQ> group_ids = {};
+    int32_t group_count = 0;
+    int32_t last_primary = -1;
+
+    for (int32_t i = 0; i < ctx.n_tokens; ++i) {
+      const int32_t seq_id = ctx.seq_primary_ids[i];
+      const size_t slot = static_cast<size_t>(seq_id);
+      if (seq_used[slot] >= seq_counts[slot]) {
+        continue;
+      }
+      if (group_used[slot] != 0) {
+        continue;
+      }
+      if (ctx.equal_sequential && group_count > 0 && seq_id != last_primary + 1) {
+        continue;
+      }
+      group_used[slot] = 1;
+      group_ids[static_cast<size_t>(group_count)] = seq_id;
+      group_count += 1;
+      last_primary = seq_id;
+      if (group_count > ctx.effective_n_ubatch) {
+        break;
+      }
+    }
+
+    if (group_count == 0) {
+      fail_split(ctx);
+      return;
+    }
+
+    int32_t min_avail = ctx.n_tokens + 1;
+    for (int32_t g = 0; g < group_count; ++g) {
+      const int32_t seq_id = group_ids[static_cast<size_t>(g)];
+      const size_t slot = static_cast<size_t>(seq_id);
+      const int32_t avail = seq_counts[slot] - seq_used[slot];
+      min_avail = std::min(min_avail, avail);
+    }
+
+    const int32_t max_rows = ctx.effective_n_ubatch / group_count;
+    const int32_t n_seq_tokens = std::min(max_rows, min_avail);
+    if (n_seq_tokens <= 0) {
+      fail_split(ctx);
+      return;
+    }
+
+    if (!begin_ubatch(ctx)) {
+      fail_split(ctx);
+      return;
+    }
+
+    for (int32_t g = 0; g < group_count; ++g) {
+      const int32_t seq_id = group_ids[static_cast<size_t>(g)];
+      const size_t slot = static_cast<size_t>(seq_id);
+      const int32_t base = seq_offsets[slot] + seq_used[slot];
+      for (int32_t i = 0; i < n_seq_tokens; ++i) {
+        const int32_t idx = seq_indices[static_cast<size_t>(base + i)];
+        if (!append_token_index(ctx, idx)) {
+          fail_split(ctx);
+          return;
+        }
+      }
+      seq_used[slot] += n_seq_tokens;
+      remaining -= n_seq_tokens;
+    }
+
+    const int32_t added = n_seq_tokens * group_count;
+    if (!push_ubatch_size(ctx, added)) {
+      fail_split(ctx);
+      return;
+    }
+  }
+
+  finalize_token_offsets(ctx);
+};
+
 // Materializes micro-batch boundaries in seq mode. On failure, leaves ubatch_count == 0.
 inline auto create_ubatches_seq = [](context & ctx) noexcept {
   prepare_split(ctx);

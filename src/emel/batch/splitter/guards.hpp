@@ -87,6 +87,11 @@ inline constexpr auto mode_is_equal = [](const action::context & ctx) noexcept {
   return ctx.mode == event::split_mode::equal;
 };
 
+inline constexpr auto mode_is_equal_primary_fast = [](const action::context & ctx) noexcept {
+  return ctx.mode == event::split_mode::equal && ctx.seq_masks == nullptr &&
+         ctx.seq_primary_ids != nullptr;
+};
+
 inline constexpr auto mode_is_seq = [](const action::context & ctx) noexcept {
   return ctx.mode == event::split_mode::seq;
 };

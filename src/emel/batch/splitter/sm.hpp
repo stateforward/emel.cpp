@@ -42,6 +42,8 @@ struct selecting_mode {};
 struct splitting_simple {};
 // Computes micro-batch boundaries (equal mode).
 struct splitting_equal {};
+// Computes micro-batch boundaries (equal mode, primary-id fast path).
+struct splitting_equal_primary {};
 // Computes micro-batch boundaries (seq mode).
 struct splitting_seq {};
 // Checks output capacity and finalizes results.
@@ -72,6 +74,8 @@ struct model {
       sml::state<normalizing_batch> = sml::state<selecting_mode>,
 
       sml::state<selecting_mode>[guard::mode_is_simple] = sml::state<splitting_simple>,
+      sml::state<selecting_mode>[guard::mode_is_equal_primary_fast] =
+          sml::state<splitting_equal_primary>,
       sml::state<selecting_mode>[guard::mode_is_equal] = sml::state<splitting_equal>,
       sml::state<selecting_mode>[guard::mode_is_seq] = sml::state<splitting_seq>,
       sml::state<selecting_mode> = sml::state<invalid_request>,
@@ -83,6 +87,13 @@ struct model {
       sml::state<splitting_equal> + sml::on_entry<sml::_> / action::create_ubatches_equal,
       sml::state<splitting_equal>[guard::split_succeeded] = sml::state<publishing>,
       sml::state<splitting_equal>[guard::split_failed] = sml::state<split_failed>,
+
+      sml::state<splitting_equal_primary> + sml::on_entry<sml::_> /
+          action::create_ubatches_equal_primary,
+      sml::state<splitting_equal_primary>[guard::split_succeeded] =
+          sml::state<publishing>,
+      sml::state<splitting_equal_primary>[guard::split_failed] =
+          sml::state<split_failed>,
 
       sml::state<splitting_seq> + sml::on_entry<sml::_> / action::create_ubatches_seq,
       sml::state<splitting_seq>[guard::split_succeeded] = sml::state<publishing>,
@@ -117,6 +128,8 @@ struct model {
       sml::state<selecting_mode> + sml::unexpected_event<sml::_> = sml::state<unexpected_event>,
       sml::state<splitting_simple> + sml::unexpected_event<sml::_> = sml::state<unexpected_event>,
       sml::state<splitting_equal> + sml::unexpected_event<sml::_> = sml::state<unexpected_event>,
+      sml::state<splitting_equal_primary> + sml::unexpected_event<sml::_> =
+          sml::state<unexpected_event>,
       sml::state<splitting_seq> + sml::unexpected_event<sml::_> = sml::state<unexpected_event>,
       sml::state<publishing> + sml::unexpected_event<sml::_> = sml::state<unexpected_event>,
       sml::state<done> + sml::unexpected_event<sml::_> = sml::state<unexpected_event>,

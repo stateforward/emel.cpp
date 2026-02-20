@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <chrono>
 #include <cinttypes>
 #include <cstddef>
 #include <cstdint>
@@ -7,38 +6,18 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
-#include <array>
 
-#include "emel/buffer/allocator/events.hpp"
-#include "emel/buffer/allocator/sm.hpp"
-#include "emel/emel.h"
-
-#include "ggml-alloc.h"
-#include "ggml-backend.h"
-#include "ggml.h"
+#include "bench_cases.hpp"
+#include "bench_common.hpp"
 
 namespace {
+namespace bench = emel::bench;
 
 constexpr std::uint64_t k_default_iterations = 100000;
 constexpr std::size_t k_default_runs = 5;
 constexpr std::uint64_t k_default_warmup_iterations = 1000;
 constexpr std::size_t k_default_warmup_runs = 1;
 constexpr std::size_t k_max_runs = 25;
-
-struct config {
-  std::uint64_t iterations = k_default_iterations;
-  std::size_t runs = k_default_runs;
-  std::uint64_t warmup_iterations = k_default_warmup_iterations;
-  std::size_t warmup_runs = k_default_warmup_runs;
-};
-
-struct result {
-  std::string name;
-  double ns_per_op = 0.0;
-  std::uint64_t iterations = 0;
-  std::size_t runs = 0;
-};
-
 std::uint64_t read_env_u64(const char * name, std::uint64_t fallback) {
   const char * value = std::getenv(name);
   if (value == nullptr || value[0] == '\0') {
@@ -63,276 +42,25 @@ std::size_t read_env_size(const char * name, std::size_t fallback) {
   return static_cast<std::size_t>(parsed);
 }
 
-template <class Fn>
-result measure_case(const char * name, const config & cfg, Fn && fn) {
-  std::vector<double> samples;
-  samples.reserve(cfg.runs);
-
-  for (std::size_t run = 0; run < cfg.warmup_runs; ++run) {
-    for (std::uint64_t i = 0; i < cfg.warmup_iterations; ++i) {
-      fn();
-    }
-  }
-
-  for (std::size_t run = 0; run < cfg.runs; ++run) {
-    const auto start = std::chrono::steady_clock::now();
-    for (std::uint64_t i = 0; i < cfg.iterations; ++i) {
-      fn();
-    }
-    const auto end = std::chrono::steady_clock::now();
-    const auto duration_ns =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-    samples.push_back(static_cast<double>(duration_ns) / static_cast<double>(cfg.iterations));
-  }
-
-  std::sort(samples.begin(), samples.end());
-  const double median = samples[samples.size() / 2];
-
-  result out;
-  out.name = name;
-  out.ns_per_op = median;
-  out.iterations = cfg.iterations;
-  out.runs = cfg.runs;
-  return out;
-}
-
-using tensor_desc = emel::buffer::allocator::event::tensor_desc;
-using graph_view = emel::buffer::allocator::event::graph_view;
-
-struct graph_storage {
-  std::array<tensor_desc, 1> nodes = {};
-  std::array<tensor_desc, 1> leafs = {};
-  int32_t n_nodes = 0;
-  int32_t n_leafs = 0;
-};
-
-graph_view as_view(const graph_storage & g) {
-  return graph_view{
-    .nodes = g.nodes.data(),
-    .n_nodes = g.n_nodes,
-    .leafs = g.leafs.data(),
-    .n_leafs = g.n_leafs,
-  };
-}
-
-graph_storage make_graph() {
-  graph_storage g{};
-  g.n_leafs = 1;
-  g.n_nodes = 1;
-  g.leafs[0] = tensor_desc{
-    .tensor_id = 10,
-    .alloc_size = 256,
-    .src_ids = emel::buffer::allocator::event::make_src_ids(),
-    .is_view = false,
-    .view_src_id = -1,
-    .is_input = true,
-    .is_output = false,
-    .has_external_data = false,
-  };
-  auto src_ids = emel::buffer::allocator::event::make_src_ids();
-  src_ids[0] = 10;
-  g.nodes[0] = tensor_desc{
-    .tensor_id = 20,
-    .alloc_size = 256,
-    .src_ids = src_ids,
-    .is_view = false,
-    .view_src_id = -1,
-    .is_input = false,
-    .is_output = true,
-    .has_external_data = false,
-  };
-  return g;
-}
-
-std::vector<result> run_emel_benchmarks(const config & cfg) {
-  std::vector<result> results;
-  results.reserve(3);
-
-  {
-    emel::buffer::allocator::sm machine{};
-    graph_storage g = make_graph();
-    const std::array<int32_t, 1> node_ids = {{0}};
-    const std::array<int32_t, 1> leaf_ids = {{0}};
-
-    (void)machine.process_event(emel::buffer::allocator::event::initialize{
-      .buffer_count = 1,
-    });
-
-    auto fn = [&]() {
-      (void)machine.process_event(emel::buffer::allocator::event::reserve_n{
-        .graph = as_view(g),
-        .node_buffer_ids = node_ids.data(),
-        .leaf_buffer_ids = leaf_ids.data(),
-      });
-    };
-
-    results.push_back(measure_case("buffer/allocator_reserve_n", cfg, fn));
-    (void)machine.process_event(emel::buffer::allocator::event::release{});
-  }
-
-  {
-    emel::buffer::allocator::sm machine{};
-    graph_storage g = make_graph();
-    const std::array<int32_t, 1> node_ids = {{0}};
-    const std::array<int32_t, 1> leaf_ids = {{0}};
-
-    (void)machine.process_event(emel::buffer::allocator::event::initialize{
-      .buffer_count = 1,
-    });
-    (void)machine.process_event(emel::buffer::allocator::event::reserve_n{
-      .graph = as_view(g),
-      .node_buffer_ids = node_ids.data(),
-      .leaf_buffer_ids = leaf_ids.data(),
-    });
-
-    auto fn = [&]() {
-      (void)machine.process_event(emel::buffer::allocator::event::alloc_graph{
-        .graph = as_view(g),
-      });
-    };
-
-    results.push_back(measure_case("buffer/allocator_alloc_graph", cfg, fn));
-    (void)machine.process_event(emel::buffer::allocator::event::release{});
-  }
-
-  {
-    emel::buffer::allocator::sm machine{};
-    graph_storage g = make_graph();
-    const std::array<int32_t, 1> node_ids = {{0}};
-    const std::array<int32_t, 1> leaf_ids = {{0}};
-
-    (void)machine.process_event(emel::buffer::allocator::event::initialize{
-      .buffer_count = 1,
-    });
-
-    auto fn = [&]() {
-      (void)machine.process_event(emel::buffer::allocator::event::reserve_n{
-        .graph = as_view(g),
-        .node_buffer_ids = node_ids.data(),
-        .leaf_buffer_ids = leaf_ids.data(),
-      });
-      (void)machine.process_event(emel::buffer::allocator::event::alloc_graph{
-        .graph = as_view(g),
-      });
-    };
-
-    results.push_back(measure_case("buffer/allocator_full", cfg, fn));
-    (void)machine.process_event(emel::buffer::allocator::event::release{});
-  }
-
+std::vector<bench::result> run_emel_benchmarks(const bench::config & cfg) {
+  std::vector<bench::result> results;
+  results.reserve(6);
+  bench::append_emel_buffer_allocator_cases(results, cfg);
+  bench::append_emel_batch_splitter_cases(results, cfg);
   return results;
 }
 
-struct reference_state {
-  ggml_context * ctx = nullptr;
-  ggml_cgraph * graph = nullptr;
-  ggml_gallocr_t galloc = nullptr;
-};
-
-reference_state make_reference_state() {
-  ggml_init_params params = {
-    .mem_size = 4 * 1024 * 1024,
-    .mem_buffer = nullptr,
-    .no_alloc = true,
-  };
-
-  ggml_context * ctx = ggml_init(params);
-  if (ctx == nullptr) {
-    std::fprintf(stderr, "error: ggml_init failed\n");
-    std::abort();
-  }
-
-  ggml_tensor * input = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 64);
-  if (input == nullptr) {
-    std::fprintf(stderr, "error: tensor init failed\n");
-    ggml_free(ctx);
-    std::abort();
-  }
-  ggml_set_input(input);
-
-  ggml_tensor * node = ggml_dup(ctx, input);
-  if (node == nullptr) {
-    std::fprintf(stderr, "error: node init failed\n");
-    ggml_free(ctx);
-    std::abort();
-  }
-  ggml_set_output(node);
-
-  ggml_cgraph * graph = ggml_new_graph(ctx);
-  if (graph == nullptr) {
-    std::fprintf(stderr, "error: graph init failed\n");
-    ggml_free(ctx);
-    std::abort();
-  }
-  ggml_build_forward_expand(graph, node);
-
-  ggml_gallocr_t galloc = ggml_gallocr_new(ggml_backend_cpu_buffer_type());
-  if (galloc == nullptr) {
-    std::fprintf(stderr, "error: ggml_gallocr_new failed\n");
-    ggml_free(ctx);
-    std::abort();
-  }
-
-  return reference_state{
-    .ctx = ctx,
-    .graph = graph,
-    .galloc = galloc,
-  };
-}
-
-void free_reference_state(reference_state & state) {
-  if (state.galloc != nullptr) {
-    ggml_gallocr_free(state.galloc);
-    state.galloc = nullptr;
-  }
-  if (state.ctx != nullptr) {
-    ggml_free(state.ctx);
-    state.ctx = nullptr;
-  }
-  state.graph = nullptr;
-}
-
-std::vector<result> run_reference_benchmarks(const config & cfg) {
-  std::vector<result> results;
-  results.reserve(3);
-
-  const int node_buffer_ids[1] = {0};
-  const int leaf_buffer_ids[1] = {0};
-
-  {
-    reference_state state = make_reference_state();
-    auto fn = [&]() {
-      (void)ggml_gallocr_reserve_n(state.galloc, state.graph, node_buffer_ids, leaf_buffer_ids);
-    };
-    results.push_back(measure_case("buffer/allocator_reserve_n", cfg, fn));
-    free_reference_state(state);
-  }
-
-  {
-    reference_state state = make_reference_state();
-    auto fn = [&]() {
-      (void)ggml_gallocr_alloc_graph(state.galloc, state.graph);
-    };
-    results.push_back(measure_case("buffer/allocator_alloc_graph", cfg, fn));
-    free_reference_state(state);
-  }
-
-  {
-    reference_state state = make_reference_state();
-    auto fn = [&]() {
-      (void)ggml_gallocr_reserve_n(state.galloc, state.graph, node_buffer_ids, leaf_buffer_ids);
-      (void)ggml_gallocr_alloc_graph(state.galloc, state.graph);
-    };
-    results.push_back(measure_case("buffer/allocator_full", cfg, fn));
-    free_reference_state(state);
-  }
-
+std::vector<bench::result> run_reference_benchmarks(const bench::config & cfg) {
+  std::vector<bench::result> results;
+  results.reserve(6);
+  bench::append_reference_buffer_allocator_cases(results, cfg);
+  bench::append_reference_batch_splitter_cases(results, cfg);
   return results;
 }
 
-void print_snapshot(const std::vector<result> & results) {
-  std::vector<result> sorted = results;
-  std::sort(sorted.begin(), sorted.end(), [](const result & a, const result & b) {
+void print_snapshot(const std::vector<bench::result> & results) {
+  std::vector<bench::result> sorted = results;
+  std::sort(sorted.begin(), sorted.end(), [](const bench::result & a, const bench::result & b) {
     return a.name < b.name;
   });
 
@@ -345,15 +73,17 @@ void print_snapshot(const std::vector<result> & results) {
   }
 }
 
-void print_compare(const std::vector<result> & emel_results,
-                   const std::vector<result> & reference_results) {
-  std::vector<result> emel_sorted = emel_results;
-  std::vector<result> ref_sorted = reference_results;
+void print_compare(const std::vector<bench::result> & emel_results,
+                   const std::vector<bench::result> & reference_results) {
+  std::vector<bench::result> emel_sorted = emel_results;
+  std::vector<bench::result> ref_sorted = reference_results;
 
-  std::sort(emel_sorted.begin(), emel_sorted.end(), [](const result & a, const result & b) {
+  std::sort(emel_sorted.begin(), emel_sorted.end(), [](const bench::result & a,
+                                                       const bench::result & b) {
     return a.name < b.name;
   });
-  std::sort(ref_sorted.begin(), ref_sorted.end(), [](const result & a, const result & b) {
+  std::sort(ref_sorted.begin(), ref_sorted.end(), [](const bench::result & a,
+                                                     const bench::result & b) {
     return a.name < b.name;
   });
 
@@ -405,7 +135,7 @@ mode parse_mode(int argc, char ** argv) {
 }  // namespace
 
 int main(int argc, char ** argv) {
-  config cfg;
+  bench::config cfg;
   cfg.iterations = read_env_u64("EMEL_BENCH_ITERS", k_default_iterations);
   cfg.runs = read_env_size("EMEL_BENCH_RUNS", k_default_runs);
   cfg.warmup_iterations = read_env_u64(
