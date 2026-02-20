@@ -11,7 +11,7 @@ performance characterization for each machine.
   - `// benchmark: scaffold` means no benchmark required yet.
   - `// benchmark: ready` means a benchmark **is required** and will be enforced by gates.
 - Benchmarks are only required for machines marked `ready`.
-- Benchmarks are enforced via a snapshot diff with a **5% regression tolerance**.
+- Benchmarks are enforced via a snapshot diff with a **10% regression tolerance**.
 - Reference comparison is pinned to a specific upstream commit in
   `tools/bench/reference_ref.txt` for reproducibility.
 

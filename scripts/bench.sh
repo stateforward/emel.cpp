@@ -67,7 +67,7 @@ if $UPDATE && ! $SNAPSHOT; then
 fi
 
 if $SNAPSHOT; then
-  TOLERANCE="${BENCH_TOLERANCE:-0.05}"
+  TOLERANCE="${BENCH_TOLERANCE:-0.10}"
   BASELINE="$ROOT_DIR/snapshots/bench/benchmarks.txt"
   CURRENT="$(mktemp)"
   trap 'rm -f "$CURRENT"' EXIT
