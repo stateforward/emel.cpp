@@ -19,6 +19,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 README_FILE="$ROOT_DIR/README.md"
 BENCH_FILE="$ROOT_DIR/docs/benchmarks.md"
+BENCH_COMPARE_SNAPSHOT="$ROOT_DIR/snapshots/bench/benchmarks_compare.txt"
 
 require_tools() {
   for tool in "$@"; do
@@ -27,6 +28,29 @@ require_tools() {
       exit 1
     fi
   done
+}
+
+run_benchmarks_compare() {
+  if [[ ! -x "$ROOT_DIR/scripts/bench.sh" ]]; then
+    echo "error: missing executable scripts/bench.sh" >&2
+    exit 1
+  fi
+
+  if $CHECK_MODE; then
+    local current="$TMP_DIR/benchmarks_compare.txt"
+    "$ROOT_DIR/scripts/bench.sh" --compare > "$current"
+    if [[ ! -f "$BENCH_COMPARE_SNAPSHOT" ]]; then
+      echo "error: missing $BENCH_COMPARE_SNAPSHOT" >&2
+      exit 1
+    fi
+    if ! diff -u "$BENCH_COMPARE_SNAPSHOT" "$current"; then
+      echo "error: benchmark comparison snapshot out of sync" >&2
+      exit 1
+    fi
+    return
+  fi
+
+  "$ROOT_DIR/scripts/bench.sh" --compare-update
 }
 
 collect_sm_headers() {
@@ -412,7 +436,7 @@ CPP
 }
 
 generate_benchmarks() {
-  local snapshot="$ROOT_DIR/snapshots/bench/benchmarks_compare.txt"
+  local snapshot="$BENCH_COMPARE_SNAPSHOT"
   local tmp_file="$TMP_DIR/benchmarks.md"
 
   if [[ ! -f "$snapshot" ]]; then
@@ -475,5 +499,6 @@ write_readme() {
 }
 
 generate_sm_docs
+run_benchmarks_compare
 generate_benchmarks
 write_readme

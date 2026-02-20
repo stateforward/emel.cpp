@@ -57,6 +57,7 @@ environments, while Zig remains the default for day-to-day builds.
 ## Docs index
 
 - [`docs/benchmarks.md`](docs/benchmarks.md)
+- [`docs/architecture/batch_sanitizer.md`](docs/architecture/batch_sanitizer.md)
 - [`docs/architecture/batch_splitter.md`](docs/architecture/batch_splitter.md)
 - [`docs/architecture/buffer_allocator.md`](docs/architecture/buffer_allocator.md)
 - [`docs/architecture/buffer_chunk_allocator.md`](docs/architecture/buffer_chunk_allocator.md)
