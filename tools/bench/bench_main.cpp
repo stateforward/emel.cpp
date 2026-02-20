@@ -47,7 +47,6 @@ std::vector<bench::result> run_emel_benchmarks(const bench::config & cfg) {
   results.reserve(8);
   bench::append_emel_buffer_allocator_cases(results, cfg);
   bench::append_emel_batch_splitter_cases(results, cfg);
-  bench::append_emel_batch_sanitizer_cases(results, cfg);
   return results;
 }
 
@@ -56,7 +55,6 @@ std::vector<bench::result> run_reference_benchmarks(const bench::config & cfg) {
   results.reserve(8);
   bench::append_reference_buffer_allocator_cases(results, cfg);
   bench::append_reference_batch_splitter_cases(results, cfg);
-  bench::append_reference_batch_sanitizer_cases(results, cfg);
   return results;
 }
 

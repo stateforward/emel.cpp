@@ -4,10 +4,9 @@ Source: `snapshots/bench/benchmarks_compare.txt`
 
 | Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |
 | --- | ---: | ---: | ---: |
-| `batch/sanitizer_decode` | 1144.114 | 6400.777 | 0.179x |
-| `batch/splitter_equal` | 1682.211 | 5996.362 | 0.281x |
-| `batch/splitter_seq` | 1433.652 | 2591.535 | 0.553x |
-| `batch/splitter_simple` | 778.503 | 2150.086 | 0.362x |
-| `buffer/allocator_alloc_graph` | 15.867 | 12.251 | 1.295x |
-| `buffer/allocator_full` | 36.969 | 78.695 | 0.470x |
-| `buffer/allocator_reserve_n` | 18.492 | 149.090 | 0.124x |
+| `batch/splitter_equal` | 1927.551 | 6330.960 | 0.304x |
+| `batch/splitter_seq` | 1505.408 | 2496.272 | 0.603x |
+| `batch/splitter_simple` | 835.505 | 2120.028 | 0.394x |
+| `buffer/allocator_alloc_graph` | 15.915 | 12.732 | 1.250x |
+| `buffer/allocator_full` | 36.215 | 73.595 | 0.492x |
+| `buffer/allocator_reserve_n` | 19.538 | 142.770 | 0.137x |
