@@ -1,11 +1,11 @@
 # Parity gaps and validation status
 
 Scope of this audit
-- Reference source: `tmp/llama.cpp/ggml/src/ggml-alloc.c`.
+- Reference source: `ggml-alloc.c`.
 - Target machines reviewed: `src/emel/buffer/allocator/sm.hpp`, `src/emel/buffer/planner/sm.hpp`,
   `src/emel/buffer/chunk_allocator/sm.hpp`, `src/emel/buffer/realloc_analyzer/sm.hpp`.
 - Date: 2026-02-16.
-- All other machines are not yet validated against `tmp/llama.cpp` behavior.
+- All other machines are not yet validated against reference behavior.
 
 Allocator cluster status (ggml-alloc parity)
 - Unexpected-event handling is now explicit for allocator cluster machines via wildcard transitions
@@ -37,12 +37,12 @@ Model loader audit (llama.cpp parity)
 - Note: public C API entrypoints and C-boundary status mapping remain pending as a separate task.
 
 Parser audit (llama.cpp parity)
-- Reference source: `tmp/llama.cpp/src/llama-model.cpp` and `tmp/llama.cpp/src/llama-vocab.cpp`.
+- Reference source: `llama-model.cpp` and `llama-vocab.cpp`.
 - Status: complete for GGUF metadata mapping to `emel::model::data` fields and parser orchestration.
 - Implemented: tokenizer IDs and flags, token arrays, merges, and vocabulary metadata required by EMEL.
 
 Weight loader audit (llama.cpp parity)
-- Reference source: `tmp/llama.cpp/src/llama-model-loader.cpp` (weight mapping + data load).
+- Reference source: `llama-model-loader.cpp` (weight mapping + data load).
 - Status: implemented for EMEL loader callbacks (strategy selection, mappings init, mmap/stream
   load, validation, and cleanup).
 - Notes:
@@ -50,7 +50,7 @@ Weight loader audit (llama.cpp parity)
     loader callbacks rather than embedded in the state machine.
 
 KV cache audit (llama.cpp parity)
-- Reference source: `tmp/llama.cpp/src/llama-kv-cache.cpp`.
+- Reference source: `llama-kv-cache.cpp`.
 - Status: partial. Slot planning, apply, and rollback are modeled, but multi-stream support and
   sequence-aware operations are not yet represented in the state machine.
 - Gaps to close:
@@ -59,9 +59,8 @@ KV cache audit (llama.cpp parity)
   - Shift/defrag handling and sliding-window behaviors.
 
 Decoder audit (llama.cpp parity)
-- Reference sources: `tmp/llama.cpp/src/llama-context.cpp`, `tmp/llama.cpp/src/llama-batch.cpp`,
-  `tmp/llama.cpp/src/llama-batch.h`, `tmp/llama.cpp/src/llama-kv-cache.cpp`,
-  `tmp/llama.cpp/src/llama-memory-*.cpp`.
+- Reference sources: `llama-context.cpp`, `llama-batch.cpp`, `llama-batch.h`,
+  `llama-kv-cache.cpp`, `llama-memory-*.cpp`.
 - Reference commit: `abb9f3c42b5e6acee9e8e37836ef691d1a41bdb8`.
 - Date: 2026-02-19.
 - Status: partial. Batch splitting, output selection (`output_all`, `output_mask`, last-token),
@@ -79,7 +78,7 @@ Decoder audit (llama.cpp parity)
   - Encoder-decoder cross-attention metadata (e.g. T5-style cross state).
 
 Encoder audit (llama.cpp parity)
-- Reference sources: `tmp/llama.cpp/src/llama-vocab.cpp`, `tmp/llama.cpp/src/llama-vocab.h`.
+- Reference sources: `llama-vocab.cpp`, `llama-vocab.h`.
 - Reference commit: `abb9f3c42b5e6acee9e8e37836ef691d1a41bdb8`.
 - Date: 2026-02-20.
 - Status: complete. Encoder/tokenizer behavior is aligned with llama.cpp for BPE, WPM, UGM, RWKV,
@@ -99,5 +98,5 @@ Unvalidated machines (no parity audit performed yet)
 - `src/emel/sm.hpp`
 
 Recommended next steps
-- Decide which component to audit next against `tmp/llama.cpp` and identify the exact reference
+- Decide which component to audit next against the reference implementation and identify the exact
   files and functions to map.

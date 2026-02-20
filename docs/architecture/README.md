@@ -31,10 +31,11 @@ WARNING: This architecture documentation is under active development and may cha
 This split keeps long-lived and RAII usage consistent, reduces duplicated dependency state,
 and makes event traces sufficient for debugging/telemetry.
 
-## Relationship To `tmp/llama.cpp`
+## Relationship To Reference Implementations
 
-Ported behavior is preserved while restructuring control flow into explicit state-machine contracts.
-Transport, parse, and load decisions are modeled as events/states, not hidden function flow.
+Ported behavior is preserved while restructuring control flow into explicit state-machine
+contracts. Transport, parse, and load decisions are modeled as events/states, not hidden function
+flow.
 
 ## What To Update Together
 

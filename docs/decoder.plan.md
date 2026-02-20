@@ -1,7 +1,7 @@
 # Decoder parity plan (rolling)
 
-This document tracks agreed decisions and upcoming work items for decoder parity with
-`tmp/llama.cpp`. Entries are appended as decisions are made.
+This document tracks agreed decisions and upcoming work items for decoder parity with reference
+implementations. Entries are appended as decisions are made.
 
 ## Decisions
 - Memory decomposition will use `memory/coordinator/{recurrent,kv,hybrid}` under shared coordinator

@@ -66,7 +66,7 @@ Production completion checklist (open)
   - [x] Explicit multi-buffer mapping mismatch validation and error coding.
   - [x] Overflow/limit hardening across size/count paths.
   - [ ] Strategy contract tests for null/invalid/override tables.
-  - [ ] Ported allocator parity scenarios from tmp/llama.cpp/tests/test-alloc.cpp.
+  - [ ] Ported allocator parity scenarios from reference `test-alloc.cpp`.
   - [x] Public C API allocator-path tests for exact EMEL_* status mapping.
   - [ ] Performance guardrails for hot-path behavior and scaling.
 */

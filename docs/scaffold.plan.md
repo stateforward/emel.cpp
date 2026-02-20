@@ -1,7 +1,7 @@
 # Scaffolding plan (parity coverage)
 
 This file captures the agreed machine/component scaffolding needed to reach full parity with
-`tmp/llama.cpp` across decoder, tokenizer/encoder, generator, and parsing workflows. It
+reference implementations across decoder, tokenizer/encoder, generator, and parsing workflows. It
 consolidates decisions from `docs/decoder.plan.md` and ongoing architecture discussions.
 
 ## Decoder

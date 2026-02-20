@@ -135,15 +135,16 @@ NEVER maintain parallel machine-definition markdown specs under
 `docs/architecture/*`.
 ALWAYS document state purpose, key invariants, guard semantics, and action side
 effects.
-ALWAYS treat `tmp/llama.cpp` as the functional logic reference for allocator and
-behavioral parity work.
+ALWAYS treat the reference implementation as the functional logic reference for
+allocator and behavioral parity work.
 NEVER port reference control flow, branching structure, lifecycle semantics, or
 orchestration decisions verbatim from llama.cpp/ggml.
 ALWAYS define EMEL behavior and orchestration semantics in Boost.SML machines as
 source of truth.
 ALWAYS port llama.cpp/ggml arithmetic, kernels, and instruction behavior into
 this codebase when implementing equivalent EMEL functionality.
-ALWAYS preserve or improve performance when porting logic from tmp/llama.cpp.
+ALWAYS preserve or improve performance when porting logic from the reference
+implementation.
 ALWAYS implement equivalent functionality natively without external llama.cpp or
 ggml linkage.
 NEVER link llama.cpp.

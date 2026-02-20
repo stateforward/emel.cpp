@@ -1,7 +1,7 @@
 # Decoder parity notes (llama.cpp)
 
 ## Reference
-- Upstream: `tmp/llama.cpp` at commit `abb9f3c42b5e6acee9e8e37836ef691d1a41bdb8`.
+- Upstream reference commit: `abb9f3c42b5e6acee9e8e37836ef691d1a41bdb8`.
 - Primary files: `src/llama-context.cpp`, `src/llama-batch.cpp`, `src/llama-batch.h`,
   `src/llama-kv-cache.cpp`, `src/llama-memory-*.cpp`.
 - Date: 2026-02-19.
