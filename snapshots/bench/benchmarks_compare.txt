@@ -1,6 +1,6 @@
-batch/splitter_equal emel.cpp 1927.551 ns/op, llama.cpp 6330.960 ns/op, ratio=0.304x
-batch/splitter_seq emel.cpp 1505.408 ns/op, llama.cpp 2496.272 ns/op, ratio=0.603x
-batch/splitter_simple emel.cpp 835.505 ns/op, llama.cpp 2120.028 ns/op, ratio=0.394x
-buffer/allocator_alloc_graph emel.cpp 15.915 ns/op, llama.cpp 12.732 ns/op, ratio=1.250x
-buffer/allocator_full emel.cpp 36.215 ns/op, llama.cpp 73.595 ns/op, ratio=0.492x
-buffer/allocator_reserve_n emel.cpp 19.538 ns/op, llama.cpp 142.770 ns/op, ratio=0.137x
+batch/splitter_equal emel.cpp 1719.135 ns/op, llama.cpp 6177.673 ns/op, ratio=0.278x
+batch/splitter_seq emel.cpp 1447.235 ns/op, llama.cpp 2587.691 ns/op, ratio=0.559x
+batch/splitter_simple emel.cpp 762.933 ns/op, llama.cpp 2170.691 ns/op, ratio=0.351x
+buffer/allocator_alloc_graph emel.cpp 16.752 ns/op, llama.cpp 12.770 ns/op, ratio=1.312x
+buffer/allocator_full emel.cpp 35.639 ns/op, llama.cpp 78.312 ns/op, ratio=0.455x
+buffer/allocator_reserve_n emel.cpp 20.139 ns/op, llama.cpp 148.171 ns/op, ratio=0.136x

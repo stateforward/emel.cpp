@@ -11,6 +11,9 @@
 #include "emel/generator/sm.hpp"
 #include "emel/kv/cache/sm.hpp"
 #include "emel/memory/coordinator/sm.hpp"
+#include "emel/memory/coordinator/recurrent/sm.hpp"
+#include "emel/memory/coordinator/kv/sm.hpp"
+#include "emel/memory/coordinator/hybrid/sm.hpp"
 #include "emel/model/loader/sm.hpp"
 #include "emel/parser/sm.hpp"
 #include "emel/model/weight_loader/sm.hpp"
@@ -39,6 +42,9 @@ using EncoderFallback = emel::encoder::fallback::sm;
 using Generator = emel::generator::sm;
 using KvCache = emel::kv::cache::sm;
 using MemoryCoordinator = emel::memory::coordinator::sm;
+using MemoryCoordinatorRecurrent = emel::memory::coordinator::recurrent::sm;
+using MemoryCoordinatorKv = emel::memory::coordinator::kv::sm;
+using MemoryCoordinatorHybrid = emel::memory::coordinator::hybrid::sm;
 using ModelLoader = emel::model::loader::sm;
 using Model = emel::model::loader::sm;
 using Parser = emel::parser::gguf::sm;
