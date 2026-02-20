@@ -26,27 +26,23 @@ set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(${reference_impl_SOURCE_DIR}/ggml ggml)
 
-set(EMEL_ENABLE_TESTS ON CACHE BOOL "" FORCE)
+set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${EMEL_ROOT} emel)
 
-add_executable(reference_allocator_bench
-  ${CMAKE_CURRENT_SOURCE_DIR}/reference_allocator_bench.cpp
+add_executable(bench_runner
+  ${CMAKE_CURRENT_SOURCE_DIR}/bench_main.cpp
 )
 
-target_link_libraries(reference_allocator_bench
+target_link_libraries(bench_runner
   PRIVATE
+    emel_core
+    emel
     ggml
 )
 
-target_include_directories(reference_allocator_bench
+target_include_directories(bench_runner
   PRIVATE
+    ${EMEL_ROOT}/src
+    ${EMEL_ROOT}/include
     ${reference_impl_SOURCE_DIR}/ggml/include
-)
-
-add_custom_target(bench_compare
-  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run_compare.sh
-          $<TARGET_FILE:emel_bench_bin>
-          $<TARGET_FILE:reference_allocator_bench>
-  DEPENDS emel_bench_bin reference_allocator_bench
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )

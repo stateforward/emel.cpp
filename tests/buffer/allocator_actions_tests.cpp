@@ -201,6 +201,121 @@ TEST_CASE("buffer_allocator_actions_detail_alignment_and_tensor_alloc") {
         std::numeric_limits<int32_t>::max());
 }
 
+TEST_CASE("buffer_allocator_cached_guards_accept_stable_graph") {
+  const graph_storage g = make_graph();
+  emel::buffer::allocator::action::context ctx{};
+  ctx.buffer_count = 1;
+  ctx.has_required_sizes = true;
+  ctx.last_required_sizes[0] = 256;
+  ctx.committed_sizes[0] = 256;
+  ctx.committed_chunk_counts[0] = 1;
+  ctx.committed_chunk_ids[0] = 0;
+  ctx.committed_chunk_sizes[0] = 256;
+
+  emel::buffer::allocator::action::detail::capture_buffer_map(ctx, as_view(g), nullptr, nullptr);
+  CHECK(emel::buffer::allocator::action::detail::capture_alloc_snapshot(ctx, as_view(g), nullptr, nullptr));
+
+  std::array<int32_t, 1> sizes = {{0}};
+  const std::array<int32_t, 1> node_ids = {{0}};
+  const std::array<int32_t, 1> leaf_ids = {{0}};
+
+  CHECK(emel::buffer::allocator::guard::can_reserve_n_size_cached{}(
+    emel::buffer::allocator::event::reserve_n_size{
+      .graph = as_view(g),
+      .node_buffer_ids = nullptr,
+      .leaf_buffer_ids = nullptr,
+      .sizes_out = sizes.data(),
+      .sizes_out_count = static_cast<int32_t>(sizes.size()),
+    },
+    ctx));
+
+  CHECK(emel::buffer::allocator::guard::can_reserve_n_cached{}(
+    emel::buffer::allocator::event::reserve_n{
+      .graph = as_view(g),
+      .node_buffer_ids = node_ids.data(),
+      .leaf_buffer_ids = leaf_ids.data(),
+    },
+    ctx));
+
+  CHECK(emel::buffer::allocator::guard::can_reserve_cached{}(
+    emel::buffer::allocator::event::reserve{
+      .graph = as_view(g),
+    },
+    ctx));
+
+  CHECK(emel::buffer::allocator::guard::can_alloc_graph_cached{}(
+    emel::buffer::allocator::event::alloc_graph{
+      .graph = as_view(g),
+    },
+    ctx));
+}
+
+TEST_CASE("buffer_allocator_cached_actions_report_success") {
+  const graph_storage g = make_graph();
+  emel::buffer::allocator::action::context ctx{};
+  ctx.buffer_count = 1;
+  ctx.has_required_sizes = true;
+  ctx.last_required_sizes[0] = 256;
+
+  std::array<int32_t, 1> sizes = {{0}};
+  int32_t error_out = EMEL_ERR_BACKEND;
+
+  emel::buffer::allocator::action::begin_reserve_n_size_cached(
+    emel::buffer::allocator::event::reserve_n_size{
+      .graph = as_view(g),
+      .node_buffer_ids = nullptr,
+      .leaf_buffer_ids = nullptr,
+      .sizes_out = sizes.data(),
+      .sizes_out_count = static_cast<int32_t>(sizes.size()),
+      .error_out = &error_out,
+    },
+    ctx);
+  CHECK(sizes[0] == ctx.last_required_sizes[0]);
+  CHECK(error_out == EMEL_OK);
+  CHECK(ctx.phase_error == EMEL_OK);
+
+  error_out = EMEL_ERR_BACKEND;
+  emel::buffer::allocator::action::begin_reserve_n_cached(
+    emel::buffer::allocator::event::reserve_n{
+      .graph = as_view(g),
+      .node_buffer_ids = nullptr,
+      .leaf_buffer_ids = nullptr,
+      .error_out = &error_out,
+    },
+    ctx);
+  CHECK(error_out == EMEL_OK);
+  CHECK(ctx.phase_error == EMEL_OK);
+
+  error_out = EMEL_ERR_BACKEND;
+  emel::buffer::allocator::action::begin_reserve_cached(
+    emel::buffer::allocator::event::reserve{
+      .graph = as_view(g),
+      .error_out = &error_out,
+    },
+    ctx);
+  CHECK(error_out == EMEL_OK);
+  CHECK(ctx.phase_error == EMEL_OK);
+
+  error_out = EMEL_ERR_BACKEND;
+  emel::buffer::allocator::action::begin_alloc_graph_cached(
+    emel::buffer::allocator::event::alloc_graph{
+      .graph = as_view(g),
+      .error_out = &error_out,
+    },
+    ctx);
+  CHECK(error_out == EMEL_OK);
+  CHECK(ctx.phase_error == EMEL_OK);
+
+  error_out = EMEL_ERR_BACKEND;
+  emel::buffer::allocator::action::begin_release_noop(
+    emel::buffer::allocator::event::release{
+      .error_out = &error_out,
+    },
+    ctx);
+  CHECK(error_out == EMEL_OK);
+  CHECK(ctx.phase_error == EMEL_OK);
+}
+
 TEST_CASE("buffer_allocator_actions_capture_snapshot_and_realloc_checks") {
   graph_storage g = make_graph();
   const graph_view view = as_view(g);

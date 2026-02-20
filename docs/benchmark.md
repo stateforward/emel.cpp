@@ -15,9 +15,9 @@ performance characterization for each machine.
 
 ## Benchmark harness
 
-We use an in-repo harness (no external dependencies):
-- Benchmark registry lives in `tests/bench/bench_main.cpp`.
-- Each machine adds a benchmark case in `tests/bench/<path>_bench.cpp` and registers it.
+We use a single benchmark harness that lives in `tools/bench/bench_main.cpp` and
+links EMEL with the reference allocator implementation for apples-to-apples
+comparisons.
 - Output format is deterministic and diff-friendly:
   - `machine_path ns_per_op=123.4 iter=100000 runs=5`
   - `machine_path` matches the `src/emel/<path>/sm.hpp` path without the prefix and suffix.
@@ -27,15 +27,15 @@ We use an in-repo harness (no external dependencies):
 
 ## External reference compare (optional)
 
-We also maintain an optional tool that compares EMEL results against a reference allocator
-implementation. It lives under `tools/bench` and builds both sides out-of-tree.
+We also maintain an optional comparison mode that runs EMEL and reference benchmarks
+in the same tool build.
 
-To add a new reference comparison case:
-1. Add/register the EMEL bench case in `tests/bench/`.
-2. Add the matching reference case in `tools/bench/reference_allocator_bench.cpp`.
-3. Add the case name to the `cases=(...)` list in `tools/bench/run_compare.sh`.
+To add a new comparison case:
+1. Add the EMEL case in `tools/bench/bench_main.cpp`.
+2. Add the matching reference case in `tools/bench/bench_main.cpp`.
+3. Keep the case names identical for proper matching.
 
-The compare tool expects exact case-name matches and prints `ratio` values for quick inspection.
+The compare mode expects exact case-name matches and prints `ratio` values for quick inspection.
 Run it via `scripts/bench.sh --compare`.
 
 ## Gate behavior

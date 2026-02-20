@@ -31,14 +31,13 @@ Human review is deliberately light. The real judges are the quality gates + AI a
 Before you hit submit:
 - Read and follow `docs/sml.rules.md` and `AGENTS.md` like they’re gospel.
 - Keep changes small and focused.
-- Run `scripts/build_with_zig.sh`
-- Run `scripts/test_with_coverage.sh` (≥ 90% branch coverage required on changed code)
-- Run `scripts/lint_snapshot.sh`
-- Run `scripts/bench.sh --snapshot` (required for new machines marked `benchmark: ready`)
+- Run `scripts/quality_gates.sh`
 - Add or update tests for any new behavior.
 - Update documentation when behavior changes.
 
 Benchmarks are enforced via snapshots; see `docs/benchmark.md`.
+
+Individual gate scripts live in `scripts/`.
 
 ### Architecture & style rules (the constitution)
 

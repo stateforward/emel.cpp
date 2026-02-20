@@ -29,10 +29,11 @@ assumptions or baggage. It’s intentionally low-ceremony while we iterate on th
 ## Build and test
 
 ```bash
-scripts/build_with_zig.sh
-scripts/test_with_coverage.sh
-scripts/lint_snapshot.sh
+scripts/quality_gates.sh
 ```
+
+See `scripts/build_with_zig.sh`, `scripts/test_with_coverage.sh`,
+`scripts/lint_snapshot.sh`, and `scripts/bench.sh` for individual gates.
 
 ### Why Zig for builds
 

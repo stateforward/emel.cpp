@@ -198,23 +198,4 @@ if(EMEL_ENABLE_TESTS)
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_puml.sh --check
   )
 
-  add_executable(emel_bench_bin
-    tests/bench/bench_main.cpp
-    tests/bench/bench_registry.cpp
-    tests/bench/buffer_allocator_bench.cpp
-  )
-
-  target_link_libraries(emel_bench_bin
-    PRIVATE
-      emel_core
-      emel
-  )
-
-  target_include_directories(emel_bench_bin
-    PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/src
-      ${CMAKE_CURRENT_SOURCE_DIR}/include
-      ${CMAKE_CURRENT_SOURCE_DIR}/tests
-      ${boost_sml_SOURCE_DIR}/include
-  )
 endif()

@@ -7,14 +7,19 @@ TOOLS_DIR="$ROOT_DIR/tools/bench"
 SNAPSHOT=false
 COMPARE=false
 UPDATE=false
+USE_ZIG=false
+MODE_FLAG=""
 
 usage() {
   cat <<'USAGE'
-usage: scripts/bench.sh [--snapshot] [--compare] [--update]
+usage: scripts/bench.sh [--snapshot] [--compare] [--update] [--zig] [--llama-only|--emel-only]
 
   --snapshot   run EMEL benchmark snapshot gate
   --compare    build and run reference comparison
   --update     update snapshot baseline (requires --snapshot)
+  --zig        use zig cc/zig c++ as the toolchain
+  --llama-only run only the reference benchmarks
+  --emel-only  run only the EMEL benchmarks
 USAGE
 }
 
@@ -23,6 +28,9 @@ for arg in "$@"; do
     --snapshot) SNAPSHOT=true ;;
     --compare) COMPARE=true ;;
     --update) UPDATE=true ;;
+    --zig) USE_ZIG=true ;;
+    --llama-only) MODE_FLAG="--mode=reference" ;;
+    --emel-only) MODE_FLAG="--mode=emel" ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "error: unknown argument '$arg'" >&2
@@ -33,8 +41,7 @@ for arg in "$@"; do
 done
 
 if ! $SNAPSHOT && ! $COMPARE; then
-  usage
-  exit 1
+  COMPARE=true
 fi
 
 if $UPDATE && ! $SNAPSHOT; then
@@ -48,30 +55,30 @@ if $SNAPSHOT; then
   CURRENT="$(mktemp)"
   trap 'rm -f "$CURRENT"' EXIT
 
-  for tool in zig cmake ninja git; do
+  for tool in cmake ninja git; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "error: required tool missing: $tool" >&2
       exit 1
     fi
   done
 
-base_ref="${BENCH_BASE_REF:-origin/main}"
-if ! git -C "$ROOT_DIR" rev-parse --verify "$base_ref" >/dev/null 2>&1; then
-  if git -C "$ROOT_DIR" rev-parse --verify main >/dev/null 2>&1; then
-    base_ref="main"
-  else
-    base_ref="HEAD"
-    echo "warning: unable to resolve base ref, using HEAD (set BENCH_BASE_REF to override)" >&2
+  base_ref="${BENCH_BASE_REF:-origin/main}"
+  if ! git -C "$ROOT_DIR" rev-parse --verify "$base_ref" >/dev/null 2>&1; then
+    if git -C "$ROOT_DIR" rev-parse --verify main >/dev/null 2>&1; then
+      base_ref="main"
+    else
+      base_ref="HEAD"
+      echo "warning: unable to resolve base ref, using HEAD (set BENCH_BASE_REF to override)" >&2
+    fi
   fi
-fi
 
-new_sms=()
-if [[ "$base_ref" != "HEAD" ]]; then
-  while IFS= read -r line; do
-    new_sms+=("$line")
-  done < <(git -C "$ROOT_DIR" diff --name-status "$base_ref...HEAD" -- 'src/emel/**/sm.hpp' \
-    | awk '$1 == "A" { print $2 }')
-fi
+  new_sms=()
+  if [[ "$base_ref" != "HEAD" ]]; then
+    while IFS= read -r line; do
+      new_sms+=("$line")
+    done < <(git -C "$ROOT_DIR" diff --name-status "$base_ref...HEAD" -- 'src/emel/**/sm.hpp' \
+      | awk '$1 == "A" { print $2 }')
+  fi
 
   ready_names=()
   for sm in "${new_sms[@]+${new_sms[@]}}"; do
@@ -87,20 +94,38 @@ fi
     fi
   done
 
-  zig_bin="$(command -v zig)"
-  build_dir="${BENCH_BUILD_DIR:-$ROOT_DIR/build/bench}"
+  build_dir="${BENCH_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
+  bench_cc="${BENCH_CC:-cc}"
+  bench_cxx="${BENCH_CXX:-c++}"
+  bench_cc_arg=""
+  bench_cxx_arg=""
+  bench_asm_arg=""
+  if $USE_ZIG; then
+    bench_cc="zig"
+    bench_cxx="zig"
+    bench_cc_arg="cc"
+    bench_cxx_arg="c++"
+    bench_asm_arg="cc"
+  fi
 
-  cmake -S "$ROOT_DIR" -B "$build_dir" -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_C_COMPILER="$zig_bin" \
-    -DCMAKE_C_COMPILER_ARG1=cc \
-    -DCMAKE_CXX_COMPILER="$zig_bin" \
-    -DCMAKE_CXX_COMPILER_ARG1=c++ \
-    -DEMEL_ENABLE_TESTS=ON
+  cmake_args=(-S "$TOOLS_DIR" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
+              -DEMEL_ENABLE_TESTS=OFF)
+  cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
+  cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
+  cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
+  if [[ -n "$bench_cc_arg" ]]; then
+    cmake_args+=("-DCMAKE_C_COMPILER_ARG1=$bench_cc_arg")
+    cmake_args+=("-DCMAKE_ASM_COMPILER_ARG1=$bench_cc_arg")
+  fi
+  if [[ -n "$bench_cxx_arg" ]]; then
+    cmake_args+=("-DCMAKE_CXX_COMPILER_ARG1=$bench_cxx_arg")
+  fi
 
-  cmake --build "$build_dir" --parallel --target emel_bench_bin
+  cmake "${cmake_args[@]}"
 
-  "$build_dir/emel_bench_bin" > "$CURRENT"
+  cmake --build "$build_dir" --parallel --target bench_runner
+
+  "$build_dir/bench_runner" --mode=emel > "$CURRENT"
 
   for name in "${ready_names[@]+${ready_names[@]}}"; do
     if ! grep -q "^${name} " "$CURRENT"; then
@@ -185,15 +210,45 @@ fi
 fi
 
 if $COMPARE; then
-  for tool in cmake; do
+  for tool in cmake ninja git; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "error: required tool missing: $tool" >&2
       exit 1
     fi
   done
 
-  compare_build_dir="${BENCH_COMPARE_BUILD_DIR:-$ROOT_DIR/build/tools_bench}"
+  compare_build_dir="${BENCH_COMPARE_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
+  bench_cc="${BENCH_CC:-cc}"
+  bench_cxx="${BENCH_CXX:-c++}"
+  bench_cc_arg=""
+  bench_cxx_arg=""
+  bench_asm_arg=""
+  if $USE_ZIG; then
+    bench_cc="zig"
+    bench_cxx="zig"
+    bench_cc_arg="cc"
+    bench_cxx_arg="c++"
+    bench_asm_arg="cc"
+  fi
 
-  cmake -S "$TOOLS_DIR" -B "$compare_build_dir" -DCMAKE_BUILD_TYPE=Release
-  cmake --build "$compare_build_dir" --target bench_compare
+  cmake_args=(-S "$TOOLS_DIR" -B "$compare_build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
+              -DEMEL_ENABLE_TESTS=OFF)
+  cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
+  cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
+  cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
+  if [[ -n "$bench_cc_arg" ]]; then
+    cmake_args+=("-DCMAKE_C_COMPILER_ARG1=$bench_cc_arg")
+    cmake_args+=("-DCMAKE_ASM_COMPILER_ARG1=$bench_cc_arg")
+  fi
+  if [[ -n "$bench_cxx_arg" ]]; then
+    cmake_args+=("-DCMAKE_CXX_COMPILER_ARG1=$bench_cxx_arg")
+  fi
+
+  cmake "${cmake_args[@]}"
+  cmake --build "$compare_build_dir" --parallel --target bench_runner
+  if [[ -n "$MODE_FLAG" ]]; then
+    "$compare_build_dir/bench_runner" "$MODE_FLAG"
+  else
+    "$compare_build_dir/bench_runner" --mode=compare
+  fi
 fi

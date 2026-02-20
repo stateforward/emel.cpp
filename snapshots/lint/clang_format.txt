@@ -171,10 +171,6 @@ tests/batch/splitter_additional_tests.cpp
 tests/batch/splitter_sm_flow_tests.cpp
 tests/batch/splitter_sm_transition_tests.cpp
 tests/batch/splitter_tests.cpp
-tests/bench/bench_main.cpp
-tests/bench/bench_registry.cpp
-tests/bench/bench_registry.hpp
-tests/bench/buffer_allocator_bench.cpp
 tests/buffer/allocator_action_branch_more_tests.cpp
 tests/buffer/allocator_action_branch_tests.cpp
 tests/buffer/allocator_action_line_targets_tests.cpp
