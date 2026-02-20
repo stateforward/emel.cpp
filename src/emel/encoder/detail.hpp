@@ -62,32 +62,6 @@ inline bool is_token_type(const emel::model::data::vocab &vocab,
   return vocab.entries[static_cast<uint32_t>(id)].type == type;
 }
 
-inline tokenizer_model detect_model(const emel::model::data::vocab &vocab) {
-  const std::string_view model = string_view_from_array(vocab.tokenizer_model);
-  if (model.empty() || model == "none" || model == "no_vocab") {
-    return tokenizer_model::none;
-  }
-  if (model == "llama") {
-    return tokenizer_model::spm;
-  }
-  if (model == "gpt2") {
-    return tokenizer_model::bpe;
-  }
-  if (model == "bert") {
-    return tokenizer_model::wpm;
-  }
-  if (model == "t5") {
-    return tokenizer_model::ugm;
-  }
-  if (model == "rwkv") {
-    return tokenizer_model::rwkv;
-  }
-  if (model == "plamo2") {
-    return tokenizer_model::plamo2;
-  }
-  return tokenizer_model::unknown;
-}
-
 constexpr uint32_t k_fnv_offset = 2166136261u;
 constexpr uint32_t k_fnv_prime = 16777619u;
 
@@ -379,14 +353,15 @@ inline const std::array<std::string, 256> &byte_to_utf8_table() {
 inline int32_t byte_to_token(const action::context &ctx,
                              const emel::model::data::vocab &vocab,
                              const uint8_t byte,
-                             const tokenizer_model model) {
+                             const emel::model::data::TokenizerModel model) {
   (void)vocab;
-  if (model == tokenizer_model::none) {
+  if (model == emel::model::data::TokenizerModel::NONE) {
     return k_token_null;
   }
 
-  if (model == tokenizer_model::spm || model == tokenizer_model::ugm ||
-      model == tokenizer_model::plamo2) {
+  if (model == emel::model::data::TokenizerModel::SPM ||
+      model == emel::model::data::TokenizerModel::UGM ||
+      model == emel::model::data::TokenizerModel::PLAMO2) {
     char hex[7] = {};
     static const char *digits = "0123456789ABCDEF";
     hex[0] = '<';
@@ -404,8 +379,9 @@ inline int32_t byte_to_token(const action::context &ctx,
     return lookup_token(ctx, std::string_view(&raw, 1));
   }
 
-  if (model == tokenizer_model::bpe || model == tokenizer_model::wpm ||
-      model == tokenizer_model::rwkv) {
+  if (model == emel::model::data::TokenizerModel::BPE ||
+      model == emel::model::data::TokenizerModel::WPM ||
+      model == emel::model::data::TokenizerModel::RWKV) {
     const uint32_t cpt = byte_to_codepoint_table()[byte];
     char utf8[4] = {};
     const uint8_t len = encode_cpt_utf8(cpt, utf8);
@@ -514,7 +490,7 @@ inline void merge_symbols(EncodeScratch &scratch,
 inline bool encode_bytes(const event::encode &ev,
                          action::context &ctx,
                          const emel::model::data::vocab &vocab,
-                         const tokenizer_model model,
+                         const emel::model::data::TokenizerModel model,
                          encode_result &result) {
   (void)vocab;
   int32_t count = 0;

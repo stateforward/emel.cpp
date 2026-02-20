@@ -59,66 +59,60 @@ inline encode_result encode_wpm(const event::encode &ev,
   emel::encoder::detail::ensure_tables(ctx);
 
   int32_t count = 0;
+  const std::vector<std::string> words = wpm_preprocess(std::string(ev.text));
   const char *prefix = "\xE2\x96\x81";
   constexpr size_t prefix_len = 3;
 
-  size_t word_start = 0;
-  for (size_t i = 0; i <= ev.text.size(); ++i) {
-    const bool is_end = (i == ev.text.size());
-    const bool is_space = !is_end && std::isspace(static_cast<unsigned char>(ev.text[i])) != 0;
-    if (!is_end && !is_space) {
+  for (const std::string &word : words) {
+    if (word.empty()) {
       continue;
     }
-    const size_t word_len = i - word_start;
-    if (word_len > 0) {
-      const int32_t word_token_start = count;
-      if (prefix_len + word_len > ctx.scratch.buffer.size()) {
-        result.error = EMEL_ERR_INVALID_ARGUMENT;
-        return result;
-      }
-      std::memcpy(ctx.scratch.buffer.data(), prefix, prefix_len);
-      std::memcpy(ctx.scratch.buffer.data() + prefix_len,
-                  ev.text.data() + word_start, word_len);
-      const std::string_view word(ctx.scratch.buffer.data(), prefix_len + word_len);
-      bool word_ok = true;
-      for (size_t pos = 0; pos < word.size();) {
-        bool found = false;
-        const size_t max_len = std::min(word.size() - pos,
-                                        static_cast<size_t>(ctx.max_token_len));
-        for (size_t len = max_len; len > 0; --len) {
-          const std::string_view piece = word.substr(pos, len);
-          const int32_t token = emel::encoder::detail::lookup_token(ctx, piece);
-          if (token != k_token_null) {
-            if (!emel::encoder::detail::push_token(ev, token, count)) {
-              result.error = EMEL_ERR_INVALID_ARGUMENT;
-              return result;
-            }
-            pos += len;
-            found = true;
-            break;
+    const int32_t word_token_start = count;
+    const size_t word_len = word.size();
+    if (prefix_len + word_len > ctx.scratch.buffer.size()) {
+      result.error = EMEL_ERR_INVALID_ARGUMENT;
+      return result;
+    }
+    std::memcpy(ctx.scratch.buffer.data(), prefix, prefix_len);
+    std::memcpy(ctx.scratch.buffer.data() + prefix_len, word.data(), word_len);
+    const std::string_view word_view(ctx.scratch.buffer.data(),
+                                     prefix_len + word_len);
+    const int32_t n = static_cast<int32_t>(word_view.size());
+    for (int32_t i = 0; i < n; ++i) {
+      bool found = false;
+      const int32_t end = std::min(n, i + ctx.max_token_len + 1);
+      for (int32_t j = end; j > i; --j) {
+        const std::string_view piece = word_view.substr(
+            static_cast<size_t>(i), static_cast<size_t>(j - i));
+        const int32_t token = emel::encoder::detail::lookup_token(ctx, piece);
+        if (token != k_token_null) {
+          if (!emel::encoder::detail::push_token(ev, token, count)) {
+            result.error = EMEL_ERR_INVALID_ARGUMENT;
+            return result;
           }
-        }
-        if (!found) {
-          word_ok = false;
+          found = true;
+          i = j - 1;
           break;
         }
       }
-      if (!word_ok) {
+      if (!found) {
         count = word_token_start;
-        int32_t unk = vocab.unk_id;
-        if (unk == k_token_null) {
-          unk = emel::encoder::detail::lookup_token(ctx, "<unk>");
-        }
-        if (unk == k_token_null) {
-          continue;
-        }
-        if (!emel::encoder::detail::push_token(ev, unk, count)) {
-          result.error = EMEL_ERR_INVALID_ARGUMENT;
-          return result;
-        }
+        break;
       }
     }
-    word_start = i + 1;
+    if (count == word_token_start) {
+      int32_t unk = vocab.unk_id;
+      if (unk == k_token_null) {
+        unk = emel::encoder::detail::lookup_token(ctx, "<unk>");
+      }
+      if (unk == k_token_null) {
+        continue;
+      }
+      if (!emel::encoder::detail::push_token(ev, unk, count)) {
+        result.error = EMEL_ERR_INVALID_ARGUMENT;
+        return result;
+      }
+    }
   }
 
   result.token_count = count;

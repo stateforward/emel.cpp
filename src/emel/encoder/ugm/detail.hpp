@@ -1,7 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <limits>
 #include <string>
 
 #include "emel/encoder/ugm/context.hpp"
@@ -14,16 +16,12 @@ namespace emel::encoder::ugm::detail {
 using emel::encoder::detail::encode_result;
 using emel::encoder::detail::k_token_null;
 
-inline bool xcda_table(const emel::encoder::action::context &ctx,
-                       const uint32_t *&table,
-                       size_t &table_size,
-                       const char *&replacements,
-                       size_t &replacements_size) {
+inline bool init_xcda_tables(emel::encoder::ugm::action::context &ctx) {
+  ctx.xcda_table = nullptr;
+  ctx.xcda_table_size = 0;
+  ctx.prefix_replacements = nullptr;
+  ctx.prefix_replacements_size = 0;
   if (ctx.vocab == nullptr || ctx.vocab->precompiled_charsmap_size == 0) {
-    table = nullptr;
-    table_size = 0;
-    replacements = nullptr;
-    replacements_size = 0;
     return false;
   }
   const uint8_t *data = ctx.vocab->precompiled_charsmap.data();
@@ -31,348 +29,366 @@ inline bool xcda_table(const emel::encoder::action::context &ctx,
   if (blob_size + sizeof(blob_size) > ctx.vocab->precompiled_charsmap_size) {
     return false;
   }
-  table = reinterpret_cast<const uint32_t *>(data + sizeof(blob_size));
-  table_size = blob_size / sizeof(uint32_t);
-  replacements = reinterpret_cast<const char *>(data + sizeof(blob_size) + blob_size);
-  replacements_size = ctx.vocab->precompiled_charsmap_size - sizeof(blob_size) - blob_size;
+  ctx.xcda_table = reinterpret_cast<const uint32_t *>(data + sizeof(blob_size));
+  ctx.xcda_table_size = blob_size / sizeof(uint32_t);
+  ctx.prefix_replacements = reinterpret_cast<const char *>(data + sizeof(blob_size) + blob_size);
+  ctx.prefix_replacements_size =
+      ctx.vocab->precompiled_charsmap_size - sizeof(blob_size) - blob_size;
   return true;
 }
 
-inline bool xcda_next(const emel::encoder::action::context &ctx,
-                      const uint32_t state,
-                      const uint8_t c,
-                      uint32_t &next) {
-  const uint32_t *table = nullptr;
-  size_t table_size = 0;
-  const char *replacements = nullptr;
-  size_t replacements_size = 0;
-  if (!xcda_table(ctx, table, table_size, replacements, replacements_size)) {
-    return false;
-  }
-  if (state >= table_size) {
-    return false;
-  }
-  const uint32_t entry = table[state];
-  const uint32_t base = entry >> 8;
-  const uint32_t next_idx = base ^ c;
-  if (next_idx >= table_size) {
-    return false;
-  }
-  const uint32_t next_entry = table[next_idx];
-  const uint8_t check = static_cast<uint8_t>(next_entry & 0xFFu);
-  if (check != c) {
-    return false;
-  }
-  next = next_idx;
-  return true;
-}
-
-inline bool xcda_value(const emel::encoder::action::context &ctx,
-                       const uint32_t state,
-                       uint32_t &value) {
-  const uint32_t *table = nullptr;
-  size_t table_size = 0;
-  const char *replacements = nullptr;
-  size_t replacements_size = 0;
-  if (!xcda_table(ctx, table, table_size, replacements, replacements_size)) {
-    return false;
-  }
-  if (state >= table_size) {
-    return false;
-  }
-  uint32_t leaf = 0;
-  if (!xcda_next(ctx, state, 0, leaf)) {
-    return false;
-  }
-  if (leaf >= table_size) {
-    return false;
-  }
-  const uint32_t entry = table[leaf];
-  const uint32_t base = entry >> 8;
-  if (base >= replacements_size) {
-    return false;
-  }
-  value = base;
-  return true;
-}
-
-inline std::string apply_precompiled_charsmap(const emel::encoder::action::context &ctx,
-                                              const std::string_view text) {
-  const uint32_t *table = nullptr;
-  size_t table_size = 0;
-  const char *replacements = nullptr;
-  size_t replacements_size = 0;
-  if (!xcda_table(ctx, table, table_size, replacements, replacements_size)) {
-    return std::string(text);
-  }
-
-  uint32_t state = 0;
-  uint32_t last_value = 0;
-  size_t last_end = 0;
-  bool has_value = false;
-
-  for (size_t i = 0; i < text.size(); ++i) {
-    uint32_t next = 0;
-    if (!xcda_next(ctx, state, static_cast<uint8_t>(text[i]), next)) {
-      break;
-    }
-    state = next;
-    uint32_t value = 0;
-    if (xcda_value(ctx, state, value)) {
-      last_value = value;
-      last_end = i + 1;
-      has_value = true;
-    }
-  }
-
-  if (!has_value || last_value >= replacements_size) {
-    return std::string(text);
-  }
-
-  const char *replacement = replacements + last_value;
-  const size_t replacement_len = std::strlen(replacement);
-  std::string output;
-  output.reserve(replacement_len + (text.size() - last_end));
-  output.append(replacement, replacement_len);
-  output.append(text.substr(last_end));
-  return output;
-}
-
-inline bool apply_precompiled_charsmap_into(const emel::encoder::action::context &ctx,
-                                            const std::string_view text,
-                                            char *out,
-                                            const size_t out_cap,
-                                            size_t &out_len) {
-  out_len = 0;
-  const uint32_t *table = nullptr;
-  size_t table_size = 0;
-  const char *replacements = nullptr;
-  size_t replacements_size = 0;
-  if (!xcda_table(ctx, table, table_size, replacements, replacements_size)) {
-    if (text.size() > out_cap) {
-      return false;
-    }
-    std::memcpy(out, text.data(), text.size());
-    out_len = text.size();
+inline bool ensure_ugm_tables(emel::encoder::ugm::action::context &ctx,
+                              const emel::model::data::vocab &vocab) {
+  if (ctx.ugm_tables_ready && ctx.ugm_vocab == &vocab) {
     return true;
   }
+  ctx.ugm_vocab = &vocab;
+  ctx.ugm_tables_ready = false;
+  ctx.token_matcher = emel::encoder::detail::naive_trie{};
+  ctx.user_defined_token_matcher = emel::encoder::detail::naive_trie{};
+  ctx.min_score = std::numeric_limits<float>::max();
+  ctx.max_score = -std::numeric_limits<float>::max();
 
-  uint32_t state = 0;
-  uint32_t last_value = 0;
-  size_t last_end = 0;
-  bool has_value = false;
-
-  for (size_t i = 0; i < text.size(); ++i) {
-    uint32_t next = 0;
-    if (!xcda_next(ctx, state, static_cast<uint8_t>(text[i]), next)) {
-      break;
+  for (uint32_t id = 0; id < vocab.n_tokens; ++id) {
+    const auto &entry = vocab.entries[id];
+    const std::string_view text = emel::encoder::detail::token_text(vocab, id);
+    if (text.empty()) {
+      continue;
     }
-    state = next;
-    uint32_t value = 0;
-    if (xcda_value(ctx, state, value)) {
-      last_value = value;
-      last_end = i + 1;
-      has_value = true;
+    const int32_t type = entry.type;
+    const bool is_normal = (type == 1);
+    const bool is_user_defined = (type == 4);
+    const bool is_unused = (type == 5);
+    if (is_normal) {
+      ctx.min_score = std::min(ctx.min_score, entry.score);
+      ctx.max_score = std::max(ctx.max_score, entry.score);
+    }
+    if (is_normal || is_user_defined || is_unused) {
+      ctx.token_matcher.insert(text.data(), text.size(), static_cast<int32_t>(id));
+    }
+    if (is_user_defined) {
+      ctx.user_defined_token_matcher.insert(text.data(), text.size(),
+                                            static_cast<int32_t>(id));
     }
   }
 
-  if (!has_value || last_value >= replacements_size) {
-    if (text.size() > out_cap) {
-      return false;
-    }
-    std::memcpy(out, text.data(), text.size());
-    out_len = text.size();
-    return true;
+  if (ctx.min_score == std::numeric_limits<float>::max()) {
+    ctx.min_score = 0.0f;
   }
-
-  const char *replacement = replacements + last_value;
-  const size_t replacement_len = std::strlen(replacement);
-  const size_t remainder_len = text.size() - last_end;
-  if (replacement_len + remainder_len > out_cap) {
-    return false;
-  }
-  std::memcpy(out, replacement, replacement_len);
-  if (remainder_len > 0) {
-    std::memcpy(out + replacement_len, text.data() + last_end, remainder_len);
-  }
-  out_len = replacement_len + remainder_len;
+  ctx.unknown_token_score = ctx.min_score - ctx.unknown_token_score_penalty;
+  init_xcda_tables(ctx);
+  ctx.ugm_tables_ready = true;
   return true;
 }
 
-inline std::string normalize_ugm(const emel::model::data::vocab &vocab,
-                                 emel::encoder::action::context &ctx,
-                                 const std::string_view text) {
-  std::string normalized = apply_precompiled_charsmap(ctx, text);
-  if (vocab.remove_extra_whitespaces) {
-    std::string collapsed;
-    collapsed.reserve(normalized.size());
-    bool in_space = false;
-    for (const unsigned char c : normalized) {
-      if (std::isspace(c) != 0) {
-        if (!in_space) {
-          collapsed.push_back(' ');
-          in_space = true;
+struct xcda_view {
+  const uint32_t *table = nullptr;
+  size_t table_size = 0;
+
+  bool valid_index(const size_t index) const {
+    return index < table_size;
+  }
+
+  uint32_t node(const size_t index) const {
+    if (!valid_index(index)) {
+      return 0;
+    }
+    return table[index];
+  }
+
+  uint32_t get_base(const size_t index) const {
+    const uint32_t packed = node(index);
+    return (packed >> 10) << ((packed & (1U << 9)) >> 6);
+  }
+
+  uint32_t get_lcheck(const size_t index) const {
+    return node(index) & ((1U << 31) | 0xFFu);
+  }
+
+  bool get_leaf(const size_t index) const {
+    return (node(index) >> 8) & 1U;
+  }
+
+  uint32_t get_value(const size_t index) const {
+    return node(index) & ((1U << 31) - 1U);
+  }
+};
+
+struct normalization_result {
+  const char *normalized = nullptr;
+  size_t normalized_len = 0;
+  size_t consumed_input = 0;
+};
+
+inline size_t trie_longest_prefix(const emel::encoder::detail::naive_trie &trie,
+                                  const char *text,
+                                  const size_t len) {
+  if (len == 0) {
+    return 0;
+  }
+  const auto *node = trie.traverse(text[0]);
+  if (node == nullptr) {
+    return 0;
+  }
+  size_t matched = 0;
+  size_t offset = 1;
+  if (node->has_value) {
+    matched = 1;
+  }
+  while (offset < len && node != nullptr) {
+    node = node->traverse(text[offset]);
+    offset += 1;
+    if (node == nullptr) {
+      break;
+    }
+    if (node->has_value) {
+      matched = offset;
+    }
+  }
+  return matched;
+}
+
+inline normalization_result normalize_prefix(
+    const emel::model::data::vocab &vocab,
+    emel::encoder::ugm::action::context &ctx,
+    const std::string &input,
+    const size_t input_offset) {
+  (void)vocab;
+  if (input_offset >= input.size()) {
+    return {input.data() + input_offset, 0, 0};
+  }
+
+  const size_t remaining = input.size() - input_offset;
+  const size_t user_len = trie_longest_prefix(
+      ctx.user_defined_token_matcher, input.data() + input_offset, remaining);
+  if (user_len > 0) {
+    return {input.data() + input_offset, user_len, user_len};
+  }
+
+  size_t longest_prefix_length = 0;
+  size_t longest_prefix_offset = 0;
+  if (ctx.xcda_table != nullptr && ctx.xcda_table_size > 0) {
+    xcda_view view = {ctx.xcda_table, ctx.xcda_table_size};
+    uint32_t node_index = 0;
+    if (!view.valid_index(node_index)) {
+      longest_prefix_length = 0;
+    } else {
+      node_index = view.get_base(node_index);
+      for (size_t prefix_offset = input_offset; prefix_offset < input.size();
+           ++prefix_offset) {
+        const unsigned char c = static_cast<unsigned char>(input[prefix_offset]);
+        if (c == 0) {
+          break;
         }
-        continue;
+        node_index ^= c;
+        if (!view.valid_index(node_index) ||
+            view.get_lcheck(node_index) != c) {
+          break;
+        }
+        const bool is_leaf = view.get_leaf(node_index);
+        node_index ^= view.get_base(node_index);
+        if (is_leaf) {
+          longest_prefix_length = prefix_offset - input_offset + 1;
+          longest_prefix_offset = view.get_value(node_index);
+        }
       }
-      in_space = false;
-      collapsed.push_back(static_cast<char>(c));
     }
-    if (!vocab.treat_whitespace_as_suffix) {
-      while (!collapsed.empty() && collapsed.front() == ' ') {
-        collapsed.erase(collapsed.begin());
-      }
-      while (!collapsed.empty() && collapsed.back() == ' ') {
-        collapsed.pop_back();
-      }
-    }
-    normalized.swap(collapsed);
   }
 
-  if (vocab.add_space_prefix && !normalized.empty() && normalized.front() != ' ') {
-    normalized.insert(normalized.begin(), ' ');
+  if (longest_prefix_length > 0) {
+    if (longest_prefix_offset >= ctx.prefix_replacements_size) {
+      return {nullptr, 0, 0};
+    }
+    const char *replacement = ctx.prefix_replacements + longest_prefix_offset;
+    const size_t replacement_len = std::strlen(replacement);
+    return {replacement, replacement_len, longest_prefix_length};
   }
 
-  if (vocab.escape_whitespaces) {
-    std::string escaped;
-    escaped.reserve(normalized.size() * 2);
-    for (const char c : normalized) {
-      if (c == ' ') {
-        escaped.append("\xE2\x96\x81");
-      } else {
-        escaped.push_back(c);
-      }
-    }
-    normalized.swap(escaped);
+  size_t prefix_offset = input_offset;
+  try {
+    emel::text::unicode_cpt_from_utf8(input, prefix_offset);
+    return {input.data() + input_offset, prefix_offset - input_offset,
+            prefix_offset - input_offset};
+  } catch (const std::invalid_argument &) {
+    static const char k_replacement[] = "\xEF\xBF\xBD";
+    return {k_replacement, 3, 1};
   }
-  return normalized;
 }
 
 inline bool normalize_ugm_into(const emel::model::data::vocab &vocab,
-                               emel::encoder::action::context &ctx,
+                               emel::encoder::ugm::action::context &ctx,
                                const std::string_view text,
                                std::string_view &out_view) {
-  size_t len = 0;
-  if (!apply_precompiled_charsmap_into(ctx, text,
-                                       ctx.scratch.buffer.data(),
-                                       ctx.scratch.buffer.size(), len)) {
-    return false;
-  }
-  std::string_view current(ctx.scratch.buffer.data(), len);
+  const std::string input(text);
+  const char *space = vocab.escape_whitespaces ? "\xE2\x96\x81" : " ";
+  const size_t space_len = vocab.escape_whitespaces ? 3 : 1;
+  const bool shall_prepend_space =
+      !vocab.treat_whitespace_as_suffix && vocab.add_space_prefix;
+  const bool shall_append_space =
+      vocab.treat_whitespace_as_suffix && vocab.add_space_prefix;
+  const bool shall_merge_spaces = vocab.remove_extra_whitespaces;
 
-  if (vocab.remove_extra_whitespaces) {
-    size_t out_len = 0;
-    bool in_space = false;
-    for (size_t i = 0; i < current.size(); ++i) {
-      const unsigned char c = static_cast<unsigned char>(current[i]);
-      if (std::isspace(c) != 0) {
-        if (!in_space) {
-          ctx.scratch.buffer_alt[out_len++] = ' ';
-          in_space = true;
-        }
-        continue;
-      }
-      in_space = false;
-      ctx.scratch.buffer_alt[out_len++] = static_cast<char>(c);
-    }
-    if (!vocab.treat_whitespace_as_suffix) {
-      size_t start = 0;
-      while (start < out_len && ctx.scratch.buffer_alt[start] == ' ') {
-        start += 1;
-      }
-      size_t end = out_len;
-      while (end > start && ctx.scratch.buffer_alt[end - 1] == ' ') {
-        end -= 1;
-      }
-      out_len = end - start;
-      if (out_len > 0 && start > 0) {
-        std::memmove(ctx.scratch.buffer_alt.data(),
-                     ctx.scratch.buffer_alt.data() + start,
-                     out_len);
-      }
-    }
-    current = std::string_view(ctx.scratch.buffer_alt.data(), out_len);
-  }
+  size_t out_len = 0;
+  bool is_space_prepended = false;
+  bool processing_non_ws = false;
 
-  if (vocab.add_space_prefix && !current.empty() && current.front() != ' ') {
-    if (current.size() + 1 > ctx.scratch.buffer.size()) {
+  size_t input_offset = 0;
+  while (input_offset < input.size()) {
+    normalization_result norm = normalize_prefix(vocab, ctx, input, input_offset);
+    if (norm.normalized == nullptr && norm.consumed_input == 0) {
       return false;
     }
-    ctx.scratch.buffer[0] = ' ';
-    std::memcpy(ctx.scratch.buffer.data() + 1, current.data(), current.size());
-    current = std::string_view(ctx.scratch.buffer.data(), current.size() + 1);
-  }
-
-  if (vocab.escape_whitespaces) {
-    size_t out_len = 0;
-    for (const char c : current) {
-      if (c == ' ') {
-        if (out_len + 3 > ctx.scratch.buffer_alt.size()) {
+    for (size_t i = 0; i < norm.normalized_len; ++i) {
+      const char c = norm.normalized[i];
+      if (c != ' ') {
+        if (!processing_non_ws) {
+          processing_non_ws = true;
+          if ((shall_prepend_space && !is_space_prepended) || shall_merge_spaces) {
+            if (out_len + space_len > ctx.scratch.buffer.size()) {
+              return false;
+            }
+            std::memcpy(ctx.scratch.buffer.data() + out_len, space, space_len);
+            out_len += space_len;
+            is_space_prepended = true;
+          }
+        }
+        if (out_len + 1 > ctx.scratch.buffer.size()) {
           return false;
         }
-        ctx.scratch.buffer_alt[out_len++] = '\xE2';
-        ctx.scratch.buffer_alt[out_len++] = '\x96';
-        ctx.scratch.buffer_alt[out_len++] = '\x81';
+        ctx.scratch.buffer[out_len++] = c;
       } else {
-        if (out_len + 1 > ctx.scratch.buffer_alt.size()) {
-          return false;
+        if (processing_non_ws) {
+          processing_non_ws = false;
         }
-        ctx.scratch.buffer_alt[out_len++] = c;
+        if (!shall_merge_spaces) {
+          if (out_len + space_len > ctx.scratch.buffer.size()) {
+            return false;
+          }
+          std::memcpy(ctx.scratch.buffer.data() + out_len, space, space_len);
+          out_len += space_len;
+        }
       }
     }
-    current = std::string_view(ctx.scratch.buffer_alt.data(), out_len);
+    input_offset += norm.consumed_input;
   }
 
-  out_view = current;
+  if (shall_append_space) {
+    if (out_len + space_len > ctx.scratch.buffer.size()) {
+      return false;
+    }
+    std::memcpy(ctx.scratch.buffer.data() + out_len, space, space_len);
+    out_len += space_len;
+  }
+
+  out_view = std::string_view(ctx.scratch.buffer.data(), out_len);
   return true;
 }
 
 inline encode_result encode_ugm(const event::encode &ev,
-                                emel::encoder::action::context &ctx,
+                                emel::encoder::ugm::action::context &ctx,
                                 const emel::model::data::vocab &vocab) {
   encode_result result{};
   if (ev.text.empty()) {
     return result;
   }
   emel::encoder::detail::ensure_tables(ctx);
+  if (!ensure_ugm_tables(ctx, vocab)) {
+    result.error = EMEL_ERR_INVALID_ARGUMENT;
+    return result;
+  }
+
+  const int32_t unk_id = (vocab.unk_id != k_token_null)
+                             ? vocab.unk_id
+                             : emel::encoder::detail::lookup_token(ctx, "<unk>");
 
   std::string_view normalized;
   if (!normalize_ugm_into(vocab, ctx, ev.text, normalized)) {
     result.error = EMEL_ERR_INVALID_ARGUMENT;
     return result;
   }
+  const size_t input_len = normalized.size();
+  if (input_len == 0) {
+    result.error = EMEL_OK;
+    return result;
+  }
+  if (input_len >= ctx.best.size()) {
+    result.error = EMEL_ERR_INVALID_ARGUMENT;
+    return result;
+  }
 
-  int32_t count = 0;
-  size_t pos = 0;
-  while (pos < normalized.size()) {
-    bool found = false;
-    const size_t max_len = std::min(normalized.size() - pos,
-                                    static_cast<size_t>(ctx.max_token_len));
-    for (size_t len = max_len; len > 0; --len) {
-      const std::string_view piece = normalized.substr(pos, len);
-      const int32_t token = emel::encoder::detail::lookup_token(ctx, piece);
-      if (token != k_token_null) {
-        if (!emel::encoder::detail::push_token(ev, token, count)) {
-          result.error = EMEL_ERR_INVALID_ARGUMENT;
-          return result;
+  for (size_t i = 0; i <= input_len; ++i) {
+    ctx.best[i] = {unk_id, 0u, -std::numeric_limits<double>::max()};
+  }
+  ctx.best[0] = {unk_id, 0u, 0.0};
+
+  size_t input_offset = 0;
+  while (input_offset < input_len) {
+    const size_t n_utf8_code_units =
+        std::min(static_cast<size_t>(emel::encoder::detail::utf8_len(
+                     normalized[input_offset])),
+                 input_len - input_offset);
+    bool single_codepoint_token_found = false;
+    const auto &current_best = ctx.best[input_offset];
+    size_t prefix_offset = input_offset;
+    const auto *node = ctx.token_matcher.traverse(normalized[prefix_offset]);
+    prefix_offset += 1;
+    while (prefix_offset <= input_len && node != nullptr) {
+      if (node->has_value) {
+        if (prefix_offset - input_offset == n_utf8_code_units) {
+          single_codepoint_token_found = true;
         }
-        pos += len;
-        found = true;
+        const int32_t token_id = node->value;
+        const auto &token_data = vocab.entries[static_cast<uint32_t>(token_id)];
+        const bool is_user_defined = (token_data.type == 4);
+        const double token_score = is_user_defined ? 0.0 : token_data.score;
+        const double challenger_score = current_best.score_sum + token_score;
+        auto &current_champ = ctx.best[prefix_offset];
+        if (challenger_score > current_champ.score_sum) {
+          current_champ = {token_id, static_cast<uint32_t>(input_offset), challenger_score};
+        }
+      }
+      if (prefix_offset >= input_len) {
         break;
       }
+      node = node->traverse(normalized[prefix_offset]);
+      prefix_offset += 1;
     }
-    if (!found) {
-      int32_t unk = vocab.unk_id;
-      if (unk == k_token_null) {
-        unk = emel::encoder::detail::lookup_token(ctx, "<unk>");
+
+    if (!single_codepoint_token_found && unk_id != k_token_null) {
+      const double challenger_score = current_best.score_sum + ctx.unknown_token_score;
+      const size_t next_offset = input_offset + n_utf8_code_units;
+      auto &current_champ = ctx.best[next_offset];
+      if (challenger_score > current_champ.score_sum) {
+        current_champ = {unk_id, static_cast<uint32_t>(input_offset), challenger_score};
       }
-      if (unk != k_token_null) {
-        if (!emel::encoder::detail::push_token(ev, unk, count)) {
-          result.error = EMEL_ERR_INVALID_ARGUMENT;
-          return result;
-        }
+    }
+
+    input_offset += n_utf8_code_units;
+  }
+
+  size_t out_count = 0;
+  bool is_prev_unknown = false;
+  for (auto tokenization = ctx.best[input_len]; ; tokenization = ctx.best[tokenization.input_offset]) {
+    const bool is_unknown = tokenization.token_id == unk_id;
+    if (!(is_prev_unknown && is_unknown)) {
+      if (out_count >= ctx.token_buffer.size()) {
+        result.error = EMEL_ERR_INVALID_ARGUMENT;
+        return result;
       }
-      pos += emel::encoder::detail::utf8_len(normalized[pos]);
+      ctx.token_buffer[out_count++] = tokenization.token_id;
+    }
+    if (tokenization.input_offset == 0) {
+      break;
+    }
+    is_prev_unknown = is_unknown;
+  }
+
+  int32_t count = 0;
+  for (size_t i = 0; i < out_count; ++i) {
+    const int32_t token = ctx.token_buffer[out_count - 1 - i];
+    if (!emel::encoder::detail::push_token(ev, token, count)) {
+      result.error = EMEL_ERR_INVALID_ARGUMENT;
+      return result;
     }
   }
 

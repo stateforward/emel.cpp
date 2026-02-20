@@ -27,6 +27,70 @@ struct data {
   static constexpr int32_t k_max_clip_image_stats = 16;
   static constexpr int32_t k_max_clip_layer_indexes = 512;
 
+  enum class TokenizerModel : uint8_t {
+    NONE = 0,
+    SPM = 1,
+    BPE = 2,
+    WPM = 3,
+    UGM = 4,
+    RWKV = 5,
+    PLAMO2 = 6,
+    UNKNOWN = 7,
+  };
+
+  enum class TokenizerPre : uint16_t {
+    DEFAULT = 0,
+    LLAMA3,
+    JAIS2,
+    DBRX,
+    SMAUG,
+    DEEPSEEK_LLM,
+    DEEPSEEK_CODER,
+    DEEPSEEK3_LLM,
+    YOUTU,
+    FALCON,
+    MPT,
+    STARCODER,
+    GPT2,
+    JAIS,
+    REFACT,
+    COMMAND_R,
+    QWEN2,
+    QWEN35,
+    STABLELM2,
+    OLMO,
+    PORO,
+    CHATGLM4,
+    VIKING,
+    TEKKEN,
+    SMOLLM,
+    CODESHELL,
+    BLOOM,
+    GPT3_FINNISH,
+    EXAONE,
+    EXAONE4,
+    EXAONE_MOE,
+    CHAMELEON,
+    MINERVA,
+    MEGREZ,
+    GPT4O,
+    TINY_AYA,
+    SUPERBPE,
+    TRILLION,
+    GRANITE_DOCLING,
+    BAILINGMOE,
+    SEED_CODER,
+    HUNYUAN,
+    HUNYUAN_DENSE,
+    JOYAI_LLM,
+    KIMI_K2,
+    GROK_2,
+    AFMOE,
+    MINIMAX_M2,
+    SOLAR_OPEN,
+    UNKNOWN,
+  };
+
   struct tensor_record {
     uint32_t name_offset = 0;
     uint32_t name_length = 0;
@@ -183,6 +247,9 @@ struct data {
     static constexpr uint32_t k_attr_flag_bytes = (k_max_vocab_tokens + 7) / 8;
     std::array<uint8_t, k_attr_flag_bytes> lstrip_flags = {};
     std::array<uint8_t, k_attr_flag_bytes> rstrip_flags = {};
+
+    TokenizerModel tokenizer_model_id = TokenizerModel::UNKNOWN;
+    TokenizerPre tokenizer_pre_id = TokenizerPre::DEFAULT;
 
     int32_t bos_id = -1;
     int32_t eos_id = -1;

@@ -16,17 +16,6 @@ namespace emel::encoder::detail {
 
 constexpr int32_t k_token_null = -1;
 
-enum class tokenizer_model : uint8_t {
-  none = 0,
-  spm = 1,
-  bpe = 2,
-  wpm = 3,
-  ugm = 4,
-  rwkv = 5,
-  plamo2 = 6,
-  unknown = 7,
-};
-
 struct NaiveTrie {
   struct Node {
     std::array<int32_t, 256> next = {};

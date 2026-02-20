@@ -1,15 +1,14 @@
 #pragma once
 
-#include <string>
 #include <vector>
 
 #include "emel/encoder/context.hpp"
-#include "emel/encoder/types.hpp"
+#include "emel/model/data.hpp"
 
 namespace emel::encoder::bpe::action {
 
 struct context : emel::encoder::action::context {
-  std::string bpe_pre = {};
+  emel::model::data::TokenizerPre bpe_pre_id = emel::model::data::TokenizerPre::DEFAULT;
   std::vector<std::string> bpe_regex_exprs = {};
 };
 

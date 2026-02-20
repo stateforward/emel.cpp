@@ -1,6 +1,7 @@
 #include <array>
 #include <queue>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -74,11 +75,39 @@ struct vocab_builder {
   void set_model(const char * value) {
     std::memset(vocab->tokenizer_model.data(), 0, vocab->tokenizer_model.size());
     std::strncpy(vocab->tokenizer_model.data(), value, vocab->tokenizer_model.size() - 1);
+    if (std::strcmp(value, "llama") == 0) {
+      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::SPM;
+    } else if (std::strcmp(value, "gpt2") == 0) {
+      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::BPE;
+    } else if (std::strcmp(value, "bert") == 0) {
+      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::WPM;
+    } else if (std::strcmp(value, "t5") == 0) {
+      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::UGM;
+    } else if (std::strcmp(value, "rwkv") == 0) {
+      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::RWKV;
+    } else if (std::strcmp(value, "plamo2") == 0) {
+      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::PLAMO2;
+    } else if (std::strcmp(value, "none") == 0 || std::strcmp(value, "no_vocab") == 0) {
+      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::NONE;
+    } else {
+      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::UNKNOWN;
+    }
   }
 
   void set_pre(const char * value) {
     std::memset(vocab->tokenizer_pre.data(), 0, vocab->tokenizer_pre.size());
     std::strncpy(vocab->tokenizer_pre.data(), value, vocab->tokenizer_pre.size() - 1);
+    if (std::strcmp(value, "default") == 0) {
+      vocab->tokenizer_pre_id = emel::model::data::TokenizerPre::DEFAULT;
+    } else if (std::strcmp(value, "gpt2") == 0) {
+      vocab->tokenizer_pre_id = emel::model::data::TokenizerPre::GPT2;
+    } else if (std::strcmp(value, "llama3") == 0) {
+      vocab->tokenizer_pre_id = emel::model::data::TokenizerPre::LLAMA3;
+    } else if (std::strcmp(value, "mpt") == 0) {
+      vocab->tokenizer_pre_id = emel::model::data::TokenizerPre::MPT;
+    } else {
+      vocab->tokenizer_pre_id = emel::model::data::TokenizerPre::UNKNOWN;
+    }
   }
 
   int32_t add_token(const char * text, float score, int32_t type) {
@@ -111,19 +140,42 @@ struct vocab_builder {
     return add_token(token.c_str(), 0.0f, 6);
   }
 
+  int32_t add_plamo2_byte_token(uint8_t byte) {
+    char token[7] = {};
+    std::snprintf(token, sizeof(token), "<0x%02X>", byte);
+    return add_token(token, 0.0f, 6);
+  }
+
+  void add_all_byte_tokens() {
+    for (int value = 0; value < 256; ++value) {
+      add_byte_token(static_cast<uint8_t>(value));
+    }
+  }
+
+  void add_all_plamo2_byte_tokens() {
+    for (int value = 0; value < 256; ++value) {
+      add_plamo2_byte_token(static_cast<uint8_t>(value));
+    }
+  }
+
   void set_charsmap_a_to_b() {
     uint8_t * data = vocab->precompiled_charsmap.data();
-    const uint32_t blob_size = 12u;
+    constexpr uint32_t table_size = 98u;
+    const uint32_t blob_size = table_size * static_cast<uint32_t>(sizeof(uint32_t));
     std::memcpy(data, &blob_size, sizeof(blob_size));
-    const uint32_t entries[3] = {
-      (0x60u << 8) | 0x00u,  // base for root, check 0
-      (2u << 8) | 0x61u,     // state for 'a'
-      0u,                   // leaf at index 2 with value offset 0
-    };
-    std::memcpy(data + sizeof(blob_size), entries, sizeof(entries));
-    data[sizeof(blob_size) + sizeof(entries) + 0] = 'b';
-    data[sizeof(blob_size) + sizeof(entries) + 1] = '\0';
-    vocab->precompiled_charsmap_size = sizeof(blob_size) + sizeof(entries) + 2;
+    uint32_t * entries = reinterpret_cast<uint32_t *>(data + sizeof(blob_size));
+    std::memset(entries, 0, blob_size);
+
+    // root base = 1, so root_base ^ 'a' -> 96
+    entries[0] = (1u << 10);
+    // node 96: lcheck='a', leaf=1, base=1, so node ^ base -> value node 97
+    entries[96] = (1u << 10) | (1u << 8) | static_cast<uint32_t>('a');
+    // node 97: value offset = 0 into replacement strings blob
+    entries[97] = 0u;
+
+    data[sizeof(blob_size) + blob_size + 0] = 'b';
+    data[sizeof(blob_size) + blob_size + 1] = '\0';
+    vocab->precompiled_charsmap_size = sizeof(blob_size) + blob_size + 2;
   }
 };
 
@@ -312,12 +364,13 @@ TEST_CASE("encoder_ugm_normalization_flags") {
   emel::encoder::ugm::action::context ctx{};
   ctx.vocab = builder.vocab;
 
-  const std::string normalized =
-    emel::encoder::ugm::detail::normalize_ugm(*builder.vocab, ctx, "  hello   world ");
+  std::string_view normalized{};
+  CHECK(emel::encoder::ugm::detail::normalize_ugm_into(
+    *builder.vocab, ctx, "  hello   world ", normalized));
 
   CHECK(!normalized.empty());
-  CHECK(normalized.find("hello") != std::string::npos);
-  CHECK(normalized.find("world") != std::string::npos);
+  CHECK(normalized.find("hello") != std::string_view::npos);
+  CHECK(normalized.find("world") != std::string_view::npos);
 }
 
 TEST_CASE("unicode_helpers_cover_common_paths") {
@@ -515,7 +568,9 @@ TEST_CASE("encoder_fallback_byte_tokens") {
 TEST_CASE("encoder_plamo2_byte_tokens") {
   vocab_builder builder{};
   builder.set_model("plamo2");
-  const int32_t byte_id = builder.add_byte_token(static_cast<uint8_t>('p'));
+  builder.add_token("<unk>", 0.0f, 2);
+  builder.add_all_plamo2_byte_tokens();
+  const int32_t byte_id = builder.add_plamo2_byte_token(static_cast<uint8_t>('p'));
 
   emel::encoder::plamo2::action::context ctx{};
   ctx.vocab = builder.vocab;
@@ -637,16 +692,16 @@ TEST_CASE("encoder_assign_bpe_regex_variants") {
 
   builder.set_pre("gpt2");
   emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-  CHECK(ctx.bpe_pre == "gpt2");
+  CHECK(ctx.bpe_pre_id == emel::model::data::TokenizerPre::GPT2);
   CHECK(!ctx.bpe_regex_exprs.empty());
 
   builder.set_pre("llama3");
   emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-  CHECK(ctx.bpe_pre == "llama3");
+  CHECK(ctx.bpe_pre_id == emel::model::data::TokenizerPre::LLAMA3);
 
   builder.set_pre("mpt");
   emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-  CHECK(ctx.bpe_pre == "mpt");
+  CHECK(ctx.bpe_pre_id == emel::model::data::TokenizerPre::MPT);
 }
 
 TEST_CASE("encoder_guard_validates_inputs") {
@@ -701,7 +756,7 @@ TEST_CASE("encoder_detail_misc_branches") {
 
   CHECK(emel::encoder::detail::byte_to_token(
     ctx, *builder.vocab, static_cast<uint8_t>('x'),
-    emel::encoder::detail::tokenizer_model::spm) == raw_x);
+    emel::model::data::TokenizerModel::SPM) == raw_x);
 
   CHECK(emel::encoder::detail::token_text(*builder.vocab, -1).empty());
   CHECK(!emel::encoder::detail::is_token_type(*builder.vocab, -1, 1));
@@ -751,8 +806,7 @@ TEST_CASE("encoder_detail_helpers") {
   CHECK(emel::encoder::detail::token_text(*builder.vocab, hello_id) == "hello");
   CHECK(emel::encoder::detail::is_token_type(*builder.vocab, world_id, 1));
 
-  const auto model = emel::encoder::detail::detect_model(*builder.vocab);
-  (void)model;
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::BPE);
   CHECK(emel::encoder::detail::lookup_token(ctx, "hello") == hello_id);
 
   std::array<int32_t, 1> out_tokens = {};
@@ -805,7 +859,11 @@ TEST_CASE("encoder_detail_helpers") {
   CHECK(emel::encoder::detail::byte_to_utf8_table()[static_cast<size_t>('A')] == "A");
   CHECK(!emel::encoder::detail::byte_to_utf8_table()[0x01].empty());
 
-  const auto normalized = emel::encoder::ugm::detail::normalize_ugm(*builder.vocab, ctx, "Hello");
+  emel::encoder::ugm::action::context ugm_ctx{};
+  ugm_ctx.vocab = builder.vocab;
+  std::string_view normalized{};
+  CHECK(emel::encoder::ugm::detail::normalize_ugm_into(
+    *builder.vocab, ugm_ctx, "Hello", normalized));
   CHECK(!normalized.empty());
 }
 
@@ -822,13 +880,6 @@ TEST_CASE("encoder_encode_impl_variants") {
       }
       setup_vocab(builder);
 
-      emel::encoder::bpe::action::context ctx{};
-      ctx.vocab = builder.vocab;
-      CHECK(emel::encoder::detail::ensure_tables(ctx));
-      if (pre != nullptr) {
-        emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-      }
-
       std::array<int32_t, 32> out_tokens = {};
       int32_t token_count = 0;
       int32_t err = EMEL_OK;
@@ -840,31 +891,62 @@ TEST_CASE("encoder_encode_impl_variants") {
         .error_out = &err,
       };
 
-      const auto model_id = emel::encoder::detail::detect_model(*builder.vocab);
+      const auto model_id = builder.vocab->tokenizer_model_id;
       emel::encoder::detail::encode_result result{};
       switch (model_id) {
-        case emel::encoder::detail::tokenizer_model::spm:
+        case emel::model::data::TokenizerModel::SPM: {
+          emel::encoder::action::context ctx{};
+          ctx.vocab = builder.vocab;
+          CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::spm::detail::encode_spm(ev, ctx, *builder.vocab);
           break;
-        case emel::encoder::detail::tokenizer_model::bpe:
+        }
+        case emel::model::data::TokenizerModel::BPE: {
+          emel::encoder::bpe::action::context ctx{};
+          ctx.vocab = builder.vocab;
+          CHECK(emel::encoder::detail::ensure_tables(ctx));
+          if (pre != nullptr) {
+            emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
+          }
           result = emel::encoder::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
           break;
-        case emel::encoder::detail::tokenizer_model::wpm:
+        }
+        case emel::model::data::TokenizerModel::WPM: {
+          emel::encoder::wpm::action::context ctx{};
+          ctx.vocab = builder.vocab;
+          CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
           break;
-        case emel::encoder::detail::tokenizer_model::ugm:
+        }
+        case emel::model::data::TokenizerModel::UGM: {
+          emel::encoder::ugm::action::context ctx{};
+          ctx.vocab = builder.vocab;
+          CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
           break;
-        case emel::encoder::detail::tokenizer_model::rwkv:
+        }
+        case emel::model::data::TokenizerModel::RWKV: {
+          emel::encoder::rwkv::action::context ctx{};
+          ctx.vocab = builder.vocab;
+          CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
           break;
-        case emel::encoder::detail::tokenizer_model::plamo2:
+        }
+        case emel::model::data::TokenizerModel::PLAMO2: {
+          emel::encoder::plamo2::action::context ctx{};
+          ctx.vocab = builder.vocab;
+          CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::plamo2::detail::encode_plamo2(ev, ctx, *builder.vocab);
           break;
-        case emel::encoder::detail::tokenizer_model::unknown:
+        }
+        case emel::model::data::TokenizerModel::UNKNOWN: {
+          emel::encoder::action::context ctx{};
+          ctx.vocab = builder.vocab;
+          CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::fallback::detail::encode_fallback(ev, ctx, *builder.vocab);
           break;
-        case emel::encoder::detail::tokenizer_model::none:
+        }
+        case emel::model::data::TokenizerModel::NONE:
           result.error = EMEL_ERR_BACKEND;
           break;
       }
@@ -904,7 +986,9 @@ TEST_CASE("encoder_encode_impl_variants") {
   });
 
   run_variant("plamo2", nullptr, "p", [] (vocab_builder & builder) {
-    builder.add_byte_token(static_cast<uint8_t>('p'));
+    builder.add_token("<unk>", 0.0f, 2);
+    builder.add_all_plamo2_byte_tokens();
+    builder.add_plamo2_byte_token(static_cast<uint8_t>('p'));
   });
 
   run_variant("unknown", nullptr, "x", [] (vocab_builder & builder) {
@@ -955,7 +1039,7 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     builder.add_token("he", 0.2f, 1);
     builder.add_token("##llo", 0.2f, 1);
     builder.add_token("<unk>", 0.0f, 2);
-    emel::encoder::bpe::action::context ctx{};
+    emel::encoder::wpm::action::context ctx{};
     ctx.vocab = builder.vocab;
     CHECK(emel::encoder::detail::ensure_tables(ctx));
     emel::encoder::event::encode ev_wpm = ev;
@@ -975,10 +1059,9 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     builder.add_token("\xE2\x96\x81hello", 0.5f, 1);
     builder.add_token("world", 0.4f, 1);
     builder.set_charsmap_a_to_b();
-    emel::encoder::bpe::action::context ctx{};
+    emel::encoder::action::context ctx{};
     ctx.vocab = builder.vocab;
     CHECK(emel::encoder::detail::ensure_tables(ctx));
-    emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
     emel::encoder::event::encode ev_spm = ev;
     ev_spm.text = "hello world";
     auto result = emel::encoder::spm::detail::encode_spm(ev_spm, ctx, *builder.vocab);
@@ -990,7 +1073,7 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     builder.set_model("t5");
     builder.add_token("\xE2\x96\x81hello", 0.5f, 1);
     builder.add_token("world", 0.4f, 1);
-    emel::encoder::bpe::action::context ctx{};
+    emel::encoder::ugm::action::context ctx{};
     ctx.vocab = builder.vocab;
     CHECK(emel::encoder::detail::ensure_tables(ctx));
     emel::encoder::event::encode ev_ugm = ev;
@@ -1003,7 +1086,7 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     vocab_builder builder{};
     builder.set_model("rwkv");
     builder.add_byte_token(static_cast<uint8_t>('r'));
-    emel::encoder::action::context ctx{};
+    emel::encoder::rwkv::action::context ctx{};
     ctx.vocab = builder.vocab;
     CHECK(emel::encoder::detail::ensure_tables(ctx));
     auto result = emel::encoder::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
@@ -1013,8 +1096,10 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
   {
     vocab_builder builder{};
     builder.set_model("plamo2");
-    builder.add_byte_token(static_cast<uint8_t>('p'));
-    emel::encoder::action::context ctx{};
+    builder.add_token("<unk>", 0.0f, 2);
+    builder.add_all_plamo2_byte_tokens();
+    builder.add_plamo2_byte_token(static_cast<uint8_t>('p'));
+    emel::encoder::plamo2::action::context ctx{};
     ctx.vocab = builder.vocab;
     CHECK(emel::encoder::detail::ensure_tables(ctx));
     auto result = emel::encoder::plamo2::detail::encode_plamo2(ev, ctx, *builder.vocab);
@@ -1047,53 +1132,42 @@ TEST_CASE("encoder_detail_branch_coverage") {
 
   CHECK(emel::encoder::detail::byte_to_token(
     ctx, *builder.vocab, static_cast<uint8_t>('A'),
-    emel::encoder::detail::tokenizer_model::spm) == hex_id);
+    emel::model::data::TokenizerModel::SPM) == hex_id);
   CHECK(emel::encoder::detail::byte_to_token(
     ctx, *builder.vocab, static_cast<uint8_t>('!'),
-    emel::encoder::detail::tokenizer_model::bpe) == byte_id);
+    emel::model::data::TokenizerModel::BPE) == byte_id);
   CHECK(emel::encoder::detail::byte_to_token(
     ctx, *builder.vocab, static_cast<uint8_t>('A'),
-    emel::encoder::detail::tokenizer_model::unknown) == raw_id);
-
-  uint32_t next = 0;
-  CHECK(!emel::encoder::ugm::detail::xcda_next(ctx, 0, 0, next));
-  uint32_t value = 0;
-  CHECK(!emel::encoder::ugm::detail::xcda_value(ctx, 0, value));
-  CHECK(emel::encoder::ugm::detail::apply_precompiled_charsmap(ctx, "abc") == "abc");
+    emel::model::data::TokenizerModel::UNKNOWN) == raw_id);
 
   builder.set_model("t5");
   builder.vocab->escape_whitespaces = true;
   builder.vocab->treat_whitespace_as_suffix = false;
   builder.vocab->add_space_prefix = true;
   builder.vocab->remove_extra_whitespaces = true;
-  ctx.vocab = builder.vocab;
-  const std::string normalized = emel::encoder::ugm::detail::normalize_ugm(*builder.vocab, ctx, "  a");
+  emel::encoder::ugm::action::context ugm_ctx{};
+  ugm_ctx.vocab = builder.vocab;
+  std::string_view normalized{};
+  CHECK(emel::encoder::ugm::detail::normalize_ugm_into(
+    *builder.vocab, ugm_ctx, "  a", normalized));
   CHECK(!normalized.empty());
 
   builder.set_model("none");
-  CHECK(emel::encoder::detail::detect_model(*builder.vocab) ==
-        emel::encoder::detail::tokenizer_model::none);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::NONE);
   builder.set_model("no_vocab");
-  CHECK(emel::encoder::detail::detect_model(*builder.vocab) ==
-        emel::encoder::detail::tokenizer_model::none);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::NONE);
   builder.set_model("llama");
-  CHECK(emel::encoder::detail::detect_model(*builder.vocab) ==
-        emel::encoder::detail::tokenizer_model::spm);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::SPM);
   builder.set_model("bert");
-  CHECK(emel::encoder::detail::detect_model(*builder.vocab) ==
-        emel::encoder::detail::tokenizer_model::wpm);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::WPM);
   builder.set_model("t5");
-  CHECK(emel::encoder::detail::detect_model(*builder.vocab) ==
-        emel::encoder::detail::tokenizer_model::ugm);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::UGM);
   builder.set_model("rwkv");
-  CHECK(emel::encoder::detail::detect_model(*builder.vocab) ==
-        emel::encoder::detail::tokenizer_model::rwkv);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::RWKV);
   builder.set_model("plamo2");
-  CHECK(emel::encoder::detail::detect_model(*builder.vocab) ==
-        emel::encoder::detail::tokenizer_model::plamo2);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::PLAMO2);
   builder.set_model("unknown");
-  CHECK(emel::encoder::detail::detect_model(*builder.vocab) ==
-        emel::encoder::detail::tokenizer_model::unknown);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::UNKNOWN);
 
   builder.set_pre("");
   emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
@@ -1205,8 +1279,12 @@ TEST_CASE("encoder_detail_empty_encode_variants") {
   vocab_builder builder{};
   builder.set_model("unknown");
 
-  emel::encoder::action::context ctx{};
-  ctx.vocab = builder.vocab;
+  emel::encoder::action::context fallback_ctx{};
+  fallback_ctx.vocab = builder.vocab;
+  emel::encoder::rwkv::action::context rwkv_ctx{};
+  rwkv_ctx.vocab = builder.vocab;
+  emel::encoder::plamo2::action::context plamo2_ctx{};
+  plamo2_ctx.vocab = builder.vocab;
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
@@ -1219,15 +1297,17 @@ TEST_CASE("encoder_detail_empty_encode_variants") {
     .error_out = &err,
   };
 
-  const auto fallback = emel::encoder::fallback::detail::encode_fallback(ev, ctx, *builder.vocab);
+  const auto fallback =
+    emel::encoder::fallback::detail::encode_fallback(ev, fallback_ctx, *builder.vocab);
   CHECK(fallback.token_count == 0);
   CHECK(fallback.error == EMEL_OK);
 
-  const auto rwkv = emel::encoder::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
+  const auto rwkv = emel::encoder::rwkv::detail::encode_rwkv(ev, rwkv_ctx, *builder.vocab);
   CHECK(rwkv.token_count == 0);
   CHECK(rwkv.error == EMEL_OK);
 
-  const auto plamo2 = emel::encoder::plamo2::detail::encode_plamo2(ev, ctx, *builder.vocab);
+  const auto plamo2 =
+    emel::encoder::plamo2::detail::encode_plamo2(ev, plamo2_ctx, *builder.vocab);
   CHECK(plamo2.token_count == 0);
   CHECK(plamo2.error == EMEL_OK);
 }
@@ -1252,7 +1332,7 @@ TEST_CASE("encoder_detail_byte_to_token_none") {
   ctx.vocab = builder.vocab;
   CHECK(emel::encoder::detail::byte_to_token(
     ctx, *builder.vocab, static_cast<uint8_t>('A'),
-    emel::encoder::detail::tokenizer_model::none) ==
+    emel::model::data::TokenizerModel::NONE) ==
     emel::encoder::detail::k_token_null);
 }
 
@@ -1278,7 +1358,7 @@ TEST_CASE("encoder_detail_bpe_merge_and_errors") {
   const int32_t he_id = builder.add_token("he", 0.5f, 1);
   builder.add_merge("h e");
 
-  emel::encoder::action::context ctx{};
+  emel::encoder::bpe::action::context ctx{};
   ctx.vocab = builder.vocab;
   CHECK(emel::encoder::detail::ensure_tables(ctx));
 
@@ -1299,7 +1379,7 @@ TEST_CASE("encoder_detail_bpe_merge_and_errors") {
   CHECK(tokens[0] == he_id);
 
   builder.vocab->ignore_merges = true;
-  emel::encoder::action::context ctx_fail{};
+  emel::encoder::bpe::action::context ctx_fail{};
   ctx_fail.vocab = builder.vocab;
   CHECK(emel::encoder::detail::ensure_tables(ctx_fail));
 
@@ -1321,24 +1401,14 @@ TEST_CASE("encoder_detail_xcda_error_paths") {
   builder.set_model("t5");
   builder.set_charsmap_a_to_b();
 
-  emel::encoder::action::context ctx{};
+  emel::encoder::ugm::action::context ctx{};
   ctx.vocab = builder.vocab;
 
   const uint32_t original_size = builder.vocab->precompiled_charsmap_size;
   builder.vocab->precompiled_charsmap_size = 2;
-  const uint32_t *table = nullptr;
-  size_t table_size = 0;
-  const char *replacements = nullptr;
-  size_t replacements_size = 0;
-  CHECK(!emel::encoder::ugm::detail::xcda_table(
-    ctx, table, table_size, replacements, replacements_size));
+  CHECK(!emel::encoder::ugm::detail::init_xcda_tables(ctx));
   builder.vocab->precompiled_charsmap_size = original_size;
-
-  uint32_t next = 0;
-  CHECK(!emel::encoder::ugm::detail::xcda_next(
-    ctx, 9999, static_cast<uint8_t>('a'), next));
-  uint32_t value = 0;
-  CHECK(!emel::encoder::ugm::detail::xcda_value(ctx, 9999, value));
+  CHECK(emel::encoder::ugm::detail::init_xcda_tables(ctx));
 }
 
 TEST_CASE("encoder_detail_spm_merge_capacity_error") {
@@ -1406,7 +1476,7 @@ TEST_CASE("encoder_detail_bpe_buffer_overflow") {
   builder.set_pre("gpt2");
   builder.add_token("a", 0.1f, 1);
 
-  emel::encoder::action::context ctx{};
+  emel::encoder::bpe::action::context ctx{};
   ctx.vocab = builder.vocab;
   CHECK(emel::encoder::detail::ensure_tables(ctx));
 
@@ -1453,30 +1523,28 @@ TEST_CASE("encoder_detail_charsmap_into_paths") {
   builder.set_model("t5");
   builder.set_charsmap_a_to_b();
 
-  emel::encoder::action::context ctx{};
+  emel::encoder::ugm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::encoder::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
 
-  std::array<char, 8> out = {};
-  size_t out_len = 0;
-  CHECK(emel::encoder::ugm::detail::apply_precompiled_charsmap_into(
-    ctx, "a", out.data(), out.size(), out_len));
-  CHECK(std::string_view(out.data(), out_len) == "b");
-  CHECK(emel::encoder::ugm::detail::apply_precompiled_charsmap_into(
-    ctx, "b", out.data(), out.size(), out_len));
-  CHECK(std::string_view(out.data(), out_len) == "b");
+  const std::string a_input = "a";
+  const auto mapped_a =
+    emel::encoder::ugm::detail::normalize_prefix(*builder.vocab, ctx, a_input, 0);
+  REQUIRE(mapped_a.normalized != nullptr);
+  CHECK(std::string_view(mapped_a.normalized, mapped_a.normalized_len) == "b");
+  CHECK(mapped_a.consumed_input == 1);
 
-  CHECK(emel::encoder::ugm::detail::apply_precompiled_charsmap(ctx, "a") == "b");
-  CHECK(emel::encoder::ugm::detail::apply_precompiled_charsmap(ctx, "b") == "b");
-
-  std::array<char, 1> tiny = {};
-  CHECK(!emel::encoder::ugm::detail::apply_precompiled_charsmap_into(
-    ctx, "bb", tiny.data(), tiny.size(), out_len));
+  const std::string b_input = "b";
+  const auto mapped_b =
+    emel::encoder::ugm::detail::normalize_prefix(*builder.vocab, ctx, b_input, 0);
+  REQUIRE(mapped_b.normalized != nullptr);
+  CHECK(std::string_view(mapped_b.normalized, mapped_b.normalized_len) == "b");
+  CHECK(mapped_b.consumed_input == 1);
 
   builder.vocab->precompiled_charsmap_size = 0;
-  emel::encoder::action::context ctx_no_table{};
+  emel::encoder::ugm::action::context ctx_no_table{};
   ctx_no_table.vocab = builder.vocab;
-  CHECK(!emel::encoder::ugm::detail::apply_precompiled_charsmap_into(
-    ctx_no_table, "long", tiny.data(), tiny.size(), out_len));
+  CHECK(!emel::encoder::ugm::detail::init_xcda_tables(ctx_no_table));
 }
 
 TEST_CASE("encoder_detail_normalize_ugm_into_paths") {
@@ -1488,7 +1556,7 @@ TEST_CASE("encoder_detail_normalize_ugm_into_paths") {
   builder.vocab->add_space_prefix = true;
   builder.vocab->remove_extra_whitespaces = true;
 
-  emel::encoder::action::context ctx{};
+  emel::encoder::ugm::action::context ctx{};
   ctx.vocab = builder.vocab;
 
   std::string_view out;
@@ -1557,9 +1625,628 @@ TEST_CASE("encoder_assign_bpe_regex_variants_extended") {
     emel::encoder::bpe::action::context ctx{};
     ctx.vocab = builder.vocab;
     emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-    CHECK(ctx.bpe_pre == pre);
+    CHECK(ctx.bpe_pre_id == builder.vocab->tokenizer_pre_id);
     CHECK(!ctx.bpe_regex_exprs.empty());
   }
+}
+
+TEST_CASE("encoder_assign_bpe_regex_enum_cases") {
+  using TokenizerPre = emel::model::data::TokenizerPre;
+  vocab_builder builder{};
+  builder.set_model("gpt2");
+
+  const std::array<TokenizerPre, 47> presets = {{
+    TokenizerPre::DEFAULT,
+    TokenizerPre::LLAMA3,
+    TokenizerPre::JAIS2,
+    TokenizerPre::DBRX,
+    TokenizerPre::SMAUG,
+    TokenizerPre::DEEPSEEK_LLM,
+    TokenizerPre::DEEPSEEK3_LLM,
+    TokenizerPre::HUNYUAN_DENSE,
+    TokenizerPre::JOYAI_LLM,
+    TokenizerPre::YOUTU,
+    TokenizerPre::DEEPSEEK_CODER,
+    TokenizerPre::FALCON,
+    TokenizerPre::STARCODER,
+    TokenizerPre::REFACT,
+    TokenizerPre::COMMAND_R,
+    TokenizerPre::SMOLLM,
+    TokenizerPre::CODESHELL,
+    TokenizerPre::EXAONE,
+    TokenizerPre::MINERVA,
+    TokenizerPre::GPT2,
+    TokenizerPre::MPT,
+    TokenizerPre::OLMO,
+    TokenizerPre::JAIS,
+    TokenizerPre::TRILLION,
+    TokenizerPre::GRANITE_DOCLING,
+    TokenizerPre::QWEN35,
+    TokenizerPre::STABLELM2,
+    TokenizerPre::QWEN2,
+    TokenizerPre::HUNYUAN,
+    TokenizerPre::SOLAR_OPEN,
+    TokenizerPre::PORO,
+    TokenizerPre::BLOOM,
+    TokenizerPre::GPT3_FINNISH,
+    TokenizerPre::CHATGLM4,
+    TokenizerPre::VIKING,
+    TokenizerPre::TEKKEN,
+    TokenizerPre::CHAMELEON,
+    TokenizerPre::GPT4O,
+    TokenizerPre::MINIMAX_M2,
+    TokenizerPre::TINY_AYA,
+    TokenizerPre::KIMI_K2,
+    TokenizerPre::SUPERBPE,
+    TokenizerPre::BAILINGMOE,
+    TokenizerPre::SEED_CODER,
+    TokenizerPre::GROK_2,
+    TokenizerPre::AFMOE,
+    TokenizerPre::EXAONE_MOE,
+  }};
+
+  for (const auto pre : presets) {
+    builder.vocab->tokenizer_pre_id = pre;
+    emel::encoder::bpe::action::context ctx{};
+    ctx.vocab = builder.vocab;
+    emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
+    CHECK(ctx.bpe_pre_id == pre);
+    CHECK(!ctx.bpe_regex_exprs.empty());
+  }
+}
+
+TEST_CASE("encoder_detail_rwkv_unescape_branches") {
+  std::string out;
+  CHECK(emel::encoder::rwkv::detail::unescape_rwkv_token("plain", out));
+  CHECK(out == "plain");
+  CHECK(emel::encoder::rwkv::detail::unescape_rwkv_token("\\n\\t\\r", out));
+  CHECK(out == std::string("\n\t\r"));
+  CHECK(emel::encoder::rwkv::detail::unescape_rwkv_token("\\\\", out));
+  CHECK(out == "\\");
+  CHECK(emel::encoder::rwkv::detail::unescape_rwkv_token("\\x41\\x42", out));
+  CHECK(out == "AB");
+  CHECK_FALSE(emel::encoder::rwkv::detail::unescape_rwkv_token("\\x1", out));
+}
+
+TEST_CASE("encoder_rwkv_tables_reject_incomplete_hex") {
+  vocab_builder builder{};
+  builder.set_model("rwkv");
+  builder.add_token("\\x1", 0.0f, 1);
+  emel::encoder::rwkv::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  CHECK_FALSE(emel::encoder::rwkv::detail::ensure_rwkv_tables(ctx, *builder.vocab));
+}
+
+TEST_CASE("encoder_rwkv_skips_unknown_without_unk") {
+  vocab_builder builder{};
+  builder.set_model("rwkv");
+  builder.add_token("a", 0.0f, 1);
+  builder.vocab->unk_id = emel::encoder::detail::k_token_null;
+
+  emel::encoder::rwkv::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  std::array<int32_t, 4> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = "b",
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+
+  const auto result = emel::encoder::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_OK);
+  CHECK(result.token_count == 0);
+}
+
+TEST_CASE("encoder_detail_wpm_preprocess_punctuation_and_control") {
+  const std::string input = std::string("Hi,") + "\xEF\xBF\xBD" + "\xE4\xB8\xAD";
+  const auto parts = emel::encoder::wpm::detail::wpm_preprocess(input);
+  CHECK(parts.size() == 3);
+  CHECK(parts[0] == "hi");
+  CHECK(parts[1] == ",");
+  CHECK(parts[2] == std::string("\xE4\xB8\xAD"));
+}
+
+TEST_CASE("encoder_detail_wpm_skips_unknown_without_unk") {
+  vocab_builder builder{};
+  builder.set_model("bert");
+  builder.add_token("hello", 0.0f, 1);
+  builder.vocab->unk_id = emel::encoder::detail::k_token_null;
+
+  emel::encoder::wpm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  std::array<int32_t, 4> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = "unknown",
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+
+  const auto result = emel::encoder::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_OK);
+  CHECK(result.token_count == 0);
+}
+
+TEST_CASE("encoder_detail_spm_prefix_overflow") {
+  vocab_builder builder{};
+  builder.set_model("llama");
+  builder.vocab->add_space_prefix = true;
+  emel::encoder::spm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  const size_t max_bytes = ctx.scratch.buffer.size();
+  std::string text(max_bytes, 'a');
+  std::array<int32_t, 4> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = text,
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+  const auto result = emel::encoder::spm::detail::encode_spm(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("encoder_detail_spm_space_overflow") {
+  vocab_builder builder{};
+  builder.set_model("llama");
+  emel::encoder::spm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  const size_t max_bytes = ctx.scratch.buffer.size();
+  std::string text(max_bytes - 1, 'a');
+  text.back() = ' ';
+  std::array<int32_t, 4> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = text,
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+  const auto result = emel::encoder::spm::detail::encode_spm(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("encoder_detail_spm_missing_byte_token") {
+  vocab_builder builder{};
+  builder.set_model("llama");
+  builder.add_token("a", 0.0f, 1);
+  emel::encoder::spm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  std::array<int32_t, 4> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = "b",
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+  const auto result = emel::encoder::spm::detail::encode_spm(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
+  vocab_builder builder{};
+  builder.set_model("plamo2");
+  builder.add_token("dummy", 0.0f, 1);
+  builder.add_token("", 0.0f, 1);
+  builder.add_all_plamo2_byte_tokens();
+  emel::encoder::plamo2::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  CHECK(emel::encoder::plamo2::detail::ensure_plamo2_tables(ctx, *builder.vocab));
+  CHECK(emel::encoder::plamo2::detail::ensure_plamo2_tables(ctx, *builder.vocab));
+  std::array<int32_t, 8> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = "\xEF\xBB\xBF" "a",
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+  const auto result = emel::encoder::plamo2::detail::encode_plamo2(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_OK);
+  CHECK(result.token_count > 0);
+
+  emel::encoder::event::encode ev_bom_only = ev;
+  ev_bom_only.text = "\xEF\xBB\xBF";
+  const auto bom_only =
+      emel::encoder::plamo2::detail::encode_plamo2(ev_bom_only, ctx, *builder.vocab);
+  CHECK(bom_only.error == EMEL_OK);
+  CHECK(bom_only.token_count == 0);
+
+  emel::encoder::event::encode ev_long = ev;
+  const size_t max_len = ctx.cpts.size();
+  std::string long_text(max_len + 1, 'a');
+  ev_long.text = long_text;
+  const auto too_long =
+      emel::encoder::plamo2::detail::encode_plamo2(ev_long, ctx, *builder.vocab);
+  CHECK(too_long.error == EMEL_ERR_INVALID_ARGUMENT);
+
+  vocab_builder incomplete_builder{};
+  incomplete_builder.set_model("plamo2");
+  incomplete_builder.add_token("dummy", 0.0f, 1);
+  incomplete_builder.add_plamo2_byte_token(static_cast<uint8_t>('a'));
+  emel::encoder::plamo2::action::context ctx_incomplete{};
+  ctx_incomplete.vocab = incomplete_builder.vocab;
+  emel::encoder::event::encode ev_incomplete = ev;
+  ev_incomplete.text = "a";
+  const auto invalid =
+      emel::encoder::plamo2::detail::encode_plamo2(ev_incomplete, ctx_incomplete,
+                                                   *incomplete_builder.vocab);
+  CHECK(invalid.error == EMEL_ERR_MODEL_INVALID);
+}
+
+TEST_CASE("encoder_detail_ugm_helper_branches") {
+  vocab_builder builder{};
+  builder.set_model("t5");
+  builder.add_token("", 0.0f, 1);
+  builder.add_token("user", 0.0f, 4);
+  builder.add_token("a", 0.1f, 1);
+
+  emel::encoder::ugm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  CHECK(emel::encoder::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
+  CHECK(emel::encoder::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
+
+  emel::encoder::detail::naive_trie trie{};
+  trie.insert("a", 1, 1);
+  CHECK(emel::encoder::ugm::detail::trie_longest_prefix(trie, "a", 1) == 1);
+  CHECK(emel::encoder::ugm::detail::trie_longest_prefix(trie, "b", 1) == 0);
+  CHECK(emel::encoder::ugm::detail::trie_longest_prefix(trie, "a", 0) == 0);
+
+  emel::encoder::ugm::detail::xcda_view view{};
+  CHECK(view.node(1) == 0);
+
+  const std::string input = "user";
+  const auto norm_end =
+      emel::encoder::ugm::detail::normalize_prefix(*builder.vocab, ctx, input,
+                                                   input.size());
+  CHECK(norm_end.normalized_len == 0);
+
+  const auto norm_user =
+      emel::encoder::ugm::detail::normalize_prefix(*builder.vocab, ctx, input, 0);
+  CHECK(norm_user.consumed_input == input.size());
+
+  const std::string bad(1, static_cast<char>(0x80));
+  const auto norm_bad =
+      emel::encoder::ugm::detail::normalize_prefix(*builder.vocab, ctx, bad, 0);
+  CHECK(norm_bad.consumed_input == 1);
+}
+
+TEST_CASE("encoder_detail_ugm_normalize_overflow") {
+  vocab_builder builder{};
+  builder.set_model("t5");
+  builder.add_token("a", 0.0f, 1);
+  builder.vocab->add_space_prefix = true;
+  builder.vocab->treat_whitespace_as_suffix = false;
+  builder.vocab->remove_extra_whitespaces = false;
+  builder.vocab->escape_whitespaces = false;
+
+  emel::encoder::ugm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  const size_t max_bytes = ctx.scratch.buffer.size();
+  std::string text(max_bytes, 'a');
+  std::string_view normalized;
+  CHECK_FALSE(emel::encoder::ugm::detail::normalize_ugm_into(*builder.vocab, ctx,
+                                                             text, normalized));
+
+  std::array<int32_t, 4> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = text,
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+  const auto result = emel::encoder::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("encoder_detail_ugm_normalize_empty") {
+  vocab_builder builder{};
+  builder.set_model("t5");
+  builder.add_token("a", 0.0f, 1);
+  builder.vocab->add_space_prefix = false;
+  builder.vocab->treat_whitespace_as_suffix = false;
+  builder.vocab->remove_extra_whitespaces = true;
+
+  emel::encoder::ugm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  std::array<int32_t, 4> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = "   ",
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+  const auto result = emel::encoder::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_OK);
+  CHECK(result.token_count == 0);
+}
+
+TEST_CASE("encoder_detail_bpe_byte_push_overflow") {
+  vocab_builder builder{};
+  builder.set_model("gpt2");
+  builder.set_pre("gpt2");
+  builder.add_token("a", 0.0f, 1);
+  builder.add_token("b", 0.0f, 1);
+  builder.add_merge("a b");
+
+  emel::encoder::bpe::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  std::array<int32_t, 1> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = "ab",
+    .token_ids = out_tokens.data(),
+    .token_capacity = 0,
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+
+  const auto result = emel::encoder::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("encoder_detail_wpm_prefix_overflow") {
+  vocab_builder builder{};
+  builder.set_model("bert");
+  emel::encoder::wpm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  const size_t max_bytes = ctx.scratch.buffer.size();
+  std::string text(max_bytes, 'a');
+  std::array<int32_t, 4> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = text,
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+
+  const auto result = emel::encoder::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("encoder_detail_wpm_push_overflow") {
+  vocab_builder builder{};
+  builder.set_model("bert");
+  builder.add_token("\xE2\x96\x81" "a", 0.0f, 1);
+  emel::encoder::wpm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  std::array<int32_t, 1> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = "a",
+    .token_ids = out_tokens.data(),
+    .token_capacity = 0,
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+
+  const auto result = emel::encoder::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("encoder_detail_spm_empty_text") {
+  vocab_builder builder{};
+  builder.set_model("llama");
+  emel::encoder::spm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  std::array<int32_t, 4> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = "",
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+
+  const auto result = emel::encoder::spm::detail::encode_spm(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_OK);
+  CHECK(result.token_count == 0);
+}
+
+TEST_CASE("encoder_detail_spm_symbol_overflow") {
+  vocab_builder builder{};
+  builder.set_model("llama");
+  emel::encoder::spm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  const size_t max_symbols = ctx.scratch.offsets.size();
+  std::string text(max_symbols + 1, 'a');
+  std::array<int32_t, 4> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = text,
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+
+  const auto result = emel::encoder::spm::detail::encode_spm(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("encoder_detail_insert_token_map_full") {
+  vocab_builder builder{};
+  builder.set_model("gpt2");
+  const int32_t token_x = builder.add_token("x", 0.0f, 1);
+  const int32_t token_y = builder.add_token("y", 0.0f, 1);
+
+  emel::encoder::detail::TokenMap map{};
+  const std::string_view target = "y";
+  const uint32_t hash = emel::encoder::detail::hash_sv(target);
+  for (uint32_t i = 0; i < emel::encoder::detail::k_token_hash_size; ++i) {
+    map.hashes.get()[i] = hash;
+    map.values.get()[i] = token_x;
+  }
+
+  const bool ok =
+      emel::encoder::detail::insert_token_map(map, *builder.vocab, target, token_y);
+  CHECK_FALSE(ok);
+}
+
+TEST_CASE("encoder_detail_insert_merge_map_full") {
+  vocab_builder builder{};
+  builder.set_model("gpt2");
+  builder.add_merge("a b");
+
+  emel::encoder::detail::MergeMap map{};
+  const std::string_view left = "x";
+  const std::string_view right = "y";
+  const uint32_t hash = emel::encoder::detail::hash_pair(left, right);
+  for (uint32_t i = 0; i < emel::encoder::detail::k_merge_hash_size; ++i) {
+    map.hashes.get()[i] = hash;
+    map.values.get()[i] = 0;
+  }
+
+  const bool ok =
+      emel::encoder::detail::insert_merge_map(map, left, right, 1, *builder.vocab);
+  CHECK_FALSE(ok);
+}
+
+TEST_CASE("encoder_detail_lookup_token_full_probe") {
+  vocab_builder builder{};
+  builder.set_model("gpt2");
+  const int32_t token_x = builder.add_token("x", 0.0f, 1);
+  builder.add_token("y", 0.0f, 1);
+
+  emel::encoder::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  const std::string_view target = "y";
+  const uint32_t hash = emel::encoder::detail::hash_sv(target);
+  for (uint32_t i = 0; i < emel::encoder::detail::k_token_hash_size; ++i) {
+    ctx.token_to_id.hashes.get()[i] = hash;
+    ctx.token_to_id.values.get()[i] = token_x;
+  }
+
+  const int32_t id = emel::encoder::detail::lookup_token(ctx, target);
+  CHECK(id == emel::encoder::detail::k_token_null);
+}
+
+TEST_CASE("encoder_rwkv_table_cache_and_empty_token") {
+  vocab_builder builder{};
+  builder.set_model("rwkv");
+  builder.add_token("", 0.0f, 1);
+  builder.add_token("a", 0.0f, 1);
+  emel::encoder::rwkv::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  CHECK(emel::encoder::rwkv::detail::ensure_rwkv_tables(ctx, *builder.vocab));
+  CHECK(emel::encoder::rwkv::detail::ensure_rwkv_tables(ctx, *builder.vocab));
+}
+
+TEST_CASE("encoder_rwkv_encode_reports_invalid_table") {
+  vocab_builder builder{};
+  builder.set_model("rwkv");
+  builder.add_token("\\x1", 0.0f, 1);
+  emel::encoder::rwkv::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  std::array<int32_t, 2> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = "a",
+    .token_ids = out_tokens.data(),
+    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+  const auto result = emel::encoder::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("encoder_detail_ugm_append_space_and_overflow") {
+  vocab_builder builder{};
+  builder.set_model("t5");
+  builder.add_token("a", 0.0f, 1);
+  builder.vocab->add_space_prefix = true;
+  builder.vocab->treat_whitespace_as_suffix = true;
+  builder.vocab->remove_extra_whitespaces = false;
+  builder.vocab->escape_whitespaces = false;
+
+  emel::encoder::ugm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  std::string_view normalized;
+  CHECK(emel::encoder::ugm::detail::normalize_ugm_into(*builder.vocab, ctx, "a",
+                                                       normalized));
+  CHECK(!normalized.empty());
+  CHECK(normalized.back() == ' ');
+
+  const size_t max_bytes = ctx.scratch.buffer.size();
+  std::string spaces(max_bytes + 1, ' ');
+  CHECK_FALSE(emel::encoder::ugm::detail::normalize_ugm_into(*builder.vocab, ctx,
+                                                             spaces, normalized));
+}
+
+TEST_CASE("encoder_detail_ugm_xcda_break_and_trie_paths") {
+  emel::encoder::detail::naive_trie trie{};
+  trie.insert("a", 1, 1);
+  trie.insert("ab", 2, 2);
+  CHECK(emel::encoder::ugm::detail::trie_longest_prefix(trie, "ac", 2) == 1);
+
+  vocab_builder builder{};
+  builder.set_model("t5");
+  builder.add_token("a", 0.0f, 1);
+  emel::encoder::ugm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  std::array<uint32_t, 1> table = {0};
+  ctx.xcda_table = table.data();
+  ctx.xcda_table_size = table.size();
+  ctx.prefix_replacements = "";
+  ctx.prefix_replacements_size = 0;
+  const std::string input(1, '\0');
+  const auto norm = emel::encoder::ugm::detail::normalize_prefix(*builder.vocab, ctx,
+                                                                 input, 0);
+  CHECK(norm.consumed_input == 1);
+}
+
+TEST_CASE("encoder_rwkv_push_unk_overflow") {
+  vocab_builder builder{};
+  builder.set_model("rwkv");
+  const int32_t unk_id = builder.add_token("<unk>", 0.0f, 1);
+  builder.vocab->unk_id = unk_id;
+  emel::encoder::rwkv::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  std::array<int32_t, 1> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::encoder::event::encode ev{
+    .text = "z",
+    .token_ids = out_tokens.data(),
+    .token_capacity = 0,
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+  const auto result = emel::encoder::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("encoder_encode_branch_cases") {
@@ -1593,7 +2280,7 @@ TEST_CASE("encoder_encode_branch_cases") {
     builder.set_model("t5");
     const int32_t unk_id = builder.add_token("<unk>", 0.0f, 2);
     builder.vocab->unk_id = unk_id;
-    emel::encoder::action::context ctx{};
+    emel::encoder::ugm::action::context ctx{};
     ctx.vocab = builder.vocab;
     CHECK(emel::encoder::detail::ensure_tables(ctx));
     emel::encoder::event::encode ev_ugm = ev;
@@ -1607,7 +2294,7 @@ TEST_CASE("encoder_encode_branch_cases") {
     builder.set_model("rwkv");
     const int32_t unk_id = builder.add_token("<unk>", 0.0f, 2);
     builder.vocab->unk_id = unk_id;
-    emel::encoder::action::context ctx{};
+    emel::encoder::rwkv::action::context ctx{};
     ctx.vocab = builder.vocab;
     CHECK(emel::encoder::detail::ensure_tables(ctx));
     emel::encoder::event::encode ev_rwkv = ev;
@@ -1624,7 +2311,7 @@ TEST_CASE("encoder_encode_branch_cases") {
     CHECK(emel::encoder::detail::ensure_tables(ctx));
     CHECK(emel::encoder::detail::byte_to_token(
       ctx, *builder.vocab, static_cast<uint8_t>('x'),
-      emel::encoder::detail::tokenizer_model::none) == emel::encoder::detail::k_token_null);
+      emel::model::data::TokenizerModel::NONE) == emel::encoder::detail::k_token_null);
   }
 }
 
@@ -1875,7 +2562,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
   {
     vocab_builder builder{};
     builder.set_model("plamo2");
-    builder.add_byte_token(static_cast<uint8_t>('x'));
+    builder.add_token("<unk>", 0.0f, 2);
+    builder.add_all_plamo2_byte_tokens();
+    builder.add_plamo2_byte_token(static_cast<uint8_t>('x'));
 
     emel::encoder::plamo2::action::context ctx{};
     ctx.vocab = builder.vocab;
