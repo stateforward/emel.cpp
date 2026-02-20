@@ -5,7 +5,7 @@
 #include "emel/decoder/ubatch_executor/sm.hpp"
 #include "emel/emel.h"
 #include "emel/kv/cache/sm.hpp"
-#include "emel/memory/coordinator/sm.hpp"
+#include "emel/memory/coordinator/any.hpp"
 
 namespace {
 
@@ -99,7 +99,7 @@ TEST_CASE("ubatch_executor_starts_initialized") {
 
 TEST_CASE("ubatch_executor_execute_success_path") {
   emel::decoder::ubatch_executor::sm machine{};
-  emel::memory::coordinator::sm memory_coordinator{};
+  emel::memory::coordinator::any memory_coordinator{};
   emel::kv::cache::sm kv_cache{};
 
   const int32_t ubatch_size = 3;
@@ -132,7 +132,7 @@ TEST_CASE("ubatch_executor_execute_success_path") {
 
 TEST_CASE("ubatch_executor_execute_rejects_invalid_payload") {
   emel::decoder::ubatch_executor::sm machine{};
-  emel::memory::coordinator::sm memory_coordinator{};
+  emel::memory::coordinator::any memory_coordinator{};
   emel::kv::cache::sm kv_cache{};
   int32_t error = EMEL_OK;
 
@@ -151,7 +151,7 @@ TEST_CASE("ubatch_executor_execute_rejects_invalid_payload") {
 
 TEST_CASE("ubatch_executor_compute_failure_attempts_rollback") {
   emel::decoder::ubatch_executor::sm machine{};
-  emel::memory::coordinator::sm memory_coordinator{};
+  emel::memory::coordinator::any memory_coordinator{};
   emel::kv::cache::sm kv_cache{};
   bool rollback_attempted = false;
   int32_t error = EMEL_OK;

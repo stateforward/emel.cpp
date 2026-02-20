@@ -8,18 +8,19 @@ SNAPSHOT=false
 COMPARE=false
 COMPARE_UPDATE=false
 UPDATE=false
-USE_ZIG=false
+USE_ZIG=true
 MODE_FLAG=""
 
 usage() {
   cat <<'USAGE'
-usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [--zig] [--llama-only|--emel-only]
+usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [--zig|--system] [--llama-only|--emel-only]
 
   --snapshot   run EMEL benchmark snapshot gate
   --compare    build and run reference comparison
   --compare-update update reference comparison snapshot
   --update     update snapshot baseline (requires --snapshot)
-  --zig        use zig cc/zig c++ as the toolchain
+  --zig        use zig cc/zig c++ as the toolchain (default)
+  --system     use system cc/c++
   --llama-only run only the reference benchmarks
   --emel-only  run only the EMEL benchmarks
 USAGE
@@ -32,6 +33,7 @@ for arg in "$@"; do
     --compare-update) COMPARE=true; COMPARE_UPDATE=true ;;
     --update) UPDATE=true ;;
     --zig) USE_ZIG=true ;;
+    --system) USE_ZIG=false ;;
     --llama-only) MODE_FLAG="--mode=reference" ;;
     --emel-only) MODE_FLAG="--mode=emel" ;;
     -h|--help) usage; exit 0 ;;
@@ -42,6 +44,18 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+ref_file="$TOOLS_DIR/reference_ref.txt"
+ref_value=""
+if [[ -f "$ref_file" ]]; then
+  ref_value="$(head -n 1 "$ref_file" | tr -d '[:space:]')"
+fi
+if [[ -n "${BENCH_REF_OVERRIDE:-}" ]]; then
+  ref_value="${BENCH_REF_OVERRIDE}"
+fi
+if [[ -z "$ref_value" ]]; then
+  ref_value="master"
+fi
 
 if ! $SNAPSHOT && ! $COMPARE; then
   COMPARE=true
@@ -64,6 +78,10 @@ if $SNAPSHOT; then
       exit 1
     fi
   done
+  if $USE_ZIG && ! command -v zig >/dev/null 2>&1; then
+    echo "error: zig not found (use --system to use system compilers)" >&2
+    exit 1
+  fi
 
   base_ref="${BENCH_BASE_REF:-origin/main}"
   if ! git -C "$ROOT_DIR" rev-parse --verify "$base_ref" >/dev/null 2>&1; then
@@ -100,19 +118,24 @@ if $SNAPSHOT; then
   build_dir="${BENCH_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
   bench_cc="${BENCH_CC:-cc}"
   bench_cxx="${BENCH_CXX:-c++}"
+  bench_c_flags=""
+  bench_cxx_flags=""
   bench_cc_arg=""
   bench_cxx_arg=""
   bench_asm_arg=""
   if $USE_ZIG; then
-    bench_cc="zig"
-    bench_cxx="zig"
+    bench_cc="$(command -v zig)"
+    bench_cxx="$bench_cc"
     bench_cc_arg="cc"
     bench_cxx_arg="c++"
     bench_asm_arg="cc"
+    bench_c_flags="-fno-sanitize=undefined"
+    bench_cxx_flags="-fno-sanitize=undefined"
   fi
 
   cmake_args=(-S "$TOOLS_DIR" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
-              -DEMEL_ENABLE_TESTS=OFF)
+              -DEMEL_ENABLE_TESTS=OFF
+              -DREF_IMPL_REF="$ref_value")
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
@@ -122,6 +145,12 @@ if $SNAPSHOT; then
   fi
   if [[ -n "$bench_cxx_arg" ]]; then
     cmake_args+=("-DCMAKE_CXX_COMPILER_ARG1=$bench_cxx_arg")
+  fi
+  if [[ -n "$bench_c_flags" ]]; then
+    cmake_args+=("-DCMAKE_C_FLAGS=$bench_c_flags")
+  fi
+  if [[ -n "$bench_cxx_flags" ]]; then
+    cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
   fi
 
   cmake "${cmake_args[@]}"
@@ -139,7 +168,11 @@ if $SNAPSHOT; then
 
   if $UPDATE; then
     mkdir -p "$(dirname "$BASELINE")"
-    cp "$CURRENT" "$BASELINE"
+    {
+      printf "# ref=%s\n" "$ref_value"
+      printf "# toolchain=%s\n" "$bench_cxx"
+      cat "$CURRENT"
+    } > "$BASELINE"
     echo "updated $BASELINE"
   else
     if [[ ! -f "$BASELINE" ]]; then
@@ -219,23 +252,32 @@ if $COMPARE; then
       exit 1
     fi
   done
+  if $USE_ZIG && ! command -v zig >/dev/null 2>&1; then
+    echo "error: zig not found (use --system to use system compilers)" >&2
+    exit 1
+  fi
 
   compare_build_dir="${BENCH_COMPARE_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
   bench_cc="${BENCH_CC:-cc}"
   bench_cxx="${BENCH_CXX:-c++}"
+  bench_c_flags=""
+  bench_cxx_flags=""
   bench_cc_arg=""
   bench_cxx_arg=""
   bench_asm_arg=""
   if $USE_ZIG; then
-    bench_cc="zig"
-    bench_cxx="zig"
+    bench_cc="$(command -v zig)"
+    bench_cxx="$bench_cc"
     bench_cc_arg="cc"
     bench_cxx_arg="c++"
     bench_asm_arg="cc"
+    bench_c_flags="-fno-sanitize=undefined"
+    bench_cxx_flags="-fno-sanitize=undefined"
   fi
 
   cmake_args=(-S "$TOOLS_DIR" -B "$compare_build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
-              -DEMEL_ENABLE_TESTS=OFF)
+              -DEMEL_ENABLE_TESTS=OFF
+              -DREF_IMPL_REF="$ref_value")
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
@@ -246,12 +288,22 @@ if $COMPARE; then
   if [[ -n "$bench_cxx_arg" ]]; then
     cmake_args+=("-DCMAKE_CXX_COMPILER_ARG1=$bench_cxx_arg")
   fi
+  if [[ -n "$bench_c_flags" ]]; then
+    cmake_args+=("-DCMAKE_C_FLAGS=$bench_c_flags")
+  fi
+  if [[ -n "$bench_cxx_flags" ]]; then
+    cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
+  fi
 
   cmake "${cmake_args[@]}"
   cmake --build "$compare_build_dir" --parallel --target bench_runner
   if $COMPARE_UPDATE; then
     compare_baseline="$ROOT_DIR/snapshots/bench/benchmarks_compare.txt"
-    "$compare_build_dir/bench_runner" --mode=compare > "$compare_baseline"
+    {
+      printf "# ref=%s\n" "$ref_value"
+      printf "# toolchain=%s\n" "$bench_cxx"
+      "$compare_build_dir/bench_runner" --mode=compare
+    } > "$compare_baseline"
     echo "updated $compare_baseline"
   else
     if [[ -n "$MODE_FLAG" ]]; then

@@ -102,6 +102,7 @@ src/emel/kv/cache/guards.hpp
 src/emel/kv/cache/sm.hpp
 src/emel/machines.hpp
 src/emel/memory/coordinator/actions.hpp
+src/emel/memory/coordinator/any.hpp
 src/emel/memory/coordinator/context.hpp
 src/emel/memory/coordinator/events.hpp
 src/emel/memory/coordinator/guards.hpp

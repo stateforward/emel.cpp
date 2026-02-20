@@ -9,7 +9,17 @@ if(NOT EMEL_ROOT)
 endif()
 
 set(REF_IMPL_REPOSITORY "https://github.com/ggml-org/llama.cpp.git" CACHE STRING "")
-set(REF_IMPL_REF "master" CACHE STRING "")
+set(REF_IMPL_REF "" CACHE STRING "")
+if(REF_IMPL_REF STREQUAL "")
+  set(REF_IMPL_REF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/reference_ref.txt")
+  if(EXISTS "${REF_IMPL_REF_FILE}")
+    file(READ "${REF_IMPL_REF_FILE}" REF_IMPL_REF_CONTENT)
+    string(STRIP "${REF_IMPL_REF_CONTENT}" REF_IMPL_REF_CONTENT)
+    set(REF_IMPL_REF "${REF_IMPL_REF_CONTENT}" CACHE STRING "" FORCE)
+  else()
+    set(REF_IMPL_REF "master" CACHE STRING "" FORCE)
+  endif()
+endif()
 
 include(FetchContent)
 FetchContent_Declare(

@@ -384,11 +384,9 @@ TEST_CASE("decoder_action_helpers_cover_memory_machine_failure_and_owner_error_d
     ctx.n_tokens = static_cast<int32_t>(tokens.size());
     ctx.n_ubatch = 1;
 
-    using mem_base_t = emel::memory::coordinator::sm::base_type;
-    auto & mem_base = static_cast<mem_base_t &>(*ctx.memory_coordinator);
     emel::memory::coordinator::event::memory_status status =
         emel::memory::coordinator::event::memory_status::success;
-    CHECK(mem_base.process_event(emel::memory::coordinator::event::prepare_update{
+    CHECK(ctx.memory_coordinator->process_event(emel::memory::coordinator::event::prepare_update{
       .optimize = false,
       .status_out = &status,
     }));
@@ -403,11 +401,9 @@ TEST_CASE("decoder_action_helpers_cover_memory_machine_failure_and_owner_error_d
 
   {
     emel::decoder::action::context ctx{};
-    using mem_base_t = emel::memory::coordinator::sm::base_type;
-    auto & mem_base = static_cast<mem_base_t &>(*ctx.memory_coordinator);
     emel::memory::coordinator::event::memory_status status =
         emel::memory::coordinator::event::memory_status::success;
-    CHECK(mem_base.process_event(emel::memory::coordinator::event::prepare_update{
+    CHECK(ctx.memory_coordinator->process_event(emel::memory::coordinator::event::prepare_update{
       .optimize = true,
       .status_out = &status,
     }));

@@ -9,7 +9,7 @@ struct sm;
 }  // namespace emel::kv::cache
 
 namespace emel::memory::coordinator {
-struct sm;
+class any;
 }  // namespace emel::memory::coordinator
 
 namespace emel::decoder::ubatch_executor::event {
@@ -24,7 +24,7 @@ using compute_extract_outputs_fn = emel::decoder::compute_executor::event::extra
 struct execute {
   int32_t ubatch_index = 0;
   int32_t ubatch_size = 0;
-  emel::memory::coordinator::sm * memory_coordinator_sm = nullptr;
+  emel::memory::coordinator::any * memory_coordinator_sm = nullptr;
   emel::kv::cache::sm * kv_cache_sm = nullptr;
   int32_t expected_outputs = 0;
   void * compute_ctx = nullptr;
@@ -53,7 +53,7 @@ struct validate {
 };
 
 struct prepare_memory {
-  emel::memory::coordinator::sm * memory_coordinator_sm = nullptr;
+  emel::memory::coordinator::any * memory_coordinator_sm = nullptr;
   int32_t * error_out = nullptr;
 };
 

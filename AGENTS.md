@@ -103,7 +103,8 @@ NEVER use exceptions for control flow in hot paths.
 
 ## Naming, Style, and Portability
 ALWAYS use snake_case for functions, variables, and namespaces.
-ALWAYS use PascalCase for types and SML state names.
+ALWAYS use PascalCase for exported/public types and SML state names.
+ALWAYS use lower_snake_case for non-exported/internal types (e.g., src-only aliases).
 ALWAYS use SCREAMING_SNAKE_CASE for constants and macros.
 ALWAYS keep line length near 100 columns and use 2-space indentation.
 NEVER use `using namespace` in headers.

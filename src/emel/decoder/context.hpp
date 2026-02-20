@@ -10,7 +10,7 @@
 #include "emel/decoder/ubatch_executor/sm.hpp"
 #include "emel/emel.h"
 #include "emel/kv/cache/sm.hpp"
-#include "emel/memory/coordinator/sm.hpp"
+#include "emel/memory/coordinator/any.hpp"
 
 namespace emel::decoder::action {
 
@@ -69,7 +69,7 @@ struct context {
 
   std::unique_ptr<emel::batch::sanitizer::sm> batch_sanitizer;
   std::unique_ptr<emel::batch::splitter::sm> batch_splitter;
-  std::unique_ptr<emel::memory::coordinator::sm> memory_coordinator;
+  std::unique_ptr<emel::memory::coordinator::any> memory_coordinator;
   std::unique_ptr<emel::kv::cache::sm> kv_cache;
   std::unique_ptr<emel::decoder::ubatch_executor::sm> ubatch_executor;
 
@@ -93,7 +93,7 @@ struct context {
 inline context::context()
     : batch_sanitizer(std::make_unique<emel::batch::sanitizer::sm>()),
       batch_splitter(std::make_unique<emel::batch::splitter::sm>()),
-      memory_coordinator(std::make_unique<emel::memory::coordinator::sm>()),
+      memory_coordinator(std::make_unique<emel::memory::coordinator::any>()),
       kv_cache(std::make_unique<emel::kv::cache::sm>()),
       ubatch_executor(std::make_unique<emel::decoder::ubatch_executor::sm>()) {
   // One-time heap allocation keeps decoder context small on the stack.

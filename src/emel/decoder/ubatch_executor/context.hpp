@@ -6,7 +6,7 @@
 #include "emel/decoder/ubatch_executor/events.hpp"
 #include "emel/emel.h"
 #include "emel/kv/cache/sm.hpp"
-#include "emel/memory/coordinator/sm.hpp"
+#include "emel/memory/coordinator/any.hpp"
 
 namespace emel::decoder::ubatch_executor::action {
 
@@ -18,7 +18,7 @@ struct context {
   int32_t outputs_produced = 0;
   int32_t kv_tokens = 0;
   emel::decoder::compute_executor::sm compute_executor = {};
-  emel::memory::coordinator::sm * memory_coordinator_sm = nullptr;
+  emel::memory::coordinator::any * memory_coordinator_sm = nullptr;
   emel::kv::cache::sm * kv_cache_sm = nullptr;
   void * compute_ctx = nullptr;
   event::compute_validate_fn compute_validate = nullptr;

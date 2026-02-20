@@ -214,6 +214,11 @@ struct Sm {
   }
 };
 ```
+
+## 15. Naming and style
+1. Exported/public types MUST use PascalCase.
+2. Non-exported/internal types (e.g., src-only aliases) MUST use lower_snake_case.
+3. SML state names MUST use PascalCase.
 Rule check: the anonymous self-loop is bounded by `i < 3`; cycles without bounds are forbidden.
 Rule check: the anonymous self-loop is bounded by `i < 3`; cycles without bounds are forbidden.
 

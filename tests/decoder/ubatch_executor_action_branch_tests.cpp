@@ -5,7 +5,7 @@
 #include "emel/decoder/ubatch_executor/events.hpp"
 #include "emel/decoder/ubatch_executor/guards.hpp"
 #include "emel/kv/cache/sm.hpp"
-#include "emel/memory/coordinator/sm.hpp"
+#include "emel/memory/coordinator/any.hpp"
 
 namespace {
 
@@ -90,7 +90,7 @@ TEST_CASE("ubatch_executor_actions_return_early_when_error_out_is_null") {
 
 TEST_CASE("ubatch_executor_actions_set_ok_when_dependencies_present") {
   emel::decoder::ubatch_executor::action::context ctx{};
-  emel::memory::coordinator::sm memory_coordinator{};
+  emel::memory::coordinator::any memory_coordinator{};
   emel::kv::cache::sm kv_cache{};
   int32_t err = EMEL_ERR_BACKEND;
 
@@ -129,7 +129,7 @@ TEST_CASE("ubatch_executor_actions_set_ok_when_dependencies_present") {
 
 TEST_CASE("ubatch_executor_guard_validates_execute_request") {
   emel::decoder::ubatch_executor::action::context ctx{};
-  emel::memory::coordinator::sm memory_coordinator{};
+  emel::memory::coordinator::any memory_coordinator{};
   emel::kv::cache::sm kv_cache{};
 
   emel::decoder::ubatch_executor::event::execute request{
@@ -146,7 +146,7 @@ TEST_CASE("ubatch_executor_guard_validates_execute_request") {
 
 TEST_CASE("ubatch_executor_guard_rejects_invalid_execute_fields") {
   emel::decoder::ubatch_executor::action::context ctx{};
-  emel::memory::coordinator::sm memory_coordinator{};
+  emel::memory::coordinator::any memory_coordinator{};
   emel::kv::cache::sm kv_cache{};
   std::array<int32_t, 3> positions = {{0, 1, 2}};
   std::array<uint64_t, emel::kv::cache::action::SEQ_WORDS> masks = {};

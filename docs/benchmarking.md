@@ -12,6 +12,8 @@ performance characterization for each machine.
   - `// benchmark: ready` means a benchmark **is required** and will be enforced by gates.
 - Benchmarks are only required for machines marked `ready`.
 - Benchmarks are enforced via a snapshot diff with a **5% regression tolerance**.
+- Reference comparison is pinned to a specific upstream commit in
+  `tools/bench/reference_ref.txt` for reproducibility.
 
 ## Benchmark harness
 
@@ -24,6 +26,9 @@ comparisons.
 - Optional warmup controls (shared by EMEL + reference benches):
   - `EMEL_BENCH_WARMUP_ITERS` (default: min(`EMEL_BENCH_ITERS`, 1000))
   - `EMEL_BENCH_WARMUP_RUNS` (default: 1)
+- Toolchain defaults to Zig (`zig cc` / `zig c++`) for determinism. Use
+  `scripts/bench.sh --system` if you explicitly want system compilers.
+- Reference commit can be overridden via `BENCH_REF_OVERRIDE` if needed.
 
 ## External reference compare (optional)
 
