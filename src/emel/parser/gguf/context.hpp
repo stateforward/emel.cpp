@@ -33,6 +33,22 @@ struct context {
   std::array<const void *, emel::model::data::k_max_split_files> mapped_splits = {};
   std::array<uint64_t, emel::model::data::k_max_split_files> mapped_sizes = {};
   uint16_t mapped_count = 0;
+  bool has_tokenizer_model = false;
+  bool has_tokenizer_pre = false;
+  bool has_bos_id = false;
+  bool has_eos_id = false;
+  bool has_unk_id = false;
+  bool has_sep_id = false;
+  bool has_pad_id = false;
+  bool has_mask_id = false;
+  bool has_add_bos = false;
+  bool has_add_eos = false;
+  bool has_add_sep = false;
+  bool has_add_space_prefix = false;
+  bool has_remove_extra_whitespaces = false;
+  bool has_escape_whitespaces = false;
+  bool has_treat_whitespace_as_suffix = false;
+  bool has_ignore_merges = false;
 };
 
 }  // namespace emel::parser::gguf

@@ -1792,6 +1792,7 @@ TEST_CASE("gguf parse_kv handles split metadata") {
 
 TEST_CASE("gguf parse_kv loads tokenizer metadata and arrays") {
   using emel::parser::gguf::context;
+  using emel::parser::gguf::metadata_string_equals;
   using emel::parser::gguf::parse_kv;
   using emel::parser::gguf::reader;
 
@@ -1812,15 +1813,37 @@ TEST_CASE("gguf parse_kv loads tokenizer metadata and arrays") {
   REQUIRE(write_kv_array_u8(file, "tokenizer.ggml.precompiled_charsmap", charsmap, 3));
   REQUIRE(write_kv_i32(file, "tokenizer.ggml.bos_token_id", 1));
   REQUIRE(write_kv_i32(file, "tokenizer.ggml.eos_token_id", 2));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.eot_token_id", 3));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.eom_token_id", 4));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.unknown_token_id", 5));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.seperator_token_id", 6));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.padding_token_id", 7));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.cls_token_id", 8));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.mask_token_id", 9));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.prefix_token_id", 10));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.suffix_token_id", 11));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.middle_token_id", 12));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.fim_pre_token_id", 13));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.fim_suf_token_id", 14));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.fim_mid_token_id", 15));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.fim_pad_token_id", 16));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.fim_rep_token_id", 17));
+  REQUIRE(write_kv_i32(file, "tokenizer.ggml.fim_sep_token_id", 18));
   REQUIRE(write_kv_bool(file, "tokenizer.ggml.add_bos_token", true));
   REQUIRE(write_kv_bool(file, "tokenizer.ggml.add_eos_token", false));
+  REQUIRE(write_kv_bool(file, "tokenizer.ggml.add_sep_token", true));
+  REQUIRE(write_kv_bool(file, "tokenizer.ggml.add_space_prefix", true));
+  REQUIRE(write_kv_bool(file, "tokenizer.ggml.remove_extra_whitespaces", false));
+  REQUIRE(write_kv_bool(file, "tokenizer.ggml.escape_whitespaces", true));
+  REQUIRE(write_kv_bool(file, "tokenizer.ggml.treat_whitespace_as_suffix", true));
+  REQUIRE(write_kv_bool(file, "tokenizer.ggml.ignore_merges", false));
   std::rewind(file);
 
   reader r{file};
   context ctx{};
   emel::model::data local_model{};
   int32_t err = EMEL_OK;
-  CHECK(parse_kv(r, ctx, local_model, 11, err));
+  CHECK(parse_kv(r, ctx, local_model, 34, err));
   CHECK(local_model.vocab_data.n_tokens == 2);
   CHECK(local_model.vocab_data.n_token_types == 3);
   CHECK(local_model.vocab_data.entries[0].score == doctest::Approx(0.1f));
@@ -1831,8 +1854,200 @@ TEST_CASE("gguf parse_kv loads tokenizer metadata and arrays") {
   CHECK(local_model.vocab_data.precompiled_charsmap_size == 3);
   CHECK(local_model.vocab_data.bos_id == 1);
   CHECK(local_model.vocab_data.eos_id == 2);
+  CHECK(local_model.vocab_data.eot_id == 3);
+  CHECK(local_model.vocab_data.eom_id == 4);
+  CHECK(local_model.vocab_data.unk_id == 5);
+  CHECK(local_model.vocab_data.sep_id == 6);
+  CHECK(local_model.vocab_data.pad_id == 7);
+  CHECK(local_model.vocab_data.cls_id == 8);
+  CHECK(local_model.vocab_data.mask_id == 9);
+  CHECK(local_model.vocab_data.prefix_id == 10);
+  CHECK(local_model.vocab_data.suffix_id == 11);
+  CHECK(local_model.vocab_data.middle_id == 12);
+  CHECK(local_model.vocab_data.fim_pre_id == 13);
+  CHECK(local_model.vocab_data.fim_suf_id == 14);
+  CHECK(local_model.vocab_data.fim_mid_id == 15);
+  CHECK(local_model.vocab_data.fim_pad_id == 16);
+  CHECK(local_model.vocab_data.fim_rep_id == 17);
+  CHECK(local_model.vocab_data.fim_sep_id == 18);
   CHECK(local_model.vocab_data.add_bos);
   CHECK(!local_model.vocab_data.add_eos);
+  CHECK(local_model.vocab_data.add_sep);
+  CHECK(local_model.vocab_data.add_space_prefix);
+  CHECK(!local_model.vocab_data.remove_extra_whitespaces);
+  CHECK(local_model.vocab_data.escape_whitespaces);
+  CHECK(local_model.vocab_data.treat_whitespace_as_suffix);
+  CHECK(!local_model.vocab_data.ignore_merges);
+  std::fclose(file);
+}
+
+TEST_CASE("gguf parse_kv loads general metadata fields") {
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::metadata_string_equals;
+  using emel::parser::gguf::parse_kv;
+  using emel::parser::gguf::reader;
+
+  std::FILE * file = std::tmpfile();
+  REQUIRE(file != nullptr);
+  const char * tags[] = {"tag-a", "tag-b"};
+  const char * languages[] = {"en", "fr"};
+  REQUIRE(write_kv_string(file, "general.name", "test-model"));
+  REQUIRE(write_kv_string(file, "general.author", "tester"));
+  REQUIRE(write_kv_string(file, "general.version", "1.0"));
+  REQUIRE(write_kv_string(file, "general.organization", "org"));
+  REQUIRE(write_kv_string(file, "general.finetune", "finetune"));
+  REQUIRE(write_kv_string(file, "general.basename", "base"));
+  REQUIRE(write_kv_string(file, "general.description", "desc"));
+  REQUIRE(write_kv_string(file, "general.quantized_by", "quant"));
+  REQUIRE(write_kv_string(file, "general.size_label", "small"));
+  REQUIRE(write_kv_string(file, "general.license", "mit"));
+  REQUIRE(write_kv_string(file, "general.license.name", "MIT"));
+  REQUIRE(write_kv_string(file, "general.license.link", "license"));
+  REQUIRE(write_kv_string(file, "general.url", "url"));
+  REQUIRE(write_kv_string(file, "general.doi", "doi"));
+  REQUIRE(write_kv_string(file, "general.uuid", "uuid"));
+  REQUIRE(write_kv_string(file, "general.repo_url", "repo"));
+  REQUIRE(write_kv_string(file, "general.source.url", "source-url"));
+  REQUIRE(write_kv_string(file, "general.source.doi", "source-doi"));
+  REQUIRE(write_kv_string(file, "general.source.uuid", "source-uuid"));
+  REQUIRE(write_kv_string(file, "general.source.repo_url", "source-repo"));
+  REQUIRE(write_kv_string(file, "general.source.huggingface.repository", "hf-repo"));
+  REQUIRE(write_kv_array_string(file, "general.tags", tags, 2));
+  REQUIRE(write_kv_array_string(file, "general.languages", languages, 2));
+  REQUIRE(write_kv_u32(file, "general.base_model.count", 1));
+  REQUIRE(write_kv_string(file, "general.base_model.0.name", "base-name"));
+  REQUIRE(write_kv_string(file, "general.base_model.0.author", "base-author"));
+  REQUIRE(write_kv_string(file, "general.base_model.0.version", "base-ver"));
+  REQUIRE(write_kv_string(file, "general.base_model.0.organization", "base-org"));
+  REQUIRE(write_kv_string(file, "general.base_model.0.description", "base-desc"));
+  REQUIRE(write_kv_string(file, "general.base_model.0.url", "base-url"));
+  REQUIRE(write_kv_string(file, "general.base_model.0.doi", "base-doi"));
+  REQUIRE(write_kv_string(file, "general.base_model.0.uuid", "base-uuid"));
+  REQUIRE(write_kv_string(file, "general.base_model.0.repo_url", "base-repo"));
+  REQUIRE(write_kv_u32(file, "general.dataset.count", 1));
+  REQUIRE(write_kv_string(file, "general.dataset.0.name", "data-name"));
+  REQUIRE(write_kv_string(file, "general.dataset.0.author", "data-author"));
+  REQUIRE(write_kv_string(file, "general.dataset.0.version", "data-ver"));
+  REQUIRE(write_kv_string(file, "general.dataset.0.organization", "data-org"));
+  REQUIRE(write_kv_string(file, "general.dataset.0.description", "data-desc"));
+  REQUIRE(write_kv_string(file, "general.dataset.0.url", "data-url"));
+  REQUIRE(write_kv_string(file, "general.dataset.0.doi", "data-doi"));
+  REQUIRE(write_kv_string(file, "general.dataset.0.uuid", "data-uuid"));
+  REQUIRE(write_kv_string(file, "general.dataset.0.repo_url", "data-repo"));
+  std::rewind(file);
+
+  reader r{file};
+  context ctx{};
+  emel::model::data local_model{};
+  int32_t err = EMEL_OK;
+  CHECK(parse_kv(r, ctx, local_model, 43, err));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.name,
+                               "test-model", 10));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.author,
+                               "tester", 6));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.version,
+                               "1.0", 3));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.organization,
+                               "org", 3));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.finetune,
+                               "finetune", 8));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.basename,
+                               "base", 4));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.description,
+                               "desc", 4));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.quantized_by,
+                               "quant", 5));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.size_label,
+                               "small", 5));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.license,
+                               "mit", 3));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.license_name,
+                               "MIT", 3));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.license_link,
+                               "license", 7));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.url,
+                               "url", 3));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.doi,
+                               "doi", 3));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.uuid,
+                               "uuid", 4));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.repo_url,
+                               "repo", 4));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.source_url,
+                               "source-url", 10));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.source_doi,
+                               "source-doi", 10));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.source_uuid,
+                               "source-uuid", 11));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.source_repo_url,
+                               "source-repo", 11));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.source_hf_repo,
+                               "hf-repo", 7));
+  CHECK(local_model.meta.general_data.tag_count == 2);
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.tags[0],
+                               "tag-a", 5));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.tags[1],
+                               "tag-b", 5));
+  CHECK(local_model.meta.general_data.language_count == 2);
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.languages[0],
+                               "en", 2));
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.languages[1],
+                               "fr", 2));
+  CHECK(local_model.meta.general_data.base_model_count == 1);
+  CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.base_models[0].name,
+                               "base-name", 9));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.base_models[0].author,
+      "base-author", 11));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.base_models[0].version,
+      "base-ver", 8));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.base_models[0].organization,
+      "base-org", 8));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.base_models[0].description,
+      "base-desc", 9));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.base_models[0].url,
+      "base-url", 8));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.base_models[0].doi,
+      "base-doi", 8));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.base_models[0].uuid,
+      "base-uuid", 9));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.base_models[0].repo_url,
+      "base-repo", 9));
+  CHECK(local_model.meta.general_data.dataset_count == 1);
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.datasets[0].name,
+      "data-name", 9));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.datasets[0].author,
+      "data-author", 11));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.datasets[0].version,
+      "data-ver", 8));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.datasets[0].organization,
+      "data-org", 8));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.datasets[0].description,
+      "data-desc", 9));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.datasets[0].url,
+      "data-url", 8));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.datasets[0].doi,
+      "data-doi", 8));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.datasets[0].uuid,
+      "data-uuid", 9));
+  CHECK(metadata_string_equals(
+      local_model.meta, local_model.meta.general_data.datasets[0].repo_url,
+      "data-repo", 9));
   std::fclose(file);
 }
 
@@ -1984,6 +2199,77 @@ TEST_CASE("gguf helper functions cover branch paths") {
   CHECK(prefix_len == 3);
   CHECK(!key_has_suffix("foo", 3, ".bar", prefix_len));
   CHECK(!key_has_suffix("foo.baz", 7, ".bar", prefix_len));
+}
+
+TEST_CASE("gguf helper functions cover indexed and prefix checks") {
+  using emel::parser::gguf::context;
+  using emel::parser::gguf::key_has_suffix_primary;
+  using emel::parser::gguf::parse_indexed_key;
+  using emel::parser::gguf::prefix_is_primary_arch;
+
+  context ctx{};
+  uint64_t prefix_len = 0;
+  const char * block_key = "llama.block_count";
+  CHECK(key_has_suffix_primary(ctx, block_key, std::strlen(block_key),
+                               ".block_count", prefix_len));
+  CHECK(prefix_len == 5);
+  CHECK(prefix_is_primary_arch(ctx, "llama.block_count", 5));
+  CHECK_FALSE(prefix_is_primary_arch(ctx, "llama.block_count", 6));
+
+  std::memcpy(ctx.architecture.data(), "llama", 5);
+  ctx.architecture_len = 5;
+  CHECK(key_has_suffix_primary(ctx, block_key, std::strlen(block_key),
+                               ".block_count", prefix_len));
+  const char * other_block = "other.block_count";
+  CHECK_FALSE(key_has_suffix_primary(ctx, other_block, std::strlen(other_block),
+                                     ".block_count", prefix_len));
+
+  uint32_t index = 0;
+  const char * indexed_key = "general.base_model.12.name";
+  CHECK(parse_indexed_key(indexed_key, std::strlen(indexed_key),
+                          "general.base_model.", ".name", index));
+  CHECK(index == 12);
+  const char * no_index = "general.base_model.name";
+  CHECK_FALSE(parse_indexed_key(no_index, std::strlen(no_index),
+                                "general.base_model.", ".name", index));
+  const char * bad_digit = "general.base_model.1a.name";
+  CHECK_FALSE(parse_indexed_key(bad_digit, std::strlen(bad_digit),
+                                "general.base_model.", ".name", index));
+  const char * long_index = "general.base_model.12345678901.name";
+  CHECK_FALSE(parse_indexed_key(long_index, std::strlen(long_index),
+                                "general.base_model.", ".name", index));
+  const char * bad_suffix = "general.base_model.0.names";
+  CHECK_FALSE(parse_indexed_key(bad_suffix, std::strlen(bad_suffix),
+                                "general.base_model.", ".name", index));
+  const char * wrong_prefix = "other.base_model.0.name";
+  CHECK_FALSE(parse_indexed_key(wrong_prefix, std::strlen(wrong_prefix),
+                                "general.base_model.", ".name", index));
+}
+
+TEST_CASE("gguf read_and_discard_string handles short reads") {
+  using emel::parser::gguf::read_and_discard_string;
+  using emel::parser::gguf::reader;
+
+  {
+    std::FILE * file = std::tmpfile();
+    REQUIRE(file != nullptr);
+    reader r{file};
+    CHECK_FALSE(read_and_discard_string(r));
+    std::fclose(file);
+  }
+
+  {
+    std::FILE * file = std::tmpfile();
+    REQUIRE(file != nullptr);
+    const uint64_t len = 4;
+    REQUIRE(std::fwrite(&len, 1, sizeof(len), file) == sizeof(len));
+    const char str[] = {'t', 'e', 's', 't'};
+    REQUIRE(std::fwrite(str, 1, sizeof(str), file) == sizeof(str));
+    std::rewind(file);
+    reader r{file};
+    CHECK(read_and_discard_string(r));
+    std::fclose(file);
+  }
 }
 
 TEST_CASE("gguf read_string and skip_value cover branches") {

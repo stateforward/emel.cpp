@@ -1426,7 +1426,7 @@ inline bool contains_any(
   return false;
 }
 
-inline void finalize_vocab_attrs(emel::model::data & model) {
+inline void finalize_vocab_attrs(emel::model::data & model, const context &ctx) {
   emel::model::data::vocab & vocab = model.vocab_data;
   if (vocab.n_tokens == 0) {
     return;
@@ -1447,6 +1447,7 @@ inline void finalize_vocab_attrs(emel::model::data & model) {
   }
 
   std::string model_name(metadata_view(model.meta, model.meta.general_data.name));
+  std::string tokenizer_model(array_view(vocab.tokenizer_model));
   std::string tokenizer_pre(array_view(vocab.tokenizer_pre));
   std::string general_arch(array_view(model.architecture_name));
 
@@ -1457,8 +1458,316 @@ inline void finalize_vocab_attrs(emel::model::data & model) {
     return c;
   };
   std::transform(model_name.begin(), model_name.end(), model_name.begin(), to_lower_ascii);
+  std::transform(tokenizer_model.begin(), tokenizer_model.end(), tokenizer_model.begin(),
+                 to_lower_ascii);
   std::transform(tokenizer_pre.begin(), tokenizer_pre.end(), tokenizer_pre.begin(), to_lower_ascii);
   std::transform(general_arch.begin(), general_arch.end(), general_arch.begin(), to_lower_ascii);
+
+  auto model_id_from = [](const std::string_view model) {
+    using TokenizerModel = emel::model::data::TokenizerModel;
+    if (model.empty() || model == "none" || model == "no_vocab") {
+      return TokenizerModel::NONE;
+    }
+    if (model == "llama") {
+      return TokenizerModel::SPM;
+    }
+    if (model == "gpt2") {
+      return TokenizerModel::BPE;
+    }
+    if (model == "bert") {
+      return TokenizerModel::WPM;
+    }
+    if (model == "t5") {
+      return TokenizerModel::UGM;
+    }
+    if (model == "rwkv") {
+      return TokenizerModel::RWKV;
+    }
+    if (model == "plamo2") {
+      return TokenizerModel::PLAMO2;
+    }
+    return TokenizerModel::UNKNOWN;
+  };
+
+  auto pre_id_from = [](const std::string_view pre) {
+    using TokenizerPre = emel::model::data::TokenizerPre;
+    if (pre.empty() || pre == "default") {
+      return TokenizerPre::DEFAULT;
+    }
+    if (pre == "llama3" || pre == "llama-v3" || pre == "llama-bpe" ||
+        pre == "falcon3" || pre == "falcon-h1" || pre == "pixtral" ||
+        pre == "midm-2.0" || pre == "lfm2") {
+      return TokenizerPre::LLAMA3;
+    }
+    if (pre == "jais-2") {
+      return TokenizerPre::JAIS2;
+    }
+    if (pre == "dbrx") {
+      return TokenizerPre::DBRX;
+    }
+    if (pre == "smaug-bpe") {
+      return TokenizerPre::SMAUG;
+    }
+    if (pre == "deepseek-llm") {
+      return TokenizerPre::DEEPSEEK_LLM;
+    }
+    if (pre == "deepseek-coder") {
+      return TokenizerPre::DEEPSEEK_CODER;
+    }
+    if (pre == "deepseek-v3") {
+      return TokenizerPre::DEEPSEEK3_LLM;
+    }
+    if (pre == "youtu") {
+      return TokenizerPre::YOUTU;
+    }
+    if (pre == "falcon") {
+      return TokenizerPre::FALCON;
+    }
+    if (pre == "mpt") {
+      return TokenizerPre::MPT;
+    }
+    if (pre == "starcoder") {
+      return TokenizerPre::STARCODER;
+    }
+    if (pre == "gpt-2" || pre == "phi-2" || pre == "jina-es" || pre == "jina-de" ||
+        pre == "gigachat" || pre == "jina-v2-es" || pre == "jina-v2-de" ||
+        pre == "a.x-4.0" || pre == "mellum" || pre == "modern-bert" ||
+        pre == "jina-v1-en" || pre == "jina-v2-code" || pre == "roberta-bpe" ||
+        pre == "exaone4") {
+      return TokenizerPre::GPT2;
+    }
+    if (pre == "jais") {
+      return TokenizerPre::JAIS;
+    }
+    if (pre == "refact") {
+      return TokenizerPre::REFACT;
+    }
+    if (pre == "command-r") {
+      return TokenizerPre::COMMAND_R;
+    }
+    if (pre == "qwen2" || pre == "deepseek-r1-qwen" || pre == "kormo" ||
+        pre == "megrez") {
+      return TokenizerPre::QWEN2;
+    }
+    if (pre == "qwen35") {
+      return TokenizerPre::QWEN35;
+    }
+    if (pre == "stablelm2") {
+      return TokenizerPre::STABLELM2;
+    }
+    if (pre == "olmo") {
+      return TokenizerPre::OLMO;
+    }
+    if (pre == "poro-chat") {
+      return TokenizerPre::PORO;
+    }
+    if (pre == "glm4" || pre == "chatglm-bpe") {
+      return TokenizerPre::CHATGLM4;
+    }
+    if (pre == "viking") {
+      return TokenizerPre::VIKING;
+    }
+    if (pre == "tekken") {
+      return TokenizerPre::TEKKEN;
+    }
+    if (pre == "smollm") {
+      return TokenizerPre::SMOLLM;
+    }
+    if (pre == "codeshell") {
+      return TokenizerPre::CODESHELL;
+    }
+    if (pre == "bloom") {
+      return TokenizerPre::BLOOM;
+    }
+    if (pre == "gpt3-finnish") {
+      return TokenizerPre::GPT3_FINNISH;
+    }
+    if (pre == "exaone") {
+      return TokenizerPre::EXAONE;
+    }
+    if (pre == "exaone-moe") {
+      return TokenizerPre::EXAONE_MOE;
+    }
+    if (pre == "chameleon") {
+      return TokenizerPre::CHAMELEON;
+    }
+    if (pre == "minerva-7b") {
+      return TokenizerPre::MINERVA;
+    }
+    if (pre == "gpt-4o" || pre == "llama4") {
+      return TokenizerPre::GPT4O;
+    }
+    if (pre == "tiny_aya") {
+      return TokenizerPre::TINY_AYA;
+    }
+    if (pre == "superbpe") {
+      return TokenizerPre::SUPERBPE;
+    }
+    if (pre == "trillion") {
+      return TokenizerPre::TRILLION;
+    }
+    if (pre == "granite-docling") {
+      return TokenizerPre::GRANITE_DOCLING;
+    }
+    if (pre == "bailingmoe" || pre == "bailingmoe2" || pre == "llada-moe") {
+      return TokenizerPre::BAILINGMOE;
+    }
+    if (pre == "seed-coder") {
+      return TokenizerPre::SEED_CODER;
+    }
+    if (pre == "hunyuan") {
+      return TokenizerPre::HUNYUAN;
+    }
+    if (pre == "hunyuan-dense") {
+      return TokenizerPre::HUNYUAN_DENSE;
+    }
+    if (pre == "joyai-llm") {
+      return TokenizerPre::JOYAI_LLM;
+    }
+    if (pre == "kimi-k2") {
+      return TokenizerPre::KIMI_K2;
+    }
+    if (pre == "grok-2") {
+      return TokenizerPre::GROK_2;
+    }
+    if (pre == "afmoe") {
+      return TokenizerPre::AFMOE;
+    }
+    if (pre == "minimax-m2") {
+      return TokenizerPre::MINIMAX_M2;
+    }
+    if (pre == "solar-open") {
+      return TokenizerPre::SOLAR_OPEN;
+    }
+    return TokenizerPre::UNKNOWN;
+  };
+
+  vocab.tokenizer_model_id = model_id_from(tokenizer_model);
+  vocab.tokenizer_pre_id = pre_id_from(tokenizer_pre);
+
+  auto set_if_missing = [](bool has_key, int32_t &field, int32_t value) {
+    if (!has_key) {
+      field = value;
+    }
+  };
+
+  using TokenizerModel = emel::model::data::TokenizerModel;
+  switch (vocab.tokenizer_model_id) {
+    case TokenizerModel::SPM:
+      set_if_missing(ctx.has_bos_id, vocab.bos_id, 1);
+      set_if_missing(ctx.has_eos_id, vocab.eos_id, 2);
+      set_if_missing(ctx.has_unk_id, vocab.unk_id, 0);
+      set_if_missing(ctx.has_sep_id, vocab.sep_id, -1);
+      set_if_missing(ctx.has_pad_id, vocab.pad_id, -1);
+      set_if_missing(ctx.has_mask_id, vocab.mask_id, -1);
+      if (!ctx.has_add_space_prefix) {
+        vocab.add_space_prefix = true;
+      }
+      if (!ctx.has_add_bos) {
+        vocab.add_bos = true;
+      }
+      if (!ctx.has_add_eos) {
+        vocab.add_eos = false;
+      }
+      break;
+    case TokenizerModel::WPM:
+      set_if_missing(ctx.has_bos_id, vocab.bos_id, 101);
+      set_if_missing(ctx.has_eos_id, vocab.eos_id, -1);
+      set_if_missing(ctx.has_unk_id, vocab.unk_id, 100);
+      set_if_missing(ctx.has_sep_id, vocab.sep_id, 102);
+      set_if_missing(ctx.has_pad_id, vocab.pad_id, 0);
+      set_if_missing(ctx.has_mask_id, vocab.mask_id, 103);
+      if (!ctx.has_add_space_prefix) {
+        vocab.add_space_prefix = false;
+      }
+      if (!ctx.has_add_bos) {
+        vocab.add_bos = true;
+      }
+      if (!ctx.has_add_eos) {
+        vocab.add_eos = false;
+      }
+      if (!ctx.has_add_sep) {
+        vocab.add_sep = true;
+      }
+      break;
+    case TokenizerModel::UGM:
+      set_if_missing(ctx.has_bos_id, vocab.bos_id, -1);
+      set_if_missing(ctx.has_eos_id, vocab.eos_id, 1);
+      set_if_missing(ctx.has_unk_id, vocab.unk_id, 2);
+      set_if_missing(ctx.has_sep_id, vocab.sep_id, -1);
+      set_if_missing(ctx.has_pad_id, vocab.pad_id, 0);
+      set_if_missing(ctx.has_mask_id, vocab.mask_id, -1);
+      if (!ctx.has_add_bos) {
+        vocab.add_bos = false;
+      }
+      if (!ctx.has_add_eos) {
+        vocab.add_eos = true;
+      }
+      break;
+    case TokenizerModel::RWKV:
+      set_if_missing(ctx.has_bos_id, vocab.bos_id, -1);
+      set_if_missing(ctx.has_eos_id, vocab.eos_id, -1);
+      set_if_missing(ctx.has_unk_id, vocab.unk_id, -1);
+      set_if_missing(ctx.has_sep_id, vocab.sep_id, -1);
+      set_if_missing(ctx.has_pad_id, vocab.pad_id, -1);
+      set_if_missing(ctx.has_mask_id, vocab.mask_id, -1);
+      if (!ctx.has_add_space_prefix) {
+        vocab.add_space_prefix = false;
+      }
+      if (!ctx.has_add_bos) {
+        vocab.add_bos = false;
+      }
+      if (!ctx.has_add_eos) {
+        vocab.add_eos = false;
+      }
+      break;
+    case TokenizerModel::PLAMO2:
+      set_if_missing(ctx.has_bos_id, vocab.bos_id, 1);
+      set_if_missing(ctx.has_eos_id, vocab.eos_id, 2);
+      set_if_missing(ctx.has_unk_id, vocab.unk_id, 0);
+      set_if_missing(ctx.has_sep_id, vocab.sep_id, -1);
+      set_if_missing(ctx.has_pad_id, vocab.pad_id, 3);
+      set_if_missing(ctx.has_mask_id, vocab.mask_id, -1);
+      break;
+    case TokenizerModel::BPE:
+      set_if_missing(ctx.has_bos_id, vocab.bos_id, 11);
+      set_if_missing(ctx.has_eos_id, vocab.eos_id, 11);
+      set_if_missing(ctx.has_unk_id, vocab.unk_id, -1);
+      set_if_missing(ctx.has_sep_id, vocab.sep_id, -1);
+      set_if_missing(ctx.has_pad_id, vocab.pad_id, -1);
+      set_if_missing(ctx.has_mask_id, vocab.mask_id, -1);
+      if (!ctx.has_add_space_prefix) {
+        vocab.add_space_prefix = false;
+      }
+      if (!ctx.has_add_bos) {
+        const bool add_bos =
+            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::LLAMA3 ||
+            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::TEKKEN ||
+            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::CHAMELEON;
+        vocab.add_bos = add_bos;
+      }
+      if (!ctx.has_add_eos) {
+        vocab.add_eos = false;
+      }
+      if (!ctx.has_add_sep) {
+        const bool add_sep = (tokenizer_pre == "jina-v1-en" ||
+                              tokenizer_pre == "jina-v2-code" ||
+                              tokenizer_pre == "roberta-bpe");
+        vocab.add_sep = add_sep;
+      }
+      if (!ctx.has_ignore_merges) {
+        const bool ignore_merges =
+            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::LLAMA3 ||
+            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::YOUTU ||
+            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::TEKKEN;
+        vocab.ignore_merges = ignore_merges;
+      }
+      break;
+    case TokenizerModel::NONE:
+    case TokenizerModel::UNKNOWN:
+    default:
+      break;
+  }
 
   const std::array<std::string_view, 3> jina_tokens = {
     "jina-v2-de", "jina-v2-es", "jina-v2-code",
@@ -2577,6 +2886,7 @@ inline bool parse_kv(
         out_error = EMEL_ERR_PARSE_FAILED;
         return false;
       }
+      ctx.has_tokenizer_model = true;
       continue;
     }
 
@@ -2591,6 +2901,7 @@ inline bool parse_kv(
         out_error = EMEL_ERR_PARSE_FAILED;
         return false;
       }
+      ctx.has_tokenizer_pre = true;
       continue;
     }
 
@@ -4020,6 +4331,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.bos_id = value;
+      ctx.has_bos_id = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.eos_token_id")) {
@@ -4029,6 +4341,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.eos_id = value;
+      ctx.has_eos_id = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.eot_token_id")) {
@@ -4056,6 +4369,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.unk_id = value;
+      ctx.has_unk_id = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.seperator_token_id")) {
@@ -4065,6 +4379,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.sep_id = value;
+      ctx.has_sep_id = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.padding_token_id")) {
@@ -4074,6 +4389,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.pad_id = value;
+      ctx.has_pad_id = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.cls_token_id")) {
@@ -4092,6 +4408,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.mask_id = value;
+      ctx.has_mask_id = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.prefix_token_id")) {
@@ -4182,6 +4499,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.add_bos = value;
+      ctx.has_add_bos = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.add_eos_token")) {
@@ -4191,6 +4509,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.add_eos = value;
+      ctx.has_add_eos = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.add_sep_token")) {
@@ -4200,6 +4519,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.add_sep = value;
+      ctx.has_add_sep = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.add_space_prefix")) {
@@ -4209,6 +4529,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.add_space_prefix = value;
+      ctx.has_add_space_prefix = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.remove_extra_whitespaces")) {
@@ -4218,6 +4539,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.remove_extra_whitespaces = value;
+      ctx.has_remove_extra_whitespaces = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.escape_whitespaces")) {
@@ -4227,6 +4549,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.escape_whitespaces = value;
+      ctx.has_escape_whitespaces = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.treat_whitespace_as_suffix")) {
@@ -4236,6 +4559,7 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.treat_whitespace_as_suffix = value;
+      ctx.has_treat_whitespace_as_suffix = true;
       continue;
     }
     if (key_equals(key, key_len, "tokenizer.ggml.ignore_merges")) {
@@ -4245,189 +4569,9 @@ inline bool parse_kv(
         return false;
       }
       model.vocab_data.ignore_merges = value;
+      ctx.has_ignore_merges = true;
       continue;
     }
-    if (key_equals(key, key_len, "tokenizer.ggml.padding_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.pad_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.cls_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.cls_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.mask_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.mask_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.prefix_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.prefix_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.suffix_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.suffix_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.middle_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.middle_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.fim_pre_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.fim_pre_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.fim_suf_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.fim_suf_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.fim_mid_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.fim_mid_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.fim_pad_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.fim_pad_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.fim_rep_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.fim_rep_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.fim_sep_token_id")) {
-      int32_t value = -1;
-      if (!parse_i32_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.fim_sep_id = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.add_bos_token")) {
-      bool value = false;
-      if (!parse_bool_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.add_bos = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.add_eos_token")) {
-      bool value = false;
-      if (!parse_bool_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.add_eos = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.add_sep_token")) {
-      bool value = false;
-      if (!parse_bool_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.add_sep = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.add_space_prefix")) {
-      bool value = false;
-      if (!parse_bool_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.add_space_prefix = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.remove_extra_whitespaces")) {
-      bool value = false;
-      if (!parse_bool_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.remove_extra_whitespaces = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.escape_whitespaces")) {
-      bool value = false;
-      if (!parse_bool_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.escape_whitespaces = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.treat_whitespace_as_suffix")) {
-      bool value = false;
-      if (!parse_bool_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.treat_whitespace_as_suffix = value;
-      continue;
-    }
-    if (key_equals(key, key_len, "tokenizer.ggml.ignore_merges")) {
-      bool value = false;
-      if (!parse_bool_value(r, type, value)) {
-        out_error = EMEL_ERR_PARSE_FAILED;
-        return false;
-      }
-      model.vocab_data.ignore_merges = value;
-      continue;
-    }
-
     if (key_has_suffix(key, key_len, k_suffix_block_count, prefix_len)) {
       uint32_t block_count = 0;
       if (!parse_u32_value(r, type, block_count)) {
@@ -5039,7 +5183,14 @@ inline bool parse_vocab(const emel::parser::event::parse_model & ev, int32_t * e
     }
     return false;
   }
-  finalize_vocab_attrs(*ev.model);
+  context * ctx = get_context(ev.format_ctx);
+  if (ctx == nullptr) {
+    if (err_out != nullptr) {
+      *err_out = EMEL_ERR_MODEL_INVALID;
+    }
+    return false;
+  }
+  finalize_vocab_attrs(*ev.model, *ctx);
   if (ev.model->vocab_data.n_tokens == 0) {
     if (err_out != nullptr) {
       *err_out = EMEL_ERR_MODEL_INVALID;

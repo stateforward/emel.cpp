@@ -78,10 +78,16 @@ Decoder audit (llama.cpp parity)
   - Graph reuse/scheduling parity for decode execution.
   - Encoder-decoder cross-attention metadata (e.g. T5-style cross state).
 
+Encoder audit (llama.cpp parity)
+- Reference sources: `tmp/llama.cpp/src/llama-vocab.cpp`, `tmp/llama.cpp/src/llama-vocab.h`.
+- Reference commit: `abb9f3c42b5e6acee9e8e37836ef691d1a41bdb8`.
+- Date: 2026-02-20.
+- Status: complete. Encoder/tokenizer behavior is aligned with llama.cpp for BPE, WPM, UGM, RWKV,
+  and PLaMo-2, including pre-tokenizer regex mapping, word-level splitting, defaults, and
+  byte-fallback handling.
+
 Unvalidated machines (no parity audit performed yet)
 - `src/emel/model/weight_loader/sm.hpp`
-- `src/emel/tokenizer/sm.hpp`
-- `src/emel/encoder/sm.hpp`
 - `src/emel/generator/sm.hpp`
 - `src/emel/sampler/pipeline/sm.hpp`
 - `src/emel/sampler/candidate_builder/sm.hpp`

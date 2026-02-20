@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <type_traits>
 
 #include "emel/emel.h"
 #include "emel/tokenizer/context.hpp"
@@ -49,21 +50,6 @@ inline context::context()
 
 namespace emel::tokenizer::detail {
 
-enum class tokenizer_model {
-  none = 0,
-  spm = 1,
-  bpe = 2,
-  wpm = 3,
-  ugm = 4,
-  rwkv = 5,
-  plamo2 = 6,
-  unknown = 7,
-};
-
-static_assert(static_cast<size_t>(tokenizer_model::unknown) + 1 ==
-                  action::k_encoder_map_size,
-              "encoder map size must cover tokenizer models");
-
 constexpr int32_t k_token_type_unknown = 2;
 constexpr int32_t k_token_type_control = 3;
 constexpr int32_t k_token_type_user_defined = 4;
@@ -77,40 +63,26 @@ inline bool token_type_skip_when_no_parse(const int32_t type) {
   return type == k_token_type_control || type == k_token_type_unknown;
 }
 
-template <size_t N>
-inline std::string_view
-string_view_from_array(const std::array<char, N> &data) {
-  size_t len = 0;
-  while (len < N && data[len] != '\0') {
-    ++len;
+inline encoder_slot encoder_slot_from_model(
+    const emel::model::data::TokenizerModel model) {
+  switch (model) {
+    case emel::model::data::TokenizerModel::SPM:
+      return encoder_slot::spm;
+    case emel::model::data::TokenizerModel::BPE:
+      return encoder_slot::bpe;
+    case emel::model::data::TokenizerModel::WPM:
+      return encoder_slot::wpm;
+    case emel::model::data::TokenizerModel::UGM:
+      return encoder_slot::ugm;
+    case emel::model::data::TokenizerModel::RWKV:
+      return encoder_slot::rwkv;
+    case emel::model::data::TokenizerModel::PLAMO2:
+      return encoder_slot::plamo2;
+    case emel::model::data::TokenizerModel::NONE:
+    case emel::model::data::TokenizerModel::UNKNOWN:
+    default:
+      return encoder_slot::none;
   }
-  return std::string_view(data.data(), len);
-}
-
-inline tokenizer_model detect_model(const emel::model::data::vocab &vocab) {
-  const std::string_view model = string_view_from_array(vocab.tokenizer_model);
-  if (model.empty() || model == "none" || model == "no_vocab") {
-    return tokenizer_model::none;
-  }
-  if (model == "llama") {
-    return tokenizer_model::spm;
-  }
-  if (model == "bert") {
-    return tokenizer_model::wpm;
-  }
-  if (model == "gpt2") {
-    return tokenizer_model::bpe;
-  }
-  if (model == "t5") {
-    return tokenizer_model::ugm;
-  }
-  if (model == "rwkv") {
-    return tokenizer_model::rwkv;
-  }
-  if (model == "plamo2") {
-    return tokenizer_model::plamo2;
-  }
-  return tokenizer_model::unknown;
 }
 
 inline std::string_view token_text(const emel::model::data::vocab &vocab,
@@ -294,6 +266,26 @@ inline void reset_encoder_contexts(context &ctx,
       encoder_ctx.vocab = vocab;
       encoder_ctx.tables_ready = false;
       encoder_ctx.ugm_ready = false;
+      using ctx_type = std::decay_t<decltype(encoder_ctx)>;
+      if constexpr (std::is_same_v<ctx_type, emel::encoder::bpe::action::context>) {
+        encoder_ctx.bpe_pre_id = emel::model::data::TokenizerPre::DEFAULT;
+        encoder_ctx.bpe_regex_exprs.clear();
+      } else if constexpr (std::is_same_v<ctx_type, emel::encoder::ugm::action::context>) {
+        encoder_ctx.ugm_tables_ready = false;
+        encoder_ctx.ugm_vocab = nullptr;
+        encoder_ctx.token_matcher = emel::encoder::detail::naive_trie{};
+        encoder_ctx.user_defined_token_matcher = emel::encoder::detail::naive_trie{};
+      } else if constexpr (std::is_same_v<ctx_type, emel::encoder::rwkv::action::context>) {
+        encoder_ctx.rwkv_tables_ready = false;
+        encoder_ctx.rwkv_vocab = nullptr;
+        encoder_ctx.token_matcher = emel::encoder::detail::naive_trie{};
+      } else if constexpr (std::is_same_v<ctx_type, emel::encoder::plamo2::action::context>) {
+        encoder_ctx.plamo2_tables_ready = false;
+        encoder_ctx.plamo2_vocab = nullptr;
+        encoder_ctx.byte_tokens.fill(0);
+        encoder_ctx.suffix_map.clear();
+        encoder_ctx.table.clear();
+      }
     }
   };
   reset_ctx(ctx.bpe_ctx);
@@ -375,48 +367,103 @@ struct partition_with_specials {
     ctx.phase_error = EMEL_OK;
     ctx.fragment_count = 0;
     ctx.fragment_index = 0;
-    bool ok = true;
-    size_t offset = 0;
-    while (offset < ctx.text.size()) {
-      const std::string_view remaining = ctx.text.substr(offset);
-      const detail::special_match match =
-          detail::find_next_special(remaining, ctx, ctx.parse_special);
-      if (!match.found) {
-        if (!detail::push_raw_fragment(ctx, remaining)) {
-          ok = false;
-        }
-        break;
-      }
-      size_t left_len = match.pos;
-      if (match.lstrip) {
-        while (left_len > 0 && std::isspace(static_cast<unsigned char>(
-                                   remaining[left_len - 1])) != 0) {
-          left_len -= 1;
-        }
-      }
-      if (left_len > 0) {
-        const std::string_view left = remaining.substr(0, left_len);
-        if (!detail::push_raw_fragment(ctx, left)) {
-          ok = false;
-          break;
-        }
-      }
-      if (!detail::push_token_fragment(ctx, match.token)) {
-        ok = false;
-        break;
-      }
-      size_t right_offset = match.pos + match.len;
-      if (match.rstrip) {
-        while (right_offset < remaining.size() &&
-               std::isspace(
-                   static_cast<unsigned char>(remaining[right_offset])) != 0) {
-          right_offset += 1;
-        }
-      }
-      offset += right_offset;
-    }
-    if (!ok) {
+    if (!detail::push_raw_fragment(ctx, ctx.text)) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
+
+    std::array<fragment, k_max_fragments> next_fragments = {};
+    for (size_t token_idx = 0; token_idx < ctx.special_token_count; ++token_idx) {
+      const special_token &token = ctx.special_tokens[token_idx];
+      if (token.text.empty()) {
+        continue;
+      }
+      if (!ctx.parse_special && detail::token_type_skip_when_no_parse(token.type)) {
+        continue;
+      }
+
+      size_t next_count = 0;
+      auto push_raw = [&](const std::string_view text) {
+        if (text.empty()) {
+          return true;
+        }
+        if (next_count >= next_fragments.size()) {
+          return false;
+        }
+        fragment &entry = next_fragments[next_count++];
+        entry.kind = fragment_kind::raw_text;
+        entry.text = text;
+        entry.token = -1;
+        return true;
+      };
+      auto push_token = [&](const int32_t token_id) {
+        if (token_id < 0) {
+          return false;
+        }
+        if (next_count >= next_fragments.size()) {
+          return false;
+        }
+        fragment &entry = next_fragments[next_count++];
+        entry.kind = fragment_kind::token;
+        entry.text = {};
+        entry.token = token_id;
+        return true;
+      };
+
+      for (size_t frag_idx = 0; frag_idx < ctx.fragment_count; ++frag_idx) {
+        const fragment &frag = ctx.fragments[frag_idx];
+        if (frag.kind != fragment_kind::raw_text) {
+          if (!push_token(frag.token)) {
+            set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+            return;
+          }
+          continue;
+        }
+
+        const std::string_view raw = frag.text;
+        size_t base_offset = 0;
+        while (base_offset < raw.size()) {
+          const size_t match = raw.find(token.text, base_offset);
+          if (match == std::string_view::npos) {
+            if (!push_raw(raw.substr(base_offset))) {
+              set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+              return;
+            }
+            break;
+          }
+          size_t left_len = match - base_offset;
+          if (token.lstrip) {
+            while (left_len > 0 &&
+                   std::isspace(static_cast<unsigned char>(
+                       raw[base_offset + left_len - 1])) != 0) {
+              left_len -= 1;
+            }
+          }
+          if (left_len > 0) {
+            if (!push_raw(raw.substr(base_offset, left_len))) {
+              set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+              return;
+            }
+          }
+          if (!push_token(token.token)) {
+            set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+            return;
+          }
+          size_t right_offset = match + token.text.size();
+          if (token.rstrip) {
+            while (right_offset < raw.size() &&
+                   std::isspace(static_cast<unsigned char>(
+                       raw[right_offset])) != 0) {
+              right_offset += 1;
+            }
+          }
+          base_offset = right_offset;
+        }
+      }
+
+      ctx.fragment_count = next_count;
+      ctx.fragments = next_fragments;
+      ctx.fragment_index = 0;
     }
   }
 };
@@ -429,8 +476,8 @@ struct select_backend {
       return;
     }
     reset_encoder_contexts(ctx, ctx.vocab);
-    const auto slot =
-        static_cast<encoder_slot>(detail::detect_model(*ctx.vocab));
+    const auto slot = detail::encoder_slot_from_model(
+        ctx.vocab->tokenizer_model_id);
     ctx.model_slot = slot;
     ctx.active_encoder = &ctx.encoder_map[static_cast<size_t>(slot)];
     if (ctx.active_encoder == nullptr ||

@@ -83,6 +83,9 @@ src/emel/encoder/wpm/context.hpp
 src/emel/encoder/wpm/detail.hpp
 src/emel/encoder/wpm/guards.hpp
 src/emel/encoder/wpm/sm.hpp
+src/emel/gbnf/parser/detail.hpp
+src/emel/gbnf/parser/sm.hpp
+src/emel/gbnf/types.hpp
 src/emel/generator/actions.hpp
 src/emel/generator/events.hpp
 src/emel/generator/guards.hpp
@@ -206,6 +209,7 @@ tests/decoder/ubatch_executor_action_branch_tests.cpp
 tests/decoder/ubatch_executor_tests.cpp
 tests/encoder/encoder_tests.cpp
 tests/encoder/encoder_unicode_tests.cpp
+tests/gbnf/parser_tests.cpp
 tests/kv/cache_action_branch_tests.cpp
 tests/kv/cache_guard_tests.cpp
 tests/kv/cache_sm_testing_policy_tests.cpp
