@@ -1,5 +1,10 @@
 include/emel/callback.hpp
 include/emel/emel.h
+src/emel/batch/sanitizer/actions.hpp
+src/emel/batch/sanitizer/context.hpp
+src/emel/batch/sanitizer/events.hpp
+src/emel/batch/sanitizer/guards.hpp
+src/emel/batch/sanitizer/sm.hpp
 src/emel/batch/splitter/actions.hpp
 src/emel/batch/splitter/context.hpp
 src/emel/batch/splitter/events.hpp
@@ -167,6 +172,7 @@ src/emel/tokenizer/actions.hpp
 src/emel/tokenizer/context.hpp
 src/emel/tokenizer/events.hpp
 src/emel/tokenizer/sm.hpp
+tests/batch/sanitizer_tests.cpp
 tests/batch/splitter_action_branch_tests.cpp
 tests/batch/splitter_actions_tests.cpp
 tests/batch/splitter_additional_tests.cpp
