@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
-#include "emel/encoder/actions.hpp"
+#include "emel/encoder/fallback/actions.hpp"
+#include "emel/encoder/fallback/guards.hpp"
 #include "emel/encoder/events.hpp"
-#include "emel/encoder/guards.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::encoder::fallback {
@@ -79,22 +79,68 @@ struct model {
         sml::state<encode_decision> +
             sml::event<event::encode> / action::on_unexpected =
             sml::state<unexpected>,
-
-        sml::state<initialized> + sml::event<sml::_> / action::on_unexpected =
+        sml::state<initialized> +
+            sml::event<events::encoding_done> / action::on_unexpected =
             sml::state<unexpected>,
-        sml::state<encoding> + sml::event<sml::_> / action::on_unexpected =
+        sml::state<initialized> +
+            sml::event<events::encoding_error> / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<encoding> +
+            sml::event<events::encoding_done> / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<encoding> +
+            sml::event<events::encoding_error> / action::on_unexpected =
             sml::state<unexpected>,
         sml::state<encode_decision> +
-            sml::event<sml::_> / action::on_unexpected = sml::state<unexpected>,
-        sml::state<done> + sml::event<sml::_> / action::on_unexpected =
+            sml::event<events::encoding_done> / action::on_unexpected =
             sml::state<unexpected>,
-        sml::state<errored> + sml::event<sml::_> / action::on_unexpected =
+        sml::state<encode_decision> +
+            sml::event<events::encoding_error> / action::on_unexpected =
             sml::state<unexpected>,
-        sml::state<unexpected> + sml::event<sml::_> / action::on_unexpected =
+        sml::state<done> +
+            sml::event<events::encoding_done> / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<done> +
+            sml::event<events::encoding_error> / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<errored> +
+            sml::event<events::encoding_done> / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<errored> +
+            sml::event<events::encoding_error> / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<unexpected> +
+            sml::event<events::encoding_done> / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<unexpected> +
+            sml::event<events::encoding_error> / action::on_unexpected =
+            sml::state<unexpected>,
+
+        sml::state<initialized> +
+            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<encoding> +
+            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<encode_decision> +
+            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<done> +
+            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<errored> +
+            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
+            sml::state<unexpected>,
+        sml::state<unexpected> +
+            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
             sml::state<unexpected>);
   }
 };
 
-using sm = boost::sml::sm<model>;
+struct sm : public emel::sm<model> {
+  using base_type = emel::sm<model>;
+  using base_type::base_type;
+  using base_type::process_event;
+};
 
 } // namespace emel::encoder::fallback

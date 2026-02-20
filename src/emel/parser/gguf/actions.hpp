@@ -24,13 +24,12 @@
 #include "emel/model/loader/events.hpp"
 #include "emel/parser/actions.hpp"
 #include "emel/parser/events.hpp"
+#include "emel/parser/gguf/context.hpp"
 #include "emel/model/weight_loader/events.hpp"
 
 namespace emel::parser::gguf {
 
 inline constexpr uint32_t k_gguf_version = 3;
-inline constexpr uint32_t k_default_alignment = 32;
-inline constexpr uint32_t k_max_architecture = 64;
 inline constexpr uint32_t k_max_key_length = 256;
 inline constexpr uint32_t k_max_path_length = 1024;
 inline constexpr uint32_t k_direct_io_alignment = 4096;
@@ -304,30 +303,6 @@ struct block_iq4_xs {
   uint16_t scales_h;
   uint8_t scales_l[k_qk_k / 64];
   uint8_t qs[k_qk_k / 2];
-};
-
-struct context {
-  std::FILE * file = nullptr;
-  bool owns_file = false;
-  uint32_t version = 0;
-  uint32_t alignment = k_default_alignment;
-  uint64_t data_offset = 0;
-  uint64_t data_size = 0;
-  uint16_t split_count = 1;
-  uint16_t split_no = 0;
-  uint16_t split_tensors_count = 0;
-  std::array<char, k_max_architecture> architecture = {};
-  uint32_t architecture_len = 0;
-  uint32_t block_count = 0;
-  std::array<char, k_max_architecture> pending_arch = {};
-  uint32_t pending_arch_len = 0;
-  uint32_t pending_block_count = 0;
-  bool pending_block_count_valid = false;
-  const void * mapped_data = nullptr;
-  uint64_t mapped_size = 0;
-  std::array<const void *, emel::model::data::k_max_split_files> mapped_splits = {};
-  std::array<uint64_t, emel::model::data::k_max_split_files> mapped_sizes = {};
-  uint16_t mapped_count = 0;
 };
 
 struct reader {

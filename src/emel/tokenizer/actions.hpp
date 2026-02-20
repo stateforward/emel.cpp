@@ -1,39 +1,15 @@
 #pragma once
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
 
 #include "emel/emel.h"
-#include "emel/encoder/actions.hpp"
-#include "emel/encoder/sm.hpp"
-#include "emel/tokenizer/events.hpp"
+#include "emel/tokenizer/context.hpp"
 
 namespace emel::tokenizer::action {
-
-constexpr size_t k_max_fragments = 1024;
-constexpr size_t k_max_special_tokens = 256;
-constexpr size_t k_encoder_map_size = 8;
-
-enum class encoder_slot : uint8_t {
-  none = 0,
-  spm = 1,
-  bpe = 2,
-  wpm = 3,
-  ugm = 4,
-  rwkv = 5,
-  plamo2 = 6,
-  fallback = 7,
-};
-
-struct encoder_entry {
-  void *handle = nullptr;
-  bool (*process)(void *handle,
-                  const emel::encoder::event::encode &ev) = nullptr;
-};
 
 template <class Sm>
 inline bool process_encoder(void *handle,
@@ -47,79 +23,28 @@ inline bool process_encoder(void *handle,
 template <class Sm> inline encoder_entry make_encoder_entry(Sm &sm) {
   return encoder_entry{&sm, process_encoder<Sm>};
 }
-
-enum class fragment_kind : uint8_t {
-  raw_text = 0,
-  token = 1,
-};
-
-struct fragment {
-  fragment_kind kind = fragment_kind::raw_text;
-  std::string_view text = {};
-  int32_t token = -1;
-};
-
-struct special_token {
-  std::string_view text = {};
-  int32_t token = -1;
-  int32_t type = 0;
-  bool lstrip = false;
-  bool rstrip = false;
-};
-
-struct context {
-  emel::encoder::action::context encoder_ctx = {};
-  emel::encoder::bpe::sm bpe_encoder;
-  emel::encoder::spm::sm spm_encoder;
-  emel::encoder::wpm::sm wpm_encoder;
-  emel::encoder::ugm::sm ugm_encoder;
-  emel::encoder::rwkv::sm rwkv_encoder;
-  emel::encoder::plamo2::sm plamo2_encoder;
-  emel::encoder::fallback::sm fallback_encoder;
-  std::array<encoder_entry, k_encoder_map_size> encoder_map = {};
-  encoder_entry *active_encoder = nullptr;
-  std::array<fragment, k_max_fragments> fragments = {};
-  size_t fragment_count = 0;
-  size_t fragment_index = 0;
-  std::array<special_token, k_max_special_tokens> special_tokens = {};
-  size_t special_token_count = 0;
-  const emel::model::data::vocab *special_vocab = nullptr;
-  const emel::model::data::vocab *vocab = nullptr;
-  std::string_view text = {};
-  bool add_special = false;
-  bool parse_special = false;
-  int32_t *token_ids_out = nullptr;
-  int32_t token_capacity = 0;
-  encoder_slot model_slot = encoder_slot::none;
-  int32_t token_count = 0;
-  int32_t phase_error = EMEL_OK;
-  int32_t last_error = EMEL_OK;
-
-  context()
-      : bpe_encoder(encoder_ctx), spm_encoder(encoder_ctx),
-        wpm_encoder(encoder_ctx), ugm_encoder(encoder_ctx),
-        rwkv_encoder(encoder_ctx), plamo2_encoder(encoder_ctx),
-        fallback_encoder(encoder_ctx) {
-    encoder_map[static_cast<size_t>(encoder_slot::spm)] =
-        make_encoder_entry(spm_encoder);
-    encoder_map[static_cast<size_t>(encoder_slot::bpe)] =
-        make_encoder_entry(bpe_encoder);
-    encoder_map[static_cast<size_t>(encoder_slot::wpm)] =
-        make_encoder_entry(wpm_encoder);
-    encoder_map[static_cast<size_t>(encoder_slot::ugm)] =
-        make_encoder_entry(ugm_encoder);
-    encoder_map[static_cast<size_t>(encoder_slot::rwkv)] =
-        make_encoder_entry(rwkv_encoder);
-    encoder_map[static_cast<size_t>(encoder_slot::plamo2)] =
-        make_encoder_entry(plamo2_encoder);
-    encoder_map[static_cast<size_t>(encoder_slot::fallback)] =
-        make_encoder_entry(fallback_encoder);
-    encoder_map[static_cast<size_t>(encoder_slot::none)] =
-        encoder_map[static_cast<size_t>(encoder_slot::fallback)];
-    active_encoder = &encoder_map[static_cast<size_t>(encoder_slot::none)];
-  }
-};
-
+inline context::context()
+    : bpe_encoder(bpe_ctx), spm_encoder(spm_ctx), wpm_encoder(wpm_ctx),
+      ugm_encoder(ugm_ctx), rwkv_encoder(rwkv_ctx),
+      plamo2_encoder(plamo2_ctx), fallback_encoder(fallback_ctx) {
+  encoder_map[static_cast<size_t>(encoder_slot::spm)] =
+      make_encoder_entry(spm_encoder);
+  encoder_map[static_cast<size_t>(encoder_slot::bpe)] =
+      make_encoder_entry(bpe_encoder);
+  encoder_map[static_cast<size_t>(encoder_slot::wpm)] =
+      make_encoder_entry(wpm_encoder);
+  encoder_map[static_cast<size_t>(encoder_slot::ugm)] =
+      make_encoder_entry(ugm_encoder);
+  encoder_map[static_cast<size_t>(encoder_slot::rwkv)] =
+      make_encoder_entry(rwkv_encoder);
+  encoder_map[static_cast<size_t>(encoder_slot::plamo2)] =
+      make_encoder_entry(plamo2_encoder);
+  encoder_map[static_cast<size_t>(encoder_slot::fallback)] =
+      make_encoder_entry(fallback_encoder);
+  encoder_map[static_cast<size_t>(encoder_slot::none)] =
+      encoder_map[static_cast<size_t>(encoder_slot::fallback)];
+  active_encoder = &encoder_map[static_cast<size_t>(encoder_slot::none)];
+}
 } // namespace emel::tokenizer::action
 
 namespace emel::tokenizer::detail {
@@ -362,6 +287,24 @@ inline void set_error(context &ctx, const int32_t err) noexcept {
   ctx.last_error = err;
 }
 
+inline void reset_encoder_contexts(context &ctx,
+                                   const emel::model::data::vocab *vocab) noexcept {
+  auto reset_ctx = [vocab](auto &encoder_ctx) {
+    if (encoder_ctx.vocab != vocab) {
+      encoder_ctx.vocab = vocab;
+      encoder_ctx.tables_ready = false;
+      encoder_ctx.ugm_ready = false;
+    }
+  };
+  reset_ctx(ctx.bpe_ctx);
+  reset_ctx(ctx.spm_ctx);
+  reset_ctx(ctx.wpm_ctx);
+  reset_ctx(ctx.ugm_ctx);
+  reset_ctx(ctx.rwkv_ctx);
+  reset_ctx(ctx.plamo2_ctx);
+  reset_ctx(ctx.fallback_ctx);
+}
+
 inline void clear_request(context &ctx) noexcept {
   ctx.vocab = nullptr;
   ctx.text = {};
@@ -380,6 +323,7 @@ struct begin_tokenize {
     if (ev.error_out != nullptr) {
       *ev.error_out = EMEL_OK;
     }
+    const auto * prior_vocab = ctx.vocab;
     ctx.vocab = ev.vocab;
     ctx.text = ev.text;
     ctx.add_special = ev.add_special;
@@ -392,10 +336,8 @@ struct begin_tokenize {
     ctx.token_count = 0;
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
-    if (ctx.encoder_ctx.vocab != ev.vocab) {
-      ctx.encoder_ctx.vocab = ev.vocab;
-      ctx.encoder_ctx.tables_ready = false;
-      ctx.encoder_ctx.ugm_ready = false;
+    if (prior_vocab != ev.vocab) {
+      reset_encoder_contexts(ctx, ev.vocab);
     }
   }
 };
@@ -486,11 +428,7 @@ struct select_backend {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
     }
-    if (ctx.encoder_ctx.vocab != ctx.vocab) {
-      ctx.encoder_ctx.vocab = ctx.vocab;
-      ctx.encoder_ctx.tables_ready = false;
-      ctx.encoder_ctx.ugm_ready = false;
-    }
+    reset_encoder_contexts(ctx, ctx.vocab);
     const auto slot =
         static_cast<encoder_slot>(detail::detect_model(*ctx.vocab));
     ctx.model_slot = slot;

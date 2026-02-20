@@ -1,21 +1,11 @@
 #pragma once
 
-#include <cstdint>
+#include <type_traits>
 
-#include "emel/emel.h"
+#include "emel/encoder/context.hpp"
 #include "emel/encoder/events.hpp"
-#include "emel/model/data.hpp"
 
 namespace emel::encoder::action {
-
-struct context {
-  const emel::model::data::vocab * vocab = nullptr;
-  bool tables_ready = false;
-  bool ugm_ready = false;
-  int32_t token_count = 0;
-  int32_t phase_error = EMEL_OK;
-  int32_t last_error = EMEL_OK;
-};
 
 namespace detail {
 
@@ -45,20 +35,6 @@ inline int32_t normalize_error(const int32_t phase_error, const int32_t last_err
 
 }  // namespace detail
 
-struct begin_encode {
-  void operator()(const event::encode & ev, context & ctx) const noexcept {
-    ctx.token_count = 0;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-    if (ev.token_count_out != nullptr) {
-      *ev.token_count_out = 0;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-  }
-};
-
 struct reject_invalid_encode {
   void operator()(const event::encode & ev, context & ctx) const {
     ctx.token_count = 0;
@@ -75,63 +51,54 @@ struct reject_invalid_encode {
 };
 
 struct run_encode {
-  void operator()(const event::encode &, context & ctx) const noexcept {
-    ctx.token_count = 0;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
+  void operator()(context &) const noexcept {
   }
 };
 
 struct mark_done {
-  void operator()(const event::encode & ev, context & ctx) const {
+  void operator()(context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
-    if (ev.token_count_out != nullptr) {
-      *ev.token_count_out = ctx.token_count;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-    detail::dispatch_done(ev, ctx.token_count);
   }
 };
 
 struct ensure_last_error {
-  void operator()(const event::encode & ev, context & ctx) const {
+  void operator()(context & ctx) const noexcept {
     ctx.last_error = detail::normalize_error(ctx.phase_error, ctx.last_error);
-    if (ev.token_count_out != nullptr) {
-      *ev.token_count_out = 0;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = ctx.last_error;
-    }
-    detail::dispatch_error(ev, ctx.last_error);
   }
 };
 
 struct on_unexpected {
   template <class Event>
-  void operator()(const Event &, context & ctx) const noexcept {
+  void operator()(const Event & ev, context & ctx) const noexcept {
     ctx.token_count = 0;
     ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
     ctx.last_error = EMEL_ERR_INVALID_ARGUMENT;
-  }
-
-  void operator()(const event::encode & ev, context & ctx) const {
-    ctx.token_count = 0;
-    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-    ctx.last_error = EMEL_ERR_INVALID_ARGUMENT;
-    if (ev.token_count_out != nullptr) {
-      *ev.token_count_out = 0;
+    using decayed_event = std::decay_t<Event>;
+    if constexpr (std::is_same_v<decayed_event, event::encode>) {
+      if (ev.token_count_out != nullptr) {
+        *ev.token_count_out = 0;
+      }
+      if (ev.error_out != nullptr) {
+        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
+      }
+      detail::dispatch_error(ev, EMEL_ERR_INVALID_ARGUMENT);
+    } else if constexpr (std::is_same_v<decayed_event, events::encoding_done> ||
+                         std::is_same_v<decayed_event, events::encoding_error>) {
+      if (ev.request == nullptr) {
+        return;
+      }
+      if (ev.request->token_count_out != nullptr) {
+        *ev.request->token_count_out = 0;
+      }
+      if (ev.request->error_out != nullptr) {
+        *ev.request->error_out = EMEL_ERR_INVALID_ARGUMENT;
+      }
+      detail::dispatch_error(*ev.request, EMEL_ERR_INVALID_ARGUMENT);
     }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    }
-    detail::dispatch_error(ev, EMEL_ERR_INVALID_ARGUMENT);
   }
 };
 
-inline constexpr begin_encode begin_encode{};
 inline constexpr reject_invalid_encode reject_invalid_encode{};
 inline constexpr run_encode run_encode{};
 inline constexpr mark_done mark_done{};

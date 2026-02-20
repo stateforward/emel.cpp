@@ -61,6 +61,13 @@ Primary sources consulted (non-exhaustive)
    - Action initiates work and transitions to a “waiting” state.
    - A later external event represents completion (still no queues).
 9. Actions SHOULD be `noexcept` in production builds. If exceptions are enabled, the system MUST define a hard policy for exception events and document action-throws semantics (Overview page notes different semantics for guard-throws vs action-throws).
+10. Unexpected-event handling MUST NOT consume internal SML events. Do NOT use
+    `event<sml::_>` or `unexpected_event<_>` without filtering, as internal
+    `boost::sml::back::internal_event` types (e.g., `anonymous`, `on_entry`, `on_exit`,
+    `unexpected_event`) can match and create infinite RTC loops.
+11. When modeling unexpected events, either:
+    - guard wildcard handlers to exclude `boost::sml::back::internal_event`, or
+    - handle only explicit external event types with `unexpected_event<T>`.
 
 ## 7. Reentrancy and nested dispatch
 1. An actor MUST NOT call its own `process_event` (directly or indirectly) from inside a guard/action. This prevents unbounded recursion and makes WCET analysis tractable. (Motivation: `process_event` is synchronous and can be re-entered; SML users report deep call stacks if they do this.)

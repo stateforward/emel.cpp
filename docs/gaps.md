@@ -58,19 +58,34 @@ KV cache audit (llama.cpp parity)
   - Sequence operations (`seq_rm`, `seq_cp`, `seq_keep`, `seq_add`, `seq_div`) and copy scheduling.
   - Shift/defrag handling and sliding-window behaviors.
 
+Decoder audit (llama.cpp parity)
+- Reference sources: `tmp/llama.cpp/src/llama-context.cpp`, `tmp/llama.cpp/src/llama-batch.cpp`,
+  `tmp/llama.cpp/src/llama-batch.h`, `tmp/llama.cpp/src/llama-kv-cache.cpp`,
+  `tmp/llama.cpp/src/llama-memory-*.cpp`.
+- Reference commit: `abb9f3c42b5e6acee9e8e37836ef691d1a41bdb8`.
+- Date: 2026-02-19.
+- Status: partial. Batch splitting, output selection (`output_all`, `output_mask`, last-token),
+  seq masks/primary ids, and 1D/3D position handling are aligned for decode execution.
+- Gaps to close:
+  - Embedding inputs and pooled embedding outputs (pooling modes, per-sequence embeddings).
+  - Auto-generation and validation of batch fields (`n_seq_id`, `seq_id`, `pos`, `logits` masks).
+  - Sequence coupling, continuity checks, and disallowing partial sequence subsets.
+  - Ubatch metadata parity (`n_seqs`, `n_seq_tokens`, `n_seqs_unq`, `seq_id_unq`, `seq_idx`) and
+    output ordering/reordering (`out_ids`, swap tracking).
+  - Backend sampling integration (samplers, sampled/logits/probs/candidates buffers).
+  - Output buffer reservation/resizing and host-buffer transfer orchestration.
+  - Memory context semantics for decode (NO_UPDATE/FAILED_* status handling and rollback).
+  - Graph reuse/scheduling parity for decode execution.
+  - Encoder-decoder cross-attention metadata (e.g. T5-style cross state).
+
 Unvalidated machines (no parity audit performed yet)
 - `src/emel/model/weight_loader/sm.hpp`
 - `src/emel/tokenizer/sm.hpp`
 - `src/emel/encoder/sm.hpp`
-- `src/emel/decoder/sm.hpp`
-- `src/emel/decoder/ubatch_executor/sm.hpp`
-- `src/emel/decoder/compute_executor/sm.hpp`
 - `src/emel/generator/sm.hpp`
-- `src/emel/memory/coordinator/sm.hpp`
 - `src/emel/sampler/pipeline/sm.hpp`
 - `src/emel/sampler/candidate_builder/sm.hpp`
 - `src/emel/sampler/token_selector/sm.hpp`
-- `src/emel/batch/splitter/sm.hpp`
 - `src/emel/tensor/allocator/sm.hpp`
 - `src/emel/tensor/lifetime_analyzer/sm.hpp`
 - `src/emel/telemetry/provider/sm.hpp`

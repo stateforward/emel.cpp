@@ -7,3 +7,9 @@
 #include "emel/encoder/spm/sm.hpp"
 #include "emel/encoder/ugm/sm.hpp"
 #include "emel/encoder/wpm/sm.hpp"
+
+namespace emel::encoder {
+
+using sm = emel::encoder::bpe::sm;
+
+}  // namespace emel::encoder

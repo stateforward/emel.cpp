@@ -31,6 +31,10 @@ Callbacks (`emel::callback`) are allowed only for immediate synchronous replies 
 same RTC chain; invoke before dispatch returns, never store in context, and never call
 `process_event` inside the callback.
 ALWAYS define explicit behavior for unexpected events; NEVER drop them silently.
+ALWAYS ensure unexpected-event handling ignores internal SML events.
+NEVER use `event<sml::_>` or `unexpected_event<_>` without excluding
+`boost::sml::back::internal_event` (e.g., `anonymous`, `on_entry`, `on_exit`,
+`unexpected_event`), or you can create infinite RTC loops.
 ALWAYS keep tracing deterministic, bounded, and allocation-free; use
 `sml::logger<...>` when needed.
 

@@ -1,17 +1,8 @@
 #pragma once
 
-#include <cstdint>
-
-#include "emel/emel.h"
-#include "emel/parser/events.hpp"
+#include "emel/parser/context.hpp"
 
 namespace emel::parser::action {
-
-struct context {
-  event::parse_model request = {};
-  int32_t phase_error = EMEL_OK;
-  int32_t last_error = EMEL_OK;
-};
 
 inline void store_request(const event::parse_model & ev, context & ctx) noexcept {
   ctx.request = ev;
