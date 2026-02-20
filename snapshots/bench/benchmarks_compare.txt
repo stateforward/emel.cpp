@@ -1,0 +1,3 @@
+buffer/allocator_alloc_graph emel.cpp 17.579 ns/op, llama.cpp 11.892 ns/op, ratio=1.478x
+buffer/allocator_full emel.cpp 36.845 ns/op, llama.cpp 76.450 ns/op, ratio=0.482x
+buffer/allocator_reserve_n emel.cpp 18.436 ns/op, llama.cpp 141.390 ns/op, ratio=0.130x

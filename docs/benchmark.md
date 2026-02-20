@@ -37,6 +37,8 @@ To add a new comparison case:
 
 The compare mode expects exact case-name matches and prints `ratio` values for quick inspection.
 Run it via `scripts/bench.sh --compare`.
+When updating the comparison snapshot used by documentation, run:
+`scripts/bench.sh --compare-update`.
 
 ## Gate behavior
 

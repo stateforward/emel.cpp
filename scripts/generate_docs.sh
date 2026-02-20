@@ -412,7 +412,7 @@ CPP
 }
 
 generate_benchmarks() {
-  local snapshot="$ROOT_DIR/snapshots/bench/benchmarks.txt"
+  local snapshot="$ROOT_DIR/snapshots/bench/benchmarks_compare.txt"
   local tmp_file="$TMP_DIR/benchmarks.md"
 
   if [[ ! -f "$snapshot" ]]; then
@@ -423,28 +423,17 @@ generate_benchmarks() {
   {
     echo "# Benchmarks"
     echo
-    echo "Source: \`snapshots/bench/benchmarks.txt\`"
+    echo "Source: \`snapshots/bench/benchmarks_compare.txt\`"
     echo
-    echo "| Benchmark | ns/op | iter | runs |"
+    echo "| Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |"
     echo "| --- | ---: | ---: | ---: |"
-    awk '{
+    awk 'NF {
       name = $1;
-      ns = "";
-      iter = "";
-      runs = "";
-      for (i = 2; i <= NF; ++i) {
-        if ($i ~ /^ns_per_op=/) {
-          split($i, pair, "=");
-          ns = pair[2];
-        } else if ($i ~ /^iter=/) {
-          split($i, pair, "=");
-          iter = pair[2];
-        } else if ($i ~ /^runs=/) {
-          split($i, pair, "=");
-          runs = pair[2];
-        }
-      }
-      printf("| `%s` | %s | %s | %s |\n", name, ns, iter, runs);
+      emel = $3;
+      ref = $6;
+      ratio = $8;
+      sub(/^ratio=/, "", ratio);
+      printf("| `%s` | %s | %s | %s |\n", name, emel, ref, ratio);
     }' "$snapshot"
   } > "$tmp_file"
 

@@ -6,16 +6,18 @@ TOOLS_DIR="$ROOT_DIR/tools/bench"
 
 SNAPSHOT=false
 COMPARE=false
+COMPARE_UPDATE=false
 UPDATE=false
 USE_ZIG=false
 MODE_FLAG=""
 
 usage() {
   cat <<'USAGE'
-usage: scripts/bench.sh [--snapshot] [--compare] [--update] [--zig] [--llama-only|--emel-only]
+usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [--zig] [--llama-only|--emel-only]
 
   --snapshot   run EMEL benchmark snapshot gate
   --compare    build and run reference comparison
+  --compare-update update reference comparison snapshot
   --update     update snapshot baseline (requires --snapshot)
   --zig        use zig cc/zig c++ as the toolchain
   --llama-only run only the reference benchmarks
@@ -27,6 +29,7 @@ for arg in "$@"; do
   case "$arg" in
     --snapshot) SNAPSHOT=true ;;
     --compare) COMPARE=true ;;
+    --compare-update) COMPARE=true; COMPARE_UPDATE=true ;;
     --update) UPDATE=true ;;
     --zig) USE_ZIG=true ;;
     --llama-only) MODE_FLAG="--mode=reference" ;;
@@ -246,9 +249,15 @@ if $COMPARE; then
 
   cmake "${cmake_args[@]}"
   cmake --build "$compare_build_dir" --parallel --target bench_runner
-  if [[ -n "$MODE_FLAG" ]]; then
-    "$compare_build_dir/bench_runner" "$MODE_FLAG"
+  if $COMPARE_UPDATE; then
+    compare_baseline="$ROOT_DIR/snapshots/bench/benchmarks_compare.txt"
+    "$compare_build_dir/bench_runner" --mode=compare > "$compare_baseline"
+    echo "updated $compare_baseline"
   else
-    "$compare_build_dir/bench_runner" --mode=compare
+    if [[ -n "$MODE_FLAG" ]]; then
+      "$compare_build_dir/bench_runner" "$MODE_FLAG"
+    else
+      "$compare_build_dir/bench_runner" --mode=compare
+    fi
   fi
 fi
