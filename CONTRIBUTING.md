@@ -34,10 +34,11 @@ Before you hit submit:
 - Run `scripts/build_with_zig.sh`
 - Run `scripts/test_with_coverage.sh` (≥ 90% branch coverage required on changed code)
 - Run `scripts/lint_snapshot.sh`
+- Run `scripts/bench.sh --snapshot` (required for new machines marked `benchmark: ready`)
 - Add or update tests for any new behavior.
 - Update documentation when behavior changes.
 
-Benchmarks will matter eventually — and they’ll be optimized the same way everything else is: via the AI + gates workflow.
+Benchmarks are enforced via snapshots; see `docs/benchmark.md`.
 
 ### Architecture & style rules (the constitution)
 

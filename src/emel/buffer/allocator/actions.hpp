@@ -391,6 +391,27 @@ inline void capture_buffer_map(
   }
 }
 
+inline bool buffer_map_matches(
+    const event::graph_view & graph,
+    const int32_t * node_buffer_ids,
+    const int32_t * leaf_buffer_ids,
+    const context & c) noexcept {
+  if (graph.n_nodes != c.last_n_nodes || graph.n_leafs != c.last_n_leafs) {
+    return false;
+  }
+  for (int32_t i = 0; i < graph.n_nodes; ++i) {
+    if (get_buffer_id(node_buffer_ids, i) != c.last_node_buffer_ids[i]) {
+      return false;
+    }
+  }
+  for (int32_t i = 0; i < graph.n_leafs; ++i) {
+    if (get_buffer_id(leaf_buffer_ids, i) != c.last_leaf_buffer_ids[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline void reset_chunk_bindings(context & c) noexcept {
   for (int32_t i = 0; i < k_max_buffers; ++i) {
     c.committed_chunk_counts[i] = 0;
@@ -710,6 +731,7 @@ struct begin_reserve_n_size {
       emel::buffer::planner::sm & planner) const noexcept {
     int32_t err = EMEL_OK;
     c.phase_error = EMEL_OK;
+    c.has_required_sizes = false;
     emel::buffer::planner::sm * planner_sm =
         ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
     const emel::buffer::planner::strategy * strategy =
@@ -723,12 +745,32 @@ struct begin_reserve_n_size {
       detail::capture_buffer_map(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids);
       if (!detail::capture_alloc_snapshot(c, ev.graph, ev.node_buffer_ids, ev.leaf_buffer_ids)) {
         err = EMEL_ERR_INVALID_ARGUMENT;  // GCOVR_EXCL_LINE
+      } else if (ev.sizes_out != nullptr && ev.sizes_out_count >= c.buffer_count) {
+        for (int32_t i = 0; i < c.buffer_count; ++i) {
+          c.last_required_sizes[i] = ev.sizes_out[i];
+        }
+        c.has_required_sizes = true;
       }
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
     c.phase_error = err;
+    c.step += 1;
+  }
+};
+
+struct begin_reserve_n_size_cached {
+  void operator()(const event::reserve_n_size & ev, context & c) const noexcept {
+    if (ev.sizes_out != nullptr) {
+      for (int32_t i = 0; i < c.buffer_count; ++i) {
+        ev.sizes_out[i] = c.last_required_sizes[i];
+      }
+    }
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_OK;
+    }
+    c.phase_error = EMEL_OK;
     c.step += 1;
   }
 };
@@ -771,6 +813,7 @@ struct begin_reserve_n {
       emel::buffer::chunk_allocator::sm & chunk_allocator) const noexcept {
     int32_t err = EMEL_OK;
     c.phase_error = EMEL_OK;
+    c.has_required_sizes = false;
     emel::buffer::planner::sm * planner_sm =
         ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
     emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
@@ -795,12 +838,35 @@ struct begin_reserve_n {
       } else if (!detail::apply_required_sizes_to_chunks(
                    c, required, chunk_counts.data(), chunk_sizes.data(), chunk_allocator_sm, planner_err)) {
         err = planner_err;  // GCOVR_EXCL_LINE
+      } else {
+        c.last_required_sizes = required;
+        c.has_required_sizes = true;
       }
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }
     c.phase_error = err;
+    c.step += 1;
+  }
+};
+
+struct begin_reserve_n_cached {
+  void operator()(const event::reserve_n & ev, context & c) const noexcept {
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_OK;
+    }
+    c.phase_error = EMEL_OK;
+    c.step += 1;
+  }
+};
+
+struct begin_reserve_cached {
+  void operator()(const event::reserve & ev, context & c) const noexcept {
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_OK;
+    }
+    c.phase_error = EMEL_OK;
     c.step += 1;
   }
 };
@@ -813,6 +879,7 @@ struct begin_reserve {
       emel::buffer::chunk_allocator::sm & chunk_allocator) const noexcept {
     int32_t err = EMEL_OK;
     c.phase_error = EMEL_OK;
+    c.has_required_sizes = false;
     emel::buffer::planner::sm * planner_sm =
         ev.buffer_planner_sm != nullptr ? ev.buffer_planner_sm : &planner;
     emel::buffer::chunk_allocator::sm * chunk_allocator_sm =
@@ -837,6 +904,9 @@ struct begin_reserve {
       } else if (!detail::apply_required_sizes_to_chunks(
                    c, required, chunk_counts.data(), chunk_sizes.data(), chunk_allocator_sm, planner_err)) {
         err = planner_err;  // GCOVR_EXCL_LINE
+      } else {
+        c.last_required_sizes = required;
+        c.has_required_sizes = true;
       }
     }
     if (ev.error_out != nullptr) {
@@ -948,6 +1018,16 @@ struct begin_alloc_graph {
   }
 };
 
+struct begin_alloc_graph_cached {
+  void operator()(const event::alloc_graph & ev, context & c) const noexcept {
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_OK;
+    }
+    c.phase_error = EMEL_OK;
+    c.step += 1;
+  }
+};
+
 struct on_alloc_graph_done {
   void operator()(const events::alloc_graph_done & ev, context & c) const noexcept {
     c.alloc_epoch += 1;
@@ -995,6 +1075,16 @@ struct begin_release {
       c.step += 1;
       return;
     }
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_OK;
+    }
+    c.phase_error = EMEL_OK;
+    c.step += 1;
+  }
+};
+
+struct begin_release_noop {
+  void operator()(const event::release & ev, context & c) const noexcept {
     if (ev.error_out != nullptr) {
       *ev.error_out = EMEL_OK;
     }
@@ -1067,16 +1157,21 @@ inline constexpr begin_initialize begin_initialize{};
 inline constexpr on_initialize_done on_initialize_done{};
 inline constexpr on_initialize_error on_initialize_error{};
 inline constexpr begin_reserve_n_size begin_reserve_n_size{};
+inline constexpr begin_reserve_n_size_cached begin_reserve_n_size_cached{};
 inline constexpr on_reserve_n_size_done on_reserve_n_size_done{};
 inline constexpr on_reserve_n_size_error on_reserve_n_size_error{};
 inline constexpr begin_reserve_n begin_reserve_n{};
+inline constexpr begin_reserve_n_cached begin_reserve_n_cached{};
+inline constexpr begin_reserve_cached begin_reserve_cached{};
 inline constexpr begin_reserve begin_reserve{};
 inline constexpr on_reserve_done on_reserve_done{};
 inline constexpr on_reserve_error on_reserve_error{};
 inline constexpr begin_alloc_graph begin_alloc_graph{};
+inline constexpr begin_alloc_graph_cached begin_alloc_graph_cached{};
 inline constexpr on_alloc_graph_done on_alloc_graph_done{};
 inline constexpr on_alloc_graph_error on_alloc_graph_error{};
 inline constexpr begin_release begin_release{};
+inline constexpr begin_release_noop begin_release_noop{};
 inline constexpr on_release_done on_release_done{};
 inline constexpr on_release_error on_release_error{};
 inline constexpr reject_invalid reject_invalid{};

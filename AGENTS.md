@@ -123,8 +123,9 @@ ALWAYS keep snapshot baselines under `snapshots/` and lint baselines under
 `snapshots/lint/`.
 ALWAYS hard-fail runs when required tools are missing.
 ALWAYS enforce line coverage >= 90%.
-ALWAYS run `scripts/build_with_zig.sh`, `scripts/test_with_coverage.sh`, and
-`scripts/lint_snapshot.sh` after each implementation change.
+ALWAYS run `scripts/build_with_zig.sh`, `scripts/test_with_coverage.sh`,
+`scripts/lint_snapshot.sh`, and `scripts/bench.sh --snapshot` after each
+implementation change.
 ALWAYS use ctest targets `emel_tests` and `lint_snapshot` for test execution.
 ALWAYS reference `docs/sml.rules.md` for SML semantics and testing guidance.
 
@@ -147,8 +148,8 @@ ALWAYS preserve or improve performance when porting logic from the reference
 implementation.
 ALWAYS implement equivalent functionality natively without external llama.cpp or
 ggml linkage.
-NEVER link llama.cpp.
-NEVER link ggml.
+NEVER link "emel" against llama.cpp or ggml.
+Linking `tools/` against llama.cpp or ggml is allowed.
 NEVER use `llama_` or `ggml_` prefixes in identifiers, symbols, files, or APIs.
 ALWAYS use `emel_` or `EMEL_` prefixes for project-owned identifiers, symbols,
 files, and APIs.

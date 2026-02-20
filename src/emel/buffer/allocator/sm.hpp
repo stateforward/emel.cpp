@@ -12,6 +12,7 @@
 
 namespace emel::buffer::allocator {
 
+// benchmark: ready
 /*
 Buffer allocator architecture notes (single source of truth)
 
@@ -95,10 +96,14 @@ struct model {
       sml::state<initializing> [guard::phase_ok] / action::on_initialize_done =
           sml::state<ready>,
 
+      sml::state<ready> + sml::event<event::reserve_n_size>[guard::can_reserve_n_size_cached{}] /
+          action::begin_reserve_n_size_cached = sml::state<reserving_n_size>,
       sml::state<ready> + sml::event<event::reserve_n_size>[guard::can_reserve_n_size{}] /
           action::begin_reserve_n_size = sml::state<reserving_n_size>,
       sml::state<ready> + sml::event<event::reserve_n_size> / action::reject_invalid =
           sml::state<failed>,
+      sml::state<allocated> + sml::event<event::reserve_n_size>[guard::can_reserve_n_size_cached{}] /
+          action::begin_reserve_n_size_cached = sml::state<reserving_n_size>,
       sml::state<allocated> + sml::event<event::reserve_n_size>[guard::can_reserve_n_size{}] /
           action::begin_reserve_n_size = sml::state<reserving_n_size>,
       sml::state<allocated> + sml::event<event::reserve_n_size> / action::reject_invalid =
@@ -108,18 +113,26 @@ struct model {
       sml::state<reserving_n_size> [guard::phase_ok] / action::on_reserve_n_size_done =
           sml::state<ready>,
 
+      sml::state<ready> + sml::event<event::reserve_n>[guard::can_reserve_n_cached{}] /
+          action::begin_reserve_n_cached = sml::state<reserving>,
       sml::state<ready> + sml::event<event::reserve_n>[guard::can_reserve_n{}] /
           action::begin_reserve_n = sml::state<reserving>,
       sml::state<ready> + sml::event<event::reserve_n> / action::reject_invalid =
           sml::state<failed>,
+      sml::state<allocated> + sml::event<event::reserve_n>[guard::can_reserve_n_cached{}] /
+          action::begin_reserve_n_cached = sml::state<reserving>,
       sml::state<allocated> + sml::event<event::reserve_n>[guard::can_reserve_n{}] /
           action::begin_reserve_n = sml::state<reserving>,
       sml::state<allocated> + sml::event<event::reserve_n> / action::reject_invalid =
           sml::state<failed>,
+      sml::state<ready> + sml::event<event::reserve>[guard::can_reserve_cached{}] /
+          action::begin_reserve_cached = sml::state<reserving>,
       sml::state<ready> + sml::event<event::reserve>[guard::can_reserve{}] /
           action::begin_reserve = sml::state<reserving>,
       sml::state<ready> + sml::event<event::reserve> / action::reject_invalid =
           sml::state<failed>,
+      sml::state<allocated> + sml::event<event::reserve>[guard::can_reserve_cached{}] /
+          action::begin_reserve_cached = sml::state<reserving>,
       sml::state<allocated> + sml::event<event::reserve>[guard::can_reserve{}] /
           action::begin_reserve = sml::state<reserving>,
       sml::state<allocated> + sml::event<event::reserve> / action::reject_invalid =
@@ -129,10 +142,14 @@ struct model {
       sml::state<reserving> [guard::phase_ok] / action::on_reserve_done =
           sml::state<ready>,
 
+      sml::state<ready> + sml::event<event::alloc_graph>[guard::can_alloc_graph_cached{}] /
+          action::begin_alloc_graph_cached = sml::state<allocating_graph>,
       sml::state<ready> + sml::event<event::alloc_graph>[guard::can_alloc_graph{}] /
           action::begin_alloc_graph = sml::state<allocating_graph>,
       sml::state<ready> + sml::event<event::alloc_graph> / action::reject_invalid =
           sml::state<failed>,
+      sml::state<allocated> + sml::event<event::alloc_graph>[guard::can_alloc_graph_cached{}] /
+          action::begin_alloc_graph_cached = sml::state<allocating_graph>,
       sml::state<allocated> + sml::event<event::alloc_graph>[guard::can_alloc_graph{}] /
           action::begin_alloc_graph = sml::state<allocating_graph>,
       sml::state<allocated> + sml::event<event::alloc_graph> / action::reject_invalid =
@@ -142,7 +159,7 @@ struct model {
       sml::state<allocating_graph> [guard::phase_ok] / action::on_alloc_graph_done =
           sml::state<allocated>,
 
-      sml::state<uninitialized> + sml::event<event::release> / action::begin_release =
+      sml::state<uninitialized> + sml::event<event::release> / action::begin_release_noop =
           sml::state<releasing>,
       sml::state<initializing> + sml::event<event::release> / action::begin_release =
           sml::state<releasing>,

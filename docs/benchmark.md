@@ -1,0 +1,61 @@
+# Benchmark snapshot policy
+
+This project requires a benchmark snapshot for new state machines once they are marked complete.
+The benchmark gate exists to prevent performance regressions and to force explicit, repeatable
+performance characterization for each machine.
+
+## Summary
+
+- Every **new** `src/emel/**/sm.hpp` must include a benchmark readiness marker.
+- Markers live in the `sm.hpp` file header comment:
+  - `// benchmark: scaffold` means no benchmark required yet.
+  - `// benchmark: ready` means a benchmark **is required** and will be enforced by gates.
+- Benchmarks are only required for machines marked `ready`.
+- Benchmarks are enforced via a snapshot diff with a **5% regression tolerance**.
+
+## Benchmark harness
+
+We use an in-repo harness (no external dependencies):
+- Benchmark registry lives in `tests/bench/bench_main.cpp`.
+- Each machine adds a benchmark case in `tests/bench/<path>_bench.cpp` and registers it.
+- Output format is deterministic and diff-friendly:
+  - `machine_path ns_per_op=123.4 iter=100000 runs=5`
+  - `machine_path` matches the `src/emel/<path>/sm.hpp` path without the prefix and suffix.
+- Optional warmup controls (shared by EMEL + reference benches):
+  - `EMEL_BENCH_WARMUP_ITERS` (default: min(`EMEL_BENCH_ITERS`, 1000))
+  - `EMEL_BENCH_WARMUP_RUNS` (default: 1)
+
+## External reference compare (optional)
+
+We also maintain an optional tool that compares EMEL results against a reference allocator
+implementation. It lives under `tools/bench` and builds both sides out-of-tree.
+
+To add a new reference comparison case:
+1. Add/register the EMEL bench case in `tests/bench/`.
+2. Add the matching reference case in `tools/bench/reference_allocator_bench.cpp`.
+3. Add the case name to the `cases=(...)` list in `tools/bench/run_compare.sh`.
+
+The compare tool expects exact case-name matches and prints `ratio` values for quick inspection.
+Run it via `scripts/bench.sh --compare`.
+
+## Gate behavior
+
+The benchmark gate script enforces the following:
+- If a new `sm.hpp` file is added:
+  - It must declare `// benchmark: scaffold` or `// benchmark: ready`.
+  - If `ready`, a benchmark case **must** exist and be registered.
+- Snapshot regression failure if `ns_per_op` exceeds baseline by > 5%.
+- Snapshot baseline can be updated intentionally with `--update`.
+
+## Developer workflow
+
+1. Add a new machine `sm.hpp` with a benchmark marker.
+2. If the machine is complete, set `// benchmark: ready` and add a benchmark case.
+3. Run `scripts/bench.sh --snapshot` locally to verify, or
+   `scripts/bench.sh --snapshot --update` to update the baseline.
+
+## Rationale
+
+Scaffolded machines often produce trivial workloads that distort baselines. The readiness marker
+allows incremental scaffolding without blocking CI, while still forcing benchmarks once behavior
+is complete.

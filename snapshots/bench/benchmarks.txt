@@ -1,0 +1,3 @@
+buffer/allocator_alloc_graph ns_per_op=16.638 iter=100000 runs=5
+buffer/allocator_full ns_per_op=34.227 iter=100000 runs=5
+buffer/allocator_reserve_n ns_per_op=21.089 iter=100000 runs=5

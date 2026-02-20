@@ -31,10 +31,12 @@ struct context {
   int32_t last_n_nodes = 0;
   int32_t last_n_leafs = 0;
   bool has_reserve_snapshot = false;
+  bool has_required_sizes = false;
   std::array<int32_t, k_max_buffers> buffer_alignments = {};
   std::array<int32_t, k_max_buffers> buffer_max_sizes = {};
   std::array<int32_t, k_max_buffers> committed_sizes = {};
   std::array<int32_t, k_max_buffers> committed_chunk_counts = {};
+  std::array<int32_t, k_max_buffers> last_required_sizes = {};
   std::array<int32_t, k_max_chunk_bindings> committed_chunk_ids = {};
   std::array<uint64_t, k_max_chunk_bindings> committed_chunk_offsets = {};
   std::array<uint64_t, k_max_chunk_bindings> committed_chunk_sizes = {};
