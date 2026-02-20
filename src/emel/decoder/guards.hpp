@@ -36,12 +36,14 @@ inline constexpr auto valid_token_inputs = [](const action::context & ctx) {
   if (ctx.output_mask != nullptr && ctx.output_mask_count < ctx.n_tokens) {
     return false;
   }
-  if (ctx.seq_mask_words <= 0 ||
-      ctx.seq_mask_words > emel::batch::splitter::action::SEQ_WORDS) {
-    return false;
-  }
-  if (ctx.seq_masks != nullptr && ctx.seq_masks_count < ctx.n_tokens) {
-    return false;
+  if (ctx.seq_masks != nullptr) {
+    if (ctx.seq_mask_words <= 0 ||
+        ctx.seq_mask_words > emel::batch::splitter::action::SEQ_WORDS) {
+      return false;
+    }
+    if (ctx.seq_masks_count < ctx.n_tokens) {
+      return false;
+    }
   }
   if (ctx.seq_primary_ids != nullptr && ctx.seq_primary_ids_count < ctx.n_tokens) {
     return false;

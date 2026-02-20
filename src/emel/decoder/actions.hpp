@@ -115,6 +115,13 @@ struct begin_decode {
     ctx.ubatch_positions.fill(0);
     ctx.ubatch_seq_masks.fill(0);
     ctx.ubatch_seq_primary_ids.fill(0);
+    ctx.sanitized_seq_primary_ids.fill(0);
+    ctx.sanitized_seq_masks.fill(0);
+    ctx.sanitized_positions.fill(0);
+    ctx.sanitized_output_mask.fill(0);
+    ctx.sanitized_outputs_total = 0;
+    ctx.sanitized_positions_count = 0;
+    ctx.sanitized_seq_mask_words = 1;
     ctx.token_indices_count = 0;
     ctx.phase_error = EMEL_OK;
     ctx.ubatch_error = EMEL_OK;
@@ -136,6 +143,76 @@ struct run_validate {
   template <class Ev>
   void operator()(const Ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
+  }
+};
+
+struct run_sanitize_batch {
+  void operator()(const event::sanitize_batch & ev, context & ctx) const noexcept {
+    if (ev.error_out == nullptr) {
+      return;
+    }
+    *ev.error_out = EMEL_OK;
+    ctx.phase_error = EMEL_OK;
+
+    if (ctx.batch_sanitizer == nullptr) {
+      *ev.error_out = EMEL_ERR_BACKEND;
+      ctx.phase_error = EMEL_ERR_BACKEND;
+      return;
+    }
+
+    const bool ok = ctx.batch_sanitizer->process_event(
+        emel::batch::sanitizer::event::sanitize_decode{
+          .token_ids = ctx.token_ids,
+          .n_tokens = ctx.n_tokens,
+          .seq_masks = ctx.seq_masks,
+          .seq_mask_words = ctx.seq_mask_words,
+          .seq_masks_count = ctx.seq_masks_count,
+          .seq_primary_ids = ctx.seq_primary_ids,
+          .seq_primary_ids_count = ctx.seq_primary_ids_count,
+          .positions = ctx.positions,
+          .positions_count = ctx.positions_count,
+          .output_mask = ctx.output_mask,
+          .output_mask_count = ctx.output_mask_count,
+          .output_all = ctx.output_all,
+          .enforce_single_output_per_seq = false,
+          .seq_primary_ids_out = ctx.sanitized_seq_primary_ids.data(),
+          .seq_primary_ids_capacity = static_cast<int32_t>(ctx.sanitized_seq_primary_ids.size()),
+          .seq_masks_out = ctx.sanitized_seq_masks.data(),
+          .seq_masks_capacity = static_cast<int32_t>(ctx.sanitized_seq_masks.size()),
+          .positions_out = ctx.sanitized_positions.data(),
+          .positions_capacity = static_cast<int32_t>(ctx.sanitized_positions.size()),
+          .output_mask_out = ctx.sanitized_output_mask.data(),
+          .output_mask_capacity = static_cast<int32_t>(ctx.sanitized_output_mask.size()),
+          .outputs_total_out = &ctx.sanitized_outputs_total,
+          .seq_mask_words_out = &ctx.sanitized_seq_mask_words,
+          .positions_count_out = &ctx.sanitized_positions_count,
+          .error_out = &ctx.phase_error,
+        });
+
+    if (!ok || ctx.phase_error != EMEL_OK) {
+      *ev.error_out = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
+      ctx.phase_error = *ev.error_out;
+      return;
+    }
+
+    ctx.seq_masks = ctx.sanitized_seq_masks.data();
+    ctx.seq_masks_count = ctx.n_tokens;
+    ctx.seq_mask_words = ctx.sanitized_seq_mask_words;
+    ctx.seq_primary_ids = ctx.sanitized_seq_primary_ids.data();
+    ctx.seq_primary_ids_count = ctx.n_tokens;
+    ctx.positions = ctx.sanitized_positions.data();
+    ctx.positions_count = ctx.sanitized_positions_count;
+    ctx.output_mask = ctx.sanitized_output_mask.data();
+    ctx.output_mask_count = ctx.n_tokens;
+  }
+
+  template <class Ev>
+  void operator()(const Ev &, context & ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    event::sanitize_batch sanitize{
+      .error_out = &ctx.phase_error,
+    };
+    (*this)(sanitize, ctx);
   }
 };
 
@@ -888,6 +965,7 @@ struct on_unexpected {
 
 inline constexpr begin_decode begin_decode{};
 inline constexpr run_validate run_validate{};
+inline constexpr run_sanitize_batch run_sanitize_batch{};
 inline constexpr reject_invalid_validate reject_invalid_validate{};
 inline constexpr run_initialize_batch run_initialize_batch{};
 inline constexpr run_update_memory run_update_memory{};

@@ -71,18 +71,18 @@ struct model {
             sml::state<Errored>,
 
         sml::state<Initialized> +
-            sml::event<sml::_>[guard::not_internal_event{}] /
+            sml::unexpected_event<sml::_> /
                 action::on_unexpected = sml::state<Unexpected>,
         sml::state<ParseDecision> +
-            sml::event<sml::_>[guard::not_internal_event{}] /
+            sml::unexpected_event<sml::_> /
                 action::on_unexpected = sml::state<Unexpected>,
-        sml::state<Done> + sml::event<sml::_>[guard::not_internal_event{}] /
+        sml::state<Done> + sml::unexpected_event<sml::_> /
                                action::on_unexpected = sml::state<Unexpected>,
-        sml::state<Errored> + sml::event<sml::_>[guard::not_internal_event{}] /
+        sml::state<Errored> + sml::unexpected_event<sml::_> /
                                   action::on_unexpected =
             sml::state<Unexpected>,
         sml::state<Unexpected> +
-            sml::event<sml::_>[guard::not_internal_event{}] /
+            sml::unexpected_event<sml::_> /
                 action::on_unexpected = sml::state<Unexpected>);
   }
 };

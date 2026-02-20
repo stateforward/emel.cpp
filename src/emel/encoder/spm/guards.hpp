@@ -29,11 +29,4 @@ struct phase_failed {
   }
 };
 
-struct not_internal_event {
-  template <class Event>
-  bool operator()(const Event & ev, const action::context & ctx) const noexcept {
-    return emel::encoder::guard::not_internal_event{}(ev, ctx);
-  }
-};
-
 }  // namespace emel::encoder::spm::guard

@@ -20,8 +20,8 @@ option(EMEL_ENABLE_TESTS "Build tests" ON)
 include(FetchContent)
 FetchContent_Declare(
   boost_sml
-  GIT_REPOSITORY https://github.com/boost-ext/sml.git
-  GIT_TAG v1.1.11
+  GIT_REPOSITORY https://github.com/stateforward/sml.cpp
+  GIT_TAG main
 )
 FetchContent_MakeAvailable(boost_sml)
 
@@ -99,6 +99,7 @@ if(EMEL_ENABLE_TESTS)
     tests/batch/splitter_action_branch_tests.cpp
     tests/batch/splitter_sm_transition_tests.cpp
     tests/batch/splitter_sm_flow_tests.cpp
+    tests/batch/sanitizer_tests.cpp
     tests/memory/coordinator_tests.cpp
     tests/memory/coordinator_sm_transition_tests.cpp
     tests/memory/coordinator_sm_transition_more_tests.cpp

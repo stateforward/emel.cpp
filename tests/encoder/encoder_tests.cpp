@@ -2410,7 +2410,6 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
   CHECK(emel::encoder::guard::phase_ok{}(base_ctx));
   base_ctx.phase_error = EMEL_ERR_BACKEND;
   CHECK(emel::encoder::guard::phase_failed{}(base_ctx));
-  CHECK(emel::encoder::guard::not_internal_event{}(base_ev, base_ctx));
 
   {
     vocab_builder builder{};
@@ -2439,7 +2438,6 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::encoder::bpe::guard::phase_ok{}(ctx));
     ctx.phase_error = EMEL_ERR_BACKEND;
     CHECK(emel::encoder::bpe::guard::phase_failed{}(ctx));
-    CHECK(emel::encoder::bpe::guard::not_internal_event{}(ev_ok, ctx));
   }
 
   {
@@ -2469,7 +2467,6 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::encoder::wpm::guard::phase_ok{}(ctx));
     ctx.phase_error = EMEL_ERR_BACKEND;
     CHECK(emel::encoder::wpm::guard::phase_failed{}(ctx));
-    CHECK(emel::encoder::wpm::guard::not_internal_event{}(ev_ok, ctx));
   }
 
   {
@@ -2498,7 +2495,6 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::encoder::spm::guard::phase_ok{}(ctx));
     ctx.phase_error = EMEL_ERR_BACKEND;
     CHECK(emel::encoder::spm::guard::phase_failed{}(ctx));
-    CHECK(emel::encoder::spm::guard::not_internal_event{}(ev_ok, ctx));
   }
 
   {
@@ -2528,7 +2524,6 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::encoder::ugm::guard::phase_ok{}(ctx));
     ctx.phase_error = EMEL_ERR_BACKEND;
     CHECK(emel::encoder::ugm::guard::phase_failed{}(ctx));
-    CHECK(emel::encoder::ugm::guard::not_internal_event{}(ev_ok, ctx));
   }
 
   {
@@ -2556,7 +2551,6 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::encoder::rwkv::guard::phase_ok{}(ctx));
     ctx.phase_error = EMEL_ERR_BACKEND;
     CHECK(emel::encoder::rwkv::guard::phase_failed{}(ctx));
-    CHECK(emel::encoder::rwkv::guard::not_internal_event{}(ev_ok, ctx));
   }
 
   {
@@ -2586,7 +2580,6 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::encoder::plamo2::guard::phase_ok{}(ctx));
     ctx.phase_error = EMEL_ERR_BACKEND;
     CHECK(emel::encoder::plamo2::guard::phase_failed{}(ctx));
-    CHECK(emel::encoder::plamo2::guard::not_internal_event{}(ev_ok, ctx));
   }
 
   {
@@ -2614,6 +2607,5 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::encoder::fallback::guard::phase_ok{}(ctx));
     ctx.phase_error = EMEL_ERR_BACKEND;
     CHECK(emel::encoder::fallback::guard::phase_failed{}(ctx));
-    CHECK(emel::encoder::fallback::guard::not_internal_event{}(ev_ok, ctx));
   }
 }

@@ -29,10 +29,6 @@ struct model {
 
   auto operator()() const {
     namespace sml = boost::sml;
-    const auto not_anonymous = [](const auto & ev) {
-      using event_type = std::decay_t<decltype(ev)>;
-      return !std::is_same_v<event_type, boost::sml::anonymous>;
-    };
     return sml::make_transition_table(
       *sml::state<Idle> + sml::event<event::allocate_tensors> /
         action::begin_allocate_tensors = sml::state<Validating>,
@@ -99,37 +95,37 @@ struct model {
       sml::state<ReleaseDecision> [guard::phase_failed{}] = sml::state<Errored>,
       sml::state<ReleaseDecision> [guard::phase_ok{}] = sml::state<Idle>,
 
-      sml::state<Idle> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<Idle> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<Validating> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<Validating> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<ValidateDecision> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<ValidateDecision> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<ScanningTensors> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<ScanningTensors> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<ScanDecision> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<ScanDecision> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<PartitioningRanges> + sml::event<sml::_> [not_anonymous] /
+      sml::state<PartitioningRanges> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<PartitionDecision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<PartitionDecision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<AllocatingRanges> + sml::event<sml::_> [not_anonymous] /
+      sml::state<AllocatingRanges> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<AllocateDecision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<AllocateDecision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<InitializingTensors> + sml::event<sml::_> [not_anonymous] /
+      sml::state<InitializingTensors> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<InitializeDecision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<InitializeDecision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<AssemblingResult> + sml::event<sml::_> [not_anonymous] /
+      sml::state<AssemblingResult> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<AssembleDecision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<AssembleDecision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<Done> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<Done> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<Errored> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<Errored> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<ReleaseDecision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<ReleaseDecision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>
     );
   }

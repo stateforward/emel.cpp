@@ -149,14 +149,15 @@ TEST_CASE("decoder_run_validate_checks_token_inputs") {
   CHECK(emel::decoder::guard::invalid_token_inputs(ctx));
   ctx.n_ubatch = 0;
 
+  std::array<uint64_t, 1> seq_masks = {{1U}};
+  ctx.seq_masks = seq_masks.data();
+  ctx.seq_masks_count = 1;
   ctx.seq_mask_words = 0;
   CHECK(emel::decoder::guard::invalid_token_inputs(ctx));
   ctx.seq_mask_words = emel::batch::splitter::action::SEQ_WORDS + 1;
   CHECK(emel::decoder::guard::invalid_token_inputs(ctx));
   ctx.seq_mask_words = 1;
-
-  std::array<uint64_t, 1> seq_masks = {{1U}};
-  ctx.seq_masks = seq_masks.data();
+  CHECK(emel::decoder::guard::valid_token_inputs(ctx));
   ctx.seq_masks_count = 0;
   CHECK(emel::decoder::guard::invalid_token_inputs(ctx));
   ctx.seq_masks_count = 1;

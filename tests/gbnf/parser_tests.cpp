@@ -154,7 +154,6 @@ TEST_CASE("gbnf_parser_guards_and_actions_cover_branches") {
   CHECK(emel::gbnf::parser::guard::phase_ok{}(ctx));
   ctx.phase_error = EMEL_ERR_PARSE_FAILED;
   CHECK(emel::gbnf::parser::guard::phase_failed{}(ctx));
-  CHECK(emel::gbnf::parser::guard::not_internal_event{}(ev, ctx));
 
   emel::gbnf::parser::action::run_parse(ev, ctx);
   CHECK(done_called);

@@ -52,6 +52,10 @@ struct validate {
   int32_t * error_out = nullptr;
 };
 
+struct sanitize_batch {
+  int32_t * error_out = nullptr;
+};
+
 struct initialize_batch {
   int32_t * error_out = nullptr;
 };
@@ -95,6 +99,14 @@ struct validate_done {
   const event::decode * request = nullptr;
 };
 struct validate_error {
+  int32_t err = 0;
+  const event::decode * request = nullptr;
+};
+
+struct sanitize_batch_done {
+  const event::decode * request = nullptr;
+};
+struct sanitize_batch_error {
   int32_t err = 0;
   const event::decode * request = nullptr;
 };

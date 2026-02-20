@@ -41,10 +41,6 @@ struct ResetDecision {};
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
-    const auto not_anonymous = [](const auto & ev) {
-      using event_type = std::decay_t<decltype(ev)>;
-      return !std::is_same_v<event_type, boost::sml::anonymous>;
-    };
     return sml::make_transition_table(
       *sml::state<Idle> + sml::event<event::analyze> / action::begin_analyze =
         sml::state<Validating>,
@@ -84,25 +80,25 @@ struct model {
       sml::state<ResetDecision> [guard::phase_failed{}] = sml::state<Errored>,
       sml::state<ResetDecision> [guard::phase_ok{}] = sml::state<Idle>,
 
-      sml::state<Idle> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<Idle> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<Validating> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<Validating> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<ValidateDecision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<ValidateDecision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<CollectingRanges> + sml::event<sml::_> [not_anonymous] /
+      sml::state<CollectingRanges> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<CollectDecision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<CollectDecision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<Publishing> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<Publishing> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<PublishDecision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<PublishDecision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>,
-      sml::state<Done> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<Done> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<Errored> + sml::event<sml::_> [not_anonymous] / action::on_unexpected =
+      sml::state<Errored> + sml::unexpected_event<sml::_> / action::on_unexpected =
         sml::state<Errored>,
-      sml::state<ResetDecision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<ResetDecision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<Errored>
     );
   }

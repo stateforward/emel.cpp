@@ -20,10 +20,6 @@ struct model {
 
   auto operator()() const {
     namespace sml = boost::sml;
-    const auto not_anonymous = [](const auto & ev) {
-      using event_type = std::decay_t<decltype(ev)>;
-      return !std::is_same_v<event_type, boost::sml::anonymous>;
-    };
     return sml::make_transition_table(
       *sml::state<initialized> + sml::event<event::configure> / action::run_configure =
         sml::state<configure_decision>,
@@ -54,19 +50,19 @@ struct model {
       sml::state<errored> + sml::event<event::reset> / action::run_reset =
         sml::state<initialized>,
 
-      sml::state<initialized> + sml::event<sml::_> [not_anonymous] /
+      sml::state<initialized> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<configure_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<configure_decision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<start_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<start_decision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<running> + sml::event<sml::_> [not_anonymous] /
+      sml::state<running> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<publish_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<publish_decision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<stop_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<stop_decision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<errored> + sml::event<sml::_> [not_anonymous] /
+      sml::state<errored> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>
     );
   }

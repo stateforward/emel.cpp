@@ -44,17 +44,19 @@ std::size_t read_env_size(const char * name, std::size_t fallback) {
 
 std::vector<bench::result> run_emel_benchmarks(const bench::config & cfg) {
   std::vector<bench::result> results;
-  results.reserve(6);
+  results.reserve(8);
   bench::append_emel_buffer_allocator_cases(results, cfg);
   bench::append_emel_batch_splitter_cases(results, cfg);
+  bench::append_emel_batch_sanitizer_cases(results, cfg);
   return results;
 }
 
 std::vector<bench::result> run_reference_benchmarks(const bench::config & cfg) {
   std::vector<bench::result> results;
-  results.reserve(6);
+  results.reserve(8);
   bench::append_reference_buffer_allocator_cases(results, cfg);
   bench::append_reference_batch_splitter_cases(results, cfg);
+  bench::append_reference_batch_sanitizer_cases(results, cfg);
   return results;
 }
 

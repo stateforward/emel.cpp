@@ -81,10 +81,6 @@ struct errored {};
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
-    const auto not_anonymous = [](const auto & ev) {
-      using event_type = std::decay_t<decltype(ev)>;
-      return !std::is_same_v<event_type, boost::sml::anonymous>;
-    };
 
     return sml::make_transition_table(
       *sml::state<initialized> + sml::event<event::prepare> / action::begin_prepare =
@@ -229,77 +225,77 @@ struct model {
       sml::state<done> / action::mark_done = sml::state<prepared>,
       sml::state<errored> / action::ensure_last_error = sml::state<prepared>,
 
-      sml::state<initialized> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<initialized> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<prepared> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<prepared> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<validating_prepare> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<validating_prepare> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<preparing_slots> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<preparing_slots> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<preparing_slots_step> + sml::event<sml::_> [not_anonymous] /
+      sml::state<preparing_slots_step> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<prepare_slots_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<prepare_slots_decision> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<applying> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<applying> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<apply_step_validating> + sml::event<sml::_> [not_anonymous] /
+      sml::state<apply_step_validating> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<applying_step> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<applying_step> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<apply_step_decision> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<apply_step_decision> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<rolling_back> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<rolling_back> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<rollback_step_validating> + sml::event<sml::_> [not_anonymous] /
+      sml::state<rollback_step_validating> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<rollback_step> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<rollback_step> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<rollback_step_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<rollback_step_decision> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<seq_remove_validating> + sml::event<sml::_> [not_anonymous] /
+      sml::state<seq_remove_validating> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<seq_remove_step> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<seq_remove_step> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<seq_remove_step_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<seq_remove_step_decision> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<seq_copy_validating> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<seq_copy_validating> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<seq_copy_step> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<seq_copy_step> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<seq_copy_step_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<seq_copy_step_decision> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<seq_keep_validating> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<seq_keep_validating> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<seq_keep_step> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<seq_keep_step> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<seq_keep_step_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<seq_keep_step_decision> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<seq_add_validating> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<seq_add_validating> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<seq_add_step> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<seq_add_step> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<seq_add_step_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<seq_add_step_decision> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<seq_div_validating> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<seq_div_validating> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<seq_div_step> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<seq_div_step> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<seq_div_step_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<seq_div_step_decision> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<updates_validating> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<updates_validating> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<updates_step> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<updates_step> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<updates_step_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<updates_step_decision> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
-      sml::state<publishing> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<publishing> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<publish_decision> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<publish_decision> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<done> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<done> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
-      sml::state<errored> + sml::event<sml::_> [not_anonymous] / action::on_unexpected{} =
+      sml::state<errored> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>
     );
   }

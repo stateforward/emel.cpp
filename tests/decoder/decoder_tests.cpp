@@ -547,10 +547,10 @@ TEST_CASE("decoder_decode_fails_when_batch_splitter_cannot_emit_all_ubatches") {
   }));
 
   CHECK(machine.is(boost::sml::state<emel::decoder::initialized>));
-  CHECK(error == EMEL_ERR_BACKEND);
+  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(owner.done_calls == 0);
   CHECK(owner.error_calls == 1);
-  CHECK(owner.err == EMEL_ERR_BACKEND);
+  CHECK(owner.err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("decoder_decode_fails_when_kv_capacity_request_exceeds_supported_limit") {
@@ -569,10 +569,10 @@ TEST_CASE("decoder_decode_fails_when_kv_capacity_request_exceeds_supported_limit
   }));
 
   CHECK(machine.is(boost::sml::state<emel::decoder::initialized>));
-  CHECK(error == EMEL_ERR_BACKEND);
+  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(owner.done_calls == 0);
   CHECK(owner.error_calls == 1);
-  CHECK(owner.err == EMEL_ERR_BACKEND);
+  CHECK(owner.err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("decoder_rejects_repeated_invalid_decode_requests") {

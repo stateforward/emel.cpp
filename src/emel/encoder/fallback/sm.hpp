@@ -117,22 +117,22 @@ struct model {
             sml::state<unexpected>,
 
         sml::state<initialized> +
-            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
+            sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
         sml::state<encoding> +
-            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
+            sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
         sml::state<encode_decision> +
-            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
+            sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
         sml::state<done> +
-            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
+            sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
         sml::state<errored> +
-            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
+            sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
         sml::state<unexpected> +
-            sml::event<sml::_>[guard::not_internal_event{}] / action::on_unexpected =
+            sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>);
   }
 };

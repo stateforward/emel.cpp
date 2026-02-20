@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "emel/batch/sanitizer/sm.hpp"
 #include "emel/batch/splitter/sm.hpp"
 #include "emel/decoder/events.hpp"
 #include "emel/decoder/ubatch_executor/sm.hpp"
@@ -51,10 +52,22 @@ struct context {
                  emel::batch::splitter::action::SEQ_WORDS>
       ubatch_seq_masks = {};
   std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_seq_primary_ids = {};
+  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> sanitized_seq_primary_ids = {};
+  std::array<uint64_t,
+             emel::batch::splitter::action::MAX_UBATCHES *
+                 emel::batch::splitter::action::SEQ_WORDS>
+      sanitized_seq_masks = {};
+  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES * 3>
+      sanitized_positions = {};
+  std::array<int8_t, emel::batch::splitter::action::MAX_UBATCHES> sanitized_output_mask = {};
+  int32_t sanitized_outputs_total = 0;
+  int32_t sanitized_positions_count = 0;
+  int32_t sanitized_seq_mask_words = 1;
   int32_t token_indices_count = 0;
   int32_t ubatches_total = 0;
   int32_t ubatches_processed = 0;
 
+  std::unique_ptr<emel::batch::sanitizer::sm> batch_sanitizer;
   std::unique_ptr<emel::batch::splitter::sm> batch_splitter;
   std::unique_ptr<emel::memory::coordinator::sm> memory_coordinator;
   std::unique_ptr<emel::kv::cache::sm> kv_cache;
@@ -78,7 +91,8 @@ struct context {
 };
 
 inline context::context()
-    : batch_splitter(std::make_unique<emel::batch::splitter::sm>()),
+    : batch_sanitizer(std::make_unique<emel::batch::sanitizer::sm>()),
+      batch_splitter(std::make_unique<emel::batch::splitter::sm>()),
       memory_coordinator(std::make_unique<emel::memory::coordinator::sm>()),
       kv_cache(std::make_unique<emel::kv::cache::sm>()),
       ubatch_executor(std::make_unique<emel::decoder::ubatch_executor::sm>()) {

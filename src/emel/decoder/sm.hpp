@@ -13,6 +13,8 @@ namespace emel::decoder {
 struct initialized {};
 struct validating_request {};
 struct validate_decision {};
+struct sanitizing_batch {};
+struct sanitize_decision {};
 struct initializing_batch {};
 struct initialize_batch_decision {};
 struct updating_memory_pre {};
@@ -40,6 +42,7 @@ struct errored {};
  * State purposes:
  * - `initialized`: idle state awaiting decode intent.
  * - `validating_request`/`validate_decision`: validate token inputs before orchestration.
+ * - `sanitizing_batch`/`sanitize_decision`: sanitize and auto-generate batch metadata.
  * - `initializing_batch`/`initialize_batch_decision`: compute ubatch sizes and outputs count.
  * - `updating_memory_pre`/`update_memory_decision`: update memory coordinator before batch prep.
  * - `preparing_memory_batch_initial`/`prepare_memory_batch_initial_decision`: prepare memory & kv cache.
@@ -72,7 +75,12 @@ struct model {
           sml::state<validate_decision>,
 
       sml::state<validate_decision> [guard::phase_failed] = sml::state<errored>,
-      sml::state<validate_decision> [guard::phase_ok] = sml::state<initializing_batch>,
+      sml::state<validate_decision> [guard::phase_ok] = sml::state<sanitizing_batch>,
+
+      sml::state<sanitizing_batch> / action::run_sanitize_batch =
+          sml::state<sanitize_decision>,
+      sml::state<sanitize_decision> [guard::phase_failed] = sml::state<errored>,
+      sml::state<sanitize_decision> [guard::phase_ok] = sml::state<initializing_batch>,
 
       sml::state<initializing_batch> / action::run_initialize_batch =
           sml::state<initialize_batch_decision>,
@@ -144,6 +152,10 @@ struct model {
       sml::state<validating_request> + sml::event<event::decode> / action::on_unexpected =
           sml::state<errored>,
       sml::state<validate_decision> + sml::event<event::decode> / action::on_unexpected =
+          sml::state<errored>,
+      sml::state<sanitizing_batch> + sml::event<event::decode> / action::on_unexpected =
+          sml::state<errored>,
+      sml::state<sanitize_decision> + sml::event<event::decode> / action::on_unexpected =
           sml::state<errored>,
       sml::state<initializing_batch> + sml::event<event::decode> / action::on_unexpected =
           sml::state<errored>,

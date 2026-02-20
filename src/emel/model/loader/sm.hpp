@@ -30,10 +30,6 @@ struct model {
 
   auto operator()() const {
     namespace sml = boost::sml;
-    const auto not_anonymous = [](const auto & ev) {
-      using event_type = std::decay_t<decltype(ev)>;
-      return !std::is_same_v<event_type, boost::sml::anonymous>;
-    };
     return sml::make_transition_table(
       *sml::state<initialized> + sml::event<event::load> [guard::can_map_parser{}]
         / action::begin_load = sml::state<mapping_parser>,
@@ -98,37 +94,37 @@ struct model {
       sml::state<done> / action::publish_done = sml::state<initialized>,
       sml::state<errored> / action::publish_error = sml::state<initialized>,
 
-      sml::state<initialized> + sml::event<sml::_> [not_anonymous] /
+      sml::state<initialized> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<mapping_parser> + sml::event<sml::_> [not_anonymous] /
+      sml::state<mapping_parser> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<map_parser_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<map_parser_decision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<parsing> + sml::event<sml::_> [not_anonymous] /
+      sml::state<parsing> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<parse_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<parse_decision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<loading_weights> + sml::event<sml::_> [not_anonymous] /
+      sml::state<loading_weights> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<load_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<load_decision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<mapping_layers> + sml::event<sml::_> [not_anonymous] /
+      sml::state<mapping_layers> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<map_layers_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<map_layers_decision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<validating_structure> + sml::event<sml::_> [not_anonymous] /
+      sml::state<validating_structure> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<structure_skipped> + sml::event<sml::_> [not_anonymous] /
+      sml::state<structure_skipped> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<structure_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<structure_decision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<validating_architecture> + sml::event<sml::_> [not_anonymous] /
+      sml::state<validating_architecture> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<architecture_decision> + sml::event<sml::_> [not_anonymous] /
+      sml::state<architecture_decision> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<done> + sml::event<sml::_> [not_anonymous] /
+      sml::state<done> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>,
-      sml::state<errored> + sml::event<sml::_> [not_anonymous] /
+      sml::state<errored> + sml::unexpected_event<sml::_> /
         action::on_unexpected = sml::state<errored>
     );
   }
