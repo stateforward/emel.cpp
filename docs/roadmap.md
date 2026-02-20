@@ -32,6 +32,8 @@ Scaffolding decisions live in `docs/scaffold.plan.md`.
 **Next milestones**
 1. [ ] Close decoder gaps per `docs/decoder.plan.md` and `docs/scaffold.plan.md`.
 2. [ ] Expand KV cache parity to stream-aware behavior and sliding-window handling.
-3. [ ] Audit generator + sampler pipeline parity against reference sampling paths.
-4. [ ] Audit tensor allocator/lifetime analyzer parity against `ggml` alloc paths.
-5. [ ] Add public C API parity for loader/parser/weight loader paths.
+3. [ ] Optimize allocator cached-guard checks with a tensor-id lookup cache to avoid
+   repeated graph scans in `graph_needs_realloc`.
+4. [ ] Audit generator + sampler pipeline parity against reference sampling paths.
+5. [ ] Audit tensor allocator/lifetime analyzer parity against `ggml` alloc paths.
+6. [ ] Add public C API parity for loader/parser/weight loader paths.
