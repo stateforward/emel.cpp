@@ -449,9 +449,13 @@ generate_benchmarks() {
     echo
     echo "Source: \`snapshots/bench/benchmarks_compare.txt\`"
     echo
+    echo "Note: While EMEL is modular and easy to bench in isolation, llama.cpp code is very"
+    echo "intertwined. These microbenches aim for apples-to-apples comparisons but likely"
+    echo "are not. True benchmarks will be end-to-end once the system is complete."
+    echo
     echo "| Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |"
     echo "| --- | ---: | ---: | ---: |"
-    awk 'NF {
+    awk 'NF && $1 !~ /^#/ {
       name = $1;
       emel = $3;
       ref = $6;
