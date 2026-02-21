@@ -2123,45 +2123,4 @@ inline bool render_statements(action::context & ctx,
   return ctx.phase_error == EMEL_OK;
 }
 
-inline bool run_render(action::context & ctx,
-                       const emel::jinja::event::render & ev) noexcept {
-  ctx.phase_error = EMEL_OK;
-  ctx.last_error = EMEL_OK;
-  ctx.error_pos = 0;
-  ctx.steps_remaining = action::k_max_steps;
-  ctx.scope_count = 0;
-  ctx.array_items_used = 0;
-  ctx.object_entries_used = 0;
-  ctx.string_buffer_used = 0;
-  ctx.callable_count = 0;
-
-  if (!push_scope(ctx)) {
-    return false;
-  }
-
-  render_io io = {};
-  init_writer(io, ev.output, ev.output_capacity);
-
-  control_flow flow = control_flow::none;
-  if (ev.program != nullptr) {
-    render_statements(ctx, ev.program->body, ev.globals, io, false, flow);
-  } else {
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT, 0);
-  }
-
-  if (ev.output_length != nullptr) {
-    *ev.output_length = io.writers[0].length;
-  }
-  if (ev.output_truncated != nullptr) {
-    *ev.output_truncated = ctx.phase_error != EMEL_OK;
-  }
-  if (ev.error_out != nullptr) {
-    *ev.error_out = ctx.phase_error;
-  }
-  if (ev.error_pos_out != nullptr) {
-    *ev.error_pos_out = ctx.error_pos;
-  }
-  return ctx.phase_error == EMEL_OK;
-}
-
 }  // namespace emel::jinja::renderer::detail

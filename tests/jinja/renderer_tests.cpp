@@ -1633,3 +1633,158 @@ TEST_CASE("jinja_renderer_detail_value_equal_cases") {
   invalid_b.type = static_cast<value_type>(99);
   CHECK_FALSE(renderer::detail::value_equal(invalid_a, invalid_b));
 }
+
+TEST_CASE("jinja_renderer_actions_branch_coverage") {
+  using namespace emel::jinja;
+  using emel::jinja::renderer::action::begin_render;
+  using emel::jinja::renderer::action::eval_next_stmt;
+  using emel::jinja::renderer::action::eval_pending_expr;
+  using emel::jinja::renderer::action::finalize_done;
+  using emel::jinja::renderer::action::finalize_error;
+  using emel::jinja::renderer::action::seed_program;
+  using emel::jinja::renderer::action::write_pending_value;
+
+  {
+    renderer::action::context ctx{};
+    ctx.phase_error = EMEL_ERR_BACKEND;
+    seed_program(ctx);
+    CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+  }
+
+  {
+    renderer::action::context ctx{};
+    ctx.scope_count = renderer::action::k_max_scopes;
+    seed_program(ctx);
+    CHECK(ctx.phase_error != EMEL_OK);
+  }
+
+  {
+    renderer::action::context ctx{};
+    ctx.phase_error = EMEL_ERR_BACKEND;
+    eval_next_stmt(ctx);
+    CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+  }
+
+  {
+    renderer::action::context ctx{};
+    eval_next_stmt(ctx);
+    CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
+  }
+
+  {
+    renderer::action::context ctx{};
+    ast_list stmts;
+    ctx.statements = &stmts;
+    ctx.statement_index = 0;
+    eval_next_stmt(ctx);
+    CHECK(ctx.phase_error == EMEL_OK);
+  }
+
+  {
+    renderer::action::context ctx{};
+    ast_list stmts;
+    stmts.emplace_back(std::make_unique<noop_statement>());
+    ctx.statements = &stmts;
+    ctx.steps_remaining = 0;
+    eval_next_stmt(ctx);
+    CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+  }
+
+  {
+    renderer::action::context ctx{};
+    ast_list stmts;
+    stmts.emplace_back(nullptr);
+    ctx.statements = &stmts;
+    eval_next_stmt(ctx);
+    CHECK(ctx.phase_error == EMEL_OK);
+  }
+
+  {
+    renderer::action::context ctx{};
+    ast_list stmts;
+    stmts.emplace_back(std::make_unique<continue_statement>());
+    ctx.statements = &stmts;
+    eval_next_stmt(ctx);
+    CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
+  }
+
+  {
+    renderer::action::context ctx{};
+    ast_list stmts;
+    ast_list args;
+    ast_list body;
+    auto name = std::make_unique<identifier>("macro");
+    stmts.emplace_back(std::make_unique<macro_statement>(std::move(name), std::move(args), std::move(body)));
+    ctx.statements = &stmts;
+    ctx.callable_count = renderer::action::k_max_callables;
+    eval_next_stmt(ctx);
+    CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
+  }
+
+  {
+    renderer::action::context ctx{};
+    ast_list stmts;
+    ast_list args;
+    ast_list body;
+    auto name = std::make_unique<string_literal>("macro");
+    stmts.emplace_back(std::make_unique<macro_statement>(std::move(name), std::move(args), std::move(body)));
+    ctx.statements = &stmts;
+    eval_next_stmt(ctx);
+    CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
+  }
+
+  {
+    renderer::action::context ctx{};
+    eval_pending_expr(ctx);
+    CHECK_FALSE(ctx.pending_value_ready);
+  }
+
+  {
+    renderer::action::context ctx{};
+    write_pending_value(ctx);
+    CHECK_FALSE(ctx.pending_value_ready);
+  }
+
+  {
+    renderer::action::context ctx{};
+    finalize_done(ctx);
+    finalize_error(ctx);
+  }
+
+  {
+    auto done_cb = emel::callback<bool(const emel::jinja::events::rendering_done &)>::from<
+        +[](const emel::jinja::events::rendering_done &) -> bool { return true; }>();
+    auto error_cb = emel::callback<bool(const emel::jinja::events::rendering_error &)>::from<
+        +[](const emel::jinja::events::rendering_error &) -> bool { return true; }>();
+
+    std::array<char, 4> buffer = {};
+    size_t out_len = 0;
+    bool truncated = false;
+    int32_t err = EMEL_OK;
+    size_t err_pos = 0;
+    event::render ev{
+      .program = nullptr,
+      .globals = nullptr,
+      .output = buffer.data(),
+      .output_capacity = buffer.size(),
+      .output_length = &out_len,
+      .output_truncated = &truncated,
+      .error_out = &err,
+      .error_pos_out = &err_pos,
+      .dispatch_done = done_cb,
+      .dispatch_error = error_cb,
+    };
+
+    renderer::action::context ctx{};
+    begin_render(ev, ctx);
+    ctx.phase_error = EMEL_OK;
+    ctx.output_length = 2;
+    finalize_done(ctx);
+    CHECK(out_len == 2);
+    CHECK_FALSE(truncated);
+
+    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
+    finalize_error(ctx);
+    CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  }
+}

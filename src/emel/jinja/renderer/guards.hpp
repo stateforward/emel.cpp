@@ -25,4 +25,34 @@ struct phase_failed {
   }
 };
 
+struct has_stmt_work {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.statements != nullptr && ctx.statement_index < ctx.statements->size();
+  }
+};
+
+struct no_stmt_work {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.statements == nullptr || ctx.statement_index >= ctx.statements->size();
+  }
+};
+
+struct needs_expr {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.pending_expr != nullptr;
+  }
+};
+
+struct has_pending_expr {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.pending_expr != nullptr;
+  }
+};
+
+struct needs_write {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.pending_value_ready;
+  }
+};
+
 }  // namespace emel::jinja::renderer::guard

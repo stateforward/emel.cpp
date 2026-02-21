@@ -8,6 +8,10 @@
 #include "emel/jinja/ast.hpp"
 #include "emel/jinja/value.hpp"
 
+namespace emel::jinja::event {
+struct render;
+}  // namespace emel::jinja::event
+
 namespace emel::jinja::renderer::action {
 
 inline constexpr size_t k_max_scopes = 16;
@@ -44,6 +48,17 @@ struct context {
   int32_t last_error = EMEL_OK;
   size_t error_pos = 0;
   uint32_t steps_remaining = k_max_steps;
+  const emel::jinja::event::render * request = nullptr;
+  const emel::jinja::object_value * globals = nullptr;
+  const emel::jinja::ast_list * statements = nullptr;
+  size_t statement_index = 0;
+  const emel::jinja::ast_node * pending_expr = nullptr;
+  emel::jinja::value pending_value = {};
+  bool pending_value_ready = false;
+  char * output = nullptr;
+  size_t output_capacity = 0;
+  size_t output_length = 0;
+  bool output_truncated = false;
 
   std::array<scope_state, k_max_scopes> scopes = {};
   size_t scope_count = 0;
