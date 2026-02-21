@@ -8,7 +8,7 @@ scaffolding decisions live in [scaffold.plan.md](plans/scaffold.plan.md).
 **completed parity (audited)**
 - [x] buffer allocator cluster: allocator, planner, chunk allocator, realloc analyzer aligned with
   `ggml-alloc.c` (parity tests included).
-- [x] encoder/tokenizer: BPE, WPM, UGM, RWKV, PLaMo-2, pretokenizer, byte fallback aligned with
+- [x] encoder/tokenizer: BPE, WPM, UGM, RWKV, PLaMo-2, preprocessor, byte fallback aligned with
   reference vocab behavior.
 - [x] model parser: GGUF metadata mapping and orchestration aligned with reference parser behavior.
 - [x] model loader: orchestration and GGUF callbacks aligned with reference behavior.

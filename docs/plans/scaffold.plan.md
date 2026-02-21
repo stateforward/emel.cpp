@@ -16,7 +16,7 @@ consolidates decisions from `docs/decoder.plan.md` and ongoing architecture disc
   `encoder/graph_scheduler`) replacing compute_* naming.
 
 ## tokenizer + encoder
-- `tokenizer/pretokenizer`.
+- `tokenizer/preprocessor`.
 - `tokenizer/byte_fallback`.
 - `tokenizer/specials.hpp` (helper module; no separate SM for now).
 - model encoder (inference) will live under `generator/encoder/{text,vision,audio}` since generator

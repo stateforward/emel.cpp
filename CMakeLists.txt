@@ -87,6 +87,7 @@ if(EMEL_ENABLE_TESTS)
     tests/telemetry/exporter_tests.cpp
     tests/telemetry/provider_tests.cpp
     tests/sm/sm_policy_tests.cpp
+    tests/sm/sm_any_tests.cpp
     tests/decoder/decoder_tests.cpp
     tests/decoder/decoder_sm_transition_tests.cpp
     tests/decoder/decoder_action_branch_tests.cpp
