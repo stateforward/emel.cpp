@@ -32,7 +32,23 @@ cmake -S . -B build/coverage -G Ninja \
   -DCMAKE_EXE_LINKER_FLAGS="--coverage"
 
 cmake --build build/coverage --parallel
-ctest --test-dir build/coverage --output-on-failure -R emel_tests
+cpu_count=2
+if command -v nproc >/dev/null 2>&1; then
+  cpu_count="$(nproc)"
+elif command -v getconf >/dev/null 2>&1; then
+  cpu_count="$(getconf _NPROCESSORS_ONLN || echo 2)"
+elif command -v sysctl >/dev/null 2>&1; then
+  cpu_count="$(sysctl -n hw.ncpu || echo 2)"
+fi
+if [[ -z "$cpu_count" || "$cpu_count" -lt 1 ]]; then
+  cpu_count=2
+fi
+ctest_jobs=$((cpu_count / 2))
+if [[ "$ctest_jobs" -lt 1 ]]; then
+  ctest_jobs=1
+fi
+
+ctest --test-dir build/coverage --output-on-failure -R emel_tests -j "$ctest_jobs"
 
 echo "enforcing coverage thresholds: line >= ${LINE_COVERAGE_MIN}%, branch >= ${BRANCH_COVERAGE_MIN}%"
 

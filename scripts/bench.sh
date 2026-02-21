@@ -10,6 +10,7 @@ COMPARE_UPDATE=false
 UPDATE=false
 USE_ZIG=true
 MODE_FLAG=""
+COMBINED=false
 
 usage() {
   cat <<'USAGE'
@@ -64,6 +65,228 @@ fi
 if $UPDATE && ! $SNAPSHOT; then
   echo "error: --update requires --snapshot" >&2
   exit 1
+fi
+
+if $SNAPSHOT && $COMPARE; then
+  COMBINED=true
+fi
+
+if $COMBINED && [[ -n "$MODE_FLAG" ]]; then
+  echo "error: --llama-only/--emel-only cannot be used with --snapshot and --compare together" >&2
+  exit 1
+fi
+
+prepare_toolchain() {
+  bench_cc="${BENCH_CC:-cc}"
+  bench_cxx="${BENCH_CXX:-c++}"
+  bench_c_flags=""
+  bench_cxx_flags=""
+  bench_cc_arg=""
+  bench_cxx_arg=""
+  bench_asm_arg=""
+  if $USE_ZIG; then
+    bench_cc="$(command -v zig)"
+    bench_cxx="$bench_cc"
+    bench_cc_arg="cc"
+    bench_cxx_arg="c++"
+    bench_asm_arg="cc"
+    bench_c_flags="-fno-sanitize=undefined"
+    bench_cxx_flags="-fno-sanitize=undefined"
+  fi
+}
+
+configure_bench_build() {
+  local build_dir="$1"
+
+  cmake_args=(-S "$TOOLS_DIR" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
+              -DEMEL_ENABLE_TESTS=OFF
+              -DREF_IMPL_REF="$ref_value")
+  cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
+  cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
+  cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
+  if [[ -n "$bench_cc_arg" ]]; then
+    cmake_args+=("-DCMAKE_C_COMPILER_ARG1=$bench_cc_arg")
+    cmake_args+=("-DCMAKE_ASM_COMPILER_ARG1=$bench_cc_arg")
+  fi
+  if [[ -n "$bench_cxx_arg" ]]; then
+    cmake_args+=("-DCMAKE_CXX_COMPILER_ARG1=$bench_cxx_arg")
+  fi
+  if [[ -n "$bench_c_flags" ]]; then
+    cmake_args+=("-DCMAKE_C_FLAGS=$bench_c_flags")
+  fi
+  if [[ -n "$bench_cxx_flags" ]]; then
+    cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
+  fi
+
+  cmake "${cmake_args[@]}"
+  cmake --build "$build_dir" --parallel --target bench_runner
+}
+
+if $COMBINED; then
+  for tool in cmake ninja git; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "error: required tool missing: $tool" >&2
+      exit 1
+    fi
+  done
+  if $USE_ZIG && ! command -v zig >/dev/null 2>&1; then
+    echo "error: zig not found (use --system to use system compilers)" >&2
+    exit 1
+  fi
+
+  prepare_toolchain
+
+  build_dir="${BENCH_COMPARE_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
+  configure_bench_build "$build_dir"
+
+  compare_output="$(mktemp)"
+  "$build_dir/bench_runner" --mode=compare > "$compare_output"
+
+  current_snapshot="$(mktemp)"
+  trap 'rm -f "$compare_output" "$current_snapshot"' EXIT
+  awk '
+    /^[^#]/ {
+      name = $1;
+      emel = $3;
+      if (name != "" && emel != "") {
+        printf("%s ns_per_op=%s\n", name, emel);
+      }
+    }
+  ' "$compare_output" > "$current_snapshot"
+
+  TOLERANCE="${BENCH_TOLERANCE:-0.10}"
+  BASELINE="$ROOT_DIR/snapshots/bench/benchmarks.txt"
+
+  new_sms=()
+  base_ref="${BENCH_BASE_REF:-origin/main}"
+  if ! git -C "$ROOT_DIR" rev-parse --verify "$base_ref" >/dev/null 2>&1; then
+    if git -C "$ROOT_DIR" rev-parse --verify main >/dev/null 2>&1; then
+      base_ref="main"
+    else
+      base_ref="HEAD"
+      echo "warning: unable to resolve base ref, using HEAD (set BENCH_BASE_REF to override)" >&2
+    fi
+  fi
+
+  if [[ "$base_ref" != "HEAD" ]]; then
+    while IFS= read -r line; do
+      new_sms+=("$line")
+    done < <(git -C "$ROOT_DIR" diff --name-status "$base_ref...HEAD" -- 'src/emel/**/sm.hpp' \
+      | awk '$1 == "A" { print $2 }')
+  fi
+
+  ready_names=()
+  for sm in "${new_sms[@]+${new_sms[@]}}"; do
+    marker="$(grep -E "benchmark: (scaffold|ready)" "$ROOT_DIR/$sm" | head -n 1 || true)"
+    if [[ -z "$marker" ]]; then
+      echo "error: missing benchmark marker in $sm" >&2
+      exit 1
+    fi
+    if [[ "$marker" == *"benchmark: ready"* ]]; then
+      rel="${sm#src/emel/}"
+      name="${rel%/sm.hpp}"
+      ready_names+=("$name")
+    fi
+  done
+
+  for name in "${ready_names[@]+${ready_names[@]}}"; do
+    if ! grep -q "^${name} " "$current_snapshot"; then
+      echo "error: missing benchmark entry for $name" >&2
+      exit 1
+    fi
+  done
+
+  if $UPDATE; then
+    mkdir -p "$(dirname "$BASELINE")"
+    {
+      printf "# ref=%s\n" "$ref_value"
+      printf "# toolchain=%s\n" "$bench_cxx"
+      cat "$current_snapshot"
+    } > "$BASELINE"
+    echo "updated $BASELINE"
+  else
+    if [[ ! -f "$BASELINE" ]]; then
+      echo "error: missing baseline $BASELINE (run scripts/bench.sh --snapshot --update)" >&2
+      exit 1
+    fi
+
+    awk -v tol="$TOLERANCE" '
+    function parse_base(line,    n, fields, name, ns, i, pair) {
+      n = split(line, fields, " ");
+      name = fields[1];
+      for (i = 2; i <= n; ++i) {
+        if (fields[i] ~ /^ns_per_op=/) {
+          split(fields[i], pair, "=");
+          ns = pair[2];
+          break;
+        }
+      }
+      if (name == "" || ns == "") {
+        return;
+      }
+      base[name] = ns;
+    }
+    function parse_curr(line,    n, fields, name, ns, i, pair) {
+      n = split(line, fields, " ");
+      name = fields[1];
+      for (i = 2; i <= n; ++i) {
+        if (fields[i] ~ /^ns_per_op=/) {
+          split(fields[i], pair, "=");
+          ns = pair[2];
+          break;
+        }
+      }
+      if (name == "" || ns == "") {
+        return;
+      }
+      curr[name] = ns;
+    }
+    FNR == NR {
+      parse_base($0);
+      next;
+    }
+    {
+      parse_curr($0);
+      next;
+    }
+    END {
+      fail = 0;
+      for (name in base) {
+        if (!(name in curr)) {
+          print "error: missing benchmark entry for " name > "/dev/stderr";
+          fail = 1;
+          continue;
+        }
+        limit = base[name] * (1 + tol);
+        if (curr[name] > limit) {
+          printf("error: benchmark regression %s (%.3f > %.3f)\n", name, curr[name], limit) > "/dev/stderr";
+          fail = 1;
+        }
+      }
+      for (name in curr) {
+        if (!(name in base)) {
+          print "error: new benchmark entry without baseline: " name > "/dev/stderr";
+          fail = 1;
+        }
+      }
+      exit fail;
+    }
+    ' "$BASELINE" "$current_snapshot"
+  fi
+
+  if $COMPARE_UPDATE; then
+    compare_baseline="$ROOT_DIR/snapshots/bench/benchmarks_compare.txt"
+    {
+      printf "# ref=%s\n" "$ref_value"
+      printf "# toolchain=%s\n" "$bench_cxx"
+      cat "$compare_output"
+    } > "$compare_baseline"
+    echo "updated $compare_baseline"
+  else
+    cat "$compare_output"
+  fi
+
+  exit 0
 fi
 
 if $SNAPSHOT; then
