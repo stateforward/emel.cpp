@@ -1,9 +1,9 @@
 # ref=94b0200a01a753eff5897dab9311f51a7bc1c62f
 # toolchain=/opt/homebrew/bin/zig
-batch/splitter_equal emel.cpp 1863.059 ns/op, llama.cpp 6245.366 ns/op, ratio=0.298x
-batch/splitter_seq emel.cpp 1746.334 ns/op, llama.cpp 2747.782 ns/op, ratio=0.636x
-batch/splitter_simple emel.cpp 807.071 ns/op, llama.cpp 2380.369 ns/op, ratio=0.339x
-buffer/allocator_alloc_graph emel.cpp 17.284 ns/op, llama.cpp 53.085 ns/op, ratio=0.326x
-buffer/allocator_full emel.cpp 39.908 ns/op, llama.cpp 252.686 ns/op, ratio=0.158x
-buffer/allocator_reserve_n emel.cpp 20.470 ns/op, llama.cpp 452.188 ns/op, ratio=0.045x
-memory/coordinator_recurrent_full emel.cpp 3852.476 ns/op, llama.cpp 6002.800 ns/op, ratio=0.642x
+batch/splitter_equal emel.cpp 1612.731 ns/op, llama.cpp 6375.223 ns/op, ratio=0.253x
+batch/splitter_seq emel.cpp 1494.051 ns/op, llama.cpp 2637.307 ns/op, ratio=0.567x
+batch/splitter_simple emel.cpp 779.220 ns/op, llama.cpp 2259.085 ns/op, ratio=0.345x
+buffer/allocator_alloc_graph emel.cpp 17.263 ns/op, llama.cpp 52.344 ns/op, ratio=0.330x
+buffer/allocator_full emel.cpp 39.801 ns/op, llama.cpp 239.172 ns/op, ratio=0.166x
+buffer/allocator_reserve_n emel.cpp 20.497 ns/op, llama.cpp 426.365 ns/op, ratio=0.048x
+memory/coordinator_recurrent_full emel.cpp 3821.260 ns/op, llama.cpp 5509.109 ns/op, ratio=0.694x

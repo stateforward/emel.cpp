@@ -8,10 +8,10 @@ are not. True benchmarks will be end-to-end once the system is complete.
 
 | Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |
 | --- | ---: | ---: | ---: |
-| `batch/splitter_equal` | 1863.059 | 6245.366 | 0.298x |
-| `batch/splitter_seq` | 1746.334 | 2747.782 | 0.636x |
-| `batch/splitter_simple` | 807.071 | 2380.369 | 0.339x |
-| `buffer/allocator_alloc_graph` | 17.284 | 53.085 | 0.326x |
-| `buffer/allocator_full` | 39.908 | 252.686 | 0.158x |
-| `buffer/allocator_reserve_n` | 20.470 | 452.188 | 0.045x |
-| `memory/coordinator_recurrent_full` | 3852.476 | 6002.800 | 0.642x |
+| `batch/splitter_equal` | 1612.731 | 6375.223 | 0.253x |
+| `batch/splitter_seq` | 1494.051 | 2637.307 | 0.567x |
+| `batch/splitter_simple` | 779.220 | 2259.085 | 0.345x |
+| `buffer/allocator_alloc_graph` | 17.263 | 52.344 | 0.330x |
+| `buffer/allocator_full` | 39.801 | 239.172 | 0.166x |
+| `buffer/allocator_reserve_n` | 20.497 | 426.365 | 0.048x |
+| `memory/coordinator_recurrent_full` | 3821.260 | 5509.109 | 0.694x |
