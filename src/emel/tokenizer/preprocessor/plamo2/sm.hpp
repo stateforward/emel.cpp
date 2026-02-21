@@ -1,13 +1,119 @@
 #pragma once
 
 #include "emel/sm.hpp"
-#include "emel/tokenizer/preprocessor/actions.hpp"
-#include "emel/tokenizer/preprocessor/model.hpp"
+#include "emel/tokenizer/preprocessor/plamo2/actions.hpp"
+#include "emel/tokenizer/preprocessor/plamo2/guards.hpp"
 
 namespace emel::tokenizer::preprocessor::plamo2 {
 
-struct plamo2_tag {};
-struct model : emel::tokenizer::preprocessor::detail::model<plamo2_tag> {};
+struct idle {};
+struct preparing {};
+struct partitioning_select {};
+struct partitioning_bpe_no_specials {};
+struct partitioning_bpe_with_specials {};
+struct partitioning_non_bpe {};
+struct partition_decision {};
+struct done {};
+struct errored {};
+struct unexpected {};
+
+/**
+ * tokenizer preprocessor orchestration model.
+ *
+ * state purposes:
+ * - `idle`: wait for preprocess intent.
+ * - `preparing`: build special-token cache for the vocab.
+ * - `partitioning_select`: route to the correct partitioning behavior.
+ * - `partitioning_bpe_no_specials`: split raw text into BPE fragments without specials.
+ * - `partitioning_bpe_with_specials`: split raw text into fragments with specials isolated.
+ * - `partitioning_non_bpe`: split raw text into fragments with specials isolated.
+ * - `partition_decision`: branch on partition success/failure.
+ * - `done`/`errored`: terminal outcomes for a request.
+ * - `unexpected`: sequencing contract violation.
+ *
+ * guard semantics:
+ * - `valid_request`/`invalid_request`: validate request pointers and capacity.
+ * - `phase_ok`/`phase_failed`: observe error set by actions.
+ * - `bpe_no_specials`/`bpe_with_specials`/`not_bpe`: choose partition strategy.
+ *
+ * action side effects:
+ * - `begin_preprocess`: capture inputs and reset outputs.
+ * - `build_specials`: build cached special-token inventory.
+ * - `partition_non_bpe`: populate output fragments for non-BPE vocabularies.
+ * - `partition_bpe_no_specials`: populate output fragments without special tokens.
+ * - `partition_bpe_with_specials`: populate output fragments with special tokens.
+ * - `mark_done`: clear error state.
+ * - `ensure_last_error`: provide a terminal error code when missing.
+ * - `on_unexpected`: report sequencing violations.
+ */
+struct model {
+  auto operator()() const {
+    namespace sml = boost::sml;
+
+    return sml::make_transition_table(
+        *sml::state<idle> + sml::event<event::preprocess>[guard::valid_request{}] /
+                action::begin_preprocess = sml::state<preparing>,
+        sml::state<idle> + sml::event<event::preprocess>[guard::invalid_request{}] /
+                action::reject_invalid = sml::state<errored>,
+
+        sml::state<preparing> / action::build_specials =
+                sml::state<partitioning_select>,
+        sml::state<partitioning_select>[guard::bpe_no_specials{}] =
+                sml::state<partitioning_bpe_no_specials>,
+        sml::state<partitioning_select>[guard::bpe_with_specials{}] =
+                sml::state<partitioning_bpe_with_specials>,
+        sml::state<partitioning_select>[guard::not_bpe{}] =
+                sml::state<partitioning_non_bpe>,
+
+        sml::state<partitioning_bpe_no_specials> / action::partition_bpe_no_specials =
+                sml::state<partition_decision>,
+        sml::state<partitioning_bpe_with_specials> / action::partition_bpe_with_specials =
+                sml::state<partition_decision>,
+        sml::state<partitioning_non_bpe> / action::partition_non_bpe =
+                sml::state<partition_decision>,
+
+        sml::state<partition_decision>[guard::phase_failed{}] /
+                action::ensure_last_error = sml::state<errored>,
+        sml::state<partition_decision>[guard::phase_ok{}] /
+                action::mark_done = sml::state<done>,
+
+        sml::state<done> + sml::event<event::preprocess>[guard::valid_request{}] /
+                action::begin_preprocess = sml::state<preparing>,
+        sml::state<done> + sml::event<event::preprocess>[guard::invalid_request{}] /
+                action::reject_invalid = sml::state<errored>,
+
+        sml::state<errored> + sml::event<event::preprocess>[guard::valid_request{}] /
+                action::begin_preprocess = sml::state<preparing>,
+        sml::state<errored> + sml::event<event::preprocess>[guard::invalid_request{}] /
+                action::reject_invalid = sml::state<errored>,
+
+        sml::state<unexpected> + sml::event<event::preprocess>[guard::valid_request{}] /
+                action::begin_preprocess = sml::state<preparing>,
+        sml::state<unexpected> + sml::event<event::preprocess>[guard::invalid_request{}] /
+                action::reject_invalid = sml::state<errored>,
+
+        sml::state<idle> + sml::unexpected_event<sml::_> /
+                action::on_unexpected = sml::state<unexpected>,
+        sml::state<preparing> + sml::unexpected_event<sml::_> /
+                action::on_unexpected = sml::state<unexpected>,
+        sml::state<partitioning_select> + sml::unexpected_event<sml::_> /
+                action::on_unexpected = sml::state<unexpected>,
+        sml::state<partitioning_bpe_no_specials> + sml::unexpected_event<sml::_> /
+                action::on_unexpected = sml::state<unexpected>,
+        sml::state<partitioning_bpe_with_specials> + sml::unexpected_event<sml::_> /
+                action::on_unexpected = sml::state<unexpected>,
+        sml::state<partitioning_non_bpe> + sml::unexpected_event<sml::_> /
+                action::on_unexpected = sml::state<unexpected>,
+        sml::state<partition_decision> + sml::unexpected_event<sml::_> /
+                action::on_unexpected = sml::state<unexpected>,
+        sml::state<done> + sml::unexpected_event<sml::_> /
+                action::on_unexpected = sml::state<unexpected>,
+        sml::state<errored> + sml::unexpected_event<sml::_> /
+                action::on_unexpected = sml::state<unexpected>,
+        sml::state<unexpected> + sml::unexpected_event<sml::_> /
+                action::on_unexpected = sml::state<unexpected>);
+  }
+};
 
 struct sm : public emel::sm<model> {
   using base_type = emel::sm<model>;
@@ -18,7 +124,7 @@ struct sm : public emel::sm<model> {
     namespace sml = boost::sml;
 
     const bool accepted = base_type::process_event(ev);
-    const bool ok = this->is(sml::state<detail::done>);
+    const bool ok = this->is(sml::state<done>);
     const int32_t err =
         ok ? EMEL_OK
            : (context_.last_error != EMEL_OK ? context_.last_error

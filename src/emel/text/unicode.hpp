@@ -948,13 +948,13 @@ inline std::vector<uint32_t> unicode_cpts_from_utf8(const std::string & utf8) {
   return result;
 }
 
-unicode_cpt_flags unicode_cpt_flags_from_cpt(const uint32_t cpt) {
+inline unicode_cpt_flags unicode_cpt_flags_from_cpt(const uint32_t cpt) {
   static const unicode_cpt_flags undef(unicode_cpt_flags::UNDEFINED);
   static const auto cpt_flags = unicode_cpt_flags_array();
   return cpt < cpt_flags.size() ? cpt_flags[cpt] : undef;
 }
 
-unicode_cpt_flags unicode_cpt_flags_from_utf8(const std::string & utf8) {
+inline unicode_cpt_flags unicode_cpt_flags_from_utf8(const std::string & utf8) {
   static const unicode_cpt_flags undef(unicode_cpt_flags::UNDEFINED);
   if (utf8.empty()) {
     return undef;  // undefined
@@ -968,7 +968,7 @@ inline std::string unicode_byte_to_utf8(uint8_t byte) {
   return map.at(byte);
 }
 
-uint8_t unicode_utf8_to_byte(const std::string & utf8) {
+inline uint8_t unicode_utf8_to_byte(const std::string & utf8) {
   static std::unordered_map<std::string, uint8_t> map = unicode_utf8_to_byte_map();
   return map.at(utf8);
 }

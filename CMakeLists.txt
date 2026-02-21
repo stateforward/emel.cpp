@@ -16,6 +16,7 @@ else()
 endif()
 
 option(EMEL_ENABLE_TESTS "Build tests" ON)
+option(EMEL_ENABLE_FUZZ "Build fuzz targets" OFF)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -203,4 +204,41 @@ if(EMEL_ENABLE_TESTS)
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_docs.sh --check
   )
 
+endif()
+
+if(EMEL_ENABLE_FUZZ)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "EMEL fuzz targets require Clang/libFuzzer")
+  endif()
+
+  function(emel_configure_fuzzer target_name)
+    target_link_libraries(${target_name}
+      PRIVATE
+        emel_core
+        emel
+    )
+    target_compile_options(${target_name}
+      PRIVATE
+        -fsanitize=fuzzer,address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(${target_name}
+      PRIVATE
+        -fsanitize=fuzzer,address,undefined
+    )
+    target_compile_definitions(${target_name}
+      PRIVATE
+        FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    )
+  endfunction()
+
+  add_executable(emel_fuzz_gguf_parser
+    tests/fuzz/gguf_parser_fuzz.cpp
+  )
+  emel_configure_fuzzer(emel_fuzz_gguf_parser)
+
+  add_executable(emel_fuzz_gbnf_parser
+    tests/fuzz/gbnf_parser_fuzz.cpp
+  )
+  emel_configure_fuzzer(emel_fuzz_gbnf_parser)
 endif()

@@ -459,8 +459,8 @@ namespace emel::bench {
 void append_emel_memory_coordinator_recurrent_cases(std::vector<result> & results,
                                                     const config & cfg) {
   emel::memory::coordinator::recurrent::sm machine{};
-  reference_state llama_state{};
-  ensure_splitter_parity(llama_state.splitter);
+  auto llama_state = std::make_shared<reference_state>();
+  ensure_splitter_parity(llama_state->splitter);
   event::memory_status update_status = event::memory_status::failed_prepare;
   event::memory_status batch_status = event::memory_status::failed_prepare;
   event::memory_status full_status = event::memory_status::failed_prepare;
@@ -473,7 +473,7 @@ void append_emel_memory_coordinator_recurrent_cases(std::vector<result> & result
     .status_out = &update_status,
     .error_out = &update_error,
     .prepare_fn = &prepare_update_reference,
-    .prepare_ctx = &llama_state,
+    .prepare_ctx = llama_state.get(),
   };
   event::prepare_batch batch_request = {
     .n_ubatch = 1,
@@ -481,21 +481,21 @@ void append_emel_memory_coordinator_recurrent_cases(std::vector<result> & result
     .status_out = &batch_status,
     .error_out = &batch_error,
     .prepare_fn = &prepare_batch_reference,
-    .prepare_ctx = &llama_state,
+    .prepare_ctx = llama_state.get(),
   };
   event::prepare_full full_request = {
     .status_out = &full_status,
     .error_out = &full_error,
     .prepare_fn = &prepare_full_reference,
-    .prepare_ctx = &llama_state,
+    .prepare_ctx = llama_state.get(),
   };
 
   auto fn = [&]() {
     split_result split_out;
-    if (!run_emel_split_equal(llama_state.splitter.inputs, split_out)) {
+    if (!run_emel_split_equal(llama_state->splitter.inputs, split_out)) {
       return;
     }
-    build_ubatches_from_split(llama_state.splitter.inputs, split_out, llama_state.ubatches);
+    build_ubatches_from_split(llama_state->splitter.inputs, split_out, llama_state->ubatches);
     (void)machine.process_event(update_request);
     (void)machine.process_event(batch_request);
     (void)machine.process_event(full_request);
@@ -506,8 +506,8 @@ void append_emel_memory_coordinator_recurrent_cases(std::vector<result> & result
 
 void append_reference_memory_coordinator_recurrent_cases(std::vector<result> & results,
                                                          const config & cfg) {
-  reference_state state{};
-  ensure_splitter_parity(state.splitter);
+  auto state = std::make_shared<reference_state>();
+  ensure_splitter_parity(state->splitter);
   event::prepare_update update_request = {
     .optimize = true,
   };
@@ -518,14 +518,14 @@ void append_reference_memory_coordinator_recurrent_cases(std::vector<result> & r
   event::prepare_full full_request = {};
   auto fn = [&]() {
     split_result split_out;
-    if (!run_llama_split_equal(state.splitter, split_out)) {
+    if (!run_llama_split_equal(state->splitter, split_out)) {
       return;
     }
-    build_ubatches_from_split(state.splitter.inputs, split_out, state.ubatches);
+    build_ubatches_from_split(state->splitter.inputs, split_out, state->ubatches);
     int32_t err = EMEL_OK;
-    (void)prepare_update_reference(update_request, &state, &err);
-    (void)prepare_batch_reference(batch_request, &state, &err);
-    (void)prepare_full_reference(full_request, &state, &err);
+    (void)prepare_update_reference(update_request, state.get(), &err);
+    (void)prepare_batch_reference(batch_request, state.get(), &err);
+    (void)prepare_full_reference(full_request, state.get(), &err);
   };
   results.push_back(measure_case("memory/coordinator_recurrent_full", cfg, fn));
 }

@@ -106,6 +106,7 @@ add_executable(bench_runner
   ${CMAKE_CURRENT_SOURCE_DIR}/jinja_renderer_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_coordinator_recurrent_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/sm_any_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_preprocessor_bench.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/lexer.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/parser.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/runtime.cpp

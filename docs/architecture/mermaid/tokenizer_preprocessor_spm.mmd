@@ -3,8 +3,13 @@ stateDiagram-v2
   [*] --> idle
   idle --> preparing : preprocess [valid_request_] / begin_preprocess_
   idle --> errored : preprocess [invalid_request_] / reject_invalid_
-  preparing --> partitioning : [always] / build_specials_
-  partitioning --> partition_decision : [always] / partition_specials_
+  preparing --> partitioning_select : [always] / build_specials_
+  partitioning_select --> partitioning_bpe_no_specials : [bpe_no_specials_] / none
+  partitioning_select --> partitioning_bpe_with_specials : [bpe_with_specials_] / none
+  partitioning_select --> partitioning_non_bpe : [not_bpe_] / none
+  partitioning_bpe_no_specials --> partition_decision : [always] / partition_bpe_no_specials_
+  partitioning_bpe_with_specials --> partition_decision : [always] / partition_bpe_with_specials_
+  partitioning_non_bpe --> partition_decision : [always] / partition_non_bpe_
   partition_decision --> errored : [phase_failed_] / ensure_last_error_
   partition_decision --> done : [phase_ok_] / mark_done_
   done --> preparing : preprocess [valid_request_] / begin_preprocess_
@@ -15,7 +20,10 @@ stateDiagram-v2
   unexpected --> errored : preprocess [invalid_request_] / reject_invalid_
   idle --> unexpected : _ [always] / on_unexpected_
   preparing --> unexpected : _ [always] / on_unexpected_
-  partitioning --> unexpected : _ [always] / on_unexpected_
+  partitioning_select --> unexpected : _ [always] / on_unexpected_
+  partitioning_bpe_no_specials --> unexpected : _ [always] / on_unexpected_
+  partitioning_bpe_with_specials --> unexpected : _ [always] / on_unexpected_
+  partitioning_non_bpe --> unexpected : _ [always] / on_unexpected_
   partition_decision --> unexpected : _ [always] / on_unexpected_
   done --> unexpected : _ [always] / on_unexpected_
   errored --> unexpected : _ [always] / on_unexpected_

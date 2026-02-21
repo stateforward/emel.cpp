@@ -196,6 +196,7 @@ src/emel/tensor/lifetime_analyzer/sm.hpp
 src/emel/text/unicode.hpp
 src/emel/text/unicode_data.hpp
 src/emel/tokenizer/actions.hpp
+src/emel/tokenizer/bpe/regex.hpp
 src/emel/tokenizer/context.hpp
 src/emel/tokenizer/events.hpp
 src/emel/tokenizer/preprocessor/actions.hpp
@@ -206,7 +207,6 @@ src/emel/tokenizer/preprocessor/detail.hpp
 src/emel/tokenizer/preprocessor/events.hpp
 src/emel/tokenizer/preprocessor/fallback/sm.hpp
 src/emel/tokenizer/preprocessor/guards.hpp
-src/emel/tokenizer/preprocessor/model.hpp
 src/emel/tokenizer/preprocessor/plamo2/sm.hpp
 src/emel/tokenizer/preprocessor/rwkv/sm.hpp
 src/emel/tokenizer/preprocessor/spm/sm.hpp

@@ -104,6 +104,11 @@ ALWAYS reuse unavoidable heap allocations.
 ALWAYS document rationale for unavoidable heap allocation in code.
 ALWAYS keep telemetry non-blocking and optional.
 NEVER use exceptions for control flow in hot paths.
+NEVER rely on try/catch inside state machine actions/guards; avoid exceptions
+unless absolutely necessary.
+ALWAYS keep actor models independent; do not share a model between actors unless
+explicitly authorized by the user. Only common actions/guards that are not
+variant-specific may be shared.
 
 ## naming, style, and portability
 ALWAYS use snake_case for functions, variables, and namespaces.
@@ -114,6 +119,7 @@ ALWAYS keep line length near 100 columns and use 2-space indentation.
 NEVER use `using namespace` in headers.
 ALWAYS keep code portable across linux, macOS, and windows.
 NEVER use platform-specific APIs unless wrapped behind an abstraction.
+ALWAYS write scripts to work on any Unix-based OS.
 
 ## build, tests, and CI gates
 ALWAYS use zig toolchain (zig cc and zig c++) for default development and
@@ -154,6 +160,7 @@ ALWAYS implement equivalent functionality natively without external llama.cpp or
 ggml linkage.
 NEVER link "emel" against llama.cpp or ggml outside `tools/bench`.
 ALWAYS link llama.cpp and ggml together with emel in `tools/bench` only.
-NEVER use `llama_` or `ggml_` prefixes in identifiers, symbols, files, or APIs.
+NEVER use `llama_` or `ggml_` prefixes in identifiers, symbols, files, or APIs
+outside `tools/bench`.
 ALWAYS use `emel_` or `EMEL_` prefixes for project-owned identifiers, symbols,
 files, and APIs.

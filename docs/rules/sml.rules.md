@@ -61,6 +61,11 @@ primary sources consulted (non-exhaustive)
    - action initiates work and transitions to a “waiting” state.
    - A later external event represents completion (still no queues).
 9. actions SHOULD be `noexcept` in production builds. if exceptions are enabled, the system MUST define a hard policy for exception events and document action-throws semantics (overview page notes different semantics for guard-throws vs action-throws).
+10. avoid try/catch in guards/actions. exceptions MUST be avoided unless
+    absolutely necessary and explicitly justified.
+11. actors are independent: do not share a model between actors unless
+    explicitly authorized by the user. only common actions/guards that are not
+    variant-specific may be shared.
 10. unexpected-event handling MUST NOT consume internal SML events. do NOT use
     `event<sml::_>` as an unexpected-event wildcard. use `sml::unexpected_event`
     for unexpected-event handling; it is only raised for unhandled external events.

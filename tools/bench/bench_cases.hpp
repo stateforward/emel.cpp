@@ -20,5 +20,8 @@ void append_emel_jinja_renderer_cases(std::vector<result> & results, const confi
 void append_reference_jinja_renderer_cases(std::vector<result> & results, const config & cfg);
 void append_emel_sm_any_cases(std::vector<result> & results, const config & cfg);
 void append_reference_sm_any_cases(std::vector<result> & results, const config & cfg);
+void append_emel_tokenizer_preprocessor_cases(std::vector<result> & results, const config & cfg);
+void append_reference_tokenizer_preprocessor_cases(std::vector<result> & results,
+                                                   const config & cfg);
 
 }  // namespace emel::bench

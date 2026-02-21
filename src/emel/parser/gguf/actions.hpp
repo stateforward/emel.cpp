@@ -58,6 +58,8 @@ inline constexpr char k_key_general_version[] = "general.version";
 inline constexpr char k_key_general_organization[] = "general.organization";
 inline constexpr char k_key_general_finetune[] = "general.finetune";
 inline constexpr char k_key_general_basename[] = "general.basename";
+
+inline const emel::model::data::vocab k_default_vocab = {};
 inline constexpr char k_key_general_description[] = "general.description";
 inline constexpr char k_key_general_quantized_by[] = "general.quantized_by";
 inline constexpr char k_key_general_size_label[] = "general.size_label";
@@ -1314,7 +1316,7 @@ inline void reset_model_data(emel::model::data & model) {
   model.weights_mapped = false;
   model.architecture_name[0] = '\0';
   model.params = {};
-  model.vocab_data = {};
+  model.vocab_data = k_default_vocab;
   model.weights_split_count = 1;
   model.weights_split_sizes = {};
   model.weights_split_offsets = {};

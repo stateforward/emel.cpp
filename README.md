@@ -33,7 +33,8 @@ scripts/quality_gates.sh
 ```
 
 Individual gates live in `scripts/build_with_zig.sh`, `scripts/test_with_coverage.sh`,
-`scripts/lint_snapshot.sh`, and `scripts/bench.sh`.
+`scripts/test_with_sanitizers.sh`, `scripts/fuzz_smoke.sh`, `scripts/lint_snapshot.sh`,
+and `scripts/bench.sh`.
 
 ### Why Zig for builds
 

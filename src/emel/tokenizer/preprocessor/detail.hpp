@@ -69,7 +69,7 @@ inline bool is_special_type(const emel::model::data::vocab & vocab,
 
 inline bool build_special_tokens(special_token_cache & cache,
                                  const emel::model::data::vocab & vocab) {
-  if (cache.vocab == &vocab && cache.count > 0) {
+  if (cache.vocab == &vocab) {
     return true;
   }
   cache.vocab = &vocab;
@@ -145,6 +145,15 @@ inline bool partition_with_specials(const std::string_view text,
   *fragment_count_out = 0;
   if (fragment_capacity == 0 || fragment_capacity > k_max_fragments) {
     return false;
+  }
+
+  if (cache.count == 0) {
+    size_t count = 0;
+    if (!push_raw_fragment(fragments_out, fragment_capacity, count, text)) {
+      return false;
+    }
+    *fragment_count_out = count;
+    return true;
   }
 
   std::array<fragment, k_max_fragments> current_fragments = {};
