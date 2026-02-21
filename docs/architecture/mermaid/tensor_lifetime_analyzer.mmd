@@ -1,36 +1,36 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__tensor__lifetime_analyzer__idle
-  emel__tensor__lifetime_analyzer__idle --> emel__tensor__lifetime_analyzer__validating : emel__tensor__lifetime_analyzer__event__analyze [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__begin_analyze_
-  emel__tensor__lifetime_analyzer__validating --> emel__tensor__lifetime_analyzer__validate_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__run_validate_
-  emel__tensor__lifetime_analyzer__validate_decision --> emel__tensor__lifetime_analyzer__errored : [boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__guard__phase_failed_] / boost__sml__front__none
-  emel__tensor__lifetime_analyzer__validate_decision --> emel__tensor__lifetime_analyzer__collecting_ranges : [boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__guard__phase_ok_] / boost__sml__front__none
-  emel__tensor__lifetime_analyzer__collecting_ranges --> emel__tensor__lifetime_analyzer__collect_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__run_collect_ranges_
-  emel__tensor__lifetime_analyzer__collect_decision --> emel__tensor__lifetime_analyzer__errored : [boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__guard__phase_failed_] / boost__sml__front__none
-  emel__tensor__lifetime_analyzer__collect_decision --> emel__tensor__lifetime_analyzer__publishing : [boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__guard__phase_ok_] / boost__sml__front__none
-  emel__tensor__lifetime_analyzer__publishing --> emel__tensor__lifetime_analyzer__publish_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__run_publish_
-  emel__tensor__lifetime_analyzer__publish_decision --> emel__tensor__lifetime_analyzer__errored : [boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__guard__phase_failed_] / boost__sml__front__none
-  emel__tensor__lifetime_analyzer__publish_decision --> emel__tensor__lifetime_analyzer__done : [boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__guard__phase_ok_] / boost__sml__front__none
-  emel__tensor__lifetime_analyzer__done --> emel__tensor__lifetime_analyzer__idle : [boost__sml__front__always] / boost__sml__front__none
-  emel__tensor__lifetime_analyzer__errored --> emel__tensor__lifetime_analyzer__idle : [boost__sml__front__always] / boost__sml__front__none
-  emel__tensor__lifetime_analyzer__idle --> emel__tensor__lifetime_analyzer__reset_decision : emel__tensor__lifetime_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__begin_reset_
-  emel__tensor__lifetime_analyzer__validating --> emel__tensor__lifetime_analyzer__reset_decision : emel__tensor__lifetime_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__begin_reset_
-  emel__tensor__lifetime_analyzer__validate_decision --> emel__tensor__lifetime_analyzer__reset_decision : emel__tensor__lifetime_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__begin_reset_
-  emel__tensor__lifetime_analyzer__collecting_ranges --> emel__tensor__lifetime_analyzer__reset_decision : emel__tensor__lifetime_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__begin_reset_
-  emel__tensor__lifetime_analyzer__collect_decision --> emel__tensor__lifetime_analyzer__reset_decision : emel__tensor__lifetime_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__begin_reset_
-  emel__tensor__lifetime_analyzer__publishing --> emel__tensor__lifetime_analyzer__reset_decision : emel__tensor__lifetime_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__begin_reset_
-  emel__tensor__lifetime_analyzer__publish_decision --> emel__tensor__lifetime_analyzer__reset_decision : emel__tensor__lifetime_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__begin_reset_
-  emel__tensor__lifetime_analyzer__done --> emel__tensor__lifetime_analyzer__reset_decision : emel__tensor__lifetime_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__begin_reset_
-  emel__tensor__lifetime_analyzer__errored --> emel__tensor__lifetime_analyzer__reset_decision : emel__tensor__lifetime_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__begin_reset_
-  emel__tensor__lifetime_analyzer__reset_decision --> emel__tensor__lifetime_analyzer__errored : [boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__guard__phase_failed_] / boost__sml__front__none
-  emel__tensor__lifetime_analyzer__reset_decision --> emel__tensor__lifetime_analyzer__idle : [boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__guard__phase_ok_] / boost__sml__front__none
-  emel__tensor__lifetime_analyzer__idle --> emel__tensor__lifetime_analyzer__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__on_unexpected_
-  emel__tensor__lifetime_analyzer__validating --> emel__tensor__lifetime_analyzer__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__on_unexpected_
-  emel__tensor__lifetime_analyzer__validate_decision --> emel__tensor__lifetime_analyzer__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__on_unexpected_
-  emel__tensor__lifetime_analyzer__collecting_ranges --> emel__tensor__lifetime_analyzer__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__on_unexpected_
-  emel__tensor__lifetime_analyzer__collect_decision --> emel__tensor__lifetime_analyzer__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__on_unexpected_
-  emel__tensor__lifetime_analyzer__publishing --> emel__tensor__lifetime_analyzer__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__on_unexpected_
-  emel__tensor__lifetime_analyzer__publish_decision --> emel__tensor__lifetime_analyzer__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__on_unexpected_
-  emel__tensor__lifetime_analyzer__done --> emel__tensor__lifetime_analyzer__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__on_unexpected_
-  emel__tensor__lifetime_analyzer__errored --> emel__tensor__lifetime_analyzer__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__on_unexpected_
-  emel__tensor__lifetime_analyzer__reset_decision --> emel__tensor__lifetime_analyzer__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__on_unexpected_
+  [*] --> idle
+  idle --> validating : analyze [always] / begin_analyze_
+  validating --> validate_decision : [always] / run_validate_
+  validate_decision --> errored : [phase_failed_] / none
+  validate_decision --> collecting_ranges : [phase_ok_] / none
+  collecting_ranges --> collect_decision : [always] / run_collect_ranges_
+  collect_decision --> errored : [phase_failed_] / none
+  collect_decision --> publishing : [phase_ok_] / none
+  publishing --> publish_decision : [always] / run_publish_
+  publish_decision --> errored : [phase_failed_] / none
+  publish_decision --> done : [phase_ok_] / none
+  done --> idle : [always] / none
+  errored --> idle : [always] / none
+  idle --> reset_decision : reset [always] / begin_reset_
+  validating --> reset_decision : reset [always] / begin_reset_
+  validate_decision --> reset_decision : reset [always] / begin_reset_
+  collecting_ranges --> reset_decision : reset [always] / begin_reset_
+  collect_decision --> reset_decision : reset [always] / begin_reset_
+  publishing --> reset_decision : reset [always] / begin_reset_
+  publish_decision --> reset_decision : reset [always] / begin_reset_
+  done --> reset_decision : reset [always] / begin_reset_
+  errored --> reset_decision : reset [always] / begin_reset_
+  reset_decision --> errored : [phase_failed_] / none
+  reset_decision --> idle : [phase_ok_] / none
+  idle --> errored : _ [always] / on_unexpected_
+  validating --> errored : _ [always] / on_unexpected_
+  validate_decision --> errored : _ [always] / on_unexpected_
+  collecting_ranges --> errored : _ [always] / on_unexpected_
+  collect_decision --> errored : _ [always] / on_unexpected_
+  publishing --> errored : _ [always] / on_unexpected_
+  publish_decision --> errored : _ [always] / on_unexpected_
+  done --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_
+  reset_decision --> errored : _ [always] / on_unexpected_

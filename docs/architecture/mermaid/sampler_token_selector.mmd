@@ -1,19 +1,19 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__sampler__token_selector__initialized
-  emel__sampler__token_selector__initialized --> emel__sampler__token_selector__validating : emel__sampler__token_selector__event__select_token [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__begin_select_token_
-  emel__sampler__token_selector__validating --> emel__sampler__token_selector__validate_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__run_validate_
-  emel__sampler__token_selector__validate_decision --> emel__sampler__token_selector__errored : [boost__sml__aux__zero_wrapper_emel__sampler__token_selector__guard__phase_failed_] / boost__sml__front__none
-  emel__sampler__token_selector__validate_decision --> emel__sampler__token_selector__selecting_token : [boost__sml__aux__zero_wrapper_emel__sampler__token_selector__guard__phase_ok_] / boost__sml__front__none
-  emel__sampler__token_selector__selecting_token --> emel__sampler__token_selector__select_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__run_select_
-  emel__sampler__token_selector__select_decision --> emel__sampler__token_selector__errored : [boost__sml__aux__zero_wrapper_emel__sampler__token_selector__guard__phase_failed_] / boost__sml__front__none
-  emel__sampler__token_selector__select_decision --> emel__sampler__token_selector__done : [boost__sml__aux__zero_wrapper_emel__sampler__token_selector__guard__phase_ok_] / boost__sml__front__none
-  emel__sampler__token_selector__done --> emel__sampler__token_selector__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__publish_done_
-  emel__sampler__token_selector__errored --> emel__sampler__token_selector__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__publish_error_
-  emel__sampler__token_selector__initialized --> emel__sampler__token_selector__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__on_unexpected_
-  emel__sampler__token_selector__validating --> emel__sampler__token_selector__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__on_unexpected_
-  emel__sampler__token_selector__validate_decision --> emel__sampler__token_selector__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__on_unexpected_
-  emel__sampler__token_selector__selecting_token --> emel__sampler__token_selector__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__on_unexpected_
-  emel__sampler__token_selector__select_decision --> emel__sampler__token_selector__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__on_unexpected_
-  emel__sampler__token_selector__done --> emel__sampler__token_selector__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__on_unexpected_
-  emel__sampler__token_selector__errored --> emel__sampler__token_selector__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__on_unexpected_
+  [*] --> initialized
+  initialized --> validating : select_token [always] / begin_select_token_
+  validating --> validate_decision : [always] / run_validate_
+  validate_decision --> errored : [phase_failed_] / none
+  validate_decision --> selecting_token : [phase_ok_] / none
+  selecting_token --> select_decision : [always] / run_select_
+  select_decision --> errored : [phase_failed_] / none
+  select_decision --> done : [phase_ok_] / none
+  done --> initialized : [always] / publish_done_
+  errored --> initialized : [always] / publish_error_
+  initialized --> errored : _ [always] / on_unexpected_
+  validating --> errored : _ [always] / on_unexpected_
+  validate_decision --> errored : _ [always] / on_unexpected_
+  selecting_token --> errored : _ [always] / on_unexpected_
+  select_decision --> errored : _ [always] / on_unexpected_
+  done --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_

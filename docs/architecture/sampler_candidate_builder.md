@@ -7,28 +7,28 @@ Source: [`emel/sampler/candidate_builder/sm.hpp`](https://github.com/stateforwar
 ```mermaid
 stateDiagram-v2
   direction TB
-  [*] --> emel__sampler__candidate_builder__initialized
-  emel__sampler__candidate_builder__initialized --> emel__sampler__candidate_builder__validating : emel__sampler__candidate_builder__event__build [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__begin_build_
-  emel__sampler__candidate_builder__validating --> emel__sampler__candidate_builder__validate_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__run_validate_
-  emel__sampler__candidate_builder__validate_decision --> emel__sampler__candidate_builder__errored : [boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__guard__phase_failed_] / boost__sml__front__none
-  emel__sampler__candidate_builder__validate_decision --> emel__sampler__candidate_builder__building_candidates : [boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__guard__phase_ok_] / boost__sml__front__none
-  emel__sampler__candidate_builder__building_candidates --> emel__sampler__candidate_builder__build_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__run_build_candidates_
-  emel__sampler__candidate_builder__build_decision --> emel__sampler__candidate_builder__errored : [boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__guard__phase_failed_] / boost__sml__front__none
-  emel__sampler__candidate_builder__build_decision --> emel__sampler__candidate_builder__normalizing_scores : [boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__guard__phase_ok_] / boost__sml__front__none
-  emel__sampler__candidate_builder__normalizing_scores --> emel__sampler__candidate_builder__normalize_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__run_normalize_scores_
-  emel__sampler__candidate_builder__normalize_decision --> emel__sampler__candidate_builder__errored : [boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__guard__phase_failed_] / boost__sml__front__none
-  emel__sampler__candidate_builder__normalize_decision --> emel__sampler__candidate_builder__done : [boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__guard__phase_ok_] / boost__sml__front__none
-  emel__sampler__candidate_builder__done --> emel__sampler__candidate_builder__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__publish_done_
-  emel__sampler__candidate_builder__errored --> emel__sampler__candidate_builder__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__publish_error_
-  emel__sampler__candidate_builder__initialized --> emel__sampler__candidate_builder__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__on_unexpected_
-  emel__sampler__candidate_builder__validating --> emel__sampler__candidate_builder__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__on_unexpected_
-  emel__sampler__candidate_builder__validate_decision --> emel__sampler__candidate_builder__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__on_unexpected_
-  emel__sampler__candidate_builder__building_candidates --> emel__sampler__candidate_builder__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__on_unexpected_
-  emel__sampler__candidate_builder__build_decision --> emel__sampler__candidate_builder__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__on_unexpected_
-  emel__sampler__candidate_builder__normalizing_scores --> emel__sampler__candidate_builder__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__on_unexpected_
-  emel__sampler__candidate_builder__normalize_decision --> emel__sampler__candidate_builder__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__on_unexpected_
-  emel__sampler__candidate_builder__done --> emel__sampler__candidate_builder__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__on_unexpected_
-  emel__sampler__candidate_builder__errored --> emel__sampler__candidate_builder__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__on_unexpected_
+  [*] --> initialized
+  initialized --> validating : build [always] / begin_build_
+  validating --> validate_decision : [always] / run_validate_
+  validate_decision --> errored : [phase_failed_] / none
+  validate_decision --> building_candidates : [phase_ok_] / none
+  building_candidates --> build_decision : [always] / run_build_candidates_
+  build_decision --> errored : [phase_failed_] / none
+  build_decision --> normalizing_scores : [phase_ok_] / none
+  normalizing_scores --> normalize_decision : [always] / run_normalize_scores_
+  normalize_decision --> errored : [phase_failed_] / none
+  normalize_decision --> done : [phase_ok_] / none
+  done --> initialized : [always] / publish_done_
+  errored --> initialized : [always] / publish_error_
+  initialized --> errored : _ [always] / on_unexpected_
+  validating --> errored : _ [always] / on_unexpected_
+  validate_decision --> errored : _ [always] / on_unexpected_
+  building_candidates --> errored : _ [always] / on_unexpected_
+  build_decision --> errored : _ [always] / on_unexpected_
+  normalizing_scores --> errored : _ [always] / on_unexpected_
+  normalize_decision --> errored : _ [always] / on_unexpected_
+  done --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_
 ```
 
 ## Transitions

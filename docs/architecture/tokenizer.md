@@ -7,64 +7,64 @@ Source: [`emel/tokenizer/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/
 ```mermaid
 stateDiagram-v2
   direction TB
-  [*] --> emel__tokenizer__initialized
-  emel__tokenizer__initialized --> emel__tokenizer__building_special_tokens : emel__tokenizer__event__tokenize [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__can_tokenize_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__begin_tokenize_
-  emel__tokenizer__initialized --> emel__tokenizer__errored : emel__tokenizer__event__tokenize [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__reject_invalid_
-  emel__tokenizer__done --> emel__tokenizer__building_special_tokens : emel__tokenizer__event__tokenize [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__can_tokenize_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__begin_tokenize_
-  emel__tokenizer__done --> emel__tokenizer__errored : emel__tokenizer__event__tokenize [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__reject_invalid_
-  emel__tokenizer__errored --> emel__tokenizer__building_special_tokens : emel__tokenizer__event__tokenize [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__can_tokenize_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__begin_tokenize_
-  emel__tokenizer__errored --> emel__tokenizer__errored : emel__tokenizer__event__tokenize [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__reject_invalid_
-  emel__tokenizer__unexpected --> emel__tokenizer__building_special_tokens : emel__tokenizer__event__tokenize [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__can_tokenize_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__begin_tokenize_
-  emel__tokenizer__unexpected --> emel__tokenizer__unexpected : emel__tokenizer__event__tokenize [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__reject_invalid_
-  emel__tokenizer__building_special_tokens --> emel__tokenizer__special_tokens_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__build_special_tokens_
-  emel__tokenizer__special_tokens_decision --> emel__tokenizer__errored : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__phase_failed_] / boost__sml__front__none
-  emel__tokenizer__special_tokens_decision --> emel__tokenizer__partitioning_with_specials : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__has_special_tokens_] / boost__sml__front__none
-  emel__tokenizer__special_tokens_decision --> emel__tokenizer__partitioning_raw : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__no_special_tokens_] / boost__sml__front__none
-  emel__tokenizer__partitioning_raw --> emel__tokenizer__partitioning_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__partition_raw_
-  emel__tokenizer__partitioning_with_specials --> emel__tokenizer__partitioning_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__partition_with_specials_
-  emel__tokenizer__partitioning_decision --> emel__tokenizer__errored : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__phase_failed_] / boost__sml__front__none
-  emel__tokenizer__partitioning_decision --> emel__tokenizer__selecting_backend : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__phase_ok_] / boost__sml__front__none
-  emel__tokenizer__selecting_backend --> emel__tokenizer__selecting_backend_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__select_backend_
-  emel__tokenizer__selecting_backend_decision --> emel__tokenizer__errored : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__phase_failed_] / boost__sml__front__none
-  emel__tokenizer__selecting_backend_decision --> emel__tokenizer__prefix_decision : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__phase_ok_] / boost__sml__front__none
-  emel__tokenizer__prefix_decision --> emel__tokenizer__encoding_ready : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__bos_ready_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__append_bos_
-  emel__tokenizer__prefix_decision --> emel__tokenizer__errored : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__bos_no_capacity_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__set_capacity_error_
-  emel__tokenizer__prefix_decision --> emel__tokenizer__errored : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__bos_invalid_id_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__set_invalid_id_error_
-  emel__tokenizer__prefix_decision --> emel__tokenizer__encoding_ready : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__no_prefix_] / boost__sml__front__none
-  emel__tokenizer__encoding_ready --> emel__tokenizer__suffix_decision : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__no_more_fragments_] / boost__sml__front__none
-  emel__tokenizer__encoding_ready --> emel__tokenizer__errored : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__more_fragments_no_capacity_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__set_capacity_error_
-  emel__tokenizer__encoding_ready --> emel__tokenizer__encoding_token_fragment : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__more_fragments_token_] / boost__sml__front__none
-  emel__tokenizer__encoding_ready --> emel__tokenizer__encoding_raw_fragment : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__more_fragments_raw_] / boost__sml__front__none
-  emel__tokenizer__encoding_token_fragment --> emel__tokenizer__encoding_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__append_fragment_token_
-  emel__tokenizer__encoding_raw_fragment --> emel__tokenizer__encoding_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__encode_raw_fragment_
-  emel__tokenizer__encoding_decision --> emel__tokenizer__errored : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__phase_failed_] / boost__sml__front__none
-  emel__tokenizer__encoding_decision --> emel__tokenizer__encoding_ready : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__phase_ok_] / boost__sml__front__none
-  emel__tokenizer__suffix_decision --> emel__tokenizer__finalizing : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__sep_ready_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__append_sep_
-  emel__tokenizer__suffix_decision --> emel__tokenizer__errored : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__sep_no_capacity_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__set_capacity_error_
-  emel__tokenizer__suffix_decision --> emel__tokenizer__errored : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__sep_invalid_id_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__set_invalid_id_error_
-  emel__tokenizer__suffix_decision --> emel__tokenizer__finalizing : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__eos_ready_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__append_eos_
-  emel__tokenizer__suffix_decision --> emel__tokenizer__errored : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__eos_no_capacity_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__set_capacity_error_
-  emel__tokenizer__suffix_decision --> emel__tokenizer__errored : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__eos_invalid_id_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__set_invalid_id_error_
-  emel__tokenizer__suffix_decision --> emel__tokenizer__finalizing : [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__no_suffix_] / boost__sml__front__none
-  emel__tokenizer__finalizing --> emel__tokenizer__done : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__finalize_
-  emel__tokenizer__initialized --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__building_special_tokens --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__special_tokens_decision --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__partitioning_raw --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__partitioning_with_specials --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__partitioning_decision --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__selecting_backend --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__selecting_backend_decision --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__prefix_decision --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__encoding_ready --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__encoding_token_fragment --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__encoding_raw_fragment --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__encoding_decision --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__suffix_decision --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__finalizing --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__done --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__errored --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
-  emel__tokenizer__unexpected --> emel__tokenizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__on_unexpected_
+  [*] --> initialized
+  initialized --> building_special_tokens : tokenize [can_tokenize_] / begin_tokenize_
+  initialized --> errored : tokenize [always] / reject_invalid_
+  done --> building_special_tokens : tokenize [can_tokenize_] / begin_tokenize_
+  done --> errored : tokenize [always] / reject_invalid_
+  errored --> building_special_tokens : tokenize [can_tokenize_] / begin_tokenize_
+  errored --> errored : tokenize [always] / reject_invalid_
+  unexpected --> building_special_tokens : tokenize [can_tokenize_] / begin_tokenize_
+  unexpected --> unexpected : tokenize [always] / reject_invalid_
+  building_special_tokens --> special_tokens_decision : [always] / build_special_tokens_
+  special_tokens_decision --> errored : [phase_failed_] / none
+  special_tokens_decision --> partitioning_with_specials : [has_special_tokens_] / none
+  special_tokens_decision --> partitioning_raw : [no_special_tokens_] / none
+  partitioning_raw --> partitioning_decision : [always] / partition_raw_
+  partitioning_with_specials --> partitioning_decision : [always] / partition_with_specials_
+  partitioning_decision --> errored : [phase_failed_] / none
+  partitioning_decision --> selecting_backend : [phase_ok_] / none
+  selecting_backend --> selecting_backend_decision : [always] / select_backend_
+  selecting_backend_decision --> errored : [phase_failed_] / none
+  selecting_backend_decision --> prefix_decision : [phase_ok_] / none
+  prefix_decision --> encoding_ready : [bos_ready_] / append_bos_
+  prefix_decision --> errored : [bos_no_capacity_] / set_capacity_error_
+  prefix_decision --> errored : [bos_invalid_id_] / set_invalid_id_error_
+  prefix_decision --> encoding_ready : [no_prefix_] / none
+  encoding_ready --> suffix_decision : [no_more_fragments_] / none
+  encoding_ready --> errored : [more_fragments_no_capacity_] / set_capacity_error_
+  encoding_ready --> encoding_token_fragment : [more_fragments_token_] / none
+  encoding_ready --> encoding_raw_fragment : [more_fragments_raw_] / none
+  encoding_token_fragment --> encoding_decision : [always] / append_fragment_token_
+  encoding_raw_fragment --> encoding_decision : [always] / encode_raw_fragment_
+  encoding_decision --> errored : [phase_failed_] / none
+  encoding_decision --> encoding_ready : [phase_ok_] / none
+  suffix_decision --> finalizing : [sep_ready_] / append_sep_
+  suffix_decision --> errored : [sep_no_capacity_] / set_capacity_error_
+  suffix_decision --> errored : [sep_invalid_id_] / set_invalid_id_error_
+  suffix_decision --> finalizing : [eos_ready_] / append_eos_
+  suffix_decision --> errored : [eos_no_capacity_] / set_capacity_error_
+  suffix_decision --> errored : [eos_invalid_id_] / set_invalid_id_error_
+  suffix_decision --> finalizing : [no_suffix_] / none
+  finalizing --> done : [always] / finalize_
+  initialized --> unexpected : _ [always] / on_unexpected_
+  building_special_tokens --> unexpected : _ [always] / on_unexpected_
+  special_tokens_decision --> unexpected : _ [always] / on_unexpected_
+  partitioning_raw --> unexpected : _ [always] / on_unexpected_
+  partitioning_with_specials --> unexpected : _ [always] / on_unexpected_
+  partitioning_decision --> unexpected : _ [always] / on_unexpected_
+  selecting_backend --> unexpected : _ [always] / on_unexpected_
+  selecting_backend_decision --> unexpected : _ [always] / on_unexpected_
+  prefix_decision --> unexpected : _ [always] / on_unexpected_
+  encoding_ready --> unexpected : _ [always] / on_unexpected_
+  encoding_token_fragment --> unexpected : _ [always] / on_unexpected_
+  encoding_raw_fragment --> unexpected : _ [always] / on_unexpected_
+  encoding_decision --> unexpected : _ [always] / on_unexpected_
+  suffix_decision --> unexpected : _ [always] / on_unexpected_
+  finalizing --> unexpected : _ [always] / on_unexpected_
+  done --> unexpected : _ [always] / on_unexpected_
+  errored --> unexpected : _ [always] / on_unexpected_
+  unexpected --> unexpected : _ [always] / on_unexpected_
 ```
 
 ## Transitions

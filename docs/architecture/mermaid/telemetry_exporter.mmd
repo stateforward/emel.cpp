@@ -1,45 +1,45 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__telemetry__exporter__initialized
-  emel__telemetry__exporter__initialized --> emel__telemetry__exporter__configuring : emel__telemetry__exporter__event__configure [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__begin_configure_
-  emel__telemetry__exporter__configuring --> emel__telemetry__exporter__configure_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__run_validate_config_
-  emel__telemetry__exporter__configure_decision --> emel__telemetry__exporter__errored : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_failed_] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__publish_error_
-  emel__telemetry__exporter__configure_decision --> emel__telemetry__exporter__initialized : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_ok_] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__publish_done_
-  emel__telemetry__exporter__initialized --> emel__telemetry__exporter__starting : emel__telemetry__exporter__event__start [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__begin_start_
-  emel__telemetry__exporter__starting --> emel__telemetry__exporter__start_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__run_start_
-  emel__telemetry__exporter__start_decision --> emel__telemetry__exporter__errored : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_failed_] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__publish_error_
-  emel__telemetry__exporter__start_decision --> emel__telemetry__exporter__running : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_ok_] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__publish_done_
-  emel__telemetry__exporter__running --> emel__telemetry__exporter__collecting : emel__telemetry__exporter__event__tick [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__begin_tick_
-  emel__telemetry__exporter__collecting --> emel__telemetry__exporter__collect_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__run_collect_batch_
-  emel__telemetry__exporter__collect_decision --> emel__telemetry__exporter__errored : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_failed_] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__publish_error_
-  emel__telemetry__exporter__collect_decision --> emel__telemetry__exporter__flushing : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_ok_and_has_batch_] / boost__sml__front__none
-  emel__telemetry__exporter__collect_decision --> emel__telemetry__exporter__running : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_ok_and_no_batch_] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__publish_done_
-  emel__telemetry__exporter__flushing --> emel__telemetry__exporter__flush_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__run_flush_batch_
-  emel__telemetry__exporter__flush_decision --> emel__telemetry__exporter__backing_off : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_failed_] / boost__sml__front__none
-  emel__telemetry__exporter__flush_decision --> emel__telemetry__exporter__running : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_ok_] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__publish_done_
-  emel__telemetry__exporter__backing_off --> emel__telemetry__exporter__backoff_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__run_backoff_
-  emel__telemetry__exporter__backoff_decision --> emel__telemetry__exporter__errored : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_failed_] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__publish_error_
-  emel__telemetry__exporter__backoff_decision --> emel__telemetry__exporter__running : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_ok_] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__publish_error_
-  emel__telemetry__exporter__running --> emel__telemetry__exporter__stopping : emel__telemetry__exporter__event__stop [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__begin_stop_
-  emel__telemetry__exporter__initialized --> emel__telemetry__exporter__stopping : emel__telemetry__exporter__event__stop [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__begin_stop_
-  emel__telemetry__exporter__errored --> emel__telemetry__exporter__stopping : emel__telemetry__exporter__event__stop [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__begin_stop_
-  emel__telemetry__exporter__stopping --> emel__telemetry__exporter__stop_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__run_stop_
-  emel__telemetry__exporter__stop_decision --> emel__telemetry__exporter__errored : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_failed_] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__publish_error_
-  emel__telemetry__exporter__stop_decision --> emel__telemetry__exporter__initialized : [boost__sml__aux__zero_wrapper_emel__telemetry__exporter__guard__phase_ok_] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__publish_done_
-  emel__telemetry__exporter__initialized --> emel__telemetry__exporter__initialized : emel__telemetry__exporter__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__run_reset_
-  emel__telemetry__exporter__errored --> emel__telemetry__exporter__initialized : emel__telemetry__exporter__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__run_reset_
-  emel__telemetry__exporter__initialized --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__configuring --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__configure_decision --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__starting --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__start_decision --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__running --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__collecting --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__collect_decision --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__flushing --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__flush_decision --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__backing_off --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__backoff_decision --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__stopping --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__stop_decision --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
-  emel__telemetry__exporter__errored --> emel__telemetry__exporter__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__on_unexpected_
+  [*] --> initialized
+  initialized --> configuring : configure [always] / begin_configure_
+  configuring --> configure_decision : [always] / run_validate_config_
+  configure_decision --> errored : [phase_failed_] / publish_error_
+  configure_decision --> initialized : [phase_ok_] / publish_done_
+  initialized --> starting : start [always] / begin_start_
+  starting --> start_decision : [always] / run_start_
+  start_decision --> errored : [phase_failed_] / publish_error_
+  start_decision --> running : [phase_ok_] / publish_done_
+  running --> collecting : tick [always] / begin_tick_
+  collecting --> collect_decision : [always] / run_collect_batch_
+  collect_decision --> errored : [phase_failed_] / publish_error_
+  collect_decision --> flushing : [phase_ok_and_has_batch_] / none
+  collect_decision --> running : [phase_ok_and_no_batch_] / publish_done_
+  flushing --> flush_decision : [always] / run_flush_batch_
+  flush_decision --> backing_off : [phase_failed_] / none
+  flush_decision --> running : [phase_ok_] / publish_done_
+  backing_off --> backoff_decision : [always] / run_backoff_
+  backoff_decision --> errored : [phase_failed_] / publish_error_
+  backoff_decision --> running : [phase_ok_] / publish_error_
+  running --> stopping : stop [always] / begin_stop_
+  initialized --> stopping : stop [always] / begin_stop_
+  errored --> stopping : stop [always] / begin_stop_
+  stopping --> stop_decision : [always] / run_stop_
+  stop_decision --> errored : [phase_failed_] / publish_error_
+  stop_decision --> initialized : [phase_ok_] / publish_done_
+  initialized --> initialized : reset [always] / run_reset_
+  errored --> initialized : reset [always] / run_reset_
+  initialized --> errored : _ [always] / on_unexpected_
+  configuring --> errored : _ [always] / on_unexpected_
+  configure_decision --> errored : _ [always] / on_unexpected_
+  starting --> errored : _ [always] / on_unexpected_
+  start_decision --> errored : _ [always] / on_unexpected_
+  running --> errored : _ [always] / on_unexpected_
+  collecting --> errored : _ [always] / on_unexpected_
+  collect_decision --> errored : _ [always] / on_unexpected_
+  flushing --> errored : _ [always] / on_unexpected_
+  flush_decision --> errored : _ [always] / on_unexpected_
+  backing_off --> errored : _ [always] / on_unexpected_
+  backoff_decision --> errored : _ [always] / on_unexpected_
+  stopping --> errored : _ [always] / on_unexpected_
+  stop_decision --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_

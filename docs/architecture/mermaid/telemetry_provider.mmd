@@ -1,26 +1,26 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__telemetry__provider__initialized
-  emel__telemetry__provider__initialized --> emel__telemetry__provider__configure_decision : emel__telemetry__provider__event__configure [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__run_configure_
-  emel__telemetry__provider__configure_decision --> emel__telemetry__provider__errored : [boost__sml__aux__zero_wrapper_emel__telemetry__provider__guard__phase_failed_] / boost__sml__front__none
-  emel__telemetry__provider__configure_decision --> emel__telemetry__provider__initialized : [boost__sml__aux__zero_wrapper_emel__telemetry__provider__guard__phase_ok_] / boost__sml__front__none
-  emel__telemetry__provider__initialized --> emel__telemetry__provider__start_decision : emel__telemetry__provider__event__start [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__run_start_
-  emel__telemetry__provider__start_decision --> emel__telemetry__provider__errored : [boost__sml__aux__zero_wrapper_emel__telemetry__provider__guard__phase_failed_] / boost__sml__front__none
-  emel__telemetry__provider__start_decision --> emel__telemetry__provider__running : [boost__sml__aux__zero_wrapper_emel__telemetry__provider__guard__phase_ok_] / boost__sml__front__none
-  emel__telemetry__provider__running --> emel__telemetry__provider__publish_decision : emel__telemetry__provider__event__publish [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__run_publish_
-  emel__telemetry__provider__publish_decision --> emel__telemetry__provider__errored : [boost__sml__aux__zero_wrapper_emel__telemetry__provider__guard__phase_failed_] / boost__sml__front__none
-  emel__telemetry__provider__publish_decision --> emel__telemetry__provider__running : [boost__sml__aux__zero_wrapper_emel__telemetry__provider__guard__phase_ok_] / boost__sml__front__none
-  emel__telemetry__provider__running --> emel__telemetry__provider__stop_decision : emel__telemetry__provider__event__stop [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__run_stop_
-  emel__telemetry__provider__initialized --> emel__telemetry__provider__stop_decision : emel__telemetry__provider__event__stop [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__run_stop_
-  emel__telemetry__provider__errored --> emel__telemetry__provider__stop_decision : emel__telemetry__provider__event__stop [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__run_stop_
-  emel__telemetry__provider__stop_decision --> emel__telemetry__provider__errored : [boost__sml__aux__zero_wrapper_emel__telemetry__provider__guard__phase_failed_] / boost__sml__front__none
-  emel__telemetry__provider__stop_decision --> emel__telemetry__provider__initialized : [boost__sml__aux__zero_wrapper_emel__telemetry__provider__guard__phase_ok_] / boost__sml__front__none
-  emel__telemetry__provider__initialized --> emel__telemetry__provider__initialized : emel__telemetry__provider__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__run_reset_
-  emel__telemetry__provider__errored --> emel__telemetry__provider__initialized : emel__telemetry__provider__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__run_reset_
-  emel__telemetry__provider__initialized --> emel__telemetry__provider__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__on_unexpected_
-  emel__telemetry__provider__configure_decision --> emel__telemetry__provider__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__on_unexpected_
-  emel__telemetry__provider__start_decision --> emel__telemetry__provider__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__on_unexpected_
-  emel__telemetry__provider__running --> emel__telemetry__provider__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__on_unexpected_
-  emel__telemetry__provider__publish_decision --> emel__telemetry__provider__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__on_unexpected_
-  emel__telemetry__provider__stop_decision --> emel__telemetry__provider__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__on_unexpected_
-  emel__telemetry__provider__errored --> emel__telemetry__provider__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__on_unexpected_
+  [*] --> initialized
+  initialized --> configure_decision : configure [always] / run_configure_
+  configure_decision --> errored : [phase_failed_] / none
+  configure_decision --> initialized : [phase_ok_] / none
+  initialized --> start_decision : start [always] / run_start_
+  start_decision --> errored : [phase_failed_] / none
+  start_decision --> running : [phase_ok_] / none
+  running --> publish_decision : publish [always] / run_publish_
+  publish_decision --> errored : [phase_failed_] / none
+  publish_decision --> running : [phase_ok_] / none
+  running --> stop_decision : stop [always] / run_stop_
+  initialized --> stop_decision : stop [always] / run_stop_
+  errored --> stop_decision : stop [always] / run_stop_
+  stop_decision --> errored : [phase_failed_] / none
+  stop_decision --> initialized : [phase_ok_] / none
+  initialized --> initialized : reset [always] / run_reset_
+  errored --> initialized : reset [always] / run_reset_
+  initialized --> errored : _ [always] / on_unexpected_
+  configure_decision --> errored : _ [always] / on_unexpected_
+  start_decision --> errored : _ [always] / on_unexpected_
+  running --> errored : _ [always] / on_unexpected_
+  publish_decision --> errored : _ [always] / on_unexpected_
+  stop_decision --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_

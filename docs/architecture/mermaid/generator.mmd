@@ -1,11 +1,11 @@
 stateDiagram-v2
   direction TB
   [*] --> initialized
-  initialized --> tokenizing_prompt : emel__generator__event__generate [boost__sml__front__always] / boost__sml__front__none
-  tokenizing_prompt --> prefilling : emel__generator__event__prompt_tokenized_done [boost__sml__front__always] / boost__sml__front__none
-  tokenizing_prompt --> errored : emel__generator__event__prompt_tokenized_error [boost__sml__front__always] / boost__sml__front__none
-  prefilling --> decoding : emel__generator__event__prefill_done [boost__sml__front__always] / boost__sml__front__none
-  prefilling --> errored : emel__generator__event__prefill_error [boost__sml__front__always] / boost__sml__front__none
-  decoding --> decoding : emel__generator__event__decode_step_done [boost__sml__aux__zero_wrapper_emel__generator__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_generator_guards_hpp_8_48__] / boost__sml__front__none
-  decoding --> done : emel__generator__event__stop_condition_met [boost__sml__front__always] / boost__sml__front__none
-  decoding --> errored : emel__generator__event__decode_step_error [boost__sml__front__always] / boost__sml__front__none
+  initialized --> tokenizing_prompt : generate [always] / none
+  tokenizing_prompt --> prefilling : prompt_tokenized_done [always] / none
+  tokenizing_prompt --> errored : prompt_tokenized_error [always] / none
+  prefilling --> decoding : prefill_done [always] / none
+  prefilling --> errored : prefill_error [always] / none
+  decoding --> decoding : decode_step_done [lambda_guards_8_48] / none
+  decoding --> done : stop_condition_met [always] / none
+  decoding --> errored : decode_step_error [always] / none

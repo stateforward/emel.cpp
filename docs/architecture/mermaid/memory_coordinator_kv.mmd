@@ -1,62 +1,62 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__memory__coordinator__kv__initialized
-  emel__memory__coordinator__kv__initialized --> emel__memory__coordinator__kv__validating_update : emel__memory__coordinator__event__prepare_update [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_35_46__
-  emel__memory__coordinator__kv__initialized --> emel__memory__coordinator__kv__validating_batch : emel__memory__coordinator__event__prepare_batch [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_46_45__
-  emel__memory__coordinator__kv__initialized --> emel__memory__coordinator__kv__validating_full : emel__memory__coordinator__event__prepare_full [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_57_44__
-  emel__memory__coordinator__kv__validating_update --> emel__memory__coordinator__kv__preparing_update : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__valid_update_context_] / boost__sml__front__none
-  emel__memory__coordinator__kv__validating_update --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__invalid_update_context_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_68_46__
-  emel__memory__coordinator__kv__validating_batch --> emel__memory__coordinator__kv__preparing_batch : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__valid_batch_context_] / boost__sml__front__none
-  emel__memory__coordinator__kv__validating_batch --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__invalid_batch_context_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_68_46__
-  emel__memory__coordinator__kv__validating_full --> emel__memory__coordinator__kv__preparing_full : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__valid_full_context_] / boost__sml__front__none
-  emel__memory__coordinator__kv__validating_full --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__invalid_full_context_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_68_46__
-  emel__memory__coordinator__kv__preparing_update --> emel__memory__coordinator__kv__prepare_update_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_78_50__
-  emel__memory__coordinator__kv__prepare_update_decision --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_failed_] / boost__sml__front__none
-  emel__memory__coordinator__kv__prepare_update_decision --> emel__memory__coordinator__kv__applying_update : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__prepare_update_success_] / boost__sml__front__none
-  emel__memory__coordinator__kv__prepare_update_decision --> emel__memory__coordinator__kv__publishing_update : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__prepare_update_no_update_] / boost__sml__front__none
-  emel__memory__coordinator__kv__prepare_update_decision --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__prepare_update_invalid_status_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_73_43__
-  emel__memory__coordinator__kv__preparing_batch --> emel__memory__coordinator__kv__prepare_batch_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_85_49__
-  emel__memory__coordinator__kv__prepare_batch_decision --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_failed_] / boost__sml__front__none
-  emel__memory__coordinator__kv__prepare_batch_decision --> emel__memory__coordinator__kv__publishing_batch : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_ok_] / boost__sml__front__none
-  emel__memory__coordinator__kv__preparing_full --> emel__memory__coordinator__kv__prepare_full_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_92_48__
-  emel__memory__coordinator__kv__prepare_full_decision --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_failed_] / boost__sml__front__none
-  emel__memory__coordinator__kv__prepare_full_decision --> emel__memory__coordinator__kv__publishing_full : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_ok_] / boost__sml__front__none
-  emel__memory__coordinator__kv__applying_update --> emel__memory__coordinator__kv__apply_update_decision : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__apply_update_ready_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_99_48__
-  emel__memory__coordinator__kv__applying_update --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__apply_update_backend_failed_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_73_43__
-  emel__memory__coordinator__kv__applying_update --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__apply_update_invalid_context_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_68_46__
-  emel__memory__coordinator__kv__apply_update_decision --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_failed_] / boost__sml__front__none
-  emel__memory__coordinator__kv__apply_update_decision --> emel__memory__coordinator__kv__publishing_update : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_ok_] / boost__sml__front__none
-  emel__memory__coordinator__kv__publishing_update --> emel__memory__coordinator__kv__publish_update_decision : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__valid_publish_update_context_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_105_50__
-  emel__memory__coordinator__kv__publishing_update --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__invalid_publish_update_context_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_68_46__
-  emel__memory__coordinator__kv__publish_update_decision --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_failed_] / boost__sml__front__none
-  emel__memory__coordinator__kv__publish_update_decision --> emel__memory__coordinator__kv__done : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_ok_] / boost__sml__front__none
-  emel__memory__coordinator__kv__publishing_batch --> emel__memory__coordinator__kv__publish_batch_decision : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__valid_publish_batch_context_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_109_49__
-  emel__memory__coordinator__kv__publishing_batch --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__invalid_publish_batch_context_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_68_46__
-  emel__memory__coordinator__kv__publish_batch_decision --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_failed_] / boost__sml__front__none
-  emel__memory__coordinator__kv__publish_batch_decision --> emel__memory__coordinator__kv__done : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_ok_] / boost__sml__front__none
-  emel__memory__coordinator__kv__publishing_full --> emel__memory__coordinator__kv__publish_full_decision : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__valid_publish_full_context_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_113_48__
-  emel__memory__coordinator__kv__publishing_full --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__invalid_publish_full_context_] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_68_46__
-  emel__memory__coordinator__kv__publish_full_decision --> emel__memory__coordinator__kv__errored : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_failed_] / boost__sml__front__none
-  emel__memory__coordinator__kv__publish_full_decision --> emel__memory__coordinator__kv__done : [boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__guard__phase_ok_] / boost__sml__front__none
-  emel__memory__coordinator__kv__done --> emel__memory__coordinator__kv__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_memory_coordinator_kv_actions_hpp_117_35__
-  emel__memory__coordinator__kv__errored --> emel__memory__coordinator__kv__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__ensure_last_error_
-  emel__memory__coordinator__kv__initialized --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__validating_update --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__validating_batch --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__validating_full --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__preparing_update --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__prepare_update_decision --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__preparing_batch --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__prepare_batch_decision --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__preparing_full --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__prepare_full_decision --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__applying_update --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__apply_update_decision --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__publishing_update --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__publish_update_decision --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__publishing_batch --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__publish_batch_decision --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__publishing_full --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__publish_full_decision --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__done --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
-  emel__memory__coordinator__kv__errored --> emel__memory__coordinator__kv__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__memory__coordinator__kv__action__on_unexpected_
+  [*] --> initialized
+  initialized --> validating_update : prepare_update [always] / lambda_actions_35_46
+  initialized --> validating_batch : prepare_batch [always] / lambda_actions_46_45
+  initialized --> validating_full : prepare_full [always] / lambda_actions_57_44
+  validating_update --> preparing_update : [valid_update_context_] / none
+  validating_update --> errored : [invalid_update_context_] / lambda_actions_68_46
+  validating_batch --> preparing_batch : [valid_batch_context_] / none
+  validating_batch --> errored : [invalid_batch_context_] / lambda_actions_68_46
+  validating_full --> preparing_full : [valid_full_context_] / none
+  validating_full --> errored : [invalid_full_context_] / lambda_actions_68_46
+  preparing_update --> prepare_update_decision : [always] / lambda_actions_78_50
+  prepare_update_decision --> errored : [phase_failed_] / none
+  prepare_update_decision --> applying_update : [prepare_update_success_] / none
+  prepare_update_decision --> publishing_update : [prepare_update_no_update_] / none
+  prepare_update_decision --> errored : [prepare_update_invalid_status_] / lambda_actions_73_43
+  preparing_batch --> prepare_batch_decision : [always] / lambda_actions_85_49
+  prepare_batch_decision --> errored : [phase_failed_] / none
+  prepare_batch_decision --> publishing_batch : [phase_ok_] / none
+  preparing_full --> prepare_full_decision : [always] / lambda_actions_92_48
+  prepare_full_decision --> errored : [phase_failed_] / none
+  prepare_full_decision --> publishing_full : [phase_ok_] / none
+  applying_update --> apply_update_decision : [apply_update_ready_] / lambda_actions_99_48
+  applying_update --> errored : [apply_update_backend_failed_] / lambda_actions_73_43
+  applying_update --> errored : [apply_update_invalid_context_] / lambda_actions_68_46
+  apply_update_decision --> errored : [phase_failed_] / none
+  apply_update_decision --> publishing_update : [phase_ok_] / none
+  publishing_update --> publish_update_decision : [valid_publish_update_context_] / lambda_actions_105_50
+  publishing_update --> errored : [invalid_publish_update_context_] / lambda_actions_68_46
+  publish_update_decision --> errored : [phase_failed_] / none
+  publish_update_decision --> done : [phase_ok_] / none
+  publishing_batch --> publish_batch_decision : [valid_publish_batch_context_] / lambda_actions_109_49
+  publishing_batch --> errored : [invalid_publish_batch_context_] / lambda_actions_68_46
+  publish_batch_decision --> errored : [phase_failed_] / none
+  publish_batch_decision --> done : [phase_ok_] / none
+  publishing_full --> publish_full_decision : [valid_publish_full_context_] / lambda_actions_113_48
+  publishing_full --> errored : [invalid_publish_full_context_] / lambda_actions_68_46
+  publish_full_decision --> errored : [phase_failed_] / none
+  publish_full_decision --> done : [phase_ok_] / none
+  done --> initialized : [always] / lambda_actions_117_35
+  errored --> initialized : [always] / ensure_last_error_
+  initialized --> errored : _ [always] / on_unexpected_
+  validating_update --> errored : _ [always] / on_unexpected_
+  validating_batch --> errored : _ [always] / on_unexpected_
+  validating_full --> errored : _ [always] / on_unexpected_
+  preparing_update --> errored : _ [always] / on_unexpected_
+  prepare_update_decision --> errored : _ [always] / on_unexpected_
+  preparing_batch --> errored : _ [always] / on_unexpected_
+  prepare_batch_decision --> errored : _ [always] / on_unexpected_
+  preparing_full --> errored : _ [always] / on_unexpected_
+  prepare_full_decision --> errored : _ [always] / on_unexpected_
+  applying_update --> errored : _ [always] / on_unexpected_
+  apply_update_decision --> errored : _ [always] / on_unexpected_
+  publishing_update --> errored : _ [always] / on_unexpected_
+  publish_update_decision --> errored : _ [always] / on_unexpected_
+  publishing_batch --> errored : _ [always] / on_unexpected_
+  publish_batch_decision --> errored : _ [always] / on_unexpected_
+  publishing_full --> errored : _ [always] / on_unexpected_
+  publish_full_decision --> errored : _ [always] / on_unexpected_
+  done --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_

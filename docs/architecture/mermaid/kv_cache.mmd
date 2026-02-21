@@ -1,106 +1,106 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__kv__cache__initialized
-  emel__kv__cache__initialized --> emel__kv__cache__validating_prepare : emel__kv__cache__event__prepare [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_987_39__
-  emel__kv__cache__prepared --> emel__kv__cache__validating_prepare : emel__kv__cache__event__prepare [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_987_39__
-  emel__kv__cache__validating_prepare --> emel__kv__cache__preparing_slots : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_prepare_context_] / boost__sml__front__none
-  emel__kv__cache__validating_prepare --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_prepare_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__preparing_slots --> emel__kv__cache__preparing_slots_step : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_prepare_slots_context_] / boost__sml__front__none
-  emel__kv__cache__preparing_slots --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_prepare_slots_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__preparing_slots_step --> emel__kv__cache__prepare_slots_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__run_prepare_slots_phase_
-  emel__kv__cache__prepare_slots_decision --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_failed_] / boost__sml__front__none
-  emel__kv__cache__prepare_slots_decision --> emel__kv__cache__publishing : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_ok_] / boost__sml__front__none
-  emel__kv__cache__prepared --> emel__kv__cache__applying : emel__kv__cache__event__apply_ubatch [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_1103_37__
-  emel__kv__cache__applying --> emel__kv__cache__apply_step_validating : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_apply_context_] / boost__sml__front__none
-  emel__kv__cache__applying --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_apply_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__apply_step_validating --> emel__kv__cache__applying_step : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_apply_step_context_] / boost__sml__front__none
-  emel__kv__cache__apply_step_validating --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_apply_step_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__applying_step --> emel__kv__cache__apply_step_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__run_apply_step_phase_
-  emel__kv__cache__apply_step_decision --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_failed_] / boost__sml__front__none
-  emel__kv__cache__apply_step_decision --> emel__kv__cache__publishing : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_ok_] / boost__sml__front__none
-  emel__kv__cache__prepared --> emel__kv__cache__rolling_back : emel__kv__cache__event__rollback [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_1115_40__
-  emel__kv__cache__errored --> emel__kv__cache__rolling_back : emel__kv__cache__event__rollback [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_1115_40__
-  emel__kv__cache__rolling_back --> emel__kv__cache__rollback_step_validating : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_rollback_context_] / boost__sml__front__none
-  emel__kv__cache__rolling_back --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_rollback_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__rollback_step_validating --> emel__kv__cache__rollback_step : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_rollback_step_context_] / boost__sml__front__none
-  emel__kv__cache__rollback_step_validating --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_rollback_step_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__rollback_step --> emel__kv__cache__rollback_step_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__run_rollback_step_phase_
-  emel__kv__cache__rollback_step_decision --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_failed_] / boost__sml__front__none
-  emel__kv__cache__rollback_step_decision --> emel__kv__cache__publishing : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_ok_] / boost__sml__front__none
-  emel__kv__cache__prepared --> emel__kv__cache__seq_remove_validating : emel__kv__cache__event__seq_remove [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_1322_42__
-  emel__kv__cache__seq_remove_validating --> emel__kv__cache__seq_remove_step : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_seq_remove_context_] / boost__sml__front__none
-  emel__kv__cache__seq_remove_validating --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_seq_remove_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__seq_remove_step --> emel__kv__cache__seq_remove_step_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__run_seq_remove_phase_
-  emel__kv__cache__seq_remove_step_decision --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_failed_] / boost__sml__front__none
-  emel__kv__cache__seq_remove_step_decision --> emel__kv__cache__done : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_ok_] / boost__sml__front__none
-  emel__kv__cache__prepared --> emel__kv__cache__seq_copy_validating : emel__kv__cache__event__seq_copy [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_1331_40__
-  emel__kv__cache__seq_copy_validating --> emel__kv__cache__seq_copy_step : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_seq_copy_context_] / boost__sml__front__none
-  emel__kv__cache__seq_copy_validating --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_seq_copy_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__seq_copy_step --> emel__kv__cache__seq_copy_step_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__run_seq_copy_phase_
-  emel__kv__cache__seq_copy_step_decision --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_failed_] / boost__sml__front__none
-  emel__kv__cache__seq_copy_step_decision --> emel__kv__cache__done : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_ok_] / boost__sml__front__none
-  emel__kv__cache__prepared --> emel__kv__cache__seq_keep_validating : emel__kv__cache__event__seq_keep [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_1340_40__
-  emel__kv__cache__seq_keep_validating --> emel__kv__cache__seq_keep_step : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_seq_keep_context_] / boost__sml__front__none
-  emel__kv__cache__seq_keep_validating --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_seq_keep_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__seq_keep_step --> emel__kv__cache__seq_keep_step_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__run_seq_keep_phase_
-  emel__kv__cache__seq_keep_step_decision --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_failed_] / boost__sml__front__none
-  emel__kv__cache__seq_keep_step_decision --> emel__kv__cache__done : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_ok_] / boost__sml__front__none
-  emel__kv__cache__prepared --> emel__kv__cache__seq_add_validating : emel__kv__cache__event__seq_add [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_1349_39__
-  emel__kv__cache__seq_add_validating --> emel__kv__cache__seq_add_step : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_seq_add_context_] / boost__sml__front__none
-  emel__kv__cache__seq_add_validating --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_seq_add_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__seq_add_step --> emel__kv__cache__seq_add_step_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__run_seq_add_phase_
-  emel__kv__cache__seq_add_step_decision --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_failed_] / boost__sml__front__none
-  emel__kv__cache__seq_add_step_decision --> emel__kv__cache__done : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_ok_] / boost__sml__front__none
-  emel__kv__cache__prepared --> emel__kv__cache__seq_div_validating : emel__kv__cache__event__seq_div [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_1358_39__
-  emel__kv__cache__seq_div_validating --> emel__kv__cache__seq_div_step : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_seq_div_context_] / boost__sml__front__none
-  emel__kv__cache__seq_div_validating --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_seq_div_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__seq_div_step --> emel__kv__cache__seq_div_step_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__run_seq_div_phase_
-  emel__kv__cache__seq_div_step_decision --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_failed_] / boost__sml__front__none
-  emel__kv__cache__seq_div_step_decision --> emel__kv__cache__done : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_ok_] / boost__sml__front__none
-  emel__kv__cache__prepared --> emel__kv__cache__updates_validating : emel__kv__cache__event__apply_updates [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_1367_45__
-  emel__kv__cache__updates_validating --> emel__kv__cache__updates_step : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__valid_updates_context_] / boost__sml__front__none
-  emel__kv__cache__updates_validating --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__invalid_updates_context_] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__set_invalid_argument_
-  emel__kv__cache__updates_step --> emel__kv__cache__updates_step_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__run_updates_phase_
-  emel__kv__cache__updates_step_decision --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_failed_] / boost__sml__front__none
-  emel__kv__cache__updates_step_decision --> emel__kv__cache__done : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_ok_] / boost__sml__front__none
-  emel__kv__cache__publishing --> emel__kv__cache__publish_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__run_publish_phase_
-  emel__kv__cache__publish_decision --> emel__kv__cache__errored : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_failed_] / boost__sml__front__none
-  emel__kv__cache__publish_decision --> emel__kv__cache__done : [boost__sml__aux__zero_wrapper_emel__kv__cache__guard__phase_ok_] / boost__sml__front__none
-  emel__kv__cache__done --> emel__kv__cache__prepared : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__mark_done_
-  emel__kv__cache__errored --> emel__kv__cache__prepared : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__ensure_last_error_
-  emel__kv__cache__initialized --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__prepared --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__validating_prepare --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__preparing_slots --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__preparing_slots_step --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__prepare_slots_decision --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__applying --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__apply_step_validating --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__applying_step --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__apply_step_decision --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__rolling_back --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__rollback_step_validating --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__rollback_step --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__rollback_step_decision --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_remove_validating --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_remove_step --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_remove_step_decision --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_copy_validating --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_copy_step --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_copy_step_decision --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_keep_validating --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_keep_step --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_keep_step_decision --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_add_validating --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_add_step --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_add_step_decision --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_div_validating --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_div_step --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__seq_div_step_decision --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__updates_validating --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__updates_step --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__updates_step_decision --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__publishing --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__publish_decision --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__done --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
-  emel__kv__cache__errored --> emel__kv__cache__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action__on_unexpected_
+  [*] --> initialized
+  initialized --> validating_prepare : prepare [always] / lambda_actions_987_39
+  prepared --> validating_prepare : prepare [always] / lambda_actions_987_39
+  validating_prepare --> preparing_slots : [valid_prepare_context_] / none
+  validating_prepare --> errored : [invalid_prepare_context_] / set_invalid_argument_
+  preparing_slots --> preparing_slots_step : [valid_prepare_slots_context_] / none
+  preparing_slots --> errored : [invalid_prepare_slots_context_] / set_invalid_argument_
+  preparing_slots_step --> prepare_slots_decision : [always] / run_prepare_slots_phase_
+  prepare_slots_decision --> errored : [phase_failed_] / none
+  prepare_slots_decision --> publishing : [phase_ok_] / none
+  prepared --> applying : apply_ubatch [always] / lambda_actions_1103_37
+  applying --> apply_step_validating : [valid_apply_context_] / none
+  applying --> errored : [invalid_apply_context_] / set_invalid_argument_
+  apply_step_validating --> applying_step : [valid_apply_step_context_] / none
+  apply_step_validating --> errored : [invalid_apply_step_context_] / set_invalid_argument_
+  applying_step --> apply_step_decision : [always] / run_apply_step_phase_
+  apply_step_decision --> errored : [phase_failed_] / none
+  apply_step_decision --> publishing : [phase_ok_] / none
+  prepared --> rolling_back : rollback [always] / lambda_actions_1115_40
+  errored --> rolling_back : rollback [always] / lambda_actions_1115_40
+  rolling_back --> rollback_step_validating : [valid_rollback_context_] / none
+  rolling_back --> errored : [invalid_rollback_context_] / set_invalid_argument_
+  rollback_step_validating --> rollback_step : [valid_rollback_step_context_] / none
+  rollback_step_validating --> errored : [invalid_rollback_step_context_] / set_invalid_argument_
+  rollback_step --> rollback_step_decision : [always] / run_rollback_step_phase_
+  rollback_step_decision --> errored : [phase_failed_] / none
+  rollback_step_decision --> publishing : [phase_ok_] / none
+  prepared --> seq_remove_validating : seq_remove [always] / lambda_actions_1322_42
+  seq_remove_validating --> seq_remove_step : [valid_seq_remove_context_] / none
+  seq_remove_validating --> errored : [invalid_seq_remove_context_] / set_invalid_argument_
+  seq_remove_step --> seq_remove_step_decision : [always] / run_seq_remove_phase_
+  seq_remove_step_decision --> errored : [phase_failed_] / none
+  seq_remove_step_decision --> done : [phase_ok_] / none
+  prepared --> seq_copy_validating : seq_copy [always] / lambda_actions_1331_40
+  seq_copy_validating --> seq_copy_step : [valid_seq_copy_context_] / none
+  seq_copy_validating --> errored : [invalid_seq_copy_context_] / set_invalid_argument_
+  seq_copy_step --> seq_copy_step_decision : [always] / run_seq_copy_phase_
+  seq_copy_step_decision --> errored : [phase_failed_] / none
+  seq_copy_step_decision --> done : [phase_ok_] / none
+  prepared --> seq_keep_validating : seq_keep [always] / lambda_actions_1340_40
+  seq_keep_validating --> seq_keep_step : [valid_seq_keep_context_] / none
+  seq_keep_validating --> errored : [invalid_seq_keep_context_] / set_invalid_argument_
+  seq_keep_step --> seq_keep_step_decision : [always] / run_seq_keep_phase_
+  seq_keep_step_decision --> errored : [phase_failed_] / none
+  seq_keep_step_decision --> done : [phase_ok_] / none
+  prepared --> seq_add_validating : seq_add [always] / lambda_actions_1349_39
+  seq_add_validating --> seq_add_step : [valid_seq_add_context_] / none
+  seq_add_validating --> errored : [invalid_seq_add_context_] / set_invalid_argument_
+  seq_add_step --> seq_add_step_decision : [always] / run_seq_add_phase_
+  seq_add_step_decision --> errored : [phase_failed_] / none
+  seq_add_step_decision --> done : [phase_ok_] / none
+  prepared --> seq_div_validating : seq_div [always] / lambda_actions_1358_39
+  seq_div_validating --> seq_div_step : [valid_seq_div_context_] / none
+  seq_div_validating --> errored : [invalid_seq_div_context_] / set_invalid_argument_
+  seq_div_step --> seq_div_step_decision : [always] / run_seq_div_phase_
+  seq_div_step_decision --> errored : [phase_failed_] / none
+  seq_div_step_decision --> done : [phase_ok_] / none
+  prepared --> updates_validating : apply_updates [always] / lambda_actions_1367_45
+  updates_validating --> updates_step : [valid_updates_context_] / none
+  updates_validating --> errored : [invalid_updates_context_] / set_invalid_argument_
+  updates_step --> updates_step_decision : [always] / run_updates_phase_
+  updates_step_decision --> errored : [phase_failed_] / none
+  updates_step_decision --> done : [phase_ok_] / none
+  publishing --> publish_decision : [always] / run_publish_phase_
+  publish_decision --> errored : [phase_failed_] / none
+  publish_decision --> done : [phase_ok_] / none
+  done --> prepared : [always] / mark_done_
+  errored --> prepared : [always] / ensure_last_error_
+  initialized --> errored : _ [always] / on_unexpected_
+  prepared --> errored : _ [always] / on_unexpected_
+  validating_prepare --> errored : _ [always] / on_unexpected_
+  preparing_slots --> errored : _ [always] / on_unexpected_
+  preparing_slots_step --> errored : _ [always] / on_unexpected_
+  prepare_slots_decision --> errored : _ [always] / on_unexpected_
+  applying --> errored : _ [always] / on_unexpected_
+  apply_step_validating --> errored : _ [always] / on_unexpected_
+  applying_step --> errored : _ [always] / on_unexpected_
+  apply_step_decision --> errored : _ [always] / on_unexpected_
+  rolling_back --> errored : _ [always] / on_unexpected_
+  rollback_step_validating --> errored : _ [always] / on_unexpected_
+  rollback_step --> errored : _ [always] / on_unexpected_
+  rollback_step_decision --> errored : _ [always] / on_unexpected_
+  seq_remove_validating --> errored : _ [always] / on_unexpected_
+  seq_remove_step --> errored : _ [always] / on_unexpected_
+  seq_remove_step_decision --> errored : _ [always] / on_unexpected_
+  seq_copy_validating --> errored : _ [always] / on_unexpected_
+  seq_copy_step --> errored : _ [always] / on_unexpected_
+  seq_copy_step_decision --> errored : _ [always] / on_unexpected_
+  seq_keep_validating --> errored : _ [always] / on_unexpected_
+  seq_keep_step --> errored : _ [always] / on_unexpected_
+  seq_keep_step_decision --> errored : _ [always] / on_unexpected_
+  seq_add_validating --> errored : _ [always] / on_unexpected_
+  seq_add_step --> errored : _ [always] / on_unexpected_
+  seq_add_step_decision --> errored : _ [always] / on_unexpected_
+  seq_div_validating --> errored : _ [always] / on_unexpected_
+  seq_div_step --> errored : _ [always] / on_unexpected_
+  seq_div_step_decision --> errored : _ [always] / on_unexpected_
+  updates_validating --> errored : _ [always] / on_unexpected_
+  updates_step --> errored : _ [always] / on_unexpected_
+  updates_step_decision --> errored : _ [always] / on_unexpected_
+  publishing --> errored : _ [always] / on_unexpected_
+  publish_decision --> errored : _ [always] / on_unexpected_
+  done --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_

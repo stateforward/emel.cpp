@@ -1,34 +1,34 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__encoder__plamo2__initialized
-  emel__encoder__plamo2__initialized --> emel__encoder__plamo2__encoding : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__valid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__begin_encode_
-  emel__encoder__plamo2__initialized --> emel__encoder__plamo2__errored : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__invalid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__reject_invalid_encode_
-  emel__encoder__plamo2__done --> emel__encoder__plamo2__encoding : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__valid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__begin_encode_
-  emel__encoder__plamo2__done --> emel__encoder__plamo2__errored : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__invalid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__reject_invalid_encode_
-  emel__encoder__plamo2__errored --> emel__encoder__plamo2__encoding : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__valid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__begin_encode_
-  emel__encoder__plamo2__errored --> emel__encoder__plamo2__errored : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__invalid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__reject_invalid_encode_
-  emel__encoder__plamo2__unexpected --> emel__encoder__plamo2__encoding : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__valid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__begin_encode_
-  emel__encoder__plamo2__unexpected --> emel__encoder__plamo2__unexpected : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__invalid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__reject_invalid_encode_
-  emel__encoder__plamo2__encoding --> emel__encoder__plamo2__encode_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__run_encode_
-  emel__encoder__plamo2__encode_decision --> emel__encoder__plamo2__done : [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__phase_ok_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__mark_done_
-  emel__encoder__plamo2__encode_decision --> emel__encoder__plamo2__errored : [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__phase_failed_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__ensure_last_error_
-  emel__encoder__plamo2__encoding --> emel__encoder__plamo2__unexpected : emel__encoder__event__encode [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__encode_decision --> emel__encoder__plamo2__unexpected : emel__encoder__event__encode [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__initialized --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_done [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__initialized --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_error [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__encoding --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_done [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__encoding --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_error [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__encode_decision --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_done [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__encode_decision --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_error [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__done --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_done [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__done --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_error [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__errored --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_done [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__errored --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_error [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__unexpected --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_done [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__unexpected --> emel__encoder__plamo2__unexpected : emel__encoder__events__encoding_error [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__initialized --> emel__encoder__plamo2__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__encoding --> emel__encoder__plamo2__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__encode_decision --> emel__encoder__plamo2__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__done --> emel__encoder__plamo2__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__errored --> emel__encoder__plamo2__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
-  emel__encoder__plamo2__unexpected --> emel__encoder__plamo2__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__on_unexpected_
+  [*] --> initialized
+  initialized --> encoding : encode [valid_encode_] / begin_encode_
+  initialized --> errored : encode [invalid_encode_] / reject_invalid_encode_
+  done --> encoding : encode [valid_encode_] / begin_encode_
+  done --> errored : encode [invalid_encode_] / reject_invalid_encode_
+  errored --> encoding : encode [valid_encode_] / begin_encode_
+  errored --> errored : encode [invalid_encode_] / reject_invalid_encode_
+  unexpected --> encoding : encode [valid_encode_] / begin_encode_
+  unexpected --> unexpected : encode [invalid_encode_] / reject_invalid_encode_
+  encoding --> encode_decision : [always] / run_encode_
+  encode_decision --> done : [phase_ok_] / mark_done_
+  encode_decision --> errored : [phase_failed_] / ensure_last_error_
+  encoding --> unexpected : encode [always] / on_unexpected_
+  encode_decision --> unexpected : encode [always] / on_unexpected_
+  initialized --> unexpected : encoding_done [always] / on_unexpected_
+  initialized --> unexpected : encoding_error [always] / on_unexpected_
+  encoding --> unexpected : encoding_done [always] / on_unexpected_
+  encoding --> unexpected : encoding_error [always] / on_unexpected_
+  encode_decision --> unexpected : encoding_done [always] / on_unexpected_
+  encode_decision --> unexpected : encoding_error [always] / on_unexpected_
+  done --> unexpected : encoding_done [always] / on_unexpected_
+  done --> unexpected : encoding_error [always] / on_unexpected_
+  errored --> unexpected : encoding_done [always] / on_unexpected_
+  errored --> unexpected : encoding_error [always] / on_unexpected_
+  unexpected --> unexpected : encoding_done [always] / on_unexpected_
+  unexpected --> unexpected : encoding_error [always] / on_unexpected_
+  initialized --> unexpected : _ [always] / on_unexpected_
+  encoding --> unexpected : _ [always] / on_unexpected_
+  encode_decision --> unexpected : _ [always] / on_unexpected_
+  done --> unexpected : _ [always] / on_unexpected_
+  errored --> unexpected : _ [always] / on_unexpected_
+  unexpected --> unexpected : _ [always] / on_unexpected_

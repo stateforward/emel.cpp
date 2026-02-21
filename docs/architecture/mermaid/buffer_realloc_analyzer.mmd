@@ -1,32 +1,32 @@
 stateDiagram-v2
   direction TB
   [*] --> idle
-  idle --> validating : emel__buffer__realloc_analyzer__event__analyze [boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__guard__can_analyze_] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__begin_analyze_
-  idle --> failed : emel__buffer__realloc_analyzer__event__analyze [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__reject_invalid_
-  validating --> evaluating : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__run_validate_
-  evaluating --> failed : [boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_buffer_realloc_analyzer_guards_hpp_11_38__] / boost__sml__front__none
-  evaluating --> publishing : [boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_buffer_realloc_analyzer_guards_hpp_7_34__] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__run_evaluate_
-  publishing --> failed : [boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_buffer_realloc_analyzer_guards_hpp_11_38__] / boost__sml__front__none
-  publishing --> done : [boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_buffer_realloc_analyzer_guards_hpp_7_34__] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__run_publish_
-  done --> failed : [boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_buffer_realloc_analyzer_guards_hpp_11_38__] / boost__sml__front__none
-  done --> idle : [boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_buffer_realloc_analyzer_guards_hpp_7_34__] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_analyze_done_
-  failed --> idle : [boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_buffer_realloc_analyzer_guards_hpp_15_32__] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_analyze_error_
-  idle --> resetting : emel__buffer__realloc_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__begin_reset_
-  validating --> resetting : emel__buffer__realloc_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__begin_reset_
-  evaluating --> resetting : emel__buffer__realloc_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__begin_reset_
-  publishing --> resetting : emel__buffer__realloc_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__begin_reset_
-  done --> resetting : emel__buffer__realloc_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__begin_reset_
-  failed --> resetting : emel__buffer__realloc_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__begin_reset_
-  resetting --> reset_final : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__begin_reset_
-  reset_final --> failed : [boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_buffer_realloc_analyzer_guards_hpp_11_38__] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_reset_error_
-  reset_final --> idle : [boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_buffer_realloc_analyzer_guards_hpp_7_34__] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_reset_done_
-  validating --> failed : emel__buffer__realloc_analyzer__event__analyze [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_unexpected_
-  evaluating --> failed : emel__buffer__realloc_analyzer__event__analyze [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_unexpected_
-  publishing --> failed : emel__buffer__realloc_analyzer__event__analyze [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_unexpected_
-  done --> failed : emel__buffer__realloc_analyzer__event__analyze [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_unexpected_
-  resetting --> failed : emel__buffer__realloc_analyzer__event__analyze [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_unexpected_
-  reset_final --> failed : emel__buffer__realloc_analyzer__event__analyze [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_unexpected_
-  failed --> failed : emel__buffer__realloc_analyzer__event__analyze [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_unexpected_
-  resetting --> failed : emel__buffer__realloc_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_unexpected_
-  reset_final --> failed : emel__buffer__realloc_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_unexpected_
-  failed --> failed : emel__buffer__realloc_analyzer__event__reset [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__realloc_analyzer__action__on_unexpected_
+  idle --> validating : analyze [can_analyze_] / begin_analyze_
+  idle --> failed : analyze [always] / reject_invalid_
+  validating --> evaluating : [always] / run_validate_
+  evaluating --> failed : [lambda_guards_11_38] / none
+  evaluating --> publishing : [lambda_guards_7_34] / run_evaluate_
+  publishing --> failed : [lambda_guards_11_38] / none
+  publishing --> done : [lambda_guards_7_34] / run_publish_
+  done --> failed : [lambda_guards_11_38] / none
+  done --> idle : [lambda_guards_7_34] / on_analyze_done_
+  failed --> idle : [lambda_guards_15_32] / on_analyze_error_
+  idle --> resetting : reset [always] / begin_reset_
+  validating --> resetting : reset [always] / begin_reset_
+  evaluating --> resetting : reset [always] / begin_reset_
+  publishing --> resetting : reset [always] / begin_reset_
+  done --> resetting : reset [always] / begin_reset_
+  failed --> resetting : reset [always] / begin_reset_
+  resetting --> reset_final : [always] / begin_reset_
+  reset_final --> failed : [lambda_guards_11_38] / on_reset_error_
+  reset_final --> idle : [lambda_guards_7_34] / on_reset_done_
+  validating --> failed : analyze [always] / on_unexpected_
+  evaluating --> failed : analyze [always] / on_unexpected_
+  publishing --> failed : analyze [always] / on_unexpected_
+  done --> failed : analyze [always] / on_unexpected_
+  resetting --> failed : analyze [always] / on_unexpected_
+  reset_final --> failed : analyze [always] / on_unexpected_
+  failed --> failed : analyze [always] / on_unexpected_
+  resetting --> failed : reset [always] / on_unexpected_
+  reset_final --> failed : reset [always] / on_unexpected_
+  failed --> failed : reset [always] / on_unexpected_

@@ -1,33 +1,33 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__jinja__renderer__initialized
-  emel__jinja__renderer__initialized --> emel__jinja__renderer__setup : emel__jinja__event__render [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_jinja_renderer_guards_hpp_8_38__] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__begin_render_
-  emel__jinja__renderer__initialized --> emel__jinja__renderer__errored : emel__jinja__event__render [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_jinja_renderer_guards_hpp_12_40__] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__reject_invalid_render_
-  emel__jinja__renderer__done --> emel__jinja__renderer__setup : emel__jinja__event__render [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_jinja_renderer_guards_hpp_8_38__] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__begin_render_
-  emel__jinja__renderer__done --> emel__jinja__renderer__errored : emel__jinja__event__render [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_jinja_renderer_guards_hpp_12_40__] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__reject_invalid_render_
-  emel__jinja__renderer__errored --> emel__jinja__renderer__setup : emel__jinja__event__render [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_jinja_renderer_guards_hpp_8_38__] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__begin_render_
-  emel__jinja__renderer__errored --> emel__jinja__renderer__errored : emel__jinja__event__render [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_jinja_renderer_guards_hpp_12_40__] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__reject_invalid_render_
-  emel__jinja__renderer__unexpected --> emel__jinja__renderer__setup : emel__jinja__event__render [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_jinja_renderer_guards_hpp_8_38__] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__begin_render_
-  emel__jinja__renderer__unexpected --> emel__jinja__renderer__unexpected : emel__jinja__event__render [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_jinja_renderer_guards_hpp_12_40__] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__reject_invalid_render_
-  emel__jinja__renderer__setup --> emel__jinja__renderer__eval_stmt : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__seed_program_
-  emel__jinja__renderer__eval_stmt --> emel__jinja__renderer__render_decision : [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard__phase_failed_] / boost__sml__front__none
-  emel__jinja__renderer__eval_stmt --> emel__jinja__renderer__eval_expr : [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard__needs_expr_] / boost__sml__front__none
-  emel__jinja__renderer__eval_stmt --> emel__jinja__renderer__eval_stmt : [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard__has_stmt_work_] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__eval_next_stmt_
-  emel__jinja__renderer__eval_stmt --> emel__jinja__renderer__render_decision : [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard__no_stmt_work_] / boost__sml__front__none
-  emel__jinja__renderer__eval_expr --> emel__jinja__renderer__eval_expr : [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard__has_pending_expr_] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__eval_pending_expr_
-  emel__jinja__renderer__eval_expr --> emel__jinja__renderer__render_decision : [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard__phase_failed_] / boost__sml__front__none
-  emel__jinja__renderer__eval_expr --> emel__jinja__renderer__write_output : [boost__sml__front__always] / boost__sml__front__none
-  emel__jinja__renderer__write_output --> emel__jinja__renderer__render_decision : [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard__phase_failed_] / boost__sml__front__none
-  emel__jinja__renderer__write_output --> emel__jinja__renderer__write_output : [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard__needs_write_] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__write_pending_value_
-  emel__jinja__renderer__write_output --> emel__jinja__renderer__eval_stmt : [boost__sml__front__always] / boost__sml__front__none
-  emel__jinja__renderer__render_decision --> emel__jinja__renderer__done : [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard__phase_ok_] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__finalize_done_
-  emel__jinja__renderer__render_decision --> emel__jinja__renderer__errored : [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard__phase_failed_] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__finalize_error_
-  emel__jinja__renderer__initialized --> emel__jinja__renderer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__on_unexpected_
-  emel__jinja__renderer__setup --> emel__jinja__renderer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__on_unexpected_
-  emel__jinja__renderer__eval_stmt --> emel__jinja__renderer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__on_unexpected_
-  emel__jinja__renderer__eval_expr --> emel__jinja__renderer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__on_unexpected_
-  emel__jinja__renderer__write_output --> emel__jinja__renderer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__on_unexpected_
-  emel__jinja__renderer__render_decision --> emel__jinja__renderer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__on_unexpected_
-  emel__jinja__renderer__done --> emel__jinja__renderer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__on_unexpected_
-  emel__jinja__renderer__errored --> emel__jinja__renderer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__on_unexpected_
-  emel__jinja__renderer__unexpected --> emel__jinja__renderer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__on_unexpected_
+  [*] --> initialized
+  initialized --> setup : render [lambda_guards_8_38] / begin_render_
+  initialized --> errored : render [lambda_guards_12_40] / reject_invalid_render_
+  done --> setup : render [lambda_guards_8_38] / begin_render_
+  done --> errored : render [lambda_guards_12_40] / reject_invalid_render_
+  errored --> setup : render [lambda_guards_8_38] / begin_render_
+  errored --> errored : render [lambda_guards_12_40] / reject_invalid_render_
+  unexpected --> setup : render [lambda_guards_8_38] / begin_render_
+  unexpected --> unexpected : render [lambda_guards_12_40] / reject_invalid_render_
+  setup --> eval_stmt : [always] / seed_program_
+  eval_stmt --> render_decision : [phase_failed_] / none
+  eval_stmt --> eval_expr : [needs_expr_] / none
+  eval_stmt --> eval_stmt : [has_stmt_work_] / eval_next_stmt_
+  eval_stmt --> render_decision : [no_stmt_work_] / none
+  eval_expr --> eval_expr : [has_pending_expr_] / eval_pending_expr_
+  eval_expr --> render_decision : [phase_failed_] / none
+  eval_expr --> write_output : [always] / none
+  write_output --> render_decision : [phase_failed_] / none
+  write_output --> write_output : [needs_write_] / write_pending_value_
+  write_output --> eval_stmt : [always] / none
+  render_decision --> done : [phase_ok_] / finalize_done_
+  render_decision --> errored : [phase_failed_] / finalize_error_
+  initialized --> unexpected : _ [always] / on_unexpected_
+  setup --> unexpected : _ [always] / on_unexpected_
+  eval_stmt --> unexpected : _ [always] / on_unexpected_
+  eval_expr --> unexpected : _ [always] / on_unexpected_
+  write_output --> unexpected : _ [always] / on_unexpected_
+  render_decision --> unexpected : _ [always] / on_unexpected_
+  done --> unexpected : _ [always] / on_unexpected_
+  errored --> unexpected : _ [always] / on_unexpected_
+  unexpected --> unexpected : _ [always] / on_unexpected_

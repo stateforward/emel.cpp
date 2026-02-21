@@ -1,20 +1,20 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__batch__sanitizer__initialized
-  emel__batch__sanitizer__initialized --> emel__batch__sanitizer__sanitizing : emel__batch__sanitizer__event__sanitize_decode [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__valid_request_] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__begin_sanitize_
-  emel__batch__sanitizer__initialized --> emel__batch__sanitizer__errored : emel__batch__sanitizer__event__sanitize_decode [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__invalid_request_] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__reject_invalid_sanitize_
-  emel__batch__sanitizer__sanitizing --> emel__batch__sanitizer__sanitize_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__run_sanitize_decode_
-  emel__batch__sanitizer__sanitize_decision --> emel__batch__sanitizer__errored : [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__phase_failed_] / boost__sml__front__none
-  emel__batch__sanitizer__sanitize_decision --> emel__batch__sanitizer__done : [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__phase_ok_] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__mark_done_
-  emel__batch__sanitizer__done --> emel__batch__sanitizer__sanitizing : emel__batch__sanitizer__event__sanitize_decode [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__valid_request_] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__begin_sanitize_
-  emel__batch__sanitizer__done --> emel__batch__sanitizer__errored : emel__batch__sanitizer__event__sanitize_decode [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__invalid_request_] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__reject_invalid_sanitize_
-  emel__batch__sanitizer__errored --> emel__batch__sanitizer__sanitizing : emel__batch__sanitizer__event__sanitize_decode [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__valid_request_] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__begin_sanitize_
-  emel__batch__sanitizer__errored --> emel__batch__sanitizer__errored : emel__batch__sanitizer__event__sanitize_decode [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__invalid_request_] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__reject_invalid_sanitize_
-  emel__batch__sanitizer__unexpected --> emel__batch__sanitizer__sanitizing : emel__batch__sanitizer__event__sanitize_decode [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__valid_request_] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__begin_sanitize_
-  emel__batch__sanitizer__unexpected --> emel__batch__sanitizer__errored : emel__batch__sanitizer__event__sanitize_decode [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__invalid_request_] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__reject_invalid_sanitize_
-  emel__batch__sanitizer__initialized --> emel__batch__sanitizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__on_unexpected_
-  emel__batch__sanitizer__sanitizing --> emel__batch__sanitizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__on_unexpected_
-  emel__batch__sanitizer__sanitize_decision --> emel__batch__sanitizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__on_unexpected_
-  emel__batch__sanitizer__done --> emel__batch__sanitizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__on_unexpected_
-  emel__batch__sanitizer__errored --> emel__batch__sanitizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__on_unexpected_
-  emel__batch__sanitizer__unexpected --> emel__batch__sanitizer__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__on_unexpected_
+  [*] --> initialized
+  initialized --> sanitizing : sanitize_decode [valid_request_] / begin_sanitize_
+  initialized --> errored : sanitize_decode [invalid_request_] / reject_invalid_sanitize_
+  sanitizing --> sanitize_decision : [always] / run_sanitize_decode_
+  sanitize_decision --> errored : [phase_failed_] / none
+  sanitize_decision --> done : [phase_ok_] / mark_done_
+  done --> sanitizing : sanitize_decode [valid_request_] / begin_sanitize_
+  done --> errored : sanitize_decode [invalid_request_] / reject_invalid_sanitize_
+  errored --> sanitizing : sanitize_decode [valid_request_] / begin_sanitize_
+  errored --> errored : sanitize_decode [invalid_request_] / reject_invalid_sanitize_
+  unexpected --> sanitizing : sanitize_decode [valid_request_] / begin_sanitize_
+  unexpected --> errored : sanitize_decode [invalid_request_] / reject_invalid_sanitize_
+  initialized --> unexpected : _ [always] / on_unexpected_
+  sanitizing --> unexpected : _ [always] / on_unexpected_
+  sanitize_decision --> unexpected : _ [always] / on_unexpected_
+  done --> unexpected : _ [always] / on_unexpected_
+  errored --> unexpected : _ [always] / on_unexpected_
+  unexpected --> unexpected : _ [always] / on_unexpected_

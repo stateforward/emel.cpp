@@ -8,14 +8,14 @@ Source: [`emel/generator/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/
 stateDiagram-v2
   direction TB
   [*] --> initialized
-  initialized --> tokenizing_prompt : emel__generator__event__generate [boost__sml__front__always] / boost__sml__front__none
-  tokenizing_prompt --> prefilling : emel__generator__event__prompt_tokenized_done [boost__sml__front__always] / boost__sml__front__none
-  tokenizing_prompt --> errored : emel__generator__event__prompt_tokenized_error [boost__sml__front__always] / boost__sml__front__none
-  prefilling --> decoding : emel__generator__event__prefill_done [boost__sml__front__always] / boost__sml__front__none
-  prefilling --> errored : emel__generator__event__prefill_error [boost__sml__front__always] / boost__sml__front__none
-  decoding --> decoding : emel__generator__event__decode_step_done [boost__sml__aux__zero_wrapper_emel__generator__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_generator_guards_hpp_8_48__] / boost__sml__front__none
-  decoding --> done : emel__generator__event__stop_condition_met [boost__sml__front__always] / boost__sml__front__none
-  decoding --> errored : emel__generator__event__decode_step_error [boost__sml__front__always] / boost__sml__front__none
+  initialized --> tokenizing_prompt : generate [always] / none
+  tokenizing_prompt --> prefilling : prompt_tokenized_done [always] / none
+  tokenizing_prompt --> errored : prompt_tokenized_error [always] / none
+  prefilling --> decoding : prefill_done [always] / none
+  prefilling --> errored : prefill_error [always] / none
+  decoding --> decoding : decode_step_done [lambda_guards_8_48] / none
+  decoding --> done : stop_condition_met [always] / none
+  decoding --> errored : decode_step_error [always] / none
 ```
 
 ## Transitions
@@ -27,6 +27,6 @@ stateDiagram-v2
 | [`tokenizing_prompt`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`prompt_tokenized_error`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`always`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`none`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`errored`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) |
 | [`prefilling`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`prefill_done`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`always`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`none`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`decoding`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) |
 | [`prefilling`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`prefill_error`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`always`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`none`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`errored`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) |
-| [`decoding`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`decode_step_done`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`(lambda at /Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/tools/docsgen/../../src/emel/generator/guards.hpp:8:48)>`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`none`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`decoding`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) |
+| [`decoding`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`decode_step_done`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`lambda_guards_8_48`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`none`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`decoding`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) |
 | [`decoding`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`stop_condition_met`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`always`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`none`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`done`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) |
 | [`decoding`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`decode_step_error`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`always`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`none`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) | [`errored`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/generator/sm.hpp) |

@@ -1,48 +1,48 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__model__weight_loader__initialized
-  emel__model__weight_loader__initialized --> emel__model__weight_loader__selecting : emel__model__weight_loader__event__load_weights [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__begin_load_
-  emel__model__weight_loader__selecting --> emel__model__weight_loader__strategy_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__select_strategy_
-  emel__model__weight_loader__strategy_decision --> emel__model__weight_loader__errored : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_failed_] / boost__sml__front__none
-  emel__model__weight_loader__strategy_decision --> emel__model__weight_loader__initializing : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_use_mmap_and_can_init_mappings_] / boost__sml__front__none
-  emel__model__weight_loader__strategy_decision --> emel__model__weight_loader__loading_mmap : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_use_mmap_and_skip_init_mappings_] / boost__sml__front__none
-  emel__model__weight_loader__strategy_decision --> emel__model__weight_loader__errored : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_use_mmap_and_cannot_init_mappings_] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__set_invalid_argument_
-  emel__model__weight_loader__strategy_decision --> emel__model__weight_loader__loading_streamed : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_use_stream_and_can_load_streamed_] / boost__sml__front__none
-  emel__model__weight_loader__strategy_decision --> emel__model__weight_loader__errored : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_use_stream_and_cannot_load_streamed_] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__set_invalid_argument_
-  emel__model__weight_loader__initializing --> emel__model__weight_loader__init_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__run_init_mappings_
-  emel__model__weight_loader__init_decision --> emel__model__weight_loader__errored : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_failed_] / boost__sml__front__none
-  emel__model__weight_loader__init_decision --> emel__model__weight_loader__loading_mmap : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_can_load_mmap_] / boost__sml__front__none
-  emel__model__weight_loader__init_decision --> emel__model__weight_loader__errored : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_cannot_load_mmap_] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__set_invalid_argument_
-  emel__model__weight_loader__loading_mmap --> emel__model__weight_loader__load_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__run_load_mmap_
-  emel__model__weight_loader__loading_streamed --> emel__model__weight_loader__load_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__run_load_streamed_
-  emel__model__weight_loader__load_decision --> emel__model__weight_loader__errored : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_failed_] / boost__sml__front__none
-  emel__model__weight_loader__load_decision --> emel__model__weight_loader__validating : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_can_validate_] / boost__sml__front__none
-  emel__model__weight_loader__load_decision --> emel__model__weight_loader__cleanup_decision : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_skip_validate_] / boost__sml__front__none
-  emel__model__weight_loader__load_decision --> emel__model__weight_loader__errored : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_cannot_validate_] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__set_invalid_argument_
-  emel__model__weight_loader__validating --> emel__model__weight_loader__validation_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__run_validate_
-  emel__model__weight_loader__validation_decision --> emel__model__weight_loader__errored : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_failed_] / boost__sml__front__none
-  emel__model__weight_loader__validation_decision --> emel__model__weight_loader__cleanup_decision : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_] / boost__sml__front__none
-  emel__model__weight_loader__cleanup_decision --> emel__model__weight_loader__errored : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_failed_] / boost__sml__front__none
-  emel__model__weight_loader__cleanup_decision --> emel__model__weight_loader__cleaning_up : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_can_clean_up_] / boost__sml__front__none
-  emel__model__weight_loader__cleanup_decision --> emel__model__weight_loader__done : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_skip_clean_up_] / boost__sml__front__none
-  emel__model__weight_loader__cleanup_decision --> emel__model__weight_loader__errored : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_and_cannot_clean_up_] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__set_invalid_argument_
-  emel__model__weight_loader__cleaning_up --> emel__model__weight_loader__cleanup_result : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__run_clean_up_
-  emel__model__weight_loader__cleanup_result --> emel__model__weight_loader__errored : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_failed_] / boost__sml__front__none
-  emel__model__weight_loader__cleanup_result --> emel__model__weight_loader__done : [boost__sml__aux__zero_wrapper_emel__model__weight_loader__guard__phase_ok_] / boost__sml__front__none
-  emel__model__weight_loader__done --> emel__model__weight_loader__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__publish_done_
-  emel__model__weight_loader__errored --> emel__model__weight_loader__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__publish_error_
-  emel__model__weight_loader__initialized --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__selecting --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__strategy_decision --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__initializing --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__init_decision --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__loading_mmap --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__loading_streamed --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__load_decision --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__validating --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__validation_decision --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__cleanup_decision --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__cleaning_up --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__cleanup_result --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__done --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
-  emel__model__weight_loader__errored --> emel__model__weight_loader__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__on_unexpected_
+  [*] --> initialized
+  initialized --> selecting : load_weights [always] / begin_load_
+  selecting --> strategy_decision : [always] / select_strategy_
+  strategy_decision --> errored : [phase_failed_] / none
+  strategy_decision --> initializing : [phase_ok_and_use_mmap_and_can_init_mappings_] / none
+  strategy_decision --> loading_mmap : [phase_ok_and_use_mmap_and_skip_init_mappings_] / none
+  strategy_decision --> errored : [phase_ok_and_use_mmap_and_cannot_init_mappings_] / set_invalid_argument_
+  strategy_decision --> loading_streamed : [phase_ok_and_use_stream_and_can_load_streamed_] / none
+  strategy_decision --> errored : [phase_ok_and_use_stream_and_cannot_load_streamed_] / set_invalid_argument_
+  initializing --> init_decision : [always] / run_init_mappings_
+  init_decision --> errored : [phase_failed_] / none
+  init_decision --> loading_mmap : [phase_ok_and_can_load_mmap_] / none
+  init_decision --> errored : [phase_ok_and_cannot_load_mmap_] / set_invalid_argument_
+  loading_mmap --> load_decision : [always] / run_load_mmap_
+  loading_streamed --> load_decision : [always] / run_load_streamed_
+  load_decision --> errored : [phase_failed_] / none
+  load_decision --> validating : [phase_ok_and_can_validate_] / none
+  load_decision --> cleanup_decision : [phase_ok_and_skip_validate_] / none
+  load_decision --> errored : [phase_ok_and_cannot_validate_] / set_invalid_argument_
+  validating --> validation_decision : [always] / run_validate_
+  validation_decision --> errored : [phase_failed_] / none
+  validation_decision --> cleanup_decision : [phase_ok_] / none
+  cleanup_decision --> errored : [phase_failed_] / none
+  cleanup_decision --> cleaning_up : [phase_ok_and_can_clean_up_] / none
+  cleanup_decision --> done : [phase_ok_and_skip_clean_up_] / none
+  cleanup_decision --> errored : [phase_ok_and_cannot_clean_up_] / set_invalid_argument_
+  cleaning_up --> cleanup_result : [always] / run_clean_up_
+  cleanup_result --> errored : [phase_failed_] / none
+  cleanup_result --> done : [phase_ok_] / none
+  done --> initialized : [always] / publish_done_
+  errored --> initialized : [always] / publish_error_
+  initialized --> errored : _ [always] / on_unexpected_
+  selecting --> errored : _ [always] / on_unexpected_
+  strategy_decision --> errored : _ [always] / on_unexpected_
+  initializing --> errored : _ [always] / on_unexpected_
+  init_decision --> errored : _ [always] / on_unexpected_
+  loading_mmap --> errored : _ [always] / on_unexpected_
+  loading_streamed --> errored : _ [always] / on_unexpected_
+  load_decision --> errored : _ [always] / on_unexpected_
+  validating --> errored : _ [always] / on_unexpected_
+  validation_decision --> errored : _ [always] / on_unexpected_
+  cleanup_decision --> errored : _ [always] / on_unexpected_
+  cleaning_up --> errored : _ [always] / on_unexpected_
+  cleanup_result --> errored : _ [always] / on_unexpected_
+  done --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_

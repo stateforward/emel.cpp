@@ -7,40 +7,40 @@ Source: [`emel/parser/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/mai
 ```mermaid
 stateDiagram-v2
   direction TB
-  [*] --> emel__parser__gguf__initialized
-  emel__parser__gguf__initialized --> emel__parser__gguf__parsing_architecture : emel__parser__event__parse_model [boost__sml__aux__zero_wrapper_emel__parser__guard__valid_parse_request_] / boost__sml__aux__zero_wrapper_emel__parser__action__begin_parse_
-  emel__parser__gguf__initialized --> emel__parser__gguf__errored : emel__parser__event__parse_model [boost__sml__aux__zero_wrapper_emel__parser__guard__invalid_parse_request_] / boost__sml__aux__zero_wrapper_emel__parser__action__set_invalid_argument_
-  emel__parser__gguf__parsing_architecture --> emel__parser__gguf__parse_architecture_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__gguf__action__run_parse_architecture_
-  emel__parser__gguf__parse_architecture_decision --> emel__parser__gguf__errored : [boost__sml__aux__zero_wrapper_emel__parser__guard__phase_failed_] / boost__sml__front__none
-  emel__parser__gguf__parse_architecture_decision --> emel__parser__gguf__mapping_architecture : [boost__sml__aux__zero_wrapper_emel__parser__guard__phase_ok_] / boost__sml__front__none
-  emel__parser__gguf__mapping_architecture --> emel__parser__gguf__map_architecture_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__gguf__action__run_map_architecture_
-  emel__parser__gguf__map_architecture_decision --> emel__parser__gguf__errored : [boost__sml__aux__zero_wrapper_emel__parser__guard__phase_failed_] / boost__sml__front__none
-  emel__parser__gguf__map_architecture_decision --> emel__parser__gguf__parsing_hparams : [boost__sml__aux__zero_wrapper_emel__parser__guard__phase_ok_] / boost__sml__front__none
-  emel__parser__gguf__parsing_hparams --> emel__parser__gguf__parse_hparams_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__gguf__action__run_parse_hparams_
-  emel__parser__gguf__parse_hparams_decision --> emel__parser__gguf__errored : [boost__sml__aux__zero_wrapper_emel__parser__guard__phase_failed_] / boost__sml__front__none
-  emel__parser__gguf__parse_hparams_decision --> emel__parser__gguf__parsing_vocab : [boost__sml__aux__zero_wrapper_emel__parser__guard__phase_ok_] / boost__sml__front__none
-  emel__parser__gguf__parsing_vocab --> emel__parser__gguf__parse_vocab_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__gguf__action__run_parse_vocab_
-  emel__parser__gguf__parse_vocab_decision --> emel__parser__gguf__errored : [boost__sml__aux__zero_wrapper_emel__parser__guard__phase_failed_] / boost__sml__front__none
-  emel__parser__gguf__parse_vocab_decision --> emel__parser__gguf__done : [boost__sml__aux__zero_wrapper_emel__parser__guard__phase_ok_and_skip_map_tensors_] / boost__sml__front__none
-  emel__parser__gguf__parse_vocab_decision --> emel__parser__gguf__mapping_tensors : [boost__sml__aux__zero_wrapper_emel__parser__guard__phase_ok_and_map_tensors_] / boost__sml__front__none
-  emel__parser__gguf__mapping_tensors --> emel__parser__gguf__map_tensors_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__gguf__action__run_map_tensors_
-  emel__parser__gguf__map_tensors_decision --> emel__parser__gguf__errored : [boost__sml__aux__zero_wrapper_emel__parser__guard__phase_failed_] / boost__sml__front__none
-  emel__parser__gguf__map_tensors_decision --> emel__parser__gguf__done : [boost__sml__aux__zero_wrapper_emel__parser__guard__phase_ok_] / boost__sml__front__none
-  emel__parser__gguf__done --> emel__parser__gguf__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__mark_done_
-  emel__parser__gguf__errored --> emel__parser__gguf__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__ensure_last_error_
-  emel__parser__gguf__initialized --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__parsing_architecture --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__parse_architecture_decision --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__mapping_architecture --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__map_architecture_decision --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__parsing_hparams --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__parse_hparams_decision --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__parsing_vocab --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__parse_vocab_decision --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__mapping_tensors --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__map_tensors_decision --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__done --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
-  emel__parser__gguf__errored --> emel__parser__gguf__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__parser__action__on_unexpected_
+  [*] --> initialized
+  initialized --> parsing_architecture : parse_model [valid_parse_request_] / begin_parse_
+  initialized --> errored : parse_model [invalid_parse_request_] / set_invalid_argument_
+  parsing_architecture --> parse_architecture_decision : [always] / run_parse_architecture_
+  parse_architecture_decision --> errored : [phase_failed_] / none
+  parse_architecture_decision --> mapping_architecture : [phase_ok_] / none
+  mapping_architecture --> map_architecture_decision : [always] / run_map_architecture_
+  map_architecture_decision --> errored : [phase_failed_] / none
+  map_architecture_decision --> parsing_hparams : [phase_ok_] / none
+  parsing_hparams --> parse_hparams_decision : [always] / run_parse_hparams_
+  parse_hparams_decision --> errored : [phase_failed_] / none
+  parse_hparams_decision --> parsing_vocab : [phase_ok_] / none
+  parsing_vocab --> parse_vocab_decision : [always] / run_parse_vocab_
+  parse_vocab_decision --> errored : [phase_failed_] / none
+  parse_vocab_decision --> done : [phase_ok_and_skip_map_tensors_] / none
+  parse_vocab_decision --> mapping_tensors : [phase_ok_and_map_tensors_] / none
+  mapping_tensors --> map_tensors_decision : [always] / run_map_tensors_
+  map_tensors_decision --> errored : [phase_failed_] / none
+  map_tensors_decision --> done : [phase_ok_] / none
+  done --> initialized : [always] / mark_done_
+  errored --> initialized : [always] / ensure_last_error_
+  initialized --> errored : _ [always] / on_unexpected_
+  parsing_architecture --> errored : _ [always] / on_unexpected_
+  parse_architecture_decision --> errored : _ [always] / on_unexpected_
+  mapping_architecture --> errored : _ [always] / on_unexpected_
+  map_architecture_decision --> errored : _ [always] / on_unexpected_
+  parsing_hparams --> errored : _ [always] / on_unexpected_
+  parse_hparams_decision --> errored : _ [always] / on_unexpected_
+  parsing_vocab --> errored : _ [always] / on_unexpected_
+  parse_vocab_decision --> errored : _ [always] / on_unexpected_
+  mapping_tensors --> errored : _ [always] / on_unexpected_
+  map_tensors_decision --> errored : _ [always] / on_unexpected_
+  done --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_
 ```
 
 ## Transitions

@@ -1,40 +1,40 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__decoder__ubatch_executor__initialized
-  emel__decoder__ubatch_executor__initialized --> emel__decoder__ubatch_executor__validating : emel__decoder__ubatch_executor__event__execute [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard__valid_execute_request_] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__begin_execute_
-  emel__decoder__ubatch_executor__initialized --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard__invalid_execute_request_] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__reject_invalid_execute_
-  emel__decoder__ubatch_executor__validating --> emel__decoder__ubatch_executor__validate_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__run_validate_
-  emel__decoder__ubatch_executor__validate_decision --> emel__decoder__ubatch_executor__errored : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_12_38__] / boost__sml__front__none
-  emel__decoder__ubatch_executor__validate_decision --> emel__decoder__ubatch_executor__preparing_memory : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_8_34__] / boost__sml__front__none
-  emel__decoder__ubatch_executor__preparing_memory --> emel__decoder__ubatch_executor__prepare_memory_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__run_prepare_memory_
-  emel__decoder__ubatch_executor__prepare_memory_decision --> emel__decoder__ubatch_executor__errored : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_12_38__] / boost__sml__front__none
-  emel__decoder__ubatch_executor__prepare_memory_decision --> emel__decoder__ubatch_executor__preparing_kv : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_8_34__] / boost__sml__front__none
-  emel__decoder__ubatch_executor__preparing_kv --> emel__decoder__ubatch_executor__prepare_kv_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__run_prepare_kv_
-  emel__decoder__ubatch_executor__prepare_kv_decision --> emel__decoder__ubatch_executor__errored : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_12_38__] / boost__sml__front__none
-  emel__decoder__ubatch_executor__prepare_kv_decision --> emel__decoder__ubatch_executor__running_compute : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_8_34__] / boost__sml__front__none
-  emel__decoder__ubatch_executor__running_compute --> emel__decoder__ubatch_executor__compute_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__run_compute_
-  emel__decoder__ubatch_executor__compute_decision --> emel__decoder__ubatch_executor__rolling_back : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_12_38__] / boost__sml__front__none
-  emel__decoder__ubatch_executor__compute_decision --> emel__decoder__ubatch_executor__extracting_outputs : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_8_34__] / boost__sml__front__none
-  emel__decoder__ubatch_executor__extracting_outputs --> emel__decoder__ubatch_executor__extract_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__run_extract_outputs_
-  emel__decoder__ubatch_executor__extract_decision --> emel__decoder__ubatch_executor__rolling_back : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_12_38__] / boost__sml__front__none
-  emel__decoder__ubatch_executor__extract_decision --> emel__decoder__ubatch_executor__rolling_back : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_16_50__] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__mark_missing_outputs_
-  emel__decoder__ubatch_executor__extract_decision --> emel__decoder__ubatch_executor__done : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_8_34__] / boost__sml__front__none
-  emel__decoder__ubatch_executor__rolling_back --> emel__decoder__ubatch_executor__rollback_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__run_rollback_
-  emel__decoder__ubatch_executor__rollback_decision --> emel__decoder__ubatch_executor__errored : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_12_38__] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__capture_rollback_error_
-  emel__decoder__ubatch_executor__rollback_decision --> emel__decoder__ubatch_executor__errored : [boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_ubatch_executor_guards_hpp_8_34__] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__capture_execution_error_
-  emel__decoder__ubatch_executor__done --> emel__decoder__ubatch_executor__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__mark_done_
-  emel__decoder__ubatch_executor__errored --> emel__decoder__ubatch_executor__initialized : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__ensure_last_error_
-  emel__decoder__ubatch_executor__validating --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__validate_decision --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__preparing_memory --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__prepare_memory_decision --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__preparing_kv --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__prepare_kv_decision --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__running_compute --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__compute_decision --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__extracting_outputs --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__extract_decision --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__rolling_back --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__rollback_decision --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__done --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
-  emel__decoder__ubatch_executor__errored --> emel__decoder__ubatch_executor__errored : emel__decoder__ubatch_executor__event__execute [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__ubatch_executor__action__on_unexpected_
+  [*] --> initialized
+  initialized --> validating : execute [valid_execute_request_] / begin_execute_
+  initialized --> errored : execute [invalid_execute_request_] / reject_invalid_execute_
+  validating --> validate_decision : [always] / run_validate_
+  validate_decision --> errored : [lambda_guards_12_38] / none
+  validate_decision --> preparing_memory : [lambda_guards_8_34] / none
+  preparing_memory --> prepare_memory_decision : [always] / run_prepare_memory_
+  prepare_memory_decision --> errored : [lambda_guards_12_38] / none
+  prepare_memory_decision --> preparing_kv : [lambda_guards_8_34] / none
+  preparing_kv --> prepare_kv_decision : [always] / run_prepare_kv_
+  prepare_kv_decision --> errored : [lambda_guards_12_38] / none
+  prepare_kv_decision --> running_compute : [lambda_guards_8_34] / none
+  running_compute --> compute_decision : [always] / run_compute_
+  compute_decision --> rolling_back : [lambda_guards_12_38] / none
+  compute_decision --> extracting_outputs : [lambda_guards_8_34] / none
+  extracting_outputs --> extract_decision : [always] / run_extract_outputs_
+  extract_decision --> rolling_back : [lambda_guards_12_38] / none
+  extract_decision --> rolling_back : [lambda_guards_16_50] / mark_missing_outputs_
+  extract_decision --> done : [lambda_guards_8_34] / none
+  rolling_back --> rollback_decision : [always] / run_rollback_
+  rollback_decision --> errored : [lambda_guards_12_38] / capture_rollback_error_
+  rollback_decision --> errored : [lambda_guards_8_34] / capture_execution_error_
+  done --> initialized : [always] / mark_done_
+  errored --> initialized : [always] / ensure_last_error_
+  validating --> errored : execute [always] / on_unexpected_
+  validate_decision --> errored : execute [always] / on_unexpected_
+  preparing_memory --> errored : execute [always] / on_unexpected_
+  prepare_memory_decision --> errored : execute [always] / on_unexpected_
+  preparing_kv --> errored : execute [always] / on_unexpected_
+  prepare_kv_decision --> errored : execute [always] / on_unexpected_
+  running_compute --> errored : execute [always] / on_unexpected_
+  compute_decision --> errored : execute [always] / on_unexpected_
+  extracting_outputs --> errored : execute [always] / on_unexpected_
+  extract_decision --> errored : execute [always] / on_unexpected_
+  rolling_back --> errored : execute [always] / on_unexpected_
+  rollback_decision --> errored : execute [always] / on_unexpected_
+  done --> errored : execute [always] / on_unexpected_
+  errored --> errored : execute [always] / on_unexpected_

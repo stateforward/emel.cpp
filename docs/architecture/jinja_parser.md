@@ -7,22 +7,22 @@ Source: [`emel/jinja/parser/sm.hpp`](https://github.com/stateforward/emel.cpp/bl
 ```mermaid
 stateDiagram-v2
   direction TB
-  [*] --> emel__jinja__parser__initialized
-  emel__jinja__parser__initialized --> emel__jinja__parser__parse_decision : emel__jinja__event__parse [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__valid_parse_] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__run_parse_
-  emel__jinja__parser__initialized --> emel__jinja__parser__errored : emel__jinja__event__parse [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__invalid_parse_] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__reject_invalid_parse_
-  emel__jinja__parser__done --> emel__jinja__parser__parse_decision : emel__jinja__event__parse [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__valid_parse_] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__run_parse_
-  emel__jinja__parser__done --> emel__jinja__parser__errored : emel__jinja__event__parse [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__invalid_parse_] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__reject_invalid_parse_
-  emel__jinja__parser__errored --> emel__jinja__parser__parse_decision : emel__jinja__event__parse [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__valid_parse_] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__run_parse_
-  emel__jinja__parser__errored --> emel__jinja__parser__errored : emel__jinja__event__parse [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__invalid_parse_] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__reject_invalid_parse_
-  emel__jinja__parser__unexpected --> emel__jinja__parser__parse_decision : emel__jinja__event__parse [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__valid_parse_] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__run_parse_
-  emel__jinja__parser__unexpected --> emel__jinja__parser__unexpected : emel__jinja__event__parse [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__invalid_parse_] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__reject_invalid_parse_
-  emel__jinja__parser__parse_decision --> emel__jinja__parser__done : [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__phase_ok_] / boost__sml__front__none
-  emel__jinja__parser__parse_decision --> emel__jinja__parser__errored : [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__phase_failed_] / boost__sml__front__none
-  emel__jinja__parser__initialized --> emel__jinja__parser__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__on_unexpected_
-  emel__jinja__parser__parse_decision --> emel__jinja__parser__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__on_unexpected_
-  emel__jinja__parser__done --> emel__jinja__parser__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__on_unexpected_
-  emel__jinja__parser__errored --> emel__jinja__parser__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__on_unexpected_
-  emel__jinja__parser__unexpected --> emel__jinja__parser__unexpected : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__on_unexpected_
+  [*] --> initialized
+  initialized --> parse_decision : parse [valid_parse_] / run_parse_
+  initialized --> errored : parse [invalid_parse_] / reject_invalid_parse_
+  done --> parse_decision : parse [valid_parse_] / run_parse_
+  done --> errored : parse [invalid_parse_] / reject_invalid_parse_
+  errored --> parse_decision : parse [valid_parse_] / run_parse_
+  errored --> errored : parse [invalid_parse_] / reject_invalid_parse_
+  unexpected --> parse_decision : parse [valid_parse_] / run_parse_
+  unexpected --> unexpected : parse [invalid_parse_] / reject_invalid_parse_
+  parse_decision --> done : [phase_ok_] / none
+  parse_decision --> errored : [phase_failed_] / none
+  initialized --> unexpected : _ [always] / on_unexpected_
+  parse_decision --> unexpected : _ [always] / on_unexpected_
+  done --> unexpected : _ [always] / on_unexpected_
+  errored --> unexpected : _ [always] / on_unexpected_
+  unexpected --> unexpected : _ [always] / on_unexpected_
 ```
 
 ## Transitions

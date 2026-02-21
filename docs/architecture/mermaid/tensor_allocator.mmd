@@ -1,57 +1,57 @@
 stateDiagram-v2
   direction TB
-  [*] --> emel__tensor__allocator__idle
-  emel__tensor__allocator__idle --> emel__tensor__allocator__validating : emel__tensor__allocator__event__allocate_tensors [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_allocate_tensors_
-  emel__tensor__allocator__validating --> emel__tensor__allocator__validate_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_validate_
-  emel__tensor__allocator__validate_decision --> emel__tensor__allocator__errored : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_failed_] / boost__sml__front__none
-  emel__tensor__allocator__validate_decision --> emel__tensor__allocator__scanning_tensors : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_ok_] / boost__sml__front__none
-  emel__tensor__allocator__scanning_tensors --> emel__tensor__allocator__scan_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_scan_tensors_
-  emel__tensor__allocator__scan_decision --> emel__tensor__allocator__errored : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_failed_] / boost__sml__front__none
-  emel__tensor__allocator__scan_decision --> emel__tensor__allocator__partitioning_ranges : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_ok_] / boost__sml__front__none
-  emel__tensor__allocator__partitioning_ranges --> emel__tensor__allocator__partition_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_partition_ranges_
-  emel__tensor__allocator__partition_decision --> emel__tensor__allocator__errored : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_failed_] / boost__sml__front__none
-  emel__tensor__allocator__partition_decision --> emel__tensor__allocator__allocating_ranges : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_ok_] / boost__sml__front__none
-  emel__tensor__allocator__allocating_ranges --> emel__tensor__allocator__allocate_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_allocate_ranges_
-  emel__tensor__allocator__allocate_decision --> emel__tensor__allocator__errored : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_failed_] / boost__sml__front__none
-  emel__tensor__allocator__allocate_decision --> emel__tensor__allocator__initializing_tensors : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_ok_] / boost__sml__front__none
-  emel__tensor__allocator__initializing_tensors --> emel__tensor__allocator__initialize_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_initialize_tensors_
-  emel__tensor__allocator__initialize_decision --> emel__tensor__allocator__errored : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_failed_] / boost__sml__front__none
-  emel__tensor__allocator__initialize_decision --> emel__tensor__allocator__assembling_result : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_ok_] / boost__sml__front__none
-  emel__tensor__allocator__assembling_result --> emel__tensor__allocator__assemble_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_assemble_
-  emel__tensor__allocator__assemble_decision --> emel__tensor__allocator__errored : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_failed_] / boost__sml__front__none
-  emel__tensor__allocator__assemble_decision --> emel__tensor__allocator__done : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_ok_] / boost__sml__front__none
-  emel__tensor__allocator__done --> emel__tensor__allocator__idle : [boost__sml__front__always] / boost__sml__front__none
-  emel__tensor__allocator__errored --> emel__tensor__allocator__idle : [boost__sml__front__always] / boost__sml__front__none
-  emel__tensor__allocator__idle --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__validating --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__validate_decision --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__scanning_tensors --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__scan_decision --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__partitioning_ranges --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__partition_decision --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__allocating_ranges --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__allocate_decision --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__initializing_tensors --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__initialize_decision --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__assembling_result --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__assemble_decision --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__done --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__errored --> emel__tensor__allocator__release_decision : emel__tensor__allocator__event__release [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_release_
-  emel__tensor__allocator__release_decision --> emel__tensor__allocator__errored : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_failed_] / boost__sml__front__none
-  emel__tensor__allocator__release_decision --> emel__tensor__allocator__idle : [boost__sml__aux__zero_wrapper_emel__tensor__allocator__guard__phase_ok_] / boost__sml__front__none
-  emel__tensor__allocator__idle --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__validating --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__validate_decision --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__scanning_tensors --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__scan_decision --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__partitioning_ranges --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__partition_decision --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__allocating_ranges --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__allocate_decision --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__initializing_tensors --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__initialize_decision --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__assembling_result --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__assemble_decision --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__done --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__errored --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
-  emel__tensor__allocator__release_decision --> emel__tensor__allocator__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__on_unexpected_
+  [*] --> idle
+  idle --> validating : allocate_tensors [always] / begin_allocate_tensors_
+  validating --> validate_decision : [always] / run_validate_
+  validate_decision --> errored : [phase_failed_] / none
+  validate_decision --> scanning_tensors : [phase_ok_] / none
+  scanning_tensors --> scan_decision : [always] / run_scan_tensors_
+  scan_decision --> errored : [phase_failed_] / none
+  scan_decision --> partitioning_ranges : [phase_ok_] / none
+  partitioning_ranges --> partition_decision : [always] / run_partition_ranges_
+  partition_decision --> errored : [phase_failed_] / none
+  partition_decision --> allocating_ranges : [phase_ok_] / none
+  allocating_ranges --> allocate_decision : [always] / run_allocate_ranges_
+  allocate_decision --> errored : [phase_failed_] / none
+  allocate_decision --> initializing_tensors : [phase_ok_] / none
+  initializing_tensors --> initialize_decision : [always] / run_initialize_tensors_
+  initialize_decision --> errored : [phase_failed_] / none
+  initialize_decision --> assembling_result : [phase_ok_] / none
+  assembling_result --> assemble_decision : [always] / run_assemble_
+  assemble_decision --> errored : [phase_failed_] / none
+  assemble_decision --> done : [phase_ok_] / none
+  done --> idle : [always] / none
+  errored --> idle : [always] / none
+  idle --> release_decision : release [always] / begin_release_
+  validating --> release_decision : release [always] / begin_release_
+  validate_decision --> release_decision : release [always] / begin_release_
+  scanning_tensors --> release_decision : release [always] / begin_release_
+  scan_decision --> release_decision : release [always] / begin_release_
+  partitioning_ranges --> release_decision : release [always] / begin_release_
+  partition_decision --> release_decision : release [always] / begin_release_
+  allocating_ranges --> release_decision : release [always] / begin_release_
+  allocate_decision --> release_decision : release [always] / begin_release_
+  initializing_tensors --> release_decision : release [always] / begin_release_
+  initialize_decision --> release_decision : release [always] / begin_release_
+  assembling_result --> release_decision : release [always] / begin_release_
+  assemble_decision --> release_decision : release [always] / begin_release_
+  done --> release_decision : release [always] / begin_release_
+  errored --> release_decision : release [always] / begin_release_
+  release_decision --> errored : [phase_failed_] / none
+  release_decision --> idle : [phase_ok_] / none
+  idle --> errored : _ [always] / on_unexpected_
+  validating --> errored : _ [always] / on_unexpected_
+  validate_decision --> errored : _ [always] / on_unexpected_
+  scanning_tensors --> errored : _ [always] / on_unexpected_
+  scan_decision --> errored : _ [always] / on_unexpected_
+  partitioning_ranges --> errored : _ [always] / on_unexpected_
+  partition_decision --> errored : _ [always] / on_unexpected_
+  allocating_ranges --> errored : _ [always] / on_unexpected_
+  allocate_decision --> errored : _ [always] / on_unexpected_
+  initializing_tensors --> errored : _ [always] / on_unexpected_
+  initialize_decision --> errored : _ [always] / on_unexpected_
+  assembling_result --> errored : _ [always] / on_unexpected_
+  assemble_decision --> errored : _ [always] / on_unexpected_
+  done --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_
+  release_decision --> errored : _ [always] / on_unexpected_
