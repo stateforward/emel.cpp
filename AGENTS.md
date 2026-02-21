@@ -133,6 +133,7 @@ NEVER create monolithic test files.
 ALWAYS scope each test file to one machine, one system, or one behavior.
 ALWAYS keep snapshot baselines under `snapshots/` and lint baselines under
 `snapshots/lint/`.
+NEVER update snapshots without explicit user consent.
 ALWAYS hard-fail runs when required tools are missing.
 ALWAYS enforce line coverage >= 90%.
 ALWAYS run `scripts/quality_gates.sh` after each implementation change.
