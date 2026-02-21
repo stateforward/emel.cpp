@@ -16,17 +16,17 @@ namespace emel::encoder::detail {
 
 constexpr int32_t k_token_null = -1;
 
-struct NaiveTrie {
-  struct Node {
+struct naive_trie {
+  struct node {
     std::array<int32_t, 256> next = {};
     bool has_value = false;
     int32_t value = 0;
 
-    Node() {
+    node() {
       next.fill(-1);
     }
 
-    const Node * traverse(const char c) const {
+    const node * traverse(const char c) const {
       const int32_t idx = next[static_cast<uint8_t>(c)];
       if (idx < 0) {
         return nullptr;
@@ -34,7 +34,7 @@ struct NaiveTrie {
       return &nodes_ref->at(static_cast<size_t>(idx));
     }
 
-    Node * traverse(const char c) {
+    node * traverse(const char c) {
       const int32_t idx = next[static_cast<uint8_t>(c)];
       if (idx < 0) {
         return nullptr;
@@ -42,12 +42,12 @@ struct NaiveTrie {
       return &nodes_ref->at(static_cast<size_t>(idx));
     }
 
-    std::vector<Node> *nodes_ref = nullptr;
+    std::vector<node> *nodes_ref = nullptr;
   };
 
-  std::vector<Node> nodes = {};
+  std::vector<node> nodes = {};
 
-  NaiveTrie() {
+  naive_trie() {
     nodes.emplace_back();
     nodes.back().nodes_ref = &nodes;
   }
@@ -55,7 +55,7 @@ struct NaiveTrie {
   void insert(const char *text, const size_t len, const int32_t value) {
     size_t idx = 0;
     for (size_t i = 0; i < len; ++i) {
-      Node &node = nodes[idx];
+      node &node = nodes[idx];
       const uint8_t byte = static_cast<uint8_t>(text[i]);
       if (node.next[byte] < 0) {
         node.next[byte] = static_cast<int32_t>(nodes.size());
@@ -68,7 +68,7 @@ struct NaiveTrie {
     nodes[idx].value = value;
   }
 
-  const Node * traverse(const char c) const {
+  const node * traverse(const char c) const {
     const int32_t idx = nodes[0].next[static_cast<uint8_t>(c)];
     if (idx < 0) {
       return nullptr;
@@ -77,27 +77,27 @@ struct NaiveTrie {
   }
 };
 
-using naive_trie = NaiveTrie;
+using naive_trie = naive_trie;
 
-struct SpmBigram {
+struct spm_bigram {
   struct comparator {
-    bool operator()(const SpmBigram &l, const SpmBigram &r) const {
+    bool operator()(const spm_bigram &l, const spm_bigram &r) const {
       return (l.score < r.score) || (l.score == r.score && l.left > r.left);
     }
   };
 
-  using queue_storage = std::vector<SpmBigram>;
+  using queue_storage = std::vector<spm_bigram>;
   int left = 0;
   int right = 0;
   float score = 0.0f;
   size_t size = 0;
 };
 
-using spm_bigram = SpmBigram;
+using spm_bigram = spm_bigram;
 
-struct BpeBigram {
+struct bpe_bigram {
   struct comparator {
-    bool operator()(const BpeBigram &l, const BpeBigram &r) const {
+    bool operator()(const bpe_bigram &l, const bpe_bigram &r) const {
       return l.rank > r.rank || (l.rank == r.rank && l.left > r.left);
     }
   };
@@ -108,7 +108,7 @@ struct BpeBigram {
   size_t size = 0;
 };
 
-using bpe_bigram = BpeBigram;
+using bpe_bigram = bpe_bigram;
 
 constexpr uint32_t next_pow2(uint32_t v) {
   if (v == 0) {
@@ -130,12 +130,12 @@ constexpr uint32_t k_merge_hash_size = next_pow2(
 static_assert((k_token_hash_size & (k_token_hash_size - 1)) == 0, "token hash size");
 static_assert((k_merge_hash_size & (k_merge_hash_size - 1)) == 0, "merge hash size");
 
-struct TokenMap {
+struct token_map {
   std::unique_ptr<uint32_t[]> hashes = nullptr;
   std::unique_ptr<int32_t[]> values = nullptr;
   uint32_t count = 0;
 
-  TokenMap()
+  token_map()
       : hashes(std::make_unique<uint32_t[]>(k_token_hash_size)),
         values(std::make_unique<int32_t[]>(k_token_hash_size)) {
     clear();
@@ -152,12 +152,12 @@ struct TokenMap {
   }
 };
 
-struct MergeMap {
+struct merge_map {
   std::unique_ptr<uint32_t[]> hashes = nullptr;
   std::unique_ptr<int32_t[]> values = nullptr;
   uint32_t count = 0;
 
-  MergeMap()
+  merge_map()
       : hashes(std::make_unique<uint32_t[]>(k_merge_hash_size)),
         values(std::make_unique<int32_t[]>(k_merge_hash_size)) {
     clear();
@@ -178,7 +178,7 @@ constexpr size_t k_max_encode_symbols = 16384;
 constexpr size_t k_max_encode_bytes = k_max_encode_symbols * 4;
 constexpr size_t k_max_encode_segments = 1024;
 
-struct EncodeScratch {
+struct encode_scratch {
   std::array<uint32_t, k_max_encode_symbols> offsets = {};
   std::array<uint32_t, k_max_encode_symbols> lengths = {};
   std::array<int32_t, k_max_encode_symbols> prev = {};

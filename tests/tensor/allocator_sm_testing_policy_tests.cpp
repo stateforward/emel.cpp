@@ -47,7 +47,7 @@ TEST_CASE("tensor_allocator_sm_testing_policy_handles_release_from_mid_state") {
   namespace sml = boost::sml;
   emel::tensor::allocator::action::context ctx{};
   sml::sm<emel::tensor::allocator::model, sml::testing> machine{ctx};
-  machine.set_current_states(sml::state<emel::tensor::allocator::Validating>);
+  machine.set_current_states(sml::state<emel::tensor::allocator::validating>);
 
   int32_t err = EMEL_OK;
   emel_error_detail detail{};

@@ -1,10 +1,10 @@
 # AGENTS.md
 
-These rules define the engineering contract for emel.cpp. They are aligned with
-`docs/sml.rules.md`. If a rule here conflicts with `docs/sml.rules.md`, the doc
+these rules define the engineering contract for emel.cpp. they are aligned with
+`docs/sml.rules.md`. if a rule here conflicts with `docs/sml.rules.md`, the doc
 wins and this file must be updated.
 
-## Boost.SML Actor Model (Aligned With docs/sml.rules.md)
+## boost.SML actor model (aligned with docs/sml.rules.md)
 ALWAYS follow the RTC actor model and no-queue invariant from `docs/sml.rules.md`.
 NEVER use `sml::process_queue`, `sml::defer_queue`, or any mailbox/post-for-later
 mechanism.
@@ -27,20 +27,20 @@ NEVER rely on constructor parameter order; prefer a single context aggregate.
 ALWAYS use `visit_current_states` or `is(...)` for state inspection.
 NEVER allow re-entrancy into the same actor within one RTC chain.
 ALWAYS keep cross-actor synchronous calls acyclic and deterministically ordered.
-Callbacks (`emel::callback`) are allowed only for immediate synchronous replies within the
+callbacks (`emel::callback`) are allowed only for immediate synchronous replies within the
 same RTC chain; invoke before dispatch returns, never store in context, and never call
 `process_event` inside the callback.
 ALWAYS define explicit behavior for unexpected events; NEVER drop them silently.
 ALWAYS use `sml::unexpected_event` for unexpected-event handling (never `event<sml::_>`).
 `sml::unexpected_event<_>` is only raised for unhandled external events; it already excludes
-internal events. Do NOT guard it to exclude `boost::sml::back::internal_event`, or you will
+internal events. do NOT guard it to exclude `boost::sml::back::internal_event`, or you will
 suppress the unexpected event itself.
 ALWAYS reproduce a reported bug by adding a failing unit test before making fixes.
 ALWAYS keep tracing deterministic, bounded, and allocation-free; use
 `sml::logger<...>` when needed.
 
-## Architecture and Composition
-ALWAYS use Boost.SML for orchestration state machines.
+## architecture and composition
+ALWAYS use boost.SML for orchestration state machines.
 ALWAYS define transition tables in `struct model` and expose `using sm =
 boost::sml::sm<model>;`.
 ALWAYS keep canonical machine types in component namespaces as `emel::<component>::sm`.
@@ -58,7 +58,7 @@ ALWAYS dispatch cross-machine events only via `machine->process_event(...)`.
 ALWAYS ask the user before changing state machine structure.
 NEVER duplicate code if it's used more than once; put it somewhere it can be shared.
 
-## Events, Outcomes, and Errors
+## events, outcomes, and errors
 ALWAYS define trigger intent events in the `event` namespace using noun-like,
 domain-action names without `cmd_` prefixes.
 ALWAYS define machine outcome events in the `events` namespace with explicit
@@ -73,7 +73,7 @@ NEVER mirror explicit state/event outcomes into context members.
 NEVER add redundant `status_code` fields when errors are modeled by states/events.
 NEVER store per-invocation API output pointers in machine context.
 
-## Context Rules
+## context rules
 ALWAYS define a component-local state-machine context type (e.g. `action::context`).
 ALWAYS mutate context inside actions or internal transitions when needed.
 NEVER mutate context in guards.
@@ -82,7 +82,7 @@ phase events.
 NEVER store orchestration phase/attempt/failure flags in context.
 NEVER add string/pointer `error` members to machine data.
 
-## API Boundaries
+## API boundaries
 ALWAYS use `extern \"C\"` for public API function signatures.
 ALWAYS use fixed-width integer types at API boundaries.
 ALWAYS return error codes across API boundaries.
@@ -90,7 +90,7 @@ NEVER throw exceptions across API boundaries.
 NEVER expose C++ templates, classes, or STL containers directly in the public C
 ABI.
 
-## Performance and Allocation
+## performance and allocation
 ALWAYS treat performance as a top-level priority.
 NEVER use dynamic dispatch in inference hot paths unless explicitly justified.
 ALWAYS prefer compile-time polymorphism in hot paths.
@@ -102,18 +102,18 @@ ALWAYS document rationale for unavoidable heap allocation in code.
 ALWAYS keep telemetry non-blocking and optional.
 NEVER use exceptions for control flow in hot paths.
 
-## Naming, Style, and Portability
+## naming, style, and portability
 ALWAYS use snake_case for functions, variables, and namespaces.
-ALWAYS use PascalCase for exported/public types and SML state names.
-ALWAYS use lower_snake_case for non-exported/internal types (e.g., src-only aliases).
+ALWAYS use PascalCase for exported/public C++ types only (not C API types).
+ALWAYS use lower_snake_case for non-exported/internal types, SML state names, and events.
 ALWAYS use SCREAMING_SNAKE_CASE for constants and macros.
 ALWAYS keep line length near 100 columns and use 2-space indentation.
 NEVER use `using namespace` in headers.
-ALWAYS keep code portable across Linux, macOS, and Windows.
+ALWAYS keep code portable across linux, macOS, and windows.
 NEVER use platform-specific APIs unless wrapped behind an abstraction.
 
-## Build, Tests, and CI Gates
-ALWAYS use Zig toolchain (zig cc and zig c++) for default development and
+## build, tests, and CI gates
+ALWAYS use zig toolchain (zig cc and zig c++) for default development and
 production builds.
 ALWAYS use native clang or gcc for coverage builds.
 ALWAYS use doctest for unit tests.
@@ -130,8 +130,8 @@ ALWAYS run `scripts/quality_gates.sh` after each implementation change.
 ALWAYS use ctest targets `emel_tests` and `lint_snapshot` for test execution.
 ALWAYS reference `docs/sml.rules.md` for SML semantics and testing guidance.
 
-## Reference Policy
-ALWAYS treat `src/` Boost.SML machines as the single source of truth for
+## reference policy
+ALWAYS treat `src/` boost.SML machines as the single source of truth for
 architecture and orchestration.
 NEVER maintain parallel machine-definition markdown specs under
 `docs/architecture/*`.
@@ -141,7 +141,7 @@ ALWAYS treat the reference implementation as the functional logic reference for
 allocator and behavioral parity work.
 NEVER port reference control flow, branching structure, lifecycle semantics, or
 orchestration decisions verbatim from llama.cpp/ggml.
-ALWAYS define EMEL behavior and orchestration semantics in Boost.SML machines as
+ALWAYS define EMEL behavior and orchestration semantics in boost.SML machines as
 source of truth.
 ALWAYS port llama.cpp/ggml arithmetic, kernels, and instruction behavior into
 this codebase when implementing equivalent EMEL functionality.

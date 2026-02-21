@@ -123,7 +123,7 @@ inline bool merge_match(const std::string_view merge,
   return merge.substr(pos + 1) == right;
 }
 
-inline bool insert_token_map(TokenMap &map,
+inline bool insert_token_map(token_map &map,
                              const emel::model::data::vocab &vocab,
                              const std::string_view text,
                              const int32_t id) {
@@ -153,7 +153,7 @@ inline bool insert_token_map(TokenMap &map,
   return false;
 }
 
-inline bool insert_merge_map(MergeMap &map,
+inline bool insert_merge_map(merge_map &map,
                              const std::string_view left,
                              const std::string_view right,
                              const int32_t rank,
@@ -353,15 +353,15 @@ inline const std::array<std::string, 256> &byte_to_utf8_table() {
 inline int32_t byte_to_token(const action::context &ctx,
                              const emel::model::data::vocab &vocab,
                              const uint8_t byte,
-                             const emel::model::data::TokenizerModel model) {
+                             const emel::model::data::tokenizer_model model) {
   (void)vocab;
-  if (model == emel::model::data::TokenizerModel::NONE) {
+  if (model == emel::model::data::tokenizer_model::NONE) {
     return k_token_null;
   }
 
-  if (model == emel::model::data::TokenizerModel::SPM ||
-      model == emel::model::data::TokenizerModel::UGM ||
-      model == emel::model::data::TokenizerModel::PLAMO2) {
+  if (model == emel::model::data::tokenizer_model::SPM ||
+      model == emel::model::data::tokenizer_model::UGM ||
+      model == emel::model::data::tokenizer_model::PLAMO2) {
     char hex[7] = {};
     static const char *digits = "0123456789ABCDEF";
     hex[0] = '<';
@@ -379,9 +379,9 @@ inline int32_t byte_to_token(const action::context &ctx,
     return lookup_token(ctx, std::string_view(&raw, 1));
   }
 
-  if (model == emel::model::data::TokenizerModel::BPE ||
-      model == emel::model::data::TokenizerModel::WPM ||
-      model == emel::model::data::TokenizerModel::RWKV) {
+  if (model == emel::model::data::tokenizer_model::BPE ||
+      model == emel::model::data::tokenizer_model::WPM ||
+      model == emel::model::data::tokenizer_model::RWKV) {
     const uint32_t cpt = byte_to_codepoint_table()[byte];
     char utf8[4] = {};
     const uint8_t len = encode_cpt_utf8(cpt, utf8);
@@ -449,7 +449,7 @@ inline void split_whitespace(const std::string_view text,
 }
 
 inline bool build_symbols(const std::string_view text,
-                          EncodeScratch &scratch,
+                          encode_scratch &scratch,
                           encode_result &result) {
   scratch.symbol_count = 0;
   size_t offset = 0;
@@ -475,7 +475,7 @@ inline bool build_symbols(const std::string_view text,
   return true;
 }
 
-inline void merge_symbols(EncodeScratch &scratch,
+inline void merge_symbols(encode_scratch &scratch,
                           const int32_t left,
                           const int32_t right) {
   scratch.lengths[static_cast<size_t>(left)] += scratch.lengths[static_cast<size_t>(right)];
@@ -490,7 +490,7 @@ inline void merge_symbols(EncodeScratch &scratch,
 inline bool encode_bytes(const event::encode &ev,
                          action::context &ctx,
                          const emel::model::data::vocab &vocab,
-                         const emel::model::data::TokenizerModel model,
+                         const emel::model::data::tokenizer_model model,
                          encode_result &result) {
   (void)vocab;
   int32_t count = 0;

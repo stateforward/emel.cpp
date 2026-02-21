@@ -96,7 +96,7 @@ inline context::context()
       memory_coordinator(std::make_unique<emel::memory::coordinator::any>()),
       kv_cache(std::make_unique<emel::kv::cache::sm>()),
       ubatch_executor(std::make_unique<emel::decoder::ubatch_executor::sm>()) {
-  // One-time heap allocation keeps decoder context small on the stack.
+  // one-time heap allocation keeps decoder context small on the stack.
 }
 
 }  // namespace emel::decoder::action

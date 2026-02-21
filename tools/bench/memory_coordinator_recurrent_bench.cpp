@@ -182,13 +182,13 @@ struct split_state {
   }
 };
 
-struct ReferenceState {
+struct reference_state {
   llama_model model;
   std::unique_ptr<llama_memory_recurrent> memory;
   split_state splitter;
   std::vector<llama_ubatch> ubatches;
 
-  ReferenceState()
+  reference_state()
       : model(make_model_params()) {
     ensure_backend_init();
     configure_hparams(model.hparams);
@@ -396,7 +396,7 @@ void build_ubatches_from_split(const split_inputs & inputs,
 event::memory_status prepare_update_reference(const event::prepare_update & request,
                                               void * user_data,
                                               int32_t * err_out) noexcept {
-  auto * state = static_cast<ReferenceState *>(user_data);
+  auto * state = static_cast<reference_state *>(user_data);
   auto ctx = state->memory->init_update(nullptr, request.optimize);
   if (!ctx) {
     if (err_out != nullptr) {
@@ -417,7 +417,7 @@ event::memory_status prepare_update_reference(const event::prepare_update & requ
 event::memory_status prepare_batch_reference(const event::prepare_batch & request,
                                              void * user_data,
                                              int32_t * err_out) noexcept {
-  auto * state = static_cast<ReferenceState *>(user_data);
+  auto * state = static_cast<reference_state *>(user_data);
   if (request.n_ubatch <= 0 || request.n_ubatches_total <= 0) {
     if (err_out != nullptr) {
       *err_out = EMEL_ERR_INVALID_ARGUMENT;
@@ -434,7 +434,7 @@ event::memory_status prepare_batch_reference(const event::prepare_batch & reques
 event::memory_status prepare_full_reference(const event::prepare_full &,
                                             void * user_data,
                                             int32_t * err_out) noexcept {
-  auto * state = static_cast<ReferenceState *>(user_data);
+  auto * state = static_cast<reference_state *>(user_data);
   auto ctx = state->memory->init_full();
   if (!ctx) {
     if (err_out != nullptr) {
@@ -459,7 +459,7 @@ namespace emel::bench {
 void append_emel_memory_coordinator_recurrent_cases(std::vector<result> & results,
                                                     const config & cfg) {
   emel::memory::coordinator::recurrent::sm machine{};
-  ReferenceState llama_state{};
+  reference_state llama_state{};
   ensure_splitter_parity(llama_state.splitter);
   event::memory_status update_status = event::memory_status::failed_prepare;
   event::memory_status batch_status = event::memory_status::failed_prepare;
@@ -506,7 +506,7 @@ void append_emel_memory_coordinator_recurrent_cases(std::vector<result> & result
 
 void append_reference_memory_coordinator_recurrent_cases(std::vector<result> & results,
                                                          const config & cfg) {
-  ReferenceState state{};
+  reference_state state{};
   ensure_splitter_parity(state.splitter);
   event::prepare_update update_request = {
     .optimize = true,

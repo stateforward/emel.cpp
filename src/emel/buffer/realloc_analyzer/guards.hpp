@@ -17,8 +17,8 @@ inline constexpr auto always = [](const action::context &) {
 };
 
 struct no_error {
-  template <class Event>
-  bool operator()(const Event & ev, const action::context &) const noexcept {
+  template <class event>
+  bool operator()(const event & ev, const action::context &) const noexcept {
     if constexpr (requires { ev.err; }) {
       return ev.err == EMEL_OK;
     }
@@ -27,8 +27,8 @@ struct no_error {
 };
 
 struct has_error {
-  template <class Event>
-  bool operator()(const Event & ev, const action::context &) const noexcept {
+  template <class event>
+  bool operator()(const event & ev, const action::context &) const noexcept {
     if constexpr (requires { ev.err; }) {
       return ev.err != EMEL_OK;
     }

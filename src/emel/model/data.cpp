@@ -2,6 +2,6 @@
 
 namespace emel::model {
 
-// Translation unit placeholder for model-owned data definitions.
+// translation unit placeholder for model-owned data definitions.
 
 }  // namespace emel::model

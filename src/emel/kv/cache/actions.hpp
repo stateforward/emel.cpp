@@ -1888,8 +1888,8 @@ inline constexpr auto on_kv_done = [](const events::kv_done &, context &) {};
 inline constexpr auto on_kv_error = [](const events::kv_error &, context &) {};
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & ctx) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_BACKEND;

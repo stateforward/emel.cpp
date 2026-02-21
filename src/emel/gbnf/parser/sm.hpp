@@ -9,27 +9,27 @@
 
 namespace emel::gbnf::parser {
 
-struct Initialized {};
-struct ParseDecision {};
-struct Done {};
-struct Errored {};
-struct Unexpected {};
+struct initialized {};
+struct parse_decision {};
+struct done {};
+struct errored {};
+struct unexpected {};
 
 /**
  * GBNF parser orchestration model.
  *
- * State purposes:
+ * state purposes:
  * - `initialized`: idle state awaiting parse intent.
  * - `parse_decision`: run parsing step and branch based on phase
  * results.
  * - `done`/`errored`: terminal outcomes.
  * - `unexpected`: sequencing contract violation.
  *
- * Guard semantics:
+ * guard semantics:
  * - `valid_parse`/`invalid_parse` validate request pointers and parameters.
  * - `phase_*` guards observe errors set by actions.
  *
- * Action side effects:
+ * action side effects:
  * - `run_parse` parses grammar synchronously and dispatches callbacks.
  * - `on_unexpected` reports any event sequencing violations.
  */
@@ -38,52 +38,52 @@ struct model {
     namespace sml = boost::sml;
 
     return sml::make_transition_table(
-        // 1. Start parsing
-        *sml::state<Initialized> +
+        // 1. start parsing
+        *sml::state<initialized> +
             sml::event<event::parse>[guard::valid_parse{}] /
-                action::run_parse = sml::state<ParseDecision>,
-        sml::state<Initialized> +
+                action::run_parse = sml::state<parse_decision>,
+        sml::state<initialized> +
             sml::event<event::parse>[guard::invalid_parse{}] /
-                action::reject_invalid_parse = sml::state<Errored>,
+                action::reject_invalid_parse = sml::state<errored>,
 
-        sml::state<Done> + sml::event<event::parse>[guard::valid_parse{}] /
-                               action::run_parse = sml::state<ParseDecision>,
-        sml::state<Done> + sml::event<event::parse>[guard::invalid_parse{}] /
+        sml::state<done> + sml::event<event::parse>[guard::valid_parse{}] /
+                               action::run_parse = sml::state<parse_decision>,
+        sml::state<done> + sml::event<event::parse>[guard::invalid_parse{}] /
                                action::reject_invalid_parse =
-            sml::state<Errored>,
+            sml::state<errored>,
 
-        sml::state<Errored> + sml::event<event::parse>[guard::valid_parse{}] /
-                                  action::run_parse = sml::state<ParseDecision>,
-        sml::state<Errored> + sml::event<event::parse>[guard::invalid_parse{}] /
+        sml::state<errored> + sml::event<event::parse>[guard::valid_parse{}] /
+                                  action::run_parse = sml::state<parse_decision>,
+        sml::state<errored> + sml::event<event::parse>[guard::invalid_parse{}] /
                                   action::reject_invalid_parse =
-            sml::state<Errored>,
+            sml::state<errored>,
 
-        sml::state<Unexpected> +
+        sml::state<unexpected> +
             sml::event<event::parse>[guard::valid_parse{}] /
-                action::run_parse = sml::state<ParseDecision>,
-        sml::state<Unexpected> +
+                action::run_parse = sml::state<parse_decision>,
+        sml::state<unexpected> +
             sml::event<event::parse>[guard::invalid_parse{}] /
-                action::reject_invalid_parse = sml::state<Unexpected>,
+                action::reject_invalid_parse = sml::state<unexpected>,
 
-        sml::state<ParseDecision>[guard::phase_ok{}] =
-            sml::state<Done>,
-        sml::state<ParseDecision>[guard::phase_failed{}] =
-            sml::state<Errored>,
+        sml::state<parse_decision>[guard::phase_ok{}] =
+            sml::state<done>,
+        sml::state<parse_decision>[guard::phase_failed{}] =
+            sml::state<errored>,
 
-        sml::state<Initialized> +
+        sml::state<initialized> +
             sml::unexpected_event<sml::_> /
-                action::on_unexpected = sml::state<Unexpected>,
-        sml::state<ParseDecision> +
+                action::on_unexpected = sml::state<unexpected>,
+        sml::state<parse_decision> +
             sml::unexpected_event<sml::_> /
-                action::on_unexpected = sml::state<Unexpected>,
-        sml::state<Done> + sml::unexpected_event<sml::_> /
-                               action::on_unexpected = sml::state<Unexpected>,
-        sml::state<Errored> + sml::unexpected_event<sml::_> /
+                action::on_unexpected = sml::state<unexpected>,
+        sml::state<done> + sml::unexpected_event<sml::_> /
+                               action::on_unexpected = sml::state<unexpected>,
+        sml::state<errored> + sml::unexpected_event<sml::_> /
                                   action::on_unexpected =
-            sml::state<Unexpected>,
-        sml::state<Unexpected> +
+            sml::state<unexpected>,
+        sml::state<unexpected> +
             sml::unexpected_event<sml::_> /
-                action::on_unexpected = sml::state<Unexpected>);
+                action::on_unexpected = sml::state<unexpected>);
   }
 };
 

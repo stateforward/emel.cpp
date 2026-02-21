@@ -56,7 +56,7 @@ class recursive_descent_parser {
 
  private:
   const emel::jinja::token & peek(size_t offset = 0) const {
-    static const emel::jinja::token end_token{emel::jinja::token_type::Eof, "", 0};
+    static const emel::jinja::token end_token{emel::jinja::token_type::eof, "", 0};
     if (tokens_ == nullptr || current_ + offset >= tokens_->size()) {
       return end_token;
     }
@@ -91,7 +91,7 @@ class recursive_descent_parser {
       return false;
     }
     const auto & t = peek();
-    if (t.type != emel::jinja::token_type::Identifier || t.value != name) {
+    if (t.type != emel::jinja::token_type::identifier || t.value != name) {
       set_error(EMEL_ERR_PARSE_FAILED, t.pos);
       return false;
     }
@@ -105,12 +105,12 @@ class recursive_descent_parser {
 
   bool is_identifier(std::string_view name) const {
     const auto & t = peek();
-    return t.type == emel::jinja::token_type::Identifier && t.value == name;
+    return t.type == emel::jinja::token_type::identifier && t.value == name;
   }
 
   bool is_statement(std::initializer_list<std::string_view> names) const {
-    if (peek(0).type != emel::jinja::token_type::OpenStatement ||
-        peek(1).type != emel::jinja::token_type::Identifier) {
+    if (peek(0).type != emel::jinja::token_type::open_statement ||
+        peek(1).type != emel::jinja::token_type::identifier) {
       return false;
     }
     const std::string & val = peek(1).value;
@@ -122,9 +122,9 @@ class recursive_descent_parser {
     return false;
   }
 
-  template <class T, class... Args>
-  emel::jinja::ast_ptr make_node(size_t start_pos, Args &&... args) {
-    auto node = std::make_unique<T>(std::forward<Args>(args)...);
+  template <class T, class... args>
+  emel::jinja::ast_ptr make_node(size_t start_pos, args &&... args_in) {
+    auto node = std::make_unique<T>(std::forward<args>(args_in)...);
     if (tokens_ != nullptr && start_pos < tokens_->size()) {
       node->pos = (*tokens_)[start_pos].pos;
     } else {
@@ -137,15 +137,15 @@ class recursive_descent_parser {
     size_t start_pos = current_;
     const auto & t = peek();
     switch (t.type) {
-      case emel::jinja::token_type::Comment:
+      case emel::jinja::token_type::comment:
         ++current_;
         return make_node<emel::jinja::comment_statement>(start_pos, t.value);
-      case emel::jinja::token_type::Text:
+      case emel::jinja::token_type::text:
         ++current_;
         return make_node<emel::jinja::string_literal>(start_pos, t.value);
-      case emel::jinja::token_type::OpenStatement:
+      case emel::jinja::token_type::open_statement:
         return parse_jinja_statement();
-      case emel::jinja::token_type::OpenExpression:
+      case emel::jinja::token_type::open_expression:
         return parse_jinja_expression();
       default:
         set_error(EMEL_ERR_PARSE_FAILED, t.pos);
@@ -154,23 +154,23 @@ class recursive_descent_parser {
   }
 
   emel::jinja::ast_ptr parse_jinja_expression() {
-    if (!expect(emel::jinja::token_type::OpenExpression)) {
+    if (!expect(emel::jinja::token_type::open_expression)) {
       return nullptr;
     }
     auto result = parse_expression();
-    if (!expect(emel::jinja::token_type::CloseExpression)) {
+    if (!expect(emel::jinja::token_type::close_expression)) {
       return nullptr;
     }
     return result;
   }
 
   emel::jinja::ast_ptr parse_jinja_statement() {
-    if (!expect(emel::jinja::token_type::OpenStatement)) {
+    if (!expect(emel::jinja::token_type::open_statement)) {
       return nullptr;
     }
 
     const auto & name_token = peek();
-    if (name_token.type != emel::jinja::token_type::Identifier) {
+    if (name_token.type != emel::jinja::token_type::identifier) {
       set_error(EMEL_ERR_PARSE_FAILED, name_token.pos);
       return nullptr;
     }
@@ -184,50 +184,50 @@ class recursive_descent_parser {
       result = parse_set_statement(start_pos);
     } else if (name == "if") {
       result = parse_if_statement(start_pos);
-      if (!expect(emel::jinja::token_type::OpenStatement)) {
+      if (!expect(emel::jinja::token_type::open_statement)) {
         return nullptr;
       }
       if (!expect_identifier("endif")) {
         return nullptr;
       }
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
     } else if (name == "macro") {
       result = parse_macro_statement(start_pos);
-      if (!expect(emel::jinja::token_type::OpenStatement)) {
+      if (!expect(emel::jinja::token_type::open_statement)) {
         return nullptr;
       }
       if (!expect_identifier("endmacro")) {
         return nullptr;
       }
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
     } else if (name == "for") {
       result = parse_for_statement(start_pos);
-      if (!expect(emel::jinja::token_type::OpenStatement)) {
+      if (!expect(emel::jinja::token_type::open_statement)) {
         return nullptr;
       }
       if (!expect_identifier("endfor")) {
         return nullptr;
       }
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
     } else if (name == "break") {
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
       result = make_node<emel::jinja::break_statement>(start_pos);
     } else if (name == "continue") {
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
       result = make_node<emel::jinja::continue_statement>(start_pos);
     } else if (name == "call") {
       emel::jinja::ast_list caller_args;
-      if (is(emel::jinja::token_type::OpenParen)) {
+      if (is(emel::jinja::token_type::open_paren)) {
         caller_args = parse_args();
       }
       auto callee = parse_primary_expression();
@@ -236,7 +236,7 @@ class recursive_descent_parser {
         return nullptr;
       }
       auto call_args = parse_args();
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
 
@@ -244,13 +244,13 @@ class recursive_descent_parser {
       while (ok() && !is_statement({"endcall"})) {
         body.push_back(parse_any());
       }
-      if (!expect(emel::jinja::token_type::OpenStatement)) {
+      if (!expect(emel::jinja::token_type::open_statement)) {
         return nullptr;
       }
       if (!expect_identifier("endcall")) {
         return nullptr;
       }
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
 
@@ -264,10 +264,10 @@ class recursive_descent_parser {
         return nullptr;
       }
       if (filter_node && is_type<emel::jinja::identifier>(filter_node) &&
-          is(emel::jinja::token_type::OpenParen)) {
+          is(emel::jinja::token_type::open_paren)) {
         filter_node = parse_call_expression(std::move(filter_node));
       }
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
 
@@ -275,19 +275,19 @@ class recursive_descent_parser {
       while (ok() && !is_statement({"endfilter"})) {
         body.push_back(parse_any());
       }
-      if (!expect(emel::jinja::token_type::OpenStatement)) {
+      if (!expect(emel::jinja::token_type::open_statement)) {
         return nullptr;
       }
       if (!expect_identifier("endfilter")) {
         return nullptr;
       }
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
       result = make_node<emel::jinja::filter_statement>(
           start_pos, std::move(filter_node), std::move(body));
     } else if (name == "generation" || name == "endgeneration") {
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
       result = make_node<emel::jinja::noop_statement>(start_pos);
@@ -303,24 +303,24 @@ class recursive_descent_parser {
     emel::jinja::ast_ptr value = nullptr;
     emel::jinja::ast_list body;
 
-    if (is(emel::jinja::token_type::Equals)) {
+    if (is(emel::jinja::token_type::equals)) {
       ++current_;
       value = parse_expression_sequence();
     } else {
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
       while (ok() && !is_statement({"endset"})) {
         body.push_back(parse_any());
       }
-      if (!expect(emel::jinja::token_type::OpenStatement)) {
+      if (!expect(emel::jinja::token_type::open_statement)) {
         return nullptr;
       }
       if (!expect_identifier("endset")) {
         return nullptr;
       }
     }
-    if (!expect(emel::jinja::token_type::CloseStatement)) {
+    if (!expect(emel::jinja::token_type::close_statement)) {
       return nullptr;
     }
     return make_node<emel::jinja::set_statement>(
@@ -329,7 +329,7 @@ class recursive_descent_parser {
 
   emel::jinja::ast_ptr parse_if_statement(size_t start_pos) {
     auto test = parse_expression();
-    if (!expect(emel::jinja::token_type::CloseStatement)) {
+    if (!expect(emel::jinja::token_type::close_statement)) {
       return nullptr;
     }
 
@@ -346,7 +346,7 @@ class recursive_descent_parser {
       alternate.push_back(parse_if_statement(pos0));
     } else if (ok() && is_statement({"else"})) {
       current_ += 2;
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
       while (ok() && !is_statement({"endif"})) {
@@ -360,7 +360,7 @@ class recursive_descent_parser {
   emel::jinja::ast_ptr parse_macro_statement(size_t start_pos) {
     auto name = parse_primary_expression();
     auto args = parse_args();
-    if (!expect(emel::jinja::token_type::CloseStatement)) {
+    if (!expect(emel::jinja::token_type::close_statement)) {
       return nullptr;
     }
     emel::jinja::ast_list body;
@@ -375,8 +375,8 @@ class recursive_descent_parser {
     size_t start_pos = current_;
     emel::jinja::ast_list exprs;
     exprs.push_back(primary ? parse_primary_expression() : parse_expression());
-    bool is_tuple = is(emel::jinja::token_type::Comma);
-    while (ok() && is(emel::jinja::token_type::Comma)) {
+    bool is_tuple = is(emel::jinja::token_type::comma);
+    while (ok() && is(emel::jinja::token_type::comma)) {
       ++current_;
       exprs.push_back(primary ? parse_primary_expression() : parse_expression());
     }
@@ -395,7 +395,7 @@ class recursive_descent_parser {
     }
     ++current_;
     auto iterable = parse_expression();
-    if (!expect(emel::jinja::token_type::CloseStatement)) {
+    if (!expect(emel::jinja::token_type::close_statement)) {
       return nullptr;
     }
 
@@ -408,7 +408,7 @@ class recursive_descent_parser {
 
     if (ok() && is_statement({"else"})) {
       current_ += 2;
-      if (!expect(emel::jinja::token_type::CloseStatement)) {
+      if (!expect(emel::jinja::token_type::close_statement)) {
         return nullptr;
       }
       while (ok() && !is_statement({"endfor"})) {
@@ -480,13 +480,13 @@ class recursive_descent_parser {
     while (ok()) {
       emel::jinja::token op;
       size_t start_pos = current_;
-      if (is_identifier("not") && peek(1).type == emel::jinja::token_type::Identifier &&
+      if (is_identifier("not") && peek(1).type == emel::jinja::token_type::identifier &&
           peek(1).value == "in") {
-        op = {emel::jinja::token_type::Identifier, "not in", peek().pos};
+        op = {emel::jinja::token_type::identifier, "not in", peek().pos};
         current_ += 2;
       } else if (is_identifier("in")) {
         op = (*tokens_)[current_++];
-      } else if (is(emel::jinja::token_type::ComparisonBinaryOperator)) {
+      } else if (is(emel::jinja::token_type::comparison_binary_operator)) {
         op = (*tokens_)[current_++];
       } else {
         break;
@@ -499,7 +499,7 @@ class recursive_descent_parser {
 
   emel::jinja::ast_ptr parse_additive_expression() {
     auto left = parse_multiplicative_expression();
-    while (ok() && is(emel::jinja::token_type::AdditiveBinaryOperator)) {
+    while (ok() && is(emel::jinja::token_type::additive_binary_operator)) {
       size_t start_pos = current_;
       auto op = (*tokens_)[current_++];
       left = make_node<emel::jinja::binary_expression>(
@@ -510,7 +510,7 @@ class recursive_descent_parser {
 
   emel::jinja::ast_ptr parse_multiplicative_expression() {
     auto left = parse_test_expression();
-    while (ok() && is(emel::jinja::token_type::MultiplicativeBinaryOperator)) {
+    while (ok() && is(emel::jinja::token_type::multiplicative_binary_operator)) {
       size_t start_pos = current_;
       auto op = (*tokens_)[current_++];
       left = make_node<emel::jinja::binary_expression>(
@@ -530,7 +530,7 @@ class recursive_descent_parser {
         negate = true;
       }
       auto test_id = parse_primary_expression();
-      if (is(emel::jinja::token_type::OpenParen)) {
+      if (is(emel::jinja::token_type::open_paren)) {
         test_id = parse_call_expression(std::move(test_id));
       }
       operand = make_node<emel::jinja::test_expression>(
@@ -541,11 +541,11 @@ class recursive_descent_parser {
 
   emel::jinja::ast_ptr parse_filter_expression() {
     auto operand = parse_call_member_expression();
-    while (ok() && is(emel::jinja::token_type::Pipe)) {
+    while (ok() && is(emel::jinja::token_type::pipe)) {
       size_t start_pos = current_;
       ++current_;
       auto filter = parse_primary_expression();
-      if (is(emel::jinja::token_type::OpenParen)) {
+      if (is(emel::jinja::token_type::open_paren)) {
         filter = parse_call_expression(std::move(filter));
       }
       operand = make_node<emel::jinja::filter_expression>(
@@ -556,7 +556,7 @@ class recursive_descent_parser {
 
   emel::jinja::ast_ptr parse_call_member_expression() {
     auto member = parse_member_expression(parse_primary_expression());
-    if (is(emel::jinja::token_type::OpenParen)) {
+    if (is(emel::jinja::token_type::open_paren)) {
       return parse_call_expression(std::move(member));
     }
     return member;
@@ -567,7 +567,7 @@ class recursive_descent_parser {
     auto expr = make_node<emel::jinja::call_expression>(
         start_pos, std::move(callee), parse_args());
     auto member = parse_member_expression(std::move(expr));
-    if (is(emel::jinja::token_type::OpenParen)) {
+    if (is(emel::jinja::token_type::open_paren)) {
       return parse_call_expression(std::move(member));
     }
     return member;
@@ -575,12 +575,12 @@ class recursive_descent_parser {
 
   emel::jinja::ast_list parse_args() {
     emel::jinja::ast_list args;
-    if (!expect(emel::jinja::token_type::OpenParen)) {
+    if (!expect(emel::jinja::token_type::open_paren)) {
       return args;
     }
-    while (ok() && !is(emel::jinja::token_type::CloseParen)) {
+    while (ok() && !is(emel::jinja::token_type::close_paren)) {
       emel::jinja::ast_ptr arg;
-      if (peek().type == emel::jinja::token_type::MultiplicativeBinaryOperator &&
+      if (peek().type == emel::jinja::token_type::multiplicative_binary_operator &&
           peek().value == "*") {
         size_t start_pos = current_;
         ++current_;
@@ -588,7 +588,7 @@ class recursive_descent_parser {
             start_pos, parse_expression());
       } else {
         arg = parse_expression();
-        if (is(emel::jinja::token_type::Equals)) {
+        if (is(emel::jinja::token_type::equals)) {
           size_t start_pos = current_;
           ++current_;
           arg = make_node<emel::jinja::keyword_argument_expression>(
@@ -596,24 +596,24 @@ class recursive_descent_parser {
         }
       }
       args.push_back(std::move(arg));
-      if (is(emel::jinja::token_type::Comma)) {
+      if (is(emel::jinja::token_type::comma)) {
         ++current_;
       }
     }
-    expect(emel::jinja::token_type::CloseParen);
+    expect(emel::jinja::token_type::close_paren);
     return args;
   }
 
   emel::jinja::ast_ptr parse_member_expression(emel::jinja::ast_ptr object) {
     size_t start_pos = current_;
-    while (ok() && (is(emel::jinja::token_type::Dot) ||
-                    is(emel::jinja::token_type::OpenSquareBracket))) {
+    while (ok() && (is(emel::jinja::token_type::dot) ||
+                    is(emel::jinja::token_type::open_square_bracket))) {
       auto op = (*tokens_)[current_++];
-      bool computed = op.type == emel::jinja::token_type::OpenSquareBracket;
+      bool computed = op.type == emel::jinja::token_type::open_square_bracket;
       emel::jinja::ast_ptr prop;
       if (computed) {
         prop = parse_member_expression_arguments();
-        if (!expect(emel::jinja::token_type::CloseSquareBracket)) {
+        if (!expect(emel::jinja::token_type::close_square_bracket)) {
           return nullptr;
         }
       } else {
@@ -629,14 +629,14 @@ class recursive_descent_parser {
     emel::jinja::ast_list slices;
     bool is_slice = false;
     size_t start_pos = current_;
-    while (ok() && !is(emel::jinja::token_type::CloseSquareBracket)) {
-      if (is(emel::jinja::token_type::Colon)) {
+    while (ok() && !is(emel::jinja::token_type::close_square_bracket)) {
+      if (is(emel::jinja::token_type::colon)) {
         slices.push_back(nullptr);
         ++current_;
         is_slice = true;
       } else {
         slices.push_back(parse_expression());
-        if (is(emel::jinja::token_type::Colon)) {
+        if (is(emel::jinja::token_type::colon)) {
           ++current_;
           is_slice = true;
         }
@@ -660,7 +660,7 @@ class recursive_descent_parser {
     const auto & t = peek();
     ++current_;
     switch (t.type) {
-      case emel::jinja::token_type::NumericLiteral: {
+      case emel::jinja::token_type::numeric_literal: {
         const char * str = t.value.c_str();
         if (t.value.find('.') != std::string::npos) {
           char * end = nullptr;
@@ -679,49 +679,49 @@ class recursive_descent_parser {
         }
         return make_node<emel::jinja::integer_literal>(start_pos, static_cast<int64_t>(v));
       }
-      case emel::jinja::token_type::StringLiteral: {
+      case emel::jinja::token_type::string_literal: {
         std::string val = t.value;
-        while (is(emel::jinja::token_type::StringLiteral)) {
+        while (is(emel::jinja::token_type::string_literal)) {
           val += peek().value;
           ++current_;
         }
         return make_node<emel::jinja::string_literal>(start_pos, std::move(val));
       }
-      case emel::jinja::token_type::Identifier:
+      case emel::jinja::token_type::identifier:
         return make_node<emel::jinja::identifier>(start_pos, t.value);
-      case emel::jinja::token_type::OpenParen: {
+      case emel::jinja::token_type::open_paren: {
         auto expr = parse_expression_sequence();
-        if (!expect(emel::jinja::token_type::CloseParen)) {
+        if (!expect(emel::jinja::token_type::close_paren)) {
           return nullptr;
         }
         return expr;
       }
-      case emel::jinja::token_type::OpenSquareBracket: {
+      case emel::jinja::token_type::open_square_bracket: {
         emel::jinja::ast_list vals;
-        while (ok() && !is(emel::jinja::token_type::CloseSquareBracket)) {
+        while (ok() && !is(emel::jinja::token_type::close_square_bracket)) {
           vals.push_back(parse_expression());
-          if (is(emel::jinja::token_type::Comma)) {
+          if (is(emel::jinja::token_type::comma)) {
             ++current_;
           }
         }
-        if (!expect(emel::jinja::token_type::CloseSquareBracket)) {
+        if (!expect(emel::jinja::token_type::close_square_bracket)) {
           return nullptr;
         }
         return make_node<emel::jinja::array_literal>(start_pos, std::move(vals));
       }
-      case emel::jinja::token_type::OpenCurlyBracket: {
+      case emel::jinja::token_type::open_curly_bracket: {
         emel::jinja::ast_pair_list pairs;
-        while (ok() && !is(emel::jinja::token_type::CloseCurlyBracket)) {
+        while (ok() && !is(emel::jinja::token_type::close_curly_bracket)) {
           auto key = parse_expression();
-          if (!expect(emel::jinja::token_type::Colon)) {
+          if (!expect(emel::jinja::token_type::colon)) {
             return nullptr;
           }
           pairs.push_back({std::move(key), parse_expression()});
-          if (is(emel::jinja::token_type::Comma)) {
+          if (is(emel::jinja::token_type::comma)) {
             ++current_;
           }
         }
-        if (!expect(emel::jinja::token_type::CloseCurlyBracket)) {
+        if (!expect(emel::jinja::token_type::close_curly_bracket)) {
           return nullptr;
         }
         return make_node<emel::jinja::object_literal>(start_pos, std::move(pairs));

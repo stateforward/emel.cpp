@@ -1848,8 +1848,8 @@ TEST_CASE("gguf parse_kv loads tokenizer metadata and arrays") {
   CHECK(local_model.vocab_data.n_token_types == 3);
   CHECK(local_model.vocab_data.entries[0].score == doctest::Approx(0.1f));
   CHECK(local_model.vocab_data.entries[1].type == 2);
-  CHECK(std::strncmp(local_model.vocab_data.tokenizer_model.data(), "gpt2", 4) == 0);
-  CHECK(std::strncmp(local_model.vocab_data.tokenizer_pre.data(), "default", 7) == 0);
+  CHECK(std::strncmp(local_model.vocab_data.tokenizer_model_name.data(), "gpt2", 4) == 0);
+  CHECK(std::strncmp(local_model.vocab_data.tokenizer_pre_name.data(), "default", 7) == 0);
   CHECK(local_model.vocab_data.n_merges == 2);
   CHECK(local_model.vocab_data.precompiled_charsmap_size == 3);
   CHECK(local_model.vocab_data.bos_id == 1);

@@ -9,52 +9,52 @@
 
 namespace emel::batch::splitter {
 
-// Batch splitter contract (llama parity):
+// batch splitter contract (llama parity):
 // - `event::split` requires `on_done` and `on_error` callbacks on every request.
-// - Sequence sets are provided via `seq_masks` with `seq_mask_words` 64-bit words per token.
-//   The layout is `[n_tokens * seq_mask_words]`. Supported width is 1..SEQ_WORDS (up to 256 seqs).
-//   Example (`seq_mask_words = 2`):
+// - sequence sets are provided via `seq_masks` with `seq_mask_words` 64-bit words per token.
+//   the layout is `[n_tokens * seq_mask_words]`. supported width is 1..SEQ_WORDS (up to 256 seqs).
+//   example (`seq_mask_words = 2`):
 //     token 0 mask words at indices [0,1], token 1 at [2,3], etc.
 //     uint64_t masks[] = {t0_w0, t0_w1, t1_w0, t1_w1, ...};
-// - If `seq_masks` is null, `seq_primary_ids` may provide the single sequence id per token.
-//   If both are null, all tokens are treated as belonging to sequence 0.
+// - if `seq_masks` is null, `seq_primary_ids` may provide the single sequence id per token.
+//   if both are null, all tokens are treated as belonging to sequence 0.
 // - `equal_sequential == true` requires `seq_primary_ids` and rejects coupled sequences
 //   (masks with more than one bit set), matching llama's sequential split restriction.
-// - Output selection:
+// - output selection:
 //   - `output_all == true` marks all tokens as outputs (overrides `output_mask`).
-//   - When `output_mask` is null and `output_all == false`, only the last token is output.
-//   - Otherwise `output_mask` marks per-token outputs.
+//   - when `output_mask` is null and `output_all == false`, only the last token is output.
+//   - otherwise `output_mask` marks per-token outputs.
 // - `total_outputs` is derived from the output selection rules above.
 // - `splitting_done` includes `ubatch_token_indices` and `ubatch_token_offsets` so callers can
 //   reconstruct per-ubatch token ordering (matching llama's split ordering).
-// - Equal mode groups non-overlapping sequence sets and fills ubatches up to `n_ubatch`.
-// - Seq mode builds one sequence-set ubatch at a time using subset expansion.
+// - equal mode groups non-overlapping sequence sets and fills ubatches up to `n_ubatch`.
+// - seq mode builds one sequence-set ubatch at a time using subset expansion.
 
-// Ready state. Invariant: no active split in progress.
+// ready state. invariant: no active split in progress.
 struct initialized {};
-// Validates inputs copied into context by begin_split.
+// validates inputs copied into context by begin_split.
 struct validating {};
-// Normalizes batch sizing parameters.
+// normalizes batch sizing parameters.
 struct normalizing_batch {};
-// Selects split algorithm based on request mode.
+// selects split algorithm based on request mode.
 struct selecting_mode {};
-// Computes micro-batch boundaries (simple mode).
+// computes micro-batch boundaries (simple mode).
 struct splitting_simple {};
-// Computes micro-batch boundaries (equal mode).
+// computes micro-batch boundaries (equal mode).
 struct splitting_equal {};
-// Computes micro-batch boundaries (equal mode, primary-id fast path).
+// computes micro-batch boundaries (equal mode, primary-id fast path).
 struct splitting_equal_primary {};
-// Computes micro-batch boundaries (seq mode).
+// computes micro-batch boundaries (seq mode).
 struct splitting_seq {};
-// Checks output capacity and finalizes results.
+// checks output capacity and finalizes results.
 struct publishing {};
-// Terminal success state.
+// terminal success state.
 struct done {};
-// Terminal error: invalid arguments or callback contract.
+// terminal error: invalid arguments or callback contract.
 struct invalid_request {};
-// Terminal error: split computation failed.
+// terminal error: split computation failed.
 struct split_failed {};
-// Terminal error: unexpected event.
+// terminal error: unexpected event.
 struct unexpected_event {};
 
 struct model {
@@ -162,8 +162,8 @@ struct sm : public emel::sm<model> {
     return accepted;
   }
 
-  template <class Event>
-  bool process_event(const Event & ev) {
+  template <class event>
+  bool process_event(const event & ev) {
     return base_type::process_event(ev);
   }
 

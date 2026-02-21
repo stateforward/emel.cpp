@@ -8,14 +8,14 @@
 namespace emel::buffer::chunk_allocator {
 
 /**
- * Dynamic chunk allocator orchestration model.
+ * dynamic chunk allocator orchestration model.
  *
- * Parity reference:
+ * parity reference:
  * - `ggml_dyn_tallocr_alloc(...)`
  * - `ggml_dyn_tallocr_free_bytes(...)`
  * - `ggml_dyn_tallocr_reset(...)`
  *
- * State purposes:
+ * state purposes:
  * - `ready`: accepts configure, allocate, release, and reset operations.
  * - `configuring`/`applying_configure`/`configure_final`: validates and applies runtime allocator limits.
  * - `validating_allocate`/`selecting_block`/`ensuring_chunk`/`ensure_final`/`allocate_final`:

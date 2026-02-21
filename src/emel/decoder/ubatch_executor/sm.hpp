@@ -27,9 +27,9 @@ struct done {};
 struct errored {};
 
 /**
- * Ubatch executor orchestration model.
+ * ubatch executor orchestration model.
  *
- * State purposes:
+ * state purposes:
  * - `initialized`: idle state awaiting ubatch execute intent.
  * - `validating`/`validate_decision`: validate dependencies before execution.
  * - `preparing_memory`/`prepare_memory_decision`: prepare memory.
@@ -39,13 +39,13 @@ struct errored {};
  * - `rolling_back`/`rollback_decision`: attempt rollback after compute/output failure.
  * - `done`/`errored`: terminal outcomes, immediately return to initialized.
  *
- * Guard semantics:
+ * guard semantics:
  * - `valid_execute_request` is a pure predicate on the execute payload.
  * - `phase_*` guards observe errors set by actions.
  * - `outputs_produced_invalid` enforces the expected per-ubatch output count.
  *
- * Action side effects:
- * - Actions run bounded submachine calls and update context fields.
+ * action side effects:
+ * - actions run bounded submachine calls and update context fields.
  */
 struct model {
   auto operator()() const {

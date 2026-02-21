@@ -929,8 +929,8 @@ inline void copy_plan_outputs(const context & ctx, const event::plan & request) 
 namespace emel::buffer::planner::action {
 
 struct no_op {
-  template <class Event>
-  void operator()(const Event &, context &) const noexcept {}
+  template <class event>
+  void operator()(const event &, context &) const noexcept {}
 };
 
 struct begin_plan {
@@ -975,57 +975,57 @@ struct reject_plan {
 };
 
 struct run_reset {
-  template <class Event>
-  void operator()(const Event &, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event &, context & ctx) const noexcept {
     ctx.phase_error = detail::run_reset(ctx);
   }
 };
 
 struct run_seed_leafs {
-  template <class Event>
-  void operator()(const Event &, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event &, context & ctx) const noexcept {
     ctx.phase_error = detail::run_seed_leafs(ctx);
   }
 };
 
 struct run_count_references {
-  template <class Event>
-  void operator()(const Event &, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event &, context & ctx) const noexcept {
     ctx.phase_error = detail::run_count_references(ctx);
   }
 };
 
 struct run_alloc_explicit_inputs {
-  template <class Event>
-  void operator()(const Event &, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event &, context & ctx) const noexcept {
     ctx.phase_error = detail::run_alloc_explicit_inputs(ctx);
   }
 };
 
 struct run_plan_nodes {
-  template <class Event>
-  void operator()(const Event &, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event &, context & ctx) const noexcept {
     ctx.phase_error = detail::run_plan_nodes(ctx);
   }
 };
 
 struct run_release_expired {
-  template <class Event>
-  void operator()(const Event &, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event &, context & ctx) const noexcept {
     ctx.phase_error = detail::run_release_expired(ctx);
   }
 };
 
 struct run_finalize {
-  template <class Event>
-  void operator()(const Event &, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event &, context & ctx) const noexcept {
     ctx.phase_error = detail::run_finalize(ctx);
   }
 };
 
 struct run_split_required {
-  template <class Event>
-  void operator()(const Event &, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event &, context & ctx) const noexcept {
     ctx.phase_error = detail::run_split_required(ctx);
   }
 };
@@ -1111,8 +1111,8 @@ struct on_split_required_done {
 };
 
 struct record_phase_error {
-  template <class ErrorEvent>
-  void operator()(const ErrorEvent & ev, context &) const noexcept {
+  template <class error_event>
+  void operator()(const error_event & ev, context &) const noexcept {
     (void)ev;
   }
 };
@@ -1124,8 +1124,8 @@ struct on_plan_done {
     }
   }
 
-  template <class Event>
-  void operator()(const Event &, context &) const noexcept {}
+  template <class event>
+  void operator()(const event &, context &) const noexcept {}
 };
 
 struct on_plan_error {
@@ -1135,13 +1135,13 @@ struct on_plan_error {
     }
   }
 
-  template <class Event>
-  void operator()(const Event &, context &) const noexcept {}
+  template <class event>
+  void operator()(const event &, context &) const noexcept {}
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & ctx) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;

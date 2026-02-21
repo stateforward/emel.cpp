@@ -17,19 +17,19 @@ struct errored {};
 struct unexpected {};
 
 /**
- * Batch sanitizer orchestration model (decode-only).
+ * batch sanitizer orchestration model (decode-only).
  *
- * State purposes:
+ * state purposes:
  * - `initialized`: idle state awaiting sanitize intent.
  * - `sanitizing`/`sanitize_decision`: run sanitizer logic and branch on result.
  * - `done`/`errored`: terminal outcomes.
  * - `unexpected`: sequencing contract violation.
  *
- * Guard semantics:
+ * guard semantics:
  * - `valid_request`/`invalid_request`: validate request pointers and capacity.
  * - `phase_ok`/`phase_failed`: observe errors set by actions.
  *
- * Action side effects:
+ * action side effects:
  * - `begin_sanitize`: capture inputs and reset outputs.
  * - `run_sanitize_decode`: validate and normalize batch fields.
  * - `mark_done`: clear error state.

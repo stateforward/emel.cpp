@@ -26,9 +26,9 @@ struct done {};
 struct errored {};
 
 /**
- * Compute executor orchestration model.
+ * compute executor orchestration model.
  *
- * State purposes:
+ * state purposes:
  * - `initialized`: idle state awaiting execute intent.
  * - `validating`/`validate_decision`: validate callbacks and ubatch inputs.
  * - `prepare_decision`: build or reuse compute graphs.
@@ -38,12 +38,12 @@ struct errored {};
  * - `extracting_outputs`/`extract_decision`: read outputs for this ubatch.
  * - `done`/`errored`: terminal outcomes, immediately return to initialized.
  *
- * Guard semantics:
+ * guard semantics:
  * - `valid_execute_request` is a pure predicate on the execute payload.
  * - `phase_*` guards observe errors set by actions.
  *
- * Action side effects:
- * - Actions run bounded compute steps and update context fields.
+ * action side effects:
+ * - actions run bounded compute steps and update context fields.
  */
 struct model {
   auto operator()() const {

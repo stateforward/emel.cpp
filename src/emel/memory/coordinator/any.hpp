@@ -80,56 +80,56 @@ class any {
 
   using storage_t = std::aligned_storage_t<k_max_size, k_max_align>;
 
-  template <class Sm>
-  static Sm * ptr(void * storage) noexcept {
-    return std::launder(reinterpret_cast<Sm *>(storage));
+  template <class sm>
+  static sm * ptr(void * storage) noexcept {
+    return std::launder(reinterpret_cast<sm *>(storage));
   }
 
-  template <class Sm>
-  static const Sm * ptr(const void * storage) noexcept {
-    return std::launder(reinterpret_cast<const Sm *>(storage));
+  template <class sm>
+  static const sm * ptr(const void * storage) noexcept {
+    return std::launder(reinterpret_cast<const sm *>(storage));
   }
 
-  template <class Sm>
+  template <class sm>
   static bool process_update_impl(void * storage, const event::prepare_update & ev) {
-    return ptr<Sm>(storage)->process_event(ev);
+    return ptr<sm>(storage)->process_event(ev);
   }
 
-  template <class Sm>
+  template <class sm>
   static bool process_batch_impl(void * storage, const event::prepare_batch & ev) {
-    return ptr<Sm>(storage)->process_event(ev);
+    return ptr<sm>(storage)->process_event(ev);
   }
 
-  template <class Sm>
+  template <class sm>
   static bool process_full_impl(void * storage, const event::prepare_full & ev) {
-    return ptr<Sm>(storage)->process_event(ev);
+    return ptr<sm>(storage)->process_event(ev);
   }
 
-  template <class Sm>
+  template <class sm>
   static int32_t last_error_impl(const void * storage) noexcept {
-    return ptr<Sm>(storage)->last_error();
+    return ptr<sm>(storage)->last_error();
   }
 
-  template <class Sm>
+  template <class sm>
   static event::memory_status last_status_impl(const void * storage) noexcept {
-    return ptr<Sm>(storage)->last_status();
+    return ptr<sm>(storage)->last_status();
   }
 
-  template <class Sm>
+  template <class sm>
   static void destroy_impl(void * storage) noexcept {
-    ptr<Sm>(storage)->~Sm();
+    ptr<sm>(storage)->~sm();
   }
 
-  template <class Sm>
+  template <class sm>
   void construct_impl(const coordinator_kind kind) {
-    new (&storage_) Sm();
+    new (&storage_) sm();
     kind_ = kind;
-    process_update_ = &process_update_impl<Sm>;
-    process_batch_ = &process_batch_impl<Sm>;
-    process_full_ = &process_full_impl<Sm>;
-    last_error_ = &last_error_impl<Sm>;
-    last_status_ = &last_status_impl<Sm>;
-    destroy_ = &destroy_impl<Sm>;
+    process_update_ = &process_update_impl<sm>;
+    process_batch_ = &process_batch_impl<sm>;
+    process_full_ = &process_full_impl<sm>;
+    last_error_ = &last_error_impl<sm>;
+    last_status_ = &last_status_impl<sm>;
+    destroy_ = &destroy_impl<sm>;
   }
 
   void construct(const coordinator_kind kind) {

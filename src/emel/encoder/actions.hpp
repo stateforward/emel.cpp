@@ -69,12 +69,12 @@ struct ensure_last_error {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & ctx) const noexcept {
     ctx.token_count = 0;
     ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
     ctx.last_error = EMEL_ERR_INVALID_ARGUMENT;
-    using decayed_event = std::decay_t<Event>;
+    using decayed_event = std::decay_t<ev_type>;
     if constexpr (std::is_same_v<decayed_event, event::encode>) {
       if (ev.token_count_out != nullptr) {
         *ev.token_count_out = 0;

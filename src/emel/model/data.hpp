@@ -27,7 +27,7 @@ struct data {
   static constexpr int32_t k_max_clip_image_stats = 16;
   static constexpr int32_t k_max_clip_layer_indexes = 512;
 
-  enum class TokenizerModel : uint8_t {
+  enum class tokenizer_model : uint8_t {
     NONE = 0,
     SPM = 1,
     BPE = 2,
@@ -38,7 +38,7 @@ struct data {
     UNKNOWN = 7,
   };
 
-  enum class TokenizerPre : uint16_t {
+  enum class tokenizer_pre : uint16_t {
     DEFAULT = 0,
     LLAMA3,
     JAIS2,
@@ -235,8 +235,8 @@ struct data {
     uint32_t merge_bytes_used = 0;
     uint32_t precompiled_charsmap_size = 0;
 
-    std::array<char, k_max_tokenizer_model> tokenizer_model = {};
-    std::array<char, k_max_tokenizer_pre> tokenizer_pre = {};
+    std::array<char, k_max_tokenizer_model> tokenizer_model_name = {};
+    std::array<char, k_max_tokenizer_pre> tokenizer_pre_name = {};
     std::array<char, k_max_vocab_bytes> token_storage = {};
     std::array<char, k_max_merge_bytes> merge_storage = {};
 
@@ -248,8 +248,8 @@ struct data {
     std::array<uint8_t, k_attr_flag_bytes> lstrip_flags = {};
     std::array<uint8_t, k_attr_flag_bytes> rstrip_flags = {};
 
-    TokenizerModel tokenizer_model_id = TokenizerModel::UNKNOWN;
-    TokenizerPre tokenizer_pre_id = TokenizerPre::DEFAULT;
+    tokenizer_model tokenizer_model_id = tokenizer_model::UNKNOWN;
+    tokenizer_pre tokenizer_pre_id = tokenizer_pre::DEFAULT;
 
     int32_t bos_id = -1;
     int32_t eos_id = -1;

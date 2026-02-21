@@ -1,8 +1,8 @@
 # model_parser
 
-Source: [`emel/model/parser/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp)
+source: [`emel/model/parser/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp)
 
-## Mermaid
+## mermaid
 
 ```mermaid
 stateDiagram-v2
@@ -28,9 +28,9 @@ stateDiagram-v2
   emel__model__parser__errored --> emel__model__parser__errored : boost__sml__back___ [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__parser__action__on_unexpected_
 ```
 
-## Transitions
+## transitions
 
-| Source | Event | Guard | Action | Target |
+| source | event | guard | action | target |
 | --- | --- | --- | --- | --- |
 | [`initialized`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp) | [`parse_model`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp) | [`always`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp) | [`parse_architecture>`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp) | [`parsing_architecture`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp) |
 | [`parsing_architecture`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp) | [`parse_architecture_done`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp) | [`always`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp) | [`map_architecture>`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp) | [`mapping_architecture`](https://github.com/stateforward/emel.cpp/blob/main/src/emel/model/parser/sm.hpp) |

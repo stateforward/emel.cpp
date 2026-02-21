@@ -73,40 +73,40 @@ struct vocab_builder {
   }
 
   void set_model(const char * value) {
-    std::memset(vocab->tokenizer_model.data(), 0, vocab->tokenizer_model.size());
-    std::strncpy(vocab->tokenizer_model.data(), value, vocab->tokenizer_model.size() - 1);
+    std::memset(vocab->tokenizer_model_name.data(), 0, vocab->tokenizer_model_name.size());
+    std::strncpy(vocab->tokenizer_model_name.data(), value, vocab->tokenizer_model_name.size() - 1);
     if (std::strcmp(value, "llama") == 0) {
-      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::SPM;
+      vocab->tokenizer_model_id = emel::model::data::tokenizer_model::SPM;
     } else if (std::strcmp(value, "gpt2") == 0) {
-      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::BPE;
+      vocab->tokenizer_model_id = emel::model::data::tokenizer_model::BPE;
     } else if (std::strcmp(value, "bert") == 0) {
-      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::WPM;
+      vocab->tokenizer_model_id = emel::model::data::tokenizer_model::WPM;
     } else if (std::strcmp(value, "t5") == 0) {
-      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::UGM;
+      vocab->tokenizer_model_id = emel::model::data::tokenizer_model::UGM;
     } else if (std::strcmp(value, "rwkv") == 0) {
-      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::RWKV;
+      vocab->tokenizer_model_id = emel::model::data::tokenizer_model::RWKV;
     } else if (std::strcmp(value, "plamo2") == 0) {
-      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::PLAMO2;
+      vocab->tokenizer_model_id = emel::model::data::tokenizer_model::PLAMO2;
     } else if (std::strcmp(value, "none") == 0 || std::strcmp(value, "no_vocab") == 0) {
-      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::NONE;
+      vocab->tokenizer_model_id = emel::model::data::tokenizer_model::NONE;
     } else {
-      vocab->tokenizer_model_id = emel::model::data::TokenizerModel::UNKNOWN;
+      vocab->tokenizer_model_id = emel::model::data::tokenizer_model::UNKNOWN;
     }
   }
 
   void set_pre(const char * value) {
-    std::memset(vocab->tokenizer_pre.data(), 0, vocab->tokenizer_pre.size());
-    std::strncpy(vocab->tokenizer_pre.data(), value, vocab->tokenizer_pre.size() - 1);
+    std::memset(vocab->tokenizer_pre_name.data(), 0, vocab->tokenizer_pre_name.size());
+    std::strncpy(vocab->tokenizer_pre_name.data(), value, vocab->tokenizer_pre_name.size() - 1);
     if (std::strcmp(value, "default") == 0) {
-      vocab->tokenizer_pre_id = emel::model::data::TokenizerPre::DEFAULT;
+      vocab->tokenizer_pre_id = emel::model::data::tokenizer_pre::DEFAULT;
     } else if (std::strcmp(value, "gpt2") == 0) {
-      vocab->tokenizer_pre_id = emel::model::data::TokenizerPre::GPT2;
+      vocab->tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
     } else if (std::strcmp(value, "llama3") == 0) {
-      vocab->tokenizer_pre_id = emel::model::data::TokenizerPre::LLAMA3;
+      vocab->tokenizer_pre_id = emel::model::data::tokenizer_pre::LLAMA3;
     } else if (std::strcmp(value, "mpt") == 0) {
-      vocab->tokenizer_pre_id = emel::model::data::TokenizerPre::MPT;
+      vocab->tokenizer_pre_id = emel::model::data::tokenizer_pre::MPT;
     } else {
-      vocab->tokenizer_pre_id = emel::model::data::TokenizerPre::UNKNOWN;
+      vocab->tokenizer_pre_id = emel::model::data::tokenizer_pre::UNKNOWN;
     }
   }
 
@@ -395,7 +395,7 @@ TEST_CASE("unicode_helpers_cover_common_paths") {
 }
 
 TEST_CASE("unicode_regex_split_custom_paths") {
-  const std::string text = "Hello 123!";
+  const std::string text = "hello 123!";
   const auto cpts = emel::text::unicode_cpts_from_utf8(text);
   const std::vector<size_t> offsets{cpts.size()};
 
@@ -692,16 +692,16 @@ TEST_CASE("encoder_assign_bpe_regex_variants") {
 
   builder.set_pre("gpt2");
   emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-  CHECK(ctx.bpe_pre_id == emel::model::data::TokenizerPre::GPT2);
+  CHECK(ctx.bpe_pre_id == emel::model::data::tokenizer_pre::GPT2);
   CHECK(!ctx.bpe_regex_exprs.empty());
 
   builder.set_pre("llama3");
   emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-  CHECK(ctx.bpe_pre_id == emel::model::data::TokenizerPre::LLAMA3);
+  CHECK(ctx.bpe_pre_id == emel::model::data::tokenizer_pre::LLAMA3);
 
   builder.set_pre("mpt");
   emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-  CHECK(ctx.bpe_pre_id == emel::model::data::TokenizerPre::MPT);
+  CHECK(ctx.bpe_pre_id == emel::model::data::tokenizer_pre::MPT);
 }
 
 TEST_CASE("encoder_guard_validates_inputs") {
@@ -756,7 +756,7 @@ TEST_CASE("encoder_detail_misc_branches") {
 
   CHECK(emel::encoder::detail::byte_to_token(
     ctx, *builder.vocab, static_cast<uint8_t>('x'),
-    emel::model::data::TokenizerModel::SPM) == raw_x);
+    emel::model::data::tokenizer_model::SPM) == raw_x);
 
   CHECK(emel::encoder::detail::token_text(*builder.vocab, -1).empty());
   CHECK(!emel::encoder::detail::is_token_type(*builder.vocab, -1, 1));
@@ -806,7 +806,7 @@ TEST_CASE("encoder_detail_helpers") {
   CHECK(emel::encoder::detail::token_text(*builder.vocab, hello_id) == "hello");
   CHECK(emel::encoder::detail::is_token_type(*builder.vocab, world_id, 1));
 
-  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::BPE);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::tokenizer_model::BPE);
   CHECK(emel::encoder::detail::lookup_token(ctx, "hello") == hello_id);
 
   std::array<int32_t, 1> out_tokens = {};
@@ -847,7 +847,7 @@ TEST_CASE("encoder_detail_helpers") {
   CHECK(has_token(non_empty, "b"));
   CHECK(has_token(non_empty, "c"));
 
-  const auto wpm_tokens = emel::encoder::wpm::detail::wpm_preprocess("Hello!");
+  const auto wpm_tokens = emel::encoder::wpm::detail::wpm_preprocess("hello!");
   CHECK(!wpm_tokens.empty());
 
   CHECK(emel::encoder::detail::is_chinese_char(0x4E00));
@@ -863,7 +863,7 @@ TEST_CASE("encoder_detail_helpers") {
   ugm_ctx.vocab = builder.vocab;
   std::string_view normalized{};
   CHECK(emel::encoder::ugm::detail::normalize_ugm_into(
-    *builder.vocab, ugm_ctx, "Hello", normalized));
+    *builder.vocab, ugm_ctx, "hello", normalized));
   CHECK(!normalized.empty());
 }
 
@@ -894,14 +894,14 @@ TEST_CASE("encoder_encode_impl_variants") {
       const auto model_id = builder.vocab->tokenizer_model_id;
       emel::encoder::detail::encode_result result{};
       switch (model_id) {
-        case emel::model::data::TokenizerModel::SPM: {
+        case emel::model::data::tokenizer_model::SPM: {
           emel::encoder::action::context ctx{};
           ctx.vocab = builder.vocab;
           CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::spm::detail::encode_spm(ev, ctx, *builder.vocab);
           break;
         }
-        case emel::model::data::TokenizerModel::BPE: {
+        case emel::model::data::tokenizer_model::BPE: {
           emel::encoder::bpe::action::context ctx{};
           ctx.vocab = builder.vocab;
           CHECK(emel::encoder::detail::ensure_tables(ctx));
@@ -911,42 +911,42 @@ TEST_CASE("encoder_encode_impl_variants") {
           result = emel::encoder::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
           break;
         }
-        case emel::model::data::TokenizerModel::WPM: {
+        case emel::model::data::tokenizer_model::WPM: {
           emel::encoder::wpm::action::context ctx{};
           ctx.vocab = builder.vocab;
           CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
           break;
         }
-        case emel::model::data::TokenizerModel::UGM: {
+        case emel::model::data::tokenizer_model::UGM: {
           emel::encoder::ugm::action::context ctx{};
           ctx.vocab = builder.vocab;
           CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
           break;
         }
-        case emel::model::data::TokenizerModel::RWKV: {
+        case emel::model::data::tokenizer_model::RWKV: {
           emel::encoder::rwkv::action::context ctx{};
           ctx.vocab = builder.vocab;
           CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
           break;
         }
-        case emel::model::data::TokenizerModel::PLAMO2: {
+        case emel::model::data::tokenizer_model::PLAMO2: {
           emel::encoder::plamo2::action::context ctx{};
           ctx.vocab = builder.vocab;
           CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::plamo2::detail::encode_plamo2(ev, ctx, *builder.vocab);
           break;
         }
-        case emel::model::data::TokenizerModel::UNKNOWN: {
+        case emel::model::data::tokenizer_model::UNKNOWN: {
           emel::encoder::action::context ctx{};
           ctx.vocab = builder.vocab;
           CHECK(emel::encoder::detail::ensure_tables(ctx));
           result = emel::encoder::fallback::detail::encode_fallback(ev, ctx, *builder.vocab);
           break;
         }
-        case emel::model::data::TokenizerModel::NONE:
+        case emel::model::data::tokenizer_model::NONE:
           result.error = EMEL_ERR_BACKEND;
           break;
       }
@@ -1132,13 +1132,13 @@ TEST_CASE("encoder_detail_branch_coverage") {
 
   CHECK(emel::encoder::detail::byte_to_token(
     ctx, *builder.vocab, static_cast<uint8_t>('A'),
-    emel::model::data::TokenizerModel::SPM) == hex_id);
+    emel::model::data::tokenizer_model::SPM) == hex_id);
   CHECK(emel::encoder::detail::byte_to_token(
     ctx, *builder.vocab, static_cast<uint8_t>('!'),
-    emel::model::data::TokenizerModel::BPE) == byte_id);
+    emel::model::data::tokenizer_model::BPE) == byte_id);
   CHECK(emel::encoder::detail::byte_to_token(
     ctx, *builder.vocab, static_cast<uint8_t>('A'),
-    emel::model::data::TokenizerModel::UNKNOWN) == raw_id);
+    emel::model::data::tokenizer_model::UNKNOWN) == raw_id);
 
   builder.set_model("t5");
   builder.vocab->escape_whitespaces = true;
@@ -1153,21 +1153,21 @@ TEST_CASE("encoder_detail_branch_coverage") {
   CHECK(!normalized.empty());
 
   builder.set_model("none");
-  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::NONE);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::tokenizer_model::NONE);
   builder.set_model("no_vocab");
-  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::NONE);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::tokenizer_model::NONE);
   builder.set_model("llama");
-  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::SPM);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::tokenizer_model::SPM);
   builder.set_model("bert");
-  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::WPM);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::tokenizer_model::WPM);
   builder.set_model("t5");
-  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::UGM);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::tokenizer_model::UGM);
   builder.set_model("rwkv");
-  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::RWKV);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::tokenizer_model::RWKV);
   builder.set_model("plamo2");
-  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::PLAMO2);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::tokenizer_model::PLAMO2);
   builder.set_model("unknown");
-  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::TokenizerModel::UNKNOWN);
+  CHECK(builder.vocab->tokenizer_model_id == emel::model::data::tokenizer_model::UNKNOWN);
 
   builder.set_pre("");
   emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
@@ -1207,7 +1207,7 @@ TEST_CASE("encoder_detail_merge_and_token_helpers") {
   CHECK(emel::encoder::detail::hash_sv("token") != 0u);
   CHECK(emel::encoder::detail::hash_pair("a", "b") != 0u);
 
-  emel::encoder::detail::TokenMap token_map{};
+  emel::encoder::detail::token_map token_map{};
   CHECK(emel::encoder::detail::insert_token_map(
     token_map, *builder.vocab, "", token_id));
   CHECK(emel::encoder::detail::insert_token_map(
@@ -1216,7 +1216,7 @@ TEST_CASE("encoder_detail_merge_and_token_helpers") {
     token_map, *builder.vocab, "token", token_id + 1));
   CHECK(token_map.count >= 1);
 
-  emel::encoder::detail::MergeMap merge_map{};
+  emel::encoder::detail::merge_map merge_map{};
   CHECK(!emel::encoder::detail::insert_merge_map(
     merge_map, "", "b", 0, *builder.vocab));
   CHECK(emel::encoder::detail::insert_merge_map(
@@ -1332,7 +1332,7 @@ TEST_CASE("encoder_detail_byte_to_token_none") {
   ctx.vocab = builder.vocab;
   CHECK(emel::encoder::detail::byte_to_token(
     ctx, *builder.vocab, static_cast<uint8_t>('A'),
-    emel::model::data::TokenizerModel::NONE) ==
+    emel::model::data::tokenizer_model::NONE) ==
     emel::encoder::detail::k_token_null);
 }
 
@@ -1631,58 +1631,58 @@ TEST_CASE("encoder_assign_bpe_regex_variants_extended") {
 }
 
 TEST_CASE("encoder_assign_bpe_regex_enum_cases") {
-  using TokenizerPre = emel::model::data::TokenizerPre;
+  using tokenizer_pre = emel::model::data::tokenizer_pre;
   vocab_builder builder{};
   builder.set_model("gpt2");
 
-  const std::array<TokenizerPre, 47> presets = {{
-    TokenizerPre::DEFAULT,
-    TokenizerPre::LLAMA3,
-    TokenizerPre::JAIS2,
-    TokenizerPre::DBRX,
-    TokenizerPre::SMAUG,
-    TokenizerPre::DEEPSEEK_LLM,
-    TokenizerPre::DEEPSEEK3_LLM,
-    TokenizerPre::HUNYUAN_DENSE,
-    TokenizerPre::JOYAI_LLM,
-    TokenizerPre::YOUTU,
-    TokenizerPre::DEEPSEEK_CODER,
-    TokenizerPre::FALCON,
-    TokenizerPre::STARCODER,
-    TokenizerPre::REFACT,
-    TokenizerPre::COMMAND_R,
-    TokenizerPre::SMOLLM,
-    TokenizerPre::CODESHELL,
-    TokenizerPre::EXAONE,
-    TokenizerPre::MINERVA,
-    TokenizerPre::GPT2,
-    TokenizerPre::MPT,
-    TokenizerPre::OLMO,
-    TokenizerPre::JAIS,
-    TokenizerPre::TRILLION,
-    TokenizerPre::GRANITE_DOCLING,
-    TokenizerPre::QWEN35,
-    TokenizerPre::STABLELM2,
-    TokenizerPre::QWEN2,
-    TokenizerPre::HUNYUAN,
-    TokenizerPre::SOLAR_OPEN,
-    TokenizerPre::PORO,
-    TokenizerPre::BLOOM,
-    TokenizerPre::GPT3_FINNISH,
-    TokenizerPre::CHATGLM4,
-    TokenizerPre::VIKING,
-    TokenizerPre::TEKKEN,
-    TokenizerPre::CHAMELEON,
-    TokenizerPre::GPT4O,
-    TokenizerPre::MINIMAX_M2,
-    TokenizerPre::TINY_AYA,
-    TokenizerPre::KIMI_K2,
-    TokenizerPre::SUPERBPE,
-    TokenizerPre::BAILINGMOE,
-    TokenizerPre::SEED_CODER,
-    TokenizerPre::GROK_2,
-    TokenizerPre::AFMOE,
-    TokenizerPre::EXAONE_MOE,
+  const std::array<tokenizer_pre, 47> presets = {{
+    tokenizer_pre::DEFAULT,
+    tokenizer_pre::LLAMA3,
+    tokenizer_pre::JAIS2,
+    tokenizer_pre::DBRX,
+    tokenizer_pre::SMAUG,
+    tokenizer_pre::DEEPSEEK_LLM,
+    tokenizer_pre::DEEPSEEK3_LLM,
+    tokenizer_pre::HUNYUAN_DENSE,
+    tokenizer_pre::JOYAI_LLM,
+    tokenizer_pre::YOUTU,
+    tokenizer_pre::DEEPSEEK_CODER,
+    tokenizer_pre::FALCON,
+    tokenizer_pre::STARCODER,
+    tokenizer_pre::REFACT,
+    tokenizer_pre::COMMAND_R,
+    tokenizer_pre::SMOLLM,
+    tokenizer_pre::CODESHELL,
+    tokenizer_pre::EXAONE,
+    tokenizer_pre::MINERVA,
+    tokenizer_pre::GPT2,
+    tokenizer_pre::MPT,
+    tokenizer_pre::OLMO,
+    tokenizer_pre::JAIS,
+    tokenizer_pre::TRILLION,
+    tokenizer_pre::GRANITE_DOCLING,
+    tokenizer_pre::QWEN35,
+    tokenizer_pre::STABLELM2,
+    tokenizer_pre::QWEN2,
+    tokenizer_pre::HUNYUAN,
+    tokenizer_pre::SOLAR_OPEN,
+    tokenizer_pre::PORO,
+    tokenizer_pre::BLOOM,
+    tokenizer_pre::GPT3_FINNISH,
+    tokenizer_pre::CHATGLM4,
+    tokenizer_pre::VIKING,
+    tokenizer_pre::TEKKEN,
+    tokenizer_pre::CHAMELEON,
+    tokenizer_pre::GPT4O,
+    tokenizer_pre::MINIMAX_M2,
+    tokenizer_pre::TINY_AYA,
+    tokenizer_pre::KIMI_K2,
+    tokenizer_pre::SUPERBPE,
+    tokenizer_pre::BAILINGMOE,
+    tokenizer_pre::SEED_CODER,
+    tokenizer_pre::GROK_2,
+    tokenizer_pre::AFMOE,
+    tokenizer_pre::EXAONE_MOE,
   }};
 
   for (const auto pre : presets) {
@@ -1742,7 +1742,7 @@ TEST_CASE("encoder_rwkv_skips_unknown_without_unk") {
 }
 
 TEST_CASE("encoder_detail_wpm_preprocess_punctuation_and_control") {
-  const std::string input = std::string("Hi,") + "\xEF\xBF\xBD" + "\xE4\xB8\xAD";
+  const std::string input = std::string("hi,") + "\xEF\xBF\xBD" + "\xE4\xB8\xAD";
   const auto parts = emel::encoder::wpm::detail::wpm_preprocess(input);
   CHECK(parts.size() == 3);
   CHECK(parts[0] == "hi");
@@ -2101,7 +2101,7 @@ TEST_CASE("encoder_detail_insert_token_map_full") {
   const int32_t token_x = builder.add_token("x", 0.0f, 1);
   const int32_t token_y = builder.add_token("y", 0.0f, 1);
 
-  emel::encoder::detail::TokenMap map{};
+  emel::encoder::detail::token_map map{};
   const std::string_view target = "y";
   const uint32_t hash = emel::encoder::detail::hash_sv(target);
   for (uint32_t i = 0; i < emel::encoder::detail::k_token_hash_size; ++i) {
@@ -2119,7 +2119,7 @@ TEST_CASE("encoder_detail_insert_merge_map_full") {
   builder.set_model("gpt2");
   builder.add_merge("a b");
 
-  emel::encoder::detail::MergeMap map{};
+  emel::encoder::detail::merge_map map{};
   const std::string_view left = "x";
   const std::string_view right = "y";
   const uint32_t hash = emel::encoder::detail::hash_pair(left, right);
@@ -2311,7 +2311,7 @@ TEST_CASE("encoder_encode_branch_cases") {
     CHECK(emel::encoder::detail::ensure_tables(ctx));
     CHECK(emel::encoder::detail::byte_to_token(
       ctx, *builder.vocab, static_cast<uint8_t>('x'),
-      emel::model::data::TokenizerModel::NONE) == emel::encoder::detail::k_token_null);
+      emel::model::data::tokenizer_model::NONE) == emel::encoder::detail::k_token_null);
   }
 }
 

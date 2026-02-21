@@ -260,8 +260,8 @@ struct run_validate_configure {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.phase_error = EMEL_OK;
     c.step += 1;
   }
@@ -277,8 +277,8 @@ struct run_apply_configure {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.alignment = c.pending_alignment;
     c.max_chunk_size = detail::clamp_chunk_size_limit(c.pending_max_chunk_size);
     detail::reset_chunks(c);
@@ -327,8 +327,8 @@ struct run_validate_allocate {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     uint64_t aligned = 0;
     if (!detail::align_up(c.request_size, c.request_alignment, aligned)) {
       c.phase_error = EMEL_ERR_INVALID_ARGUMENT;
@@ -353,8 +353,8 @@ struct run_select_block {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.selected_chunk = -1;
     c.selected_block = -1;
     detail::select_best_non_last(c);
@@ -383,8 +383,8 @@ struct run_ensure_chunk {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     int32_t err = EMEL_OK;
     if (c.selected_chunk < 0) {
       int32_t new_chunk = -1;
@@ -411,8 +411,8 @@ struct run_commit_allocate {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     int32_t err = EMEL_OK;
     if (!detail::allocate_from_selected(c)) {
       err = EMEL_ERR_BACKEND;
@@ -447,8 +447,8 @@ struct run_validate_release {
     if (ev.error_out != nullptr) *ev.error_out = EMEL_OK;
     c.step += 1;
   }
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     uint64_t aligned = 0;
     if (!detail::align_up(c.request_size, c.request_alignment, aligned)) {
       c.phase_error = EMEL_ERR_INVALID_ARGUMENT;
@@ -471,8 +471,8 @@ struct run_merge_release {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     int32_t err = EMEL_OK;
     if (!detail::free_bytes(c)) {
       err = EMEL_ERR_BACKEND;
@@ -498,8 +498,8 @@ struct run_apply_reset {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     detail::reset_chunks(c);
     c.phase_error = EMEL_OK;
     c.step += 1;
@@ -512,8 +512,8 @@ struct on_configure_done {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -526,8 +526,8 @@ struct on_configure_error {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -538,8 +538,8 @@ struct on_allocate_done {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -552,8 +552,8 @@ struct on_allocate_error {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -564,8 +564,8 @@ struct on_release_done {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -578,8 +578,8 @@ struct on_release_error {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -590,8 +590,8 @@ struct on_reset_done {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -604,15 +604,15 @@ struct on_reset_error {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
 
 struct reject_invalid {
-  template <class Event>
-  void operator()(const Event & ev, context & c) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & c) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
@@ -624,8 +624,8 @@ struct reject_invalid {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & c) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & c) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;

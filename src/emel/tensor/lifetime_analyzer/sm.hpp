@@ -9,97 +9,97 @@
 
 namespace emel::tensor::lifetime_analyzer {
 
-struct Idle {};
-struct Validating {};
-struct ValidateDecision {};
-struct CollectingRanges {};
-struct CollectDecision {};
-struct Publishing {};
-struct PublishDecision {};
-struct Done {};
-struct Errored {};
-struct ResetDecision {};
+struct idle {};
+struct validating {};
+struct validate_decision {};
+struct collecting_ranges {};
+struct collect_decision {};
+struct publishing {};
+struct publish_decision {};
+struct done {};
+struct errored {};
+struct reset_decision {};
 
 /**
- * Tensor lifetime analysis orchestration model.
+ * tensor lifetime analysis orchestration model.
  *
- * Runtime invariants:
- * - Inputs are accepted only through `event::analyze`.
- * - Internal phases advance through anonymous transitions only.
- * - Phase outcomes route through explicit error states.
- * - Completion/error is explicit through terminal states.
+ * runtime invariants:
+ * - inputs are accepted only through `event::analyze`.
+ * - internal phases advance through anonymous transitions only.
+ * - phase outcomes route through explicit error states.
+ * - completion/error is explicit through terminal states.
  *
- * State purposes:
- * - `Idle`: accepts `event::analyze` and `event::reset`.
- * - `Validating`: validates payload pointers/counts and output contracts.
- * - `CollectingRanges`: computes first/last-use ranges per tensor id.
- * - `Publishing`: placeholder phase before output publication by caller.
- * - `Done`: successful terminal.
- * - `Errored`: failed terminal.
- * - `ResetDecision`: clears runtime state and routes to `Idle`.
+ * state purposes:
+ * - `idle`: accepts `event::analyze` and `event::reset`.
+ * - `validating`: validates payload pointers/counts and output contracts.
+ * - `collecting_ranges`: computes first/last-use ranges per tensor id.
+ * - `publishing`: placeholder phase before output publication by caller.
+ * - `done`: successful terminal.
+ * - `errored`: failed terminal.
+ * - `reset_decision`: clears runtime state and routes to `idle`.
  */
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
     return sml::make_transition_table(
-      *sml::state<Idle> + sml::event<event::analyze> / action::begin_analyze =
-        sml::state<Validating>,
-      sml::state<Validating> / action::run_validate = sml::state<ValidateDecision>,
-      sml::state<ValidateDecision> [guard::phase_failed{}] = sml::state<Errored>,
-      sml::state<ValidateDecision> [guard::phase_ok{}] = sml::state<CollectingRanges>,
+      *sml::state<idle> + sml::event<event::analyze> / action::begin_analyze =
+        sml::state<validating>,
+      sml::state<validating> / action::run_validate = sml::state<validate_decision>,
+      sml::state<validate_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<validate_decision> [guard::phase_ok{}] = sml::state<collecting_ranges>,
 
-      sml::state<CollectingRanges> / action::run_collect_ranges = sml::state<CollectDecision>,
-      sml::state<CollectDecision> [guard::phase_failed{}] = sml::state<Errored>,
-      sml::state<CollectDecision> [guard::phase_ok{}] = sml::state<Publishing>,
+      sml::state<collecting_ranges> / action::run_collect_ranges = sml::state<collect_decision>,
+      sml::state<collect_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<collect_decision> [guard::phase_ok{}] = sml::state<publishing>,
 
-      sml::state<Publishing> / action::run_publish = sml::state<PublishDecision>,
-      sml::state<PublishDecision> [guard::phase_failed{}] = sml::state<Errored>,
-      sml::state<PublishDecision> [guard::phase_ok{}] = sml::state<Done>,
+      sml::state<publishing> / action::run_publish = sml::state<publish_decision>,
+      sml::state<publish_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<publish_decision> [guard::phase_ok{}] = sml::state<done>,
 
-      sml::state<Done> = sml::state<Idle>,
-      sml::state<Errored> = sml::state<Idle>,
+      sml::state<done> = sml::state<idle>,
+      sml::state<errored> = sml::state<idle>,
 
-      sml::state<Idle> + sml::event<event::reset> / action::begin_reset =
-        sml::state<ResetDecision>,
-      sml::state<Validating> + sml::event<event::reset> / action::begin_reset =
-        sml::state<ResetDecision>,
-      sml::state<ValidateDecision> + sml::event<event::reset> / action::begin_reset =
-        sml::state<ResetDecision>,
-      sml::state<CollectingRanges> + sml::event<event::reset> / action::begin_reset =
-        sml::state<ResetDecision>,
-      sml::state<CollectDecision> + sml::event<event::reset> / action::begin_reset =
-        sml::state<ResetDecision>,
-      sml::state<Publishing> + sml::event<event::reset> / action::begin_reset =
-        sml::state<ResetDecision>,
-      sml::state<PublishDecision> + sml::event<event::reset> / action::begin_reset =
-        sml::state<ResetDecision>,
-      sml::state<Done> + sml::event<event::reset> / action::begin_reset =
-        sml::state<ResetDecision>,
-      sml::state<Errored> + sml::event<event::reset> / action::begin_reset =
-        sml::state<ResetDecision>,
-      sml::state<ResetDecision> [guard::phase_failed{}] = sml::state<Errored>,
-      sml::state<ResetDecision> [guard::phase_ok{}] = sml::state<Idle>,
+      sml::state<idle> + sml::event<event::reset> / action::begin_reset =
+        sml::state<reset_decision>,
+      sml::state<validating> + sml::event<event::reset> / action::begin_reset =
+        sml::state<reset_decision>,
+      sml::state<validate_decision> + sml::event<event::reset> / action::begin_reset =
+        sml::state<reset_decision>,
+      sml::state<collecting_ranges> + sml::event<event::reset> / action::begin_reset =
+        sml::state<reset_decision>,
+      sml::state<collect_decision> + sml::event<event::reset> / action::begin_reset =
+        sml::state<reset_decision>,
+      sml::state<publishing> + sml::event<event::reset> / action::begin_reset =
+        sml::state<reset_decision>,
+      sml::state<publish_decision> + sml::event<event::reset> / action::begin_reset =
+        sml::state<reset_decision>,
+      sml::state<done> + sml::event<event::reset> / action::begin_reset =
+        sml::state<reset_decision>,
+      sml::state<errored> + sml::event<event::reset> / action::begin_reset =
+        sml::state<reset_decision>,
+      sml::state<reset_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<reset_decision> [guard::phase_ok{}] = sml::state<idle>,
 
-      sml::state<Idle> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<Validating> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<ValidateDecision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<CollectingRanges> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<CollectDecision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<Publishing> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<PublishDecision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<Done> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<Errored> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<ResetDecision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>
+      sml::state<idle> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<validating> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<validate_decision> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<collecting_ranges> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<collect_decision> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<publishing> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<publish_decision> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<done> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<errored> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<reset_decision> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>
     );
   }
 };

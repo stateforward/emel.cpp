@@ -31,8 +31,8 @@ struct ensure_last_error {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & ctx) const noexcept {
     emel::encoder::action::on_unexpected(ev, ctx);
   }
 };

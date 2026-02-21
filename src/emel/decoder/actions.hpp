@@ -140,8 +140,8 @@ struct run_validate {
     ctx.phase_error = EMEL_OK;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
   }
 };
@@ -206,8 +206,8 @@ struct run_sanitize_batch {
     ctx.output_mask_count = ctx.n_tokens;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     event::sanitize_batch sanitize{
       .error_out = &ctx.phase_error,
@@ -226,8 +226,8 @@ struct reject_invalid_validate {
     ctx.last_error = EMEL_ERR_INVALID_ARGUMENT;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
     ctx.last_error = EMEL_ERR_INVALID_ARGUMENT;
   }
@@ -427,8 +427,8 @@ struct run_initialize_batch {
     }
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     event::initialize_batch initialize{
       .error_out = &ctx.phase_error,
@@ -466,8 +466,8 @@ struct run_update_memory {
     }
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     event::update_memory update{
       .error_out = &ctx.phase_error,
@@ -543,8 +543,8 @@ struct run_prepare_memory_batch {
     }
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     ctx.phase_retryable = false;
     event::prepare_memory_batch prepare{
@@ -584,8 +584,8 @@ struct run_optimize_memory {
     }
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     event::optimize_memory optimize{
       .error_out = &ctx.phase_error,
@@ -607,8 +607,8 @@ struct run_reserve_output {
     }
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
   }
 };
@@ -622,8 +622,8 @@ struct reject_invalid_reserve_output {
     ctx.phase_error = EMEL_ERR_BACKEND;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_ERR_BACKEND;
   }
 };
@@ -789,8 +789,8 @@ struct run_process_ubatch {
     ctx.ubatches_processed += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     ctx.rollback_needed = false;
     event::process_ubatch process{
@@ -817,8 +817,8 @@ struct on_invalid_ubatch_size {
     ctx.rollback_needed = false;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_ERR_BACKEND;
     ctx.ubatch_error = EMEL_ERR_BACKEND;
     ctx.rollback_needed = false;
@@ -862,8 +862,8 @@ struct run_rollback_ubatch {
     }
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     event::rollback_ubatch rollback{
       .error_out = &ctx.phase_error,
@@ -886,8 +886,8 @@ struct run_finalize_outputs {
     }
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     event::finalize_outputs finalize{
       .error_out = &ctx.phase_error,
@@ -952,8 +952,8 @@ struct ensure_last_error {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & ctx) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_BACKEND;

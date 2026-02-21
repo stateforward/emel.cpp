@@ -91,7 +91,7 @@ TEST_CASE("unicode_cpt_is_han_detects_cjk_ranges") {
 }
 
 TEST_CASE("unicode_regex_split_custom_paths") {
-  const std::string ascii_text = "Hello 123";
+  const std::string ascii_text = "hello 123";
   const std::vector<size_t> ascii_offsets = {0u, ascii_text.size()};
 
   const auto gpt2 = emel::text::unicode_regex_split_custom(
@@ -108,7 +108,7 @@ TEST_CASE("unicode_regex_split_custom_paths") {
 
   const std::string han_text = "汉字";
   const std::vector<size_t> han_offsets = {0u, emel::text::unicode_cpts_from_utf8(han_text).size()};
-  const auto kimi = emel::text::unicode_regex_split_custom(han_text, "\\p{Han}+", han_offsets);
+  const auto kimi = emel::text::unicode_regex_split_custom(han_text, "\\p{han}+", han_offsets);
   CHECK(!kimi.empty());
 
   const std::string digits = "1234567";
@@ -118,7 +118,7 @@ TEST_CASE("unicode_regex_split_custom_paths") {
 }
 
 TEST_CASE("unicode_regex_split_runs_default_pipeline") {
-  const std::string text = "Hello, world!";
+  const std::string text = "hello, world!";
   const std::vector<std::string> exprs = {
     "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)",
   };
@@ -145,7 +145,7 @@ TEST_CASE("unicode_cpts_to_utf8_roundtrip") {
 }
 
 TEST_CASE("unicode_regex_split_category_patterns") {
-  const std::string text = "Abc 123.";
+  const std::string text = "abc 123.";
   const std::vector<std::string> exprs = {
     "\\p{L}+",
     "\\p{N}+",
@@ -179,7 +179,7 @@ TEST_CASE("unicode_regex_split_custom_gpt2_branches") {
 }
 
 TEST_CASE("unicode_regex_split_custom_llama3_branches") {
-  const std::string text = "!Hello 'RE 1234!!!\r\n";
+  const std::string text = "!hello 'RE 1234!!!\r\n";
   const auto cpts = emel::text::unicode_cpts_from_utf8(text);
   const std::vector<size_t> offsets = {cpts.size()};
   const auto result = emel::text::unicode_regex_split_custom_llama3(text, offsets);
@@ -187,7 +187,7 @@ TEST_CASE("unicode_regex_split_custom_llama3_branches") {
 }
 
 TEST_CASE("unicode_regex_split_custom_kimi_k2_extra") {
-  const std::string text = "汉字!Abc's ?1234\r\n";
+  const std::string text = "汉字!abc's ?1234\r\n";
   const auto cpts = emel::text::unicode_cpts_from_utf8(text);
   const std::vector<size_t> offsets = {cpts.size()};
   const auto result = emel::text::unicode_regex_split_custom_kimi_k2(text, offsets);

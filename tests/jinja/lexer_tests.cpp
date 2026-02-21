@@ -5,16 +5,16 @@
 
 TEST_CASE("jinja_lexer_tokenizes_expression") {
   emel::jinja::lexer lex;
-  emel::jinja::lexer_result result = lex.tokenize("Hello {{ name }}");
+  emel::jinja::lexer_result result = lex.tokenize("hello {{ name }}");
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() >= 4);
-  CHECK(result.tokens[0].type == emel::jinja::token_type::Text);
-  CHECK(result.tokens[0].value == "Hello ");
-  CHECK(result.tokens[1].type == emel::jinja::token_type::OpenExpression);
-  CHECK(result.tokens[2].type == emel::jinja::token_type::Identifier);
+  CHECK(result.tokens[0].type == emel::jinja::token_type::text);
+  CHECK(result.tokens[0].value == "hello ");
+  CHECK(result.tokens[1].type == emel::jinja::token_type::open_expression);
+  CHECK(result.tokens[2].type == emel::jinja::token_type::identifier);
   CHECK(result.tokens[2].value == "name");
-  CHECK(result.tokens[3].type == emel::jinja::token_type::CloseExpression);
+  CHECK(result.tokens[3].type == emel::jinja::token_type::close_expression);
 }
 
 TEST_CASE("jinja_lexer_handles_empty_input") {
@@ -31,10 +31,10 @@ TEST_CASE("jinja_lexer_tokenizes_comment") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() >= 4);
-  CHECK(result.tokens[0].type == emel::jinja::token_type::Text);
-  CHECK(result.tokens[1].type == emel::jinja::token_type::Comment);
-  CHECK(result.tokens[2].type == emel::jinja::token_type::OpenExpression);
-  CHECK(result.tokens[3].type == emel::jinja::token_type::Identifier);
+  CHECK(result.tokens[0].type == emel::jinja::token_type::text);
+  CHECK(result.tokens[1].type == emel::jinja::token_type::comment);
+  CHECK(result.tokens[2].type == emel::jinja::token_type::open_expression);
+  CHECK(result.tokens[3].type == emel::jinja::token_type::identifier);
 }
 
 TEST_CASE("jinja_lexer_rejects_invalid_escape") {
@@ -72,7 +72,7 @@ TEST_CASE("jinja_lexer_handles_lonely_brace") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() == 1);
-  CHECK(result.tokens[0].type == emel::jinja::token_type::Text);
+  CHECK(result.tokens[0].type == emel::jinja::token_type::text);
 }
 
 TEST_CASE("jinja_lexer_handles_double_dash_expression") {
@@ -81,8 +81,8 @@ TEST_CASE("jinja_lexer_handles_double_dash_expression") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() >= 2);
-  CHECK(result.tokens[0].type == emel::jinja::token_type::OpenExpression);
-  CHECK(result.tokens.back().type == emel::jinja::token_type::CloseExpression);
+  CHECK(result.tokens[0].type == emel::jinja::token_type::open_expression);
+  CHECK(result.tokens.back().type == emel::jinja::token_type::close_expression);
 }
 
 TEST_CASE("jinja_lexer_rejects_unterminated_string") {
@@ -98,8 +98,8 @@ TEST_CASE("jinja_lexer_handles_unary_numeric") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() >= 4);
-  CHECK(result.tokens[0].type == emel::jinja::token_type::OpenExpression);
-  CHECK(result.tokens[1].type == emel::jinja::token_type::NumericLiteral);
+  CHECK(result.tokens[0].type == emel::jinja::token_type::open_expression);
+  CHECK(result.tokens[1].type == emel::jinja::token_type::numeric_literal);
   CHECK(result.tokens[1].value == "-1");
 }
 
@@ -109,8 +109,8 @@ TEST_CASE("jinja_lexer_handles_nested_objects") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() >= 6);
-  CHECK(result.tokens[0].type == emel::jinja::token_type::OpenExpression);
-  CHECK(result.tokens[1].type == emel::jinja::token_type::OpenCurlyBracket);
+  CHECK(result.tokens[0].type == emel::jinja::token_type::open_expression);
+  CHECK(result.tokens[1].type == emel::jinja::token_type::open_curly_bracket);
 }
 
 TEST_CASE("jinja_lexer_handles_decimal_numbers") {
@@ -119,7 +119,7 @@ TEST_CASE("jinja_lexer_handles_decimal_numbers") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() >= 3);
-  CHECK(result.tokens[1].type == emel::jinja::token_type::NumericLiteral);
+  CHECK(result.tokens[1].type == emel::jinja::token_type::numeric_literal);
   CHECK(result.tokens[1].value == "1.25");
 }
 
@@ -130,7 +130,7 @@ TEST_CASE("jinja_lexer_handles_escaped_strings") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() >= 3);
-  CHECK(result.tokens[1].type == emel::jinja::token_type::StringLiteral);
+  CHECK(result.tokens[1].type == emel::jinja::token_type::string_literal);
 }
 
 TEST_CASE("jinja_lexer_normalizes_crlf") {
@@ -148,7 +148,7 @@ TEST_CASE("jinja_lexer_trims_blocks") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(!result.tokens.empty());
-  CHECK(result.tokens[0].type == emel::jinja::token_type::OpenStatement);
+  CHECK(result.tokens[0].type == emel::jinja::token_type::open_statement);
 }
 
 TEST_CASE("jinja_lexer_trims_whitespace_before_block") {
@@ -157,7 +157,7 @@ TEST_CASE("jinja_lexer_trims_whitespace_before_block") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(!result.tokens.empty());
-  CHECK(result.tokens[0].type == emel::jinja::token_type::OpenStatement);
+  CHECK(result.tokens[0].type == emel::jinja::token_type::open_statement);
 }
 
 TEST_CASE("jinja_lexer_trims_whitespace_after_block") {
@@ -166,7 +166,7 @@ TEST_CASE("jinja_lexer_trims_whitespace_after_block") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(!result.tokens.empty());
-  CHECK(result.tokens[0].type == emel::jinja::token_type::OpenStatement);
+  CHECK(result.tokens[0].type == emel::jinja::token_type::open_statement);
 }
 
 TEST_CASE("jinja_lexer_trims_newline_after_block") {
@@ -175,7 +175,7 @@ TEST_CASE("jinja_lexer_trims_newline_after_block") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() >= 5);
-  CHECK(result.tokens.back().type == emel::jinja::token_type::Text);
+  CHECK(result.tokens.back().type == emel::jinja::token_type::text);
   CHECK(result.tokens.back().value == "text");
 }
 
@@ -185,7 +185,7 @@ TEST_CASE("jinja_lexer_handles_single_quote_escape") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() >= 3);
-  CHECK(result.tokens[1].type == emel::jinja::token_type::StringLiteral);
+  CHECK(result.tokens[1].type == emel::jinja::token_type::string_literal);
   CHECK(result.tokens[1].value == "it's");
 }
 
@@ -195,9 +195,9 @@ TEST_CASE("jinja_lexer_lstrip_block_trims_trailing_whitespace") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() >= 2);
-  CHECK(result.tokens[0].type == emel::jinja::token_type::Text);
+  CHECK(result.tokens[0].type == emel::jinja::token_type::text);
   CHECK(result.tokens[0].value == "hello");
-  CHECK(result.tokens[1].type == emel::jinja::token_type::OpenStatement);
+  CHECK(result.tokens[1].type == emel::jinja::token_type::open_statement);
 }
 
 TEST_CASE("jinja_lexer_handles_open_expression_trailing_dash") {
@@ -206,5 +206,5 @@ TEST_CASE("jinja_lexer_handles_open_expression_trailing_dash") {
 
   CHECK(result.error == EMEL_OK);
   REQUIRE(result.tokens.size() == 1);
-  CHECK(result.tokens[0].type == emel::jinja::token_type::OpenExpression);
+  CHECK(result.tokens[0].type == emel::jinja::token_type::open_expression);
 }

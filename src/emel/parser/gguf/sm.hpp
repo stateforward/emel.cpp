@@ -30,18 +30,18 @@ struct errored {};
 /**
  * GGUF parser orchestration model.
  *
- * State purposes:
+ * state purposes:
  * - `initialized`: idle state awaiting parse intent.
  * - `parsing_*`: run parser steps.
  * - `*_decision`: branch on phase error or configuration.
  * - `done`/`errored`: terminal outcomes that return to initialized.
  *
- * Guard semantics:
+ * guard semantics:
  * - `valid_parse_request` validates required request fields.
  * - `phase_*` guards observe `context.phase_error`.
  *
- * Action side effects:
- * - Actions execute bounded parsing hooks and set `phase_error`.
+ * action side effects:
+ * - actions execute bounded parsing hooks and set `phase_error`.
  */
 struct model {
   auto operator()() const {

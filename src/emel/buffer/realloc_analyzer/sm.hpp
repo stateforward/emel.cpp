@@ -8,28 +8,28 @@
 namespace emel::buffer::realloc_analyzer {
 
 /**
- * Buffer realloc analyzer orchestration model.
+ * buffer realloc analyzer orchestration model.
  *
- * Parity reference:
+ * parity reference:
  * - `ggml_gallocr_node_needs_realloc(...)`
  * - `ggml_gallocr_needs_realloc(...)`
  *
- * Runtime invariants:
- * - Inputs are accepted only through `event::analyze`.
- * - Phase progression uses anonymous transitions only (no internal queues).
- * - Side effects are limited to capturing inputs and writing output pointers after dispatch.
- * - No cross-machine mutation; analysis is pure over payload + snapshot.
+ * runtime invariants:
+ * - inputs are accepted only through `event::analyze`.
+ * - phase progression uses anonymous transitions only (no internal queues).
+ * - side effects are limited to capturing inputs and writing output pointers after dispatch.
+ * - no cross-machine mutation; analysis is pure over payload + snapshot.
  *
- * Guard semantics:
+ * guard semantics:
  * - `guard::can_analyze` validates payload shape and pointer presence.
  * - `guard::phase_ok` / `guard::phase_failed` route based on `context.phase_error`.
  *
- * Action side effects:
+ * action side effects:
  * - `begin_analyze` captures request inputs and clears outputs.
  * - `run_evaluate` updates `context.needs_realloc`.
  * - `begin_reset` clears error outputs; `on_reset_done` clears context.
  *
- * State purposes:
+ * state purposes:
  * - `idle`: accepts `event::analyze` and `event::reset`.
  * - `validating`: validates graph/snapshot payload contracts.
  * - `evaluating`: evaluates whether realloc is required.

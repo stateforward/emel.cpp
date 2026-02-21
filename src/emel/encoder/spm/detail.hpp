@@ -104,7 +104,7 @@ inline encode_result encode_spm(const event::encode &ev,
     for (const unsigned char c : symbol) {
       const int32_t byte_token =
           emel::encoder::detail::byte_to_token(ctx, vocab, c,
-                                               emel::model::data::TokenizerModel::SPM);
+                                               emel::model::data::tokenizer_model::SPM);
       if (byte_token == k_token_null || !emel::encoder::detail::push_token(ev, byte_token, count)) {
         result.error = EMEL_ERR_BACKEND;
         return result;

@@ -18,7 +18,7 @@ inline encode_result encode_fallback(const event::encode &ev,
   }
   emel::encoder::detail::ensure_tables(ctx);
   emel::encoder::detail::encode_bytes(ev, ctx, vocab,
-                                      emel::model::data::TokenizerModel::UNKNOWN,
+                                      emel::model::data::tokenizer_model::UNKNOWN,
                                       result);
   return result;
 }

@@ -7,7 +7,7 @@
 
 namespace emel::batch::splitter::action {
 
-// Initializes context for a new split request.
+// initializes context for a new split request.
 inline constexpr auto begin_split = [](const event::split & ev, context & ctx) noexcept {
   ctx.token_ids = ev.token_ids;
   ctx.n_tokens = ev.n_tokens;
@@ -32,7 +32,7 @@ inline constexpr auto begin_split = [](const event::split & ev, context & ctx) n
   ctx.token_indices_count = 0;
 };
 
-// Normalizes the requested micro-batch size.
+// normalizes the requested micro-batch size.
 inline constexpr auto normalize_batch = [](context & ctx) noexcept {
   const int32_t default_ubatch = ctx.n_tokens;
   const int32_t requested = ctx.requested_n_ubatch > 0 ? ctx.requested_n_ubatch : default_ubatch;
@@ -183,7 +183,7 @@ inline void prepare_split(context & ctx) noexcept {
   ctx.ubatch_token_offsets.fill(0);
 }
 
-// Materializes micro-batch boundaries in simple mode. On failure, leaves ubatch_count == 0.
+// materializes micro-batch boundaries in simple mode. on failure, leaves ubatch_count == 0.
 inline auto create_ubatches_simple = [](context & ctx) noexcept {
   prepare_split(ctx);
 
@@ -210,7 +210,7 @@ inline auto create_ubatches_simple = [](context & ctx) noexcept {
   finalize_token_offsets(ctx);
 };
 
-// Materializes micro-batch boundaries in equal mode. On failure, leaves ubatch_count == 0.
+// materializes micro-batch boundaries in equal mode. on failure, leaves ubatch_count == 0.
 inline auto create_ubatches_equal = [](context & ctx) noexcept {
   prepare_split(ctx);
 
@@ -329,7 +329,7 @@ inline auto create_ubatches_equal = [](context & ctx) noexcept {
   finalize_token_offsets(ctx);
 };
 
-// Materializes micro-batch boundaries in equal mode (primary-id fast path).
+// materializes micro-batch boundaries in equal mode (primary-id fast path).
 inline auto create_ubatches_equal_primary = [](context & ctx) noexcept {
   prepare_split(ctx);
 
@@ -454,7 +454,7 @@ inline auto create_ubatches_equal_primary = [](context & ctx) noexcept {
   finalize_token_offsets(ctx);
 };
 
-// Materializes micro-batch boundaries in seq mode. On failure, leaves ubatch_count == 0.
+// materializes micro-batch boundaries in seq mode. on failure, leaves ubatch_count == 0.
 inline auto create_ubatches_seq = [](context & ctx) noexcept {
   prepare_split(ctx);
 
@@ -520,7 +520,7 @@ inline auto create_ubatches_seq = [](context & ctx) noexcept {
   finalize_token_offsets(ctx);
 };
 
-// Publishes split outputs (output write-back happens in caller via callbacks).
+// publishes split outputs (output write-back happens in caller via callbacks).
 inline constexpr auto publish = [](context &) noexcept {};
 
 inline constexpr auto dispatch_done = [](const event::split & ev, const context & ctx) noexcept {

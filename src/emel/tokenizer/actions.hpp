@@ -12,17 +12,17 @@
 
 namespace emel::tokenizer::action {
 
-template <class Sm>
+template <class sm_type>
 inline bool process_encoder(void *handle,
                             const emel::encoder::event::encode &ev) {
   if (handle == nullptr) {
     return false;
   }
-  return static_cast<Sm *>(handle)->process_event(ev);
+  return static_cast<sm_type *>(handle)->process_event(ev);
 }
 
-template <class Sm> inline encoder_entry make_encoder_entry(Sm &sm) {
-  return encoder_entry{&sm, process_encoder<Sm>};
+template <class sm_type> inline encoder_entry make_encoder_entry(sm_type &sm_value) {
+  return encoder_entry{&sm_value, process_encoder<sm_type>};
 }
 inline context::context()
     : bpe_encoder(bpe_ctx), spm_encoder(spm_ctx), wpm_encoder(wpm_ctx),
@@ -69,22 +69,22 @@ inline bool token_type_skip_when_no_parse(const int32_t type) {
 }
 
 inline encoder_slot encoder_slot_from_model(
-    const emel::model::data::TokenizerModel model) {
+    const emel::model::data::tokenizer_model model) {
   switch (model) {
-    case emel::model::data::TokenizerModel::SPM:
+    case emel::model::data::tokenizer_model::SPM:
       return encoder_slot::spm;
-    case emel::model::data::TokenizerModel::BPE:
+    case emel::model::data::tokenizer_model::BPE:
       return encoder_slot::bpe;
-    case emel::model::data::TokenizerModel::WPM:
+    case emel::model::data::tokenizer_model::WPM:
       return encoder_slot::wpm;
-    case emel::model::data::TokenizerModel::UGM:
+    case emel::model::data::tokenizer_model::UGM:
       return encoder_slot::ugm;
-    case emel::model::data::TokenizerModel::RWKV:
+    case emel::model::data::tokenizer_model::RWKV:
       return encoder_slot::rwkv;
-    case emel::model::data::TokenizerModel::PLAMO2:
+    case emel::model::data::tokenizer_model::PLAMO2:
       return encoder_slot::plamo2;
-    case emel::model::data::TokenizerModel::NONE:
-    case emel::model::data::TokenizerModel::UNKNOWN:
+    case emel::model::data::tokenizer_model::NONE:
+    case emel::model::data::tokenizer_model::UNKNOWN:
     default:
       return encoder_slot::none;
   }
@@ -273,7 +273,7 @@ inline void reset_encoder_contexts(context &ctx,
       encoder_ctx.ugm_ready = false;
       using ctx_type = std::decay_t<decltype(encoder_ctx)>;
       if constexpr (std::is_same_v<ctx_type, emel::encoder::bpe::action::context>) {
-        encoder_ctx.bpe_pre_id = emel::model::data::TokenizerPre::DEFAULT;
+        encoder_ctx.bpe_pre_id = emel::model::data::tokenizer_pre::DEFAULT;
         encoder_ctx.bpe_regex_exprs.clear();
       } else if constexpr (std::is_same_v<ctx_type, emel::encoder::ugm::action::context>) {
         encoder_ctx.ugm_tables_ready = false;
@@ -607,8 +607,8 @@ struct set_invalid_id_error {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event &, context &ctx) const noexcept {
+  template <class event>
+  void operator()(const event &, context &ctx) const noexcept {
     ctx.token_count = 0;
     set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
   }

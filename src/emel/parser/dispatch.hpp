@@ -7,13 +7,13 @@
 
 namespace emel::parser {
 
-template <class Sm>
+template <class sm>
 inline bool dispatch_parse_sm(void * parser_sm,
                               const emel::parser::event::parse_model & ev) {
   if (parser_sm == nullptr) {
     return false;
   }
-  return static_cast<Sm *>(parser_sm)->process_event(ev);
+  return static_cast<sm *>(parser_sm)->process_event(ev);
 }
 
 inline dispatch_parse_fn dispatch_for_kind(const kind kind_id) {

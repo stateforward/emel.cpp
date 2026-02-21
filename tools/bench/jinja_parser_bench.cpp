@@ -15,7 +15,7 @@ std::string make_long_template() {
   std::string out;
   out.reserve(2048);
   for (int i = 0; i < 12; ++i) {
-    out += "{% if cond %}Hello {{ name }}{% else %}Bye{% endif %}\n";
+    out += "{% if cond %}hello {{ name }}{% else %}bye{% endif %}\n";
     out += "{% for item in items %}{{ item }}{% endfor %}\n";
   }
   return out;
@@ -52,7 +52,7 @@ void ensure_reference_parses(const std::string & templ) {
 namespace emel::bench {
 
 void append_emel_jinja_parser_cases(std::vector<result> & results, const config & cfg) {
-  const std::string short_template = "Hello {{ name }}";
+  const std::string short_template = "hello {{ name }}";
   const std::string long_template = make_long_template();
 
   ensure_emel_parses(short_template);
@@ -77,7 +77,7 @@ void append_emel_jinja_parser_cases(std::vector<result> & results, const config 
 }
 
 void append_reference_jinja_parser_cases(std::vector<result> & results, const config & cfg) {
-  const std::string short_template = "Hello {{ name }}";
+  const std::string short_template = "hello {{ name }}";
   const std::string long_template = make_long_template();
 
   ensure_reference_parses(short_template);

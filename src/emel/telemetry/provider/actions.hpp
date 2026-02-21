@@ -87,8 +87,8 @@ struct run_reset {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & ctx) const noexcept {
     set_error(ctx, EMEL_ERR_BACKEND);
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {

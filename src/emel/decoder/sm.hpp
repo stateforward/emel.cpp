@@ -37,9 +37,9 @@ struct done {};
 struct errored {};
 
 /**
- * Decoder orchestration model.
+ * decoder orchestration model.
  *
- * State purposes:
+ * state purposes:
  * - `initialized`: idle state awaiting decode intent.
  * - `validating_request`/`validate_decision`: validate token inputs before orchestration.
  * - `sanitizing_batch`/`sanitize_decision`: sanitize and auto-generate batch metadata.
@@ -54,12 +54,12 @@ struct errored {};
  * - `finalizing_outputs`/`finalize_decision`: verify outputs and close request.
  * - `done`/`errored`: terminal outcomes, immediately return to initialized.
  *
- * Guard semantics:
+ * guard semantics:
  * - `valid_*`/`invalid_*` guards are pure predicates of context.
  * - `phase_*` guards observe phase error flags set by actions.
  *
- * Action side effects:
- * - Actions run bounded, allocation-free orchestration steps and update context fields.
+ * action side effects:
+ * - actions run bounded, allocation-free orchestration steps and update context fields.
  */
 struct model {
   auto operator()() const {

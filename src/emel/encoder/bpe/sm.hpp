@@ -19,17 +19,17 @@ struct unexpected {};
 /**
  * BPE encoder orchestration model.
  *
- * State purposes:
+ * state purposes:
  * - `initialized`: idle state awaiting encode intent.
  * - `encoding`/`encode_decision`: run encoder step and branch on phase error.
  * - `done`/`errored`: terminal outcomes.
  * - `unexpected`: sequencing contract violation.
  *
- * Guard semantics:
+ * guard semantics:
  * - `valid_encode`/`invalid_encode` validate request pointers and context.
  * - `phase_*` guards observe errors set by actions.
  *
- * Action side effects:
+ * action side effects:
  * - `begin_encode` resets per-request outputs.
  * - `run_encode` performs bounded encoding work.
  * - `mark_done` writes outputs and dispatches done callbacks.

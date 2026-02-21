@@ -24,8 +24,8 @@ struct result {
   std::size_t runs = 0;
 };
 
-template <class Fn>
-result measure_case(const char * name, const config & cfg, Fn && fn) {
+template <class fn_type>
+result measure_case(const char * name, const config & cfg, fn_type && fn) {
   std::vector<double> samples;
   samples.reserve(cfg.runs);
 

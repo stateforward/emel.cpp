@@ -97,8 +97,8 @@ struct run_validate {
     ctx.phase_error = EMEL_OK;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
   }
 };
@@ -117,8 +117,8 @@ struct run_prepare_memory {
     ctx.phase_error = EMEL_OK;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     if (ctx.memory_coordinator_sm == nullptr) {
       ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
@@ -141,8 +141,8 @@ struct run_prepare_kv {
     ctx.phase_error = EMEL_OK;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = ctx.kv_cache_sm == nullptr ? EMEL_ERR_INVALID_ARGUMENT : EMEL_OK;
   }
 };
@@ -211,8 +211,8 @@ struct run_compute {
     ctx.phase_error = EMEL_OK;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     if (ctx.kv_cache_sm == nullptr) {
       ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
@@ -241,8 +241,8 @@ struct run_extract_outputs {
     ctx.phase_error = EMEL_OK;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
   }
 };
@@ -272,8 +272,8 @@ struct run_rollback {
     ctx.phase_error = EMEL_OK;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     ctx.rollback_attempted = true;
     if (ctx.kv_cache_sm == nullptr) {
@@ -300,8 +300,8 @@ struct mark_missing_outputs {
 };
 
 struct reject_invalid_execute {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & ctx) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
@@ -345,8 +345,8 @@ struct ensure_last_error {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & ctx) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_BACKEND;

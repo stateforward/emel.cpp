@@ -28,7 +28,7 @@ bool dispatch_error_test(void * owner,
 TEST_CASE("jinja_parser_starts_initialized") {
   emel::jinja::parser::action::context ctx{};
   emel::jinja::parser::sm machine{ctx};
-  CHECK(machine.is(boost::sml::state<emel::jinja::parser::Initialized>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::parser::initialized>));
 }
 
 TEST_CASE("jinja_parser_valid_parse_reaches_done") {
@@ -52,7 +52,7 @@ TEST_CASE("jinja_parser_valid_parse_reaches_done") {
               &error_called, dispatch_error_test)};
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::jinja::parser::Done>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::parser::done>));
   CHECK(done_called);
   CHECK_FALSE(error_called);
   CHECK(error == EMEL_OK);
@@ -77,7 +77,7 @@ TEST_CASE("jinja_parser_invalid_parse_reaches_errored") {
               &error_called, dispatch_error_test)};
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::jinja::parser::Errored>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::parser::errored>));
   CHECK(error_called);
   CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(program.body.empty());
@@ -100,7 +100,7 @@ TEST_CASE("jinja_parser_parse_failure_reports_parse_error") {
               &error_called, dispatch_error_test)};
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::jinja::parser::Errored>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::parser::errored>));
   CHECK(error_called);
   CHECK(error == EMEL_ERR_PARSE_FAILED);
   CHECK(program.body.empty());
@@ -123,7 +123,7 @@ TEST_CASE("jinja_parser_lex_failure_reports_parse_error") {
               &error_called, dispatch_error_test)};
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::jinja::parser::Errored>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::parser::errored>));
   CHECK(error_called);
   CHECK(error == EMEL_ERR_PARSE_FAILED);
   CHECK(program.body.empty());
@@ -157,7 +157,7 @@ TEST_CASE("jinja_parser_parses_control_statements") {
               &done_called, dispatch_done_test)};
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::jinja::parser::Done>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::parser::done>));
   CHECK(done_called);
   CHECK(error == EMEL_OK);
   CHECK(program.body.size() >= 7);
@@ -187,7 +187,7 @@ TEST_CASE("jinja_parser_parses_expressions") {
   };
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::jinja::parser::Done>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::parser::done>));
   CHECK(error == EMEL_OK);
   CHECK(program.body.size() >= 9);
 }
@@ -216,7 +216,7 @@ TEST_CASE("jinja_parser_parses_additional_expressions") {
   };
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::jinja::parser::Done>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::parser::done>));
   CHECK(error == EMEL_OK);
   CHECK(program.body.size() >= 8);
 }
@@ -239,7 +239,7 @@ TEST_CASE("jinja_parser_parses_slices_and_loops") {
   };
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::jinja::parser::Done>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::parser::done>));
   CHECK(error == EMEL_OK);
   CHECK(program.body.size() >= 5);
 }
@@ -257,7 +257,7 @@ TEST_CASE("jinja_parser_rejects_unknown_statement") {
   };
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::jinja::parser::Errored>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::parser::errored>));
   CHECK(error == EMEL_ERR_PARSE_FAILED);
   CHECK(program.body.empty());
 }

@@ -53,7 +53,7 @@ render_result render_template(const std::string & templ,
   result.err = err;
   result.error_pos = error_pos;
   result.output.assign(buffer.data(), out_len);
-  result.done = machine.is(boost::sml::state<emel::jinja::renderer::Done>);
+  result.done = machine.is(boost::sml::state<emel::jinja::renderer::done>);
   return result;
 }
 
@@ -117,16 +117,16 @@ emel::jinja::value make_object(emel::jinja::object_entry * entries, size_t count
 TEST_CASE("jinja_renderer_starts_initialized") {
   emel::jinja::renderer::action::context ctx{};
   emel::jinja::renderer::sm machine{ctx};
-  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::Initialized>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::initialized>));
 }
 
 TEST_CASE("jinja_renderer_renders_simple_template") {
   emel::jinja::program program{};
-  parse_template("Hello {{ name }}!", program);
+  parse_template("hello {{ name }}!", program);
 
   std::array<emel::jinja::object_entry, 1> entries = {};
   entries[0].key = make_string("name");
-  entries[0].val = make_string("World");
+  entries[0].val = make_string("world");
   emel::jinja::object_value globals{entries.data(), entries.size(), entries.size(), false};
 
   std::array<char, 64> buffer = {};
@@ -146,10 +146,10 @@ TEST_CASE("jinja_renderer_renders_simple_template") {
 
   machine.process_event(ev);
 
-  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::Done>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::done>));
   CHECK(err == EMEL_OK);
   std::string_view rendered(buffer.data(), out_len);
-  CHECK(rendered == "Hello World!");
+  CHECK(rendered == "hello world!");
 }
 
 TEST_CASE("jinja_renderer_handles_loops_and_filters") {
@@ -181,7 +181,7 @@ TEST_CASE("jinja_renderer_handles_loops_and_filters") {
 
   machine.process_event(ev);
 
-  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::Done>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::done>));
   CHECK(err == EMEL_OK);
   std::string_view rendered(buffer.data(), out_len);
   CHECK(rendered == "13");
@@ -189,7 +189,7 @@ TEST_CASE("jinja_renderer_handles_loops_and_filters") {
 
 TEST_CASE("jinja_renderer_supports_set_and_member_access") {
   emel::jinja::program program{};
-  parse_template("{% set name = 'Bob' %}{{ name }} {{ obj.key }}", program);
+  parse_template("{% set name = 'bob' %}{{ name }} {{ obj.key }}", program);
 
   std::array<emel::jinja::object_entry, 1> obj_entries = {};
   obj_entries[0].key = make_string("key");
@@ -218,10 +218,10 @@ TEST_CASE("jinja_renderer_supports_set_and_member_access") {
 
   machine.process_event(ev);
 
-  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::Done>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::done>));
   CHECK(err == EMEL_OK);
   std::string_view rendered(buffer.data(), out_len);
-  CHECK(rendered == "Bob OK");
+  CHECK(rendered == "bob OK");
 }
 
 TEST_CASE("jinja_renderer_invalid_request_errors") {
@@ -239,7 +239,7 @@ TEST_CASE("jinja_renderer_invalid_request_errors") {
 
   machine.process_event(ev);
 
-  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::Errored>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::errored>));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
@@ -283,7 +283,7 @@ TEST_CASE("jinja_renderer_range_join") {
 TEST_CASE("jinja_renderer_if_and_select") {
   std::array<emel::jinja::object_entry, 2> entries = {};
   entries[0].key = make_string("name");
-  entries[0].val = make_string("Bob");
+  entries[0].val = make_string("bob");
   entries[1].key = make_string("cond");
   entries[1].val = make_bool(true);
   emel::jinja::object_value globals{entries.data(), entries.size(), entries.size(), false};
@@ -333,8 +333,8 @@ TEST_CASE("jinja_renderer_loops_and_members") {
 TEST_CASE("jinja_renderer_macro_and_call") {
   emel::jinja::program program{};
   parse_template(
-      "{% macro wrap(name) %}{{ name }}{{ caller() }}{% endmacro %}"
-      "{% call() wrap(\"Hi\") %}{{ \"there\"|upper }}{% endcall %}",
+      "{% macro wrap(name) %}{{ name }}_{{ caller()|lower }}{% endmacro %}"
+      "{% call() wrap(\"hi\") %}{{ \"there\"|upper }}{% endcall %}",
       program);
 
   std::array<char, 256> buffer = {};
@@ -353,10 +353,10 @@ TEST_CASE("jinja_renderer_macro_and_call") {
 
   machine.process_event(ev);
 
-  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::Done>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::done>));
   CHECK(err == EMEL_OK);
   std::string_view rendered(buffer.data(), out_len);
-  CHECK(rendered == "HiTHERE");
+  CHECK(rendered == "hi_there");
 }
 
 TEST_CASE("jinja_renderer_filter_statement") {
@@ -379,7 +379,7 @@ TEST_CASE("jinja_renderer_filter_statement") {
 
   machine.process_event(ev);
 
-  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::Done>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::done>));
   CHECK(err == EMEL_OK);
   std::string_view rendered(buffer.data(), out_len);
   CHECK(rendered == "HELLO");
@@ -387,11 +387,11 @@ TEST_CASE("jinja_renderer_filter_statement") {
 
 TEST_CASE("jinja_renderer_truncates_on_small_buffer") {
   emel::jinja::program program{};
-  parse_template("Hello {{ name }}!", program);
+  parse_template("hello {{ name }}!", program);
 
   std::array<emel::jinja::object_entry, 1> entries = {};
   entries[0].key = make_string("name");
-  entries[0].val = make_string("World");
+  entries[0].val = make_string("world");
   emel::jinja::object_value globals{entries.data(), entries.size(), entries.size(), false};
 
   std::array<char, 4> buffer = {};
@@ -413,14 +413,14 @@ TEST_CASE("jinja_renderer_truncates_on_small_buffer") {
 
   machine.process_event(ev);
 
-  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::Errored>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::errored>));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(truncated);
 }
 
 TEST_CASE("jinja_renderer_dispatch_callbacks") {
   emel::jinja::program program{};
-  parse_template("Hi", program);
+  parse_template("hi", program);
 
   std::array<char, 32> buffer = {};
   size_t out_len = 0;
@@ -461,7 +461,7 @@ TEST_CASE("jinja_renderer_dispatch_callbacks") {
 
   machine.process_event(ev);
 
-  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::Done>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::done>));
   CHECK(err == EMEL_OK);
   CHECK(track.done);
   CHECK_FALSE(track.error);
@@ -500,7 +500,7 @@ TEST_CASE("jinja_renderer_rejects_invalid_and_dispatches_error") {
 
   machine.process_event(ev);
 
-  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::Errored>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::errored>));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(out_len == 0);
   CHECK_FALSE(truncated);
@@ -516,7 +516,7 @@ TEST_CASE("jinja_renderer_unexpected_event_sets_error") {
   emel::jinja::renderer::sm machine{ctx};
   machine.process_event(unknown_event{});
 
-  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::Unexpected>));
+  CHECK(machine.is(boost::sml::state<emel::jinja::renderer::unexpected>));
   CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
 }
 
@@ -571,7 +571,7 @@ TEST_CASE("jinja_renderer_member_and_set_variants") {
 
   auto result = render_template(
       "{# comment #}{% generation %}"
-      "{% set name %}Bob{% endset %}{{ name }}"
+      "{% set name %}bob{% endset %}{{ name }}"
       "{% set a, b = [1,2] %}{{ a }}{{ b }}"
       "{% set obj.key = \"v\" %}{{ obj.key }}"
       "{{ obj[\"key\"] }}{{ \"hello\"[1] }}{{ \"hello\"[1:4] }}"
@@ -608,10 +608,10 @@ TEST_CASE("jinja_renderer_filter_statement_with_args") {
 
 TEST_CASE("jinja_renderer_macro_defaults_and_caller_params") {
   auto result = render_template(
-      "{% macro greet(name=\"Bob\") %}{{ name }}{% endmacro %}"
+      "{% macro greet(name=\"bob\") %}{{ name }}{% endmacro %}"
       "{% macro wrap(name) %}{{ caller(name) }}{% endmacro %}"
-      "{% call(n) wrap(\"Hi\") %}{{ n|upper }}{% endcall %}"
-      "{{ greet() }}{{ greet(\"Ana\") }}");
+      "{% call(n) wrap(\"hi\") %}{{ n|upper }}{% endcall %}"
+      "{{ greet() }}{{ greet(\"ana\") }}");
 
   CHECK(result.done);
   CHECK(result.err == EMEL_OK);
@@ -629,7 +629,7 @@ TEST_CASE("jinja_renderer_tests_and_memberships") {
 
   std::array<emel::jinja::object_entry, 8> entries = {};
   entries[0].key = make_string("name");
-  entries[0].val = make_string("Bob");
+  entries[0].val = make_string("bob");
   entries[1].key = make_string("flag");
   entries[1].val = make_bool(false);
   entries[2].key = make_string("true_val");
@@ -805,7 +805,7 @@ TEST_CASE("jinja_renderer_detail_unary_paths") {
     char buffer[16] = {};
     renderer::detail::init_writer(io, buffer, sizeof(buffer));
 
-    token op{token_type::AdditiveBinaryOperator, "+", 0};
+    token op{token_type::additive_binary_operator, "+", 0};
     auto operand = std::make_unique<integer_literal>(2);
     unary_expression expr{op, std::move(operand)};
     auto value = renderer::detail::eval_expr(ctx, &expr, nullptr, io);
@@ -820,7 +820,7 @@ TEST_CASE("jinja_renderer_detail_unary_paths") {
     char buffer[16] = {};
     renderer::detail::init_writer(io, buffer, sizeof(buffer));
 
-    token op{token_type::AdditiveBinaryOperator, "-", 0};
+    token op{token_type::additive_binary_operator, "-", 0};
     auto operand = std::make_unique<float_literal>(1.5);
     unary_expression expr{op, std::move(operand)};
     auto value = renderer::detail::eval_expr(ctx, &expr, nullptr, io);
@@ -835,7 +835,7 @@ TEST_CASE("jinja_renderer_detail_unary_paths") {
     char buffer[16] = {};
     renderer::detail::init_writer(io, buffer, sizeof(buffer));
 
-    token op{token_type::AdditiveBinaryOperator, "+", 0};
+    token op{token_type::additive_binary_operator, "+", 0};
     auto operand = std::make_unique<string_literal>("a");
     unary_expression expr{op, std::move(operand)};
     auto value = renderer::detail::eval_expr(ctx, &expr, nullptr, io);

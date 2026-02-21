@@ -143,8 +143,8 @@ struct begin_allocate_tensors {
 };
 
 struct run_validate {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     reset_phase(c);
     int32_t chunk_sizes_out_count = c.chunk_sizes_out_count;
     bool has_chunk_sizes_out = c.has_chunk_sizes_out;
@@ -192,8 +192,8 @@ struct run_validate {
 };
 
 struct run_scan_tensors {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     reset_phase(c);
     c.tensor_ids.fill(-1);
     c.effective_sizes.fill(0);
@@ -268,8 +268,8 @@ struct run_scan_tensors {
 };
 
 struct run_partition_ranges {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     reset_phase(c);
     c.chunk_sizes.fill(0);
     c.chunk_count = 0;
@@ -323,8 +323,8 @@ struct run_partition_ranges {
 };
 
 struct run_allocate_ranges {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     reset_phase(c);
     c.allocated_buffers.fill(nullptr);
     c.result_buffer = nullptr;
@@ -388,8 +388,8 @@ struct run_allocate_ranges {
 };
 
 struct run_initialize_tensors {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     reset_phase(c);
     int32_t err = EMEL_OK;
     if (c.no_alloc) {
@@ -509,8 +509,8 @@ struct run_initialize_tensors {
 };
 
 struct run_assemble {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     reset_phase(c);
     int32_t err = EMEL_OK;
     c.result_buffer = nullptr;
@@ -609,8 +609,8 @@ struct run_assemble {
 };
 
 struct begin_release {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     reset_phase(c);
     const int32_t err = detail::release_allocated_buffers(c) ? EMEL_OK : EMEL_ERR_BACKEND;
     if (err != EMEL_OK) {
@@ -643,8 +643,8 @@ struct begin_release {
 };
 
 struct on_unexpected {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     set_error(
         c,
         EMEL_ERR_BACKEND,

@@ -63,8 +63,8 @@ struct begin_analyze {
 };
 
 struct run_validate {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     reset_phase(c);
     const event::tensor_desc * tensors = c.tensors;
     int32_t tensor_count = c.tensor_count;
@@ -116,8 +116,8 @@ struct run_validate {
 };
 
 struct run_collect_ranges {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     reset_phase(c);
     const event::tensor_desc * tensors = c.tensors;
     int32_t tensor_count = c.tensor_count;
@@ -251,8 +251,8 @@ struct run_collect_ranges {
 };
 
 struct run_publish {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     reset_phase(c);
     if constexpr (requires { ev.first_use_out; } && requires { ev.last_use_out; }) {
       if (ev.first_use_out != nullptr && ev.last_use_out != nullptr) {
@@ -271,8 +271,8 @@ struct run_publish {
 };
 
 struct begin_reset {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     (void)ev;
     c = {};
     c.first_use.fill(-1);
@@ -294,8 +294,8 @@ struct begin_reset {
 };
 
 struct on_unexpected {
-  template <class Ev>
-  void operator()(const Ev & ev, context & c) const noexcept {
+  template <class ev_type>
+  void operator()(const ev_type & ev, context & c) const noexcept {
     set_error(c, EMEL_ERR_BACKEND);
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {

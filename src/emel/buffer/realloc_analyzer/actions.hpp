@@ -154,8 +154,8 @@ struct run_validate {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.phase_error = detail::valid_analyze_payload(
         c.graph, c.node_allocs, c.node_alloc_count, c.leaf_allocs, c.leaf_alloc_count)
       ? EMEL_OK
@@ -175,8 +175,8 @@ struct run_evaluate {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.needs_realloc = detail::graph_needs_realloc(
         c.graph, c.node_allocs, c.node_alloc_count, c.leaf_allocs, c.leaf_alloc_count);
     c.phase_error = EMEL_OK;
@@ -196,8 +196,8 @@ struct run_publish {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.phase_error = EMEL_OK;
     c.step += 1;
   }
@@ -212,8 +212,8 @@ struct begin_reset {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.phase_error = EMEL_OK;
     c.step += 1;
   }
@@ -229,8 +229,8 @@ struct on_analyze_done {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -243,8 +243,8 @@ struct on_analyze_error {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -255,8 +255,8 @@ struct on_reset_done {
     c.step = 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c = {};
     c.step = 1;
   }
@@ -271,15 +271,15 @@ struct on_reset_error {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
 
 struct reject_invalid {
-  template <class Event>
-  void operator()(const Event & ev, context & c) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & c) const noexcept {
     if constexpr (requires { ev.needs_realloc_out; }) {
       if (ev.needs_realloc_out != nullptr) {
         *ev.needs_realloc_out = 0;
@@ -296,8 +296,8 @@ struct reject_invalid {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & c) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & c) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;

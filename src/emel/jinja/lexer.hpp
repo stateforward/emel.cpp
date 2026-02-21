@@ -13,36 +13,36 @@
 namespace emel::jinja {
 
 enum class token_type : uint8_t {
-  Eof = 0,
-  Text,
-  NumericLiteral,
-  StringLiteral,
-  Identifier,
-  Equals,
-  OpenParen,
-  CloseParen,
-  OpenStatement,
-  CloseStatement,
-  OpenExpression,
-  CloseExpression,
-  OpenSquareBracket,
-  CloseSquareBracket,
-  OpenCurlyBracket,
-  CloseCurlyBracket,
-  Comma,
-  Dot,
-  Colon,
-  Pipe,
-  CallOperator,
-  AdditiveBinaryOperator,
-  MultiplicativeBinaryOperator,
-  ComparisonBinaryOperator,
-  UnaryOperator,
-  Comment
+  eof = 0,
+  text,
+  numeric_literal,
+  string_literal,
+  identifier,
+  equals,
+  open_paren,
+  close_paren,
+  open_statement,
+  close_statement,
+  open_expression,
+  close_expression,
+  open_square_bracket,
+  close_square_bracket,
+  open_curly_bracket,
+  close_curly_bracket,
+  comma,
+  dot,
+  colon,
+  pipe,
+  call_operator,
+  additive_binary_operator,
+  multiplicative_binary_operator,
+  comparison_binary_operator,
+  unary_operator,
+  comment
 };
 
 struct token {
-  token_type type = token_type::Eof;
+  token_type type = token_type::eof;
   std::string value;
   size_t pos = 0;
 };
@@ -140,40 +140,40 @@ struct lexer {
     };
 
     static constexpr mapping k_mapping_table[] = {
-      {"{%-", token_type::OpenStatement},
-      {"-%}", token_type::CloseStatement},
-      {"{{-", token_type::OpenExpression},
-      {"-}}", token_type::CloseExpression},
-      {"{%", token_type::OpenStatement},
-      {"%}", token_type::CloseStatement},
-      {"{{", token_type::OpenExpression},
-      {"}}", token_type::CloseExpression},
-      {"(", token_type::OpenParen},
-      {")", token_type::CloseParen},
-      {"{", token_type::OpenCurlyBracket},
-      {"}", token_type::CloseCurlyBracket},
-      {"[", token_type::OpenSquareBracket},
-      {"]", token_type::CloseSquareBracket},
-      {",", token_type::Comma},
-      {".", token_type::Dot},
-      {":", token_type::Colon},
-      {"|", token_type::Pipe},
-      {"<=", token_type::ComparisonBinaryOperator},
-      {">=", token_type::ComparisonBinaryOperator},
-      {"==", token_type::ComparisonBinaryOperator},
-      {"!=", token_type::ComparisonBinaryOperator},
-      {"<", token_type::ComparisonBinaryOperator},
-      {">", token_type::ComparisonBinaryOperator},
-      {"+", token_type::AdditiveBinaryOperator},
-      {"-", token_type::AdditiveBinaryOperator},
-      {"~", token_type::AdditiveBinaryOperator},
-      {"*", token_type::MultiplicativeBinaryOperator},
-      {"/", token_type::MultiplicativeBinaryOperator},
-      {"%", token_type::MultiplicativeBinaryOperator},
-      {"=", token_type::Equals},
+      {"{%-", token_type::open_statement},
+      {"-%}", token_type::close_statement},
+      {"{{-", token_type::open_expression},
+      {"-}}", token_type::close_expression},
+      {"{%", token_type::open_statement},
+      {"%}", token_type::close_statement},
+      {"{{", token_type::open_expression},
+      {"}}", token_type::close_expression},
+      {"(", token_type::open_paren},
+      {")", token_type::close_paren},
+      {"{", token_type::open_curly_bracket},
+      {"}", token_type::close_curly_bracket},
+      {"[", token_type::open_square_bracket},
+      {"]", token_type::close_square_bracket},
+      {",", token_type::comma},
+      {".", token_type::dot},
+      {":", token_type::colon},
+      {"|", token_type::pipe},
+      {"<=", token_type::comparison_binary_operator},
+      {">=", token_type::comparison_binary_operator},
+      {"==", token_type::comparison_binary_operator},
+      {"!=", token_type::comparison_binary_operator},
+      {"<", token_type::comparison_binary_operator},
+      {">", token_type::comparison_binary_operator},
+      {"+", token_type::additive_binary_operator},
+      {"-", token_type::additive_binary_operator},
+      {"~", token_type::additive_binary_operator},
+      {"*", token_type::multiplicative_binary_operator},
+      {"/", token_type::multiplicative_binary_operator},
+      {"%", token_type::multiplicative_binary_operator},
+      {"=", token_type::equals},
     };
 
-    // Normalize \r\n or \r to \n
+    // normalize \r\n or \r to \n
     for (std::string::size_type pos = 0;
          (pos = src.find("\r\n", pos)) != std::string::npos; ) {
       src.erase(pos, 1);
@@ -254,12 +254,12 @@ struct lexer {
     while (pos < src.size() && ok) {
       start_pos = pos;
       token_type last_token_type = tokens.empty()
-                                      ? token_type::CloseStatement
+                                      ? token_type::close_statement
                                       : tokens.back().type;
 
-      if (last_token_type == token_type::CloseStatement ||
-          last_token_type == token_type::CloseExpression ||
-          last_token_type == token_type::Comment) {
+      if (last_token_type == token_type::close_statement ||
+          last_token_type == token_type::close_expression ||
+          last_token_type == token_type::comment) {
         bool last_block_can_rm_newline = false;
         is_rstrip_block = false;
         if (pos > 3) {
@@ -316,7 +316,7 @@ struct lexer {
         }
 
         if (!text.empty()) {
-          tokens.push_back({token_type::Text, text, start_pos});
+          tokens.push_back({token_type::text, text, start_pos});
           continue;
         }
       }
@@ -336,14 +336,14 @@ struct lexer {
         if (!ok) {
           break;
         }
-        tokens.push_back({token_type::Comment, comment, start_pos});
+        tokens.push_back({token_type::comment, comment, start_pos});
         pos += 2;
         continue;
       }
 
       if (pos < src.size() && src[pos] == '-' &&
-          (last_token_type == token_type::OpenExpression ||
-           last_token_type == token_type::OpenStatement)) {
+          (last_token_type == token_type::open_expression ||
+           last_token_type == token_type::open_statement)) {
         ++pos;
         if (pos >= src.size()) {
           break;
@@ -365,17 +365,17 @@ struct lexer {
 
       if (!is_closing_block && (ch == '-' || ch == '+')) {
         start_pos = pos;
-      token_type last = tokens.empty() ? token_type::Eof : tokens.back().type;
-        if (last == token_type::Text || last == token_type::Eof) {
+      token_type last = tokens.empty() ? token_type::eof : tokens.back().type;
+        if (last == token_type::text || last == token_type::eof) {
           set_error(EMEL_ERR_PARSE_FAILED, pos);
           break;
         }
         switch (last) {
-          case token_type::Identifier:
-          case token_type::NumericLiteral:
-          case token_type::StringLiteral:
-          case token_type::CloseParen:
-          case token_type::CloseSquareBracket:
+          case token_type::identifier:
+          case token_type::numeric_literal:
+          case token_type::string_literal:
+          case token_type::close_paren:
+          case token_type::close_square_bracket:
             break;
           default: {
             ++pos;
@@ -387,7 +387,7 @@ struct lexer {
             value.reserve(num.size() + 1);
             value.push_back(ch);
             value += num;
-            token_type t = num.empty() ? token_type::UnaryOperator : token_type::NumericLiteral;
+            token_type t = num.empty() ? token_type::unary_operator : token_type::numeric_literal;
             tokens.push_back({t, std::move(value), start_pos});
             continue;
           }
@@ -403,11 +403,11 @@ struct lexer {
         if (pos + entry.seq.size() <= src.size() &&
             src.compare(pos, entry.seq.size(), entry.seq) == 0) {
           tokens.push_back({entry.type, std::string(entry.seq), start_pos});
-        if (entry.type == token_type::OpenExpression) {
+        if (entry.type == token_type::open_expression) {
           curly_bracket_depth = 0;
-        } else if (entry.type == token_type::OpenCurlyBracket) {
+        } else if (entry.type == token_type::open_curly_bracket) {
           ++curly_bracket_depth;
-        } else if (entry.type == token_type::CloseCurlyBracket) {
+        } else if (entry.type == token_type::close_curly_bracket) {
           if (curly_bracket_depth > 0) {
             --curly_bracket_depth;
           }
@@ -428,7 +428,7 @@ struct lexer {
         if (!ok) {
           break;
         }
-      tokens.push_back({token_type::StringLiteral, std::move(str), start_pos});
+      tokens.push_back({token_type::string_literal, std::move(str), start_pos});
         if (pos < src.size()) {
           ++pos;
         } else {
@@ -444,7 +444,7 @@ struct lexer {
         if (!ok) {
           break;
         }
-      tokens.push_back({token_type::NumericLiteral, std::move(num), start_pos});
+      tokens.push_back({token_type::numeric_literal, std::move(num), start_pos});
         continue;
       }
 
@@ -454,7 +454,7 @@ struct lexer {
         if (!ok) {
           break;
         }
-      tokens.push_back({token_type::Identifier, std::move(word), start_pos});
+      tokens.push_back({token_type::identifier, std::move(word), start_pos});
         continue;
       }
 

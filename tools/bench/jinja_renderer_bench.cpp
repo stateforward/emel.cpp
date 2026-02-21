@@ -17,7 +17,7 @@ std::string make_long_template() {
   std::string out;
   out.reserve(2048);
   for (int i = 0; i < 10; ++i) {
-    out += "{% if cond %}Hello {{ name|upper }}{% else %}Bye{% endif %}\n";
+    out += "{% if cond %}hello {{ name|upper }}{% else %}bye{% endif %}\n";
     out += "{% for item in items %}{{ item }}{% endfor %}\n";
   }
   return out;
@@ -86,7 +86,7 @@ emel::jinja::value make_array(emel::jinja::value * items, size_t count) {
 namespace emel::bench {
 
 void append_emel_jinja_renderer_cases(std::vector<result> & results, const config & cfg) {
-  const std::string short_template = "Hello {{ name|upper }}";
+  const std::string short_template = "hello {{ name|upper }}";
   const std::string long_template = make_long_template();
 
   const emel::jinja::program short_program = parse_emel(short_template);
@@ -97,7 +97,7 @@ void append_emel_jinja_renderer_cases(std::vector<result> & results, const confi
 
   std::array<emel::jinja::object_entry, 3> entries = {};
   entries[0].key = make_string("name");
-  entries[0].val = make_string("World");
+  entries[0].val = make_string("world");
   entries[1].key = make_string("cond");
   entries[1].val = make_bool(true);
   entries[2].key = make_string("items");
@@ -141,7 +141,7 @@ void append_emel_jinja_renderer_cases(std::vector<result> & results, const confi
 }
 
 void append_reference_jinja_renderer_cases(std::vector<result> & results, const config & cfg) {
-  const std::string short_template = "Hello {{ name|upper }}";
+  const std::string short_template = "hello {{ name|upper }}";
   const std::string long_template = make_long_template();
 
   const ::jinja::program short_program = parse_reference(short_template);
@@ -149,7 +149,7 @@ void append_reference_jinja_renderer_cases(std::vector<result> & results, const 
 
   auto short_fn = [&]() {
     ::jinja::context ctx;
-    ctx.set_val("name", ::jinja::mk_val<::jinja::value_string>("World"));
+    ctx.set_val("name", ::jinja::mk_val<::jinja::value_string>("world"));
     ::jinja::runtime runtime{ctx};
     auto result = runtime.execute(short_program);
     auto parts = ::jinja::runtime::gather_string_parts(result);
@@ -159,7 +159,7 @@ void append_reference_jinja_renderer_cases(std::vector<result> & results, const 
 
   auto long_fn = [&]() {
     ::jinja::context ctx;
-    ctx.set_val("name", ::jinja::mk_val<::jinja::value_string>("World"));
+    ctx.set_val("name", ::jinja::mk_val<::jinja::value_string>("world"));
     ctx.set_val("cond", ::jinja::mk_val<::jinja::value_bool>(true));
     auto items = ::jinja::mk_val<::jinja::value_array>();
     items->push_back(::jinja::mk_val<::jinja::value_int>(1));

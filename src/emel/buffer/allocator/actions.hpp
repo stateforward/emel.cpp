@@ -703,8 +703,8 @@ struct on_initialize_done {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.init_epoch += 1;
     c.step += 1;
   }
@@ -718,8 +718,8 @@ struct on_initialize_error {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -784,8 +784,8 @@ struct on_reserve_n_size_done {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.reserve_epoch += 1;
     c.step += 1;
   }
@@ -799,8 +799,8 @@ struct on_reserve_n_size_error {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -926,8 +926,8 @@ struct on_reserve_done {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.reserve_epoch += 1;
     c.step += 1;
   }
@@ -941,8 +941,8 @@ struct on_reserve_error {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -1037,8 +1037,8 @@ struct on_alloc_graph_done {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.alloc_epoch += 1;
     c.step += 1;
   }
@@ -1052,8 +1052,8 @@ struct on_alloc_graph_error {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
@@ -1104,8 +1104,8 @@ struct on_release_done {
     c.step = 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     const int32_t releases = c.release_epoch + 1;
     c = {};
     c.release_epoch = releases;
@@ -1121,15 +1121,15 @@ struct on_release_error {
     c.step += 1;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & c) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & c) const noexcept {
     c.step += 1;
   }
 };
 
 struct reject_invalid {
-  template <class Event>
-  void operator()(const Event & ev, context & c) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & c) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
@@ -1141,8 +1141,8 @@ struct reject_invalid {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & c) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & c) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;

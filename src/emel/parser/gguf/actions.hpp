@@ -1447,8 +1447,8 @@ inline void finalize_vocab_attrs(emel::model::data & model, const context &ctx) 
   }
 
   std::string model_name(metadata_view(model.meta, model.meta.general_data.name));
-  std::string tokenizer_model(array_view(vocab.tokenizer_model));
-  std::string tokenizer_pre(array_view(vocab.tokenizer_pre));
+  std::string tokenizer_model_name(array_view(vocab.tokenizer_model_name));
+  std::string tokenizer_pre_name(array_view(vocab.tokenizer_pre_name));
   std::string general_arch(array_view(model.architecture_name));
 
   auto to_lower_ascii = [](const char c) {
@@ -1458,192 +1458,193 @@ inline void finalize_vocab_attrs(emel::model::data & model, const context &ctx) 
     return c;
   };
   std::transform(model_name.begin(), model_name.end(), model_name.begin(), to_lower_ascii);
-  std::transform(tokenizer_model.begin(), tokenizer_model.end(), tokenizer_model.begin(),
-                 to_lower_ascii);
-  std::transform(tokenizer_pre.begin(), tokenizer_pre.end(), tokenizer_pre.begin(), to_lower_ascii);
+  std::transform(tokenizer_model_name.begin(), tokenizer_model_name.end(),
+                 tokenizer_model_name.begin(), to_lower_ascii);
+  std::transform(tokenizer_pre_name.begin(), tokenizer_pre_name.end(),
+                 tokenizer_pre_name.begin(), to_lower_ascii);
   std::transform(general_arch.begin(), general_arch.end(), general_arch.begin(), to_lower_ascii);
 
   auto model_id_from = [](const std::string_view model) {
-    using TokenizerModel = emel::model::data::TokenizerModel;
+    using tokenizer_model = emel::model::data::tokenizer_model;
     if (model.empty() || model == "none" || model == "no_vocab") {
-      return TokenizerModel::NONE;
+      return tokenizer_model::NONE;
     }
     if (model == "llama") {
-      return TokenizerModel::SPM;
+      return tokenizer_model::SPM;
     }
     if (model == "gpt2") {
-      return TokenizerModel::BPE;
+      return tokenizer_model::BPE;
     }
     if (model == "bert") {
-      return TokenizerModel::WPM;
+      return tokenizer_model::WPM;
     }
     if (model == "t5") {
-      return TokenizerModel::UGM;
+      return tokenizer_model::UGM;
     }
     if (model == "rwkv") {
-      return TokenizerModel::RWKV;
+      return tokenizer_model::RWKV;
     }
     if (model == "plamo2") {
-      return TokenizerModel::PLAMO2;
+      return tokenizer_model::PLAMO2;
     }
-    return TokenizerModel::UNKNOWN;
+    return tokenizer_model::UNKNOWN;
   };
 
   auto pre_id_from = [](const std::string_view pre) {
-    using TokenizerPre = emel::model::data::TokenizerPre;
+    using tokenizer_pre = emel::model::data::tokenizer_pre;
     if (pre.empty() || pre == "default") {
-      return TokenizerPre::DEFAULT;
+      return tokenizer_pre::DEFAULT;
     }
     if (pre == "llama3" || pre == "llama-v3" || pre == "llama-bpe" ||
         pre == "falcon3" || pre == "falcon-h1" || pre == "pixtral" ||
         pre == "midm-2.0" || pre == "lfm2") {
-      return TokenizerPre::LLAMA3;
+      return tokenizer_pre::LLAMA3;
     }
     if (pre == "jais-2") {
-      return TokenizerPre::JAIS2;
+      return tokenizer_pre::JAIS2;
     }
     if (pre == "dbrx") {
-      return TokenizerPre::DBRX;
+      return tokenizer_pre::DBRX;
     }
     if (pre == "smaug-bpe") {
-      return TokenizerPre::SMAUG;
+      return tokenizer_pre::SMAUG;
     }
     if (pre == "deepseek-llm") {
-      return TokenizerPre::DEEPSEEK_LLM;
+      return tokenizer_pre::DEEPSEEK_LLM;
     }
     if (pre == "deepseek-coder") {
-      return TokenizerPre::DEEPSEEK_CODER;
+      return tokenizer_pre::DEEPSEEK_CODER;
     }
     if (pre == "deepseek-v3") {
-      return TokenizerPre::DEEPSEEK3_LLM;
+      return tokenizer_pre::DEEPSEEK3_LLM;
     }
     if (pre == "youtu") {
-      return TokenizerPre::YOUTU;
+      return tokenizer_pre::YOUTU;
     }
     if (pre == "falcon") {
-      return TokenizerPre::FALCON;
+      return tokenizer_pre::FALCON;
     }
     if (pre == "mpt") {
-      return TokenizerPre::MPT;
+      return tokenizer_pre::MPT;
     }
     if (pre == "starcoder") {
-      return TokenizerPre::STARCODER;
+      return tokenizer_pre::STARCODER;
     }
     if (pre == "gpt-2" || pre == "phi-2" || pre == "jina-es" || pre == "jina-de" ||
         pre == "gigachat" || pre == "jina-v2-es" || pre == "jina-v2-de" ||
         pre == "a.x-4.0" || pre == "mellum" || pre == "modern-bert" ||
         pre == "jina-v1-en" || pre == "jina-v2-code" || pre == "roberta-bpe" ||
         pre == "exaone4") {
-      return TokenizerPre::GPT2;
+      return tokenizer_pre::GPT2;
     }
     if (pre == "jais") {
-      return TokenizerPre::JAIS;
+      return tokenizer_pre::JAIS;
     }
     if (pre == "refact") {
-      return TokenizerPre::REFACT;
+      return tokenizer_pre::REFACT;
     }
     if (pre == "command-r") {
-      return TokenizerPre::COMMAND_R;
+      return tokenizer_pre::COMMAND_R;
     }
     if (pre == "qwen2" || pre == "deepseek-r1-qwen" || pre == "kormo" ||
         pre == "megrez") {
-      return TokenizerPre::QWEN2;
+      return tokenizer_pre::QWEN2;
     }
     if (pre == "qwen35") {
-      return TokenizerPre::QWEN35;
+      return tokenizer_pre::QWEN35;
     }
     if (pre == "stablelm2") {
-      return TokenizerPre::STABLELM2;
+      return tokenizer_pre::STABLELM2;
     }
     if (pre == "olmo") {
-      return TokenizerPre::OLMO;
+      return tokenizer_pre::OLMO;
     }
     if (pre == "poro-chat") {
-      return TokenizerPre::PORO;
+      return tokenizer_pre::PORO;
     }
     if (pre == "glm4" || pre == "chatglm-bpe") {
-      return TokenizerPre::CHATGLM4;
+      return tokenizer_pre::CHATGLM4;
     }
     if (pre == "viking") {
-      return TokenizerPre::VIKING;
+      return tokenizer_pre::VIKING;
     }
     if (pre == "tekken") {
-      return TokenizerPre::TEKKEN;
+      return tokenizer_pre::TEKKEN;
     }
     if (pre == "smollm") {
-      return TokenizerPre::SMOLLM;
+      return tokenizer_pre::SMOLLM;
     }
     if (pre == "codeshell") {
-      return TokenizerPre::CODESHELL;
+      return tokenizer_pre::CODESHELL;
     }
     if (pre == "bloom") {
-      return TokenizerPre::BLOOM;
+      return tokenizer_pre::BLOOM;
     }
     if (pre == "gpt3-finnish") {
-      return TokenizerPre::GPT3_FINNISH;
+      return tokenizer_pre::GPT3_FINNISH;
     }
     if (pre == "exaone") {
-      return TokenizerPre::EXAONE;
+      return tokenizer_pre::EXAONE;
     }
     if (pre == "exaone-moe") {
-      return TokenizerPre::EXAONE_MOE;
+      return tokenizer_pre::EXAONE_MOE;
     }
     if (pre == "chameleon") {
-      return TokenizerPre::CHAMELEON;
+      return tokenizer_pre::CHAMELEON;
     }
     if (pre == "minerva-7b") {
-      return TokenizerPre::MINERVA;
+      return tokenizer_pre::MINERVA;
     }
     if (pre == "gpt-4o" || pre == "llama4") {
-      return TokenizerPre::GPT4O;
+      return tokenizer_pre::GPT4O;
     }
     if (pre == "tiny_aya") {
-      return TokenizerPre::TINY_AYA;
+      return tokenizer_pre::TINY_AYA;
     }
     if (pre == "superbpe") {
-      return TokenizerPre::SUPERBPE;
+      return tokenizer_pre::SUPERBPE;
     }
     if (pre == "trillion") {
-      return TokenizerPre::TRILLION;
+      return tokenizer_pre::TRILLION;
     }
     if (pre == "granite-docling") {
-      return TokenizerPre::GRANITE_DOCLING;
+      return tokenizer_pre::GRANITE_DOCLING;
     }
     if (pre == "bailingmoe" || pre == "bailingmoe2" || pre == "llada-moe") {
-      return TokenizerPre::BAILINGMOE;
+      return tokenizer_pre::BAILINGMOE;
     }
     if (pre == "seed-coder") {
-      return TokenizerPre::SEED_CODER;
+      return tokenizer_pre::SEED_CODER;
     }
     if (pre == "hunyuan") {
-      return TokenizerPre::HUNYUAN;
+      return tokenizer_pre::HUNYUAN;
     }
     if (pre == "hunyuan-dense") {
-      return TokenizerPre::HUNYUAN_DENSE;
+      return tokenizer_pre::HUNYUAN_DENSE;
     }
     if (pre == "joyai-llm") {
-      return TokenizerPre::JOYAI_LLM;
+      return tokenizer_pre::JOYAI_LLM;
     }
     if (pre == "kimi-k2") {
-      return TokenizerPre::KIMI_K2;
+      return tokenizer_pre::KIMI_K2;
     }
     if (pre == "grok-2") {
-      return TokenizerPre::GROK_2;
+      return tokenizer_pre::GROK_2;
     }
     if (pre == "afmoe") {
-      return TokenizerPre::AFMOE;
+      return tokenizer_pre::AFMOE;
     }
     if (pre == "minimax-m2") {
-      return TokenizerPre::MINIMAX_M2;
+      return tokenizer_pre::MINIMAX_M2;
     }
     if (pre == "solar-open") {
-      return TokenizerPre::SOLAR_OPEN;
+      return tokenizer_pre::SOLAR_OPEN;
     }
-    return TokenizerPre::UNKNOWN;
+    return tokenizer_pre::UNKNOWN;
   };
 
-  vocab.tokenizer_model_id = model_id_from(tokenizer_model);
-  vocab.tokenizer_pre_id = pre_id_from(tokenizer_pre);
+  vocab.tokenizer_model_id = model_id_from(tokenizer_model_name);
+  vocab.tokenizer_pre_id = pre_id_from(tokenizer_pre_name);
 
   auto set_if_missing = [](bool has_key, int32_t &field, int32_t value) {
     if (!has_key) {
@@ -1651,9 +1652,9 @@ inline void finalize_vocab_attrs(emel::model::data & model, const context &ctx) 
     }
   };
 
-  using TokenizerModel = emel::model::data::TokenizerModel;
+  using tokenizer_model = emel::model::data::tokenizer_model;
   switch (vocab.tokenizer_model_id) {
-    case TokenizerModel::SPM:
+    case tokenizer_model::SPM:
       set_if_missing(ctx.has_bos_id, vocab.bos_id, 1);
       set_if_missing(ctx.has_eos_id, vocab.eos_id, 2);
       set_if_missing(ctx.has_unk_id, vocab.unk_id, 0);
@@ -1670,7 +1671,7 @@ inline void finalize_vocab_attrs(emel::model::data & model, const context &ctx) 
         vocab.add_eos = false;
       }
       break;
-    case TokenizerModel::WPM:
+    case tokenizer_model::WPM:
       set_if_missing(ctx.has_bos_id, vocab.bos_id, 101);
       set_if_missing(ctx.has_eos_id, vocab.eos_id, -1);
       set_if_missing(ctx.has_unk_id, vocab.unk_id, 100);
@@ -1690,7 +1691,7 @@ inline void finalize_vocab_attrs(emel::model::data & model, const context &ctx) 
         vocab.add_sep = true;
       }
       break;
-    case TokenizerModel::UGM:
+    case tokenizer_model::UGM:
       set_if_missing(ctx.has_bos_id, vocab.bos_id, -1);
       set_if_missing(ctx.has_eos_id, vocab.eos_id, 1);
       set_if_missing(ctx.has_unk_id, vocab.unk_id, 2);
@@ -1704,7 +1705,7 @@ inline void finalize_vocab_attrs(emel::model::data & model, const context &ctx) 
         vocab.add_eos = true;
       }
       break;
-    case TokenizerModel::RWKV:
+    case tokenizer_model::RWKV:
       set_if_missing(ctx.has_bos_id, vocab.bos_id, -1);
       set_if_missing(ctx.has_eos_id, vocab.eos_id, -1);
       set_if_missing(ctx.has_unk_id, vocab.unk_id, -1);
@@ -1721,7 +1722,7 @@ inline void finalize_vocab_attrs(emel::model::data & model, const context &ctx) 
         vocab.add_eos = false;
       }
       break;
-    case TokenizerModel::PLAMO2:
+    case tokenizer_model::PLAMO2:
       set_if_missing(ctx.has_bos_id, vocab.bos_id, 1);
       set_if_missing(ctx.has_eos_id, vocab.eos_id, 2);
       set_if_missing(ctx.has_unk_id, vocab.unk_id, 0);
@@ -1729,7 +1730,7 @@ inline void finalize_vocab_attrs(emel::model::data & model, const context &ctx) 
       set_if_missing(ctx.has_pad_id, vocab.pad_id, 3);
       set_if_missing(ctx.has_mask_id, vocab.mask_id, -1);
       break;
-    case TokenizerModel::BPE:
+    case tokenizer_model::BPE:
       set_if_missing(ctx.has_bos_id, vocab.bos_id, 11);
       set_if_missing(ctx.has_eos_id, vocab.eos_id, 11);
       set_if_missing(ctx.has_unk_id, vocab.unk_id, -1);
@@ -1741,30 +1742,30 @@ inline void finalize_vocab_attrs(emel::model::data & model, const context &ctx) 
       }
       if (!ctx.has_add_bos) {
         const bool add_bos =
-            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::LLAMA3 ||
-            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::TEKKEN ||
-            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::CHAMELEON;
+            vocab.tokenizer_pre_id == emel::model::data::tokenizer_pre::LLAMA3 ||
+            vocab.tokenizer_pre_id == emel::model::data::tokenizer_pre::TEKKEN ||
+            vocab.tokenizer_pre_id == emel::model::data::tokenizer_pre::CHAMELEON;
         vocab.add_bos = add_bos;
       }
       if (!ctx.has_add_eos) {
         vocab.add_eos = false;
       }
       if (!ctx.has_add_sep) {
-        const bool add_sep = (tokenizer_pre == "jina-v1-en" ||
-                              tokenizer_pre == "jina-v2-code" ||
-                              tokenizer_pre == "roberta-bpe");
+        const bool add_sep = (tokenizer_pre_name == "jina-v1-en" ||
+                              tokenizer_pre_name == "jina-v2-code" ||
+                              tokenizer_pre_name == "roberta-bpe");
         vocab.add_sep = add_sep;
       }
       if (!ctx.has_ignore_merges) {
         const bool ignore_merges =
-            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::LLAMA3 ||
-            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::YOUTU ||
-            vocab.tokenizer_pre_id == emel::model::data::TokenizerPre::TEKKEN;
+            vocab.tokenizer_pre_id == emel::model::data::tokenizer_pre::LLAMA3 ||
+            vocab.tokenizer_pre_id == emel::model::data::tokenizer_pre::YOUTU ||
+            vocab.tokenizer_pre_id == emel::model::data::tokenizer_pre::TEKKEN;
         vocab.ignore_merges = ignore_merges;
       }
       break;
-    case TokenizerModel::NONE:
-    case TokenizerModel::UNKNOWN:
+    case tokenizer_model::NONE:
+    case tokenizer_model::UNKNOWN:
     default:
       break;
   }
@@ -1782,7 +1783,7 @@ inline void finalize_vocab_attrs(emel::model::data & model, const context &ctx) 
     "modern-bert",
   };
 
-  if (contains_any(tokenizer_pre, jina_tokens.data(), jina_tokens.size()) ||
+  if (contains_any(tokenizer_pre_name, jina_tokens.data(), jina_tokens.size()) ||
       contains_any(general_arch, jina_arch.data(), jina_arch.size())) {
     const int32_t mask_id = find_token_id_by_text(vocab, "<mask>");
     if (mask_id >= 0) {
@@ -2881,8 +2882,8 @@ inline bool parse_kv(
         return false;
       }
       uint64_t len = 0;
-      if (!r.read_string(model.vocab_data.tokenizer_model.data(),
-                         model.vocab_data.tokenizer_model.size(), len)) {
+      if (!r.read_string(model.vocab_data.tokenizer_model_name.data(),
+                         model.vocab_data.tokenizer_model_name.size(), len)) {
         out_error = EMEL_ERR_PARSE_FAILED;
         return false;
       }
@@ -2896,8 +2897,8 @@ inline bool parse_kv(
         return false;
       }
       uint64_t len = 0;
-      if (!r.read_string(model.vocab_data.tokenizer_pre.data(),
-                         model.vocab_data.tokenizer_pre.size(), len)) {
+      if (!r.read_string(model.vocab_data.tokenizer_pre_name.data(),
+                         model.vocab_data.tokenizer_pre_name.size(), len)) {
         out_error = EMEL_ERR_PARSE_FAILED;
         return false;
       }

@@ -115,8 +115,8 @@ struct symbol_table {
 };
 
 /**
- * Encapsulates the recursive descent grammar parser from llama.cpp.
- * Translated to use bounded storage and length-aware parsing.
+ * encapsulates the recursive descent grammar parser from llama.cpp.
+ * translated to use bounded storage and length-aware parsing.
  */
 struct recursive_descent_parser {
   action::context &ctx;

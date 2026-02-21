@@ -28,7 +28,7 @@ enum class element_type : uint32_t {
  */
 struct element {
   element_type type;
-  uint32_t value; // Unicode code point, rule ID, or token ID
+  uint32_t value; // unicode code point, rule ID, or token ID
 };
 
 constexpr size_t k_max_gbnf_rules = 2048;

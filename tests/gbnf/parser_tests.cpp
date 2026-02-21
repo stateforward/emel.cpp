@@ -24,7 +24,7 @@ bool dispatch_error_test(void *owner,
 TEST_CASE("gbnf_parser_starts_initialized") {
   emel::gbnf::parser::action::context ctx{};
   emel::gbnf::parser::sm machine{ctx};
-  CHECK(machine.is(boost::sml::state<emel::gbnf::parser::Initialized>));
+  CHECK(machine.is(boost::sml::state<emel::gbnf::parser::initialized>));
 }
 
 TEST_CASE("gbnf_parser_valid_parse_reaches_done") {
@@ -44,7 +44,7 @@ TEST_CASE("gbnf_parser_valid_parse_reaches_done") {
               &done_called, dispatch_done_test)};
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::gbnf::parser::Done>));
+  CHECK(machine.is(boost::sml::state<emel::gbnf::parser::done>));
   CHECK(done_called);
   CHECK(error == EMEL_OK);
   CHECK(grammar.rule_count > 0);
@@ -60,7 +60,7 @@ TEST_CASE("gbnf_parser_invalid_parse_reaches_errored") {
   bool error_called = false;
 
   ::emel::gbnf::event::parse ev{
-      .grammar_text = "", // Invalid: empty text
+      .grammar_text = "", // invalid: empty text
       .grammar_out = &grammar,
       .error_out = &error,
       .owner_sm = &error_called,
@@ -69,7 +69,7 @@ TEST_CASE("gbnf_parser_invalid_parse_reaches_errored") {
               &error_called, dispatch_error_test)};
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::gbnf::parser::Errored>));
+  CHECK(machine.is(boost::sml::state<emel::gbnf::parser::errored>));
   CHECK(error_called);
   CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(grammar.rule_count == 0);
@@ -82,8 +82,8 @@ TEST_CASE("gbnf_detail_parser_parses_complex_grammar") {
   emel::gbnf::parser::detail::recursive_descent_parser parser{ctx, &grammar_out};
   const std::string_view grammar = R"g(# comment
 root ::= ("ab" | [a-z] | [^0-9] | <[3]> | !<[4]> | . | name-ref)+
-name-ref ::= "\x41\u0042\U00000043" {2,3} "t\n\r\t\\"?
-range-rule ::= [a-zA-Z0-9]*
+name-ref ::= "\x41\u0042\u00000043" {2,3} "t\n\r\t\\"?
+range-rule ::= [a-zA-z0-9]*
 )g";
   CHECK(parser.parse(grammar));
   CHECK(grammar_out.rule_count >= 3);

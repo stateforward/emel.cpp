@@ -1,13 +1,13 @@
 # ref=94b0200a01a753eff5897dab9311f51a7bc1c62f
 # toolchain=/opt/homebrew/bin/zig
-batch/splitter_equal ns_per_op=2164.668 iter=100000 runs=5
-batch/splitter_seq ns_per_op=1658.935 iter=100000 runs=5
-batch/splitter_simple ns_per_op=883.898 iter=100000 runs=5
-buffer/allocator_alloc_graph ns_per_op=17.351 iter=100000 runs=5
-buffer/allocator_full ns_per_op=40.075 iter=100000 runs=5
-buffer/allocator_reserve_n ns_per_op=20.415 iter=100000 runs=5
-jinja/parser_long ns_per_op=35641.337 iter=100000 runs=5
-jinja/parser_short ns_per_op=427.632 iter=100000 runs=5
-jinja/renderer_long ns_per_op=98885.892 iter=100000 runs=5
-jinja/renderer_short ns_per_op=1424.538 iter=100000 runs=5
-memory/coordinator_recurrent_full ns_per_op=5518.883 iter=100000 runs=5
+batch/splitter_equal ns_per_op=1610.788 iter=100000 runs=5
+batch/splitter_seq ns_per_op=1497.687 iter=100000 runs=5
+batch/splitter_simple ns_per_op=807.884 iter=100000 runs=5
+buffer/allocator_alloc_graph ns_per_op=18.160 iter=100000 runs=5
+buffer/allocator_full ns_per_op=39.995 iter=100000 runs=5
+buffer/allocator_reserve_n ns_per_op=20.897 iter=100000 runs=5
+jinja/parser_long ns_per_op=31307.898 iter=100000 runs=5
+jinja/parser_short ns_per_op=392.942 iter=100000 runs=5
+jinja/renderer_long ns_per_op=91093.635 iter=100000 runs=5
+jinja/renderer_short ns_per_op=1405.605 iter=100000 runs=5
+memory/coordinator_recurrent_full ns_per_op=3973.762 iter=100000 runs=5

@@ -5,7 +5,7 @@
 
 namespace emel::batch::splitter::guard {
 
-// Validates callback contract on the triggering event.
+// validates callback contract on the triggering event.
 inline constexpr auto callbacks_are_valid = [](const event::split & ev) noexcept {
   return static_cast<bool>(ev.on_done) && static_cast<bool>(ev.on_error);
 };
@@ -13,7 +13,7 @@ inline constexpr auto callbacks_are_valid = [](const event::split & ev) noexcept
 inline constexpr auto callbacks_are_invalid =
     [](const event::split & ev) noexcept { return !callbacks_are_valid(ev); };
 
-// Validates request inputs copied into context (token pointer, counts, and mode).
+// validates request inputs copied into context (token pointer, counts, and mode).
 inline constexpr auto inputs_are_valid = [](const action::context & ctx) noexcept {
   if (ctx.token_ids == nullptr || ctx.n_tokens <= 0) {
     return false;
@@ -96,7 +96,7 @@ inline constexpr auto mode_is_seq = [](const action::context & ctx) noexcept {
   return ctx.mode == event::split_mode::seq;
 };
 
-// Reports whether split computation produced usable output sizes.
+// reports whether split computation produced usable output sizes.
 inline constexpr auto split_succeeded = [](const action::context & ctx) noexcept {
   if (ctx.ubatch_count <= 0 || ctx.total_outputs < 0) {
     return false;

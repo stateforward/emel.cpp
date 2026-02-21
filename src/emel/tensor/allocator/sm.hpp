@@ -7,22 +7,22 @@
 
 namespace emel::tensor::allocator {
 
-struct Idle {};
-struct Validating {};
-struct ValidateDecision {};
-struct ScanningTensors {};
-struct ScanDecision {};
-struct PartitioningRanges {};
-struct PartitionDecision {};
-struct AllocatingRanges {};
-struct AllocateDecision {};
-struct InitializingTensors {};
-struct InitializeDecision {};
-struct AssemblingResult {};
-struct AssembleDecision {};
-struct Done {};
-struct Errored {};
-struct ReleaseDecision {};
+struct idle {};
+struct validating {};
+struct validate_decision {};
+struct scanning_tensors {};
+struct scan_decision {};
+struct partitioning_ranges {};
+struct partition_decision {};
+struct allocating_ranges {};
+struct allocate_decision {};
+struct initializing_tensors {};
+struct initialize_decision {};
+struct assembling_result {};
+struct assemble_decision {};
+struct done {};
+struct errored {};
+struct release_decision {};
 
 struct model {
   using context = action::context;
@@ -30,103 +30,103 @@ struct model {
   auto operator()() const {
     namespace sml = boost::sml;
     return sml::make_transition_table(
-      *sml::state<Idle> + sml::event<event::allocate_tensors> /
-        action::begin_allocate_tensors = sml::state<Validating>,
-      sml::state<Validating> / action::run_validate = sml::state<ValidateDecision>,
-      sml::state<ValidateDecision> [guard::phase_failed{}] = sml::state<Errored>,
-      sml::state<ValidateDecision> [guard::phase_ok{}] = sml::state<ScanningTensors>,
+      *sml::state<idle> + sml::event<event::allocate_tensors> /
+        action::begin_allocate_tensors = sml::state<validating>,
+      sml::state<validating> / action::run_validate = sml::state<validate_decision>,
+      sml::state<validate_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<validate_decision> [guard::phase_ok{}] = sml::state<scanning_tensors>,
 
-      sml::state<ScanningTensors> / action::run_scan_tensors = sml::state<ScanDecision>,
-      sml::state<ScanDecision> [guard::phase_failed{}] = sml::state<Errored>,
-      sml::state<ScanDecision> [guard::phase_ok{}] = sml::state<PartitioningRanges>,
+      sml::state<scanning_tensors> / action::run_scan_tensors = sml::state<scan_decision>,
+      sml::state<scan_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<scan_decision> [guard::phase_ok{}] = sml::state<partitioning_ranges>,
 
-      sml::state<PartitioningRanges> / action::run_partition_ranges =
-        sml::state<PartitionDecision>,
-      sml::state<PartitionDecision> [guard::phase_failed{}] = sml::state<Errored>,
-      sml::state<PartitionDecision> [guard::phase_ok{}] = sml::state<AllocatingRanges>,
+      sml::state<partitioning_ranges> / action::run_partition_ranges =
+        sml::state<partition_decision>,
+      sml::state<partition_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<partition_decision> [guard::phase_ok{}] = sml::state<allocating_ranges>,
 
-      sml::state<AllocatingRanges> / action::run_allocate_ranges =
-        sml::state<AllocateDecision>,
-      sml::state<AllocateDecision> [guard::phase_failed{}] = sml::state<Errored>,
-      sml::state<AllocateDecision> [guard::phase_ok{}] = sml::state<InitializingTensors>,
+      sml::state<allocating_ranges> / action::run_allocate_ranges =
+        sml::state<allocate_decision>,
+      sml::state<allocate_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<allocate_decision> [guard::phase_ok{}] = sml::state<initializing_tensors>,
 
-      sml::state<InitializingTensors> / action::run_initialize_tensors =
-        sml::state<InitializeDecision>,
-      sml::state<InitializeDecision> [guard::phase_failed{}] = sml::state<Errored>,
-      sml::state<InitializeDecision> [guard::phase_ok{}] = sml::state<AssemblingResult>,
+      sml::state<initializing_tensors> / action::run_initialize_tensors =
+        sml::state<initialize_decision>,
+      sml::state<initialize_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<initialize_decision> [guard::phase_ok{}] = sml::state<assembling_result>,
 
-      sml::state<AssemblingResult> / action::run_assemble = sml::state<AssembleDecision>,
-      sml::state<AssembleDecision> [guard::phase_failed{}] = sml::state<Errored>,
-      sml::state<AssembleDecision> [guard::phase_ok{}] = sml::state<Done>,
+      sml::state<assembling_result> / action::run_assemble = sml::state<assemble_decision>,
+      sml::state<assemble_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<assemble_decision> [guard::phase_ok{}] = sml::state<done>,
 
-      sml::state<Done> = sml::state<Idle>,
-      sml::state<Errored> = sml::state<Idle>,
+      sml::state<done> = sml::state<idle>,
+      sml::state<errored> = sml::state<idle>,
 
-      sml::state<Idle> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<Validating> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<ValidateDecision> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<ScanningTensors> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<ScanDecision> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<PartitioningRanges> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<PartitionDecision> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<AllocatingRanges> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<AllocateDecision> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<InitializingTensors> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<InitializeDecision> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<AssemblingResult> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<AssembleDecision> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<Done> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<Errored> + sml::event<event::release> / action::begin_release =
-        sml::state<ReleaseDecision>,
-      sml::state<ReleaseDecision> [guard::phase_failed{}] = sml::state<Errored>,
-      sml::state<ReleaseDecision> [guard::phase_ok{}] = sml::state<Idle>,
+      sml::state<idle> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<validating> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<validate_decision> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<scanning_tensors> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<scan_decision> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<partitioning_ranges> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<partition_decision> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<allocating_ranges> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<allocate_decision> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<initializing_tensors> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<initialize_decision> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<assembling_result> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<assemble_decision> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<done> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<errored> + sml::event<event::release> / action::begin_release =
+        sml::state<release_decision>,
+      sml::state<release_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<release_decision> [guard::phase_ok{}] = sml::state<idle>,
 
-      sml::state<Idle> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<Validating> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<ValidateDecision> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<ScanningTensors> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<ScanDecision> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<PartitioningRanges> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<PartitionDecision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<AllocatingRanges> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<AllocateDecision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<InitializingTensors> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<InitializeDecision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<AssemblingResult> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<AssembleDecision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>,
-      sml::state<Done> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<Errored> + sml::unexpected_event<sml::_> / action::on_unexpected =
-        sml::state<Errored>,
-      sml::state<ReleaseDecision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<Errored>
+      sml::state<idle> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<validating> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<validate_decision> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<scanning_tensors> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<scan_decision> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<partitioning_ranges> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<partition_decision> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<allocating_ranges> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<allocate_decision> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<initializing_tensors> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<initialize_decision> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<assembling_result> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<assemble_decision> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>,
+      sml::state<done> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<errored> + sml::unexpected_event<sml::_> / action::on_unexpected =
+        sml::state<errored>,
+      sml::state<release_decision> + sml::unexpected_event<sml::_> /
+        action::on_unexpected = sml::state<errored>
     );
   }
 };

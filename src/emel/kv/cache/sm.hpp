@@ -63,7 +63,7 @@ struct errored {};
 /**
  * KV cache orchestration model.
  *
- * State purposes:
+ * state purposes:
  * - `initialized`/`prepared`: idle states awaiting new requests.
  * - `validating_*`: validate request payloads.
  * - `*_step`: perform bounded cache operations.
@@ -71,12 +71,12 @@ struct errored {};
  * - `publishing`/`publish_decision`: finalize cache publish phase.
  * - `done`/`errored`: terminal outcomes that return to prepared.
  *
- * Guard semantics:
+ * guard semantics:
  * - `valid_*` guards are pure predicates on `(context)`.
  * - `phase_*` guards observe `context.phase_error`.
  *
- * Action side effects:
- * - Actions run bounded steps and set `phase_error`.
+ * action side effects:
+ * - actions run bounded steps and set `phase_error`.
  */
 struct model {
   auto operator()() const {
@@ -305,7 +305,7 @@ struct sm_deps {
   std::unique_ptr<action::context> context_;
 
   sm_deps() : context_(std::make_unique<action::context>()) {
-    // One-time heap allocation keeps kv cache context off the stack.
+    // one-time heap allocation keeps kv cache context off the stack.
   }
 };
 

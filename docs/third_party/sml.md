@@ -1,75 +1,75 @@
-All code examples include `boost/sml.hpp` as well as declare a convienent `sml` namespace alias.
+all code examples include `boost/sml.hpp` as well as declare a convienent `sml` namespace alias.
 
 ```cpp
 #include <boost/sml.hpp>
 namespace sml = boost::sml;
 ```
 
-\###0. Read Boost.MSM - eUML documentation
+\###0. read boost.MSM - eUML documentation
 
-* [Boost.MSM - UML Short Guide](http://www.boost.org/doc/libs/1_60_0/libs/msm/doc/HTML/ch02.html)
-* [Boost.MSM - eUML Documentation](http://www.boost.org/doc/libs/1_60_0/libs/msm/doc/HTML/ch03s04.html)
+* [boost.MSM - UML short guide](http://www.boost.org/doc/libs/1_60_0/libs/msm/doc/HTML/ch02.html)
+* [boost.MSM - eUML documentation](http://www.boost.org/doc/libs/1_60_0/libs/msm/doc/HTML/ch03s04.html)
 
-\###1. Create events and states
+\###1. create events and states
 
-State machine is composed of finite number of states and transitions which are triggered via events.
+state machine is composed of finite number of states and transitions which are triggered via events.
 
-An Event is just a unique type, which will be processed by the state machine.
+an event is just a unique type, which will be processed by the state machine.
 
 ```cpp
 struct my_event { ... };
 ```
 
-You can also create event instance in order to simplify transition table notation.
+you can also create event instance in order to simplify transition table notation.
 
 ```cpp
 auto event = sml::event<my_event>;
 ```
 
-If you happen to have a Clang/GCC compiler, you can create an Event on the fly.
+if you happen to have a clang/GCC compiler, you can create an event on the fly.
 
 ```cpp
 using namespace sml;
 auto event  = "event"_e;
 ```
 
-However, such event will not store any data.
+however, such event will not store any data.
 
 ***
 
-A State can have entry/exit behaviour executed whenever machine enters/leaves State and
+A state can have entry/exit behaviour executed whenever machine enters/leaves state and
 represents current location of the state machine flow.
 
-To create a state below snippet might be used.
+to create a state below snippet might be used.
 
 ```cpp
 auto idle = sml::state<class idle>;
 ```
 
-If you happen to have a Clang/GCC compiler, you can create a State on the fly.
+if you happen to have a clang/GCC compiler, you can create a state on the fly.
 
 ```cpp
 using namespace sml;
 auto state  = "idle"_s;
 ```
 
-However, please notice that above solution is a non-standard extension for Clang/GCC.
+however, please notice that above solution is a non-standard extension for clang/GCC.
 
 `SML` states cannot have data as data is injected directly into guards/actions instead.
 
-A state machine might be a State itself.
+A state machine might be a state itself.
 
 ```cpp
 sml::state<state_machine> composite;
 ```
 
-`SML` supports `terminate` state, which stops events to be processed. It defined by `X`.
+`SML` supports `terminate` state, which stops events to be processed. it defined by `X`.
 
 ```cpp
 "state"_s = X;
 ```
 
-States are printable too.
+states are printable too.
 
 ```cpp
 assert(string("idle") == "idle"_s.c_str());
@@ -83,11 +83,11 @@ assert(string("idle") == "idle"_s.c_str());
 
 ***
 
-\###2. Create guards and actions
+\###2. create guards and actions
 
-Guards and actions are callable objects which will be executed by the state machine in order to verify whether a transition, followed by an action should take place.
+guards and actions are callable objects which will be executed by the state machine in order to verify whether a transition, followed by an action should take place.
 
-Guard MUST return boolean value.
+guard MUST return boolean value.
 
 ```cpp
 auto guard1 = [] {
@@ -109,7 +109,7 @@ struct guard4 {
 };
 ```
 
-Action MUST not return.
+action MUST not return.
 
 ```cpp
 auto action1 = [] { };
@@ -126,18 +126,18 @@ struct action4 {
 
 ***
 
-\###3. Create a transition table
+\###3. create a transition table
 
-When we have states and events handy we can finally create a transition table which represents
+when we have states and events handy we can finally create a transition table which represents
 our transitions.
 
 `SML` is using eUML-like DSL in order to be as close as possible to UML design.
 
-* Transition Table DSL
+* transition table DSL
 
-  * Postfix Notation
+  * postfix notation
 
-  | Expression                                                                                                 | Description                                                               |
+  | expression                                                                                                 | description                                                               |
   | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
   | state + event<e> \[ guard ]                                                                                | internal transition on event e when guard                                 |
   | src\_state / \[] {} = dst\_state                                                                           | anonymous transition with action                                          |
@@ -146,9 +146,9 @@ our transitions.
   | src\_state + event<e> \[ guard ] / action = dst\_state                                                     | transition from src\_state to dst\_state on event e with guard and action |
   | src\_state + event<e> \[ guard && (!\[]{return true;} && guard2) ] / (action, action2, \[]{}) = dst\_state | transition from src\_state to dst\_state on event e with guard and action |
 
-  * Prefix Notation
+  * prefix notation
 
-  | Expression                                                                                                  | Description                                                               |
+  | expression                                                                                                  | description                                                               |
   | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
   | state + event<e> \[ guard ]                                                                                 | internal transition on event e when guard                                 |
   | dst\_state <= src\_state / \[] {}                                                                           | anonymous transition with action                                          |
@@ -157,7 +157,7 @@ our transitions.
   | dst\_state <= src\_state + event<e> \[ guard ] / action                                                     | transition from src\_state to dst\_state on event e with guard and action |
   | dst\_state <= src\_state + event<e> \[ guard && (!\[]{return true;} && guard2) ] / (action, action2, \[]{}) | transition from src\_state to dst\_state on event e with guard and action |
 
-* Transition flow
+* transition flow
 
 ```
 src_state + event [ guard ] / action = dst_state
@@ -168,10 +168,10 @@ src_state + event [ guard ] / action = dst_state
                                     2. dst_state + on_entry
 ```
 
-To create a transition table [`make_transition_table`](user_guide.md#make_transition_table-state-machine) is provided.
+to create a transition table [`make_transition_table`](user_guide.md#make_transition_table-state-machine) is provided.
 
 ```cpp
-using namespace sml; // Postfix Notation
+using namespace sml; // postfix notation
 
 make_transition_table(
  *"src_state"_s + event<my_event> [ guard ] / action = "dst_state"_s
@@ -182,7 +182,7 @@ make_transition_table(
 or
 
 ```cpp
-using namespace sml; // Prefix Notation
+using namespace sml; // prefix notation
 
 make_transition_table(
   "dst_state"_s <= *"src_state"_s + event<my_event> [ guard ] / action
@@ -197,9 +197,9 @@ make_transition_table(
 
 ***
 
-\###4. Set initial states
+\###4. set initial states
 
-Initial state tells the state machine where to start. It can be set by prefixing a State with `*`.
+initial state tells the state machine where to start. it can be set by prefixing a state with `*`.
 
 ```cpp
 using namespace sml;
@@ -209,8 +209,8 @@ make_transition_table(
 );
 ```
 
-Initial/Current state might be remembered by the State Machine so that whenever it will reentered
-the last active state will reactivated. In order to enable history you just have
+initial/current state might be remembered by the state machine so that whenever it will reentered
+the last active state will reactivated. in order to enable history you just have
 to replace `*` with postfixed `(H)` when declaring the initial state.
 
 ```cpp
@@ -221,8 +221,8 @@ make_transition_table(
 );
 ```
 
-You can have more than one initial state. All initial states will be executed in pseudo-parallel way
-. Such states are called `Orthogonal regions`.
+you can have more than one initial state. all initial states will be executed in pseudo-parallel way
+. such states are called `orthogonal regions`.
 
 ```cpp
 using namespace sml;
@@ -242,10 +242,10 @@ make_transition_table(
 
 ***
 
-\###5. Create a state machine
+\###5. create a state machine
 
-State machine is an abstraction for transition table holding current states and processing events.
-To create a state machine, we have to add a transition table.
+state machine is an abstraction for transition table holding current states and processing events.
+to create a state machine, we have to add a transition table.
 
 ```cpp
 class example {
@@ -260,13 +260,13 @@ public:
 };
 ```
 
-Having transition table configured we can create a state machine.
+having transition table configured we can create a state machine.
 
 ```cpp
 sml::sm<example> sm;
 ```
 
-State machine constructor provides required dependencies for actions and guards.
+state machine constructor provides required dependencies for actions and guards.
 
 ```cpp
                             /---- event (injected from process_event)
@@ -285,9 +285,9 @@ sml::sm<example> s{42, 87.0};
 sml::sm<example> s{87.0, 42}; // order in which parameters have to passed is not specificied
 ```
 
-Passing and maintaining a lot of dependencies might be tedious and requires huge amount of boilerplate code.
-In order to avoid it, Dependency Injection Library might be used to automate this process.
-For example, we can use [ext Boost.DI](https://github.com/boost-ext/di).
+passing and maintaining a lot of dependencies might be tedious and requires huge amount of boilerplate code.
+in order to avoid it, dependency injection library might be used to automate this process.
+for example, we can use [ext boost.DI](https://github.com/boost-ext/di).
 
 ```cpp
 auto injector = di::make_injector(
@@ -306,10 +306,10 @@ sm.process_event(e1{});
 
 ***
 
-\###6. Process events
+\###6. process events
 
-State machine is a simple creature. Its main purpose is to process events.
-In order to do it, `process_event` method might be used.
+state machine is a simple creature. its main purpose is to process events.
+in order to do it, `process_event` method might be used.
 
 ```cpp
 sml::sm<example> sm;
@@ -318,7 +318,7 @@ sm.process_event(my_event{}); // handled
 sm.process_event(int{}); // not handled -> unexpected_event<int>
 ```
 
-Process event might be also triggered on transition table.
+process event might be also triggered on transition table.
 
 ```
 using namespace sml;
@@ -350,9 +350,9 @@ dispatch_event(event, event.type); // will call sm.process(game_over{});
 
 ***
 
-\###8. Handle errors
+\###8. handle errors
 
-In case when a State Machine can't handle given event an `unexpected_event` is fired.
+in case when a state machine can't handle given event an `unexpected_event` is fired.
 
 ```cpp
 make_transition_table(
@@ -361,7 +361,7 @@ make_transition_table(
 );
 ```
 
-Any unexpected event might be handled too by using `unexpected_event<_>`.
+any unexpected event might be handled too by using `unexpected_event<_>`.
 
 ```cpp
 make_transition_table(
@@ -371,7 +371,7 @@ make_transition_table(
 );
 ```
 
-In such case...
+in such case...
 
 ```cpp
 sm.process_event(some_event{}); // "unexpected 'some_event'
@@ -379,29 +379,29 @@ sm.process_event(int{}); // terminate
 assert(sm.is(X));
 ```
 
-Usually, it's handy to create additional `Orthogonal region` to cover this scenario,
-This way State causing unexpected event does not matter.
+usually, it's handy to create additional `orthogonal region` to cover this scenario,
+this way state causing unexpected event does not matter.
 
 ```cpp
 make_transition_table(
  *"idle"_s + event<my_event> [ guard ] / action = "s1"_s
 , "s1"_s + event<other_event> [ guard ] / action = "s2"_s
 , "s2"_s + event<yet_another_event> [ guard ] / action = X
-// terminate (=X) the Machine or reset to another state
+// terminate (=X) the machine or reset to another state
 ,*"error_handler"_s + unexpected_event<some_event> = X
 );
 ```
 
-We can always check whether a State Machine is in terminate state by.
+we can always check whether a state machine is in terminate state by.
 
 ```cpp
 assert(sm.is(sml::X)); // doesn't matter how many regions there are
 ```
 
-When exceptions are enabled (project is NOT compiled with `-fno-exceptions`) they
-can be caught using `exception<name>` syntax. Exception handlers will be processed
+when exceptions are enabled (project is NOT compiled with `-fno-exceptions`) they
+can be caught using `exception<name>` syntax. exception handlers will be processed
 in the order they were defined, and `exception<>` might be used to catch anything (equivalent to `catch (...)`).
-Please, notice that when there is no exception handler defined in the Transition Table, exception will not be handled by the State Machine.
+please, notice that when there is no exception handler defined in the transition table, exception will not be handled by the state machine.
 
 ```cpp
 make_transition_table(
@@ -418,10 +418,10 @@ make_transition_table(
 
 ***
 
-\###9. Test it
+\###9. test it
 
-Sometimes it's useful to verify whether a state machine is in a specific state, for example, if
-we are in a terminate state or not. We can do it with `SML` using `is` or `visit_current_states`
+sometimes it's useful to verify whether a state machine is in a specific state, for example, if
+we are in a terminate state or not. we can do it with `SML` using `is` or `visit_current_states`
 functionality.
 
 ```cpp
@@ -434,7 +434,7 @@ assert(sm.is(X)); // is(X, s1, ...) when you have orthogonal regions
 sm.visit_current_states([](auto state) { std::cout << state.c_str() << std::endl; });
 ```
 
-On top of that, `SML` provides testing facilities to check state machine as a whole.
+on top of that, `SML` provides testing facilities to check state machine as a whole.
 `set_current_states` method is available from `testing::sm` in order to set state machine
 in a requested state.
 
@@ -451,10 +451,10 @@ assert(sm.is(X));
 
 ***
 
-\###10. Debug it
+\###10. debug it
 
 `SML` provides logging capabilities in order to inspect state machine flow.
-To enable logging you can use (Logger Policy)(user\_guide.md#policies)
+to enable logging you can use (logger policy)(user\_guide.md#policies)
 
 ````cpp
 struct my_logger {
@@ -466,7 +466,7 @@ struct my_logger {
   template <class SM, class TGuard, class TEvent>
   void log_guard(const TGuard&, const TEvent&, bool result) {
     printf("[%s][guard] %s %s %s\n", sml::aux::get_type_name<SM>(), sml::aux::get_type_name<TGuard>(),
-           sml::aux::get_type_name<TEvent>(), (result ? "[OK]" : "[Reject]"));
+           sml::aux::get_type_name<TEvent>(), (result ? "[OK]" : "[reject]"));
   }
 
   template <class SM, class TAction, class TEvent>
@@ -491,7 +491,7 @@ sm.process_event(my_event{}); // will call logger appropriately
 <iframe style="width: 100%; height: 600px;" src="https://boost-ext.github.io/sml/embo-2018" />
 \###transitional \[concept]
 
-***Header***
+***header***
 
 ````
 
@@ -499,11 +499,11 @@ sm.process_event(my_event{}); // will call logger appropriately
 
 ```
 
-***Description***
+***description***
 
-Requirements for transition.
+requirements for transition.
 
-***Synopsis***
+***synopsis***
 
 ```
 
@@ -522,7 +522,7 @@ T::history;
 
 ```
 
-***Semantics***
+***semantics***
 
 ```
 
@@ -530,19 +530,19 @@ transitional<T>
 
 ```
 
-***Example***
+***example***
 
 ```
 
 using namespace sml;
 
 {
-auto transition = ("idle"\_s = X); // Postfix Notation
+auto transition = ("idle"\_s = X); // postfix notation
 static\_assert(transitional\<decltype(transition)>::value);
 }
 
 {
-auto transition = (X <= "idle"\_s); // Prefix Notation
+auto transition = (X <= "idle"\_s); // prefix notation
 static\_assert(transitional\<decltype(transition)>::value);
 }
 
@@ -554,12 +554,12 @@ static\_assert(transitional\<decltype(transition)>::value);
 using namespace sml;
 
 {
-auto transition = ("idle"_s = X); // Postfix Notation
+auto transition = ("idle"_s = X); // postfix notation
 static_assert(transitional<decltype(transition)>::value);
 }
 
 {
-auto transition = (X <= "idle"_s); // Prefix Notation
+auto transition = (X <= "idle"_s); // prefix notation
 static_assert(transitional<decltype(transition)>::value);
 }
 ````
@@ -570,17 +570,17 @@ static_assert(transitional<decltype(transition)>::value);
 
 \###configurable \[concept]
 
-***Header***
+***header***
 
 ```
 #include <boost/sml.hpp>
 ```
 
-***Description***
+***description***
 
-Requirements for the state machine.
+requirements for the state machine.
 
-***Synopsis***
+***synopsis***
 
 ```
 template <class SM>
@@ -591,13 +591,13 @@ concept bool configurable() {
 };
 ```
 
-***Semantics***
+***semantics***
 
 ```
 configurable<SM>
 ```
 
-***Example***
+***example***
 
 ```
 class example {
@@ -627,17 +627,17 @@ static_assert(configurable<example>::value);
 
 \###callable \[concept]
 
-***Header***
+***header***
 
 ```
 #include <boost/sml.hpp>
 ```
 
-***Description***
+***description***
 
-Requirements for action and guards.
+requirements for action and guards.
 
-***Synopsis***
+***synopsis***
 
 ```
 template <class TResult, class T>
@@ -648,13 +648,13 @@ concept bool callable() {
 }
 ```
 
-***Semantics***
+***semantics***
 
 ```
 callable<SM>
 ```
 
-***Example***
+***example***
 
 ```
 auto guard = [] { return true; };
@@ -680,17 +680,17 @@ static_assert(callable<void, decltype(action)>::value);
 
 \###dispatchable \[concept]
 
-***Header***
+***header***
 
 ```
 #include <boost/sml.hpp>
 ```
 
-***Description***
+***description***
 
-Requirements for the dispatch table.
+requirements for the dispatch table.
 
-***Synopsis***
+***synopsis***
 
 ```
 template <class TDynamicEvent, TEvent>
@@ -702,13 +702,13 @@ concept bool dispatchable() {
 };
 ```
 
-***Semantics***
+***semantics***
 
 ```
 dispatchable<SM>
 ```
 
-***Example***
+***example***
 
 ```
 struct runtime_event { };
@@ -746,10 +746,10 @@ static_assert(dispatchable<runtime_event, event2>::value);
 
 ```cpp
 //
-// Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
+// copyright (c) 2016-2020 kris jusiak (kris at jusiak dot net)
 //
-// Distributed under the Boost Software License, Version 1.0.
-// (See accompanying file LICENSE_1_0.txt or copy at
+// distributed under the boost software license, version 1.0.
+// (see accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
 #include <boost/sml.hpp>
@@ -794,17 +794,17 @@ union SDL_Event {
 };
 #endif
 
-template <SDL_EventType Id>
+template <SDL_EventType id>
 struct sdl_event_impl {
-  static constexpr auto id = Id;
+  static constexpr auto id = id;
   explicit sdl_event_impl(const SDL_Event& data) noexcept : data(data) {}
   SDL_Event data;
 };
 
-template <SDL_EventType Id>
-decltype(sml::event<sdl_event_impl<Id>>) sdl_event{};
+template <SDL_EventType id>
+decltype(sml::event<sdl_event_impl<id>>) sdl_event{};
 
-struct IsKey {
+struct is_key {
   auto operator()(int key) {
     return [=](auto event) { return event.data.key.keysym.sym == key; };
   }
@@ -877,17 +877,17 @@ int main() {
 
 \###state \[core]
 
-***Header***
+***header***
 
 ```
 #include <boost/sml.hpp>
 ```
 
-***Description***
+***description***
 
-Represents a state machine state.
+represents a state machine state.
 
-***Synopsis***
+***synopsis***
 
 ```
 template<class TState> // no requirements, TState may be a state machine
@@ -913,24 +913,24 @@ public:
   const char* c_str() noexcept;
 };
 
-template <class T, T... Chrs>
+template <class T, T... chrs>
 state<unspecified> operator""_s() noexcept;
 
 // predefined states
 state<unspecified> X;
 ```
 
-***Requirements***
+***requirements***
 
 * [callable](#callable-concept)
 
-***Semantics***
+***semantics***
 
 ```
 state<T>{}
 ```
 
-***Example***
+***example***
 
 ```
 auto idle = state<class idle>;
@@ -943,10 +943,10 @@ auto terminate_state = X;
 
 ```cpp
 //
-// Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
+// copyright (c) 2016-2020 kris jusiak (kris at jusiak dot net)
 //
-// Distributed under the Boost Software License, Version 1.0.
-// (See accompanying file LICENSE_1_0.txt or copy at
+// distributed under the boost software license, version 1.0.
+// (see accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
 #include <boost/sml.hpp>
@@ -988,10 +988,10 @@ int main() {
 
 ```cpp
 //
-// Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
+// copyright (c) 2016-2020 kris jusiak (kris at jusiak dot net)
 //
-// Distributed under the Boost Software License, Version 1.0.
-// (See accompanying file LICENSE_1_0.txt or copy at
+// distributed under the boost software license, version 1.0.
+// (see accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
 #include <boost/sml.hpp>
@@ -1064,10 +1064,10 @@ int main() {
 
 ```cpp
 //
-// Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
+// copyright (c) 2016-2020 kris jusiak (kris at jusiak dot net)
 //
-// Distributed under the Boost Software License, Version 1.0.
-// (See accompanying file LICENSE_1_0.txt or copy at
+// distributed under the boost software license, version 1.0.
+// (see accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
 #include <boost/sml.hpp>
@@ -1115,17 +1115,17 @@ int main() {
 
 \###event \[core]
 
-***Header***
+***header***
 
 ```
 #include <boost/sml.hpp>
 ```
 
-***Description***
+***description***
 
-Represents a state machine event.
+represents a state machine event.
 
-***Synopsis***
+***synopsis***
 
 ```
 template<TEvent> // no requirements
@@ -1149,32 +1149,32 @@ template<class TEvent> unexpected_event{};
 template<class T> exception{};
 ```
 
-***Requirements***
+***requirements***
 
 * [callable](#callable-concept)
 
-***Semantics***
+***semantics***
 
 ```
 event<T>
 ```
 
-***Example***
+***example***
 
 ```
 auto my_int_event = event<int>;
 ```
 
 ```cpp
-// Note: action_guards.cpp file not found, this is a placeholder for the events example
+// note: action_guards.cpp file not found, this is a placeholder for the events example
 ```
 
 ```cpp
 //
-// Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
+// copyright (c) 2016-2020 kris jusiak (kris at jusiak dot net)
 //
-// Distributed under the Boost Software License, Version 1.0.
-// (See accompanying file LICENSE_1_0.txt or copy at
+// distributed under the boost software license, version 1.0.
+// (see accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
 #include <boost/sml.hpp>
@@ -1230,34 +1230,34 @@ int main() {
 
 \###make\_transition\_table \[state machine]
 
-***Header***
+***header***
 
 ```
 #include <boost/sml.hpp>
 ```
 
-***Description***
+***description***
 
-Creates a transition table.
+creates a transition table.
 
-***Synopsis***
+***synopsis***
 
 ```
-template <class... Ts> requires transitional<Ts>...
-auto make_transition_table(Ts...) noexcept;
+template <class... ts> requires transitional<ts>...
+auto make_transition_table(ts...) noexcept;
 ```
 
-***Requirements***
+***requirements***
 
 * [transitional](#transitional-concept)
 
-***Semantics***
+***semantics***
 
 ```
 make_transition_table(transitions...);
 ```
 
-***Example***
+***example***
 
 ```
 auto transition_table_postfix_notation = make_transition_table(
@@ -1278,10 +1278,10 @@ public:
 
 ```cpp
 //
-// Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
+// copyright (c) 2016-2020 kris jusiak (kris at jusiak dot net)
 //
-// Distributed under the Boost Software License, Version 1.0.
-// (See accompanying file LICENSE_1_0.txt or copy at
+// distributed under the boost software license, version 1.0.
+// (see accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
 #include <boost/sml.hpp>
@@ -1327,24 +1327,24 @@ int main() {
 
 \###sm \[state machine]
 
-***Header***
+***header***
 
 ```
 #include <boost/sml.hpp>
 ```
 
-***Description***
+***description***
 
-Creates a State Machine.
+creates a state machine.
 
-***Synopsis***
+***synopsis***
 
 ```
 template<class T> requires configurable<T>
 class sm {
 public:
   using states = unspecified; // unique list of states
-  using events = unspecified; // unique list of events which can be handled by the State Machine
+  using events = unspecified; // unique list of events which can be handled by the state machine
   using transitions = unspecified; // list of transitions
 
   sm(sm &&) = default;
@@ -1368,7 +1368,7 @@ public:
 };
 ```
 
-| Expression                       | Requirement                                        | Description                                          | Returns                                                       |
+| expression                       | requirement                                        | description                                          | returns                                                       |
 | -------------------------------- | -------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------- |
 | `TDeps...`                       | is\_base\_of dependencies                          | constructor                                          |                                                               |
 | `process_event<TEvent>`          | -                                                  | process event `TEvent`                               | returns true when handled, false otherwise                    |
@@ -1376,7 +1376,7 @@ public:
 | `is<TState>`                     | -                                                  | verify whether any of current states equals `TState` | true when any current state matches `TState`, false otherwise |
 | `is<TStates...>`                 | size of TStates... equals number of initial states | verify whether all current states match `TStates...` | true when all states match `TState...`, false otherwise       |
 
-***Semantics***
+***semantics***
 
 ```
 sml::sm<T>{...};
@@ -1386,7 +1386,7 @@ sm.is(X);
 sm.is(s1, s2);
 ```
 
-***Example***
+***example***
 
 ```
 struct my_event {};
@@ -1412,10 +1412,10 @@ sm.visit_current_states([](auto state) { std::cout << state.c_str() << std::endl
 
 ```cpp
 //
-// Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
+// copyright (c) 2016-2020 kris jusiak (kris at jusiak dot net)
 //
-// Distributed under the Boost Software License, Version 1.0.
-// (See accompanying file LICENSE_1_0.txt or copy at
+// distributed under the boost software license, version 1.0.
+// (see accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
 #include <boost/sml.hpp>
@@ -1517,10 +1517,10 @@ int main() {
 
 ```cpp
 //
-// Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
+// copyright (c) 2016-2020 kris jusiak (kris at jusiak dot net)
 //
-// Distributed under the Boost Software License, Version 1.0.
-// (See accompanying file LICENSE_1_0.txt or copy at
+// distributed under the boost software license, version 1.0.
+// (see accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
 #if __has_include(<boost/di.hpp>)
@@ -1596,10 +1596,10 @@ int main() {}
 
 ```cpp
 //
-// Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
+// copyright (c) 2016-2020 kris jusiak (kris at jusiak dot net)
 //
-// Distributed under the Boost Software License, Version 1.0.
-// (See accompanying file LICENSE_1_0.txt or copy at
+// distributed under the boost software license, version 1.0.
+// (see accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
 #include <boost/sml.hpp>
@@ -1622,12 +1622,12 @@ auto s2 = sml::state<class s2>;
 
 class euml_emulation;
 
-struct Guard {
+struct guard {
   template <class TEvent>
   bool operator()(euml_emulation&, const TEvent&) const;
 } guard;
 
-struct Action {
+struct action {
   template <class TEvent>
   void operator()(euml_emulation&, const TEvent&);
 } action;
@@ -1654,12 +1654,12 @@ class euml_emulation {
 };
 
 template <class TEvent>
-bool Guard::operator()(euml_emulation& sm, const TEvent& event) const {
+bool guard::operator()(euml_emulation& sm, const TEvent& event) const {
   return sm.call_guard(event);
 }
 
 template <class TEvent>
-void Action::operator()(euml_emulation& sm, const TEvent& event) {
+void action::operator()(euml_emulation& sm, const TEvent& event) {
   sm.call_action(event);
 }
 }  // namespace
@@ -1683,29 +1683,29 @@ int main() {
 
 \###policies \[state machine]
 
-***Header***
+***header***
 
 ```
 #include <boost/sml.hpp>
 ```
 
-***Description***
+***description***
 
-Additional State Machine configurations.
+additional state machine configurations.
 
-***Synopsis***
+***synopsis***
 
 ```
-thread_safe<Lockable>
-logger<Loggable>
+thread_safe<lockable>
+logger<loggable>
 ```
 
-| Expression | Requirement                                               | Description   | Example                              |
+| expression | requirement                                               | description   | example                              |
 | ---------- | --------------------------------------------------------- | ------------- | ------------------------------------ |
-| `Lockable` | `lock/unlock`                                             | Lockable type | `std::mutex`, `std::recursive_mutex` |
-| `Loggable` | `log_process_event/log_state_change/log_action/log_guard` | Loggable type | -                                    |
+| `lockable` | `lock/unlock`                                             | lockable type | `std::mutex`, `std::recursive_mutex` |
+| `loggable` | `log_process_event/log_state_change/log_action/log_guard` | loggable type | -                                    |
 
-***Example***
+***example***
 
 ```
 sml::sm<example, sml::thread_safe<std::recursive_mutex>> sm; // thread safe policy
@@ -1717,7 +1717,7 @@ sml::sm<example, sml::logger<my_logger>, sml::thread_safe<std::recursive_mutex>>
 ### emel extension: coroutine scheduler policy
 
 `emel::co_sm` supports a scheduler policy in addition to SML policies.
-Default is:
+default is:
 
 ```cpp
 emel::policy::coroutine_scheduler<emel::policy::fifo_scheduler<>>
@@ -1728,8 +1728,8 @@ using inline_policy = emel::policy::coroutine_scheduler<emel::policy::inline_sch
 emel::co_sm<example, inline_policy> co;
 ```
 
-Custom scheduler requirement:
-- provide `schedule(Fn)` where `Fn` is a no-arg callable used to resume coroutine work.
+custom scheduler requirement:
+- provide `schedule(fn)` where `fn` is a no-arg callable used to resume coroutine work.
 - declare strict ordering guarantees:
   - `static constexpr bool guarantees_fifo = true;`
   - `static constexpr bool single_consumer = true;`
@@ -1737,10 +1737,10 @@ Custom scheduler requirement:
 
 ```cpp
 //
-// Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
+// copyright (c) 2016-2020 kris jusiak (kris at jusiak dot net)
 //
-// Distributed under the Boost Software License, Version 1.0.
-// (See accompanying file LICENSE_1_0.txt or copy at
+// distributed under the boost software license, version 1.0.
+// (see accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
 #include <boost/sml.hpp>
@@ -1760,7 +1760,7 @@ struct my_logger {
   template <class SM, class TGuard, class TEvent>
   void log_guard(const TGuard&, const TEvent&, bool result) {
     printf("[%s][guard] %s %s %s\n", sml::aux::get_type_name<SM>(), sml::aux::get_type_name<TGuard>(),
-           sml::aux::get_type_name<TEvent>(), (result ? "[OK]" : "[Reject]"));
+           sml::aux::get_type_name<TEvent>(), (result ? "[OK]" : "[reject]"));
   }
 
   template <class SM, class TAction, class TEvent>
@@ -1812,17 +1812,17 @@ int main() {
 
 \###testing::sm \[testing]
 
-***Header***
+***header***
 
 ```
 #include <boost/sml/testing/state_machine.hpp>
 ```
 
-***Description***
+***description***
 
-Creates a state machine with testing capabilities.
+creates a state machine with testing capabilities.
 
-***Synopsis***
+***synopsis***
 
 ```
 namespace testing {
@@ -1837,18 +1837,18 @@ namespace testing {
 }
 ```
 
-| Expression                       | Requirement | Description        | Returns |
+| expression                       | requirement | description        | returns |
 | -------------------------------- | ----------- | ------------------ | ------- |
 | `set_current_states<TStates...>` | -           | set current states |         |
 
-***Semantics***
+***semantics***
 
 ```
 sml::testing::sm<T>{...};
 sm.set_current_states("s1"_s);
 ```
 
-***Example***
+***example***
 
 ```
 sml::testing::sm<T>{inject_fake_data...};
@@ -1859,10 +1859,10 @@ sm.is(X);
 
 ```cpp
 //
-// Copyright (c) 2016-2020 Kris Jusiak (kris at jusiak dot net)
+// copyright (c) 2016-2020 kris jusiak (kris at jusiak dot net)
 //
-// Distributed under the Boost Software License, Version 1.0.
-// (See accompanying file LICENSE_1_0.txt or copy at
+// distributed under the boost software license, version 1.0.
+// (see accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
 #include <boost/sml.hpp>
@@ -1914,36 +1914,36 @@ int main() {
 
 \###make\_dispatch\_table \[utility]
 
-***Header***
+***header***
 
 ```
 #include <boost/sml/utility/dispatch_table.hpp>
 ```
 
-***Description***
+***description***
 
-Creates a dispatch table to handle runtime events.
+creates a dispatch table to handle runtime events.
 
-***Synopsis***
+***synopsis***
 
 ```
 namespace utility {
-  template<class TEvent, int EventRangeBegin, int EventRangeBegin, class SM> requires dispatchable<TEvent, typename SM::events>
+  template<class TEvent, int event_range_begin, int event_range_begin, class SM> requires dispatchable<TEvent, typename SM::events>
   callable<bool, (TEvent, int)> make_dispatch_table(sm<SM>&) noexcept;
 }
 ```
 
-***Requirements***
+***requirements***
 
 * [dispatchable](#dispatchable-concept)
 
-***Semantics***
+***semantics***
 
 ```
 sml::utility::make_dispatch_table<T, 0, 10>(sm);
 ```
 
-***Example***
+***example***
 
 ```
 struct runtime_event {

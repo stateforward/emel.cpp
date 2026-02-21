@@ -102,8 +102,8 @@ struct run_parse {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event &, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_ERR_BACKEND;
     ctx.last_error = EMEL_ERR_BACKEND;
   }

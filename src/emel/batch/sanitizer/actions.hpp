@@ -219,7 +219,7 @@ struct run_sanitize_decode {
     const bool has_output_mask_in =
         ctx.output_mask != nullptr && ctx.output_mask_count >= ctx.n_tokens;
 
-    // Normalize seq masks + primary ids
+    // normalize seq masks + primary ids
     for (int32_t i = 0; i < ctx.n_tokens; ++i) {
       uint64_t * out_mask = ctx.seq_masks_out + static_cast<size_t>(i) * mask_words;
       detail::clear_mask(out_mask, mask_words);
@@ -262,7 +262,7 @@ struct run_sanitize_decode {
       ctx.seq_primary_ids_out[i] = primary;
     }
 
-    // Normalize positions
+    // normalize positions
     if (has_positions_in) {
       const int32_t count = ctx.normalized_positions_count;
       std::copy(ctx.positions, ctx.positions + count, ctx.positions_out);
@@ -287,7 +287,7 @@ struct run_sanitize_decode {
       }
     }
 
-    // Normalize output mask
+    // normalize output mask
     if (ctx.output_all) {
       std::fill_n(ctx.output_mask_out, ctx.n_tokens, static_cast<int8_t>(1));
     } else if (has_output_mask_in) {
@@ -316,7 +316,7 @@ struct run_sanitize_decode {
     }
     detail::write_outputs_total(ctx, ctx.outputs_total);
 
-    // Validate per-sequence output constraint if requested.
+    // validate per-sequence output constraint if requested.
     if (ctx.enforce_single_output_per_seq) {
       std::array<int32_t, MAX_SEQ> seq_output_count = {};
       seq_output_count.fill(0);
@@ -341,7 +341,7 @@ struct run_sanitize_decode {
       }
     }
 
-    // Continuity and subset checks.
+    // continuity and subset checks.
     std::array<int32_t, MAX_SEQ> seq_last_pos = {};
     std::array<int32_t, MAX_SEQ> seq_pos_min = {};
     std::array<int32_t, MAX_SEQ> seq_pos_max = {};
@@ -439,8 +439,8 @@ struct ensure_last_error {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & ctx) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_BACKEND;

@@ -42,9 +42,9 @@ struct done {};
 struct errored {};
 
 /**
- * Memory coordination orchestration model.
+ * memory coordination orchestration model.
  *
- * State purposes:
+ * state purposes:
  * - `initialized`: idle state awaiting a prepare request.
  * - `validating_*`: request validation via guards.
  * - `preparing_*`: compute prepared status and update context.
@@ -53,14 +53,14 @@ struct errored {};
  * - `*_decision`: branch on `phase_error` and prepared status.
  * - `done`/`errored`: terminal outcomes that return to initialized.
  *
- * Guard semantics:
+ * guard semantics:
  * - `valid_*` guards are pure predicates over `(context)`.
  * - `phase_*` guards observe `context.phase_error`.
  * - `prepare_update_*` guards inspect `context.prepared_status`.
  *
- * Action side effects:
- * - Actions update context counters and `prepared_status`.
- * - Errors are recorded in `phase_error`/`last_error`.
+ * action side effects:
+ * - actions update context counters and `prepared_status`.
+ * - errors are recorded in `phase_error`/`last_error`.
  */
 struct model {
   auto operator()() const {

@@ -9,20 +9,20 @@
 
 namespace emel::jinja::renderer {
 
-struct Initialized {};
-struct Setup {};
-struct EvalStmt {};
-struct EvalExpr {};
-struct WriteOutput {};
-struct RenderDecision {};
-struct Done {};
-struct Errored {};
-struct Unexpected {};
+struct initialized {};
+struct setup {};
+struct eval_stmt {};
+struct eval_expr {};
+struct write_output {};
+struct render_decision {};
+struct done {};
+struct errored {};
+struct unexpected {};
 
 /**
- * Jinja renderer orchestration model.
+ * jinja renderer orchestration model.
  *
- * State purposes:
+ * state purposes:
  * - `initialized`: idle state awaiting render intent.
  * - `setup`: initialize context and seed statement work.
  * - `eval_stmt`: step through statements and enqueue expressions when needed.
@@ -32,11 +32,11 @@ struct Unexpected {};
  * - `done`/`errored`: terminal outcomes.
  * - `unexpected`: sequencing contract violation.
  *
- * Guard semantics:
+ * guard semantics:
  * - `valid_render`/`invalid_render` validate request pointers and parameters.
  * - `phase_*` guards observe errors set by actions.
  *
- * Action side effects:
+ * action side effects:
  * - `begin_render`/`seed_program` prepare context for a render pass.
  * - `eval_next_stmt`/`eval_pending_expr`/`write_pending_value` execute rendering steps.
  * - `finalize_*` dispatch completion callbacks and write output metadata.
@@ -48,73 +48,73 @@ struct model {
     namespace sml = boost::sml;
 
     return sml::make_transition_table(
-        *sml::state<Initialized> +
+        *sml::state<initialized> +
             sml::event<event::render>[guard::valid_render] / action::begin_render =
-                sml::state<Setup>,
-        sml::state<Initialized> +
+                sml::state<setup>,
+        sml::state<initialized> +
             sml::event<event::render>[guard::invalid_render] /
-                action::reject_invalid_render = sml::state<Errored>,
+                action::reject_invalid_render = sml::state<errored>,
 
-        sml::state<Done> + sml::event<event::render>[guard::valid_render] /
-                               action::begin_render = sml::state<Setup>,
-        sml::state<Done> + sml::event<event::render>[guard::invalid_render] /
+        sml::state<done> + sml::event<event::render>[guard::valid_render] /
+                               action::begin_render = sml::state<setup>,
+        sml::state<done> + sml::event<event::render>[guard::invalid_render] /
                                action::reject_invalid_render =
-            sml::state<Errored>,
+            sml::state<errored>,
 
-        sml::state<Errored> + sml::event<event::render>[guard::valid_render] /
-                                  action::begin_render = sml::state<Setup>,
-        sml::state<Errored> + sml::event<event::render>[guard::invalid_render] /
+        sml::state<errored> + sml::event<event::render>[guard::valid_render] /
+                                  action::begin_render = sml::state<setup>,
+        sml::state<errored> + sml::event<event::render>[guard::invalid_render] /
                                   action::reject_invalid_render =
-            sml::state<Errored>,
+            sml::state<errored>,
 
-        sml::state<Unexpected> +
+        sml::state<unexpected> +
             sml::event<event::render>[guard::valid_render] / action::begin_render =
-                sml::state<Setup>,
-        sml::state<Unexpected> +
+                sml::state<setup>,
+        sml::state<unexpected> +
             sml::event<event::render>[guard::invalid_render] /
-                action::reject_invalid_render = sml::state<Unexpected>,
+                action::reject_invalid_render = sml::state<unexpected>,
 
-        sml::state<Setup> / action::seed_program = sml::state<EvalStmt>,
+        sml::state<setup> / action::seed_program = sml::state<eval_stmt>,
 
-        sml::state<EvalStmt>[guard::phase_failed{}] = sml::state<RenderDecision>,
-        sml::state<EvalStmt>[guard::needs_expr{}] = sml::state<EvalExpr>,
-        sml::state<EvalStmt>[guard::has_stmt_work{}] / action::eval_next_stmt =
-            sml::state<EvalStmt>,
-        sml::state<EvalStmt>[guard::no_stmt_work{}] = sml::state<RenderDecision>,
+        sml::state<eval_stmt>[guard::phase_failed{}] = sml::state<render_decision>,
+        sml::state<eval_stmt>[guard::needs_expr{}] = sml::state<eval_expr>,
+        sml::state<eval_stmt>[guard::has_stmt_work{}] / action::eval_next_stmt =
+            sml::state<eval_stmt>,
+        sml::state<eval_stmt>[guard::no_stmt_work{}] = sml::state<render_decision>,
 
-        sml::state<EvalExpr>[guard::has_pending_expr{}] / action::eval_pending_expr =
-            sml::state<EvalExpr>,
-        sml::state<EvalExpr>[guard::phase_failed{}] = sml::state<RenderDecision>,
-        sml::state<EvalExpr> = sml::state<WriteOutput>,
+        sml::state<eval_expr>[guard::has_pending_expr{}] / action::eval_pending_expr =
+            sml::state<eval_expr>,
+        sml::state<eval_expr>[guard::phase_failed{}] = sml::state<render_decision>,
+        sml::state<eval_expr> = sml::state<write_output>,
 
-        sml::state<WriteOutput>[guard::phase_failed{}] = sml::state<RenderDecision>,
-        sml::state<WriteOutput>[guard::needs_write{}] / action::write_pending_value =
-            sml::state<WriteOutput>,
-        sml::state<WriteOutput> = sml::state<EvalStmt>,
+        sml::state<write_output>[guard::phase_failed{}] = sml::state<render_decision>,
+        sml::state<write_output>[guard::needs_write{}] / action::write_pending_value =
+            sml::state<write_output>,
+        sml::state<write_output> = sml::state<eval_stmt>,
 
-        sml::state<RenderDecision>[guard::phase_ok{}] / action::finalize_done =
-            sml::state<Done>,
-        sml::state<RenderDecision>[guard::phase_failed{}] / action::finalize_error =
-            sml::state<Errored>,
+        sml::state<render_decision>[guard::phase_ok{}] / action::finalize_done =
+            sml::state<done>,
+        sml::state<render_decision>[guard::phase_failed{}] / action::finalize_error =
+            sml::state<errored>,
 
-        sml::state<Initialized> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<Unexpected>,
-        sml::state<Setup> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<Unexpected>,
-        sml::state<EvalStmt> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<Unexpected>,
-        sml::state<EvalExpr> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<Unexpected>,
-        sml::state<WriteOutput> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<Unexpected>,
-        sml::state<RenderDecision> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<Unexpected>,
-        sml::state<Done> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<Unexpected>,
-        sml::state<Errored> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<Unexpected>,
-        sml::state<Unexpected> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<Unexpected>);
+        sml::state<initialized> + sml::unexpected_event<sml::_> /
+            action::on_unexpected = sml::state<unexpected>,
+        sml::state<setup> + sml::unexpected_event<sml::_> /
+            action::on_unexpected = sml::state<unexpected>,
+        sml::state<eval_stmt> + sml::unexpected_event<sml::_> /
+            action::on_unexpected = sml::state<unexpected>,
+        sml::state<eval_expr> + sml::unexpected_event<sml::_> /
+            action::on_unexpected = sml::state<unexpected>,
+        sml::state<write_output> + sml::unexpected_event<sml::_> /
+            action::on_unexpected = sml::state<unexpected>,
+        sml::state<render_decision> + sml::unexpected_event<sml::_> /
+            action::on_unexpected = sml::state<unexpected>,
+        sml::state<done> + sml::unexpected_event<sml::_> /
+            action::on_unexpected = sml::state<unexpected>,
+        sml::state<errored> + sml::unexpected_event<sml::_> /
+            action::on_unexpected = sml::state<unexpected>,
+        sml::state<unexpected> + sml::unexpected_event<sml::_> /
+            action::on_unexpected = sml::state<unexpected>);
   }
 };
 

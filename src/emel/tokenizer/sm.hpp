@@ -30,14 +30,14 @@ struct errored {};
 struct unexpected {};
 
 /*
-Tokenizer architecture notes (single source of truth)
+tokenizer architecture notes (single source of truth)
 
-Scope
-- Component boundary: tokenizer
-- Goal: tokenize text into token ids with special-token partitioning and
+scope
+- component boundary: tokenizer
+- goal: tokenize text into token ids with special-token partitioning and
 model-aware encoding.
 
-State purpose
+state purpose
 - initialized: idle, accepts tokenize requests.
 - building_special_tokens: builds token inventory for special-token parsing.
 - special_tokens_decision: routes to raw or special partitioning.
@@ -51,12 +51,12 @@ State purpose
 - errored: last request failed with an error code.
 - unexpected: sequencing contract violation.
 
-Key invariants
-- Per-request outputs are written only through the triggering event payload.
-- Context owns only runtime data (fragments, encoder context, counters).
-- Internal progress uses anonymous transitions (no self-dispatch).
+key invariants
+- per-request outputs are written only through the triggering event payload.
+- context owns only runtime data (fragments, encoder context, counters).
+- internal progress uses anonymous transitions (no self-dispatch).
 
-Guard semantics
+guard semantics
 - can_tokenize: validates request pointers and capacity.
 - phase_ok/phase_failed: observe errors set by actions.
 - has_special_tokens: indicates whether special-token inventory is available.
@@ -64,7 +64,7 @@ Guard semantics
 - should_add_bos/sep/eos: determines prefix/suffix requirements.
 - has_more_fragments: indicates more fragments to encode.
 
-Action side effects
+action side effects
 - begin_tokenize: resets request outputs and context runtime state.
 - build_special_tokens: builds special-token inventory.
 - partition_raw/partition_with_specials: builds fragment list, honoring

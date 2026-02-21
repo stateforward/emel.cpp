@@ -15,9 +15,9 @@ struct context {
   int32_t last_error = EMEL_OK;
 
   int32_t max_token_len = 0;
-  detail::TokenMap token_to_id = {};
-  detail::MergeMap bpe_ranks = {};
-  detail::EncodeScratch scratch = {};
+  detail::token_map token_to_id = {};
+  detail::merge_map bpe_ranks = {};
+  detail::encode_scratch scratch = {};
 };
 
 }  // namespace emel::encoder::action

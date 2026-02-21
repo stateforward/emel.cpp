@@ -17,8 +17,8 @@ namespace emel {
 
 namespace detail {
 
-template <class Event>
-constexpr bool normalize_event_result(const Event & ev, const bool accepted) noexcept {
+template <class event>
+constexpr bool normalize_event_result(const event & ev, const bool accepted) noexcept {
   if (!accepted) {
     return false;
   }
@@ -30,24 +30,24 @@ constexpr bool normalize_event_result(const Event & ev, const bool accepted) noe
   return true;
 }
 
-template <class Owner, class Process>
+template <class owner, class process>
 struct process_support {
   struct immediate_queue {
     using container_type = void;
-    Owner * owner = nullptr;
+    owner * owner_ptr = nullptr;
 
-    template <class Event>
-    void push(const Event & ev) noexcept {
-      if (owner != nullptr) {
-        owner->process_event(ev);
+    template <class event>
+    void push(const event & ev) noexcept {
+      if (owner_ptr != nullptr) {
+        owner_ptr->process_event(ev);
       }
     }
   };
 
-  explicit process_support(Owner * owner) : queue_{owner}, process_{queue_} {}
+  explicit process_support(owner * owner_ptr) : queue_{owner_ptr}, process_{queue_} {}
 
   immediate_queue queue_{};
-  Process process_;
+  process process_;
 };
 
 }  // namespace detail
@@ -59,19 +59,19 @@ struct inline_scheduler {
   static constexpr bool single_consumer = true;
   static constexpr bool run_to_completion = true;
 
-  template <class Fn>
-  void schedule(Fn && fn) noexcept(noexcept(std::forward<Fn>(fn)())) {
-    std::forward<Fn>(fn)();
+  template <class fn>
+  void schedule(fn && fn_value) noexcept(noexcept(std::forward<fn>(fn_value)())) {
+    std::forward<fn>(fn_value)();
   }
 };
 
-template <std::size_t Capacity = 1024, std::size_t InlineTaskBytes = 64>
+template <std::size_t capacity = 1024, std::size_t inline_task_bytes = 64>
 class fifo_scheduler {
  public:
-  static_assert(Capacity > 1, "fifo_scheduler capacity must be greater than 1");
+  static_assert(capacity > 1, "fifo_scheduler capacity must be greater than 1");
   static_assert(
-    (Capacity & (Capacity - 1)) == 0, "fifo_scheduler capacity must be a power of two");
-  static_assert(InlineTaskBytes > 0, "fifo_scheduler inline storage must be non-zero");
+    (capacity & (capacity - 1)) == 0, "fifo_scheduler capacity must be a power of two");
+  static_assert(inline_task_bytes > 0, "fifo_scheduler inline storage must be non-zero");
 
   static constexpr bool guarantees_fifo = true;
   static constexpr bool single_consumer = true;
@@ -86,26 +86,26 @@ class fifo_scheduler {
   fifo_scheduler(fifo_scheduler &&) = delete;
   fifo_scheduler & operator=(fifo_scheduler &&) = delete;
 
-  template <class Fn>
-  bool try_run_immediate(Fn && fn) noexcept(noexcept(std::forward<Fn>(fn)())) {
+  template <class fn>
+  bool try_run_immediate(fn && fn_value) noexcept(noexcept(std::forward<fn>(fn_value)())) {
     if (draining_ || !empty()) {
       return false;
     }
 
     draining_ = true;
-    std::forward<Fn>(fn)();
+    std::forward<fn>(fn_value)();
     drain_pending();
     draining_ = false;
     return true;
   }
 
-  template <class Fn>
-  void schedule(Fn && fn) noexcept {
-    if (try_run_immediate(std::forward<Fn>(fn))) {
+  template <class fn>
+  void schedule(fn && fn_value) noexcept {
+    if (try_run_immediate(std::forward<fn>(fn_value))) {
       return;
     }
 
-    enqueue(std::forward<Fn>(fn));
+    enqueue(std::forward<fn>(fn_value));
     if (draining_) {
       return;
     }
@@ -121,20 +121,20 @@ class fifo_scheduler {
     using invoke_fn = void (*)(void *) noexcept;
     using destroy_fn = void (*)(void *) noexcept;
 
-    alignas(std::max_align_t) std::array<std::byte, InlineTaskBytes> storage = {};
+    alignas(std::max_align_t) std::array<std::byte, inline_task_bytes> storage = {};
     invoke_fn invoke = nullptr;
     destroy_fn destroy = nullptr;
 
-    template <class Fn>
-    void set(Fn && fn) noexcept {
-      using fn_type = std::decay_t<Fn>;
+    template <class fn>
+    void set(fn && fn_value) noexcept {
+      using fn_type = std::decay_t<fn>;
       static_assert(
-        sizeof(fn_type) <= InlineTaskBytes, "Scheduled task exceeds inline storage capacity");
+        sizeof(fn_type) <= inline_task_bytes, "scheduled task exceeds inline storage capacity");
       static_assert(
         alignof(fn_type) <= alignof(std::max_align_t),
-        "Scheduled task alignment exceeds scheduler storage alignment");
+        "scheduled task alignment exceeds scheduler storage alignment");
 
-      new (storage.data()) fn_type(std::forward<Fn>(fn));
+      new (storage.data()) fn_type(std::forward<fn>(fn_value));
       invoke = [](void * ptr) noexcept { (*static_cast<fn_type *>(ptr))(); };
       destroy = [](void * ptr) noexcept { static_cast<fn_type *>(ptr)->~fn_type(); };
     }
@@ -157,20 +157,20 @@ class fifo_scheduler {
   // GCOVR_EXCL_STOP
 
   static constexpr std::size_t next(const std::size_t index) noexcept {
-    return (index + 1) & (Capacity - 1);
+    return (index + 1) & (capacity - 1);
   }
 
   bool empty() const noexcept { return head_ == tail_; }
 
   bool full() const noexcept { return next(tail_) == head_; }
 
-  template <class Fn>
-  void enqueue(Fn && fn) noexcept {
+  template <class fn>
+  void enqueue(fn && fn_value) noexcept {
     if (full()) {
       std::terminate();  // GCOVR_EXCL_LINE
     }
 
-    tasks_[tail_].set(std::forward<Fn>(fn));
+    tasks_[tail_].set(std::forward<fn>(fn_value));
     tail_ = next(tail_);
   }
 
@@ -191,15 +191,15 @@ class fifo_scheduler {
     draining_ = false;
   }
 
-  std::array<task_slot, Capacity> tasks_ = {};
+  std::array<task_slot, capacity> tasks_ = {};
   std::size_t head_ = 0;
   std::size_t tail_ = 0;
   bool draining_ = false;
 };
 
-template <class Scheduler>
+template <class scheduler>
 struct coroutine_scheduler {
-  using scheduler_type = Scheduler;
+  using scheduler_type = scheduler;
 };
 
 struct heap_coroutine_allocator {
@@ -213,16 +213,16 @@ struct heap_coroutine_allocator {
   }
 };
 
-template <std::size_t SlotSize = 1024, std::size_t SlotCount = 64>
+template <std::size_t slot_size = 1024, std::size_t slot_count = 64>
 class pooled_coroutine_allocator {
  public:
-  static_assert(SlotSize > 0, "pooled_coroutine_allocator slot size must be non-zero");
-  static_assert(SlotCount > 0, "pooled_coroutine_allocator slot count must be non-zero");
+  static_assert(slot_size > 0, "pooled_coroutine_allocator slot size must be non-zero");
+  static_assert(slot_count > 0, "pooled_coroutine_allocator slot count must be non-zero");
 
   pooled_coroutine_allocator() noexcept { reset_freelist(); }
 
   void * allocate(const std::size_t size, const std::size_t alignment) {
-    if (size <= SlotSize && alignment <= alignof(pool_slot) && free_head_ != INVALID_INDEX) {
+    if (size <= slot_size && alignment <= alignof(pool_slot) && free_head_ != INVALID_INDEX) {
       const std::size_t slot_index = free_head_;
       free_head_ = next_free_[slot_index];
       return static_cast<void *>(slots_[slot_index].storage.data());
@@ -237,7 +237,7 @@ class pooled_coroutine_allocator {
       return;
     }
 
-    if (size <= SlotSize && alignment <= alignof(pool_slot) && is_pool_pointer(ptr)) {
+    if (size <= slot_size && alignment <= alignof(pool_slot) && is_pool_pointer(ptr)) {
       const std::size_t slot_index = slot_index_for(ptr);
       next_free_[slot_index] = free_head_;
       free_head_ = slot_index;
@@ -248,10 +248,10 @@ class pooled_coroutine_allocator {
   }
 
  private:
-  static constexpr std::size_t INVALID_INDEX = SlotCount;
+  static constexpr std::size_t INVALID_INDEX = slot_count;
 
   struct pool_slot {
-    alignas(std::max_align_t) std::array<std::byte, SlotSize> storage = {};
+    alignas(std::max_align_t) std::array<std::byte, slot_size> storage = {};
   };
 
   bool is_pool_pointer(void * ptr) const noexcept {
@@ -273,66 +273,68 @@ class pooled_coroutine_allocator {
   }
 
   void reset_freelist() noexcept {
-    for (std::size_t i = 0; i + 1 < SlotCount; ++i) {
+    for (std::size_t i = 0; i + 1 < slot_count; ++i) {
       next_free_[i] = i + 1;
     }
-    next_free_[SlotCount - 1] = INVALID_INDEX;
+    next_free_[slot_count - 1] = INVALID_INDEX;
     free_head_ = 0;
   }
 
-  std::array<pool_slot, SlotCount> slots_ = {};
-  std::array<std::size_t, SlotCount> next_free_ = {};
+  std::array<pool_slot, slot_count> slots_ = {};
+  std::array<std::size_t, slot_count> next_free_ = {};
   std::size_t free_head_ = 0;
 };
 
-template <class Allocator>
+template <class allocator>
 struct coroutine_allocator {
-  using allocator_type = Allocator;
+  using allocator_type = allocator;
 };
 
-template <class SchedulerPolicy>
+template <class scheduler_policy>
 concept valid_coroutine_scheduler_policy = requires {
-  typename SchedulerPolicy::scheduler_type;
+  typename scheduler_policy::scheduler_type;
 };
 
-template <class Scheduler>
-concept valid_coroutine_scheduler = requires(Scheduler scheduler, void (*fn)()) {
-  scheduler.schedule(fn);
+template <class scheduler>
+concept valid_coroutine_scheduler = requires(scheduler scheduler_value, void (*fn_ptr)()) {
+  scheduler_value.schedule(fn_ptr);
 };
 
-template <class Scheduler>
+template <class scheduler>
 concept strict_ordering_scheduler_contract =
   requires {
-    { Scheduler::guarantees_fifo } -> std::convertible_to<bool>;
-    { Scheduler::single_consumer } -> std::convertible_to<bool>;
-    { Scheduler::run_to_completion } -> std::convertible_to<bool>;
-  } && static_cast<bool>(Scheduler::guarantees_fifo) &&
-  static_cast<bool>(Scheduler::single_consumer) &&
-  static_cast<bool>(Scheduler::run_to_completion);
+    { scheduler::guarantees_fifo } -> std::convertible_to<bool>;
+    { scheduler::single_consumer } -> std::convertible_to<bool>;
+    { scheduler::run_to_completion } -> std::convertible_to<bool>;
+  } && static_cast<bool>(scheduler::guarantees_fifo) &&
+  static_cast<bool>(scheduler::single_consumer) &&
+  static_cast<bool>(scheduler::run_to_completion);
 
-template <class Scheduler>
+template <class scheduler>
 concept has_try_run_immediate =
-  requires(Scheduler scheduler) { { scheduler.try_run_immediate(+[]() noexcept {}) } -> std::same_as<bool>; };
+  requires(scheduler scheduler_value) {
+    { scheduler_value.try_run_immediate(+[]() noexcept {}) } -> std::same_as<bool>;
+  };
 
-template <class AllocatorPolicy>
+template <class allocator_policy>
 concept valid_coroutine_allocator_policy = requires {
-  typename AllocatorPolicy::allocator_type;
+  typename allocator_policy::allocator_type;
 };
 
-template <class Allocator>
+template <class allocator>
 concept valid_coroutine_allocator =
-  requires(Allocator allocator, void * ptr, std::size_t size, std::size_t alignment) {
-    { allocator.allocate(size, alignment) } -> std::same_as<void *>;
-    { allocator.deallocate(ptr, size, alignment) } noexcept;
+  requires(allocator allocator_value, void * ptr, std::size_t size, std::size_t alignment) {
+    { allocator_value.allocate(size, alignment) } -> std::same_as<void *>;
+    { allocator_value.deallocate(ptr, size, alignment) } noexcept;
   };
 
 }  // namespace policy
 
-template <class Model, class... Policies>
+template <class model, class... policies>
 class sm {
  public:
-  using model_type = Model;
-  using state_machine_type = boost::sml::sm<Model, Policies...>;
+  using model_type = model;
+  using state_machine_type = boost::sml::sm<model, policies...>;
 
   sm() = default;
   ~sm() = default;
@@ -342,23 +344,23 @@ class sm {
   sm & operator=(const sm &) = default;
   sm & operator=(sm &&) = default;
 
-  template <class... Args>
-  explicit sm(Args &&... args) : state_machine_(std::forward<Args>(args)...) {}
+  template <class... args>
+  explicit sm(args &&... args_in) : state_machine_(std::forward<args>(args_in)...) {}
 
-  template <class Event>
-  bool process_event(const Event & ev) {
+  template <class event>
+  bool process_event(const event & ev) {
     const bool accepted = state_machine_.process_event(ev);
     return detail::normalize_event_result(ev, accepted);
   }
 
-  template <class State>
-  bool is(State state = {}) const {
-    return state_machine_.is(state);
+  template <class state>
+  bool is(state state_value = {}) const {
+    return state_machine_.is(state_value);
   }
 
-  template <class Visitor>
-  void visit_current_states(Visitor && visitor) {
-    state_machine_.visit_current_states(std::forward<Visitor>(visitor));
+  template <class visitor>
+  void visit_current_states(visitor && visitor_fn) {
+    state_machine_.visit_current_states(std::forward<visitor>(visitor_fn));
   }
 
  protected:
@@ -418,21 +420,23 @@ class bool_task {
       return aligned_frame;
     }
 
-    template <class Allocator>
-    static void * allocate_frame_with_allocator(std::size_t frame_size, Allocator & allocator) {
+    template <class allocator>
+    static void * allocate_frame_with_allocator(
+        std::size_t frame_size,
+        allocator & allocator_value) {
       static_assert(
-        policy::valid_coroutine_allocator<Allocator>,
-        "Coroutine allocator must provide allocate(size, alignment) and "
+        policy::valid_coroutine_allocator<allocator>,
+        "coroutine allocator must provide allocate(size, alignment) and "
         "noexcept deallocate(ptr, size, alignment)");
 
       return allocate_frame(
         frame_size,
-        &allocator,
+        &allocator_value,
         [](void * ctx, const std::size_t size, const std::size_t alignment) -> void * {
-          return static_cast<Allocator *>(ctx)->allocate(size, alignment);
+          return static_cast<allocator *>(ctx)->allocate(size, alignment);
         },
         [](void * ctx, void * ptr, const std::size_t size, const std::size_t alignment) noexcept {
-          static_cast<Allocator *>(ctx)->deallocate(ptr, size, alignment);
+          static_cast<allocator *>(ctx)->deallocate(ptr, size, alignment);
         });
     }
 
@@ -462,13 +466,13 @@ class bool_task {
         });
     }
 
-    template <class Allocator, class... Args>
+    template <class allocator, class... args>
     static void * operator new(
         std::size_t frame_size,
         std::allocator_arg_t,
-        Allocator & allocator,
-        Args &&...) {
-      return allocate_frame_with_allocator(frame_size, allocator);
+        allocator & allocator_value,
+        args &&...) {
+      return allocate_frame_with_allocator(frame_size, allocator_value);
     }
 
     static void operator delete(void * frame_ptr) noexcept { deallocate_frame(frame_ptr); }
@@ -477,12 +481,12 @@ class bool_task {
       deallocate_frame(frame_ptr);
     }
 
-    template <class Allocator, class... Args>
+    template <class allocator, class... args>
     static void operator delete(
         void * frame_ptr,
         std::allocator_arg_t,
-        Allocator &,
-        Args &&...) noexcept {
+        allocator &,
+        args &&...) noexcept {
       deallocate_frame(frame_ptr);
     }
 
@@ -591,29 +595,29 @@ class bool_task {
 };
 
 template <
-    class Model,
-    class SchedulerPolicy = policy::coroutine_scheduler<policy::fifo_scheduler<>>,
-    class AllocatorPolicy = policy::coroutine_allocator<policy::pooled_coroutine_allocator<>>,
-    class... Policies>
+    class model,
+    class scheduler_policy = policy::coroutine_scheduler<policy::fifo_scheduler<>>,
+    class allocator_policy = policy::coroutine_allocator<policy::pooled_coroutine_allocator<>>,
+    class... policies>
 class co_sm {
  public:
   static_assert(
-    policy::valid_coroutine_scheduler_policy<SchedulerPolicy>,
-    "SchedulerPolicy must define scheduler_type");
+    policy::valid_coroutine_scheduler_policy<scheduler_policy>,
+    "scheduler_policy must define scheduler_type");
   static_assert(
-    policy::valid_coroutine_allocator_policy<AllocatorPolicy>,
-    "AllocatorPolicy must define allocator_type");
+    policy::valid_coroutine_allocator_policy<allocator_policy>,
+    "allocator_policy must define allocator_type");
 
-  using model_type = Model;
-  using scheduler_policy_type = SchedulerPolicy;
+  using model_type = model;
+  using scheduler_policy_type = scheduler_policy;
   using scheduler_type = typename scheduler_policy_type::scheduler_type;
-  using allocator_policy_type = AllocatorPolicy;
+  using allocator_policy_type = allocator_policy;
   using allocator_type = typename allocator_policy_type::allocator_type;
-  using state_machine_type = boost::sml::sm<Model, Policies...>;
+  using state_machine_type = boost::sml::sm<model, policies...>;
 
   static_assert(
     policy::valid_coroutine_scheduler<scheduler_type>,
-    "scheduler_type must provide schedule(Fn)");
+    "scheduler_type must provide schedule(fn)");
   static_assert(
     policy::strict_ordering_scheduler_contract<scheduler_type>,
     "scheduler_type must guarantee FIFO ordering, single-consumer dispatch, and run-to-completion");
@@ -635,29 +639,31 @@ class co_sm {
   co_sm(const scheduler_type & scheduler, const allocator_type & allocator)
       : scheduler_(scheduler), allocator_(allocator) {}
 
-  template <class... Args>
-  explicit co_sm(Args &&... args) : state_machine_(std::forward<Args>(args)...) {}
+  template <class... args>
+  explicit co_sm(args &&... args_in) : state_machine_(std::forward<args>(args_in)...) {}
 
-  template <class... Args>
-  co_sm(const scheduler_type & scheduler, Args &&... args)
-      : state_machine_(std::forward<Args>(args)...), scheduler_(scheduler) {}
+  template <class... args>
+  co_sm(const scheduler_type & scheduler, args &&... args_in)
+      : state_machine_(std::forward<args>(args_in)...), scheduler_(scheduler) {}
 
-  template <class... Args>
-  co_sm(const allocator_type & allocator, Args &&... args)
-      : state_machine_(std::forward<Args>(args)...), allocator_(allocator) {}
+  template <class... args>
+  co_sm(const allocator_type & allocator, args &&... args_in)
+      : state_machine_(std::forward<args>(args_in)...), allocator_(allocator) {}
 
-  template <class... Args>
-  co_sm(const scheduler_type & scheduler, const allocator_type & allocator, Args &&... args)
-      : state_machine_(std::forward<Args>(args)...), scheduler_(scheduler), allocator_(allocator) {}
+  template <class... args>
+  co_sm(const scheduler_type & scheduler, const allocator_type & allocator, args &&... args_in)
+      : state_machine_(std::forward<args>(args_in)...),
+        scheduler_(scheduler),
+        allocator_(allocator) {}
 
-  template <class Event>
-  bool process_event(const Event & ev) {
+  template <class event>
+  bool process_event(const event & ev) {
     const bool accepted = state_machine_.process_event(ev);
     return detail::normalize_event_result(ev, accepted);
   }
 
-  template <class Event>
-  bool_task process_event_async(const Event & ev) {
+  template <class event>
+  bool_task process_event_async(const event & ev) {
     if constexpr (std::is_same_v<scheduler_type, policy::inline_scheduler>) {
       const bool accepted = detail::normalize_event_result(ev, state_machine_.process_event(ev));
       return bool_task::from_value(accepted);
@@ -673,14 +679,14 @@ class co_sm {
     return process_event_async_impl(std::allocator_arg, allocator_, *this, ev);
   }
 
-  template <class State>
-  bool is(State state = {}) const {
-    return state_machine_.is(state);
+  template <class state>
+  bool is(state state_value = {}) const {
+    return state_machine_.is(state_value);
   }
 
-  template <class Visitor>
-  void visit_current_states(Visitor && visitor) {
-    state_machine_.visit_current_states(std::forward<Visitor>(visitor));
+  template <class visitor>
+  void visit_current_states(visitor && visitor_fn) {
+    state_machine_.visit_current_states(std::forward<visitor>(visitor_fn));
   }
 
   scheduler_type & scheduler() noexcept { return scheduler_; }
@@ -693,22 +699,26 @@ class co_sm {
   const state_machine_type & raw_sm() const { return state_machine_; }
 
  private:
-  template <class Event>
+  template <class event>
   static bool_task process_event_async_impl(
-      std::allocator_arg_t, allocator_type & allocator, co_sm & self, const Event & ev) {
-    (void)allocator;
-    co_return co_await process_event_awaitable<Event>{self, ev};
+      std::allocator_arg_t,
+      allocator_type & allocator_value,
+      co_sm & self,
+      const event & ev) {
+    (void)allocator_value;
+    co_return co_await process_event_awaitable<event>{self, ev};
   }
 
-  template <class Event>
+  template <class event>
   struct process_event_awaitable {
     co_sm & self;
-    const Event & event;
+    const event & event_value;
     bool accepted = false;
 
     bool await_ready() noexcept {
       if constexpr (std::is_same_v<scheduler_type, policy::inline_scheduler>) {
-        accepted = detail::normalize_event_result(event, self.state_machine_.process_event(event));
+        accepted =
+          detail::normalize_event_result(event_value, self.state_machine_.process_event(event_value));
         return true;
       }
       return false;
@@ -716,7 +726,9 @@ class co_sm {
 
     void await_suspend(std::coroutine_handle<> handle) {
       self.scheduler_.schedule([this, handle]() mutable {
-        accepted = detail::normalize_event_result(event, self.state_machine_.process_event(event));
+        accepted = detail::normalize_event_result(
+          event_value,
+          self.state_machine_.process_event(event_value));
         handle.resume();
       });
     }

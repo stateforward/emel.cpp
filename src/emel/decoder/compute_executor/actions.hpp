@@ -80,8 +80,8 @@ struct run_validate {
     ctx.phase_error = normalized;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     if (ctx.validate == nullptr) {
       return;
@@ -119,8 +119,8 @@ struct run_prepare_graph {
     ctx.phase_error = normalized;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.graph_reused = false;
     ctx.phase_error = EMEL_OK;
     if (ctx.prepare_graph == nullptr) {
@@ -157,8 +157,8 @@ struct run_alloc_graph {
     ctx.phase_error = normalized;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     if (ctx.alloc_graph == nullptr) {
       ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
@@ -192,8 +192,8 @@ struct run_bind_inputs {
     ctx.phase_error = normalized;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     if (ctx.bind_inputs == nullptr) {
       ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
@@ -227,8 +227,8 @@ struct run_backend {
     ctx.phase_error = normalized;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     if (ctx.run_backend == nullptr) {
       ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
@@ -268,8 +268,8 @@ struct run_extract_outputs {
     ctx.phase_error = EMEL_OK;
   }
 
-  template <class Ev>
-  void operator()(const Ev &, context & ctx) const noexcept {
+  template <class ev>
+  void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     if (ctx.extract_outputs == nullptr) {
       ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
@@ -289,8 +289,8 @@ struct run_extract_outputs {
 };
 
 struct on_unexpected {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & ctx) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_BACKEND;
@@ -301,8 +301,8 @@ struct on_unexpected {
 };
 
 struct reject_invalid_execute {
-  template <class Event>
-  void operator()(const Event & ev, context & ctx) const noexcept {
+  template <class event>
+  void operator()(const event & ev, context & ctx) const noexcept {
     if constexpr (requires { ev.error_out; }) {
       if (ev.error_out != nullptr) {
         *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
