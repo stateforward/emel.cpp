@@ -6,6 +6,7 @@ Source: [`emel/sampler/pipeline/sm.hpp`](https://github.com/stateforward/emel.cp
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__sampler__pipeline__initialized
   emel__sampler__pipeline__initialized --> emel__sampler__pipeline__preparing_candidates : emel__sampler__pipeline__event__sample [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__pipeline__action__begin_sample_
   emel__sampler__pipeline__preparing_candidates --> emel__sampler__pipeline__prepare_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__pipeline__action__run_prepare_candidates_

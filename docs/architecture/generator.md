@@ -6,6 +6,7 @@ Source: [`emel/generator/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> initialized
   initialized --> tokenizing_prompt : emel__generator__event__generate [boost__sml__front__always] / boost__sml__front__none
   tokenizing_prompt --> prefilling : emel__generator__event__prompt_tokenized_done [boost__sml__front__always] / boost__sml__front__none

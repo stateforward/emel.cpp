@@ -6,6 +6,7 @@ Source: [`emel/parser/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/mai
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__parser__gguf__initialized
   emel__parser__gguf__initialized --> emel__parser__gguf__parsing_architecture : emel__parser__event__parse_model [boost__sml__aux__zero_wrapper_emel__parser__guard__valid_parse_request_] / boost__sml__aux__zero_wrapper_emel__parser__action__begin_parse_
   emel__parser__gguf__initialized --> emel__parser__gguf__errored : emel__parser__event__parse_model [boost__sml__aux__zero_wrapper_emel__parser__guard__invalid_parse_request_] / boost__sml__aux__zero_wrapper_emel__parser__action__set_invalid_argument_

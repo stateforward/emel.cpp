@@ -6,6 +6,7 @@ Source: [`emel/buffer/chunk_allocator/sm.hpp`](https://github.com/stateforward/e
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> ready
   ready --> configuring : emel__buffer__chunk_allocator__event__configure [boost__sml__aux__zero_wrapper_emel__buffer__chunk_allocator__guard__can_configure_] / boost__sml__aux__zero_wrapper_emel__buffer__chunk_allocator__action__begin_configure_
   ready --> failed : emel__buffer__chunk_allocator__event__configure [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__chunk_allocator__action__reject_invalid_

@@ -6,6 +6,7 @@ Source: [`emel/jinja/parser/sm.hpp`](https://github.com/stateforward/emel.cpp/bl
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__jinja__parser__initialized
   emel__jinja__parser__initialized --> emel__jinja__parser__parse_decision : emel__jinja__event__parse [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__valid_parse_] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__run_parse_
   emel__jinja__parser__initialized --> emel__jinja__parser__errored : emel__jinja__event__parse [boost__sml__aux__zero_wrapper_emel__jinja__parser__guard__invalid_parse_] / boost__sml__aux__zero_wrapper_emel__jinja__parser__action__reject_invalid_parse_

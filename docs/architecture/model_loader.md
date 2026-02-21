@@ -6,6 +6,7 @@ Source: [`emel/model/loader/sm.hpp`](https://github.com/stateforward/emel.cpp/bl
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__model__loader__initialized
   emel__model__loader__initialized --> emel__model__loader__mapping_parser : emel__model__loader__event__load [boost__sml__aux__zero_wrapper_emel__model__loader__guard__can_map_parser_] / boost__sml__aux__zero_wrapper_emel__model__loader__action__begin_load_
   emel__model__loader__initialized --> emel__model__loader__errored : emel__model__loader__event__load [boost__sml__aux__zero_wrapper_emel__model__loader__guard__cannot_map_parser_] / boost__sml__aux__zero_wrapper_emel__model__loader__action__set_invalid_argument_

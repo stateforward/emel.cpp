@@ -6,6 +6,7 @@ Source: [`emel/telemetry/exporter/sm.hpp`](https://github.com/stateforward/emel.
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__telemetry__exporter__initialized
   emel__telemetry__exporter__initialized --> emel__telemetry__exporter__configuring : emel__telemetry__exporter__event__configure [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__begin_configure_
   emel__telemetry__exporter__configuring --> emel__telemetry__exporter__configure_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__exporter__action__run_validate_config_

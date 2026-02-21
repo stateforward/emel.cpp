@@ -1,4 +1,5 @@
 stateDiagram-v2
+  direction TB
   [*] --> emel__tensor__lifetime_analyzer__idle
   emel__tensor__lifetime_analyzer__idle --> emel__tensor__lifetime_analyzer__validating : emel__tensor__lifetime_analyzer__event__analyze [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__begin_analyze_
   emel__tensor__lifetime_analyzer__validating --> emel__tensor__lifetime_analyzer__validate_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__lifetime_analyzer__action__run_validate_

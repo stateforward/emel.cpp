@@ -3,7 +3,7 @@
 Source: `snapshots/bench/benchmarks_compare.txt`
 
 Note: While EMEL is modular and easy to bench in isolation, llama.cpp code is very
-intertwined. These microbenches aim for apples-to-apples comparisons but likely
+entangled. These microbenches aim for apples-to-apples comparisons but likely
 are not. True benchmarks will be end-to-end once the system is complete.
 
 | Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |

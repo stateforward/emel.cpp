@@ -6,6 +6,7 @@ Source: [`emel/decoder/compute_executor/sm.hpp`](https://github.com/stateforward
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__decoder__compute_executor__initialized
   emel__decoder__compute_executor__initialized --> emel__decoder__compute_executor__validating : emel__decoder__compute_executor__event__execute [boost__sml__aux__zero_wrapper_emel__decoder__compute_executor__guard__valid_execute_request_] / boost__sml__aux__zero_wrapper_emel__decoder__compute_executor__action__begin_execute_
   emel__decoder__compute_executor__initialized --> emel__decoder__compute_executor__errored : emel__decoder__compute_executor__event__execute [boost__sml__aux__zero_wrapper_emel__decoder__compute_executor__guard__invalid_execute_request_] / boost__sml__aux__zero_wrapper_emel__decoder__compute_executor__action__reject_invalid_execute_

@@ -6,6 +6,7 @@ Source: [`emel/tensor/allocator/sm.hpp`](https://github.com/stateforward/emel.cp
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__tensor__allocator__idle
   emel__tensor__allocator__idle --> emel__tensor__allocator__validating : emel__tensor__allocator__event__allocate_tensors [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__begin_allocate_tensors_
   emel__tensor__allocator__validating --> emel__tensor__allocator__validate_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tensor__allocator__action__run_validate_

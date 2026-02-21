@@ -6,6 +6,7 @@ Source: [`emel/buffer/allocator/sm.hpp`](https://github.com/stateforward/emel.cp
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> uninitialized
   uninitialized --> initializing : emel__buffer__allocator__event__initialize [boost__sml__aux__zero_wrapper_emel__buffer__allocator__guard__valid_initialize_] / boost__sml__aux__zero_wrapper_emel__buffer__allocator__action__begin_initialize_
   uninitialized --> failed : emel__buffer__allocator__event__initialize [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__allocator__action__reject_invalid_

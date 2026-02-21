@@ -6,6 +6,7 @@ Source: [`emel/decoder/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/ma
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__decoder__initialized
   emel__decoder__initialized --> emel__decoder__validating_request : emel__decoder__event__decode [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__decoder__action__begin_decode_
   emel__decoder__validating_request --> emel__decoder__errored : [boost__sml__aux__zero_wrapper_emel__decoder__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_decoder_guards_hpp_63_46__] / boost__sml__aux__zero_wrapper_emel__decoder__action__reject_invalid_validate_

@@ -6,6 +6,7 @@ Source: [`emel/encoder/rwkv/sm.hpp`](https://github.com/stateforward/emel.cpp/bl
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__encoder__rwkv__initialized
   emel__encoder__rwkv__initialized --> emel__encoder__rwkv__encoding : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__rwkv__guard__valid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__rwkv__action__begin_encode_
   emel__encoder__rwkv__initialized --> emel__encoder__rwkv__errored : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__rwkv__guard__invalid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__rwkv__action__reject_invalid_encode_

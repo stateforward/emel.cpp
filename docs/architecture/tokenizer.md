@@ -6,6 +6,7 @@ Source: [`emel/tokenizer/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__tokenizer__initialized
   emel__tokenizer__initialized --> emel__tokenizer__building_special_tokens : emel__tokenizer__event__tokenize [boost__sml__aux__zero_wrapper_emel__tokenizer__guard__can_tokenize_] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__begin_tokenize_
   emel__tokenizer__initialized --> emel__tokenizer__errored : emel__tokenizer__event__tokenize [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__tokenizer__action__reject_invalid_

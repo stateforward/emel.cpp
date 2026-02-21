@@ -6,6 +6,7 @@ Source: [`emel/telemetry/provider/sm.hpp`](https://github.com/stateforward/emel.
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__telemetry__provider__initialized
   emel__telemetry__provider__initialized --> emel__telemetry__provider__configure_decision : emel__telemetry__provider__event__configure [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__telemetry__provider__action__run_configure_
   emel__telemetry__provider__configure_decision --> emel__telemetry__provider__errored : [boost__sml__aux__zero_wrapper_emel__telemetry__provider__guard__phase_failed_] / boost__sml__front__none

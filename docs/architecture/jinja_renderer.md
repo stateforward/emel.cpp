@@ -6,6 +6,7 @@ Source: [`emel/jinja/renderer/sm.hpp`](https://github.com/stateforward/emel.cpp/
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__jinja__renderer__initialized
   emel__jinja__renderer__initialized --> emel__jinja__renderer__setup : emel__jinja__event__render [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_jinja_renderer_guards_hpp_8_38__] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__begin_render_
   emel__jinja__renderer__initialized --> emel__jinja__renderer__errored : emel__jinja__event__render [boost__sml__aux__zero_wrapper_emel__jinja__renderer__guard___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_jinja_renderer_guards_hpp_12_40__] / boost__sml__aux__zero_wrapper_emel__jinja__renderer__action__reject_invalid_render_

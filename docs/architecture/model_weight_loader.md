@@ -6,6 +6,7 @@ Source: [`emel/model/weight_loader/sm.hpp`](https://github.com/stateforward/emel
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__model__weight_loader__initialized
   emel__model__weight_loader__initialized --> emel__model__weight_loader__selecting : emel__model__weight_loader__event__load_weights [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__begin_load_
   emel__model__weight_loader__selecting --> emel__model__weight_loader__strategy_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__model__weight_loader__action__select_strategy_

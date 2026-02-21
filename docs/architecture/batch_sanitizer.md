@@ -6,6 +6,7 @@ Source: [`emel/batch/sanitizer/sm.hpp`](https://github.com/stateforward/emel.cpp
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__batch__sanitizer__initialized
   emel__batch__sanitizer__initialized --> emel__batch__sanitizer__sanitizing : emel__batch__sanitizer__event__sanitize_decode [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__valid_request_] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__begin_sanitize_
   emel__batch__sanitizer__initialized --> emel__batch__sanitizer__errored : emel__batch__sanitizer__event__sanitize_decode [boost__sml__aux__zero_wrapper_emel__batch__sanitizer__guard__invalid_request_] / boost__sml__aux__zero_wrapper_emel__batch__sanitizer__action__reject_invalid_sanitize_

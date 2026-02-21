@@ -6,6 +6,7 @@ Source: [`emel/kv/cache/sm.hpp`](https://github.com/stateforward/emel.cpp/blob/m
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__kv__cache__initialized
   emel__kv__cache__initialized --> emel__kv__cache__validating_prepare : emel__kv__cache__event__prepare [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_987_39__
   emel__kv__cache__prepared --> emel__kv__cache__validating_prepare : emel__kv__cache__event__prepare [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__kv__cache__action___lambda_at__Users_gabrielwillen_VSCode_stateforward_emel_emel_cpp_tools_docsgen_______src_emel_kv_cache_actions_hpp_987_39__

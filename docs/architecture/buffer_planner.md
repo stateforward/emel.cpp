@@ -6,6 +6,7 @@ Source: [`emel/buffer/planner/sm.hpp`](https://github.com/stateforward/emel.cpp/
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> idle
   idle --> resetting : emel__buffer__planner__event__plan [boost__sml__aux__zero_wrapper_emel__buffer__planner__guard__valid_plan_] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__begin_plan_
   idle --> errored : emel__buffer__planner__event__plan [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__buffer__planner__action__reject_plan_

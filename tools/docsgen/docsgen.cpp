@@ -268,6 +268,7 @@ void emit_machine(const machine_spec & spec, const doc_paths & paths, bool check
 
   std::string mermaid;
   mermaid += "stateDiagram-v2\n";
+  mermaid += "  direction TB\n";
   for (const auto & initial : initial_states) {
     mermaid += "  [*] --> ";
     mermaid += initial;

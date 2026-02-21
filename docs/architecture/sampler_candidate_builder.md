@@ -6,6 +6,7 @@ Source: [`emel/sampler/candidate_builder/sm.hpp`](https://github.com/stateforwar
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__sampler__candidate_builder__initialized
   emel__sampler__candidate_builder__initialized --> emel__sampler__candidate_builder__validating : emel__sampler__candidate_builder__event__build [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__begin_build_
   emel__sampler__candidate_builder__validating --> emel__sampler__candidate_builder__validate_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__candidate_builder__action__run_validate_

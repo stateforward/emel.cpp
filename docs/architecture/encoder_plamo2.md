@@ -6,6 +6,7 @@ Source: [`emel/encoder/plamo2/sm.hpp`](https://github.com/stateforward/emel.cpp/
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__encoder__plamo2__initialized
   emel__encoder__plamo2__initialized --> emel__encoder__plamo2__encoding : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__valid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__begin_encode_
   emel__encoder__plamo2__initialized --> emel__encoder__plamo2__errored : emel__encoder__event__encode [boost__sml__aux__zero_wrapper_emel__encoder__plamo2__guard__invalid_encode_] / boost__sml__aux__zero_wrapper_emel__encoder__plamo2__action__reject_invalid_encode_

@@ -6,6 +6,7 @@ Source: [`emel/sampler/token_selector/sm.hpp`](https://github.com/stateforward/e
 
 ```mermaid
 stateDiagram-v2
+  direction TB
   [*] --> emel__sampler__token_selector__initialized
   emel__sampler__token_selector__initialized --> emel__sampler__token_selector__validating : emel__sampler__token_selector__event__select_token [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__begin_select_token_
   emel__sampler__token_selector__validating --> emel__sampler__token_selector__validate_decision : [boost__sml__front__always] / boost__sml__aux__zero_wrapper_emel__sampler__token_selector__action__run_validate_
