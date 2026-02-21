@@ -9,7 +9,7 @@ include(FetchContent)
 FetchContent_Declare(
   boost_sml
   GIT_REPOSITORY https://github.com/stateforward/sml.cpp
-  GIT_TAG main
+  GIT_TAG 3f04b240585789931a5d5dabf1de2526707fe11b
 )
 FetchContent_MakeAvailable(boost_sml)
 
@@ -44,4 +44,3 @@ target_include_directories(docsgen PRIVATE
   "${boost_sml_SOURCE_DIR}/include"
   "${CMAKE_CURRENT_BINARY_DIR}"
 )
-
