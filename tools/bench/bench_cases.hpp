@@ -16,5 +16,7 @@ void append_reference_memory_coordinator_recurrent_cases(std::vector<result> & r
                                                          const config & cfg);
 void append_emel_jinja_parser_cases(std::vector<result> & results, const config & cfg);
 void append_reference_jinja_parser_cases(std::vector<result> & results, const config & cfg);
+void append_emel_jinja_renderer_cases(std::vector<result> & results, const config & cfg);
+void append_reference_jinja_renderer_cases(std::vector<result> & results, const config & cfg);
 
 }  // namespace emel::bench

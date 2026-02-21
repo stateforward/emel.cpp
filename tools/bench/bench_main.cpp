@@ -49,6 +49,7 @@ std::vector<bench::result> run_emel_benchmarks(const bench::config & cfg) {
   bench::append_emel_batch_splitter_cases(results, cfg);
   bench::append_emel_memory_coordinator_recurrent_cases(results, cfg);
   bench::append_emel_jinja_parser_cases(results, cfg);
+  bench::append_emel_jinja_renderer_cases(results, cfg);
   return results;
 }
 
@@ -59,6 +60,7 @@ std::vector<bench::result> run_reference_benchmarks(const bench::config & cfg) {
   bench::append_reference_batch_splitter_cases(results, cfg);
   bench::append_reference_memory_coordinator_recurrent_cases(results, cfg);
   bench::append_reference_jinja_parser_cases(results, cfg);
+  bench::append_reference_jinja_renderer_cases(results, cfg);
   return results;
 }
 

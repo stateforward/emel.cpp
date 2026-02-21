@@ -77,6 +77,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`docs/architecture/gbnf_parser.md`](docs/architecture/gbnf_parser.md)
 - [`docs/architecture/generator.md`](docs/architecture/generator.md)
 - [`docs/architecture/jinja_parser.md`](docs/architecture/jinja_parser.md)
+- [`docs/architecture/jinja_renderer.md`](docs/architecture/jinja_renderer.md)
 - [`docs/architecture/kv_cache.md`](docs/architecture/kv_cache.md)
 - [`docs/architecture/memory_coordinator_hybrid.md`](docs/architecture/memory_coordinator_hybrid.md)
 - [`docs/architecture/memory_coordinator_kv.md`](docs/architecture/memory_coordinator_kv.md)
