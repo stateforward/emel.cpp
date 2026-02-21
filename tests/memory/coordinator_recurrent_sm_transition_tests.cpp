@@ -7,6 +7,26 @@
 
 namespace {
 
+emel::memory::coordinator::event::memory_status prepare_update_success(
+    const emel::memory::coordinator::event::prepare_update &,
+    void *,
+    int32_t * err_out) noexcept {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return emel::memory::coordinator::event::memory_status::success;
+}
+
+emel::memory::coordinator::event::memory_status prepare_batch_failed(
+    const emel::memory::coordinator::event::prepare_batch &,
+    void *,
+    int32_t * err_out) noexcept {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return emel::memory::coordinator::event::memory_status::failed_prepare;
+}
+
 TEST_CASE("memory_coordinator_sm_prepare_update_no_update") {
   emel::memory::coordinator::recurrent::sm machine{};
   emel::memory::coordinator::event::memory_status status =
@@ -44,6 +64,7 @@ TEST_CASE("memory_coordinator_sm_prepare_batch_then_update_success") {
     .optimize = false,
     .status_out = &update_status,
     .error_out = &err,
+    .prepare_fn = prepare_update_success,
   }));
   CHECK(err == EMEL_OK);
   CHECK(update_status == emel::memory::coordinator::event::memory_status::success);
@@ -69,6 +90,19 @@ TEST_CASE("memory_coordinator_sm_prepare_full_and_validation_error") {
     .error_out = &err,
   }));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("memory_coordinator_sm_prepare_batch_hook_failure") {
+  emel::memory::coordinator::recurrent::sm machine{};
+  int32_t err = EMEL_OK;
+
+  CHECK_FALSE(machine.process_event(emel::memory::coordinator::event::prepare_batch{
+    .n_ubatch = 1,
+    .n_ubatches_total = 1,
+    .error_out = &err,
+    .prepare_fn = prepare_batch_failed,
+  }));
+  CHECK(err == EMEL_ERR_BACKEND);
 }
 
 }  // namespace

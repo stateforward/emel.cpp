@@ -102,6 +102,7 @@ add_subdirectory(${EMEL_ROOT} emel)
 add_executable(bench_runner
   ${CMAKE_CURRENT_SOURCE_DIR}/batch_splitter_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/buffer_allocator_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/memory_coordinator_recurrent_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_cases.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_main.cpp

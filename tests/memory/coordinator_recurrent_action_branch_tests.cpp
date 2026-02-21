@@ -4,6 +4,20 @@
 #include "emel/memory/coordinator/recurrent/actions.hpp"
 #include "emel/memory/coordinator/recurrent/guards.hpp"
 
+namespace {
+
+emel::memory::coordinator::event::memory_status prepare_update_success(
+    const emel::memory::coordinator::event::prepare_update &,
+    void *,
+    int32_t * err_out) noexcept {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return emel::memory::coordinator::event::memory_status::success;
+}
+
+}  // namespace
+
 TEST_CASE("memory_coordinator_begin_actions_store_requests") {
   emel::memory::coordinator::recurrent::action::context ctx{};
   int32_t err = EMEL_ERR_BACKEND;
@@ -73,7 +87,12 @@ TEST_CASE("memory_coordinator_prepare_update_phase_tracks_status") {
 
   ctx.update_request.optimize = true;
   emel::memory::coordinator::recurrent::action::run_prepare_update_phase(ctx);
+  CHECK(ctx.prepared_status == emel::memory::coordinator::event::memory_status::no_update);
+
+  ctx.update_request.prepare_fn = prepare_update_success;
+  emel::memory::coordinator::recurrent::action::run_prepare_update_phase(ctx);
   CHECK(ctx.prepared_status == emel::memory::coordinator::event::memory_status::success);
+  CHECK(ctx.has_pending_update);
 }
 
 TEST_CASE("memory_coordinator_apply_update_phase_clears_pending") {

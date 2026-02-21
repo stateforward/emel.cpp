@@ -7,6 +7,20 @@
 #include "emel/memory/coordinator/recurrent/guards.hpp"
 #include "emel/memory/coordinator/recurrent/sm.hpp"
 
+namespace {
+
+emel::memory::coordinator::event::memory_status prepare_update_success(
+    const emel::memory::coordinator::event::prepare_update &,
+    void *,
+    int32_t * err_out) noexcept {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return emel::memory::coordinator::event::memory_status::success;
+}
+
+}  // namespace
+
 TEST_CASE("memory_coordinator_starts_initialized") {
   emel::memory::coordinator::recurrent::sm machine{};
   CHECK(machine.is(boost::sml::state<emel::memory::coordinator::recurrent::initialized>));
@@ -82,6 +96,7 @@ TEST_CASE("memory_coordinator_prepare_batch_then_update_applies_pending_work") {
   CHECK(machine.process_event(emel::memory::coordinator::event::prepare_update{
     .optimize = false,
     .status_out = &update_status,
+    .prepare_fn = prepare_update_success,
   }));
   CHECK(update_status == emel::memory::coordinator::event::memory_status::success);
 }
@@ -102,10 +117,6 @@ TEST_CASE("memory_coordinator_guard_helpers_cover_phase_and_apply") {
   CHECK_FALSE(emel::memory::coordinator::recurrent::guard::apply_update_backend_failed{}(ctx));
 
   ctx.has_pending_update = false;
-  ctx.update_request.optimize = true;
-  CHECK(emel::memory::coordinator::recurrent::guard::apply_update_ready{}(ctx));
-
-  ctx.update_request.optimize = false;
   CHECK(emel::memory::coordinator::recurrent::guard::apply_update_backend_failed{}(ctx));
 }
 

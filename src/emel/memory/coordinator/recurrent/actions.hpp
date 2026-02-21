@@ -6,6 +6,26 @@ namespace emel::memory::coordinator::recurrent::action {
 
 namespace event = emel::memory::coordinator::event;
 
+namespace detail {
+
+inline int32_t normalize_prepare_error(const event::memory_status status,
+                                       const int32_t err) noexcept {
+  if (err != EMEL_OK) {
+    return err;
+  }
+  switch (status) {
+    case event::memory_status::success:
+    case event::memory_status::no_update:
+      return EMEL_OK;
+    case event::memory_status::failed_prepare:
+    case event::memory_status::failed_compute:
+      return EMEL_ERR_BACKEND;
+  }
+  return EMEL_ERR_BACKEND;
+}
+
+}  // namespace detail
+
 inline void store_update_request(const event::prepare_update & ev, context & ctx) noexcept {
   ctx.update_request = ev;
   ctx.update_request.status_out = nullptr;
@@ -77,23 +97,53 @@ inline constexpr auto set_backend_error = [](context & ctx) {
 
 inline constexpr auto run_prepare_update_phase = [](context & ctx) {
   ctx.phase_error = EMEL_OK;
-  ctx.prepared_status = (ctx.update_request.optimize || ctx.has_pending_update)
-    ? event::memory_status::success
-    : event::memory_status::no_update;
+  ctx.has_pending_update = false;
+  ctx.prepared_status = event::memory_status::no_update;
+  if (ctx.update_request.prepare_fn == nullptr) {
+    return;
+  }
+  int32_t err = EMEL_OK;
+  const event::memory_status status = ctx.update_request.prepare_fn(
+    ctx.update_request,
+    ctx.update_request.prepare_ctx,
+    &err);
+  ctx.prepared_status = status;
+  ctx.phase_error = detail::normalize_prepare_error(status, err);
+  if (ctx.phase_error == EMEL_OK && status == event::memory_status::success) {
+    ctx.has_pending_update = true;
+  }
 };
 
 inline constexpr auto run_prepare_batch_phase = [](context & ctx) {
   ctx.phase_error = EMEL_OK;
   ctx.batch_prepare_count += 1;
-  ctx.has_pending_update = true;
   ctx.prepared_status = event::memory_status::success;
+  if (ctx.batch_request.prepare_fn == nullptr) {
+    return;
+  }
+  int32_t err = EMEL_OK;
+  const event::memory_status status = ctx.batch_request.prepare_fn(
+    ctx.batch_request,
+    ctx.batch_request.prepare_ctx,
+    &err);
+  ctx.prepared_status = status;
+  ctx.phase_error = detail::normalize_prepare_error(status, err);
 };
 
 inline constexpr auto run_prepare_full_phase = [](context & ctx) {
   ctx.phase_error = EMEL_OK;
   ctx.full_prepare_count += 1;
-  ctx.has_pending_update = true;
   ctx.prepared_status = event::memory_status::success;
+  if (ctx.full_request.prepare_fn == nullptr) {
+    return;
+  }
+  int32_t err = EMEL_OK;
+  const event::memory_status status = ctx.full_request.prepare_fn(
+    ctx.full_request,
+    ctx.full_request.prepare_ctx,
+    &err);
+  ctx.prepared_status = status;
+  ctx.phase_error = detail::normalize_prepare_error(status, err);
 };
 
 inline constexpr auto run_apply_update_phase = [](context & ctx) {

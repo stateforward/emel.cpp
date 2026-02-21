@@ -83,7 +83,7 @@ struct apply_update_ready {
   bool operator()(const action::context & ctx) const noexcept {
     return ctx.active_request == action::request_kind::update &&
       ctx.prepared_status == event::memory_status::success &&
-      (ctx.has_pending_update || ctx.update_request.optimize);
+      ctx.has_pending_update;
   }
 };
 
@@ -91,7 +91,7 @@ struct apply_update_backend_failed {
   bool operator()(const action::context & ctx) const noexcept {
     return ctx.active_request == action::request_kind::update &&
       ctx.prepared_status == event::memory_status::success &&
-      !ctx.has_pending_update && !ctx.update_request.optimize;
+      !ctx.has_pending_update;
   }
 };
 

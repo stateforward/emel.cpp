@@ -11,10 +11,23 @@ enum class memory_status : int32_t {
   failed_compute = 3,
 };
 
+struct prepare_update;
+struct prepare_batch;
+struct prepare_full;
+
+using prepare_update_fn =
+  memory_status (*)(const prepare_update & request, void * user_data, int32_t * err_out) noexcept;
+using prepare_batch_fn =
+  memory_status (*)(const prepare_batch & request, void * user_data, int32_t * err_out) noexcept;
+using prepare_full_fn =
+  memory_status (*)(const prepare_full & request, void * user_data, int32_t * err_out) noexcept;
+
 struct prepare_update {
   bool optimize = false;
   memory_status * status_out = nullptr;
   int32_t * error_out = nullptr;
+  prepare_update_fn prepare_fn = nullptr;
+  void * prepare_ctx = nullptr;
 };
 
 struct prepare_batch {
@@ -22,11 +35,15 @@ struct prepare_batch {
   int32_t n_ubatches_total = 0;
   memory_status * status_out = nullptr;
   int32_t * error_out = nullptr;
+  prepare_batch_fn prepare_fn = nullptr;
+  void * prepare_ctx = nullptr;
 };
 
 struct prepare_full {
   memory_status * status_out = nullptr;
   int32_t * error_out = nullptr;
+  prepare_full_fn prepare_fn = nullptr;
+  void * prepare_ctx = nullptr;
 };
 
 struct validate_update {

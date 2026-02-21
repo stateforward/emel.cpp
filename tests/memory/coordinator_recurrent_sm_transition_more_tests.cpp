@@ -6,6 +6,16 @@
 
 namespace {
 
+emel::memory::coordinator::event::memory_status prepare_update_success(
+    const emel::memory::coordinator::event::prepare_update &,
+    void *,
+    int32_t * err_out) noexcept {
+  if (err_out != nullptr) {
+    *err_out = EMEL_OK;
+  }
+  return emel::memory::coordinator::event::memory_status::success;
+}
+
 TEST_CASE("memory_coordinator_sm_update_success_path_updates_counts") {
   emel::memory::coordinator::recurrent::action::context ctx{};
   boost::sml::sm<
@@ -14,6 +24,7 @@ TEST_CASE("memory_coordinator_sm_update_success_path_updates_counts") {
     machine{ctx};
   CHECK(machine.process_event(emel::memory::coordinator::event::prepare_update{
     .optimize = true,
+    .prepare_fn = prepare_update_success,
   }));
   CHECK(ctx.prepared_status == emel::memory::coordinator::event::memory_status::success);
   CHECK(ctx.update_apply_count == 1);
@@ -28,7 +39,7 @@ TEST_CASE("memory_coordinator_sm_update_no_update_skips_apply") {
     boost::sml::testing>
     machine{ctx};
   CHECK(machine.process_event(emel::memory::coordinator::event::prepare_update{
-    .optimize = false,
+    .optimize = true,
   }));
   CHECK(ctx.prepared_status == emel::memory::coordinator::event::memory_status::no_update);
   CHECK(ctx.update_apply_count == 0);
@@ -47,7 +58,7 @@ TEST_CASE("memory_coordinator_sm_batch_prepare_sets_pending") {
   }));
   CHECK(ctx.prepared_status == emel::memory::coordinator::event::memory_status::success);
   CHECK(ctx.batch_prepare_count == 1);
-  CHECK(ctx.has_pending_update);
+  CHECK_FALSE(ctx.has_pending_update);
   CHECK(machine.is(boost::sml::state<emel::memory::coordinator::recurrent::initialized>));
 }
 
@@ -61,7 +72,7 @@ TEST_CASE("memory_coordinator_sm_full_prepare_sets_pending") {
   }));
   CHECK(ctx.prepared_status == emel::memory::coordinator::event::memory_status::success);
   CHECK(ctx.full_prepare_count == 1);
-  CHECK(ctx.has_pending_update);
+  CHECK_FALSE(ctx.has_pending_update);
   CHECK(machine.is(boost::sml::state<emel::memory::coordinator::recurrent::initialized>));
 }
 
