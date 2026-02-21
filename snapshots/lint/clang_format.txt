@@ -95,7 +95,10 @@ src/emel/generator/actions.hpp
 src/emel/generator/events.hpp
 src/emel/generator/guards.hpp
 src/emel/generator/sm.hpp
+src/emel/jinja/ast.hpp
+src/emel/jinja/lexer.hpp
 src/emel/jinja/parser/actions.hpp
+src/emel/jinja/parser/detail.hpp
 src/emel/jinja/parser/events.hpp
 src/emel/jinja/parser/guards.hpp
 src/emel/jinja/parser/sm.hpp
@@ -235,6 +238,7 @@ tests/decoder/ubatch_executor_tests.cpp
 tests/encoder/encoder_tests.cpp
 tests/encoder/encoder_unicode_tests.cpp
 tests/gbnf/parser_tests.cpp
+tests/jinja/lexer_tests.cpp
 tests/jinja/parser_tests.cpp
 tests/kv/cache_action_branch_tests.cpp
 tests/kv/cache_guard_tests.cpp

@@ -56,6 +56,7 @@ NEVER call another machine's actions, guards, or functions directly.
 NEVER mutate another machine's context directly.
 ALWAYS dispatch cross-machine events only via `machine->process_event(...)`.
 ALWAYS ask the user before changing state machine structure.
+NEVER duplicate code if it's used more than once; put it somewhere it can be shared.
 
 ## Events, Outcomes, and Errors
 ALWAYS define trigger intent events in the `event` namespace using noun-like,
@@ -125,9 +126,7 @@ ALWAYS keep snapshot baselines under `snapshots/` and lint baselines under
 `snapshots/lint/`.
 ALWAYS hard-fail runs when required tools are missing.
 ALWAYS enforce line coverage >= 90%.
-ALWAYS run `scripts/build_with_zig.sh`, `scripts/test_with_coverage.sh`,
-`scripts/lint_snapshot.sh`, and `scripts/bench.sh --snapshot` after each
-implementation change.
+ALWAYS run `scripts/quality_gates.sh` after each implementation change.
 ALWAYS use ctest targets `emel_tests` and `lint_snapshot` for test execution.
 ALWAYS reference `docs/sml.rules.md` for SML semantics and testing guidance.
 

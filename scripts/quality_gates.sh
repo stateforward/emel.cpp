@@ -7,3 +7,4 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 "$ROOT_DIR/scripts/test_with_coverage.sh"
 "$ROOT_DIR/scripts/lint_snapshot.sh"
 "$ROOT_DIR/scripts/bench.sh" --snapshot
+"$ROOT_DIR/scripts/generate_docs.sh"

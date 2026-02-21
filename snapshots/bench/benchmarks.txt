@@ -1,8 +1,9 @@
 # ref=94b0200a01a753eff5897dab9311f51a7bc1c62f
 # toolchain=/opt/homebrew/bin/zig
-batch/splitter_equal ns_per_op=1643.879 iter=100000 runs=5
-batch/splitter_seq ns_per_op=1438.015 iter=100000 runs=5
-batch/splitter_simple ns_per_op=764.744 iter=100000 runs=5
-buffer/allocator_alloc_graph ns_per_op=16.974 iter=100000 runs=5
-buffer/allocator_full ns_per_op=40.541 iter=100000 runs=5
-buffer/allocator_reserve_n ns_per_op=20.131 iter=100000 runs=5
+batch/splitter_equal ns_per_op=1764.558 iter=100000 runs=5
+batch/splitter_seq ns_per_op=1572.671 iter=100000 runs=5
+batch/splitter_simple ns_per_op=1003.316 iter=100000 runs=5
+buffer/allocator_alloc_graph ns_per_op=17.492 iter=100000 runs=5
+buffer/allocator_full ns_per_op=39.293 iter=100000 runs=5
+buffer/allocator_reserve_n ns_per_op=19.610 iter=100000 runs=5
+memory/coordinator_recurrent_full ns_per_op=3921.630 iter=100000 runs=5

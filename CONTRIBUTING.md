@@ -31,13 +31,13 @@ Human review is deliberately light. The real judges are the quality gates + AI a
 Before you hit submit:
 - Read and follow `docs/sml.rules.md` and `AGENTS.md` like they’re gospel.
 - Keep changes small and focused.
-- Run `scripts/quality_gates.sh`
+- Run `scripts/quality_gates.sh` (this is the only required gate script; it runs everything).
 - Add or update tests for any new behavior.
 - Update documentation when behavior changes.
 
 Benchmarks are enforced via snapshots; see `docs/benchmark.md`.
 
-Individual gate scripts live in `scripts/`.
+Individual gate scripts live in `scripts/`, but you should only invoke them through `scripts/quality_gates.sh`.
 
 ### Architecture & style rules (the constitution)
 

@@ -78,6 +78,7 @@ if(EMEL_ENABLE_TESTS)
     tests/model/parser_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/jinja/parser_tests.cpp
+    tests/jinja/lexer_tests.cpp
     tests/model/weight_loader_tests.cpp
     tests/sampler/candidate_builder_tests.cpp
     tests/sampler/pipeline_tests.cpp
