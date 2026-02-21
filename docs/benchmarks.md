@@ -8,10 +8,12 @@ are not. True benchmarks will be end-to-end once the system is complete.
 
 | Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |
 | --- | ---: | ---: | ---: |
-| `batch/splitter_equal` | 1592.440 | 6484.798 | 0.246x |
-| `batch/splitter_seq` | 1451.627 | 2720.506 | 0.534x |
-| `batch/splitter_simple` | 800.218 | 2349.349 | 0.341x |
-| `buffer/allocator_alloc_graph` | 16.767 | 53.678 | 0.312x |
-| `buffer/allocator_full` | 39.332 | 251.407 | 0.156x |
-| `buffer/allocator_reserve_n` | 20.590 | 433.747 | 0.047x |
-| `memory/coordinator_recurrent_full` | 3800.401 | 5600.444 | 0.679x |
+| `batch/splitter_equal` | 1884.083 | 6167.943 | 0.305x |
+| `batch/splitter_seq` | 1745.865 | 2582.198 | 0.676x |
+| `batch/splitter_simple` | 804.447 | 2174.350 | 0.370x |
+| `buffer/allocator_alloc_graph` | 17.637 | 54.470 | 0.324x |
+| `buffer/allocator_full` | 39.142 | 252.186 | 0.155x |
+| `buffer/allocator_reserve_n` | 20.856 | 445.627 | 0.047x |
+| `jinja/parser_long` | 30136.921 | 49115.570 | 0.614x |
+| `jinja/parser_short` | 387.295 | 484.637 | 0.799x |
+| `memory/coordinator_recurrent_full` | 3768.017 | 5383.530 | 0.700x |

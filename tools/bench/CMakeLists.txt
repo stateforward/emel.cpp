@@ -102,7 +102,14 @@ add_subdirectory(${EMEL_ROOT} emel)
 add_executable(bench_runner
   ${CMAKE_CURRENT_SOURCE_DIR}/batch_splitter_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/buffer_allocator_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/jinja_parser_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_coordinator_recurrent_bench.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/lexer.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/parser.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/runtime.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/value.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/string.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_cases.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_main.cpp
@@ -121,6 +128,7 @@ target_include_directories(bench_runner
     ${EMEL_ROOT}/src
     ${EMEL_ROOT}/include
     ${reference_impl_SOURCE_DIR}/src
+    ${reference_impl_SOURCE_DIR}/common
     ${reference_impl_SOURCE_DIR}/ggml/include
     ${reference_impl_SOURCE_DIR}/include
 )
