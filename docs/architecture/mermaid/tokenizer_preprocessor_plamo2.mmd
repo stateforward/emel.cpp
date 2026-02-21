@@ -1,0 +1,22 @@
+stateDiagram-v2
+  direction TB
+  [*] --> idle
+  idle --> preparing : preprocess [valid_request_] / begin_preprocess_
+  idle --> errored : preprocess [invalid_request_] / reject_invalid_
+  preparing --> partitioning : [always] / build_specials_
+  partitioning --> partition_decision : [always] / partition_specials_
+  partition_decision --> errored : [phase_failed_] / ensure_last_error_
+  partition_decision --> done : [phase_ok_] / mark_done_
+  done --> preparing : preprocess [valid_request_] / begin_preprocess_
+  done --> errored : preprocess [invalid_request_] / reject_invalid_
+  errored --> preparing : preprocess [valid_request_] / begin_preprocess_
+  errored --> errored : preprocess [invalid_request_] / reject_invalid_
+  unexpected --> preparing : preprocess [valid_request_] / begin_preprocess_
+  unexpected --> errored : preprocess [invalid_request_] / reject_invalid_
+  idle --> unexpected : _ [always] / on_unexpected_
+  preparing --> unexpected : _ [always] / on_unexpected_
+  partitioning --> unexpected : _ [always] / on_unexpected_
+  partition_decision --> unexpected : _ [always] / on_unexpected_
+  done --> unexpected : _ [always] / on_unexpected_
+  errored --> unexpected : _ [always] / on_unexpected_
+  unexpected --> unexpected : _ [always] / on_unexpected_

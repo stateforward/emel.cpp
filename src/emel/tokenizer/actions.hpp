@@ -9,6 +9,7 @@
 
 #include "emel/emel.h"
 #include "emel/tokenizer/context.hpp"
+#include "emel/tokenizer/preprocessor/detail.hpp"
 
 namespace emel::tokenizer::action {
 
@@ -51,22 +52,6 @@ inline context::context()
 namespace emel::tokenizer::detail {
 
 using action::encoder_slot;
-using action::fragment;
-using action::fragment_kind;
-using action::special_token;
-
-constexpr int32_t k_token_type_unknown = 2;
-constexpr int32_t k_token_type_control = 3;
-constexpr int32_t k_token_type_user_defined = 4;
-
-inline bool token_type_is_special(const int32_t type) {
-  return type == k_token_type_control || type == k_token_type_user_defined ||
-         type == k_token_type_unknown;
-}
-
-inline bool token_type_skip_when_no_parse(const int32_t type) {
-  return type == k_token_type_control || type == k_token_type_unknown;
-}
 
 inline encoder_slot encoder_slot_from_model(
     const emel::model::data::tokenizer_model model) {
@@ -90,50 +75,6 @@ inline encoder_slot encoder_slot_from_model(
   }
 }
 
-inline std::string_view token_text(const emel::model::data::vocab &vocab,
-                                   uint32_t id) {
-  if (id >= vocab.n_tokens) {
-    return {};
-  }
-  const auto &entry = vocab.entries[id];
-  if (entry.text_length == 0) {
-    return {};
-  }
-  return std::string_view(vocab.token_storage.data() + entry.text_offset,
-                          entry.text_length);
-}
-
-inline bool
-flag_set(const emel::model::data::vocab &vocab,
-         const std::array<uint8_t, emel::model::data::vocab::k_attr_flag_bytes>
-             &flags,
-         const uint32_t id) {
-  if (id >= vocab.n_tokens) {
-    return false;
-  }
-  const uint32_t byte = id >> 3;
-  const uint8_t mask = static_cast<uint8_t>(1u << (id & 7u));
-  return (flags[byte] & mask) != 0;
-}
-
-inline bool has_lstrip(const emel::model::data::vocab &vocab,
-                       const uint32_t id) {
-  return flag_set(vocab, vocab.lstrip_flags, id);
-}
-
-inline bool has_rstrip(const emel::model::data::vocab &vocab,
-                       const uint32_t id) {
-  return flag_set(vocab, vocab.rstrip_flags, id);
-}
-
-inline bool is_special_type(const emel::model::data::vocab &vocab,
-                            uint32_t id) {
-  if (id >= vocab.n_tokens) {
-    return false;
-  }
-  return token_type_is_special(vocab.entries[id].type);
-}
-
 inline bool append_token(action::context &ctx, const int32_t token) {
   if (token < 0) {
     return false;
@@ -147,112 +88,6 @@ inline bool append_token(action::context &ctx, const int32_t token) {
   ctx.token_ids_out[ctx.token_count] = token;
   ctx.token_count += 1;
   return true;
-}
-
-inline bool push_raw_fragment(action::context &ctx,
-                              const std::string_view text) {
-  if (text.empty()) {
-    return true;
-  }
-  if (ctx.fragment_count >= ctx.fragments.size()) {
-    return false;
-  }
-  fragment &entry = ctx.fragments[ctx.fragment_count];
-  entry.kind = action::fragment_kind::raw_text;
-  entry.text = text;
-  entry.token = -1;
-  ctx.fragment_count += 1;
-  return true;
-}
-
-inline bool push_token_fragment(action::context &ctx, const int32_t token) {
-  if (token < 0) {
-    return false;
-  }
-  if (ctx.fragment_count >= ctx.fragments.size()) {
-    return false;
-  }
-  fragment &entry = ctx.fragments[ctx.fragment_count];
-  entry.kind = action::fragment_kind::token;
-  entry.text = {};
-  entry.token = token;
-  ctx.fragment_count += 1;
-  return true;
-}
-
-inline bool build_special_tokens(action::context &ctx,
-                                 const emel::model::data::vocab &vocab) {
-  if (ctx.special_vocab == &vocab && ctx.special_token_count > 0) {
-    return true;
-  }
-  ctx.special_vocab = &vocab;
-  ctx.special_token_count = 0;
-  for (uint32_t i = 0; i < vocab.n_tokens; ++i) {
-    if (!is_special_type(vocab, i)) {
-      continue;
-    }
-    const std::string_view text = token_text(vocab, i);
-    if (text.empty()) {
-      continue;
-    }
-    if (ctx.special_token_count >= ctx.special_tokens.size()) {
-      return false;
-    }
-    special_token &entry = ctx.special_tokens[ctx.special_token_count];
-    entry.text = text;
-    entry.token = static_cast<int32_t>(i);
-    entry.type = vocab.entries[i].type;
-    entry.lstrip = has_lstrip(vocab, i);
-    entry.rstrip = has_rstrip(vocab, i);
-    ctx.special_token_count += 1;
-  }
-  std::sort(ctx.special_tokens.begin(),
-            ctx.special_tokens.begin() +
-                static_cast<std::ptrdiff_t>(ctx.special_token_count),
-            [](const special_token &a, const special_token &b) {
-              return a.text.size() > b.text.size();
-            });
-  return true;
-}
-
-struct special_match {
-  bool found = false;
-  size_t pos = 0;
-  size_t len = 0;
-  int32_t token = -1;
-  bool lstrip = false;
-  bool rstrip = false;
-};
-
-inline special_match find_next_special(const std::string_view text,
-                                       const action::context &ctx,
-                                       const bool parse_special) {
-  special_match best = {};
-  for (size_t i = 0; i < ctx.special_token_count; ++i) {
-    const action::special_token &token = ctx.special_tokens[i];
-    if (token.text.empty()) {
-      continue;
-    }
-    if (!parse_special) {
-      if (token_type_skip_when_no_parse(token.type)) {
-        continue;
-      }
-    }
-    const size_t pos = text.find(token.text);
-    if (pos == std::string_view::npos) {
-      continue;
-    }
-    if (!best.found || pos < best.pos ||
-        (pos == best.pos && token.text.size() > best.len)) {
-      best.found = true;
-      best.pos = pos;
-      best.len = token.text.size();
-      best.token = token.token;
-      best.lstrip = token.lstrip;
-      best.rstrip = token.rstrip;
-    }
-  }
-  return best;
 }
 
 } // namespace emel::tokenizer::detail
@@ -350,7 +185,8 @@ struct build_special_tokens {
   void operator()(context &ctx) const {
     ctx.phase_error = EMEL_OK;
     if (ctx.vocab == nullptr ||
-        !detail::build_special_tokens(ctx, *ctx.vocab)) {
+        !emel::tokenizer::preprocessor::detail::build_special_tokens(
+            ctx.special_cache, *ctx.vocab)) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
     }
   }
@@ -361,7 +197,9 @@ struct partition_raw {
     ctx.phase_error = EMEL_OK;
     ctx.fragment_count = 0;
     ctx.fragment_index = 0;
-    if (!detail::push_raw_fragment(ctx, ctx.text)) {
+    if (!emel::tokenizer::preprocessor::detail::push_raw_fragment(
+            ctx.fragments.data(), ctx.fragments.size(), ctx.fragment_count,
+            ctx.text)) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
     }
   }
@@ -372,103 +210,10 @@ struct partition_with_specials {
     ctx.phase_error = EMEL_OK;
     ctx.fragment_count = 0;
     ctx.fragment_index = 0;
-    if (!detail::push_raw_fragment(ctx, ctx.text)) {
+    if (!emel::tokenizer::preprocessor::detail::partition_with_specials(
+            ctx.text, ctx.special_cache, ctx.parse_special,
+            ctx.fragments.data(), ctx.fragments.size(), &ctx.fragment_count)) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-
-    std::array<fragment, k_max_fragments> next_fragments = {};
-    for (size_t token_idx = 0; token_idx < ctx.special_token_count; ++token_idx) {
-      const special_token &token = ctx.special_tokens[token_idx];
-      if (token.text.empty()) {
-        continue;
-      }
-      if (!ctx.parse_special && detail::token_type_skip_when_no_parse(token.type)) {
-        continue;
-      }
-
-      size_t next_count = 0;
-      auto push_raw = [&](const std::string_view text) {
-        if (text.empty()) {
-          return true;
-        }
-        if (next_count >= next_fragments.size()) {
-          return false;
-        }
-        fragment &entry = next_fragments[next_count++];
-        entry.kind = fragment_kind::raw_text;
-        entry.text = text;
-        entry.token = -1;
-        return true;
-      };
-      auto push_token = [&](const int32_t token_id) {
-        if (token_id < 0) {
-          return false;
-        }
-        if (next_count >= next_fragments.size()) {
-          return false;
-        }
-        fragment &entry = next_fragments[next_count++];
-        entry.kind = fragment_kind::token;
-        entry.text = {};
-        entry.token = token_id;
-        return true;
-      };
-
-      for (size_t frag_idx = 0; frag_idx < ctx.fragment_count; ++frag_idx) {
-        const fragment &frag = ctx.fragments[frag_idx];
-        if (frag.kind != fragment_kind::raw_text) {
-          if (!push_token(frag.token)) {
-            set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-            return;
-          }
-          continue;
-        }
-
-        const std::string_view raw = frag.text;
-        size_t base_offset = 0;
-        while (base_offset < raw.size()) {
-          const size_t match = raw.find(token.text, base_offset);
-          if (match == std::string_view::npos) {
-            if (!push_raw(raw.substr(base_offset))) {
-              set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-              return;
-            }
-            break;
-          }
-          size_t left_len = match - base_offset;
-          if (token.lstrip) {
-            while (left_len > 0 &&
-                   std::isspace(static_cast<unsigned char>(
-                       raw[base_offset + left_len - 1])) != 0) {
-              left_len -= 1;
-            }
-          }
-          if (left_len > 0) {
-            if (!push_raw(raw.substr(base_offset, left_len))) {
-              set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-              return;
-            }
-          }
-          if (!push_token(token.token)) {
-            set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-            return;
-          }
-          size_t right_offset = match + token.text.size();
-          if (token.rstrip) {
-            while (right_offset < raw.size() &&
-                   std::isspace(static_cast<unsigned char>(
-                       raw[right_offset])) != 0) {
-              right_offset += 1;
-            }
-          }
-          base_offset = right_offset;
-        }
-      }
-
-      ctx.fragment_count = next_count;
-      ctx.fragments = next_fragments;
-      ctx.fragment_index = 0;
     }
   }
 };

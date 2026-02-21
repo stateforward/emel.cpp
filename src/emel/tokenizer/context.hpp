@@ -23,11 +23,14 @@
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
 #include "emel/tokenizer/events.hpp"
+#include "emel/tokenizer/preprocessor/types.hpp"
 
 namespace emel::tokenizer::action {
 
-constexpr size_t k_max_fragments = 1024;
-constexpr size_t k_max_special_tokens = 256;
+constexpr size_t k_max_fragments =
+    emel::tokenizer::preprocessor::k_max_fragments;
+constexpr size_t k_max_special_tokens =
+    emel::tokenizer::preprocessor::k_max_special_tokens;
 constexpr size_t k_encoder_map_size = 8;
 
 enum class encoder_slot : uint8_t {
@@ -47,24 +50,10 @@ struct encoder_entry {
                   const emel::encoder::event::encode &ev) = nullptr;
 };
 
-enum class fragment_kind : uint8_t {
-  raw_text = 0,
-  token = 1,
-};
-
-struct fragment {
-  fragment_kind kind = fragment_kind::raw_text;
-  std::string_view text = {};
-  int32_t token = -1;
-};
-
-struct special_token {
-  std::string_view text = {};
-  int32_t token = -1;
-  int32_t type = 0;
-  bool lstrip = false;
-  bool rstrip = false;
-};
+using fragment_kind = emel::tokenizer::preprocessor::fragment_kind;
+using fragment = emel::tokenizer::preprocessor::fragment;
+using special_token = emel::tokenizer::preprocessor::special_token;
+using special_token_cache = emel::tokenizer::preprocessor::special_token_cache;
 
 struct context {
   emel::encoder::bpe::action::context bpe_ctx = {};
@@ -88,9 +77,7 @@ struct context {
   std::array<fragment, k_max_fragments> fragments = {};
   size_t fragment_count = 0;
   size_t fragment_index = 0;
-  std::array<special_token, k_max_special_tokens> special_tokens = {};
-  size_t special_token_count = 0;
-  const emel::model::data::vocab *special_vocab = nullptr;
+  special_token_cache special_cache = {};
   const emel::model::data::vocab *vocab = nullptr;
   std::string_view text = {};
   bool add_special = false;

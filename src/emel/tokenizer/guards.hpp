@@ -28,13 +28,13 @@ struct phase_failed {
 
 struct has_special_tokens {
   bool operator()(const action::context &ctx) const noexcept {
-    return ctx.special_token_count > 0;
+    return ctx.special_cache.count > 0;
   }
 };
 
 struct no_special_tokens {
   bool operator()(const action::context &ctx) const noexcept {
-    return ctx.special_token_count == 0;
+    return ctx.special_cache.count == 0;
   }
 };
 

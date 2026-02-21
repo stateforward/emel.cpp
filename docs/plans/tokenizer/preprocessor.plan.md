@@ -41,4 +41,5 @@ state machine conventions in `docs/rules/sml.rules.md`.
   select and invoke the active variant based on model/vocab.
 
 ## open questions
-- how much of current tokenizer fragment logic moves into preprocessor.
+- output buffer is caller-provided (`fragment *`, `capacity`, `count_out`).
+- tokenizer integration deferred; preprocessor machines scaffolded only.

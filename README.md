@@ -94,6 +94,13 @@ environments, while Zig remains the default for day-to-day builds.
 - [`docs/architecture/telemetry_provider.md`](docs/architecture/telemetry_provider.md)
 - [`docs/architecture/tensor_allocator.md`](docs/architecture/tensor_allocator.md)
 - [`docs/architecture/tensor_lifetime_analyzer.md`](docs/architecture/tensor_lifetime_analyzer.md)
+- [`docs/architecture/tokenizer_preprocessor_bpe.md`](docs/architecture/tokenizer_preprocessor_bpe.md)
+- [`docs/architecture/tokenizer_preprocessor_fallback.md`](docs/architecture/tokenizer_preprocessor_fallback.md)
+- [`docs/architecture/tokenizer_preprocessor_plamo2.md`](docs/architecture/tokenizer_preprocessor_plamo2.md)
+- [`docs/architecture/tokenizer_preprocessor_rwkv.md`](docs/architecture/tokenizer_preprocessor_rwkv.md)
+- [`docs/architecture/tokenizer_preprocessor_spm.md`](docs/architecture/tokenizer_preprocessor_spm.md)
+- [`docs/architecture/tokenizer_preprocessor_ugm.md`](docs/architecture/tokenizer_preprocessor_ugm.md)
+- [`docs/architecture/tokenizer_preprocessor_wpm.md`](docs/architecture/tokenizer_preprocessor_wpm.md)
 - [`docs/architecture/tokenizer.md`](docs/architecture/tokenizer.md)
 
 

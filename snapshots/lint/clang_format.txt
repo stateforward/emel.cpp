@@ -198,6 +198,21 @@ src/emel/text/unicode_data.hpp
 src/emel/tokenizer/actions.hpp
 src/emel/tokenizer/context.hpp
 src/emel/tokenizer/events.hpp
+src/emel/tokenizer/preprocessor/actions.hpp
+src/emel/tokenizer/preprocessor/any.hpp
+src/emel/tokenizer/preprocessor/bpe/sm.hpp
+src/emel/tokenizer/preprocessor/context.hpp
+src/emel/tokenizer/preprocessor/detail.hpp
+src/emel/tokenizer/preprocessor/events.hpp
+src/emel/tokenizer/preprocessor/fallback/sm.hpp
+src/emel/tokenizer/preprocessor/guards.hpp
+src/emel/tokenizer/preprocessor/model.hpp
+src/emel/tokenizer/preprocessor/plamo2/sm.hpp
+src/emel/tokenizer/preprocessor/rwkv/sm.hpp
+src/emel/tokenizer/preprocessor/spm/sm.hpp
+src/emel/tokenizer/preprocessor/types.hpp
+src/emel/tokenizer/preprocessor/ugm/sm.hpp
+src/emel/tokenizer/preprocessor/wpm/sm.hpp
 src/emel/tokenizer/sm.hpp
 tests/batch/sanitizer_tests.cpp
 tests/batch/splitter_action_branch_tests.cpp
@@ -300,3 +315,4 @@ tests/tensor/lifetime_analyzer_error_tests.cpp
 tests/tensor/lifetime_analyzer_sm_error_tests.cpp
 tests/tensor/lifetime_analyzer_sm_transition_tests.cpp
 tests/tensor/lifetime_analyzer_tests.cpp
+tests/tokenizer/preprocessor_tests.cpp

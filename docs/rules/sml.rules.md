@@ -135,6 +135,7 @@ primary sources consulted (non-exhaustive)
    - submachine gets first chance to handle events,
    - if unhandled, parent transitions may run (fallback). (source: `boost/sml.hpp`, `transitions_sub<sm<tsm>, ...>::execute_impl`.)
 3. entry into a composite state MUST initialize its submachine(s) deterministically. SML updates composite state initialization during state updates. (source: `boost/sml.hpp`, `update_current_state` overload for `state<back::sm<T>>`.)
+4. do NOT introduce shared base classes for machine wrappers (e.g. `sm_base`). each machine MUST own its context and define its own `process_event` wrapper. share behavior via `actions.hpp`/`detail.hpp` helpers and `sm_any` dispatch, not inheritance.
 
 ### orthogonal regions
 4. orthogonal regions (multiple initial states) MUST be designed so that the same event does not cause side effects in more than one region, unless those side effects commute and ordering does not matter.
