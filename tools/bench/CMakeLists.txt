@@ -112,6 +112,7 @@ add_executable(bench_runner
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_preprocessor_wpm_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_preprocessor_rwkv_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_preprocessor_plamo2_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_bench.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/lexer.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/parser.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/runtime.cpp

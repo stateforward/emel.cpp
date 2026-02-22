@@ -8,9 +8,20 @@
 namespace emel::tokenizer::events {
 struct tokenizer_done;
 struct tokenizer_error;
+struct tokenizer_bind_done;
+struct tokenizer_bind_error;
 }  // namespace emel::tokenizer::events
 
 namespace emel::tokenizer::event {
+
+struct bind {
+  const emel::model::data::vocab * vocab = nullptr;
+  int32_t * error_out = nullptr;
+  void * owner_sm = nullptr;
+  bool (*dispatch_done)(void * owner_sm, const events::tokenizer_bind_done &) = nullptr;
+  bool (*dispatch_error)(void * owner_sm,
+                         const events::tokenizer_bind_error &) = nullptr;
+};
 
 struct tokenize {
   const emel::model::data::vocab * vocab = nullptr;
@@ -93,6 +104,15 @@ struct tokenizer_done {
 
 struct tokenizer_error {
   const event::tokenize * request = nullptr;
+  int32_t err = 0;
+};
+
+struct tokenizer_bind_done {
+  const event::bind * request = nullptr;
+};
+
+struct tokenizer_bind_error {
+  const event::bind * request = nullptr;
   int32_t err = 0;
 };
 

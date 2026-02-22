@@ -6,10 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "emel/tokenizer/bpe/regex.hpp"
+#include "emel/tokenizer/bpe/split.hpp"
 #include "emel/tokenizer/preprocessor/bpe/sm.hpp"
-
-#include "unicode.h"
 
 namespace {
 
@@ -47,21 +45,25 @@ std::string make_long_text() {
 
 reference_fragments build_reference_fragments(const emel::model::data::vocab & vocab,
                                               const std::string & text) {
-  emel::model::data::tokenizer_pre pre_id = emel::model::data::tokenizer_pre::UNKNOWN;
-  std::vector<std::string> regex_exprs;
-  emel::tokenizer::bpe::detail::assign_bpe_regex(pre_id, regex_exprs, vocab);
-
-  const auto words = ::unicode_regex_split(text, regex_exprs);
+  emel::tokenizer::bpe::detail::split_scratch scratch = {};
+  emel::tokenizer::bpe::detail::split_view view = {};
+  scratch.reset();
+  if (!emel::tokenizer::bpe::detail::split_and_encode_append(
+          text, vocab, scratch, view)) {
+    std::fprintf(stderr, "error: reference split failed\n");
+    std::abort();
+  }
 
   reference_fragments out;
-  out.storage.reserve(words.size());
-  out.fragments.reserve(words.size());
+  out.storage.reserve(view.count);
+  out.fragments.reserve(view.count);
 
-  for (const auto & word : words) {
+  for (size_t idx = 0; idx < view.count; ++idx) {
+    const std::string_view word = view.words[idx];
     if (word.empty()) {
       continue;
     }
-    out.storage.push_back(word);
+    out.storage.emplace_back(word);
     out.fragments.push_back(
       fragment{fragment_kind::raw_text, std::string_view(out.storage.back()), -1});
   }

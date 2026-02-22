@@ -44,5 +44,7 @@ void append_emel_tokenizer_preprocessor_plamo2_cases(std::vector<result> & resul
                                                      const config & cfg);
 void append_reference_tokenizer_preprocessor_plamo2_cases(std::vector<result> & results,
                                                           const config & cfg);
+void append_emel_tokenizer_cases(std::vector<result> & results, const config & cfg);
+void append_reference_tokenizer_cases(std::vector<result> & results, const config & cfg);
 
 }  // namespace emel::bench

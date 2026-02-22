@@ -21,6 +21,7 @@ struct preprocess {
   fragment * fragments_out = nullptr;
   size_t fragment_capacity = 0;
   size_t * fragment_count_out = nullptr;
+  bool * preprocessed_out = nullptr;
   int32_t * error_out = nullptr;
   void * owner_sm = nullptr;
   bool (*dispatch_done)(void * owner_sm,

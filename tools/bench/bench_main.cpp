@@ -42,7 +42,8 @@ std::size_t read_env_size(const char * name, std::size_t fallback) {
   return static_cast<std::size_t>(parsed);
 }
 
-std::vector<bench::result> run_emel_benchmarks(const bench::config & cfg) {
+std::vector<bench::result> run_emel_benchmarks(const bench::config & cfg,
+                                               const bool include_tokenizer) {
   std::vector<bench::result> results;
   results.reserve(10);
   bench::append_emel_buffer_allocator_cases(results, cfg);
@@ -57,10 +58,14 @@ std::vector<bench::result> run_emel_benchmarks(const bench::config & cfg) {
   bench::append_emel_tokenizer_preprocessor_wpm_cases(results, cfg);
   bench::append_emel_tokenizer_preprocessor_rwkv_cases(results, cfg);
   bench::append_emel_tokenizer_preprocessor_plamo2_cases(results, cfg);
+  if (include_tokenizer) {
+    bench::append_emel_tokenizer_cases(results, cfg);
+  }
   return results;
 }
 
-std::vector<bench::result> run_reference_benchmarks(const bench::config & cfg) {
+std::vector<bench::result> run_reference_benchmarks(const bench::config & cfg,
+                                                    const bool include_tokenizer) {
   std::vector<bench::result> results;
   results.reserve(10);
   bench::append_reference_buffer_allocator_cases(results, cfg);
@@ -75,6 +80,9 @@ std::vector<bench::result> run_reference_benchmarks(const bench::config & cfg) {
   bench::append_reference_tokenizer_preprocessor_wpm_cases(results, cfg);
   bench::append_reference_tokenizer_preprocessor_rwkv_cases(results, cfg);
   bench::append_reference_tokenizer_preprocessor_plamo2_cases(results, cfg);
+  if (include_tokenizer) {
+    bench::append_reference_tokenizer_cases(results, cfg);
+  }
   return results;
 }
 
@@ -166,19 +174,19 @@ int main(int argc, char ** argv) {
   const mode run_mode = parse_mode(argc, argv);
 
   if (run_mode == mode::k_emel) {
-    const auto results = run_emel_benchmarks(cfg);
+    const auto results = run_emel_benchmarks(cfg, true);
     print_snapshot(results);
     return 0;
   }
 
   if (run_mode == mode::k_reference) {
-    const auto results = run_reference_benchmarks(cfg);
+    const auto results = run_reference_benchmarks(cfg, true);
     print_snapshot(results);
     return 0;
   }
 
-  const auto emel_results = run_emel_benchmarks(cfg);
-  const auto ref_results = run_reference_benchmarks(cfg);
+  const auto emel_results = run_emel_benchmarks(cfg, true);
+  const auto ref_results = run_reference_benchmarks(cfg, true);
   print_compare(emel_results, ref_results);
   return 0;
 }

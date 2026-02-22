@@ -198,6 +198,7 @@ src/emel/text/unicode.hpp
 src/emel/text/unicode_data.hpp
 src/emel/tokenizer/actions.hpp
 src/emel/tokenizer/bpe/regex.hpp
+src/emel/tokenizer/bpe/split.hpp
 src/emel/tokenizer/context.hpp
 src/emel/tokenizer/events.hpp
 src/emel/tokenizer/preprocessor/actions.hpp
@@ -326,9 +327,14 @@ tests/tensor/lifetime_analyzer_error_tests.cpp
 tests/tensor/lifetime_analyzer_sm_error_tests.cpp
 tests/tensor/lifetime_analyzer_sm_transition_tests.cpp
 tests/tensor/lifetime_analyzer_tests.cpp
+tests/tokenizer/bpe_regex_tests.cpp
+tests/tokenizer/bpe_split_tests.cpp
 tests/tokenizer/preprocessor_fallback_tests.cpp
 tests/tokenizer/preprocessor_plamo2_tests.cpp
 tests/tokenizer/preprocessor_rwkv_tests.cpp
 tests/tokenizer/preprocessor_spm_tests.cpp
 tests/tokenizer/preprocessor_tests.cpp
 tests/tokenizer/preprocessor_wpm_tests.cpp
+tests/tokenizer/tokenizer_action_guard_tests.cpp
+tests/tokenizer/tokenizer_parity_tests.cpp
+tests/tokenizer/tokenizer_tests.cpp

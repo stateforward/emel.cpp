@@ -15,6 +15,7 @@ explicit approval.
 - preprocessing is modeled as a component with variant SMs under `tokenizer/preprocessor/*`.
 - encoding is modeled as encoder SMs under `encoder/*` with a stable `encoder::event::encode` API.
 - tokenizer is bound to a loaded model/vocab; encoder binding happens at init (no per-request select).
+- binding is performed via an explicit tokenizer `bind` event before tokenization.
 - tokenizer outputs are written only through the request payload (no persistent output buffers).
 - tokenizer errors are surfaced via `_error` events and error_out fields only.
 
@@ -64,11 +65,13 @@ explicit approval.
 ## encoding model
 - encoder binding is done at init from `vocab->tokenizer_model_id` with a fallback encoder.
 - encoders must treat input fragments as authoritative and never re-run special token parsing.
+- encoders accept preprocessed fragments via `event::encode.preprocessed`.
 - fragment encoding is a bounded RTC loop with explicit capacity checks.
 - prefix/suffix handling is centralized in the tokenizer (not encoder-specific code paths).
 
 ## data contracts
 - inputs: `event::tokenize` carries vocab pointer, text view, flags, output buffers, and callbacks.
+- inputs: `event::bind` carries the vocab pointer and error output for binding.
 - preprocessing output: `fragment` array with `raw_text` spans or `token` ids.
 - outputs: `token_ids_out` and `token_count_out` only; no context-owned output buffers.
 - errors: `error_out` and `_error` events; context holds only the latest error code.

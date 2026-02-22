@@ -23,15 +23,55 @@ inline encode_result encode_spm(const event::encode &ev,
   emel::encoder::detail::ensure_tables(ctx);
 
   size_t out_len = 0;
-  if (vocab.add_space_prefix && ev.text.front() != ' ') {
-    if (out_len + 1 > ctx.scratch.buffer.size()) {
-      result.error = EMEL_ERR_INVALID_ARGUMENT;
-      return result;
-    }
-    ctx.scratch.buffer[out_len++] = ' ';
-  }
+  const bool add_prefix = vocab.add_space_prefix && !vocab.treat_whitespace_as_suffix;
+  const bool add_suffix = vocab.add_space_prefix && vocab.treat_whitespace_as_suffix;
+  const bool escape_spaces = vocab.escape_whitespaces;
+  bool prefix_inserted = false;
   for (const char c : ev.text) {
+    if (add_prefix && !prefix_inserted && c != ' ') {
+      if (escape_spaces) {
+        if (out_len + 3 > ctx.scratch.buffer.size()) {
+          result.error = EMEL_ERR_INVALID_ARGUMENT;
+          return result;
+        }
+        ctx.scratch.buffer[out_len++] = '\xE2';
+        ctx.scratch.buffer[out_len++] = '\x96';
+        ctx.scratch.buffer[out_len++] = '\x81';
+      } else {
+        if (out_len + 1 > ctx.scratch.buffer.size()) {
+          result.error = EMEL_ERR_INVALID_ARGUMENT;
+          return result;
+        }
+        ctx.scratch.buffer[out_len++] = ' ';
+      }
+      prefix_inserted = true;
+    }
     if (c == ' ') {
+      if (escape_spaces) {
+        if (out_len + 3 > ctx.scratch.buffer.size()) {
+          result.error = EMEL_ERR_INVALID_ARGUMENT;
+          return result;
+        }
+        ctx.scratch.buffer[out_len++] = '\xE2';
+        ctx.scratch.buffer[out_len++] = '\x96';
+        ctx.scratch.buffer[out_len++] = '\x81';
+      } else {
+        if (out_len + 1 > ctx.scratch.buffer.size()) {
+          result.error = EMEL_ERR_INVALID_ARGUMENT;
+          return result;
+        }
+        ctx.scratch.buffer[out_len++] = ' ';
+      }
+    } else {
+      if (out_len + 1 > ctx.scratch.buffer.size()) {
+        result.error = EMEL_ERR_INVALID_ARGUMENT;
+        return result;
+      }
+      ctx.scratch.buffer[out_len++] = c;
+    }
+  }
+  if (add_suffix) {
+    if (escape_spaces) {
       if (out_len + 3 > ctx.scratch.buffer.size()) {
         result.error = EMEL_ERR_INVALID_ARGUMENT;
         return result;
@@ -44,7 +84,7 @@ inline encode_result encode_spm(const event::encode &ev,
         result.error = EMEL_ERR_INVALID_ARGUMENT;
         return result;
       }
-      ctx.scratch.buffer[out_len++] = c;
+      ctx.scratch.buffer[out_len++] = ' ';
     }
   }
 

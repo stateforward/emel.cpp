@@ -5,12 +5,27 @@
 namespace emel::tokenizer::guard {
 
 struct can_tokenize {
-  bool operator()(const event::tokenize &ev) const noexcept {
-    if (ev.vocab == nullptr || ev.token_ids_out == nullptr ||
-        ev.token_count_out == nullptr) {
+  bool operator()(const event::tokenize &ev,
+                  const action::context &ctx) const noexcept {
+    if (!ctx.is_bound || ctx.vocab == nullptr) {
+      return false;
+    }
+    if (ev.vocab == nullptr || ev.vocab != ctx.vocab) {
+      return false;
+    }
+    if (ev.token_ids_out == nullptr || ev.token_count_out == nullptr) {
       return false;
     }
     return ev.token_capacity > 0;
+  }
+};
+
+struct can_bind {
+  bool operator()(const event::bind &ev) const noexcept {
+    if (ev.vocab == nullptr) {
+      return false;
+    }
+    return true;
   }
 };
 
@@ -23,18 +38,6 @@ struct phase_ok {
 struct phase_failed {
   bool operator()(const action::context &ctx) const noexcept {
     return ctx.phase_error != EMEL_OK;
-  }
-};
-
-struct has_special_tokens {
-  bool operator()(const action::context &ctx) const noexcept {
-    return ctx.special_cache.count > 0;
-  }
-};
-
-struct no_special_tokens {
-  bool operator()(const action::context &ctx) const noexcept {
-    return ctx.special_cache.count == 0;
   }
 };
 

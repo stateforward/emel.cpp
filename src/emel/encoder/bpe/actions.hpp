@@ -43,8 +43,6 @@ struct begin_encode {
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
     if (emel::encoder::action::detail::sync_vocab(ctx, ev.vocab)) {
-      ctx.bpe_pre_id = emel::model::data::tokenizer_pre::DEFAULT;
-      ctx.bpe_regex_exprs.clear();
     }
     if (ev.token_count_out != nullptr) {
       *ev.token_count_out = 0;
