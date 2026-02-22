@@ -10,14 +10,14 @@
 
 namespace emel::tokenizer {
 
-struct initialized {};
-struct building_special_tokens {};
-struct special_tokens_decision {};
-struct partitioning_raw {};
-struct partitioning_with_specials {};
-struct partitioning_decision {};
-struct selecting_backend {};
-struct selecting_backend_decision {};
+struct uninitialized {};
+struct binding_preprocessor {};
+struct binding_preprocessor_decision {};
+struct binding_encoder {};
+struct binding_encoder_decision {};
+struct idle {};
+struct preprocessing {};
+struct preprocess_decision {};
 struct prefix_decision {};
 struct encoding_ready {};
 struct encoding_token_fragment {};
@@ -38,16 +38,16 @@ scope
 model-aware encoding.
 
 state purpose
-- initialized: idle, accepts tokenize requests.
-- building_special_tokens: builds token inventory for special-token parsing.
-- special_tokens_decision: routes to raw or special partitioning.
-- partitioning_raw/partitioning_with_specials: build fragment list.
-- selecting_backend: binds encoder context and selects encoder machine.
-- prefix_decision: applies optional BOS prefix or errors.
-- encoding_ready/encoding_*: encodes fragments in a bounded loop.
-- suffix_decision: applies optional SEP/EOS suffix or errors.
-- finalizing: marks success.
-- done: last request completed successfully.
+  - uninitialized: no bound vocab, awaits bind.
+  - binding_preprocessor/binding_encoder: bind model-specific preprocess/encode stages.
+  - idle: ready to tokenize requests.
+  - preprocessing: dispatch preprocessor to build fragment list.
+  - preprocess_decision: routes based on preprocess success/failure.
+  - prefix_decision: applies optional BOS prefix or errors.
+  - encoding_ready/encoding_*: encodes fragments in a bounded loop.
+  - suffix_decision: applies optional SEP/EOS suffix or errors.
+  - finalizing: marks success.
+  - done: last request completed successfully.
 - errored: last request failed with an error code.
 - unexpected: sequencing contract violation.
 
@@ -57,21 +57,21 @@ key invariants
 - internal progress uses anonymous transitions (no self-dispatch).
 
 guard semantics
-- can_tokenize: validates request pointers and capacity.
-- phase_ok/phase_failed: observe errors set by actions.
-- has_special_tokens: indicates whether special-token inventory is available.
-- has_capacity: checks remaining output capacity before encoding.
-- should_add_bos/sep/eos: determines prefix/suffix requirements.
-- has_more_fragments: indicates more fragments to encode.
+  - can_bind: validates bind request pointers.
+  - can_tokenize: validates request pointers, capacity, and bound vocab match.
+  - phase_ok/phase_failed: observe errors set by actions.
+  - has_capacity: checks remaining output capacity before encoding.
+  - should_add_bos/sep/eos: determines prefix/suffix requirements.
+  - has_more_fragments: indicates more fragments to encode.
 
 action side effects
-- begin_tokenize: resets request outputs and context runtime state.
-- build_special_tokens: builds special-token inventory.
-- partition_raw/partition_with_specials: builds fragment list, honoring
-parse_special.
-- append_bos/sep/eos: appends prefix/suffix tokens as configured by vocab.
-- append_fragment_token/encode_raw_fragment: encode a fragment or append a
-literal token.
+  - begin_bind: stores vocab and resets bind error state.
+  - bind_preprocessor/bind_encoder: select backend machines for model.
+  - begin_tokenize: resets request outputs and context runtime state.
+  - run_preprocess: builds fragment list, honoring parse_special.
+  - append_bos/sep/eos: appends prefix/suffix tokens as configured by vocab.
+  - append_fragment_token/encode_raw_fragment: encode a fragment or append a
+  literal token.
 - set_capacity_error/set_invalid_id_error: records validation failures.
 - finalize: marks success.
 - on_unexpected: reports sequencing violations.
@@ -81,55 +81,71 @@ struct model {
     namespace sml = boost::sml;
 
     return sml::make_transition_table(
-        *sml::state<initialized> +
-            sml::event<event::tokenize>[guard::can_tokenize{}] /
-                action::begin_tokenize = sml::state<building_special_tokens>,
-        sml::state<initialized> +
-            sml::event<event::tokenize> / action::reject_invalid =
+        *sml::state<uninitialized> + sml::event<event::bind>[guard::can_bind{}] /
+                action::begin_bind = sml::state<binding_preprocessor>,
+        sml::state<uninitialized> + sml::event<event::bind> /
+                action::reject_bind = sml::state<errored>,
+        sml::state<uninitialized> + sml::event<event::tokenize> /
+                action::reject_invalid = sml::state<errored>,
+
+        sml::state<binding_preprocessor> / action::bind_preprocessor =
+            sml::state<binding_preprocessor_decision>,
+        sml::state<binding_preprocessor_decision>[guard::phase_failed{}] =
             sml::state<errored>,
+        sml::state<binding_preprocessor_decision>[guard::phase_ok{}] =
+            sml::state<binding_encoder>,
 
+        sml::state<binding_encoder> / action::bind_encoder =
+            sml::state<binding_encoder_decision>,
+        sml::state<binding_encoder_decision>[guard::phase_failed{}] =
+            sml::state<errored>,
+        sml::state<binding_encoder_decision>[guard::phase_ok{}] =
+            sml::state<idle>,
+
+        sml::state<idle> + sml::event<event::bind>[guard::can_bind{}] /
+                action::begin_bind = sml::state<binding_preprocessor>,
+        sml::state<idle> + sml::event<event::bind> /
+                action::reject_bind = sml::state<errored>,
+        sml::state<idle> + sml::event<event::tokenize>[guard::can_tokenize{}] /
+                action::begin_tokenize = sml::state<preprocessing>,
+        sml::state<idle> + sml::event<event::tokenize> /
+                action::reject_invalid = sml::state<errored>,
+
+        sml::state<done> + sml::event<event::bind>[guard::can_bind{}] /
+                action::begin_bind = sml::state<binding_preprocessor>,
+        sml::state<done> + sml::event<event::bind> /
+                action::reject_bind = sml::state<errored>,
         sml::state<done> + sml::event<event::tokenize>[guard::can_tokenize{}] /
-                               action::begin_tokenize =
-            sml::state<building_special_tokens>,
+                action::begin_tokenize = sml::state<preprocessing>,
         sml::state<done> + sml::event<event::tokenize> /
-                               action::reject_invalid = sml::state<errored>,
+                action::reject_invalid = sml::state<errored>,
 
+        sml::state<errored> + sml::event<event::bind>[guard::can_bind{}] /
+                action::begin_bind = sml::state<binding_preprocessor>,
+        sml::state<errored> + sml::event<event::bind> /
+                action::reject_bind = sml::state<errored>,
         sml::state<errored> +
             sml::event<event::tokenize>[guard::can_tokenize{}] /
-                action::begin_tokenize = sml::state<building_special_tokens>,
+                action::begin_tokenize = sml::state<preprocessing>,
         sml::state<errored> + sml::event<event::tokenize> /
-                                  action::reject_invalid = sml::state<errored>,
+                action::reject_invalid = sml::state<errored>,
 
+        sml::state<unexpected> + sml::event<event::bind>[guard::can_bind{}] /
+                action::begin_bind = sml::state<binding_preprocessor>,
+        sml::state<unexpected> + sml::event<event::bind> /
+                action::reject_bind = sml::state<unexpected>,
         sml::state<unexpected> +
             sml::event<event::tokenize>[guard::can_tokenize{}] /
-                action::begin_tokenize = sml::state<building_special_tokens>,
+                action::begin_tokenize = sml::state<preprocessing>,
         sml::state<unexpected> +
             sml::event<event::tokenize> / action::reject_invalid =
             sml::state<unexpected>,
 
-        sml::state<building_special_tokens> / action::build_special_tokens =
-            sml::state<special_tokens_decision>,
-        sml::state<special_tokens_decision>[guard::phase_failed{}] =
+        sml::state<preprocessing> / action::run_preprocess =
+            sml::state<preprocess_decision>,
+        sml::state<preprocess_decision>[guard::phase_failed{}] =
             sml::state<errored>,
-        sml::state<special_tokens_decision>[guard::has_special_tokens{}] =
-            sml::state<partitioning_with_specials>,
-        sml::state<special_tokens_decision>[guard::no_special_tokens{}] =
-            sml::state<partitioning_raw>,
-
-        sml::state<partitioning_raw> / action::partition_raw =
-            sml::state<partitioning_decision>,
-        sml::state<partitioning_with_specials> /
-            action::partition_with_specials = sml::state<partitioning_decision>,
-        sml::state<partitioning_decision>[guard::phase_failed{}] =
-            sml::state<errored>,
-        sml::state<partitioning_decision>[guard::phase_ok{}] =
-            sml::state<selecting_backend>,
-
-        sml::state<selecting_backend> / action::select_backend =
-            sml::state<selecting_backend_decision>,
-        sml::state<selecting_backend_decision>[guard::phase_failed{}] =
-            sml::state<errored>,
-        sml::state<selecting_backend_decision>[guard::phase_ok{}] =
+        sml::state<preprocess_decision>[guard::phase_ok{}] =
             sml::state<prefix_decision>,
 
         sml::state<prefix_decision>[guard::bos_ready{}] /
@@ -176,28 +192,28 @@ struct model {
 
         sml::state<finalizing> / action::finalize = sml::state<done>,
 
-        sml::state<initialized> +
+        sml::state<uninitialized> +
             sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
-        sml::state<building_special_tokens> +
+        sml::state<binding_preprocessor> +
             sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
-        sml::state<special_tokens_decision> +
+        sml::state<binding_preprocessor_decision> +
             sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
-        sml::state<partitioning_raw> +
+        sml::state<binding_encoder> +
             sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
-        sml::state<partitioning_with_specials> +
+        sml::state<binding_encoder_decision> +
             sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
-        sml::state<partitioning_decision> +
+        sml::state<idle> +
             sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
-        sml::state<selecting_backend> +
+        sml::state<preprocessing> +
             sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
-        sml::state<selecting_backend_decision> +
+        sml::state<preprocess_decision> +
             sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
         sml::state<prefix_decision> +
@@ -236,6 +252,33 @@ struct sm : public emel::sm<model> {
   using base_type = emel::sm<model>;
 
   sm() : base_type(context_) {}
+
+  bool process_event(const event::bind &ev) {
+    namespace sml = boost::sml;
+
+    const bool accepted = base_type::process_event(ev);
+    const bool ok = this->is(sml::state<idle>);
+    const int32_t err =
+        ok ? EMEL_OK
+           : (context_.last_error != EMEL_OK ? context_.last_error
+                                             : EMEL_ERR_BACKEND);
+
+    if (ev.error_out != nullptr) {
+      *ev.error_out = err;
+    }
+    if (ok) {
+      if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
+        ev.dispatch_done(ev.owner_sm, events::tokenizer_bind_done{&ev});
+      }
+    } else {
+      if (ev.dispatch_error != nullptr && ev.owner_sm != nullptr) {
+        ev.dispatch_error(ev.owner_sm, events::tokenizer_bind_error{&ev, err});
+      }
+    }
+
+    action::clear_request(context_);
+    return accepted && ok;
+  }
 
   bool process_event(const event::tokenize &ev) {
     namespace sml = boost::sml;

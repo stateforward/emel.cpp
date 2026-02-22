@@ -104,6 +104,10 @@ if(EMEL_ENABLE_TESTS)
     tests/tokenizer/preprocessor_rwkv_tests.cpp
     tests/tokenizer/preprocessor_plamo2_tests.cpp
     tests/tokenizer/preprocessor_fallback_tests.cpp
+    tests/tokenizer/bpe_regex_tests.cpp
+    tests/tokenizer/bpe_split_tests.cpp
+    tests/tokenizer/tokenizer_tests.cpp
+    tests/tokenizer/tokenizer_action_guard_tests.cpp
     tests/batch/splitter_tests.cpp
     tests/batch/splitter_actions_tests.cpp
     tests/batch/splitter_additional_tests.cpp

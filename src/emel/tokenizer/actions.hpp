@@ -7,20 +7,24 @@
 #include "emel/emel.h"
 #include "emel/encoder/events.hpp"
 #include "emel/tokenizer/context.hpp"
-#include "emel/tokenizer/preprocessor/detail.hpp"
+#include "emel/tokenizer/preprocessor/events.hpp"
 
 namespace emel::tokenizer::action {
 
 inline context::context()
     : encoder_any() {
+  preprocessor_any.set_kind(preprocessor_kind::fallback);
   encoder_any.set_kind(encoder_kind::fallback);
+  preprocess_kind = preprocessor_kind::fallback;
   model_kind = encoder_kind::fallback;
+  is_bound = false;
 }
 } // namespace emel::tokenizer::action
 
 namespace emel::tokenizer::detail {
 
 using action::encoder_kind;
+using action::preprocessor_kind;
 
 inline encoder_kind encoder_kind_from_model(
     const emel::model::data::tokenizer_model model) {
@@ -41,6 +45,28 @@ inline encoder_kind encoder_kind_from_model(
     case emel::model::data::tokenizer_model::UNKNOWN:
     default:
       return encoder_kind::fallback;
+  }
+}
+
+inline preprocessor_kind preprocessor_kind_from_model(
+    const emel::model::data::tokenizer_model model) {
+  switch (model) {
+    case emel::model::data::tokenizer_model::SPM:
+      return preprocessor_kind::spm;
+    case emel::model::data::tokenizer_model::BPE:
+      return preprocessor_kind::bpe;
+    case emel::model::data::tokenizer_model::WPM:
+      return preprocessor_kind::wpm;
+    case emel::model::data::tokenizer_model::UGM:
+      return preprocessor_kind::ugm;
+    case emel::model::data::tokenizer_model::RWKV:
+      return preprocessor_kind::rwkv;
+    case emel::model::data::tokenizer_model::PLAMO2:
+      return preprocessor_kind::plamo2;
+    case emel::model::data::tokenizer_model::NONE:
+    case emel::model::data::tokenizer_model::UNKNOWN:
+    default:
+      return preprocessor_kind::fallback;
   }
 }
 
@@ -69,14 +95,33 @@ inline void set_error(context &ctx, const int32_t err) noexcept {
 }
 
 inline void clear_request(context &ctx) noexcept {
-  ctx.vocab = nullptr;
   ctx.text = {};
   ctx.add_special = false;
   ctx.parse_special = false;
   ctx.token_ids_out = nullptr;
   ctx.token_capacity = 0;
-  ctx.model_kind = encoder_kind::fallback;
 }
+
+struct begin_bind {
+  void operator()(const event::bind &ev, context &ctx) const noexcept {
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_OK;
+    }
+    ctx.vocab = ev.vocab;
+    ctx.is_bound = false;
+    ctx.preprocess_kind = preprocessor_kind::fallback;
+    ctx.model_kind = encoder_kind::fallback;
+    ctx.phase_error = EMEL_OK;
+    ctx.last_error = EMEL_OK;
+  }
+};
+
+struct reject_bind {
+  void operator()(const event::bind &, context &ctx) const noexcept {
+    ctx.is_bound = false;
+    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+  }
+};
 
 struct begin_tokenize {
   void operator()(const event::tokenize &ev, context &ctx) const noexcept {
@@ -86,13 +131,11 @@ struct begin_tokenize {
     if (ev.error_out != nullptr) {
       *ev.error_out = EMEL_OK;
     }
-    ctx.vocab = ev.vocab;
     ctx.text = ev.text;
     ctx.add_special = ev.add_special;
     ctx.parse_special = ev.parse_special;
     ctx.token_ids_out = ev.token_ids_out;
     ctx.token_capacity = ev.token_capacity;
-    ctx.model_kind = encoder_kind::fallback;
     ctx.fragment_count = 0;
     ctx.fragment_index = 0;
     ctx.token_count = 0;
@@ -108,46 +151,24 @@ struct reject_invalid {
   }
 };
 
-struct build_special_tokens {
-  void operator()(context &ctx) const {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.vocab == nullptr ||
-        !emel::tokenizer::preprocessor::detail::build_special_tokens(
-            ctx.special_cache, *ctx.vocab)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    }
-  }
-};
-
-struct partition_raw {
-  void operator()(context &ctx) const {
-    ctx.phase_error = EMEL_OK;
-    ctx.fragment_count = 0;
-    ctx.fragment_index = 0;
-    if (!emel::tokenizer::preprocessor::detail::push_raw_fragment(
-            ctx.fragments.data(), ctx.fragments.size(), ctx.fragment_count,
-            ctx.text)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    }
-  }
-};
-
-struct partition_with_specials {
-  void operator()(context &ctx) const {
-    ctx.phase_error = EMEL_OK;
-    ctx.fragment_count = 0;
-    ctx.fragment_index = 0;
-    if (!emel::tokenizer::preprocessor::detail::partition_with_specials(
-            ctx.text, ctx.special_cache, ctx.parse_special,
-            ctx.fragments.data(), ctx.fragments.size(), &ctx.fragment_count)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    }
-  }
-};
-
-struct select_backend {
+struct bind_preprocessor {
   void operator()(context &ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
+    if (ctx.vocab == nullptr) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
+    const auto kind = detail::preprocessor_kind_from_model(
+        ctx.vocab->tokenizer_model_id);
+    ctx.preprocess_kind = kind;
+    ctx.preprocessor_any.set_kind(kind);
+  }
+};
+
+struct bind_encoder {
+  void operator()(context &ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    ctx.is_bound = false;
     if (ctx.vocab == nullptr) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
@@ -156,6 +177,39 @@ struct select_backend {
         ctx.vocab->tokenizer_model_id);
     ctx.model_kind = kind;
     ctx.encoder_any.set_kind(kind);
+    ctx.is_bound = true;
+  }
+};
+
+struct run_preprocess {
+  void operator()(context &ctx) const noexcept {
+    ctx.phase_error = EMEL_OK;
+    ctx.fragment_count = 0;
+    ctx.fragment_index = 0;
+    if (ctx.vocab == nullptr) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
+    size_t fragment_count = 0;
+    int32_t err = EMEL_OK;
+    emel::tokenizer::preprocessor::event::preprocess ev = {};
+    ev.vocab = ctx.vocab;
+    ev.text = ctx.text;
+    ev.parse_special = ctx.parse_special;
+    ev.fragments_out = ctx.fragments.data();
+    ev.fragment_capacity = ctx.fragments.size();
+    ev.fragment_count_out = &fragment_count;
+    ev.error_out = &err;
+    const bool accepted = ctx.preprocessor_any.process_event(ev);
+    if (!accepted && err == EMEL_OK) {
+      set_error(ctx, EMEL_ERR_BACKEND);
+      return;
+    }
+    if (err != EMEL_OK) {
+      set_error(ctx, err);
+      return;
+    }
+    ctx.fragment_count = fragment_count;
   }
 };
 
@@ -232,6 +286,7 @@ struct encode_raw_fragment {
     emel::encoder::event::encode encode_ev = {};
     encode_ev.vocab = ctx.vocab;
     encode_ev.text = frag.text;
+    encode_ev.pretokenized = (ctx.model_kind == encoder_kind::bpe);
     encode_ev.token_ids = ctx.token_ids_out + ctx.token_count;
     encode_ev.token_capacity = capacity;
     encode_ev.token_count_out = &fragment_count;
@@ -281,12 +336,13 @@ struct on_unexpected {
   }
 };
 
+inline constexpr begin_bind begin_bind{};
+inline constexpr reject_bind reject_bind{};
 inline constexpr begin_tokenize begin_tokenize{};
 inline constexpr reject_invalid reject_invalid{};
-inline constexpr build_special_tokens build_special_tokens{};
-inline constexpr partition_raw partition_raw{};
-inline constexpr partition_with_specials partition_with_specials{};
-inline constexpr select_backend select_backend{};
+inline constexpr bind_preprocessor bind_preprocessor{};
+inline constexpr bind_encoder bind_encoder{};
+inline constexpr run_preprocess run_preprocess{};
 inline constexpr append_bos append_bos{};
 inline constexpr append_sep append_sep{};
 inline constexpr append_eos append_eos{};

@@ -3,12 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <string>
-#include <vector>
-
 #include "emel/emel.h"
-#include "emel/text/unicode.hpp"
-#include "emel/tokenizer/bpe/regex.hpp"
+#include "emel/tokenizer/bpe/split.hpp"
 #include "emel/tokenizer/preprocessor/context.hpp"
 #include "emel/tokenizer/preprocessor/detail.hpp"
 
@@ -26,7 +22,7 @@ inline void clear_request(context & ctx) noexcept {
   ctx.parse_special = false;
   ctx.fragment_capacity = 0;
   ctx.fragment_count = 0;
-  ctx.bpe_words.clear();
+  ctx.bpe_scratch.reset();
 }
 
 struct begin_preprocess {
@@ -45,7 +41,7 @@ struct begin_preprocess {
     ctx.fragment_count = 0;
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
-    ctx.bpe_words.clear();
+    ctx.bpe_scratch.reset();
   }
 };
 
@@ -90,31 +86,24 @@ struct partition_bpe_no_specials {
       return;
     }
 
-    emel::tokenizer::bpe::detail::assign_bpe_regex(ctx.bpe_pre_id,
-                                                   ctx.bpe_regex_exprs,
-                                                   *ctx.vocab);
-    ctx.bpe_words.clear();
-    if (ctx.bpe_words.capacity() < ctx.fragment_capacity) {
-      ctx.bpe_words.reserve(ctx.fragment_capacity);
-    }
-
     size_t out_count = 0;
-    const std::string raw_text(ctx.text);
-    const auto words = emel::text::unicode_regex_split(raw_text,
-                                                       ctx.bpe_regex_exprs);
-    for (const std::string & word : words) {
-      if (word.empty()) {
-        continue;
-      }
+    ctx.bpe_scratch.reset();
+    emel::tokenizer::bpe::detail::split_view view = {};
+    if (!emel::tokenizer::bpe::detail::split_and_encode_append(
+            ctx.text, *ctx.vocab, ctx.bpe_scratch, view)) {
+      ctx.fragment_count = 0;
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
+    for (size_t idx = 0; idx < view.count; ++idx) {
       if (out_count >= ctx.fragment_capacity) {
         ctx.fragment_count = 0;
         set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
         return;
       }
-      ctx.bpe_words.push_back(word);
       if (!detail::push_raw_fragment(ctx.request->fragments_out,
                                      ctx.fragment_capacity, out_count,
-                                     ctx.bpe_words.back())) {
+                                     view.words[idx])) {
         ctx.fragment_count = 0;
         set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
         return;
@@ -143,14 +132,7 @@ struct partition_bpe_with_specials {
       return;
     }
 
-    emel::tokenizer::bpe::detail::assign_bpe_regex(ctx.bpe_pre_id,
-                                                   ctx.bpe_regex_exprs,
-                                                   *ctx.vocab);
-    ctx.bpe_words.clear();
-    if (ctx.bpe_words.capacity() < ctx.fragment_capacity) {
-      ctx.bpe_words.reserve(ctx.fragment_capacity);
-    }
-
+    ctx.bpe_scratch.reset();
     size_t out_count = 0;
     for (size_t idx = 0; idx < partition_count; ++idx) {
       const fragment & frag = partitions[idx];
@@ -168,23 +150,22 @@ struct partition_bpe_with_specials {
       if (frag.text.empty()) {
         continue;
       }
-
-      const std::string raw_text(frag.text);
-      const auto words = emel::text::unicode_regex_split(raw_text,
-                                                         ctx.bpe_regex_exprs);
-      for (const std::string & word : words) {
-        if (word.empty()) {
-          continue;
-        }
+      emel::tokenizer::bpe::detail::split_view view = {};
+      if (!emel::tokenizer::bpe::detail::split_and_encode_append(
+              frag.text, *ctx.vocab, ctx.bpe_scratch, view)) {
+        ctx.fragment_count = 0;
+        set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+        return;
+      }
+      for (size_t word_idx = 0; word_idx < view.count; ++word_idx) {
         if (out_count >= ctx.fragment_capacity) {
           ctx.fragment_count = 0;
           set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
           return;
         }
-        ctx.bpe_words.push_back(word);
         if (!detail::push_raw_fragment(ctx.request->fragments_out,
                                        ctx.fragment_capacity, out_count,
-                                       ctx.bpe_words.back())) {
+                                       view.words[word_idx])) {
           ctx.fragment_count = 0;
           set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
           return;

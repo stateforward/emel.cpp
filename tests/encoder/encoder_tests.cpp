@@ -669,27 +669,6 @@ TEST_CASE("encoder_ensure_tables_populates_state") {
   CHECK(ctx.ugm_ready);
 }
 
-TEST_CASE("encoder_assign_bpe_regex_variants") {
-  vocab_builder builder{};
-  builder.set_model("gpt2");
-
-  emel::encoder::bpe::action::context ctx{};
-  ctx.vocab = builder.vocab;
-
-  builder.set_pre("gpt2");
-  emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-  CHECK(ctx.bpe_pre_id == emel::model::data::tokenizer_pre::GPT2);
-  CHECK(!ctx.bpe_regex_exprs.empty());
-
-  builder.set_pre("llama3");
-  emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-  CHECK(ctx.bpe_pre_id == emel::model::data::tokenizer_pre::LLAMA3);
-
-  builder.set_pre("mpt");
-  emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-  CHECK(ctx.bpe_pre_id == emel::model::data::tokenizer_pre::MPT);
-}
-
 TEST_CASE("encoder_guard_validates_inputs") {
   vocab_builder builder{};
   std::array<int32_t, 2> tokens = {};
@@ -894,9 +873,6 @@ TEST_CASE("encoder_encode_impl_variants") {
           emel::encoder::bpe::action::context ctx{};
           ctx.vocab = builder.vocab;
           CHECK(emel::encoder::detail::ensure_tables(ctx));
-          if (pre != nullptr) {
-            emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-          }
           result = emel::encoder::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
           break;
         }
@@ -1008,7 +984,6 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     emel::encoder::bpe::action::context ctx{};
     ctx.vocab = builder.vocab;
     CHECK(emel::encoder::detail::ensure_tables(ctx));
-    emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
     emel::encoder::event::encode ev_plain = ev;
     auto result = emel::encoder::bpe::detail::encode_bpe(ev_plain, ctx, *builder.vocab);
     (void)result;
@@ -1159,7 +1134,6 @@ TEST_CASE("encoder_detail_branch_coverage") {
   CHECK(builder.vocab->tokenizer_model_id == emel::model::data::tokenizer_model::UNKNOWN);
 
   builder.set_pre("");
-  emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
 }
 
 TEST_CASE("encoder_detail_merge_and_token_helpers") {
@@ -1558,130 +1532,6 @@ TEST_CASE("encoder_detail_normalize_ugm_into_paths") {
   CHECK(emel::encoder::ugm::detail::normalize_ugm_into(
     *builder.vocab, ctx, "  a  ", trimmed));
   CHECK(!trimmed.empty());
-}
-
-TEST_CASE("encoder_assign_bpe_regex_variants_extended") {
-  vocab_builder builder{};
-  builder.set_model("gpt2");
-
-  const std::array<const char *, 42> presets = {{
-    "llama3",
-    "dbrx",
-    "smaug",
-    "deepseek-llm",
-    "deepseek3-llm",
-    "hunyuan-dense",
-    "youtu",
-    "deepseek-coder",
-    "falcon",
-    "starcoder",
-    "refact",
-    "command-r",
-    "smollm",
-    "codeshell",
-    "exaone",
-    "minerva",
-    "gpt2",
-    "mpt",
-    "olmo",
-    "jais",
-    "trillion",
-    "granite-docling",
-    "stablelm2",
-    "qwen2",
-    "hunyuan",
-    "solar-open",
-    "qwen35",
-    "poro",
-    "bloom",
-    "gpt3-finnish",
-    "chatglm4",
-    "viking",
-    "tekken",
-    "chameleon",
-    "gpt4o",
-    "minimax-m2",
-    "kimi-k2",
-    "superbpe",
-    "bailingmoe",
-    "seed-coder",
-    "grok-2",
-    "afmoe",
-  }};
-
-  for (const auto pre : presets) {
-    builder.set_pre(pre);
-    emel::encoder::bpe::action::context ctx{};
-    ctx.vocab = builder.vocab;
-    emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-    CHECK(ctx.bpe_pre_id == builder.vocab->tokenizer_pre_id);
-    CHECK(!ctx.bpe_regex_exprs.empty());
-  }
-}
-
-TEST_CASE("encoder_assign_bpe_regex_enum_cases") {
-  using tokenizer_pre = emel::model::data::tokenizer_pre;
-  vocab_builder builder{};
-  builder.set_model("gpt2");
-
-  const std::array<tokenizer_pre, 47> presets = {{
-    tokenizer_pre::DEFAULT,
-    tokenizer_pre::LLAMA3,
-    tokenizer_pre::JAIS2,
-    tokenizer_pre::DBRX,
-    tokenizer_pre::SMAUG,
-    tokenizer_pre::DEEPSEEK_LLM,
-    tokenizer_pre::DEEPSEEK3_LLM,
-    tokenizer_pre::HUNYUAN_DENSE,
-    tokenizer_pre::JOYAI_LLM,
-    tokenizer_pre::YOUTU,
-    tokenizer_pre::DEEPSEEK_CODER,
-    tokenizer_pre::FALCON,
-    tokenizer_pre::STARCODER,
-    tokenizer_pre::REFACT,
-    tokenizer_pre::COMMAND_R,
-    tokenizer_pre::SMOLLM,
-    tokenizer_pre::CODESHELL,
-    tokenizer_pre::EXAONE,
-    tokenizer_pre::MINERVA,
-    tokenizer_pre::GPT2,
-    tokenizer_pre::MPT,
-    tokenizer_pre::OLMO,
-    tokenizer_pre::JAIS,
-    tokenizer_pre::TRILLION,
-    tokenizer_pre::GRANITE_DOCLING,
-    tokenizer_pre::QWEN35,
-    tokenizer_pre::STABLELM2,
-    tokenizer_pre::QWEN2,
-    tokenizer_pre::HUNYUAN,
-    tokenizer_pre::SOLAR_OPEN,
-    tokenizer_pre::PORO,
-    tokenizer_pre::BLOOM,
-    tokenizer_pre::GPT3_FINNISH,
-    tokenizer_pre::CHATGLM4,
-    tokenizer_pre::VIKING,
-    tokenizer_pre::TEKKEN,
-    tokenizer_pre::CHAMELEON,
-    tokenizer_pre::GPT4O,
-    tokenizer_pre::MINIMAX_M2,
-    tokenizer_pre::TINY_AYA,
-    tokenizer_pre::KIMI_K2,
-    tokenizer_pre::SUPERBPE,
-    tokenizer_pre::BAILINGMOE,
-    tokenizer_pre::SEED_CODER,
-    tokenizer_pre::GROK_2,
-    tokenizer_pre::AFMOE,
-    tokenizer_pre::EXAONE_MOE,
-  }};
-
-  for (const auto pre : presets) {
-    builder.vocab->tokenizer_pre_id = pre;
-    emel::encoder::bpe::action::context ctx{};
-    ctx.vocab = builder.vocab;
-    emel::encoder::bpe::detail::assign_bpe_regex(ctx, *builder.vocab);
-    CHECK(ctx.bpe_pre_id == pre);
-    CHECK(!ctx.bpe_regex_exprs.empty());
-  }
 }
 
 TEST_CASE("encoder_detail_rwkv_unescape_branches") {
@@ -2259,7 +2109,6 @@ TEST_CASE("encoder_encode_branch_cases") {
     emel::encoder::bpe::action::context ctx{};
     ctx.vocab = builder.vocab;
     CHECK(emel::encoder::detail::ensure_tables(ctx));
-    ctx.bpe_regex_exprs.clear();
     auto result = emel::encoder::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
     (void)result;
   }
