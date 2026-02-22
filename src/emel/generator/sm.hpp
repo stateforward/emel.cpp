@@ -7,7 +7,7 @@
 #include "emel/generator/events.hpp"
 #include "emel/generator/guards.hpp"
 #include "emel/model/data.hpp"
-#include "emel/tokenizer/sm.hpp"
+#include "emel/text/tokenizer/sm.hpp"
 
 namespace emel::generator {
 
@@ -44,7 +44,7 @@ struct sm : emel::sm<model> {
 
  private:
   emel::model::data & model_;
-  emel::tokenizer::sm tokenizer_ = {};
+  emel::text::tokenizer::sm tokenizer_ = {};
   int32_t tokens_generated = 0;
   int32_t max_tokens = 0;
 };

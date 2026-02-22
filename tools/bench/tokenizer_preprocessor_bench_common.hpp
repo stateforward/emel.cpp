@@ -13,16 +13,16 @@
 
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
-#include "emel/tokenizer/preprocessor/detail.hpp"
-#include "emel/tokenizer/preprocessor/events.hpp"
-#include "emel/tokenizer/preprocessor/types.hpp"
+#include "emel/text/tokenizer/preprocessor/detail.hpp"
+#include "emel/text/tokenizer/preprocessor/events.hpp"
+#include "emel/text/tokenizer/preprocessor/types.hpp"
 
 namespace emel::bench::tokenizer_preprocessor {
 
-using emel::tokenizer::preprocessor::fragment;
-using emel::tokenizer::preprocessor::fragment_kind;
+using emel::text::tokenizer::preprocessor::fragment;
+using emel::text::tokenizer::preprocessor::fragment_kind;
 
-constexpr size_t k_fragment_capacity = emel::tokenizer::preprocessor::k_max_fragments;
+constexpr size_t k_fragment_capacity = emel::text::tokenizer::preprocessor::k_max_fragments;
 
 struct special_case {
   const char * name = nullptr;
@@ -86,15 +86,15 @@ inline reference_fragments build_reference_special_fragments(
   reference_fragments out;
   out.text = text;
 
-  emel::tokenizer::preprocessor::special_token_cache cache = {};
-  if (!emel::tokenizer::preprocessor::detail::build_special_tokens(cache, vocab)) {
+  emel::text::tokenizer::preprocessor::special_token_cache cache = {};
+  if (!emel::text::tokenizer::preprocessor::detail::build_special_tokens(cache, vocab)) {
     std::fprintf(stderr, "error: %s reference special token build failed\n", label);
     std::abort();
   }
 
   std::array<fragment, k_fragment_capacity> fragments = {};
   size_t count = 0;
-  if (!emel::tokenizer::preprocessor::detail::partition_with_specials(
+  if (!emel::text::tokenizer::preprocessor::detail::partition_with_specials(
           out.text, cache, parse_special, fragments.data(), fragments.size(), &count)) {
     std::fprintf(stderr, "error: %s reference partition failed\n", label);
     std::abort();
@@ -115,7 +115,7 @@ bool collect_emel_fragments(machine_type & machine,
                             int32_t & err) {
   count = 0;
   err = EMEL_OK;
-  emel::tokenizer::preprocessor::event::preprocess request = {};
+  emel::text::tokenizer::preprocessor::event::preprocess request = {};
   request.vocab = &vocab;
   request.text = text;
   request.parse_special = parse_special;

@@ -11,7 +11,7 @@
 
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
-#include "emel/tokenizer/sm.hpp"
+#include "emel/text/tokenizer/sm.hpp"
 
 namespace {
 
@@ -128,10 +128,10 @@ std::string make_repeated_text(const int repeats) {
   return out;
 }
 
-bool bind_tokenizer(emel::tokenizer::sm & machine,
+bool bind_tokenizer(emel::text::tokenizer::sm & machine,
                     const emel::model::data::vocab & vocab) {
   int32_t err = EMEL_OK;
-  emel::tokenizer::event::bind bind_ev = {};
+  emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
   bind_ev.error_out = &err;
   if (!machine.process_event(bind_ev) || err != EMEL_OK) {
@@ -140,14 +140,14 @@ bool bind_tokenizer(emel::tokenizer::sm & machine,
   return true;
 }
 
-bool tokenize_once(emel::tokenizer::sm & machine,
+bool tokenize_once(emel::text::tokenizer::sm & machine,
                    const emel::model::data::vocab & vocab,
                    const std::string_view text,
                    std::array<int32_t, k_token_capacity> & tokens,
                    int32_t & token_count,
                    int32_t & err) {
   err = EMEL_OK;
-  emel::tokenizer::event::tokenize tok_ev = {};
+  emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = &vocab;
   tok_ev.text = text;
   tok_ev.add_special = false;
@@ -160,7 +160,7 @@ bool tokenize_once(emel::tokenizer::sm & machine,
   return accepted && err == EMEL_OK;
 }
 
-void ensure_tokenizes(emel::tokenizer::sm & machine,
+void ensure_tokenizes(emel::text::tokenizer::sm & machine,
                       const emel::model::data::vocab & vocab,
                       const std::string_view text,
                       const char * label) {
@@ -201,7 +201,7 @@ void append_emel_tokenizer_cases(std::vector<result> & results, const config & c
     const std::string short_text = make_repeated_text(entry.short_repeats);
     const std::string long_text = make_repeated_text(entry.long_repeats);
     auto vocab = entry.build_vocab();
-    emel::tokenizer::sm machine{};
+    emel::text::tokenizer::sm machine{};
     if (!bind_tokenizer(machine, *vocab)) {
       std::fprintf(stderr, "error: tokenizer bind failed\n");
       std::abort();
@@ -212,7 +212,7 @@ void append_emel_tokenizer_cases(std::vector<result> & results, const config & c
     std::array<int32_t, k_token_capacity> tokens = {};
     int32_t token_count = 0;
     int32_t err = EMEL_OK;
-    emel::tokenizer::event::tokenize short_ev = {};
+    emel::text::tokenizer::event::tokenize short_ev = {};
     short_ev.vocab = vocab.get();
     short_ev.text = short_text;
     short_ev.add_special = false;
@@ -226,7 +226,7 @@ void append_emel_tokenizer_cases(std::vector<result> & results, const config & c
     const std::string short_name = std::string(entry.name) + "_short";
     results.push_back(measure_case(short_name.c_str(), cfg, short_fn));
 
-    emel::tokenizer::event::tokenize long_ev = short_ev;
+    emel::text::tokenizer::event::tokenize long_ev = short_ev;
     long_ev.text = long_text;
     auto long_fn = [&]() { (void)machine.process_event(long_ev); };
     const std::string long_name = std::string(entry.name) + "_long";

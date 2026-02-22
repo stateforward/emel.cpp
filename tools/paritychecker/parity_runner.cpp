@@ -14,7 +14,7 @@
 #include "emel/parser/gguf/actions.hpp"
 #include "emel/parser/gguf/context.hpp"
 #include "emel/parser/gguf/sm.hpp"
-#include "emel/tokenizer/sm.hpp"
+#include "emel/text/tokenizer/sm.hpp"
 
 #include "llama.h"
 
@@ -58,7 +58,7 @@ bool load_emel_vocab(const std::string & model_path, emel::model::data & model,
   return true;
 }
 
-bool run_emel_tokenize(emel::tokenizer::sm & tokenizer,
+bool run_emel_tokenize(emel::text::tokenizer::sm & tokenizer,
                        const emel::model::data::vocab & vocab,
                        std::string_view text,
                        bool add_special,
@@ -73,7 +73,7 @@ bool run_emel_tokenize(emel::tokenizer::sm & tokenizer,
 
   out_tokens.assign(capacity, 0);
   int32_t token_count = 0;
-  emel::tokenizer::event::tokenize tok_ev{};
+  emel::text::tokenizer::event::tokenize tok_ev{};
   tok_ev.vocab = &vocab;
   tok_ev.text = text;
   tok_ev.add_special = add_special;
@@ -243,9 +243,9 @@ int run_parity(const parity_options & opts) {
     return 1;
   }
 
-  emel::tokenizer::sm tokenizer;
+  emel::text::tokenizer::sm tokenizer;
   int32_t bind_err = EMEL_OK;
-  emel::tokenizer::event::bind bind_ev{};
+  emel::text::tokenizer::event::bind bind_ev{};
   bind_ev.vocab = &model->vocab_data;
   bind_ev.error_out = &bind_err;
   if (!tokenizer.process_event(bind_ev) || bind_err != EMEL_OK) {

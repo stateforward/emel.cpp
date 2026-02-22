@@ -6,7 +6,7 @@
 
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
-#include "emel/tokenizer/sm.hpp"
+#include "emel/text/tokenizer/sm.hpp"
 
 namespace {
 
@@ -49,10 +49,10 @@ emel::model::data::vocab make_bpe_vocab() {
 
 TEST_CASE("tokenizer_bind_and_tokenize_bpe") {
   emel::model::data::vocab vocab = make_bpe_vocab();
-  emel::tokenizer::sm machine{};
+  emel::text::tokenizer::sm machine{};
 
   int32_t bind_err = EMEL_OK;
-  emel::tokenizer::event::bind bind_ev = {};
+  emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
   bind_ev.error_out = &bind_err;
 
@@ -62,7 +62,7 @@ TEST_CASE("tokenizer_bind_and_tokenize_bpe") {
   std::array<int32_t, 8> tokens = {};
   int32_t count = 0;
   int32_t tok_err = EMEL_OK;
-  emel::tokenizer::event::tokenize tok_ev = {};
+  emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = &vocab;
   tok_ev.text = std::string_view("hello world");
   tok_ev.add_special = true;
@@ -83,12 +83,12 @@ TEST_CASE("tokenizer_bind_and_tokenize_bpe") {
 
 TEST_CASE("tokenizer_tokenize_requires_bind") {
   emel::model::data::vocab vocab = make_bpe_vocab();
-  emel::tokenizer::sm machine{};
+  emel::text::tokenizer::sm machine{};
 
   std::array<int32_t, 4> tokens = {};
   int32_t count = 0;
   int32_t err = EMEL_OK;
-  emel::tokenizer::event::tokenize tok_ev = {};
+  emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = &vocab;
   tok_ev.text = std::string_view("hello");
   tok_ev.add_special = false;
@@ -106,10 +106,10 @@ TEST_CASE("tokenizer_tokenize_requires_bind") {
 TEST_CASE("tokenizer_tokenize_rejects_mismatched_vocab") {
   emel::model::data::vocab vocab = make_bpe_vocab();
   emel::model::data::vocab other_vocab = make_bpe_vocab();
-  emel::tokenizer::sm machine{};
+  emel::text::tokenizer::sm machine{};
 
   int32_t bind_err = EMEL_OK;
-  emel::tokenizer::event::bind bind_ev = {};
+  emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
   bind_ev.error_out = &bind_err;
   CHECK(machine.process_event(bind_ev));
@@ -118,7 +118,7 @@ TEST_CASE("tokenizer_tokenize_rejects_mismatched_vocab") {
   std::array<int32_t, 4> tokens = {};
   int32_t count = 0;
   int32_t err = EMEL_OK;
-  emel::tokenizer::event::tokenize tok_ev = {};
+  emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = &other_vocab;
   tok_ev.text = std::string_view("hello");
   tok_ev.add_special = false;

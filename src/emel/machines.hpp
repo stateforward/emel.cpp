@@ -22,7 +22,7 @@
 #include "emel/telemetry/provider/sm.hpp"
 #include "emel/tensor/allocator/sm.hpp"
 #include "emel/tensor/lifetime_analyzer/sm.hpp"
-#include "emel/tokenizer/sm.hpp"
+#include "emel/text/tokenizer/sm.hpp"
 
 namespace emel {
 
@@ -54,7 +54,7 @@ using TelemetryExporter = emel::telemetry::exporter::sm;
 using TelemetryProvider = emel::telemetry::provider::sm;
 using TensorAllocator = emel::tensor::allocator::sm;
 using TensorLifetimeAnalyzer = emel::tensor::lifetime_analyzer::sm;
-using Tokenizer = emel::tokenizer::sm;
+using Tokenizer = emel::text::tokenizer::sm;
 using WeightLoader = emel::model::weight_loader::sm;
 
 }  // namespace emel

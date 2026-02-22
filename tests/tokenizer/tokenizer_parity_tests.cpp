@@ -10,11 +10,11 @@
 
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
-#include "emel/tokenizer/actions.hpp"
-#include "emel/tokenizer/preprocessor/any.hpp"
-#include "emel/tokenizer/preprocessor/types.hpp"
+#include "emel/text/tokenizer/actions.hpp"
+#include "emel/text/tokenizer/preprocessor/any.hpp"
+#include "emel/text/tokenizer/preprocessor/types.hpp"
 #include "emel/encoder/any.hpp"
-#include "emel/tokenizer/sm.hpp"
+#include "emel/text/tokenizer/sm.hpp"
 
 namespace {
 
@@ -111,15 +111,15 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
   token_count = 0;
   err = EMEL_OK;
 
-  emel::tokenizer::preprocessor::any preprocessor;
+  emel::text::tokenizer::preprocessor::any preprocessor;
   preprocessor.set_kind(
-    emel::tokenizer::detail::preprocessor_kind_from_model(vocab.tokenizer_model_id));
+    emel::text::tokenizer::detail::preprocessor_kind_from_model(vocab.tokenizer_model_id));
 
-  std::array<emel::tokenizer::preprocessor::fragment,
-             emel::tokenizer::preprocessor::k_max_fragments> fragments = {};
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments> fragments = {};
   size_t fragment_count = 0;
   bool preprocessed = false;
-  emel::tokenizer::preprocessor::event::preprocess pre_ev = {};
+  emel::text::tokenizer::preprocessor::event::preprocess pre_ev = {};
   pre_ev.vocab = &vocab;
   pre_ev.text = text;
   pre_ev.parse_special = parse_special;
@@ -152,12 +152,12 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
   }
 
   emel::encoder::any encoder;
-  encoder.set_kind(emel::tokenizer::detail::encoder_kind_from_model(
+  encoder.set_kind(emel::text::tokenizer::detail::encoder_kind_from_model(
     vocab.tokenizer_model_id));
 
   for (size_t idx = 0; idx < fragment_count; ++idx) {
     const auto & frag = fragments[idx];
-    if (frag.kind == emel::tokenizer::preprocessor::fragment_kind::token) {
+    if (frag.kind == emel::text::tokenizer::preprocessor::fragment_kind::token) {
       if (!push_token(frag.token)) {
         return false;
       }
@@ -202,9 +202,9 @@ void run_parity_case(const emel::model::data::vocab & vocab,
                      const std::string_view text,
                      const bool add_special,
                      const bool parse_special) {
-  emel::tokenizer::sm machine{};
+  emel::text::tokenizer::sm machine{};
   int32_t bind_err = EMEL_OK;
-  emel::tokenizer::event::bind bind_ev = {};
+  emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
   bind_ev.error_out = &bind_err;
   REQUIRE(machine.process_event(bind_ev));
@@ -213,7 +213,7 @@ void run_parity_case(const emel::model::data::vocab & vocab,
   std::array<int32_t, 32> tokens = {};
   int32_t count = 0;
   int32_t err = EMEL_OK;
-  emel::tokenizer::event::tokenize tok_ev = {};
+  emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = &vocab;
   tok_ev.text = text;
   tok_ev.add_special = add_special;
