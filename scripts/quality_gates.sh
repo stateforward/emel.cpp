@@ -21,6 +21,7 @@ fi
 
 timing_lines=()
 total_start="$(date +%s)"
+bench_status=0
 
 write_timing_snapshot() {
   local total_now
@@ -49,6 +50,26 @@ run_step() {
   write_timing_snapshot
 }
 
+run_step_allow_fail() {
+  local name="$1"
+  shift
+  local start
+  local end
+  local duration
+  local status=0
+  start="$(date +%s)"
+  if "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  end="$(date +%s)"
+  duration="$(( end - start ))"
+  timing_lines+=("$name $duration")
+  write_timing_snapshot
+  return "$status"
+}
+
 run_step build_with_zig "$ROOT_DIR/scripts/build_with_zig.sh"
 run_step test_with_coverage "$ROOT_DIR/scripts/test_with_coverage.sh"
 run_step paritychecker "$ROOT_DIR/scripts/paritychecker.sh"
@@ -56,10 +77,16 @@ run_step paritychecker "$ROOT_DIR/scripts/paritychecker.sh"
 # TODO: re-enable once stateforward/sml.cpp fix lands.
 run_step fuzz_smoke "$ROOT_DIR/scripts/fuzz_smoke.sh"
 run_step lint_snapshot "$ROOT_DIR/scripts/lint_snapshot.sh"
-run_step bench_snapshot env \
+if ! run_step_allow_fail bench_snapshot env \
   EMEL_BENCH_ITERS=10000 \
   EMEL_BENCH_RUNS=3 \
   EMEL_BENCH_WARMUP_ITERS=1000 \
   EMEL_BENCH_WARMUP_RUNS=1 \
-  "$ROOT_DIR/scripts/bench.sh" --snapshot --compare-update
+  "$ROOT_DIR/scripts/bench.sh" --snapshot --compare-update; then
+  bench_status=$?
+fi
 run_step generate_docs "$ROOT_DIR/scripts/generate_docs.sh"
+
+if [[ $bench_status -ne 0 ]]; then
+  exit "$bench_status"
+fi
