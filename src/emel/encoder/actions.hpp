@@ -33,6 +33,16 @@ inline int32_t normalize_error(const int32_t phase_error, const int32_t last_err
   return EMEL_ERR_BACKEND;
 }
 
+inline bool sync_vocab(context & ctx, const emel::model::data::vocab * vocab) noexcept {
+  if (ctx.vocab == vocab) {
+    return false;
+  }
+  ctx.vocab = vocab;
+  ctx.tables_ready = false;
+  ctx.ugm_ready = false;
+  return true;
+}
+
 }  // namespace detail
 
 struct reject_invalid_encode {

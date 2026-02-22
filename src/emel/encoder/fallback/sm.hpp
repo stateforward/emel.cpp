@@ -139,8 +139,15 @@ struct model {
 
 struct sm : public emel::sm<model> {
   using base_type = emel::sm<model>;
-  using base_type::base_type;
+  sm() : base_type(context_) {}
+
   using base_type::process_event;
+  using base_type::visit_current_states;
+
+  int32_t last_error() const noexcept { return context_.last_error; }
+
+ private:
+  action::context context_{};
 };
 
 } // namespace emel::encoder::fallback

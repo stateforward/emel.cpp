@@ -42,6 +42,7 @@ struct begin_encode {
     ctx.token_count = 0;
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
+    emel::encoder::action::detail::sync_vocab(ctx, ev.vocab);
     if (ev.token_count_out != nullptr) {
       *ev.token_count_out = 0;
     }

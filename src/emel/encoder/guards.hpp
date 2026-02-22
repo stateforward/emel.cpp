@@ -7,7 +7,8 @@ namespace emel::encoder::guard {
 
 struct valid_encode {
   bool operator()(const event::encode & ev, const action::context & ctx) const noexcept {
-    if (ctx.vocab == nullptr) {
+    (void)ctx;
+    if (ev.vocab == nullptr) {
       return false;
     }
     if (ev.token_count_out == nullptr || ev.error_out == nullptr) {

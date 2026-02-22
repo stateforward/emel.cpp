@@ -1,8 +1,6 @@
 # quality_gates timing (seconds)
 build_with_zig 0
-test_with_coverage 70
+test_with_coverage 71
 fuzz_smoke 28
-lint_snapshot 6
-bench_snapshot 28
-generate_docs 48
-total 180
+lint_snapshot 5
+total 105

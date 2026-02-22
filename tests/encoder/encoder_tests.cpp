@@ -188,15 +188,14 @@ TEST_CASE("encoder_bpe_ignore_merges_prefers_full_token") {
   const int32_t full_id = builder.add_token("hello", 0.5f, 1);
   builder.vocab->ignore_merges = true;
 
-  emel::encoder::bpe::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::bpe::sm machine{ctx};
+  emel::encoder::bpe::sm machine{};
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "hello",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -215,15 +214,14 @@ TEST_CASE("encoder_wpm_emits_longest_token") {
   const int32_t token_id = builder.add_token("\xE2\x96\x81hello", 0.2f, 1);
   builder.vocab->unk_id = 0;
 
-  emel::encoder::wpm::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::wpm::sm machine{ctx};
+  emel::encoder::wpm::sm machine{};
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "hello",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -245,15 +243,14 @@ TEST_CASE("encoder_ugm_applies_precompiled_charsmap") {
   builder.vocab->add_space_prefix = false;
   builder.set_charsmap_a_to_b();
 
-  emel::encoder::ugm::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::ugm::sm machine{ctx};
+  emel::encoder::ugm::sm machine{};
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "a",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -275,15 +272,14 @@ TEST_CASE("encoder_spm_merges_bigram") {
   (void)h_id;
   (void)i_id;
 
-  emel::encoder::spm::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::spm::sm machine{ctx};
+  emel::encoder::spm::sm machine{};
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "hi",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -305,15 +301,14 @@ TEST_CASE("encoder_bpe_merges_ranked_pair") {
   builder.add_token("e", 0.1f, 1);
   builder.add_merge("h e");
 
-  emel::encoder::bpe::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::bpe::sm machine{ctx};
+  emel::encoder::bpe::sm machine{};
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "he",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -332,15 +327,14 @@ TEST_CASE("encoder_bpe_byte_fallback") {
   builder.set_pre("gpt2");
   const int32_t byte_id = builder.add_byte_token(static_cast<uint8_t>('!'));
 
-  emel::encoder::bpe::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::bpe::sm machine{ctx};
+  emel::encoder::bpe::sm machine{};
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "!",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -431,14 +425,13 @@ TEST_CASE("encoder_rejects_invalid_input") {
   builder.set_pre("gpt2");
   builder.add_token("hello", 0.5f, 1);
 
-  emel::encoder::bpe::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::bpe::sm machine{ctx};
+  emel::encoder::bpe::sm machine{};
 
   int32_t token_count = 7;
   int32_t err = EMEL_OK;
 
   CHECK(!machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "hello",
     .token_ids = nullptr,
     .token_capacity = 0,
@@ -456,9 +449,7 @@ TEST_CASE("encoder_dispatch_callbacks") {
   builder.vocab->ignore_merges = true;
   builder.add_token("hello", 0.5f, 1);
 
-  emel::encoder::bpe::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::bpe::sm machine{ctx};
+  emel::encoder::bpe::sm machine{};
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
@@ -466,6 +457,7 @@ TEST_CASE("encoder_dispatch_callbacks") {
   dispatch_recorder recorder{};
 
   CHECK(machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "hello",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -485,9 +477,7 @@ TEST_CASE("encoder_dispatch_error_on_missing_bytes") {
   vocab_builder builder{};
   builder.set_model("unknown");
 
-  emel::encoder::fallback::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::fallback::sm machine{ctx};
+  emel::encoder::fallback::sm machine{};
 
   std::array<int32_t, 1> tokens = {};
   int32_t token_count = 0;
@@ -495,6 +485,7 @@ TEST_CASE("encoder_dispatch_error_on_missing_bytes") {
   dispatch_recorder recorder{};
 
   CHECK(!machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "x",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -516,15 +507,14 @@ TEST_CASE("encoder_wpm_falls_back_to_unk") {
   const int32_t unk_id = builder.add_token("<unk>", 0.0f, 2);
   builder.vocab->unk_id = unk_id;
 
-  emel::encoder::wpm::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::wpm::sm machine{ctx};
+  emel::encoder::wpm::sm machine{};
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "hello",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -543,15 +533,14 @@ TEST_CASE("encoder_fallback_byte_tokens") {
   const int32_t x_id = builder.add_byte_token(static_cast<uint8_t>('x'));
   const int32_t y_id = builder.add_byte_token(static_cast<uint8_t>('y'));
 
-  emel::encoder::fallback::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::fallback::sm machine{ctx};
+  emel::encoder::fallback::sm machine{};
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "xy",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -572,15 +561,14 @@ TEST_CASE("encoder_plamo2_byte_tokens") {
   builder.add_all_plamo2_byte_tokens();
   const int32_t byte_id = builder.add_plamo2_byte_token(static_cast<uint8_t>('p'));
 
-  emel::encoder::plamo2::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::plamo2::sm machine{ctx};
+  emel::encoder::plamo2::sm machine{};
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "p",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -598,15 +586,14 @@ TEST_CASE("encoder_rwkv_byte_tokens") {
   builder.set_model("rwkv");
   const int32_t byte_id = builder.add_byte_token(static_cast<uint8_t>('r'));
 
-  emel::encoder::rwkv::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::rwkv::sm machine{ctx};
+  emel::encoder::rwkv::sm machine{};
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::encoder::event::encode{
+    .vocab = builder.vocab,
     .text = "r",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -625,9 +612,7 @@ TEST_CASE("encoder_unexpected_event_sets_error") {
   builder.set_pre("gpt2");
   builder.add_token("hello", 0.5f, 1);
 
-  emel::encoder::bpe::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  emel::encoder::bpe::sm machine{ctx};
+  emel::encoder::bpe::sm machine{};
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
@@ -635,6 +620,7 @@ TEST_CASE("encoder_unexpected_event_sets_error") {
   dispatch_recorder recorder{};
 
   emel::encoder::event::encode request{
+    .vocab = builder.vocab,
     .text = "hello",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -711,6 +697,7 @@ TEST_CASE("encoder_guard_validates_inputs") {
   int32_t err = EMEL_OK;
 
   emel::encoder::event::encode valid{
+    .vocab = builder.vocab,
     .text = "ok",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -719,6 +706,7 @@ TEST_CASE("encoder_guard_validates_inputs") {
   };
 
   emel::encoder::event::encode invalid{
+    .vocab = builder.vocab,
     .text = "bad",
     .token_ids = nullptr,
     .token_capacity = 0,
@@ -727,6 +715,7 @@ TEST_CASE("encoder_guard_validates_inputs") {
   };
 
   emel::encoder::event::encode missing_count{
+    .vocab = builder.vocab,
     .text = "bad",
     .token_ids = tokens.data(),
     .token_capacity = static_cast<int32_t>(tokens.size()),
@@ -742,7 +731,7 @@ TEST_CASE("encoder_guard_validates_inputs") {
   CHECK(!emel::encoder::guard::valid_encode{}(missing_count, ctx));
 
   emel::encoder::action::context empty_ctx{};
-  CHECK(!emel::encoder::guard::valid_encode{}(valid, empty_ctx));
+  CHECK(emel::encoder::guard::valid_encode{}(valid, empty_ctx));
 }
 
 TEST_CASE("encoder_detail_misc_branches") {
@@ -2362,8 +2351,10 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
 
-  auto make_event = [&](const char * text, const int32_t capacity) {
+  auto make_event = [&](const char * text, const int32_t capacity,
+                        const emel::model::data::vocab * vocab) {
     return emel::encoder::event::encode{
+      .vocab = vocab,
       .text = text,
       .token_ids = tokens.data(),
       .token_capacity = capacity,
@@ -2372,8 +2363,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     };
   };
 
-  auto make_invalid_event = [&]() {
+  auto make_invalid_event = [&](const emel::model::data::vocab * vocab) {
     return emel::encoder::event::encode{
+      .vocab = vocab,
       .text = "x",
       .token_ids = nullptr,
       .token_capacity = 0,
@@ -2398,12 +2390,12 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
   emel::encoder::action::ensure_last_error(base_ctx);
   CHECK(base_ctx.last_error == EMEL_ERR_BACKEND);
 
-  auto base_ev = make_event("x", 1);
+  auto base_ev = make_event("x", 1, base_builder.vocab);
   emel::encoder::action::on_unexpected(base_ev, base_ctx);
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   emel::encoder::action::on_unexpected(emel::encoder::events::encoding_done{nullptr, 0}, base_ctx);
 
-  auto invalid_ev = make_invalid_event();
+  auto invalid_ev = make_invalid_event(base_builder.vocab);
   CHECK(emel::encoder::guard::valid_encode{}(base_ev, base_ctx));
   CHECK(emel::encoder::guard::invalid_encode{}(invalid_ev, base_ctx));
   base_ctx.phase_error = EMEL_OK;
@@ -2420,9 +2412,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
     emel::encoder::bpe::action::context ctx{};
     ctx.vocab = builder.vocab;
-    auto ev_ok = make_event("x", 1);
-    auto ev_error = make_event("x", 0);
-    auto ev_invalid = make_invalid_event();
+    auto ev_ok = make_event("x", 1, builder.vocab);
+    auto ev_error = make_event("x", 0, builder.vocab);
+    auto ev_invalid = make_invalid_event(builder.vocab);
 
     emel::encoder::bpe::action::reject_invalid_encode(ev_ok, ctx);
     emel::encoder::bpe::action::run_encode(ctx);
@@ -2449,9 +2441,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
     emel::encoder::wpm::action::context ctx{};
     ctx.vocab = builder.vocab;
-    auto ev_ok = make_event("x", 1);
-    auto ev_error = make_event("x", 0);
-    auto ev_invalid = make_invalid_event();
+    auto ev_ok = make_event("x", 1, builder.vocab);
+    auto ev_error = make_event("x", 0, builder.vocab);
+    auto ev_invalid = make_invalid_event(builder.vocab);
 
     emel::encoder::wpm::action::reject_invalid_encode(ev_ok, ctx);
     emel::encoder::wpm::action::run_encode(ctx);
@@ -2477,9 +2469,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
     emel::encoder::spm::action::context ctx{};
     ctx.vocab = builder.vocab;
-    auto ev_ok = make_event("x", 1);
-    auto ev_error = make_event("x", 0);
-    auto ev_invalid = make_invalid_event();
+    auto ev_ok = make_event("x", 1, builder.vocab);
+    auto ev_error = make_event("x", 0, builder.vocab);
+    auto ev_invalid = make_invalid_event(builder.vocab);
 
     emel::encoder::spm::action::reject_invalid_encode(ev_ok, ctx);
     emel::encoder::spm::action::run_encode(ctx);
@@ -2506,9 +2498,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
     emel::encoder::ugm::action::context ctx{};
     ctx.vocab = builder.vocab;
-    auto ev_ok = make_event("x", 1);
-    auto ev_error = make_event("x", 0);
-    auto ev_invalid = make_invalid_event();
+    auto ev_ok = make_event("x", 1, builder.vocab);
+    auto ev_error = make_event("x", 0, builder.vocab);
+    auto ev_invalid = make_invalid_event(builder.vocab);
 
     emel::encoder::ugm::action::reject_invalid_encode(ev_ok, ctx);
     emel::encoder::ugm::action::run_encode(ctx);
@@ -2533,9 +2525,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
     emel::encoder::rwkv::action::context ctx{};
     ctx.vocab = builder.vocab;
-    auto ev_ok = make_event("x", 1);
-    auto ev_error = make_event("x", 0);
-    auto ev_invalid = make_invalid_event();
+    auto ev_ok = make_event("x", 1, builder.vocab);
+    auto ev_error = make_event("x", 0, builder.vocab);
+    auto ev_invalid = make_invalid_event(builder.vocab);
 
     emel::encoder::rwkv::action::reject_invalid_encode(ev_ok, ctx);
     emel::encoder::rwkv::action::run_encode(ctx);
@@ -2562,9 +2554,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
     emel::encoder::plamo2::action::context ctx{};
     ctx.vocab = builder.vocab;
-    auto ev_ok = make_event("x", 1);
-    auto ev_error = make_event("x", 0);
-    auto ev_invalid = make_invalid_event();
+    auto ev_ok = make_event("x", 1, builder.vocab);
+    auto ev_error = make_event("x", 0, builder.vocab);
+    auto ev_invalid = make_invalid_event(builder.vocab);
 
     emel::encoder::plamo2::action::reject_invalid_encode(ev_ok, ctx);
     emel::encoder::plamo2::action::run_encode(ctx);
@@ -2589,9 +2581,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
     emel::encoder::fallback::action::context ctx{};
     ctx.vocab = builder.vocab;
-    auto ev_ok = make_event("x", 1);
-    auto ev_error = make_event("x", 0);
-    auto ev_invalid = make_invalid_event();
+    auto ev_ok = make_event("x", 1, builder.vocab);
+    auto ev_error = make_event("x", 0, builder.vocab);
+    auto ev_invalid = make_invalid_event(builder.vocab);
 
     emel::encoder::fallback::action::reject_invalid_encode(ev_ok, ctx);
     emel::encoder::fallback::action::run_encode(ctx);

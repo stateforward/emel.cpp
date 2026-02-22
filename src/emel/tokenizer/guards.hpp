@@ -97,7 +97,7 @@ struct should_add_sep {
     if (!ctx.add_special || ctx.vocab == nullptr) {
       return false;
     }
-    return ctx.model_slot == action::encoder_slot::wpm && ctx.vocab->add_sep;
+    return ctx.model_kind == action::encoder_kind::wpm && ctx.vocab->add_sep;
   }
 };
 
@@ -106,7 +106,7 @@ struct should_add_eos {
     if (!ctx.add_special || ctx.vocab == nullptr) {
       return false;
     }
-    return ctx.model_slot != action::encoder_slot::wpm && ctx.vocab->add_eos;
+    return ctx.model_kind != action::encoder_kind::wpm && ctx.vocab->add_eos;
   }
 };
 
