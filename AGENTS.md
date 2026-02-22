@@ -162,9 +162,11 @@ ALWAYS preserve or improve performance when porting logic from the reference
 implementation.
 ALWAYS implement equivalent functionality natively without external llama.cpp or
 ggml linkage.
-NEVER link "emel" against llama.cpp or ggml outside `tools/bench`.
-ALWAYS link llama.cpp and ggml together with emel in `tools/bench` only.
+NEVER link "emel" against llama.cpp or ggml outside `tools/bench` or
+`tools/paritychecker`.
+ALWAYS link llama.cpp and ggml together with emel in `tools/bench` and
+`tools/paritychecker` only.
 NEVER use `llama_` or `ggml_` prefixes in identifiers, symbols, files, or APIs
-outside `tools/bench`.
+outside `tools/bench` or `tools/paritychecker`.
 ALWAYS use `emel_` or `EMEL_` prefixes for project-owned identifiers, symbols,
 files, and APIs.

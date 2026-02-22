@@ -24,11 +24,13 @@ inline encode_result encode_spm(const event::encode &ev,
 
   size_t out_len = 0;
   if (vocab.add_space_prefix && ev.text.front() != ' ') {
-    if (out_len + 1 > ctx.scratch.buffer.size()) {
+    if (out_len + 3 > ctx.scratch.buffer.size()) {
       result.error = EMEL_ERR_INVALID_ARGUMENT;
       return result;
     }
-    ctx.scratch.buffer[out_len++] = ' ';
+    ctx.scratch.buffer[out_len++] = '\xE2';
+    ctx.scratch.buffer[out_len++] = '\x96';
+    ctx.scratch.buffer[out_len++] = '\x81';
   }
   for (const char c : ev.text) {
     if (c == ' ') {
