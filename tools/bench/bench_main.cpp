@@ -57,6 +57,7 @@ std::vector<bench::result> run_emel_benchmarks(const bench::config & cfg) {
   bench::append_emel_tokenizer_preprocessor_wpm_cases(results, cfg);
   bench::append_emel_tokenizer_preprocessor_rwkv_cases(results, cfg);
   bench::append_emel_tokenizer_preprocessor_plamo2_cases(results, cfg);
+  bench::append_emel_tokenizer_cases(results, cfg);
   return results;
 }
 
@@ -75,6 +76,7 @@ std::vector<bench::result> run_reference_benchmarks(const bench::config & cfg) {
   bench::append_reference_tokenizer_preprocessor_wpm_cases(results, cfg);
   bench::append_reference_tokenizer_preprocessor_rwkv_cases(results, cfg);
   bench::append_reference_tokenizer_preprocessor_plamo2_cases(results, cfg);
+  bench::append_reference_tokenizer_cases(results, cfg);
   return results;
 }
 
