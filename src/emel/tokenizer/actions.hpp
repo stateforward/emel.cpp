@@ -134,6 +134,7 @@ struct begin_tokenize {
     ctx.text = ev.text;
     ctx.add_special = ev.add_special;
     ctx.parse_special = ev.parse_special;
+    ctx.fragments_preprocessed = false;
     ctx.token_ids_out = ev.token_ids_out;
     ctx.token_capacity = ev.token_capacity;
     ctx.fragment_count = 0;
@@ -191,6 +192,7 @@ struct run_preprocess {
       return;
     }
     size_t fragment_count = 0;
+    bool preprocessed = false;
     int32_t err = EMEL_OK;
     emel::tokenizer::preprocessor::event::preprocess ev = {};
     ev.vocab = ctx.vocab;
@@ -199,6 +201,7 @@ struct run_preprocess {
     ev.fragments_out = ctx.fragments.data();
     ev.fragment_capacity = ctx.fragments.size();
     ev.fragment_count_out = &fragment_count;
+    ev.preprocessed_out = &preprocessed;
     ev.error_out = &err;
     const bool accepted = ctx.preprocessor_any.process_event(ev);
     if (!accepted && err == EMEL_OK) {
@@ -210,6 +213,7 @@ struct run_preprocess {
       return;
     }
     ctx.fragment_count = fragment_count;
+    ctx.fragments_preprocessed = preprocessed;
   }
 };
 
@@ -286,7 +290,7 @@ struct encode_raw_fragment {
     emel::encoder::event::encode encode_ev = {};
     encode_ev.vocab = ctx.vocab;
     encode_ev.text = frag.text;
-    encode_ev.pretokenized = (ctx.model_kind == encoder_kind::bpe);
+    encode_ev.preprocessed = ctx.fragments_preprocessed;
     encode_ev.token_ids = ctx.token_ids_out + ctx.token_count;
     encode_ev.token_capacity = capacity;
     encode_ev.token_count_out = &fragment_count;

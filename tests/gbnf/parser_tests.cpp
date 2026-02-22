@@ -117,6 +117,21 @@ TEST_CASE("gbnf_detail_parser_rejects_large_repetitions") {
   CHECK(ctx.phase_error == EMEL_ERR_PARSE_FAILED);
 }
 
+TEST_CASE("gbnf_detail_parser_rejects_deeply_nested_groups") {
+  emel::gbnf::parser::action::context ctx{};
+  emel::gbnf::grammar grammar_out{};
+  emel::gbnf::parser::detail::recursive_descent_parser parser{ctx, &grammar_out};
+  ctx.phase_error = EMEL_OK;
+  const uint32_t nesting =
+      emel::gbnf::parser::detail::recursive_descent_parser::k_max_nesting_depth + 4;
+  std::string grammar = "root ::= ";
+  grammar.append(nesting, '(');
+  grammar += "\"a\"";
+  grammar.append(nesting, ')');
+  CHECK_FALSE(parser.parse(grammar));
+  CHECK(ctx.phase_error == EMEL_ERR_PARSE_FAILED);
+}
+
 TEST_CASE("gbnf_parser_guards_and_actions_cover_branches") {
   emel::gbnf::parser::action::context ctx{};
   emel::gbnf::grammar grammar{};

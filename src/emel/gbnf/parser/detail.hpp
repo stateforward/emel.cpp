@@ -123,6 +123,14 @@ struct recursive_descent_parser {
   emel::gbnf::grammar *grammar = nullptr;
   symbol_table symbols = {};
   uint32_t next_symbol_id = 0;
+  uint32_t nesting_depth = 0;
+  static constexpr uint32_t k_max_nesting_depth = 32;
+
+  struct depth_guard {
+    uint32_t &depth;
+    explicit depth_guard(uint32_t &depth_in) noexcept : depth(depth_in) { ++depth; }
+    ~depth_guard() noexcept { --depth; }
+  };
 
   explicit recursive_descent_parser(action::context &c,
                                     emel::gbnf::grammar *out) noexcept
@@ -369,6 +377,11 @@ struct recursive_descent_parser {
                                const std::string_view &rule_name,
                                uint32_t rule_id,
                                bool is_nested) noexcept {
+    if (nesting_depth >= k_max_nesting_depth) {
+      ctx.phase_error = EMEL_ERR_PARSE_FAILED;
+      return nullptr;
+    }
+    depth_guard guard(nesting_depth);
     rule_builder current_rule{};
     const char *pos = parse_sequence(src, end, rule_name, current_rule, is_nested);
     if (!pos) {

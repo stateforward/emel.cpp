@@ -336,4 +336,5 @@ tests/tokenizer/preprocessor_spm_tests.cpp
 tests/tokenizer/preprocessor_tests.cpp
 tests/tokenizer/preprocessor_wpm_tests.cpp
 tests/tokenizer/tokenizer_action_guard_tests.cpp
+tests/tokenizer/tokenizer_parity_tests.cpp
 tests/tokenizer/tokenizer_tests.cpp

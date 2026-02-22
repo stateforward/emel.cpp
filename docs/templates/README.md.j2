@@ -10,6 +10,14 @@ allocator, and execution pipelines stabilize.
 
 This inference engine is being implemented by AI under human engineering and architecture direction.
 
+## Implementation priorities
+
+1. Architect first, then scaffold cleanly.
+2. Port math, instructions, and behavior without mirroring reference control flow.
+3. Prove parity against llama.cpp.
+4. Match model/tokenizer intent as defined by their creators (transformers).
+5. Optimize once correctness is locked.
+
 ## Why EMEL
 
 EMEL exists to make inference behavior explicit and verifiable. Instead of ad-hoc control flow,

@@ -20,6 +20,7 @@ inline void clear_request(context & ctx) noexcept {
   ctx.vocab = nullptr;
   ctx.text = {};
   ctx.parse_special = false;
+  ctx.preprocessed = false;
   ctx.fragment_capacity = 0;
   ctx.fragment_count = 0;
   ctx.bpe_scratch.reset();
@@ -37,11 +38,15 @@ struct begin_preprocess {
     ctx.vocab = ev.vocab;
     ctx.text = ev.text;
     ctx.parse_special = ev.parse_special;
+    ctx.preprocessed = false;
     ctx.fragment_capacity = ev.fragment_capacity;
     ctx.fragment_count = 0;
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
     ctx.bpe_scratch.reset();
+    if (ev.preprocessed_out != nullptr) {
+      *ev.preprocessed_out = false;
+    }
   }
 };
 
@@ -74,7 +79,10 @@ struct partition_non_bpe {
             ctx.request->fragments_out, ctx.fragment_capacity,
             &ctx.fragment_count)) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      ctx.preprocessed = false;
+      return;
     }
+    ctx.preprocessed = true;
   }
 };
 
@@ -96,14 +104,13 @@ struct partition_bpe_no_specials {
       return;
     }
     for (size_t idx = 0; idx < view.count; ++idx) {
-      if (out_count >= ctx.fragment_capacity) {
-        ctx.fragment_count = 0;
-        set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-        return;
+      const std::string_view word = view.words[idx];
+      if (word.empty()) {
+        continue;
       }
       if (!detail::push_raw_fragment(ctx.request->fragments_out,
                                      ctx.fragment_capacity, out_count,
-                                     view.words[idx])) {
+                                     word)) {
         ctx.fragment_count = 0;
         set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
         return;
@@ -111,6 +118,7 @@ struct partition_bpe_no_specials {
     }
 
     ctx.fragment_count = out_count;
+    ctx.preprocessed = true;
   }
 };
 
@@ -158,14 +166,13 @@ struct partition_bpe_with_specials {
         return;
       }
       for (size_t word_idx = 0; word_idx < view.count; ++word_idx) {
-        if (out_count >= ctx.fragment_capacity) {
-          ctx.fragment_count = 0;
-          set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-          return;
+        const std::string_view word = view.words[word_idx];
+        if (word.empty()) {
+          continue;
         }
         if (!detail::push_raw_fragment(ctx.request->fragments_out,
                                        ctx.fragment_capacity, out_count,
-                                       view.words[word_idx])) {
+                                       word)) {
           ctx.fragment_count = 0;
           set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
           return;
@@ -174,6 +181,7 @@ struct partition_bpe_with_specials {
     }
 
     ctx.fragment_count = out_count;
+    ctx.preprocessed = true;
   }
 };
 

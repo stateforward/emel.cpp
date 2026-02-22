@@ -16,6 +16,7 @@ struct context {
   const emel::model::data::vocab * vocab = nullptr;
   std::string_view text = {};
   bool parse_special = false;
+  bool preprocessed = false;
   size_t fragment_capacity = 0;
   size_t fragment_count = 0;
   special_token_cache special_cache = {};

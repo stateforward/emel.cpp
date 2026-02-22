@@ -107,6 +107,9 @@ struct sm : public emel::sm<model> {
     if (ev.fragment_count_out != nullptr) {
       *ev.fragment_count_out = context_.fragment_count;
     }
+    if (ev.preprocessed_out != nullptr) {
+      *ev.preprocessed_out = context_.preprocessed;
+    }
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
     }

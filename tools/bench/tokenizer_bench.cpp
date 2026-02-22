@@ -19,9 +19,9 @@ constexpr size_t k_token_capacity = 4096;
 
 int32_t add_token(emel::model::data::vocab & vocab,
                   const char * text,
+                  const uint32_t len,
                   float score,
                   int32_t type) {
-  const uint32_t len = static_cast<uint32_t>(std::strlen(text));
   const uint32_t offset = vocab.token_bytes_used;
   std::memcpy(vocab.token_storage.data() + offset, text, len);
   const uint32_t id = vocab.n_tokens;
@@ -32,6 +32,13 @@ int32_t add_token(emel::model::data::vocab & vocab,
   vocab.token_bytes_used += len;
   vocab.n_tokens = id + 1;
   return static_cast<int32_t>(id);
+}
+
+int32_t add_token(emel::model::data::vocab & vocab,
+                  const char * text,
+                  float score,
+                  int32_t type) {
+  return add_token(vocab, text, static_cast<uint32_t>(std::strlen(text)), score, type);
 }
 
 void add_all_plamo2_byte_tokens(emel::model::data::vocab & vocab) {
@@ -49,8 +56,8 @@ std::unique_ptr<emel::model::data::vocab> make_bpe_vocab() {
   vocab->ignore_merges = true;
 
   for (int value = 0; value < 256; ++value) {
-    const char c = static_cast<char>(value);
-    (void)add_token(*vocab, std::string(1, c).c_str(), 0.0f, 6);
+    const char byte = static_cast<char>(value);
+    (void)add_token(*vocab, &byte, 1, 0.0f, 6);
   }
   (void)add_token(*vocab, "hello", 0.5f, 1);
   (void)add_token(*vocab, "\xC4\xA0" "hello", 0.5f, 1);
@@ -228,6 +235,7 @@ void append_emel_tokenizer_cases(std::vector<result> & results, const config & c
 }
 
 void append_reference_tokenizer_cases(std::vector<result> & results, const config & cfg) {
+  // Reference tokenizer benchmarks reuse the EMEL pipeline until llama.cpp parity is wired.
   append_emel_tokenizer_cases(results, cfg);
 }
 

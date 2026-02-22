@@ -34,6 +34,7 @@ struct context {
   std::string_view text = {};
   bool add_special = false;
   bool parse_special = false;
+  bool fragments_preprocessed = false;
   int32_t *token_ids_out = nullptr;
   int32_t token_capacity = 0;
   bool is_bound = false;

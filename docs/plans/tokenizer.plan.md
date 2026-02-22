@@ -65,7 +65,7 @@ explicit approval.
 ## encoding model
 - encoder binding is done at init from `vocab->tokenizer_model_id` with a fallback encoder.
 - encoders must treat input fragments as authoritative and never re-run special token parsing.
-- encoders accept pre-tokenized BPE fragments via `event::encode.pretokenized`.
+- encoders accept preprocessed fragments via `event::encode.preprocessed`.
 - fragment encoding is a bounded RTC loop with explicit capacity checks.
 - prefix/suffix handling is centralized in the tokenizer (not encoder-specific code paths).
 

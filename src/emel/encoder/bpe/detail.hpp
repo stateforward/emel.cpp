@@ -7,7 +7,7 @@
 #include "emel/encoder/detail.hpp"
 #include "emel/encoder/events.hpp"
 #include "emel/model/data.hpp"
-#include "emel/tokenizer/bpe/split.hpp"
+#include "emel/text/unicode.hpp"
 
 namespace emel::encoder::bpe::detail {
 
@@ -87,16 +87,21 @@ inline bool encode_bpe_word(const event::encode &ev,
       }
       continue;
     }
-    for (const unsigned char c : symbol) {
-      const char byte = static_cast<char>(c);
-      const int32_t byte_token =
-          emel::encoder::detail::lookup_token(ctx, std::string_view(&byte, 1));
+    size_t byte_offset = 0;
+    while (byte_offset < symbol.size()) {
+      size_t len = emel::text::unicode_len_utf8(symbol[byte_offset]);
+      if (byte_offset + len > symbol.size()) {
+        len = 1;
+      }
+      const std::string_view unit(symbol.data() + byte_offset, len);
+      const int32_t byte_token = emel::encoder::detail::lookup_token(ctx, unit);
       if (byte_token != k_token_null) {
         if (!emel::encoder::detail::push_token(ev, byte_token, count)) {
           result.error = EMEL_ERR_INVALID_ARGUMENT;
           return false;
         }
       }
+      byte_offset += len;
     }
   }
 
@@ -113,31 +118,13 @@ inline encode_result encode_bpe(const event::encode &ev,
   emel::encoder::detail::ensure_tables(ctx);
 
   int32_t count = 0;
-  if (ev.pretokenized) {
-    if (!encode_bpe_word(ev, ctx, vocab, ev.text, count, result)) {
-      return result;
-    }
-    result.token_count = count;
-    result.error = EMEL_OK;
-    return result;
-  }
-
-  ctx.bpe_scratch.reset();
-  emel::tokenizer::bpe::detail::split_view view = {};
-  if (!emel::tokenizer::bpe::detail::split_and_encode_append(
-          ev.text, vocab, ctx.bpe_scratch, view)) {
+  if (!ev.preprocessed) {
     result.error = EMEL_ERR_INVALID_ARGUMENT;
     return result;
   }
-  for (size_t idx = 0; idx < view.count; ++idx) {
-    if (!encode_bpe_word(ev, ctx, vocab, view.words[idx], count, result)) {
-      return result;
-    }
-    if (result.error != EMEL_OK) {
-      return result;
-    }
+  if (!encode_bpe_word(ev, ctx, vocab, ev.text, count, result)) {
+    return result;
   }
-
   result.token_count = count;
   result.error = EMEL_OK;
   return result;

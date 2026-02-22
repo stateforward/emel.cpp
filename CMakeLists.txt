@@ -107,6 +107,7 @@ if(EMEL_ENABLE_TESTS)
     tests/tokenizer/bpe_regex_tests.cpp
     tests/tokenizer/bpe_split_tests.cpp
     tests/tokenizer/tokenizer_tests.cpp
+    tests/tokenizer/tokenizer_parity_tests.cpp
     tests/tokenizer/tokenizer_action_guard_tests.cpp
     tests/batch/splitter_tests.cpp
     tests/batch/splitter_actions_tests.cpp

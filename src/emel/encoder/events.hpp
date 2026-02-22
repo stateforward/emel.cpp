@@ -17,7 +17,7 @@ namespace emel::encoder::event {
 struct encode {
   const emel::model::data::vocab * vocab = nullptr;
   std::string_view text = {};
-  bool pretokenized = false;
+  bool preprocessed = false;
   int32_t * token_ids = nullptr;
   int32_t token_capacity = 0;
   int32_t * token_count_out = nullptr;

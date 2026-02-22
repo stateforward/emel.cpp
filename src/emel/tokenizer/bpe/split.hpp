@@ -526,11 +526,6 @@ inline bool split_and_encode_append(const std::string_view text,
   }
 
   const regex_list regex = regex_for(vocab);
-  if (regex.count != 1) {
-    const bool ok = split_and_encode_fallback(text, regex, scratch);
-    view.count = scratch.word_count;
-    return ok;
-  }
 
   static constexpr std::string_view k_gpt2_regex =
       "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)";
@@ -539,11 +534,12 @@ inline bool split_and_encode_append(const std::string_view text,
       "[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+"
       "[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
 
-  const std::string_view expr = regex.exprs[0];
-  if (expr != k_gpt2_regex && expr != k_llama3_regex) {
-    const bool ok = split_and_encode_fallback(text, regex, scratch);
-    view.count = scratch.word_count;
-    return ok;
+  const bool byte_encode = (regex.count == 1) &&
+                           (regex.exprs[0] == k_gpt2_regex ||
+                            regex.exprs[0] == k_llama3_regex);
+
+  if (text.size() > scratch.encoded.size()) {
+    return false;
   }
 
   if (!decode_utf8_to_cpts(text, scratch)) {
@@ -554,7 +550,13 @@ inline bool split_and_encode_append(const std::string_view text,
   scratch.offset_count = 1;
   size_t out_count = 0;
   bool ok = false;
-  if (expr == k_gpt2_regex) {
+  if (regex.count != 1 || !byte_encode) {
+    ok = split_and_encode_fallback(text, regex, scratch);
+    view.count = scratch.word_count;
+    return ok;
+  }
+
+  if (regex.exprs[0] == k_gpt2_regex) {
     ok = split_gpt2(scratch.cpts.data(), scratch.cpt_count,
                     scratch.offsets_a.data(), scratch.offset_count,
                     scratch.offsets_b.data(), scratch.offsets_b.size(),

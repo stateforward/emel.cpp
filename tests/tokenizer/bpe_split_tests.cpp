@@ -88,7 +88,7 @@ TEST_CASE("tokenizer_bpe_split_fallback_single_regex") {
   CHECK(view.count > 0);
 }
 
-TEST_CASE("tokenizer_bpe_split_rejects_long_text") {
+TEST_CASE("tokenizer_bpe_split_accepts_long_text") {
   auto vocab = make_vocab(emel::model::data::tokenizer_pre::GPT2);
   emel::tokenizer::bpe::detail::split_scratch scratch = {};
   emel::tokenizer::bpe::detail::split_view view = {};
@@ -98,6 +98,7 @@ TEST_CASE("tokenizer_bpe_split_rejects_long_text") {
   const bool ok = emel::tokenizer::bpe::detail::split_and_encode_append(
       text, vocab, scratch, view);
   CHECK_FALSE(ok);
+  CHECK(view.count == 0);
 }
 
 TEST_CASE("tokenizer_bpe_encode_utf8_branches") {

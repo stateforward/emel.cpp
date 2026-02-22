@@ -51,6 +51,7 @@ run_step() {
 
 run_step build_with_zig "$ROOT_DIR/scripts/build_with_zig.sh"
 run_step test_with_coverage "$ROOT_DIR/scripts/test_with_coverage.sh"
+run_step paritychecker "$ROOT_DIR/scripts/paritychecker.sh"
 # Temporarily disabled (SML UBSAN issue under asan_ubsan).
 # TODO: re-enable once stateforward/sml.cpp fix lands.
 run_step fuzz_smoke "$ROOT_DIR/scripts/fuzz_smoke.sh"

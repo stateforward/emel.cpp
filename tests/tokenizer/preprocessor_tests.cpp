@@ -349,6 +349,45 @@ TEST_CASE("tokenizer_preprocessor_partition_bpe_no_specials") {
         emel::tokenizer::preprocessor::fragment_kind::raw_text);
 }
 
+TEST_CASE("tokenizer_preprocessor_partition_bpe_no_specials_large_input") {
+  emel::model::data::vocab vocab = make_bpe_vocab();
+  std::array<emel::tokenizer::preprocessor::fragment,
+             emel::tokenizer::preprocessor::k_max_fragments>
+      fragments = {};
+  size_t count = 0;
+  int32_t err = EMEL_OK;
+
+  std::string text;
+  const size_t word_count =
+      emel::tokenizer::preprocessor::k_max_fragments + 1;
+  text.reserve(word_count * 2);
+  for (size_t idx = 0; idx < word_count; ++idx) {
+    if (idx > 0) {
+      text += ' ';
+    }
+    text += 'a';
+  }
+
+  emel::tokenizer::preprocessor::event::preprocess ev = {};
+  ev.vocab = &vocab;
+  ev.text = std::string_view(text);
+  ev.fragments_out = fragments.data();
+  ev.fragment_capacity = fragments.size();
+  ev.fragment_count_out = &count;
+  ev.error_out = &err;
+
+  emel::tokenizer::preprocessor::action::context ctx = {};
+  struct emel::tokenizer::preprocessor::action::begin_preprocess begin_preprocess{};
+  struct emel::tokenizer::preprocessor::action::partition_bpe_no_specials
+      partition_bpe_no_specials{};
+
+  begin_preprocess(ev, ctx);
+  partition_bpe_no_specials(ctx);
+  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK_FALSE(ctx.preprocessed);
+  CHECK(ctx.fragment_count == 0);
+}
+
 TEST_CASE("tokenizer_preprocessor_partition_bpe_no_specials_invalid") {
   emel::tokenizer::preprocessor::action::context ctx = {};
   struct emel::tokenizer::preprocessor::action::partition_bpe_no_specials
