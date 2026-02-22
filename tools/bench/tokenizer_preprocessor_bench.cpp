@@ -17,6 +17,7 @@
 #include "emel/tokenizer/preprocessor/spm/sm.hpp"
 #include "emel/tokenizer/preprocessor/ugm/sm.hpp"
 #include "emel/tokenizer/preprocessor/wpm/sm.hpp"
+#include "emel/tokenizer/preprocessor/rwkv/sm.hpp"
 
 #include "unicode.h"
 
@@ -52,6 +53,12 @@ struct wpm_case {
   bool parse_special = false;
 };
 
+struct rwkv_case {
+  const char * name = nullptr;
+  std::string text;
+  bool parse_special = false;
+};
+
 std::unique_ptr<emel::model::data::vocab> make_bpe_vocab(const tokenizer_pre pre) {
   auto vocab = std::make_unique<emel::model::data::vocab>();
   vocab->n_tokens = 0;
@@ -64,6 +71,23 @@ std::unique_ptr<emel::model::data::vocab> make_spm_vocab() {
   auto vocab = std::make_unique<emel::model::data::vocab>();
   vocab->n_tokens = 2;
   vocab->tokenizer_model_id = emel::model::data::tokenizer_model::SPM;
+  vocab->entries[0].text_offset = 0;
+  vocab->entries[0].text_length = 1;
+  vocab->entries[0].type = 4;
+  vocab->entries[1].text_offset = 2;
+  vocab->entries[1].text_length = 3;
+  vocab->entries[1].type = 3;
+  vocab->token_storage[0] = 'A';
+  vocab->token_storage[2] = 'B';
+  vocab->token_storage[3] = 'B';
+  vocab->token_storage[4] = 'B';
+  return vocab;
+}
+
+std::unique_ptr<emel::model::data::vocab> make_rwkv_vocab() {
+  auto vocab = std::make_unique<emel::model::data::vocab>();
+  vocab->n_tokens = 2;
+  vocab->tokenizer_model_id = emel::model::data::tokenizer_model::RWKV;
   vocab->entries[0].text_offset = 0;
   vocab->entries[0].text_length = 1;
   vocab->entries[0].type = 4;
@@ -126,6 +150,19 @@ std::string make_long_text() {
 }
 
 std::string make_spm_long_text() {
+  std::string out;
+  out.reserve(2048);
+  for (int i = 0; i < 32; ++i) {
+    out += " hello ";
+    out += "A";
+    out += " world ";
+    out += "BBB";
+    out += "!";
+  }
+  return out;
+}
+
+std::string make_rwkv_long_text() {
   std::string out;
   out.reserve(2048);
   for (int i = 0; i < 32; ++i) {
@@ -211,6 +248,31 @@ reference_fragments build_reference_spm_fragments(const emel::model::data::vocab
   if (!emel::tokenizer::preprocessor::detail::partition_with_specials(
           out.text, cache, parse_special, fragments.data(), fragments.size(), &count)) {
     std::fprintf(stderr, "error: spm reference partition failed\n");
+    std::abort();
+  }
+
+  out.fragments.assign(fragments.begin(),
+                       fragments.begin() + static_cast<std::ptrdiff_t>(count));
+  return out;
+}
+
+reference_fragments build_reference_rwkv_fragments(const emel::model::data::vocab & vocab,
+                                                   const std::string & text,
+                                                   const bool parse_special) {
+  reference_fragments out;
+  out.text = text;
+
+  emel::tokenizer::preprocessor::special_token_cache cache = {};
+  if (!emel::tokenizer::preprocessor::detail::build_special_tokens(cache, vocab)) {
+    std::fprintf(stderr, "error: rwkv reference special token build failed\n");
+    std::abort();
+  }
+
+  std::array<fragment, k_fragment_capacity> fragments = {};
+  size_t count = 0;
+  if (!emel::tokenizer::preprocessor::detail::partition_with_specials(
+          out.text, cache, parse_special, fragments.data(), fragments.size(), &count)) {
+    std::fprintf(stderr, "error: rwkv reference partition failed\n");
     std::abort();
   }
 
@@ -358,6 +420,41 @@ void ensure_preprocessor_spm_parity(const emel::model::data::vocab & vocab,
   }
 }
 
+void ensure_preprocessor_rwkv_parity(const emel::model::data::vocab & vocab,
+                                     const std::string & text,
+                                     const bool parse_special) {
+  emel::tokenizer::preprocessor::rwkv::sm machine{};
+  std::array<fragment, k_fragment_capacity> fragments = {};
+  size_t count = 0;
+  int32_t err = EMEL_OK;
+  if (!collect_emel_fragments(machine, vocab, text, parse_special, fragments, count, err) ||
+      err != EMEL_OK) {
+    std::fprintf(stderr, "error: rwkv preprocessor failed for parity check: %d\n", err);
+    std::abort();
+  }
+
+  const reference_fragments reference =
+      build_reference_rwkv_fragments(vocab, text, parse_special);
+  if (count != reference.fragments.size()) {
+    std::fprintf(stderr,
+                 "error: rwkv preprocessor parity mismatch count %zu vs %zu\n",
+                 count,
+                 reference.fragments.size());
+    std::abort();
+  }
+
+  for (size_t i = 0; i < count; ++i) {
+    const auto & lhs = fragments[i];
+    const auto & rhs = reference.fragments[i];
+    if (lhs.kind != rhs.kind || lhs.text != rhs.text || lhs.token != rhs.token) {
+      std::fprintf(stderr,
+                   "error: rwkv preprocessor parity mismatch at %zu\n",
+                   i);
+      std::abort();
+    }
+  }
+}
+
 void ensure_preprocessor_wpm_parity(const emel::model::data::vocab & vocab,
                                     const std::string & text,
                                     const bool parse_special) {
@@ -456,6 +553,28 @@ void append_emel_tokenizer_preprocessor_cases(std::vector<result> & results,
     results.push_back(measure_case(entry.name, cfg, fn));
   }
 
+  const rwkv_case rwkv_cases[] = {
+    {"tokenizer/preprocessor_rwkv_short", "hello A  BBB world", true},
+    {"tokenizer/preprocessor_rwkv_long", make_rwkv_long_text(), true},
+  };
+
+  for (const auto & entry : rwkv_cases) {
+    const auto vocab = make_rwkv_vocab();
+    ensure_preprocessor_rwkv_parity(*vocab, entry.text, entry.parse_special);
+
+    emel::tokenizer::preprocessor::rwkv::sm machine{};
+    std::array<fragment, k_fragment_capacity> fragments = {};
+    size_t count = 0;
+    int32_t err = EMEL_OK;
+
+    auto fn = [&]() {
+      (void)collect_emel_fragments(machine, *vocab, entry.text, entry.parse_special,
+                                   fragments, count, err);
+    };
+
+    results.push_back(measure_case(entry.name, cfg, fn));
+  }
+
   const wpm_case wpm_cases[] = {
     {"tokenizer/preprocessor_wpm_short", "hello A  BBB world", true},
     {"tokenizer/preprocessor_wpm_long", make_wpm_long_text(), true},
@@ -535,6 +654,27 @@ void append_reference_tokenizer_preprocessor_cases(std::vector<result> & results
 
     auto fn = [&]() {
       const auto fragments = build_reference_fragments(*vocab, entry.text);
+      static volatile size_t sink = 0;
+      sink += fragments.fragments.size();
+      for (const auto & frag : fragments.fragments) {
+        sink += frag.text.size();
+      }
+    };
+
+    results.push_back(measure_case(entry.name, cfg, fn));
+  }
+
+  const rwkv_case rwkv_cases[] = {
+    {"tokenizer/preprocessor_rwkv_short", "hello A  BBB world", true},
+    {"tokenizer/preprocessor_rwkv_long", make_rwkv_long_text(), true},
+  };
+
+  for (const auto & entry : rwkv_cases) {
+    const auto vocab = make_rwkv_vocab();
+
+    auto fn = [&]() {
+      const auto fragments =
+          build_reference_rwkv_fragments(*vocab, entry.text, entry.parse_special);
       static volatile size_t sink = 0;
       sink += fragments.fragments.size();
       for (const auto & frag : fragments.fragments) {
