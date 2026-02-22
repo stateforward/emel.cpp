@@ -8,18 +8,20 @@ are not. True benchmarks will be end-to-end once the system is complete.
 
 | Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |
 | --- | ---: | ---: | ---: |
-| `batch/splitter_equal` | 1537.300 | 6376.304 | 0.241x |
-| `batch/splitter_seq` | 1689.346 | 2605.417 | 0.648x |
-| `batch/splitter_simple` | 760.000 | 2290.971 | 0.332x |
-| `buffer/allocator_alloc_graph` | 17.067 | 55.596 | 0.307x |
-| `buffer/allocator_full` | 39.717 | 249.071 | 0.159x |
-| `buffer/allocator_reserve_n` | 20.421 | 427.475 | 0.048x |
-| `jinja/parser_long` | 31251.229 | 49294.158 | 0.634x |
-| `jinja/parser_short` | 398.696 | 501.533 | 0.795x |
-| `jinja/renderer_long` | 90781.492 | 220542.663 | 0.412x |
-| `jinja/renderer_short` | 1422.304 | 3777.592 | 0.377x |
-| `memory/coordinator_recurrent_full` | 3848.525 | 5483.962 | 0.702x |
-| `tokenizer/preprocessor_bpe_long` | 16304.067 | 16237.467 | 1.004x |
-| `tokenizer/preprocessor_bpe_short` | 516.013 | 701.867 | 0.735x |
-| `tokenizer/preprocessor_ugm_long` | 3199.125 | 4484.833 | 0.713x |
-| `tokenizer/preprocessor_ugm_short` | 2452.967 | 3440.771 | 0.713x |
+| `batch/splitter_equal` | 1728.079 | 6453.962 | 0.268x |
+| `batch/splitter_seq` | 1558.554 | 2653.787 | 0.587x |
+| `batch/splitter_simple` | 731.362 | 2304.171 | 0.317x |
+| `buffer/allocator_alloc_graph` | 17.571 | 56.804 | 0.309x |
+| `buffer/allocator_full` | 40.513 | 263.467 | 0.154x |
+| `buffer/allocator_reserve_n` | 21.079 | 451.738 | 0.047x |
+| `jinja/parser_long` | 30677.896 | 49257.442 | 0.623x |
+| `jinja/parser_short` | 395.800 | 499.596 | 0.792x |
+| `jinja/renderer_long` | 92039.608 | 225672.625 | 0.408x |
+| `jinja/renderer_short` | 1443.375 | 3848.754 | 0.375x |
+| `memory/coordinator_recurrent_full` | 3634.921 | 5636.025 | 0.645x |
+| `tokenizer/preprocessor_bpe_long` | 15782.367 | 16053.500 | 0.983x |
+| `tokenizer/preprocessor_bpe_short` | 498.363 | 726.817 | 0.686x |
+| `tokenizer/preprocessor_spm_long` | 3033.567 | 4630.917 | 0.655x |
+| `tokenizer/preprocessor_spm_short` | 2357.088 | 3541.925 | 0.665x |
+| `tokenizer/preprocessor_ugm_long` | 3154.358 | 4700.567 | 0.671x |
+| `tokenizer/preprocessor_ugm_short` | 2344.287 | 3531.192 | 0.664x |
