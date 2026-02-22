@@ -207,6 +207,8 @@ src/emel/tokenizer/preprocessor/detail.hpp
 src/emel/tokenizer/preprocessor/events.hpp
 src/emel/tokenizer/preprocessor/fallback/sm.hpp
 src/emel/tokenizer/preprocessor/guards.hpp
+src/emel/tokenizer/preprocessor/plamo2/actions.hpp
+src/emel/tokenizer/preprocessor/plamo2/guards.hpp
 src/emel/tokenizer/preprocessor/plamo2/sm.hpp
 src/emel/tokenizer/preprocessor/rwkv/actions.hpp
 src/emel/tokenizer/preprocessor/rwkv/guards.hpp
@@ -321,6 +323,7 @@ tests/tensor/lifetime_analyzer_error_tests.cpp
 tests/tensor/lifetime_analyzer_sm_error_tests.cpp
 tests/tensor/lifetime_analyzer_sm_transition_tests.cpp
 tests/tensor/lifetime_analyzer_tests.cpp
+tests/tokenizer/preprocessor_plamo2_tests.cpp
 tests/tokenizer/preprocessor_rwkv_tests.cpp
 tests/tokenizer/preprocessor_spm_tests.cpp
 tests/tokenizer/preprocessor_tests.cpp
