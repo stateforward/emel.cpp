@@ -77,14 +77,13 @@ run_step paritychecker "$ROOT_DIR/scripts/paritychecker.sh"
 # TODO: re-enable once stateforward/sml.cpp fix lands.
 run_step fuzz_smoke "$ROOT_DIR/scripts/fuzz_smoke.sh"
 run_step lint_snapshot "$ROOT_DIR/scripts/lint_snapshot.sh"
-if ! run_step_allow_fail bench_snapshot env \
+run_step_allow_fail bench_snapshot env \
   EMEL_BENCH_ITERS=10000 \
   EMEL_BENCH_RUNS=3 \
   EMEL_BENCH_WARMUP_ITERS=1000 \
   EMEL_BENCH_WARMUP_RUNS=1 \
-  "$ROOT_DIR/scripts/bench.sh" --snapshot --compare-update; then
-  bench_status=$?
-fi
+  "$ROOT_DIR/scripts/bench.sh" --snapshot --compare-update
+bench_status=$?
 run_step generate_docs "$ROOT_DIR/scripts/generate_docs.sh"
 
 if [[ $bench_status -ne 0 ]]; then
