@@ -122,6 +122,8 @@ NEVER use platform-specific APIs unless wrapped behind an abstraction.
 ALWAYS write scripts to work on any Unix-based OS.
 
 ## build, tests, and CI gates
+ALWAYS work on a feature branch and submit changes via a pull request.
+NEVER push directly to `main`.
 ALWAYS use zig toolchain (zig cc and zig c++) for default development and
 production builds.
 ALWAYS use native clang or gcc for coverage builds.
