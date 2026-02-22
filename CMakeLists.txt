@@ -100,6 +100,7 @@ if(EMEL_ENABLE_TESTS)
     tests/encoder/encoder_tests.cpp
     tests/tokenizer/preprocessor_tests.cpp
     tests/tokenizer/preprocessor_spm_tests.cpp
+    tests/tokenizer/preprocessor_wpm_tests.cpp
     tests/batch/splitter_tests.cpp
     tests/batch/splitter_actions_tests.cpp
     tests/batch/splitter_additional_tests.cpp
