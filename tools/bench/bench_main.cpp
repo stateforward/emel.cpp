@@ -51,7 +51,12 @@ std::vector<bench::result> run_emel_benchmarks(const bench::config & cfg) {
   bench::append_emel_jinja_parser_cases(results, cfg);
   bench::append_emel_jinja_renderer_cases(results, cfg);
   bench::append_emel_sm_any_cases(results, cfg);
-  bench::append_emel_tokenizer_preprocessor_cases(results, cfg);
+  bench::append_emel_tokenizer_preprocessor_bpe_cases(results, cfg);
+  bench::append_emel_tokenizer_preprocessor_spm_cases(results, cfg);
+  bench::append_emel_tokenizer_preprocessor_ugm_cases(results, cfg);
+  bench::append_emel_tokenizer_preprocessor_wpm_cases(results, cfg);
+  bench::append_emel_tokenizer_preprocessor_rwkv_cases(results, cfg);
+  bench::append_emel_tokenizer_preprocessor_plamo2_cases(results, cfg);
   return results;
 }
 
@@ -64,7 +69,12 @@ std::vector<bench::result> run_reference_benchmarks(const bench::config & cfg) {
   bench::append_reference_jinja_parser_cases(results, cfg);
   bench::append_reference_jinja_renderer_cases(results, cfg);
   bench::append_reference_sm_any_cases(results, cfg);
-  bench::append_reference_tokenizer_preprocessor_cases(results, cfg);
+  bench::append_reference_tokenizer_preprocessor_bpe_cases(results, cfg);
+  bench::append_reference_tokenizer_preprocessor_spm_cases(results, cfg);
+  bench::append_reference_tokenizer_preprocessor_ugm_cases(results, cfg);
+  bench::append_reference_tokenizer_preprocessor_wpm_cases(results, cfg);
+  bench::append_reference_tokenizer_preprocessor_rwkv_cases(results, cfg);
+  bench::append_reference_tokenizer_preprocessor_plamo2_cases(results, cfg);
   return results;
 }
 
