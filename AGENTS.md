@@ -133,6 +133,7 @@ ALWAYS name test files by machine or domain (e.g. `tests/inference/sampler_tests
 NEVER use arbitrary or ad-hoc test file names.
 NEVER create monolithic test files.
 ALWAYS scope each test file to one machine, one system, or one behavior.
+ALWAYS keep one machine benchmark per `tools/bench` source file.
 ALWAYS keep snapshot baselines under `snapshots/` and lint baselines under
 `snapshots/lint/`.
 NEVER update snapshots without explicit user consent.
