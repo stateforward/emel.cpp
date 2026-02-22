@@ -42,6 +42,13 @@ struct begin_encode {
     ctx.token_count = 0;
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
+    if (emel::encoder::action::detail::sync_vocab(ctx, ev.vocab)) {
+      ctx.plamo2_tables_ready = false;
+      ctx.plamo2_vocab = nullptr;
+      ctx.byte_tokens.fill(0);
+      ctx.suffix_map.clear();
+      ctx.table.clear();
+    }
     if (ev.token_count_out != nullptr) {
       *ev.token_count_out = 0;
     }

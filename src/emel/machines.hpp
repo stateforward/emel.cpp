@@ -7,6 +7,7 @@
 #include "emel/batch/splitter/sm.hpp"
 #include "emel/decoder/compute_executor/sm.hpp"
 #include "emel/decoder/sm.hpp"
+#include "emel/encoder/any.hpp"
 #include "emel/encoder/sm.hpp"
 #include "emel/generator/sm.hpp"
 #include "emel/kv/cache/sm.hpp"
@@ -32,6 +33,7 @@ using BufferReallocAnalyzer = emel::buffer::realloc_analyzer::sm;
 using BatchSplitter = emel::batch::splitter::sm;
 using ComputeExecutor = emel::decoder::compute_executor::sm;
 using Decoder = emel::decoder::sm;
+using EncoderAny = emel::encoder::any;
 using EncoderBpe = emel::encoder::bpe::sm;
 using EncoderSpm = emel::encoder::spm::sm;
 using EncoderWpm = emel::encoder::wpm::sm;

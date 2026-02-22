@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include "emel/model/data.hpp"
+
 namespace emel::encoder::events {
 
 struct encoding_done;
@@ -13,6 +15,7 @@ struct encoding_error;
 namespace emel::encoder::event {
 
 struct encode {
+  const emel::model::data::vocab * vocab = nullptr;
   std::string_view text = {};
   int32_t * token_ids = nullptr;
   int32_t token_capacity = 0;

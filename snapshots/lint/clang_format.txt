@@ -47,6 +47,7 @@ src/emel/decoder/ubatch_executor/events.hpp
 src/emel/decoder/ubatch_executor/guards.hpp
 src/emel/decoder/ubatch_executor/sm.hpp
 src/emel/encoder/actions.hpp
+src/emel/encoder/any.hpp
 src/emel/encoder/bpe/actions.hpp
 src/emel/encoder/bpe/context.hpp
 src/emel/encoder/bpe/detail.hpp
