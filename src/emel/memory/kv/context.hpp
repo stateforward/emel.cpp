@@ -80,11 +80,18 @@ struct context {
   std::array<int32_t, MAX_STREAM_COPY> pending_copy_src = {};
   std::array<int32_t, MAX_STREAM_COPY> pending_copy_dst = {};
   int32_t pending_copy_count = 0;
+  std::array<int32_t, MAX_KV_CELLS> lifecycle_slot_indices = {};
+  std::array<int32_t, MAX_KV_CELLS> lifecycle_positions = {};
+  int32_t lifecycle_slot_count = 0;
 
   int32_t kv_tokens = 0;
   int32_t phase_error = EMEL_OK;
   int32_t last_error = EMEL_OK;
 
+  event::reserve reserve_request = {};
+  event::allocate_sequence allocate_sequence_request = {};
+  event::branch_sequence branch_sequence_request = {};
+  event::free_sequence free_sequence_request = {};
   event::prepare prepare_request = {};
   event::apply_ubatch apply_request = {};
   event::rollback rollback_request = {};

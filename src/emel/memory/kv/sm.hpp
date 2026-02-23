@@ -20,6 +20,9 @@ struct preparing_slots {};
 struct preparing_slots_step {};
 struct prepare_slots_decision {};
 
+struct reserving {};
+struct reserve_decision {};
+
 struct applying {};
 struct apply_step_validating {};
 struct applying_step {};
@@ -29,6 +32,15 @@ struct rolling_back {};
 struct rollback_step_validating {};
 struct rollback_step {};
 struct rollback_step_decision {};
+
+struct allocating_sequence {};
+struct allocate_sequence_decision {};
+
+struct branching_sequence {};
+struct branch_sequence_decision {};
+
+struct freeing_sequence {};
+struct free_sequence_decision {};
 
 struct seq_remove_validating {};
 struct seq_remove_step {};
@@ -103,6 +115,44 @@ struct model {
           sml::state<errored>,
       sml::state<prepare_slots_decision> [guard::phase_ok{}] =
           sml::state<publishing>,
+
+      *sml::state<initialized> + sml::event<event::reserve> / action::begin_reserve =
+          sml::state<reserving>,
+      sml::state<prepared> + sml::event<event::reserve> / action::begin_reserve =
+          sml::state<reserving>,
+      sml::state<reserving> [guard::valid_reserve_context{}] /
+          action::run_reserve_phase = sml::state<reserve_decision>,
+      sml::state<reserving> [guard::invalid_reserve_context{}] /
+          action::set_invalid_argument = sml::state<errored>,
+      sml::state<reserve_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<reserve_decision> [guard::phase_ok{}] = sml::state<done>,
+
+      sml::state<prepared> + sml::event<event::allocate_sequence> /
+          action::begin_allocate_sequence = sml::state<allocating_sequence>,
+      sml::state<allocating_sequence> [guard::valid_allocate_sequence_context{}] /
+          action::run_allocate_sequence_phase = sml::state<allocate_sequence_decision>,
+      sml::state<allocating_sequence> [guard::invalid_allocate_sequence_context{}] /
+          action::set_invalid_argument = sml::state<errored>,
+      sml::state<allocate_sequence_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<allocate_sequence_decision> [guard::phase_ok{}] = sml::state<done>,
+
+      sml::state<prepared> + sml::event<event::branch_sequence> /
+          action::begin_branch_sequence = sml::state<branching_sequence>,
+      sml::state<branching_sequence> [guard::valid_branch_sequence_context{}] /
+          action::run_branch_sequence_phase = sml::state<branch_sequence_decision>,
+      sml::state<branching_sequence> [guard::invalid_branch_sequence_context{}] /
+          action::set_invalid_argument = sml::state<errored>,
+      sml::state<branch_sequence_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<branch_sequence_decision> [guard::phase_ok{}] = sml::state<done>,
+
+      sml::state<prepared> + sml::event<event::free_sequence> /
+          action::begin_free_sequence = sml::state<freeing_sequence>,
+      sml::state<freeing_sequence> [guard::valid_free_sequence_context{}] /
+          action::run_free_sequence_phase = sml::state<free_sequence_decision>,
+      sml::state<freeing_sequence> [guard::invalid_free_sequence_context{}] /
+          action::set_invalid_argument = sml::state<errored>,
+      sml::state<free_sequence_decision> [guard::phase_failed{}] = sml::state<errored>,
+      sml::state<free_sequence_decision> [guard::phase_ok{}] = sml::state<done>,
 
       sml::state<prepared> + sml::event<event::apply_ubatch> / action::begin_apply =
           sml::state<applying>,
@@ -237,6 +287,22 @@ struct model {
           action::on_unexpected{} = sml::state<errored>,
       sml::state<prepare_slots_decision> + sml::unexpected_event<sml::_> /
           action::on_unexpected{} = sml::state<errored>,
+      sml::state<reserving> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<reserve_decision> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
+          sml::state<errored>,
+      sml::state<allocating_sequence> + sml::unexpected_event<sml::_> /
+          action::on_unexpected{} = sml::state<errored>,
+      sml::state<allocate_sequence_decision> + sml::unexpected_event<sml::_> /
+          action::on_unexpected{} = sml::state<errored>,
+      sml::state<branching_sequence> + sml::unexpected_event<sml::_> /
+          action::on_unexpected{} = sml::state<errored>,
+      sml::state<branch_sequence_decision> + sml::unexpected_event<sml::_> /
+          action::on_unexpected{} = sml::state<errored>,
+      sml::state<freeing_sequence> + sml::unexpected_event<sml::_> /
+          action::on_unexpected{} = sml::state<errored>,
+      sml::state<free_sequence_decision> + sml::unexpected_event<sml::_> /
+          action::on_unexpected{} = sml::state<errored>,
       sml::state<applying> + sml::unexpected_event<sml::_> / action::on_unexpected{} =
           sml::state<errored>,
       sml::state<apply_step_validating> + sml::unexpected_event<sml::_> /
@@ -341,6 +407,46 @@ struct sm : private sm_deps, public emel::sm<model> {
     return accepted && err == EMEL_OK;
   }
 
+  bool process_event(const event::reserve & ev) {
+    const bool accepted = this->raw_sm().process_event(ev);
+    const int32_t err = context_->last_error;
+    if (ev.error_out != nullptr) {
+      *ev.error_out = err;
+    }
+    action::clear_request(*context_);
+    return accepted && err == EMEL_OK;
+  }
+
+  bool process_event(const event::allocate_sequence & ev) {
+    const bool accepted = this->raw_sm().process_event(ev);
+    const int32_t err = context_->last_error;
+    if (ev.error_out != nullptr) {
+      *ev.error_out = err;
+    }
+    action::clear_request(*context_);
+    return accepted && err == EMEL_OK;
+  }
+
+  bool process_event(const event::branch_sequence & ev) {
+    const bool accepted = this->raw_sm().process_event(ev);
+    const int32_t err = context_->last_error;
+    if (ev.error_out != nullptr) {
+      *ev.error_out = err;
+    }
+    action::clear_request(*context_);
+    return accepted && err == EMEL_OK;
+  }
+
+  bool process_event(const event::free_sequence & ev) {
+    const bool accepted = this->raw_sm().process_event(ev);
+    const int32_t err = context_->last_error;
+    if (ev.error_out != nullptr) {
+      *ev.error_out = err;
+    }
+    action::clear_request(*context_);
+    return accepted && err == EMEL_OK;
+  }
+
   bool process_event(const event::apply_ubatch & ev) {
     const bool accepted = this->raw_sm().process_event(ev);
     const int32_t err = context_->last_error;
@@ -429,6 +535,10 @@ struct sm : private sm_deps, public emel::sm<model> {
 
   int32_t kv_tokens() const noexcept { return context_->kv_tokens; }
   int32_t last_error() const noexcept { return context_->last_error; }
+  bool has_sequence(int32_t seq_id) const noexcept { return action::sequence_exists(*context_, seq_id); }
+  int32_t sequence_token_count(int32_t seq_id) const noexcept {
+    return action::sequence_token_count(*context_, seq_id);
+  }
 
  private:
   using base_type::raw_sm;

@@ -46,6 +46,35 @@ struct prepare_full {
   void * prepare_ctx = nullptr;
 };
 
+struct reserve {
+  int32_t kv_size = 0;
+  int32_t recurrent_slot_capacity = 0;
+  int32_t n_stream = 1;
+  int32_t n_pad = 1;
+  int32_t n_swa = 0;
+  int32_t swa_type = 0;
+  const int32_t * seq_to_stream = nullptr;
+  int32_t seq_to_stream_count = 0;
+  int32_t * error_out = nullptr;
+};
+
+struct allocate_sequence {
+  int32_t seq_id = 0;
+  int32_t slot_count = 0;
+  int32_t * error_out = nullptr;
+};
+
+struct branch_sequence {
+  int32_t seq_id_src = 0;
+  int32_t seq_id_dst = 0;
+  int32_t * error_out = nullptr;
+};
+
+struct free_sequence {
+  int32_t seq_id = 0;
+  int32_t * error_out = nullptr;
+};
+
 struct validate_update {
   const prepare_update * request = nullptr;
   int32_t * error_out = nullptr;

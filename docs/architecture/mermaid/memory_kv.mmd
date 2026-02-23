@@ -1,8 +1,8 @@
 stateDiagram-v2
   direction TB
   [*] --> initialized
-  initialized --> validating_prepare : prepare [always] / lambda_actions_987_39
-  prepared --> validating_prepare : prepare [always] / lambda_actions_987_39
+  initialized --> validating_prepare : prepare [always] / lambda_actions_1050_39
+  prepared --> validating_prepare : prepare [always] / lambda_actions_1050_39
   validating_prepare --> preparing_slots : [valid_prepare_context_] / none
   validating_prepare --> errored : [invalid_prepare_context_] / set_invalid_argument_
   preparing_slots --> preparing_slots_step : [valid_prepare_slots_context_] / none
@@ -10,7 +10,28 @@ stateDiagram-v2
   preparing_slots_step --> prepare_slots_decision : [always] / run_prepare_slots_phase_
   prepare_slots_decision --> errored : [phase_failed_] / none
   prepare_slots_decision --> publishing : [phase_ok_] / none
-  prepared --> applying : apply_ubatch [always] / lambda_actions_1103_37
+  initialized --> reserving : reserve [always] / lambda_actions_1166_39
+  prepared --> reserving : reserve [always] / lambda_actions_1166_39
+  reserving --> reserve_decision : [valid_reserve_context_] / run_reserve_phase_
+  reserving --> errored : [invalid_reserve_context_] / set_invalid_argument_
+  reserve_decision --> errored : [phase_failed_] / none
+  reserve_decision --> done : [phase_ok_] / none
+  prepared --> allocating_sequence : allocate_sequence [always] / lambda_actions_1175_49
+  allocating_sequence --> allocate_sequence_decision : [valid_allocate_sequence_context_] / run_allocate_sequence_phase_
+  allocating_sequence --> errored : [invalid_allocate_sequence_context_] / set_invalid_argument_
+  allocate_sequence_decision --> errored : [phase_failed_] / none
+  allocate_sequence_decision --> done : [phase_ok_] / none
+  prepared --> branching_sequence : branch_sequence [always] / lambda_actions_1185_47
+  branching_sequence --> branch_sequence_decision : [valid_branch_sequence_context_] / run_branch_sequence_phase_
+  branching_sequence --> errored : [invalid_branch_sequence_context_] / set_invalid_argument_
+  branch_sequence_decision --> errored : [phase_failed_] / none
+  branch_sequence_decision --> done : [phase_ok_] / none
+  prepared --> freeing_sequence : free_sequence [always] / lambda_actions_1195_45
+  freeing_sequence --> free_sequence_decision : [valid_free_sequence_context_] / run_free_sequence_phase_
+  freeing_sequence --> errored : [invalid_free_sequence_context_] / set_invalid_argument_
+  free_sequence_decision --> errored : [phase_failed_] / none
+  free_sequence_decision --> done : [phase_ok_] / none
+  prepared --> applying : apply_ubatch [always] / lambda_actions_1205_37
   applying --> apply_step_validating : [valid_apply_context_] / none
   applying --> errored : [invalid_apply_context_] / set_invalid_argument_
   apply_step_validating --> applying_step : [valid_apply_step_context_] / none
@@ -18,8 +39,8 @@ stateDiagram-v2
   applying_step --> apply_step_decision : [always] / run_apply_step_phase_
   apply_step_decision --> errored : [phase_failed_] / none
   apply_step_decision --> publishing : [phase_ok_] / none
-  prepared --> rolling_back : rollback [always] / lambda_actions_1115_40
-  errored --> rolling_back : rollback [always] / lambda_actions_1115_40
+  prepared --> rolling_back : rollback [always] / lambda_actions_1217_40
+  errored --> rolling_back : rollback [always] / lambda_actions_1217_40
   rolling_back --> rollback_step_validating : [valid_rollback_context_] / none
   rolling_back --> errored : [invalid_rollback_context_] / set_invalid_argument_
   rollback_step_validating --> rollback_step : [valid_rollback_step_context_] / none
@@ -27,37 +48,37 @@ stateDiagram-v2
   rollback_step --> rollback_step_decision : [always] / run_rollback_step_phase_
   rollback_step_decision --> errored : [phase_failed_] / none
   rollback_step_decision --> publishing : [phase_ok_] / none
-  prepared --> seq_remove_validating : seq_remove [always] / lambda_actions_1322_42
+  prepared --> seq_remove_validating : seq_remove [always] / lambda_actions_1424_42
   seq_remove_validating --> seq_remove_step : [valid_seq_remove_context_] / none
   seq_remove_validating --> errored : [invalid_seq_remove_context_] / set_invalid_argument_
   seq_remove_step --> seq_remove_step_decision : [always] / run_seq_remove_phase_
   seq_remove_step_decision --> errored : [phase_failed_] / none
   seq_remove_step_decision --> done : [phase_ok_] / none
-  prepared --> seq_copy_validating : seq_copy [always] / lambda_actions_1331_40
+  prepared --> seq_copy_validating : seq_copy [always] / lambda_actions_1433_40
   seq_copy_validating --> seq_copy_step : [valid_seq_copy_context_] / none
   seq_copy_validating --> errored : [invalid_seq_copy_context_] / set_invalid_argument_
   seq_copy_step --> seq_copy_step_decision : [always] / run_seq_copy_phase_
   seq_copy_step_decision --> errored : [phase_failed_] / none
   seq_copy_step_decision --> done : [phase_ok_] / none
-  prepared --> seq_keep_validating : seq_keep [always] / lambda_actions_1340_40
+  prepared --> seq_keep_validating : seq_keep [always] / lambda_actions_1442_40
   seq_keep_validating --> seq_keep_step : [valid_seq_keep_context_] / none
   seq_keep_validating --> errored : [invalid_seq_keep_context_] / set_invalid_argument_
   seq_keep_step --> seq_keep_step_decision : [always] / run_seq_keep_phase_
   seq_keep_step_decision --> errored : [phase_failed_] / none
   seq_keep_step_decision --> done : [phase_ok_] / none
-  prepared --> seq_add_validating : seq_add [always] / lambda_actions_1349_39
+  prepared --> seq_add_validating : seq_add [always] / lambda_actions_1451_39
   seq_add_validating --> seq_add_step : [valid_seq_add_context_] / none
   seq_add_validating --> errored : [invalid_seq_add_context_] / set_invalid_argument_
   seq_add_step --> seq_add_step_decision : [always] / run_seq_add_phase_
   seq_add_step_decision --> errored : [phase_failed_] / none
   seq_add_step_decision --> done : [phase_ok_] / none
-  prepared --> seq_div_validating : seq_div [always] / lambda_actions_1358_39
+  prepared --> seq_div_validating : seq_div [always] / lambda_actions_1460_39
   seq_div_validating --> seq_div_step : [valid_seq_div_context_] / none
   seq_div_validating --> errored : [invalid_seq_div_context_] / set_invalid_argument_
   seq_div_step --> seq_div_step_decision : [always] / run_seq_div_phase_
   seq_div_step_decision --> errored : [phase_failed_] / none
   seq_div_step_decision --> done : [phase_ok_] / none
-  prepared --> updates_validating : apply_updates [always] / lambda_actions_1367_45
+  prepared --> updates_validating : apply_updates [always] / lambda_actions_1469_45
   updates_validating --> updates_step : [valid_updates_context_] / none
   updates_validating --> errored : [invalid_updates_context_] / set_invalid_argument_
   updates_step --> updates_step_decision : [always] / run_updates_phase_
@@ -74,6 +95,14 @@ stateDiagram-v2
   preparing_slots --> errored : _ [always] / on_unexpected_
   preparing_slots_step --> errored : _ [always] / on_unexpected_
   prepare_slots_decision --> errored : _ [always] / on_unexpected_
+  reserving --> errored : _ [always] / on_unexpected_
+  reserve_decision --> errored : _ [always] / on_unexpected_
+  allocating_sequence --> errored : _ [always] / on_unexpected_
+  allocate_sequence_decision --> errored : _ [always] / on_unexpected_
+  branching_sequence --> errored : _ [always] / on_unexpected_
+  branch_sequence_decision --> errored : _ [always] / on_unexpected_
+  freeing_sequence --> errored : _ [always] / on_unexpected_
+  free_sequence_decision --> errored : _ [always] / on_unexpected_
   applying --> errored : _ [always] / on_unexpected_
   apply_step_validating --> errored : _ [always] / on_unexpected_
   applying_step --> errored : _ [always] / on_unexpected_

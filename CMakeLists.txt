@@ -137,11 +137,15 @@ if(EMEL_ENABLE_TESTS)
     tests/memory/coordinator_hybrid_sm_transition_more_tests.cpp
     tests/memory/coordinator_hybrid_sm_testing_policy_tests.cpp
     tests/memory/coordinator_hybrid_action_branch_tests.cpp
+    tests/memory/coordinator_any_tests.cpp
     tests/memory/kv/cache_tests.cpp
     tests/memory/kv/cache_sm_transition_tests.cpp
     tests/memory/kv/cache_sm_testing_policy_tests.cpp
     tests/memory/kv/cache_action_branch_tests.cpp
     tests/memory/kv/cache_guard_tests.cpp
+    tests/memory/kv/lifecycle_tests.cpp
+    tests/memory/recurrent/recurrent_tests.cpp
+    tests/memory/hybrid/hybrid_tests.cpp
     tests/buffer/allocator_tests.cpp
     tests/buffer/allocator_error_tests.cpp
     tests/buffer/allocator_detail_tests.cpp

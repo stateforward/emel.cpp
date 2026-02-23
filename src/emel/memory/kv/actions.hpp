@@ -49,9 +49,16 @@ inline void reset_context_state(context & ctx) {
   ctx.pending_copy_src.fill(0);
   ctx.pending_copy_dst.fill(0);
   ctx.pending_copy_count = 0;
+  ctx.lifecycle_slot_indices.fill(0);
+  ctx.lifecycle_positions.fill(0);
+  ctx.lifecycle_slot_count = 0;
   ctx.kv_tokens = 0;
   ctx.phase_error = EMEL_OK;
   ctx.last_error = EMEL_OK;
+  ctx.reserve_request = {};
+  ctx.allocate_sequence_request = {};
+  ctx.branch_sequence_request = {};
+  ctx.free_sequence_request = {};
   ctx.prepare_request = {};
   ctx.apply_request = {};
   ctx.rollback_request = {};
@@ -459,6 +466,35 @@ inline int32_t compute_kv_tokens(const context & ctx) {
     result = std::max(result, padded);
   }
   return result;
+}
+
+inline int32_t sequence_token_count(const context & ctx, int32_t seq_id) {
+  if (seq_id < 0 || seq_id >= MAX_SEQ) {
+    return 0;
+  }
+  if (ctx.kv_size <= 0) {
+    return 0;
+  }
+  const int32_t stream_id = ctx.seq_to_stream[seq_id];
+  if (stream_id < 0 || stream_id >= ctx.n_stream) {
+    return 0;
+  }
+  const stream_state & stream = ctx.streams[stream_id];
+  int32_t count = 0;
+  for (int32_t i = 0; i < ctx.kv_size; ++i) {
+    if (stream.pos[i] == POS_NONE) {
+      continue;
+    }
+    if (!cell_has_seq(stream, i, seq_id)) {
+      continue;
+    }
+    ++count;
+  }
+  return count;
+}
+
+inline bool sequence_exists(const context & ctx, int32_t seq_id) {
+  return sequence_token_count(ctx, seq_id) > 0;
 }
 
 inline bool is_masked_swa(int32_t n_swa, int32_t swa_type, int32_t pos_cell, int32_t pos_max_p1) {
@@ -931,6 +967,29 @@ inline void store_prepare_request(const event::prepare & ev, context & ctx) noex
   ctx.prepare_request.error_out = nullptr;
 }
 
+inline void store_reserve_request(const event::reserve & ev, context & ctx) noexcept {
+  ctx.reserve_request = ev;
+  ctx.reserve_request.error_out = nullptr;
+}
+
+inline void store_allocate_sequence_request(const event::allocate_sequence & ev,
+                                            context & ctx) noexcept {
+  ctx.allocate_sequence_request = ev;
+  ctx.allocate_sequence_request.error_out = nullptr;
+}
+
+inline void store_branch_sequence_request(const event::branch_sequence & ev,
+                                          context & ctx) noexcept {
+  ctx.branch_sequence_request = ev;
+  ctx.branch_sequence_request.error_out = nullptr;
+}
+
+inline void store_free_sequence_request(const event::free_sequence & ev,
+                                        context & ctx) noexcept {
+  ctx.free_sequence_request = ev;
+  ctx.free_sequence_request.error_out = nullptr;
+}
+
 inline void store_apply_request(const event::apply_ubatch & ev, context & ctx) noexcept {
   ctx.apply_request = ev;
   ctx.apply_request.kv_tokens_out = nullptr;
@@ -973,6 +1032,10 @@ inline void store_updates_request(const event::apply_updates & ev, context & ctx
 }
 
 inline void clear_requests(context & ctx) noexcept {
+  ctx.reserve_request = {};
+  ctx.allocate_sequence_request = {};
+  ctx.branch_sequence_request = {};
+  ctx.free_sequence_request = {};
   ctx.prepare_request = {};
   ctx.apply_request = {};
   ctx.rollback_request = {};
@@ -1098,6 +1161,45 @@ inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ct
   }
 
   ctx.kv_tokens = compute_kv_tokens(ctx);
+};
+
+inline constexpr auto begin_reserve = [](const event::reserve & ev, context & ctx) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_reserve_request(ev, ctx);
+};
+
+inline constexpr auto begin_allocate_sequence = [](const event::allocate_sequence & ev,
+                                                   context & ctx) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_allocate_sequence_request(ev, ctx);
+};
+
+inline constexpr auto begin_branch_sequence = [](const event::branch_sequence & ev,
+                                                 context & ctx) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_branch_sequence_request(ev, ctx);
+};
+
+inline constexpr auto begin_free_sequence = [](const event::free_sequence & ev,
+                                               context & ctx) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
+  store_free_sequence_request(ev, ctx);
 };
 
 inline constexpr auto begin_apply = [](const event::apply_ubatch & ev, context & ctx) {
@@ -1463,6 +1565,230 @@ inline constexpr auto reject_invalid_updates = [](const event::validate_updates 
   *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
 };
 
+inline constexpr auto run_reserve_step = [](context & ctx, int32_t * error_out) {
+  if (error_out == nullptr) {
+    return;
+  }
+  *error_out = EMEL_OK;
+
+  const event::reserve & request = ctx.reserve_request;
+  if (request.kv_size <= 0 || request.kv_size > MAX_KV_CELLS) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (request.n_stream <= 0 || request.n_stream > MAX_STREAMS) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+
+  ctx.kv_size = request.kv_size;
+  ctx.n_stream = request.n_stream;
+  ctx.n_pad = request.n_pad > 0 ? request.n_pad : 1;
+  ctx.n_swa = request.n_swa;
+  ctx.swa_type = request.swa_type;
+  ctx.seq_to_stream.fill(0);
+  if (request.seq_to_stream != nullptr && request.seq_to_stream_count > 0) {
+    const int32_t count = std::min(request.seq_to_stream_count, MAX_SEQ);
+    for (int32_t i = 0; i < count; ++i) {
+      const int32_t stream_id = request.seq_to_stream[i];
+      if (stream_id < 0 || stream_id >= ctx.n_stream) {
+        *error_out = EMEL_ERR_INVALID_ARGUMENT;
+        return;
+      }
+      ctx.seq_to_stream[i] = stream_id;
+    }
+  } else if (ctx.n_stream > 1) {
+    for (int32_t i = 0; i < ctx.n_stream; ++i) {
+      ctx.seq_to_stream[i] = i;
+    }
+  }
+
+  ctx.next_pos.fill(0);
+  for (int32_t s = 0; s < ctx.n_stream; ++s) {
+    reset_stream(ctx.streams[s]);
+  }
+  ctx.pending_copy_count = 0;
+  ctx.kv_tokens = 0;
+};
+
+inline constexpr auto run_allocate_sequence_step = [](context & ctx, int32_t * error_out) {
+  if (error_out == nullptr) {
+    return;
+  }
+  *error_out = EMEL_OK;
+
+  const event::allocate_sequence & request = ctx.allocate_sequence_request;
+  const int32_t seq_id = request.seq_id;
+  if (seq_id < 0 || seq_id >= MAX_SEQ) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (request.slot_count <= 0) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (ctx.kv_size <= 0 || ctx.kv_size > MAX_KV_CELLS) {
+    *error_out = EMEL_ERR_BACKEND;
+    return;
+  }
+  if (request.slot_count > ctx.kv_size) {
+    *error_out = EMEL_ERR_BACKEND;
+    return;
+  }
+  if (sequence_exists(ctx, seq_id)) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+
+  const int32_t stream_id = ctx.seq_to_stream[seq_id];
+  if (stream_id < 0 || stream_id >= ctx.n_stream) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  stream_state & stream = ctx.streams[stream_id];
+  ensure_next_pos_for_seq(ctx, seq_id, stream);
+
+  ctx.lifecycle_slot_count = request.slot_count;
+  if (!find_slot_indices(
+        ctx,
+        stream,
+        ctx.kv_size,
+        ctx.lifecycle_slot_count,
+        ctx.lifecycle_slot_indices.data())) {
+    *error_out = EMEL_ERR_BACKEND;
+    return;
+  }
+
+  const int32_t base_pos = ctx.next_pos[seq_id];
+  for (int32_t i = 0; i < ctx.lifecycle_slot_count; ++i) {
+    const int32_t idx = ctx.lifecycle_slot_indices[i];
+    set_cell_empty(stream, idx);
+    set_cell_pos(stream, idx, base_pos + i);
+    stream.shift[idx] = 0;
+    stream.ext_x[idx] = 0;
+    stream.ext_y[idx] = 0;
+    add_seq_to_cell(stream, idx, seq_id);
+  }
+
+  const int32_t last_idx = ctx.lifecycle_slot_indices[ctx.lifecycle_slot_count - 1];
+  stream.head = last_idx + 1;
+  if (stream.head >= ctx.kv_size) {
+    stream.head %= ctx.kv_size;
+  }
+  reset_next_pos_for_seq(ctx, seq_id, stream);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
+};
+
+inline constexpr auto run_branch_sequence_step = [](context & ctx, int32_t * error_out) {
+  if (error_out == nullptr) {
+    return;
+  }
+  *error_out = EMEL_OK;
+
+  const event::branch_sequence & request = ctx.branch_sequence_request;
+  if (request.seq_id_src < 0 || request.seq_id_src >= MAX_SEQ ||
+      request.seq_id_dst < 0 || request.seq_id_dst >= MAX_SEQ ||
+      request.seq_id_src == request.seq_id_dst) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (!sequence_exists(ctx, request.seq_id_src) || sequence_exists(ctx, request.seq_id_dst)) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+
+  const int32_t src_stream_id = ctx.seq_to_stream[request.seq_id_src];
+  const int32_t dst_stream_id = ctx.seq_to_stream[request.seq_id_dst];
+  if (src_stream_id < 0 || src_stream_id >= ctx.n_stream ||
+      dst_stream_id < 0 || dst_stream_id >= ctx.n_stream) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+
+  stream_state & src_stream = ctx.streams[src_stream_id];
+  stream_state & dst_stream = ctx.streams[dst_stream_id];
+  if (src_stream_id != dst_stream_id) {
+    bool found_pair = false;
+    for (int32_t i = 0; i < ctx.pending_copy_count; ++i) {
+      if (ctx.pending_copy_src[i] == src_stream_id &&
+          ctx.pending_copy_dst[i] == dst_stream_id) {
+        found_pair = true;
+        break;
+      }
+    }
+    if (!found_pair && ctx.pending_copy_count >= MAX_STREAM_COPY) {
+      *error_out = EMEL_ERR_BACKEND;
+      return;
+    }
+    if (!found_pair) {
+      add_pending_copy(ctx, src_stream_id, dst_stream_id);
+    }
+    reset_stream(dst_stream);
+  }
+
+  for (int32_t i = 0; i < ctx.kv_size; ++i) {
+    if (src_stream.pos[i] == POS_NONE) {
+      continue;
+    }
+    if (!cell_has_seq(src_stream, i, request.seq_id_src)) {
+      continue;
+    }
+    if (src_stream_id == dst_stream_id) {
+      add_seq_to_cell(dst_stream, i, request.seq_id_dst);
+      continue;
+    }
+    set_cell_pos(dst_stream, i, src_stream.pos[i]);
+    dst_stream.shift[i] = src_stream.shift[i];
+    dst_stream.ext_x[i] = src_stream.ext_x[i];
+    dst_stream.ext_y[i] = src_stream.ext_y[i];
+    if (dst_stream.shift[i] != 0) {
+      dst_stream.has_shift = true;
+    }
+    add_seq_to_cell(dst_stream, i, request.seq_id_dst);
+  }
+  if (src_stream_id != dst_stream_id) {
+    dst_stream.head = src_stream.head;
+  }
+  reset_next_pos_for_seq(ctx, request.seq_id_dst, dst_stream);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
+};
+
+inline constexpr auto run_free_sequence_step = [](context & ctx, int32_t * error_out) {
+  if (error_out == nullptr) {
+    return;
+  }
+  *error_out = EMEL_OK;
+
+  const event::free_sequence & request = ctx.free_sequence_request;
+  if (request.seq_id < 0 || request.seq_id >= MAX_SEQ) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+  if (!sequence_exists(ctx, request.seq_id)) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+
+  const int32_t stream_id = ctx.seq_to_stream[request.seq_id];
+  if (stream_id < 0 || stream_id >= ctx.n_stream) {
+    *error_out = EMEL_ERR_INVALID_ARGUMENT;
+    return;
+  }
+
+  stream_state & stream = ctx.streams[stream_id];
+  for (int32_t i = 0; i < ctx.kv_size; ++i) {
+    if (stream.pos[i] == POS_NONE) {
+      continue;
+    }
+    if (!cell_has_seq(stream, i, request.seq_id)) {
+      continue;
+    }
+    remove_seq_from_cell(stream, i, request.seq_id);
+  }
+  reset_next_pos_for_seq(ctx, request.seq_id, stream);
+  ctx.kv_tokens = compute_kv_tokens(ctx);
+};
+
 inline constexpr auto run_seq_remove_step = [](const event::seq_remove_step & ev, context & ctx) {
   if (ev.error_out == nullptr) return;
   *ev.error_out = EMEL_OK;
@@ -1781,6 +2107,38 @@ struct run_prepare_slots_phase {
   }
 };
 
+struct run_reserve_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    run_reserve_step(ctx, &err);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_allocate_sequence_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    run_allocate_sequence_step(ctx, &err);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_branch_sequence_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    run_branch_sequence_step(ctx, &err);
+    ctx.phase_error = err;
+  }
+};
+
+struct run_free_sequence_phase {
+  void operator()(context & ctx) const noexcept {
+    int32_t err = EMEL_OK;
+    run_free_sequence_step(ctx, &err);
+    ctx.phase_error = err;
+  }
+};
+
 struct run_apply_step_phase {
   void operator()(context & ctx) const noexcept {
     int32_t err = EMEL_OK;
@@ -1902,6 +2260,10 @@ struct on_unexpected {
 
 inline constexpr set_invalid_argument set_invalid_argument{};
 inline constexpr run_prepare_slots_phase run_prepare_slots_phase{};
+inline constexpr run_reserve_phase run_reserve_phase{};
+inline constexpr run_allocate_sequence_phase run_allocate_sequence_phase{};
+inline constexpr run_branch_sequence_phase run_branch_sequence_phase{};
+inline constexpr run_free_sequence_phase run_free_sequence_phase{};
 inline constexpr run_apply_step_phase run_apply_step_phase{};
 inline constexpr run_rollback_step_phase run_rollback_step_phase{};
 inline constexpr run_seq_remove_phase run_seq_remove_phase{};

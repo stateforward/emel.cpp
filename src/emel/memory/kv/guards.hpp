@@ -669,6 +669,83 @@ inline constexpr auto invalid_updates_step_request = [](
   return !valid_updates_step_request(ev, ctx);
 };
 
+inline constexpr auto valid_reserve_request = [](const action::context & ctx) noexcept {
+  const event::reserve & request = ctx.reserve_request;
+  if (request.kv_size <= 0 || request.kv_size > action::MAX_KV_CELLS) {
+    return false;
+  }
+  if (request.n_stream <= 0 || request.n_stream > action::MAX_STREAMS) {
+    return false;
+  }
+  if (request.seq_to_stream != nullptr && request.seq_to_stream_count > 0) {
+    const int32_t count = std::min(request.seq_to_stream_count, action::MAX_SEQ);
+    for (int32_t i = 0; i < count; ++i) {
+      const int32_t stream_id = request.seq_to_stream[i];
+      if (stream_id < 0 || stream_id >= request.n_stream) {
+        return false;
+      }
+    }
+  }
+  return true;
+};
+
+inline constexpr auto valid_allocate_sequence_request = [](const action::context & ctx) noexcept {
+  const event::allocate_sequence & request = ctx.allocate_sequence_request;
+  if (ctx.kv_size <= 0 || ctx.kv_size > action::MAX_KV_CELLS) {
+    return false;
+  }
+  if (request.seq_id < 0 || request.seq_id >= action::MAX_SEQ) {
+    return false;
+  }
+  if (request.slot_count <= 0 || request.slot_count > ctx.kv_size) {
+    return false;
+  }
+  const int32_t stream_id = ctx.seq_to_stream[request.seq_id];
+  if (!valid_stream_id(ctx, stream_id)) {
+    return false;
+  }
+  return !action::sequence_exists(ctx, request.seq_id);
+};
+
+inline constexpr auto valid_branch_sequence_request = [](const action::context & ctx) noexcept {
+  const event::branch_sequence & request = ctx.branch_sequence_request;
+  if (ctx.kv_size <= 0 || ctx.kv_size > action::MAX_KV_CELLS) {
+    return false;
+  }
+  if (!valid_seq_id(request.seq_id_src) ||
+      !valid_seq_id(request.seq_id_dst) ||
+      request.seq_id_src == request.seq_id_dst) {
+    return false;
+  }
+  const int32_t src_stream_id = ctx.seq_to_stream[request.seq_id_src];
+  const int32_t dst_stream_id = ctx.seq_to_stream[request.seq_id_dst];
+  if (!valid_stream_id(ctx, src_stream_id) || !valid_stream_id(ctx, dst_stream_id)) {
+    return false;
+  }
+  if (!action::sequence_exists(ctx, request.seq_id_src)) {
+    return false;
+  }
+  if (action::sequence_exists(ctx, request.seq_id_dst)) {
+    return false;
+  }
+  return true;
+};
+
+inline constexpr auto valid_free_sequence_request = [](const action::context & ctx) noexcept {
+  const event::free_sequence & request = ctx.free_sequence_request;
+  if (ctx.kv_size <= 0 || ctx.kv_size > action::MAX_KV_CELLS) {
+    return false;
+  }
+  if (!valid_seq_id(request.seq_id)) {
+    return false;
+  }
+  const int32_t stream_id = ctx.seq_to_stream[request.seq_id];
+  if (!valid_stream_id(ctx, stream_id)) {
+    return false;
+  }
+  return action::sequence_exists(ctx, request.seq_id);
+};
+
 struct valid_prepare_context {
   bool operator()(const action::context & ctx) const noexcept {
     event::validate_prepare validate{.request = &ctx.prepare_request};
@@ -900,6 +977,54 @@ struct valid_updates_step_context {
 struct invalid_updates_step_context {
   bool operator()(const action::context & ctx) const noexcept {
     return !valid_updates_step_context{}(ctx);
+  }
+};
+
+struct valid_reserve_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return valid_reserve_request(ctx);
+  }
+};
+
+struct invalid_reserve_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_reserve_context{}(ctx);
+  }
+};
+
+struct valid_allocate_sequence_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return valid_allocate_sequence_request(ctx);
+  }
+};
+
+struct invalid_allocate_sequence_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_allocate_sequence_context{}(ctx);
+  }
+};
+
+struct valid_branch_sequence_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return valid_branch_sequence_request(ctx);
+  }
+};
+
+struct invalid_branch_sequence_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_branch_sequence_context{}(ctx);
+  }
+};
+
+struct valid_free_sequence_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return valid_free_sequence_request(ctx);
+  }
+};
+
+struct invalid_free_sequence_context {
+  bool operator()(const action::context & ctx) const noexcept {
+    return !valid_free_sequence_context{}(ctx);
   }
 };
 

@@ -11,8 +11,8 @@
 #include "emel/batch/planner/events.hpp"
 #include "emel/batch/planner/sm.hpp"
 #include "emel/emel.h"
+#include "emel/memory/coordinator/any.hpp"
 #include "emel/memory/coordinator/events.hpp"
-#include "emel/memory/coordinator/recurrent/sm.hpp"
 
 #include "llama-batch.h"
 #include "llama-memory-recurrent.h"
@@ -461,7 +461,8 @@ namespace emel::bench {
 
 void append_emel_memory_coordinator_recurrent_cases(std::vector<result> & results,
                                                     const config & cfg) {
-  emel::memory::coordinator::recurrent::sm machine{};
+  emel::memory::coordinator::any machine{};
+  machine.set_kind(emel::memory::coordinator::coordinator_kind::recurrent);
   auto llama_state = std::make_shared<reference_state>();
   ensure_splitter_parity(llama_state->splitter);
   event::memory_status update_status = event::memory_status::failed_prepare;
