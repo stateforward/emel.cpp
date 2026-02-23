@@ -5,16 +5,15 @@
 #include <string_view>
 
 #include "emel/emel.h"
-#include "emel/text/tokenizer/preprocessor/events.hpp"
 #include "emel/text/tokenizer/preprocessor/types.hpp"
 #include "emel/text/tokenizer/bpe/split.hpp"
 
 namespace emel::text::tokenizer::preprocessor::action {
 
 struct context {
-  const event::preprocess * request = nullptr;
   const emel::model::data::vocab * vocab = nullptr;
   std::string_view text = {};
+  fragment * fragments_out = nullptr;
   bool parse_special = false;
   bool preprocessed = false;
   size_t fragment_capacity = 0;
