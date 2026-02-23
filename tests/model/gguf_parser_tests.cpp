@@ -16,6 +16,12 @@
 
 namespace {
 
+emel::model::data & fresh_model() {
+  static emel::model::data model = {};
+  std::memset(&model, 0, sizeof(model));
+  return model;
+}
+
 bool make_temp_path(char * out, const size_t capacity) {
   if (out == nullptr || capacity == 0) {
     return false;
@@ -665,7 +671,7 @@ TEST_CASE("gguf parser reads tokenizer flags and ids") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_vocab_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;
@@ -713,7 +719,7 @@ TEST_CASE("gguf parser reads extended metadata") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_metadata_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;

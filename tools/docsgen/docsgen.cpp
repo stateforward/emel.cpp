@@ -19,9 +19,9 @@
 #include <vector>
 
 #include "emel/emel.h"
-#include "emel/jinja/parser/sm.hpp"
-#include "emel/jinja/renderer/sm.hpp"
-#include "emel/jinja/value.hpp"
+#include "emel/text/jinja/parser/sm.hpp"
+#include "emel/text/jinja/formatter/sm.hpp"
+#include "emel/text/jinja/value.hpp"
 
 namespace fs = std::filesystem;
 
@@ -424,11 +424,11 @@ std::optional<std::string> render_template(const fs::path & template_path,
     return std::nullopt;
   }
 
-  emel::jinja::program program;
+  emel::text::jinja::program program;
   int32_t parse_err = EMEL_OK;
-  emel::jinja::parser::action::context parse_ctx;
-  emel::jinja::parser::sm parser{parse_ctx};
-  emel::jinja::event::parse parse_ev{
+  emel::text::jinja::parser::action::context parse_ctx;
+  emel::text::jinja::parser::sm parser{parse_ctx};
+  emel::text::jinja::event::parse parse_ev{
     .template_text = template_text,
     .program_out = &program,
     .error_out = &parse_err,
@@ -436,29 +436,29 @@ std::optional<std::string> render_template(const fs::path & template_path,
 
   parser.process_event(parse_ev);
   if (parse_err != EMEL_OK ||
-      !parser.is(boost::sml::state<emel::jinja::parser::done>)) {
+      !parser.is(boost::sml::state<emel::text::jinja::parser::done>)) {
     std::fprintf(stderr, "error: jinja parse failed\n");
     return std::nullopt;
   }
 
-  std::vector<emel::jinja::object_entry> entries;
+  std::vector<emel::text::jinja::object_entry> entries;
   entries.reserve(vars.size());
   for (const auto & var : vars) {
-    emel::jinja::value key;
-    key.type = emel::jinja::value_type::string;
+    emel::text::jinja::value key;
+    key.type = emel::text::jinja::value_type::string;
     key.string_v.view = var.key;
 
-    emel::jinja::value val;
-    val.type = emel::jinja::value_type::string;
+    emel::text::jinja::value val;
+    val.type = emel::text::jinja::value_type::string;
     val.string_v.view = var.value;
 
-    emel::jinja::object_entry entry;
+    emel::text::jinja::object_entry entry;
     entry.key = key;
     entry.val = val;
     entries.push_back(entry);
   }
 
-  emel::jinja::object_value globals{};
+  emel::text::jinja::object_value globals{};
   if (!entries.empty()) {
     globals.entries = entries.data();
     globals.count = entries.size();
@@ -477,9 +477,9 @@ std::optional<std::string> render_template(const fs::path & template_path,
   size_t out_len = 0;
   size_t error_pos = 0;
   int32_t render_err = EMEL_OK;
-  emel::jinja::renderer::action::context render_ctx;
-  emel::jinja::renderer::sm renderer{render_ctx};
-  emel::jinja::event::render render_ev{
+  emel::text::jinja::formatter::action::context render_ctx;
+  emel::text::jinja::formatter::sm renderer{render_ctx};
+  emel::text::jinja::event::render render_ev{
     .program = &program,
     .globals = entries.empty() ? nullptr : &globals,
     .source_text = template_text,
@@ -492,7 +492,7 @@ std::optional<std::string> render_template(const fs::path & template_path,
 
   renderer.process_event(render_ev);
   if (render_err != EMEL_OK ||
-      !renderer.is(boost::sml::state<emel::jinja::renderer::done>)) {
+      !renderer.is(boost::sml::state<emel::text::jinja::formatter::done>)) {
     std::fprintf(stderr, "error: jinja render failed\n");
     return std::nullopt;
   }

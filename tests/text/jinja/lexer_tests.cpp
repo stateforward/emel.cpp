@@ -1,0 +1,210 @@
+#include <doctest/doctest.h>
+
+#include "emel/emel.h"
+#include "emel/text/jinja/lexer.hpp"
+
+TEST_CASE("jinja_lexer_tokenizes_expression") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("hello {{ name }}");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() >= 4);
+  CHECK(result.tokens[0].type == emel::text::jinja::token_type::text);
+  CHECK(result.tokens[0].value == "hello ");
+  CHECK(result.tokens[1].type == emel::text::jinja::token_type::open_expression);
+  CHECK(result.tokens[2].type == emel::text::jinja::token_type::identifier);
+  CHECK(result.tokens[2].value == "name");
+  CHECK(result.tokens[3].type == emel::text::jinja::token_type::close_expression);
+}
+
+TEST_CASE("jinja_lexer_handles_empty_input") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("");
+
+  CHECK(result.error == EMEL_OK);
+  CHECK(result.tokens.empty());
+}
+
+TEST_CASE("jinja_lexer_tokenizes_comment") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("text{# note #}{{ x }}");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() >= 4);
+  CHECK(result.tokens[0].type == emel::text::jinja::token_type::text);
+  CHECK(result.tokens[1].type == emel::text::jinja::token_type::comment);
+  CHECK(result.tokens[2].type == emel::text::jinja::token_type::open_expression);
+  CHECK(result.tokens[3].type == emel::text::jinja::token_type::identifier);
+}
+
+TEST_CASE("jinja_lexer_rejects_invalid_escape") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{{ \"\\x\" }}");
+
+  CHECK(result.error == EMEL_ERR_PARSE_FAILED);
+  CHECK(result.error_pos > 0);
+}
+
+TEST_CASE("jinja_lexer_rejects_unterminated_escape") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{{ \"foo\\");
+
+  CHECK(result.error == EMEL_ERR_PARSE_FAILED);
+}
+
+TEST_CASE("jinja_lexer_rejects_unterminated_comment") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{# comment");
+
+  CHECK(result.error == EMEL_ERR_PARSE_FAILED);
+}
+
+TEST_CASE("jinja_lexer_rejects_unexpected_character") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{{ @ }}");
+
+  CHECK(result.error == EMEL_ERR_PARSE_FAILED);
+}
+
+TEST_CASE("jinja_lexer_handles_lonely_brace") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() == 1);
+  CHECK(result.tokens[0].type == emel::text::jinja::token_type::text);
+}
+
+TEST_CASE("jinja_lexer_handles_double_dash_expression") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{{--}}");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() >= 2);
+  CHECK(result.tokens[0].type == emel::text::jinja::token_type::open_expression);
+  CHECK(result.tokens.back().type == emel::text::jinja::token_type::close_expression);
+}
+
+TEST_CASE("jinja_lexer_rejects_unterminated_string") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{{ \"foo }}");
+
+  CHECK(result.error == EMEL_ERR_PARSE_FAILED);
+}
+
+TEST_CASE("jinja_lexer_handles_unary_numeric") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{{ -1 + 2 }}");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() >= 4);
+  CHECK(result.tokens[0].type == emel::text::jinja::token_type::open_expression);
+  CHECK(result.tokens[1].type == emel::text::jinja::token_type::numeric_literal);
+  CHECK(result.tokens[1].value == "-1");
+}
+
+TEST_CASE("jinja_lexer_handles_nested_objects") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{{ {'a': {'b': 1}} }}");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() >= 6);
+  CHECK(result.tokens[0].type == emel::text::jinja::token_type::open_expression);
+  CHECK(result.tokens[1].type == emel::text::jinja::token_type::open_curly_bracket);
+}
+
+TEST_CASE("jinja_lexer_handles_decimal_numbers") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{{ 1.25 }}");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() >= 3);
+  CHECK(result.tokens[1].type == emel::text::jinja::token_type::numeric_literal);
+  CHECK(result.tokens[1].value == "1.25");
+}
+
+TEST_CASE("jinja_lexer_handles_escaped_strings") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result =
+      lex.tokenize("{{ \"a\\n\\t\\r\\b\\f\\v\\\\\\\"\" }}");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() >= 3);
+  CHECK(result.tokens[1].type == emel::text::jinja::token_type::string_literal);
+}
+
+TEST_CASE("jinja_lexer_normalizes_crlf") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("a\r\nb\r{{ x }}\n");
+
+  CHECK(result.error == EMEL_OK);
+  CHECK(result.source.find('\r') == std::string::npos);
+}
+
+TEST_CASE("jinja_lexer_trims_blocks") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result =
+      lex.tokenize(" \n  {%- if x -%}\ntext");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(!result.tokens.empty());
+  CHECK(result.tokens[0].type == emel::text::jinja::token_type::open_statement);
+}
+
+TEST_CASE("jinja_lexer_trims_whitespace_before_block") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("   {%- if x %}");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(!result.tokens.empty());
+  CHECK(result.tokens[0].type == emel::text::jinja::token_type::open_statement);
+}
+
+TEST_CASE("jinja_lexer_trims_whitespace_after_block") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{%- if x -%}   ");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(!result.tokens.empty());
+  CHECK(result.tokens[0].type == emel::text::jinja::token_type::open_statement);
+}
+
+TEST_CASE("jinja_lexer_trims_newline_after_block") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{% if x %}\ntext");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() >= 5);
+  CHECK(result.tokens.back().type == emel::text::jinja::token_type::text);
+  CHECK(result.tokens.back().value == "text");
+}
+
+TEST_CASE("jinja_lexer_handles_single_quote_escape") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{{ 'it\\'s' }}");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() >= 3);
+  CHECK(result.tokens[1].type == emel::text::jinja::token_type::string_literal);
+  CHECK(result.tokens[1].value == "it's");
+}
+
+TEST_CASE("jinja_lexer_lstrip_block_trims_trailing_whitespace") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("hello  {%- if x %}");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() >= 2);
+  CHECK(result.tokens[0].type == emel::text::jinja::token_type::text);
+  CHECK(result.tokens[0].value == "hello");
+  CHECK(result.tokens[1].type == emel::text::jinja::token_type::open_statement);
+}
+
+TEST_CASE("jinja_lexer_handles_open_expression_trailing_dash") {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result result = lex.tokenize("{{-");
+
+  CHECK(result.error == EMEL_OK);
+  REQUIRE(result.tokens.size() == 1);
+  CHECK(result.tokens[0].type == emel::text::jinja::token_type::open_expression);
+}

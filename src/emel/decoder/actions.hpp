@@ -739,23 +739,13 @@ struct run_process_ubatch {
     int32_t kv_tokens = 0;
     bool rollback_attempted = false;
     int32_t ubatch_error = EMEL_OK;
-    const bool ok = ctx.ubatch_executor->process_event(emel::graph::builder::event::execute{
+    const bool ok = ctx.ubatch_executor->process_event(emel::graph::processor::event::execute{
       .ubatch_index = ctx.ubatches_processed,
       .ubatch_size = current,
       .memory_coordinator_sm = ctx.memory_coordinator.get(),
       .kv_cache_sm = ctx.kv_cache.get(),
       .expected_outputs = expected_outputs,
       .compute_ctx = ctx.compute_ctx,
-      .compute_validate = ctx.compute_validate,
-      .compute_prepare_graph = ctx.compute_prepare_graph,
-      .compute_alloc_graph = ctx.compute_alloc_graph,
-      .compute_bind_inputs = ctx.compute_bind_inputs,
-      .compute_run_backend = ctx.compute_run_backend,
-      .compute_extract_outputs = ctx.compute_extract_outputs,
-      .outputs_produced_out = &produced,
-      .kv_tokens_out = &kv_tokens,
-      .rollback_attempted_out = &rollback_attempted,
-      .error_out = &ubatch_error,
       .positions = positions,
       .positions_count = positions_count,
       .seq_masks = seq_masks,
@@ -763,6 +753,16 @@ struct run_process_ubatch {
       .seq_masks_count = seq_masks_count,
       .seq_primary_ids = seq_primary_ids,
       .seq_primary_ids_count = seq_primary_ids_count,
+      .validate = ctx.compute_validate,
+      .prepare_graph = ctx.compute_prepare_graph,
+      .alloc_graph = ctx.compute_alloc_graph,
+      .bind_inputs = ctx.compute_bind_inputs,
+      .run_backend = ctx.compute_run_backend,
+      .extract_outputs = ctx.compute_extract_outputs,
+      .outputs_produced_out = &produced,
+      .kv_tokens_out = &kv_tokens,
+      .rollback_attempted_out = &rollback_attempted,
+      .error_out = &ubatch_error,
     });
 
     const int32_t normalized = detail::normalize_ubatch_error(ok, ubatch_error);

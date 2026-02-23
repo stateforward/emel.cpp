@@ -718,3 +718,19 @@ TEST_CASE("decoder_run_rollback_ubatch_reports_missing_kv_cache") {
     ctx);
   CHECK(err == EMEL_ERR_BACKEND);
 }
+
+TEST_CASE("decoder_run_sanitize_batch_handles_missing_outputs_and_dependencies") {
+  emel::decoder::action::context ctx{};
+  emel::decoder::action::run_sanitize_batch(
+      emel::decoder::event::sanitize_batch{}, ctx);
+
+  int32_t err = EMEL_OK;
+  ctx.batch_sanitizer.reset();
+  emel::decoder::action::run_sanitize_batch(
+      emel::decoder::event::sanitize_batch{
+          .error_out = &err,
+      },
+      ctx);
+  CHECK(err == EMEL_ERR_BACKEND);
+  CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+}

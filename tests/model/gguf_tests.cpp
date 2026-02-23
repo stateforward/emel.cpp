@@ -21,6 +21,11 @@ namespace {
 
 emel::model::data model{};
 
+emel::model::data & fresh_model() {
+  std::memset(&model, 0, sizeof(model));
+  return model;
+}
+
 struct upload_probe {
   uint64_t begin_total = 0;
   uint64_t bytes = 0;
@@ -693,7 +698,7 @@ TEST_CASE("gguf loader parses metadata and tensors") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -732,7 +737,7 @@ TEST_CASE("gguf loader rejects missing architecture") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_gguf_without_arch(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -760,7 +765,7 @@ TEST_CASE("gguf loader rejects invalid alignment") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_bad_alignment_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -779,7 +784,7 @@ TEST_CASE("gguf loader rejects invalid tensor type") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_bad_tensor_type_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -798,7 +803,7 @@ TEST_CASE("gguf loader rejects invalid tensor offsets") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_bad_tensor_offset_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -844,7 +849,7 @@ TEST_CASE("gguf loader accepts long key and array kv") {
   REQUIRE(std::fwrite(weights.data(), 1, weights.size(), file) == weights.size());
   std::fclose(file);
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -863,7 +868,7 @@ TEST_CASE("gguf loader checks architecture list") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -897,7 +902,7 @@ TEST_CASE("gguf loader streams weights into provided buffer") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -932,7 +937,7 @@ TEST_CASE("gguf loader streams weights with upload callbacks") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -975,7 +980,7 @@ TEST_CASE("gguf loader rejects partial upload callbacks") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -1010,7 +1015,7 @@ TEST_CASE("gguf loader reports upload begin failure") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -1046,7 +1051,7 @@ TEST_CASE("gguf loader reports upload chunk failure") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -1083,7 +1088,7 @@ TEST_CASE("gguf loader reports upload end failure") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -1167,7 +1172,7 @@ TEST_CASE("gguf map_parser rejects negative kv count") {
   CHECK(write_header(file, emel::parser::gguf::k_gguf_version, 0, -1));
   std::fclose(file);
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
   emel::model::loader::event::load request{model};
@@ -1189,7 +1194,7 @@ TEST_CASE("gguf map_parser rejects negative tensor count") {
   CHECK(write_header(file, emel::parser::gguf::k_gguf_version, -1, 0));
   std::fclose(file);
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
   emel::model::loader::event::load request{model};
@@ -1209,7 +1214,7 @@ TEST_CASE("gguf map_parser rejects invalid split metadata") {
   std::snprintf(path, sizeof(path), "%s.gguf", base_path);
   CHECK(write_split_gguf(path, 1, 1, 1));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
   emel::model::loader::event::load request{model};
@@ -1233,7 +1238,7 @@ TEST_CASE("gguf map_parser rejects mismatched split metadata") {
   CHECK(emel::parser::gguf::format_split_path(path, 1, 2, split_path, sizeof(split_path)));
   CHECK(write_split_gguf(split_path, 2, 0, 1));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
   emel::model::loader::event::load request{model};
@@ -1253,7 +1258,7 @@ TEST_CASE("gguf loader rejects direct io on unsupported platforms") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -1289,7 +1294,7 @@ TEST_CASE("gguf loader streams weights with direct io") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -1338,7 +1343,7 @@ TEST_CASE("gguf loader rejects too-small weight buffer") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -1370,7 +1375,7 @@ TEST_CASE("gguf loader validates structure") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -1398,7 +1403,7 @@ TEST_CASE("gguf loader maps weights via mmap") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -1695,7 +1700,7 @@ TEST_CASE("gguf parser reports missing model data") {
 }
 
 TEST_CASE("gguf map_architecture rejects mismatched list") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   std::memcpy(model.architecture_name.data(), "llama", 6);
 
   const char * list[] = {"gpt", "other"};
@@ -1841,7 +1846,7 @@ TEST_CASE("gguf parse_kv loads tokenizer metadata and arrays") {
 
   reader r{file};
   context ctx{};
-  emel::model::data local_model{};
+  auto & local_model = fresh_model();
   int32_t err = EMEL_OK;
   CHECK(parse_kv(r, ctx, local_model, 34, err));
   CHECK(local_model.vocab_data.n_tokens == 2);
@@ -1938,7 +1943,7 @@ TEST_CASE("gguf parse_kv loads general metadata fields") {
 
   reader r{file};
   context ctx{};
-  emel::model::data local_model{};
+  auto & local_model = fresh_model();
   int32_t err = EMEL_OK;
   CHECK(parse_kv(r, ctx, local_model, 43, err));
   CHECK(metadata_string_equals(local_model.meta, local_model.meta.general_data.name,
@@ -2070,7 +2075,7 @@ TEST_CASE("gguf parse_hparams loads core fields") {
 
   reader r{file};
   context ctx{};
-  emel::model::data local_model{};
+  auto & local_model = fresh_model();
   int32_t err = EMEL_OK;
   CHECK(parse_kv(r, ctx, local_model, 7, err));
   emel::parser::event::parse_model request{};
@@ -2104,7 +2109,7 @@ TEST_CASE("gguf load_streamed supports split weights") {
   REQUIRE(write_minimal_split_gguf(path0.c_str(), 2, 0, 1.0f));
   REQUIRE(write_minimal_split_gguf(path1.c_str(), 2, 1, 2.0f));
 
-  emel::model::data local_model{};
+  auto & local_model = fresh_model();
   emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{local_model};
   request.model_path = path0;
@@ -2148,7 +2153,7 @@ TEST_CASE("gguf parse_tensors rejects oversize name") {
   using emel::parser::gguf::reader;
   using emel::parser::gguf::tensor_type;
 
-  emel::model::data model{};
+  auto & model = fresh_model();
   context ctx{};
   int32_t err = EMEL_OK;
   std::FILE * file = std::tmpfile();
@@ -2346,7 +2351,7 @@ TEST_CASE("gguf read_string and skip_value cover branches") {
 }
 
 TEST_CASE("gguf parse_tensors validates counts") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx{};
   int32_t err = EMEL_OK;
   std::FILE * file = std::tmpfile();
@@ -2361,7 +2366,7 @@ TEST_CASE("gguf parse_tensors rejects invalid entries") {
   using emel::parser::gguf::reader;
   using emel::parser::gguf::tensor_type;
 
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx{};
   int32_t err = EMEL_OK;
 
@@ -2450,7 +2455,7 @@ TEST_CASE("gguf parse_tensors rejects invalid entries") {
 }
 
 TEST_CASE("gguf map_parser handles invalid inputs") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx{};
 
   {
@@ -2487,7 +2492,7 @@ TEST_CASE("gguf map_parser handles invalid inputs") {
 }
 
 TEST_CASE("gguf parse_architecture and hparams handle invalid ctx") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx{};
   emel::parser::event::parse_model parse_request{};
   parse_request.model = &model;
@@ -2521,7 +2526,7 @@ TEST_CASE("gguf parse_architecture and hparams handle invalid ctx") {
 }
 
 TEST_CASE("gguf map_tensors and map_layers validate counts") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::model::loader::event::load request{model};
   int32_t err = EMEL_OK;
 
@@ -2594,7 +2599,7 @@ TEST_CASE("gguf parse_kv handles i32 alignment and string arrays") {
 }
 
 TEST_CASE("gguf map_parser rejects long path") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{model};
   request.format_ctx = &ctx;
@@ -2609,7 +2614,7 @@ TEST_CASE("gguf map_parser rejects long path") {
 }
 
 TEST_CASE("gguf parse_tensors rejects oversize tensor count") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx{};
   int32_t err = EMEL_OK;
   std::FILE * file = std::tmpfile();
@@ -2750,7 +2755,8 @@ TEST_CASE("gguf parse_kv ignores oversize block_count prefix") {
 
 #if !defined(_WIN32)
 TEST_CASE("gguf map_mmap handles invalid requests") {
-  emel::model::data model{};
+  auto & model = fresh_model();
+  model.weights_split_count = 1;
   emel::parser::gguf::context ctx{};
 
   emel::model::weight_loader::event::load_weights load_req{};
@@ -2792,7 +2798,8 @@ TEST_CASE("gguf map_mmap handles invalid requests") {
 #endif
 
 TEST_CASE("gguf load_streamed reports invalid requests") {
-  emel::model::data model{};
+  auto & model = fresh_model();
+  model.weights_split_count = 1;
   emel::parser::gguf::context ctx{};
 
   emel::model::weight_loader::event::load_weights load_req{};
@@ -2818,7 +2825,8 @@ TEST_CASE("gguf load_streamed reports invalid requests") {
 }
 
 TEST_CASE("gguf load_streamed handles fseek and fread failures") {
-  emel::model::data model{};
+  auto & model = fresh_model();
+  model.weights_split_count = 1;
   emel::parser::gguf::context ctx{};
 
   std::FILE * file = std::tmpfile();
@@ -2987,7 +2995,7 @@ TEST_CASE("gguf parse_header handles short reads") {
 TEST_CASE("gguf store_name rejects overflow conditions") {
   using emel::parser::gguf::store_name;
 
-  emel::model::data model{};
+  auto & model = fresh_model();
   uint32_t offset = 0;
   model.name_bytes_used = static_cast<uint32_t>(model.name_storage.size()) + 1;
   CHECK(!store_name(model, "a", 1, offset));
@@ -3187,7 +3195,7 @@ TEST_CASE("gguf parse_tensors handles read failures") {
   using emel::parser::gguf::reader;
   using emel::parser::gguf::tensor_type;
 
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx{};
   int32_t err = EMEL_OK;
 
@@ -3250,7 +3258,7 @@ TEST_CASE("gguf compute_tensor_size rejects invalid type") {
 }
 
 TEST_CASE("gguf map_parser reports file open failure") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{model};
   request.format_ctx = &ctx;
@@ -3266,7 +3274,7 @@ TEST_CASE("gguf map_parser reports file open failure") {
 }
 
 TEST_CASE("gguf validate_structure handles null context") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::model::loader::event::load request{model};
   int32_t err = EMEL_OK;
   CHECK(!emel::parser::gguf::validate_structure(request, &err));
@@ -3285,7 +3293,7 @@ TEST_CASE("gguf parse_architecture handles null model") {
 }
 
 TEST_CASE("gguf map_architecture accepts empty whitelist") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   std::memcpy(model.architecture_name.data(), "llama", 6);
   emel::parser::event::parse_model parse_request{
     .model = &model,
@@ -3298,7 +3306,7 @@ TEST_CASE("gguf map_architecture accepts empty whitelist") {
 }
 
 TEST_CASE("gguf validate_structure rejects empty weights") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{model};
   request.format_ctx = &ctx;
@@ -3309,7 +3317,8 @@ TEST_CASE("gguf validate_structure rejects empty weights") {
 
 #if !defined(_WIN32)
 TEST_CASE("gguf map_mmap reports file open failure") {
-  emel::model::data model{};
+  auto & model = fresh_model();
+  model.weights_split_count = 1;
   emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{model};
   request.format_ctx = &ctx;
@@ -3332,7 +3341,8 @@ TEST_CASE("gguf map_mmap reports file open failure") {
 #endif
 
 TEST_CASE("gguf load_streamed reports path errors") {
-  emel::model::data model{};
+  auto & model = fresh_model();
+  model.weights_split_count = 1;
   emel::parser::gguf::context ctx{};
   ctx.data_size = 0;
 
@@ -3367,7 +3377,7 @@ TEST_CASE("gguf load_streamed handles owned files") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   int32_t err = EMEL_OK;
 
@@ -3428,7 +3438,7 @@ TEST_CASE("gguf init_mappings maps files") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;
@@ -3455,7 +3465,7 @@ TEST_CASE("gguf clean_up_weights unmaps unused ranges") {
   void * mapping = mmap(nullptr, map_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
   REQUIRE(mapping != MAP_FAILED);
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   ctx.mapped_splits[0] = mapping;
   ctx.mapped_sizes[0] = map_size;
@@ -3487,7 +3497,7 @@ TEST_CASE("gguf init_mappings reports invalid requests") {
   CHECK(!emel::parser::gguf::init_mappings(load_req, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::model::loader::event::load request{model};
   load_req.loader_request = &request;
   err = EMEL_OK;
@@ -3501,7 +3511,7 @@ TEST_CASE("gguf validate_weights handles request errors") {
   CHECK(!emel::parser::gguf::validate_weights(load_req, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx{};
   emel::model::loader::event::load request{model};
   request.format_ctx = &ctx;
@@ -3519,7 +3529,7 @@ TEST_CASE("gguf clean_up_weights reports invalid requests") {
   CHECK(!emel::parser::gguf::clean_up_weights(load_req, &err));
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::model::loader::event::load request{model};
   load_req.loader_request = &request;
   err = EMEL_OK;
@@ -3532,7 +3542,7 @@ TEST_CASE("gguf map_mmap reports progress cancellation") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;

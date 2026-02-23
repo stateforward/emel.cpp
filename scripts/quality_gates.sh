@@ -82,7 +82,7 @@ run_step_allow_fail bench_snapshot env \
   EMEL_BENCH_RUNS=3 \
   EMEL_BENCH_WARMUP_ITERS=1000 \
   EMEL_BENCH_WARMUP_RUNS=1 \
-  "$ROOT_DIR/scripts/bench.sh" --snapshot --compare-update
+  "$ROOT_DIR/scripts/bench.sh" --snapshot --compare
 bench_status=$?
 run_step generate_docs "$ROOT_DIR/scripts/generate_docs.sh"
 

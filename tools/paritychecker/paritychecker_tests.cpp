@@ -27,9 +27,9 @@ std::filesystem::path models_dir() {
 std::filesystem::path parity_texts_dir() {
 #ifdef PARITYCHECKER_REPO_ROOT
   std::filesystem::path root = PARITYCHECKER_REPO_ROOT;
-  return root / "tests" / "tokenizer" / "parity_texts";
+  return root / "tests" / "text" / "tokenizer" / "parity_texts";
 #else
-  return std::filesystem::path("tests") / "tokenizer" / "parity_texts";
+  return std::filesystem::path("tests") / "text" / "tokenizer" / "parity_texts";
 #endif
 }
 
