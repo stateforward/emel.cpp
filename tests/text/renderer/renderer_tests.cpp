@@ -266,6 +266,28 @@ TEST_CASE("renderer_bind_render_and_flush_without_stop_sequences") {
   CHECK(status == emel::text::renderer::sequence_status::running);
 }
 
+TEST_CASE("renderer_bind_rejects_invalid_stop_sequences") {
+  auto & vocab = make_vocab();
+  emel::text::detokenizer::sm detokenizer{};
+  emel::text::renderer::sm renderer{};
+
+  const std::array<std::string_view, 1> invalid_stops = {
+      std::string_view("0123456789012345678901234567890123456789")};
+
+  int32_t bind_err = EMEL_OK;
+  emel::text::renderer::event::bind bind_ev = {};
+  bind_ev.vocab = &vocab;
+  bind_ev.detokenizer_sm = &detokenizer;
+  bind_ev.dispatch_detokenizer_bind = detokenizer_bind_dispatch;
+  bind_ev.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
+  bind_ev.stop_sequences = invalid_stops.data();
+  bind_ev.stop_sequence_count = invalid_stops.size();
+  bind_ev.error_out = &bind_err;
+
+  CHECK_FALSE(renderer.process_event(bind_ev));
+  CHECK(bind_err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
 TEST_CASE("renderer_handles_plamo2_byte_fallback_utf8") {
   auto & vocab = make_vocab();
   const int32_t b0 = add_token(vocab, "<0xE2>");
@@ -828,17 +850,23 @@ TEST_CASE("renderer_action_and_guard_paths") {
   CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
 
   ctx.vocab = &vocab;
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
   ctx.detokenizer_sm = dummy_ptr;
   ctx.dispatch_detokenizer_bind = detokenizer_bind_fail_no_error;
   ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
   emel::text::renderer::action::bind_detokenizer(ctx);
   CHECK(ctx.last_error == EMEL_ERR_BACKEND);
 
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
   ctx.dispatch_detokenizer_bind = detokenizer_bind_fail_with_error;
   emel::text::renderer::action::bind_detokenizer(ctx);
   CHECK(ctx.last_error == EMEL_ERR_MODEL_INVALID);
 
   emel::text::detokenizer::sm detokenizer{};
+  ctx.phase_error = EMEL_OK;
+  ctx.last_error = EMEL_OK;
   ctx.detokenizer_sm = &detokenizer;
   ctx.dispatch_detokenizer_bind = detokenizer_bind_dispatch;
   ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;

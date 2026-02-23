@@ -250,8 +250,14 @@ struct reject_bind {
 
 struct bind_detokenizer {
   void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
     ctx.is_bound = false;
+    if (ctx.phase_error != EMEL_OK) {
+      if (ctx.last_error == EMEL_OK) {
+        ctx.last_error = ctx.phase_error;
+      }
+      return;
+    }
+    ctx.phase_error = EMEL_OK;
 
     if (ctx.vocab == nullptr || ctx.detokenizer_sm == nullptr ||
         ctx.dispatch_detokenizer_bind == nullptr ||
