@@ -1,6 +1,7 @@
 #pragma once
 
 // benchmark: scaffold
+// docs: disabled
 
 #include "emel/sm.hpp"
 #include "emel/text/conditioner/events.hpp"

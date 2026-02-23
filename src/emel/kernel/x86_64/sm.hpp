@@ -1,6 +1,7 @@
 #pragma once
 
 // benchmark: scaffold
+// docs: disabled
 
 #include "emel/sm.hpp"
 #include "emel/kernel/x86_64/events.hpp"
