@@ -19,6 +19,9 @@
 #include "llama-model.h"
 #include "llama-vocab.h"
 
+// TODO(rearchitecture-cleanup): Keep legacy "splitter" helper naming in this parity bench
+// until downstream references are migrated.
+
 namespace {
 
 namespace event = emel::memory::coordinator::event;

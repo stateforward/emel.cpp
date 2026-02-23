@@ -11,6 +11,9 @@
 #include "jinja/parser.h"
 #include "jinja/runtime.h"
 
+// TODO(rearchitecture-cleanup): Keep legacy "renderer" benchmark IDs until
+// downstream references and snapshot consumers are migrated.
+
 namespace {
 
 std::string make_long_template() {

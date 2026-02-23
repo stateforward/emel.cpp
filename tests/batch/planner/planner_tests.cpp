@@ -8,6 +8,9 @@
 #include "emel/callback.hpp"
 #include "emel/emel.h"
 
+// TODO(rearchitecture-cleanup): Keep legacy "batch_splitter_*" test names until
+// external references to current test IDs are migrated.
+
 namespace {
 
 struct split_capture {

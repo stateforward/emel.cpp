@@ -316,6 +316,8 @@ struct run_initialize_batch {
     const emel::batch::planner::event::split_mode split_mode =
         ctx.output_all ? emel::batch::planner::event::split_mode::seq
                        : emel::batch::planner::event::split_mode::equal;
+    // TODO(rearchitecture-cleanup): Keep `batch_splitter` member naming until decoder
+    // consumers migrate to the planner terminology.
     const bool ok = ctx.batch_splitter->process_event(emel::batch::planner::event::split{
       .token_ids = ctx.token_ids,
       .n_tokens = ctx.n_tokens,

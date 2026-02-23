@@ -68,6 +68,8 @@ struct context {
   int32_t ubatches_processed = 0;
 
   std::unique_ptr<emel::token::batcher::sm> batch_sanitizer;
+  // TODO(rearchitecture-cleanup): Rename `batch_splitter` to `batch_planner` after
+  // downstream references to the legacy name are removed.
   std::unique_ptr<emel::batch::planner::sm> batch_splitter;
   std::unique_ptr<emel::memory::coordinator::any> memory_coordinator;
   std::unique_ptr<emel::memory::kv::sm> kv_cache;

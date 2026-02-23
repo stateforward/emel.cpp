@@ -8,6 +8,9 @@
 #include "emel/text/jinja/parser/detail.hpp"
 #include "emel/text/jinja/formatter/sm.hpp"
 
+// TODO(rearchitecture-cleanup): Keep legacy "jinja_renderer_*" test names until
+// external references to current test IDs are migrated.
+
 namespace {
 
 auto parse_template(const std::string & text, emel::text::jinja::program & program) {

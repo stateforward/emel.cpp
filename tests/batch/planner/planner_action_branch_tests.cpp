@@ -4,6 +4,9 @@
 #include "emel/batch/planner/guards.hpp"
 #include "emel/callback.hpp"
 
+// TODO(rearchitecture-cleanup): Keep legacy "batch_splitter_*" test names until
+// external references to current test IDs are migrated.
+
 namespace {
 
 inline void noop_done(const emel::batch::planner::events::splitting_done &) noexcept {}

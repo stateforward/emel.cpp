@@ -5,6 +5,9 @@
 #include "emel/graph/processor/sm.hpp"
 #include "emel/emel.h"
 
+// TODO(rearchitecture-cleanup): Keep legacy "compute_executor_*" test names until
+// external references to current test IDs are migrated.
+
 namespace {
 
 using execute_t = emel::graph::processor::event::execute;

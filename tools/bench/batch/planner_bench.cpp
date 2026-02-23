@@ -14,6 +14,9 @@
 #include "llama-batch.h"
 #include "llama-vocab.h"
 
+// TODO(rearchitecture-cleanup): Keep legacy "splitter" helper names and benchmark IDs
+// until downstream references and snapshot consumers are migrated.
+
 namespace {
 
 constexpr int32_t k_split_token_count = 128;
