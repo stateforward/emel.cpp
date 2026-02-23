@@ -149,6 +149,41 @@ TEST_CASE("batch_sanitizer_autopopulates_positions_from_seed_lookup") {
   CHECK(positions_out[2] == 43);
 }
 
+TEST_CASE("batch_sanitizer_allows_first_seen_coupled_seq_without_seed_callback") {
+  emel::token::batcher::sm machine{};
+  std::array<int32_t, 2> tokens = {{1, 2}};
+  std::array<uint64_t, 2> seq_masks_in = {{uint64_t{1}, uint64_t{3}}};
+  std::array<int32_t, 2> seq_primary_in = {{0, 0}};
+  std::array<int32_t, 2> seq_primary_out = {};
+  std::array<uint64_t, 2 * emel::batch::planner::action::SEQ_WORDS> seq_masks_out = {};
+  std::array<int32_t, 2> positions_out = {};
+  std::array<int8_t, 2> output_mask_out = {};
+  int32_t err = EMEL_OK;
+
+  auto request = emel::token::batcher::event::sanitize_decode{};
+  request.token_ids = tokens.data();
+  request.n_tokens = static_cast<int32_t>(tokens.size());
+  request.seq_masks = seq_masks_in.data();
+  request.seq_mask_words = 1;
+  request.seq_masks_count = static_cast<int32_t>(seq_masks_in.size());
+  request.seq_primary_ids = seq_primary_in.data();
+  request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_in.size());
+  request.seq_primary_ids_out = seq_primary_out.data();
+  request.seq_primary_ids_capacity = static_cast<int32_t>(seq_primary_out.size());
+  request.seq_masks_out = seq_masks_out.data();
+  request.seq_masks_capacity = static_cast<int32_t>(seq_masks_out.size());
+  request.positions_out = positions_out.data();
+  request.positions_capacity = static_cast<int32_t>(positions_out.size());
+  request.output_mask_out = output_mask_out.data();
+  request.output_mask_capacity = static_cast<int32_t>(output_mask_out.size());
+  request.error_out = &err;
+
+  CHECK(machine.process_event(request));
+  CHECK(err == EMEL_OK);
+  CHECK(positions_out[0] == 0);
+  CHECK(positions_out[1] == 1);
+}
+
 TEST_CASE("batch_sanitizer_rejects_diverged_coupled_seed_positions") {
   emel::token::batcher::sm machine{};
   std::array<int32_t, 1> tokens = {{1}};

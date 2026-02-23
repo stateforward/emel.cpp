@@ -313,6 +313,31 @@ struct run_sanitize_decode {
         return true;
       };
 
+      const auto ensure_coupled_position = [&](const int32_t seq_id,
+                                               const int32_t pos) noexcept -> bool {
+        if (seq_id < 0 || seq_id >= MAX_SEQ) {
+          detail::set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+          return false;
+        }
+        if (seeded[seq_id] == 0) {
+          if (ctx.resolve_position_seed != nullptr) {
+            if (!ensure_seeded(seq_id)) {
+              return false;
+            }
+          } else {
+            // Preserve legacy no-callback behavior: first-seen coupled sequences
+            // inherit the current token position.
+            next_pos[seq_id] = pos;
+            seeded[seq_id] = 1;
+          }
+        }
+        if (next_pos[seq_id] != pos) {
+          detail::set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+          return false;
+        }
+        return true;
+      };
+
       for (int32_t i = 0; i < ctx.n_tokens; ++i) {
         const uint64_t * mask = ctx.seq_masks_out + static_cast<size_t>(i) * mask_words;
         const int32_t primary = ctx.seq_primary_ids_out[i];
@@ -327,11 +352,7 @@ struct run_sanitize_decode {
           while (bits != 0) {
             const int32_t bit = __builtin_ctzll(bits);
             const int32_t seq_id = w * 64 + bit;
-            if (!ensure_seeded(seq_id)) {
-              return;
-            }
-            if (next_pos[seq_id] != pos) {
-              detail::set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+            if (!ensure_coupled_position(seq_id, pos)) {
               return;
             }
             bits &= (bits - 1);
