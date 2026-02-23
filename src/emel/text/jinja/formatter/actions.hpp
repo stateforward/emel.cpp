@@ -21,15 +21,11 @@ struct reject_invalid_render {
     if (ev.output_truncated != nullptr) {
       *ev.output_truncated = false;
     }
-    if (ev.dispatch_error) {
-      ev.dispatch_error(emel::text::jinja::events::rendering_error{&ev, EMEL_ERR_INVALID_ARGUMENT, 0});
-    }
   }
 };
 
 struct begin_render {
   void operator()(const emel::text::jinja::event::render & ev, context & ctx) const noexcept {
-    ctx.request = &ev;
     ctx.globals = ev.globals;
     ctx.statements = ev.program != nullptr ? &ev.program->body : nullptr;
     ctx.statement_index = 0;
@@ -179,52 +175,16 @@ struct write_pending_value {
 
 struct finalize_done {
   void operator()(context & ctx) const noexcept {
-    const auto * ev = ctx.request;
-    if (ev == nullptr) {
-      return;
-    }
-    if (ev->output_length != nullptr) {
-      *ev->output_length = ctx.output_length;
-    }
-    if (ev->output_truncated != nullptr) {
-      *ev->output_truncated = ctx.phase_error != EMEL_OK;
-    }
-    if (ev->error_out != nullptr) {
-      *ev->error_out = ctx.phase_error;
-    }
-    if (ev->error_pos_out != nullptr) {
-      *ev->error_pos_out = ctx.error_pos;
-    }
-    if (ev->dispatch_done) {
-      ev->dispatch_done(emel::text::jinja::events::rendering_done{
-          ev,
-          ctx.output_length,
-          ctx.phase_error != EMEL_OK});
-    }
+    ctx.last_error = EMEL_OK;
   }
 };
 
 struct finalize_error {
   void operator()(context & ctx) const noexcept {
-    const auto * ev = ctx.request;
-    if (ev == nullptr) {
-      return;
+    if (ctx.phase_error == EMEL_OK) {
+      ctx.phase_error = EMEL_ERR_BACKEND;
     }
-    if (ev->output_length != nullptr) {
-      *ev->output_length = ctx.output_length;
-    }
-    if (ev->output_truncated != nullptr) {
-      *ev->output_truncated = ctx.phase_error != EMEL_OK;
-    }
-    if (ev->error_out != nullptr) {
-      *ev->error_out = ctx.phase_error;
-    }
-    if (ev->error_pos_out != nullptr) {
-      *ev->error_pos_out = ctx.error_pos;
-    }
-    if (ev->dispatch_error) {
-      ev->dispatch_error(emel::text::jinja::events::rendering_error{ev, ctx.phase_error, ctx.error_pos});
-    }
+    ctx.last_error = ctx.phase_error;
   }
 };
 
