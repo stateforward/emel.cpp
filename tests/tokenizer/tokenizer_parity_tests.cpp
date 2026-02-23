@@ -13,7 +13,7 @@
 #include "emel/text/tokenizer/actions.hpp"
 #include "emel/text/tokenizer/preprocessor/any.hpp"
 #include "emel/text/tokenizer/preprocessor/types.hpp"
-#include "emel/encoder/any.hpp"
+#include "emel/text/encoders/any.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 
 namespace {
@@ -151,7 +151,7 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
     }
   }
 
-  emel::encoder::any encoder;
+  emel::text::encoders::any encoder;
   encoder.set_kind(emel::text::tokenizer::detail::encoder_kind_from_model(
     vocab.tokenizer_model_id));
 
@@ -167,7 +167,7 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
       continue;
     }
     int32_t fragment_tokens = 0;
-    emel::encoder::event::encode enc_ev = {};
+    emel::text::encoders::event::encode enc_ev = {};
     enc_ev.vocab = &vocab;
     enc_ev.text = frag.text;
     enc_ev.preprocessed = preprocessed;

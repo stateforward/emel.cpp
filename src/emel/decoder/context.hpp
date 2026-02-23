@@ -4,12 +4,12 @@
 #include <cstdint>
 #include <memory>
 
-#include "emel/batch/sanitizer/sm.hpp"
-#include "emel/batch/splitter/sm.hpp"
+#include "emel/token/batcher/sm.hpp"
+#include "emel/batch/planner/sm.hpp"
 #include "emel/decoder/events.hpp"
-#include "emel/decoder/ubatch_executor/sm.hpp"
+#include "emel/graph/builder/sm.hpp"
 #include "emel/emel.h"
-#include "emel/kv/cache/sm.hpp"
+#include "emel/memory/kv/sm.hpp"
 #include "emel/memory/coordinator/any.hpp"
 
 namespace emel::decoder::action {
@@ -39,27 +39,27 @@ struct context {
   int32_t outputs_total = 0;
   int32_t outputs_processed = 0;
 
-  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_sizes = {};
-  std::array<int32_t, emel::kv::cache::action::MAX_UBATCHES> slot_offsets = {};
-  std::array<int32_t, emel::kv::cache::action::MAX_UBATCHES> ubatch_seq_ids = {};
-  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_token_indices = {};
-  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES + 1> ubatch_token_offsets =
+  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_sizes = {};
+  std::array<int32_t, emel::memory::kv::action::MAX_UBATCHES> slot_offsets = {};
+  std::array<int32_t, emel::memory::kv::action::MAX_UBATCHES> ubatch_seq_ids = {};
+  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_token_indices = {};
+  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES + 1> ubatch_token_offsets =
       {};
-  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_outputs = {};
-  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES * 3> ubatch_positions = {};
+  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_outputs = {};
+  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES * 3> ubatch_positions = {};
   std::array<uint64_t,
-             emel::batch::splitter::action::MAX_UBATCHES *
-                 emel::batch::splitter::action::SEQ_WORDS>
+             emel::batch::planner::action::MAX_UBATCHES *
+                 emel::batch::planner::action::SEQ_WORDS>
       ubatch_seq_masks = {};
-  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> ubatch_seq_primary_ids = {};
-  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES> sanitized_seq_primary_ids = {};
+  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_seq_primary_ids = {};
+  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> sanitized_seq_primary_ids = {};
   std::array<uint64_t,
-             emel::batch::splitter::action::MAX_UBATCHES *
-                 emel::batch::splitter::action::SEQ_WORDS>
+             emel::batch::planner::action::MAX_UBATCHES *
+                 emel::batch::planner::action::SEQ_WORDS>
       sanitized_seq_masks = {};
-  std::array<int32_t, emel::batch::splitter::action::MAX_UBATCHES * 3>
+  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES * 3>
       sanitized_positions = {};
-  std::array<int8_t, emel::batch::splitter::action::MAX_UBATCHES> sanitized_output_mask = {};
+  std::array<int8_t, emel::batch::planner::action::MAX_UBATCHES> sanitized_output_mask = {};
   int32_t sanitized_outputs_total = 0;
   int32_t sanitized_positions_count = 0;
   int32_t sanitized_seq_mask_words = 1;
@@ -67,11 +67,11 @@ struct context {
   int32_t ubatches_total = 0;
   int32_t ubatches_processed = 0;
 
-  std::unique_ptr<emel::batch::sanitizer::sm> batch_sanitizer;
-  std::unique_ptr<emel::batch::splitter::sm> batch_splitter;
+  std::unique_ptr<emel::token::batcher::sm> batch_sanitizer;
+  std::unique_ptr<emel::batch::planner::sm> batch_splitter;
   std::unique_ptr<emel::memory::coordinator::any> memory_coordinator;
-  std::unique_ptr<emel::kv::cache::sm> kv_cache;
-  std::unique_ptr<emel::decoder::ubatch_executor::sm> ubatch_executor;
+  std::unique_ptr<emel::memory::kv::sm> kv_cache;
+  std::unique_ptr<emel::graph::builder::sm> ubatch_executor;
 
   void * compute_ctx = nullptr;
   event::compute_validate_fn compute_validate = nullptr;
@@ -91,11 +91,11 @@ struct context {
 };
 
 inline context::context()
-    : batch_sanitizer(std::make_unique<emel::batch::sanitizer::sm>()),
-      batch_splitter(std::make_unique<emel::batch::splitter::sm>()),
+    : batch_sanitizer(std::make_unique<emel::token::batcher::sm>()),
+      batch_splitter(std::make_unique<emel::batch::planner::sm>()),
       memory_coordinator(std::make_unique<emel::memory::coordinator::any>()),
-      kv_cache(std::make_unique<emel::kv::cache::sm>()),
-      ubatch_executor(std::make_unique<emel::decoder::ubatch_executor::sm>()) {
+      kv_cache(std::make_unique<emel::memory::kv::sm>()),
+      ubatch_executor(std::make_unique<emel::graph::builder::sm>()) {
   // one-time heap allocation keeps decoder context small on the stack.
 }
 

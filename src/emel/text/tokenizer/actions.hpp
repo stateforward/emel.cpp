@@ -5,7 +5,7 @@
 #include <string_view>
 
 #include "emel/emel.h"
-#include "emel/encoder/events.hpp"
+#include "emel/text/encoders/events.hpp"
 #include "emel/text/tokenizer/context.hpp"
 #include "emel/text/tokenizer/preprocessor/events.hpp"
 
@@ -287,7 +287,7 @@ struct encode_raw_fragment {
     }
     int32_t fragment_count = 0;
     int32_t err = EMEL_OK;
-    emel::encoder::event::encode encode_ev = {};
+    emel::text::encoders::event::encode encode_ev = {};
     encode_ev.vocab = ctx.vocab;
     encode_ev.text = frag.text;
     encode_ev.preprocessed = ctx.fragments_preprocessed;

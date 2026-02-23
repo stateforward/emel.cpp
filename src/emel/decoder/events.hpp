@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "emel/decoder/ubatch_executor/events.hpp"
+#include "emel/graph/builder/events.hpp"
 
 namespace emel::decoder::events {
 
@@ -14,12 +14,12 @@ struct owner_event;
 
 namespace emel::decoder::event {
 
-using compute_validate_fn = ubatch_executor::event::compute_validate_fn;
-using compute_prepare_graph_fn = ubatch_executor::event::compute_prepare_graph_fn;
-using compute_alloc_graph_fn = ubatch_executor::event::compute_alloc_graph_fn;
-using compute_bind_inputs_fn = ubatch_executor::event::compute_bind_inputs_fn;
-using compute_run_backend_fn = ubatch_executor::event::compute_run_backend_fn;
-using compute_extract_outputs_fn = ubatch_executor::event::compute_extract_outputs_fn;
+using compute_validate_fn = graph::builder::event::compute_validate_fn;
+using compute_prepare_graph_fn = graph::builder::event::compute_prepare_graph_fn;
+using compute_alloc_graph_fn = graph::builder::event::compute_alloc_graph_fn;
+using compute_bind_inputs_fn = graph::builder::event::compute_bind_inputs_fn;
+using compute_run_backend_fn = graph::builder::event::compute_run_backend_fn;
+using compute_extract_outputs_fn = graph::builder::event::compute_extract_outputs_fn;
 
 struct decode {
   const int32_t * token_ids = nullptr;
@@ -36,12 +36,12 @@ struct decode {
   const int32_t * positions = nullptr;
   int32_t positions_count = 0;
   void * compute_ctx = nullptr;
-  ubatch_executor::event::compute_validate_fn compute_validate = nullptr;
-  ubatch_executor::event::compute_prepare_graph_fn compute_prepare_graph = nullptr;
-  ubatch_executor::event::compute_alloc_graph_fn compute_alloc_graph = nullptr;
-  ubatch_executor::event::compute_bind_inputs_fn compute_bind_inputs = nullptr;
-  ubatch_executor::event::compute_run_backend_fn compute_run_backend = nullptr;
-  ubatch_executor::event::compute_extract_outputs_fn compute_extract_outputs = nullptr;
+  graph::builder::event::compute_validate_fn compute_validate = nullptr;
+  graph::builder::event::compute_prepare_graph_fn compute_prepare_graph = nullptr;
+  graph::builder::event::compute_alloc_graph_fn compute_alloc_graph = nullptr;
+  graph::builder::event::compute_bind_inputs_fn compute_bind_inputs = nullptr;
+  graph::builder::event::compute_run_backend_fn compute_run_backend = nullptr;
+  graph::builder::event::compute_extract_outputs_fn compute_extract_outputs = nullptr;
   int32_t outputs_capacity = 0;
   void * owner_sm = nullptr;
   bool (*dispatch_event)(void * owner_sm, const events::owner_event &) = nullptr;

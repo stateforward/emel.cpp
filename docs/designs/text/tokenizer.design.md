@@ -5,7 +5,7 @@ orchestration model and data contracts; any structural changes still require exp
 
 ## role
 - text/tokenizer is a codec-stage actor: text -> token ids.
-- tokenizer composes a preprocessor + text/encoder pair selected from model metadata.
+- tokenizer composes a preprocessor + `text/encoders::any` pair selected from model metadata.
 
 ## public interface
 - `event::bind` (vocab binding)
@@ -22,7 +22,7 @@ are not stored in context.
 ## composition and binding
 - tokenizer owns:
   - `text/tokenizer::preprocessor::any` (variant preprocessor SM),
-  - `text/encoder::any` (variant encoder SM).
+  - `text/encoders::any` (variant encoder SM).
 - binding maps `vocab->tokenizer_model_id` to preprocessor + encoder kinds:
   `spm`, `bpe`, `wpm`, `ugm`, `rwkv`, `plamo2`, or `fallback`.
 - binding is performed by the tokenizer SM via the `bind` event.
@@ -49,7 +49,7 @@ are not stored in context.
 ## encoding
 - encoding iterates fragments in a bounded RTC loop.
 - `token` fragments append directly to `token_ids_out`.
-- `raw_text` fragments are encoded by the bound encoder via `text/encoder::any`.
+- `raw_text` fragments are encoded by the bound encoder via `text/encoders::any`.
 - `preprocessed` flag is forwarded to the encoder.
 
 ## prefix/suffix rules (current)

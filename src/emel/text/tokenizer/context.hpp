@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include "emel/encoder/any.hpp"
+#include "emel/text/encoders/any.hpp"
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
 #include "emel/text/tokenizer/events.hpp"
@@ -18,7 +18,7 @@ constexpr size_t k_max_fragments =
     emel::text::tokenizer::preprocessor::k_max_fragments;
 constexpr size_t k_max_special_tokens =
     emel::text::tokenizer::preprocessor::k_max_special_tokens;
-using encoder_kind = emel::encoder::encoder_kind;
+using encoder_kind = emel::text::encoders::encoder_kind;
 
 using fragment_kind = emel::text::tokenizer::preprocessor::fragment_kind;
 using fragment = emel::text::tokenizer::preprocessor::fragment;
@@ -26,7 +26,7 @@ using preprocessor_kind = emel::text::tokenizer::preprocessor::preprocessor_kind
 
 struct context {
   emel::text::tokenizer::preprocessor::any preprocessor_any = {};
-  emel::encoder::any encoder_any = {};
+  emel::text::encoders::any encoder_any = {};
   std::array<fragment, k_max_fragments> fragments = {};
   size_t fragment_count = 0;
   size_t fragment_index = 0;
