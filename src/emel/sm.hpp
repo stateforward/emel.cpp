@@ -615,9 +615,6 @@ class sm_any {
   };
 };
 
-template <class kind_enum, class sm_list, class event_list>
-using SmAny = sm_any<kind_enum, sm_list, event_list>;
-
 class bool_task {
  public:
   struct promise_type;

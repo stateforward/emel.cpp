@@ -4,13 +4,13 @@
 #include "emel/buffer/chunk_allocator/sm.hpp"
 #include "emel/buffer/planner/sm.hpp"
 #include "emel/buffer/realloc_analyzer/sm.hpp"
-#include "emel/batch/splitter/sm.hpp"
-#include "emel/decoder/compute_executor/sm.hpp"
+#include "emel/batch/planner/sm.hpp"
+#include "emel/graph/processor/sm.hpp"
 #include "emel/decoder/sm.hpp"
-#include "emel/encoder/any.hpp"
-#include "emel/encoder/sm.hpp"
+#include "emel/text/encoders/any.hpp"
+#include "emel/text/encoders/sm.hpp"
 #include "emel/generator/sm.hpp"
-#include "emel/kv/cache/sm.hpp"
+#include "emel/memory/kv/sm.hpp"
 #include "emel/memory/coordinator/sm.hpp"
 #include "emel/memory/coordinator/recurrent/sm.hpp"
 #include "emel/memory/coordinator/kv/sm.hpp"
@@ -22,7 +22,7 @@
 #include "emel/telemetry/provider/sm.hpp"
 #include "emel/tensor/allocator/sm.hpp"
 #include "emel/tensor/lifetime_analyzer/sm.hpp"
-#include "emel/tokenizer/sm.hpp"
+#include "emel/text/tokenizer/sm.hpp"
 
 namespace emel {
 
@@ -30,19 +30,19 @@ using BufferAllocator = emel::buffer::allocator::sm;
 using BufferChunkAllocator = emel::buffer::chunk_allocator::sm;
 using BufferPlanner = emel::buffer::planner::sm;
 using BufferReallocAnalyzer = emel::buffer::realloc_analyzer::sm;
-using BatchSplitter = emel::batch::splitter::sm;
-using ComputeExecutor = emel::decoder::compute_executor::sm;
+using BatchSplitter = emel::batch::planner::sm;
+using ComputeExecutor = emel::graph::processor::sm;
 using Decoder = emel::decoder::sm;
-using EncoderAny = emel::encoder::any;
-using EncoderBpe = emel::encoder::bpe::sm;
-using EncoderSpm = emel::encoder::spm::sm;
-using EncoderWpm = emel::encoder::wpm::sm;
-using EncoderUgm = emel::encoder::ugm::sm;
-using EncoderRwkv = emel::encoder::rwkv::sm;
-using EncoderPlamo2 = emel::encoder::plamo2::sm;
-using EncoderFallback = emel::encoder::fallback::sm;
+using EncoderAny = emel::text::encoders::any;
+using EncoderBpe = emel::text::encoders::bpe::sm;
+using EncoderSpm = emel::text::encoders::spm::sm;
+using EncoderWpm = emel::text::encoders::wpm::sm;
+using EncoderUgm = emel::text::encoders::ugm::sm;
+using EncoderRwkv = emel::text::encoders::rwkv::sm;
+using EncoderPlamo2 = emel::text::encoders::plamo2::sm;
+using EncoderFallback = emel::text::encoders::fallback::sm;
 using Generator = emel::generator::sm;
-using KvCache = emel::kv::cache::sm;
+using KvCache = emel::memory::kv::sm;
 using MemoryCoordinator = emel::memory::coordinator::sm;
 using MemoryCoordinatorRecurrent = emel::memory::coordinator::recurrent::sm;
 using MemoryCoordinatorKv = emel::memory::coordinator::kv::sm;
@@ -54,7 +54,7 @@ using TelemetryExporter = emel::telemetry::exporter::sm;
 using TelemetryProvider = emel::telemetry::provider::sm;
 using TensorAllocator = emel::tensor::allocator::sm;
 using TensorLifetimeAnalyzer = emel::tensor::lifetime_analyzer::sm;
-using Tokenizer = emel::tokenizer::sm;
+using Tokenizer = emel::text::tokenizer::sm;
 using WeightLoader = emel::model::weight_loader::sm;
 
 }  // namespace emel

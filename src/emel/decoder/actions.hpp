@@ -161,7 +161,7 @@ struct run_sanitize_batch {
     }
 
     const bool ok = ctx.batch_sanitizer->process_event(
-        emel::batch::sanitizer::event::sanitize_decode{
+        emel::token::batcher::event::sanitize_decode{
           .token_ids = ctx.token_ids,
           .n_tokens = ctx.n_tokens,
           .seq_masks = ctx.seq_masks,
@@ -254,7 +254,7 @@ struct run_initialize_batch {
       int32_t token_offsets_count = 0;
       int32_t err = EMEL_OK;
 
-      void on_done(const emel::batch::splitter::events::splitting_done & reply) noexcept {
+      void on_done(const emel::batch::planner::events::splitting_done & reply) noexcept {
         err = EMEL_OK;
         ubatch_count = reply.ubatch_count;
         total_outputs = reply.total_outputs;
@@ -292,7 +292,7 @@ struct run_initialize_batch {
         }
       }
 
-      void on_error(const emel::batch::splitter::events::splitting_error & reply) noexcept {
+      void on_error(const emel::batch::planner::events::splitting_error & reply) noexcept {
         err = reply.err;
       }
     };
@@ -307,16 +307,16 @@ struct run_initialize_batch {
     };
 
     const auto on_done =
-        emel::callback<void(const emel::batch::splitter::events::splitting_done &)>::from<
+        emel::callback<void(const emel::batch::planner::events::splitting_done &)>::from<
             split_reply, &split_reply::on_done>(&reply);
     const auto on_error =
-        emel::callback<void(const emel::batch::splitter::events::splitting_error &)>::from<
+        emel::callback<void(const emel::batch::planner::events::splitting_error &)>::from<
             split_reply, &split_reply::on_error>(&reply);
 
-    const emel::batch::splitter::event::split_mode split_mode =
-        ctx.output_all ? emel::batch::splitter::event::split_mode::seq
-                       : emel::batch::splitter::event::split_mode::equal;
-    const bool ok = ctx.batch_splitter->process_event(emel::batch::splitter::event::split{
+    const emel::batch::planner::event::split_mode split_mode =
+        ctx.output_all ? emel::batch::planner::event::split_mode::seq
+                       : emel::batch::planner::event::split_mode::equal;
+    const bool ok = ctx.batch_splitter->process_event(emel::batch::planner::event::split{
       .token_ids = ctx.token_ids,
       .n_tokens = ctx.n_tokens,
       .n_ubatch = ctx.n_ubatch,
@@ -525,7 +525,7 @@ struct run_prepare_memory_batch {
       return;  // GCOVR_EXCL_LINE
     }
 
-    const bool kv_ok = ctx.kv_cache->process_event(emel::kv::cache::event::prepare{
+    const bool kv_ok = ctx.kv_cache->process_event(emel::memory::kv::event::prepare{
       .ubatch_sizes = ctx.ubatch_sizes.data(),
       .ubatch_count = ctx.ubatches_total,
       .requested_capacity = ctx.n_tokens,
@@ -739,7 +739,7 @@ struct run_process_ubatch {
     int32_t kv_tokens = 0;
     bool rollback_attempted = false;
     int32_t ubatch_error = EMEL_OK;
-    const bool ok = ctx.ubatch_executor->process_event(emel::decoder::ubatch_executor::event::execute{
+    const bool ok = ctx.ubatch_executor->process_event(emel::graph::builder::event::execute{
       .ubatch_index = ctx.ubatches_processed,
       .ubatch_size = current,
       .memory_coordinator_sm = ctx.memory_coordinator.get(),
@@ -845,7 +845,7 @@ struct run_rollback_ubatch {
 
     const int32_t rollback_to = std::max<int32_t>(0, ctx.ubatches_processed - 1);
     int32_t kv_error = EMEL_OK;
-    const bool kv_ok = ctx.kv_cache->process_event(emel::kv::cache::event::rollback{
+    const bool kv_ok = ctx.kv_cache->process_event(emel::memory::kv::event::rollback{
       .from_ubatch_index = rollback_to,
       .error_out = &kv_error,
     });

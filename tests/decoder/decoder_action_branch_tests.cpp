@@ -5,7 +5,7 @@
 #include "emel/decoder/events.hpp"
 #include "emel/decoder/guards.hpp"
 #include "emel/emel.h"
-#include "emel/kv/cache/actions.hpp"
+#include "emel/memory/kv/actions.hpp"
 
 namespace {
 
@@ -27,7 +27,7 @@ bool on_decode_event(void * owner_sm, const emel::decoder::events::owner_event &
   return true;
 }
 
-using compute_execute_t = emel::decoder::compute_executor::event::execute;
+using compute_execute_t = emel::graph::processor::event::execute;
 
 bool compute_validate(const compute_execute_t &, int32_t * err_out) {
   if (err_out != nullptr) {
@@ -154,7 +154,7 @@ TEST_CASE("decoder_run_validate_checks_token_inputs") {
   ctx.seq_masks_count = 1;
   ctx.seq_mask_words = 0;
   CHECK(emel::decoder::guard::invalid_token_inputs(ctx));
-  ctx.seq_mask_words = emel::batch::splitter::action::SEQ_WORDS + 1;
+  ctx.seq_mask_words = emel::batch::planner::action::SEQ_WORDS + 1;
   CHECK(emel::decoder::guard::invalid_token_inputs(ctx));
   ctx.seq_mask_words = 1;
   CHECK(emel::decoder::guard::valid_token_inputs(ctx));
@@ -536,7 +536,7 @@ TEST_CASE("decoder_run_prepare_memory_batch_reports_errors") {
 
   ctx.n_ubatch = 1;
   ctx.ubatches_total = 1;
-  ctx.n_tokens = emel::kv::cache::action::MAX_KV_CELLS + 1;
+  ctx.n_tokens = emel::memory::kv::action::MAX_KV_CELLS + 1;
   err = EMEL_OK;
   retryable = false;
   emel::decoder::action::run_prepare_memory_batch(
@@ -587,7 +587,7 @@ TEST_CASE("decoder_run_process_ubatch_populates_positions_and_seq_metadata") {
   ctx.compute_extract_outputs = compute_extract_outputs;
 
   int32_t ubatch_size = 2;
-  CHECK(ctx.kv_cache->process_event(emel::kv::cache::event::prepare{
+  CHECK(ctx.kv_cache->process_event(emel::memory::kv::event::prepare{
     .ubatch_sizes = &ubatch_size,
     .ubatch_count = 1,
     .requested_capacity = 8,

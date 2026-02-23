@@ -7,7 +7,7 @@
 #include "emel/decoder/guards.hpp"
 #include "emel/decoder/sm.hpp"
 #include "emel/emel.h"
-#include "emel/kv/cache/actions.hpp"
+#include "emel/memory/kv/actions.hpp"
 
 namespace {
 
@@ -158,7 +158,7 @@ TEST_CASE("decoder_prepare_memory_batch_reports_kv_failure") {
   emel::decoder::action::context ctx{};
   ctx.n_ubatch = 1;
   ctx.ubatches_total = 1;
-  ctx.n_tokens = emel::kv::cache::action::MAX_KV_CELLS + 1;
+  ctx.n_tokens = emel::memory::kv::action::MAX_KV_CELLS + 1;
 
   int32_t err = EMEL_OK;
   bool retryable = false;
@@ -508,12 +508,12 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
     rollback_ok_ctx.outputs_processed = 2;
     int32_t ubatch_size = 1;
     int32_t kv_tokens = 0;
-    CHECK(rollback_ok_ctx.kv_cache->process_event(emel::kv::cache::event::prepare{
+    CHECK(rollback_ok_ctx.kv_cache->process_event(emel::memory::kv::event::prepare{
       .ubatch_sizes = &ubatch_size,
       .ubatch_count = 1,
       .requested_capacity = 4,
     }));
-    CHECK(rollback_ok_ctx.kv_cache->process_event(emel::kv::cache::event::apply_ubatch{
+    CHECK(rollback_ok_ctx.kv_cache->process_event(emel::memory::kv::event::apply_ubatch{
       .ubatch_index = 0,
       .kv_tokens_out = &kv_tokens,
     }));

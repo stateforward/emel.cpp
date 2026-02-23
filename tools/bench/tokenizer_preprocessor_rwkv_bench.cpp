@@ -1,14 +1,14 @@
 #include "bench_cases.hpp"
 #include "tokenizer_preprocessor_bench_common.hpp"
 
-#include "emel/tokenizer/preprocessor/rwkv/sm.hpp"
+#include "emel/text/tokenizer/preprocessor/rwkv/sm.hpp"
 
 namespace emel::bench {
 
 void append_emel_tokenizer_preprocessor_rwkv_cases(std::vector<result> & results,
                                                    const config & cfg) {
   tokenizer_preprocessor::append_emel_special_preprocessor_cases<
-      emel::tokenizer::preprocessor::rwkv::sm>(
+      emel::text::tokenizer::preprocessor::rwkv::sm>(
       results,
       cfg,
       "tokenizer/preprocessor_rwkv_short",

@@ -6,8 +6,8 @@
 
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
-#include "emel/tokenizer/preprocessor/fallback/sm.hpp"
-#include "emel/tokenizer/preprocessor/types.hpp"
+#include "emel/text/tokenizer/preprocessor/fallback/sm.hpp"
+#include "emel/text/tokenizer/preprocessor/types.hpp"
 
 namespace {
 
@@ -41,14 +41,14 @@ emel::model::data::vocab make_bpe_vocab() {
 TEST_CASE("tokenizer_preprocessor_fallback_identity_even_for_bpe_vocab") {
   emel::model::data::vocab vocab = make_bpe_vocab();
 
-  std::array<emel::tokenizer::preprocessor::fragment,
-             emel::tokenizer::preprocessor::k_max_fragments>
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
       fragments = {};
   size_t count = 0;
   int32_t err = EMEL_OK;
 
-  emel::tokenizer::preprocessor::fallback::sm machine{};
-  emel::tokenizer::preprocessor::event::preprocess ev = {};
+  emel::text::tokenizer::preprocessor::fallback::sm machine{};
+  emel::text::tokenizer::preprocessor::event::preprocess ev = {};
   ev.vocab = &vocab;
   ev.text = std::string_view("hello world");
   ev.parse_special = false;
@@ -61,21 +61,21 @@ TEST_CASE("tokenizer_preprocessor_fallback_identity_even_for_bpe_vocab") {
   CHECK(err == EMEL_OK);
   CHECK(count == 1);
   CHECK(fragments[0].kind ==
-        emel::tokenizer::preprocessor::fragment_kind::raw_text);
+        emel::text::tokenizer::preprocessor::fragment_kind::raw_text);
   CHECK(fragments[0].text == std::string_view("hello world"));
 }
 
 TEST_CASE("tokenizer_preprocessor_fallback_parse_special_true") {
   emel::model::data::vocab vocab = make_vocab_with_specials();
 
-  std::array<emel::tokenizer::preprocessor::fragment,
-             emel::tokenizer::preprocessor::k_max_fragments>
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
       fragments = {};
   size_t count = 0;
   int32_t err = EMEL_OK;
 
-  emel::tokenizer::preprocessor::fallback::sm machine{};
-  emel::tokenizer::preprocessor::event::preprocess ev = {};
+  emel::text::tokenizer::preprocessor::fallback::sm machine{};
+  emel::text::tokenizer::preprocessor::event::preprocess ev = {};
   ev.vocab = &vocab;
   ev.text = std::string_view("ABBB");
   ev.parse_special = true;
@@ -88,24 +88,24 @@ TEST_CASE("tokenizer_preprocessor_fallback_parse_special_true") {
   CHECK(err == EMEL_OK);
   REQUIRE(count == 2);
   CHECK(fragments[0].kind ==
-        emel::tokenizer::preprocessor::fragment_kind::token);
+        emel::text::tokenizer::preprocessor::fragment_kind::token);
   CHECK(fragments[0].token == 0);
   CHECK(fragments[1].kind ==
-        emel::tokenizer::preprocessor::fragment_kind::token);
+        emel::text::tokenizer::preprocessor::fragment_kind::token);
   CHECK(fragments[1].token == 1);
 }
 
 TEST_CASE("tokenizer_preprocessor_fallback_parse_special_false") {
   emel::model::data::vocab vocab = make_vocab_with_specials();
 
-  std::array<emel::tokenizer::preprocessor::fragment,
-             emel::tokenizer::preprocessor::k_max_fragments>
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
       fragments = {};
   size_t count = 0;
   int32_t err = EMEL_OK;
 
-  emel::tokenizer::preprocessor::fallback::sm machine{};
-  emel::tokenizer::preprocessor::event::preprocess ev = {};
+  emel::text::tokenizer::preprocessor::fallback::sm machine{};
+  emel::text::tokenizer::preprocessor::event::preprocess ev = {};
   ev.vocab = &vocab;
   ev.text = std::string_view("ABBB");
   ev.parse_special = false;
@@ -118,9 +118,9 @@ TEST_CASE("tokenizer_preprocessor_fallback_parse_special_false") {
   CHECK(err == EMEL_OK);
   REQUIRE(count == 2);
   CHECK(fragments[0].kind ==
-        emel::tokenizer::preprocessor::fragment_kind::token);
+        emel::text::tokenizer::preprocessor::fragment_kind::token);
   CHECK(fragments[0].token == 0);
   CHECK(fragments[1].kind ==
-        emel::tokenizer::preprocessor::fragment_kind::raw_text);
+        emel::text::tokenizer::preprocessor::fragment_kind::raw_text);
   CHECK(fragments[1].text == std::string_view("BBB"));
 }

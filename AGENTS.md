@@ -46,6 +46,9 @@ boost::sml::sm<model>;`.
 ALWAYS keep canonical machine types in component namespaces as `emel::<component>::sm`.
 ALWAYS provide additive top-level PascalCase aliases (e.g. `emel::Model`).
 ALWAYS map directory layout to namespaces.
+ALWAYS structure machine docs and code namespaces using the pattern
+`<domain>/<component>/<type>` for variant families (for example
+`memory/coordinator/kv`, `text/tokenizer/preprocessor/bpe`).
 ALWAYS colocate machine definition, data, guards, actions, and events within the
 same component directory.
 NEVER place orchestration logic in data-only files.

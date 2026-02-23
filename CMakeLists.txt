@@ -82,9 +82,9 @@ if(EMEL_ENABLE_TESTS)
     tests/jinja/lexer_tests.cpp
     tests/jinja/renderer_tests.cpp
     tests/model/weight_loader_tests.cpp
-    tests/sampler/candidate_builder_tests.cpp
-    tests/sampler/pipeline_tests.cpp
-    tests/sampler/token_selector_tests.cpp
+    tests/logits/validator/candidate_builder_tests.cpp
+    tests/logits/sampler/pipeline_tests.cpp
+    tests/logits/sampler/token_selector_tests.cpp
     tests/telemetry/exporter_tests.cpp
     tests/telemetry/provider_tests.cpp
     tests/sm/sm_policy_tests.cpp
@@ -92,12 +92,12 @@ if(EMEL_ENABLE_TESTS)
     tests/decoder/decoder_tests.cpp
     tests/decoder/decoder_sm_transition_tests.cpp
     tests/decoder/decoder_action_branch_tests.cpp
-    tests/decoder/compute_executor_tests.cpp
-    tests/decoder/compute_executor_sm_transition_tests.cpp
-    tests/decoder/compute_executor_action_branch_tests.cpp
-    tests/decoder/ubatch_executor_tests.cpp
-    tests/decoder/ubatch_executor_action_branch_tests.cpp
-    tests/encoder/encoder_tests.cpp
+    tests/graph/processor/compute_executor_tests.cpp
+    tests/graph/processor/compute_executor_sm_transition_tests.cpp
+    tests/graph/processor/compute_executor_action_branch_tests.cpp
+    tests/graph/builder/ubatch_executor_tests.cpp
+    tests/graph/builder/ubatch_executor_action_branch_tests.cpp
+    tests/text/encoders/encoder_tests.cpp
     tests/tokenizer/preprocessor_tests.cpp
     tests/tokenizer/preprocessor_spm_tests.cpp
     tests/tokenizer/preprocessor_wpm_tests.cpp
@@ -109,13 +109,13 @@ if(EMEL_ENABLE_TESTS)
     tests/tokenizer/tokenizer_tests.cpp
     tests/tokenizer/tokenizer_parity_tests.cpp
     tests/tokenizer/tokenizer_action_guard_tests.cpp
-    tests/batch/splitter_tests.cpp
-    tests/batch/splitter_actions_tests.cpp
-    tests/batch/splitter_additional_tests.cpp
-    tests/batch/splitter_action_branch_tests.cpp
-    tests/batch/splitter_sm_transition_tests.cpp
-    tests/batch/splitter_sm_flow_tests.cpp
-    tests/batch/sanitizer_tests.cpp
+    tests/batch/planner/splitter_tests.cpp
+    tests/batch/planner/splitter_actions_tests.cpp
+    tests/batch/planner/splitter_additional_tests.cpp
+    tests/batch/planner/splitter_action_branch_tests.cpp
+    tests/batch/planner/splitter_sm_transition_tests.cpp
+    tests/batch/planner/splitter_sm_flow_tests.cpp
+    tests/token/batcher/sanitizer_tests.cpp
     tests/memory/coordinator_tests.cpp
     tests/memory/coordinator_sm_transition_tests.cpp
     tests/memory/coordinator_sm_transition_more_tests.cpp
@@ -136,11 +136,11 @@ if(EMEL_ENABLE_TESTS)
     tests/memory/coordinator_hybrid_sm_transition_more_tests.cpp
     tests/memory/coordinator_hybrid_sm_testing_policy_tests.cpp
     tests/memory/coordinator_hybrid_action_branch_tests.cpp
-    tests/kv/cache_tests.cpp
-    tests/kv/cache_sm_transition_tests.cpp
-    tests/kv/cache_sm_testing_policy_tests.cpp
-    tests/kv/cache_action_branch_tests.cpp
-    tests/kv/cache_guard_tests.cpp
+    tests/memory/kv/cache_tests.cpp
+    tests/memory/kv/cache_sm_transition_tests.cpp
+    tests/memory/kv/cache_sm_testing_policy_tests.cpp
+    tests/memory/kv/cache_action_branch_tests.cpp
+    tests/memory/kv/cache_guard_tests.cpp
     tests/buffer/allocator_tests.cpp
     tests/buffer/allocator_error_tests.cpp
     tests/buffer/allocator_detail_tests.cpp

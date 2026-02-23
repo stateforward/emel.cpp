@@ -38,7 +38,7 @@ inline constexpr auto valid_token_inputs = [](const action::context & ctx) {
   }
   if (ctx.seq_masks != nullptr) {
     if (ctx.seq_mask_words <= 0 ||
-        ctx.seq_mask_words > emel::batch::splitter::action::SEQ_WORDS) {
+        ctx.seq_mask_words > emel::batch::planner::action::SEQ_WORDS) {
       return false;
     }
     if (ctx.seq_masks_count < ctx.n_tokens) {

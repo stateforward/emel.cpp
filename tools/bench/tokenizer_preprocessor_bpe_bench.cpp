@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "emel/tokenizer/bpe/split.hpp"
-#include "emel/tokenizer/preprocessor/bpe/sm.hpp"
+#include "emel/text/tokenizer/bpe/split.hpp"
+#include "emel/text/tokenizer/preprocessor/bpe/sm.hpp"
 
 namespace {
 
@@ -45,10 +45,10 @@ std::string make_long_text() {
 
 reference_fragments build_reference_fragments(const emel::model::data::vocab & vocab,
                                               const std::string & text) {
-  emel::tokenizer::bpe::detail::split_scratch scratch = {};
-  emel::tokenizer::bpe::detail::split_view view = {};
+  emel::text::tokenizer::bpe::detail::split_scratch scratch = {};
+  emel::text::tokenizer::bpe::detail::split_view view = {};
   scratch.reset();
-  if (!emel::tokenizer::bpe::detail::split_and_encode_append(
+  if (!emel::text::tokenizer::bpe::detail::split_and_encode_append(
           text, vocab, scratch, view)) {
     std::fprintf(stderr, "error: reference split failed\n");
     std::abort();
@@ -73,7 +73,7 @@ reference_fragments build_reference_fragments(const emel::model::data::vocab & v
 
 void ensure_preprocessor_bpe_parity(const emel::model::data::vocab & vocab,
                                     const std::string & text) {
-  emel::tokenizer::preprocessor::bpe::sm machine{};
+  emel::text::tokenizer::preprocessor::bpe::sm machine{};
   std::array<fragment, k_fragment_capacity> fragments = {};
   size_t count = 0;
   int32_t err = EMEL_OK;
@@ -120,7 +120,7 @@ void append_emel_tokenizer_preprocessor_bpe_cases(std::vector<result> & results,
     const auto vocab = make_bpe_vocab(entry.pre);
     ensure_preprocessor_bpe_parity(*vocab, entry.text);
 
-    emel::tokenizer::preprocessor::bpe::sm machine{};
+    emel::text::tokenizer::preprocessor::bpe::sm machine{};
     std::array<fragment, k_fragment_capacity> fragments = {};
     size_t count = 0;
     int32_t err = EMEL_OK;

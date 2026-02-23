@@ -3,14 +3,14 @@
 #include <doctest/doctest.h>
 
 #include "emel/model/data.hpp"
-#include "emel/tokenizer/bpe/regex.hpp"
+#include "emel/text/tokenizer/bpe/regex.hpp"
 
 TEST_CASE("tokenizer_bpe_regex_for_vocab") {
   emel::model::data::vocab vocab = {};
   vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
 
-  const auto from_vocab = emel::tokenizer::bpe::detail::regex_for(vocab);
-  const auto from_pre = emel::tokenizer::bpe::detail::regex_for(
+  const auto from_vocab = emel::text::tokenizer::bpe::detail::regex_for(vocab);
+  const auto from_pre = emel::text::tokenizer::bpe::detail::regex_for(
     emel::model::data::tokenizer_pre::GPT2);
 
   CHECK(from_vocab.count == from_pre.count);
@@ -72,7 +72,7 @@ TEST_CASE("tokenizer_bpe_regex_for_presets") {
   }};
 
   for (const auto pre : presets) {
-    const auto list = emel::tokenizer::bpe::detail::regex_for(pre);
+    const auto list = emel::text::tokenizer::bpe::detail::regex_for(pre);
     CHECK(list.count > 0);
     CHECK(!list.exprs[0].empty());
   }
