@@ -259,4 +259,47 @@ int main() {
   dispatch_runtime(e, e.id);
 }
 ```
+
+## 16. `sml::utility::sm_pool` rules
+`sm_pool` is the preferred utility when one SML router machine must drive a large indexed pool of logical actors/items with shared storage.
+
+1. `sm_pool` storage type MUST be either:
+   - default-constructible, or
+   - constructible from `std::size_t` (pool size).
+2. storage SHOULD provide `reset()` if `sm_pool::reset()` is used.
+3. indexed dispatch MUST use `sml::utility::indexed_event<TEvent>` and route by `ev.id`.
+4. router actions/guards SHOULD access storage by `ev.id` only and MUST bounds-check indirectly via validated IDs at the call site.
+5. for contiguous ID/event buffers, callers SHOULD use pointer/count overloads to minimize iterator overhead:
+   - `process_indexed_batch<TEvent>(ids_ptr, count, event)`
+   - `process_event_batch(events_ptr, count)`
+6. iterator/range overloads MUST preserve deterministic input order; batch APIs are still synchronous RTC dispatch.
+7. batch APIs MUST NOT allocate during dispatch. all memory for IDs/events/storage MUST be prepared before the call.
+8. `sm_pool` usage MUST stay generic (event-driven state logic), not tailored to a single domain workflow.
+
+### example D: indexed pooled dispatch
+```cpp
+#include <boost/sml.hpp>
+#include <boost/sml/utility/sm_pool.hpp>
+namespace sml = boost::sml;
+
+struct ev_tick {};
+using pooled_tick = sml::utility::indexed_event<ev_tick>;
+
+struct storage {
+  explicit storage(std::size_t n) : flags(n) {}
+  void reset() { for (auto& f : flags) f = 0; }
+  std::vector<unsigned char> flags;
+};
+
+struct router {
+  auto operator()() const {
+    using namespace sml;
+    const auto hot = "hot"_s;
+    const auto toggle = [](storage& s, const pooled_tick& ev) { s.flags[ev.id] ^= 1; };
+    return make_transition_table(*hot + event<pooled_tick> / toggle);
+  }
+};
+
+using pool_t = sml::utility::sm_pool<storage, router>;
+```
 this uses a static dispatch table indexed by event ID; the ID range must be validated by the caller.

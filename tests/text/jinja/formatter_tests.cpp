@@ -471,6 +471,30 @@ TEST_CASE("jinja_renderer_dispatch_callbacks") {
   CHECK(track.length == out_len);
 }
 
+TEST_CASE("jinja_renderer_clears_stale_error_out_before_successful_render") {
+  emel::text::jinja::program program{};
+  parse_template("ok", program);
+
+  std::array<char, 8> buffer = {};
+  size_t out_len = 0;
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+
+  emel::text::jinja::formatter::action::context ctx{};
+  emel::text::jinja::formatter::sm machine{ctx};
+  emel::text::jinja::event::render ev{
+    .program = &program,
+    .output = buffer.data(),
+    .output_capacity = buffer.size(),
+    .output_length = &out_len,
+    .error_out = &err,
+  };
+
+  CHECK(machine.process_event(ev));
+  CHECK(machine.is(boost::sml::state<emel::text::jinja::formatter::done>));
+  CHECK(err == EMEL_OK);
+  CHECK(out_len == 2);
+}
+
 TEST_CASE("jinja_renderer_rejects_invalid_and_dispatches_error") {
   std::array<char, 16> buffer = {};
   size_t out_len = 7;
@@ -1659,7 +1683,6 @@ TEST_CASE("jinja_renderer_detail_value_equal_cases") {
 
 TEST_CASE("jinja_renderer_actions_branch_coverage") {
   using namespace emel::text::jinja;
-  using emel::text::jinja::formatter::action::begin_render;
   using emel::text::jinja::formatter::action::eval_next_stmt;
   using emel::text::jinja::formatter::action::eval_pending_expr;
   using emel::text::jinja::formatter::action::finalize_done;
@@ -1771,7 +1794,11 @@ TEST_CASE("jinja_renderer_actions_branch_coverage") {
   {
     formatter::action::context ctx{};
     finalize_done(ctx);
+    CHECK(ctx.last_error == EMEL_OK);
+    ctx.phase_error = EMEL_OK;
     finalize_error(ctx);
+    CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+    CHECK(ctx.last_error == EMEL_ERR_BACKEND);
   }
 
   {
@@ -1785,8 +1812,10 @@ TEST_CASE("jinja_renderer_actions_branch_coverage") {
     bool truncated = false;
     int32_t err = EMEL_OK;
     size_t err_pos = 0;
+    program render_program{};
+    parse_template("hi", render_program);
     event::render ev{
-      .program = nullptr,
+      .program = &render_program,
       .globals = nullptr,
       .output = buffer.data(),
       .output_capacity = buffer.size(),
@@ -1799,15 +1828,16 @@ TEST_CASE("jinja_renderer_actions_branch_coverage") {
     };
 
     formatter::action::context ctx{};
-    begin_render(ev, ctx);
-    ctx.phase_error = EMEL_OK;
-    ctx.output_length = 2;
-    finalize_done(ctx);
+    formatter::sm machine{ctx};
+    CHECK(machine.process_event(ev));
     CHECK(out_len == 2);
+    CHECK(err == EMEL_OK);
     CHECK_FALSE(truncated);
 
-    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-    finalize_error(ctx);
+    ev.program = nullptr;
+    CHECK_FALSE(machine.process_event(ev));
+    CHECK(out_len == 0);
     CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+    CHECK(err_pos == 0);
   }
 }

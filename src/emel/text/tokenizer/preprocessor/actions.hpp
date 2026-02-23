@@ -7,6 +7,7 @@
 #include "emel/text/tokenizer/bpe/split.hpp"
 #include "emel/text/tokenizer/preprocessor/context.hpp"
 #include "emel/text/tokenizer/preprocessor/detail.hpp"
+#include "emel/text/tokenizer/preprocessor/events.hpp"
 
 namespace emel::text::tokenizer::preprocessor::action {
 
@@ -16,9 +17,9 @@ inline void set_error(context & ctx, const int32_t err) noexcept {
 }
 
 inline void clear_request(context & ctx) noexcept {
-  ctx.request = nullptr;
   ctx.vocab = nullptr;
   ctx.text = {};
+  ctx.fragments_out = nullptr;
   ctx.parse_special = false;
   ctx.preprocessed = false;
   ctx.fragment_capacity = 0;
@@ -34,9 +35,9 @@ struct begin_preprocess {
     if (ev.error_out != nullptr) {
       *ev.error_out = EMEL_OK;
     }
-    ctx.request = &ev;
     ctx.vocab = ev.vocab;
     ctx.text = ev.text;
+    ctx.fragments_out = ev.fragments_out;
     ctx.parse_special = ev.parse_special;
     ctx.preprocessed = false;
     ctx.fragment_capacity = ev.fragment_capacity;
@@ -70,13 +71,13 @@ struct build_specials {
 struct partition_non_bpe {
   void operator()(context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
-    if (ctx.request == nullptr || ctx.vocab == nullptr) {
+    if (ctx.fragments_out == nullptr || ctx.vocab == nullptr) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
     }
     if (!detail::partition_with_specials(
             ctx.text, ctx.special_cache, ctx.parse_special,
-            ctx.request->fragments_out, ctx.fragment_capacity,
+            ctx.fragments_out, ctx.fragment_capacity,
             &ctx.fragment_count)) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       ctx.preprocessed = false;
@@ -89,7 +90,7 @@ struct partition_non_bpe {
 struct partition_bpe_no_specials {
   void operator()(context & ctx) const {
     ctx.phase_error = EMEL_OK;
-    if (ctx.request == nullptr || ctx.vocab == nullptr) {
+    if (ctx.fragments_out == nullptr || ctx.vocab == nullptr) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
     }
@@ -108,7 +109,7 @@ struct partition_bpe_no_specials {
       if (word.empty()) {
         continue;
       }
-      if (!detail::push_raw_fragment(ctx.request->fragments_out,
+      if (!detail::push_raw_fragment(ctx.fragments_out,
                                      ctx.fragment_capacity, out_count,
                                      word)) {
         ctx.fragment_count = 0;
@@ -125,7 +126,7 @@ struct partition_bpe_no_specials {
 struct partition_bpe_with_specials {
   void operator()(context & ctx) const {
     ctx.phase_error = EMEL_OK;
-    if (ctx.request == nullptr || ctx.vocab == nullptr) {
+    if (ctx.fragments_out == nullptr || ctx.vocab == nullptr) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
     }
@@ -145,7 +146,7 @@ struct partition_bpe_with_specials {
     for (size_t idx = 0; idx < partition_count; ++idx) {
       const fragment & frag = partitions[idx];
       if (frag.kind == fragment_kind::token) {
-        if (!detail::push_token_fragment(ctx.request->fragments_out,
+        if (!detail::push_token_fragment(ctx.fragments_out,
                                          ctx.fragment_capacity, out_count,
                                          frag.token)) {
           ctx.fragment_count = 0;
@@ -170,7 +171,7 @@ struct partition_bpe_with_specials {
         if (word.empty()) {
           continue;
         }
-        if (!detail::push_raw_fragment(ctx.request->fragments_out,
+        if (!detail::push_raw_fragment(ctx.fragments_out,
                                        ctx.fragment_capacity, out_count,
                                        word)) {
           ctx.fragment_count = 0;

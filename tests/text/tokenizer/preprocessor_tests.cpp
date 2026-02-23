@@ -455,9 +455,9 @@ TEST_CASE("tokenizer_preprocessor_partition_bpe_with_specials_invalid") {
   ev.error_out = &err;
 
   emel::text::tokenizer::preprocessor::action::context ctx = {};
-  ctx.request = &ev;
   ctx.vocab = &vocab;
   ctx.text = ev.text;
+  ctx.fragments_out = ev.fragments_out;
   ctx.parse_special = ev.parse_special;
   ctx.fragment_capacity = ev.fragment_capacity;
 
@@ -573,9 +573,9 @@ TEST_CASE("tokenizer_preprocessor_partition_non_bpe_failure") {
   ev.fragment_capacity = 0;
 
   emel::text::tokenizer::preprocessor::action::context ctx = {};
-  ctx.request = &ev;
   ctx.vocab = &vocab;
   ctx.text = ev.text;
+  ctx.fragments_out = ev.fragments_out;
   ctx.fragment_capacity = ev.fragment_capacity;
   struct emel::text::tokenizer::preprocessor::action::partition_non_bpe partition_non_bpe{};
   partition_non_bpe(ctx);
@@ -594,9 +594,9 @@ TEST_CASE("tokenizer_preprocessor_partition_bpe_failure") {
   ev.fragment_capacity = 0;
 
   emel::text::tokenizer::preprocessor::action::context ctx = {};
-  ctx.request = &ev;
   ctx.vocab = &vocab;
   ctx.text = ev.text;
+  ctx.fragments_out = ev.fragments_out;
   ctx.fragment_capacity = ev.fragment_capacity;
   struct emel::text::tokenizer::preprocessor::action::partition_bpe_no_specials partition_bpe_no_specials{};
   partition_bpe_no_specials(ctx);

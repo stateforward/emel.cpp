@@ -1,6 +1,7 @@
 #pragma once
 
 #include "emel/text/tokenizer/preprocessor/context.hpp"
+#include "emel/text/tokenizer/preprocessor/events.hpp"
 #include "emel/text/tokenizer/preprocessor/types.hpp"
 
 namespace emel::text::tokenizer::preprocessor::guard {

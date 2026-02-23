@@ -8,10 +8,6 @@
 #include "emel/text/jinja/ast.hpp"
 #include "emel/text/jinja/value.hpp"
 
-namespace emel::text::jinja::event {
-struct render;
-}  // namespace emel::text::jinja::event
-
 namespace emel::text::jinja::formatter::action {
 
 inline constexpr size_t k_max_scopes = 16;
@@ -48,7 +44,6 @@ struct context {
   int32_t last_error = EMEL_OK;
   size_t error_pos = 0;
   uint32_t steps_remaining = k_max_steps;
-  const emel::text::jinja::event::render * request = nullptr;
   const emel::text::jinja::object_value * globals = nullptr;
   const emel::text::jinja::ast_list * statements = nullptr;
   size_t statement_index = 0;

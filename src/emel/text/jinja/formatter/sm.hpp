@@ -39,7 +39,7 @@ struct unexpected {};
  * action side effects:
  * - `begin_render`/`seed_program` prepare context for a render pass.
  * - `eval_next_stmt`/`eval_pending_expr`/`write_pending_value` execute rendering steps.
- * - `finalize_*` dispatch completion callbacks and write output metadata.
+ * - `finalize_*` finalize terminal status on context.
  * - `reject_invalid_render` writes errors for invalid requests.
  * - `on_unexpected` reports sequencing violations.
  */
@@ -120,8 +120,57 @@ struct model {
 
 struct sm : public emel::sm<model> {
   using base_type = emel::sm<model>;
-  using base_type::base_type;
+
+  explicit sm(action::context & ctx) : base_type(ctx), context_(&ctx) {}
+
+  bool process_event(const event::render & ev) {
+    namespace sml = boost::sml;
+
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_OK;
+    }
+
+    const bool accepted = base_type::process_event(ev);
+    const bool ok = this->is(sml::state<done>);
+    const bool valid = guard::valid_render(ev);
+    const int32_t err = ok ? EMEL_OK
+                           : (context_->last_error != EMEL_OK ? context_->last_error
+                                                               : EMEL_ERR_BACKEND);
+    const size_t output_length = valid ? context_->output_length : 0;
+    const size_t error_pos = valid ? context_->error_pos : 0;
+    const bool output_truncated = valid ? (err != EMEL_OK) : false;
+
+    if (ev.output_length != nullptr) {
+      *ev.output_length = output_length;
+    }
+    if (ev.output_truncated != nullptr) {
+      *ev.output_truncated = output_truncated;
+    }
+    if (ev.error_out != nullptr) {
+      *ev.error_out = err;
+    }
+    if (ev.error_pos_out != nullptr) {
+      *ev.error_pos_out = error_pos;
+    }
+
+    if (ok) {
+      if (ev.dispatch_done) {
+        ev.dispatch_done(events::rendering_done{&ev, output_length, output_truncated});
+      }
+    } else {
+      if (ev.dispatch_error) {
+        ev.dispatch_error(events::rendering_error{&ev, err, error_pos});
+      }
+    }
+
+    return accepted && ok;
+  }
+
   using base_type::process_event;
+  using base_type::visit_current_states;
+
+ private:
+  action::context * context_ = nullptr;
 };
 
 }  // namespace emel::text::jinja::formatter
