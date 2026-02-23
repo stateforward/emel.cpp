@@ -22,7 +22,7 @@ namespace {
 emel::model::data model{};
 
 emel::model::data & fresh_model() {
-  std::memset(&model, 0, sizeof(model));
+  model = emel::model::data{};
   return model;
 }
 
