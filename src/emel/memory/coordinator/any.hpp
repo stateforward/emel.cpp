@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include "emel/emel.h"
 #include "emel/memory/coordinator/events.hpp"
@@ -33,8 +34,23 @@ class any {
   ~any() = default;
 
   void set_kind(const coordinator_kind kind) {
+    const coordinator_kind previous_kind = selected_kind_;
     core_.set_kind(kind);
     selected_kind_ = kind;
+    if (selected_kind_ == previous_kind) {
+      return;
+    }
+    switch (selected_kind_) {
+      case coordinator_kind::recurrent:
+        reset_machine(recurrent_memory_);
+        break;
+      case coordinator_kind::kv:
+        reset_machine(kv_memory_);
+        break;
+      case coordinator_kind::hybrid:
+        reset_machine(hybrid_memory_);
+        break;
+    }
   }
 
   coordinator_kind kind() const noexcept { return selected_kind_; }
@@ -256,6 +272,12 @@ class any {
   using event_list = boost::sml::aux::type_list<event::prepare_update,
                                                 event::prepare_batch,
                                                 event::prepare_full>;
+
+  template <class machine_type>
+  static void reset_machine(machine_type & machine) {
+    std::destroy_at(std::addressof(machine));
+    std::construct_at(std::addressof(machine));
+  }
 
   emel::sm_any<coordinator_kind, sm_list, event_list> core_{};
   coordinator_kind selected_kind_ = coordinator_kind::recurrent;

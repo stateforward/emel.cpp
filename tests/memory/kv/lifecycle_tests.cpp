@@ -75,3 +75,48 @@ TEST_CASE("kv_lifecycle_reports_capacity_errors_without_partial_leaks") {
   CHECK_FALSE(machine.has_sequence(1));
   CHECK(machine.has_sequence(0));
 }
+
+TEST_CASE("kv_lifecycle_branch_preserves_existing_destination_stream_sequences") {
+  emel::memory::kv::sm machine{};
+  int32_t err = EMEL_OK;
+  const int32_t seq_to_stream[] = {0, 1, 1};
+
+  CHECK(machine.process_event(emel::memory::kv::event::reserve{
+      .kv_size = 16,
+      .n_stream = 2,
+      .seq_to_stream = seq_to_stream,
+      .seq_to_stream_count = 3,
+      .error_out = &err,
+  }));
+  CHECK(err == EMEL_OK);
+
+  CHECK(machine.process_event(emel::memory::kv::event::allocate_sequence{
+      .seq_id = 0,
+      .slot_count = 3,
+      .error_out = &err,
+  }));
+  CHECK(err == EMEL_OK);
+
+  CHECK(machine.process_event(emel::memory::kv::event::allocate_sequence{
+      .seq_id = 1,
+      .slot_count = 2,
+      .error_out = &err,
+  }));
+  CHECK(err == EMEL_OK);
+  CHECK(machine.has_sequence(1));
+  CHECK(machine.sequence_token_count(1) == 2);
+
+  CHECK(machine.process_event(emel::memory::kv::event::branch_sequence{
+      .seq_id_src = 0,
+      .seq_id_dst = 2,
+      .error_out = &err,
+  }));
+  CHECK(err == EMEL_OK);
+
+  CHECK(machine.has_sequence(0));
+  CHECK(machine.sequence_token_count(0) == 3);
+  CHECK(machine.has_sequence(1));
+  CHECK(machine.sequence_token_count(1) == 2);
+  CHECK(machine.has_sequence(2));
+  CHECK(machine.sequence_token_count(2) == 3);
+}

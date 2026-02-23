@@ -1707,25 +1707,22 @@ inline constexpr auto run_branch_sequence_step = [](context & ctx, int32_t * err
 
   stream_state & src_stream = ctx.streams[src_stream_id];
   stream_state & dst_stream = ctx.streams[dst_stream_id];
-  if (src_stream_id != dst_stream_id) {
-    bool found_pair = false;
-    for (int32_t i = 0; i < ctx.pending_copy_count; ++i) {
-      if (ctx.pending_copy_src[i] == src_stream_id &&
-          ctx.pending_copy_dst[i] == dst_stream_id) {
-        found_pair = true;
-        break;
+  if (src_stream_id == dst_stream_id) {
+    for (int32_t i = 0; i < ctx.kv_size; ++i) {
+      if (src_stream.pos[i] == POS_NONE) {
+        continue;
       }
+      if (!cell_has_seq(src_stream, i, request.seq_id_src)) {
+        continue;
+      }
+      add_seq_to_cell(dst_stream, i, request.seq_id_dst);
     }
-    if (!found_pair && ctx.pending_copy_count >= MAX_STREAM_COPY) {
-      *error_out = EMEL_ERR_BACKEND;
-      return;
-    }
-    if (!found_pair) {
-      add_pending_copy(ctx, src_stream_id, dst_stream_id);
-    }
-    reset_stream(dst_stream);
+    reset_next_pos_for_seq(ctx, request.seq_id_dst, dst_stream);
+    ctx.kv_tokens = compute_kv_tokens(ctx);
+    return;
   }
 
+  ctx.lifecycle_slot_count = 0;
   for (int32_t i = 0; i < ctx.kv_size; ++i) {
     if (src_stream.pos[i] == POS_NONE) {
       continue;
@@ -1733,21 +1730,70 @@ inline constexpr auto run_branch_sequence_step = [](context & ctx, int32_t * err
     if (!cell_has_seq(src_stream, i, request.seq_id_src)) {
       continue;
     }
-    if (src_stream_id == dst_stream_id) {
-      add_seq_to_cell(dst_stream, i, request.seq_id_dst);
+    if (ctx.lifecycle_slot_count >= ctx.kv_size) {
+      *error_out = EMEL_ERR_BACKEND;
+      return;
+    }
+    ctx.lifecycle_slot_indices[ctx.lifecycle_slot_count] = i;
+    ctx.lifecycle_positions[ctx.lifecycle_slot_count] = POS_NONE;
+    ++ctx.lifecycle_slot_count;
+  }
+  if (ctx.lifecycle_slot_count <= 0) {
+    *error_out = EMEL_ERR_BACKEND;
+    return;
+  }
+
+  std::array<uint8_t, MAX_KV_CELLS> target_used = {};
+  int32_t next_free_idx = 0;
+  for (int32_t token_idx = 0; token_idx < ctx.lifecycle_slot_count; ++token_idx) {
+    const int32_t src_idx = ctx.lifecycle_slot_indices[token_idx];
+    if (dst_stream.pos[src_idx] == POS_NONE) {
+      ctx.lifecycle_positions[token_idx] = src_idx;
+      target_used[src_idx] = 1;
+    }
+  }
+
+  for (int32_t token_idx = 0; token_idx < ctx.lifecycle_slot_count; ++token_idx) {
+    if (ctx.lifecycle_positions[token_idx] != POS_NONE) {
       continue;
     }
-    set_cell_pos(dst_stream, i, src_stream.pos[i]);
-    dst_stream.shift[i] = src_stream.shift[i];
-    dst_stream.ext_x[i] = src_stream.ext_x[i];
-    dst_stream.ext_y[i] = src_stream.ext_y[i];
-    if (dst_stream.shift[i] != 0) {
+    while (next_free_idx < ctx.kv_size &&
+           (dst_stream.pos[next_free_idx] != POS_NONE || target_used[next_free_idx] != 0)) {
+      ++next_free_idx;
+    }
+    if (next_free_idx >= ctx.kv_size) {
+      *error_out = EMEL_ERR_BACKEND;
+      return;
+    }
+    ctx.lifecycle_positions[token_idx] = next_free_idx;
+    target_used[next_free_idx] = 1;
+    ++next_free_idx;
+  }
+
+  int32_t min_written_idx = ctx.kv_size;
+  for (int32_t token_idx = 0; token_idx < ctx.lifecycle_slot_count; ++token_idx) {
+    const int32_t src_idx = ctx.lifecycle_slot_indices[token_idx];
+    const int32_t dst_idx = ctx.lifecycle_positions[token_idx];
+    if (dst_idx < 0 || dst_idx >= ctx.kv_size) {
+      *error_out = EMEL_ERR_BACKEND;
+      return;
+    }
+    if (dst_stream.pos[dst_idx] != POS_NONE) {
+      *error_out = EMEL_ERR_BACKEND;
+      return;
+    }
+    set_cell_pos(dst_stream, dst_idx, src_stream.pos[src_idx]);
+    dst_stream.shift[dst_idx] = src_stream.shift[src_idx];
+    dst_stream.ext_x[dst_idx] = src_stream.ext_x[src_idx];
+    dst_stream.ext_y[dst_idx] = src_stream.ext_y[src_idx];
+    if (dst_stream.shift[dst_idx] != 0) {
       dst_stream.has_shift = true;
     }
-    add_seq_to_cell(dst_stream, i, request.seq_id_dst);
+    add_seq_to_cell(dst_stream, dst_idx, request.seq_id_dst);
+    min_written_idx = std::min(min_written_idx, dst_idx);
   }
-  if (src_stream_id != dst_stream_id) {
-    dst_stream.head = src_stream.head;
+  if (min_written_idx < dst_stream.head) {
+    dst_stream.head = min_written_idx;
   }
   reset_next_pos_for_seq(ctx, request.seq_id_dst, dst_stream);
   ctx.kv_tokens = compute_kv_tokens(ctx);
