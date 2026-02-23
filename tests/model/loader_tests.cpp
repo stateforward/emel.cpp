@@ -15,6 +15,12 @@
 
 namespace {
 
+emel::model::data & fresh_model() {
+  static emel::model::data model = {};
+  std::memset(&model, 0, sizeof(model));
+  return model;
+}
+
 struct owner_state {
   bool done = false;
   bool error = false;
@@ -180,7 +186,7 @@ bool validate_architecture_ok(const emel::model::loader::event::load &, int32_t 
 }  // namespace
 
 TEST_CASE("model loader guards follow request flags") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   emel::model::loader::event::load request{model_data};
   emel::model::loader::action::context ctx{};
   ctx.request = &request;
@@ -212,7 +218,7 @@ TEST_CASE("model loader guards follow request flags") {
 }
 
 TEST_CASE("model loader guards cover parser and weight paths") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   emel::model::loader::event::load request{model_data};
   emel::model::loader::action::context ctx{};
 
@@ -274,7 +280,7 @@ TEST_CASE("model loader guards cover parser and weight paths") {
 }
 
 TEST_CASE("model loader completes happy path with mmap") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   owner_state owner{};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
 
@@ -307,7 +313,7 @@ TEST_CASE("model loader completes happy path with mmap") {
 }
 
 TEST_CASE("model loader reports parsing errors") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   owner_state owner{};
   int32_t err = EMEL_OK;
 
@@ -339,7 +345,7 @@ TEST_CASE("model loader reports parsing errors") {
 }
 
 TEST_CASE("model loader reports loading errors") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   owner_state owner{};
   int32_t err = EMEL_OK;
 
@@ -378,7 +384,7 @@ TEST_CASE("model loader reports loading errors") {
 }
 
 TEST_CASE("model loader reports structure validation errors") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   owner_state owner{};
   int32_t err = EMEL_OK;
 
@@ -414,7 +420,7 @@ TEST_CASE("model loader reports structure validation errors") {
 }
 
 TEST_CASE("model loader reports architecture validation errors") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   owner_state owner{};
   int32_t err = EMEL_OK;
 
@@ -450,7 +456,7 @@ TEST_CASE("model loader reports architecture validation errors") {
 }
 
 TEST_CASE("model loader skips weight loading when vocab_only") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   owner_state owner{};
   int32_t err = EMEL_ERR_INVALID_ARGUMENT;
   bool load_called = false;
@@ -523,7 +529,7 @@ bool dispatch_load_weights_done(void *, const emel::model::weight_loader::event:
 }  // namespace
 
 TEST_CASE("loader actions map_parser and parse update phase_error") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::model::loader::event::load request{model};
   emel::model::loader::action::context ctx{};
   emel::model::loader::action::begin_load(request, ctx);
@@ -559,7 +565,7 @@ TEST_CASE("loader actions map_parser and parse update phase_error") {
 }
 
 TEST_CASE("loader actions handle missing callbacks and requests") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::model::loader::event::load request{model};
   emel::model::loader::action::context ctx{};
 
@@ -621,7 +627,7 @@ TEST_CASE("loader actions handle missing callbacks and requests") {
 }
 
 TEST_CASE("loader actions handle null callback owners") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::model::loader::event::load request{model};
   emel::model::loader::events::parsing_done parsing_done{&request};
   emel::model::loader::events::parsing_error parsing_error{&request, EMEL_ERR_BACKEND};
@@ -635,7 +641,7 @@ TEST_CASE("loader actions handle null callback owners") {
 }
 
 TEST_CASE("loader actions load_weights and map_layers update phase_error") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::model::loader::event::load request{model};
   emel::model::loader::action::context ctx{};
   ctx.request = &request;
@@ -667,7 +673,7 @@ TEST_CASE("loader actions load_weights and map_layers update phase_error") {
 }
 
 TEST_CASE("loader actions validate structure and architecture update errors") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::model::loader::event::load request{model};
   emel::model::loader::action::context ctx{};
   ctx.request = &request;
@@ -703,7 +709,7 @@ TEST_CASE("loader actions validate structure and architecture update errors") {
 }
 
 TEST_CASE("loader actions publish_done and publish_error notify owners") {
-  emel::model::data model{};
+  auto & model = fresh_model();
   emel::model::loader::event::load request{model};
   emel::model::loader::action::context ctx{};
   owner_probe owner{};
@@ -746,7 +752,7 @@ TEST_CASE("parser actions cover error and success branches") {
   CHECK(emel::parser::guard::invalid_parse_request{}(request));
 
   emel::parser::gguf::context gguf_ctx{};
-  emel::model::data model{};
+  auto & model = fresh_model();
   request.model = &model;
   request.format_ctx = &gguf_ctx;
   emel::parser::action::begin_parse(request, ctx);

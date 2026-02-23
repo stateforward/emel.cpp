@@ -21,7 +21,17 @@ inline event::execute make_request(const context & ctx) noexcept {
     .ubatch_index = ctx.ubatch_index,
     .ubatch_size = ctx.ubatch_size,
     .kv_tokens = ctx.kv_tokens,
+    .memory_coordinator_sm = ctx.memory_coordinator_sm,
+    .kv_cache_sm = ctx.kv_cache_sm,
+    .expected_outputs = ctx.expected_outputs,
     .compute_ctx = ctx.compute_ctx,
+    .positions = ctx.positions,
+    .positions_count = ctx.positions_count,
+    .seq_masks = ctx.seq_masks,
+    .seq_mask_words = ctx.seq_mask_words,
+    .seq_masks_count = ctx.seq_masks_count,
+    .seq_primary_ids = ctx.seq_primary_ids,
+    .seq_primary_ids_count = ctx.seq_primary_ids_count,
     .validate = ctx.validate,
     .prepare_graph = ctx.prepare_graph,
     .alloc_graph = ctx.alloc_graph,
@@ -29,6 +39,8 @@ inline event::execute make_request(const context & ctx) noexcept {
     .run_backend = ctx.run_backend,
     .extract_outputs = ctx.extract_outputs,
     .outputs_produced_out = nullptr,
+    .kv_tokens_out = ctx.kv_tokens_out,
+    .rollback_attempted_out = ctx.rollback_attempted_out,
     .error_out = nullptr,
   };
 }
@@ -40,17 +52,35 @@ struct begin_execute {
     ctx.ubatch_index = ev.ubatch_index;
     ctx.ubatch_size = ev.ubatch_size;
     ctx.kv_tokens = ev.kv_tokens;
+    ctx.memory_coordinator_sm = ev.memory_coordinator_sm;
+    ctx.kv_cache_sm = ev.kv_cache_sm;
+    ctx.expected_outputs = ev.expected_outputs;
     ctx.compute_ctx = ev.compute_ctx;
+    ctx.positions = ev.positions;
+    ctx.positions_count = ev.positions_count;
+    ctx.seq_masks = ev.seq_masks;
+    ctx.seq_mask_words = ev.seq_mask_words;
+    ctx.seq_masks_count = ev.seq_masks_count;
+    ctx.seq_primary_ids = ev.seq_primary_ids;
+    ctx.seq_primary_ids_count = ev.seq_primary_ids_count;
     ctx.validate = ev.validate;
     ctx.prepare_graph = ev.prepare_graph;
     ctx.alloc_graph = ev.alloc_graph;
     ctx.bind_inputs = ev.bind_inputs;
     ctx.run_backend = ev.run_backend;
     ctx.extract_outputs = ev.extract_outputs;
+    ctx.kv_tokens_out = ev.kv_tokens_out;
+    ctx.rollback_attempted_out = ev.rollback_attempted_out;
     ctx.outputs_produced = 0;
     ctx.graph_reused = false;
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
+    if (ctx.kv_tokens_out != nullptr) {
+      *ctx.kv_tokens_out = ctx.kv_tokens;
+    }
+    if (ctx.rollback_attempted_out != nullptr) {
+      *ctx.rollback_attempted_out = false;
+    }
   }
 };
 

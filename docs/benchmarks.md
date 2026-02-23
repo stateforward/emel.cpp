@@ -5,6 +5,8 @@ Source: `snapshots/bench/benchmarks_compare.txt`
 Note: While EMEL is modular and easy to bench in isolation, llama.cpp code is very
 entangled. These microbenches aim for apples-to-apples comparisons but likely
 are not. True benchmarks will be end-to-end once the system is complete.
+Legacy benchmark IDs like `batch/splitter_*` and `jinja/renderer_*` are intentionally
+retained for snapshot/report continuity and should be renamed after consumers migrate.
 
 | Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |
 | --- | ---: | ---: | ---: |

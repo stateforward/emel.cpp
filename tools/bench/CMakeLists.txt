@@ -100,19 +100,19 @@ set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${EMEL_ROOT} emel)
 
 add_executable(bench_runner
-  ${CMAKE_CURRENT_SOURCE_DIR}/batch_splitter_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/batch/planner_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/buffer_allocator_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/jinja_parser_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/jinja_renderer_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/text/jinja/parser_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/text/jinja/formatter_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_coordinator_recurrent_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/sm_any_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_preprocessor_bpe_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_preprocessor_spm_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_preprocessor_ugm_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_preprocessor_wpm_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_preprocessor_rwkv_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_preprocessor_plamo2_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/bpe_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/spm_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/ugm_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/wpm_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/rwkv_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/plamo2_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/tokenizer_bench.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/lexer.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/parser.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/runtime.cpp
@@ -134,6 +134,7 @@ target_link_libraries(bench_runner
 
 target_include_directories(bench_runner
   PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${EMEL_ROOT}/src
     ${EMEL_ROOT}/include
     ${reference_impl_SOURCE_DIR}/src

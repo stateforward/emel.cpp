@@ -7,7 +7,7 @@
 #include "emel/token/batcher/sm.hpp"
 #include "emel/batch/planner/sm.hpp"
 #include "emel/decoder/events.hpp"
-#include "emel/graph/builder/sm.hpp"
+#include "emel/graph/processor/sm.hpp"
 #include "emel/emel.h"
 #include "emel/memory/kv/sm.hpp"
 #include "emel/memory/coordinator/any.hpp"
@@ -68,10 +68,12 @@ struct context {
   int32_t ubatches_processed = 0;
 
   std::unique_ptr<emel::token::batcher::sm> batch_sanitizer;
+  // TODO(rearchitecture-cleanup): Rename `batch_splitter` to `batch_planner` after
+  // downstream references to the legacy name are removed.
   std::unique_ptr<emel::batch::planner::sm> batch_splitter;
   std::unique_ptr<emel::memory::coordinator::any> memory_coordinator;
   std::unique_ptr<emel::memory::kv::sm> kv_cache;
-  std::unique_ptr<emel::graph::builder::sm> ubatch_executor;
+  std::unique_ptr<emel::graph::processor::sm> ubatch_executor;
 
   void * compute_ctx = nullptr;
   event::compute_validate_fn compute_validate = nullptr;
@@ -95,7 +97,7 @@ inline context::context()
       batch_splitter(std::make_unique<emel::batch::planner::sm>()),
       memory_coordinator(std::make_unique<emel::memory::coordinator::any>()),
       kv_cache(std::make_unique<emel::memory::kv::sm>()),
-      ubatch_executor(std::make_unique<emel::graph::builder::sm>()) {
+      ubatch_executor(std::make_unique<emel::graph::processor::sm>()) {
   // one-time heap allocation keeps decoder context small on the stack.
 }
 

@@ -22,7 +22,7 @@ include(FetchContent)
 FetchContent_Declare(
   boost_sml
   GIT_REPOSITORY https://github.com/stateforward/sml.cpp
-  GIT_TAG 3f04b240585789931a5d5dabf1de2526707fe11b
+  GIT_TAG 119ca42bc7e47e4683d37f8dd40b08881073e268
 )
 FetchContent_MakeAvailable(boost_sml)
 
@@ -78,11 +78,11 @@ if(EMEL_ENABLE_TESTS)
     tests/model/loader_tests.cpp
     tests/model/parser_tests.cpp
     tests/gbnf/parser_tests.cpp
-    tests/jinja/parser_tests.cpp
-    tests/jinja/lexer_tests.cpp
-    tests/jinja/renderer_tests.cpp
+    tests/text/jinja/parser_tests.cpp
+    tests/text/jinja/lexer_tests.cpp
+    tests/text/jinja/formatter_tests.cpp
     tests/model/weight_loader_tests.cpp
-    tests/logits/validator/candidate_builder_tests.cpp
+    tests/logits/validator/validator_tests.cpp
     tests/logits/sampler/pipeline_tests.cpp
     tests/logits/sampler/token_selector_tests.cpp
     tests/telemetry/exporter_tests.cpp
@@ -92,35 +92,34 @@ if(EMEL_ENABLE_TESTS)
     tests/decoder/decoder_tests.cpp
     tests/decoder/decoder_sm_transition_tests.cpp
     tests/decoder/decoder_action_branch_tests.cpp
-    tests/graph/processor/compute_executor_tests.cpp
-    tests/graph/processor/compute_executor_sm_transition_tests.cpp
-    tests/graph/processor/compute_executor_action_branch_tests.cpp
-    tests/graph/builder/ubatch_executor_tests.cpp
-    tests/graph/builder/ubatch_executor_action_branch_tests.cpp
+    tests/graph/processor/processor_tests.cpp
+    tests/graph/processor/processor_sm_transition_tests.cpp
+    tests/graph/processor/processor_action_branch_tests.cpp
     tests/text/encoders/encoder_tests.cpp
-    tests/tokenizer/preprocessor_tests.cpp
-    tests/tokenizer/preprocessor_spm_tests.cpp
-    tests/tokenizer/preprocessor_wpm_tests.cpp
-    tests/tokenizer/preprocessor_rwkv_tests.cpp
-    tests/tokenizer/preprocessor_plamo2_tests.cpp
-    tests/tokenizer/preprocessor_fallback_tests.cpp
-    tests/tokenizer/bpe_regex_tests.cpp
-    tests/tokenizer/bpe_split_tests.cpp
-    tests/tokenizer/tokenizer_tests.cpp
-    tests/tokenizer/tokenizer_parity_tests.cpp
-    tests/tokenizer/tokenizer_action_guard_tests.cpp
-    tests/batch/planner/splitter_tests.cpp
-    tests/batch/planner/splitter_actions_tests.cpp
-    tests/batch/planner/splitter_additional_tests.cpp
-    tests/batch/planner/splitter_action_branch_tests.cpp
-    tests/batch/planner/splitter_sm_transition_tests.cpp
-    tests/batch/planner/splitter_sm_flow_tests.cpp
+    tests/text/tokenizer/preprocessor_tests.cpp
+    tests/text/tokenizer/preprocessor_spm_tests.cpp
+    tests/text/tokenizer/preprocessor_wpm_tests.cpp
+    tests/text/tokenizer/preprocessor_rwkv_tests.cpp
+    tests/text/tokenizer/preprocessor_plamo2_tests.cpp
+    tests/text/tokenizer/preprocessor_fallback_tests.cpp
+    tests/text/tokenizer/bpe_regex_tests.cpp
+    tests/text/tokenizer/bpe_split_tests.cpp
+    tests/text/tokenizer/tokenizer_tests.cpp
+    tests/text/tokenizer/tokenizer_parity_tests.cpp
+    tests/text/tokenizer/tokenizer_action_guard_tests.cpp
+    tests/batch/planner/planner_tests.cpp
+    tests/batch/planner/planner_actions_tests.cpp
+    tests/batch/planner/planner_additional_tests.cpp
+    tests/batch/planner/planner_action_branch_tests.cpp
+    tests/batch/planner/planner_sm_transition_tests.cpp
+    tests/batch/planner/planner_sm_flow_tests.cpp
     tests/token/batcher/sanitizer_tests.cpp
     tests/memory/coordinator_tests.cpp
     tests/memory/coordinator_sm_transition_tests.cpp
     tests/memory/coordinator_sm_transition_more_tests.cpp
     tests/memory/coordinator_sm_testing_policy_tests.cpp
     tests/memory/coordinator_action_branch_tests.cpp
+    tests/memory/coordinator_guard_tests.cpp
     tests/memory/coordinator_recurrent_tests.cpp
     tests/memory/coordinator_recurrent_sm_transition_tests.cpp
     tests/memory/coordinator_recurrent_sm_transition_more_tests.cpp
@@ -145,6 +144,7 @@ if(EMEL_ENABLE_TESTS)
     tests/buffer/allocator_error_tests.cpp
     tests/buffer/allocator_detail_tests.cpp
     tests/buffer/allocator_sm_transition_tests.cpp
+    tests/buffer/allocator_guard_tests.cpp
     tests/buffer/allocator_action_branch_tests.cpp
     tests/buffer/allocator_c_api_tests.cpp
     tests/buffer/planner_tests.cpp

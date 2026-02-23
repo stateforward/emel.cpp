@@ -12,6 +12,12 @@
 
 namespace {
 
+emel::model::data & fresh_model() {
+  static emel::model::data model = {};
+  std::memset(&model, 0, sizeof(model));
+  return model;
+}
+
 struct owner_state {
   bool done = false;
   bool error = false;
@@ -50,7 +56,7 @@ bool can_handle_false(const emel::model::loader::event::load &) {
 }  // namespace
 
 TEST_CASE("parser completes happy path") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   owner_state owner{};
   emel::parser::gguf::sm machine{};
   emel::parser::gguf::context gguf_ctx{};
@@ -77,7 +83,7 @@ TEST_CASE("parser completes happy path") {
 }
 
 TEST_CASE("parser reports parsing errors") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   owner_state owner{};
   emel::parser::gguf::sm machine{};
   emel::parser::gguf::context gguf_ctx{};
@@ -102,7 +108,7 @@ TEST_CASE("parser actions and guards handle state transitions") {
   CHECK(emel::parser::guard::invalid_parse_request{}(request));
   CHECK(!emel::parser::guard::valid_parse_request{}(request));
 
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   emel::parser::gguf::context gguf_ctx{};
   request.model = &model_data;
   request.format_ctx = &gguf_ctx;
@@ -147,7 +153,7 @@ TEST_CASE("parser actions and guards handle state transitions") {
 }
 
 TEST_CASE("parser map selection skips invalid entries") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   emel::model::loader::event::load request{model_data};
 
   emel::parser::entry entries[3] = {};
@@ -172,7 +178,7 @@ TEST_CASE("parser map selection skips invalid entries") {
 }
 
 TEST_CASE("parser dispatch table covers kind lookup") {
-  emel::model::data model_data{};
+  auto & model_data = fresh_model();
   emel::parser::gguf::context gguf_ctx{};
   emel::parser::gguf::sm machine{};
 

@@ -1,0 +1,180 @@
+#include "bench_cases.hpp"
+
+#include <cstdio>
+#include <string>
+
+#include "emel/text/jinja/lexer.hpp"
+#include "emel/text/jinja/parser/detail.hpp"
+#include "emel/text/jinja/formatter/sm.hpp"
+
+#include "jinja/lexer.h"
+#include "jinja/parser.h"
+#include "jinja/runtime.h"
+
+// TODO(rearchitecture-cleanup): Keep legacy "renderer" benchmark IDs until
+// downstream references and snapshot consumers are migrated.
+
+namespace {
+
+std::string make_long_template() {
+  std::string out;
+  out.reserve(2048);
+  for (int i = 0; i < 10; ++i) {
+    out += "{% if cond %}hello {{ name|upper }}{% else %}bye{% endif %}\n";
+    out += "{% for item in items %}{{ item }}{% endfor %}\n";
+  }
+  return out;
+}
+
+emel::text::jinja::program parse_emel(const std::string & templ) {
+  emel::text::jinja::lexer lex;
+  emel::text::jinja::lexer_result lex_res = lex.tokenize(templ);
+  if (lex_res.error != EMEL_OK) {
+    std::fprintf(stderr, "error: emel jinja lexer failed at %zu\n", lex_res.error_pos);
+    std::abort();
+  }
+  emel::text::jinja::program program{};
+  emel::text::jinja::parser::detail::recursive_descent_parser parser{program};
+  if (!parser.parse(lex_res)) {
+    std::fprintf(stderr, "error: emel jinja parser failed at %zu\n", parser.error_pos());
+    std::abort();
+  }
+  return program;
+}
+
+::jinja::program parse_reference(const std::string & templ) {
+  try {
+    ::jinja::lexer lex;
+    ::jinja::lexer_result lex_res = lex.tokenize(templ);
+    return ::jinja::parse_from_tokens(lex_res);
+  } catch (const std::exception & ex) {
+    std::fprintf(stderr, "error: reference jinja parse failed: %s\n", ex.what());
+    std::abort();
+  }
+}
+
+emel::text::jinja::value make_string(std::string_view v) {
+  emel::text::jinja::value out;
+  out.type = emel::text::jinja::value_type::string;
+  out.string_v.view = v;
+  return out;
+}
+
+emel::text::jinja::value make_bool(bool v) {
+  emel::text::jinja::value out;
+  out.type = emel::text::jinja::value_type::boolean;
+  out.bool_v = v;
+  return out;
+}
+
+emel::text::jinja::value make_int(int64_t v) {
+  emel::text::jinja::value out;
+  out.type = emel::text::jinja::value_type::integer;
+  out.int_v = v;
+  out.float_v = static_cast<double>(v);
+  return out;
+}
+
+emel::text::jinja::value make_array(emel::text::jinja::value * items, size_t count) {
+  emel::text::jinja::value out;
+  out.type = emel::text::jinja::value_type::array;
+  out.array_v.items = items;
+  out.array_v.count = count;
+  out.array_v.capacity = count;
+  return out;
+}
+
+}  // namespace
+
+namespace emel::bench {
+
+void append_emel_jinja_formatter_cases(std::vector<result> & results, const config & cfg) {
+  const std::string short_template = "hello {{ name|upper }}";
+  const std::string long_template = make_long_template();
+
+  const emel::text::jinja::program short_program = parse_emel(short_template);
+  const emel::text::jinja::program long_program = parse_emel(long_template);
+
+  std::array<emel::text::jinja::value, 3> items = {make_int(1), make_int(2), make_int(3)};
+  emel::text::jinja::value items_val = make_array(items.data(), items.size());
+
+  std::array<emel::text::jinja::object_entry, 3> entries = {};
+  entries[0].key = make_string("name");
+  entries[0].val = make_string("world");
+  entries[1].key = make_string("cond");
+  entries[1].val = make_bool(true);
+  entries[2].key = make_string("items");
+  entries[2].val = items_val;
+  emel::text::jinja::object_value globals{entries.data(), entries.size(), entries.size(), false};
+
+  emel::text::jinja::formatter::action::context ctx{};
+  emel::text::jinja::formatter::sm machine{ctx};
+
+  auto short_fn = [&]() {
+    std::array<char, 256> buffer = {};
+    size_t out_len = 0;
+    int32_t err = EMEL_OK;
+    emel::text::jinja::event::render ev{
+      .program = &short_program,
+      .globals = &globals,
+      .output = buffer.data(),
+      .output_capacity = buffer.size(),
+      .output_length = &out_len,
+      .error_out = &err,
+    };
+    (void)machine.process_event(ev);
+  };
+  results.push_back(measure_case("jinja/renderer_short", cfg, short_fn));
+
+  auto long_fn = [&]() {
+    std::array<char, 1024> buffer = {};
+    size_t out_len = 0;
+    int32_t err = EMEL_OK;
+    emel::text::jinja::event::render ev{
+      .program = &long_program,
+      .globals = &globals,
+      .output = buffer.data(),
+      .output_capacity = buffer.size(),
+      .output_length = &out_len,
+      .error_out = &err,
+    };
+    (void)machine.process_event(ev);
+  };
+  results.push_back(measure_case("jinja/renderer_long", cfg, long_fn));
+}
+
+void append_reference_jinja_formatter_cases(std::vector<result> & results, const config & cfg) {
+  const std::string short_template = "hello {{ name|upper }}";
+  const std::string long_template = make_long_template();
+
+  const ::jinja::program short_program = parse_reference(short_template);
+  const ::jinja::program long_program = parse_reference(long_template);
+
+  auto short_fn = [&]() {
+    ::jinja::context ctx;
+    ctx.set_val("name", ::jinja::mk_val<::jinja::value_string>("world"));
+    ::jinja::runtime runtime{ctx};
+    auto result = runtime.execute(short_program);
+    auto parts = ::jinja::runtime::gather_string_parts(result);
+    (void)::jinja::render_string_parts(parts);
+  };
+  results.push_back(measure_case("jinja/renderer_short", cfg, short_fn));
+
+  auto long_fn = [&]() {
+    ::jinja::context ctx;
+    ctx.set_val("name", ::jinja::mk_val<::jinja::value_string>("world"));
+    ctx.set_val("cond", ::jinja::mk_val<::jinja::value_bool>(true));
+    auto items = ::jinja::mk_val<::jinja::value_array>();
+    items->push_back(::jinja::mk_val<::jinja::value_int>(1));
+    items->push_back(::jinja::mk_val<::jinja::value_int>(2));
+    items->push_back(::jinja::mk_val<::jinja::value_int>(3));
+    ctx.set_val("items", items);
+    ::jinja::runtime runtime{ctx};
+    auto result = runtime.execute(long_program);
+    auto parts = ::jinja::runtime::gather_string_parts(result);
+    (void)::jinja::render_string_parts(parts);
+  };
+  results.push_back(measure_case("jinja/renderer_long", cfg, long_fn));
+}
+
+}  // namespace emel::bench

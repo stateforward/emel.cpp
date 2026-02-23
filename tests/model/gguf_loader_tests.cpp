@@ -18,6 +18,12 @@
 
 namespace {
 
+emel::model::data & fresh_model() {
+  static emel::model::data model = {};
+  std::memset(&model, 0, sizeof(model));
+  return model;
+}
+
 bool make_temp_path(char * out, const size_t capacity) {
   if (out == nullptr || capacity == 0) {
     return false;
@@ -731,7 +737,7 @@ TEST_CASE("gguf parser reads vocab arrays") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_vocab_arrays_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;
@@ -756,7 +762,7 @@ TEST_CASE("gguf parser covers suffix parameters") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_suffix_params_gguf(path));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;
@@ -949,7 +955,7 @@ TEST_CASE("gguf parser rejects bad kv types") {
     REQUIRE(write_bad_kv(file, key, type, is_array, elem_type));
     std::fclose(file);
 
-    emel::model::data model = {};
+    auto & model = fresh_model();
     emel::parser::gguf::context ctx = {};
     emel::model::loader::event::load request{model};
     request.model_path = path;
@@ -1123,7 +1129,7 @@ TEST_CASE("gguf parser reports invalid headers") {
   CHECK(std::fwrite(magic, 1, sizeof(magic), file) == sizeof(magic));
   std::fclose(file);
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;
@@ -1135,7 +1141,7 @@ TEST_CASE("gguf parser reports invalid headers") {
 }
 
 TEST_CASE("gguf helper routines validate tensor metadata") {
-  emel::model::data model = {};
+  auto & model = fresh_model();
   std::array<uint8_t, 32> buffer = {};
   model.n_tensors = 1;
   model.weights_split_count = 1;
@@ -1184,7 +1190,7 @@ TEST_CASE("gguf tensor size and reset helpers") {
   CHECK(!emel::parser::gguf::compute_tensor_size(
     bad_dims, emel::parser::gguf::tensor_type::k_q4_0, size));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   model.n_tensors = 1;
   model.weights_split_count = 2;
   model.weights_split_sizes[0] = 16;
@@ -1338,7 +1344,7 @@ TEST_CASE("gguf weight loader handles streamed and mapped loads") {
   CHECK(make_temp_path(path, sizeof(path)));
   CHECK(write_minimal_gguf(path, 3.5f));
 
-  emel::model::data model = {};
+  auto & model = fresh_model();
   emel::parser::gguf::context ctx = {};
   emel::model::loader::event::load request{model};
   request.model_path = path;

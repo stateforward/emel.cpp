@@ -527,6 +527,8 @@ TEST_CASE("decoder_action_helpers_cover_prepare_and_ubatch_failure_branches") {
   }
 }
 
+// TODO(rearchitecture-cleanup): Rename legacy "batch_splitter" test labels after
+// external references to current test IDs are migrated.
 TEST_CASE("decoder_decode_fails_when_batch_splitter_cannot_emit_all_ubatches") {
   emel::decoder::sm machine{};
   owner_probe owner{};

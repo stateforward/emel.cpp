@@ -17,7 +17,17 @@ struct execute {
   int32_t ubatch_index = 0;
   int32_t ubatch_size = 0;
   int32_t kv_tokens = 0;
+  void * memory_coordinator_sm = nullptr;
+  void * kv_cache_sm = nullptr;
+  int32_t expected_outputs = 0;
   void * compute_ctx = nullptr;
+  const int32_t * positions = nullptr;
+  int32_t positions_count = 0;
+  const uint64_t * seq_masks = nullptr;
+  int32_t seq_mask_words = 1;
+  int32_t seq_masks_count = 0;
+  const int32_t * seq_primary_ids = nullptr;
+  int32_t seq_primary_ids_count = 0;
   validate_fn validate = nullptr;
   prepare_graph_fn prepare_graph = nullptr;
   alloc_graph_fn alloc_graph = nullptr;
@@ -25,6 +35,8 @@ struct execute {
   run_backend_fn run_backend = nullptr;
   extract_outputs_fn extract_outputs = nullptr;
   int32_t * outputs_produced_out = nullptr;
+  int32_t * kv_tokens_out = nullptr;
+  bool * rollback_attempted_out = nullptr;
   int32_t * error_out = nullptr;
 };
 
