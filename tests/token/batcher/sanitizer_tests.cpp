@@ -7,6 +7,31 @@
 #include "emel/batch/planner/context.hpp"
 #include "emel/emel.h"
 
+namespace {
+
+struct seed_lookup_state {
+  std::array<int32_t, emel::batch::planner::action::MAX_SEQ> seeds = {};
+  bool fail = false;
+};
+
+bool resolve_seed_position(
+    void * ctx,
+    const int32_t seq_id,
+    int32_t * position_out) noexcept {
+  if (ctx == nullptr || position_out == nullptr || seq_id < 0 ||
+      seq_id >= emel::batch::planner::action::MAX_SEQ) {
+    return false;
+  }
+  const auto * state = static_cast<const seed_lookup_state *>(ctx);
+  if (state->fail) {
+    return false;
+  }
+  *position_out = state->seeds[static_cast<size_t>(seq_id)];
+  return true;
+}
+
+}  // namespace
+
 TEST_CASE("batch_sanitizer_starts_initialized") {
   emel::token::batcher::sm machine{};
   CHECK(machine.is(boost::sml::state<emel::token::batcher::initialized>));
@@ -56,6 +81,146 @@ TEST_CASE("batch_sanitizer_generates_defaults") {
   CHECK(positions[0] == 0);
   CHECK(positions[1] == 1);
   CHECK(positions[2] == 2);
+}
+
+TEST_CASE("batch_sanitizer_rejects_token_out_of_vocab_bounds") {
+  emel::token::batcher::sm machine{};
+  std::array<int32_t, 2> tokens = {{1, 9}};
+  std::array<int32_t, 2> seq_primary_out = {};
+  std::array<uint64_t, 2 * emel::batch::planner::action::SEQ_WORDS> seq_masks_out = {};
+  std::array<int32_t, 2> positions_out = {};
+  std::array<int8_t, 2> output_mask_out = {};
+  int32_t err = EMEL_OK;
+
+  auto request = emel::token::batcher::event::sanitize_decode{};
+  request.token_ids = tokens.data();
+  request.n_tokens = static_cast<int32_t>(tokens.size());
+  request.vocab_size = 8;
+  request.seq_mask_words = 1;
+  request.seq_primary_ids_out = seq_primary_out.data();
+  request.seq_primary_ids_capacity = static_cast<int32_t>(seq_primary_out.size());
+  request.seq_masks_out = seq_masks_out.data();
+  request.seq_masks_capacity = static_cast<int32_t>(seq_masks_out.size());
+  request.positions_out = positions_out.data();
+  request.positions_capacity = static_cast<int32_t>(positions_out.size());
+  request.output_mask_out = output_mask_out.data();
+  request.output_mask_capacity = static_cast<int32_t>(output_mask_out.size());
+  request.error_out = &err;
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("batch_sanitizer_autopopulates_positions_from_seed_lookup") {
+  emel::token::batcher::sm machine{};
+  std::array<int32_t, 3> tokens = {{1, 2, 3}};
+  std::array<int32_t, 3> seq_primary_in = {{5, 5, 5}};
+  std::array<int32_t, 3> seq_primary_out = {};
+  std::array<uint64_t, 3 * emel::batch::planner::action::SEQ_WORDS> seq_masks_out = {};
+  std::array<int32_t, 3> positions_out = {};
+  std::array<int8_t, 3> output_mask_out = {};
+  seed_lookup_state seed_state{};
+  int32_t err = EMEL_OK;
+
+  seed_state.seeds[5] = 41;
+
+  auto request = emel::token::batcher::event::sanitize_decode{};
+  request.token_ids = tokens.data();
+  request.n_tokens = static_cast<int32_t>(tokens.size());
+  request.seq_primary_ids = seq_primary_in.data();
+  request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_in.size());
+  request.seq_mask_words = 1;
+  request.position_seed_ctx = &seed_state;
+  request.resolve_position_seed = resolve_seed_position;
+  request.seq_primary_ids_out = seq_primary_out.data();
+  request.seq_primary_ids_capacity = static_cast<int32_t>(seq_primary_out.size());
+  request.seq_masks_out = seq_masks_out.data();
+  request.seq_masks_capacity = static_cast<int32_t>(seq_masks_out.size());
+  request.positions_out = positions_out.data();
+  request.positions_capacity = static_cast<int32_t>(positions_out.size());
+  request.output_mask_out = output_mask_out.data();
+  request.output_mask_capacity = static_cast<int32_t>(output_mask_out.size());
+  request.error_out = &err;
+
+  CHECK(machine.process_event(request));
+  CHECK(err == EMEL_OK);
+  CHECK(positions_out[0] == 41);
+  CHECK(positions_out[1] == 42);
+  CHECK(positions_out[2] == 43);
+}
+
+TEST_CASE("batch_sanitizer_rejects_diverged_coupled_seed_positions") {
+  emel::token::batcher::sm machine{};
+  std::array<int32_t, 1> tokens = {{1}};
+  std::array<uint64_t, 1> seq_masks_in = {{(uint64_t{1} << 0) | (uint64_t{1} << 1)}};
+  std::array<int32_t, 1> seq_primary_in = {{0}};
+  std::array<int32_t, 1> seq_primary_out = {};
+  std::array<uint64_t, emel::batch::planner::action::SEQ_WORDS> seq_masks_out = {};
+  std::array<int32_t, 1> positions_out = {};
+  std::array<int8_t, 1> output_mask_out = {};
+  seed_lookup_state seed_state{};
+  int32_t err = EMEL_OK;
+
+  seed_state.seeds[0] = 7;
+  seed_state.seeds[1] = 8;
+
+  auto request = emel::token::batcher::event::sanitize_decode{};
+  request.token_ids = tokens.data();
+  request.n_tokens = static_cast<int32_t>(tokens.size());
+  request.seq_masks = seq_masks_in.data();
+  request.seq_mask_words = 1;
+  request.seq_masks_count = static_cast<int32_t>(tokens.size());
+  request.seq_primary_ids = seq_primary_in.data();
+  request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_in.size());
+  request.position_seed_ctx = &seed_state;
+  request.resolve_position_seed = resolve_seed_position;
+  request.seq_primary_ids_out = seq_primary_out.data();
+  request.seq_primary_ids_capacity = static_cast<int32_t>(seq_primary_out.size());
+  request.seq_masks_out = seq_masks_out.data();
+  request.seq_masks_capacity = static_cast<int32_t>(seq_masks_out.size());
+  request.positions_out = positions_out.data();
+  request.positions_capacity = static_cast<int32_t>(positions_out.size());
+  request.output_mask_out = output_mask_out.data();
+  request.output_mask_capacity = static_cast<int32_t>(output_mask_out.size());
+  request.error_out = &err;
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
+TEST_CASE("batch_sanitizer_reports_seed_lookup_failure") {
+  emel::token::batcher::sm machine{};
+  std::array<int32_t, 1> tokens = {{1}};
+  std::array<int32_t, 1> seq_primary_in = {{0}};
+  std::array<int32_t, 1> seq_primary_out = {};
+  std::array<uint64_t, emel::batch::planner::action::SEQ_WORDS> seq_masks_out = {};
+  std::array<int32_t, 1> positions_out = {};
+  std::array<int8_t, 1> output_mask_out = {};
+  seed_lookup_state seed_state{};
+  int32_t err = EMEL_OK;
+
+  seed_state.fail = true;
+
+  auto request = emel::token::batcher::event::sanitize_decode{};
+  request.token_ids = tokens.data();
+  request.n_tokens = static_cast<int32_t>(tokens.size());
+  request.seq_primary_ids = seq_primary_in.data();
+  request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_in.size());
+  request.position_seed_ctx = &seed_state;
+  request.resolve_position_seed = resolve_seed_position;
+  request.seq_mask_words = 1;
+  request.seq_primary_ids_out = seq_primary_out.data();
+  request.seq_primary_ids_capacity = static_cast<int32_t>(seq_primary_out.size());
+  request.seq_masks_out = seq_masks_out.data();
+  request.seq_masks_capacity = static_cast<int32_t>(seq_masks_out.size());
+  request.positions_out = positions_out.data();
+  request.positions_capacity = static_cast<int32_t>(positions_out.size());
+  request.output_mask_out = output_mask_out.data();
+  request.output_mask_capacity = static_cast<int32_t>(output_mask_out.size());
+  request.error_out = &err;
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK(err == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("batch_sanitizer_rejects_invalid_seq_id") {

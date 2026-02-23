@@ -95,6 +95,7 @@ struct begin_sanitize {
   void operator()(const event::sanitize_decode & ev, context & ctx) const noexcept {
     ctx.token_ids = ev.token_ids;
     ctx.n_tokens = ev.n_tokens;
+    ctx.vocab_size = ev.vocab_size;
     ctx.seq_masks = ev.seq_masks;
     ctx.seq_mask_words = ev.seq_mask_words;
     ctx.seq_masks_count = ev.seq_masks_count;
@@ -102,6 +103,8 @@ struct begin_sanitize {
     ctx.seq_primary_ids_count = ev.seq_primary_ids_count;
     ctx.positions = ev.positions;
     ctx.positions_count = ev.positions_count;
+    ctx.position_seed_ctx = ev.position_seed_ctx;
+    ctx.resolve_position_seed = ev.resolve_position_seed;
     ctx.output_mask = ev.output_mask;
     ctx.output_mask_count = ev.output_mask_count;
     ctx.output_all = ev.output_all;
@@ -153,6 +156,19 @@ struct run_sanitize_decode {
     if (ctx.n_tokens > MAX_TOKENS) {
       detail::set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
+    }
+    if (ctx.vocab_size < 0) {
+      detail::set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
+    if (ctx.vocab_size > 0) {
+      for (int32_t i = 0; i < ctx.n_tokens; ++i) {
+        const int32_t token_id = ctx.token_ids[i];
+        if (token_id < 0 || token_id >= ctx.vocab_size) {
+          detail::set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+          return;
+        }
+      }
     }
     if (ctx.seq_primary_ids_out == nullptr || ctx.seq_primary_ids_capacity < ctx.n_tokens) {
       detail::set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
@@ -268,12 +284,59 @@ struct run_sanitize_decode {
       std::copy(ctx.positions, ctx.positions + count, ctx.positions_out);
     } else {
       std::array<int32_t, MAX_SEQ> next_pos = {};
+      std::array<uint8_t, MAX_SEQ> seeded = {};
       next_pos.fill(0);
+      seeded.fill(0);
+
+      const auto ensure_seeded = [&](const int32_t seq_id) noexcept -> bool {
+        if (seq_id < 0 || seq_id >= MAX_SEQ) {
+          detail::set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+          return false;
+        }
+        if (seeded[seq_id] != 0) {
+          return true;
+        }
+        if (ctx.resolve_position_seed != nullptr) {
+          int32_t seed = 0;
+          if (!ctx.resolve_position_seed(
+                  ctx.position_seed_ctx, seq_id, &seed)) {
+            detail::set_error(ctx, EMEL_ERR_BACKEND);
+            return false;
+          }
+          if (seed < 0) {
+            detail::set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+            return false;
+          }
+          next_pos[seq_id] = seed;
+        }
+        seeded[seq_id] = 1;
+        return true;
+      };
+
       for (int32_t i = 0; i < ctx.n_tokens; ++i) {
         const uint64_t * mask = ctx.seq_masks_out + static_cast<size_t>(i) * mask_words;
         const int32_t primary = ctx.seq_primary_ids_out[i];
+        if (!ensure_seeded(primary)) {
+          return;
+        }
         const int32_t pos = next_pos[primary];
         ctx.positions_out[i] = pos;
+
+        for (int32_t w = 0; w < mask_words; ++w) {
+          uint64_t bits = mask[static_cast<size_t>(w)];
+          while (bits != 0) {
+            const int32_t bit = __builtin_ctzll(bits);
+            const int32_t seq_id = w * 64 + bit;
+            if (!ensure_seeded(seq_id)) {
+              return;
+            }
+            if (next_pos[seq_id] != pos) {
+              detail::set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+              return;
+            }
+            bits &= (bits - 1);
+          }
+        }
 
         for (int32_t w = 0; w < mask_words; ++w) {
           uint64_t bits = mask[static_cast<size_t>(w)];
