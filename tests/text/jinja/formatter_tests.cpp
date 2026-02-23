@@ -471,6 +471,30 @@ TEST_CASE("jinja_renderer_dispatch_callbacks") {
   CHECK(track.length == out_len);
 }
 
+TEST_CASE("jinja_renderer_clears_stale_error_out_before_successful_render") {
+  emel::text::jinja::program program{};
+  parse_template("ok", program);
+
+  std::array<char, 8> buffer = {};
+  size_t out_len = 0;
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+
+  emel::text::jinja::formatter::action::context ctx{};
+  emel::text::jinja::formatter::sm machine{ctx};
+  emel::text::jinja::event::render ev{
+    .program = &program,
+    .output = buffer.data(),
+    .output_capacity = buffer.size(),
+    .output_length = &out_len,
+    .error_out = &err,
+  };
+
+  CHECK(machine.process_event(ev));
+  CHECK(machine.is(boost::sml::state<emel::text::jinja::formatter::done>));
+  CHECK(err == EMEL_OK);
+  CHECK(out_len == 2);
+}
+
 TEST_CASE("jinja_renderer_rejects_invalid_and_dispatches_error") {
   std::array<char, 16> buffer = {};
   size_t out_len = 7;

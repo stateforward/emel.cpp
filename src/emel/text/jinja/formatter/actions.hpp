@@ -8,19 +8,10 @@
 namespace emel::text::jinja::formatter::action {
 
 struct reject_invalid_render {
-  void operator()(const emel::text::jinja::event::render & ev, context & ctx) const noexcept {
+  void operator()(const emel::text::jinja::event::render &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
     ctx.last_error = EMEL_ERR_INVALID_ARGUMENT;
     ctx.error_pos = 0;
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    }
-    if (ev.output_length != nullptr) {
-      *ev.output_length = 0;
-    }
-    if (ev.output_truncated != nullptr) {
-      *ev.output_truncated = false;
-    }
   }
 };
 

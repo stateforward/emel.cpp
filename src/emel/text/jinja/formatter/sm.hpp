@@ -126,6 +126,10 @@ struct sm : public emel::sm<model> {
   bool process_event(const event::render & ev) {
     namespace sml = boost::sml;
 
+    if (ev.error_out != nullptr) {
+      *ev.error_out = EMEL_OK;
+    }
+
     const bool accepted = base_type::process_event(ev);
     const bool ok = this->is(sml::state<done>);
     const bool valid = guard::valid_render(ev);
