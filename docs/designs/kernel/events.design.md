@@ -1,7 +1,7 @@
 # kernel events architecture design (draft)
 
 this document defines the kernel domain events. each graph op is a compile-time typed
-event dispatched to the device via `make_dispatch_table`. unsupported ops naturally hit
+event handled via `make_transition_table`. unsupported ops naturally hit
 `sml::unexpected_event` in the device variant's transition table.
 
 ## event shape (common)
@@ -22,12 +22,10 @@ all opcode events carry the same operand payload:
 
 ## opcode events
 
-kernel/any walks the graph nodes and dispatches one opcode event per node to
-`kernel::device::any` via `sml::utility::make_dispatch_table`. the runtime opcode ID
-from the graph node selects the compile-time event type.
-
-each device variant's transition table lists the opcodes it supports. unsupported
-opcodes hit `sml::unexpected_event` and route to the error state.
+kernel/any walks the graph nodes and dispatches one compile-time typed opcode event
+per node to `kernel::device::any` via `process_event`. each device variant's
+`make_transition_table` lists the opcodes it supports as explicit transitions.
+unsupported opcodes hit `sml::unexpected_event` and route to the error state.
 
 ### arithmetic
 - `op::dup`, `op::add`, `op::add_id`, `op::add1`, `op::acc`.
@@ -101,12 +99,6 @@ opcodes hit `sml::unexpected_event` and route to the error state.
 - `op::unary` and `op::glu` carry a subop field that selects the specific function.
 - `op::pool_1d` and `op::pool_2d` carry `pool_type` parameters.
 - subop dispatch is handled inside the action, not as separate SML events.
-
-## dispatch table
-- `sml::utility::make_dispatch_table` bridges runtime opcode ID to compile-time event
-  type.
-- opcode ID range: `[op::dup, op::glu]` (excluding sentinels `NONE` and `COUNT`).
-- kernel/any validates opcode ID range before indexing the dispatch table.
 
 ## notes
 - opcode events use `emel::kernel::op` namespace, not `ggml_op` identifiers.

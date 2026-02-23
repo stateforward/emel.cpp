@@ -5,8 +5,8 @@ graph scheduling requests from graph/processor and delegates to `kernel::device:
 
 ## role
 - receive `event::schedule` from graph/processor.
-- walk graph nodes and dispatch per-node opcode events to `kernel::device::any`.
-- bridge runtime opcode IDs to compile-time event types via `make_dispatch_table`.
+- walk graph nodes and dispatch per-node compile-time typed opcode events to
+  `kernel::device::any` via `process_event`.
 
 ## composition
 - owns `kernel::device::any` (device-level variant dispatch).
@@ -24,7 +24,6 @@ graph scheduling requests from graph/processor and delegates to `kernel::device:
 - unexpected events route to `unexpected`.
 
 ## responsibilities
-- validate opcode ID range before indexing the dispatch table.
 - walk graph nodes in topological order.
 - dispatch one `op::*` event per node to `kernel::device::any`.
 - propagate device errors back as `events::schedule_error`.
