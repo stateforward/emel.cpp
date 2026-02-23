@@ -9,9 +9,13 @@ struct sanitize_error;
 
 namespace emel::token::batcher::event {
 
+using position_seed_fn =
+    bool (*)(void * position_seed_ctx, int32_t seq_id, int32_t * position_out) noexcept;
+
 struct sanitize_decode {
   const int32_t * token_ids = nullptr;
   int32_t n_tokens = 0;
+  int32_t vocab_size = 0;
 
   const uint64_t * seq_masks = nullptr;
   int32_t seq_mask_words = 1;
@@ -21,6 +25,8 @@ struct sanitize_decode {
 
   const int32_t * positions = nullptr;
   int32_t positions_count = 0;
+  void * position_seed_ctx = nullptr;
+  position_seed_fn resolve_position_seed = nullptr;
 
   const int8_t * output_mask = nullptr;
   int32_t output_mask_count = 0;

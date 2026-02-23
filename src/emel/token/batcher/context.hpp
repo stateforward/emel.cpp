@@ -16,6 +16,7 @@ inline constexpr int32_t SEQ_WORDS = emel::batch::planner::action::SEQ_WORDS;
 struct context {
   const int32_t * token_ids = nullptr;
   int32_t n_tokens = 0;
+  int32_t vocab_size = 0;
 
   const uint64_t * seq_masks = nullptr;
   int32_t seq_mask_words = 1;
@@ -25,6 +26,8 @@ struct context {
 
   const int32_t * positions = nullptr;
   int32_t positions_count = 0;
+  void * position_seed_ctx = nullptr;
+  event::position_seed_fn resolve_position_seed = nullptr;
 
   const int8_t * output_mask = nullptr;
   int32_t output_mask_count = 0;
