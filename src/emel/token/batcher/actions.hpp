@@ -364,6 +364,10 @@ struct run_sanitize_decode {
           while (bits != 0) {
             const int32_t bit = __builtin_ctzll(bits);
             const int32_t seq_id = w * 64 + bit;
+            if (pos == std::numeric_limits<int32_t>::max()) {
+              detail::set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+              return;
+            }
             next_pos[seq_id] = pos + 1;
             bits &= (bits - 1);
           }

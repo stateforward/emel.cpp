@@ -1,6 +1,7 @@
 #include <array>
 #include <boost/sml.hpp>
 #include <doctest/doctest.h>
+#include <limits>
 
 #include "emel/token/batcher/actions.hpp"
 #include "emel/token/batcher/sm.hpp"
@@ -256,6 +257,41 @@ TEST_CASE("batch_sanitizer_reports_seed_lookup_failure") {
 
   CHECK_FALSE(machine.process_event(request));
   CHECK(err == EMEL_ERR_BACKEND);
+}
+
+TEST_CASE("batch_sanitizer_rejects_seed_position_overflow") {
+  emel::token::batcher::sm machine{};
+  std::array<int32_t, 1> tokens = {{1}};
+  std::array<int32_t, 1> seq_primary_in = {{0}};
+  std::array<int32_t, 1> seq_primary_out = {};
+  std::array<uint64_t, emel::batch::planner::action::SEQ_WORDS> seq_masks_out = {};
+  std::array<int32_t, 1> positions_out = {};
+  std::array<int8_t, 1> output_mask_out = {};
+  seed_lookup_state seed_state{};
+  int32_t err = EMEL_OK;
+
+  seed_state.seeds[0] = std::numeric_limits<int32_t>::max();
+
+  auto request = emel::token::batcher::event::sanitize_decode{};
+  request.token_ids = tokens.data();
+  request.n_tokens = static_cast<int32_t>(tokens.size());
+  request.seq_primary_ids = seq_primary_in.data();
+  request.seq_primary_ids_count = static_cast<int32_t>(seq_primary_in.size());
+  request.position_seed_ctx = &seed_state;
+  request.resolve_position_seed = resolve_seed_position;
+  request.seq_mask_words = 1;
+  request.seq_primary_ids_out = seq_primary_out.data();
+  request.seq_primary_ids_capacity = static_cast<int32_t>(seq_primary_out.size());
+  request.seq_masks_out = seq_masks_out.data();
+  request.seq_masks_capacity = static_cast<int32_t>(seq_masks_out.size());
+  request.positions_out = positions_out.data();
+  request.positions_capacity = static_cast<int32_t>(positions_out.size());
+  request.output_mask_out = output_mask_out.data();
+  request.output_mask_capacity = static_cast<int32_t>(output_mask_out.size());
+  request.error_out = &err;
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("batch_sanitizer_rejects_invalid_seq_id") {
