@@ -10,6 +10,11 @@ allocator, and execution pipelines stabilize.
 
 This inference engine is being implemented by AI under human engineering and architecture direction.
 
+> [!WARNING]
+> EMEL is currently going through a major re-architecture expected to complete by end of day on
+> Monday, February 23, 2026. See [Architecture](docs/architecture/) and
+> [Design Docs](docs/designs/) for the latest improvements.
+
 ## Implementation priorities
 
 1. Architect first, then scaffold cleanly.
@@ -33,6 +38,15 @@ That enables:
 
 “EMEL” is pronounced like “ML”. It’s a short, neutral name that doesn’t carry existing
 assumptions or baggage. It’s intentionally low-ceremony while we iterate on the core design.
+
+## Acknowledgements
+
+Huge thanks to the contributors of [llama.cpp](https://github.com/ggml-org/llama.cpp) and
+[ggml](https://github.com/ggml-org/ggml). EMEL’s parity work depends on the quality and clarity
+of these reference implementations.
+
+Special shout out to [Georgi Gerganov](https://github.com/ggerganov), whose work created the
+foundation that made this ecosystem possible.
 
 ## Build and test
 
