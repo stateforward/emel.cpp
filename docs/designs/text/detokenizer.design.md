@@ -1,46 +1,65 @@
-# text/detokenizer architecture design (draft)
+---
+title: text/detokenizer architecture design
+status: draft
+---
 
-this document defines a detokenizer actor that converts token ids back into text for renderer
-outputs. it is intentionally separate from the tokenizer encoder to keep the codec split and avoid
-orthogonal regions in a single SM.
+# text/detokenizer architecture design
+
+this document defines the text/detokenizer actor. it is a pure, low-level codec stage that converts
+token IDs directly into raw bytes or text pieces based on the model's vocabulary.
 
 ## role
-- text/detokenizer is a codec-stage actor: token ids -> text/bytes.
-- detokenizer is model/vocab-aware and must honor special-token and byte-fallback rules.
+- act as the pure translation layer: `token_id` -> `bytes`.
+- remain completely stateless across sequences and unaware of generation logic, streaming, or stop
+  conditions.
+- honor model-specific vocabulary rules, including special-token handling and byte-fallback encoding.
 
-## public interface (proposed)
-- `event::bind` (vocab binding)
-  - inputs: `vocab`, `error_out`, optional callbacks.
-  - outputs: bound state ready for decode.
-- `event::detokenize` (decode tokens)
-  - inputs: `vocab`, `token_ids`, `token_count`, `emit_special`, `utf8_out`, `utf8_capacity`,
-    `utf8_count_out`, `error_out`, optional callbacks.
-  - outputs: written utf8 bytes + count; errors via `error_out`.
-- streaming support (optional):
-  - `event::flush` to emit any pending partial UTF-8 bytes.
+## architecture shift: pure stateless codec
+in dynamic systems, a detokenizer often holds internal state (like a pending byte buffer for partial
+utf-8 characters) that ties it to a specific sequence.
 
-## state model (draft)
-- `uninitialized` -> `binding` -> `idle`.
-- `idle` -> `decoding` -> `decode_decision` -> `done`.
-- `errored` and `unexpected` terminal error states with recovery on next valid bind.
+in `emel`, to support efficient batch rendering, the `text/detokenizer` actor itself is stateless.
+any required state (like a 4-byte pending utf-8 buffer) is owned by the parent `text/renderer` and
+passed into the detokenizer via the `event::detokenize` payload. this allows a single, pooled
+detokenizer actor to translate tokens for thousands of different sequences interchangeably.
+
+## events
+- `event::bind`
+  - inputs: `vocab` reference and optional synchronous callbacks.
+  - outputs: invokes callback upon successfully binding state ready for decode.
+- `event::detokenize`
+  - inputs: `token_id`, a reference to the renderer's pending byte buffer, `emit_special` flag,
+    the output buffer capacity, and optional synchronous callbacks (`dispatch_done`, `dispatch_error`).
+  - outputs: writes utf-8 bytes to the output buffer, updates the pending byte buffer state, and
+    invokes the appropriate callback before returning, completely avoiding context-reading race conditions.
+
+## state model
+
+```text
+uninitialized ──► binding ──► idle
+                               │
+idle ──► decoding ──► decode_decision ──► (idle | errored)
+  ▲                                          │
+  └──────────────────────────────────────────┘
+```
+
+- `uninitialized` — awaiting initial setup.
+- `binding` — validating the vocab reference.
+- `idle` — waiting for a translation request.
+- `decoding` — looking up the `token_id` in the vocabulary and applying byte-fallback rules.
+- `decode_decision` — determining if the resulting bytes form a complete utf-8 sequence (combined
+  with the pending buffer). if yes, write to output; if no, store in the pending buffer.
+- unexpected events route to `unexpected`.
 
 ## decoding rules
-- token -> piece mapping uses vocab metadata (token text, flags, byte-fallback).
-- optional `emit_special` controls whether special tokens are emitted as text or skipped.
-- byte-fallback tokens are accumulated into a byte buffer and only emitted when forming valid
-  UTF-8 sequences.
-- invalid token ids or insufficient output capacity are errors.
-
-## context (draft)
-- bound vocab pointer and model kind.
-- small pending-byte buffer for UTF-8 boundary handling (fixed size, no heap).
-- counters: output count, last error.
+1. **token-to-piece mapping:** uses vocab metadata to look up the text string for a given ID.
+2. **special tokens:** if `emit_special` is false, tokens flagged as `special` (like `<|eot_id|>`)
+   result in zero output bytes.
+3. **byte-fallback accumulation:** if the token represents a raw byte (e.g., `<0xE2>`), it is
+   appended to the renderer-provided pending buffer. the detokenizer only flushes bytes to the
+   output buffer when they form a valid, complete utf-8 sequence.
 
 ## invariants
-- no allocations during dispatch; all buffers fixed-size.
-- no self-dispatch; bounded RTC work per request.
+- no allocations during dispatch.
 - output is written only to caller-provided buffers.
-
-## open questions
-- how to represent special-token rendering (literal string vs placeholder vs skip)?
-- maximum pending-byte buffer size needed for UTF-8 assembly.
+- the actor holds no sequence-specific state between dispatches.

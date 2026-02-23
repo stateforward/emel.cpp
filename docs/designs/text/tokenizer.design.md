@@ -1,4 +1,9 @@
-# text/tokenizer architecture design (rolling)
+---
+title: text/tokenizer architecture design
+status: rolling
+---
+
+# text/tokenizer architecture design
 
 this document captures the tokenizer actor as implemented today. it reflects the current
 orchestration model and data contracts; any structural changes still require explicit approval.
@@ -19,16 +24,27 @@ orchestration model and data contracts; any structural changes still require exp
 callbacks (`dispatch_done`/`dispatch_error`) are invoked synchronously before dispatch returns and
 are not stored in context.
 
-## composition and binding
-- tokenizer owns:
-  - `text/tokenizer::preprocessor::any` (variant preprocessor SM),
-  - `text/encoders::any` (variant encoder SM).
-- binding maps `vocab->tokenizer_model_id` to preprocessor + encoder kinds:
-  `spm`, `bpe`, `wpm`, `ugm`, `rwkv`, `plamo2`, or `fallback`.
-- binding is performed by the tokenizer SM via the `bind` event.
-- intended DI extension: allow callers to inject preprocessor/encoder handles; if provided, the
-  tokenizer uses them directly, otherwise it selects by model metadata. (current implementation
-  always selects internally.)
+## composition and explicit dependency injection (DI)
+to maintain strict modularity and fast compile times, the `text/tokenizer` relies on **explicit
+dependency injection**. it does not parse model metadata to auto-instantiate its sub-components.
+
+- **owns (injected SML actors):**
+  - `text/tokenizer::preprocessor::any` (variant preprocessor SM, e.g., using `emel::sm_any`).
+  - `text/encoders::any` (variant encoder SM, e.g., using `emel::sm_any`).
+- **binding:** the `preprocessor` and `encoder` variants (e.g., `bpe`, `spm`, `rwkv`) MUST be explicitly
+  injected by the caller (like the `text/conditioner` or a higher-level factory) via the `event::bind`
+  payload. the tokenizer does not instantiate them internally based on model metadata.
+
+## architecture shift: output via synchronous callbacks
+to strictly enforce the Actor Model isolation and prevent future race conditions (especially when
+moving toward asynchronous `co_sm` wrappers), the `text/tokenizer` relies heavily on **synchronous
+callbacks** rather than exposing read-only snapshots of its internal SML context.
+
+as defined in `sml.rules.md`, events carry `emel::callback`-style functors (e.g., `dispatch_done`,
+`dispatch_error`). the tokenizer guarantees these callbacks are invoked *before* the SML dispatch
+returns. this ensures the caller immediately receives the results (or errors) without needing to hold
+a reference to the tokenizer's internal state machine context, completely eliminating the risk of
+read/write race conditions across concurrent steps.
 
 ## state model (current)
 - bind flow:

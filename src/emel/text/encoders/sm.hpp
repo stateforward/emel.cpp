@@ -1,5 +1,7 @@
 #pragma once
 
+// benchmark: scaffold
+
 #include "emel/text/encoders/bpe/sm.hpp"
 #include "emel/text/encoders/fallback/sm.hpp"
 #include "emel/text/encoders/plamo2/sm.hpp"

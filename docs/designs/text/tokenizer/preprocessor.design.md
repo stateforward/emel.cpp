@@ -1,8 +1,13 @@
+---
+title: text/tokenizer preprocessor design
+status: draft
+---
+
 # text/tokenizer preprocessor design
 
 this design captures the agreed intent for a tokenizer preprocessor component and
 its variants. it defines scope only; implementation will follow the existing
-state machine conventions in `docs/rules/sml.rules.md`.
+state machine conventions in `docs/sml.rules.md`.
 
 ## summary
 - the tokenizer needs a preprocessor stage that runs before encoding.

@@ -1,4 +1,9 @@
-# text/encoders architecture design (rolling)
+---
+title: text/encoders architecture design
+status: rolling
+---
+
+# text/encoders architecture design
 
 this document defines the text-domain encoder actor cluster that maps preprocessed text fragments to
 token ids. this is distinct from model encoders (vision/audio/etc) and lives under the text domain

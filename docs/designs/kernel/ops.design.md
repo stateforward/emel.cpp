@@ -1,28 +1,25 @@
 ---
-title: kernel events architecture design
+title: kernel operations architecture design
 status: draft
 ---
 
-# kernel events architecture design
+# kernel operations architecture design
 
-this document defines the kernel domain events. each graph op is a compile-time typed
-event handled via `make_transition_table`. unsupported ops naturally hit
-`sml::unexpected_event` in the device variant's transition table.
+this document defines the kernel domain operations (`ops`). each graph node represents a
+mathematical operation that the `graph/processor` dispatches to the hardware kernel.
 
-## event shape (common)
-all opcode events carry the same operand payload:
+## operation shape (common)
+all op payloads carry the data necessary for the kernel to execute the math:
 - destination handle (tensor metadata + data pointer/offset).
 - source operand handles (`src0`, `src1`, `src2`; nullptr when unused).
 - tensor shape/stride metadata needed by the kernel.
+- op-specific parameters (e.g., axis, eps, scale).
 
-## opcode events
+## opcode catalog
 
-the `graph/processor` iterates over graph nodes and dispatches one compile-time typed opcode event
-per node to `kernel::any`. each device variant's
-`make_transition_table` lists the opcodes it supports as explicit transitions.
-unsupported opcodes naturally hit `sml::unexpected_event`. this allows
-the `kernel` SM to gracefully catch an unsupported hardware op and route it to a CPU fallback
-without crashing the execution pipeline.
+the `graph/processor` reads the node's op type and dispatches the corresponding compute
+instruction to the active hardware kernel. unsupported opcodes on a specific backend return
+a fallback error, usually prompting a fallback to CPU.
 
 ### arithmetic
 - `op::dup`, `op::add`, `op::add_id`, `op::add1`, `op::acc`.
@@ -88,15 +85,11 @@ without crashing the execution pipeline.
 ### custom
 - `op::map_custom1`, `op::map_custom2`, `op::map_custom3`, `op::custom`.
 
-### training (future)
-- `op::cross_entropy_loss`, `op::cross_entropy_loss_back`.
-- `op::opt_step_adamw`, `op::opt_step_sgd`.
-
 ## subop handling
 - `op::unary` and `op::glu` carry a subop field that selects the specific function.
 - `op::pool_1d` and `op::pool_2d` carry `pool_type` parameters.
-- subop dispatch is handled inside the action, not as separate SML events.
+- subop dispatch is handled internally by the kernel backend.
 
 ## notes
-- opcode events use `emel::kernel::op` namespace, not `ggml_op` identifiers.
-- all opcode events are trivially copyable and allocation-free.
+- opcodes use `emel::kernel::op` namespace.
+- op payloads are trivially copyable and allocation-free.
