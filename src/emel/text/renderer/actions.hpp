@@ -319,7 +319,8 @@ struct run_render {
     ctx.output_length = 0;
     ctx.status = sequence_status::running;
 
-    if (!ctx.is_bound || ctx.vocab == nullptr || ctx.output == nullptr ||
+    if (!ctx.is_bound || ctx.vocab == nullptr ||
+        (ctx.output == nullptr && ctx.output_capacity > 0) ||
         ctx.detokenizer_sm == nullptr ||
         ctx.dispatch_detokenizer_detokenize == nullptr) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
@@ -363,6 +364,11 @@ struct run_render {
     }
     if (err != EMEL_OK) {
       set_error(ctx, err);
+      return;
+    }
+    if (detok_output_length > ctx.output_capacity ||
+        pending_length > detok_ev.pending_capacity) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
     }
 

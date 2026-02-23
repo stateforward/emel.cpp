@@ -133,6 +133,10 @@ struct run_format {
       set_error(ctx, err);
       return;
     }
+    if (ctx.formatted_length > ctx.formatted.size()) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
   }
 };
 
@@ -166,6 +170,10 @@ struct run_tokenize {
     }
     if (err != EMEL_OK) {
       set_error(ctx, err);
+      return;
+    }
+    if (count < 0 || count > ctx.token_capacity) {
+      set_error(ctx, EMEL_ERR_BACKEND);
       return;
     }
 

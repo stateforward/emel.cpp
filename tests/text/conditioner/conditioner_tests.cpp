@@ -187,6 +187,30 @@ bool tokenizer_tokenize_fail_with_error(
   return true;
 }
 
+bool tokenizer_tokenize_negative_count(
+    void *,
+    const emel::text::tokenizer::event::tokenize & ev) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+  if (ev.token_count_out != nullptr) {
+    *ev.token_count_out = -1;
+  }
+  return true;
+}
+
+bool tokenizer_tokenize_over_capacity(
+    void *,
+    const emel::text::tokenizer::event::tokenize & ev) {
+  if (ev.error_out != nullptr) {
+    *ev.error_out = EMEL_OK;
+  }
+  if (ev.token_count_out != nullptr) {
+    *ev.token_count_out = ev.token_capacity + 1;
+  }
+  return true;
+}
+
 bool formatter_fail_no_error(
     void *,
     const emel::text::formatter::format_request & request,
@@ -208,6 +232,19 @@ bool formatter_fail_with_error(
     *error_out = EMEL_ERR_MODEL_INVALID;
   }
   return false;
+}
+
+bool formatter_oversized_length(
+    void *,
+    const emel::text::formatter::format_request & request,
+    int32_t * error_out) {
+  if (error_out != nullptr) {
+    *error_out = EMEL_OK;
+  }
+  if (request.output_length_out != nullptr) {
+    *request.output_length_out = request.output_capacity + 1;
+  }
+  return true;
 }
 
 }  // namespace
@@ -408,6 +445,10 @@ TEST_CASE("conditioner_action_and_guard_error_paths") {
   emel::text::conditioner::action::run_format(ctx);
   CHECK(ctx.last_error == EMEL_ERR_MODEL_INVALID);
 
+  ctx.format_prompt = formatter_oversized_length;
+  emel::text::conditioner::action::run_format(ctx);
+  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
+
   ctx.format_prompt = emel::text::formatter::format_raw;
   ctx.last_error = EMEL_OK;
   emel::text::conditioner::action::run_format(ctx);
@@ -424,6 +465,14 @@ TEST_CASE("conditioner_action_and_guard_error_paths") {
   ctx.dispatch_tokenizer_tokenize = tokenizer_tokenize_fail_with_error;
   emel::text::conditioner::action::run_tokenize(ctx);
   CHECK(ctx.last_error == EMEL_ERR_MODEL_INVALID);
+
+  ctx.dispatch_tokenizer_tokenize = tokenizer_tokenize_negative_count;
+  emel::text::conditioner::action::run_tokenize(ctx);
+  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
+
+  ctx.dispatch_tokenizer_tokenize = tokenizer_tokenize_over_capacity;
+  emel::text::conditioner::action::run_tokenize(ctx);
+  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
 
   ctx.dispatch_tokenizer_tokenize = tokenizer_tokenize_dispatch;
   ctx.tokenizer_sm = &tokenizer;
