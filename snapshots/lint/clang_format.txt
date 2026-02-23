@@ -268,6 +268,7 @@ src/emel/text/encoders/wpm/sm.hpp
 src/emel/text/formatter/actions.hpp
 src/emel/text/formatter/context.hpp
 src/emel/text/formatter/events.hpp
+src/emel/text/formatter/format.hpp
 src/emel/text/formatter/guards.hpp
 src/emel/text/formatter/sm.hpp
 src/emel/text/jinja/ast.hpp
@@ -427,10 +428,12 @@ tests/tensor/lifetime_analyzer_error_tests.cpp
 tests/tensor/lifetime_analyzer_sm_error_tests.cpp
 tests/tensor/lifetime_analyzer_sm_transition_tests.cpp
 tests/tensor/lifetime_analyzer_tests.cpp
+tests/text/conditioner/conditioner_tests.cpp
 tests/text/encoders/encoder_tests.cpp
 tests/text/jinja/formatter_tests.cpp
 tests/text/jinja/lexer_tests.cpp
 tests/text/jinja/parser_tests.cpp
+tests/text/renderer/renderer_tests.cpp
 tests/text/tokenizer/bpe_regex_tests.cpp
 tests/text/tokenizer/bpe_split_tests.cpp
 tests/text/tokenizer/preprocessor_fallback_tests.cpp

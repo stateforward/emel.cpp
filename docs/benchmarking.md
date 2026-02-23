@@ -11,7 +11,7 @@ performance characterization for each machine.
   - `// benchmark: scaffold` means no benchmark required yet.
   - `// benchmark: ready` means a benchmark **is required** and will be enforced by gates.
 - benchmarks are only required for machines marked `ready`.
-- benchmarks are enforced via a snapshot diff with a **10% regression tolerance**.
+- benchmarks are enforced via a snapshot diff with a **30% regression tolerance in quality gates during rearchitecture**.
 - reference comparison is pinned to a specific upstream commit in
   `tools/bench/reference_ref.txt` for reproducibility.
 
@@ -51,7 +51,9 @@ the benchmark gate script enforces the following:
 - if a new `sm.hpp` file is added:
   - it must declare `// benchmark: scaffold` or `// benchmark: ready`.
   - if `ready`, a benchmark case **must** exist and be registered.
-- snapshot regression failure if `ns_per_op` exceeds baseline by > 5%.
+- snapshot regression failure if `ns_per_op` exceeds baseline by > tolerance.
+  - default (`scripts/bench.sh`): 10% (`BENCH_TOLERANCE=0.10`)
+  - current quality gate override (`scripts/quality_gates.sh` during rearchitecture): 30%
 - snapshot baseline can be updated intentionally with `--update`.
 
 ## developer workflow

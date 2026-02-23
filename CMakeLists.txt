@@ -96,6 +96,8 @@ if(EMEL_ENABLE_TESTS)
     tests/graph/processor/processor_sm_transition_tests.cpp
     tests/graph/processor/processor_action_branch_tests.cpp
     tests/text/encoders/encoder_tests.cpp
+    tests/text/conditioner/conditioner_tests.cpp
+    tests/text/renderer/renderer_tests.cpp
     tests/text/tokenizer/preprocessor_tests.cpp
     tests/text/tokenizer/preprocessor_spm_tests.cpp
     tests/text/tokenizer/preprocessor_wpm_tests.cpp
