@@ -9,7 +9,6 @@
 #include "emel/decoder/events.hpp"
 #include "emel/graph/processor/sm.hpp"
 #include "emel/emel.h"
-#include "emel/memory/kv/sm.hpp"
 #include "emel/memory/coordinator/any.hpp"
 
 namespace emel::decoder::action {
@@ -40,8 +39,7 @@ struct context {
   int32_t outputs_processed = 0;
 
   std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_sizes = {};
-  std::array<int32_t, emel::memory::kv::action::MAX_UBATCHES> slot_offsets = {};
-  std::array<int32_t, emel::memory::kv::action::MAX_UBATCHES> ubatch_seq_ids = {};
+  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_seq_ids = {};
   std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_token_indices = {};
   std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES + 1> ubatch_token_offsets =
       {};
@@ -72,7 +70,6 @@ struct context {
   // downstream references to the legacy name are removed.
   std::unique_ptr<emel::batch::planner::sm> batch_splitter;
   std::unique_ptr<emel::memory::coordinator::any> memory_coordinator;
-  std::unique_ptr<emel::memory::kv::sm> kv_cache;
   std::unique_ptr<emel::graph::processor::sm> ubatch_executor;
 
   void * compute_ctx = nullptr;
@@ -88,6 +85,7 @@ struct context {
   int32_t last_error = EMEL_OK;
   bool phase_retryable = false;
   bool rollback_needed = false;
+  bool memory_reserved = false;
 
   context();
 };
@@ -96,7 +94,6 @@ inline context::context()
     : batch_sanitizer(std::make_unique<emel::token::batcher::sm>()),
       batch_splitter(std::make_unique<emel::batch::planner::sm>()),
       memory_coordinator(std::make_unique<emel::memory::coordinator::any>()),
-      kv_cache(std::make_unique<emel::memory::kv::sm>()),
       ubatch_executor(std::make_unique<emel::graph::processor::sm>()) {
   // one-time heap allocation keeps decoder context small on the stack.
 }

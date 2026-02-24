@@ -51,33 +51,6 @@ inline int32_t primary_seq_from_mask(
 
 }  // namespace detail
 
-inline prepare_failure_kind classify_prepare_failure_from_memory_status(
-    const emel::memory::coordinator::event::memory_status status) {
-  switch (status) {
-    case emel::memory::coordinator::event::memory_status::success:
-      return prepare_failure_kind::none;
-    case emel::memory::coordinator::event::memory_status::failed_prepare:
-      return prepare_failure_kind::retryable;
-    case emel::memory::coordinator::event::memory_status::no_update:
-    case emel::memory::coordinator::event::memory_status::failed_compute:
-      return prepare_failure_kind::permanent;
-  }
-  return prepare_failure_kind::permanent;
-}
-
-inline bool update_status_is_error(
-    const emel::memory::coordinator::event::memory_status status) {
-  switch (status) {
-    case emel::memory::coordinator::event::memory_status::success:
-    case emel::memory::coordinator::event::memory_status::no_update:
-      return false;
-    case emel::memory::coordinator::event::memory_status::failed_prepare:
-    case emel::memory::coordinator::event::memory_status::failed_compute:
-      return true;
-  }
-  return true;
-}
-
 struct begin_decode {
   void operator()(const event::decode & ev, context & ctx) const noexcept {
     ctx.token_ids = ev.token_ids;
@@ -107,7 +80,6 @@ struct begin_decode {
     ctx.ubatches_total = 0;
     ctx.ubatches_processed = 0;
     ctx.ubatch_sizes.fill(0);
-    ctx.slot_offsets.fill(0);
     ctx.ubatch_seq_ids.fill(0);
     ctx.ubatch_token_indices.fill(0);
     ctx.ubatch_token_offsets.fill(0);
@@ -128,6 +100,10 @@ struct begin_decode {
     ctx.last_error = EMEL_OK;
     ctx.phase_retryable = false;
     ctx.rollback_needed = false;
+
+    if (ctx.memory_coordinator != nullptr) {
+      ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
+    }
   }
 };
 
@@ -453,18 +429,21 @@ struct run_update_memory {
       return;
     }
 
-    emel::memory::coordinator::event::memory_status status =
-        emel::memory::coordinator::event::memory_status::success;
-    const bool ok =
-        ctx.memory_coordinator->process_event(emel::memory::coordinator::event::prepare_update{
-      .optimize = false,
-      .status_out = &status,
-    });
-
-    if (!ok || update_status_is_error(status)) {
-      *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      return;  // GCOVR_EXCL_LINE
+    if (!ctx.memory_reserved) {
+      int32_t reserve_error = EMEL_OK;
+      const bool reserved = ctx.memory_coordinator->process_event(emel::memory::coordinator::event::reserve{
+        .max_sequences = 256,
+        .max_blocks = 32768,
+        .block_tokens = 16,
+        .error_out = &reserve_error,
+      });
+      const int32_t normalized = detail::normalize_error(reserved, reserve_error);
+      if (normalized != EMEL_OK) {
+        *ev.error_out = normalized;
+        ctx.phase_error = normalized;
+        return;
+      }
+      ctx.memory_reserved = true;
     }
   }
 
@@ -490,58 +469,43 @@ struct run_prepare_memory_batch {
       *ev.retryable_out = false;
     }
 
-    if (ctx.memory_coordinator == nullptr || ctx.kv_cache == nullptr) {
+    if (ctx.memory_coordinator == nullptr) {
       *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
       ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
       return;
     }
 
-    emel::memory::coordinator::event::memory_status status =
-        emel::memory::coordinator::event::memory_status::success;
-    const bool memory_ok =
-        ctx.memory_coordinator->process_event(emel::memory::coordinator::event::prepare_batch{
-      .n_ubatch = ctx.n_ubatch,
-      .n_ubatches_total = ctx.ubatches_total,
-      .status_out = &status,
-    });
+    for (int32_t i = 0; i < ctx.ubatches_total; ++i) {
+      const int32_t seq_id = ctx.ubatch_seq_ids[i];
+      const int32_t token_count = ctx.ubatch_sizes[i];
+      int32_t alloc_error = EMEL_OK;
 
-    if (!memory_ok) {
-      *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      return;  // GCOVR_EXCL_LINE
-    }
+      const bool sequence_ok =
+          ctx.memory_coordinator->process_event(emel::memory::coordinator::event::allocate_sequence{
+            .seq_id = seq_id,
+            .error_out = &alloc_error,
+          });
+      const int32_t normalized_sequence = detail::normalize_error(sequence_ok, alloc_error);
+      if (normalized_sequence != EMEL_OK) {
+        *ev.error_out = normalized_sequence;
+        ctx.phase_error = normalized_sequence;
+        ctx.phase_retryable = false;
+        return;
+      }
 
-    const prepare_failure_kind prepare_failure = classify_prepare_failure_from_memory_status(status);
-    if (prepare_failure == prepare_failure_kind::retryable) {
-      *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      ctx.phase_retryable = true;  // GCOVR_EXCL_LINE
-      if (ev.retryable_out != nullptr) {  // GCOVR_EXCL_LINE
-        *ev.retryable_out = true;  // GCOVR_EXCL_LINE
-      }  // GCOVR_EXCL_LINE
-      return;  // GCOVR_EXCL_LINE
-    }
-    if (prepare_failure == prepare_failure_kind::permanent) {
-      *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      return;  // GCOVR_EXCL_LINE
-    }
-
-    const bool kv_ok = ctx.kv_cache->process_event(emel::memory::kv::event::prepare{
-      .ubatch_sizes = ctx.ubatch_sizes.data(),
-      .ubatch_count = ctx.ubatches_total,
-      .requested_capacity = ctx.n_tokens,
-      .slot_offsets_out = ctx.slot_offsets.data(),
-      .slot_offsets_capacity = static_cast<int32_t>(ctx.slot_offsets.size()),
-      .ubatch_count_out = nullptr,
-      .ubatch_seq_ids = ctx.ubatch_seq_ids.data(),
-      .ubatch_seq_ids_count = ctx.ubatches_total,
-    });
-
-    if (!kv_ok) {
-      *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      return;  // GCOVR_EXCL_LINE
+      const bool slots_ok =
+          ctx.memory_coordinator->process_event(emel::memory::coordinator::event::allocate_slots{
+            .seq_id = seq_id,
+            .token_count = token_count,
+            .error_out = &alloc_error,
+          });
+      const int32_t normalized_slots = detail::normalize_error(slots_ok, alloc_error);
+      if (normalized_slots != EMEL_OK) {
+        *ev.error_out = normalized_slots;
+        ctx.phase_error = normalized_slots;
+        ctx.phase_retryable = false;
+        return;
+      }
     }
   }
 
@@ -565,25 +529,7 @@ struct run_optimize_memory {
     *ev.error_out = EMEL_OK;
     ctx.phase_error = EMEL_OK;
 
-    if (ctx.memory_coordinator == nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-
-    emel::memory::coordinator::event::memory_status status =
-        emel::memory::coordinator::event::memory_status::success;
-    const bool ok =
-        ctx.memory_coordinator->process_event(emel::memory::coordinator::event::prepare_update{
-      .optimize = true,
-      .status_out = &status,
-    });
-
-    if (!ok) {
-      *ev.error_out = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      ctx.phase_error = EMEL_ERR_BACKEND;  // GCOVR_EXCL_LINE
-      return;  // GCOVR_EXCL_LINE
-    }
+    (void)ctx;
   }
 
   template <class ev>
@@ -650,6 +596,12 @@ struct run_process_ubatch {
       if (ev.rollback_needed_out != nullptr) {
         *ev.rollback_needed_out = true;
       }
+      return;
+    }
+    if (ctx.memory_coordinator == nullptr) {
+      *ev.error_out = EMEL_ERR_BACKEND;
+      ctx.phase_error = EMEL_ERR_BACKEND;
+      ctx.ubatch_error = EMEL_ERR_BACKEND;
       return;
     }
 
@@ -744,8 +696,8 @@ struct run_process_ubatch {
     const bool ok = ctx.ubatch_executor->process_event(emel::graph::processor::event::execute{
       .ubatch_index = ctx.ubatches_processed,
       .ubatch_size = current,
-      .memory_coordinator_sm = ctx.memory_coordinator.get(),
-      .kv_cache_sm = ctx.kv_cache.get(),
+      .memory_sm = ctx.memory_coordinator.get(),
+      .memory_view = ctx.memory_coordinator->view(),
       .expected_outputs = expected_outputs,
       .compute_ctx = ctx.compute_ctx,
       .positions = positions,
@@ -839,19 +791,27 @@ struct run_rollback_ubatch {
       return;  // GCOVR_EXCL_LINE
     }
 
-    if (ctx.kv_cache == nullptr) {
+    if (ctx.memory_coordinator == nullptr || ctx.ubatches_total <= 0) {
       *ev.error_out = EMEL_ERR_BACKEND;
       ctx.phase_error = EMEL_ERR_BACKEND;
       return;
     }
 
-    const int32_t rollback_to = std::max<int32_t>(0, ctx.ubatches_processed - 1);
-    int32_t kv_error = EMEL_OK;
-    const bool kv_ok = ctx.kv_cache->process_event(emel::memory::kv::event::rollback{
-      .from_ubatch_index = rollback_to,
-      .error_out = &kv_error,
-    });
-    const int32_t normalized = detail::normalize_error(kv_ok, kv_error);
+    const int32_t rollback_index = std::max<int32_t>(0, ctx.ubatches_processed - 1);
+    if (rollback_index < 0 || rollback_index >= ctx.ubatches_total) {
+      *ev.error_out = EMEL_ERR_BACKEND;
+      ctx.phase_error = EMEL_ERR_BACKEND;
+      return;
+    }
+
+    int32_t rollback_error = EMEL_OK;
+    const bool rollback_ok =
+        ctx.memory_coordinator->process_event(emel::memory::coordinator::event::rollback_slots{
+          .seq_id = ctx.ubatch_seq_ids[rollback_index],
+          .token_count = ctx.ubatch_sizes[rollback_index],
+          .error_out = &rollback_error,
+        });
+    const int32_t normalized = detail::normalize_error(rollback_ok, rollback_error);
     if (normalized != EMEL_OK) {
       *ev.error_out = normalized;
       ctx.phase_error = normalized;

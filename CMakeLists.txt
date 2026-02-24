@@ -116,32 +116,10 @@ if(EMEL_ENABLE_TESTS)
     tests/batch/planner/planner_sm_transition_tests.cpp
     tests/batch/planner/planner_sm_flow_tests.cpp
     tests/token/batcher/sanitizer_tests.cpp
-    tests/memory/coordinator_tests.cpp
-    tests/memory/coordinator_sm_transition_tests.cpp
-    tests/memory/coordinator_sm_transition_more_tests.cpp
-    tests/memory/coordinator_sm_testing_policy_tests.cpp
-    tests/memory/coordinator_action_branch_tests.cpp
-    tests/memory/coordinator_guard_tests.cpp
-    tests/memory/coordinator_recurrent_tests.cpp
-    tests/memory/coordinator_recurrent_sm_transition_tests.cpp
-    tests/memory/coordinator_recurrent_sm_transition_more_tests.cpp
-    tests/memory/coordinator_recurrent_sm_testing_policy_tests.cpp
-    tests/memory/coordinator_recurrent_action_branch_tests.cpp
-    tests/memory/coordinator_kv_tests.cpp
-    tests/memory/coordinator_kv_sm_transition_tests.cpp
-    tests/memory/coordinator_kv_sm_transition_more_tests.cpp
-    tests/memory/coordinator_kv_sm_testing_policy_tests.cpp
-    tests/memory/coordinator_kv_action_branch_tests.cpp
-    tests/memory/coordinator_hybrid_tests.cpp
-    tests/memory/coordinator_hybrid_sm_transition_tests.cpp
-    tests/memory/coordinator_hybrid_sm_transition_more_tests.cpp
-    tests/memory/coordinator_hybrid_sm_testing_policy_tests.cpp
-    tests/memory/coordinator_hybrid_action_branch_tests.cpp
-    tests/memory/kv/cache_tests.cpp
-    tests/memory/kv/cache_sm_transition_tests.cpp
-    tests/memory/kv/cache_sm_testing_policy_tests.cpp
-    tests/memory/kv/cache_action_branch_tests.cpp
-    tests/memory/kv/cache_guard_tests.cpp
+    tests/memory/kv/lifecycle_tests.cpp
+    tests/memory/recurrent/lifecycle_tests.cpp
+    tests/memory/hybrid/lifecycle_tests.cpp
+    tests/memory/coordinator_any_lifecycle_tests.cpp
     tests/buffer/allocator_tests.cpp
     tests/buffer/allocator_error_tests.cpp
     tests/buffer/allocator_detail_tests.cpp

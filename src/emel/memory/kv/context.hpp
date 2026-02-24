@@ -3,99 +3,81 @@
 #include <array>
 #include <cstdint>
 
+#include <boost/sml.hpp>
+#include <boost/sml/utility/sm_pool.hpp>
+
 #include "emel/emel.h"
-#include "emel/memory/kv/events.hpp"
 
 namespace emel::memory::kv::action {
 
-inline constexpr int32_t MAX_UBATCHES = 4096;
-inline constexpr int32_t MAX_KV_CELLS = 32768;
-inline constexpr int32_t MAX_SEQ = 256;
-inline constexpr int32_t MAX_STREAMS = MAX_SEQ;
-inline constexpr int32_t SEQ_WORDS = (MAX_SEQ + 63) / 64;
-inline constexpr int32_t MAX_STREAM_COPY = MAX_STREAMS;
-inline constexpr int32_t POS_NONE = -1;
+inline constexpr int32_t DEFAULT_BLOCK_TOKENS = 16;
+inline constexpr int32_t MAX_SEQUENCES = 256;
+inline constexpr int32_t MAX_BLOCKS = 32768;
+inline constexpr int32_t MAX_BLOCKS_PER_SEQUENCE = 4096;
+inline constexpr int32_t INVALID_INDEX = -1;
 
-struct stream_state {
-  int32_t head = 0;
-  int32_t used_count = 0;
-  int32_t used_max_p1 = 0;
-  bool has_shift = false;
+struct block_link {};
+struct block_unlink {};
+struct router_ready {};
 
-  std::array<int32_t, MAX_KV_CELLS> pos = {};
-  std::array<int32_t, MAX_KV_CELLS> shift = {};
-  std::array<int32_t, MAX_KV_CELLS> ext_x = {};
-  std::array<int32_t, MAX_KV_CELLS> ext_y = {};
-  std::array<uint16_t, MAX_KV_CELLS> seq_count = {};
-  std::array<std::array<uint64_t, SEQ_WORDS>, MAX_KV_CELLS> seq_mask = {};
-  std::array<int32_t, MAX_SEQ> seq_pos_min = {};
-  std::array<int32_t, MAX_SEQ> seq_pos_max = {};
-  std::array<uint16_t, MAX_SEQ> seq_pos_min_count = {};
-  std::array<uint16_t, MAX_SEQ> seq_pos_max_count = {};
+struct block_storage {
+  std::array<uint16_t, MAX_BLOCKS> refs = {};
+
+  void reset() noexcept { refs.fill(0); }
 };
 
-struct cell_snapshot {
-  int32_t pos = POS_NONE;
-  int32_t shift = 0;
-  int32_t ext_x = 0;
-  int32_t ext_y = 0;
-  uint16_t seq_count = 0;
-  std::array<uint64_t, SEQ_WORDS> seq_mask = {};
+struct block_router_model {
+  auto operator()() const {
+    namespace sml = boost::sml;
+
+    const auto valid_link = [](const block_storage & storage,
+                               const sml::utility::indexed_event<block_link> & ev) {
+      return ev.id < storage.refs.size() && storage.refs[ev.id] < UINT16_MAX;
+    };
+
+    const auto do_link = [](block_storage & storage,
+                            const sml::utility::indexed_event<block_link> & ev) {
+      ++storage.refs[ev.id];
+    };
+
+    const auto valid_unlink = [](const block_storage & storage,
+                                 const sml::utility::indexed_event<block_unlink> & ev) {
+      return ev.id < storage.refs.size() && storage.refs[ev.id] > 0;
+    };
+
+    const auto do_unlink = [](block_storage & storage,
+                              const sml::utility::indexed_event<block_unlink> & ev) {
+      --storage.refs[ev.id];
+    };
+
+    // clang-format off
+    return sml::make_transition_table(
+      *sml::state<router_ready> + sml::event<sml::utility::indexed_event<block_link>>[valid_link] / do_link,
+       sml::state<router_ready> + sml::event<sml::utility::indexed_event<block_unlink>>[valid_unlink] / do_unlink
+    );
+    // clang-format on
+  }
 };
 
-struct stream_snapshot {
-  int32_t head = 0;
-  int32_t used_count = 0;
-  int32_t used_max_p1 = 0;
-  bool has_shift = false;
-  std::array<int32_t, MAX_SEQ> seq_pos_min = {};
-  std::array<int32_t, MAX_SEQ> seq_pos_max = {};
-  std::array<uint16_t, MAX_SEQ> seq_pos_min_count = {};
-  std::array<uint16_t, MAX_SEQ> seq_pos_max_count = {};
-};
+using block_pool = boost::sml::utility::sm_pool<block_storage, block_router_model>;
 
 struct context {
-  std::array<int32_t, MAX_UBATCHES> ubatch_sizes = {};
-  std::array<int32_t, MAX_UBATCHES> slot_offsets = {};
-  std::array<int32_t, MAX_KV_CELLS> slot_indices = {};
-  std::array<int32_t, MAX_KV_CELLS> slot_stream_ids = {};
-  std::array<cell_snapshot, MAX_KV_CELLS> slot_snapshots = {};
-  int32_t slot_index_count = 0;
-  std::array<int32_t, MAX_UBATCHES> ubatch_stream_ids = {};
-  std::array<int32_t, MAX_UBATCHES> ubatch_seq_ids = {};
-  int32_t ubatch_count = 0;
-  int32_t planned_ubatch_count = 0;
-  int32_t applied_ubatches = 0;
+  int32_t max_sequences = MAX_SEQUENCES;
+  int32_t max_blocks = MAX_BLOCKS;
+  int32_t block_tokens = DEFAULT_BLOCK_TOKENS;
 
-  int32_t kv_size = 0;
-  int32_t n_stream = 1;
-  int32_t n_pad = 1;
-  int32_t n_swa = 0;
-  int32_t swa_type = 0;
-  std::array<int32_t, MAX_SEQ> seq_to_stream = {};
-  std::array<int32_t, MAX_SEQ> next_pos = {};
-  std::array<stream_state, MAX_STREAMS> streams = {};
-  std::array<stream_snapshot, MAX_STREAMS> prepare_snapshot = {};
+  block_pool block_refs = {};
+  std::array<bool, MAX_SEQUENCES> sequence_active = {};
+  std::array<int32_t, MAX_SEQUENCES> sequence_length = {};
+  std::array<int32_t, MAX_SEQUENCES> sequence_block_count = {};
+  std::array<std::array<uint16_t, MAX_BLOCKS_PER_SEQUENCE>, MAX_SEQUENCES> seq_to_blocks = {};
 
-  std::array<int32_t, MAX_STREAM_COPY> pending_copy_src = {};
-  std::array<int32_t, MAX_STREAM_COPY> pending_copy_dst = {};
-  int32_t pending_copy_count = 0;
+  std::array<uint16_t, MAX_BLOCKS> free_stack = {};
+  int32_t free_count = 0;
 
-  int32_t kv_tokens = 0;
   int32_t phase_error = EMEL_OK;
+  bool phase_out_of_memory = false;
   int32_t last_error = EMEL_OK;
-
-  event::prepare prepare_request = {};
-  event::apply_ubatch apply_request = {};
-  event::rollback rollback_request = {};
-  event::seq_remove seq_remove_request = {};
-  event::seq_copy seq_copy_request = {};
-  event::seq_keep seq_keep_request = {};
-  event::seq_add seq_add_request = {};
-  event::seq_div seq_div_request = {};
-  event::apply_updates updates_request = {};
-
-  context();
 };
 
 }  // namespace emel::memory::kv::action

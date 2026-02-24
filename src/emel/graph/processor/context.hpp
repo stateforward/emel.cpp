@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "emel/graph/processor/events.hpp"
 #include "emel/emel.h"
+#include "emel/graph/processor/events.hpp"
 
 namespace emel::graph::processor::action {
 
@@ -12,8 +12,8 @@ struct context {
   int32_t ubatch_index = 0;
   int32_t ubatch_size = 0;
   int32_t kv_tokens = 0;
-  void * memory_coordinator_sm = nullptr;
-  void * kv_cache_sm = nullptr;
+  void * memory_sm = nullptr;
+  emel::memory::view::any memory_view = {};
   int32_t expected_outputs = 0;
   void * compute_ctx = nullptr;
   const int32_t * positions = nullptr;

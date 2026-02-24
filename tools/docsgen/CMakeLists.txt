@@ -9,7 +9,7 @@ include(FetchContent)
 FetchContent_Declare(
   boost_sml
   GIT_REPOSITORY https://github.com/stateforward/sml.cpp
-  GIT_TAG 3f04b240585789931a5d5dabf1de2526707fe11b
+  GIT_TAG 119ca42bc7e47e4683d37f8dd40b08881073e268
 )
 FetchContent_MakeAvailable(boost_sml)
 

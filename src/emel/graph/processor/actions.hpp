@@ -21,8 +21,8 @@ inline event::execute make_request(const context & ctx) noexcept {
     .ubatch_index = ctx.ubatch_index,
     .ubatch_size = ctx.ubatch_size,
     .kv_tokens = ctx.kv_tokens,
-    .memory_coordinator_sm = ctx.memory_coordinator_sm,
-    .kv_cache_sm = ctx.kv_cache_sm,
+    .memory_sm = ctx.memory_sm,
+    .memory_view = ctx.memory_view,
     .expected_outputs = ctx.expected_outputs,
     .compute_ctx = ctx.compute_ctx,
     .positions = ctx.positions,
@@ -52,8 +52,8 @@ struct begin_execute {
     ctx.ubatch_index = ev.ubatch_index;
     ctx.ubatch_size = ev.ubatch_size;
     ctx.kv_tokens = ev.kv_tokens;
-    ctx.memory_coordinator_sm = ev.memory_coordinator_sm;
-    ctx.kv_cache_sm = ev.kv_cache_sm;
+    ctx.memory_sm = ev.memory_sm;
+    ctx.memory_view = ev.memory_view;
     ctx.expected_outputs = ev.expected_outputs;
     ctx.compute_ctx = ev.compute_ctx;
     ctx.positions = ev.positions;

@@ -7,6 +7,7 @@
 #include "emel/memory/coordinator/hybrid/sm.hpp"
 #include "emel/memory/coordinator/kv/sm.hpp"
 #include "emel/memory/coordinator/recurrent/sm.hpp"
+#include "emel/memory/view.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::memory::coordinator {
@@ -33,17 +34,12 @@ class any {
 
   coordinator_kind kind() const noexcept { return core_.kind(); }
 
-  bool process_event(const event::prepare_update & ev) {
-    return core_.process_event(ev);
-  }
-
-  bool process_event(const event::prepare_batch & ev) {
-    return core_.process_event(ev);
-  }
-
-  bool process_event(const event::prepare_full & ev) {
-    return core_.process_event(ev);
-  }
+  bool process_event(const event::reserve & ev) { return core_.process_event(ev); }
+  bool process_event(const event::allocate_sequence & ev) { return core_.process_event(ev); }
+  bool process_event(const event::allocate_slots & ev) { return core_.process_event(ev); }
+  bool process_event(const event::branch_sequence & ev) { return core_.process_event(ev); }
+  bool process_event(const event::free_sequence & ev) { return core_.process_event(ev); }
+  bool process_event(const event::rollback_slots & ev) { return core_.process_event(ev); }
 
   int32_t last_error() const noexcept {
     int32_t err = EMEL_ERR_BACKEND;
@@ -51,17 +47,20 @@ class any {
     return err;
   }
 
-  event::memory_status last_status() const noexcept {
-    event::memory_status status = {};
-    core_.visit([&](const auto & sm) { status = sm.last_status(); });
-    return status;
+  view::any view() const noexcept {
+    view::any result = {};
+    core_.visit([&](const auto & sm) { result = sm.view(); });
+    return result;
   }
 
  private:
   using sm_list = boost::sml::aux::type_list<recurrent::sm, kv::sm, hybrid::sm>;
-  using event_list = boost::sml::aux::type_list<event::prepare_update,
-                                                event::prepare_batch,
-                                                event::prepare_full>;
+  using event_list = boost::sml::aux::type_list<event::reserve,
+                                                event::allocate_sequence,
+                                                event::allocate_slots,
+                                                event::branch_sequence,
+                                                event::free_sequence,
+                                                event::rollback_slots>;
 
   emel::sm_any<coordinator_kind, sm_list, event_list> core_{};
 };
