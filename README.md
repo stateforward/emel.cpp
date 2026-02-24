@@ -12,7 +12,7 @@ This inference engine is being implemented by AI under human engineering and arc
 
 > [!WARNING]
 > EMEL is currently going through a major re-architecture expected to complete by end of day on
-> Monday, February 23, 2026. See [Architecture](docs/architecture/) and
+> Tuesday, February 24, 2026. See [Architecture](docs/architecture/) and
 > [Design Docs](docs/designs/) for the latest improvements.
 
 ## Implementation priorities
