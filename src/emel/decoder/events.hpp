@@ -60,16 +60,11 @@ struct initialize_batch {
   int32_t * error_out = nullptr;
 };
 
-struct update_memory {
+struct reserve_memory {
   int32_t * error_out = nullptr;
 };
 
-struct prepare_memory_batch {
-  int32_t * error_out = nullptr;
-  bool * retryable_out = nullptr;
-};
-
-struct optimize_memory {
+struct allocate_memory_batch {
   int32_t * error_out = nullptr;
 };
 
@@ -119,30 +114,18 @@ struct initialize_batch_error {
   const event::decode * request = nullptr;
 };
 
-struct update_memory_done {
+struct reserve_memory_done {
   const event::decode * request = nullptr;
 };
-struct update_memory_error {
+struct reserve_memory_error {
   int32_t err = 0;
   const event::decode * request = nullptr;
 };
 
-struct prepare_memory_batch_done {
+struct allocate_memory_batch_done {
   const event::decode * request = nullptr;
 };
-struct prepare_memory_batch_retryable_error {
-  int32_t err = 0;
-  const event::decode * request = nullptr;
-};
-struct prepare_memory_batch_permanent_error {
-  int32_t err = 0;
-  const event::decode * request = nullptr;
-};
-
-struct optimize_memory_done {
-  const event::decode * request = nullptr;
-};
-struct optimize_memory_error {
+struct allocate_memory_batch_error {
   int32_t err = 0;
   const event::decode * request = nullptr;
 };

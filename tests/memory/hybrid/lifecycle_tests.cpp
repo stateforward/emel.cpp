@@ -170,6 +170,15 @@ TEST_CASE("memory_hybrid_lifecycle_validation_and_unexpected_event_paths") {
 
   CHECK(machine.process_event(emel::memory::events::rollback_slots_done{}));
   CHECK(machine.last_error() == EMEL_ERR_BACKEND);
+
+  err = EMEL_OK;
+  CHECK(machine.process_event(event::reserve{
+    .max_sequences = 4,
+    .max_blocks = 2,
+    .block_tokens = 2,
+    .error_out = &err,
+  }));
+  CHECK(err == EMEL_OK);
 }
 
 TEST_CASE("memory_hybrid_action_direct_failure_and_helper_paths") {

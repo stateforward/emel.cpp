@@ -13,12 +13,6 @@
 
 namespace emel::decoder::action {
 
-enum class prepare_failure_kind : uint8_t {
-  none = 0,
-  retryable,
-  permanent,
-};
-
 struct context {
   const int32_t * token_ids = nullptr;
   bool output_all = false;
@@ -81,7 +75,6 @@ struct context {
   int32_t phase_error = EMEL_OK;
   int32_t ubatch_error = EMEL_OK;
   int32_t last_error = EMEL_OK;
-  bool phase_retryable = false;
   bool rollback_needed = false;
   bool memory_reserved = false;
 

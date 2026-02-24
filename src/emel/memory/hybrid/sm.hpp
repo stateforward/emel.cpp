@@ -22,6 +22,7 @@ struct freeing_sequence {};
 struct rolling_back_slots {};
 struct out_of_memory {};
 struct errored {};
+struct unexpected {};
 
 struct model {
   auto operator()() const {
@@ -31,6 +32,8 @@ struct model {
         *sml::state<uninitialized> + sml::event<event::reserve> / action::begin_reserve =
             sml::state<initializing>,
         sml::state<ready> + sml::event<event::reserve> / action::begin_reserve =
+            sml::state<initializing>,
+        sml::state<unexpected> + sml::event<event::reserve> / action::begin_reserve =
             sml::state<initializing>,
 
         sml::state<initializing>[guard::phase_ok] = sml::state<ready>,
@@ -69,25 +72,27 @@ struct model {
         sml::state<errored> / action::ensure_last_error = sml::state<ready>,
 
         sml::state<uninitialized> + sml::unexpected_event<sml::_> / action::on_unexpected =
-            sml::state<errored>,
+            sml::state<unexpected>,
         sml::state<initializing> + sml::unexpected_event<sml::_> / action::on_unexpected =
-            sml::state<errored>,
+            sml::state<unexpected>,
         sml::state<ready> + sml::unexpected_event<sml::_> / action::on_unexpected =
-            sml::state<errored>,
+            sml::state<unexpected>,
         sml::state<allocating_sequence> + sml::unexpected_event<sml::_> / action::on_unexpected =
-            sml::state<errored>,
+            sml::state<unexpected>,
         sml::state<allocating_slots> + sml::unexpected_event<sml::_> / action::on_unexpected =
-            sml::state<errored>,
+            sml::state<unexpected>,
         sml::state<branching_sequence> + sml::unexpected_event<sml::_> / action::on_unexpected =
-            sml::state<errored>,
+            sml::state<unexpected>,
         sml::state<freeing_sequence> + sml::unexpected_event<sml::_> / action::on_unexpected =
-            sml::state<errored>,
+            sml::state<unexpected>,
         sml::state<rolling_back_slots> + sml::unexpected_event<sml::_> / action::on_unexpected =
-            sml::state<errored>,
+            sml::state<unexpected>,
         sml::state<out_of_memory> + sml::unexpected_event<sml::_> / action::on_unexpected =
-            sml::state<errored>,
+            sml::state<unexpected>,
         sml::state<errored> + sml::unexpected_event<sml::_> / action::on_unexpected =
-            sml::state<errored>);
+            sml::state<unexpected>,
+        sml::state<unexpected> + sml::unexpected_event<sml::_> / action::on_unexpected =
+            sml::state<unexpected>);
   }
 };
 

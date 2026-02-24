@@ -3,9 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <string_view>
-#include <vector>
 
 #include "emel/text/unicode.hpp"
 #include "emel/text/tokenizer/bpe/regex.hpp"
@@ -39,6 +37,116 @@ struct split_scratch {
     word_count = 0;
   }
 };
+
+enum class split_profile : uint8_t {
+  gpt2 = 0,
+  llama3,
+  jais2,
+  deepseek_llm,
+  deepseek3_family,
+  youtu,
+  deepseek_coder,
+  falcon,
+  starcoder_family,
+  qwen35,
+  stablelm2_family,
+  poro_family,
+  viking,
+  tekken,
+  chameleon,
+  gpt4o_family,
+  tiny_aya,
+  kimi_k2,
+  superbpe,
+  bailingmoe,
+  seed_coder,
+  afmoe,
+  exaone_moe,
+  default_profile,
+};
+
+inline split_profile split_profile_for(
+    const emel::model::data::tokenizer_pre pre) noexcept {
+  using tokenizer_pre = emel::model::data::tokenizer_pre;
+  switch (pre) {
+    case tokenizer_pre::GPT2:
+    case tokenizer_pre::MPT:
+    case tokenizer_pre::OLMO:
+    case tokenizer_pre::JAIS:
+    case tokenizer_pre::TRILLION:
+    case tokenizer_pre::GRANITE_DOCLING:
+      return split_profile::gpt2;
+    case tokenizer_pre::LLAMA3:
+    case tokenizer_pre::DBRX:
+    case tokenizer_pre::SMAUG:
+    case tokenizer_pre::CHATGLM4:
+    case tokenizer_pre::GROK_2:
+      return split_profile::llama3;
+    case tokenizer_pre::JAIS2:
+      return split_profile::jais2;
+    case tokenizer_pre::DEEPSEEK_LLM:
+      return split_profile::deepseek_llm;
+    case tokenizer_pre::DEEPSEEK3_LLM:
+    case tokenizer_pre::HUNYUAN_DENSE:
+    case tokenizer_pre::JOYAI_LLM:
+      return split_profile::deepseek3_family;
+    case tokenizer_pre::YOUTU:
+      return split_profile::youtu;
+    case tokenizer_pre::DEEPSEEK_CODER:
+      return split_profile::deepseek_coder;
+    case tokenizer_pre::FALCON:
+      return split_profile::falcon;
+    case tokenizer_pre::STARCODER:
+    case tokenizer_pre::REFACT:
+    case tokenizer_pre::COMMAND_R:
+    case tokenizer_pre::SMOLLM:
+    case tokenizer_pre::CODESHELL:
+    case tokenizer_pre::EXAONE:
+    case tokenizer_pre::MINERVA:
+      return split_profile::starcoder_family;
+    case tokenizer_pre::QWEN35:
+      return split_profile::qwen35;
+    case tokenizer_pre::STABLELM2:
+    case tokenizer_pre::QWEN2:
+    case tokenizer_pre::HUNYUAN:
+    case tokenizer_pre::SOLAR_OPEN:
+      return split_profile::stablelm2_family;
+    case tokenizer_pre::PORO:
+    case tokenizer_pre::BLOOM:
+    case tokenizer_pre::GPT3_FINNISH:
+      return split_profile::poro_family;
+    case tokenizer_pre::VIKING:
+      return split_profile::viking;
+    case tokenizer_pre::TEKKEN:
+      return split_profile::tekken;
+    case tokenizer_pre::CHAMELEON:
+      return split_profile::chameleon;
+    case tokenizer_pre::GPT4O:
+    case tokenizer_pre::MINIMAX_M2:
+      return split_profile::gpt4o_family;
+    case tokenizer_pre::TINY_AYA:
+      return split_profile::tiny_aya;
+    case tokenizer_pre::KIMI_K2:
+      return split_profile::kimi_k2;
+    case tokenizer_pre::SUPERBPE:
+      return split_profile::superbpe;
+    case tokenizer_pre::BAILINGMOE:
+      return split_profile::bailingmoe;
+    case tokenizer_pre::SEED_CODER:
+      return split_profile::seed_coder;
+    case tokenizer_pre::AFMOE:
+      return split_profile::afmoe;
+    case tokenizer_pre::EXAONE_MOE:
+      return split_profile::exaone_moe;
+    case tokenizer_pre::DEFAULT:
+    case tokenizer_pre::EXAONE4:
+    case tokenizer_pre::MEGREZ:
+    case tokenizer_pre::UNKNOWN:
+      return split_profile::default_profile;
+    default:
+      return split_profile::default_profile;
+  }
+}
 
 inline constexpr uint32_t bpe_out_of_range = 0xFFFFFFFFu;
 
@@ -446,6 +554,157 @@ inline bool split_llama3(const uint32_t * cpts, size_t cpt_count,
   return true;
 }
 
+inline bool split_kimi_k2(const uint32_t * cpts, size_t cpt_count,
+                          const size_t * offsets_in, size_t offsets_in_count,
+                          size_t * offsets_out, size_t out_capacity,
+                          size_t & out_count) {
+  out_count = 0;
+  size_t start = 0;
+  for (size_t idx = 0; idx < offsets_in_count; ++idx) {
+    const size_t offset_ini = start;
+    const size_t offset_end = start + offsets_in[idx];
+    if (offset_end > cpt_count) {
+      return false;
+    }
+    start = offset_end;
+
+    size_t prev_end = offset_ini;
+    auto add_token = [&](const size_t end) -> bool {
+      if (end < prev_end || end > offset_end) {
+        return false;
+      }
+      const size_t len = end - prev_end;
+      prev_end = end;
+      return push_offset(len, offsets_out, out_capacity, out_count);
+    };
+
+    for (size_t pos = offset_ini; pos < offset_end;) {
+      const uint32_t cpt = cpts[pos];
+      const auto flags = emel::text::unicode_cpt_flags_from_cpt(cpt);
+
+      if (emel::text::unicode_cpt_is_han(cpt)) {
+        ++pos;
+        while (pos < offset_end && emel::text::unicode_cpt_is_han(cpts[pos])) {
+          ++pos;
+        }
+        if (!add_token(pos)) {
+          return false;
+        }
+        continue;
+      }
+
+      if (flags.is_letter) {
+        ++pos;
+        while (pos < offset_end) {
+          const uint32_t next = cpts[pos];
+          const auto next_flags = emel::text::unicode_cpt_flags_from_cpt(next);
+          if (!next_flags.is_letter || emel::text::unicode_cpt_is_han(next)) {
+            break;
+          }
+          ++pos;
+        }
+        if (!add_token(pos)) {
+          return false;
+        }
+        continue;
+      }
+
+      if (flags.is_number) {
+        ++pos;
+        size_t digits = 1;
+        while (pos < offset_end &&
+               emel::text::unicode_cpt_flags_from_cpt(cpts[pos]).is_number &&
+               digits < 3) {
+          ++pos;
+          ++digits;
+        }
+        if (!add_token(pos)) {
+          return false;
+        }
+        continue;
+      }
+
+      if (flags.is_whitespace) {
+        ++pos;
+        while (pos < offset_end &&
+               emel::text::unicode_cpt_flags_from_cpt(cpts[pos]).is_whitespace) {
+          ++pos;
+        }
+        if (!add_token(pos)) {
+          return false;
+        }
+        continue;
+      }
+
+      ++pos;
+      if (!add_token(pos)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+inline bool split_afmoe(const uint32_t * cpts, size_t cpt_count,
+                        const size_t * offsets_in, size_t offsets_in_count,
+                        size_t * offsets_out, size_t out_capacity,
+                        size_t & out_count) {
+  out_count = 0;
+  size_t start = 0;
+  for (size_t idx = 0; idx < offsets_in_count; ++idx) {
+    const size_t offset_ini = start;
+    const size_t offset_end = start + offsets_in[idx];
+    if (offset_end > cpt_count) {
+      return false;
+    }
+    start = offset_end;
+
+    size_t prev_end = offset_ini;
+    auto add_token = [&](const size_t end) -> bool {
+      if (end < prev_end || end > offset_end) {
+        return false;
+      }
+      const size_t len = end - prev_end;
+      prev_end = end;
+      return push_offset(len, offsets_out, out_capacity, out_count);
+    };
+
+    for (size_t pos = offset_ini; pos < offset_end;) {
+      const auto flags = emel::text::unicode_cpt_flags_from_cpt(cpts[pos]);
+      if (!flags.is_number) {
+        ++pos;
+        if (!add_token(pos)) {
+          return false;
+        }
+        continue;
+      }
+
+      const size_t digit_start = pos;
+      while (pos < offset_end &&
+             emel::text::unicode_cpt_flags_from_cpt(cpts[pos]).is_number) {
+        ++pos;
+      }
+
+      size_t current = digit_start;
+      const size_t digit_count = pos - digit_start;
+      const size_t remainder = digit_count % 3;
+      if (remainder > 0) {
+        current += remainder;
+        if (!add_token(current)) {
+          return false;
+        }
+      }
+      while (current < pos) {
+        current += 3;
+        if (!add_token(current)) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 inline bool encode_bpe_segment(const uint32_t * cpts, size_t start,
                                size_t len, split_scratch & scratch) {
   size_t segment_offset = scratch.encoded_size;
@@ -483,65 +742,62 @@ inline bool encode_bpe_segment(const uint32_t * cpts, size_t start,
   return true;
 }
 
-inline bool split_and_encode_fallback(const std::string_view text,
-                                      const regex_list & regex,
-                                      split_scratch & scratch) {
-  std::vector<std::string> regex_exprs;
-  regex_exprs.reserve(regex.count);
-  for (size_t idx = 0; idx < regex.count; ++idx) {
-    regex_exprs.emplace_back(regex.exprs[idx]);
+inline bool split_offsets_for_profile(const split_profile profile,
+                                      const uint32_t * cpts,
+                                      const size_t cpt_count,
+                                      const size_t * offsets_in,
+                                      const size_t offsets_in_count,
+                                      size_t * offsets_out,
+                                      const size_t out_capacity,
+                                      size_t & out_count) {
+  switch (profile) {
+    case split_profile::gpt2:
+      return split_gpt2(cpts, cpt_count, offsets_in, offsets_in_count, offsets_out,
+                        out_capacity, out_count);
+    case split_profile::llama3:
+    case split_profile::jais2:
+    case split_profile::deepseek_llm:
+    case split_profile::deepseek3_family:
+    case split_profile::youtu:
+    case split_profile::deepseek_coder:
+    case split_profile::falcon:
+    case split_profile::starcoder_family:
+    case split_profile::qwen35:
+    case split_profile::stablelm2_family:
+    case split_profile::poro_family:
+    case split_profile::viking:
+    case split_profile::tekken:
+    case split_profile::chameleon:
+    case split_profile::gpt4o_family:
+    case split_profile::tiny_aya:
+    case split_profile::bailingmoe:
+    case split_profile::seed_coder:
+    case split_profile::exaone_moe:
+    case split_profile::default_profile:
+      return split_llama3(cpts, cpt_count, offsets_in, offsets_in_count, offsets_out,
+                          out_capacity, out_count);
+    case split_profile::kimi_k2:
+      return split_kimi_k2(cpts, cpt_count, offsets_in, offsets_in_count, offsets_out,
+                           out_capacity, out_count);
+    case split_profile::superbpe:
+    case split_profile::afmoe:
+      return split_afmoe(cpts, cpt_count, offsets_in, offsets_in_count, offsets_out,
+                         out_capacity, out_count);
   }
-  const std::string raw_text(text);
-  const auto words = emel::text::unicode_regex_split(raw_text, regex_exprs);
-  scratch.word_count = 0;
-  for (const std::string & word : words) {
-    if (word.empty()) {
-      continue;
-    }
-    if (scratch.word_count >= scratch.words.size()) {
-      return false;
-    }
-    if (scratch.encoded_size + word.size() > scratch.encoded.size()) {
-      return false;
-    }
-    const size_t offset = scratch.encoded_size;
-    for (const char c : word) {
-      scratch.encoded[scratch.encoded_size++] = c;
-    }
-    scratch.words[scratch.word_count++] =
-        std::string_view(scratch.encoded.data() + offset, word.size());
-  }
-  return true;
+  return false;
 }
 
-inline bool split_and_encode_append(const std::string_view text,
-                                    const emel::model::data::vocab & vocab,
-                                    split_scratch & scratch,
-                                    split_view & view) {
-  view.words = scratch.words.data();
-  view.count = 0;
+inline bool split_and_encode_profile(const std::string_view text,
+                                     const split_profile profile,
+                                     split_scratch & scratch) {
   scratch.word_count = 0;
+  scratch.encoded_size = 0;
   if (text.empty()) {
     return true;
   }
-
-  const regex_list regex = regex_for(vocab);
-
-  static constexpr std::string_view k_gpt2_regex =
-      "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)";
-  static constexpr std::string_view k_llama3_regex =
-      "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|"
-      "[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+"
-      "[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
-
-  const bool byte_encode = (regex.count == 1) &&
-                           (regex.exprs[0] == k_gpt2_regex ||
-                            regex.exprs[0] == k_llama3_regex);
-
   if (text.size() > scratch.encoded.size()) {
     return false;
   }
-
   if (!decode_utf8_to_cpts(text, scratch)) {
     return false;
   }
@@ -549,25 +805,14 @@ inline bool split_and_encode_append(const std::string_view text,
   scratch.offsets_a[0] = scratch.cpt_count;
   scratch.offset_count = 1;
   size_t out_count = 0;
-  bool ok = false;
-  if (regex.count != 1 || !byte_encode) {
-    ok = split_and_encode_fallback(text, regex, scratch);
-    view.count = scratch.word_count;
-    return ok;
-  }
-
-  if (regex.exprs[0] == k_gpt2_regex) {
-    ok = split_gpt2(scratch.cpts.data(), scratch.cpt_count,
-                    scratch.offsets_a.data(), scratch.offset_count,
-                    scratch.offsets_b.data(), scratch.offsets_b.size(),
-                    out_count);
-  } else {
-    ok = split_llama3(scratch.cpts.data(), scratch.cpt_count,
-                      scratch.offsets_a.data(), scratch.offset_count,
-                      scratch.offsets_b.data(), scratch.offsets_b.size(),
-                      out_count);
-  }
-  if (!ok) {
+  if (!split_offsets_for_profile(profile,
+                                 scratch.cpts.data(),
+                                 scratch.cpt_count,
+                                 scratch.offsets_a.data(),
+                                 scratch.offset_count,
+                                 scratch.offsets_b.data(),
+                                 scratch.offsets_b.size(),
+                                 out_count)) {
     return false;
   }
 
@@ -582,7 +827,51 @@ inline bool split_and_encode_append(const std::string_view text,
     }
     start += len;
   }
+  return true;
+}
 
+inline bool split_and_encode_fallback(const std::string_view text,
+                                      const regex_list & regex,
+                                      split_scratch & scratch) {
+  static constexpr std::string_view k_gpt2_regex =
+      "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)";
+  static constexpr std::string_view k_llama3_regex =
+      "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|"
+      "[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+"
+      "[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
+
+  split_profile profile = split_profile::default_profile;
+  if (regex.count == 1) {
+    if (regex.exprs[0] == k_gpt2_regex) {
+      profile = split_profile::gpt2;
+    } else if (regex.exprs[0] == k_llama3_regex) {
+      profile = split_profile::llama3;
+    } else if (regex.exprs[0] == "\\p{han}+") {
+      profile = split_profile::kimi_k2;
+    } else if (regex.exprs[0] == "\\p{AFMoE_digits}") {
+      profile = split_profile::afmoe;
+    }
+  }
+  return split_and_encode_profile(text, profile, scratch);
+}
+
+inline bool split_and_encode_from_vocab(const std::string_view text,
+                                        const emel::model::data::vocab & vocab,
+                                        split_scratch & scratch) {
+  return split_and_encode_profile(text, split_profile_for(vocab.tokenizer_pre_id), scratch);
+}
+
+inline bool split_and_encode_append(const std::string_view text,
+                                    const emel::model::data::vocab & vocab,
+                                    split_scratch & scratch,
+                                    split_view & view) {
+  scratch.word_count = 0;
+  view.words = scratch.words.data();
+  view.count = 0;
+  scratch.word_count = 0;
+  if (!split_and_encode_from_vocab(text, vocab, scratch)) {
+    return false;
+  }
   view.count = scratch.word_count;
   return true;
 }

@@ -98,6 +98,7 @@ if(EMEL_ENABLE_TESTS)
     tests/text/encoders/encoder_tests.cpp
     tests/text/conditioner/conditioner_tests.cpp
     tests/text/renderer/renderer_tests.cpp
+    tests/text/unicode/unicode_tests.cpp
     tests/text/tokenizer/preprocessor_tests.cpp
     tests/text/tokenizer/preprocessor_spm_tests.cpp
     tests/text/tokenizer/preprocessor_wpm_tests.cpp

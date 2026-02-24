@@ -17,6 +17,64 @@ emel::model::data::vocab & make_vocab(
   return vocab;
 }
 
+struct profile_case {
+  emel::model::data::tokenizer_pre pre;
+  emel::text::tokenizer::bpe::detail::split_profile profile;
+  std::string_view text;
+};
+
+constexpr std::array<profile_case, 24> k_profile_cases = {{
+    {emel::model::data::tokenizer_pre::GPT2,
+     emel::text::tokenizer::bpe::detail::split_profile::gpt2, "hello world"},
+    {emel::model::data::tokenizer_pre::LLAMA3,
+     emel::text::tokenizer::bpe::detail::split_profile::llama3, "hello world"},
+    {emel::model::data::tokenizer_pre::JAIS2,
+     emel::text::tokenizer::bpe::detail::split_profile::jais2, "hello world"},
+    {emel::model::data::tokenizer_pre::DEEPSEEK_LLM,
+     emel::text::tokenizer::bpe::detail::split_profile::deepseek_llm, "hello world"},
+    {emel::model::data::tokenizer_pre::DEEPSEEK3_LLM,
+     emel::text::tokenizer::bpe::detail::split_profile::deepseek3_family, "hello world"},
+    {emel::model::data::tokenizer_pre::YOUTU,
+     emel::text::tokenizer::bpe::detail::split_profile::youtu, "hello world"},
+    {emel::model::data::tokenizer_pre::DEEPSEEK_CODER,
+     emel::text::tokenizer::bpe::detail::split_profile::deepseek_coder, "hello world"},
+    {emel::model::data::tokenizer_pre::FALCON,
+     emel::text::tokenizer::bpe::detail::split_profile::falcon, "hello world"},
+    {emel::model::data::tokenizer_pre::STARCODER,
+     emel::text::tokenizer::bpe::detail::split_profile::starcoder_family, "hello world"},
+    {emel::model::data::tokenizer_pre::QWEN35,
+     emel::text::tokenizer::bpe::detail::split_profile::qwen35, "hello world"},
+    {emel::model::data::tokenizer_pre::STABLELM2,
+     emel::text::tokenizer::bpe::detail::split_profile::stablelm2_family, "hello world"},
+    {emel::model::data::tokenizer_pre::PORO,
+     emel::text::tokenizer::bpe::detail::split_profile::poro_family, "hello world"},
+    {emel::model::data::tokenizer_pre::VIKING,
+     emel::text::tokenizer::bpe::detail::split_profile::viking, "hello world"},
+    {emel::model::data::tokenizer_pre::TEKKEN,
+     emel::text::tokenizer::bpe::detail::split_profile::tekken, "hello world"},
+    {emel::model::data::tokenizer_pre::CHAMELEON,
+     emel::text::tokenizer::bpe::detail::split_profile::chameleon, "hello world"},
+    {emel::model::data::tokenizer_pre::GPT4O,
+     emel::text::tokenizer::bpe::detail::split_profile::gpt4o_family, "hello world"},
+    {emel::model::data::tokenizer_pre::TINY_AYA,
+     emel::text::tokenizer::bpe::detail::split_profile::tiny_aya, "hello world"},
+    {emel::model::data::tokenizer_pre::KIMI_K2,
+     emel::text::tokenizer::bpe::detail::split_profile::kimi_k2,
+     "\xE6\xB1\x89\xE5\xAD\x97" "abc"},
+    {emel::model::data::tokenizer_pre::SUPERBPE,
+     emel::text::tokenizer::bpe::detail::split_profile::superbpe, "1234567"},
+    {emel::model::data::tokenizer_pre::BAILINGMOE,
+     emel::text::tokenizer::bpe::detail::split_profile::bailingmoe, "hello world"},
+    {emel::model::data::tokenizer_pre::SEED_CODER,
+     emel::text::tokenizer::bpe::detail::split_profile::seed_coder, "hello world"},
+    {emel::model::data::tokenizer_pre::AFMOE,
+     emel::text::tokenizer::bpe::detail::split_profile::afmoe, "1234567"},
+    {emel::model::data::tokenizer_pre::EXAONE_MOE,
+     emel::text::tokenizer::bpe::detail::split_profile::exaone_moe, "hello world"},
+    {emel::model::data::tokenizer_pre::UNKNOWN,
+     emel::text::tokenizer::bpe::detail::split_profile::default_profile, "hello world"},
+}};
+
 }  // namespace
 
 TEST_CASE("tokenizer_bpe_split_empty") {
@@ -28,6 +86,21 @@ TEST_CASE("tokenizer_bpe_split_empty") {
       std::string_view{}, vocab, scratch, view);
   CHECK(ok);
   CHECK(view.count == 0);
+}
+
+TEST_CASE("tokenizer_bpe_split_profile_mapping_and_dispatch_coverage") {
+  for (const auto & profile : k_profile_cases) {
+    auto & vocab = make_vocab(profile.pre);
+    emel::text::tokenizer::bpe::detail::split_scratch scratch = {};
+    emel::text::tokenizer::bpe::detail::split_view view = {};
+
+    CHECK(emel::text::tokenizer::bpe::detail::split_profile_for(profile.pre) ==
+          profile.profile);
+    const bool ok = emel::text::tokenizer::bpe::detail::split_and_encode_append(
+        profile.text, vocab, scratch, view);
+    CHECK(ok);
+    CHECK(view.count > 0);
+  }
 }
 
 TEST_CASE("tokenizer_bpe_split_gpt2_basic") {
@@ -204,8 +277,9 @@ TEST_CASE("tokenizer_bpe_split_fallback_overflow") {
   regex.exprs[0] = "\\p{L}+";
   regex.count = 1;
   emel::text::tokenizer::bpe::detail::split_scratch scratch = {};
-  scratch.encoded_size = scratch.encoded.size();
+  const std::string too_long(
+      emel::text::tokenizer::bpe::detail::k_max_bpe_bytes + 1, 'a');
 
   CHECK_FALSE(emel::text::tokenizer::bpe::detail::split_and_encode_fallback(
-      "hello", regex, scratch));
+      too_long, regex, scratch));
 }

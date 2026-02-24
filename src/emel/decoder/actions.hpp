@@ -266,7 +266,6 @@ struct begin_decode {
     ctx.phase_error = EMEL_OK;
     ctx.ubatch_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
-    ctx.phase_retryable = false;
     ctx.rollback_needed = false;
 
     if (ctx.memory_coordinator != nullptr) {
@@ -581,8 +580,8 @@ struct run_initialize_batch {
   }
 };
 
-struct run_update_memory {
-  void operator()(const event::update_memory & ev, context & ctx) const noexcept {
+struct run_reserve_memory {
+  void operator()(const event::reserve_memory & ev, context & ctx) const noexcept {
     if (ev.error_out == nullptr) {
       return;
     }
@@ -616,24 +615,20 @@ struct run_update_memory {
   template <class ev>
   void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
-    event::update_memory update{
+    event::reserve_memory reserve{
       .error_out = &ctx.phase_error,
     };
-    (*this)(update, ctx);
+    (*this)(reserve, ctx);
   }
 };
 
-struct run_prepare_memory_batch {
-  void operator()(const event::prepare_memory_batch & ev, context & ctx) const noexcept {
+struct run_allocate_memory_batch {
+  void operator()(const event::allocate_memory_batch & ev, context & ctx) const noexcept {
     if (ev.error_out == nullptr) {
       return;
     }
     *ev.error_out = EMEL_OK;
     ctx.phase_error = EMEL_OK;
-    ctx.phase_retryable = false;
-    if (ev.retryable_out != nullptr) {
-      *ev.retryable_out = false;
-    }
 
     if (ctx.memory_coordinator == nullptr) {
       *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
@@ -646,7 +641,6 @@ struct run_prepare_memory_batch {
       if (normalized != EMEL_OK) {
         *ev.error_out = normalized;
         ctx.phase_error = normalized;
-        ctx.phase_retryable = false;
         return;
       }
     }
@@ -655,33 +649,10 @@ struct run_prepare_memory_batch {
   template <class ev>
   void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
-    ctx.phase_retryable = false;
-    event::prepare_memory_batch prepare{
-      .error_out = &ctx.phase_error,
-      .retryable_out = &ctx.phase_retryable,
-    };
-    (*this)(prepare, ctx);
-  }
-};
-
-struct run_optimize_memory {
-  void operator()(const event::optimize_memory & ev, context & ctx) const noexcept {
-    if (ev.error_out == nullptr) {
-      return;
-    }
-    *ev.error_out = EMEL_OK;
-    ctx.phase_error = EMEL_OK;
-
-    (void)ctx;
-  }
-
-  template <class ev>
-  void operator()(const ev &, context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    event::optimize_memory optimize{
+    event::allocate_memory_batch allocate{
       .error_out = &ctx.phase_error,
     };
-    (*this)(optimize, ctx);
+    (*this)(allocate, ctx);
   }
 };
 
@@ -1071,9 +1042,8 @@ inline constexpr run_validate run_validate{};
 inline constexpr run_batch_tokens run_batch_tokens{};
 inline constexpr reject_invalid_validate reject_invalid_validate{};
 inline constexpr run_initialize_batch run_initialize_batch{};
-inline constexpr run_update_memory run_update_memory{};
-inline constexpr run_prepare_memory_batch run_prepare_memory_batch{};
-inline constexpr run_optimize_memory run_optimize_memory{};
+inline constexpr run_reserve_memory run_reserve_memory{};
+inline constexpr run_allocate_memory_batch run_allocate_memory_batch{};
 inline constexpr run_reserve_output run_reserve_output{};
 inline constexpr reject_invalid_reserve_output reject_invalid_reserve_output{};
 inline constexpr run_process_ubatch run_process_ubatch{};

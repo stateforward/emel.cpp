@@ -367,7 +367,6 @@ tests/buffer/realloc_analyzer_tests.cpp
 tests/decoder/decoder_action_branch_tests.cpp
 tests/decoder/decoder_sm_transition_tests.cpp
 tests/decoder/decoder_tests.cpp
-tests/encoder/encoder_unicode_tests.cpp
 tests/gbnf/parser_tests.cpp
 tests/graph/processor/processor_action_branch_tests.cpp
 tests/graph/processor/processor_sm_transition_tests.cpp
@@ -420,4 +419,5 @@ tests/text/tokenizer/preprocessor_wpm_tests.cpp
 tests/text/tokenizer/tokenizer_action_guard_tests.cpp
 tests/text/tokenizer/tokenizer_parity_tests.cpp
 tests/text/tokenizer/tokenizer_tests.cpp
+tests/text/unicode/unicode_tests.cpp
 tests/token/batcher/lifecycle_tests.cpp

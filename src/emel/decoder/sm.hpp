@@ -17,14 +17,10 @@ struct batching_tokens {};
 struct batch_decision {};
 struct initializing_batch {};
 struct initialize_batch_decision {};
-struct updating_memory_pre {};
-struct update_memory_decision {};
-struct preparing_memory_batch_initial {};
-struct prepare_memory_batch_initial_decision {};
-struct optimizing_memory {};
-struct optimize_memory_decision {};
-struct preparing_memory_batch_retry {};
-struct prepare_memory_batch_retry_decision {};
+struct reserving_memory {};
+struct reserving_memory_decision {};
+struct allocating_memory_batch {};
+struct allocating_memory_batch_decision {};
 struct reserving_output {};
 struct reserve_decision {};
 struct processing_ubatch {};
@@ -44,10 +40,8 @@ struct errored {};
  * - `validating_request`/`validate_decision`: validate token inputs before orchestration.
  * - `batching_tokens`/`batch_decision`: normalize and auto-generate batch metadata.
  * - `initializing_batch`/`initialize_batch_decision`: compute ubatch sizes and outputs count.
- * - `updating_memory_pre`/`update_memory_decision`: update memory coordinator before batch prep.
- * - `preparing_memory_batch_initial`/`prepare_memory_batch_initial_decision`: prepare memory & kv cache.
- * - `optimizing_memory`/`optimize_memory_decision`: one-shot optimization retry for prepare failures.
- * - `preparing_memory_batch_retry`/`prepare_memory_batch_retry_decision`: retry prepare after optimize.
+ * - `reserving_memory`/`reserving_memory_decision`: one-time memory-domain reserve.
+ * - `allocating_memory_batch`/`allocating_memory_batch_decision`: allocate lifecycle slots per ubatch.
  * - `reserving_output`/`reserve_decision`: validate output totals before execution.
  * - `processing_ubatch`/`ubatch_decision`: run ubatch execution loop, bounded by ubatch count.
  * - `handling_ubatch_failure`/`rollback_decision`: attempt rollback after ubatch error.
@@ -86,34 +80,19 @@ struct model {
           sml::state<initialize_batch_decision>,
       sml::state<initialize_batch_decision> [guard::phase_failed] = sml::state<errored>,
       sml::state<initialize_batch_decision> [guard::phase_ok] =
-          sml::state<updating_memory_pre>,
+          sml::state<reserving_memory>,
 
-      sml::state<updating_memory_pre> / action::run_update_memory =
-          sml::state<update_memory_decision>,
-      sml::state<update_memory_decision> [guard::phase_failed] = sml::state<errored>,
-      sml::state<update_memory_decision> [guard::phase_ok] =
-          sml::state<preparing_memory_batch_initial>,
+      sml::state<reserving_memory> / action::run_reserve_memory =
+          sml::state<reserving_memory_decision>,
+      sml::state<reserving_memory_decision> [guard::phase_failed] = sml::state<errored>,
+      sml::state<reserving_memory_decision> [guard::phase_ok] =
+          sml::state<allocating_memory_batch>,
 
-      sml::state<preparing_memory_batch_initial> / action::run_prepare_memory_batch =
-          sml::state<prepare_memory_batch_initial_decision>,
-      sml::state<prepare_memory_batch_initial_decision> [guard::phase_failed_retryable] =
-          sml::state<optimizing_memory>,
-      sml::state<prepare_memory_batch_initial_decision> [guard::phase_failed_permanent] =
+      sml::state<allocating_memory_batch> / action::run_allocate_memory_batch =
+          sml::state<allocating_memory_batch_decision>,
+      sml::state<allocating_memory_batch_decision> [guard::phase_failed] =
           sml::state<errored>,
-      sml::state<prepare_memory_batch_initial_decision> [guard::phase_ok] =
-          sml::state<reserving_output>,
-
-      sml::state<optimizing_memory> / action::run_optimize_memory =
-          sml::state<optimize_memory_decision>,
-      sml::state<optimize_memory_decision> [guard::phase_failed] = sml::state<errored>,
-      sml::state<optimize_memory_decision> [guard::phase_ok] =
-          sml::state<preparing_memory_batch_retry>,
-
-      sml::state<preparing_memory_batch_retry> / action::run_prepare_memory_batch =
-          sml::state<prepare_memory_batch_retry_decision>,
-      sml::state<prepare_memory_batch_retry_decision> [guard::phase_failed] =
-          sml::state<errored>,
-      sml::state<prepare_memory_batch_retry_decision> [guard::phase_ok] =
+      sml::state<allocating_memory_batch_decision> [guard::phase_ok] =
           sml::state<reserving_output>,
 
       sml::state<reserving_output> [guard::invalid_outputs_total] /
@@ -161,21 +140,13 @@ struct model {
           sml::state<errored>,
       sml::state<initialize_batch_decision> + sml::event<event::decode> / action::on_unexpected =
           sml::state<errored>,
-      sml::state<updating_memory_pre> + sml::event<event::decode> / action::on_unexpected =
+      sml::state<reserving_memory> + sml::event<event::decode> / action::on_unexpected =
           sml::state<errored>,
-      sml::state<update_memory_decision> + sml::event<event::decode> / action::on_unexpected =
+      sml::state<reserving_memory_decision> + sml::event<event::decode> / action::on_unexpected =
           sml::state<errored>,
-      sml::state<preparing_memory_batch_initial> + sml::event<event::decode> /
+      sml::state<allocating_memory_batch> + sml::event<event::decode> /
           action::on_unexpected = sml::state<errored>,
-      sml::state<prepare_memory_batch_initial_decision> + sml::event<event::decode> /
-          action::on_unexpected = sml::state<errored>,
-      sml::state<optimizing_memory> + sml::event<event::decode> / action::on_unexpected =
-          sml::state<errored>,
-      sml::state<optimize_memory_decision> + sml::event<event::decode> / action::on_unexpected =
-          sml::state<errored>,
-      sml::state<preparing_memory_batch_retry> + sml::event<event::decode> /
-          action::on_unexpected = sml::state<errored>,
-      sml::state<prepare_memory_batch_retry_decision> + sml::event<event::decode> /
+      sml::state<allocating_memory_batch_decision> + sml::event<event::decode> /
           action::on_unexpected = sml::state<errored>,
       sml::state<reserving_output> + sml::event<event::decode> / action::on_unexpected =
           sml::state<errored>,

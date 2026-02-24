@@ -89,12 +89,12 @@ bool capture_owner_event(void * owner_sm, const events::owner_event & ev) {
 
 }  // namespace
 
-TEST_CASE("decoder_action_update_memory_reserves_once_and_sets_flag") {
+TEST_CASE("decoder_action_reserve_memory_reserves_once_and_sets_flag") {
   decoder_context ctx{};
   int32_t err = EMEL_OK;
   ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
 
-  action::run_update_memory(event::update_memory{
+  action::run_reserve_memory(event::reserve_memory{
                               .error_out = &err,
                             },
                             ctx);
@@ -102,7 +102,7 @@ TEST_CASE("decoder_action_update_memory_reserves_once_and_sets_flag") {
   CHECK(ctx.memory_reserved);
 
   err = EMEL_OK;
-  action::run_update_memory(event::update_memory{
+  action::run_reserve_memory(event::reserve_memory{
                               .error_out = &err,
                             },
                             ctx);
@@ -110,10 +110,9 @@ TEST_CASE("decoder_action_update_memory_reserves_once_and_sets_flag") {
   CHECK(ctx.memory_reserved);
 }
 
-TEST_CASE("decoder_action_prepare_memory_batch_uses_lifecycle_events") {
+TEST_CASE("decoder_action_allocate_memory_batch_uses_lifecycle_events") {
   decoder_context ctx{};
   int32_t err = EMEL_OK;
-  bool retryable = true;
   ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
 
   std::array<int32_t, 3> seq_primary_ids = {{0, 0, 1}};
@@ -133,19 +132,17 @@ TEST_CASE("decoder_action_prepare_memory_batch_uses_lifecycle_events") {
   ctx.seq_primary_ids = seq_primary_ids.data();
   ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
-  action::run_update_memory(event::update_memory{
+  action::run_reserve_memory(event::reserve_memory{
                               .error_out = &err,
                             },
                             ctx);
   REQUIRE(err == EMEL_OK);
 
-  action::run_prepare_memory_batch(event::prepare_memory_batch{
+  action::run_allocate_memory_batch(event::allocate_memory_batch{
                                      .error_out = &err,
-                                     .retryable_out = &retryable,
                                    },
                                    ctx);
   CHECK(err == EMEL_OK);
-  CHECK_FALSE(retryable);
 
   const auto view = ctx.memory_coordinator->view();
   CHECK(view.is_sequence_active(0));
@@ -154,10 +151,9 @@ TEST_CASE("decoder_action_prepare_memory_batch_uses_lifecycle_events") {
   CHECK(view.sequence_length(1) == 1);
 }
 
-TEST_CASE("decoder_action_prepare_memory_batch_propagates_lifecycle_errors") {
+TEST_CASE("decoder_action_allocate_memory_batch_propagates_lifecycle_errors") {
   decoder_context ctx{};
   int32_t err = EMEL_OK;
-  bool retryable = true;
   ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
 
   std::array<int32_t, 2> seq_primary_ids = {{0, 0}};
@@ -181,21 +177,18 @@ TEST_CASE("decoder_action_prepare_memory_batch_propagates_lifecycle_errors") {
   ctx.seq_primary_ids = seq_primary_ids.data();
   ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
-  action::run_prepare_memory_batch(event::prepare_memory_batch{
+  action::run_allocate_memory_batch(event::allocate_memory_batch{
                                      .error_out = &err,
-                                     .retryable_out = &retryable,
                                    },
                                    ctx);
 
   CHECK(err == EMEL_ERR_BACKEND);
   CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
-  CHECK_FALSE(retryable);
 }
 
 TEST_CASE("decoder_action_rollback_ubatch_uses_lifecycle_rollback_slots") {
   decoder_context ctx{};
   int32_t err = EMEL_OK;
-  bool retryable = false;
   ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
 
   std::array<int32_t, 3> seq_primary_ids = {{0, 0, 0}};
@@ -214,15 +207,14 @@ TEST_CASE("decoder_action_rollback_ubatch_uses_lifecycle_rollback_slots") {
   ctx.seq_primary_ids = seq_primary_ids.data();
   ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
-  action::run_update_memory(event::update_memory{
+  action::run_reserve_memory(event::reserve_memory{
                               .error_out = &err,
                             },
                             ctx);
   REQUIRE(err == EMEL_OK);
 
-  action::run_prepare_memory_batch(event::prepare_memory_batch{
+  action::run_allocate_memory_batch(event::allocate_memory_batch{
                                      .error_out = &err,
-                                     .retryable_out = &retryable,
                                    },
                                    ctx);
   REQUIRE(err == EMEL_OK);
@@ -237,10 +229,9 @@ TEST_CASE("decoder_action_rollback_ubatch_uses_lifecycle_rollback_slots") {
   CHECK(ctx.memory_coordinator->view().sequence_length(0) == 0);
 }
 
-TEST_CASE("decoder_action_prepare_memory_batch_allocates_mixed_ubatch_per_sequence") {
+TEST_CASE("decoder_action_allocate_memory_batch_allocates_mixed_ubatch_per_sequence") {
   decoder_context ctx{};
   int32_t err = EMEL_OK;
-  bool retryable = false;
   ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
 
   std::array<int32_t, 2> seq_primary_ids = {{0, 1}};
@@ -256,19 +247,17 @@ TEST_CASE("decoder_action_prepare_memory_batch_allocates_mixed_ubatch_per_sequen
   ctx.seq_primary_ids = seq_primary_ids.data();
   ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
-  action::run_update_memory(event::update_memory{
+  action::run_reserve_memory(event::reserve_memory{
                               .error_out = &err,
                             },
                             ctx);
   REQUIRE(err == EMEL_OK);
 
-  action::run_prepare_memory_batch(event::prepare_memory_batch{
+  action::run_allocate_memory_batch(event::allocate_memory_batch{
                                      .error_out = &err,
-                                     .retryable_out = &retryable,
                                    },
                                    ctx);
   REQUIRE(err == EMEL_OK);
-  CHECK_FALSE(retryable);
 
   const auto view = ctx.memory_coordinator->view();
   CHECK(view.is_sequence_active(0));
@@ -280,7 +269,6 @@ TEST_CASE("decoder_action_prepare_memory_batch_allocates_mixed_ubatch_per_sequen
 TEST_CASE("decoder_action_rollback_ubatch_reverts_failed_and_remaining_preallocations") {
   decoder_context ctx{};
   int32_t err = EMEL_OK;
-  bool retryable = false;
   ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
 
   std::array<int32_t, 4> seq_primary_ids = {{0, 0, 1, 1}};
@@ -304,14 +292,13 @@ TEST_CASE("decoder_action_rollback_ubatch_reverts_failed_and_remaining_prealloca
   ctx.seq_primary_ids = seq_primary_ids.data();
   ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
-  action::run_update_memory(event::update_memory{
+  action::run_reserve_memory(event::reserve_memory{
                               .error_out = &err,
                             },
                             ctx);
   REQUIRE(err == EMEL_OK);
-  action::run_prepare_memory_batch(event::prepare_memory_batch{
+  action::run_allocate_memory_batch(event::allocate_memory_batch{
                                      .error_out = &err,
-                                     .retryable_out = &retryable,
                                    },
                                    ctx);
   REQUIRE(err == EMEL_OK);
@@ -337,7 +324,6 @@ TEST_CASE("decoder_action_rollback_ubatch_reverts_failed_and_remaining_prealloca
 TEST_CASE("decoder_action_process_ubatch_projects_payloads_and_updates_progress") {
   decoder_context ctx{};
   int32_t err = EMEL_OK;
-  bool retryable = false;
   bool rollback_needed = false;
   ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
 
@@ -374,15 +360,14 @@ TEST_CASE("decoder_action_process_ubatch_projects_payloads_and_updates_progress"
   ctx.compute_run_backend = &compute_run_ok;
   ctx.compute_extract_outputs = &compute_extract_expected;
 
-  action::run_update_memory(event::update_memory{
+  action::run_reserve_memory(event::reserve_memory{
                               .error_out = &err,
                             },
                             ctx);
   REQUIRE(err == EMEL_OK);
 
-  action::run_prepare_memory_batch(event::prepare_memory_batch{
+  action::run_allocate_memory_batch(event::allocate_memory_batch{
                                      .error_out = &err,
-                                     .retryable_out = &retryable,
                                    },
                                    ctx);
   REQUIRE(err == EMEL_OK);
@@ -457,15 +442,13 @@ TEST_CASE("decoder_action_process_and_rollback_error_paths") {
     ctx.seq_primary_ids = seq_primary_ids.data();
     ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
-    bool retryable = false;
-    action::run_update_memory(event::update_memory{
+    action::run_reserve_memory(event::reserve_memory{
                                 .error_out = &err,
                               },
                               ctx);
     REQUIRE(err == EMEL_OK);
-    action::run_prepare_memory_batch(event::prepare_memory_batch{
+    action::run_allocate_memory_batch(event::allocate_memory_batch{
                                        .error_out = &err,
-                                       .retryable_out = &retryable,
                                      },
                                      ctx);
     REQUIRE(err == EMEL_OK);
@@ -514,9 +497,8 @@ TEST_CASE("decoder_action_helper_branches_and_dispatch_paths") {
                                  ctx);
   CHECK(err == EMEL_ERR_BACKEND);
 
-  action::run_optimize_memory(event::decode{}, ctx);
-  action::run_update_memory(event::decode{}, ctx);
-  action::run_prepare_memory_batch(event::decode{}, ctx);
+  action::run_reserve_memory(event::decode{}, ctx);
+  action::run_allocate_memory_batch(event::decode{}, ctx);
   action::run_rollback_ubatch(event::decode{}, ctx);
   action::run_finalize_outputs(event::decode{}, ctx);
 
@@ -671,8 +653,8 @@ TEST_CASE("decoder_action_null_pointer_and_template_overload_paths") {
   action::run_validate(event::validate{}, ctx);
   action::run_batch_tokens(event::batch_tokens{}, ctx);
   action::run_initialize_batch(event::initialize_batch{}, ctx);
-  action::run_update_memory(event::update_memory{}, ctx);
-  action::run_optimize_memory(event::optimize_memory{}, ctx);
+  action::run_reserve_memory(event::reserve_memory{}, ctx);
+  action::run_allocate_memory_batch(event::allocate_memory_batch{}, ctx);
   action::run_reserve_output(event::reserve_output{}, ctx);
   action::reject_invalid_reserve_output(event::reserve_output{}, ctx);
   action::run_process_ubatch(event::process_ubatch{}, ctx);
@@ -783,7 +765,7 @@ TEST_CASE("decoder_action_batch_initialize_and_memory_failure_edges") {
   {
     decoder_context ctx{};
     ctx.memory_coordinator.reset();
-    action::run_update_memory(event::update_memory{
+    action::run_reserve_memory(event::reserve_memory{
                                 .error_out = &err,
                               },
                               ctx);
@@ -798,7 +780,7 @@ TEST_CASE("decoder_action_batch_initialize_and_memory_failure_edges") {
       .token_count = 1,
       .error_out = &coordinator_err,
     }));
-    action::run_update_memory(event::update_memory{
+    action::run_reserve_memory(event::reserve_memory{
                                 .error_out = &err,
                               },
                               ctx);
@@ -808,27 +790,22 @@ TEST_CASE("decoder_action_batch_initialize_and_memory_failure_edges") {
 
   {
     decoder_context ctx{};
-    bool retryable = true;
     ctx.ubatches_total = 1;
     ctx.ubatch_seq_ids[0] = -1;
     ctx.ubatch_sizes[0] = 1;
-    action::run_prepare_memory_batch(event::prepare_memory_batch{
+    action::run_allocate_memory_batch(event::allocate_memory_batch{
                                        .error_out = &err,
-                                       .retryable_out = &retryable,
                                      },
                                      ctx);
     const bool expected_error = err == EMEL_ERR_INVALID_ARGUMENT || err == EMEL_ERR_BACKEND;
     CHECK(expected_error);
-    CHECK_FALSE(retryable);
   }
 
   {
     decoder_context ctx{};
     ctx.memory_coordinator.reset();
-    bool retryable = true;
-    action::run_prepare_memory_batch(event::prepare_memory_batch{
+    action::run_allocate_memory_batch(event::allocate_memory_batch{
                                        .error_out = &err,
-                                       .retryable_out = &retryable,
                                      },
                                      ctx);
     CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
@@ -836,14 +813,14 @@ TEST_CASE("decoder_action_batch_initialize_and_memory_failure_edges") {
 
   {
     decoder_context ctx{};
-    action::run_prepare_memory_batch(event::prepare_memory_batch{}, ctx);
+    action::run_allocate_memory_batch(event::allocate_memory_batch{}, ctx);
     CHECK(ctx.phase_error == EMEL_OK);
   }
 
   {
     decoder_context ctx{};
     ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
-    action::run_update_memory(event::update_memory{
+    action::run_reserve_memory(event::reserve_memory{
                                 .error_out = &err,
                               },
                               ctx);
@@ -861,7 +838,7 @@ TEST_CASE("decoder_action_batch_initialize_and_memory_failure_edges") {
   {
     decoder_context ctx{};
     ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
-    action::run_update_memory(event::update_memory{
+    action::run_reserve_memory(event::reserve_memory{
                                 .error_out = &err,
                               },
                               ctx);

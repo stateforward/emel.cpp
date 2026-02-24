@@ -13,7 +13,6 @@ struct preparing {};
 struct partitioning_select {};
 struct partitioning_bpe_no_specials {};
 struct partitioning_bpe_with_specials {};
-struct partitioning_non_bpe {};
 struct partition_decision {};
 struct done {};
 struct errored {};
@@ -25,10 +24,9 @@ struct unexpected {};
  * state purposes:
  * - `idle`: wait for preprocess intent.
  * - `preparing`: build special-token cache for the vocab.
- * - `partitioning_select`: route to the correct partitioning behavior.
+ * - `partitioning_select`: route to BPE partitioning behavior.
  * - `partitioning_bpe_no_specials`: split raw text into BPE fragments without specials.
  * - `partitioning_bpe_with_specials`: split raw text into fragments with specials isolated.
- * - `partitioning_non_bpe`: split raw text into fragments with specials isolated.
  * - `partition_decision`: branch on partition success/failure.
  * - `done`/`errored`: terminal outcomes for a request.
  * - `unexpected`: sequencing contract violation.
@@ -36,12 +34,11 @@ struct unexpected {};
  * guard semantics:
  * - `valid_request`/`invalid_request`: validate request pointers and capacity.
  * - `phase_ok`/`phase_failed`: observe error set by actions.
- * - `bpe_no_specials`/`bpe_with_specials`/`not_bpe`: choose partition strategy.
+ * - `no_specials`/`has_specials`: choose BPE partition strategy.
  *
  * action side effects:
  * - `begin_preprocess`: capture inputs and reset outputs.
  * - `build_specials`: build cached special-token inventory.
- * - `partition_non_bpe`: populate output fragments for non-BPE vocabularies.
  * - `partition_bpe_no_specials`: populate output fragments without special tokens.
  * - `partition_bpe_with_specials`: populate output fragments with special tokens.
  * - `mark_done`: clear error state.
@@ -60,18 +57,14 @@ struct model {
 
         sml::state<preparing> / action::build_specials =
                 sml::state<partitioning_select>,
-        sml::state<partitioning_select>[guard::bpe_no_specials{}] =
+        sml::state<partitioning_select>[guard::no_specials{}] =
                 sml::state<partitioning_bpe_no_specials>,
-        sml::state<partitioning_select>[guard::bpe_with_specials{}] =
+        sml::state<partitioning_select>[guard::has_specials{}] =
                 sml::state<partitioning_bpe_with_specials>,
-        sml::state<partitioning_select>[guard::not_bpe{}] =
-                sml::state<partitioning_non_bpe>,
 
         sml::state<partitioning_bpe_no_specials> / action::partition_bpe_no_specials =
                 sml::state<partition_decision>,
         sml::state<partitioning_bpe_with_specials> / action::partition_bpe_with_specials =
-                sml::state<partition_decision>,
-        sml::state<partitioning_non_bpe> / action::partition_non_bpe =
                 sml::state<partition_decision>,
 
         sml::state<partition_decision>[guard::phase_failed{}] /
@@ -103,8 +96,6 @@ struct model {
         sml::state<partitioning_bpe_no_specials> + sml::unexpected_event<sml::_> /
                 action::on_unexpected = sml::state<unexpected>,
         sml::state<partitioning_bpe_with_specials> + sml::unexpected_event<sml::_> /
-                action::on_unexpected = sml::state<unexpected>,
-        sml::state<partitioning_non_bpe> + sml::unexpected_event<sml::_> /
                 action::on_unexpected = sml::state<unexpected>,
         sml::state<partition_decision> + sml::unexpected_event<sml::_> /
                 action::on_unexpected = sml::state<unexpected>,
