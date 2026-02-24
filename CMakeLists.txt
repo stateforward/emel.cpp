@@ -115,7 +115,7 @@ if(EMEL_ENABLE_TESTS)
     tests/batch/planner/planner_action_branch_tests.cpp
     tests/batch/planner/planner_sm_transition_tests.cpp
     tests/batch/planner/planner_sm_flow_tests.cpp
-    tests/token/batcher/sanitizer_tests.cpp
+    tests/token/batcher/lifecycle_tests.cpp
     tests/memory/kv/lifecycle_tests.cpp
     tests/memory/recurrent/lifecycle_tests.cpp
     tests/memory/hybrid/lifecycle_tests.cpp

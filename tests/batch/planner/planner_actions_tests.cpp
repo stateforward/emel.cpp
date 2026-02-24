@@ -8,8 +8,6 @@
 #include "emel/callback.hpp"
 #include "emel/emel.h"
 
-// TODO(rearchitecture-cleanup): Keep legacy "batch_splitter_*" test names until
-// external references to current test IDs are migrated.
 
 namespace {
 
@@ -18,7 +16,7 @@ struct done_capture {
   int32_t total_outputs = 0;
   int32_t calls = 0;
 
-  void on_done(const emel::batch::planner::events::splitting_done & ev) noexcept {
+  void on_done(const emel::batch::planner::events::plan_done & ev) noexcept {
     calls += 1;
     ubatch_count = ev.ubatch_count;
     total_outputs = ev.total_outputs;
@@ -29,40 +27,40 @@ struct error_capture {
   int32_t err = EMEL_OK;
   int32_t calls = 0;
 
-  void on_error(const emel::batch::planner::events::splitting_error & ev) noexcept {
+  void on_error(const emel::batch::planner::events::plan_error & ev) noexcept {
     calls += 1;
     err = ev.err;
   }
 };
 
-inline emel::callback<void(const emel::batch::planner::events::splitting_done &)> make_done(
+inline emel::callback<void(const emel::batch::planner::events::plan_done &)> make_done(
     done_capture * capture) {
-  return emel::callback<void(const emel::batch::planner::events::splitting_done &)>::from<
+  return emel::callback<void(const emel::batch::planner::events::plan_done &)>::from<
     done_capture,
     &done_capture::on_done>(capture);
 }
 
-inline emel::callback<void(const emel::batch::planner::events::splitting_error &)> make_error(
+inline emel::callback<void(const emel::batch::planner::events::plan_error &)> make_error(
     error_capture * capture) {
-  return emel::callback<void(const emel::batch::planner::events::splitting_error &)>::from<
+  return emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
     error_capture,
     &error_capture::on_error>(capture);
 }
 
 }  // namespace
 
-TEST_CASE("batch_splitter_actions_begin_split_copies_request") {
+TEST_CASE("batch_planner_actions_begin_plan_copies_request") {
   emel::batch::planner::action::context ctx{};
   std::array<int32_t, 3> tokens = {{1, 2, 3}};
   std::array<uint64_t, 3> masks = {{1U, 2U, 3U}};
   std::array<int32_t, 3> primary_ids = {{0, 1, 2}};
   std::array<int8_t, 3> outputs = {{1, 0, 1}};
 
-  emel::batch::planner::event::split request{
+  emel::batch::planner::event::plan request{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 2,
-    .mode = emel::batch::planner::event::split_mode::seq,
+    .mode = emel::batch::planner::event::plan_mode::seq,
     .seq_masks = masks.data(),
     .seq_masks_count = static_cast<int32_t>(masks.size()),
     .seq_primary_ids = primary_ids.data(),
@@ -74,12 +72,12 @@ TEST_CASE("batch_splitter_actions_begin_split_copies_request") {
     .output_all = true,
   };
 
-  emel::batch::planner::action::begin_split(request, ctx);
+  emel::batch::planner::action::begin_plan(request, ctx);
 
   CHECK(ctx.token_ids == tokens.data());
   CHECK(ctx.n_tokens == 3);
   CHECK(ctx.requested_n_ubatch == 2);
-  CHECK(ctx.mode == emel::batch::planner::event::split_mode::seq);
+  CHECK(ctx.mode == emel::batch::planner::event::plan_mode::seq);
   CHECK(ctx.seq_masks == masks.data());
   CHECK(ctx.seq_masks_count == static_cast<int32_t>(masks.size()));
   CHECK(ctx.seq_primary_ids == primary_ids.data());
@@ -93,7 +91,7 @@ TEST_CASE("batch_splitter_actions_begin_split_copies_request") {
   CHECK(ctx.total_outputs == 0);
 }
 
-TEST_CASE("batch_splitter_actions_normalize_batch_clamps_requested") {
+TEST_CASE("batch_planner_actions_normalize_batch_clamps_requested") {
   emel::batch::planner::action::context ctx{};
 
   ctx.n_tokens = 4;
@@ -106,7 +104,7 @@ TEST_CASE("batch_splitter_actions_normalize_batch_clamps_requested") {
   CHECK(ctx.effective_n_ubatch == 4);
 }
 
-TEST_CASE("batch_splitter_actions_sequence_mask_normalization_variants") {
+TEST_CASE("batch_planner_actions_sequence_mask_normalization_variants") {
   emel::batch::planner::action::context ctx{};
   std::array<uint64_t, 3> seq_masks = {{7U, 1U, 2U}};
   std::array<int32_t, 3> seq_primary_ids = {{2, 1, 5}};
@@ -126,7 +124,7 @@ TEST_CASE("batch_splitter_actions_sequence_mask_normalization_variants") {
   CHECK(emel::batch::planner::action::normalized_seq_mask(ctx, 2)[0] == (uint64_t{1} << 5));
 }
 
-TEST_CASE("batch_splitter_actions_push_ubatch_size_limits") {
+TEST_CASE("batch_planner_actions_push_ubatch_size_limits") {
   emel::batch::planner::action::context ctx{};
 
   CHECK_FALSE(emel::batch::planner::action::push_ubatch_size(ctx, 0));
@@ -135,13 +133,13 @@ TEST_CASE("batch_splitter_actions_push_ubatch_size_limits") {
   CHECK_FALSE(emel::batch::planner::action::push_ubatch_size(ctx, 1));
 }
 
-TEST_CASE("batch_splitter_actions_create_ubatches_simple_success") {
+TEST_CASE("batch_planner_actions_create_ubatches_simple_success") {
   emel::batch::planner::action::context ctx{};
   std::array<int32_t, 4> tokens = {{1, 2, 3, 4}};
 
   ctx.token_ids = tokens.data();
   ctx.n_tokens = static_cast<int32_t>(tokens.size());
-  ctx.mode = emel::batch::planner::event::split_mode::simple;
+  ctx.mode = emel::batch::planner::event::plan_mode::simple;
   ctx.effective_n_ubatch = 2;
 
   emel::batch::planner::action::create_ubatches_simple(ctx);
@@ -150,13 +148,13 @@ TEST_CASE("batch_splitter_actions_create_ubatches_simple_success") {
   CHECK(ctx.ubatch_sizes[1] == 2);
 }
 
-TEST_CASE("batch_splitter_actions_create_ubatches_equal_without_masks") {
+TEST_CASE("batch_planner_actions_create_ubatches_equal_without_masks") {
   emel::batch::planner::action::context ctx{};
   std::array<int32_t, 5> tokens = {{1, 2, 3, 4, 5}};
 
   ctx.token_ids = tokens.data();
   ctx.n_tokens = static_cast<int32_t>(tokens.size());
-  ctx.mode = emel::batch::planner::event::split_mode::equal;
+  ctx.mode = emel::batch::planner::event::plan_mode::equal;
   ctx.effective_n_ubatch = 2;
   ctx.seq_masks = nullptr;
   ctx.seq_primary_ids = nullptr;
@@ -168,7 +166,7 @@ TEST_CASE("batch_splitter_actions_create_ubatches_equal_without_masks") {
   CHECK(ctx.ubatch_sizes[2] == 1);
 }
 
-TEST_CASE("batch_splitter_actions_create_ubatches_equal_skips_nonconsecutive_primary") {
+TEST_CASE("batch_planner_actions_create_ubatches_equal_skips_nonconsecutive_primary") {
   emel::batch::planner::action::context ctx{};
   std::array<int32_t, 3> tokens = {{1, 2, 3}};
   std::array<uint64_t, 3> masks = {{1U, 2U, 4U}};
@@ -176,7 +174,7 @@ TEST_CASE("batch_splitter_actions_create_ubatches_equal_skips_nonconsecutive_pri
 
   ctx.token_ids = tokens.data();
   ctx.n_tokens = static_cast<int32_t>(tokens.size());
-  ctx.mode = emel::batch::planner::event::split_mode::equal;
+  ctx.mode = emel::batch::planner::event::plan_mode::equal;
   ctx.effective_n_ubatch = 2;
   ctx.seq_masks = masks.data();
   ctx.seq_primary_ids = primary_ids.data();
@@ -188,14 +186,14 @@ TEST_CASE("batch_splitter_actions_create_ubatches_equal_skips_nonconsecutive_pri
   CHECK(ctx.ubatch_sizes[1] == 1);
 }
 
-TEST_CASE("batch_splitter_actions_create_ubatches_seq_with_masks") {
+TEST_CASE("batch_planner_actions_create_ubatches_seq_with_masks") {
   emel::batch::planner::action::context ctx{};
   std::array<int32_t, 4> tokens = {{1, 2, 3, 4}};
   std::array<uint64_t, 4> masks = {{3U, 1U, 2U, 1U}};
 
   ctx.token_ids = tokens.data();
   ctx.n_tokens = static_cast<int32_t>(tokens.size());
-  ctx.mode = emel::batch::planner::event::split_mode::seq;
+  ctx.mode = emel::batch::planner::event::plan_mode::seq;
   ctx.effective_n_ubatch = 3;
   ctx.seq_masks = masks.data();
 
@@ -205,7 +203,7 @@ TEST_CASE("batch_splitter_actions_create_ubatches_seq_with_masks") {
   CHECK(ctx.ubatch_sizes[1] == 1);
 }
 
-TEST_CASE("batch_splitter_actions_mask_helpers_cover_edges") {
+TEST_CASE("batch_planner_actions_mask_helpers_cover_edges") {
   using emel::batch::planner::action::mask_any_set;
   using emel::batch::planner::action::mask_equal;
   using emel::batch::planner::action::mask_has_multiple_bits;
@@ -240,7 +238,7 @@ TEST_CASE("batch_splitter_actions_mask_helpers_cover_edges") {
   }
 }
 
-TEST_CASE("batch_splitter_actions_count_total_outputs_variants") {
+TEST_CASE("batch_planner_actions_count_total_outputs_variants") {
   emel::batch::planner::action::context ctx{};
   std::array<int8_t, 3> output_mask = {{1, 0, 1}};
 
@@ -257,7 +255,7 @@ TEST_CASE("batch_splitter_actions_count_total_outputs_variants") {
   CHECK(emel::batch::planner::action::count_total_outputs(ctx) == 2);
 }
 
-TEST_CASE("batch_splitter_actions_reject_overflow_helpers") {
+TEST_CASE("batch_planner_actions_reject_overflow_helpers") {
   emel::batch::planner::action::context ctx{};
 
   ctx.token_indices_count = emel::batch::planner::action::MAX_UBATCHES;
@@ -267,7 +265,7 @@ TEST_CASE("batch_splitter_actions_reject_overflow_helpers") {
   CHECK_FALSE(emel::batch::planner::action::begin_ubatch(ctx));
 }
 
-TEST_CASE("batch_splitter_actions_create_ubatches_simple_fails_on_index_overflow") {
+TEST_CASE("batch_planner_actions_create_ubatches_simple_fails_on_index_overflow") {
   emel::batch::planner::action::context ctx{};
   const size_t token_count =
       static_cast<size_t>(emel::batch::planner::action::MAX_UBATCHES) + 1U;
@@ -275,7 +273,7 @@ TEST_CASE("batch_splitter_actions_create_ubatches_simple_fails_on_index_overflow
 
   ctx.token_ids = tokens.data();
   ctx.n_tokens = static_cast<int32_t>(tokens.size());
-  ctx.mode = emel::batch::planner::event::split_mode::simple;
+  ctx.mode = emel::batch::planner::event::plan_mode::simple;
   ctx.effective_n_ubatch = static_cast<int32_t>(tokens.size());
 
   emel::batch::planner::action::create_ubatches_simple(ctx);
@@ -283,7 +281,7 @@ TEST_CASE("batch_splitter_actions_create_ubatches_simple_fails_on_index_overflow
   CHECK(ctx.total_outputs == 0);
 }
 
-TEST_CASE("batch_splitter_actions_create_ubatches_simple_fails_on_ubatch_overflow") {
+TEST_CASE("batch_planner_actions_create_ubatches_simple_fails_on_ubatch_overflow") {
   emel::batch::planner::action::context ctx{};
   const size_t token_count =
       static_cast<size_t>(emel::batch::planner::action::MAX_UBATCHES) + 1U;
@@ -291,7 +289,7 @@ TEST_CASE("batch_splitter_actions_create_ubatches_simple_fails_on_ubatch_overflo
 
   ctx.token_ids = tokens.data();
   ctx.n_tokens = static_cast<int32_t>(tokens.size());
-  ctx.mode = emel::batch::planner::event::split_mode::simple;
+  ctx.mode = emel::batch::planner::event::plan_mode::simple;
   ctx.effective_n_ubatch = 1;
 
   emel::batch::planner::action::create_ubatches_simple(ctx);
@@ -299,13 +297,13 @@ TEST_CASE("batch_splitter_actions_create_ubatches_simple_fails_on_ubatch_overflo
   CHECK(ctx.total_outputs == 0);
 }
 
-TEST_CASE("batch_splitter_actions_create_ubatches_equal_rejects_zero_batch") {
+TEST_CASE("batch_planner_actions_create_ubatches_equal_rejects_zero_batch") {
   emel::batch::planner::action::context ctx{};
   std::array<int32_t, 2> tokens = {{1, 2}};
 
   ctx.token_ids = tokens.data();
   ctx.n_tokens = static_cast<int32_t>(tokens.size());
-  ctx.mode = emel::batch::planner::event::split_mode::equal;
+  ctx.mode = emel::batch::planner::event::plan_mode::equal;
   ctx.effective_n_ubatch = 0;
 
   emel::batch::planner::action::create_ubatches_equal(ctx);
@@ -313,14 +311,14 @@ TEST_CASE("batch_splitter_actions_create_ubatches_equal_rejects_zero_batch") {
   CHECK(ctx.total_outputs == 0);
 }
 
-TEST_CASE("batch_splitter_actions_create_ubatches_equal_fails_when_groups_exceed_capacity") {
+TEST_CASE("batch_planner_actions_create_ubatches_equal_fails_when_groups_exceed_capacity") {
   emel::batch::planner::action::context ctx{};
   std::array<int32_t, 2> tokens = {{1, 2}};
   std::array<uint64_t, 2> masks = {{1U, 2U}};
 
   ctx.token_ids = tokens.data();
   ctx.n_tokens = static_cast<int32_t>(tokens.size());
-  ctx.mode = emel::batch::planner::event::split_mode::equal;
+  ctx.mode = emel::batch::planner::event::plan_mode::equal;
   ctx.effective_n_ubatch = 1;
   ctx.seq_masks = masks.data();
   ctx.seq_masks_count = static_cast<int32_t>(masks.size());
@@ -331,13 +329,13 @@ TEST_CASE("batch_splitter_actions_create_ubatches_equal_fails_when_groups_exceed
   CHECK(ctx.total_outputs == 0);
 }
 
-TEST_CASE("batch_splitter_actions_create_ubatches_seq_without_masks_failure") {
+TEST_CASE("batch_planner_actions_create_ubatches_seq_without_masks_failure") {
   emel::batch::planner::action::context ctx{};
   std::array<int32_t, 2> tokens = {{1, 2}};
 
   ctx.token_ids = tokens.data();
   ctx.n_tokens = static_cast<int32_t>(tokens.size());
-  ctx.mode = emel::batch::planner::event::split_mode::seq;
+  ctx.mode = emel::batch::planner::event::plan_mode::seq;
   ctx.effective_n_ubatch = 0;
   ctx.seq_masks = nullptr;
 
@@ -346,13 +344,13 @@ TEST_CASE("batch_splitter_actions_create_ubatches_seq_without_masks_failure") {
   CHECK(ctx.total_outputs == 0);
 }
 
-TEST_CASE("batch_splitter_actions_create_ubatches_failures_reset_outputs") {
+TEST_CASE("batch_planner_actions_create_ubatches_failures_reset_outputs") {
   emel::batch::planner::action::context ctx{};
   std::array<int32_t, 2> tokens = {{1, 2}};
 
   ctx.token_ids = tokens.data();
   ctx.n_tokens = static_cast<int32_t>(tokens.size());
-  ctx.mode = emel::batch::planner::event::split_mode::simple;
+  ctx.mode = emel::batch::planner::event::plan_mode::simple;
   ctx.effective_n_ubatch = 0;
 
   emel::batch::planner::action::create_ubatches_simple(ctx);
@@ -360,7 +358,7 @@ TEST_CASE("batch_splitter_actions_create_ubatches_failures_reset_outputs") {
   CHECK(ctx.total_outputs == 0);
 }
 
-TEST_CASE("batch_splitter_actions_dispatch_helpers_cover_callbacks") {
+TEST_CASE("batch_planner_actions_dispatch_helpers_cover_callbacks") {
   emel::batch::planner::action::context ctx{};
   done_capture done{};
   error_capture error{};
@@ -369,7 +367,7 @@ TEST_CASE("batch_splitter_actions_dispatch_helpers_cover_callbacks") {
   ctx.ubatch_count = 1;
   ctx.total_outputs = 2;
 
-  emel::batch::planner::event::split request{
+  emel::batch::planner::event::plan request{
     .on_done = make_done(&done),
     .on_error = make_error(&error),
   };
@@ -383,7 +381,7 @@ TEST_CASE("batch_splitter_actions_dispatch_helpers_cover_callbacks") {
   CHECK(error.calls == 1);
   CHECK(error.err == EMEL_ERR_INVALID_ARGUMENT);
 
-  emel::batch::planner::action::dispatch_split_failed(request);
+  emel::batch::planner::action::dispatch_plan_failed(request);
   CHECK(error.calls == 2);
   CHECK(error.err == EMEL_ERR_BACKEND);
 
@@ -392,16 +390,16 @@ TEST_CASE("batch_splitter_actions_dispatch_helpers_cover_callbacks") {
   CHECK(error.err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
-TEST_CASE("batch_splitter_actions_dispatch_helpers_skip_missing_callbacks") {
+TEST_CASE("batch_planner_actions_dispatch_helpers_skip_missing_callbacks") {
   emel::batch::planner::action::context ctx{};
-  emel::batch::planner::event::split request{};
+  emel::batch::planner::event::plan request{};
 
   CHECK_FALSE(static_cast<bool>(request.on_done));
   CHECK_FALSE(static_cast<bool>(request.on_error));
 
   emel::batch::planner::action::dispatch_done(request, ctx);
   emel::batch::planner::action::dispatch_invalid_request(request);
-  emel::batch::planner::action::dispatch_split_failed(request);
+  emel::batch::planner::action::dispatch_plan_failed(request);
   emel::batch::planner::action::dispatch_unexpected(request);
   CHECK(true);
 }

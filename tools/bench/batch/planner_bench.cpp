@@ -14,16 +14,13 @@
 #include "llama-batch.h"
 #include "llama-vocab.h"
 
-// TODO(rearchitecture-cleanup): Keep legacy "splitter" helper names and benchmark IDs
-// until downstream references and snapshot consumers are migrated.
-
 namespace {
 
-constexpr int32_t k_split_token_count = 128;
-constexpr int32_t k_split_ubatch = 32;
-constexpr int32_t k_split_seq_count = 4;
+constexpr int32_t k_plan_token_count = 128;
+constexpr int32_t k_plan_ubatch = 32;
+constexpr int32_t k_plan_seq_count = 4;
 
-struct split_result {
+struct plan_result {
   std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_sizes = {};
   std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_token_indices = {};
   std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES + 1> ubatch_offsets = {};
@@ -33,13 +30,13 @@ struct split_result {
   int32_t err = EMEL_OK;
 };
 
-split_result * g_split_result = nullptr;
+plan_result * g_plan_result = nullptr;
 
-void splitter_done(const emel::batch::planner::events::splitting_done & done) noexcept {
-  if (g_split_result == nullptr) {
+void planner_done(const emel::batch::planner::events::plan_done & done) noexcept {
+  if (g_plan_result == nullptr) {
     return;
   }
-  auto & out = *g_split_result;
+  auto & out = *g_plan_result;
   out.err = EMEL_OK;
   out.ubatch_count = done.ubatch_count;
   out.token_indices_count = done.ubatch_token_indices_count;
@@ -56,28 +53,28 @@ void splitter_done(const emel::batch::planner::events::splitting_done & done) no
   }
 }
 
-void splitter_error(const emel::batch::planner::events::splitting_error & err) noexcept {
-  if (g_split_result == nullptr) {
+void planner_error(const emel::batch::planner::events::plan_error & err) noexcept {
+  if (g_plan_result == nullptr) {
     return;
   }
-  g_split_result->err = err.err;
+  g_plan_result->err = err.err;
 }
 
-struct split_inputs {
-  std::array<int32_t, k_split_token_count> tokens = {};
-  std::array<int32_t, k_split_token_count> seq_primary_ids = {};
+struct plan_inputs {
+  std::array<int32_t, k_plan_token_count> tokens = {};
+  std::array<int32_t, k_plan_token_count> seq_primary_ids = {};
 };
 
-split_inputs make_split_inputs() {
-  split_inputs inputs{};
-  for (int32_t i = 0; i < k_split_token_count; ++i) {
+plan_inputs make_plan_inputs() {
+  plan_inputs inputs{};
+  for (int32_t i = 0; i < k_plan_token_count; ++i) {
     inputs.tokens[static_cast<size_t>(i)] = i;
-    inputs.seq_primary_ids[static_cast<size_t>(i)] = i % k_split_seq_count;
+    inputs.seq_primary_ids[static_cast<size_t>(i)] = i % k_plan_seq_count;
   }
   return inputs;
 }
 
-struct reference_split_state {
+struct reference_plan_state {
   static constexpr uint32_t k_embd = 1;
 
   llama_batch_allocr allocr;
@@ -90,7 +87,7 @@ struct reference_split_state {
   std::vector<llama_seq_id *> seq_id_ptrs;
   uint32_t n_embd = k_embd;
 
-  reference_split_state(uint32_t n_tokens, uint32_t n_seq_max, uint32_t seq_count)
+  reference_plan_state(uint32_t n_tokens, uint32_t n_seq_max, uint32_t seq_count)
       : allocr(1),
         embd(static_cast<size_t>(n_tokens) * k_embd, 0.0f),
         pos(static_cast<size_t>(n_tokens), 0),
@@ -126,7 +123,7 @@ struct reference_split_state {
   }
 };
 
-void reset_split_result(split_result & out) {
+void reset_split_result(plan_result & out) {
   out.ubatch_sizes.fill(0);
   out.ubatch_token_indices.fill(0);
   out.ubatch_offsets.fill(0);
@@ -136,22 +133,22 @@ void reset_split_result(split_result & out) {
   out.err = EMEL_OK;
 }
 
-bool collect_emel_split(emel::batch::planner::event::split_mode mode,
-                        const split_inputs & inputs,
-                        split_result & out) {
+bool collect_emel_plan(emel::batch::planner::event::plan_mode mode,
+                        const plan_inputs & inputs,
+                        plan_result & out) {
   reset_split_result(out);
   emel::batch::planner::sm machine{};
   const auto on_done =
-      emel::callback<void(const emel::batch::planner::events::splitting_done &)>::from<
-          &splitter_done>();
+      emel::callback<void(const emel::batch::planner::events::plan_done &)>::from<
+          &planner_done>();
   const auto on_error =
-      emel::callback<void(const emel::batch::planner::events::splitting_error &)>::from<
-          &splitter_error>();
+      emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
+          &planner_error>();
 
-  emel::batch::planner::event::split request = {
+  emel::batch::planner::event::plan request = {
     .token_ids = inputs.tokens.data(),
-    .n_tokens = k_split_token_count,
-    .n_ubatch = k_split_ubatch,
+    .n_tokens = k_plan_token_count,
+    .n_ubatch = k_plan_ubatch,
     .mode = mode,
     .seq_masks = nullptr,
     .seq_masks_count = 0,
@@ -166,36 +163,36 @@ bool collect_emel_split(emel::batch::planner::event::split_mode mode,
     .on_error = on_error,
   };
 
-  if (mode != emel::batch::planner::event::split_mode::simple) {
+  if (mode != emel::batch::planner::event::plan_mode::simple) {
     request.seq_primary_ids = inputs.seq_primary_ids.data();
-    request.seq_primary_ids_count = k_split_token_count;
+    request.seq_primary_ids_count = k_plan_token_count;
   }
 
-  g_split_result = &out;
+  g_plan_result = &out;
   (void)machine.process_event(request);
-  g_split_result = nullptr;
+  g_plan_result = nullptr;
 
   return out.err == EMEL_OK;
 }
 
-bool collect_llama_split(emel::batch::planner::event::split_mode mode,
-                         split_result & out) {
+bool collect_llama_plan(emel::batch::planner::event::plan_mode mode,
+                         plan_result & out) {
   reset_split_result(out);
   const int32_t seq_count =
-    mode == emel::batch::planner::event::split_mode::simple ? 1 : k_split_seq_count;
-  reference_split_state state(k_split_token_count,
+    mode == emel::batch::planner::event::plan_mode::simple ? 1 : k_plan_seq_count;
+  reference_plan_state state(k_plan_token_count,
                               static_cast<uint32_t>(seq_count),
                               static_cast<uint32_t>(seq_count));
   state.allocr.split_reset();
 
   auto split_next = [&]() -> llama_ubatch {
     switch (mode) {
-      case emel::batch::planner::event::split_mode::simple:
-        return state.allocr.split_simple(k_split_ubatch);
-      case emel::batch::planner::event::split_mode::equal:
-        return state.allocr.split_equal(k_split_ubatch, true);
-      case emel::batch::planner::event::split_mode::seq:
-        return state.allocr.split_seq(k_split_ubatch);
+      case emel::batch::planner::event::plan_mode::simple:
+        return state.allocr.split_simple(k_plan_ubatch);
+      case emel::batch::planner::event::plan_mode::equal:
+        return state.allocr.split_equal(k_plan_ubatch, true);
+      case emel::batch::planner::event::plan_mode::seq:
+        return state.allocr.split_seq(k_plan_ubatch);
     }
     return {};
   };
@@ -231,8 +228,8 @@ bool collect_llama_split(emel::batch::planner::event::split_mode mode,
   return true;
 }
 
-bool compare_split_results(const split_result & lhs,
-                           const split_result & rhs,
+bool compare_plan_results(const plan_result & lhs,
+                           const plan_result & rhs,
                            const char * label) {
   if (lhs.err != EMEL_OK || rhs.err != EMEL_OK) {
     std::fprintf(stderr, "error: splitter parity failed (%s): err %d vs %d\n",
@@ -296,33 +293,33 @@ void ensure_splitter_parity() {
   }
   checked = true;
 
-  const auto inputs = make_split_inputs();
-  split_result emel_out;
-  split_result llama_out;
+  const auto inputs = make_plan_inputs();
+  plan_result emel_out;
+  plan_result llama_out;
 
-  if (!collect_emel_split(emel::batch::planner::event::split_mode::simple,
+  if (!collect_emel_plan(emel::batch::planner::event::plan_mode::simple,
                           inputs,
                           emel_out) ||
-      !collect_llama_split(emel::batch::planner::event::split_mode::simple, llama_out) ||
-      !compare_split_results(emel_out, llama_out, "simple")) {
+      !collect_llama_plan(emel::batch::planner::event::plan_mode::simple, llama_out) ||
+      !compare_plan_results(emel_out, llama_out, "simple")) {
     std::fprintf(stderr, "error: splitter parity check failed (simple)\n");
     std::exit(1);
   }
 
-  if (!collect_emel_split(emel::batch::planner::event::split_mode::equal,
+  if (!collect_emel_plan(emel::batch::planner::event::plan_mode::equal,
                           inputs,
                           emel_out) ||
-      !collect_llama_split(emel::batch::planner::event::split_mode::equal, llama_out) ||
-      !compare_split_results(emel_out, llama_out, "equal")) {
+      !collect_llama_plan(emel::batch::planner::event::plan_mode::equal, llama_out) ||
+      !compare_plan_results(emel_out, llama_out, "equal")) {
     std::fprintf(stderr, "error: splitter parity check failed (equal)\n");
     std::exit(1);
   }
 
-  if (!collect_emel_split(emel::batch::planner::event::split_mode::seq,
+  if (!collect_emel_plan(emel::batch::planner::event::plan_mode::seq,
                           inputs,
                           emel_out) ||
-      !collect_llama_split(emel::batch::planner::event::split_mode::seq, llama_out) ||
-      !compare_split_results(emel_out, llama_out, "seq")) {
+      !collect_llama_plan(emel::batch::planner::event::plan_mode::seq, llama_out) ||
+      !compare_plan_results(emel_out, llama_out, "seq")) {
     std::fprintf(stderr, "error: splitter parity check failed (seq)\n");
     std::exit(1);
   }
@@ -336,19 +333,19 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
   ensure_splitter_parity();
   {
     emel::batch::planner::sm machine{};
-    const auto inputs = make_split_inputs();
+    const auto inputs = make_plan_inputs();
     const auto on_done =
-        emel::callback<void(const emel::batch::planner::events::splitting_done &)>::from<
-            &splitter_done>();
+        emel::callback<void(const emel::batch::planner::events::plan_done &)>::from<
+            &planner_done>();
     const auto on_error =
-        emel::callback<void(const emel::batch::planner::events::splitting_error &)>::from<
-            &splitter_error>();
+        emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
+            &planner_error>();
 
-    emel::batch::planner::event::split request = {
+    emel::batch::planner::event::plan request = {
       .token_ids = inputs.tokens.data(),
-      .n_tokens = k_split_token_count,
-      .n_ubatch = k_split_ubatch,
-      .mode = emel::batch::planner::event::split_mode::simple,
+      .n_tokens = k_plan_token_count,
+      .n_ubatch = k_plan_ubatch,
+      .mode = emel::batch::planner::event::plan_mode::simple,
       .seq_masks = nullptr,
       .seq_masks_count = 0,
       .seq_primary_ids = nullptr,
@@ -368,23 +365,23 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
 
   {
     emel::batch::planner::sm machine{};
-    const auto inputs = make_split_inputs();
+    const auto inputs = make_plan_inputs();
     const auto on_done =
-        emel::callback<void(const emel::batch::planner::events::splitting_done &)>::from<
-            &splitter_done>();
+        emel::callback<void(const emel::batch::planner::events::plan_done &)>::from<
+            &planner_done>();
     const auto on_error =
-        emel::callback<void(const emel::batch::planner::events::splitting_error &)>::from<
-            &splitter_error>();
+        emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
+            &planner_error>();
 
-    emel::batch::planner::event::split request = {
+    emel::batch::planner::event::plan request = {
       .token_ids = inputs.tokens.data(),
-      .n_tokens = k_split_token_count,
-      .n_ubatch = k_split_ubatch,
-      .mode = emel::batch::planner::event::split_mode::equal,
+      .n_tokens = k_plan_token_count,
+      .n_ubatch = k_plan_ubatch,
+      .mode = emel::batch::planner::event::plan_mode::equal,
       .seq_masks = nullptr,
       .seq_masks_count = 0,
       .seq_primary_ids = inputs.seq_primary_ids.data(),
-      .seq_primary_ids_count = k_split_token_count,
+      .seq_primary_ids_count = k_plan_token_count,
       .equal_sequential = true,
       .seq_mask_words = 1,
       .output_mask = nullptr,
@@ -400,23 +397,23 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
 
   {
     emel::batch::planner::sm machine{};
-    const auto inputs = make_split_inputs();
+    const auto inputs = make_plan_inputs();
     const auto on_done =
-        emel::callback<void(const emel::batch::planner::events::splitting_done &)>::from<
-            &splitter_done>();
+        emel::callback<void(const emel::batch::planner::events::plan_done &)>::from<
+            &planner_done>();
     const auto on_error =
-        emel::callback<void(const emel::batch::planner::events::splitting_error &)>::from<
-            &splitter_error>();
+        emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
+            &planner_error>();
 
-    emel::batch::planner::event::split request = {
+    emel::batch::planner::event::plan request = {
       .token_ids = inputs.tokens.data(),
-      .n_tokens = k_split_token_count,
-      .n_ubatch = k_split_ubatch,
-      .mode = emel::batch::planner::event::split_mode::seq,
+      .n_tokens = k_plan_token_count,
+      .n_ubatch = k_plan_ubatch,
+      .mode = emel::batch::planner::event::plan_mode::seq,
       .seq_masks = nullptr,
       .seq_masks_count = 0,
       .seq_primary_ids = inputs.seq_primary_ids.data(),
-      .seq_primary_ids_count = k_split_token_count,
+      .seq_primary_ids_count = k_plan_token_count,
       .equal_sequential = true,
       .seq_mask_words = 1,
       .output_mask = nullptr,
@@ -433,11 +430,11 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
 
 void append_reference_batch_planner_cases(std::vector<result> & results, const config & cfg) {
   {
-    reference_split_state state(k_split_token_count, 1, 1);
+    reference_plan_state state(k_plan_token_count, 1, 1);
     auto fn = [&]() {
       state.allocr.split_reset();
       while (true) {
-        const auto ubatch = state.allocr.split_simple(k_split_ubatch);
+        const auto ubatch = state.allocr.split_simple(k_plan_ubatch);
         if (ubatch.n_tokens == 0) {
           break;
         }
@@ -447,11 +444,11 @@ void append_reference_batch_planner_cases(std::vector<result> & results, const c
   }
 
   {
-    reference_split_state state(k_split_token_count, k_split_seq_count, k_split_seq_count);
+    reference_plan_state state(k_plan_token_count, k_plan_seq_count, k_plan_seq_count);
     auto fn = [&]() {
       state.allocr.split_reset();
       while (true) {
-        const auto ubatch = state.allocr.split_equal(k_split_ubatch, true);
+        const auto ubatch = state.allocr.split_equal(k_plan_ubatch, true);
         if (ubatch.n_tokens == 0) {
           break;
         }
@@ -461,11 +458,11 @@ void append_reference_batch_planner_cases(std::vector<result> & results, const c
   }
 
   {
-    reference_split_state state(k_split_token_count, k_split_seq_count, k_split_seq_count);
+    reference_plan_state state(k_plan_token_count, k_plan_seq_count, k_plan_seq_count);
     auto fn = [&]() {
       state.allocr.split_reset();
       while (true) {
-        const auto ubatch = state.allocr.split_seq(k_split_ubatch);
+        const auto ubatch = state.allocr.split_seq(k_plan_ubatch);
         if (ubatch.n_tokens == 0) {
           break;
         }

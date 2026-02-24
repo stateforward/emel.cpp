@@ -532,7 +532,7 @@ TEST_CASE("decoder_action_null_pointer_and_template_overload_paths") {
   bool rollback_needed = true;
 
   action::run_validate(event::validate{}, ctx);
-  action::run_sanitize_batch(event::sanitize_batch{}, ctx);
+  action::run_batch_tokens(event::batch_tokens{}, ctx);
   action::run_initialize_batch(event::initialize_batch{}, ctx);
   action::run_update_memory(event::update_memory{}, ctx);
   action::run_optimize_memory(event::optimize_memory{}, ctx);
@@ -563,13 +563,13 @@ TEST_CASE("decoder_action_null_pointer_and_template_overload_paths") {
   CHECK_FALSE(ctx.rollback_needed);
 }
 
-TEST_CASE("decoder_action_sanitize_initialize_and_memory_failure_edges") {
+TEST_CASE("decoder_action_batch_initialize_and_memory_failure_edges") {
   int32_t err = EMEL_OK;
 
   {
     decoder_context ctx{};
-    ctx.batch_sanitizer.reset();
-    action::run_sanitize_batch(event::sanitize_batch{
+    ctx.token_batcher.reset();
+    action::run_batch_tokens(event::batch_tokens{
                                  .error_out = &err,
                                },
                                ctx);
@@ -580,7 +580,7 @@ TEST_CASE("decoder_action_sanitize_initialize_and_memory_failure_edges") {
     decoder_context ctx{};
     ctx.n_tokens = 1;
     ctx.token_ids = nullptr;
-    action::run_sanitize_batch(event::sanitize_batch{
+    action::run_batch_tokens(event::batch_tokens{
                                  .error_out = &err,
                                },
                                ctx);

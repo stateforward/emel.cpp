@@ -258,6 +258,8 @@ TEST_CASE("conditioner_bind_and_prepare_with_default_formatter") {
   int32_t bind_err = EMEL_OK;
   emel::text::conditioner::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
+  bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
+  bind_ev.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   bind_ev.tokenizer_sm = &tokenizer;
   bind_ev.dispatch_tokenizer_bind = tokenizer_bind_dispatch;
   bind_ev.dispatch_tokenizer_tokenize = tokenizer_tokenize_dispatch;
@@ -335,6 +337,8 @@ TEST_CASE("conditioner_uses_injected_formatter_function") {
   int32_t bind_err = EMEL_OK;
   emel::text::conditioner::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
+  bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
+  bind_ev.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   bind_ev.tokenizer_sm = &tokenizer;
   bind_ev.dispatch_tokenizer_bind = tokenizer_bind_dispatch;
   bind_ev.dispatch_tokenizer_tokenize = tokenizer_tokenize_dispatch;
@@ -378,6 +382,8 @@ TEST_CASE("conditioner_action_and_guard_error_paths") {
   CHECK(emel::text::conditioner::guard::invalid_bind{}(bind_ev));
 
   bind_ev.vocab = &vocab;
+  bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
+  bind_ev.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   bind_ev.tokenizer_sm = dummy_ptr;
   bind_ev.dispatch_tokenizer_bind = tokenizer_bind_dispatch;
   bind_ev.dispatch_tokenizer_tokenize = tokenizer_tokenize_dispatch;
@@ -401,6 +407,8 @@ TEST_CASE("conditioner_action_and_guard_error_paths") {
   CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
 
   ctx.vocab = &vocab;
+  ctx.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
+  ctx.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   ctx.tokenizer_sm = dummy_ptr;
   ctx.dispatch_tokenizer_bind = tokenizer_bind_fail_no_error;
   ctx.dispatch_tokenizer_tokenize = tokenizer_tokenize_dispatch;

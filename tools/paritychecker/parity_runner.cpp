@@ -29,6 +29,50 @@ size_t estimate_token_capacity(std::string_view text) {
   return cap;
 }
 
+emel::text::encoders::encoder_kind encoder_kind_for_model(
+    const emel::model::data::tokenizer_model model) {
+  switch (model) {
+    case emel::model::data::tokenizer_model::SPM:
+      return emel::text::encoders::encoder_kind::spm;
+    case emel::model::data::tokenizer_model::BPE:
+      return emel::text::encoders::encoder_kind::bpe;
+    case emel::model::data::tokenizer_model::WPM:
+      return emel::text::encoders::encoder_kind::wpm;
+    case emel::model::data::tokenizer_model::UGM:
+      return emel::text::encoders::encoder_kind::ugm;
+    case emel::model::data::tokenizer_model::RWKV:
+      return emel::text::encoders::encoder_kind::rwkv;
+    case emel::model::data::tokenizer_model::PLAMO2:
+      return emel::text::encoders::encoder_kind::plamo2;
+    case emel::model::data::tokenizer_model::NONE:
+    case emel::model::data::tokenizer_model::UNKNOWN:
+    default:
+      return emel::text::encoders::encoder_kind::fallback;
+  }
+}
+
+emel::text::tokenizer::preprocessor::preprocessor_kind preprocessor_kind_for_model(
+    const emel::model::data::tokenizer_model model) {
+  switch (model) {
+    case emel::model::data::tokenizer_model::SPM:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::spm;
+    case emel::model::data::tokenizer_model::BPE:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
+    case emel::model::data::tokenizer_model::WPM:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::wpm;
+    case emel::model::data::tokenizer_model::UGM:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::ugm;
+    case emel::model::data::tokenizer_model::RWKV:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::rwkv;
+    case emel::model::data::tokenizer_model::PLAMO2:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::plamo2;
+    case emel::model::data::tokenizer_model::NONE:
+    case emel::model::data::tokenizer_model::UNKNOWN:
+    default:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::fallback;
+  }
+}
+
 bool load_emel_vocab(const std::string & model_path, emel::model::data & model,
                      emel::parser::gguf::context & gguf_ctx, int32_t & err_out) {
   err_out = EMEL_OK;
@@ -247,6 +291,8 @@ int run_parity(const parity_options & opts) {
   int32_t bind_err = EMEL_OK;
   emel::text::tokenizer::event::bind bind_ev{};
   bind_ev.vocab = &model->vocab_data;
+  bind_ev.preprocessor_variant = preprocessor_kind_for_model(model->vocab_data.tokenizer_model_id);
+  bind_ev.encoder_variant = encoder_kind_for_model(model->vocab_data.tokenizer_model_id);
   bind_ev.error_out = &bind_err;
   if (!tokenizer.process_event(bind_ev) || bind_err != EMEL_OK) {
     std::fprintf(stderr, "emel tokenizer bind failed: %d\n", bind_err);

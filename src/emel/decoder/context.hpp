@@ -50,25 +50,23 @@ struct context {
                  emel::batch::planner::action::SEQ_WORDS>
       ubatch_seq_masks = {};
   std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_seq_primary_ids = {};
-  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> sanitized_seq_primary_ids = {};
+  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> batched_seq_primary_ids = {};
   std::array<uint64_t,
              emel::batch::planner::action::MAX_UBATCHES *
                  emel::batch::planner::action::SEQ_WORDS>
-      sanitized_seq_masks = {};
+      batched_seq_masks = {};
   std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES * 3>
-      sanitized_positions = {};
-  std::array<int8_t, emel::batch::planner::action::MAX_UBATCHES> sanitized_output_mask = {};
-  int32_t sanitized_outputs_total = 0;
-  int32_t sanitized_positions_count = 0;
-  int32_t sanitized_seq_mask_words = 1;
+      batched_positions = {};
+  std::array<int8_t, emel::batch::planner::action::MAX_UBATCHES> batched_output_mask = {};
+  int32_t batched_outputs_total = 0;
+  int32_t batched_positions_count = 0;
+  int32_t batched_seq_mask_words = 1;
   int32_t token_indices_count = 0;
   int32_t ubatches_total = 0;
   int32_t ubatches_processed = 0;
 
-  std::unique_ptr<emel::token::batcher::sm> batch_sanitizer;
-  // TODO(rearchitecture-cleanup): Rename `batch_splitter` to `batch_planner` after
-  // downstream references to the legacy name are removed.
-  std::unique_ptr<emel::batch::planner::sm> batch_splitter;
+  std::unique_ptr<emel::token::batcher::sm> token_batcher;
+  std::unique_ptr<emel::batch::planner::sm> batch_planner;
   std::unique_ptr<emel::memory::coordinator::any> memory_coordinator;
   std::unique_ptr<emel::graph::processor::sm> ubatch_executor;
 
@@ -91,8 +89,8 @@ struct context {
 };
 
 inline context::context()
-    : batch_sanitizer(std::make_unique<emel::token::batcher::sm>()),
-      batch_splitter(std::make_unique<emel::batch::planner::sm>()),
+    : token_batcher(std::make_unique<emel::token::batcher::sm>()),
+      batch_planner(std::make_unique<emel::batch::planner::sm>()),
       memory_coordinator(std::make_unique<emel::memory::coordinator::any>()),
       ubatch_executor(std::make_unique<emel::graph::processor::sm>()) {
   // one-time heap allocation keeps decoder context small on the stack.

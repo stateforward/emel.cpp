@@ -4,6 +4,8 @@
 #include <string_view>
 
 #include "emel/model/data.hpp"
+#include "emel/text/encoders/any.hpp"
+#include "emel/text/tokenizer/preprocessor/any.hpp"
 
 namespace emel::text::tokenizer::events {
 struct tokenizer_done;
@@ -16,6 +18,10 @@ namespace emel::text::tokenizer::event {
 
 struct bind {
   const emel::model::data::vocab * vocab = nullptr;
+  emel::text::tokenizer::preprocessor::preprocessor_kind preprocessor_variant =
+      emel::text::tokenizer::preprocessor::preprocessor_kind::fallback;
+  emel::text::encoders::encoder_kind encoder_variant =
+      emel::text::encoders::encoder_kind::fallback;
   int32_t * error_out = nullptr;
   void * owner_sm = nullptr;
   bool (*dispatch_done)(void * owner_sm, const events::tokenizer_bind_done &) = nullptr;

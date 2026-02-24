@@ -91,8 +91,8 @@ inline bool mask_empty(const uint64_t * mask, const int32_t words) noexcept {
 
 }  // namespace detail
 
-struct begin_sanitize {
-  void operator()(const event::sanitize_decode & ev, context & ctx) const noexcept {
+struct begin_batch {
+  void operator()(const event::batch & ev, context & ctx) const noexcept {
     ctx.token_ids = ev.token_ids;
     ctx.n_tokens = ev.n_tokens;
     ctx.vocab_size = ev.vocab_size;
@@ -135,8 +135,8 @@ struct begin_sanitize {
   }
 };
 
-struct reject_invalid_sanitize {
-  void operator()(const event::sanitize_decode & ev, context & ctx) const noexcept {
+struct reject_invalid_batch {
+  void operator()(const event::batch & ev, context & ctx) const noexcept {
     ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
     ctx.last_error = EMEL_ERR_INVALID_ARGUMENT;
     if (ev.error_out != nullptr) {
@@ -145,7 +145,7 @@ struct reject_invalid_sanitize {
   }
 };
 
-struct run_sanitize_decode {
+struct run_batch {
   void operator()(context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
 
@@ -325,7 +325,7 @@ struct run_sanitize_decode {
               return false;
             }
           } else {
-            // Preserve legacy no-callback behavior: first-seen coupled sequences
+            // Without an injected seed resolver, first-seen coupled sequences
             // inherit the current token position.
             next_pos[seq_id] = pos;
             seeded[seq_id] = 1;
@@ -538,11 +538,31 @@ struct on_unexpected {
   }
 };
 
-inline constexpr begin_sanitize begin_sanitize{};
-inline constexpr reject_invalid_sanitize reject_invalid_sanitize{};
-inline constexpr run_sanitize_decode run_sanitize_decode{};
+inline constexpr begin_batch begin_batch{};
+inline constexpr reject_invalid_batch reject_invalid_batch{};
+inline constexpr run_batch run_batch{};
 inline constexpr mark_done mark_done{};
 inline constexpr ensure_last_error ensure_last_error{};
 inline constexpr on_unexpected on_unexpected{};
+
+inline constexpr auto dispatch_done = [](const event::batch & ev) noexcept {
+  if (!ev.on_done) {
+    return;
+  }
+  ev.on_done(events::batch_done{
+    .request = &ev,
+  });
+};
+
+inline constexpr auto dispatch_error = [](const event::batch & ev,
+                                          const int32_t err) noexcept {
+  if (!ev.on_error) {
+    return;
+  }
+  ev.on_error(events::batch_error{
+    .err = err,
+    .request = &ev,
+  });
+};
 
 }  // namespace emel::token::batcher::action

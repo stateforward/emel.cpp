@@ -55,6 +55,8 @@ TEST_CASE("tokenizer_bind_and_tokenize_bpe") {
   int32_t bind_err = EMEL_OK;
   emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
+  bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
+  bind_ev.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   bind_ev.error_out = &bind_err;
 
   CHECK(machine.process_event(bind_ev));
@@ -113,6 +115,8 @@ TEST_CASE("tokenizer_tokenize_rejects_mismatched_vocab") {
   int32_t bind_err = EMEL_OK;
   emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
+  bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
+  bind_ev.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   bind_ev.error_out = &bind_err;
   CHECK(machine.process_event(bind_ev));
   CHECK(bind_err == EMEL_OK);

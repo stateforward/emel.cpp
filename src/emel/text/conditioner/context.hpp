@@ -16,6 +16,10 @@ inline constexpr size_t k_max_formatted_bytes = 32768;
 
 struct context {
   const emel::model::data::vocab * vocab = nullptr;
+  emel::text::tokenizer::preprocessor::preprocessor_kind preprocessor_variant =
+      emel::text::tokenizer::preprocessor::preprocessor_kind::fallback;
+  emel::text::encoders::encoder_kind encoder_variant =
+      emel::text::encoders::encoder_kind::fallback;
   void * tokenizer_sm = nullptr;
   bool (*dispatch_tokenizer_bind)(void * tokenizer_sm,
                                   const emel::text::tokenizer::event::bind &) =

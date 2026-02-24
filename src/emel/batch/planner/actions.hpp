@@ -7,8 +7,8 @@
 
 namespace emel::batch::planner::action {
 
-// initializes context for a new split request.
-inline constexpr auto begin_split = [](const event::split & ev, context & ctx) noexcept {
+// initializes context for a new plan request.
+inline constexpr auto begin_plan = [](const event::plan & ev, context & ctx) noexcept {
   ctx.token_ids = ev.token_ids;
   ctx.n_tokens = ev.n_tokens;
   ctx.requested_n_ubatch = ev.n_ubatch;
@@ -167,7 +167,7 @@ inline bool push_ubatch_size(context & ctx, const int32_t size) noexcept {
   return true;
 }
 
-inline void fail_split(context & ctx) noexcept {
+inline void fail_plan(context & ctx) noexcept {
   ctx.ubatch_sizes.fill(0);
   ctx.ubatch_count = 0;
   ctx.total_outputs = 0;
@@ -175,7 +175,7 @@ inline void fail_split(context & ctx) noexcept {
   ctx.ubatch_token_offsets.fill(0);
 }
 
-inline void prepare_split(context & ctx) noexcept {
+inline void prepare_plan(context & ctx) noexcept {
   ctx.ubatch_sizes.fill(0);
   ctx.ubatch_count = 0;
   ctx.total_outputs = count_total_outputs(ctx);
@@ -185,25 +185,25 @@ inline void prepare_split(context & ctx) noexcept {
 
 // materializes micro-batch boundaries in simple mode. on failure, leaves ubatch_count == 0.
 inline auto create_ubatches_simple = [](context & ctx) noexcept {
-  prepare_split(ctx);
+  prepare_plan(ctx);
 
   int32_t next_token = 0;
   while (next_token < ctx.n_tokens) {
     if (!begin_ubatch(ctx)) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
     const int32_t chunk =
         std::min<int32_t>(ctx.effective_n_ubatch, ctx.n_tokens - next_token);
     for (int32_t i = 0; i < chunk; ++i) {
       if (!append_token_index(ctx, next_token + i)) {
-        fail_split(ctx);
+        fail_plan(ctx);
         return;
       }
     }
     next_token += chunk;
     if (!push_ubatch_size(ctx, chunk)) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
   }
@@ -212,10 +212,10 @@ inline auto create_ubatches_simple = [](context & ctx) noexcept {
 
 // materializes micro-batch boundaries in equal mode. on failure, leaves ubatch_count == 0.
 inline auto create_ubatches_equal = [](context & ctx) noexcept {
-  prepare_split(ctx);
+  prepare_plan(ctx);
 
   if (ctx.effective_n_ubatch <= 0) {
-    fail_split(ctx);
+    fail_plan(ctx);
     return;
   }
 
@@ -267,7 +267,7 @@ inline auto create_ubatches_equal = [](context & ctx) noexcept {
     }
 
     if (group_count == 0) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
 
@@ -288,12 +288,12 @@ inline auto create_ubatches_equal = [](context & ctx) noexcept {
     const int32_t max_rows = ctx.effective_n_ubatch / group_count;
     const int32_t n_seq_tokens = std::min(max_rows, min_avail);
     if (n_seq_tokens <= 0) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
 
     if (!begin_ubatch(ctx)) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
 
@@ -309,20 +309,20 @@ inline auto create_ubatches_equal = [](context & ctx) noexcept {
         used[static_cast<size_t>(i)] = 1;
         used_count += 1;
         if (!append_token_index(ctx, i)) {
-          fail_split(ctx);
+          fail_plan(ctx);
           return;
         }
         remaining -= 1;
       }
       if (remaining != 0) {
-        fail_split(ctx);
+        fail_plan(ctx);
         return;
       }
     }
 
     const int32_t added = n_seq_tokens * group_count;
     if (!push_ubatch_size(ctx, added)) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
   }
@@ -331,14 +331,14 @@ inline auto create_ubatches_equal = [](context & ctx) noexcept {
 
 // materializes micro-batch boundaries in equal mode (primary-id fast path).
 inline auto create_ubatches_equal_primary = [](context & ctx) noexcept {
-  prepare_split(ctx);
+  prepare_plan(ctx);
 
   if (ctx.effective_n_ubatch <= 0) {
-    fail_split(ctx);
+    fail_plan(ctx);
     return;
   }
   if (ctx.seq_primary_ids == nullptr) {
-    fail_split(ctx);
+    fail_plan(ctx);
     return;
   }
 
@@ -352,7 +352,7 @@ inline auto create_ubatches_equal_primary = [](context & ctx) noexcept {
   for (int32_t i = 0; i < ctx.n_tokens; ++i) {
     const int32_t seq_id = ctx.seq_primary_ids[i];
     if (seq_id < 0 || seq_id >= max_seq) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
     seq_counts[static_cast<size_t>(seq_id)] += 1;
@@ -369,7 +369,7 @@ inline auto create_ubatches_equal_primary = [](context & ctx) noexcept {
     const size_t slot = static_cast<size_t>(seq_id);
     const int32_t pos = seq_cursor[slot];
     if (pos < 0 || pos >= ctx.n_tokens) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
     seq_indices[static_cast<size_t>(pos)] = i;
@@ -405,7 +405,7 @@ inline auto create_ubatches_equal_primary = [](context & ctx) noexcept {
     }
 
     if (group_count == 0) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
 
@@ -420,12 +420,12 @@ inline auto create_ubatches_equal_primary = [](context & ctx) noexcept {
     const int32_t max_rows = ctx.effective_n_ubatch / group_count;
     const int32_t n_seq_tokens = std::min(max_rows, min_avail);
     if (n_seq_tokens <= 0) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
 
     if (!begin_ubatch(ctx)) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
 
@@ -436,7 +436,7 @@ inline auto create_ubatches_equal_primary = [](context & ctx) noexcept {
       for (int32_t i = 0; i < n_seq_tokens; ++i) {
         const int32_t idx = seq_indices[static_cast<size_t>(base + i)];
         if (!append_token_index(ctx, idx)) {
-          fail_split(ctx);
+          fail_plan(ctx);
           return;
         }
       }
@@ -446,7 +446,7 @@ inline auto create_ubatches_equal_primary = [](context & ctx) noexcept {
 
     const int32_t added = n_seq_tokens * group_count;
     if (!push_ubatch_size(ctx, added)) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
   }
@@ -456,10 +456,10 @@ inline auto create_ubatches_equal_primary = [](context & ctx) noexcept {
 
 // materializes micro-batch boundaries in seq mode. on failure, leaves ubatch_count == 0.
 inline auto create_ubatches_seq = [](context & ctx) noexcept {
-  prepare_split(ctx);
+  prepare_plan(ctx);
 
   if (ctx.effective_n_ubatch <= 0) {
-    fail_split(ctx);
+    fail_plan(ctx);
     return;
   }
 
@@ -478,7 +478,7 @@ inline auto create_ubatches_seq = [](context & ctx) noexcept {
     int32_t chunk = 0;
     seq_mask_t cur_mask = normalized_seq_mask(ctx, cur_idx);
     if (!begin_ubatch(ctx)) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
     while (true) {
@@ -486,7 +486,7 @@ inline auto create_ubatches_seq = [](context & ctx) noexcept {
       used_count += 1;
       chunk += 1;
       if (!append_token_index(ctx, cur_idx)) {
-        fail_split(ctx);
+        fail_plan(ctx);
         return;
       }
 
@@ -513,22 +513,22 @@ inline auto create_ubatches_seq = [](context & ctx) noexcept {
     }
 
     if (!push_ubatch_size(ctx, chunk)) {
-      fail_split(ctx);
+      fail_plan(ctx);
       return;
     }
   }
   finalize_token_offsets(ctx);
 };
 
-// publishes split outputs (output write-back happens in caller via callbacks).
+// publishes plan outputs (output write-back happens in caller via callbacks).
 inline constexpr auto publish = [](context &) noexcept {};
 
-inline constexpr auto dispatch_done = [](const event::split & ev, const context & ctx) noexcept {
+inline constexpr auto dispatch_done = [](const event::plan & ev, const context & ctx) noexcept {
   if (!ev.on_done) {
     return;
   }
 
-  ev.on_done(events::splitting_done{
+  ev.on_done(events::plan_done{
     .request = &ev,
     .ubatch_sizes = ctx.ubatch_sizes.data(),
     .ubatch_count = ctx.ubatch_count,
@@ -540,23 +540,23 @@ inline constexpr auto dispatch_done = [](const event::split & ev, const context 
   });
 };
 
-inline constexpr auto dispatch_invalid_request = [](const event::split & ev) noexcept {
+inline constexpr auto dispatch_invalid_request = [](const event::plan & ev) noexcept {
   if (!ev.on_error) {
     return;
   }
 
-  ev.on_error(events::splitting_error{
+  ev.on_error(events::plan_error{
     .err = EMEL_ERR_INVALID_ARGUMENT,
     .request = &ev,
   });
 };
 
-inline constexpr auto dispatch_split_failed = [](const event::split & ev) noexcept {
+inline constexpr auto dispatch_plan_failed = [](const event::plan & ev) noexcept {
   if (!ev.on_error) {
     return;
   }
 
-  ev.on_error(events::splitting_error{
+  ev.on_error(events::plan_error{
     .err = EMEL_ERR_BACKEND,
     .request = &ev,
   });
@@ -568,7 +568,7 @@ inline constexpr auto dispatch_unexpected = [](const auto & ev) noexcept {
       return;
     }
 
-    ev.on_error(events::splitting_error{
+    ev.on_error(events::plan_error{
       .err = EMEL_ERR_INVALID_ARGUMENT,
       .request = nullptr,
     });

@@ -52,7 +52,7 @@ struct validate {
   int32_t * error_out = nullptr;
 };
 
-struct sanitize_batch {
+struct batch_tokens {
   int32_t * error_out = nullptr;
 };
 
@@ -103,10 +103,10 @@ struct validate_error {
   const event::decode * request = nullptr;
 };
 
-struct sanitize_batch_done {
+struct batch_tokens_done {
   const event::decode * request = nullptr;
 };
-struct sanitize_batch_error {
+struct batch_tokens_error {
   int32_t err = 0;
   const event::decode * request = nullptr;
 };

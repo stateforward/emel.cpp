@@ -8,12 +8,10 @@
 #include "emel/callback.hpp"
 #include "emel/emel.h"
 
-// TODO(rearchitecture-cleanup): Keep legacy "batch_splitter_*" test names until
-// external references to current test IDs are migrated.
 
 namespace {
 
-struct split_capture {
+struct plan_capture {
   std::array<int32_t, 16> sizes = {};
   int32_t ubatch_count = 0;
   int32_t total_outputs = 0;
@@ -21,7 +19,7 @@ struct split_capture {
   bool done_called = false;
   bool error_called = false;
 
-  void on_done(const emel::batch::planner::events::splitting_done & ev) noexcept {
+  void on_done(const emel::batch::planner::events::plan_done & ev) noexcept {
     done_called = true;
     err = EMEL_OK;
     ubatch_count = ev.ubatch_count;
@@ -37,43 +35,43 @@ struct split_capture {
     }
   }
 
-  void on_error(const emel::batch::planner::events::splitting_error & ev) noexcept {
+  void on_error(const emel::batch::planner::events::plan_error & ev) noexcept {
     error_called = true;
     err = ev.err;
   }
 };
 
-inline emel::callback<void(const emel::batch::planner::events::splitting_done &)> make_done(
-    split_capture * capture) {
-  return emel::callback<void(const emel::batch::planner::events::splitting_done &)>::from<
-    split_capture,
-    &split_capture::on_done>(capture);
+inline emel::callback<void(const emel::batch::planner::events::plan_done &)> make_done(
+    plan_capture * capture) {
+  return emel::callback<void(const emel::batch::planner::events::plan_done &)>::from<
+    plan_capture,
+    &plan_capture::on_done>(capture);
 }
 
-inline emel::callback<void(const emel::batch::planner::events::splitting_error &)> make_error(
-    split_capture * capture) {
-  return emel::callback<void(const emel::batch::planner::events::splitting_error &)>::from<
-    split_capture,
-    &split_capture::on_error>(capture);
+inline emel::callback<void(const emel::batch::planner::events::plan_error &)> make_error(
+    plan_capture * capture) {
+  return emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
+    plan_capture,
+    &plan_capture::on_error>(capture);
 }
 
 }  // namespace
 
-TEST_CASE("batch_splitter_starts_initialized") {
+TEST_CASE("batch_planner_starts_initialized") {
   emel::batch::planner::sm machine{};
   CHECK(machine.is(boost::sml::state<emel::batch::planner::initialized>));
 }
 
-TEST_CASE("batch_splitter_splits_tokens_into_ubatches") {
+TEST_CASE("batch_planner_splits_tokens_into_ubatches") {
   emel::batch::planner::sm machine{};
   std::array<int32_t, 5> tokens = {{1, 2, 3, 4, 5}};
-  split_capture capture{};
+  plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 2,
-    .mode = emel::batch::planner::event::split_mode::simple,
+    .mode = emel::batch::planner::event::plan_mode::simple,
     .output_all = true,
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
@@ -88,16 +86,16 @@ TEST_CASE("batch_splitter_splits_tokens_into_ubatches") {
   CHECK(capture.sizes[2] == 1);
 }
 
-TEST_CASE("batch_splitter_equal_mode_fills_single_sequence_ubatches") {
+TEST_CASE("batch_planner_equal_mode_fills_single_sequence_ubatches") {
   emel::batch::planner::sm machine{};
   std::array<int32_t, 10> tokens = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}};
-  split_capture capture{};
+  plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 4,
-    .mode = emel::batch::planner::event::split_mode::equal,
+    .mode = emel::batch::planner::event::plan_mode::equal,
     .equal_sequential = false,
     .output_all = true,
     .on_done = make_done(&capture),
@@ -111,16 +109,16 @@ TEST_CASE("batch_splitter_equal_mode_fills_single_sequence_ubatches") {
   CHECK(capture.sizes[2] == 2);
 }
 
-TEST_CASE("batch_splitter_seq_mode_uses_sequential_chunking") {
+TEST_CASE("batch_planner_seq_mode_uses_sequential_chunking") {
   emel::batch::planner::sm machine{};
   std::array<int32_t, 7> tokens = {{1, 2, 3, 4, 5, 6, 7}};
-  split_capture capture{};
+  plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 3,
-    .mode = emel::batch::planner::event::split_mode::seq,
+    .mode = emel::batch::planner::event::plan_mode::seq,
     .output_all = true,
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
@@ -133,18 +131,18 @@ TEST_CASE("batch_splitter_seq_mode_uses_sequential_chunking") {
   CHECK(capture.sizes[2] == 1);
 }
 
-TEST_CASE("batch_splitter_equal_mode_supports_sequence_masks") {
+TEST_CASE("batch_planner_equal_mode_supports_sequence_masks") {
   emel::batch::planner::sm machine{};
   std::array<int32_t, 6> tokens = {{1, 2, 3, 4, 5, 6}};
   std::array<uint64_t, 6> seq_masks = {{1U, 2U, 1U, 2U, 1U, 2U}};
   std::array<int32_t, 6> seq_primary_ids = {{0, 1, 0, 1, 0, 1}};
-  split_capture capture{};
+  plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 4,
-    .mode = emel::batch::planner::event::split_mode::equal,
+    .mode = emel::batch::planner::event::plan_mode::equal,
     .seq_masks = seq_masks.data(),
     .seq_masks_count = static_cast<int32_t>(seq_masks.size()),
     .seq_primary_ids = seq_primary_ids.data(),
@@ -162,17 +160,17 @@ TEST_CASE("batch_splitter_equal_mode_supports_sequence_masks") {
   CHECK(capture.total_outputs == 6);
 }
 
-TEST_CASE("batch_splitter_seq_mode_supports_sequence_masks") {
+TEST_CASE("batch_planner_seq_mode_supports_sequence_masks") {
   emel::batch::planner::sm machine{};
   std::array<int32_t, 4> tokens = {{1, 2, 3, 4}};
   std::array<uint64_t, 4> seq_masks = {{3U, 1U, 2U, 1U}};
-  split_capture capture{};
+  plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 3,
-    .mode = emel::batch::planner::event::split_mode::seq,
+    .mode = emel::batch::planner::event::plan_mode::seq,
     .seq_masks = seq_masks.data(),
     .seq_masks_count = static_cast<int32_t>(seq_masks.size()),
     .output_all = true,
@@ -187,17 +185,17 @@ TEST_CASE("batch_splitter_seq_mode_supports_sequence_masks") {
   CHECK(capture.total_outputs == 4);
 }
 
-TEST_CASE("batch_splitter_counts_outputs_with_output_mask") {
+TEST_CASE("batch_planner_counts_outputs_with_output_mask") {
   emel::batch::planner::sm machine{};
   std::array<int32_t, 4> tokens = {{1, 2, 3, 4}};
   std::array<int8_t, 4> outputs = {{1, 0, 1, 0}};
-  split_capture capture{};
+  plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 2,
-    .mode = emel::batch::planner::event::split_mode::simple,
+    .mode = emel::batch::planner::event::plan_mode::simple,
     .output_mask = outputs.data(),
     .output_mask_count = static_cast<int32_t>(outputs.size()),
     .on_done = make_done(&capture),
@@ -208,15 +206,15 @@ TEST_CASE("batch_splitter_counts_outputs_with_output_mask") {
   CHECK(capture.total_outputs == 2);
 }
 
-TEST_CASE("batch_splitter_reports_invalid_arguments") {
+TEST_CASE("batch_planner_reports_invalid_arguments") {
   emel::batch::planner::sm machine{};
-  split_capture capture{};
+  plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = nullptr,
     .n_tokens = 4,
     .n_ubatch = 2,
-    .mode = emel::batch::planner::event::split_mode::simple,
+    .mode = emel::batch::planner::event::plan_mode::simple,
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
   }));
@@ -224,12 +222,12 @@ TEST_CASE("batch_splitter_reports_invalid_arguments") {
   CHECK(capture.err == EMEL_ERR_INVALID_ARGUMENT);
 
   std::array<int32_t, 3> tokens = {{1, 2, 3}};
-  split_capture mode_capture{};
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  plan_capture mode_capture{};
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 1,
-    .mode = static_cast<emel::batch::planner::event::split_mode>(99),
+    .mode = static_cast<emel::batch::planner::event::plan_mode>(99),
     .equal_sequential = false,
     .on_done = make_done(&mode_capture),
     .on_error = make_error(&mode_capture),

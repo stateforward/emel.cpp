@@ -15,7 +15,7 @@ struct context {
   const int32_t * token_ids = nullptr;
   int32_t n_tokens = 0;
   int32_t requested_n_ubatch = 0;
-  event::split_mode mode = event::split_mode::simple;
+  event::plan_mode mode = event::plan_mode::simple;
   const uint64_t * seq_masks = nullptr;
   const int32_t * seq_primary_ids = nullptr;
   bool equal_sequential = true;

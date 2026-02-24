@@ -87,13 +87,13 @@ struct begin_decode {
     ctx.ubatch_positions.fill(0);
     ctx.ubatch_seq_masks.fill(0);
     ctx.ubatch_seq_primary_ids.fill(0);
-    ctx.sanitized_seq_primary_ids.fill(0);
-    ctx.sanitized_seq_masks.fill(0);
-    ctx.sanitized_positions.fill(0);
-    ctx.sanitized_output_mask.fill(0);
-    ctx.sanitized_outputs_total = 0;
-    ctx.sanitized_positions_count = 0;
-    ctx.sanitized_seq_mask_words = 1;
+    ctx.batched_seq_primary_ids.fill(0);
+    ctx.batched_seq_masks.fill(0);
+    ctx.batched_positions.fill(0);
+    ctx.batched_output_mask.fill(0);
+    ctx.batched_outputs_total = 0;
+    ctx.batched_positions_count = 0;
+    ctx.batched_seq_mask_words = 1;
     ctx.token_indices_count = 0;
     ctx.phase_error = EMEL_OK;
     ctx.ubatch_error = EMEL_OK;
@@ -122,22 +122,22 @@ struct run_validate {
   }
 };
 
-struct run_sanitize_batch {
-  void operator()(const event::sanitize_batch & ev, context & ctx) const noexcept {
+struct run_batch_tokens {
+  void operator()(const event::batch_tokens & ev, context & ctx) const noexcept {
     if (ev.error_out == nullptr) {
       return;
     }
     *ev.error_out = EMEL_OK;
     ctx.phase_error = EMEL_OK;
 
-    if (ctx.batch_sanitizer == nullptr) {
+    if (ctx.token_batcher == nullptr) {
       *ev.error_out = EMEL_ERR_BACKEND;
       ctx.phase_error = EMEL_ERR_BACKEND;
       return;
     }
 
-    const bool ok = ctx.batch_sanitizer->process_event(
-        emel::token::batcher::event::sanitize_decode{
+    const bool ok = ctx.token_batcher->process_event(
+        emel::token::batcher::event::batch{
           .token_ids = ctx.token_ids,
           .n_tokens = ctx.n_tokens,
           .seq_masks = ctx.seq_masks,
@@ -151,17 +151,17 @@ struct run_sanitize_batch {
           .output_mask_count = ctx.output_mask_count,
           .output_all = ctx.output_all,
           .enforce_single_output_per_seq = false,
-          .seq_primary_ids_out = ctx.sanitized_seq_primary_ids.data(),
-          .seq_primary_ids_capacity = static_cast<int32_t>(ctx.sanitized_seq_primary_ids.size()),
-          .seq_masks_out = ctx.sanitized_seq_masks.data(),
-          .seq_masks_capacity = static_cast<int32_t>(ctx.sanitized_seq_masks.size()),
-          .positions_out = ctx.sanitized_positions.data(),
-          .positions_capacity = static_cast<int32_t>(ctx.sanitized_positions.size()),
-          .output_mask_out = ctx.sanitized_output_mask.data(),
-          .output_mask_capacity = static_cast<int32_t>(ctx.sanitized_output_mask.size()),
-          .outputs_total_out = &ctx.sanitized_outputs_total,
-          .seq_mask_words_out = &ctx.sanitized_seq_mask_words,
-          .positions_count_out = &ctx.sanitized_positions_count,
+          .seq_primary_ids_out = ctx.batched_seq_primary_ids.data(),
+          .seq_primary_ids_capacity = static_cast<int32_t>(ctx.batched_seq_primary_ids.size()),
+          .seq_masks_out = ctx.batched_seq_masks.data(),
+          .seq_masks_capacity = static_cast<int32_t>(ctx.batched_seq_masks.size()),
+          .positions_out = ctx.batched_positions.data(),
+          .positions_capacity = static_cast<int32_t>(ctx.batched_positions.size()),
+          .output_mask_out = ctx.batched_output_mask.data(),
+          .output_mask_capacity = static_cast<int32_t>(ctx.batched_output_mask.size()),
+          .outputs_total_out = &ctx.batched_outputs_total,
+          .seq_mask_words_out = &ctx.batched_seq_mask_words,
+          .positions_count_out = &ctx.batched_positions_count,
           .error_out = &ctx.phase_error,
         });
 
@@ -171,24 +171,24 @@ struct run_sanitize_batch {
       return;
     }
 
-    ctx.seq_masks = ctx.sanitized_seq_masks.data();
+    ctx.seq_masks = ctx.batched_seq_masks.data();
     ctx.seq_masks_count = ctx.n_tokens;
-    ctx.seq_mask_words = ctx.sanitized_seq_mask_words;
-    ctx.seq_primary_ids = ctx.sanitized_seq_primary_ids.data();
+    ctx.seq_mask_words = ctx.batched_seq_mask_words;
+    ctx.seq_primary_ids = ctx.batched_seq_primary_ids.data();
     ctx.seq_primary_ids_count = ctx.n_tokens;
-    ctx.positions = ctx.sanitized_positions.data();
-    ctx.positions_count = ctx.sanitized_positions_count;
-    ctx.output_mask = ctx.sanitized_output_mask.data();
+    ctx.positions = ctx.batched_positions.data();
+    ctx.positions_count = ctx.batched_positions_count;
+    ctx.output_mask = ctx.batched_output_mask.data();
     ctx.output_mask_count = ctx.n_tokens;
   }
 
   template <class ev>
   void operator()(const ev &, context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
-    event::sanitize_batch sanitize{
+    event::batch_tokens batch_request{
       .error_out = &ctx.phase_error,
     };
-    (*this)(sanitize, ctx);
+    (*this)(batch_request, ctx);
   }
 };
 
@@ -217,7 +217,7 @@ struct run_initialize_batch {
     *ev.error_out = EMEL_OK;
     ctx.phase_error = EMEL_OK;
 
-    struct split_reply {
+    struct plan_reply {
       int32_t * ubatch_sizes_out = nullptr;
       int32_t ubatch_sizes_capacity = 0;
       int32_t * token_indices_out = nullptr;
@@ -230,7 +230,7 @@ struct run_initialize_batch {
       int32_t token_offsets_count = 0;
       int32_t err = EMEL_OK;
 
-      void on_done(const emel::batch::planner::events::splitting_done & reply) noexcept {
+      void on_done(const emel::batch::planner::events::plan_done & reply) noexcept {
         err = EMEL_OK;
         ubatch_count = reply.ubatch_count;
         total_outputs = reply.total_outputs;
@@ -268,12 +268,12 @@ struct run_initialize_batch {
         }
       }
 
-      void on_error(const emel::batch::planner::events::splitting_error & reply) noexcept {
+      void on_error(const emel::batch::planner::events::plan_error & reply) noexcept {
         err = reply.err;
       }
     };
 
-    split_reply reply{
+    plan_reply reply{
       .ubatch_sizes_out = ctx.ubatch_sizes.data(),
       .ubatch_sizes_capacity = static_cast<int32_t>(ctx.ubatch_sizes.size()),
       .token_indices_out = ctx.ubatch_token_indices.data(),
@@ -283,22 +283,20 @@ struct run_initialize_batch {
     };
 
     const auto on_done =
-        emel::callback<void(const emel::batch::planner::events::splitting_done &)>::from<
-            split_reply, &split_reply::on_done>(&reply);
+        emel::callback<void(const emel::batch::planner::events::plan_done &)>::from<
+            plan_reply, &plan_reply::on_done>(&reply);
     const auto on_error =
-        emel::callback<void(const emel::batch::planner::events::splitting_error &)>::from<
-            split_reply, &split_reply::on_error>(&reply);
+        emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
+            plan_reply, &plan_reply::on_error>(&reply);
 
-    const emel::batch::planner::event::split_mode split_mode =
-        ctx.output_all ? emel::batch::planner::event::split_mode::seq
-                       : emel::batch::planner::event::split_mode::equal;
-    // TODO(rearchitecture-cleanup): Keep `batch_splitter` member naming until decoder
-    // consumers migrate to the planner terminology.
-    const bool ok = ctx.batch_splitter->process_event(emel::batch::planner::event::split{
+    const emel::batch::planner::event::plan_mode plan_mode =
+        ctx.output_all ? emel::batch::planner::event::plan_mode::seq
+                       : emel::batch::planner::event::plan_mode::equal;
+    const bool ok = ctx.batch_planner->process_event(emel::batch::planner::event::plan{
       .token_ids = ctx.token_ids,
       .n_tokens = ctx.n_tokens,
       .n_ubatch = ctx.n_ubatch,
-      .mode = split_mode,
+      .mode = plan_mode,
       .seq_masks = ctx.seq_masks,
       .seq_masks_count = ctx.seq_masks_count,
       .seq_primary_ids = ctx.seq_primary_ids,
@@ -927,7 +925,7 @@ struct on_unexpected {
 
 inline constexpr begin_decode begin_decode{};
 inline constexpr run_validate run_validate{};
-inline constexpr run_sanitize_batch run_sanitize_batch{};
+inline constexpr run_batch_tokens run_batch_tokens{};
 inline constexpr reject_invalid_validate reject_invalid_validate{};
 inline constexpr run_initialize_batch run_initialize_batch{};
 inline constexpr run_update_memory run_update_memory{};

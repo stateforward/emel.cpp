@@ -7,12 +7,10 @@
 #include "emel/callback.hpp"
 #include "emel/emel.h"
 
-// TODO(rearchitecture-cleanup): Keep legacy "batch_splitter_*" test names until
-// external references to current test IDs are migrated.
 
 namespace {
 
-struct split_capture {
+struct plan_capture {
   std::array<int32_t, 8> sizes = {};
   int32_t ubatch_count = 0;
   int32_t total_outputs = 0;
@@ -20,7 +18,7 @@ struct split_capture {
   bool done_called = false;
   bool error_called = false;
 
-  void on_done(const emel::batch::planner::events::splitting_done & ev) noexcept {
+  void on_done(const emel::batch::planner::events::plan_done & ev) noexcept {
     done_called = true;
     err = EMEL_OK;
     ubatch_count = ev.ubatch_count;
@@ -36,37 +34,37 @@ struct split_capture {
     }
   }
 
-  void on_error(const emel::batch::planner::events::splitting_error & ev) noexcept {
+  void on_error(const emel::batch::planner::events::plan_error & ev) noexcept {
     error_called = true;
     err = ev.err;
   }
 };
 
-inline emel::callback<void(const emel::batch::planner::events::splitting_done &)> make_done(
-    split_capture * capture) {
-  return emel::callback<void(const emel::batch::planner::events::splitting_done &)>::from<
-    split_capture,
-    &split_capture::on_done>(capture);
+inline emel::callback<void(const emel::batch::planner::events::plan_done &)> make_done(
+    plan_capture * capture) {
+  return emel::callback<void(const emel::batch::planner::events::plan_done &)>::from<
+    plan_capture,
+    &plan_capture::on_done>(capture);
 }
 
-inline emel::callback<void(const emel::batch::planner::events::splitting_error &)> make_error(
-    split_capture * capture) {
-  return emel::callback<void(const emel::batch::planner::events::splitting_error &)>::from<
-    split_capture,
-    &split_capture::on_error>(capture);
+inline emel::callback<void(const emel::batch::planner::events::plan_error &)> make_error(
+    plan_capture * capture) {
+  return emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
+    plan_capture,
+    &plan_capture::on_error>(capture);
 }
 
 }  // namespace
 
-TEST_CASE("batch_splitter_sm_recover_after_error") {
+TEST_CASE("batch_planner_sm_recover_after_error") {
   emel::batch::planner::sm machine{};
-  split_capture error_capture{};
+  plan_capture error_capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = nullptr,
     .n_tokens = 0,
     .n_ubatch = 1,
-    .mode = emel::batch::planner::event::split_mode::simple,
+    .mode = emel::batch::planner::event::plan_mode::simple,
     .on_done = make_done(&error_capture),
     .on_error = make_error(&error_capture),
   }));
@@ -74,13 +72,13 @@ TEST_CASE("batch_splitter_sm_recover_after_error") {
   CHECK(machine.is(boost::sml::state<emel::batch::planner::invalid_request>));
 
   std::array<int32_t, 3> tokens = {{1, 2, 3}};
-  split_capture ok_capture{};
+  plan_capture ok_capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 2,
-    .mode = emel::batch::planner::event::split_mode::simple,
+    .mode = emel::batch::planner::event::plan_mode::simple,
     .on_done = make_done(&ok_capture),
     .on_error = make_error(&ok_capture),
   }));
@@ -89,27 +87,27 @@ TEST_CASE("batch_splitter_sm_recover_after_error") {
   CHECK(machine.is(boost::sml::state<emel::batch::planner::done>));
 }
 
-TEST_CASE("batch_splitter_sm_accepts_consecutive_splits") {
+TEST_CASE("batch_planner_sm_accepts_consecutive_splits") {
   emel::batch::planner::sm machine{};
   std::array<int32_t, 4> tokens = {{1, 2, 3, 4}};
-  split_capture first{};
-  split_capture second{};
+  plan_capture first{};
+  plan_capture second{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 2,
-    .mode = emel::batch::planner::event::split_mode::simple,
+    .mode = emel::batch::planner::event::plan_mode::simple,
     .on_done = make_done(&first),
     .on_error = make_error(&first),
   }));
   CHECK(first.done_called);
 
-  CHECK(machine.process_event(emel::batch::planner::event::split{
+  CHECK(machine.process_event(emel::batch::planner::event::plan{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_ubatch = 1,
-    .mode = emel::batch::planner::event::split_mode::simple,
+    .mode = emel::batch::planner::event::plan_mode::simple,
     .on_done = make_done(&second),
     .on_error = make_error(&second),
   }));

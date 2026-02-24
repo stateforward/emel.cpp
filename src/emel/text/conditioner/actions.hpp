@@ -30,6 +30,8 @@ struct begin_bind {
       *ev.error_out = EMEL_OK;
     }
     ctx.vocab = ev.vocab;
+    ctx.preprocessor_variant = ev.preprocessor_variant;
+    ctx.encoder_variant = ev.encoder_variant;
     ctx.tokenizer_sm = ev.tokenizer_sm;
     ctx.dispatch_tokenizer_bind = ev.dispatch_tokenizer_bind;
     ctx.dispatch_tokenizer_tokenize = ev.dispatch_tokenizer_tokenize;
@@ -66,6 +68,8 @@ struct bind_tokenizer {
     int32_t err = EMEL_OK;
     emel::text::tokenizer::event::bind tokenize_bind = {};
     tokenize_bind.vocab = ctx.vocab;
+    tokenize_bind.preprocessor_variant = ctx.preprocessor_variant;
+    tokenize_bind.encoder_variant = ctx.encoder_variant;
     tokenize_bind.error_out = &err;
     const bool accepted =
         ctx.dispatch_tokenizer_bind(ctx.tokenizer_sm, tokenize_bind);

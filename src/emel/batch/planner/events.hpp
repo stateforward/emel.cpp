@@ -5,23 +5,23 @@
 #include "emel/callback.hpp"
 
 namespace emel::batch::planner::events {
-struct splitting_done;
-struct splitting_error;
+struct plan_done;
+struct plan_error;
 }  // namespace emel::batch::planner::events
 
 namespace emel::batch::planner::event {
 
-enum class split_mode : int32_t {
+enum class plan_mode : int32_t {
   simple = 0,
   equal = 1,
   seq = 2,
 };
 
-struct split {
+struct plan {
   const int32_t * token_ids = nullptr;
   int32_t n_tokens = 0;
   int32_t n_ubatch = 0;
-  split_mode mode = split_mode::simple;
+  plan_mode mode = plan_mode::simple;
   const uint64_t * seq_masks = nullptr;
   int32_t seq_masks_count = 0;
   const int32_t * seq_primary_ids = nullptr;
@@ -32,16 +32,16 @@ struct split {
   int32_t output_mask_count = 0;
   bool output_all = false;
 
-  emel::callback<void(const events::splitting_done &)> on_done = {};
-  emel::callback<void(const events::splitting_error &)> on_error = {};
+  emel::callback<void(const events::plan_done &)> on_done = {};
+  emel::callback<void(const events::plan_error &)> on_error = {};
 };
 
 }  // namespace emel::batch::planner::event
 
 namespace emel::batch::planner::events {
 
-struct splitting_done {
-  const event::split * request = nullptr;
+struct plan_done {
+  const event::plan * request = nullptr;
   const int32_t * ubatch_sizes = nullptr;
   int32_t ubatch_count = 0;
   int32_t total_outputs = 0;
@@ -51,9 +51,9 @@ struct splitting_done {
   int32_t ubatch_token_offsets_count = 0;
 };
 
-struct splitting_error {
+struct plan_error {
   int32_t err = 0;
-  const event::split * request = nullptr;
+  const event::plan * request = nullptr;
 };
 
 }  // namespace emel::batch::planner::events

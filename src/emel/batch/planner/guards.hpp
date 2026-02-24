@@ -6,12 +6,12 @@
 namespace emel::batch::planner::guard {
 
 // validates callback contract on the triggering event.
-inline constexpr auto callbacks_are_valid = [](const event::split & ev) noexcept {
+inline constexpr auto callbacks_are_valid = [](const event::plan & ev) noexcept {
   return static_cast<bool>(ev.on_done) && static_cast<bool>(ev.on_error);
 };
 
 inline constexpr auto callbacks_are_invalid =
-    [](const event::split & ev) noexcept { return !callbacks_are_valid(ev); };
+    [](const event::plan & ev) noexcept { return !callbacks_are_valid(ev); };
 
 // validates request inputs copied into context (token pointer, counts, and mode).
 inline constexpr auto inputs_are_valid = [](const action::context & ctx) noexcept {
@@ -53,7 +53,7 @@ inline constexpr auto inputs_are_valid = [](const action::context & ctx) noexcep
     }
   }
 
-  if (ctx.mode == event::split_mode::equal && ctx.equal_sequential) {
+  if (ctx.mode == event::plan_mode::equal && ctx.equal_sequential) {
     if (ctx.seq_masks != nullptr && ctx.seq_primary_ids == nullptr) {
       return false;
     }
@@ -68,9 +68,9 @@ inline constexpr auto inputs_are_valid = [](const action::context & ctx) noexcep
   }
 
   switch (ctx.mode) {
-    case event::split_mode::simple:
-    case event::split_mode::equal:
-    case event::split_mode::seq:
+    case event::plan_mode::simple:
+    case event::plan_mode::equal:
+    case event::plan_mode::seq:
       return true;
   }
   return false;
@@ -80,24 +80,24 @@ inline constexpr auto inputs_are_invalid =
     [](const action::context & ctx) noexcept { return !inputs_are_valid(ctx); };
 
 inline constexpr auto mode_is_simple = [](const action::context & ctx) noexcept {
-  return ctx.mode == event::split_mode::simple;
+  return ctx.mode == event::plan_mode::simple;
 };
 
 inline constexpr auto mode_is_equal = [](const action::context & ctx) noexcept {
-  return ctx.mode == event::split_mode::equal;
+  return ctx.mode == event::plan_mode::equal;
 };
 
 inline constexpr auto mode_is_equal_primary_fast = [](const action::context & ctx) noexcept {
-  return ctx.mode == event::split_mode::equal && ctx.seq_masks == nullptr &&
+  return ctx.mode == event::plan_mode::equal && ctx.seq_masks == nullptr &&
          ctx.seq_primary_ids != nullptr;
 };
 
 inline constexpr auto mode_is_seq = [](const action::context & ctx) noexcept {
-  return ctx.mode == event::split_mode::seq;
+  return ctx.mode == event::plan_mode::seq;
 };
 
-// reports whether split computation produced usable output sizes.
-inline constexpr auto split_succeeded = [](const action::context & ctx) noexcept {
+// reports whether plan computation produced usable output sizes.
+inline constexpr auto plan_succeeded = [](const action::context & ctx) noexcept {
   if (ctx.ubatch_count <= 0 || ctx.total_outputs < 0) {
     return false;
   }
@@ -110,7 +110,7 @@ inline constexpr auto split_succeeded = [](const action::context & ctx) noexcept
   return false;
 };
 
-inline constexpr auto split_failed =
-    [](const action::context & ctx) noexcept { return !split_succeeded(ctx); };
+inline constexpr auto plan_failed =
+    [](const action::context & ctx) noexcept { return !plan_succeeded(ctx); };
 
 }  // namespace emel::batch::planner::guard

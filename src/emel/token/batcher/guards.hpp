@@ -5,7 +5,7 @@
 namespace emel::token::batcher::guard {
 
 struct valid_request {
-  bool operator()(const event::sanitize_decode & ev, const action::context &) const noexcept {
+  bool operator()(const event::batch & ev, const action::context &) const noexcept {
     if (ev.error_out == nullptr) {
       return false;
     }
@@ -29,7 +29,7 @@ struct valid_request {
 };
 
 struct invalid_request {
-  bool operator()(const event::sanitize_decode & ev, const action::context & ctx) const noexcept {
+  bool operator()(const event::batch & ev, const action::context & ctx) const noexcept {
     return !valid_request{}(ev, ctx);
   }
 };
