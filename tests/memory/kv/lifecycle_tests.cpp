@@ -194,6 +194,56 @@ TEST_CASE("memory_kv_lifecycle_mapping_order_is_deterministic") {
   CHECK(machine.lookup_kv_block(1, 0) == 4);
 }
 
+TEST_CASE("memory_kv_lifecycle_append_and_rollback_use_partial_tail_capacity") {
+  kv_sm machine{};
+  int32_t err = EMEL_OK;
+
+  REQUIRE(machine.process_event(event::reserve{
+    .max_sequences = 2,
+    .max_blocks = 4,
+    .block_tokens = 16,
+    .error_out = &err,
+  }));
+  REQUIRE(machine.process_event(event::allocate_sequence{
+    .seq_id = 0,
+    .error_out = &err,
+  }));
+
+  int32_t block_delta = -1;
+  REQUIRE(machine.process_event(event::allocate_slots{
+    .seq_id = 0,
+    .token_count = 1,
+    .block_count_out = &block_delta,
+    .error_out = &err,
+  }));
+  REQUIRE(block_delta == 1);
+
+  const int32_t first_block = machine.lookup_kv_block(0, 0);
+  REQUIRE(first_block >= 0);
+
+  block_delta = -1;
+  REQUIRE(machine.process_event(event::allocate_slots{
+    .seq_id = 0,
+    .token_count = 1,
+    .block_count_out = &block_delta,
+    .error_out = &err,
+  }));
+  CHECK(block_delta == 0);
+  CHECK(machine.lookup_kv_block(0, 1) == first_block);
+  CHECK(machine.sequence_length(0) == 2);
+
+  block_delta = -1;
+  REQUIRE(machine.process_event(event::rollback_slots{
+    .seq_id = 0,
+    .token_count = 1,
+    .block_count_out = &block_delta,
+    .error_out = &err,
+  }));
+  CHECK(block_delta == 0);
+  CHECK(machine.lookup_kv_block(0, 0) == first_block);
+  CHECK(machine.sequence_length(0) == 1);
+}
+
 TEST_CASE("memory_kv_lifecycle_validation_and_unexpected_event_paths") {
   kv_sm machine{};
   int32_t err = EMEL_OK;

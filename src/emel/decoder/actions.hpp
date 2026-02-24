@@ -49,6 +49,174 @@ inline int32_t primary_seq_from_mask(
   return 0;
 }
 
+inline constexpr int32_t k_max_sequences = emel::batch::planner::action::MAX_SEQ;
+
+inline bool has_seq_masks(const context & ctx) noexcept {
+  return ctx.seq_masks != nullptr && ctx.seq_masks_count >= ctx.n_tokens &&
+         ctx.seq_mask_words > 0 &&
+         ctx.seq_mask_words <= emel::batch::planner::action::SEQ_WORDS;
+}
+
+inline bool has_seq_primary_ids(const context & ctx) noexcept {
+  return ctx.seq_primary_ids != nullptr && ctx.seq_primary_ids_count >= ctx.n_tokens;
+}
+
+inline bool resolve_ubatch_span(const context & ctx, const int32_t ubatch_index,
+                                int32_t & start, int32_t & end) noexcept {
+  if (ubatch_index < 0 || ubatch_index >= ctx.ubatches_total || ctx.n_tokens <= 0 ||
+      ctx.token_indices_count < 0 || ctx.token_indices_count > ctx.n_tokens) {
+    return false;
+  }
+
+  start = ctx.ubatch_token_offsets[ubatch_index];
+  end = ctx.ubatch_token_offsets[ubatch_index + 1];
+  if (start < 0 || end < start || end > ctx.token_indices_count) {
+    return false;
+  }
+  return end - start == ctx.ubatch_sizes[ubatch_index];
+}
+
+inline int32_t resolve_token_sequence_id(const context & ctx, const int32_t token_idx,
+                                         int32_t & seq_id) noexcept {
+  if (token_idx < 0 || token_idx >= ctx.n_tokens) {
+    return EMEL_ERR_BACKEND;
+  }
+
+  if (has_seq_primary_ids(ctx)) {
+    seq_id = ctx.seq_primary_ids[token_idx];
+  } else if (has_seq_masks(ctx)) {
+    seq_id = primary_seq_from_mask(ctx.seq_masks, ctx.seq_mask_words, token_idx);
+  } else {
+    seq_id = 0;
+  }
+
+  return seq_id < 0 || seq_id >= k_max_sequences ? EMEL_ERR_INVALID_ARGUMENT : EMEL_OK;
+}
+
+inline int32_t collect_ubatch_sequence_counts(
+    const context & ctx, const int32_t ubatch_index,
+    std::array<int32_t, static_cast<size_t>(k_max_sequences)> & sequence_ids,
+    std::array<int32_t, static_cast<size_t>(k_max_sequences)> & sequence_token_counts,
+    int32_t & sequence_count) noexcept {
+  sequence_ids.fill(0);
+  sequence_token_counts.fill(0);
+  sequence_count = 0;
+
+  int32_t token_start = 0;
+  int32_t token_end = 0;
+  if (!resolve_ubatch_span(ctx, ubatch_index, token_start, token_end)) {
+    return EMEL_ERR_BACKEND;
+  }
+
+  for (int32_t t = token_start; t < token_end; ++t) {
+    const int32_t token_idx = ctx.ubatch_token_indices[t];
+    int32_t seq_id = 0;
+    const int32_t seq_err = resolve_token_sequence_id(ctx, token_idx, seq_id);
+    if (seq_err != EMEL_OK) {
+      return seq_err;
+    }
+
+    const size_t seq_slot = static_cast<size_t>(seq_id);
+    if (sequence_token_counts[seq_slot] == 0) {
+      if (sequence_count >= k_max_sequences) {
+        return EMEL_ERR_BACKEND;
+      }
+      sequence_ids[static_cast<size_t>(sequence_count)] = seq_id;
+      sequence_count += 1;
+    }
+    sequence_token_counts[seq_slot] += 1;
+  }
+
+  if (token_end > token_start && sequence_count <= 0) {
+    return EMEL_ERR_BACKEND;
+  }
+  return EMEL_OK;
+}
+
+inline int32_t allocate_ubatch_slots(const int32_t ubatch_index, context & ctx) noexcept {
+  if (ctx.memory_coordinator == nullptr) {
+    return EMEL_ERR_INVALID_ARGUMENT;
+  }
+
+  std::array<int32_t, static_cast<size_t>(k_max_sequences)> sequence_ids = {};
+  std::array<int32_t, static_cast<size_t>(k_max_sequences)> sequence_token_counts = {};
+  int32_t sequence_count = 0;
+  const int32_t collect_err = collect_ubatch_sequence_counts(
+      ctx, ubatch_index, sequence_ids, sequence_token_counts, sequence_count);
+  if (collect_err != EMEL_OK) {
+    return collect_err;
+  }
+
+  for (int32_t i = 0; i < sequence_count; ++i) {
+    const int32_t seq_id = sequence_ids[static_cast<size_t>(i)];
+    const int32_t token_count = sequence_token_counts[static_cast<size_t>(seq_id)];
+    if (token_count <= 0) {
+      return EMEL_ERR_BACKEND;
+    }
+
+    int32_t alloc_error = EMEL_OK;
+    const bool sequence_ok =
+        ctx.memory_coordinator->process_event(emel::memory::coordinator::event::allocate_sequence{
+          .seq_id = seq_id,
+          .error_out = &alloc_error,
+        });
+    const int32_t normalized_sequence = normalize_error(sequence_ok, alloc_error);
+    if (normalized_sequence != EMEL_OK) {
+      return normalized_sequence;
+    }
+
+    const bool slots_ok =
+        ctx.memory_coordinator->process_event(emel::memory::coordinator::event::allocate_slots{
+          .seq_id = seq_id,
+          .token_count = token_count,
+          .error_out = &alloc_error,
+        });
+    const int32_t normalized_slots = normalize_error(slots_ok, alloc_error);
+    if (normalized_slots != EMEL_OK) {
+      return normalized_slots;
+    }
+  }
+
+  return EMEL_OK;
+}
+
+inline int32_t rollback_ubatch_slots(const int32_t ubatch_index, context & ctx) noexcept {
+  if (ctx.memory_coordinator == nullptr) {
+    return EMEL_ERR_BACKEND;
+  }
+
+  std::array<int32_t, static_cast<size_t>(k_max_sequences)> sequence_ids = {};
+  std::array<int32_t, static_cast<size_t>(k_max_sequences)> sequence_token_counts = {};
+  int32_t sequence_count = 0;
+  const int32_t collect_err = collect_ubatch_sequence_counts(
+      ctx, ubatch_index, sequence_ids, sequence_token_counts, sequence_count);
+  if (collect_err != EMEL_OK) {
+    return collect_err;
+  }
+
+  for (int32_t i = 0; i < sequence_count; ++i) {
+    const int32_t seq_id = sequence_ids[static_cast<size_t>(i)];
+    const int32_t token_count = sequence_token_counts[static_cast<size_t>(seq_id)];
+    if (token_count <= 0) {
+      return EMEL_ERR_BACKEND;
+    }
+
+    int32_t rollback_error = EMEL_OK;
+    const bool rollback_ok =
+        ctx.memory_coordinator->process_event(emel::memory::coordinator::event::rollback_slots{
+          .seq_id = seq_id,
+          .token_count = token_count,
+          .error_out = &rollback_error,
+        });
+    const int32_t normalized = normalize_error(rollback_ok, rollback_error);
+    if (normalized != EMEL_OK) {
+      return normalized;
+    }
+  }
+
+  return EMEL_OK;
+}
+
 }  // namespace detail
 
 struct begin_decode {
@@ -474,33 +642,10 @@ struct run_prepare_memory_batch {
     }
 
     for (int32_t i = 0; i < ctx.ubatches_total; ++i) {
-      const int32_t seq_id = ctx.ubatch_seq_ids[i];
-      const int32_t token_count = ctx.ubatch_sizes[i];
-      int32_t alloc_error = EMEL_OK;
-
-      const bool sequence_ok =
-          ctx.memory_coordinator->process_event(emel::memory::coordinator::event::allocate_sequence{
-            .seq_id = seq_id,
-            .error_out = &alloc_error,
-          });
-      const int32_t normalized_sequence = detail::normalize_error(sequence_ok, alloc_error);
-      if (normalized_sequence != EMEL_OK) {
-        *ev.error_out = normalized_sequence;
-        ctx.phase_error = normalized_sequence;
-        ctx.phase_retryable = false;
-        return;
-      }
-
-      const bool slots_ok =
-          ctx.memory_coordinator->process_event(emel::memory::coordinator::event::allocate_slots{
-            .seq_id = seq_id,
-            .token_count = token_count,
-            .error_out = &alloc_error,
-          });
-      const int32_t normalized_slots = detail::normalize_error(slots_ok, alloc_error);
-      if (normalized_slots != EMEL_OK) {
-        *ev.error_out = normalized_slots;
-        ctx.phase_error = normalized_slots;
+      const int32_t normalized = detail::allocate_ubatch_slots(i, ctx);
+      if (normalized != EMEL_OK) {
+        *ev.error_out = normalized;
+        ctx.phase_error = normalized;
         ctx.phase_retryable = false;
         return;
       }
@@ -795,25 +940,23 @@ struct run_rollback_ubatch {
       return;
     }
 
-    const int32_t rollback_index = std::max<int32_t>(0, ctx.ubatches_processed - 1);
-    if (rollback_index < 0 || rollback_index >= ctx.ubatches_total) {
+    int32_t rollback_start = ctx.ubatches_processed;
+    if (rollback_start >= ctx.ubatches_total) {
+      rollback_start = ctx.ubatches_total - 1;
+    }
+    if (rollback_start < 0 || rollback_start >= ctx.ubatches_total) {
       *ev.error_out = EMEL_ERR_BACKEND;
       ctx.phase_error = EMEL_ERR_BACKEND;
       return;
     }
 
-    int32_t rollback_error = EMEL_OK;
-    const bool rollback_ok =
-        ctx.memory_coordinator->process_event(emel::memory::coordinator::event::rollback_slots{
-          .seq_id = ctx.ubatch_seq_ids[rollback_index],
-          .token_count = ctx.ubatch_sizes[rollback_index],
-          .error_out = &rollback_error,
-        });
-    const int32_t normalized = detail::normalize_error(rollback_ok, rollback_error);
-    if (normalized != EMEL_OK) {
-      *ev.error_out = normalized;
-      ctx.phase_error = normalized;
-      return;  // GCOVR_EXCL_LINE
+    for (int32_t i = rollback_start; i < ctx.ubatches_total; ++i) {
+      const int32_t normalized = detail::rollback_ubatch_slots(i, ctx);
+      if (normalized != EMEL_OK) {
+        *ev.error_out = normalized;
+        ctx.phase_error = normalized;
+        return;  // GCOVR_EXCL_LINE
+      }
     }
 
     if (ctx.outputs_processed > ctx.outputs_total) {

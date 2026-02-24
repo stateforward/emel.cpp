@@ -116,11 +116,22 @@ TEST_CASE("decoder_action_prepare_memory_batch_uses_lifecycle_events") {
   bool retryable = true;
   ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
 
+  std::array<int32_t, 3> seq_primary_ids = {{0, 0, 1}};
   ctx.ubatches_total = 2;
+  ctx.n_tokens = 3;
+  ctx.token_indices_count = 3;
   ctx.ubatch_seq_ids[0] = 0;
   ctx.ubatch_sizes[0] = 2;
   ctx.ubatch_seq_ids[1] = 1;
   ctx.ubatch_sizes[1] = 1;
+  ctx.ubatch_token_indices[0] = 0;
+  ctx.ubatch_token_indices[1] = 1;
+  ctx.ubatch_token_indices[2] = 2;
+  ctx.ubatch_token_offsets[0] = 0;
+  ctx.ubatch_token_offsets[1] = 2;
+  ctx.ubatch_token_offsets[2] = 3;
+  ctx.seq_primary_ids = seq_primary_ids.data();
+  ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
   action::run_update_memory(event::update_memory{
                               .error_out = &err,
@@ -149,6 +160,8 @@ TEST_CASE("decoder_action_prepare_memory_batch_propagates_lifecycle_errors") {
   bool retryable = true;
   ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
 
+  std::array<int32_t, 2> seq_primary_ids = {{0, 0}};
+
   REQUIRE(ctx.memory_coordinator->process_event(emel::memory::coordinator::event::reserve{
     .max_sequences = 4,
     .max_blocks = 1,
@@ -157,8 +170,16 @@ TEST_CASE("decoder_action_prepare_memory_batch_propagates_lifecycle_errors") {
   }));
   ctx.memory_reserved = true;
   ctx.ubatches_total = 1;
+  ctx.n_tokens = 2;
+  ctx.token_indices_count = 2;
   ctx.ubatch_seq_ids[0] = 0;
   ctx.ubatch_sizes[0] = 2;
+  ctx.ubatch_token_indices[0] = 0;
+  ctx.ubatch_token_indices[1] = 1;
+  ctx.ubatch_token_offsets[0] = 0;
+  ctx.ubatch_token_offsets[1] = 2;
+  ctx.seq_primary_ids = seq_primary_ids.data();
+  ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
   action::run_prepare_memory_batch(event::prepare_memory_batch{
                                      .error_out = &err,
@@ -177,10 +198,21 @@ TEST_CASE("decoder_action_rollback_ubatch_uses_lifecycle_rollback_slots") {
   bool retryable = false;
   ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
 
+  std::array<int32_t, 3> seq_primary_ids = {{0, 0, 0}};
+
   ctx.ubatches_total = 1;
-  ctx.ubatches_processed = 1;
+  ctx.ubatches_processed = 0;
+  ctx.n_tokens = 3;
+  ctx.token_indices_count = 3;
   ctx.ubatch_seq_ids[0] = 0;
   ctx.ubatch_sizes[0] = 3;
+  ctx.ubatch_token_indices[0] = 0;
+  ctx.ubatch_token_indices[1] = 1;
+  ctx.ubatch_token_indices[2] = 2;
+  ctx.ubatch_token_offsets[0] = 0;
+  ctx.ubatch_token_offsets[1] = 3;
+  ctx.seq_primary_ids = seq_primary_ids.data();
+  ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
   action::run_update_memory(event::update_memory{
                               .error_out = &err,
@@ -203,6 +235,103 @@ TEST_CASE("decoder_action_rollback_ubatch_uses_lifecycle_rollback_slots") {
                               ctx);
   CHECK(err == EMEL_OK);
   CHECK(ctx.memory_coordinator->view().sequence_length(0) == 0);
+}
+
+TEST_CASE("decoder_action_prepare_memory_batch_allocates_mixed_ubatch_per_sequence") {
+  decoder_context ctx{};
+  int32_t err = EMEL_OK;
+  bool retryable = false;
+  ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
+
+  std::array<int32_t, 2> seq_primary_ids = {{0, 1}};
+  ctx.n_tokens = 2;
+  ctx.ubatches_total = 1;
+  ctx.token_indices_count = 2;
+  ctx.ubatch_sizes[0] = 2;
+  ctx.ubatch_seq_ids[0] = 0;
+  ctx.ubatch_token_indices[0] = 0;
+  ctx.ubatch_token_indices[1] = 1;
+  ctx.ubatch_token_offsets[0] = 0;
+  ctx.ubatch_token_offsets[1] = 2;
+  ctx.seq_primary_ids = seq_primary_ids.data();
+  ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
+
+  action::run_update_memory(event::update_memory{
+                              .error_out = &err,
+                            },
+                            ctx);
+  REQUIRE(err == EMEL_OK);
+
+  action::run_prepare_memory_batch(event::prepare_memory_batch{
+                                     .error_out = &err,
+                                     .retryable_out = &retryable,
+                                   },
+                                   ctx);
+  REQUIRE(err == EMEL_OK);
+  CHECK_FALSE(retryable);
+
+  const auto view = ctx.memory_coordinator->view();
+  CHECK(view.is_sequence_active(0));
+  CHECK(view.is_sequence_active(1));
+  CHECK(view.sequence_length(0) == 1);
+  CHECK(view.sequence_length(1) == 1);
+}
+
+TEST_CASE("decoder_action_rollback_ubatch_reverts_failed_and_remaining_preallocations") {
+  decoder_context ctx{};
+  int32_t err = EMEL_OK;
+  bool retryable = false;
+  ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
+
+  std::array<int32_t, 4> seq_primary_ids = {{0, 0, 1, 1}};
+  ctx.n_tokens = 4;
+  ctx.ubatches_total = 3;
+  ctx.token_indices_count = 4;
+  ctx.ubatch_sizes[0] = 1;
+  ctx.ubatch_sizes[1] = 2;
+  ctx.ubatch_sizes[2] = 1;
+  ctx.ubatch_seq_ids[0] = 0;
+  ctx.ubatch_seq_ids[1] = 0;
+  ctx.ubatch_seq_ids[2] = 1;
+  ctx.ubatch_token_indices[0] = 0;
+  ctx.ubatch_token_indices[1] = 1;
+  ctx.ubatch_token_indices[2] = 2;
+  ctx.ubatch_token_indices[3] = 3;
+  ctx.ubatch_token_offsets[0] = 0;
+  ctx.ubatch_token_offsets[1] = 1;
+  ctx.ubatch_token_offsets[2] = 3;
+  ctx.ubatch_token_offsets[3] = 4;
+  ctx.seq_primary_ids = seq_primary_ids.data();
+  ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
+
+  action::run_update_memory(event::update_memory{
+                              .error_out = &err,
+                            },
+                            ctx);
+  REQUIRE(err == EMEL_OK);
+  action::run_prepare_memory_batch(event::prepare_memory_batch{
+                                     .error_out = &err,
+                                     .retryable_out = &retryable,
+                                   },
+                                   ctx);
+  REQUIRE(err == EMEL_OK);
+
+  const auto before = ctx.memory_coordinator->view();
+  REQUIRE(before.sequence_length(0) == 2);
+  REQUIRE(before.sequence_length(1) == 2);
+
+  // ubatch[0] was processed successfully; ubatch[1] failed and ubatch[2] was never run.
+  ctx.ubatches_processed = 1;
+  action::run_rollback_ubatch(event::rollback_ubatch{
+                                .error_out = &err,
+                                .rollback_needed = true,
+                              },
+                              ctx);
+  REQUIRE(err == EMEL_OK);
+
+  const auto after = ctx.memory_coordinator->view();
+  CHECK(after.sequence_length(0) == 1);
+  CHECK(after.sequence_length(1) == 0);
 }
 
 TEST_CASE("decoder_action_process_ubatch_projects_payloads_and_updates_progress") {
@@ -314,11 +443,19 @@ TEST_CASE("decoder_action_process_and_rollback_error_paths") {
 
   {
     decoder_context ctx{};
+    std::array<int32_t, 1> seq_primary_ids = {{0}};
     ctx.memory_coordinator->set_kind(emel::memory::coordinator::coordinator_kind::hybrid);
+    ctx.n_tokens = 1;
     ctx.ubatches_total = 1;
     ctx.ubatches_processed = 1;
+    ctx.token_indices_count = 1;
     ctx.ubatch_seq_ids[0] = 0;
     ctx.ubatch_sizes[0] = 1;
+    ctx.ubatch_token_indices[0] = 0;
+    ctx.ubatch_token_offsets[0] = 0;
+    ctx.ubatch_token_offsets[1] = 1;
+    ctx.seq_primary_ids = seq_primary_ids.data();
+    ctx.seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size());
 
     bool retryable = false;
     action::run_update_memory(event::update_memory{

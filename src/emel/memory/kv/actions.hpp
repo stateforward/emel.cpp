@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <limits>
 
 #include "emel/memory/kv/context.hpp"
 #include "emel/memory/kv/events.hpp"
@@ -14,6 +15,13 @@ inline bool valid_sequence_id(const context & ctx, const int32_t seq_id) noexcep
 }
 
 inline int32_t required_blocks(const context & ctx, const int32_t token_count) noexcept {
+  if (token_count <= 0 || ctx.block_tokens <= 0) {
+    return 0;
+  }
+  return (token_count + ctx.block_tokens - 1) / ctx.block_tokens;
+}
+
+inline int32_t blocks_for_length(const context & ctx, const int32_t token_count) noexcept {
   if (token_count <= 0 || ctx.block_tokens <= 0) {
     return 0;
   }
@@ -143,16 +151,33 @@ inline void run_allocate_slots_phase(const event::allocate_slots & ev, context &
     write_error(ctx.phase_error, ev.error_out);
     return;
   }
-
-  const int32_t blocks_needed = required_blocks(ctx, ev.token_count);
-  if (blocks_needed <= 0) {
+  if (ctx.block_tokens <= 0) {
     ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
     end_phase(ctx);
     write_error(ctx.phase_error, ev.error_out);
     return;
   }
 
+  const int32_t old_length = ctx.sequence_length[seq_index];
+  const int64_t new_length_wide = static_cast<int64_t>(old_length) + ev.token_count;
+  if (new_length_wide <= 0 || new_length_wide > std::numeric_limits<int32_t>::max()) {
+    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
+    end_phase(ctx);
+    write_error(ctx.phase_error, ev.error_out);
+    return;
+  }
+  const int32_t new_length = static_cast<int32_t>(new_length_wide);
+
   const int32_t block_count = ctx.sequence_block_count[seq_index];
+  const int32_t old_blocks = blocks_for_length(ctx, old_length);
+  const int32_t new_blocks = blocks_for_length(ctx, new_length);
+  if (block_count < old_blocks || new_blocks < old_blocks) {
+    ctx.phase_error = EMEL_ERR_BACKEND;
+    end_phase(ctx);
+    write_error(ctx.phase_error, ev.error_out);
+    return;
+  }
+  const int32_t blocks_needed = new_blocks - old_blocks;
   if (block_count + blocks_needed > MAX_BLOCKS_PER_SEQUENCE || ctx.free_count < blocks_needed) {
     ctx.phase_error = EMEL_ERR_BACKEND;
     ctx.phase_out_of_memory = true;
@@ -161,25 +186,27 @@ inline void run_allocate_slots_phase(const event::allocate_slots & ev, context &
     return;
   }
 
-  std::array<size_t, MAX_BLOCKS_PER_SEQUENCE> ids = {};
-  for (int32_t i = 0; i < blocks_needed; ++i) {
-    const uint16_t block_id = ctx.free_stack[static_cast<size_t>(ctx.free_count - 1 - i)];
-    ids[static_cast<size_t>(i)] = static_cast<size_t>(block_id);
-    ctx.seq_to_blocks[seq_index][static_cast<size_t>(block_count + i)] = block_id;
-  }
-  ctx.free_count -= blocks_needed;
+  if (blocks_needed > 0) {
+    std::array<size_t, MAX_BLOCKS_PER_SEQUENCE> ids = {};
+    for (int32_t i = 0; i < blocks_needed; ++i) {
+      const uint16_t block_id = ctx.free_stack[static_cast<size_t>(ctx.free_count - 1 - i)];
+      ids[static_cast<size_t>(i)] = static_cast<size_t>(block_id);
+      ctx.seq_to_blocks[seq_index][static_cast<size_t>(block_count + i)] = block_id;
+    }
+    ctx.free_count -= blocks_needed;
 
-  const size_t linked =
-      ctx.block_refs.process_indexed_batch<block_link>(ids.begin(), ids.begin() + blocks_needed);
-  if (linked != static_cast<size_t>(blocks_needed)) {
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
+    const size_t linked =
+        ctx.block_refs.process_indexed_batch<block_link>(ids.begin(), ids.begin() + blocks_needed);
+    if (linked != static_cast<size_t>(blocks_needed)) {
+      ctx.phase_error = EMEL_ERR_BACKEND;
+      end_phase(ctx);
+      write_error(ctx.phase_error, ev.error_out);
+      return;
+    }
   }
 
-  ctx.sequence_block_count[seq_index] = block_count + blocks_needed;
-  ctx.sequence_length[seq_index] += ev.token_count;
+  ctx.sequence_block_count[seq_index] = new_blocks;
+  ctx.sequence_length[seq_index] = new_length;
 
   if (ev.block_count_out != nullptr) {
     *ev.block_count_out = blocks_needed;
@@ -304,39 +331,62 @@ inline void run_rollback_slots_phase(const event::rollback_slots & ev,
     write_error(ctx.phase_error, ev.error_out);
     return;
   }
-
-  const int32_t block_count = ctx.sequence_block_count[seq_index];
-  const int32_t requested = required_blocks(ctx, ev.token_count);
-  const int32_t remove_count = std::min(block_count, requested);
-
-  std::array<size_t, MAX_BLOCKS_PER_SEQUENCE> ids = {};
-  for (int32_t i = 0; i < remove_count; ++i) {
-    const int32_t block_index = block_count - 1 - i;
-    ids[static_cast<size_t>(i)] =
-        static_cast<size_t>(ctx.seq_to_blocks[seq_index][static_cast<size_t>(block_index)]);
+  if (ctx.block_tokens <= 0) {
+    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
+    end_phase(ctx);
+    write_error(ctx.phase_error, ev.error_out);
+    return;
   }
 
-  const size_t unlinked =
-      ctx.block_refs.process_indexed_batch<block_unlink>(ids.begin(), ids.begin() + remove_count);
-  if (unlinked != static_cast<size_t>(remove_count)) {
+  const int32_t current_length = ctx.sequence_length[seq_index];
+  if (current_length < 0) {
     ctx.phase_error = EMEL_ERR_BACKEND;
     end_phase(ctx);
     write_error(ctx.phase_error, ev.error_out);
     return;
   }
 
-  const auto & refs = ctx.block_refs.storage().refs;
-  for (int32_t i = 0; i < remove_count; ++i) {
-    const int32_t block_index = block_count - 1 - i;
-    const uint16_t block_id = ctx.seq_to_blocks[seq_index][static_cast<size_t>(block_index)];
-    if (refs[static_cast<size_t>(block_id)] == 0) {
-      ctx.free_stack[static_cast<size_t>(ctx.free_count)] = block_id;
-      ++ctx.free_count;
+  const int32_t block_count = ctx.sequence_block_count[seq_index];
+  const int32_t new_length = std::max(0, current_length - ev.token_count);
+  const int32_t new_blocks = blocks_for_length(ctx, new_length);
+  if (new_blocks > block_count) {
+    ctx.phase_error = EMEL_ERR_BACKEND;
+    end_phase(ctx);
+    write_error(ctx.phase_error, ev.error_out);
+    return;
+  }
+  const int32_t remove_count = block_count - new_blocks;
+
+  if (remove_count > 0) {
+    std::array<size_t, MAX_BLOCKS_PER_SEQUENCE> ids = {};
+    for (int32_t i = 0; i < remove_count; ++i) {
+      const int32_t block_index = block_count - 1 - i;
+      ids[static_cast<size_t>(i)] =
+          static_cast<size_t>(ctx.seq_to_blocks[seq_index][static_cast<size_t>(block_index)]);
+    }
+
+    const size_t unlinked =
+        ctx.block_refs.process_indexed_batch<block_unlink>(ids.begin(), ids.begin() + remove_count);
+    if (unlinked != static_cast<size_t>(remove_count)) {
+      ctx.phase_error = EMEL_ERR_BACKEND;
+      end_phase(ctx);
+      write_error(ctx.phase_error, ev.error_out);
+      return;
+    }
+
+    const auto & refs = ctx.block_refs.storage().refs;
+    for (int32_t i = 0; i < remove_count; ++i) {
+      const int32_t block_index = block_count - 1 - i;
+      const uint16_t block_id = ctx.seq_to_blocks[seq_index][static_cast<size_t>(block_index)];
+      if (refs[static_cast<size_t>(block_id)] == 0) {
+        ctx.free_stack[static_cast<size_t>(ctx.free_count)] = block_id;
+        ++ctx.free_count;
+      }
     }
   }
 
-  ctx.sequence_block_count[seq_index] = block_count - remove_count;
-  ctx.sequence_length[seq_index] = std::max(0, ctx.sequence_length[seq_index] - ev.token_count);
+  ctx.sequence_block_count[seq_index] = new_blocks;
+  ctx.sequence_length[seq_index] = new_length;
 
   if (ev.block_count_out != nullptr) {
     *ev.block_count_out = remove_count;
