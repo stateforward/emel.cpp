@@ -47,10 +47,10 @@ TEST_CASE("batch_planner_sm_successful_split") {
   std::array<int32_t, 2> tokens = {{1, 2}};
   plan_capture capture{};
 
-  machine.process_event(emel::batch::planner::event::plan{
+  machine.process_event(emel::batch::planner::event::request{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
-    .n_ubatch = 1,
+    .n_steps = 1,
     .mode = emel::batch::planner::event::plan_mode::simple,
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
@@ -60,39 +60,20 @@ TEST_CASE("batch_planner_sm_successful_split") {
   CHECK(machine.is(boost::sml::state<emel::batch::planner::done>));
 }
 
-TEST_CASE("batch_planner_sm_reports_callback_contract_error") {
-  emel::batch::planner::sm machine{};
-  std::array<int32_t, 2> tokens = {{1, 2}};
-  plan_capture capture{};
-
-  machine.process_event(emel::batch::planner::event::plan{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
-    .n_ubatch = 1,
-    .mode = emel::batch::planner::event::plan_mode::simple,
-    .on_done = {},
-    .on_error = make_error(&capture),
-  });
-
-  CHECK(capture.error_called);
-  CHECK(capture.err == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::invalid_request>));
-}
-
 TEST_CASE("batch_planner_sm_validation_error_path") {
   emel::batch::planner::sm machine{};
   plan_capture capture{};
 
-  machine.process_event(emel::batch::planner::event::plan{
+  machine.process_event(emel::batch::planner::event::request{
     .token_ids = nullptr,
     .n_tokens = 0,
-    .n_ubatch = 1,
+    .n_steps = 1,
     .mode = emel::batch::planner::event::plan_mode::simple,
     .on_done = make_done(&capture),
     .on_error = make_error(&capture),
   });
 
   CHECK(capture.error_called);
-  CHECK(capture.err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(capture.err == emel::error::cast(emel::batch::planner::error::invalid_request));
   CHECK(machine.is(boost::sml::state<emel::batch::planner::invalid_request>));
 }

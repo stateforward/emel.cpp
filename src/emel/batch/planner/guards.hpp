@@ -1,116 +1,73 @@
 #pragma once
 
 #include "emel/batch/planner/actions.hpp"
+#include "emel/batch/planner/modes/detail.hpp"
 #include "emel/batch/planner/events.hpp"
 
 namespace emel::batch::planner::guard {
 
-// validates callback contract on the triggering event.
-inline constexpr auto callbacks_are_valid = [](const event::plan & ev) noexcept {
-  return static_cast<bool>(ev.on_done) && static_cast<bool>(ev.on_error);
-};
-
-inline constexpr auto callbacks_are_invalid =
-    [](const event::plan & ev) noexcept { return !callbacks_are_valid(ev); };
-
-// validates request inputs copied into context (token pointer, counts, and mode).
-inline constexpr auto inputs_are_valid = [](const action::context & ctx) noexcept {
-  if (ctx.token_ids == nullptr || ctx.n_tokens <= 0) {
-    return false;
-  }
-  if (ctx.n_tokens > action::MAX_UBATCHES) {
-    return false;
-  }
-  if (ctx.seq_mask_words <= 0 || ctx.seq_mask_words > action::SEQ_WORDS) {
-    return false;
-  }
-  if (ctx.output_mask != nullptr && ctx.output_mask_count < ctx.n_tokens) {
-    return false;
-  }
-  if (ctx.seq_masks != nullptr && ctx.seq_masks_count < ctx.n_tokens) {
-    return false;
-  }
-  if (ctx.seq_primary_ids != nullptr && ctx.seq_primary_ids_count < ctx.n_tokens) {
-    return false;
-  }
-
-  if (ctx.seq_primary_ids != nullptr) {
-    const int32_t max_seq = ctx.seq_mask_words * 64;
-    for (int32_t i = 0; i < ctx.n_tokens; ++i) {
-      const int32_t primary = ctx.seq_primary_ids[i];
-      if (primary < 0 || primary >= max_seq) {
-        return false;
-      }
-    }
-  }
-
-  if (ctx.seq_masks != nullptr) {
-    for (int32_t i = 0; i < ctx.n_tokens; ++i) {
-      const action::seq_mask_t mask = action::normalized_seq_mask(ctx, i);
-      if (!action::mask_any_set(mask)) {
-        return false;
-      }
-    }
-  }
-
-  if (ctx.mode == event::plan_mode::equal && ctx.equal_sequential) {
-    if (ctx.seq_masks != nullptr && ctx.seq_primary_ids == nullptr) {
-      return false;
-    }
-    if (ctx.seq_primary_ids != nullptr) {
-      for (int32_t i = 0; i < ctx.n_tokens; ++i) {
-        const action::seq_mask_t mask = action::normalized_seq_mask(ctx, i);
-        if (action::mask_has_multiple_bits(mask)) {
-          return false;
-        }
-      }
-    }
-  }
-
-  switch (ctx.mode) {
-    case event::plan_mode::simple:
-    case event::plan_mode::equal:
-    case event::plan_mode::seq:
-      return true;
-  }
-  return false;
-};
+// validates request input payload (token pointer, counts, and metadata).
+inline constexpr auto inputs_are_valid =
+    [](const event::request & ev, const action::context &) noexcept {
+      return modes::detail::has_input_errors(ev) == false;
+    };
 
 inline constexpr auto inputs_are_invalid =
-    [](const action::context & ctx) noexcept { return !inputs_are_valid(ctx); };
+    [](const event::request & ev, const action::context & ctx) noexcept {
+      return !inputs_are_valid(ev, ctx);
+    };
 
-inline constexpr auto mode_is_simple = [](const action::context & ctx) noexcept {
-  return ctx.mode == event::plan_mode::simple;
+inline constexpr auto mode_is_simple =
+    [](const event::request & ev, const action::context &) noexcept {
+      return ev.mode == event::plan_mode::simple;
+    };
+
+inline constexpr auto mode_is_equal =
+    [](const event::request & ev, const action::context &) noexcept {
+      return ev.mode == event::plan_mode::equal;
+    };
+
+inline constexpr auto mode_is_equal_primary_fast =
+    [](const event::request & ev, const action::context &) noexcept {
+      return ev.mode == event::plan_mode::equal && ev.seq_masks == nullptr &&
+             ev.seq_primary_ids != nullptr;
+    };
+
+inline constexpr auto mode_is_seq = [](const event::request & ev,
+                                       const action::context &) noexcept {
+  return ev.mode == event::plan_mode::seq ||
+         ev.mode == event::plan_mode::sequential;
 };
 
-inline constexpr auto mode_is_equal = [](const action::context & ctx) noexcept {
-  return ctx.mode == event::plan_mode::equal;
-};
+inline constexpr auto mode_is_invalid =
+    [](const event::request & ev, const action::context & ctx) noexcept {
+      return !mode_is_simple(ev, ctx) && !mode_is_equal(ev, ctx) && !mode_is_seq(ev, ctx);
+    };
 
-inline constexpr auto mode_is_equal_primary_fast = [](const action::context & ctx) noexcept {
-  return ctx.mode == event::plan_mode::equal && ctx.seq_masks == nullptr &&
-         ctx.seq_primary_ids != nullptr;
-};
-
-inline constexpr auto mode_is_seq = [](const action::context & ctx) noexcept {
-  return ctx.mode == event::plan_mode::seq;
-};
+inline constexpr auto mode_is_sequential =
+    [](const event::request & ev, const action::context &) noexcept {
+      return ev.mode == event::plan_mode::sequential ||
+             ev.mode == event::plan_mode::seq;
+    };
 
 // reports whether plan computation produced usable output sizes.
-inline constexpr auto plan_succeeded = [](const action::context & ctx) noexcept {
-  if (ctx.ubatch_count <= 0 || ctx.total_outputs < 0) {
-    return false;
-  }
-  if (ctx.token_indices_count != ctx.n_tokens) {
-    return false;
-  }
-  if (ctx.ubatch_count <= action::MAX_UBATCHES) {
-    return ctx.ubatch_token_offsets[ctx.ubatch_count] == ctx.token_indices_count;
-  }
-  return false;
-};
+inline constexpr auto planning_succeeded =
+    [](const event::request & ev, const action::context & ctx) noexcept {
+      if (ctx.step_count <= 0 || ctx.total_outputs < 0) {
+        return false;
+      }
+      if (ctx.token_indices_count != ev.n_tokens) {
+        return false;
+      }
+      if (ctx.step_count <= action::MAX_PLAN_STEPS) {
+        return ctx.step_token_offsets[ctx.step_count] == ctx.token_indices_count;
+      }
+      return false;
+    };
 
-inline constexpr auto plan_failed =
-    [](const action::context & ctx) noexcept { return !plan_succeeded(ctx); };
+inline constexpr auto planning_failed =
+    [](const event::request & ev, const action::context & ctx) noexcept {
+      return !planning_succeeded(ev, ctx);
+    };
 
 }  // namespace emel::batch::planner::guard
