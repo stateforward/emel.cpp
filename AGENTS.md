@@ -1,7 +1,7 @@
 # AGENTS.md
 
 these rules define the engineering contract for emel.cpp. they are aligned with
-`docs/sml.rules.md`. if a rule here conflicts with `docs/sml.rules.md`, the doc
+`docs/rules/sml.rules.md`. if a rule here conflicts with `docs/rules/sml.rules.md`, the doc
 wins and this file must be updated.
 
 ## boost.SML actor model (aligned with docs/sml.rules.md)
@@ -10,11 +10,20 @@ NEVER use `sml::process_queue`, `sml::defer_queue`, or any mailbox/post-for-late
 mechanism.
 ALWAYS keep dispatch run-to-completion and single-writer per actor.
 NEVER call an actor's own `process_event` from guards/actions/entry/exit.
-ALWAYS model internal multi-step flows with anonymous transitions and/or entry
-actions.
+ALWAYS model internal multi-step flows with `sml::completion<TEvent>`,
+anonymous transitions, and/or entry actions.
 ALWAYS keep anonymous transition graphs acyclic or statically bounded.
+ALWAYS propagate originating event data across internal phases via typed
+completion transitions (`sml::completion<TEvent>`) when needed.
+NEVER copy event payload into context just to bridge internal phases.
 ALWAYS keep guards pure predicates of `(event, context)` with no side effects.
 ALWAYS keep actions bounded, non-blocking, and allocation-free during dispatch.
+NEVER put runtime conditional logic in actions or in functions called from
+actions.
+ALWAYS model all runtime conditional logic as explicit guards or explicit
+choice states/transitions.
+ONLY compile-time conditionals (`if constexpr`, `#if`) are allowed inside
+actions, state machine member methods, or functions called from actions.
 NEVER perform I/O waits, mutex waits, or sleeps inside guards/actions.
 ALWAYS inject time via event payloads; NEVER read wall-clock time in guards or
 actions.
@@ -43,6 +52,22 @@ ALWAYS keep tracing deterministic, bounded, and allocation-free; use
 ALWAYS use boost.SML for orchestration state machines.
 ALWAYS define transition tables in `struct model` and expose `using sm =
 boost::sml::sm<model>;`.
+ALWAYS write transition rows in destination-first form:
+`sml::state<dst> <= src + event [guard] / action`.
+NEVER write source-first rows in new or modified code
+(`src + event [guard] / action = dst`).
+ALWAYS keep the destination state and `<=` on the same line.
+ALWAYS organize large transition tables into explicit visual sections using
+phase labels and divider comments (for example
+`//------------------------------------------------------------------------------//`).
+ALWAYS use leading-comma row style after the first row inside
+`make_transition_table(...)`.
+ALWAYS use narrowly scoped `// clang-format off/on` around transition tables
+when formatting would reduce readability.
+ALWAYS use this canonical transition-table skeleton for readability and
+consistency:
+`return make_transition_table(` then one first row, then each additional row
+prefixed with `,`, with destination-first `<=` rows only.
 ALWAYS keep canonical machine types in component namespaces as `emel::<component>::sm`.
 ALWAYS provide additive top-level PascalCase aliases (e.g. `emel::Model`).
 ALWAYS map directory layout to namespaces.
@@ -83,8 +108,11 @@ NEVER store per-invocation API output pointers in machine context.
 ALWAYS define a component-local state-machine context type (e.g. `action::context`).
 ALWAYS mutate context inside actions or internal transitions when needed.
 NEVER mutate context in guards.
+NEVER read or write context directly from state machine member functions.
 ALWAYS keep context focused on machine-owned runtime data required across internal
 phase events.
+NEVER mirror per-dispatch request/event payload fields into context only for
+phase handoff.
 NEVER store orchestration phase/attempt/failure flags in context.
 NEVER add string/pointer `error` members to machine data.
 
@@ -144,11 +172,14 @@ ALWAYS hard-fail runs when required tools are missing.
 ALWAYS enforce line coverage >= 90%.
 ALWAYS run `scripts/quality_gates.sh` after each implementation change.
 ALWAYS use ctest targets `emel_tests` and `lint_snapshot` for test execution.
-ALWAYS reference `docs/sml.rules.md` for SML semantics and testing guidance.
+ALWAYS reference `docs/rules/sml.rules.md` for SML semantics and testing guidance.
 
 ## reference policy
 ALWAYS treat `src/` boost.SML machines as the single source of truth for
 architecture and orchestration.
+ALWAYS use `src/emel/gbnf` as the default architectural reference for new
+Boost.SML machine organization, decomposition, and transition-table layout,
+unless the current task explicitly requires a different reference family.
 NEVER maintain parallel machine-definition markdown specs under
 `docs/architecture/*`.
 ALWAYS document state purpose, key invariants, guard semantics, and action side
