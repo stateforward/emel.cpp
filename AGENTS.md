@@ -103,6 +103,10 @@ ALWAYS define machine outcome events in the `events` namespace with explicit
 `_done` and `_error` suffixes.
 INTERNAL-only `_done`/`_error` events MAY carry mutable payload references when
 they are not publicly exposed outside the component boundary.
+ALWAYS use references for required event fields.
+NEVER model required event fields as pointers.
+ONLY use event payload pointers for optional/nullable fields or C ABI boundary
+types that cannot use references.
 NEVER use `cmd_*`-prefixed event names.
 ALWAYS model failures via explicit error states and `_error` events.
 NEVER add synthetic fault-injection knobs to production events or actions.
@@ -120,6 +124,16 @@ NEVER mutate context in guards.
 NEVER read or write context directly from state machine member functions.
 ALWAYS keep context focused on machine-owned runtime data required across internal
 phase events.
+NEVER store dispatch-local data in context.
+Dispatch-local data includes: current request/event pointers or refs, output pointers,
+phase flags, step indexes, temporary counts, and transient error/status codes.
+NEVER add context fields named or purposed like: `request`, `event`, `phase`, `step`,
+`index`, `count`, `err`, `error`, `status`, `last_error`, `*_out`, `*_ptr`.
+ALWAYS pass per-dispatch data across internal phases via typed internal events only
+(`events::*_done` / `events::*_error` or typed completion payloads), not context.
+ALWAYS keep context fields to persistent actor-owned state meaningful across
+top-level dispatch calls.
+If a machine has no persistent actor-owned state, context MUST be an empty struct.
 NEVER mirror per-dispatch request/event payload fields into context only for
 phase handoff.
 NEVER store orchestration phase/attempt/failure flags in context.
@@ -164,6 +178,7 @@ ALWAYS write scripts to work on any Unix-based OS.
 ## build, tests, and CI gates
 ALWAYS work on a feature branch and submit changes via a pull request.
 NEVER push directly to `main`.
+NEVER commit `tmp/llama.cpp`.
 ALWAYS use zig toolchain (zig cc and zig c++) for default development and
 production builds.
 ALWAYS use native clang or gcc for coverage builds.

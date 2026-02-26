@@ -50,6 +50,9 @@ primary sources consulted (non-exhaustive)
 7. event payload pointers/references MUST remain valid for the full top-level
    `process_event` call (including internal completion/anonymous progress and
    synchronous nested actor dispatch triggered within that RTC chain).
+8. required event fields MUST be references, not pointers. pointers in event
+   payloads MUST be reserved for optional/nullable fields or C ABI boundary
+   types where references cannot be expressed.
 
 ## 5. state and context
 1. state types SHOULD be “labels”, not storage. actor data MUST live in an explicit context object owned by the actor and passed into SML via dependency injection (constructor args to `sml::sm`).
@@ -65,6 +68,13 @@ primary sources consulted (non-exhaustive)
    phases/events; ephemeral request payload SHOULD stay in events and be
    propagated with typed transitions (for example `event<TEvent>`,
    `completion<TEvent>`).
+9. context is for persistent actor-owned state only; per-dispatch orchestration
+   scratch MUST NOT be stored in context.
+10. per-dispatch phase handoff MUST use typed internal events
+    (`events::*_done`, `events::*_error`, `sml::completion<TEvent>`) and MUST
+    NOT mirror request/event data into context.
+11. error progression MUST be modeled by explicit error states/events; do not
+    use context error/status fields as control state.
 
 ## 6. actions and guards
 ### selection and evaluation order
@@ -101,6 +111,8 @@ primary sources consulted (non-exhaustive)
     - `sml::unexpected_event<sml::_>` as the catchall (NO guard). guards that exclude
       `boost::sml::back::internal_event` will suppress the unexpected event itself because
       `unexpected_event<_>` is an internal_event.
+15. guards MAY branch only on `(event, persistent_context)` and MUST NOT depend
+    on dispatch-local context fields.
 
 ## 7. reentrancy and nested dispatch
 1. an actor MUST NOT call its own `process_event` (directly or indirectly) from inside a guard/action. this prevents unbounded recursion and makes WCET analysis tractable. (motivation: `process_event` is synchronous and can be re-entered; SML users report deep call stacks if they do this.)
