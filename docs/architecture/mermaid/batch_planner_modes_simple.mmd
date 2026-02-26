@@ -1,0 +1,15 @@
+stateDiagram-v2
+  direction TB
+  [*] --> preparing
+  preparing --> planning : completion [always] / lambda_actions_37_39
+  planning --> planning_decision : completion [always] / lambda_actions_41_37
+  planning_decision --> planning_done : completion [lambda_guards_7_44] / none
+  planning_decision --> planning_failed : completion [lambda_guards_22_5] / none
+  planning_done --> terminate : [always] / none
+  planning_failed --> terminate : [always] / none
+  planning_done --> unexpected_event : _ [always] / none
+  planning_failed --> unexpected_event : _ [always] / none
+  preparing --> unexpected_event : _ [always] / none
+  planning --> unexpected_event : _ [always] / none
+  planning_decision --> unexpected_event : _ [always] / none
+  unexpected_event --> unexpected_event : _ [always] / none

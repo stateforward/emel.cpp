@@ -1,0 +1,16 @@
+stateDiagram-v2
+  direction TB
+  [*] --> unbound
+  unbound --> bound : bind_storage [valid_bind_] / run_bind_storage_
+  unbound --> errored : bind_storage [invalid_bind_] / set_invalid_argument_
+  bound --> awaiting_effects : plan_load [valid_plan_] / run_plan_load_
+  bound --> errored : plan_load [invalid_plan_] / set_invalid_argument_
+  awaiting_effects --> ready : apply_effect_results [valid_apply_] / run_apply_effects_
+  awaiting_effects --> errored : apply_effect_results [invalid_apply_] / set_invalid_argument_
+  ready --> bound : bind_storage [valid_bind_] / run_bind_storage_
+  errored --> bound : bind_storage [valid_bind_] / run_bind_storage_
+  unbound --> errored : _ [always] / on_unexpected_
+  bound --> errored : _ [always] / on_unexpected_
+  awaiting_effects --> errored : _ [always] / on_unexpected_
+  ready --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_

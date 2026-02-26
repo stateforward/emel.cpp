@@ -1,0 +1,16 @@
+stateDiagram-v2
+  direction TB
+  [*] --> uninitialized
+  uninitialized --> probed : probe [valid_probe_] / run_probe_
+  uninitialized --> errored : probe [invalid_probe_] / set_invalid_argument_
+  probed --> bound : bind_storage [valid_bind_] / run_bind_storage_
+  probed --> errored : bind_storage [invalid_bind_] / set_invalid_argument_
+  bound --> parsed : parse [valid_parse_] / run_parse_
+  bound --> errored : parse [invalid_parse_] / set_invalid_argument_
+  parsed --> probed : probe [valid_probe_] / run_probe_
+  errored --> probed : probe [valid_probe_] / run_probe_
+  uninitialized --> errored : _ [always] / on_unexpected_
+  probed --> errored : _ [always] / on_unexpected_
+  bound --> errored : _ [always] / on_unexpected_
+  parsed --> errored : _ [always] / on_unexpected_
+  errored --> errored : _ [always] / on_unexpected_

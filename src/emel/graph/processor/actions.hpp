@@ -1,375 +1,98 @@
 #pragma once
 
+#include <cstdint>
+
 #include "emel/graph/processor/context.hpp"
+#include "emel/graph/processor/errors.hpp"
+#include "emel/graph/processor/events.hpp"
 
 namespace emel::graph::processor::action {
 
-namespace detail {
-
-inline int32_t normalize_callback_error(const bool ok, const int32_t err) noexcept {
-  if (ok && err == EMEL_OK) {
-    return EMEL_OK;
-  }
-  if (err != EMEL_OK) {
-    return err;
-  }
-  return EMEL_ERR_BACKEND;
+inline void reset_output(event::execution_output & output) noexcept {
+  output.outputs_produced = 0;
+  output.graph_reused = 0;
 }
 
-inline event::execute make_request(const context & ctx) noexcept {
-  return event::execute{
-    .step_index = ctx.step_index,
-    .step_size = ctx.step_size,
-    .kv_tokens = ctx.kv_tokens,
-    .memory_sm = ctx.memory_sm,
-    .memory_view = ctx.memory_view,
-    .expected_outputs = ctx.expected_outputs,
-    .compute_ctx = ctx.compute_ctx,
-    .positions = ctx.positions,
-    .positions_count = ctx.positions_count,
-    .seq_masks = ctx.seq_masks,
-    .seq_mask_words = ctx.seq_mask_words,
-    .seq_masks_count = ctx.seq_masks_count,
-    .seq_primary_ids = ctx.seq_primary_ids,
-    .seq_primary_ids_count = ctx.seq_primary_ids_count,
-    .validate = ctx.validate,
-    .prepare_graph = ctx.prepare_graph,
-    .alloc_graph = ctx.alloc_graph,
-    .bind_inputs = ctx.bind_inputs,
-    .run_backend = ctx.run_backend,
-    .extract_outputs = ctx.extract_outputs,
-    .outputs_produced_out = nullptr,
-    .kv_tokens_out = ctx.kv_tokens_out,
-    .rollback_attempted_out = ctx.rollback_attempted_out,
-    .error_out = nullptr,
-  };
-}
+struct reject_invalid_execute_with_dispatch {
+  void operator()(const event::execute_step & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::invalid_request);
+    reset_output(*ev.request.output_out);
+    ev.request.dispatch_error(events::execution_error{
+      *ev.request.output_out,
+      static_cast<int32_t>(ev.ctx.err),
+    });
+  }
+};
 
-}  // namespace detail
+struct reject_invalid_execute_with_output_only {
+  void operator()(const event::execute_step & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::invalid_request);
+    reset_output(*ev.request.output_out);
+  }
+};
+
+struct reject_invalid_execute_without_output {
+  void operator()(const event::execute_step & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::invalid_request);
+  }
+};
 
 struct begin_execute {
-  void operator()(const event::execute & ev, context & ctx) const noexcept {
-    ctx.step_index = ev.step_index;
-    ctx.step_size = ev.step_size;
-    ctx.kv_tokens = ev.kv_tokens;
-    ctx.memory_sm = ev.memory_sm;
-    ctx.memory_view = ev.memory_view;
-    ctx.expected_outputs = ev.expected_outputs;
-    ctx.compute_ctx = ev.compute_ctx;
-    ctx.positions = ev.positions;
-    ctx.positions_count = ev.positions_count;
-    ctx.seq_masks = ev.seq_masks;
-    ctx.seq_mask_words = ev.seq_mask_words;
-    ctx.seq_masks_count = ev.seq_masks_count;
-    ctx.seq_primary_ids = ev.seq_primary_ids;
-    ctx.seq_primary_ids_count = ev.seq_primary_ids_count;
-    ctx.validate = ev.validate;
-    ctx.prepare_graph = ev.prepare_graph;
-    ctx.alloc_graph = ev.alloc_graph;
-    ctx.bind_inputs = ev.bind_inputs;
-    ctx.run_backend = ev.run_backend;
-    ctx.extract_outputs = ev.extract_outputs;
-    ctx.kv_tokens_out = ev.kv_tokens_out;
-    ctx.rollback_attempted_out = ev.rollback_attempted_out;
-    ctx.outputs_produced = 0;
-    ctx.graph_reused = false;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-    if (ctx.kv_tokens_out != nullptr) {
-      *ctx.kv_tokens_out = ctx.kv_tokens;
-    }
-    if (ctx.rollback_attempted_out != nullptr) {
-      *ctx.rollback_attempted_out = false;
-    }
+  void operator()(const event::execute_step & ev, context & ctx) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.validate_outcome = validate_step::events::phase_outcome::unknown;
+    ev.ctx.prepare_outcome = prepare_step::events::phase_outcome::unknown;
+    ev.ctx.alloc_outcome = alloc_step::events::phase_outcome::unknown;
+    ev.ctx.bind_outcome = bind_step::events::phase_outcome::unknown;
+    ev.ctx.kernel_outcome = kernel_step::events::phase_outcome::unknown;
+    ev.ctx.extract_outcome = extract_step::events::phase_outcome::unknown;
+    ev.ctx.graph_reused = 0;
+    ev.ctx.outputs_produced = 0;
+    ev.ctx.phase_callback_ok = false;
+    ev.ctx.phase_callback_err = 0;
+    ++ctx.dispatch_generation;
+    reset_output(*ev.request.output_out);
   }
 };
 
-struct run_validate {
-  void operator()(const event::validate & ev, context & ctx) const noexcept {
-    if (ev.error_out == nullptr) {
-      return;
-    }
-    *ev.error_out = EMEL_OK;
-
-    const event::execute * request = ev.request;
-    if (request == nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-
-    if (request->validate == nullptr) {
-      ctx.phase_error = EMEL_OK;
-      return;
-    }
-
-    int32_t err = EMEL_OK;
-    const bool ok = request->validate(*request, &err);
-    const int32_t normalized = detail::normalize_callback_error(ok, err);
-    *ev.error_out = normalized;
-    ctx.phase_error = normalized;
-  }
-
-  template <class ev>
-  void operator()(const ev &, context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.validate == nullptr) {
-      return;
-    }
-    event::execute request = detail::make_request(ctx);
-    int32_t err = EMEL_OK;
-    const bool ok = ctx.validate(request, &err);
-    ctx.phase_error = detail::normalize_callback_error(ok, err);
+struct commit_output {
+  void operator()(const event::execute_step & ev, const context &) const noexcept {
+    ev.request.output_out->outputs_produced = ev.ctx.outputs_produced;
+    ev.request.output_out->graph_reused = ev.ctx.graph_reused;
   }
 };
 
-struct run_prepare_graph {
-  void operator()(const event::prepare_graph & ev, context & ctx) const noexcept {
-    if (ev.error_out == nullptr) {
-      return;
-    }
-    *ev.error_out = EMEL_OK;
-
-    const event::execute * request = ev.request;
-    if (request == nullptr || request->prepare_graph == nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-
-    bool reused = false;
-    int32_t err = EMEL_OK;
-    const bool ok = request->prepare_graph(*request, &reused, &err);
-    const int32_t normalized = detail::normalize_callback_error(ok, err);
-    if (ev.reused_out != nullptr) {
-      *ev.reused_out = reused;
-    }
-    *ev.error_out = normalized;
-    ctx.graph_reused = reused;
-    ctx.phase_error = normalized;
-  }
-
-  template <class ev>
-  void operator()(const ev &, context & ctx) const noexcept {
-    ctx.graph_reused = false;
-    ctx.phase_error = EMEL_OK;
-    if (ctx.prepare_graph == nullptr) {
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-    event::execute request = detail::make_request(ctx);
-    bool reused = false;
-    int32_t err = EMEL_OK;
-    const bool ok = ctx.prepare_graph(request, &reused, &err);
-    ctx.graph_reused = reused;
-    ctx.phase_error = detail::normalize_callback_error(ok, err);
+struct dispatch_done {
+  void operator()(const event::execute_step & ev, const context &) const noexcept {
+    ev.request.dispatch_done(events::execution_done{*ev.request.output_out});
   }
 };
 
-struct run_alloc_graph {
-  void operator()(const event::alloc_graph & ev, context & ctx) const noexcept {
-    if (ev.error_out == nullptr) {
-      return;
-    }
-    *ev.error_out = EMEL_OK;
-
-    const event::execute * request = ev.request;
-    if (request == nullptr || request->alloc_graph == nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-
-    int32_t err = EMEL_OK;
-    const bool ok = request->alloc_graph(*request, &err);
-    const int32_t normalized = detail::normalize_callback_error(ok, err);
-    *ev.error_out = normalized;
-    ctx.phase_error = normalized;
-  }
-
-  template <class ev>
-  void operator()(const ev &, context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.alloc_graph == nullptr) {
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-    event::execute request = detail::make_request(ctx);
-    int32_t err = EMEL_OK;
-    const bool ok = ctx.alloc_graph(request, &err);
-    ctx.phase_error = detail::normalize_callback_error(ok, err);
-  }
-};
-
-struct run_bind_inputs {
-  void operator()(const event::bind_inputs & ev, context & ctx) const noexcept {
-    if (ev.error_out == nullptr) {
-      return;
-    }
-    *ev.error_out = EMEL_OK;
-
-    const event::execute * request = ev.request;
-    if (request == nullptr || request->bind_inputs == nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-
-    int32_t err = EMEL_OK;
-    const bool ok = request->bind_inputs(*request, &err);
-    const int32_t normalized = detail::normalize_callback_error(ok, err);
-    *ev.error_out = normalized;
-    ctx.phase_error = normalized;
-  }
-
-  template <class ev>
-  void operator()(const ev &, context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.bind_inputs == nullptr) {
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-    event::execute request = detail::make_request(ctx);
-    int32_t err = EMEL_OK;
-    const bool ok = ctx.bind_inputs(request, &err);
-    ctx.phase_error = detail::normalize_callback_error(ok, err);
-  }
-};
-
-struct run_backend {
-  void operator()(const event::run_backend & ev, context & ctx) const noexcept {
-    if (ev.error_out == nullptr) {
-      return;
-    }
-    *ev.error_out = EMEL_OK;
-
-    const event::execute * request = ev.request;
-    if (request == nullptr || request->run_backend == nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-
-    int32_t err = EMEL_OK;
-    const bool ok = request->run_backend(*request, &err);
-    const int32_t normalized = detail::normalize_callback_error(ok, err);
-    *ev.error_out = normalized;
-    ctx.phase_error = normalized;
-  }
-
-  template <class ev>
-  void operator()(const ev &, context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.run_backend == nullptr) {
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-    event::execute request = detail::make_request(ctx);
-    int32_t err = EMEL_OK;
-    const bool ok = ctx.run_backend(request, &err);
-    ctx.phase_error = detail::normalize_callback_error(ok, err);
-  }
-};
-
-struct run_extract_outputs {
-  void operator()(const event::extract_outputs & ev, context & ctx) const noexcept {
-    if (ev.error_out == nullptr) {
-      return;
-    }
-    *ev.error_out = EMEL_OK;
-
-    const event::execute * request = ev.request;
-    if (request == nullptr || request->extract_outputs == nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-
-    int32_t outputs_produced = 0;
-    int32_t err = EMEL_OK;
-    const bool ok = request->extract_outputs(*request, &outputs_produced, &err);
-    const int32_t normalized = detail::normalize_callback_error(ok, err);
-    if (normalized != EMEL_OK) {
-      *ev.error_out = normalized;
-      ctx.phase_error = normalized;
-      return;
-    }
-    ctx.outputs_produced = outputs_produced;
-    ctx.phase_error = EMEL_OK;
-  }
-
-  template <class ev>
-  void operator()(const ev &, context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.extract_outputs == nullptr) {
-      ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-    event::execute request = detail::make_request(ctx);
-    int32_t outputs_produced = 0;
-    int32_t err = EMEL_OK;
-    const bool ok = ctx.extract_outputs(request, &outputs_produced, &err);
-    const int32_t normalized = detail::normalize_callback_error(ok, err);
-    if (normalized != EMEL_OK) {
-      ctx.phase_error = normalized;
-      return;
-    }
-    ctx.outputs_produced = outputs_produced;
+struct dispatch_error {
+  void operator()(const event::execute_step & ev, const context &) const noexcept {
+    ev.request.dispatch_error(events::execution_error{
+      *ev.request.output_out,
+      static_cast<int32_t>(ev.ctx.err),
+    });
   }
 };
 
 struct on_unexpected {
-  template <class event>
-  void operator()(const event & ev, context & ctx) const noexcept {
-    if constexpr (requires { ev.error_out; }) {
-      if (ev.error_out != nullptr) {
-        *ev.error_out = EMEL_ERR_BACKEND;
-      }
+  template <class event_type>
+  void operator()(const event_type & ev, context &) const noexcept {
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = emel::error::cast(error::internal_error);
     }
-    ctx.phase_error = EMEL_ERR_BACKEND;
   }
 };
 
-struct reject_invalid_execute {
-  template <class event>
-  void operator()(const event & ev, context & ctx) const noexcept {
-    if constexpr (requires { ev.error_out; }) {
-      if (ev.error_out != nullptr) {
-        *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      }
-    }
-    ctx.outputs_produced = 0;
-    ctx.graph_reused = false;
-    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-    ctx.last_error = EMEL_ERR_INVALID_ARGUMENT;
-  }
-};
-
-struct mark_done {
-  void operator()(context & ctx) const noexcept {
-    ctx.last_error = EMEL_OK;
-  }
-};
-
-struct ensure_last_error {
-  void operator()(context & ctx) const noexcept {
-    if (ctx.last_error != EMEL_OK) {
-      return;
-    }
-    ctx.last_error = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
-  }
-};
-
+inline constexpr reject_invalid_execute_with_dispatch reject_invalid_execute_with_dispatch{};
+inline constexpr reject_invalid_execute_with_output_only reject_invalid_execute_with_output_only{};
+inline constexpr reject_invalid_execute_without_output reject_invalid_execute_without_output{};
 inline constexpr begin_execute begin_execute{};
-inline constexpr run_validate run_validate{};
-inline constexpr run_prepare_graph run_prepare_graph{};
-inline constexpr run_alloc_graph run_alloc_graph{};
-inline constexpr run_bind_inputs run_bind_inputs{};
-inline constexpr run_backend run_backend{};
-inline constexpr run_extract_outputs run_extract_outputs{};
+inline constexpr commit_output commit_output{};
+inline constexpr dispatch_done dispatch_done{};
+inline constexpr dispatch_error dispatch_error{};
 inline constexpr on_unexpected on_unexpected{};
-inline constexpr reject_invalid_execute reject_invalid_execute{};
-inline constexpr mark_done mark_done{};
-inline constexpr ensure_last_error ensure_last_error{};
 
 }  // namespace emel::graph::processor::action

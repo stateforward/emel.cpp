@@ -5,7 +5,7 @@
 #include <memory>
 
 #include "emel/gbnf/detail.hpp"
-#include "emel/gbnf/lexer/sm.hpp"
+#include "emel/gbnf/rule_parser/lexer/sm.hpp"
 #include "emel/gbnf/rule_parser/detail.hpp"
 
 namespace emel::gbnf::rule_parser::action {
@@ -16,7 +16,7 @@ struct context {
     uint32_t generated_rule_id = 0;
   };
 
-  emel::gbnf::lexer::sm lexer = {};
+  emel::gbnf::rule_parser::lexer::sm lexer = {};
   uint32_t current_rule_id = 0;
   detail::rule_builder current_rule = {};
   uint32_t last_sym_start = 0;

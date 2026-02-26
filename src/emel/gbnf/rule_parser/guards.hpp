@@ -3,21 +3,21 @@
 #include <limits>
 #include <string_view>
 
-#include "emel/gbnf/expression_parser/events.hpp"
-#include "emel/gbnf/nonterm_parser/events.hpp"
+#include "emel/gbnf/rule_parser/expression_parser/events.hpp"
+#include "emel/gbnf/rule_parser/nonterm_parser/events.hpp"
 #include "emel/gbnf/rule_parser/context.hpp"
 #include "emel/gbnf/rule_parser/errors.hpp"
 #include "emel/gbnf/rule_parser/events.hpp"
-#include "emel/gbnf/term_parser/events.hpp"
+#include "emel/gbnf/rule_parser/term_parser/events.hpp"
 
 namespace emel::gbnf::rule_parser::guard {
 
 template <lexer::event::token_kind kind>
 struct lexer_token_is {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) &&
-           ev.flow.has_token &&
-           ev.flow.token.kind == kind;
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.has_token &&
+           ev.ctx.token.kind == kind;
   }
 };
 
@@ -193,7 +193,7 @@ inline bool can_apply_quantifier(const event::parse_rules & ev,
 
   uint64_t min_times = 0;
   uint64_t max_times = 0;
-  if (!parse_quantifier_bounds(ev.flow.token.text, min_times, max_times)) {
+  if (!parse_quantifier_bounds(ev.ctx.token.text, min_times, max_times)) {
     return false;
   }
   if (min_times > k_max_repetition_threshold) {
@@ -283,108 +283,108 @@ struct invalid_parse_without_grammar {
 
 struct phase_ok {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none);
+    return ev.ctx.err == emel::error::cast(error::none);
   }
 };
 
 struct phase_failed {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 
 struct lexer_failed {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 
 struct lexer_at_eof {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) && !ev.flow.has_token;
+    return ev.ctx.err == emel::error::cast(error::none) && !ev.ctx.has_token;
   }
 };
 
 struct lexer_has_token {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) && ev.flow.has_token;
+    return ev.ctx.err == emel::error::cast(error::none) && ev.ctx.has_token;
   }
 };
 
 struct definition_done {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none);
+    return ev.ctx.err == emel::error::cast(error::none);
   }
 };
 
 struct definition_failed {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 
 struct expression_done_identifier {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) &&
-           ev.flow.expression_kind == expression_parser::events::parse_kind::identifier;
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.expression_kind == expression_parser::events::parse_kind::identifier;
   }
 };
 
 struct expression_done_non_identifier {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) &&
-           ev.flow.expression_kind == expression_parser::events::parse_kind::non_identifier;
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.expression_kind == expression_parser::events::parse_kind::non_identifier;
   }
 };
 
 struct expression_failed {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 
 struct nonterm_definition_done {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) &&
-           ev.flow.nonterm_mode == nonterm_parser::events::parse_mode::definition;
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.nonterm_mode == nonterm_parser::events::parse_mode::definition;
   }
 };
 
 struct nonterm_reference_done {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) &&
-           ev.flow.nonterm_mode == nonterm_parser::events::parse_mode::reference;
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.nonterm_mode == nonterm_parser::events::parse_mode::reference;
   }
 };
 
 struct nonterm_failed {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 
 struct term_from_need_term {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.current_term_origin == event::parse_flow::term_origin::need_term;
+    return ev.ctx.current_term_origin == event::parse_rules_ctx::term_origin::need_term;
   }
 };
 
 struct term_from_after_term {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.current_term_origin == event::parse_flow::term_origin::after_term;
+    return ev.ctx.current_term_origin == event::parse_rules_ctx::term_origin::after_term;
   }
 };
 
 struct term_failed {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 
 template <term_parser::events::term_kind kind>
 struct term_kind_is {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) && ev.flow.term_kind == kind;
+    return ev.ctx.err == emel::error::cast(error::none) && ev.ctx.term_kind == kind;
   }
 };
 
@@ -414,7 +414,7 @@ struct token_literal_valid {
       return false;
     }
     uint32_t count = 0;
-    if (!literal_element_count(ev.flow.token.text, count)) {
+    if (!literal_element_count(ev.ctx.token.text, count)) {
       return false;
     }
     return current_rule_has_space(ctx, count);
@@ -427,7 +427,7 @@ struct token_character_class_valid {
       return false;
     }
     uint32_t count = 0;
-    if (!character_class_element_count(ev.flow.token.text, count)) {
+    if (!character_class_element_count(ev.ctx.token.text, count)) {
       return false;
     }
     return current_rule_has_space(ctx, count);
@@ -438,7 +438,7 @@ struct token_rule_reference_valid {
   bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
     return term_kind_is<term_parser::events::term_kind::rule_reference>{}(ev, ctx) &&
            current_rule_has_space(ctx, 1u) &&
-           parse_rule_reference_text(ev.flow.token.text);
+           parse_rule_reference_text(ev.ctx.token.text);
   }
 };
 
@@ -502,7 +502,7 @@ struct token_close_group_valid {
 struct token_quantifier_valid {
   bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
     return term_kind_is<term_parser::events::term_kind::quantifier>{}(ev, ctx) &&
-           is_quantifier_text(ev.flow.token.text) &&
+           is_quantifier_text(ev.ctx.token.text) &&
            can_apply_quantifier(ev, ctx);
   }
 };

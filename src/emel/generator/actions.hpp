@@ -1,101 +1,143 @@
 #pragma once
 
 #include "emel/generator/context.hpp"
+#include "emel/generator/errors.hpp"
 #include "emel/generator/events.hpp"
 
 namespace emel::generator::action {
 
-inline void set_error(context & ctx, const int32_t err) noexcept {
-  ctx.phase_error = err;
-  ctx.last_error = err;
-}
-
 struct begin_generate {
-  void operator()(const event::generate & ev, context & ctx) const noexcept {
-    ctx.tokens_generated = 0;
-    ctx.max_tokens = ev.max_tokens;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
+  void operator()(const event::generate_run & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.tokens_generated = 0;
+    ev.ctx.target_tokens = ev.request.max_tokens;
   }
 };
 
 struct reject_invalid_generate {
-  void operator()(const event::generate & ev, context & ctx) const noexcept {
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    }
+  void operator()(const event::generate_run & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::invalid_request);
+    ev.ctx.tokens_generated = 0;
+    ev.ctx.target_tokens = 0;
   }
 };
 
-struct tokenize_prompt {
-  void operator()(const event::generate &, context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
+struct request_conditioning {
+  void operator()(const event::generate_run & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
   }
 };
 
-struct run_prefill {
-  void operator()(const event::generate &, context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
+struct request_planning {
+  void operator()(const event::generate_run & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.target_tokens = ev.request.max_tokens;
   }
 };
 
-struct run_decode_step {
-  void operator()(const event::generate &, context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-    ctx.tokens_generated += 1;
+struct request_prefill {
+  void operator()(const event::generate_run & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
   }
 };
 
-struct dispatch_generation_done_to_owner {
-  void operator()(const event::generate & ev, const context & ctx) const noexcept {
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-    if (ev.dispatch_done) {
-      ev.dispatch_done(events::generation_done{
-        .request = &ev,
-        .tokens_generated = ctx.tokens_generated,
+struct request_decode_compute {
+  void operator()(const event::generate_run & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+  }
+};
+
+struct request_decode_sample {
+  void operator()(const event::generate_run & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+  }
+};
+
+struct request_decode_render {
+  void operator()(const event::generate_run & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.tokens_generated += 1;
+  }
+};
+
+struct dispatch_done_with_error_out {
+  void operator()(const event::generate_run & ev, const context &) const noexcept {
+    *ev.request.error_out = emel::error::cast(error::none);
+    ev.request.on_done(
+      events::generation_done{
+        .request = &ev.request,
+        .tokens_generated = ev.ctx.tokens_generated,
       });
-    }
   }
 };
 
-struct dispatch_generation_error_to_owner {
-  void operator()(const event::generate & ev, const context & ctx) const noexcept {
-    if (ev.error_out != nullptr) {
-      *ev.error_out = ctx.last_error;
-    }
-    if (ev.dispatch_error) {
-      ev.dispatch_error(events::generation_error{
-        .request = &ev,
-        .err = ctx.last_error,
-        .tokens_generated = ctx.tokens_generated,
+struct dispatch_done_without_error_out {
+  void operator()(const event::generate_run & ev, const context &) const noexcept {
+    ev.request.on_done(
+      events::generation_done{
+        .request = &ev.request,
+        .tokens_generated = ev.ctx.tokens_generated,
       });
-    }
   }
+};
+
+struct dispatch_error_with_dispatch_and_error_out {
+  void operator()(const event::generate_run & ev, const context &) const noexcept {
+    *ev.request.error_out = ev.ctx.err;
+    ev.request.on_error(
+      events::generation_error{
+        .request = &ev.request,
+        .err = ev.ctx.err,
+        .tokens_generated = ev.ctx.tokens_generated,
+      });
+  }
+};
+
+struct dispatch_error_with_dispatch_only {
+  void operator()(const event::generate_run & ev, const context &) const noexcept {
+    ev.request.on_error(
+      events::generation_error{
+        .request = &ev.request,
+        .err = ev.ctx.err,
+        .tokens_generated = ev.ctx.tokens_generated,
+      });
+  }
+};
+
+struct dispatch_error_with_error_out_only {
+  void operator()(const event::generate_run & ev, const context &) const noexcept {
+    *ev.request.error_out = ev.ctx.err;
+  }
+};
+
+struct dispatch_error_without_error_channels {
+  void operator()(const event::generate_run &, const context &) const noexcept {}
 };
 
 struct on_unexpected {
   template <class event_type>
-  void operator()(const event_type &, context & ctx) const noexcept {
-    set_error(ctx, EMEL_ERR_BACKEND);
+  void operator()(const event_type & ev, context &) const noexcept {
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = emel::error::cast(error::backend);
+    }
   }
 };
 
 inline constexpr begin_generate begin_generate{};
 inline constexpr reject_invalid_generate reject_invalid_generate{};
-inline constexpr tokenize_prompt tokenize_prompt{};
-inline constexpr run_prefill run_prefill{};
-inline constexpr run_decode_step run_decode_step{};
-inline constexpr dispatch_generation_done_to_owner dispatch_generation_done_to_owner{};
-inline constexpr dispatch_generation_error_to_owner dispatch_generation_error_to_owner{};
+inline constexpr request_conditioning request_conditioning{};
+inline constexpr request_planning request_planning{};
+inline constexpr request_prefill request_prefill{};
+inline constexpr request_decode_compute request_decode_compute{};
+inline constexpr request_decode_sample request_decode_sample{};
+inline constexpr request_decode_render request_decode_render{};
+inline constexpr dispatch_done_with_error_out dispatch_done_with_error_out{};
+inline constexpr dispatch_done_without_error_out dispatch_done_without_error_out{};
+inline constexpr dispatch_error_with_dispatch_and_error_out
+    dispatch_error_with_dispatch_and_error_out{};
+inline constexpr dispatch_error_with_dispatch_only dispatch_error_with_dispatch_only{};
+inline constexpr dispatch_error_with_error_out_only dispatch_error_with_error_out_only{};
+inline constexpr dispatch_error_without_error_channels dispatch_error_without_error_channels{};
 inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::generator::action

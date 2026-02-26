@@ -1,0 +1,41 @@
+#pragma once
+
+#include "emel/gbnf/sampler/accept_parser/context.hpp"
+#include "emel/gbnf/sampler/accept_parser/events.hpp"
+#include "emel/gbnf/sampler/errors.hpp"
+#include "emel/gbnf/sampler/events.hpp"
+
+namespace emel::gbnf::sampler::accept_parser::action {
+
+struct consume_accepted {
+  void operator()(const sampler::event::accept_runtime & ev,
+                  const context &) const noexcept {
+    ev.flow.err = emel::error::cast(sampler::error::none);
+    ev.flow.accepted = true;
+    ev.flow.accept_result = events::accept_result::accepted;
+  }
+};
+
+struct dispatch_parse_failed {
+  void operator()(const sampler::event::accept_runtime & ev,
+                  const context &) const noexcept {
+    ev.flow.err = emel::error::cast(sampler::error::parse_failed);
+    ev.flow.accepted = false;
+    ev.flow.accept_result = events::accept_result::unknown;
+  }
+};
+
+struct on_unexpected {
+  template <class event_type>
+  void operator()(const event_type & ev, const context &) const noexcept {
+    if constexpr (requires { ev.flow.err; }) {
+      ev.flow.err = emel::error::cast(sampler::error::internal_error);
+    }
+  }
+};
+
+inline constexpr consume_accepted consume_accepted{};
+inline constexpr dispatch_parse_failed dispatch_parse_failed{};
+inline constexpr on_unexpected on_unexpected{};
+
+}  // namespace emel::gbnf::sampler::accept_parser::action

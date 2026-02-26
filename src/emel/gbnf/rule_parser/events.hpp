@@ -6,11 +6,11 @@
 #include "emel/callback.hpp"
 #include "emel/error/error.hpp"
 #include "emel/gbnf/detail.hpp"
-#include "emel/gbnf/expression_parser/events.hpp"
-#include "emel/gbnf/lexer/events.hpp"
-#include "emel/gbnf/nonterm_parser/events.hpp"
 #include "emel/gbnf/rule_parser/errors.hpp"
-#include "emel/gbnf/term_parser/events.hpp"
+#include "emel/gbnf/rule_parser/expression_parser/events.hpp"
+#include "emel/gbnf/rule_parser/lexer/events.hpp"
+#include "emel/gbnf/rule_parser/nonterm_parser/events.hpp"
+#include "emel/gbnf/rule_parser/term_parser/events.hpp"
 
 namespace emel::gbnf::rule_parser::events {
 
@@ -28,22 +28,22 @@ struct parse {
   ::emel::callback<bool(const ::emel::gbnf::rule_parser::events::parsing_error &)> dispatch_error = {};
 };
 
-// Internal runtime flow object carried via completion<parse_rules>.
-struct parse_flow {
+// Internal context object carried via completion<parse_rules>.
+struct parse_rules_ctx {
   enum class term_origin : uint8_t {
     none = 0,
     need_term = 1,
     after_term = 2,
   };
 
-  emel::gbnf::lexer::cursor cursor = {};
-  emel::gbnf::lexer::event::token token = {};
-  emel::gbnf::nonterm_parser::events::parse_mode nonterm_mode =
-      emel::gbnf::nonterm_parser::events::parse_mode::none;
-  emel::gbnf::expression_parser::events::parse_kind expression_kind =
-      emel::gbnf::expression_parser::events::parse_kind::unknown;
-  emel::gbnf::term_parser::events::term_kind term_kind =
-      emel::gbnf::term_parser::events::term_kind::unknown;
+  emel::gbnf::rule_parser::lexer::cursor cursor = {};
+  emel::gbnf::rule_parser::lexer::event::token token = {};
+  emel::gbnf::rule_parser::nonterm_parser::events::parse_mode nonterm_mode =
+      emel::gbnf::rule_parser::nonterm_parser::events::parse_mode::none;
+  emel::gbnf::rule_parser::expression_parser::events::parse_kind expression_kind =
+      emel::gbnf::rule_parser::expression_parser::events::parse_kind::unknown;
+  emel::gbnf::rule_parser::term_parser::events::term_kind term_kind =
+      emel::gbnf::rule_parser::term_parser::events::term_kind::unknown;
   term_origin current_term_origin = term_origin::none;
   uint32_t nonterm_rule_id = 0;
   bool has_token = false;
@@ -53,7 +53,7 @@ struct parse_flow {
 // Internal event used by rule_parser::sm wrapper; not part of public API.
 struct parse_rules {
   const parse & request;
-  parse_flow & flow;
+  parse_rules_ctx & ctx;
 };
 
 }  // namespace emel::gbnf::rule_parser::event
@@ -70,11 +70,3 @@ struct parsing_error {
 };
 
 }  // namespace emel::gbnf::rule_parser::events
-
-namespace emel::gbnf {
-
-// Legacy aliases kept for compatibility. Prefer emel::gbnf::rule_parser::{event,events}.
-namespace event = rule_parser::event;
-namespace events = rule_parser::events;
-
-}  // namespace emel::gbnf

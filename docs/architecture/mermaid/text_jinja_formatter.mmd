@@ -1,0 +1,33 @@
+stateDiagram-v2
+  direction TB
+  [*] --> initialized
+  initialized --> setup : render [lambda_guards_8_38] / begin_render_
+  initialized --> errored : render [lambda_guards_12_40] / reject_invalid_render_
+  done --> setup : render [lambda_guards_8_38] / begin_render_
+  done --> errored : render [lambda_guards_12_40] / reject_invalid_render_
+  errored --> setup : render [lambda_guards_8_38] / begin_render_
+  errored --> errored : render [lambda_guards_12_40] / reject_invalid_render_
+  unexpected --> setup : render [lambda_guards_8_38] / begin_render_
+  unexpected --> unexpected : render [lambda_guards_12_40] / reject_invalid_render_
+  setup --> eval_stmt : [always] / seed_program_
+  eval_stmt --> render_decision : [phase_failed_] / none
+  eval_stmt --> eval_expr : [needs_expr_] / none
+  eval_stmt --> eval_stmt : [has_stmt_work_] / eval_next_stmt_
+  eval_stmt --> render_decision : [no_stmt_work_] / none
+  eval_expr --> eval_expr : [has_pending_expr_] / eval_pending_expr_
+  eval_expr --> render_decision : [phase_failed_] / none
+  eval_expr --> write_output : [always] / none
+  write_output --> render_decision : [phase_failed_] / none
+  write_output --> write_output : [needs_write_] / write_pending_value_
+  write_output --> eval_stmt : [always] / none
+  render_decision --> done : [phase_ok_] / finalize_done_
+  render_decision --> errored : [phase_failed_] / finalize_error_
+  initialized --> unexpected : _ [always] / on_unexpected_
+  setup --> unexpected : _ [always] / on_unexpected_
+  eval_stmt --> unexpected : _ [always] / on_unexpected_
+  eval_expr --> unexpected : _ [always] / on_unexpected_
+  write_output --> unexpected : _ [always] / on_unexpected_
+  render_decision --> unexpected : _ [always] / on_unexpected_
+  done --> unexpected : _ [always] / on_unexpected_
+  errored --> unexpected : _ [always] / on_unexpected_
+  unexpected --> unexpected : _ [always] / on_unexpected_

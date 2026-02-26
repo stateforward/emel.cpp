@@ -1,73 +1,87 @@
 #include <boost/sml.hpp>
+#include <cstdint>
 #include <doctest/doctest.h>
 
 #include "emel/emel.h"
+#include "emel/generator/errors.hpp"
 #include "emel/generator/sm.hpp"
 
 namespace {
 
-bool dispatch_done_test(void * owner, const emel::generator::events::generation_done &) {
-  *static_cast<bool *>(owner) = true;
-  return true;
+struct callback_tracker {
+  bool done_called = false;
+  bool error_called = false;
+  int32_t tokens_generated = -1;
+  emel::error::type err = emel::error::cast(emel::generator::error::none);
+};
+
+void dispatch_done_test(void * owner, const emel::generator::events::generation_done & ev) {
+  auto * tracker = static_cast<callback_tracker *>(owner);
+  tracker->done_called = true;
+  tracker->tokens_generated = ev.tokens_generated;
 }
 
-bool dispatch_error_test(void * owner, const emel::generator::events::generation_error &) {
-  *static_cast<bool *>(owner) = true;
-  return true;
+void dispatch_error_test(void * owner, const emel::generator::events::generation_error & ev) {
+  auto * tracker = static_cast<callback_tracker *>(owner);
+  tracker->error_called = true;
+  tracker->tokens_generated = ev.tokens_generated;
+  tracker->err = static_cast<emel::error::type>(ev.err);
 }
 
 }  // namespace
 
-TEST_CASE("generator_starts_initialized") {
+TEST_CASE("generator_starts_ready") {
   emel::generator::sm machine{};
-  CHECK(machine.is(boost::sml::state<emel::generator::initialized>));
+  CHECK(machine.is(boost::sml::state<emel::generator::ready>));
 }
 
 TEST_CASE("generator_valid_generate_dispatches_done") {
   emel::generator::sm machine{};
-  int32_t error = EMEL_ERR_BACKEND;
-  bool done_called = false;
-  bool error_called = false;
+  emel::error::type error = emel::error::cast(emel::generator::error::backend);
+  callback_tracker tracker{};
+  const auto on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
+      &tracker, dispatch_done_test);
+  const auto on_error = emel::callback<void(const emel::generator::events::generation_error &)>(
+      &tracker, dispatch_error_test);
 
   emel::generator::event::generate ev{
     .prompt = "hello",
     .max_tokens = 3,
     .error_out = &error,
-    .dispatch_done = emel::callback<bool(const emel::generator::events::generation_done &)>(
-        &done_called, dispatch_done_test),
-    .dispatch_error = emel::callback<bool(const emel::generator::events::generation_error &)>(
-        &error_called, dispatch_error_test),
+    .on_done = on_done,
+    .on_error = on_error,
   };
 
   CHECK(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::generator::initialized>));
-  CHECK(done_called);
-  CHECK_FALSE(error_called);
-  CHECK(error == EMEL_OK);
-  CHECK(machine.context_ref().tokens_generated == 3);
-  CHECK(machine.context_ref().last_error == EMEL_OK);
+  CHECK(machine.is(boost::sml::state<emel::generator::ready>));
+  CHECK(tracker.done_called);
+  CHECK_FALSE(tracker.error_called);
+  CHECK(error == emel::error::cast(emel::generator::error::none));
+  CHECK(tracker.tokens_generated == 3);
 }
 
 TEST_CASE("generator_invalid_generate_dispatches_error") {
   emel::generator::sm machine{};
-  int32_t error = EMEL_OK;
-  bool done_called = false;
-  bool error_called = false;
+  emel::error::type error = emel::error::cast(emel::generator::error::none);
+  callback_tracker tracker{};
+  const auto on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
+      &tracker, dispatch_done_test);
+  const auto on_error = emel::callback<void(const emel::generator::events::generation_error &)>(
+      &tracker, dispatch_error_test);
 
   emel::generator::event::generate ev{
     .prompt = "hello",
     .max_tokens = 0,
     .error_out = &error,
-    .dispatch_done = emel::callback<bool(const emel::generator::events::generation_done &)>(
-        &done_called, dispatch_done_test),
-    .dispatch_error = emel::callback<bool(const emel::generator::events::generation_error &)>(
-        &error_called, dispatch_error_test),
+    .on_done = on_done,
+    .on_error = on_error,
   };
 
   CHECK_FALSE(machine.process_event(ev));
-  CHECK(machine.is(boost::sml::state<emel::generator::initialized>));
-  CHECK_FALSE(done_called);
-  CHECK(error_called);
-  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(machine.context_ref().last_error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(machine.is(boost::sml::state<emel::generator::ready>));
+  CHECK_FALSE(tracker.done_called);
+  CHECK(tracker.error_called);
+  CHECK(error == emel::error::cast(emel::generator::error::invalid_request));
+  CHECK(tracker.err == emel::error::cast(emel::generator::error::invalid_request));
+  CHECK(tracker.tokens_generated == 0);
 }

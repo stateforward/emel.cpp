@@ -2,13 +2,13 @@
 
 #include <cstdint>
 
-#include "emel/gbnf/definition_parser/sm.hpp"
-#include "emel/gbnf/expression_parser/sm.hpp"
-#include "emel/gbnf/nonterm_parser/sm.hpp"
+#include "emel/gbnf/rule_parser/definition_parser/sm.hpp"
+#include "emel/gbnf/rule_parser/expression_parser/sm.hpp"
+#include "emel/gbnf/rule_parser/nonterm_parser/sm.hpp"
 #include "emel/gbnf/rule_parser/actions.hpp"
 #include "emel/gbnf/rule_parser/events.hpp"
 #include "emel/gbnf/rule_parser/guards.hpp"
-#include "emel/gbnf/term_parser/sm.hpp"
+#include "emel/gbnf/rule_parser/term_parser/sm.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::gbnf::rule_parser {
@@ -317,10 +317,10 @@ struct sm : public emel::sm_with_context<model, action::context> {
   using base_type::process_event;
 
   bool process_event(const event::parse & ev) {
-    event::parse_flow flow{};
-    event::parse_rules runtime{ev, flow};
-    const bool accepted = base_type::process_event(runtime);
-    return accepted && flow.err == emel::error::cast(error::none);
+    event::parse_rules_ctx ctx{};
+    event::parse_rules evt{ev, ctx};
+    const bool accepted = base_type::process_event(evt);
+    return accepted && ctx.err == emel::error::cast(error::none);
   }
 };
 

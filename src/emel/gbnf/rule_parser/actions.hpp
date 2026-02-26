@@ -5,13 +5,13 @@
 #include <limits>
 #include <string_view>
 
-#include "emel/gbnf/expression_parser/events.hpp"
-#include "emel/gbnf/nonterm_parser/events.hpp"
+#include "emel/gbnf/rule_parser/expression_parser/events.hpp"
+#include "emel/gbnf/rule_parser/nonterm_parser/events.hpp"
 #include "emel/gbnf/rule_parser/context.hpp"
 #include "emel/gbnf/rule_parser/detail.hpp"
 #include "emel/gbnf/rule_parser/errors.hpp"
 #include "emel/gbnf/rule_parser/events.hpp"
-#include "emel/gbnf/term_parser/events.hpp"
+#include "emel/gbnf/rule_parser/term_parser/events.hpp"
 
 namespace emel::gbnf::rule_parser::action {
 
@@ -35,66 +35,66 @@ inline void add_rule_unchecked(emel::gbnf::grammar & grammar,
 }
 
 inline bool on_lexer_done(void * owner, const lexer::events::next_done & ev) noexcept {
-  auto * flow = static_cast<event::parse_flow *>(owner);
-  flow->err = emel::error::cast(error::none);
-  flow->has_token = ev.has_token;
-  flow->token = ev.token;
-  flow->cursor = ev.next_cursor;
-  flow->expression_kind = expression_parser::events::parse_kind::unknown;
-  flow->term_kind = term_parser::events::term_kind::unknown;
+  auto * ctx = static_cast<event::parse_rules_ctx *>(owner);
+  ctx->err = emel::error::cast(error::none);
+  ctx->has_token = ev.has_token;
+  ctx->token = ev.token;
+  ctx->cursor = ev.next_cursor;
+  ctx->expression_kind = expression_parser::events::parse_kind::unknown;
+  ctx->term_kind = term_parser::events::term_kind::unknown;
   return true;
 }
 
 inline bool on_lexer_error(void * owner, const lexer::events::next_error & ev) noexcept {
-  auto * flow = static_cast<event::parse_flow *>(owner);
-  flow->err = static_cast<emel::error::type>(ev.err);
-  flow->has_token = false;
-  flow->token = {};
-  flow->expression_kind = expression_parser::events::parse_kind::unknown;
-  flow->term_kind = term_parser::events::term_kind::unknown;
+  auto * ctx = static_cast<event::parse_rules_ctx *>(owner);
+  ctx->err = static_cast<emel::error::type>(ev.err);
+  ctx->has_token = false;
+  ctx->token = {};
+  ctx->expression_kind = expression_parser::events::parse_kind::unknown;
+  ctx->term_kind = term_parser::events::term_kind::unknown;
   return true;
 }
 
 struct reject_invalid_parse_with_dispatch {
   void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::invalid_request);
+    ev.ctx.err = emel::error::cast(error::invalid_request);
     ev.request.grammar_out->reset();
     ev.request.dispatch_error(events::parsing_error{
       *ev.request.grammar_out,
-      static_cast<int32_t>(ev.flow.err),
+      static_cast<int32_t>(ev.ctx.err),
     });
   }
 };
 
 struct reject_invalid_parse_with_grammar_only {
   void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::invalid_request);
+    ev.ctx.err = emel::error::cast(error::invalid_request);
     ev.request.grammar_out->reset();
   }
 };
 
 struct reject_invalid_parse_without_grammar {
   void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::invalid_request);
+    ev.ctx.err = emel::error::cast(error::invalid_request);
   }
 };
 
 struct begin_parse {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
-    ev.flow.err = emel::error::cast(error::none);
+    ev.ctx.err = emel::error::cast(error::none);
     ev.request.grammar_out->reset();
-    ev.flow.cursor = lexer::cursor{
+    ev.ctx.cursor = lexer::cursor{
       .input = ev.request.grammar_text,
       .offset = 0,
       .token_count = 0,
     };
-    ev.flow.token = {};
-    ev.flow.has_token = false;
-    ev.flow.nonterm_mode = nonterm_parser::events::parse_mode::none;
-    ev.flow.nonterm_rule_id = 0;
-    ev.flow.expression_kind = expression_parser::events::parse_kind::unknown;
-    ev.flow.term_kind = term_parser::events::term_kind::unknown;
-    ev.flow.current_term_origin = event::parse_flow::term_origin::none;
+    ev.ctx.token = {};
+    ev.ctx.has_token = false;
+    ev.ctx.nonterm_mode = nonterm_parser::events::parse_mode::none;
+    ev.ctx.nonterm_rule_id = 0;
+    ev.ctx.expression_kind = expression_parser::events::parse_kind::unknown;
+    ev.ctx.term_kind = term_parser::events::term_kind::unknown;
+    ev.ctx.current_term_origin = event::parse_rules_ctx::term_origin::none;
 
     ctx.current_rule_id = 0;
     ctx.current_rule.size = 0;
@@ -108,18 +108,18 @@ struct begin_parse {
 
 struct request_next_token {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
-    ev.flow.err = emel::error::cast(error::internal_error);
-    ev.flow.has_token = false;
-    ev.flow.token = {};
-    ev.flow.nonterm_mode = nonterm_parser::events::parse_mode::none;
-    ev.flow.nonterm_rule_id = 0;
-    ev.flow.expression_kind = expression_parser::events::parse_kind::unknown;
-    ev.flow.term_kind = term_parser::events::term_kind::unknown;
+    ev.ctx.err = emel::error::cast(error::internal_error);
+    ev.ctx.has_token = false;
+    ev.ctx.token = {};
+    ev.ctx.nonterm_mode = nonterm_parser::events::parse_mode::none;
+    ev.ctx.nonterm_rule_id = 0;
+    ev.ctx.expression_kind = expression_parser::events::parse_kind::unknown;
+    ev.ctx.term_kind = term_parser::events::term_kind::unknown;
 
-    const callback<bool(const lexer::events::next_done &)> done_cb{&ev.flow, on_lexer_done};
-    const callback<bool(const lexer::events::next_error &)> error_cb{&ev.flow, on_lexer_error};
+    const callback<bool(const lexer::events::next_done &)> done_cb{&ev.ctx, on_lexer_done};
+    const callback<bool(const lexer::events::next_error &)> error_cb{&ev.ctx, on_lexer_error};
     const lexer::event::next next_ev{
-      ev.flow.cursor,
+      ev.ctx.cursor,
       done_cb,
       error_cb,
     };
@@ -129,54 +129,54 @@ struct request_next_token {
 
 struct consume_token_invalid {
   void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::parse_failed);
+    ev.ctx.err = emel::error::cast(error::parse_failed);
   }
 };
 
 struct fail_eof_in_expect_definition {
   void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::parse_failed);
+    ev.ctx.err = emel::error::cast(error::parse_failed);
   }
 };
 
 struct set_nonterm_mode_definition {
   void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::none);
-    ev.flow.nonterm_mode = nonterm_parser::events::parse_mode::definition;
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.nonterm_mode = nonterm_parser::events::parse_mode::definition;
   }
 };
 
 struct set_nonterm_mode_reference {
   void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::none);
-    ev.flow.nonterm_mode = nonterm_parser::events::parse_mode::reference;
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.nonterm_mode = nonterm_parser::events::parse_mode::reference;
   }
 };
 
 struct set_term_origin_need_term {
   void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::none);
-    ev.flow.current_term_origin = event::parse_flow::term_origin::need_term;
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.current_term_origin = event::parse_rules_ctx::term_origin::need_term;
   }
 };
 
 struct set_term_origin_after_term {
   void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::none);
-    ev.flow.current_term_origin = event::parse_flow::term_origin::after_term;
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.current_term_origin = event::parse_rules_ctx::term_origin::after_term;
   }
 };
 
 struct apply_nonterm_definition {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
-    ctx.current_rule_id = ev.flow.nonterm_rule_id;
+    ctx.current_rule_id = ev.ctx.nonterm_rule_id;
   }
 };
 
 struct apply_nonterm_reference {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     ctx.last_sym_start = ctx.current_rule.size;
-    append_unchecked(ctx, {emel::gbnf::element_type::rule_ref, ev.flow.nonterm_rule_id});
+    append_unchecked(ctx, {emel::gbnf::element_type::rule_ref, ev.ctx.nonterm_rule_id});
   }
 };
 
@@ -197,7 +197,7 @@ struct consume_token_alternation {
 struct consume_token_literal {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     ctx.last_sym_start = ctx.current_rule.size;
-    const std::string_view text = ev.flow.token.text;
+    const std::string_view text = ev.ctx.token.text;
     const char * pos = text.data() + 1u;
     const char * end = text.data() + text.size() - 1u;
     while (pos < end) {
@@ -211,7 +211,7 @@ struct consume_token_literal {
 struct consume_token_character_class {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     ctx.last_sym_start = ctx.current_rule.size;
-    const std::string_view text = ev.flow.token.text;
+    const std::string_view text = ev.ctx.token.text;
     const char * pos = text.data() + 1u;
     const char * end = text.data() + text.size() - 1u;
     emel::gbnf::element_type start_type = emel::gbnf::element_type::character;
@@ -242,7 +242,7 @@ struct consume_token_rule_reference {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     bool token_not = false;
     uint32_t token_id = 0;
-    const std::string_view text = ev.flow.token.text;
+    const std::string_view text = ev.ctx.token.text;
     std::size_t pos = 0;
     if (text[0] == '!') {
       token_not = true;
@@ -319,7 +319,7 @@ struct consume_token_quantifier {
 
     uint64_t min_times = 0;
     uint64_t max_times = 0;
-    const std::string_view text = ev.flow.token.text;
+    const std::string_view text = ev.ctx.token.text;
 
     if (text == "*") {
       min_times = 0;
@@ -400,7 +400,7 @@ struct dispatch_error {
   void operator()(const event::parse_rules & ev, const context &) const noexcept {
     ev.request.dispatch_error(events::parsing_error{
       *ev.request.grammar_out,
-      static_cast<int32_t>(ev.flow.err),
+      static_cast<int32_t>(ev.ctx.err),
     });
   }
 };
@@ -408,8 +408,8 @@ struct dispatch_error {
 struct on_unexpected {
   template <class event_type>
   void operator()(const event_type & ev, context &) const noexcept {
-    if constexpr (requires { ev.flow.err; }) {
-      ev.flow.err = emel::error::cast(error::internal_error);
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = emel::error::cast(error::internal_error);
     }
   }
 };
