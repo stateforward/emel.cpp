@@ -10,32 +10,32 @@ namespace emel::gbnf::sampler::token_parser::action {
 struct consume_text_token {
   void operator()(const sampler::event::apply_runtime & ev,
                   const context &) const noexcept {
-    ev.flow.err = emel::error::cast(sampler::error::none);
-    ev.flow.token_kind = events::token_kind::text_token;
+    ev.ctx.err = emel::error::cast(sampler::error::none);
+    ev.ctx.token_kind = events::token_kind::text_token;
   }
 };
 
 struct consume_empty_token {
   void operator()(const sampler::event::apply_runtime & ev,
                   const context &) const noexcept {
-    ev.flow.err = emel::error::cast(sampler::error::none);
-    ev.flow.token_kind = events::token_kind::empty_token;
+    ev.ctx.err = emel::error::cast(sampler::error::none);
+    ev.ctx.token_kind = events::token_kind::empty_token;
   }
 };
 
 struct dispatch_parse_failed {
   void operator()(const sampler::event::apply_runtime & ev,
                   const context &) const noexcept {
-    ev.flow.err = emel::error::cast(sampler::error::parse_failed);
-    ev.flow.token_kind = events::token_kind::unknown;
+    ev.ctx.err = emel::error::cast(sampler::error::parse_failed);
+    ev.ctx.token_kind = events::token_kind::unknown;
   }
 };
 
 struct on_unexpected {
   template <class event_type>
   void operator()(const event_type & ev, const context &) const noexcept {
-    if constexpr (requires { ev.flow.err; }) {
-      ev.flow.err = emel::error::cast(sampler::error::internal_error);
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = emel::error::cast(sampler::error::internal_error);
     }
   }
 };

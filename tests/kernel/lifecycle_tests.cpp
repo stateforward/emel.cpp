@@ -4,8 +4,9 @@
 
 #include "emel/kernel/actions.hpp"
 #include "emel/kernel/any.hpp"
+#include "emel/kernel/errors.hpp"
 #include "emel/kernel/guards.hpp"
-#include "emel/kernel/op_list.hpp"
+#include "emel/kernel/detail.hpp"
 #include "emel/kernel/sm.hpp"
 #include "emel/kernel/x86_64/actions.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
@@ -262,8 +263,8 @@ TEST_CASE("kernel_backend_scaffolds_expose_explicit_op_transitions") {
                          op_rope_invalid, op_soft_max_ok, op_soft_max_invalid);
 
   CHECK(any_machine.process_event(op_add_ok));
-
-  // The orchestrator scaffold still routes only scaffold events at the top level.
+  CHECK(kernel_machine.process_event(op_add_ok));
+  CHECK_FALSE(kernel_machine.process_event(op_add_invalid));
   CHECK(kernel_machine.process_event(emel::kernel::event::scaffold{}));
 }
 
@@ -274,7 +275,7 @@ TEST_CASE("kernel_scaffold_actions_and_guards_cover_all_outcomes") {
   emel::kernel::event::dispatch_scaffold dispatch{request, runtime};
 
   emel::kernel::action::begin_dispatch(dispatch, ctx);
-  CHECK(runtime.err == EMEL_OK);
+  CHECK(runtime.err == static_cast<int32_t>(emel::error::cast(emel::kernel::error::none)));
   CHECK(runtime.primary_outcome == emel::kernel::event::phase_outcome::unknown);
   CHECK(runtime.secondary_outcome == emel::kernel::event::phase_outcome::unknown);
   CHECK(runtime.tertiary_outcome == emel::kernel::event::phase_outcome::unknown);
@@ -282,15 +283,15 @@ TEST_CASE("kernel_scaffold_actions_and_guards_cover_all_outcomes") {
 
   emel::kernel::action::request_primary(dispatch, ctx);
   CHECK(runtime.primary_outcome == emel::kernel::event::phase_outcome::done);
-  CHECK(runtime.err == EMEL_OK);
+  CHECK(runtime.err == static_cast<int32_t>(emel::error::cast(emel::kernel::error::none)));
 
   emel::kernel::action::request_secondary(dispatch, ctx);
   CHECK(runtime.secondary_outcome == emel::kernel::event::phase_outcome::done);
-  CHECK(runtime.err == EMEL_OK);
+  CHECK(runtime.err == static_cast<int32_t>(emel::error::cast(emel::kernel::error::none)));
 
   emel::kernel::action::request_tertiary(dispatch, ctx);
   CHECK(runtime.tertiary_outcome == emel::kernel::event::phase_outcome::done);
-  CHECK(runtime.err == EMEL_OK);
+  CHECK(runtime.err == static_cast<int32_t>(emel::error::cast(emel::kernel::error::none)));
 
   CHECK(emel::kernel::guard::valid_dispatch{}(dispatch, ctx));
   CHECK(emel::kernel::guard::phase_ok{}(dispatch, ctx));
@@ -324,15 +325,16 @@ TEST_CASE("kernel_scaffold_actions_and_guards_cover_all_outcomes") {
   CHECK(emel::kernel::guard::tertiary_failed{}(dispatch, ctx));
 
   emel::kernel::action::mark_unsupported(dispatch, ctx);
-  CHECK(runtime.err == EMEL_ERR_UNSUPPORTED_OP);
+  CHECK(runtime.err ==
+        static_cast<int32_t>(emel::error::cast(emel::kernel::error::unsupported_op)));
   CHECK(emel::kernel::guard::phase_failed{}(dispatch, ctx));
 
   emel::kernel::action::dispatch_done(dispatch, ctx);
   emel::kernel::action::dispatch_error(dispatch, ctx);
 
-  runtime.err = EMEL_OK;
+  runtime.err = static_cast<int32_t>(emel::error::cast(emel::kernel::error::none));
   emel::kernel::action::on_unexpected(dispatch, ctx);
-  CHECK(runtime.err == EMEL_ERR_BACKEND);
+  CHECK(runtime.err == static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
 }
 
 TEST_CASE("kernel_backend_unexpected_actions_mark_backend_error") {
@@ -372,12 +374,18 @@ TEST_CASE("kernel_backend_unexpected_actions_mark_backend_error") {
   emel::kernel::metal::action::on_unexpected(metal_dispatch, metal_ctx);
   emel::kernel::vulkan::action::on_unexpected(vulkan_dispatch, vulkan_ctx);
 
-  CHECK(x86_64_dispatch_ctx.err == EMEL_ERR_BACKEND);
-  CHECK(aarch64_dispatch_ctx.err == EMEL_ERR_BACKEND);
-  CHECK(wasm_dispatch_ctx.err == EMEL_ERR_BACKEND);
-  CHECK(cuda_dispatch_ctx.err == EMEL_ERR_BACKEND);
-  CHECK(metal_dispatch_ctx.err == EMEL_ERR_BACKEND);
-  CHECK(vulkan_dispatch_ctx.err == EMEL_ERR_BACKEND);
+  CHECK(x86_64_dispatch_ctx.err ==
+        static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
+  CHECK(aarch64_dispatch_ctx.err ==
+        static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
+  CHECK(wasm_dispatch_ctx.err ==
+        static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
+  CHECK(cuda_dispatch_ctx.err ==
+        static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
+  CHECK(metal_dispatch_ctx.err ==
+        static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
+  CHECK(vulkan_dispatch_ctx.err ==
+        static_cast<int32_t>(emel::error::cast(emel::kernel::error::internal_error)));
 
   CHECK(x86_64_dispatch_ctx.outcome == emel::kernel::x86_64::events::phase_outcome::failed);
   CHECK(aarch64_dispatch_ctx.outcome == emel::kernel::aarch64::events::phase_outcome::failed);
@@ -394,6 +402,7 @@ TEST_CASE("kernel_backend_scaffolds_cover_all_ggml_ops") {
   cuda_sm cuda_machine{};
   metal_sm metal_machine{};
   vulkan_sm vulkan_machine{};
+  kernel_sm kernel_machine{};
   emel::kernel::any any_machine{};
 
 #define EMEL_KERNEL_CHECK_ALL_BACKENDS(op_name)                                             \
@@ -403,6 +412,7 @@ TEST_CASE("kernel_backend_scaffolds_cover_all_ggml_ops") {
   CHECK(cuda_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>()));    \
   CHECK(metal_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>()));   \
   CHECK(vulkan_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>()));  \
+  CHECK(kernel_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>()));  \
   CHECK(any_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>()));
   EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_CHECK_ALL_BACKENDS)
 #undef EMEL_KERNEL_CHECK_ALL_BACKENDS

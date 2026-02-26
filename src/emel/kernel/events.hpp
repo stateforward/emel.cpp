@@ -3,7 +3,11 @@
 #include <cstdint>
 
 #include "emel/emel.h"
+#include "emel/kernel/errors.hpp"
 
+namespace emel::kernel::action {
+struct context;
+}
 
 namespace emel::kernel::event {
 
@@ -244,12 +248,23 @@ struct scaffold_ctx {
   phase_outcome primary_outcome = phase_outcome::unknown;
   phase_outcome secondary_outcome = phase_outcome::unknown;
   phase_outcome tertiary_outcome = phase_outcome::unknown;
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(error::none));
 };
 
 // Internal event used by kernel::sm wrapper; not part of public API.
 struct dispatch_scaffold {
   const scaffold & request;
+  scaffold_ctx & ctx;
+};
+
+using phase_dispatch_fn = bool (*)(action::context & ctx, const void * request);
+
+// Internal event used by kernel::sm wrapper for typed op dispatch with fallback.
+struct dispatch_op {
+  const void * request = nullptr;
+  phase_dispatch_fn dispatch_primary = nullptr;
+  phase_dispatch_fn dispatch_secondary = nullptr;
+  phase_dispatch_fn dispatch_tertiary = nullptr;
   scaffold_ctx & ctx;
 };
 
@@ -260,7 +275,7 @@ namespace emel::kernel::events {
 struct scaffold_done {};
 
 struct scaffold_error {
-  int32_t err = EMEL_ERR_BACKEND;
+  int32_t err = static_cast<int32_t>(emel::error::cast(error::internal_error));
 };
 
 }  // namespace emel::kernel::events

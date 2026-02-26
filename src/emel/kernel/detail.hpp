@@ -1,5 +1,7 @@
 #pragma once
 
+#include <type_traits>
+
 // Keep this list aligned with `tmp/llama.cpp/ggml/include/ggml.h` (`enum ggml_op`),
 // excluding sentinel entries (`NONE`, `COUNT`).
 #define EMEL_KERNEL_OP_EVENT_LIST(X) \
@@ -97,3 +99,67 @@
   X(op_opt_step_adamw) \
   X(op_opt_step_sgd) \
   X(op_glu)
+
+namespace emel::kernel::event {
+
+#define EMEL_KERNEL_FORWARD_DECLARE_EVENT(op_name) \
+  struct op_name;
+EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_FORWARD_DECLARE_EVENT)
+#undef EMEL_KERNEL_FORWARD_DECLARE_EVENT
+
+}  // namespace emel::kernel::event
+
+namespace emel::kernel {
+
+template <class event_type>
+struct is_op_event : std::false_type {};
+
+#define EMEL_KERNEL_MARK_OP_EVENT(op_name)                        \
+  template <>                                                     \
+  struct is_op_event<event::op_name> : std::true_type {};
+EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_MARK_OP_EVENT)
+#undef EMEL_KERNEL_MARK_OP_EVENT
+
+template <class event_type>
+inline constexpr bool is_op_event_v = is_op_event<event_type>::value;
+
+}  // namespace emel::kernel
+
+namespace emel::kernel::detail {
+
+template <class request_type>
+inline bool has_required_src0(const request_type & request) noexcept {
+  if constexpr (requires { request.src0; }) {
+    return request.src0 != nullptr;
+  }
+  return true;
+}
+
+template <class request_type>
+inline bool has_required_dst(const request_type & request) noexcept {
+  if constexpr (requires { request.dst; }) {
+    return request.dst != nullptr;
+  }
+  return true;
+}
+
+template <class request_type>
+inline bool has_required_extent(const request_type & request) noexcept {
+  if constexpr (requires { request.element_count; }) {
+    return request.element_count > 0;
+  }
+  if constexpr (requires { request.row_count; request.col_count; }) {
+    return request.row_count > 0 && request.col_count > 0;
+  }
+  if constexpr (requires { request.token_count; }) {
+    return request.token_count > 0;
+  }
+  return true;
+}
+
+template <class request_type>
+inline bool validate_scaffold_request(const request_type & request) noexcept {
+  return has_required_src0(request) && has_required_dst(request) && has_required_extent(request);
+}
+
+}  // namespace emel::kernel::detail

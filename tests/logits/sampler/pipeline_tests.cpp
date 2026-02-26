@@ -203,7 +203,7 @@ TEST_CASE("sampler pipeline action error paths") {
   request.error_out = &err;
 
   emel::logits::sampler::action::begin_sample(request, ctx);
-  emel::logits::sampler::action::run_prepare_candidates(ctx);
+  emel::logits::sampler::action::exec_prepare_candidates(ctx);
   CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
 
   float logits[1] = {0.0f};
@@ -217,10 +217,10 @@ TEST_CASE("sampler pipeline action error paths") {
   request.sampler_count = 1;
   ctx.request = &request;
   ctx.sampler_count = request.sampler_count;
-  emel::logits::sampler::action::run_prepare_candidates(ctx);
+  emel::logits::sampler::action::exec_prepare_candidates(ctx);
   CHECK(ctx.phase_error == EMEL_OK);
 
-  emel::logits::sampler::action::run_apply_sampling(ctx);
+  emel::logits::sampler::action::exec_apply_samplers(ctx);
   CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
 
   emel::logits::sampler::event::sampler_fn samplers[1] = {sampler_error};
@@ -229,11 +229,11 @@ TEST_CASE("sampler pipeline action error paths") {
   ctx.candidate_count = 1;
   ctx.sampler_index = 0;
   ctx.sampler_count = 1;
-  emel::logits::sampler::action::run_apply_sampling(ctx);
+  emel::logits::sampler::action::exec_apply_samplers(ctx);
   CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
 
   ctx.candidate_count = 0;
-  emel::logits::sampler::action::run_select_token(ctx);
+  emel::logits::sampler::action::exec_select_token(ctx);
   CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
 
   ids[0] = 1;
@@ -242,7 +242,7 @@ TEST_CASE("sampler pipeline action error paths") {
   request.random_01 = 0.5f;
   ctx.request = &request;
   ctx.candidate_count = 1;
-  emel::logits::sampler::action::run_select_token(ctx);
+  emel::logits::sampler::action::exec_select_token(ctx);
   CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
 
   ctx.request = &request;

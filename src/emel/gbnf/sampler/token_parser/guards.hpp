@@ -10,23 +10,23 @@ namespace emel::gbnf::sampler::token_parser::guard {
 struct candidate_text {
   bool operator()(const sampler::event::apply_runtime & ev,
                   const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(sampler::error::none) &&
-           ev.flow.candidate_kind == sampler::candidate_parser::events::candidate_kind::text;
+    return ev.ctx.err == emel::error::cast(sampler::error::none) &&
+           ev.ctx.candidate_kind == sampler::candidate_parser::events::candidate_kind::text;
   }
 };
 
 struct candidate_empty {
   bool operator()(const sampler::event::apply_runtime & ev,
                   const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(sampler::error::none) &&
-           ev.flow.candidate_kind == sampler::candidate_parser::events::candidate_kind::empty;
+    return ev.ctx.err == emel::error::cast(sampler::error::none) &&
+           ev.ctx.candidate_kind == sampler::candidate_parser::events::candidate_kind::empty;
   }
 };
 
 struct parse_failed {
   bool operator()(const sampler::event::apply_runtime & ev,
                   const action::context & ctx) const noexcept {
-    return ev.flow.err == emel::error::cast(sampler::error::none) &&
+    return ev.ctx.err == emel::error::cast(sampler::error::none) &&
            !candidate_text{}(ev, ctx) &&
            !candidate_empty{}(ev, ctx);
   }

@@ -3,12 +3,12 @@
 #include <cstdint>
 
 #include "emel/emel.h"
+#include "emel/kernel/errors.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
 #include "emel/kernel/cuda/sm.hpp"
-#include "emel/kernel/event_traits.hpp"
+#include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/metal/sm.hpp"
-#include "emel/kernel/op_list.hpp"
 #include "emel/kernel/vulkan/sm.hpp"
 #include "emel/kernel/wasm/sm.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
@@ -47,16 +47,6 @@ class any {
     requires(::emel::kernel::is_op_event_v<event_type>)
   bool process_event(const event_type & ev) {
     return core_.process_event(ev);
-  }
-
-  int32_t last_error() const noexcept {
-    int32_t err = EMEL_ERR_BACKEND;
-    core_.visit([&](const auto & sm) {
-      if constexpr (requires { sm.last_error(); }) {
-        err = sm.last_error();
-      }
-    });
-    return err;
   }
 
  private:

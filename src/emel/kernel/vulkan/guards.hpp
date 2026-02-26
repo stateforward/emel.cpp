@@ -1,6 +1,6 @@
 #pragma once
 
-#include "emel/kernel/op_list.hpp"
+#include "emel/kernel/detail.hpp"
 #include "emel/kernel/vulkan/context.hpp"
 #include "emel/kernel/vulkan/events.hpp"
 
@@ -8,8 +8,8 @@ namespace emel::kernel::vulkan::guard {
 
 template <class dispatch_event_type>
 struct valid_impl {
-  static bool check(const dispatch_event_type &, const action::context &) noexcept {
-    return true;
+  static bool check(const dispatch_event_type & ev, const action::context &) noexcept {
+    return ::emel::kernel::detail::validate_scaffold_request(ev.request);
   }
 };
 

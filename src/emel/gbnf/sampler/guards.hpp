@@ -36,77 +36,77 @@ struct invalid_accept {
 
 struct phase_ok_apply {
   bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none);
+    return ev.ctx.err == emel::error::cast(error::none);
   }
 };
 
 struct phase_failed_apply {
   bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 
 struct candidate_done {
   bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) &&
-           ev.flow.candidate_kind != candidate_parser::events::candidate_kind::unknown;
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.candidate_kind != candidate_parser::events::candidate_kind::unknown;
   }
 };
 
 struct candidate_failed {
   bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 
 struct token_done {
   bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) &&
-           ev.flow.token_kind != token_parser::events::token_kind::unknown;
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.token_kind != token_parser::events::token_kind::unknown;
   }
 };
 
 struct token_failed {
   bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 
 struct matcher_done {
   bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) &&
-           ev.flow.match_result != matcher_parser::events::match_result::unknown;
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.match_result != matcher_parser::events::match_result::unknown;
   }
 };
 
 struct matcher_failed {
   bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 
 struct phase_ok_accept {
   bool operator()(const event::accept_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none);
+    return ev.ctx.err == emel::error::cast(error::none);
   }
 };
 
 struct phase_failed_accept {
   bool operator()(const event::accept_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 
 struct accept_done {
   bool operator()(const event::accept_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(error::none) &&
-           ev.flow.accept_result != accept_parser::events::accept_result::unknown;
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.accept_result != accept_parser::events::accept_result::unknown;
   }
 };
 
 struct accept_failed {
   bool operator()(const event::accept_runtime & ev, const action::context &) const noexcept {
-    return ev.flow.err != emel::error::cast(error::none);
+    return ev.ctx.err != emel::error::cast(error::none);
   }
 };
 

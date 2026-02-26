@@ -267,6 +267,7 @@ struct sm {
    to keep diffs stable and scanning consistent.
 8. when table readability would be degraded by auto-formatting, transition
    tables MAY be wrapped with narrowly scoped `// clang-format off/on`.
+9. NEVER use macros in models.
 rule check: the anonymous self-loop is bounded by `i < 3`; cycles without bounds are forbidden.
 rule check: the anonymous self-loop is bounded by `i < 3`; cycles without bounds are forbidden.
 

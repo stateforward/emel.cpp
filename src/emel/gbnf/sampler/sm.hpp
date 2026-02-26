@@ -37,7 +37,7 @@ struct model {
                  / action::reject_invalid_apply
 
       //------------------------------------------------------------------------------//
-      // Apply flow.
+      // Apply ctx.
       , sml::state<apply_loop_decision> <= sml::state<apply_begin> + sml::completion<event::apply_runtime>
                  / action::prepare_candidate_parse
 
@@ -86,7 +86,7 @@ struct model {
                  / action::reject_invalid_accept
 
       //------------------------------------------------------------------------------//
-      // Accept flow.
+      // Accept ctx.
       , sml::state<accept_result_decision> <= sml::state<accept_begin> + sml::completion<event::accept_runtime>
                  / action::prepare_accept_parse
 
@@ -135,17 +135,17 @@ struct sm : public emel::sm_with_context<model, action::context> {
   using base_type::process_event;
 
   bool process_event(const event::apply & ev) {
-    event::apply_flow flow{};
-    event::apply_runtime runtime{ev, flow};
+    event::apply_ctx ctx{};
+    event::apply_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
-    return accepted && flow.err == emel::error::cast(error::none);
+    return accepted && ctx.err == emel::error::cast(error::none);
   }
 
   bool process_event(const event::accept & ev) {
-    event::accept_flow flow{};
-    event::accept_runtime runtime{ev, flow};
+    event::accept_ctx ctx{};
+    event::accept_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
-    return accepted && flow.err == emel::error::cast(error::none);
+    return accepted && ctx.err == emel::error::cast(error::none);
   }
 };
 

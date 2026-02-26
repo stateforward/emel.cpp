@@ -38,7 +38,7 @@ struct accept {
   const ::emel::callback<bool(const ::emel::gbnf::sampler::events::accept_error &)> & on_error;
 };
 
-struct apply_flow {
+struct apply_ctx {
   bool candidate_allowed = false;
   emel::gbnf::sampler::candidate_parser::events::candidate_kind candidate_kind =
       emel::gbnf::sampler::candidate_parser::events::candidate_kind::unknown;
@@ -49,7 +49,7 @@ struct apply_flow {
   emel::error::type err = emel::error::cast(error::none);
 };
 
-struct accept_flow {
+struct accept_ctx {
   bool accepted = false;
   emel::gbnf::sampler::accept_parser::events::accept_result accept_result =
       emel::gbnf::sampler::accept_parser::events::accept_result::unknown;
@@ -58,12 +58,12 @@ struct accept_flow {
 
 struct apply_runtime {
   const apply & request;
-  apply_flow & flow;
+  apply_ctx & ctx;
 };
 
 struct accept_runtime {
   const accept & request;
-  accept_flow & flow;
+  accept_ctx & ctx;
 };
 
 }  // namespace emel::gbnf::sampler::event

@@ -10,32 +10,32 @@ namespace emel::gbnf::sampler::candidate_parser::action {
 struct consume_text {
   void operator()(const sampler::event::apply_runtime & ev,
                   const context &) const noexcept {
-    ev.flow.err = emel::error::cast(sampler::error::none);
-    ev.flow.candidate_kind = events::candidate_kind::text;
+    ev.ctx.err = emel::error::cast(sampler::error::none);
+    ev.ctx.candidate_kind = events::candidate_kind::text;
   }
 };
 
 struct consume_empty {
   void operator()(const sampler::event::apply_runtime & ev,
                   const context &) const noexcept {
-    ev.flow.err = emel::error::cast(sampler::error::none);
-    ev.flow.candidate_kind = events::candidate_kind::empty;
+    ev.ctx.err = emel::error::cast(sampler::error::none);
+    ev.ctx.candidate_kind = events::candidate_kind::empty;
   }
 };
 
 struct dispatch_parse_failed {
   void operator()(const sampler::event::apply_runtime & ev,
                   const context &) const noexcept {
-    ev.flow.err = emel::error::cast(sampler::error::parse_failed);
-    ev.flow.candidate_kind = events::candidate_kind::unknown;
+    ev.ctx.err = emel::error::cast(sampler::error::parse_failed);
+    ev.ctx.candidate_kind = events::candidate_kind::unknown;
   }
 };
 
 struct on_unexpected {
   template <class event_type>
   void operator()(const event_type & ev, const context &) const noexcept {
-    if constexpr (requires { ev.flow.err; }) {
-      ev.flow.err = emel::error::cast(sampler::error::internal_error);
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = emel::error::cast(sampler::error::internal_error);
     }
   }
 };

@@ -38,7 +38,7 @@ struct set_backend_error {
   void operator()(context & ctx) const noexcept { set_error(ctx, EMEL_ERR_BACKEND); }
 };
 
-struct run_prepare_candidates {
+struct exec_prepare_candidates {
   void operator()(context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
@@ -64,7 +64,7 @@ struct run_prepare_candidates {
   }
 };
 
-struct run_apply_sampling {
+struct exec_apply_samplers {
   void operator()(context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
@@ -97,7 +97,7 @@ struct run_apply_sampling {
   }
 };
 
-struct run_select_token {
+struct exec_select_token {
   void operator()(context & ctx) const noexcept {
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
@@ -208,9 +208,9 @@ struct on_unexpected {
 inline constexpr begin_sample begin_sample{};
 inline constexpr set_invalid_argument set_invalid_argument{};
 inline constexpr set_backend_error set_backend_error{};
-inline constexpr run_prepare_candidates run_prepare_candidates{};
-inline constexpr run_apply_sampling run_apply_sampling{};
-inline constexpr run_select_token run_select_token{};
+inline constexpr exec_prepare_candidates exec_prepare_candidates{};
+inline constexpr exec_apply_samplers exec_apply_samplers{};
+inline constexpr exec_select_token exec_select_token{};
 inline constexpr publish_done publish_done{};
 inline constexpr publish_error publish_error{};
 inline constexpr on_unexpected on_unexpected{};

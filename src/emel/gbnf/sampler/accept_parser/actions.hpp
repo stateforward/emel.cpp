@@ -10,26 +10,26 @@ namespace emel::gbnf::sampler::accept_parser::action {
 struct consume_accepted {
   void operator()(const sampler::event::accept_runtime & ev,
                   const context &) const noexcept {
-    ev.flow.err = emel::error::cast(sampler::error::none);
-    ev.flow.accepted = true;
-    ev.flow.accept_result = events::accept_result::accepted;
+    ev.ctx.err = emel::error::cast(sampler::error::none);
+    ev.ctx.accepted = true;
+    ev.ctx.accept_result = events::accept_result::accepted;
   }
 };
 
 struct dispatch_parse_failed {
   void operator()(const sampler::event::accept_runtime & ev,
                   const context &) const noexcept {
-    ev.flow.err = emel::error::cast(sampler::error::parse_failed);
-    ev.flow.accepted = false;
-    ev.flow.accept_result = events::accept_result::unknown;
+    ev.ctx.err = emel::error::cast(sampler::error::parse_failed);
+    ev.ctx.accepted = false;
+    ev.ctx.accept_result = events::accept_result::unknown;
   }
 };
 
 struct on_unexpected {
   template <class event_type>
   void operator()(const event_type & ev, const context &) const noexcept {
-    if constexpr (requires { ev.flow.err; }) {
-      ev.flow.err = emel::error::cast(sampler::error::internal_error);
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = emel::error::cast(sampler::error::internal_error);
     }
   }
 };

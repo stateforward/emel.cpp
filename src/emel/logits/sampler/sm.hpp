@@ -92,8 +92,8 @@ namespace emel::logits::sampler {
 struct initialized {};
 struct preparing_candidates {};
 struct prepare_decision {};
-struct sampling {};
-struct sampling_decision {};
+struct apply_samplers {};
+struct sample_decision {};
 struct selecting_token {};
 struct select_decision {};
 struct done {};
@@ -104,51 +104,90 @@ struct model {
 
   auto operator()() const {
     namespace sml = boost::sml;
+    // clang-format off
     return sml::make_transition_table(
-      *sml::state<initialized> + sml::event<event::sample> / action::begin_sample =
-        sml::state<preparing_candidates>,
+      //------------------------------------------------------------------------------//
+      // Sample request.
+        sml::state<preparing_candidates> <= *sml::state<initialized> + sml::event<event::sample>
+                   / action::begin_sample
 
-      sml::state<preparing_candidates> / action::run_prepare_candidates =
-        sml::state<prepare_decision>,
-      sml::state<prepare_decision> [guard::phase_failed{}] = sml::state<errored>,
-      sml::state<prepare_decision> [guard::phase_ok_and_has_more_samplers{}] =
-        sml::state<sampling>,
-      sml::state<prepare_decision> [guard::phase_ok_and_no_more_samplers{}] =
-        sml::state<selecting_token>,
+      //------------------------------------------------------------------------------//
+      // Candidate preparation.
+      , sml::state<prepare_decision> <= sml::state<preparing_candidates> + sml::completion<event::sample>
+                   / action::exec_prepare_candidates
 
-      sml::state<sampling> / action::run_apply_sampling = sml::state<sampling_decision>,
-      sml::state<sampling_decision> [guard::phase_failed{}] = sml::state<errored>,
-      sml::state<sampling_decision> [guard::phase_ok_and_has_more_samplers{}] =
-        sml::state<sampling>,
-      sml::state<sampling_decision> [guard::phase_ok_and_no_more_samplers{}] =
-        sml::state<selecting_token>,
+      , sml::state<errored> <= sml::state<prepare_decision> + sml::completion<event::sample>
+                   [ guard::phase_failed{} ]
 
-      sml::state<selecting_token> / action::run_select_token = sml::state<select_decision>,
-      sml::state<select_decision> [guard::phase_failed{}] = sml::state<errored>,
-      sml::state<select_decision> [guard::phase_ok{}] = sml::state<done>,
+      , sml::state<apply_samplers> <= sml::state<prepare_decision> + sml::completion<event::sample>
+                   [ guard::phase_ok_and_has_more_samplers{} ]
 
-      sml::state<done> / action::publish_done = sml::state<initialized>,
-      sml::state<errored> / action::publish_error = sml::state<initialized>,
+      , sml::state<selecting_token> <= sml::state<prepare_decision> + sml::completion<event::sample>
+                   [ guard::phase_ok_and_no_more_samplers{} ]
 
-      sml::state<initialized> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<preparing_candidates> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<prepare_decision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<sampling> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<sampling_decision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<selecting_token> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<select_decision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<done> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<errored> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>
+      //------------------------------------------------------------------------------//
+      // Sampler chain application.
+      , sml::state<sample_decision> <= sml::state<apply_samplers> + sml::completion<event::sample>
+                   / action::exec_apply_samplers
+
+      , sml::state<errored> <= sml::state<sample_decision> + sml::completion<event::sample>
+                   [ guard::phase_failed{} ]
+
+      , sml::state<apply_samplers> <= sml::state<sample_decision> + sml::completion<event::sample>
+                   [ guard::phase_ok_and_has_more_samplers{} ]
+
+      , sml::state<selecting_token> <= sml::state<sample_decision> + sml::completion<event::sample>
+                   [ guard::phase_ok_and_no_more_samplers{} ]
+
+      //------------------------------------------------------------------------------//
+      // Final token selection.
+      , sml::state<select_decision> <= sml::state<selecting_token> + sml::completion<event::sample>
+                   / action::exec_select_token
+
+      , sml::state<errored> <= sml::state<select_decision> + sml::completion<event::sample>
+                   [ guard::phase_failed{} ]
+
+      , sml::state<done> <= sml::state<select_decision> + sml::completion<event::sample>
+                   [ guard::phase_ok{} ]
+
+      //------------------------------------------------------------------------------//
+      // Terminal dispatch.
+      , sml::state<initialized> <= sml::state<done> + sml::completion<event::sample>
+                   / action::publish_done
+
+      , sml::state<initialized> <= sml::state<errored> + sml::completion<event::sample>
+                   / action::publish_error
+
+      //------------------------------------------------------------------------------//
+      // Unexpected events.
+      , sml::state<errored> <= sml::state<initialized> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+
+      , sml::state<errored> <= sml::state<preparing_candidates> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+
+      , sml::state<errored> <= sml::state<prepare_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+
+      , sml::state<errored> <= sml::state<apply_samplers> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+
+      , sml::state<errored> <= sml::state<sample_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+
+      , sml::state<errored> <= sml::state<selecting_token> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+
+      , sml::state<errored> <= sml::state<select_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+
+      , sml::state<errored> <= sml::state<done> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+
+      , sml::state<errored> <= sml::state<errored> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
     );
+    // clang-format on
   }
 };
 

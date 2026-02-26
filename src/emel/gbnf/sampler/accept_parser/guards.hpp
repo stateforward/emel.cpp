@@ -9,7 +9,7 @@ namespace emel::gbnf::sampler::accept_parser::guard {
 struct valid_accept_token {
   bool operator()(const sampler::event::accept_runtime & ev,
                   const action::context &) const noexcept {
-    return ev.flow.err == emel::error::cast(sampler::error::none) &&
+    return ev.ctx.err == emel::error::cast(sampler::error::none) &&
            ev.request.token_id < ev.request.grammar.rule_count;
   }
 };
@@ -17,7 +17,7 @@ struct valid_accept_token {
 struct parse_failed {
   bool operator()(const sampler::event::accept_runtime & ev,
                   const action::context & ctx) const noexcept {
-    return ev.flow.err == emel::error::cast(sampler::error::none) &&
+    return ev.ctx.err == emel::error::cast(sampler::error::none) &&
            !valid_accept_token{}(ev, ctx);
   }
 };

@@ -3,8 +3,9 @@
 #include <cstdint>
 
 #include "emel/emel.h"
+#include "emel/kernel/errors.hpp"
 #include "emel/kernel/events.hpp"
-#include "emel/kernel/op_list.hpp"
+#include "emel/kernel/detail.hpp"
 
 namespace emel::kernel::wasm::events {
 
@@ -17,7 +18,7 @@ enum class phase_outcome : uint8_t {
 struct dispatch_done {};
 
 struct dispatch_error {
-  int32_t err = EMEL_ERR_BACKEND;
+  int32_t err = static_cast<int32_t>(emel::error::cast(error::internal_error));
 };
 
 }  // namespace emel::kernel::wasm::events
@@ -27,7 +28,7 @@ namespace emel::kernel::wasm::event {
 // Internal context object carried per dispatch call.
 struct dispatch_ctx {
   events::phase_outcome outcome = events::phase_outcome::unknown;
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(error::none));
 };
 
 struct dispatch_scaffold {

@@ -10,21 +10,21 @@ namespace emel::gbnf::sampler::action {
 
 struct reject_invalid_apply {
   void operator()(const event::apply_runtime & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::invalid_request);
+    ev.ctx.err = emel::error::cast(error::invalid_request);
     ev.request.on_error(events::apply_error{
       ev.request.grammar,
-      static_cast<int32_t>(ev.flow.err),
+      static_cast<int32_t>(ev.ctx.err),
     });
   }
 };
 
 struct begin_apply {
   void operator()(const event::apply_runtime & ev, context & ctx) const noexcept {
-    ev.flow.err = emel::error::cast(error::none);
-    ev.flow.candidate_allowed = false;
-    ev.flow.candidate_kind = candidate_parser::events::candidate_kind::unknown;
-    ev.flow.token_kind = token_parser::events::token_kind::unknown;
-    ev.flow.match_result = matcher_parser::events::match_result::unknown;
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.candidate_allowed = false;
+    ev.ctx.candidate_kind = candidate_parser::events::candidate_kind::unknown;
+    ev.ctx.token_kind = token_parser::events::token_kind::unknown;
+    ev.ctx.match_result = matcher_parser::events::match_result::unknown;
     ctx.active_rule_id = ev.request.start_rule_id;
     ctx.frontier_size = 0;
   }
@@ -32,22 +32,22 @@ struct begin_apply {
 
 struct prepare_candidate_parse {
   void operator()(const event::apply_runtime & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::none);
-    ev.flow.candidate_kind = candidate_parser::events::candidate_kind::unknown;
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.candidate_kind = candidate_parser::events::candidate_kind::unknown;
   }
 };
 
 struct prepare_token_parse {
   void operator()(const event::apply_runtime & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::none);
-    ev.flow.token_kind = token_parser::events::token_kind::unknown;
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.token_kind = token_parser::events::token_kind::unknown;
   }
 };
 
 struct prepare_match_parse {
   void operator()(const event::apply_runtime & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::none);
-    ev.flow.match_result = matcher_parser::events::match_result::unknown;
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.match_result = matcher_parser::events::match_result::unknown;
   }
 };
 
@@ -55,7 +55,7 @@ struct dispatch_apply_done {
   void operator()(const event::apply_runtime & ev, const context &) const noexcept {
     ev.request.on_done(events::apply_done{
       ev.request.grammar,
-      ev.flow.candidate_allowed,
+      ev.ctx.candidate_allowed,
     });
   }
 };
@@ -64,33 +64,33 @@ struct dispatch_apply_error {
   void operator()(const event::apply_runtime & ev, const context &) const noexcept {
     ev.request.on_error(events::apply_error{
       ev.request.grammar,
-      static_cast<int32_t>(ev.flow.err),
+      static_cast<int32_t>(ev.ctx.err),
     });
   }
 };
 
 struct reject_invalid_accept {
   void operator()(const event::accept_runtime & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::invalid_request);
+    ev.ctx.err = emel::error::cast(error::invalid_request);
     ev.request.on_error(events::accept_error{
       ev.request.grammar,
-      static_cast<int32_t>(ev.flow.err),
+      static_cast<int32_t>(ev.ctx.err),
     });
   }
 };
 
 struct begin_accept {
   void operator()(const event::accept_runtime & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::none);
-    ev.flow.accepted = false;
-    ev.flow.accept_result = accept_parser::events::accept_result::unknown;
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.accept_result = accept_parser::events::accept_result::unknown;
   }
 };
 
 struct prepare_accept_parse {
   void operator()(const event::accept_runtime & ev, context &) const noexcept {
-    ev.flow.err = emel::error::cast(error::none);
-    ev.flow.accept_result = accept_parser::events::accept_result::unknown;
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accept_result = accept_parser::events::accept_result::unknown;
   }
 };
 
@@ -98,7 +98,7 @@ struct dispatch_accept_done {
   void operator()(const event::accept_runtime & ev, const context &) const noexcept {
     ev.request.on_done(events::accept_done{
       ev.request.grammar,
-      ev.flow.accepted,
+      ev.ctx.accepted,
     });
   }
 };
@@ -107,7 +107,7 @@ struct dispatch_accept_error {
   void operator()(const event::accept_runtime & ev, const context &) const noexcept {
     ev.request.on_error(events::accept_error{
       ev.request.grammar,
-      static_cast<int32_t>(ev.flow.err),
+      static_cast<int32_t>(ev.ctx.err),
     });
   }
 };
@@ -115,8 +115,8 @@ struct dispatch_accept_error {
 struct on_unexpected {
   template <class event_type>
   void operator()(const event_type & ev, context &) const noexcept {
-    if constexpr (requires { ev.flow.err; }) {
-      ev.flow.err = emel::error::cast(error::internal_error);
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = emel::error::cast(error::internal_error);
     }
   }
 };
