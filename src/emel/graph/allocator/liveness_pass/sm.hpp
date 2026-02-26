@@ -1,4 +1,5 @@
 #pragma once
+// benchmark: scaffold
 
 #include "emel/graph/allocator/liveness_pass/actions.hpp"
 #include "emel/graph/allocator/liveness_pass/guards.hpp"

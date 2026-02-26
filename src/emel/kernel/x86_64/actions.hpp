@@ -41,7 +41,7 @@ struct reject_op {
 
 }  // namespace detail
 
-using exec_scaffold_t = detail::exec_op<::emel::kernel::x86_64::event::dispatch_scaffold>;
+using exec_dispatch_t = detail::exec_op<::emel::kernel::x86_64::event::dispatch_request>;
 
 #define EMEL_KERNEL_DECLARE_RUN_TYPE(op_name)                                \
   using exec_##op_name##_t =                                                  \
@@ -66,7 +66,7 @@ struct on_unexpected {
   }
 };
 
-inline constexpr exec_scaffold_t exec_scaffold{};
+inline constexpr exec_dispatch_t exec_dispatch{};
 
 #define EMEL_KERNEL_DEFINE_RUN_ACTION(op_name) \
   inline constexpr exec_##op_name##_t exec_##op_name{};

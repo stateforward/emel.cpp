@@ -39,6 +39,11 @@ endforeach()
 
 file(APPEND "${GEN_HEADER}" "\ninline void register_machines(std::vector<machine_spec> & out) {\n")
 foreach(sm_header IN LISTS SM_HEADERS)
+  file(STRINGS "${sm_header}" model_type_markers REGEX "using model_type = model;")
+  if(NOT model_type_markers)
+    continue()
+  endif()
+
   file(RELATIVE_PATH rel_emel "${ROOT_DIR}/src/emel" "${sm_header}")
   string(REPLACE "/sm.hpp" "" dir "${rel_emel}")
   string(REPLACE "/" "_" name "${dir}")

@@ -23,28 +23,6 @@ struct decode_render_decision {};
 struct generate_decision {};
 struct unexpected_event {};
 
-/**
- * generator orchestration scaffold.
- *
- * state purposes:
- * - `ready`: idle state awaiting generation intent.
- * - `conditioning`/`conditioning_decision`: request and classify conditioning phase completion.
- * - `planning`/`planning_decision`: request and classify planning phase completion.
- * - `prefill`/`prefill_decision`: request and classify prefill phase completion.
- * - `decode_*` and `*_decision`: bounded decode loop split into explicit compute/sample/render phases.
- * - `generate_decision`: centralized success/error outcome reducer.
- * - `unexpected_event`: catchall for unhandled external events.
- *
- * guard semantics:
- * - `valid_generate`/`invalid_generate`: validate `event::generate_run` shape and decode bound.
- * - `phase_ok`/`phase_failed`: classify each phase without action-side branching.
- * - `decode_should_continue`/`decode_complete`: enforce bounded decode progress.
- *
- * action side effects:
- * - `begin_generate`: initialize per-dispatch runtime context.
- * - `request_*`: execute one bounded phase step and report through `generate_ctx`.
- * - `dispatch_*`: publish done/error outcomes synchronously before dispatch returns.
- */
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;

@@ -1,4 +1,5 @@
 #pragma once
+// benchmark: scaffold
 
 #include "emel/gbnf/sampler/token_parser/actions.hpp"
 #include "emel/gbnf/sampler/token_parser/guards.hpp"

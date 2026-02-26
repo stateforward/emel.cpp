@@ -1,6 +1,6 @@
 #pragma once
 
-// benchmark: scaffold
+// benchmark: kernel
 // docs: disabled
 
 #include "emel/emel.h"
@@ -22,10 +22,10 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
-      // Scaffold event.
+      // Dispatch event.
         sml::state<ready> <= *sml::state<ready> +
-               sml::event<::emel::kernel::vulkan::event::dispatch_scaffold>
-                 / action::exec_scaffold
+               sml::event<::emel::kernel::vulkan::event::dispatch_request>
+                 / action::exec_dispatch
 
       //------------------------------------------------------------------------------//
       // Explicit op transitions.
@@ -982,9 +982,9 @@ struct sm : public emel::sm_with_context<model, action::context> {
   using base_type = emel::sm_with_context<model, action::context>;
   using base_type::base_type;
 
-  bool process_event(const ::emel::kernel::event::scaffold & ev) {
+  bool process_event(const ::emel::kernel::event::dispatch & ev) {
     event::dispatch_ctx ctx{};
-    const event::dispatch_scaffold dispatch{ev, ctx};
+    const event::dispatch_request dispatch{ev, ctx};
     return process_dispatch_event(dispatch);
   }
 

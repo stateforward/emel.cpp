@@ -158,7 +158,7 @@ inline bool has_required_extent(const request_type & request) noexcept {
 }
 
 template <class request_type>
-inline bool validate_scaffold_request(const request_type & request) noexcept {
+inline bool validate_dispatch_request(const request_type & request) noexcept {
   return has_required_src0(request) && has_required_dst(request) && has_required_extent(request);
 }
 

@@ -5,7 +5,7 @@
 namespace emel::kernel::x86_64::action {
 
 struct context {
-  // TODO(emel): remove once scaffold observability no longer relies on this counter.
+  // TODO(emel): remove once dispatch observability no longer relies on this counter.
   uint64_t dispatch_generation = 0;
 };
 

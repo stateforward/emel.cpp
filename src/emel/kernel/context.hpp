@@ -18,7 +18,7 @@ struct context {
   cuda::sm cuda_actor = {};
   metal::sm metal_actor = {};
   vulkan::sm vulkan_actor = {};
-  // TODO(emel): remove once scaffold observability no longer relies on this counter.
+  // TODO(emel): remove once dispatch observability no longer relies on this counter.
   uint64_t dispatch_generation = 0;
 };
 

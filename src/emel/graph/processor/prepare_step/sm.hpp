@@ -1,4 +1,5 @@
 #pragma once
+// benchmark: scaffold
 
 #include "emel/graph/processor/prepare_step/actions.hpp"
 #include "emel/graph/processor/prepare_step/guards.hpp"

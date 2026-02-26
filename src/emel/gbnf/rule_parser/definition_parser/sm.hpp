@@ -1,4 +1,5 @@
 #pragma once
+// benchmark: scaffold
 
 #include "emel/gbnf/rule_parser/definition_parser/actions.hpp"
 #include "emel/gbnf/rule_parser/definition_parser/guards.hpp"

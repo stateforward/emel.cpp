@@ -31,8 +31,8 @@ struct dispatch_ctx {
   int32_t err = static_cast<int32_t>(emel::error::cast(error::none));
 };
 
-struct dispatch_scaffold {
-  const ::emel::kernel::event::scaffold & request;
+struct dispatch_request {
+  const ::emel::kernel::event::dispatch & request;
   dispatch_ctx & ctx;
 };
 

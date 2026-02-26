@@ -21,9 +21,9 @@ constexpr int32_t k_plan_ubatch = 32;
 constexpr int32_t k_plan_seq_count = 4;
 
 struct plan_result {
-  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_sizes = {};
-  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES> ubatch_token_indices = {};
-  std::array<int32_t, emel::batch::planner::action::MAX_UBATCHES + 1> ubatch_offsets = {};
+  std::array<int32_t, emel::batch::planner::action::MAX_PLAN_STEPS> ubatch_sizes = {};
+  std::array<int32_t, emel::batch::planner::action::MAX_PLAN_STEPS> ubatch_token_indices = {};
+  std::array<int32_t, emel::batch::planner::action::MAX_PLAN_STEPS + 1> ubatch_offsets = {};
   int32_t ubatch_count = 0;
   int32_t token_indices_count = 0;
   int32_t total_outputs = 0;
@@ -38,18 +38,18 @@ void planner_done(const emel::batch::planner::events::plan_done & done) noexcept
   }
   auto & out = *g_plan_result;
   out.err = EMEL_OK;
-  out.ubatch_count = done.ubatch_count;
-  out.token_indices_count = done.ubatch_token_indices_count;
+  out.ubatch_count = done.step_count;
+  out.token_indices_count = done.step_token_indices_count;
   out.total_outputs = done.total_outputs;
 
-  for (int32_t i = 0; i < done.ubatch_count; ++i) {
-    out.ubatch_sizes[static_cast<size_t>(i)] = done.ubatch_sizes[i];
+  for (int32_t i = 0; i < done.step_count; ++i) {
+    out.ubatch_sizes[static_cast<size_t>(i)] = done.step_sizes[i];
   }
-  for (int32_t i = 0; i < done.ubatch_token_indices_count; ++i) {
-    out.ubatch_token_indices[static_cast<size_t>(i)] = done.ubatch_token_indices[i];
+  for (int32_t i = 0; i < done.step_token_indices_count; ++i) {
+    out.ubatch_token_indices[static_cast<size_t>(i)] = done.step_token_indices[i];
   }
-  for (int32_t i = 0; i <= done.ubatch_count; ++i) {
-    out.ubatch_offsets[static_cast<size_t>(i)] = done.ubatch_token_offsets[i];
+  for (int32_t i = 0; i < done.step_token_offsets_count; ++i) {
+    out.ubatch_offsets[static_cast<size_t>(i)] = done.step_token_offsets[i];
   }
 }
 
@@ -145,10 +145,10 @@ bool collect_emel_plan(emel::batch::planner::event::plan_mode mode,
       emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
           &planner_error>();
 
-  emel::batch::planner::event::plan request = {
+  emel::batch::planner::event::request request = {
     .token_ids = inputs.tokens.data(),
     .n_tokens = k_plan_token_count,
-    .n_ubatch = k_plan_ubatch,
+    .n_steps = k_plan_ubatch,
     .mode = mode,
     .seq_masks = nullptr,
     .seq_masks_count = 0,
@@ -202,7 +202,7 @@ bool collect_llama_plan(emel::batch::planner::event::plan_mode mode,
     if (ubatch.n_tokens == 0) {
       break;
     }
-    if (out.ubatch_count >= emel::batch::planner::action::MAX_UBATCHES) {
+    if (out.ubatch_count >= emel::batch::planner::action::MAX_PLAN_STEPS) {
       out.err = EMEL_ERR_BACKEND;
       return false;
     }
@@ -211,7 +211,7 @@ bool collect_llama_plan(emel::batch::planner::event::plan_mode mode,
     out.ubatch_count += 1;
 
     for (uint32_t i = 0; i < ubatch.n_tokens; ++i) {
-      if (out.token_indices_count >= emel::batch::planner::action::MAX_UBATCHES) {
+      if (out.token_indices_count >= emel::batch::planner::action::MAX_PLAN_STEPS) {
         out.err = EMEL_ERR_BACKEND;
         return false;
       }
@@ -341,10 +341,10 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
         emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
             &planner_error>();
 
-    emel::batch::planner::event::plan request = {
+    emel::batch::planner::event::request request = {
       .token_ids = inputs.tokens.data(),
       .n_tokens = k_plan_token_count,
-      .n_ubatch = k_plan_ubatch,
+      .n_steps = k_plan_ubatch,
       .mode = emel::batch::planner::event::plan_mode::simple,
       .seq_masks = nullptr,
       .seq_masks_count = 0,
@@ -373,10 +373,10 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
         emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
             &planner_error>();
 
-    emel::batch::planner::event::plan request = {
+    emel::batch::planner::event::request request = {
       .token_ids = inputs.tokens.data(),
       .n_tokens = k_plan_token_count,
-      .n_ubatch = k_plan_ubatch,
+      .n_steps = k_plan_ubatch,
       .mode = emel::batch::planner::event::plan_mode::equal,
       .seq_masks = nullptr,
       .seq_masks_count = 0,
@@ -405,10 +405,10 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
         emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
             &planner_error>();
 
-    emel::batch::planner::event::plan request = {
+    emel::batch::planner::event::request request = {
       .token_ids = inputs.tokens.data(),
       .n_tokens = k_plan_token_count,
-      .n_ubatch = k_plan_ubatch,
+      .n_steps = k_plan_ubatch,
       .mode = emel::batch::planner::event::plan_mode::seq,
       .seq_masks = nullptr,
       .seq_masks_count = 0,

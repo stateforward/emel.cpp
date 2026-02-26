@@ -1,4 +1,5 @@
 #pragma once
+// benchmark: scaffold
 
 #include "emel/graph/allocator/ordering_pass/actions.hpp"
 #include "emel/graph/allocator/ordering_pass/guards.hpp"

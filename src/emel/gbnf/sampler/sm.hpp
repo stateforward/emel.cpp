@@ -1,4 +1,5 @@
 #pragma once
+// benchmark: scaffold
 
 #include "emel/gbnf/sampler/accept_parser/sm.hpp"
 #include "emel/gbnf/sampler/actions.hpp"

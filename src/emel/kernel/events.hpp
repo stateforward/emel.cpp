@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "emel/emel.h"
+#include "emel/kernel/detail.hpp"
 #include "emel/kernel/errors.hpp"
 
 namespace emel::kernel::action {
@@ -11,16 +12,16 @@ struct context;
 
 namespace emel::kernel::event {
 
-struct scaffold {};
+struct dispatch {};
 
 //------------------------------------------------------------------------------
-// GGML/GGUF opcode scaffolds.
+// GGML/GGUF opcode events.
 //
 // Reference source-of-truth:
 // - tmp/llama.cpp/ggml/include/ggml.h (enum ggml_op)
 // - tmp/llama.cpp/ggml/src/ggml.c (GGML_OP_NAME / GGML_OP_SYMBOL)
 //
-// NOTE: These are scaffolds for typed dispatch. Most op payloads share this
+// NOTE: These are typed dispatch events. Most op payloads share this
 // generic shape until op-specific contracts are finalized.
 //------------------------------------------------------------------------------
 
@@ -239,42 +240,61 @@ struct op_glu {
 enum class phase_outcome : uint8_t {
   unknown = 0,
   done = 1,
-  unsupported = 2,
-  failed = 3,
+  rejected = 2,
 };
 
-// Internal context carried via completion<dispatch_scaffold>.
-struct scaffold_ctx {
+// Internal context carried via completion<dispatch_request>.
+struct dispatch_ctx {
+  bool primary_accepted = false;
+  bool secondary_accepted = false;
+  bool tertiary_accepted = false;
+  bool quaternary_accepted = false;
+  bool quinary_accepted = false;
+  bool senary_accepted = false;
   phase_outcome primary_outcome = phase_outcome::unknown;
   phase_outcome secondary_outcome = phase_outcome::unknown;
   phase_outcome tertiary_outcome = phase_outcome::unknown;
+  phase_outcome quaternary_outcome = phase_outcome::unknown;
+  phase_outcome quinary_outcome = phase_outcome::unknown;
+  phase_outcome senary_outcome = phase_outcome::unknown;
   int32_t err = static_cast<int32_t>(emel::error::cast(error::none));
 };
 
 // Internal event used by kernel::sm wrapper; not part of public API.
-struct dispatch_scaffold {
-  const scaffold & request;
-  scaffold_ctx & ctx;
+struct dispatch_request {
+  const dispatch & request;
+  dispatch_ctx & ctx;
 };
 
-using phase_dispatch_fn = bool (*)(action::context & ctx, const void * request);
+#define EMEL_KERNEL_DECLARE_DISPATCH_EVENT(op_name) \
+  struct dispatch_##op_name {                       \
+    const op_name & request;                        \
+    dispatch_ctx & ctx;                             \
+  };
+EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_DECLARE_DISPATCH_EVENT)
+#undef EMEL_KERNEL_DECLARE_DISPATCH_EVENT
 
-// Internal event used by kernel::sm wrapper for typed op dispatch with fallback.
-struct dispatch_op {
-  const void * request = nullptr;
-  phase_dispatch_fn dispatch_primary = nullptr;
-  phase_dispatch_fn dispatch_secondary = nullptr;
-  phase_dispatch_fn dispatch_tertiary = nullptr;
-  scaffold_ctx & ctx;
-};
+template <class event_type>
+struct dispatch_event_for;
+
+#define EMEL_KERNEL_DECLARE_DISPATCH_EVENT_TRAIT(op_name) \
+  template <>                                              \
+  struct dispatch_event_for<op_name> {                    \
+    using type = dispatch_##op_name;                      \
+  };
+EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_DECLARE_DISPATCH_EVENT_TRAIT)
+#undef EMEL_KERNEL_DECLARE_DISPATCH_EVENT_TRAIT
+
+template <class event_type>
+using dispatch_event_for_t = typename dispatch_event_for<event_type>::type;
 
 }  // namespace emel::kernel::event
 
 namespace emel::kernel::events {
 
-struct scaffold_done {};
+struct dispatch_done {};
 
-struct scaffold_error {
+struct dispatch_error {
   int32_t err = static_cast<int32_t>(emel::error::cast(error::internal_error));
 };
 

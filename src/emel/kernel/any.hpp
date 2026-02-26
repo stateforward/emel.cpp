@@ -41,7 +41,7 @@ class any {
 
   kernel_kind kind() const noexcept { return core_.kind(); }
 
-  bool process_event(const event::scaffold & ev) { return core_.process_event(ev); }
+  bool process_event(const event::dispatch & ev) { return core_.process_event(ev); }
 
   template <class event_type>
     requires(::emel::kernel::is_op_event_v<event_type>)
@@ -53,7 +53,7 @@ class any {
   using sm_list = boost::sml::aux::type_list<x86_64::sm, aarch64::sm, wasm::sm, cuda::sm,
                                              metal::sm, vulkan::sm>;
   using event_list = boost::sml::aux::type_list<
-      event::scaffold
+      event::dispatch
 #define EMEL_KERNEL_ANY_EVENT_TYPE(op_name) , event::op_name
       EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_ANY_EVENT_TYPE)
 #undef EMEL_KERNEL_ANY_EVENT_TYPE
