@@ -1,8 +1,54 @@
 #pragma once
+
+/*
+design doc: docs/designs/memory/hybrid.design.md
+ ---
+ title: memory/hybrid architecture design
+ status: draft
+ ---
+ 
+ # memory/hybrid architecture design
+ 
+ this document defines the hybrid memory actor. it provides a unified lifecycle surface for models
+ that utilize both KV Cache and Recurrent memory (e.g., Jamba, certain RWKV variants).
+ 
+ ## role
+ - act as a transparent orchestrator over both a `memory/kv::sm` and a `memory/recurrent::sm`.
+ - expose a single `memory` API to the `generator`.
+ - synchronize lifecycle events across both underlying memory architectures.
+ 
+ ## architecture: the unified facade
+ rather than building a complex, three-tiered "coordinator" state machine, the hybrid memory actor
+ is a simple facade. the true complexity of PagedAttention and Recurrent State copying remains
+ isolated inside their respective actors.
+ 
+ when the `generator` issues a lifecycle event, the hybrid actor simply multi-casts it:
+ 
+ 1. **allocate:** dispatches to both `kv` and `recurrent`. if *either* fails (hits `out_of_memory`),
+    the hybrid actor gracefully rolls back the successful one and returns `out_of_memory` to the
+    generator.
+ 2. **branch:** dispatches to both. `kv` handles the blazing-fast DOD reference bump for zero-copy
+    block sharing, while `recurrent` handles the physical state buffer copy into a new slot.
+ 3. **free:** dispatches to both, freeing the recurrent slot and dropping the KV block references via
+    their respective DOD arrays.
+ 
+ ## composition
+ - owned by the `generator`.
+ - owns one instance of `memory/kv::sm`.
+ - owns one instance of `memory/recurrent::sm`.
+ 
+ ## responsibilities
+ - multi-cast sequence lifecycle events (`allocate`, `branch`, `free`) to both sub-actors.
+ - deterministic error handling: if one subsystem fails an allocation, ensure the other is safely
+   rolled back to maintain sequence parity between the two memory domains.
+ - provide a unified `memory::any` view for the `graph/processor` to bind during execution.
+*/
+
 // benchmark: scaffold
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 
 #include "emel/memory/hybrid/actions.hpp"
 #include "emel/memory/hybrid/events.hpp"
@@ -71,6 +117,29 @@ struct model {
         sml::state<out_of_memory> / action::clear_out_of_memory = sml::state<ready>,
         sml::state<errored> / action::ensure_last_error = sml::state<ready>,
 
+        sml::state<uninitialized> + sml::event<event::capture_view> / action::capture_view{} =
+            sml::state<uninitialized>,
+        sml::state<initializing> + sml::event<event::capture_view> / action::capture_view{} =
+            sml::state<initializing>,
+        sml::state<ready> + sml::event<event::capture_view> / action::capture_view{} =
+            sml::state<ready>,
+        sml::state<allocating_sequence> + sml::event<event::capture_view> / action::capture_view{} =
+            sml::state<allocating_sequence>,
+        sml::state<allocating_slots> + sml::event<event::capture_view> / action::capture_view{} =
+            sml::state<allocating_slots>,
+        sml::state<branching_sequence> + sml::event<event::capture_view> / action::capture_view{} =
+            sml::state<branching_sequence>,
+        sml::state<freeing_sequence> + sml::event<event::capture_view> / action::capture_view{} =
+            sml::state<freeing_sequence>,
+        sml::state<rolling_back_slots> + sml::event<event::capture_view> / action::capture_view{} =
+            sml::state<rolling_back_slots>,
+        sml::state<out_of_memory> + sml::event<event::capture_view> / action::capture_view{} =
+            sml::state<out_of_memory>,
+        sml::state<errored> + sml::event<event::capture_view> / action::capture_view{} =
+            sml::state<errored>,
+        sml::state<unexpected> + sml::event<event::capture_view> / action::capture_view{} =
+            sml::state<unexpected>,
+
         sml::state<uninitialized> + sml::unexpected_event<sml::_> / action::on_unexpected =
             sml::state<unexpected>,
         sml::state<initializing> + sml::unexpected_event<sml::_> / action::on_unexpected =
@@ -99,7 +168,8 @@ struct model {
 struct sm : public emel::sm<model> {
   using base_type = emel::sm<model>;
 
-  sm() : base_type(context_) {}
+  // One-time heap storage keeps snapshot handoff frozen without per-dispatch allocation.
+  sm() : base_type(context_), snapshot_(std::make_unique<view::snapshot>()) {}
 
   bool process_event(const event::reserve & ev) { return process_lifecycle_event(ev); }
   bool process_event(const event::allocate_sequence & ev) { return process_lifecycle_event(ev); }
@@ -107,6 +177,7 @@ struct sm : public emel::sm<model> {
   bool process_event(const event::branch_sequence & ev) { return process_lifecycle_event(ev); }
   bool process_event(const event::free_sequence & ev) { return process_lifecycle_event(ev); }
   bool process_event(const event::rollback_slots & ev) { return process_lifecycle_event(ev); }
+  bool process_event(const event::capture_view & ev) { return base_type::process_event(ev); }
 
   using base_type::process_event;
 
@@ -128,14 +199,19 @@ struct sm : public emel::sm<model> {
     return context_.recurrent.lookup_recurrent_slot(seq_id);
   }
 
-  view::any view() const noexcept {
-    return view::any{
-        .self = this,
-        .is_sequence_active_impl = &is_sequence_active_thunk,
-        .sequence_length_impl = &sequence_length_thunk,
-        .lookup_kv_block_impl = &lookup_kv_block_thunk,
-        .lookup_recurrent_slot_impl = &lookup_recurrent_slot_thunk,
-    };
+  view::any view() noexcept {
+    if (snapshot_ == nullptr) {
+      return view::any{};
+    }
+    int32_t err = EMEL_OK;
+    (void)this->base_type::process_event(event::capture_view{
+      .snapshot_out = snapshot_.get(),
+      .error_out = &err,
+    });
+    if (err != EMEL_OK) {
+      return view::any{};
+    }
+    return view::any{.frozen = snapshot_.get()};
   }
 
  private:
@@ -150,23 +226,7 @@ struct sm : public emel::sm<model> {
     return accepted && context_.last_error == EMEL_OK;
   }
 
-  static bool is_sequence_active_thunk(const void * self, const int32_t seq_id) {
-    return static_cast<const sm *>(self)->is_sequence_active(seq_id);
-  }
-
-  static int32_t sequence_length_thunk(const void * self, const int32_t seq_id) {
-    return static_cast<const sm *>(self)->sequence_length(seq_id);
-  }
-
-  static int32_t lookup_kv_block_thunk(const void * self, const int32_t seq_id,
-                                       const int32_t pos) {
-    return static_cast<const sm *>(self)->lookup_kv_block(seq_id, pos);
-  }
-
-  static int32_t lookup_recurrent_slot_thunk(const void * self, const int32_t seq_id) {
-    return static_cast<const sm *>(self)->lookup_recurrent_slot(seq_id);
-  }
-
+  std::unique_ptr<view::snapshot> snapshot_;
   action::context context_{};
 };
 

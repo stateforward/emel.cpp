@@ -6,10 +6,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/sml_version.cmake")
 FetchContent_Declare(
   boost_sml
-  GIT_REPOSITORY https://github.com/stateforward/sml.cpp
-  GIT_TAG 119ca42bc7e47e4683d37f8dd40b08881073e268
+  GIT_REPOSITORY ${EMEL_BOOST_SML_GIT_REPOSITORY}
+  GIT_TAG ${EMEL_BOOST_SML_GIT_TAG}
 )
 FetchContent_MakeAvailable(boost_sml)
 

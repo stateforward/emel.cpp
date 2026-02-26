@@ -18,8 +18,8 @@ inline int32_t normalize_callback_error(const bool ok, const int32_t err) noexce
 
 inline event::execute make_request(const context & ctx) noexcept {
   return event::execute{
-    .ubatch_index = ctx.ubatch_index,
-    .ubatch_size = ctx.ubatch_size,
+    .step_index = ctx.step_index,
+    .step_size = ctx.step_size,
     .kv_tokens = ctx.kv_tokens,
     .memory_sm = ctx.memory_sm,
     .memory_view = ctx.memory_view,
@@ -49,8 +49,8 @@ inline event::execute make_request(const context & ctx) noexcept {
 
 struct begin_execute {
   void operator()(const event::execute & ev, context & ctx) const noexcept {
-    ctx.ubatch_index = ev.ubatch_index;
-    ctx.ubatch_size = ev.ubatch_size;
+    ctx.step_index = ev.step_index;
+    ctx.step_size = ev.step_size;
     ctx.kv_tokens = ev.kv_tokens;
     ctx.memory_sm = ev.memory_sm;
     ctx.memory_view = ev.memory_view;

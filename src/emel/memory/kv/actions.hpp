@@ -59,6 +59,39 @@ inline void reset_runtime(context & ctx) noexcept {
   }
 }
 
+inline void fill_snapshot(const context & ctx, view::snapshot & snapshot) noexcept {
+  snapshot = view::snapshot{};
+  snapshot.max_sequences = ctx.max_sequences;
+  snapshot.block_tokens = ctx.block_tokens;
+  for (int32_t seq_id = 0; seq_id < ctx.max_sequences; ++seq_id) {
+    const size_t seq = static_cast<size_t>(seq_id);
+    const bool active = ctx.sequence_active[seq];
+    snapshot.sequence_active[seq] = active ? 1u : 0u;
+    snapshot.sequence_recurrent_slot[seq] = -1;
+    if (!active) {
+      continue;
+    }
+    snapshot.sequence_length_values[seq] = ctx.sequence_length[seq];
+    const int32_t block_count = ctx.sequence_block_count[seq];
+    snapshot.sequence_kv_block_count[seq] = block_count;
+    for (int32_t i = 0; i < block_count; ++i) {
+      snapshot.sequence_kv_blocks[seq][static_cast<size_t>(i)] =
+          ctx.seq_to_blocks[seq][static_cast<size_t>(i)];
+    }
+  }
+}
+
+struct capture_view {
+  void operator()(const event::capture_view & ev, context & ctx) const noexcept {
+    if (ev.snapshot_out == nullptr) {
+      write_error(EMEL_ERR_INVALID_ARGUMENT, ev.error_out);
+      return;
+    }
+    fill_snapshot(ctx, *ev.snapshot_out);
+    write_error(EMEL_OK, ev.error_out);
+  }
+};
+
 inline int32_t sequence_length_value(const context & ctx, const int32_t seq_id) noexcept {
   if (!valid_sequence_id(ctx, seq_id) || !ctx.sequence_active[static_cast<size_t>(seq_id)]) {
     return 0;

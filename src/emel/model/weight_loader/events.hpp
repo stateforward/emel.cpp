@@ -3,57 +3,95 @@
 #include <cstdint>
 
 #include "emel/emel.h"
-#include "emel/model/loader/events.hpp"
+#include "emel/model/data.hpp"
 
-namespace emel::model::weight_loader::event {
+namespace emel::model::weight_loader {
 
-struct load_weights;
-
-using map_mmap_fn = bool (*)(const load_weights &,
-                             uint64_t * bytes_done,
-                             uint64_t * bytes_total,
-                             int32_t * err_out);
-using load_streamed_fn = bool (*)(const load_weights &,
-                                  uint64_t * bytes_done,
-                                  uint64_t * bytes_total,
-                                  int32_t * err_out);
-using init_mappings_fn = bool (*)(const load_weights &, int32_t * err_out);
-using validate_fn = bool (*)(const load_weights &, int32_t * err_out);
-using clean_up_fn = bool (*)(const load_weights &, int32_t * err_out);
-using upload_begin_fn = bool (*)(void * upload_ctx, uint64_t total_bytes, int32_t * err_out);
-using upload_chunk_fn = bool (*)(void * upload_ctx,
-                                 const void * data,
-                                 uint64_t size,
-                                 uint64_t offset,
-                                 int32_t * err_out);
-using upload_end_fn = bool (*)(void * upload_ctx, int32_t * err_out);
-
-struct load_weights {
-  bool request_mmap = true;
-  bool request_direct_io = false;
-  bool check_tensors = true;
-  bool no_alloc = false;
-  bool mmap_supported = true;
-  bool direct_io_supported = false;
-
-  void * buffer_allocator_sm = nullptr;
-
-  init_mappings_fn init_mappings = nullptr;
-  map_mmap_fn map_mmap = nullptr;
-  load_streamed_fn load_streamed = nullptr;
-  validate_fn validate = nullptr;
-  clean_up_fn clean_up = nullptr;
-  void * upload_ctx = nullptr;
-  upload_begin_fn upload_begin = nullptr;
-  upload_chunk_fn upload_chunk = nullptr;
-  upload_end_fn upload_end = nullptr;
-  bool (*progress_callback)(float progress, void * user_data) = nullptr;
-  void * progress_user_data = nullptr;
-
-  const emel::model::loader::event::load * loader_request = nullptr;
-  void * owner_sm = nullptr;
-  bool (*dispatch_done)(void * owner_sm, const emel::model::loader::events::loading_done &) = nullptr;
-  bool (*dispatch_error)(void * owner_sm, const emel::model::loader::events::loading_error &) = nullptr;
+enum class effect_kind : uint8_t {
+  k_none = 0,
 };
 
-}  // namespace emel::model::weight_loader::event
+struct effect_request {
+  effect_kind kind = effect_kind::k_none;
+  uint64_t offset = 0;
+  uint64_t size = 0;
+  void * target = nullptr;
+};
+
+struct effect_result {
+  effect_kind kind = effect_kind::k_none;
+  void * handle = nullptr;
+  int32_t err = EMEL_OK;
+};
+
+namespace events {
+struct bind_done;
+struct bind_error;
+struct plan_done;
+struct plan_error;
+struct apply_done;
+struct apply_error;
+}  // namespace events
+
+namespace event {
+
+struct bind_storage {
+  emel::model::data::tensor_record * tensors = nullptr;
+  uint32_t tensor_count = 0;
+  void * owner_sm = nullptr;
+  bool (*dispatch_done)(void * owner_sm, const events::bind_done &) = nullptr;
+  bool (*dispatch_error)(void * owner_sm, const events::bind_error &) = nullptr;
+};
+
+struct plan_load {
+  effect_request * effects_out = nullptr;
+  uint32_t effect_capacity = 0;
+  uint32_t * effect_count_out = nullptr;
+  void * owner_sm = nullptr;
+  bool (*dispatch_done)(void * owner_sm, const events::plan_done &) = nullptr;
+  bool (*dispatch_error)(void * owner_sm, const events::plan_error &) = nullptr;
+};
+
+struct apply_effect_results {
+  const effect_result * results = nullptr;
+  uint32_t result_count = 0;
+  void * owner_sm = nullptr;
+  bool (*dispatch_done)(void * owner_sm, const events::apply_done &) = nullptr;
+  bool (*dispatch_error)(void * owner_sm, const events::apply_error &) = nullptr;
+};
+
+}  // namespace event
+
+namespace events {
+
+struct bind_done {
+  const event::bind_storage * request = nullptr;
+};
+
+struct bind_error {
+  const event::bind_storage * request = nullptr;
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+};
+
+struct plan_done {
+  const event::plan_load * request = nullptr;
+  uint32_t effect_count = 0;
+};
+
+struct plan_error {
+  const event::plan_load * request = nullptr;
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+};
+
+struct apply_done {
+  const event::apply_effect_results * request = nullptr;
+};
+
+struct apply_error {
+  const event::apply_effect_results * request = nullptr;
+  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+};
+
+}  // namespace events
+
+}  // namespace emel::model::weight_loader

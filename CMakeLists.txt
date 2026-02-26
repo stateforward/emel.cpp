@@ -19,10 +19,11 @@ option(EMEL_ENABLE_TESTS "Build tests" ON)
 option(EMEL_ENABLE_FUZZ "Build fuzz targets" OFF)
 
 include(FetchContent)
+include(cmake/sml_version.cmake)
 FetchContent_Declare(
   boost_sml
-  GIT_REPOSITORY https://github.com/stateforward/sml.cpp
-  GIT_TAG 119ca42bc7e47e4683d37f8dd40b08881073e268
+  GIT_REPOSITORY ${EMEL_BOOST_SML_GIT_REPOSITORY}
+  GIT_TAG ${EMEL_BOOST_SML_GIT_TAG}
 )
 FetchContent_MakeAvailable(boost_sml)
 
@@ -36,7 +37,7 @@ target_include_directories(emel_core
 )
 
 add_library(emel STATIC
-  src/emel/buffer/allocator/c_api.cpp
+  src/emel/model/data.cpp
 )
 
 target_link_libraries(emel
@@ -72,26 +73,19 @@ if(EMEL_ENABLE_TESTS)
 
   add_executable(emel_tests_bin
     tests/doctest_main.cpp
-    tests/model/gguf_tests.cpp
-    tests/model/gguf_parser_tests.cpp
-    tests/model/gguf_loader_tests.cpp
-    tests/model/loader_tests.cpp
-    tests/model/parser_tests.cpp
+    tests/model/loader/lifecycle_tests.cpp
+    tests/model/weight_loader/lifecycle_tests.cpp
+    tests/parser/gguf/lifecycle_tests.cpp
+    tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
+    tests/generator/lifecycle_tests.cpp
     tests/text/jinja/parser_tests.cpp
     tests/text/jinja/lexer_tests.cpp
     tests/text/jinja/formatter_tests.cpp
-    tests/model/weight_loader_tests.cpp
     tests/logits/validator/validator_tests.cpp
     tests/logits/sampler/pipeline_tests.cpp
-    tests/logits/sampler/token_selector_tests.cpp
-    tests/telemetry/exporter_tests.cpp
-    tests/telemetry/provider_tests.cpp
     tests/sm/sm_policy_tests.cpp
     tests/sm/sm_any_tests.cpp
-    tests/decoder/decoder_tests.cpp
-    tests/decoder/decoder_sm_transition_tests.cpp
-    tests/decoder/decoder_action_branch_tests.cpp
     tests/graph/processor/processor_tests.cpp
     tests/graph/processor/processor_sm_transition_tests.cpp
     tests/graph/processor/processor_action_branch_tests.cpp
@@ -112,6 +106,10 @@ if(EMEL_ENABLE_TESTS)
     tests/text/tokenizer/tokenizer_action_guard_tests.cpp
     tests/batch/planner/planner_tests.cpp
     tests/batch/planner/planner_actions_tests.cpp
+    tests/batch/planner/modes/detail_tests.cpp
+    tests/batch/planner/modes/simple_actions_tests.cpp
+    tests/batch/planner/modes/equal_actions_tests.cpp
+    tests/batch/planner/modes/sequential_actions_tests.cpp
     tests/batch/planner/planner_additional_tests.cpp
     tests/batch/planner/planner_action_branch_tests.cpp
     tests/batch/planner/planner_sm_transition_tests.cpp
@@ -120,50 +118,6 @@ if(EMEL_ENABLE_TESTS)
     tests/memory/kv/lifecycle_tests.cpp
     tests/memory/recurrent/lifecycle_tests.cpp
     tests/memory/hybrid/lifecycle_tests.cpp
-    tests/memory/coordinator_any_lifecycle_tests.cpp
-    tests/buffer/allocator_tests.cpp
-    tests/buffer/allocator_error_tests.cpp
-    tests/buffer/allocator_detail_tests.cpp
-    tests/buffer/allocator_sm_transition_tests.cpp
-    tests/buffer/allocator_guard_tests.cpp
-    tests/buffer/allocator_action_branch_tests.cpp
-    tests/buffer/allocator_c_api_tests.cpp
-    tests/buffer/planner_tests.cpp
-    tests/buffer/planner_error_tests.cpp
-    tests/buffer/planner_sm_transition_tests.cpp
-    tests/buffer/allocator_actions_tests.cpp
-    tests/buffer/allocator_actions_more_tests.cpp
-    tests/buffer/allocator_action_line_targets_tests.cpp
-    tests/buffer/allocator_action_branch_more_tests.cpp
-    tests/buffer/allocator_parity_tests.cpp
-    tests/buffer/planner_actions_tests.cpp
-    tests/buffer/planner_actions_branch_targets_tests.cpp
-    tests/buffer/planner_action_branch_tests.cpp
-    tests/buffer/chunk_allocator_tests.cpp
-    tests/buffer/chunk_allocator_error_tests.cpp
-    tests/buffer/chunk_allocator_sm_transition_tests.cpp
-    tests/buffer/chunk_allocator_sm_testing_policy_tests.cpp
-    tests/buffer/chunk_allocator_action_branch_tests.cpp
-    tests/buffer/chunk_allocator_parity_tests.cpp
-    tests/buffer/realloc_analyzer_tests.cpp
-    tests/buffer/realloc_analyzer_error_tests.cpp
-    tests/buffer/realloc_analyzer_sm_transition_tests.cpp
-    tests/buffer/realloc_analyzer_sm_flow_tests.cpp
-    tests/buffer/realloc_analyzer_action_branch_tests.cpp
-    tests/tensor/allocator_tests.cpp
-    tests/tensor/allocator_error_tests.cpp
-    tests/tensor/allocator_branch_tests.cpp
-    tests/tensor/allocator_action_branch_targets_tests.cpp
-    tests/tensor/allocator_sm_transition_tests.cpp
-    tests/tensor/allocator_sm_transition_more_tests.cpp
-    tests/tensor/allocator_sm_testing_policy_tests.cpp
-    tests/tensor/allocator_action_branch_tests.cpp
-    tests/tensor/allocator_action_branch_more_tests.cpp
-    tests/tensor/lifetime_analyzer_tests.cpp
-    tests/tensor/lifetime_analyzer_error_tests.cpp
-    tests/tensor/lifetime_analyzer_sm_error_tests.cpp
-    tests/tensor/lifetime_analyzer_sm_transition_tests.cpp
-    tests/tensor/lifetime_analyzer_action_branch_tests.cpp
   )
 
   target_link_libraries(emel_tests_bin
@@ -202,6 +156,30 @@ if(EMEL_ENABLE_FUZZ)
     message(FATAL_ERROR "EMEL fuzz targets require Clang/libFuzzer")
   endif()
 
+  set(EMEL_FUZZ_EXTRA_LINK_OPTIONS)
+  if(APPLE)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+      message(FATAL_ERROR
+        "EMEL fuzz targets on macOS require Homebrew LLVM clang++ "
+        "(AppleClang does not ship libFuzzer runtime)")
+    endif()
+
+    get_filename_component(EMEL_CXX_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(EMEL_CXX_ROOT "${EMEL_CXX_BIN_DIR}/.." ABSOLUTE)
+    set(EMEL_CXX_LIBCXX_DIR "${EMEL_CXX_ROOT}/lib/c++")
+    if(EXISTS "${EMEL_CXX_LIBCXX_DIR}/libc++.dylib")
+      # Homebrew LLVM's libFuzzer runtime depends on Homebrew libc++ symbols.
+      list(APPEND EMEL_FUZZ_EXTRA_LINK_OPTIONS
+        "-L${EMEL_CXX_LIBCXX_DIR}"
+        "-Wl,-rpath,${EMEL_CXX_LIBCXX_DIR}"
+      )
+
+      # Apple ld works reliably with system ar/ranlib for static archives.
+      set(CMAKE_AR "/usr/bin/ar" CACHE FILEPATH "" FORCE)
+      set(CMAKE_RANLIB "/usr/bin/ranlib" CACHE FILEPATH "" FORCE)
+    endif()
+  endif()
+
   function(emel_configure_fuzzer target_name)
     target_link_libraries(${target_name}
       PRIVATE
@@ -217,6 +195,12 @@ if(EMEL_ENABLE_FUZZ)
       PRIVATE
         -fsanitize=fuzzer,address,undefined
     )
+    if(EMEL_FUZZ_EXTRA_LINK_OPTIONS)
+      target_link_options(${target_name}
+        PRIVATE
+          ${EMEL_FUZZ_EXTRA_LINK_OPTIONS}
+      )
+    endif()
     target_compile_definitions(${target_name}
       PRIVATE
         FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION

@@ -8,15 +8,15 @@
 
 ## current parity snapshot (EMEL)
 - batch splitting/output selection aligned for decode (`output_all`, `output_mask`, last-token only).
-- seq masks / primary ids are propagated into ubatch execution and KV cache apply.
-- per-ubatch 1D/3D position handling aligned.
+- seq masks / primary ids are propagated into step execution and KV cache apply.
+- per-step 1D/3D position handling aligned.
 - tests and gates passing as of 2026-02-19.
 
 ## known gaps vs llama.cpp decode
 - embedding inputs and pooled embedding outputs (pooling modes, per-sequence embeddings).
 - auto-generation and validation of batch fields (`n_seq_id`, `seq_id`, `pos`, `logits` masks).
 - sequence coupling, continuity checks, and disallowing partial sequence subsets.
-- ubatch metadata parity (`n_seqs`, `n_seq_tokens`, `n_seqs_unq`, `seq_id_unq`, `seq_idx`) and
+- step metadata parity (`n_seqs`, `n_seq_tokens`, `n_seqs_unq`, `seq_id_unq`, `seq_idx`) and
   output ordering/reordering (`out_ids`, swap tracking).
 - backend sampling integration (samplers, sampled/logits/probs/candidates buffers).
 - output buffer reservation/resizing and host-buffer transfer orchestration.

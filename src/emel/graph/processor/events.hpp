@@ -16,8 +16,8 @@ using run_backend_fn = bool (*)(const execute &, int32_t * err_out);
 using extract_outputs_fn = bool (*)(const execute &, int32_t * outputs_out, int32_t * err_out);
 
 struct execute {
-  int32_t ubatch_index = 0;
-  int32_t ubatch_size = 0;
+  int32_t step_index = 0;
+  int32_t step_size = 0;
   int32_t kv_tokens = 0;
   void * memory_sm = nullptr;
   emel::memory::view::any memory_view = {};

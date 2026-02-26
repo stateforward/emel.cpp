@@ -12,8 +12,8 @@ This inference engine is being implemented by AI under human engineering and arc
 
 > [!WARNING]
 > EMEL is currently going through a major re-architecture expected to complete by end of day on
-> Monday, February 23, 2026. See [Architecture](docs/architecture/) and
-> [Design Docs](docs/designs/) for the latest improvements.
+> Monday, February 23, 2026. The source of truth for architecture and design lives in
+> `src/emel/**/sm.hpp` docstrings and the generated docs under `docs/architecture/`.
 
 ## Implementation priorities
 
@@ -34,10 +34,28 @@ That enables:
 3. High-performance, C-compatible boundaries without dynamic dispatch in hot paths.
 4. Auditable parity work against reference implementations without copying their control flow.
 
+### Why state machines everywhere
+
+It might look like over-engineering — "I have a hammer so everything looks like a nail." But a
+state machine with two states has virtually zero overhead, and the goal is explicit behavior
+modeling, not complexity for its own sake. Stateless functions inevitably accumulate conditional
+logic as the code evolves: mode flags, error booleans, retry counters, phase enums. Taming that
+accidental complexity before it starts is the whole point of EMEL. Every actor has a visible
+state model, every transition is declared, and every unexpected event has a defined handler.
+That's the trade I'm making.
+
+End-to-end performance will be inferior to llama.cpp and other engines initially — that's
+expected and accepted, even though many individual machines will perform comparably or better in
+isolation. Having explicit actions and states makes it straightforward to find hotspots, and if
+profiling shows a state machine itself is the bottleneck, it gets removed. Concurrency is
+intentionally deferred until single-threaded behavior is verified. That doesn't mean there's no
+plan for it — the actor model makes adding concurrency easier than it looks, and it will be
+introduced only where measurement says it's necessary.
+
 ## The name
 
 “EMEL” is pronounced like “ML”. It’s a short, neutral name that doesn’t carry existing
-assumptions or baggage. It’s intentionally low-ceremony while we iterate on the core design.
+assumptions or baggage. It’s intentionally low-ceremony while I iterate on the core design.
 
 ## Acknowledgements
 
@@ -81,32 +99,18 @@ environments, while Zig remains the default for day-to-day builds.
 
 - [`docs/benchmarks.md`](docs/benchmarks.md)
 - [`docs/architecture/batch_planner.md`](docs/architecture/batch_planner.md)
-- [`docs/architecture/buffer_allocator.md`](docs/architecture/buffer_allocator.md)
-- [`docs/architecture/buffer_chunk_allocator.md`](docs/architecture/buffer_chunk_allocator.md)
-- [`docs/architecture/buffer_planner.md`](docs/architecture/buffer_planner.md)
-- [`docs/architecture/buffer_realloc_analyzer.md`](docs/architecture/buffer_realloc_analyzer.md)
-- [`docs/architecture/decoder.md`](docs/architecture/decoder.md)
 - [`docs/architecture/gbnf_parser.md`](docs/architecture/gbnf_parser.md)
 - [`docs/architecture/generator.md`](docs/architecture/generator.md)
 - [`docs/architecture/graph_processor.md`](docs/architecture/graph_processor.md)
 - [`docs/architecture/logits_sampler.md`](docs/architecture/logits_sampler.md)
 - [`docs/architecture/logits_sampler_token_selector.md`](docs/architecture/logits_sampler_token_selector.md)
 - [`docs/architecture/logits_validator.md`](docs/architecture/logits_validator.md)
-- [`docs/architecture/memory_coordinator_hybrid.md`](docs/architecture/memory_coordinator_hybrid.md)
-- [`docs/architecture/memory_coordinator_kv.md`](docs/architecture/memory_coordinator_kv.md)
-- [`docs/architecture/memory_coordinator_recurrent.md`](docs/architecture/memory_coordinator_recurrent.md)
-- [`docs/architecture/memory_coordinator.md`](docs/architecture/memory_coordinator.md)
 - [`docs/architecture/memory_hybrid.md`](docs/architecture/memory_hybrid.md)
 - [`docs/architecture/memory_kv.md`](docs/architecture/memory_kv.md)
 - [`docs/architecture/memory_recurrent.md`](docs/architecture/memory_recurrent.md)
 - [`docs/architecture/model_loader.md`](docs/architecture/model_loader.md)
 - [`docs/architecture/model_weight_loader.md`](docs/architecture/model_weight_loader.md)
 - [`docs/architecture/parser_gguf.md`](docs/architecture/parser_gguf.md)
-- [`docs/architecture/parser.md`](docs/architecture/parser.md)
-- [`docs/architecture/telemetry_exporter.md`](docs/architecture/telemetry_exporter.md)
-- [`docs/architecture/telemetry_provider.md`](docs/architecture/telemetry_provider.md)
-- [`docs/architecture/tensor_allocator.md`](docs/architecture/tensor_allocator.md)
-- [`docs/architecture/tensor_lifetime_analyzer.md`](docs/architecture/tensor_lifetime_analyzer.md)
 - [`docs/architecture/text_conditioner.md`](docs/architecture/text_conditioner.md)
 - [`docs/architecture/text_detokenizer.md`](docs/architecture/text_detokenizer.md)
 - [`docs/architecture/text_encoders_bpe.md`](docs/architecture/text_encoders_bpe.md)

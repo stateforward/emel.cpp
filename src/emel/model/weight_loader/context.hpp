@@ -3,20 +3,16 @@
 #include <cstdint>
 
 #include "emel/emel.h"
-#include "emel/model/loader/events.hpp"
-#include "emel/model/weight_loader/events.hpp"
+#include "emel/model/data.hpp"
 
 namespace emel::model::weight_loader::action {
 
 struct context {
-  const event::load_weights * request = nullptr;
-  uint64_t bytes_total = 0;
-  uint64_t bytes_done = 0;
-  bool used_mmap = false;
-  bool use_mmap = false;
-  bool use_direct_io = false;
-  int32_t phase_error = EMEL_OK;
+  emel::model::data::tensor_record * tensors = nullptr;
+  uint32_t tensor_count = 0;
+  uint32_t planned_effects = 0;
   int32_t last_error = EMEL_OK;
+  bool bound_ok = false;
 };
 
 }  // namespace emel::model::weight_loader::action

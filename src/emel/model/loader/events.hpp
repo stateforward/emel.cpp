@@ -5,23 +5,11 @@
 
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
-
-namespace emel::parser::event {
-struct parse_model;
-}  // namespace emel::parser::event
-
-namespace emel::parser {
-struct map;
-}  // namespace emel::parser
-
-namespace emel::model::weight_loader::event {
-struct load_weights;
-}  // namespace emel::model::weight_loader::event
+#include "emel/model/weight_loader/events.hpp"
+#include "emel/parser/gguf/events.hpp"
 
 namespace emel::model::loader::event {
-
 struct load;
-
 }  // namespace emel::model::loader::event
 
 namespace emel::model::loader::events {
@@ -102,76 +90,46 @@ namespace emel::model::loader::event {
 using map_layers_fn = bool (*)(const load &, int32_t * err_out);
 using validate_structure_fn = bool (*)(const load &, int32_t * err_out);
 using validate_architecture_fn = bool (*)(const load &, int32_t * err_out);
-using init_mappings_fn = bool (*)(const emel::model::weight_loader::event::load_weights &,
-                                  int32_t * err_out);
-using validate_weights_fn = bool (*)(const emel::model::weight_loader::event::load_weights &,
-                                     int32_t * err_out);
-using clean_up_weights_fn = bool (*)(const emel::model::weight_loader::event::load_weights &,
-                                     int32_t * err_out);
-using upload_begin_fn = bool (*)(void * upload_ctx, uint64_t total_bytes, int32_t * err_out);
-using upload_chunk_fn = bool (*)(void * upload_ctx,
-                                 const void * data,
-                                 uint64_t size,
-                                 uint64_t offset,
-                                 int32_t * err_out);
-using upload_end_fn = bool (*)(void * upload_ctx, int32_t * err_out);
 
 struct load {
   emel::model::data & model_data;
   std::string_view model_path = {};
-  bool request_mmap = true;
-  bool request_direct_io = false;
+  const void * file_image = nullptr;
+  uint64_t file_size = 0;
   bool check_tensors = true;
   bool vocab_only = false;
-  bool no_alloc = false;
   bool validate_architecture = true;
-  bool mmap_supported = true;
-  bool direct_io_supported = false;
-  const void * architectures = nullptr;
-  int32_t n_architectures = 0;
-  void * weights_buffer = nullptr;
-  uint64_t weights_buffer_size = 0;
-  void * file_handle = nullptr;
-  void * format_ctx = nullptr;
-  bool (*progress_callback)(float progress, void * user_data) = nullptr;
-  void * progress_user_data = nullptr;
-  void * upload_ctx = nullptr;
-  upload_begin_fn upload_begin = nullptr;
-  upload_chunk_fn upload_chunk = nullptr;
-  upload_end_fn upload_end = nullptr;
 
-  const emel::parser::map * parser_map = nullptr;
-  bool (*map_mmap)(const emel::model::weight_loader::event::load_weights &,
-                   uint64_t * bytes_done,
-                   uint64_t * bytes_total,
-                   int32_t * err_out) = nullptr;
-  bool (*load_streamed)(const emel::model::weight_loader::event::load_weights &,
-                        uint64_t * bytes_done,
-                        uint64_t * bytes_total,
-                        int32_t * err_out) = nullptr;
-  init_mappings_fn init_mappings = nullptr;
-  validate_weights_fn validate_weights = nullptr;
-  clean_up_weights_fn clean_up_weights = nullptr;
+  void * parser_sm = nullptr;
+  bool (*dispatch_probe)(void * parser_sm, const emel::parser::gguf::event::probe &) = nullptr;
+  bool (*dispatch_bind_storage)(void * parser_sm,
+                                const emel::parser::gguf::event::bind_storage &) = nullptr;
+  bool (*dispatch_parse)(void * parser_sm, const emel::parser::gguf::event::parse &) = nullptr;
+  void * parser_kv_arena = nullptr;
+  uint64_t parser_kv_arena_size = 0;
+  void * parser_kv_entries = nullptr;
+  uint32_t parser_kv_entry_capacity = 0;
+  emel::model::data::tensor_record * parser_tensors = nullptr;
+  uint32_t parser_tensor_capacity = 0;
+
+  void * weight_loader_sm = nullptr;
+  bool (*dispatch_bind_weights)(void * weight_loader_sm,
+                                const emel::model::weight_loader::event::bind_storage &) = nullptr;
+  bool (*dispatch_plan_load)(void * weight_loader_sm,
+                             const emel::model::weight_loader::event::plan_load &) = nullptr;
+  bool (*dispatch_apply_results)(void * weight_loader_sm,
+                                 const emel::model::weight_loader::event::apply_effect_results &) =
+    nullptr;
+  emel::model::weight_loader::effect_request * effect_requests = nullptr;
+  uint32_t effect_capacity = 0;
+  emel::model::weight_loader::effect_result * effect_results = nullptr;
+  uint32_t effect_result_capacity = 0;
+
   map_layers_fn map_layers = nullptr;
   validate_structure_fn validate_structure = nullptr;
   validate_architecture_fn validate_architecture_impl = nullptr;
 
-  void * weight_loader_sm = nullptr;
-  bool (*dispatch_load_weights)(void * weight_loader_sm,
-                                const emel::model::weight_loader::event::load_weights &) = nullptr;
-  void * buffer_allocator_sm = nullptr;
-  void * loader_sm = nullptr;
-  bool (*dispatch_parsing_done)(void * loader_sm,
-                                const emel::model::loader::events::parsing_done &) = nullptr;
-  bool (*dispatch_parsing_error)(void * loader_sm,
-                                 const emel::model::loader::events::parsing_error &) = nullptr;
-  bool (*dispatch_loading_done)(void * loader_sm,
-                                const emel::model::loader::events::loading_done &) = nullptr;
-  bool (*dispatch_loading_error)(void * loader_sm,
-                                 const emel::model::loader::events::loading_error &) = nullptr;
-
   int32_t * error_out = nullptr;
-
   void * owner_sm = nullptr;
   bool (*dispatch_done)(void * owner_sm, const events::load_done &) = nullptr;
   bool (*dispatch_error)(void * owner_sm, const events::load_error &) = nullptr;

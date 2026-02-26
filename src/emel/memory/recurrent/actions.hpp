@@ -52,6 +52,33 @@ inline void reset_runtime(context & ctx) noexcept {
   ctx.sequence_length.fill(0);
 }
 
+inline void fill_snapshot(const context & ctx, view::snapshot & snapshot) noexcept {
+  snapshot = view::snapshot{};
+  snapshot.max_sequences = ctx.max_sequences;
+  snapshot.block_tokens = 16;
+  for (int32_t seq_id = 0; seq_id < ctx.max_sequences; ++seq_id) {
+    const size_t seq = static_cast<size_t>(seq_id);
+    const bool active = is_active(ctx, seq_id);
+    snapshot.sequence_active[seq] = active ? 1u : 0u;
+    if (!active) {
+      continue;
+    }
+    snapshot.sequence_length_values[seq] = ctx.sequence_length[seq];
+    snapshot.sequence_recurrent_slot[seq] = ctx.seq_to_slot[seq];
+  }
+}
+
+struct capture_view {
+  void operator()(const event::capture_view & ev, context & ctx) const noexcept {
+    if (ev.snapshot_out == nullptr) {
+      write_error(EMEL_ERR_INVALID_ARGUMENT, ev.error_out);
+      return;
+    }
+    fill_snapshot(ctx, *ev.snapshot_out);
+    write_error(EMEL_OK, ev.error_out);
+  }
+};
+
 inline int32_t find_first_free_slot(const context & ctx) noexcept {
   const auto & active = ctx.slots.storage().active;
   for (int32_t i = 0; i < ctx.max_slots; ++i) {

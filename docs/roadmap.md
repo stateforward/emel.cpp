@@ -32,7 +32,7 @@ scaffolding decisions live in [scaffold.plan.md](plans/scaffold.plan.md).
 - [ ] decoder: auto-generation and validation of batch fields (`n_seq_id`, `seq_id`, `pos`,
   logits masks).
 - [ ] decoder: sequence coupling/continuity rules and disallowing partial sequence subsets.
-- [ ] decoder: ubatch metadata parity (`n_seqs`, `n_seq_tokens`, `n_seqs_unq`, `seq_id_unq`,
+- [ ] decoder: step metadata parity (`n_seqs`, `n_seq_tokens`, `n_seqs_unq`, `seq_id_unq`,
   `seq_idx`).
 - [ ] decoder: output ordering/reordering parity (`out_ids`, swap tracking).
 - [ ] decoder: backend sampling integration (samplers, sampled/logits/probs/candidates buffers).

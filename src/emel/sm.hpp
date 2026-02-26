@@ -524,6 +524,35 @@ class sm {
   state_machine_type state_machine_;
 };
 
+template <class model, class context, class... policies>
+class sm_with_context : public sm<model, policies...> {
+ public:
+  using context_type = context;
+  using base_type = sm<model, policies...>;
+
+  sm_with_context() : base_type(context_) {}
+
+  template <class... args>
+  explicit sm_with_context(args &&... args_in)
+      : base_type(context_, std::forward<args>(args_in)...) {}
+
+  sm_with_context(const sm_with_context &) = default;
+  sm_with_context(sm_with_context &&) = default;
+  sm_with_context & operator=(const sm_with_context &) = default;
+  sm_with_context & operator=(sm_with_context &&) = default;
+  ~sm_with_context() = default;
+
+  using base_type::is;
+  using base_type::process_event;
+  using base_type::visit_current_states;
+
+  context_type & context_ref() noexcept { return context_; }
+  const context_type & context_ref() const noexcept { return context_; }
+
+ private:
+  context_type context_{};
+};
+
 template <class kind_enum, class sm_list, class event_list>
 class sm_any {
  public:

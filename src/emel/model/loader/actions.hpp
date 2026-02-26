@@ -13,62 +13,13 @@ inline void set_error(context & ctx, const int32_t err) noexcept {
   ctx.last_error = err;
 }
 
-inline bool store_parsing_done(void * owner_sm,
-                               const emel::model::loader::events::parsing_done &) {
-  auto * ctx = static_cast<context *>(owner_sm);
-  if (ctx == nullptr) {
-    return false;
-  }
-  ctx->phase_error = EMEL_OK;
-  ctx->last_error = EMEL_OK;
-  return true;
-}
-
-inline bool store_parsing_error(void * owner_sm,
-                                const emel::model::loader::events::parsing_error & ev) {
-  auto * ctx = static_cast<context *>(owner_sm);
-  if (ctx == nullptr) {
-    return false;
-  }
-  ctx->phase_error = ev.err;
-  ctx->last_error = ev.err;
-  return true;
-}
-
-inline bool store_loading_done(void * owner_sm,
-                               const emel::model::loader::events::loading_done & ev) {
-  auto * ctx = static_cast<context *>(owner_sm);
-  if (ctx == nullptr) {
-    return false;
-  }
-  ctx->bytes_total = ev.bytes_total;
-  ctx->bytes_done = ev.bytes_done;
-  ctx->used_mmap = ev.used_mmap;
-  ctx->phase_error = EMEL_OK;
-  ctx->last_error = EMEL_OK;
-  return true;
-}
-
-inline bool store_loading_error(void * owner_sm,
-                                const emel::model::loader::events::loading_error & ev) {
-  auto * ctx = static_cast<context *>(owner_sm);
-  if (ctx == nullptr) {
-    return false;
-  }
-  ctx->phase_error = ev.err;
-  ctx->last_error = ev.err;
-  return true;
-}
-
 struct begin_load {
   void operator()(const event::load & ev, context & ctx) const noexcept {
     ctx.request = &ev;
     ctx.bytes_total = 0;
     ctx.bytes_done = 0;
     ctx.used_mmap = false;
-    ctx.parser_kind = emel::parser::kind::count;
-    ctx.parser_sm = nullptr;
-    ctx.parser_dispatch = nullptr;
+    ctx.parser_requirements = {};
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
     if (ev.error_out != nullptr) {
@@ -90,36 +41,11 @@ struct run_map_parser {
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
     const event::load * request = ctx.request;
-    if (request == nullptr) {
+    if (request == nullptr || request->parser_sm == nullptr ||
+        request->dispatch_probe == nullptr ||
+        request->dispatch_bind_storage == nullptr ||
+        request->dispatch_parse == nullptr) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    const emel::parser::selection selection = emel::parser::select(request->parser_map, *request);
-    if (selection.entry == nullptr) {
-      set_error(ctx, EMEL_ERR_FORMAT_UNSUPPORTED);
-      return;
-    }
-    if (selection.entry->map_parser == nullptr || selection.entry->parser_sm == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    ctx.parser_kind = selection.kind_id;
-    ctx.parser_sm = selection.entry->parser_sm;
-    ctx.parser_dispatch = selection.entry->dispatch_parse;
-    if (ctx.parser_dispatch == nullptr) {
-      ctx.parser_dispatch = emel::parser::dispatch_for_kind(ctx.parser_kind);
-    }
-    if (ctx.parser_dispatch == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    int32_t err = EMEL_OK;
-    const bool ok = selection.entry->map_parser(*request, &err);
-    if (!ok || err != EMEL_OK) {
-      if (err == EMEL_OK) {
-        err = EMEL_ERR_BACKEND;
-      }
-      set_error(ctx, err);
       return;
     }
   }
@@ -130,26 +56,45 @@ struct run_parse {
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
     const event::load * request = ctx.request;
-    if (request == nullptr || ctx.parser_sm == nullptr || ctx.parser_dispatch == nullptr) {
+    if (request == nullptr || request->parser_sm == nullptr ||
+        request->dispatch_probe == nullptr ||
+        request->dispatch_bind_storage == nullptr ||
+        request->dispatch_parse == nullptr ||
+        request->file_image == nullptr || request->file_size == 0) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
     }
-    emel::parser::event::parse_model parse_request{
-      .model = &request->model_data,
-      .model_path = request->model_path,
-      .architectures = request->architectures,
-      .n_architectures = request->n_architectures,
-      .file_handle = request->file_handle,
-      .format_ctx = request->format_ctx,
-      .map_tensors = !request->vocab_only,
-      .loader_request = request,
-      .owner_sm = &ctx,
-      .dispatch_done = store_parsing_done,
-      .dispatch_error = store_parsing_error
+
+    emel::parser::gguf::event::probe probe_request{
+      .file_image = request->file_image,
+      .size = request->file_size,
+      .requirements_out = &ctx.parser_requirements,
     };
-    const bool ok = ctx.parser_dispatch(ctx.parser_sm, parse_request);
-    if (!ok && ctx.phase_error == EMEL_OK) {
+    if (!request->dispatch_probe(request->parser_sm, probe_request)) {
       set_error(ctx, EMEL_ERR_BACKEND);
+      return;
+    }
+
+    emel::parser::gguf::event::bind_storage bind_request{
+      .kv_arena = request->parser_kv_arena,
+      .kv_arena_size = request->parser_kv_arena_size,
+      .kv_entries = request->parser_kv_entries,
+      .kv_entry_capacity = request->parser_kv_entry_capacity,
+      .tensors = request->parser_tensors,
+      .tensor_capacity = request->parser_tensor_capacity,
+    };
+    if (!request->dispatch_bind_storage(request->parser_sm, bind_request)) {
+      set_error(ctx, EMEL_ERR_BACKEND);
+      return;
+    }
+
+    emel::parser::gguf::event::parse parse_request{
+      .file_image = request->file_image,
+      .size = request->file_size,
+    };
+    if (!request->dispatch_parse(request->parser_sm, parse_request)) {
+      set_error(ctx, EMEL_ERR_BACKEND);
+      return;
     }
   }
 };
@@ -162,38 +107,41 @@ struct run_load_weights {
     ctx.bytes_done = 0;
     ctx.used_mmap = false;
     const event::load * request = ctx.request;
-    if (request == nullptr || request->dispatch_load_weights == nullptr ||
-        request->weight_loader_sm == nullptr) {
+    if (request == nullptr || request->weight_loader_sm == nullptr ||
+        request->dispatch_bind_weights == nullptr ||
+        request->dispatch_plan_load == nullptr ||
+        request->dispatch_apply_results == nullptr) {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
     }
-    emel::model::weight_loader::event::load_weights load_request{
-      .request_mmap = request->request_mmap,
-      .request_direct_io = request->request_direct_io,
-      .check_tensors = request->check_tensors,
-      .no_alloc = request->no_alloc,
-      .mmap_supported = request->mmap_supported,
-      .direct_io_supported = request->direct_io_supported,
-      .buffer_allocator_sm = request->buffer_allocator_sm,
-      .init_mappings = request->init_mappings,
-      .map_mmap = request->map_mmap,
-      .load_streamed = request->load_streamed,
-      .validate = request->validate_weights,
-      .clean_up = request->clean_up_weights,
-      .upload_ctx = request->upload_ctx,
-      .upload_begin = request->upload_begin,
-      .upload_chunk = request->upload_chunk,
-      .upload_end = request->upload_end,
-      .progress_callback = request->progress_callback,
-      .progress_user_data = request->progress_user_data,
-      .loader_request = request,
-      .owner_sm = &ctx,
-      .dispatch_done = store_loading_done,
-      .dispatch_error = store_loading_error
+
+    emel::model::weight_loader::event::bind_storage bind_request{
+      .tensors = request->parser_tensors,
+      .tensor_count = request->parser_tensor_capacity,
     };
-    const bool ok = request->dispatch_load_weights(request->weight_loader_sm, load_request);
-    if (!ok && ctx.phase_error == EMEL_OK) {
+    if (!request->dispatch_bind_weights(request->weight_loader_sm, bind_request)) {
       set_error(ctx, EMEL_ERR_BACKEND);
+      return;
+    }
+
+    uint32_t planned_count = 0;
+    emel::model::weight_loader::event::plan_load plan_request{
+      .effects_out = request->effect_requests,
+      .effect_capacity = request->effect_capacity,
+      .effect_count_out = &planned_count,
+    };
+    if (!request->dispatch_plan_load(request->weight_loader_sm, plan_request)) {
+      set_error(ctx, EMEL_ERR_BACKEND);
+      return;
+    }
+
+    emel::model::weight_loader::event::apply_effect_results apply_request{
+      .results = request->effect_results,
+      .result_count = planned_count,
+    };
+    if (!request->dispatch_apply_results(request->weight_loader_sm, apply_request)) {
+      set_error(ctx, EMEL_ERR_BACKEND);
+      return;
     }
   }
 };
@@ -271,18 +219,14 @@ struct publish_done {
     if (request == nullptr) {
       return;
     }
-    if (request->error_out != nullptr) {
-      *request->error_out = EMEL_OK;
-    }
     if (request->dispatch_done != nullptr && request->owner_sm != nullptr) {
-      request->dispatch_done(request->owner_sm, events::load_done{
+      request->dispatch_done(request->owner_sm, emel::model::loader::events::load_done{
         request,
         ctx.bytes_total,
         ctx.bytes_done,
-        ctx.used_mmap
+        ctx.used_mmap,
       });
     }
-    clear_request(ctx);
   }
 };
 
@@ -292,18 +236,12 @@ struct publish_error {
     if (request == nullptr) {
       return;
     }
-    int32_t err = ctx.last_error;
-    if (err == EMEL_OK) {
-      err = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
-    }
-    ctx.last_error = err;
-    if (request->error_out != nullptr) {
-      *request->error_out = err;
-    }
     if (request->dispatch_error != nullptr && request->owner_sm != nullptr) {
-      request->dispatch_error(request->owner_sm, events::load_error{request, err});
+      request->dispatch_error(request->owner_sm, emel::model::loader::events::load_error{
+        request,
+        ctx.last_error,
+      });
     }
-    clear_request(ctx);
   }
 };
 

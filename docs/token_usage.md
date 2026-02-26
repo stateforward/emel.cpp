@@ -9,3 +9,5 @@
 7. 2/19/2026-2/21/2026 token usage: total=57,350,647 input=54,092,143 (+ 914,317,440 cached) output=3,258,504 (reasoning 2,106,814)
 8. 2/21/2026-2/21/2026 token usage: total=906,811 input=872,166 (+ 6,228,608 cached) output=34,645 (reasoning 21,120)
 9. 2/21/2026-2/21/2026 token usage: total=278,280 input=274,722 (+ 1,838,464 cached) output=3,558 (reasoning 1,280)
+10. 2/21/2026-2/24/2026 token usage: total=1,081,671 input=908,842 (+ 20,706,432 cached) output=172,829 (reasoning 101,873)
+11. 2/24/2026-2/24/2026 token usage: total=132,023 input=101,533 (+ 2,470,400 cached) output=30,490 (reasoning 22,044)

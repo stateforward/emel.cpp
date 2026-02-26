@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "emel/memory/view.hpp"
+
 namespace emel::memory::event {
 
 struct reserve {
@@ -43,6 +45,11 @@ struct rollback_slots {
   int32_t seq_id = 0;
   int32_t token_count = 0;
   int32_t * block_count_out = nullptr;
+  int32_t * error_out = nullptr;
+};
+
+struct capture_view {
+  emel::memory::view::snapshot * snapshot_out = nullptr;
   int32_t * error_out = nullptr;
 };
 
@@ -98,6 +105,14 @@ struct rollback_slots_done {
 struct rollback_slots_error {
   int32_t err = 0;
   const event::rollback_slots * request = nullptr;
+};
+
+struct capture_view_done {
+  const event::capture_view * request = nullptr;
+};
+struct capture_view_error {
+  int32_t err = 0;
+  const event::capture_view * request = nullptr;
 };
 
 }  // namespace emel::memory::events

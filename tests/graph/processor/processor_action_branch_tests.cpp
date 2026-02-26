@@ -141,8 +141,8 @@ TEST_CASE("compute_executor_actions_return_early_when_error_out_is_null") {
 TEST_CASE("compute_executor_guard_validates_execute_request") {
   emel::graph::processor::action::context ctx{};
   execute_t request{
-    .ubatch_index = 0,
-    .ubatch_size = 1,
+    .step_index = 0,
+    .step_size = 1,
     .kv_tokens = 1,
     .validate = validate_ok,
     .prepare_graph = prepare_graph_reuse,
@@ -154,10 +154,10 @@ TEST_CASE("compute_executor_guard_validates_execute_request") {
 
   CHECK(emel::graph::processor::guard::valid_execute_request{}(request, ctx));
 
-  request.ubatch_size = 0;
+    request.step_size = 0;
   CHECK(emel::graph::processor::guard::invalid_execute_request{}(request, ctx));
 
-  request.ubatch_size = 1;
+  request.step_size = 1;
   request.prepare_graph = nullptr;
   CHECK(emel::graph::processor::guard::invalid_execute_request{}(request, ctx));
 }

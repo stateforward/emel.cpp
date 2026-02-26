@@ -1,5 +1,7 @@
 #include "doctest/doctest.h"
 
+#include <limits>
+
 #include "emel/emel.h"
 #include "emel/logits/sampler/actions.hpp"
 #include "emel/logits/sampler/sm.hpp"
@@ -138,6 +140,60 @@ TEST_CASE("sampler pipeline reports sampler errors") {
   CHECK(selected == -1);
 }
 
+TEST_CASE("sampler pipeline categorical selection uses random draw") {
+  emel::logits::sampler::sm machine{};
+
+  float logits[2] = {0.0f, 0.0f};
+  int32_t ids[2] = {};
+  float scores[2] = {};
+  int32_t selected = -1;
+  int32_t err = EMEL_OK;
+
+  emel::logits::sampler::event::sample request{};
+  request.logits = logits;
+  request.vocab_size = 2;
+  request.candidate_ids = ids;
+  request.candidate_scores = scores;
+  request.candidate_capacity = 2;
+  request.sampler_fns = nullptr;
+  request.sampler_count = 0;
+  request.policy = emel::logits::sampler::event::selection_policy::categorical;
+  request.random_01 = 0.99f;
+  request.selected_token_out = &selected;
+  request.error_out = &err;
+
+  CHECK(machine.process_event(request));
+  CHECK(err == EMEL_OK);
+  CHECK(selected == 1);
+}
+
+TEST_CASE("sampler pipeline categorical validates random range") {
+  emel::logits::sampler::sm machine{};
+
+  float logits[2] = {0.0f, 0.0f};
+  int32_t ids[2] = {};
+  float scores[2] = {};
+  int32_t selected = -1;
+  int32_t err = EMEL_OK;
+
+  emel::logits::sampler::event::sample request{};
+  request.logits = logits;
+  request.vocab_size = 2;
+  request.candidate_ids = ids;
+  request.candidate_scores = scores;
+  request.candidate_capacity = 2;
+  request.sampler_fns = nullptr;
+  request.sampler_count = 0;
+  request.policy = emel::logits::sampler::event::selection_policy::categorical;
+  request.random_01 = 1.0f;
+  request.selected_token_out = &selected;
+  request.error_out = &err;
+
+  CHECK(!machine.process_event(request));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(selected == -1);
+}
+
 TEST_CASE("sampler pipeline action error paths") {
   emel::logits::sampler::action::context ctx{};
   emel::logits::sampler::event::sample request{};
@@ -177,6 +233,15 @@ TEST_CASE("sampler pipeline action error paths") {
   CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
 
   ctx.candidate_count = 0;
+  emel::logits::sampler::action::run_select_token(ctx);
+  CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+
+  ids[0] = 1;
+  scores[0] = std::numeric_limits<float>::quiet_NaN();
+  request.policy = emel::logits::sampler::event::selection_policy::categorical;
+  request.random_01 = 0.5f;
+  ctx.request = &request;
+  ctx.candidate_count = 1;
   emel::logits::sampler::action::run_select_token(ctx);
   CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
 

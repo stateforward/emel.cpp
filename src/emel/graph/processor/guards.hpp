@@ -32,7 +32,7 @@ struct valid_execute_request {
         ev.extract_outputs == nullptr) {
       return false;
     }
-    if (ev.ubatch_index < 0 || ev.ubatch_size <= 0) {
+    if (ev.step_index < 0 || ev.step_size <= 0) {
       return false;
     }
     if (ev.kv_tokens < 0) {

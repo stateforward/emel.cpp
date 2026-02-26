@@ -101,10 +101,12 @@ add_subdirectory(${EMEL_ROOT} emel)
 
 add_executable(bench_runner
   ${CMAKE_CURRENT_SOURCE_DIR}/batch/planner_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/buffer_allocator_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/text/jinja/parser_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/text/jinja/formatter_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/memory_coordinator_recurrent_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/parser_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/memory/kv_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/memory/recurrent_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/memory/hybrid_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/sm_any_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/bpe_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/spm_bench.cpp
@@ -133,6 +135,32 @@ target_link_libraries(bench_runner
 )
 
 target_include_directories(bench_runner
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${EMEL_ROOT}/src
+    ${EMEL_ROOT}/include
+    ${reference_impl_SOURCE_DIR}/src
+    ${reference_impl_SOURCE_DIR}/common
+    ${reference_impl_SOURCE_DIR}/ggml/include
+    ${reference_impl_SOURCE_DIR}/include
+)
+
+add_executable(gbnf_bench_runner
+  ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/parser_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/bench_main.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/bench_cases.hpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp
+)
+
+target_link_libraries(gbnf_bench_runner
+  PRIVATE
+    emel_core
+    emel
+    ggml
+    llama
+)
+
+target_include_directories(gbnf_bench_runner
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${EMEL_ROOT}/src

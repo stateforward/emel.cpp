@@ -260,6 +260,62 @@ inline void run_rollback_slots_phase(const event::rollback_slots & ev,
   write_error(ctx.phase_error, ev.error_out);
 }
 
+inline void merge_snapshots(const view::snapshot & kv_snapshot,
+                            const view::snapshot & recurrent_snapshot,
+                            view::snapshot & out) noexcept {
+  out = view::snapshot{};
+  out.max_sequences = std::min(kv_snapshot.max_sequences, recurrent_snapshot.max_sequences);
+  out.block_tokens = kv_snapshot.block_tokens;
+  for (int32_t seq_id = 0; seq_id < out.max_sequences; ++seq_id) {
+    const size_t seq = static_cast<size_t>(seq_id);
+    const bool active = kv_snapshot.sequence_active[seq] != 0 &&
+                        recurrent_snapshot.sequence_active[seq] != 0;
+    out.sequence_active[seq] = active ? 1u : 0u;
+    if (!active) {
+      continue;
+    }
+    out.sequence_length_values[seq] =
+        std::min(kv_snapshot.sequence_length_values[seq],
+                 recurrent_snapshot.sequence_length_values[seq]);
+    out.sequence_kv_block_count[seq] = kv_snapshot.sequence_kv_block_count[seq];
+    out.sequence_kv_blocks[seq] = kv_snapshot.sequence_kv_blocks[seq];
+    out.sequence_recurrent_slot[seq] = recurrent_snapshot.sequence_recurrent_slot[seq];
+  }
+}
+
+struct capture_view {
+  void operator()(const event::capture_view & ev, context & ctx) const noexcept {
+    if (ev.snapshot_out == nullptr || ctx.kv_snapshot == nullptr ||
+        ctx.recurrent_snapshot == nullptr) {
+      write_error(EMEL_ERR_INVALID_ARGUMENT, ev.error_out);
+      return;
+    }
+
+    int32_t kv_error = EMEL_OK;
+    (void)ctx.kv.process_event(event::capture_view{
+      .snapshot_out = ctx.kv_snapshot.get(),
+      .error_out = &kv_error,
+    });
+    if (kv_error != EMEL_OK) {
+      write_error(kv_error, ev.error_out);
+      return;
+    }
+
+    int32_t recurrent_error = EMEL_OK;
+    (void)ctx.recurrent.process_event(event::capture_view{
+      .snapshot_out = ctx.recurrent_snapshot.get(),
+      .error_out = &recurrent_error,
+    });
+    if (recurrent_error != EMEL_OK) {
+      write_error(recurrent_error, ev.error_out);
+      return;
+    }
+
+    merge_snapshots(*ctx.kv_snapshot, *ctx.recurrent_snapshot, *ev.snapshot_out);
+    write_error(EMEL_OK, ev.error_out);
+  }
+};
+
 struct begin_reserve {
   void operator()(const event::reserve & ev, context & ctx) const noexcept {
     run_reserve_phase(ev, ctx);

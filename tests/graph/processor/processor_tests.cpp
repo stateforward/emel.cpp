@@ -69,22 +69,6 @@ bool extract_outputs_one(const execute_t &, int32_t * outputs_out, int32_t * err
 void * g_expected_memory_sm = nullptr;
 bool g_saw_unified_payload = false;
 
-bool memory_is_active(const void * self, const int32_t seq_id) {
-  return self == g_expected_memory_sm && seq_id == 7;
-}
-
-int32_t memory_sequence_length(const void * self, const int32_t seq_id) {
-  return (self == g_expected_memory_sm && seq_id == 7) ? 13 : 0;
-}
-
-int32_t memory_lookup_kv_block(const void * self, const int32_t seq_id, const int32_t pos) {
-  return (self == g_expected_memory_sm && seq_id == 7 && pos == 0) ? 42 : -1;
-}
-
-int32_t memory_lookup_recurrent_slot(const void * self, const int32_t seq_id) {
-  return (self == g_expected_memory_sm && seq_id == 7) ? 3 : -1;
-}
-
 bool prepare_graph_checks_memory_payload(const execute_t & ev, bool * reused_out,
                                          int32_t * err_out) {
   if (reused_out != nullptr) {
@@ -114,8 +98,8 @@ TEST_CASE("graph_processor_execute_success_path") {
   int32_t error = EMEL_OK;
 
   CHECK(machine.process_event(emel::graph::processor::event::execute{
-    .ubatch_index = 0,
-    .ubatch_size = 1,
+    .step_index = 0,
+    .step_size = 1,
     .kv_tokens = 1,
     .validate = validate_ok,
     .prepare_graph = prepare_graph_reuse,
@@ -136,8 +120,8 @@ TEST_CASE("graph_processor_rejects_invalid_payload") {
   int32_t error = EMEL_OK;
 
   CHECK_FALSE(machine.process_event(emel::graph::processor::event::execute{
-    .ubatch_index = -1,
-    .ubatch_size = 1,
+    .step_index = -1,
+    .step_size = 1,
     .kv_tokens = 0,
     .prepare_graph = prepare_graph_reuse,
     .bind_inputs = bind_inputs_ok,
@@ -156,17 +140,21 @@ TEST_CASE("graph_processor_propagates_unified_memory_payload") {
   g_expected_memory_sm = &memory_tag;
   g_saw_unified_payload = false;
 
+  emel::memory::view::snapshot memory_snapshot{};
+  memory_snapshot.max_sequences = 8;
+  memory_snapshot.block_tokens = 16;
+  memory_snapshot.sequence_active[7] = 1;
+  memory_snapshot.sequence_length_values[7] = 13;
+  memory_snapshot.sequence_kv_block_count[7] = 1;
+  memory_snapshot.sequence_kv_blocks[7][0] = 42;
+  memory_snapshot.sequence_recurrent_slot[7] = 3;
   const emel::memory::view::any memory_view{
-    .self = &memory_tag,
-    .is_sequence_active_impl = &memory_is_active,
-    .sequence_length_impl = &memory_sequence_length,
-    .lookup_kv_block_impl = &memory_lookup_kv_block,
-    .lookup_recurrent_slot_impl = &memory_lookup_recurrent_slot,
+    .frozen = &memory_snapshot,
   };
 
   CHECK(machine.process_event(emel::graph::processor::event::execute{
-    .ubatch_index = 0,
-    .ubatch_size = 1,
+    .step_index = 0,
+    .step_size = 1,
     .kv_tokens = 1,
     .memory_sm = &memory_tag,
     .memory_view = memory_view,
@@ -188,8 +176,8 @@ TEST_CASE("graph_processor_propagates_backend_failure") {
   int32_t error = EMEL_OK;
 
   CHECK_FALSE(machine.process_event(emel::graph::processor::event::execute{
-    .ubatch_index = 0,
-    .ubatch_size = 1,
+    .step_index = 0,
+    .step_size = 1,
     .kv_tokens = 1,
     .validate = validate_ok,
     .prepare_graph = prepare_graph_reuse,

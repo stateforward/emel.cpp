@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>
+
 #include "emel/logits/sampler/context.hpp"
 
 namespace emel::logits::sampler::action {
@@ -107,17 +109,63 @@ struct run_select_token {
       set_error(ctx, EMEL_ERR_BACKEND);
       return;
     }
-    int32_t best_id = request->candidate_ids[0];
-    float best_score = request->candidate_scores[0];
+
+    if (request->policy == event::selection_policy::categorical &&
+        (request->random_01 < 0.0f || request->random_01 >= 1.0f)) {
+      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+      return;
+    }
+
+    if (request->policy == event::selection_policy::argmax) {
+      int32_t best_id = request->candidate_ids[0];
+      float best_score = request->candidate_scores[0];
+      for (int32_t i = 1; i < ctx.candidate_count; ++i) {
+        const float score = request->candidate_scores[i];
+        const int32_t token_id = request->candidate_ids[i];
+        if (score > best_score || (score == best_score && token_id < best_id)) {
+          best_score = score;
+          best_id = token_id;
+        }
+      }
+      ctx.selected_token = best_id;
+      if (request->selected_token_out != nullptr) {
+        *request->selected_token_out = best_id;
+      }
+      return;
+    }
+
+    float max_score = request->candidate_scores[0];
     for (int32_t i = 1; i < ctx.candidate_count; ++i) {
-      if (request->candidate_scores[i] > best_score) {
-        best_score = request->candidate_scores[i];
-        best_id = request->candidate_ids[i];
+      if (request->candidate_scores[i] > max_score) {
+        max_score = request->candidate_scores[i];
       }
     }
-    ctx.selected_token = best_id;
+
+    float total_weight = 0.0f;
+    for (int32_t i = 0; i < ctx.candidate_count; ++i) {
+      total_weight += std::exp(request->candidate_scores[i] - max_score);
+    }
+    if (!(total_weight > 0.0f)) {
+      set_error(ctx, EMEL_ERR_BACKEND);
+      return;
+    }
+
+    const float target = request->random_01 * total_weight;
+    float cumulative = 0.0f;
+    for (int32_t i = 0; i < ctx.candidate_count; ++i) {
+      cumulative += std::exp(request->candidate_scores[i] - max_score);
+      if (cumulative >= target) {
+        ctx.selected_token = request->candidate_ids[i];
+        if (request->selected_token_out != nullptr) {
+          *request->selected_token_out = ctx.selected_token;
+        }
+        return;
+      }
+    }
+
+    ctx.selected_token = request->candidate_ids[ctx.candidate_count - 1];
     if (request->selected_token_out != nullptr) {
-      *request->selected_token_out = best_id;
+      *request->selected_token_out = ctx.selected_token;
     }
   }
 };

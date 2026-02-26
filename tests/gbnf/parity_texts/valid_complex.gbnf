@@ -1,0 +1,4 @@
+# comment
+root ::= ("ab" | [a-z] | [^0-9] | <[3]> | !<[4]> | . | name-ref)+
+name-ref ::= "\x41\u0042\u00000043" {2,3} "t\n\r\t\\"?
+range-rule ::= [a-zA-z0-9]*

@@ -51,14 +51,14 @@ bool run_backend_kv_gate(const execute_t & ev, int32_t * err_out) {
 }
 
 bool extract_outputs_kv_gate(const execute_t & ev, int32_t * outputs_out, int32_t * err_out) {
-  if (ev.kv_tokens < ev.ubatch_size) {
+  if (ev.kv_tokens < ev.step_size) {
     if (err_out != nullptr) {
       *err_out = EMEL_ERR_BACKEND;
     }
     return false;
   }
   if (outputs_out != nullptr) {
-    *outputs_out = ev.ubatch_size;
+    *outputs_out = ev.step_size;
   }
   if (err_out != nullptr) {
     *err_out = EMEL_OK;
@@ -72,8 +72,8 @@ TEST_CASE("compute_executor_sm_success_path_reports_outputs") {
   int32_t outputs = 0;
 
   machine.process_event(emel::graph::processor::event::execute{
-    .ubatch_index = 0,
-    .ubatch_size = 1,
+    .step_index = 0,
+    .step_size = 1,
     .kv_tokens = 0,
     .validate = validate_ok,
     .prepare_graph = prepare_graph_reuse,
@@ -92,8 +92,8 @@ TEST_CASE("compute_executor_sm_validation_error_path") {
   int32_t err = EMEL_OK;
 
   machine.process_event(emel::graph::processor::event::execute{
-    .ubatch_index = -1,
-    .ubatch_size = 0,
+    .step_index = -1,
+    .step_size = 0,
     .kv_tokens = 0,
     .validate = validate_ok,
     .prepare_graph = prepare_graph_reuse,

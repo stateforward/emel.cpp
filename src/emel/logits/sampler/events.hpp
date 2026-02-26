@@ -4,6 +4,11 @@
 
 namespace emel::logits::sampler::event {
 
+enum class selection_policy : uint8_t {
+  argmax = 0,
+  categorical,
+};
+
 using sampler_fn = bool (*)(
     int32_t * candidate_ids,
     float * candidate_scores,
@@ -20,6 +25,8 @@ struct sample {
   sampler_fn * sampler_fns = nullptr;
   int32_t sampler_count = 0;
   void * sampler_user_data = nullptr;
+  selection_policy policy = selection_policy::argmax;
+  float random_01 = 0.0f;
   int32_t * selected_token_out = nullptr;
   int32_t * error_out = nullptr;
 };

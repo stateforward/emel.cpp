@@ -8,9 +8,10 @@ namespace emel::model::loader::guard {
 
 struct can_map_parser {
   bool operator()(const event::load & ev) const {
-    return ev.parser_map != nullptr &&
-           ev.parser_map->entries != nullptr &&
-           ev.parser_map->count > 0;
+    return ev.parser_sm != nullptr &&
+           ev.dispatch_probe != nullptr &&
+           ev.dispatch_bind_storage != nullptr &&
+           ev.dispatch_parse != nullptr;
   }
 };
 
@@ -39,8 +40,10 @@ struct has_request {
 struct can_parse {
   bool operator()(const action::context & ctx) const noexcept {
     return ctx.request != nullptr &&
-           ctx.parser_sm != nullptr &&
-           ctx.parser_dispatch != nullptr;
+           ctx.request->parser_sm != nullptr &&
+           ctx.request->dispatch_probe != nullptr &&
+           ctx.request->dispatch_bind_storage != nullptr &&
+           ctx.request->dispatch_parse != nullptr;
   }
 };
 
@@ -65,8 +68,10 @@ struct skip_weights {
 struct can_load_weights {
   bool operator()(const action::context & ctx) const noexcept {
     return ctx.request != nullptr &&
-           ctx.request->dispatch_load_weights != nullptr &&
-           ctx.request->weight_loader_sm != nullptr;
+           ctx.request->weight_loader_sm != nullptr &&
+           ctx.request->dispatch_bind_weights != nullptr &&
+           ctx.request->dispatch_plan_load != nullptr &&
+           ctx.request->dispatch_apply_results != nullptr;
   }
 };
 
@@ -96,16 +101,14 @@ struct skip_validate_structure {
 
 struct can_validate_structure {
   bool operator()(const action::context & ctx) const noexcept {
-    return ctx.request != nullptr &&
-           ctx.request->check_tensors &&
+    return ctx.request != nullptr && ctx.request->check_tensors &&
            ctx.request->validate_structure != nullptr;
   }
 };
 
 struct cannot_validate_structure {
   bool operator()(const action::context & ctx) const noexcept {
-    return ctx.request != nullptr &&
-           ctx.request->check_tensors &&
+    return ctx.request != nullptr && ctx.request->check_tensors &&
            ctx.request->validate_structure == nullptr;
   }
 };
@@ -124,16 +127,14 @@ struct no_arch_validate {
 
 struct has_arch_validate_and_can_validate_architecture {
   bool operator()(const action::context & ctx) const noexcept {
-    return ctx.request != nullptr &&
-           ctx.request->validate_architecture &&
+    return ctx.request != nullptr && ctx.request->validate_architecture &&
            ctx.request->validate_architecture_impl != nullptr;
   }
 };
 
 struct has_arch_validate_and_cannot_validate_architecture {
   bool operator()(const action::context & ctx) const noexcept {
-    return ctx.request != nullptr &&
-           ctx.request->validate_architecture &&
+    return ctx.request != nullptr && ctx.request->validate_architecture &&
            ctx.request->validate_architecture_impl == nullptr;
   }
 };

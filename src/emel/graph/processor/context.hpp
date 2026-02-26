@@ -9,8 +9,8 @@ namespace emel::graph::processor::action {
 
 struct context {
   int32_t outputs_produced = 0;
-  int32_t ubatch_index = 0;
-  int32_t ubatch_size = 0;
+  int32_t step_index = 0;
+  int32_t step_size = 0;
   int32_t kv_tokens = 0;
   void * memory_sm = nullptr;
   emel::memory::view::any memory_view = {};

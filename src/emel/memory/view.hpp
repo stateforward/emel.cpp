@@ -1,47 +1,76 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace emel::memory::view {
 
-struct any {
-  using is_sequence_active_fn = bool (*)(const void * self, int32_t seq_id);
-  using sequence_length_fn = int32_t (*)(const void * self, int32_t seq_id);
-  using lookup_kv_block_fn = int32_t (*)(const void * self, int32_t seq_id, int32_t pos);
-  using lookup_recurrent_slot_fn = int32_t (*)(const void * self, int32_t seq_id);
+inline constexpr int32_t MAX_SEQUENCES = 256;
+inline constexpr int32_t MAX_BLOCKS_PER_SEQUENCE = 4096;
+inline constexpr uint16_t INVALID_KV_BLOCK = UINT16_MAX;
 
-  const void * self = nullptr;
-  is_sequence_active_fn is_sequence_active_impl = nullptr;
-  sequence_length_fn sequence_length_impl = nullptr;
-  lookup_kv_block_fn lookup_kv_block_impl = nullptr;
-  lookup_recurrent_slot_fn lookup_recurrent_slot_impl = nullptr;
+struct snapshot {
+  int32_t max_sequences = 0;
+  int32_t block_tokens = 16;
+
+  std::array<uint8_t, MAX_SEQUENCES> sequence_active = {};
+  std::array<int32_t, MAX_SEQUENCES> sequence_length_values = {};
+  std::array<int32_t, MAX_SEQUENCES> sequence_kv_block_count = {};
+  std::array<std::array<uint16_t, MAX_BLOCKS_PER_SEQUENCE>, MAX_SEQUENCES> sequence_kv_blocks = {};
+  std::array<int32_t, MAX_SEQUENCES> sequence_recurrent_slot = {};
+};
+
+struct any {
+  const snapshot * frozen = nullptr;
+
+  bool valid_seq_id(const int32_t seq_id, const snapshot & data) const noexcept {
+    return seq_id >= 0 && seq_id < data.max_sequences && seq_id < MAX_SEQUENCES;
+  }
 
   bool is_sequence_active(const int32_t seq_id) const noexcept {
-    if (is_sequence_active_impl == nullptr) {
+    if (frozen == nullptr || !valid_seq_id(seq_id, *frozen)) {
       return false;
     }
-    return is_sequence_active_impl(self, seq_id);
+    return frozen->sequence_active[static_cast<size_t>(seq_id)] != 0;
   }
 
   int32_t sequence_length(const int32_t seq_id) const noexcept {
-    if (sequence_length_impl == nullptr) {
+    if (!is_sequence_active(seq_id)) {
       return 0;
     }
-    return sequence_length_impl(self, seq_id);
+    return frozen->sequence_length_values[static_cast<size_t>(seq_id)];
   }
 
   int32_t lookup_kv_block(const int32_t seq_id, const int32_t pos) const noexcept {
-    if (lookup_kv_block_impl == nullptr) {
+    if (!is_sequence_active(seq_id) || pos < 0 || frozen == nullptr || frozen->block_tokens <= 0) {
       return -1;
     }
-    return lookup_kv_block_impl(self, seq_id, pos);
+    const int32_t length = frozen->sequence_length_values[static_cast<size_t>(seq_id)];
+    if (pos >= length) {
+      return -1;
+    }
+    const int32_t block_count = frozen->sequence_kv_block_count[static_cast<size_t>(seq_id)];
+    if (block_count <= 0 || block_count > MAX_BLOCKS_PER_SEQUENCE) {
+      return -1;
+    }
+    const int32_t logical_block = pos / frozen->block_tokens;
+    if (logical_block < 0 || logical_block >= block_count) {
+      return -1;
+    }
+    const uint16_t block_id = frozen->sequence_kv_blocks[static_cast<size_t>(seq_id)]
+                              [static_cast<size_t>(logical_block)];
+    if (block_id == INVALID_KV_BLOCK) {
+      return -1;
+    }
+    return static_cast<int32_t>(block_id);
   }
 
   int32_t lookup_recurrent_slot(const int32_t seq_id) const noexcept {
-    if (lookup_recurrent_slot_impl == nullptr) {
+    if (!is_sequence_active(seq_id)) {
       return -1;
     }
-    return lookup_recurrent_slot_impl(self, seq_id);
+    return frozen->sequence_recurrent_slot[static_cast<size_t>(seq_id)];
   }
 };
 
