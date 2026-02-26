@@ -87,23 +87,134 @@ design doc: docs/designs/kernel/kernel.design.md
 // benchmark: scaffold
 // docs: disabled
 
+#include "emel/emel.h"
+#include "emel/kernel/actions.hpp"
+#include "emel/kernel/context.hpp"
 #include "emel/sm.hpp"
 #include "emel/kernel/events.hpp"
+#include "emel/kernel/guards.hpp"
 
 namespace emel::kernel {
 
-struct idle {};
+struct ready {};
+struct primary_dispatch {};
+struct primary_decision {};
+struct secondary_dispatch {};
+struct secondary_decision {};
+struct tertiary_dispatch {};
+struct tertiary_decision {};
+struct dispatch_decision {};
 
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
+
+    // clang-format off
     return sml::make_transition_table(
-      *sml::state<idle> + sml::event<event::scaffold> = sml::state<idle>,
-      sml::state<idle> + sml::unexpected_event<sml::_> = sml::state<idle>
+      //------------------------------------------------------------------------------//
+      // Request validation.
+        sml::state<primary_dispatch> <= *sml::state<ready> + sml::event<event::dispatch_scaffold>
+                 [ guard::valid_dispatch{} ]
+                 / action::begin_dispatch
+
+      //------------------------------------------------------------------------------//
+      // Primary backend phase.
+      , sml::state<primary_decision> <= sml::state<primary_dispatch> + sml::completion<event::dispatch_scaffold>
+                 / action::request_primary
+
+      , sml::state<ready> <= sml::state<primary_decision> + sml::completion<event::dispatch_scaffold>
+                 [ guard::primary_done{} ]
+                 / action::dispatch_done
+
+      , sml::state<secondary_dispatch> <= sml::state<primary_decision> + sml::completion<event::dispatch_scaffold>
+                 [ guard::primary_unsupported{} ]
+
+      , sml::state<dispatch_decision> <= sml::state<primary_decision> + sml::completion<event::dispatch_scaffold>
+                 [ guard::primary_failed{} ]
+
+      //------------------------------------------------------------------------------//
+      // Secondary backend phase.
+      , sml::state<secondary_decision> <= sml::state<secondary_dispatch> + sml::completion<event::dispatch_scaffold>
+                 / action::request_secondary
+
+      , sml::state<ready> <= sml::state<secondary_decision> + sml::completion<event::dispatch_scaffold>
+                 [ guard::secondary_done{} ]
+                 / action::dispatch_done
+
+      , sml::state<tertiary_dispatch> <= sml::state<secondary_decision> + sml::completion<event::dispatch_scaffold>
+                 [ guard::secondary_unsupported{} ]
+
+      , sml::state<dispatch_decision> <= sml::state<secondary_decision> + sml::completion<event::dispatch_scaffold>
+                 [ guard::secondary_failed{} ]
+
+      //------------------------------------------------------------------------------//
+      // Tertiary backend phase.
+      , sml::state<tertiary_decision> <= sml::state<tertiary_dispatch> + sml::completion<event::dispatch_scaffold>
+                 / action::request_tertiary
+
+      , sml::state<ready> <= sml::state<tertiary_decision> + sml::completion<event::dispatch_scaffold>
+                 [ guard::tertiary_done{} ]
+                 / action::dispatch_done
+
+      , sml::state<dispatch_decision> <= sml::state<tertiary_decision> + sml::completion<event::dispatch_scaffold>
+                 [ guard::tertiary_unsupported{} ]
+                 / action::mark_unsupported
+
+      , sml::state<dispatch_decision> <= sml::state<tertiary_decision> + sml::completion<event::dispatch_scaffold>
+                 [ guard::tertiary_failed{} ]
+
+      //------------------------------------------------------------------------------//
+      // Finalization.
+      , sml::state<ready> <= sml::state<dispatch_decision> + sml::completion<event::dispatch_scaffold>
+                 [ guard::phase_ok{} ]
+                 / action::dispatch_done
+
+      , sml::state<ready> <= sml::state<dispatch_decision> + sml::completion<event::dispatch_scaffold>
+                 [ guard::phase_failed{} ]
+                 / action::dispatch_error
+
+      //------------------------------------------------------------------------------//
+      // Unexpected events.
+      , sml::state<ready> <= sml::state<ready> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<dispatch_decision> <= sml::state<primary_dispatch> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<dispatch_decision> <= sml::state<primary_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<dispatch_decision> <= sml::state<secondary_dispatch> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<dispatch_decision> <= sml::state<secondary_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<dispatch_decision> <= sml::state<tertiary_dispatch> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<dispatch_decision> <= sml::state<tertiary_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<ready> <= sml::state<dispatch_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
     );
+    // clang-format on
   }
 };
 
-using sm = emel::sm<model>;
+struct sm : public emel::sm_with_context<model, action::context> {
+  using base_type = emel::sm_with_context<model, action::context>;
+  using base_type::base_type;
+
+  bool process_event(const event::scaffold & ev) {
+    event::scaffold_ctx ctx{};
+    event::dispatch_scaffold evt{ev, ctx};
+    const bool accepted = base_type::process_event(evt);
+    return accepted && ctx.err == EMEL_OK;
+  }
+};
+
+using Kernel = sm;
 
 }  // namespace emel::kernel

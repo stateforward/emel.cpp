@@ -1,70 +1,87 @@
 #pragma once
 
-/*
-design doc: docs/designs/kernel/metal.design.md
- ---
- title: kernel/metal architecture design
- status: draft
- ---
- 
- # kernel/metal architecture design
- 
- this document defines kernel/metal. it executes typed kernel op events on
- Apple Metal GPUs.
- 
- ## role
- - execute `op::*` events via Metal compute shaders.
- - available on macOS and iOS with Metal support.
- 
- ## events (draft)
- - `event::bind` inputs: gpu execution policy and device context.
- - `op::*` inputs: destination/source tensor handles plus shape/stride/op metadata.
- - outputs: writes op results in-place; unsupported ops route through `sml::unexpected_event`.
- 
- ## state model (draft)
- - `uninitialized` -> `binding` -> `idle`.
- - `idle` handles incoming `op::*` events.
- - unexpected non-op events route to `unexpected`.
- 
- ## responsibilities
- - map opcodes to Metal compute pipeline states.
- - encode commands into a command buffer for each op event.
- - manage Metal buffer bindings per op event.
- - the Metal kernel actor encodes operations into a command buffer. it does not commit or wait after
-   each operation. command buffer commit and `waitUntilCompleted` happen at barrier time, outside
-   the kernel dispatch path.
- 
- no blocking calls are permitted inside dispatch actions.
- 
- ## error codes
- 
- this actor can produce the following error codes:
- 
- - `EMEL_ERR_UNSUPPORTED_OP` — the opcode is not supported by this backend.
- - `EMEL_ERR_CAPACITY` — command encoding exceeded the preallocated resource capacity.
-*/
-
-
 // benchmark: scaffold
 // docs: disabled
 
-#include "emel/kernel/events.hpp"
+#include "emel/emel.h"
+#include "emel/kernel/metal/actions.hpp"
+#include "emel/kernel/metal/events.hpp"
+#include "emel/kernel/metal/guards.hpp"
+#include "emel/kernel/event_traits.hpp"
+#include "emel/kernel/op_list.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::kernel::metal {
 
-struct idle {};
+struct ready {};
 
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
+
+    // clang-format off
     return sml::make_transition_table(
-      *sml::state<idle> + sml::event<::emel::kernel::event::scaffold> = sml::state<idle>,
-      sml::state<idle> + sml::unexpected_event<sml::_> = sml::state<idle>
+      //------------------------------------------------------------------------------//
+      // Scaffold event.
+        sml::state<ready> <= *sml::state<ready> +
+               sml::event<::emel::kernel::metal::event::dispatch_scaffold>
+                 / action::run_scaffold
+
+      //------------------------------------------------------------------------------//
+      // Explicit op transitions.
+#define EMEL_KERNEL_DEFINE_OP_TRANSITIONS(op_name) \
+      , sml::state<ready> <= sml::state<ready> + \
+               sml::event<::emel::kernel::metal::event::dispatch_##op_name> \
+                 [ guard::valid_##op_name{} ] \
+                 / action::run_##op_name \
+      , sml::state<ready> <= sml::state<ready> + \
+               sml::event<::emel::kernel::metal::event::dispatch_##op_name> \
+                 [ guard::invalid_##op_name{} ] \
+                 / action::reject_invalid_##op_name
+EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_DEFINE_OP_TRANSITIONS)
+#undef EMEL_KERNEL_DEFINE_OP_TRANSITIONS
+
+      //------------------------------------------------------------------------------//
+      // Unexpected events.
+      , sml::state<ready> <= sml::state<ready> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
     );
+    // clang-format on
   }
 };
 
-using sm = emel::sm<model>;
+struct sm : public emel::sm_with_context<model, action::context> {
+  using base_type = emel::sm_with_context<model, action::context>;
+  using base_type::base_type;
+
+  bool process_event(const ::emel::kernel::event::scaffold & ev) {
+    event::dispatch_ctx ctx{};
+    const event::dispatch_scaffold dispatch{ev, ctx};
+    return process_dispatch_event(dispatch);
+  }
+
+  template <class event_type>
+    requires(::emel::kernel::is_op_event_v<event_type>)
+  bool process_event(const event_type & ev) {
+    event::dispatch_ctx ctx{};
+    using dispatch_event_type = event::dispatch_event_for_t<event_type>;
+    const dispatch_event_type dispatch{ev, ctx};
+    return process_dispatch_event(dispatch);
+  }
+
+  int32_t last_error() const noexcept {
+    return last_error_;
+  }
+
+ private:
+  template <class dispatch_event_type>
+  bool process_dispatch_event(const dispatch_event_type & ev) {
+    const bool accepted = base_type::process_event(ev);
+    last_error_ = ev.ctx.err;
+    return accepted && ev.ctx.err == EMEL_OK;
+  }
+
+  int32_t last_error_ = EMEL_OK;
+};
 
 }  // namespace emel::kernel::metal

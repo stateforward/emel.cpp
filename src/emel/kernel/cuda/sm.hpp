@@ -1,70 +1,87 @@
 #pragma once
 
-/*
-design doc: docs/designs/kernel/cuda.design.md
- ---
- title: kernel/cuda architecture design
- status: draft
- ---
- 
- # kernel/cuda architecture design
- 
- this document defines kernel/cuda. it executes typed kernel op events on
- NVIDIA GPUs via CUDA.
- 
- ## role
- - execute `op::*` events via CUDA kernels.
- - available on platforms with NVIDIA CUDA support.
- 
- ## events (draft)
- - `event::bind` inputs: gpu execution policy and device context.
- - `op::*` inputs: destination/source tensor handles plus shape/stride/op metadata.
- - outputs: writes op results in-place; unsupported ops route through `sml::unexpected_event`.
- 
- ## state model (draft)
- - `uninitialized` -> `binding` -> `idle`.
- - `idle` handles incoming `op::*` events.
- - unexpected non-op events route to `unexpected`.
- 
- ## responsibilities
- - map opcodes to CUDA kernel launches.
- - manage CUDA stream and device buffer bindings per op event.
- - encode operations into a CUDA stream without synchronizing after each operation. the actor
-   enqueues kernel launches into the stream and returns immediately. stream synchronization
-   happens at barrier time, outside the kernel dispatch path.
- 
- no blocking calls (`cudaStreamSynchronize`, `cudaDeviceSynchronize`, or event/fence waits) are
- permitted inside dispatch actions.
- 
- ## error codes
- 
- this actor can produce the following error codes:
- 
- - `EMEL_ERR_UNSUPPORTED_OP` — the opcode is not supported by this backend.
- - `EMEL_ERR_CAPACITY` — the command recording exceeded the preallocated command buffer capacity.
-*/
-
-
 // benchmark: scaffold
 // docs: disabled
 
-#include "emel/kernel/events.hpp"
+#include "emel/emel.h"
+#include "emel/kernel/cuda/actions.hpp"
+#include "emel/kernel/cuda/events.hpp"
+#include "emel/kernel/cuda/guards.hpp"
+#include "emel/kernel/event_traits.hpp"
+#include "emel/kernel/op_list.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::kernel::cuda {
 
-struct idle {};
+struct ready {};
 
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
+
+    // clang-format off
     return sml::make_transition_table(
-      *sml::state<idle> + sml::event<::emel::kernel::event::scaffold> = sml::state<idle>,
-      sml::state<idle> + sml::unexpected_event<sml::_> = sml::state<idle>
+      //------------------------------------------------------------------------------//
+      // Scaffold event.
+        sml::state<ready> <= *sml::state<ready> +
+               sml::event<::emel::kernel::cuda::event::dispatch_scaffold>
+                 / action::run_scaffold
+
+      //------------------------------------------------------------------------------//
+      // Explicit op transitions.
+#define EMEL_KERNEL_DEFINE_OP_TRANSITIONS(op_name) \
+      , sml::state<ready> <= sml::state<ready> + \
+               sml::event<::emel::kernel::cuda::event::dispatch_##op_name> \
+                 [ guard::valid_##op_name{} ] \
+                 / action::run_##op_name \
+      , sml::state<ready> <= sml::state<ready> + \
+               sml::event<::emel::kernel::cuda::event::dispatch_##op_name> \
+                 [ guard::invalid_##op_name{} ] \
+                 / action::reject_invalid_##op_name
+EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_DEFINE_OP_TRANSITIONS)
+#undef EMEL_KERNEL_DEFINE_OP_TRANSITIONS
+
+      //------------------------------------------------------------------------------//
+      // Unexpected events.
+      , sml::state<ready> <= sml::state<ready> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
     );
+    // clang-format on
   }
 };
 
-using sm = emel::sm<model>;
+struct sm : public emel::sm_with_context<model, action::context> {
+  using base_type = emel::sm_with_context<model, action::context>;
+  using base_type::base_type;
+
+  bool process_event(const ::emel::kernel::event::scaffold & ev) {
+    event::dispatch_ctx ctx{};
+    const event::dispatch_scaffold dispatch{ev, ctx};
+    return process_dispatch_event(dispatch);
+  }
+
+  template <class event_type>
+    requires(::emel::kernel::is_op_event_v<event_type>)
+  bool process_event(const event_type & ev) {
+    event::dispatch_ctx ctx{};
+    using dispatch_event_type = event::dispatch_event_for_t<event_type>;
+    const dispatch_event_type dispatch{ev, ctx};
+    return process_dispatch_event(dispatch);
+  }
+
+  int32_t last_error() const noexcept {
+    return last_error_;
+  }
+
+ private:
+  template <class dispatch_event_type>
+  bool process_dispatch_event(const dispatch_event_type & ev) {
+    const bool accepted = base_type::process_event(ev);
+    last_error_ = ev.ctx.err;
+    return accepted && ev.ctx.err == EMEL_OK;
+  }
+
+  int32_t last_error_ = EMEL_OK;
+};
 
 }  // namespace emel::kernel::cuda
