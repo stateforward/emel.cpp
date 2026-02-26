@@ -27,7 +27,11 @@ actions, state machine member methods, or functions called from actions.
 NEVER perform I/O waits, mutex waits, or sleeps inside guards/actions.
 ALWAYS inject time via event payloads; NEVER read wall-clock time in guards or
 actions.
-ALWAYS keep events immutable and small; prefer trivially copyable payloads.
+ALWAYS keep publicly exposed events immutable and small; prefer trivially copyable payloads.
+INTERNAL-only events that are not publicly exposed MAY use mutable
+pointers/references for synchronous same-RTC handoff.
+NEVER expose mutable internal-event payload via public API types.
+NEVER retain mutable internal-event payload beyond the top-level dispatch call.
 NEVER put owning pointers or dynamic containers in events unless you can prove
 no allocation during dispatch.
 ALWAYS validate runtime event IDs before using `sml::utility::make_dispatch_table`.
@@ -94,6 +98,8 @@ ALWAYS define trigger intent events in the `event` namespace using noun-like,
 domain-action names without `cmd_` prefixes.
 ALWAYS define machine outcome events in the `events` namespace with explicit
 `_done` and `_error` suffixes.
+INTERNAL-only `_done`/`_error` events MAY carry mutable payload references when
+they are not publicly exposed outside the component boundary.
 NEVER use `cmd_*`-prefixed event names.
 ALWAYS model failures via explicit error states and `_error` events.
 NEVER add synthetic fault-injection knobs to production events or actions.

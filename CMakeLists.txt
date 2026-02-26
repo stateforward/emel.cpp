@@ -86,6 +86,14 @@ if(EMEL_ENABLE_TESTS)
     tests/logits/sampler/pipeline_tests.cpp
     tests/sm/sm_policy_tests.cpp
     tests/sm/sm_any_tests.cpp
+    tests/graph/wrapper_visibility_tests.cpp
+    tests/graph/allocator/allocator_tests.cpp
+    tests/graph/allocator/allocator_action_branch_tests.cpp
+    tests/graph/assembler/assembler_tests.cpp
+    tests/graph/assembler/assembler_action_branch_tests.cpp
+    tests/graph/graph_tests.cpp
+    tests/graph/processor/processor_action_branch_tests.cpp
+    tests/kernel/lifecycle_tests.cpp
     # Legacy processor tests target pre-cutover API shape and are disabled until migrated.
     # Keep them out of gate builds during the hard cutover.
     tests/text/encoders/encoder_tests.cpp

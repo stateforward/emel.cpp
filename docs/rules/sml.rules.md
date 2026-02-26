@@ -18,7 +18,9 @@ primary sources consulted (non-exhaustive)
 
 ## 2. definitions
 - actor: an isolated unit owning (1) exactly one SML `sm` instance and (2) its private context, processed only via event dispatch.
-- event: an immutable value (usually a trivial type) passed to `process_event`.
+- event: a value (usually a trivial type) passed to `process_event`. publicly
+  exposed events are immutable. internal-only events that are not publicly
+  exposed MAY carry mutable fields when needed for synchronous RTC handoff.
 - RTC chain: the complete, synchronous computation triggered by one top-level dispatch call, including SML internal anonymous transitions.
 - quiescence: a stable configuration where no further internal (anonymous) transitions are enabled.
 - orchestrator: the external driver that calls `process_event` on actors and provides time and ordering.
@@ -34,6 +36,10 @@ primary sources consulted (non-exhaustive)
 
 ## 4. event model
 1. event types SHOULD be small, trivially copyable, and contain only immutable payload.
+   exception: internal-only events that are not publicly exposed MAY use mutable
+   pointers/references for synchronous same-RTC handoff. such mutable payload
+   MUST NOT be exposed via public API types, MUST NOT be retained beyond the
+   top-level dispatch call, and MUST preserve deterministic bounded behavior.
 2. events MUST NOT contain owning pointers or dynamic containers (e.g., `std::string`, `std::vector`) unless a custom allocator and strict “no allocate during dispatch” enforcement is in place.
 3. event dispatch SHOULD be compile-time typed (`sm.process_event(TEvent{...})`). runtime-polymorphic “base event” dispatch SHOULD be avoided.
 4. if runtime event IDs are required, the system MAY use `sml::utility::make_dispatch_table` (static jump table indexed by ID) and MUST validate the ID range before indexing. see `make_dispatch_table` implementation using a static function-pointer table indexed by `(id - event_range_begin)`. (source: `dispatch_table.hpp` in SML repo.)

@@ -115,7 +115,6 @@ struct model {
 struct sm : public emel::sm_with_context<model, action::context> {
   using base_type = emel::sm_with_context<model, action::context>;
   using base_type::base_type;
-  using base_type::process_event;
 
   bool process_event(const event::allocate_graph & ev) {
     event::allocate_graph_ctx ctx{};

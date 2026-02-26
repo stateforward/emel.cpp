@@ -12,7 +12,7 @@ struct run_callback {
     bool graph_reused = false;
     int32_t callback_err = 0;
     const bool callback_ok = ev.request.prepare_graph(ev.request, &graph_reused, &callback_err);
-    ev.ctx.graph_reused = static_cast<uint8_t>(graph_reused ? 1u : 0u);
+    ev.ctx.graph_reused = static_cast<uint8_t>(graph_reused);
     ev.ctx.phase_callback_ok = callback_ok;
     ev.ctx.phase_callback_err = callback_err;
   }
