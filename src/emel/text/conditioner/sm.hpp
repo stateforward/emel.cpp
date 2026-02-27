@@ -143,8 +143,20 @@ struct model {
           + sml::completion<event::bind_runtime> [ guard::bind_rejected_no_error{} ]
           / action::bind_error_backend
       , sml::state<bind_error> <= sml::state<bind_decision>
-          + sml::completion<event::bind_runtime> [ guard::bind_error_code_present{} ]
-          / action::bind_error_from_code
+          + sml::completion<event::bind_runtime> [ guard::bind_error_invalid_argument_code{} ]
+          / action::set_error_invalid_argument
+      , sml::state<bind_error> <= sml::state<bind_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_model_invalid_code{} ]
+          / action::set_error_model_invalid
+      , sml::state<bind_error> <= sml::state<bind_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_capacity_code{} ]
+          / action::set_error_capacity
+      , sml::state<bind_error> <= sml::state<bind_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_backend_code{} ]
+          / action::set_error_backend
+      , sml::state<bind_error> <= sml::state<bind_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_untracked_code{} ]
+          / action::set_error_untracked
       , sml::state<bind_success> <= sml::state<bind_decision>
           + sml::completion<event::bind_runtime> [ guard::bind_successful{} ]
           / action::bind_success
@@ -181,8 +193,20 @@ struct model {
           + sml::completion<event::prepare_runtime> [ guard::format_rejected_no_error{} ]
           / action::format_error_backend
       , sml::state<prepare_error> <= sml::state<format_decision>
-          + sml::completion<event::prepare_runtime> [ guard::format_error_code_present{} ]
-          / action::format_error_from_code
+          + sml::completion<event::prepare_runtime> [ guard::format_error_invalid_argument_code{} ]
+          / action::set_error_invalid_argument
+      , sml::state<prepare_error> <= sml::state<format_decision>
+          + sml::completion<event::prepare_runtime> [ guard::format_error_model_invalid_code{} ]
+          / action::set_error_model_invalid
+      , sml::state<prepare_error> <= sml::state<format_decision>
+          + sml::completion<event::prepare_runtime> [ guard::format_error_capacity_code{} ]
+          / action::set_error_capacity
+      , sml::state<prepare_error> <= sml::state<format_decision>
+          + sml::completion<event::prepare_runtime> [ guard::format_error_backend_code{} ]
+          / action::set_error_backend
+      , sml::state<prepare_error> <= sml::state<format_decision>
+          + sml::completion<event::prepare_runtime> [ guard::format_error_untracked_code{} ]
+          / action::set_error_untracked
       , sml::state<prepare_error> <= sml::state<format_decision>
           + sml::completion<event::prepare_runtime> [ guard::format_length_overflow{} ]
           / action::format_error_invalid_argument
@@ -197,8 +221,20 @@ struct model {
           + sml::completion<event::prepare_runtime> [ guard::tokenize_rejected_no_error{} ]
           / action::tokenize_error_backend
       , sml::state<prepare_error> <= sml::state<tokenize_decision>
-          + sml::completion<event::prepare_runtime> [ guard::tokenize_error_code_present{} ]
-          / action::tokenize_error_from_code
+          + sml::completion<event::prepare_runtime> [ guard::tokenize_error_invalid_argument_code{} ]
+          / action::set_error_invalid_argument
+      , sml::state<prepare_error> <= sml::state<tokenize_decision>
+          + sml::completion<event::prepare_runtime> [ guard::tokenize_error_model_invalid_code{} ]
+          / action::set_error_model_invalid
+      , sml::state<prepare_error> <= sml::state<tokenize_decision>
+          + sml::completion<event::prepare_runtime> [ guard::tokenize_error_capacity_code{} ]
+          / action::set_error_capacity
+      , sml::state<prepare_error> <= sml::state<tokenize_decision>
+          + sml::completion<event::prepare_runtime> [ guard::tokenize_error_backend_code{} ]
+          / action::set_error_backend
+      , sml::state<prepare_error> <= sml::state<tokenize_decision>
+          + sml::completion<event::prepare_runtime> [ guard::tokenize_error_untracked_code{} ]
+          / action::set_error_untracked
       , sml::state<prepare_error> <= sml::state<tokenize_decision>
           + sml::completion<event::prepare_runtime> [ guard::tokenize_count_invalid{} ]
           / action::tokenize_error_backend
@@ -285,33 +321,33 @@ struct sm : public emel::sm<model, action::context> {
 
   sm() : base_type() {}
 
-  bool process_event(const event::bind & ev) {
+  bool process_event(const event::bind &ev) {
     event::bind_ctx runtime_ctx{
-      .err = error::none,
-      .result = false,
-      .bind_accepted = false,
-      .bind_err_code = detail::to_local_error_code(error::none),
+        .err = error::none,
+        .result = false,
+        .bind_accepted = false,
+        .bind_err_code = detail::to_local_error_code(error::none),
     };
     event::bind_runtime runtime_ev{ev, runtime_ctx};
     const bool accepted = base_type::process_event(runtime_ev);
     return accepted && runtime_ctx.result;
   }
 
-  bool process_event(const event::prepare & ev) {
+  bool process_event(const event::prepare &ev) {
     std::array<char, action::k_max_formatted_bytes> formatted;
     event::prepare_ctx runtime_ctx{
-      .err = error::none,
-      .formatted = formatted.data(),
-      .formatted_capacity = formatted.size(),
-      .formatted_length = 0,
-      .add_special = true,
-      .parse_special = false,
-      .token_count = 0,
-      .result = false,
-      .format_accepted = false,
-      .format_err_code = detail::to_local_error_code(error::none),
-      .tokenize_accepted = false,
-      .tokenize_err_code = detail::to_local_error_code(error::none),
+        .err = error::none,
+        .formatted = formatted.data(),
+        .formatted_capacity = formatted.size(),
+        .formatted_length = 0,
+        .add_special = true,
+        .parse_special = false,
+        .token_count = 0,
+        .result = false,
+        .format_accepted = false,
+        .format_err_code = detail::to_local_error_code(error::none),
+        .tokenize_accepted = false,
+        .tokenize_err_code = detail::to_local_error_code(error::none),
     };
     event::prepare_runtime runtime_ev{ev, runtime_ctx};
     const bool accepted = base_type::process_event(runtime_ev);
@@ -320,6 +356,5 @@ struct sm : public emel::sm<model, action::context> {
 
   using base_type::process_event;
   using base_type::visit_current_states;
-
 };
-}  // namespace emel::text::conditioner
+} // namespace emel::text::conditioner
