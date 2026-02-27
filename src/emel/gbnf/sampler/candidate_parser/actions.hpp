@@ -8,7 +8,7 @@
 namespace emel::gbnf::sampler::candidate_parser::action {
 
 struct consume_text {
-  void operator()(const sampler::event::apply_runtime & ev,
+  void operator()(const sampler::event::sample_runtime & ev,
                   const context &) const noexcept {
     ev.ctx.err = emel::error::cast(sampler::error::none);
     ev.ctx.candidate_kind = events::candidate_kind::text;
@@ -16,7 +16,7 @@ struct consume_text {
 };
 
 struct consume_empty {
-  void operator()(const sampler::event::apply_runtime & ev,
+  void operator()(const sampler::event::sample_runtime & ev,
                   const context &) const noexcept {
     ev.ctx.err = emel::error::cast(sampler::error::none);
     ev.ctx.candidate_kind = events::candidate_kind::empty;
@@ -24,7 +24,7 @@ struct consume_empty {
 };
 
 struct dispatch_parse_failed {
-  void operator()(const sampler::event::apply_runtime & ev,
+  void operator()(const sampler::event::sample_runtime & ev,
                   const context &) const noexcept {
     ev.ctx.err = emel::error::cast(sampler::error::parse_failed);
     ev.ctx.candidate_kind = events::candidate_kind::unknown;

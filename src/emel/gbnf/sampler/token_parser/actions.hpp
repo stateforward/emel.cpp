@@ -8,7 +8,7 @@
 namespace emel::gbnf::sampler::token_parser::action {
 
 struct consume_text_token {
-  void operator()(const sampler::event::apply_runtime & ev,
+  void operator()(const sampler::event::sample_runtime & ev,
                   const context &) const noexcept {
     ev.ctx.err = emel::error::cast(sampler::error::none);
     ev.ctx.token_kind = events::token_kind::text_token;
@@ -16,7 +16,7 @@ struct consume_text_token {
 };
 
 struct consume_empty_token {
-  void operator()(const sampler::event::apply_runtime & ev,
+  void operator()(const sampler::event::sample_runtime & ev,
                   const context &) const noexcept {
     ev.ctx.err = emel::error::cast(sampler::error::none);
     ev.ctx.token_kind = events::token_kind::empty_token;
@@ -24,7 +24,7 @@ struct consume_empty_token {
 };
 
 struct dispatch_parse_failed {
-  void operator()(const sampler::event::apply_runtime & ev,
+  void operator()(const sampler::event::sample_runtime & ev,
                   const context &) const noexcept {
     ev.ctx.err = emel::error::cast(sampler::error::parse_failed);
     ev.ctx.token_kind = events::token_kind::unknown;

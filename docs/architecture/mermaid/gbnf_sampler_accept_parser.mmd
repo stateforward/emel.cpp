@@ -1,11 +1,11 @@
 stateDiagram-v2
   direction TB
   [*] --> deciding
-  deciding --> parsed : completion [valid_accept_token_] / consume_accepted_
+  deciding --> parsed : completion [token_accepted_by_grammar_] / consume_accepted_
+  deciding --> parsed : completion [token_rejected_by_grammar_] / consume_rejected_
   deciding --> parse_failed : completion [parse_failed_] / dispatch_parse_failed_
   parsed --> terminate : [always] / none
   parse_failed --> terminate : [always] / none
-  deciding --> unexpected_event : _ [always] / on_unexpected_
-  parsed --> unexpected_event : _ [always] / on_unexpected_
-  parse_failed --> unexpected_event : _ [always] / on_unexpected_
-  unexpected_event --> unexpected_event : _ [always] / on_unexpected_
+  deciding --> parse_failed : _ [always] / on_unexpected_
+  parsed --> parse_failed : _ [always] / on_unexpected_
+  parse_failed --> parse_failed : _ [always] / on_unexpected_

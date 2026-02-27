@@ -19,15 +19,15 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
-        sml::state<parsed> <= *sml::state<deciding> + sml::completion<sampler::event::apply_runtime>
+        sml::state<parsed> <= *sml::state<deciding> + sml::completion<sampler::event::sample_runtime>
                  [ guard::has_apply_text{} ]
                  / action::consume_text
 
-      , sml::state<parsed> <= sml::state<deciding> + sml::completion<sampler::event::apply_runtime>
+      , sml::state<parsed> <= sml::state<deciding> + sml::completion<sampler::event::sample_runtime>
                  [ guard::has_empty_apply_text{} ]
                  / action::consume_empty
 
-      , sml::state<parse_failed> <= sml::state<deciding> + sml::completion<sampler::event::apply_runtime>
+      , sml::state<parse_failed> <= sml::state<deciding> + sml::completion<sampler::event::sample_runtime>
                  [ guard::parse_failed{} ]
                  / action::dispatch_parse_failed
 

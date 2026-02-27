@@ -2,15 +2,20 @@
 
 #include <cstdint>
 
+#include "emel/callback.hpp"
 #include "emel/error/error.hpp"
 #include "emel/logits/sampler/errors.hpp"
 
-namespace emel::logits::sampler::event {
+namespace emel::logits::sampler {
 
-using sampler_fn = emel::error::type (*)(int32_t & candidate_ids,
-                                         float & candidate_scores,
-                                         int32_t & candidate_count,
-                                         int32_t & selected_token_out);
+using fn = emel::callback<emel::error::type(int32_t & candidate_ids,
+                                            float & candidate_scores,
+                                            int32_t & candidate_count,
+                                            int32_t & selected_token_out)>;
+
+}  // namespace emel::logits::sampler
+
+namespace emel::logits::sampler::event {
 
 struct sample_logits {
   const float & logits;

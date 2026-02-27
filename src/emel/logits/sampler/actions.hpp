@@ -54,8 +54,8 @@ struct prepare_candidates {
 
 struct apply_sampler {
   void operator()(const event::sample_logits_runtime & ev, context & ctx) const noexcept {
-    const event::sampler_fn fn = ctx.sampler_fns[ev.ctx.sampler_index];
-    ev.ctx.sampler_call_error = fn(
+    const fn & sampler = ctx.sampler_fns[ev.ctx.sampler_index];
+    ev.ctx.sampler_call_error = sampler(
         ev.request.candidate_ids,
         ev.request.candidate_scores,
         ev.ctx.candidate_count,

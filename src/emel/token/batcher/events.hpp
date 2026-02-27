@@ -3,6 +3,8 @@
 #include <cstdint>
 
 #include "emel/callback.hpp"
+#include "emel/error/error.hpp"
+#include "emel/token/batcher/errors.hpp"
 
 namespace emel::token::batcher::events {
 struct batch_done;
@@ -15,7 +17,7 @@ using position_seed_fn =
     bool (*)(void * position_seed_ctx, int32_t seq_id, int32_t * position_out) noexcept;
 
 struct batch {
-  const int32_t * token_ids = nullptr;
+  const int32_t & token_ids;
   int32_t n_tokens = 0;
   int32_t vocab_size = 0;
 
@@ -35,21 +37,56 @@ struct batch {
   bool output_all = false;
   bool enforce_single_output_per_seq = false;
 
-  int32_t * seq_primary_ids_out = nullptr;
+  int32_t & seq_primary_ids_out;
   int32_t seq_primary_ids_capacity = 0;
-  uint64_t * seq_masks_out = nullptr;
+  uint64_t & seq_masks_out;
   int32_t seq_masks_capacity = 0;
-  int32_t * positions_out = nullptr;
+  int32_t & positions_out;
   int32_t positions_capacity = 0;
-  int8_t * output_mask_out = nullptr;
+  int8_t & output_mask_out;
   int32_t output_mask_capacity = 0;
   int32_t * outputs_total_out = nullptr;
   int32_t * seq_mask_words_out = nullptr;
   int32_t * positions_count_out = nullptr;
-  int32_t * error_out = nullptr;
+  emel::error::type & error_out;
 
   emel::callback<void(const events::batch_done &)> on_done = {};
   emel::callback<void(const events::batch_error &)> on_error = {};
+
+  batch(const int32_t & token_ids_in,
+        const int32_t n_tokens_in,
+        int32_t & seq_primary_ids_out_in,
+        const int32_t seq_primary_ids_capacity_in,
+        uint64_t & seq_masks_out_in,
+        const int32_t seq_masks_capacity_in,
+        int32_t & positions_out_in,
+        const int32_t positions_capacity_in,
+        int8_t & output_mask_out_in,
+        const int32_t output_mask_capacity_in,
+        emel::error::type & error_out_in) noexcept
+      : token_ids(token_ids_in),
+        n_tokens(n_tokens_in),
+        seq_primary_ids_out(seq_primary_ids_out_in),
+        seq_primary_ids_capacity(seq_primary_ids_capacity_in),
+        seq_masks_out(seq_masks_out_in),
+        seq_masks_capacity(seq_masks_capacity_in),
+        positions_out(positions_out_in),
+        positions_capacity(positions_capacity_in),
+        output_mask_out(output_mask_out_in),
+        output_mask_capacity(output_mask_capacity_in),
+        error_out(error_out_in) {}
+};
+
+struct batch_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+  int32_t outputs_total = 0;
+  int32_t normalized_seq_mask_words = 1;
+  int32_t normalized_positions_count = 0;
+};
+
+struct batch_runtime {
+  const batch & request;
+  batch_ctx & ctx;
 };
 
 }  // namespace emel::token::batcher::event
@@ -61,7 +98,7 @@ struct batch_done {
 };
 
 struct batch_error {
-  int32_t err = 0;
+  emel::error::type err = emel::error::cast(error::none);
   const event::batch * request = nullptr;
 };
 

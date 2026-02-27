@@ -112,7 +112,7 @@ emel::error::type run_validator_raw(const emel::logits::validator::event::build 
 }
 
 emel::error::type run_sampler_raw(const emel::logits::sampler::event::sample_logits & ev,
-                                  emel::logits::sampler::event::sampler_fn * sampler_fns,
+                                  emel::logits::sampler::fn * sampler_fns,
                                   const int32_t sampler_count) noexcept {
   if (ev.vocab_size <= 0 || ev.candidate_capacity < ev.vocab_size ||
       sampler_fns == nullptr || sampler_count <= 0) {
@@ -136,7 +136,7 @@ emel::error::type run_sampler_raw(const emel::logits::sampler::event::sample_log
   }
 
   for (int32_t i = 0; i < sampler_count; ++i) {
-    if (sampler_fns[i] == nullptr) {
+    if (!sampler_fns[i]) {
       ev.error_out = emel::error::cast(emel::logits::sampler::error::invalid_request);
       return ev.error_out;
     }
@@ -211,9 +211,9 @@ void append_component_cases(std::vector<emel::bench::result> & results,
       selected_token_out,
       sampler_error_out};
 
-    emel::logits::sampler::event::sampler_fn sampler_chain[] = {
-      top_k_sampler,
-      argmax_sampler,
+    emel::logits::sampler::fn sampler_chain[] = {
+      emel::logits::sampler::fn::from<top_k_sampler>(),
+      emel::logits::sampler::fn::from<argmax_sampler>(),
     };
     constexpr int32_t sampler_count = static_cast<int32_t>(std::size(sampler_chain));
 

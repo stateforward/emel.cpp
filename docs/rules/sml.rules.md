@@ -120,11 +120,15 @@ primary sources consulted (non-exhaustive)
    using typed completion transitions (`sml::completion<TEvent>`), anonymous
    transitions (eventless transitions), and/or entry actions, not by
    self-dispatch.
-3. anonymous transition graphs MUST be acyclic or MUST have a statically provable bound on firings per top-level event. SML’s `process_event` loops internal anonymous processing to quiescence (`while (process_internal_events(anonymous{}, ...)) {}`), so cycles can create unbounded work. (source: `boost/sml.hpp`, `sm_impl::process_event` loop.)
-4. cross-actor nested dispatch (A calls B synchronously) MAY be used, but MUST obey:
+3. `sml::completion<TEvent>` and anonymous transitions MUST NOT be used to
+   model per-element or per-item data loops. those loops MUST execute inside
+   one allocation-free action/detail kernel per phase so compiler
+   vectorization and predictable throughput are preserved.
+4. anonymous transition graphs MUST be acyclic or MUST have a statically provable bound on firings per top-level event. SML’s `process_event` loops internal anonymous processing to quiescence (`while (process_internal_events(anonymous{}, ...)) {}`), so cycles can create unbounded work. (source: `boost/sml.hpp`, `sm_impl::process_event` loop.)
+5. cross-actor nested dispatch (A calls B synchronously) MAY be used, but MUST obey:
    - no re-entrancy into the same actor instance within a single RTC chain.
    - acyclic call graph per top-level dispatch (enforced by orchestrator stack tracking or design discipline).
-5. if multi-thread calls are possible, thread-safety MUST be enforced outside SML using a single external scheduler; using `sml::thread_safe<std::mutex>` inside actors SHOULD be avoided for real-time because lock acquisition is not bounded. (docs: overview “thread safety” shows optional locking policy.)
+6. if multi-thread calls are possible, thread-safety MUST be enforced outside SML using a single external scheduler; using `sml::thread_safe<std::mutex>` inside actors SHOULD be avoided for real-time because lock acquisition is not bounded. (docs: overview “thread safety” shows optional locking policy.)
 
 ## 8. cross-actor interaction (no queues)
 ### allowed interaction patterns

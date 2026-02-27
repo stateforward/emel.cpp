@@ -21,45 +21,6 @@ struct invalid_sample_request {
   }
 };
 
-struct has_more_candidates {
-  bool operator()(const event::sample_runtime & ev) const noexcept {
-    return ev.ctx.read_index < ev.request.candidate_count;
-  }
-};
-
-struct no_more_candidates {
-  bool operator()(const event::sample_runtime & ev) const noexcept {
-    return ev.ctx.read_index >= ev.request.candidate_count;
-  }
-};
-
-struct accept_done {
-  bool operator()(const event::sample_runtime & ev) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none) &&
-           ev.ctx.accept_result != accept_parser::events::accept_result::unknown;
-  }
-};
-
-struct accept_failed {
-  bool operator()(const event::sample_runtime & ev) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
-  }
-};
-
-struct candidate_accepted {
-  bool operator()(const event::sample_runtime & ev) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none) &&
-           ev.ctx.accept_result == accept_parser::events::accept_result::accepted;
-  }
-};
-
-struct candidate_rejected {
-  bool operator()(const event::sample_runtime & ev) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none) &&
-           ev.ctx.accept_result == accept_parser::events::accept_result::rejected;
-  }
-};
-
 struct filtered_candidates_available {
   bool operator()(const event::sample_runtime & ev) const noexcept {
     return ev.ctx.write_index > 0;

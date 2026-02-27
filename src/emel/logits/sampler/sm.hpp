@@ -131,7 +131,7 @@ struct sm : public emel::sm<model, action::context> {
     this->context_ = sampler_context;
   }
 
-  sm(event::sampler_fn * sampler_fns, int32_t sampler_count)
+  sm(fn * sampler_fns, int32_t sampler_count)
       : base_type() {
     this->context_.sampler_fns = sampler_fns;
     this->context_.sampler_count = sampler_count;

@@ -8,28 +8,32 @@
 namespace emel::gbnf::sampler::matcher_parser::action {
 
 struct consume_match_accepted {
-  void operator()(const sampler::event::apply_runtime & ev,
+  void operator()(const sampler::event::sample_runtime & ev,
                   const context &) const noexcept {
     ev.ctx.err = emel::error::cast(sampler::error::none);
-    ev.ctx.candidate_allowed = true;
     ev.ctx.match_result = events::match_result::accepted;
+    ev.ctx.candidate_allowed = true;
+    ev.ctx.accept_result = sampler::accept_parser::events::accept_result::accepted;
   }
 };
 
 struct consume_match_rejected {
-  void operator()(const sampler::event::apply_runtime & ev,
+  void operator()(const sampler::event::sample_runtime & ev,
                   const context &) const noexcept {
     ev.ctx.err = emel::error::cast(sampler::error::none);
-    ev.ctx.candidate_allowed = false;
     ev.ctx.match_result = events::match_result::rejected;
+    ev.ctx.candidate_allowed = false;
+    ev.ctx.accept_result = sampler::accept_parser::events::accept_result::rejected;
   }
 };
 
 struct dispatch_parse_failed {
-  void operator()(const sampler::event::apply_runtime & ev,
+  void operator()(const sampler::event::sample_runtime & ev,
                   const context &) const noexcept {
     ev.ctx.err = emel::error::cast(sampler::error::parse_failed);
     ev.ctx.match_result = events::match_result::unknown;
+    ev.ctx.candidate_allowed = false;
+    ev.ctx.accept_result = sampler::accept_parser::events::accept_result::unknown;
   }
 };
 

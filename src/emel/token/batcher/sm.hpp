@@ -1,195 +1,293 @@
 #pragma once
 
-/*
-design doc: docs/designs/token/batcher.design.md
- ---
- title: token/batcher architecture design
- status: draft
- ---
- 
- # token/batcher architecture design
- 
- this document defines token/batcher. it acts as the strict gateway between raw user input and the
- generator's execution pipeline. it sanitizes, auto-populates, and validates token arrays, emitting a
- canonical `token::batch` that the stateless `batch/planner` can trust completely.
- 
- ## role
- - act as a strict firewall: reject malformed token inputs (out-of-bounds IDs, invalid sequence
-   positions) before they reach the graph or memory systems.
- - auto-populate missing dimensions (e.g., sequence IDs, position IDs, logit masks) using "do what I
-   mean" defaults based on the current `memory::any` state.
- - emit a `token::batch`—a canonical, validated view of token IDs and metadata that serves as the
-   single source of truth for the current generator cycle.
- 
- ## architecture shift: the strict gateway
- in dynamic systems (like `llama.cpp`), token validation is often intertwined with memory allocation
- and planning (e.g., checking vocabulary bounds while simultaneously copying arrays into a new struct).
- 
- in `emel`, because the `batch/planner` is purely stateless and mathematical, the `token/batcher` must
- guarantee that the `token::batch` it produces is logically sound. if the batcher succeeds, the
- planner is guaranteed to be able to slice it without encountering semantic errors (like a sequence
- jumping backwards in time).
- 
- ## events
- - `event::batch`
-   - inputs: raw token IDs + token count, optional sequence IDs, optional position IDs,
-     optional logit targets (output masks), and optional synchronous callbacks (`dispatch_done`, `dispatch_error`).
-   - outputs: sanitizes the input, populates the canonical `token::batch` structures in the caller-provided
-     buffers, and invokes the appropriate callback before returning, completely avoiding context reads.
- 
- ## state model
- 
- ```text
- uninitialized ──► idle
-                     │
- idle ──► populating ──► validating ──► (done | errored)
-   ▲                                       │
-   └───────────────────────────────────────┘
- ```
- 
- - `uninitialized` — awaiting initial setup.
- - `idle` — waiting for a raw token array.
- - `populating` — filling in missing metadata (e.g., if positions are omitted, query `memory::any`
-   for the current sequence length and auto-increment).
- - `validating` — strictly enforcing logical continuity and vocabulary bounds.
- - `done` — validation passed, transitions back to `idle` emitting `events::batch_done`.
- - unexpected events route to `unexpected`.
- 
- ## responsibilities
- 
- 1. **auto-population (the "do what I mean" phase):**
-    - **sequence IDs:** if omitted, default all tokens to a primary sequence (e.g., sequence `0`).
-    - **positions:** if `position_ids` are omitted, query the `memory::any` interface to find the
-      current length of the requested sequence(s), and auto-increment from there.
-    - **logit masks:** if the user doesn't specify which tokens need output logits, default to `false`
-      for all tokens *except* the very last token in the sequence (saving massive kernel compute).
- 
- 2. **strict validation (the firewall):**
-    - **vocabulary bounds:** reject any `token_id` that is `< 0` or `>= vocab.size()`.
-    - **sequence continuity:** ensure the `position_ids` for any given sequence are strictly
-      monotonically increasing. (e.g., reject `pos: [4, 5, 2, 3]` for sequence A).
-    - **coupling constraints:** if two sequences share a token (e.g., during prompt sharing or
-      prefix caching), ensure they agree on the position of that token. if they have diverged, reject.
- 
- 3. **canonical emission:**
-    - the resulting `token::batch` is not a copy of the data, but a structured, validated view
-      (often just pointers to the user's arrays, plus the auto-populated metadata arrays).
-    - this `token::batch` is handed directly to the `batch/planner` for zero-copy slicing.
- 
- ## error codes
- 
- this actor can produce the following error codes:
- 
- - `EMEL_ERR_CAPACITY` — output buffer too small for the batched token data.
- - `EMEL_ERR_INVALID_ARGUMENT` — invalid or duplicate sequence ids, missing position seed, or out-of-bounds token ids.
- - `EMEL_ERR_INTERNAL` — internal invariant violation.
-*/
-
-
-#include <cstdint>
-
+#include "emel/sm.hpp"
 #include "emel/token/batcher/actions.hpp"
+#include "emel/token/batcher/errors.hpp"
 #include "emel/token/batcher/events.hpp"
 #include "emel/token/batcher/guards.hpp"
-#include "emel/sm.hpp"
 
 namespace emel::token::batcher {
 
-struct initialized {};
-struct batching {};
-struct batch_decision {};
+struct ready {};
+struct request_decision {};
+struct seq_mode_decision {};
+struct seq_from_masks {};
+struct seq_from_primary_ids {};
+struct seq_default {};
+struct seq_mask_words_publish_decision {};
+struct positions_mode_decision {};
+struct positions_copy_stride_three {};
+struct positions_copy_stride_one {};
+struct positions_seeded_probe {};
+struct positions_unseeded_probe {};
+struct positions_generate_seeded {};
+struct positions_generate_unseeded {};
+struct positions_count_publish_decision {};
+struct output_mode_decision {};
+struct output_mask_all {};
+struct output_mask_copy {};
+struct output_mask_last {};
+struct output_counting {};
+struct outputs_total_publish_decision {};
+struct single_output_decision {};
+struct continuity_decision {};
 struct done {};
 struct errored {};
-struct unexpected {};
 
-/**
- * batch normalization orchestration model (decode-only).
- *
- * state purposes:
- * - `initialized`: idle state awaiting batch intent.
- * - `batching`/`batch_decision`: run batch normalization logic and branch on result.
- * - `done`/`errored`: terminal outcomes.
- * - `unexpected`: sequencing contract violation.
- *
- * guard semantics:
- * - `valid_request`/`invalid_request`: validate request pointers and capacity.
- * - `phase_ok`/`phase_failed`: observe errors set by actions.
- *
- * action side effects:
- * - `begin_batch`: capture inputs and reset outputs.
- * - `run_batch`: validate and normalize batch fields.
- * - `mark_done`: clear error state.
- * - `ensure_last_error`: ensure a terminal error code.
- * - `on_unexpected`: report sequencing violations.
- */
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
-
+    // clang-format off
     return sml::make_transition_table(
-      *sml::state<initialized> + sml::event<event::batch>[guard::valid_request{}] /
-          action::begin_batch = sml::state<batching>,
-      sml::state<initialized> + sml::event<event::batch>[guard::invalid_request{}] /
-          action::reject_invalid_batch = sml::state<errored>,
+      //------------------------------------------------------------------------------//
+        sml::state<request_decision> <= *sml::state<ready> + sml::event<event::batch_runtime>
+          / action::begin_batch
 
-      sml::state<batching> / action::run_batch = sml::state<batch_decision>,
-      sml::state<batch_decision>[guard::phase_failed{}] = sml::state<errored>,
-      sml::state<batch_decision>[guard::phase_ok{}] / action::mark_done =
-          sml::state<done>,
+      , sml::state<seq_mode_decision> <= sml::state<request_decision>
+          + sml::completion<event::batch_runtime> [ guard::valid_request{} ]
+      , sml::state<errored> <= sml::state<request_decision>
+          + sml::completion<event::batch_runtime> [ guard::invalid_request{} ]
+          / action::mark_invalid_request
 
-      sml::state<done> + sml::event<event::batch>[guard::valid_request{}] /
-          action::begin_batch = sml::state<batching>,
-      sml::state<done> + sml::event<event::batch>[guard::invalid_request{}] /
-          action::reject_invalid_batch = sml::state<errored>,
+      //------------------------------------------------------------------------------//
+      , sml::state<seq_from_masks> <= sml::state<seq_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::seq_mode_masks{} ]
+          / action::normalize_seq_from_masks
+      , sml::state<seq_from_primary_ids> <= sml::state<seq_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::seq_mode_primary_ids{} ]
+          / action::normalize_seq_from_primary_ids
+      , sml::state<seq_default> <= sml::state<seq_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::seq_mode_default{} ]
+          / action::normalize_seq_default
+      , sml::state<errored> <= sml::state<seq_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::seq_mode_invalid{} ]
+          / action::mark_internal_error
 
-      sml::state<errored> + sml::event<event::batch>[guard::valid_request{}] /
-          action::begin_batch = sml::state<batching>,
-      sml::state<errored> + sml::event<event::batch>[guard::invalid_request{}] /
-          action::reject_invalid_batch = sml::state<errored>,
+      //------------------------------------------------------------------------------//
+      , sml::state<seq_mask_words_publish_decision> <= sml::state<seq_from_masks>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<seq_from_masks>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+      , sml::state<seq_mask_words_publish_decision> <= sml::state<seq_from_primary_ids>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<seq_from_primary_ids>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+      , sml::state<seq_mask_words_publish_decision> <= sml::state<seq_default>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<seq_default>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
 
-      sml::state<unexpected> + sml::event<event::batch>[guard::valid_request{}] /
-          action::begin_batch = sml::state<batching>,
-      sml::state<unexpected> + sml::event<event::batch>[guard::invalid_request{}] /
-          action::reject_invalid_batch = sml::state<errored>,
+      //------------------------------------------------------------------------------//
+      , sml::state<positions_mode_decision> <= sml::state<seq_mask_words_publish_decision>
+          + sml::completion<event::batch_runtime> [ guard::seq_mask_words_out_present{} ]
+          / action::publish_seq_mask_words
+      , sml::state<positions_mode_decision> <= sml::state<seq_mask_words_publish_decision>
+          + sml::completion<event::batch_runtime> [ guard::seq_mask_words_out_absent{} ]
 
-      sml::state<initialized> + sml::unexpected_event<sml::_> /
-          action::on_unexpected = sml::state<unexpected>,
-      sml::state<batching> + sml::unexpected_event<sml::_> /
-          action::on_unexpected = sml::state<unexpected>,
-      sml::state<batch_decision> + sml::unexpected_event<sml::_> /
-          action::on_unexpected = sml::state<unexpected>,
-      sml::state<done> + sml::unexpected_event<sml::_> /
-          action::on_unexpected = sml::state<unexpected>,
-      sml::state<errored> + sml::unexpected_event<sml::_> /
-          action::on_unexpected = sml::state<unexpected>,
-      sml::state<unexpected> + sml::unexpected_event<sml::_> /
-          action::on_unexpected = sml::state<unexpected>
+      //------------------------------------------------------------------------------//
+      , sml::state<positions_copy_stride_three> <= sml::state<positions_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::positions_mode_stride_three{} ]
+          / action::copy_positions_stride_three
+      , sml::state<positions_copy_stride_one> <= sml::state<positions_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::positions_mode_stride_one{} ]
+          / action::copy_positions_stride_one
+      , sml::state<positions_seeded_probe> <= sml::state<positions_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::positions_mode_generate_seeded{} ]
+          / action::probe_positions_seeded
+      , sml::state<positions_unseeded_probe> <= sml::state<positions_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::positions_mode_generate_unseeded{} ]
+          / action::probe_positions_unseeded
+      , sml::state<errored> <= sml::state<positions_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::positions_mode_invalid{} ]
+          / action::mark_internal_error
+
+      , sml::state<positions_generate_seeded> <= sml::state<positions_seeded_probe>
+          + sml::completion<event::batch_runtime> [ guard::seeded_probe_ok{} ]
+          / action::generate_positions_seeded
+      , sml::state<errored> <= sml::state<positions_seeded_probe>
+          + sml::completion<event::batch_runtime> [ guard::seeded_probe_backend_error{} ]
+          / action::mark_backend_error
+      , sml::state<errored> <= sml::state<positions_seeded_probe>
+          + sml::completion<event::batch_runtime> [ guard::seeded_probe_invalid{} ]
+          / action::mark_invalid_request
+
+      , sml::state<positions_generate_unseeded> <= sml::state<positions_unseeded_probe>
+          + sml::completion<event::batch_runtime> [ guard::unseeded_probe_ok{} ]
+          / action::generate_positions_unseeded
+      , sml::state<errored> <= sml::state<positions_unseeded_probe>
+          + sml::completion<event::batch_runtime> [ guard::unseeded_probe_invalid{} ]
+          / action::mark_invalid_request
+
+      //------------------------------------------------------------------------------//
+      , sml::state<positions_count_publish_decision> <= sml::state<positions_copy_stride_three>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<positions_copy_stride_three>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+      , sml::state<positions_count_publish_decision> <= sml::state<positions_copy_stride_one>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<positions_copy_stride_one>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+      , sml::state<positions_count_publish_decision> <= sml::state<positions_generate_seeded>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<positions_generate_seeded>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+      , sml::state<positions_count_publish_decision> <= sml::state<positions_generate_unseeded>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<positions_generate_unseeded>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+
+      , sml::state<output_mode_decision> <= sml::state<positions_count_publish_decision>
+          + sml::completion<event::batch_runtime> [ guard::positions_count_out_present{} ]
+          / action::publish_positions_count
+      , sml::state<output_mode_decision> <= sml::state<positions_count_publish_decision>
+          + sml::completion<event::batch_runtime> [ guard::positions_count_out_absent{} ]
+
+      //------------------------------------------------------------------------------//
+      , sml::state<output_mask_all> <= sml::state<output_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::output_mode_all{} ]
+          / action::set_output_mask_all
+      , sml::state<output_mask_copy> <= sml::state<output_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::output_mode_copy{} ]
+          / action::copy_output_mask
+      , sml::state<output_mask_last> <= sml::state<output_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::output_mode_last{} ]
+          / action::set_output_mask_last
+      , sml::state<errored> <= sml::state<output_mode_decision>
+          + sml::completion<event::batch_runtime> [ guard::output_mode_invalid{} ]
+          / action::mark_internal_error
+
+      //------------------------------------------------------------------------------//
+      , sml::state<output_counting> <= sml::state<output_mask_all>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          / action::count_outputs_total
+      , sml::state<errored> <= sml::state<output_mask_all>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+      , sml::state<output_counting> <= sml::state<output_mask_copy>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          / action::count_outputs_total
+      , sml::state<errored> <= sml::state<output_mask_copy>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+      , sml::state<output_counting> <= sml::state<output_mask_last>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          / action::count_outputs_total
+      , sml::state<errored> <= sml::state<output_mask_last>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+
+      , sml::state<outputs_total_publish_decision> <= sml::state<output_counting>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<output_counting>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+
+      , sml::state<single_output_decision> <= sml::state<outputs_total_publish_decision>
+          + sml::completion<event::batch_runtime> [ guard::outputs_total_out_present{} ]
+          / action::publish_outputs_total
+      , sml::state<single_output_decision> <= sml::state<outputs_total_publish_decision>
+          + sml::completion<event::batch_runtime> [ guard::outputs_total_out_absent{} ]
+
+      //------------------------------------------------------------------------------//
+      , sml::state<continuity_decision> <= sml::state<single_output_decision>
+          + sml::completion<event::batch_runtime> [ guard::single_output_check_skipped{} ]
+      , sml::state<continuity_decision> <= sml::state<single_output_decision>
+          + sml::completion<event::batch_runtime> [ guard::single_output_check_passed{} ]
+      , sml::state<errored> <= sml::state<single_output_decision>
+          + sml::completion<event::batch_runtime> [ guard::single_output_check_failed{} ]
+          / action::mark_invalid_request
+
+      //------------------------------------------------------------------------------//
+      , sml::state<done> <= sml::state<continuity_decision>
+          + sml::completion<event::batch_runtime> [ guard::continuity_check_skipped{} ]
+      , sml::state<done> <= sml::state<continuity_decision>
+          + sml::completion<event::batch_runtime> [ guard::continuity_check_passed{} ]
+      , sml::state<errored> <= sml::state<continuity_decision>
+          + sml::completion<event::batch_runtime> [ guard::continuity_check_failed{} ]
+          / action::mark_invalid_request
+
+      //------------------------------------------------------------------------------//
+      , sml::state<ready> <= sml::state<done> + sml::completion<event::batch_runtime>
+          [ guard::done_callback_present{} ]
+          / action::publish_done
+      , sml::state<ready> <= sml::state<done> + sml::completion<event::batch_runtime>
+          [ guard::done_callback_absent{} ]
+          / action::publish_done_noop
+      , sml::state<ready> <= sml::state<errored> + sml::completion<event::batch_runtime>
+          [ guard::error_callback_present{} ]
+          / action::publish_error
+      , sml::state<ready> <= sml::state<errored> + sml::completion<event::batch_runtime>
+          [ guard::error_callback_absent{} ]
+          / action::publish_error_noop
+
+      //------------------------------------------------------------------------------//
+      , sml::state<ready> <= sml::state<ready> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<seq_mode_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<seq_from_masks> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<seq_from_primary_ids> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<seq_default> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<seq_mask_words_publish_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<positions_mode_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<positions_copy_stride_three> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<positions_copy_stride_one> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<positions_seeded_probe> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<positions_unseeded_probe> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<positions_generate_seeded> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<positions_generate_unseeded> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<positions_count_publish_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<output_mode_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<output_mask_all> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<output_mask_copy> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<output_mask_last> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<output_counting> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<outputs_total_publish_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<single_output_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<continuity_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<done> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<errored> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
     );
+    // clang-format on
   }
 };
 
 struct sm : public emel::sm<model, action::context> {
   using base_type = emel::sm<model, action::context>;
+  using base_type::is;
+  using base_type::process_event;
+  using base_type::visit_current_states;
+
   sm() : base_type() {}
 
   bool process_event(const event::batch & ev) {
-    namespace sml = boost::sml;
-    const bool accepted = base_type::process_event(ev);
-    if (this->is(sml::state<done>)) {
-      action::dispatch_done(ev);
-    } else if (this->is(sml::state<errored>) || this->is(sml::state<unexpected>)) {
-      const int32_t err = this->context_.last_error == EMEL_OK ? EMEL_ERR_BACKEND : this->context_.last_error;
-      action::dispatch_error(ev, err);
-    }
-    return accepted;
+    event::batch_ctx ctx{};
+    event::batch_runtime runtime{ev, ctx};
+    const bool accepted = base_type::process_event(runtime);
+    return accepted && ctx.err == emel::error::cast(error::none);
   }
-
-  template <class event_type>
-  bool process_event(const event_type & ev) {
-    return base_type::process_event(ev);
-  }
-
- private:
 };
+
+using Batcher = sm;
 
 }  // namespace emel::token::batcher

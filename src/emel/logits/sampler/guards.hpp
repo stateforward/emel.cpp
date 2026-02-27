@@ -58,7 +58,7 @@ struct no_more_samplers {
 
 struct sampler_fn_available {
   bool operator()(const event::sample_logits_runtime & ev, const action::context & ctx) const noexcept {
-    return ctx.sampler_fns[ev.ctx.sampler_index] != nullptr;
+    return static_cast<bool>(ctx.sampler_fns[ev.ctx.sampler_index]);
   }
 };
 

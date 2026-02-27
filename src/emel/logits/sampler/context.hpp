@@ -8,7 +8,7 @@
 namespace emel::logits::sampler::action {
 
 struct context {
-  event::sampler_fn * sampler_fns = nullptr;
+  fn * sampler_fns = nullptr;
   int32_t sampler_count = 0;
 };
 

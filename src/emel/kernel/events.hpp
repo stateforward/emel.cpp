@@ -243,7 +243,6 @@ enum class phase_outcome : uint8_t {
   rejected = 2,
 };
 
-// Internal context carried via completion<dispatch_request>.
 struct dispatch_ctx {
   bool primary_accepted = false;
   bool secondary_accepted = false;

@@ -15,6 +15,12 @@ anonymous transitions, and/or entry actions.
 ALWAYS keep anonymous transition graphs acyclic or statically bounded.
 ALWAYS propagate originating event data across internal phases via typed
 completion transitions (`sml::completion<TEvent>`) when needed.
+NEVER use `sml::completion<TEvent>` or anonymous transitions as data-plane
+iteration loops (for example per-logit, per-token, or per-tensor-element scans).
+ALWAYS keep completion/anonymous chains phase-level only with a small,
+statically bounded number of transitions per top-level dispatch.
+ALWAYS implement bulk numeric iteration in allocation-free action/detail kernels
+within a single transition per phase.
 NEVER copy event payload into context just to bridge internal phases.
 ALWAYS keep guards pure predicates of `(event, context)` with no side effects.
 ALWAYS keep actions bounded, non-blocking, and allocation-free during dispatch.

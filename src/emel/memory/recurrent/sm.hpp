@@ -1,4 +1,5 @@
 #pragma once
+// benchmark: scaffold
 
 #include <array>
 #include <cstdint>

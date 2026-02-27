@@ -85,6 +85,7 @@ if(EMEL_ENABLE_TESTS)
     tests/text/jinja/formatter_tests.cpp
     tests/logits/validator/validator_tests.cpp
     tests/logits/sampler/pipeline_tests.cpp
+    tests/sm/callback_tests.cpp
     tests/sm/sm_policy_tests.cpp
     tests/sm/sm_any_tests.cpp
     tests/graph/wrapper_visibility_tests.cpp

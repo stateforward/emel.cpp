@@ -2,6 +2,8 @@
 
 #include "emel/emel.h"
 #include "emel/error/error.hpp"
+#include "emel/gbnf/detail.hpp"
+#include "emel/gbnf/sampler/sm.hpp"
 #include "emel/logits/sampler/sm.hpp"
 
 namespace {
@@ -65,9 +67,9 @@ TEST_CASE("sampler pipeline selects token via selector sampler") {
   int32_t selected = -1;
   emel::error::type err = emel::error::cast(emel::logits::sampler::error::none);
 
-  emel::logits::sampler::event::sampler_fn samplers[2] = {
-      sampler_shift_scores,
-      sampler_select_argmax,
+  emel::logits::sampler::fn samplers[2] = {
+      emel::logits::sampler::fn::from<sampler_shift_scores>(),
+      emel::logits::sampler::fn::from<sampler_select_argmax>(),
   };
   emel::logits::sampler::sm machine{samplers, 2};
 
@@ -163,7 +165,7 @@ TEST_CASE("sampler pipeline reports missing sampler function") {
   int32_t selected = -1;
   emel::error::type err = emel::error::cast(emel::logits::sampler::error::none);
 
-  emel::logits::sampler::event::sampler_fn samplers[1] = {nullptr};
+  emel::logits::sampler::fn samplers[1] = {};
   emel::logits::sampler::sm machine{samplers, 1};
 
   emel::logits::sampler::event::sample_logits request{
@@ -181,7 +183,9 @@ TEST_CASE("sampler pipeline reports sampler errors") {
   int32_t selected = -1;
   emel::error::type err = emel::error::cast(emel::logits::sampler::error::none);
 
-  emel::logits::sampler::event::sampler_fn samplers[1] = {sampler_error};
+  emel::logits::sampler::fn samplers[1] = {
+      emel::logits::sampler::fn::from<sampler_error>(),
+  };
   emel::logits::sampler::sm machine{samplers, 1};
 
   emel::logits::sampler::event::sample_logits request{
@@ -199,7 +203,9 @@ TEST_CASE("sampler pipeline reports invalid request when no selector sampler set
   int32_t selected = -1;
   emel::error::type err = emel::error::cast(emel::logits::sampler::error::none);
 
-  emel::logits::sampler::event::sampler_fn samplers[1] = {sampler_shift_scores};
+  emel::logits::sampler::fn samplers[1] = {
+      emel::logits::sampler::fn::from<sampler_shift_scores>(),
+  };
   emel::logits::sampler::sm machine{samplers, 1};
 
   emel::logits::sampler::event::sample_logits request{
@@ -217,7 +223,9 @@ TEST_CASE("sampler pipeline reports invalid request when sampler sets invalid ca
   int32_t selected = -1;
   emel::error::type err = emel::error::cast(emel::logits::sampler::error::none);
 
-  emel::logits::sampler::event::sampler_fn samplers[1] = {sampler_set_invalid_candidate_count};
+  emel::logits::sampler::fn samplers[1] = {
+      emel::logits::sampler::fn::from<sampler_set_invalid_candidate_count>(),
+  };
   emel::logits::sampler::sm machine{samplers, 1};
 
   emel::logits::sampler::event::sample_logits request{
@@ -235,7 +243,9 @@ TEST_CASE("sampler pipeline reports invalid request when selector picks out-of-r
   int32_t selected = -1;
   emel::error::type err = emel::error::cast(emel::logits::sampler::error::none);
 
-  emel::logits::sampler::event::sampler_fn samplers[1] = {sampler_select_fixed};
+  emel::logits::sampler::fn samplers[1] = {
+      emel::logits::sampler::fn::from<sampler_select_fixed>(),
+  };
   emel::logits::sampler::sm machine{samplers, 1};
 
   emel::logits::sampler::event::sample_logits request{
@@ -244,4 +254,54 @@ TEST_CASE("sampler pipeline reports invalid request when selector picks out-of-r
   CHECK(!machine.process_event(request));
   CHECK(err == emel::error::cast(emel::logits::sampler::error::invalid_request));
   CHECK(selected == 7);
+}
+
+TEST_CASE("sampler pipeline supports gbnf_filter then argmax sampler") {
+  float logits[4] = {0.5f, 2.0f, -1.0f, 8.0f};
+  int32_t ids[4] = {};
+  float scores[4] = {};
+  int32_t selected = -1;
+  emel::error::type err = emel::error::cast(emel::logits::sampler::error::none);
+
+  emel::gbnf::grammar grammar{};
+  grammar.rule_count = 3;
+  emel::gbnf::sampler::sm gbnf_sampler{grammar, 0};
+
+  emel::logits::sampler::fn samplers[2] = {
+      emel::gbnf::sampler::make_logits_sampler_fn(gbnf_sampler),
+      emel::logits::sampler::fn::from<sampler_select_argmax>(),
+  };
+  emel::logits::sampler::sm machine{samplers, 2};
+
+  emel::logits::sampler::event::sample_logits request{
+      logits[0], 4, ids[0], scores[0], 4, selected, err};
+
+  CHECK(machine.process_event(request));
+  CHECK(err == emel::error::cast(emel::logits::sampler::error::none));
+  CHECK(selected == 1);
+}
+
+TEST_CASE("sampler pipeline propagates gbnf sampler errors") {
+  float logits[2] = {0.9f, 0.7f};
+  int32_t ids[2] = {};
+  float scores[2] = {};
+  int32_t selected = -1;
+  emel::error::type err = emel::error::cast(emel::logits::sampler::error::none);
+
+  emel::gbnf::grammar invalid_grammar{};
+  invalid_grammar.rule_count = 0;
+  emel::gbnf::sampler::sm gbnf_sampler{invalid_grammar, 0};
+
+  emel::logits::sampler::fn samplers[2] = {
+      emel::gbnf::sampler::make_logits_sampler_fn(gbnf_sampler),
+      emel::logits::sampler::fn::from<sampler_select_argmax>(),
+  };
+  emel::logits::sampler::sm machine{samplers, 2};
+
+  emel::logits::sampler::event::sample_logits request{
+      logits[0], 2, ids[0], scores[0], 2, selected, err};
+
+  CHECK(!machine.process_event(request));
+  CHECK(err == emel::error::cast(emel::gbnf::sampler::error::invalid_request));
+  CHECK(selected == -1);
 }
