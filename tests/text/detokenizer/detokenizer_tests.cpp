@@ -178,7 +178,7 @@ TEST_CASE("detokenizer_internal_reentry_rejections_dispatch_error_callbacks") {
       nullptr,
       on_detok_bind_error};
 
-  CHECK(machine.process_event(bind_ev));
+  CHECK_FALSE(machine.process_event(bind_ev));
   CHECK(bind_err == detok_invalid_request);
   CHECK(callbacks.bind_error == 1);
   CHECK(callbacks.last_error == detok_invalid_request);
@@ -205,7 +205,7 @@ TEST_CASE("detokenizer_internal_reentry_rejections_dispatch_error_callbacks") {
       nullptr,
       on_detok_detokenize_error};
 
-  CHECK(machine.process_event(detok_ev));
+  CHECK_FALSE(machine.process_event(detok_ev));
   CHECK(detok_err == detok_invalid_request);
   CHECK(callbacks.detokenize_error == 1);
   CHECK(callbacks.last_error == detok_invalid_request);
@@ -399,11 +399,11 @@ TEST_CASE("detokenizer_action_and_guard_paths") {
   err = detok_ok;
   detok_ev.pending_length = 2;
   emel::text::detokenizer::action::on_unexpected(bind_ev, ctx);
-  CHECK(err == detok_invalid_request);
+  CHECK(err == detok_ok);
   emel::text::detokenizer::action::on_unexpected(detok_ev, ctx);
-  CHECK(err == detok_invalid_request);
-  CHECK(out_len == 0);
-  CHECK(pending_len == 2);
+  CHECK(err == detok_ok);
+  CHECK(out_len == 7);
+  CHECK(pending_len == 7);
 
   const auto * saved_vocab = ctx.vocab;
   const bool saved_is_bound = ctx.is_bound;

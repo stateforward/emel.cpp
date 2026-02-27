@@ -172,54 +172,54 @@ struct model {
                    [ guard::invalid_detokenize{} ] / action::reject_detokenize
 
       //------------------------------------------------------------------------------//
-      // Internal-state reentry rejection.
-      , sml::state<binding_error_decision> <= sml::state<binding> + sml::event<event::bind>
+      // Internal-state reentry rejection via unexpected external requests.
+      , sml::state<binding_error_decision> <= sml::state<binding> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<binding> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<binding> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
-      , sml::state<binding_error_decision> <= sml::state<binding_decision> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<binding_decision> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<binding_decision> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<binding_decision> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
-      , sml::state<binding_error_decision> <= sml::state<binding_done_decision> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<binding_done_decision> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<binding_done_decision> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<binding_done_decision> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
-      , sml::state<binding_error_decision> <= sml::state<binding_done_callback> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<binding_done_callback> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<binding_done_callback> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<binding_done_callback> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
-      , sml::state<binding_error_decision> <= sml::state<binding_error_decision> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<binding_error_decision> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<binding_error_decision> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<binding_error_decision> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
-      , sml::state<binding_error_decision> <= sml::state<binding_error_callback> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<binding_error_callback> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<binding_error_callback> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<binding_error_callback> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
-      , sml::state<binding_error_decision> <= sml::state<decoding> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<decoding> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<decoding> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<decoding> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
-      , sml::state<binding_error_decision> <= sml::state<decode_decision> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<decode_decision> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
-      , sml::state<binding_error_decision> <= sml::state<detokenize_done_decision> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<detokenize_done_decision> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<detokenize_done_decision> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<detokenize_done_decision> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
-      , sml::state<binding_error_decision> <= sml::state<detokenize_done_callback> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<detokenize_done_callback> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<detokenize_done_callback> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<detokenize_done_callback> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
-      , sml::state<binding_error_decision> <= sml::state<detokenize_error_decision> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<detokenize_error_decision> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<detokenize_error_decision> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<detokenize_error_decision> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
-      , sml::state<binding_error_decision> <= sml::state<detokenize_error_callback> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<detokenize_error_callback> + sml::unexpected_event<event::bind>
                    / action::reject_bind
-      , sml::state<detokenize_error_decision> <= sml::state<detokenize_error_callback> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<detokenize_error_callback> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
 
       //------------------------------------------------------------------------------//

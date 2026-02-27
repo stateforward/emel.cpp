@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <cstring>
 #include <string_view>
-#include <type_traits>
 
 #include "emel/text/detokenizer/context.hpp"
 #include "emel/text/detokenizer/errors.hpp"
@@ -256,13 +255,7 @@ inline void notify_detokenize_error(const event::detokenize & ev) noexcept {
 
 template <class event_type>
 inline void on_unexpected(const event_type & ev) noexcept {
-  if constexpr (std::is_same_v<event_type, event::bind>) {
-    ev.error_out = error_code(error::invalid_request);
-  } else if constexpr (std::is_same_v<event_type, event::detokenize>) {
-    ev.output_length_out = 0;
-    ev.pending_length_out = ev.pending_length;
-    ev.error_out = error_code(error::invalid_request);
-  }
+  (void)ev;
 }
 
 }  // namespace emel::text::detokenizer::action::detail
