@@ -273,9 +273,7 @@ struct bind_detokenizer {
         emel::text::detokenizer::error_code(emel::text::detokenizer::error::backend_error);
     int32_t err = detok_ok;
 
-    emel::text::detokenizer::event::bind bind_ev = {};
-    bind_ev.vocab = ctx.vocab;
-    bind_ev.error_out = &err;
+    emel::text::detokenizer::event::bind bind_ev{*ctx.vocab, err};
 
     const bool accepted =
         ctx.dispatch_detokenizer_bind(ctx.detokenizer_sm, bind_ev);
@@ -361,17 +359,17 @@ struct run_render {
         emel::text::detokenizer::error_code(emel::text::detokenizer::error::backend_error);
     int32_t err = detok_ok;
 
-    emel::text::detokenizer::event::detokenize detok_ev = {};
-    detok_ev.token_id = ctx.token_id;
-    detok_ev.emit_special = ctx.emit_special;
-    detok_ev.pending_bytes = sequence.pending_bytes.data();
-    detok_ev.pending_length = sequence.pending_length;
-    detok_ev.pending_capacity = sequence.pending_bytes.size();
-    detok_ev.output = ctx.output;
-    detok_ev.output_capacity = ctx.output_capacity;
-    detok_ev.output_length_out = &detok_output_length;
-    detok_ev.pending_length_out = &pending_length;
-    detok_ev.error_out = &err;
+    emel::text::detokenizer::event::detokenize detok_ev{
+        ctx.token_id,
+        ctx.emit_special,
+        sequence.pending_bytes.data(),
+        sequence.pending_length,
+        sequence.pending_bytes.size(),
+        ctx.output,
+        ctx.output_capacity,
+        detok_output_length,
+        pending_length,
+        err};
 
     const bool accepted =
         ctx.dispatch_detokenizer_detokenize(ctx.detokenizer_sm, detok_ev);

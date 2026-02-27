@@ -118,7 +118,7 @@ struct unexpected {};
  * action side effects:
  * - `begin_detokenize` initializes request output fields.
  * - `decode_token` emits bytes and updates pending utf-8 fragments.
- * - `mark_done`/`ensure_detokenize_error` finalize terminal status.
+ * - `mark_done` finalizes success terminal status.
  */
 struct model {
   auto operator()() const {
@@ -130,46 +130,97 @@ struct model {
       // External request validation.
         sml::state<binding> <= *sml::state<uninitialized> + sml::event<event::bind>
                    [ guard::valid_bind{} ] / action::begin_bind
-      , sml::state<errored> <= sml::state<uninitialized> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<uninitialized> + sml::event<event::bind>
                    [ guard::invalid_bind{} ] / action::reject_bind
-      , sml::state<errored> <= sml::state<uninitialized> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<uninitialized> + sml::event<event::detokenize>
                    / action::reject_detokenize
 
       , sml::state<binding> <= sml::state<idle> + sml::event<event::bind>
                    [ guard::valid_bind{} ] / action::begin_bind
-      , sml::state<errored> <= sml::state<idle> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<idle> + sml::event<event::bind>
                    [ guard::invalid_bind{} ] / action::reject_bind
       , sml::state<decoding> <= sml::state<idle> + sml::event<event::detokenize>
                    [ guard::valid_detokenize{} ] / action::begin_detokenize
-      , sml::state<errored> <= sml::state<idle> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<idle> + sml::event<event::detokenize>
                    [ guard::invalid_detokenize{} ] / action::reject_detokenize
 
       , sml::state<binding> <= sml::state<done> + sml::event<event::bind>
                    [ guard::valid_bind{} ] / action::begin_bind
-      , sml::state<errored> <= sml::state<done> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<done> + sml::event<event::bind>
                    [ guard::invalid_bind{} ] / action::reject_bind
       , sml::state<decoding> <= sml::state<done> + sml::event<event::detokenize>
                    [ guard::valid_detokenize{} ] / action::begin_detokenize
-      , sml::state<errored> <= sml::state<done> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<done> + sml::event<event::detokenize>
                    [ guard::invalid_detokenize{} ] / action::reject_detokenize
 
       , sml::state<binding> <= sml::state<errored> + sml::event<event::bind>
                    [ guard::valid_bind{} ] / action::begin_bind
-      , sml::state<errored> <= sml::state<errored> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<errored> + sml::event<event::bind>
                    [ guard::invalid_bind{} ] / action::reject_bind
       , sml::state<decoding> <= sml::state<errored> + sml::event<event::detokenize>
                    [ guard::valid_detokenize{} ] / action::begin_detokenize
-      , sml::state<errored> <= sml::state<errored> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<errored> + sml::event<event::detokenize>
                    [ guard::invalid_detokenize{} ] / action::reject_detokenize
 
       , sml::state<binding> <= sml::state<unexpected> + sml::event<event::bind>
                    [ guard::valid_bind{} ] / action::begin_bind
-      , sml::state<unexpected> <= sml::state<unexpected> + sml::event<event::bind>
+      , sml::state<binding_error_decision> <= sml::state<unexpected> + sml::event<event::bind>
                    [ guard::invalid_bind{} ] / action::reject_bind
       , sml::state<decoding> <= sml::state<unexpected> + sml::event<event::detokenize>
                    [ guard::valid_detokenize{} ] / action::begin_detokenize
-      , sml::state<unexpected> <= sml::state<unexpected> + sml::event<event::detokenize>
+      , sml::state<detokenize_error_decision> <= sml::state<unexpected> + sml::event<event::detokenize>
                    [ guard::invalid_detokenize{} ] / action::reject_detokenize
+
+      //------------------------------------------------------------------------------//
+      // Internal-state reentry rejection.
+      , sml::state<binding_error_decision> <= sml::state<binding> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<binding> + sml::event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<binding_decision> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<binding_decision> + sml::event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<binding_done_decision> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<binding_done_decision> + sml::event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<binding_done_callback> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<binding_done_callback> + sml::event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<binding_error_decision> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<binding_error_decision> + sml::event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<binding_error_callback> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<binding_error_callback> + sml::event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<decoding> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<decoding> + sml::event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<decode_decision> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<detokenize_done_decision> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<detokenize_done_decision> + sml::event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<detokenize_done_callback> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<detokenize_done_callback> + sml::event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<detokenize_error_decision> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<detokenize_error_decision> + sml::event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<detokenize_error_callback> + sml::event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<detokenize_error_callback> + sml::event<event::detokenize>
+                   / action::reject_detokenize
 
       //------------------------------------------------------------------------------//
       // Internal phase progression.
@@ -183,7 +234,7 @@ struct model {
                    [ guard::no_bind_done_callback{} ]
       , sml::state<idle> <= sml::state<binding_done_callback> + sml::completion<event::bind>
       , sml::state<binding_error_decision> <= sml::state<binding_decision> + sml::completion<event::bind>
-                   [ guard::bind_phase_failed{} ] / action::ensure_bind_error
+                   [ guard::bind_phase_failed{} ]
       , sml::state<binding_error_callback> <= sml::state<binding_error_decision> + sml::completion<event::bind>
                    [ guard::has_bind_error_callback{} ] / action::notify_bind_error
       , sml::state<errored> <= sml::state<binding_error_decision> + sml::completion<event::bind>
@@ -201,7 +252,7 @@ struct model {
       , sml::state<done> <= sml::state<detokenize_done_callback> + sml::completion<event::detokenize>
                    / action::notify_detokenize_done
       , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::completion<event::detokenize>
-                   [ guard::detokenize_phase_failed{} ] / action::ensure_detokenize_error
+                   [ guard::detokenize_phase_failed{} ]
       , sml::state<detokenize_error_callback> <= sml::state<detokenize_error_decision> + sml::completion<event::detokenize>
                    [ guard::has_detokenize_error_callback{} ] / action::notify_detokenize_error
       , sml::state<errored> <= sml::state<detokenize_error_decision> + sml::completion<event::detokenize>
@@ -257,13 +308,17 @@ struct sm : public emel::sm<model, action::context> {
   bool process_event(const event::bind & ev) {
     namespace sml = boost::sml;
 
-    return base_type::process_event(ev) && this->is(sml::state<idle>);
+    const bool accepted = base_type::process_event(ev);
+    const bool at_idle = this->is(sml::state<idle>);
+    return accepted & at_idle;
   }
 
   bool process_event(const event::detokenize & ev) {
     namespace sml = boost::sml;
 
-    return base_type::process_event(ev) && this->is(sml::state<done>);
+    const bool accepted = base_type::process_event(ev);
+    const bool at_done = this->is(sml::state<done>);
+    return accepted & at_done;
   }
 
   using base_type::process_event;

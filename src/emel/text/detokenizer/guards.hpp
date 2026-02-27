@@ -8,7 +8,8 @@ namespace emel::text::detokenizer::guard {
 
 struct valid_bind {
   bool operator()(const event::bind & ev) const noexcept {
-    return ev.vocab != nullptr && ev.error_out != nullptr;
+    (void)ev;
+    return true;
   }
 };
 
@@ -23,9 +24,7 @@ struct valid_detokenize {
                   const action::context & ctx) const noexcept {
     return ctx.is_bound && ctx.vocab != nullptr && ev.pending_bytes != nullptr &&
            ev.pending_capacity > 0 && ev.pending_length <= ev.pending_capacity &&
-           (ev.output != nullptr || ev.output_capacity == 0) &&
-           ev.output_length_out != nullptr && ev.pending_length_out != nullptr &&
-           ev.error_out != nullptr;
+           (ev.output != nullptr || ev.output_capacity == 0);
   }
 };
 
@@ -38,25 +37,25 @@ struct invalid_detokenize {
 
 struct bind_phase_ok {
   bool operator()(const event::bind & ev) const noexcept {
-    return *ev.error_out == error_code(error::none);
+    return ev.error_out == error_code(error::none);
   }
 };
 
 struct bind_phase_failed {
   bool operator()(const event::bind & ev) const noexcept {
-    return *ev.error_out != error_code(error::none);
+    return ev.error_out != error_code(error::none);
   }
 };
 
 struct detokenize_phase_ok {
   bool operator()(const event::detokenize & ev) const noexcept {
-    return ev.error_out != nullptr && *ev.error_out == error_code(error::none);
+    return ev.error_out == error_code(error::none);
   }
 };
 
 struct detokenize_phase_failed {
   bool operator()(const event::detokenize & ev) const noexcept {
-    return *ev.error_out != error_code(error::none);
+    return ev.error_out != error_code(error::none);
   }
 };
 
@@ -74,7 +73,8 @@ struct no_bind_done_callback {
 
 struct has_bind_error_callback {
   bool operator()(const event::bind & ev) const noexcept {
-    return ev.dispatch_error != nullptr && ev.owner_sm != nullptr;
+    return ev.dispatch_error != nullptr &&
+           ev.owner_sm != nullptr;
   }
 };
 
@@ -98,7 +98,8 @@ struct no_detokenize_done_callback {
 
 struct has_detokenize_error_callback {
   bool operator()(const event::detokenize & ev) const noexcept {
-    return ev.dispatch_error != nullptr && ev.owner_sm != nullptr;
+    return ev.dispatch_error != nullptr &&
+           ev.owner_sm != nullptr;
   }
 };
 
