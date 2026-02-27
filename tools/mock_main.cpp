@@ -2,7 +2,7 @@
 
 #include "emel/model/loader/sm.hpp"
 #include "emel/model/weight_loader/sm.hpp"
-#include "emel/parser/gguf/sm.hpp"
+#include "emel/gguf/loader/sm.hpp"
 
 namespace {
 
@@ -10,18 +10,18 @@ void print_step(const char * step, const bool accepted) {
   std::printf("[%s] accepted=%s\n", step, accepted ? "true" : "false");
 }
 
-bool dispatch_probe(void * parser_sm, const emel::parser::gguf::event::probe & ev) {
-  auto * machine = static_cast<emel::parser::gguf::sm *>(parser_sm);
+bool dispatch_probe(void * parser_sm, const emel::gguf::loader::event::probe & ev) {
+  auto * machine = static_cast<emel::gguf::loader::sm *>(parser_sm);
   return machine != nullptr && machine->process_event(ev);
 }
 
-bool dispatch_bind_storage(void * parser_sm, const emel::parser::gguf::event::bind_storage & ev) {
-  auto * machine = static_cast<emel::parser::gguf::sm *>(parser_sm);
+bool dispatch_bind_storage(void * parser_sm, const emel::gguf::loader::event::bind_storage & ev) {
+  auto * machine = static_cast<emel::gguf::loader::sm *>(parser_sm);
   return machine != nullptr && machine->process_event(ev);
 }
 
-bool dispatch_parse(void * parser_sm, const emel::parser::gguf::event::parse & ev) {
-  auto * machine = static_cast<emel::parser::gguf::sm *>(parser_sm);
+bool dispatch_parse(void * parser_sm, const emel::gguf::loader::event::parse & ev) {
+  auto * machine = static_cast<emel::gguf::loader::sm *>(parser_sm);
   return machine != nullptr && machine->process_event(ev);
 }
 
@@ -56,7 +56,7 @@ int main() {
   {
     std::printf("=== model_load happy path ===\n");
     emel::model::weight_loader::sm weight_sm;
-    emel::parser::gguf::sm parser_sm;
+    emel::gguf::loader::sm parser_sm;
     emel::model::loader::sm loader_sm;
     emel::model::data model_data = {};
     uint8_t file_bytes[4] = {0};

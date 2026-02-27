@@ -11,7 +11,7 @@
 #include "emel/memory/kv/sm.hpp"
 #include "emel/memory/recurrent/sm.hpp"
 #include "emel/model/loader/sm.hpp"
-#include "emel/parser/gguf/sm.hpp"
+#include "emel/gguf/loader/sm.hpp"
 #include "emel/model/weight_loader/sm.hpp"
 #include "emel/text/renderer/sm.hpp"
 #include "emel/text/tokenizer/sm.hpp"
@@ -36,7 +36,7 @@ using KvCache = emel::memory::kv::sm;
 using MemoryRecurrent = emel::memory::recurrent::sm;
 using ModelLoader = emel::model::loader::sm;
 using Model = emel::model::loader::sm;
-using Parser = emel::parser::gguf::sm;
+using Parser = emel::gguf::loader::sm;
 using Renderer = emel::text::renderer::sm;
 using Tokenizer = emel::text::tokenizer::sm;
 using WeightLoader = emel::model::weight_loader::sm;

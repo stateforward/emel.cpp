@@ -1,7 +1,11 @@
 #pragma once
 
-namespace emel::tensor::tensor::action {
+#include "emel/tensor/detail.hpp"
 
-struct context {};
+namespace emel::tensor::action {
 
-}  // namespace emel::tensor::tensor::action
+struct context {
+  detail::tensor_pool tensors = {};
+};
+
+}  // namespace emel::tensor::action

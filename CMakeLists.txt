@@ -114,11 +114,13 @@ if(EMEL_ENABLE_TESTS)
     tests/memory/kv/lifecycle_tests.cpp
     tests/memory/recurrent/lifecycle_tests.cpp
     tests/memory/hybrid/lifecycle_tests.cpp
+    tests/tensor/lifecycle_tests.cpp
+    tests/tensor/view/lifecycle_tests.cpp
   )
 
   if(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES)
     list(APPEND EMEL_TEST_SOURCES
-      tests/parser/gguf/lifecycle_tests.cpp
+      tests/gguf/loader/lifecycle_tests.cpp
       tests/text/jinja/parser_tests.cpp
       tests/text/jinja/lexer_tests.cpp
       tests/text/jinja/formatter_tests.cpp

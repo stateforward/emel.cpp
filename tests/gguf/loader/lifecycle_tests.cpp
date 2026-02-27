@@ -1,7 +1,7 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <span>
+
+#include "doctest/doctest.h"
 
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/model/data.hpp"
@@ -17,13 +17,8 @@ void on_parse_error(const emel::gguf::loader::events::parse_error &) {}
 
 }  // namespace
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
-  if (data == nullptr || size == 0) {
-    return 0;
-  }
-
+TEST_CASE("gguf loader probe bind parse lifecycle") {
   emel::gguf::loader::sm machine{};
-  emel::gguf::loader::requirements req = {};
   const emel::gguf::loader::event::probe_done_fn probe_done_cb =
       emel::gguf::loader::event::probe_done_fn::from<&on_probe_done>();
   const emel::gguf::loader::event::probe_error_fn probe_error_cb =
@@ -37,13 +32,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   const emel::gguf::loader::event::parse_error_fn parse_error_cb =
       emel::gguf::loader::event::parse_error_fn::from<&on_parse_error>();
 
+  std::array<uint8_t, 4> file_bytes = {};
+  emel::gguf::loader::requirements req = {};
   const emel::gguf::loader::event::probe probe{
-    std::span<const uint8_t>{data, size},
+    std::span<const uint8_t>{file_bytes},
     req,
     probe_done_cb,
     probe_error_cb,
   };
-  (void)machine.process_event(probe);
+  CHECK(machine.process_event(probe));
 
   std::array<uint8_t, 8> kv_arena = {};
   std::array<emel::gguf::loader::kv_entry, 1> kv_entries = {};
@@ -55,14 +52,29 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     bind_done_cb,
     bind_error_cb,
   };
-  (void)machine.process_event(bind);
+  CHECK(machine.process_event(bind));
 
   const emel::gguf::loader::event::parse parse{
-    std::span<const uint8_t>{data, size},
+    std::span<const uint8_t>{file_bytes},
     parse_done_cb,
     parse_error_cb,
   };
-  (void)machine.process_event(parse);
+  CHECK(machine.process_event(parse));
+}
 
-  return 0;
+TEST_CASE("gguf loader probe rejects invalid inputs") {
+  emel::gguf::loader::sm machine{};
+  const emel::gguf::loader::event::probe_done_fn probe_done_cb =
+      emel::gguf::loader::event::probe_done_fn::from<&on_probe_done>();
+  const emel::gguf::loader::event::probe_error_fn probe_error_cb =
+      emel::gguf::loader::event::probe_error_fn::from<&on_probe_error>();
+
+  emel::gguf::loader::requirements req = {};
+  const emel::gguf::loader::event::probe probe{
+    std::span<const uint8_t>{},
+    req,
+    probe_done_cb,
+    probe_error_cb,
+  };
+  CHECK_FALSE(machine.process_event(probe));
 }
