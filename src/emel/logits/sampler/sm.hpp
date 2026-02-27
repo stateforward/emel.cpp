@@ -11,10 +11,7 @@ namespace emel::logits::sampler {
 struct ready {};
 struct request_logits_decision {};
 struct request_preselected_decision {};
-struct preparing_candidates_begin {};
-struct preparing_candidates_decision {};
-struct preparing_candidates_step {};
-struct preparing_candidates_advance {};
+struct preparing_candidates {};
 struct apply_samplers {};
 struct sample_decision {};
 struct sample_call {};
@@ -39,7 +36,7 @@ struct model {
           + sml::completion<event::sample_preselected_runtime> [ guard::preselected_token_invalid{} ]
           / action::mark_invalid_request
 
-      , sml::state<preparing_candidates_begin> <= sml::state<request_logits_decision>
+      , sml::state<preparing_candidates> <= sml::state<request_logits_decision>
           + sml::completion<event::sample_logits_runtime> [ guard::valid_request{} ]
           / action::begin_sample
       , sml::state<errored> <= sml::state<request_logits_decision>
@@ -47,18 +44,8 @@ struct model {
           / action::mark_invalid_request
 
       //------------------------------------------------------------------------------//
-      , sml::state<preparing_candidates_decision> <= sml::state<preparing_candidates_begin>
-          + sml::completion<event::sample_logits_runtime> / action::prepare_candidates_begin
-      , sml::state<preparing_candidates_step> <= sml::state<preparing_candidates_decision>
-          + sml::completion<event::sample_logits_runtime> [ guard::prepare_has_more{} ]
-      , sml::state<apply_samplers> <= sml::state<preparing_candidates_decision>
-          + sml::completion<event::sample_logits_runtime> [ guard::prepare_done{} ]
-
-      , sml::state<preparing_candidates_advance> <= sml::state<preparing_candidates_step>
-          + sml::completion<event::sample_logits_runtime> / action::prepare_candidate_step
-      , sml::state<preparing_candidates_decision> <= sml::state<preparing_candidates_advance>
-          + sml::completion<event::sample_logits_runtime>
-          / action::advance_prepare_cursor
+      , sml::state<apply_samplers> <= sml::state<preparing_candidates>
+          + sml::completion<event::sample_logits_runtime> / action::prepare_candidates
 
       //------------------------------------------------------------------------------//
       , sml::state<sample_decision> <= sml::state<apply_samplers>
@@ -111,13 +98,7 @@ struct model {
           / action::on_unexpected
       , sml::state<ready> <= sml::state<request_preselected_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
-      , sml::state<ready> <= sml::state<preparing_candidates_begin> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<preparing_candidates_decision> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<preparing_candidates_step> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<preparing_candidates_advance> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<preparing_candidates> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<apply_samplers> + sml::unexpected_event<sml::_>
           / action::on_unexpected

@@ -54,7 +54,6 @@ struct sample_logits_ctx {
   emel::error::type err = emel::error::cast(error::none);
   int32_t candidate_count = 0;
   int32_t sampler_index = 0;
-  int32_t cursor = 0;
   emel::error::type sampler_call_error = emel::error::cast(error::none);
 };
 

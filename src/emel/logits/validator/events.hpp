@@ -34,11 +34,6 @@ struct build {
 
 struct build_ctx {
   emel::error::type err = emel::error::cast(error::none);
-  int32_t candidate_count = 0;
-  int32_t build_cursor = 0;
-  int32_t max_cursor = 0;
-  int32_t normalize_cursor = 0;
-  float max_score = 0.0F;
 };
 
 struct build_runtime {

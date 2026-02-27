@@ -53,6 +53,7 @@ std::vector<bench::result> run_emel_benchmarks(const bench::config & cfg,
   bench::append_emel_jinja_parser_cases(results, cfg);
   bench::append_emel_jinja_formatter_cases(results, cfg);
   bench::append_emel_gbnf_parser_cases(results, cfg);
+  bench::append_emel_logits_cases(results, cfg);
   bench::append_emel_sm_any_cases(results, cfg);
   bench::append_emel_tokenizer_preprocessor_bpe_cases(results, cfg);
   bench::append_emel_tokenizer_preprocessor_spm_cases(results, cfg);
@@ -77,6 +78,7 @@ std::vector<bench::result> run_reference_benchmarks(const bench::config & cfg,
   bench::append_reference_jinja_parser_cases(results, cfg);
   bench::append_reference_jinja_formatter_cases(results, cfg);
   bench::append_reference_gbnf_parser_cases(results, cfg);
+  bench::append_reference_logits_cases(results, cfg);
   bench::append_reference_sm_any_cases(results, cfg);
   bench::append_reference_tokenizer_preprocessor_bpe_cases(results, cfg);
   bench::append_reference_tokenizer_preprocessor_spm_cases(results, cfg);

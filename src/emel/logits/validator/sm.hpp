@@ -10,18 +10,6 @@ namespace emel::logits::validator {
 
 struct ready {};
 struct request_decision {};
-struct preparing_candidates_begin {};
-struct preparing_candidates_decision {};
-struct preparing_candidates_step {};
-struct preparing_candidates_advance {};
-struct scanning_max_begin {};
-struct scanning_max_decision {};
-struct scanning_max_step {};
-struct scanning_max_advance {};
-struct normalizing_scores_begin {};
-struct normalizing_scores_decision {};
-struct normalizing_scores_step {};
-struct normalizing_scores_advance {};
 struct done {};
 struct errored {};
 
@@ -33,54 +21,12 @@ struct model {
       //------------------------------------------------------------------------------//
         sml::state<request_decision> <= *sml::state<ready> + sml::event<event::build_runtime>
           / action::begin_build
-      , sml::state<preparing_candidates_begin> <= sml::state<request_decision>
+      , sml::state<done> <= sml::state<request_decision>
           + sml::completion<event::build_runtime> [ guard::valid_request{} ]
+          / action::execute_build
       , sml::state<errored> <= sml::state<request_decision>
           + sml::completion<event::build_runtime> [ guard::invalid_request{} ]
           / action::mark_invalid_request
-
-      //------------------------------------------------------------------------------//
-      , sml::state<preparing_candidates_decision> <= sml::state<preparing_candidates_begin>
-          + sml::completion<event::build_runtime> / action::prepare_candidates_begin
-      , sml::state<preparing_candidates_step> <= sml::state<preparing_candidates_decision>
-          + sml::completion<event::build_runtime> [ guard::prepare_has_more{} ]
-      , sml::state<scanning_max_begin> <= sml::state<preparing_candidates_decision>
-          + sml::completion<event::build_runtime> [ guard::prepare_done{} ]
-          / action::set_candidate_count_from_vocab
-
-      , sml::state<preparing_candidates_advance> <= sml::state<preparing_candidates_step>
-          + sml::completion<event::build_runtime> / action::prepare_candidate_step
-      , sml::state<preparing_candidates_decision> <= sml::state<preparing_candidates_advance>
-          + sml::completion<event::build_runtime> / action::advance_prepare_cursor
-
-      //------------------------------------------------------------------------------//
-      , sml::state<scanning_max_decision> <= sml::state<scanning_max_begin>
-          + sml::completion<event::build_runtime> / action::begin_max_scan
-      , sml::state<scanning_max_step> <= sml::state<scanning_max_decision>
-          + sml::completion<event::build_runtime> [ guard::max_scan_has_more{} ]
-      , sml::state<normalizing_scores_begin> <= sml::state<scanning_max_decision>
-          + sml::completion<event::build_runtime> [ guard::max_scan_done{} ]
-
-      , sml::state<scanning_max_advance> <= sml::state<scanning_max_step>
-          + sml::completion<event::build_runtime> [ guard::current_score_exceeds_max{} ]
-          / action::update_max_score
-      , sml::state<scanning_max_advance> <= sml::state<scanning_max_step>
-          + sml::completion<event::build_runtime> [ guard::current_score_not_exceeds_max{} ]
-      , sml::state<scanning_max_decision> <= sml::state<scanning_max_advance>
-          + sml::completion<event::build_runtime> / action::advance_max_cursor
-
-      //------------------------------------------------------------------------------//
-      , sml::state<normalizing_scores_decision> <= sml::state<normalizing_scores_begin>
-          + sml::completion<event::build_runtime> / action::begin_normalize
-      , sml::state<normalizing_scores_step> <= sml::state<normalizing_scores_decision>
-          + sml::completion<event::build_runtime> [ guard::normalize_has_more{} ]
-      , sml::state<done> <= sml::state<normalizing_scores_decision>
-          + sml::completion<event::build_runtime> [ guard::normalize_done{} ]
-
-      , sml::state<normalizing_scores_advance> <= sml::state<normalizing_scores_step>
-          + sml::completion<event::build_runtime> / action::normalize_score_step
-      , sml::state<normalizing_scores_decision> <= sml::state<normalizing_scores_advance>
-          + sml::completion<event::build_runtime> / action::advance_normalize_cursor
 
       //------------------------------------------------------------------------------//
       , sml::state<ready> <= sml::state<done> + sml::completion<event::build_runtime>
@@ -92,30 +38,6 @@ struct model {
       , sml::state<ready> <= sml::state<ready> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<request_decision> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<preparing_candidates_begin> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<preparing_candidates_decision> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<preparing_candidates_step> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<preparing_candidates_advance> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<scanning_max_begin> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<scanning_max_decision> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<scanning_max_step> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<scanning_max_advance> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<normalizing_scores_begin> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<normalizing_scores_decision> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<normalizing_scores_step> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<ready> <= sml::state<normalizing_scores_advance> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<done> + sml::unexpected_event<sml::_>
           / action::on_unexpected

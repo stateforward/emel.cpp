@@ -99,11 +99,14 @@ add_subdirectory(${reference_impl_SOURCE_DIR}/src llama_src)
 set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${EMEL_ROOT} emel)
 
+find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
+
 add_executable(bench_runner
   ${CMAKE_CURRENT_SOURCE_DIR}/batch/planner_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/text/jinja/parser_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/text/jinja/formatter_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/parser_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/logits_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory/kv_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory/recurrent_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory/hybrid_bench.cpp
@@ -143,6 +146,7 @@ target_include_directories(bench_runner
     ${reference_impl_SOURCE_DIR}/common
     ${reference_impl_SOURCE_DIR}/ggml/include
     ${reference_impl_SOURCE_DIR}/include
+    ${NLOHMANN_JSON_INCLUDE_DIR}
 )
 
 add_executable(gbnf_bench_runner

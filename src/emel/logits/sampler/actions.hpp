@@ -23,7 +23,6 @@ struct begin_sample {
     ev.ctx.err = emel::error::cast(error::none);
     ev.ctx.candidate_count = ev.request.vocab_size;
     ev.ctx.sampler_index = 0;
-    ev.ctx.cursor = 0;
     ev.ctx.sampler_call_error = emel::error::cast(error::none);
     ev.request.selected_token_out = -1;
     ev.request.error_out = emel::error::cast(error::none);
@@ -39,22 +38,17 @@ struct mark_invalid_request {
   }
 };
 
-struct prepare_candidates_begin {
+struct prepare_candidates {
   void operator()(const event::sample_logits_runtime & ev, context &) const noexcept {
-    ev.ctx.cursor = 0;
-  }
-};
+    const int32_t vocab_size = ev.request.vocab_size;
+    const float * logits = &ev.request.logits;
+    int32_t * candidate_ids = &ev.request.candidate_ids;
+    float * candidate_scores = &ev.request.candidate_scores;
 
-struct prepare_candidate_step {
-  void operator()(const event::sample_logits_runtime & ev, context &) const noexcept {
-    (&ev.request.candidate_ids)[ev.ctx.cursor] = ev.ctx.cursor;
-    (&ev.request.candidate_scores)[ev.ctx.cursor] = (&ev.request.logits)[ev.ctx.cursor];
-  }
-};
-
-struct advance_prepare_cursor {
-  void operator()(const event::sample_logits_runtime & ev, context &) const noexcept {
-    ev.ctx.cursor += 1;
+    for (int32_t i = 0; i < vocab_size; ++i) {
+      candidate_ids[i] = i;
+      candidate_scores[i] = logits[i];
+    }
   }
 };
 
@@ -113,9 +107,7 @@ struct on_unexpected {
 
 inline constexpr begin_sample begin_sample{};
 inline constexpr mark_invalid_request mark_invalid_request{};
-inline constexpr prepare_candidates_begin prepare_candidates_begin{};
-inline constexpr prepare_candidate_step prepare_candidate_step{};
-inline constexpr advance_prepare_cursor advance_prepare_cursor{};
+inline constexpr prepare_candidates prepare_candidates{};
 inline constexpr apply_sampler apply_sampler{};
 inline constexpr mark_sampler_error mark_sampler_error{};
 inline constexpr advance_sampler_index advance_sampler_index{};

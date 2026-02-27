@@ -44,18 +44,6 @@ struct preselected_token_invalid {
   }
 };
 
-struct prepare_has_more {
-  bool operator()(const event::sample_logits_runtime & ev) const noexcept {
-    return ev.ctx.cursor < ev.request.vocab_size;
-  }
-};
-
-struct prepare_done {
-  bool operator()(const event::sample_logits_runtime & ev) const noexcept {
-    return ev.ctx.cursor >= ev.request.vocab_size;
-  }
-};
-
 struct has_more_samplers {
   bool operator()(const event::sample_logits_runtime & ev, const action::context & ctx) const noexcept {
     return ev.ctx.sampler_index < ctx.sampler_count;

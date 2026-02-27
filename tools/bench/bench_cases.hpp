@@ -20,6 +20,8 @@ void append_emel_jinja_formatter_cases(std::vector<result> & results, const conf
 void append_reference_jinja_formatter_cases(std::vector<result> & results, const config & cfg);
 void append_emel_gbnf_parser_cases(std::vector<result> & results, const config & cfg);
 void append_reference_gbnf_parser_cases(std::vector<result> & results, const config & cfg);
+void append_emel_logits_cases(std::vector<result> & results, const config & cfg);
+void append_reference_logits_cases(std::vector<result> & results, const config & cfg);
 void append_emel_sm_any_cases(std::vector<result> & results, const config & cfg);
 void append_reference_sm_any_cases(std::vector<result> & results, const config & cfg);
 void append_emel_tokenizer_preprocessor_bpe_cases(std::vector<result> & results,
