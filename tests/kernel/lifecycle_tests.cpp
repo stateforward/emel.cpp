@@ -282,6 +282,112 @@ TEST_CASE("kernel_detail_negative_compute_paths") {
   CHECK_FALSE(emel::kernel::detail::run_soft_max(soft_max_ev));
 }
 
+TEST_CASE("kernel_detail_stride_paths_and_scalar_helpers") {
+  float src0_storage[16] = {1.0f, 0.0f, 2.0f, 0.0f, 3.0f, 0.0f, 4.0f, 0.0f,
+                            5.0f, 0.0f, 6.0f, 0.0f, 7.0f, 0.0f, 8.0f, 0.0f};
+  float src1_storage[16] = {2.0f, 0.0f, 3.0f, 0.0f, 4.0f, 0.0f, 5.0f, 0.0f,
+                            6.0f, 0.0f, 7.0f, 0.0f, 8.0f, 0.0f, 9.0f, 0.0f};
+  float dst_storage[16] = {};
+
+  auto src0 = make_src(src0_storage, dtype::f32, 4);
+  auto src1 = make_src(src1_storage, dtype::f32, 4);
+  auto dst = make_dst(dst_storage, dtype::f32, 4);
+
+  src0.nb[0] = sizeof(float) * 2;
+  src0.nb[1] = src0.nb[0] * src0.ne[0];
+  src1.nb[0] = sizeof(float) * 2;
+  src1.nb[1] = src1.nb[0] * src1.ne[0];
+  dst.nb[0] = sizeof(float) * 2;
+  dst.nb[1] = dst.nb[0] * dst.ne[0];
+
+  CHECK(emel::kernel::detail::has_valid_tensor_layout(src0));
+
+  auto invalid = src0;
+  invalid.nb[0] = 2;
+  CHECK_FALSE(emel::kernel::detail::has_valid_tensor_layout(invalid));
+
+  invalid = src0;
+  invalid.ne[1] = 2;
+  invalid.nb[1] = 0;
+  CHECK_FALSE(emel::kernel::detail::has_valid_tensor_layout(invalid));
+
+  auto default_stride = src0;
+  default_stride.nb = {0, 0, 0, 0};
+  CHECK(emel::kernel::detail::tensor_stride_bytes(default_stride, 0) == sizeof(float));
+  CHECK(emel::kernel::detail::tensor_stride_bytes(default_stride, 1) == sizeof(float) * 4);
+
+  auto zero_dim = src0;
+  zero_dim.ne[2] = 0;
+  (void) emel::kernel::detail::tensor_offset_bytes(zero_dim, static_cast<uint64_t>(1));
+
+  const float read_before = emel::kernel::detail::read_f32(src0, 2);
+  CHECK(read_before == doctest::Approx(3.0f));
+  emel::kernel::detail::write_f32(dst, 2, 42.0f);
+  CHECK(dst_storage[4] == doctest::Approx(42.0f));
+
+  emel::kernel::event::op_add add_ev{
+      .src0 = src0,
+      .src1 = src1,
+      .dst = dst,
+      .nth = 1,
+  };
+  CHECK(emel::kernel::detail::run_binary(
+      add_ev, [](const float lhs, const float rhs) { return lhs + rhs; }));
+  CHECK(dst_storage[0] == doctest::Approx(3.0f));
+  CHECK(dst_storage[2] == doctest::Approx(5.0f));
+  CHECK(dst_storage[4] == doctest::Approx(7.0f));
+  CHECK(dst_storage[6] == doctest::Approx(9.0f));
+
+  emel::kernel::event::op_mul_mat mul_mat_ev{
+      .src0 = make_src(src0_storage, dtype::f32, 2, 2),
+      .src1 = make_src(src1_storage, dtype::f32, 2, 2),
+      .dst = make_dst(dst_storage, dtype::f32, 2, 2),
+      .nth = 1,
+  };
+  mul_mat_ev.src0.nb[0] = sizeof(float) * 2;
+  mul_mat_ev.src0.nb[1] = mul_mat_ev.src0.nb[0] * mul_mat_ev.src0.ne[0];
+  mul_mat_ev.src1.nb[0] = sizeof(float) * 2;
+  mul_mat_ev.src1.nb[1] = mul_mat_ev.src1.nb[0] * mul_mat_ev.src1.ne[0];
+  mul_mat_ev.dst.nb[0] = sizeof(float) * 2;
+  mul_mat_ev.dst.nb[1] = mul_mat_ev.dst.nb[0] * mul_mat_ev.dst.ne[0];
+
+  CHECK(emel::kernel::detail::run_mul_mat(mul_mat_ev));
+  CHECK(dst_storage[0] == doctest::Approx(10.0f));
+  CHECK(dst_storage[2] == doctest::Approx(13.0f));
+  CHECK(dst_storage[4] == doctest::Approx(22.0f));
+  CHECK(dst_storage[6] == doctest::Approx(29.0f));
+
+  emel::kernel::event::op_soft_max soft_max_ev{
+      .src0 = make_src(src0_storage, dtype::f32, 2, 2),
+      .dst = make_dst(dst_storage, dtype::f32, 2, 2),
+      .nth = 1,
+  };
+  soft_max_ev.src0.nb[0] = sizeof(float) * 2;
+  soft_max_ev.src0.nb[1] = soft_max_ev.src0.nb[0] * soft_max_ev.src0.ne[0];
+  soft_max_ev.dst.nb[0] = sizeof(float) * 2;
+  soft_max_ev.dst.nb[1] = soft_max_ev.dst.nb[0] * soft_max_ev.dst.ne[0];
+
+  CHECK(emel::kernel::detail::run_soft_max(soft_max_ev));
+  CHECK((dst_storage[0] + dst_storage[2]) == doctest::Approx(1.0f));
+  CHECK((dst_storage[4] + dst_storage[6]) == doctest::Approx(1.0f));
+
+  emel::kernel::event::op_div div_ev{
+      .src0 = make_src(src0_storage, dtype::f32, 4),
+      .src1 = make_src(src1_storage, dtype::f32, 4),
+      .dst = make_dst(dst_storage, dtype::f32, 4),
+      .nth = 1,
+  };
+  emel::kernel::detail::execute_scalar_unchecked(div_ev);
+  CHECK(dst_storage[0] == doctest::Approx(0.5f));
+
+  const emel::kernel::event::op_sum unsupported_ev{
+      .src0 = make_src(src0_storage, dtype::f32, 4),
+      .dst = make_dst(dst_storage, dtype::f32, 4),
+      .nth = 1,
+  };
+  CHECK_FALSE(emel::kernel::detail::execute_scalar(unsupported_ev));
+}
+
 TEST_CASE("kernel_backends_reject_quantized_dispatch_dtypes") {
   float src0[4] = {1.0f, 2.0f, 3.0f, 4.0f};
   float src1[4] = {4.0f, 3.0f, 2.0f, 1.0f};
@@ -375,14 +481,18 @@ TEST_CASE("kernel_backends_cover_all_ggml_ops") {
   emel::kernel::any any_machine{};
 
 #define EMEL_KERNEL_CHECK_ALL_BACKENDS(op_name)                                             \
-  CHECK(x86_64_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>())); \
-  CHECK(aarch64_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>())); \
-  CHECK(wasm_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>()));    \
-  CHECK(cuda_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>()));    \
-  CHECK(metal_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>()));   \
-  CHECK(vulkan_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>()));  \
-  CHECK(kernel_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>()));  \
-  CHECK(any_machine.process_event(make_smoke_op_event<emel::kernel::event::op_name>()));
+  {                                                                                           \
+    const auto ev = make_smoke_op_event<emel::kernel::event::op_name>();                     \
+    const bool scalar_supported = emel::kernel::detail::can_execute_scalar(ev);              \
+    CHECK(x86_64_machine.process_event(ev) == scalar_supported);                              \
+    CHECK(aarch64_machine.process_event(ev) == scalar_supported);                             \
+    CHECK(wasm_machine.process_event(ev));                                                    \
+    CHECK(cuda_machine.process_event(ev));                                                    \
+    CHECK(metal_machine.process_event(ev));                                                   \
+    CHECK(vulkan_machine.process_event(ev));                                                  \
+    CHECK(kernel_machine.process_event(ev) == scalar_supported);                              \
+    CHECK(any_machine.process_event(ev) == scalar_supported);                                 \
+  }
   EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_CHECK_ALL_BACKENDS)
 #undef EMEL_KERNEL_CHECK_ALL_BACKENDS
 }

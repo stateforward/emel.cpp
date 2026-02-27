@@ -49,6 +49,38 @@ TEST_CASE("kernel_aarch64_numeric_paths") {
   CHECK(out_mul[3] == doctest::Approx(32.0f));
 }
 
+TEST_CASE("kernel_aarch64_scalar_path_honors_strides") {
+  float lhs_storage[8] = {1.0f, 91.0f, 2.0f, 92.0f, 3.0f, 93.0f, 4.0f, 94.0f};
+  float rhs_storage[8] = {10.0f, 81.0f, 20.0f, 82.0f, 30.0f, 83.0f, 40.0f, 84.0f};
+  float dst_storage[8] = {};
+
+  auto lhs = make_src(lhs_storage, dtype::f32, 4);
+  auto rhs = make_src(rhs_storage, dtype::f32, 4);
+  auto dst = make_dst(dst_storage, dtype::f32, 4);
+
+  lhs.nb[0] = sizeof(float) * 2;
+  lhs.nb[1] = lhs.nb[0] * lhs.ne[0];
+  rhs.nb[0] = sizeof(float) * 2;
+  rhs.nb[1] = rhs.nb[0] * rhs.ne[0];
+  dst.nb[0] = sizeof(float) * 2;
+  dst.nb[1] = dst.nb[0] * dst.ne[0];
+
+  const emel::kernel::event::op_add add_ev{
+      .src0 = lhs,
+      .src1 = rhs,
+      .dst = dst,
+      .nth = 1,
+  };
+
+  aarch64_sm machine{emel::kernel::aarch64::action::context{false, 0}};
+  CHECK(machine.process_event(add_ev));
+
+  CHECK(dst_storage[0] == doctest::Approx(11.0f));
+  CHECK(dst_storage[2] == doctest::Approx(22.0f));
+  CHECK(dst_storage[4] == doctest::Approx(33.0f));
+  CHECK(dst_storage[6] == doctest::Approx(44.0f));
+}
+
 TEST_CASE("kernel_aarch64_forced_neon_context_path") {
   float lhs[4] = {2.0f, 4.0f, 6.0f, 8.0f};
   float rhs[4] = {1.0f, 3.0f, 5.0f, 7.0f};
@@ -163,4 +195,18 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
   (void) simd_add;
   (void) simd_mul;
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_simd(sub_ev));
+}
+
+TEST_CASE("kernel_aarch64_rejects_unimplemented_ops") {
+  float src[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+  float dst[4] = {};
+
+  const emel::kernel::event::op_sum sum_ev{
+      .src0 = make_src(src, dtype::f32, 4),
+      .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
+  };
+
+  aarch64_sm machine{};
+  CHECK_FALSE(machine.process_event(sum_ev));
 }

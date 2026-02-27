@@ -9,7 +9,21 @@
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
 
+#if (defined(__x86_64__) || defined(_M_X64)) && (defined(__GNUC__) || defined(__clang__))
+#define EMEL_KERNEL_X86_AVX2_TARGET __attribute__((target("avx2")))
+#else
+#define EMEL_KERNEL_X86_AVX2_TARGET
+#endif
+
 namespace emel::kernel::x86_64::detail {
+
+inline constexpr bool avx2_intrinsics_compiled =
+#if (defined(__x86_64__) || defined(_M_X64)) && \
+    (defined(__AVX2__) || defined(__GNUC__) || defined(__clang__))
+    true;
+#else
+    false;
+#endif
 
 inline bool detect_avx2() noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -26,24 +40,7 @@ inline bool detect_avx2() noexcept {
 
 template <class tensor_type>
 inline bool is_dense_contiguous(const tensor_type & tensor) noexcept {
-  const uint8_t code = ::emel::kernel::detail::dtype_code(tensor.type);
-  const uint64_t elem_size = ::emel::kernel::detail::dtype_size_bytes(code);
-  if (elem_size == 0) {
-    return false;
-  }
-
-  if (tensor.nb[0] == 0) {
-    return true;
-  }
-
-  uint64_t stride = elem_size;
-  for (size_t i = 0; i < 4; ++i) {
-    if (tensor.nb[i] != stride) {
-      return false;
-    }
-    stride *= tensor.ne[i];
-  }
-  return true;
+  return ::emel::kernel::detail::is_dense_contiguous(tensor);
 }
 
 template <class request_type>
@@ -54,6 +51,9 @@ inline bool can_use_avx2(const request_type & request, const bool avx2_available
   return false;
 #else
   if (!avx2_available) {
+    return false;
+  }
+  if (!avx2_intrinsics_compiled) {
     return false;
   }
   if (!::emel::kernel::detail::can_execute_scalar(request)) {
@@ -79,8 +79,10 @@ inline bool can_use_avx2(const request_type & request, const bool avx2_available
 #endif
 }
 
+EMEL_KERNEL_X86_AVX2_TARGET
 inline bool execute_avx2_dup(const event::op_dup & request) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
+#if defined(__AVX2__) || defined(__GNUC__) || defined(__clang__)
   const uint64_t count = ::emel::kernel::detail::tensor_element_count(request.dst);
   const float * src = static_cast<const float *>(request.src0.data);
   float * dst = static_cast<float *>(request.dst.data);
@@ -97,10 +99,16 @@ inline bool execute_avx2_dup(const event::op_dup & request) noexcept {
   (void) request;
   return false;
 #endif
+#else
+  (void) request;
+  return false;
+#endif
 }
 
+EMEL_KERNEL_X86_AVX2_TARGET
 inline bool execute_avx2_add(const event::op_add & request) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
+#if defined(__AVX2__) || defined(__GNUC__) || defined(__clang__)
   const uint64_t count = ::emel::kernel::detail::tensor_element_count(request.dst);
   const float * lhs = static_cast<const float *>(request.src0.data);
   const float * rhs = static_cast<const float *>(request.src1.data);
@@ -120,10 +128,16 @@ inline bool execute_avx2_add(const event::op_add & request) noexcept {
   (void) request;
   return false;
 #endif
+#else
+  (void) request;
+  return false;
+#endif
 }
 
+EMEL_KERNEL_X86_AVX2_TARGET
 inline bool execute_avx2_mul(const event::op_mul & request) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
+#if defined(__AVX2__) || defined(__GNUC__) || defined(__clang__)
   const uint64_t count = ::emel::kernel::detail::tensor_element_count(request.dst);
   const float * lhs = static_cast<const float *>(request.src0.data);
   const float * rhs = static_cast<const float *>(request.src1.data);
@@ -143,6 +157,23 @@ inline bool execute_avx2_mul(const event::op_mul & request) noexcept {
   (void) request;
   return false;
 #endif
+#else
+  (void) request;
+  return false;
+#endif
+}
+
+template <class request_type>
+inline void execute_simd_unchecked(const request_type & request) noexcept {
+  if constexpr (std::is_same_v<request_type, event::op_dup>) {
+    (void) execute_avx2_dup(request);
+  }
+  if constexpr (std::is_same_v<request_type, event::op_add>) {
+    (void) execute_avx2_add(request);
+  }
+  if constexpr (std::is_same_v<request_type, event::op_mul>) {
+    (void) execute_avx2_mul(request);
+  }
 }
 
 template <class request_type>
@@ -172,3 +203,5 @@ inline bool execute_request(const request_type & request, const context_type & c
 }
 
 }  // namespace emel::kernel::x86_64::detail
+
+#undef EMEL_KERNEL_X86_AVX2_TARGET

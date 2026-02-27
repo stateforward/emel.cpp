@@ -36,7 +36,7 @@ struct exec_dispatch {
 template <class dispatch_event_type>
 struct exec_scalar_op {
   void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
-    (void) ::emel::kernel::detail::execute_scalar(ev.request);
+    ::emel::kernel::detail::execute_scalar_unchecked(ev.request);
     detail::mark_done(ev, ctx);
   }
 };
@@ -44,7 +44,7 @@ struct exec_scalar_op {
 template <class dispatch_event_type>
 struct exec_simd_op {
   void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
-    (void) ::emel::kernel::x86_64::detail::execute_simd(ev.request);
+    ::emel::kernel::x86_64::detail::execute_simd_unchecked(ev.request);
     detail::mark_done(ev, ctx);
   }
 };

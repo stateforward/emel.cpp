@@ -21,24 +21,7 @@ inline bool detect_neon() noexcept {
 
 template <class tensor_type>
 inline bool is_dense_contiguous(const tensor_type & tensor) noexcept {
-  const uint8_t code = ::emel::kernel::detail::dtype_code(tensor.type);
-  const uint64_t elem_size = ::emel::kernel::detail::dtype_size_bytes(code);
-  if (elem_size == 0) {
-    return false;
-  }
-
-  if (tensor.nb[0] == 0) {
-    return true;
-  }
-
-  uint64_t stride = elem_size;
-  for (size_t i = 0; i < 4; ++i) {
-    if (tensor.nb[i] != stride) {
-      return false;
-    }
-    stride *= tensor.ne[i];
-  }
-  return true;
+  return ::emel::kernel::detail::is_dense_contiguous(tensor);
 }
 
 template <class request_type>
@@ -140,6 +123,19 @@ inline bool execute_neon_mul(const event::op_mul & request) noexcept {
   (void) request;
   return false;
 #endif
+}
+
+template <class request_type>
+inline void execute_simd_unchecked(const request_type & request) noexcept {
+  if constexpr (std::is_same_v<request_type, event::op_dup>) {
+    (void) execute_neon_dup(request);
+  }
+  if constexpr (std::is_same_v<request_type, event::op_add>) {
+    (void) execute_neon_add(request);
+  }
+  if constexpr (std::is_same_v<request_type, event::op_mul>) {
+    (void) execute_neon_mul(request);
+  }
 }
 
 template <class request_type>

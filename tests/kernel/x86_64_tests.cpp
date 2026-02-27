@@ -51,7 +51,44 @@ TEST_CASE("kernel_x86_64_numeric_paths") {
   CHECK(out_mul[3] == doctest::Approx(32.0f));
 }
 
+TEST_CASE("kernel_x86_64_scalar_path_honors_strides") {
+  float lhs_storage[8] = {1.0f, 91.0f, 2.0f, 92.0f, 3.0f, 93.0f, 4.0f, 94.0f};
+  float rhs_storage[8] = {10.0f, 81.0f, 20.0f, 82.0f, 30.0f, 83.0f, 40.0f, 84.0f};
+  float dst_storage[8] = {};
+
+  auto lhs = make_src(lhs_storage, dtype::f32, 4);
+  auto rhs = make_src(rhs_storage, dtype::f32, 4);
+  auto dst = make_dst(dst_storage, dtype::f32, 4);
+
+  lhs.nb[0] = sizeof(float) * 2;
+  lhs.nb[1] = lhs.nb[0] * lhs.ne[0];
+  rhs.nb[0] = sizeof(float) * 2;
+  rhs.nb[1] = rhs.nb[0] * rhs.ne[0];
+  dst.nb[0] = sizeof(float) * 2;
+  dst.nb[1] = dst.nb[0] * dst.ne[0];
+
+  const emel::kernel::event::op_add add_ev{
+      .src0 = lhs,
+      .src1 = rhs,
+      .dst = dst,
+      .nth = 1,
+  };
+
+  x86_64_sm machine{emel::kernel::x86_64::action::context{false, 0}};
+  CHECK(machine.process_event(add_ev));
+
+  CHECK(dst_storage[0] == doctest::Approx(11.0f));
+  CHECK(dst_storage[2] == doctest::Approx(22.0f));
+  CHECK(dst_storage[4] == doctest::Approx(33.0f));
+  CHECK(dst_storage[6] == doctest::Approx(44.0f));
+}
+
 TEST_CASE("kernel_x86_64_forced_avx2_context_path") {
+  if (!emel::kernel::x86_64::detail::avx2_intrinsics_compiled ||
+      !emel::kernel::x86_64::detail::detect_avx2()) {
+    return;
+  }
+
   float lhs[4] = {2.0f, 4.0f, 6.0f, 8.0f};
   float rhs[4] = {1.0f, 3.0f, 5.0f, 7.0f};
   float out[4] = {};
@@ -107,7 +144,24 @@ TEST_CASE("kernel_x86_64_unary_subop_supported_and_unsupported_paths") {
   CHECK_FALSE(machine.process_event(unary_ev));
 }
 
+TEST_CASE("kernel_x86_64_rejects_unimplemented_ops") {
+  float src[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+  float dst[4] = {};
+
+  const emel::kernel::event::op_sum sum_ev{
+      .src0 = make_src(src, dtype::f32, 4),
+      .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
+  };
+
+  x86_64_sm machine{};
+  CHECK_FALSE(machine.process_event(sum_ev));
+}
+
 TEST_CASE("kernel_x86_64_detail_branch_paths") {
+  const bool host_avx2 = emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+                         emel::kernel::x86_64::detail::detect_avx2();
+
   float lhs[4] = {1.0f, 2.0f, 3.0f, 4.0f};
   float rhs[4] = {4.0f, 3.0f, 2.0f, 1.0f};
   float dst[4] = {};
@@ -120,32 +174,31 @@ TEST_CASE("kernel_x86_64_detail_branch_paths") {
   };
 
   CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, false));
-#if defined(__x86_64__) || defined(_M_X64)
-  CHECK(emel::kernel::x86_64::detail::can_use_avx2(add_ev, true));
-#else
-  CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, true));
-#endif
+  CHECK(emel::kernel::x86_64::detail::can_use_avx2(add_ev, host_avx2) == host_avx2);
   CHECK(emel::kernel::x86_64::detail::execute_request(
-      add_ev, emel::kernel::x86_64::action::context{true, 0}));
+      add_ev, emel::kernel::x86_64::action::context{host_avx2, 0}));
 
   add_ev.dst.nb[0] = add_ev.dst.nb[0] * 2;
-  CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, true));
+  CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, host_avx2));
 
   add_ev.dst.nb[0] = emel::kernel::detail::dtype_size_bytes(
       emel::kernel::detail::dtype_code(add_ev.dst.type));
   add_ev.src1.type = dtype::q4_0;
-  CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, true));
+  CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, host_avx2));
 
   add_ev.src1.type = dtype::f32;
   add_ev.src1.nb[0] = add_ev.src1.nb[0] * 2;
-  CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, true));
+  CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, host_avx2));
 
   add_ev.src1 = make_src(rhs, dtype::f32, 4);
   add_ev.src0.type = dtype::q4_0;
-  CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, true));
+  CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, host_avx2));
 }
 
 TEST_CASE("kernel_x86_64_detail_helper_edge_paths") {
+  const bool host_avx2 = emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+                         emel::kernel::x86_64::detail::detect_avx2();
+
   float src0[4] = {1.0f, 2.0f, 3.0f, 4.0f};
   float dst0[4] = {};
 
@@ -184,21 +237,48 @@ TEST_CASE("kernel_x86_64_detail_helper_edge_paths") {
       .nth = 1,
   };
 
-#if defined(__x86_64__) || defined(_M_X64)
-  CHECK(emel::kernel::x86_64::detail::execute_avx2_dup(dup_ev));
-  CHECK(emel::kernel::x86_64::detail::execute_avx2_add(add_ev));
-  CHECK(emel::kernel::x86_64::detail::execute_avx2_mul(mul_ev));
-#else
+  if (host_avx2) {
+    CHECK(emel::kernel::x86_64::detail::execute_avx2_dup(dup_ev));
+    CHECK(emel::kernel::x86_64::detail::execute_avx2_add(add_ev));
+    CHECK(emel::kernel::x86_64::detail::execute_avx2_mul(mul_ev));
+    CHECK(emel::kernel::x86_64::detail::execute_simd(dup_ev));
+    CHECK(emel::kernel::x86_64::detail::execute_simd(add_ev));
+    CHECK(emel::kernel::x86_64::detail::execute_simd(mul_ev));
+  }
+#if !(defined(__x86_64__) || defined(_M_X64))
   CHECK_FALSE(emel::kernel::x86_64::detail::execute_avx2_dup(dup_ev));
   CHECK_FALSE(emel::kernel::x86_64::detail::execute_avx2_add(add_ev));
   CHECK_FALSE(emel::kernel::x86_64::detail::execute_avx2_mul(mul_ev));
+  emel::kernel::x86_64::detail::execute_simd_unchecked(dup_ev);
+  emel::kernel::x86_64::detail::execute_simd_unchecked(add_ev);
+  emel::kernel::x86_64::detail::execute_simd_unchecked(mul_ev);
+  CHECK_FALSE(emel::kernel::x86_64::detail::execute_simd(dup_ev));
+  CHECK_FALSE(emel::kernel::x86_64::detail::execute_simd(add_ev));
+  CHECK_FALSE(emel::kernel::x86_64::detail::execute_simd(mul_ev));
 #endif
 
-  const bool simd_dup = emel::kernel::x86_64::detail::execute_simd(dup_ev);
-  const bool simd_add = emel::kernel::x86_64::detail::execute_simd(add_ev);
-  const bool simd_mul = emel::kernel::x86_64::detail::execute_simd(mul_ev);
-  (void) simd_dup;
-  (void) simd_add;
-  (void) simd_mul;
   CHECK_FALSE(emel::kernel::x86_64::detail::execute_simd(sub_ev));
+}
+
+TEST_CASE("kernel_x86_64_simd_action_exec_marks_done") {
+  float src0[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+  float src1[4] = {4.0f, 3.0f, 2.0f, 1.0f};
+  float dst[4] = {};
+
+  const emel::kernel::event::op_add add_ev{
+      .src0 = make_src(src0, dtype::f32, 4),
+      .src1 = make_src(src1, dtype::f32, 4),
+      .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
+  };
+
+  emel::kernel::x86_64::event::dispatch_ctx dispatch_ctx{};
+  emel::kernel::x86_64::action::context ctx{false, 0};
+  const emel::kernel::x86_64::event::dispatch_op_add dispatch_ev{add_ev, dispatch_ctx};
+
+  emel::kernel::x86_64::action::exec_simd_op_add(dispatch_ev, ctx);
+
+  CHECK(dispatch_ctx.outcome == emel::kernel::x86_64::events::phase_outcome::done);
+  CHECK(dispatch_ctx.err ==
+        static_cast<int32_t>(emel::error::cast(emel::kernel::x86_64::error::none)));
 }
