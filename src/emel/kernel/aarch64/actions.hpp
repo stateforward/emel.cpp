@@ -1,9 +1,10 @@
 #pragma once
 
 #include "emel/emel.h"
-#include "emel/kernel/errors.hpp"
 #include "emel/kernel/detail.hpp"
+#include "emel/kernel/aarch64/detail.hpp"
 #include "emel/kernel/aarch64/context.hpp"
+#include "emel/kernel/aarch64/errors.hpp"
 #include "emel/kernel/aarch64/events.hpp"
 
 namespace emel::kernel::aarch64::action {
@@ -25,9 +26,25 @@ inline void mark_error(const dispatch_event_type & ev, context & ctx,
   ev.ctx.err = err;
 }
 
+struct exec_dispatch {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_request & ev,
+                  context & ctx) const noexcept {
+    detail::mark_done(ev, ctx);
+  }
+};
+
 template <class dispatch_event_type>
-struct exec_op {
+struct exec_scalar_op {
   void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
+    (void) ::emel::kernel::detail::execute_scalar(ev.request);
+    detail::mark_done(ev, ctx);
+  }
+};
+
+template <class dispatch_event_type>
+struct exec_simd_op {
+  void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
+    (void) ::emel::kernel::aarch64::detail::execute_simd(ev.request);
     detail::mark_done(ev, ctx);
   }
 };
@@ -41,13 +58,17 @@ struct reject_op {
 
 }  // namespace detail
 
-using exec_dispatch_t = detail::exec_op<::emel::kernel::aarch64::event::dispatch_request>;
+using exec_dispatch_t = detail::exec_dispatch;
 
 #define EMEL_KERNEL_DECLARE_RUN_TYPE(op_name)                                \
   using exec_##op_name##_t =                                                  \
-      detail::exec_op<::emel::kernel::aarch64::event::dispatch_##op_name>;
+      detail::exec_scalar_op<::emel::kernel::aarch64::event::dispatch_##op_name>;
 EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_DECLARE_RUN_TYPE)
 #undef EMEL_KERNEL_DECLARE_RUN_TYPE
+
+using exec_simd_op_dup_t = detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_dup>;
+using exec_simd_op_add_t = detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_add>;
+using exec_simd_op_mul_t = detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_mul>;
 
 #define EMEL_KERNEL_DECLARE_REJECT_TYPE(op_name)                                      \
   using reject_invalid_##op_name##_t =                                                \
@@ -67,6 +88,9 @@ struct on_unexpected {
 };
 
 inline constexpr exec_dispatch_t exec_dispatch{};
+inline constexpr exec_simd_op_dup_t exec_simd_op_dup{};
+inline constexpr exec_simd_op_add_t exec_simd_op_add{};
+inline constexpr exec_simd_op_mul_t exec_simd_op_mul{};
 
 #define EMEL_KERNEL_DEFINE_RUN_ACTION(op_name) \
   inline constexpr exec_##op_name##_t exec_##op_name{};

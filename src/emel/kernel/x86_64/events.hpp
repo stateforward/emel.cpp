@@ -3,9 +3,9 @@
 #include <cstdint>
 
 #include "emel/emel.h"
-#include "emel/kernel/errors.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/detail.hpp"
+#include "emel/kernel/x86_64/errors.hpp"
 
 namespace emel::kernel::x86_64::events {
 

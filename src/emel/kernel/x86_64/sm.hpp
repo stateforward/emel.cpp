@@ -4,8 +4,8 @@
 // docs: disabled
 
 #include "emel/emel.h"
-#include "emel/kernel/errors.hpp"
 #include "emel/kernel/x86_64/actions.hpp"
+#include "emel/kernel/x86_64/errors.hpp"
 #include "emel/kernel/x86_64/events.hpp"
 #include "emel/kernel/x86_64/guards.hpp"
 #include "emel/kernel/detail.hpp"
@@ -31,6 +31,11 @@ struct model {
       // Explicit op transitions.
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_dup>
+                 [ guard::simd_op_dup{} ]
+                 / action::exec_simd_op_dup
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_dup>
                  [ guard::valid_op_dup{} ]
                  / action::exec_op_dup
 
@@ -38,6 +43,11 @@ struct model {
                sml::event<::emel::kernel::x86_64::event::dispatch_op_dup>
                  [ guard::invalid_op_dup{} ]
                  / action::reject_invalid_op_dup
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_add>
+                 [ guard::simd_op_add{} ]
+                 / action::exec_simd_op_add
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_add>
@@ -88,6 +98,11 @@ struct model {
                sml::event<::emel::kernel::x86_64::event::dispatch_op_sub>
                  [ guard::invalid_op_sub{} ]
                  / action::reject_invalid_op_sub
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul>
+                 [ guard::simd_op_mul{} ]
+                 / action::exec_simd_op_mul
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_mul>
