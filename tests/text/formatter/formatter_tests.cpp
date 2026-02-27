@@ -3,19 +3,11 @@
 
 #include <doctest/doctest.h>
 
-#include "emel/text/conditioner/errors.hpp"
+#include "emel/emel.h"
 #include "emel/text/formatter/format.hpp"
 
-namespace {
-
-constexpr int32_t formatter_code(const emel::text::conditioner::error err) noexcept {
-  return static_cast<int32_t>(err);
-}
-
-}  // namespace
-
 TEST_CASE("formatter_format_raw_handles_invalid_and_empty_inputs") {
-  int32_t err = formatter_code(emel::text::conditioner::error::none);
+  int32_t err = EMEL_OK;
   size_t out_len = 7;
 
   emel::text::formatter::format_request bad_req = {};
@@ -24,10 +16,10 @@ TEST_CASE("formatter_format_raw_handles_invalid_and_empty_inputs") {
   bad_req.output_capacity = 1;
   bad_req.output_length_out = &out_len;
   CHECK_FALSE(emel::text::formatter::format_raw(nullptr, bad_req, &err));
-  CHECK(err == formatter_code(emel::text::conditioner::error::invalid_argument));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(out_len == 0);
 
-  err = formatter_code(emel::text::conditioner::error::none);
+  err = EMEL_OK;
   out_len = 9;
   emel::text::formatter::format_request empty_req = {};
   empty_req.input = "";
@@ -35,6 +27,6 @@ TEST_CASE("formatter_format_raw_handles_invalid_and_empty_inputs") {
   empty_req.output_capacity = 0;
   empty_req.output_length_out = &out_len;
   CHECK(emel::text::formatter::format_raw(nullptr, empty_req, &err));
-  CHECK(err == formatter_code(emel::text::conditioner::error::none));
+  CHECK(err == EMEL_OK);
   CHECK(out_len == 0);
 }

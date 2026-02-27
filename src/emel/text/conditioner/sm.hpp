@@ -322,7 +322,4 @@ struct sm : public emel::sm<model, action::context> {
   using base_type::visit_current_states;
 
 };
-
-using Conditioner = sm;
-
 }  // namespace emel::text::conditioner

@@ -74,7 +74,7 @@ struct bind_error_from_code {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
     const auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    set_error(ev, ctx, detail::from_local_error_code(ev.ctx.bind_err_code));
+    set_error(ev, ctx, detail::from_external_error_code(ev.ctx.bind_err_code));
   }
 };
 
@@ -161,7 +161,7 @@ struct format_error_from_code {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
     const auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    set_error(ev, ctx, detail::from_local_error_code(ev.ctx.format_err_code));
+    set_error(ev, ctx, detail::from_external_error_code(ev.ctx.format_err_code));
   }
 };
 
@@ -207,7 +207,7 @@ struct tokenize_error_from_code {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
     const auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    set_error(ev, ctx, detail::from_local_error_code(ev.ctx.tokenize_err_code));
+    set_error(ev, ctx, detail::from_external_error_code(ev.ctx.tokenize_err_code));
   }
 };
 

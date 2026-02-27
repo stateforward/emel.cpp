@@ -6,6 +6,7 @@
 
 #include <doctest/doctest.h>
 
+#include "emel/emel.h"
 #include "emel/model/data.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/tokenizer/sm.hpp"
@@ -170,7 +171,7 @@ bool tokenizer_bind_fail_with_error(
     void *,
     const emel::text::tokenizer::event::bind & ev) {
   if (ev.error_out != nullptr) {
-    *ev.error_out = conditioner_code(emel::text::conditioner::error::model_invalid);
+    *ev.error_out = EMEL_ERR_MODEL_INVALID;
   }
   return true;
 }
@@ -185,7 +186,7 @@ bool tokenizer_tokenize_fail_with_error(
     void *,
     const emel::text::tokenizer::event::tokenize & ev) {
   if (ev.error_out != nullptr) {
-    *ev.error_out = conditioner_code(emel::text::conditioner::error::model_invalid);
+    *ev.error_out = EMEL_ERR_MODEL_INVALID;
   }
   return true;
 }
@@ -232,7 +233,7 @@ bool formatter_fail_with_error(
     *request.output_length_out = 0;
   }
   if (error_out != nullptr) {
-    *error_out = conditioner_code(emel::text::conditioner::error::model_invalid);
+    *error_out = EMEL_ERR_MODEL_INVALID;
   }
   return false;
 }
