@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 
-#include "emel/emel.h"
+#include "emel/callback.hpp"
+#include "emel/error/error.hpp"
 #include "emel/model/data.hpp"
+#include "emel/model/weight_loader/errors.hpp"
 
 namespace emel::model::weight_loader {
 
@@ -21,43 +24,74 @@ struct effect_request {
 struct effect_result {
   effect_kind kind = effect_kind::k_none;
   void * handle = nullptr;
-  int32_t err = EMEL_OK;
+  emel::error::type err = emel::error::cast(error::none);
 };
 
 namespace events {
+
 struct bind_done;
 struct bind_error;
 struct plan_done;
 struct plan_error;
 struct apply_done;
 struct apply_error;
+
 }  // namespace events
 
 namespace event {
 
 struct bind_storage {
-  emel::model::data::tensor_record * tensors = nullptr;
-  uint32_t tensor_count = 0;
-  void * owner_sm = nullptr;
-  bool (*dispatch_done)(void * owner_sm, const events::bind_done &) = nullptr;
-  bool (*dispatch_error)(void * owner_sm, const events::bind_error &) = nullptr;
+  std::span<emel::model::data::tensor_record> tensors = {};
+  emel::callback<void(const events::bind_done &)> on_done = {};
+  emel::callback<void(const events::bind_error &)> on_error = {};
+
+  explicit bind_storage(std::span<emel::model::data::tensor_record> tensors_in) noexcept
+      : tensors(tensors_in) {}
 };
 
 struct plan_load {
-  effect_request * effects_out = nullptr;
-  uint32_t effect_capacity = 0;
-  uint32_t * effect_count_out = nullptr;
-  void * owner_sm = nullptr;
-  bool (*dispatch_done)(void * owner_sm, const events::plan_done &) = nullptr;
-  bool (*dispatch_error)(void * owner_sm, const events::plan_error &) = nullptr;
+  std::span<effect_request> effects = {};
+  emel::callback<void(const events::plan_done &)> on_done = {};
+  emel::callback<void(const events::plan_error &)> on_error = {};
+
+  explicit plan_load(std::span<effect_request> effects_in) noexcept : effects(effects_in) {}
 };
 
 struct apply_effect_results {
-  const effect_result * results = nullptr;
-  uint32_t result_count = 0;
-  void * owner_sm = nullptr;
-  bool (*dispatch_done)(void * owner_sm, const events::apply_done &) = nullptr;
-  bool (*dispatch_error)(void * owner_sm, const events::apply_error &) = nullptr;
+  std::span<const effect_result> results = {};
+  emel::callback<void(const events::apply_done &)> on_done = {};
+  emel::callback<void(const events::apply_error &)> on_error = {};
+
+  explicit apply_effect_results(std::span<const effect_result> results_in) noexcept
+      : results(results_in) {}
+};
+
+struct bind_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+};
+
+struct bind_runtime {
+  const bind_storage & request;
+  bind_ctx & ctx;
+};
+
+struct plan_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+  uint32_t effect_count = 0u;
+};
+
+struct plan_runtime {
+  const plan_load & request;
+  plan_ctx & ctx;
+};
+
+struct apply_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+};
+
+struct apply_runtime {
+  const apply_effect_results & request;
+  apply_ctx & ctx;
 };
 
 }  // namespace event
@@ -65,31 +99,31 @@ struct apply_effect_results {
 namespace events {
 
 struct bind_done {
-  const event::bind_storage * request = nullptr;
+  const event::bind_storage & request;
 };
 
 struct bind_error {
-  const event::bind_storage * request = nullptr;
-  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+  const event::bind_storage & request;
+  emel::error::type err = emel::error::cast(error::none);
 };
 
 struct plan_done {
-  const event::plan_load * request = nullptr;
-  uint32_t effect_count = 0;
+  const event::plan_load & request;
+  uint32_t effect_count = 0u;
 };
 
 struct plan_error {
-  const event::plan_load * request = nullptr;
-  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+  const event::plan_load & request;
+  emel::error::type err = emel::error::cast(error::none);
 };
 
 struct apply_done {
-  const event::apply_effect_results * request = nullptr;
+  const event::apply_effect_results & request;
 };
 
 struct apply_error {
-  const event::apply_effect_results * request = nullptr;
-  int32_t err = EMEL_ERR_INVALID_ARGUMENT;
+  const event::apply_effect_results & request;
+  emel::error::type err = emel::error::cast(error::none);
 };
 
 }  // namespace events

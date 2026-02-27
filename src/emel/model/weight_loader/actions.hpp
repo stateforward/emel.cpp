@@ -5,47 +5,78 @@
 
 namespace emel::model::weight_loader::action {
 
-inline void set_error(context & ctx, int32_t err) noexcept {
-  ctx.last_error = err;
-}
-
-struct set_invalid_argument {
-  void operator()(context & ctx) const noexcept { set_error(ctx, EMEL_ERR_INVALID_ARGUMENT); }
-};
-
-struct run_bind_storage {
-  void operator()(const event::bind_storage & ev, context & ctx) const noexcept {
-    ctx.last_error = EMEL_OK;
-    ctx.bound_ok = true;
-    ctx.tensors = ev.tensors;
-    ctx.tensor_count = ev.tensor_count;
+struct exec_bind {
+  void operator()(const event::bind_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ctx.tensors = ev.request.tensors.data();
+    ctx.tensor_count = static_cast<uint32_t>(ev.request.tensors.size());
+    ctx.planned_effects = 0u;
   }
 };
 
-struct run_plan_load {
-  void operator()(const event::plan_load & ev, context & ctx) const noexcept {
-    ctx.last_error = EMEL_OK;
-    ctx.planned_effects = 0;
-    if (ev.effect_count_out != nullptr) {
-      *ev.effect_count_out = 0;
+struct exec_plan {
+  void operator()(const event::plan_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ctx.planned_effects = ctx.tensor_count;
+    ev.ctx.effect_count = ctx.planned_effects;
+    for (uint32_t i = 0u; i < ctx.planned_effects; ++i) {
+      const auto & tensor = ctx.tensors[i];
+      ev.request.effects[i] = effect_request{
+        .kind = effect_kind::k_none,
+        .offset = tensor.file_offset,
+        .size = tensor.data_size,
+        .target = const_cast<void *>(tensor.data),
+      };
     }
   }
 };
 
-struct run_apply_effects {
-  void operator()(const event::apply_effect_results &, context & ctx) const noexcept {
-    ctx.last_error = EMEL_OK;
+struct exec_apply {
+  void operator()(const event::apply_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    for (uint32_t i = 0u; i < ctx.planned_effects; ++i) {
+      ctx.tensors[i].data = ev.request.results[i].handle;
+    }
+    ctx.planned_effects = 0u;
+  }
+};
+
+struct mark_invalid_request {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::invalid_request);
+  }
+};
+
+struct mark_capacity {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::capacity);
+  }
+};
+
+struct mark_backend_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::backend_error);
   }
 };
 
 struct on_unexpected {
-  void operator()(context & ctx) const noexcept { set_error(ctx, EMEL_ERR_BACKEND); }
+  template <class event_type>
+  void operator()(const event_type & ev, context &) const noexcept {
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = emel::error::cast(error::internal_error);
+    }
+  }
 };
 
-inline constexpr set_invalid_argument set_invalid_argument{};
-inline constexpr run_bind_storage run_bind_storage{};
-inline constexpr run_plan_load run_plan_load{};
-inline constexpr run_apply_effects run_apply_effects{};
+inline constexpr exec_bind exec_bind{};
+inline constexpr exec_plan exec_plan{};
+inline constexpr exec_apply exec_apply{};
+inline constexpr mark_invalid_request mark_invalid_request{};
+inline constexpr mark_capacity mark_capacity{};
+inline constexpr mark_backend_error mark_backend_error{};
 inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::model::weight_loader::action
