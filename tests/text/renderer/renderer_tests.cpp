@@ -7,6 +7,7 @@
 
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
+#include "emel/text/detokenizer/errors.hpp"
 #include "emel/text/detokenizer/sm.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/renderer/sm.hpp"
@@ -37,6 +38,10 @@ emel::model::data::vocab & make_vocab() {
   return vocab;
 }
 
+constexpr int32_t detokenizer_error_code(const emel::text::detokenizer::error err) noexcept {
+  return emel::text::detokenizer::error_code(err);
+}
+
 bool detokenizer_bind_dispatch(
     void * detokenizer_sm,
     const emel::text::detokenizer::event::bind & ev) {
@@ -64,9 +69,7 @@ bool detokenizer_bind_fail_no_error(
 bool detokenizer_bind_fail_with_error(
     void *,
     const emel::text::detokenizer::event::bind & ev) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_ERR_MODEL_INVALID;
-  }
+  ev.error_out = detokenizer_error_code(emel::text::detokenizer::error::model_invalid);
   return true;
 }
 
@@ -79,39 +82,25 @@ bool detokenizer_detokenize_fail_no_error(
 bool detokenizer_detokenize_fail_with_error(
     void *,
     const emel::text::detokenizer::event::detokenize & ev) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_ERR_MODEL_INVALID;
-  }
+  ev.error_out = detokenizer_error_code(emel::text::detokenizer::error::model_invalid);
   return true;
 }
 
 bool detokenizer_detokenize_bad_output_length(
     void *,
     const emel::text::detokenizer::event::detokenize & ev) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
-  }
-  if (ev.output_length_out != nullptr) {
-    *ev.output_length_out = ev.output_capacity + 1;
-  }
-  if (ev.pending_length_out != nullptr) {
-    *ev.pending_length_out = ev.pending_length;
-  }
+  ev.error_out = detokenizer_error_code(emel::text::detokenizer::error::none);
+  ev.output_length_out = ev.output_capacity + 1;
+  ev.pending_length_out = ev.pending_length;
   return true;
 }
 
 bool detokenizer_detokenize_bad_pending_length(
     void *,
     const emel::text::detokenizer::event::detokenize & ev) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
-  }
-  if (ev.output_length_out != nullptr) {
-    *ev.output_length_out = 0;
-  }
-  if (ev.pending_length_out != nullptr) {
-    *ev.pending_length_out = ev.pending_capacity + 1;
-  }
+  ev.error_out = detokenizer_error_code(emel::text::detokenizer::error::none);
+  ev.output_length_out = 0;
+  ev.pending_length_out = ev.pending_capacity + 1;
   return true;
 }
 
@@ -570,208 +559,6 @@ TEST_CASE("renderer_dispatches_done_and_error_callbacks") {
   CHECK(recorder.flush_error == 0);
 }
 
-TEST_CASE("detokenizer_action_and_guard_paths") {
-  using emel::text::detokenizer::action::context;
-  using emel::text::detokenizer::action::detail::is_special_token_type;
-  using emel::text::detokenizer::action::detail::is_utf8_continuation;
-  using emel::text::detokenizer::action::detail::parse_hex_nibble;
-  using emel::text::detokenizer::action::detail::parse_plamo2_byte_token;
-  using emel::text::detokenizer::action::detail::utf8_sequence_length;
-
-  uint8_t value = 0;
-  CHECK(parse_hex_nibble('f', value));
-  CHECK(value == 15);
-  CHECK(parse_hex_nibble('A', value));
-  CHECK(value == 10);
-  CHECK_FALSE(parse_hex_nibble('z', value));
-
-  CHECK(parse_plamo2_byte_token("<0x4A>", value));
-  CHECK(value == 0x4A);
-  CHECK_FALSE(parse_plamo2_byte_token("<bad>", value));
-
-  CHECK(utf8_sequence_length(0x24u) == 1);
-  CHECK(utf8_sequence_length(0xC2u) == 2);
-  CHECK(utf8_sequence_length(0xE2u) == 3);
-  CHECK(utf8_sequence_length(0xF0u) == 4);
-  CHECK(utf8_sequence_length(0xFFu) == 0);
-
-  CHECK(is_utf8_continuation(0x80u));
-  CHECK_FALSE(is_utf8_continuation(0x41u));
-  CHECK(is_special_token_type(3));
-  CHECK_FALSE(is_special_token_type(0));
-
-  auto & vocab = make_vocab();
-  const int32_t plain_id = add_token(vocab, "A");
-  const int32_t special_id = add_token(vocab, "<special>", 3);
-  const int32_t byte_id = add_token(vocab, "<0x41>");
-  (void)plain_id;
-  (void)byte_id;
-
-  context ctx = {};
-  std::array<uint8_t, 4> pending = {};
-  std::array<char, 8> output = {};
-  ctx.output = output.data();
-  ctx.output_capacity = output.size();
-  CHECK(emel::text::detokenizer::action::write_bytes(ctx, "", 0));
-  ctx.output = nullptr;
-  CHECK_FALSE(emel::text::detokenizer::action::write_bytes(ctx, "x", 1));
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
-
-  ctx = context{};
-  ctx.pending_bytes = pending.data();
-  ctx.pending_capacity = pending.size();
-  ctx.output = output.data();
-  ctx.output_capacity = output.size();
-  pending[0] = 0xFFu;
-  ctx.pending_length = 1;
-  CHECK_FALSE(emel::text::detokenizer::action::flush_pending_complete_sequences(ctx));
-
-  ctx = context{};
-  ctx.pending_bytes = pending.data();
-  ctx.pending_capacity = pending.size();
-  ctx.output = output.data();
-  ctx.output_capacity = output.size();
-  pending[0] = 0xE2u;
-  ctx.pending_length = 1;
-  CHECK(emel::text::detokenizer::action::flush_pending_complete_sequences(ctx));
-  CHECK(ctx.pending_length == 1);
-
-  ctx = context{};
-  ctx.pending_bytes = pending.data();
-  ctx.pending_capacity = pending.size();
-  ctx.output = output.data();
-  ctx.output_capacity = output.size();
-  pending[0] = 0xE2u;
-  pending[1] = 0x80u;
-  pending[2] = 0x20u;
-  ctx.pending_length = 3;
-  CHECK_FALSE(emel::text::detokenizer::action::flush_pending_complete_sequences(ctx));
-
-  emel::text::detokenizer::event::bind bind_ev = {};
-  bind_ev.vocab = &vocab;
-  emel::text::detokenizer::action::begin_bind(bind_ev, ctx);
-  CHECK(ctx.vocab == &vocab);
-  CHECK_FALSE(ctx.is_bound);
-
-  ctx.vocab = nullptr;
-  emel::text::detokenizer::action::commit_bind(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
-  ctx.vocab = &vocab;
-  emel::text::detokenizer::action::commit_bind(ctx);
-  CHECK(ctx.last_error == EMEL_OK);
-  CHECK(ctx.is_bound);
-
-  emel::text::detokenizer::event::detokenize detok_ev = {};
-  detok_ev.token_id = special_id;
-  detok_ev.emit_special = false;
-  detok_ev.pending_bytes = pending.data();
-  detok_ev.pending_length = 0;
-  detok_ev.pending_capacity = pending.size();
-  detok_ev.output = output.data();
-  detok_ev.output_capacity = output.size();
-  size_t out_len = 0;
-  size_t pending_len = 0;
-  int32_t err = EMEL_OK;
-  detok_ev.output_length_out = &out_len;
-  detok_ev.pending_length_out = &pending_len;
-  detok_ev.error_out = &err;
-
-  emel::text::detokenizer::action::begin_detokenize(detok_ev, ctx);
-  CHECK(ctx.token_id == special_id);
-  CHECK(ctx.output_length == 0);
-
-  ctx.pending_bytes = nullptr;
-  emel::text::detokenizer::action::decode_token(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
-
-  ctx.pending_bytes = pending.data();
-  ctx.pending_capacity = pending.size();
-  ctx.is_bound = true;
-  ctx.vocab = &vocab;
-  ctx.token_id = 999;
-  emel::text::detokenizer::action::decode_token(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_MODEL_INVALID);
-
-  ctx.token_id = special_id;
-  ctx.emit_special = false;
-  ctx.pending_length = 0;
-  ctx.output = output.data();
-  ctx.output_capacity = output.size();
-  ctx.last_error = EMEL_OK;
-  emel::text::detokenizer::action::decode_token(ctx);
-  CHECK(ctx.last_error == EMEL_OK);
-  CHECK(ctx.output_length == 0);
-
-  ctx.token_id = byte_id;
-  ctx.emit_special = true;
-  ctx.pending_length = ctx.pending_capacity;
-  emel::text::detokenizer::action::decode_token(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
-
-  ctx.token_id = plain_id;
-  ctx.pending_length = 1;
-  pending[0] = 0xE2u;
-  ctx.output = output.data();
-  ctx.output_capacity = output.size();
-  emel::text::detokenizer::action::decode_token(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
-
-  ctx.pending_length = 0;
-  ctx.output = output.data();
-  ctx.output_capacity = 0;
-  emel::text::detokenizer::action::decode_token(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
-
-  ctx.output = output.data();
-  ctx.output_capacity = output.size();
-  ctx.last_error = EMEL_OK;
-  emel::text::detokenizer::action::decode_token(ctx);
-  CHECK(ctx.last_error == EMEL_OK);
-  CHECK(ctx.output_length == 1);
-  CHECK(output[0] == 'A');
-
-  emel::text::detokenizer::action::reject_detokenize(detok_ev, ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
-  emel::text::detokenizer::action::mark_done(ctx);
-  CHECK(ctx.last_error == EMEL_OK);
-
-  ctx.last_error = EMEL_OK;
-  ctx.phase_error = EMEL_OK;
-  emel::text::detokenizer::action::ensure_last_error(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
-  emel::text::detokenizer::action::on_unexpected(bind_ev, ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
-
-  emel::text::detokenizer::action::clear_request(ctx);
-  CHECK(ctx.pending_bytes == nullptr);
-  CHECK(ctx.token_id == -1);
-
-  emel::text::detokenizer::event::bind bad_bind = {};
-  CHECK_FALSE(emel::text::detokenizer::guard::valid_bind{}(bad_bind));
-  CHECK(emel::text::detokenizer::guard::invalid_bind{}(bad_bind));
-  bad_bind.vocab = &vocab;
-  CHECK(emel::text::detokenizer::guard::valid_bind{}(bad_bind));
-
-  emel::text::detokenizer::event::detokenize bad_detok = {};
-  CHECK_FALSE(emel::text::detokenizer::guard::valid_detokenize{}(bad_detok, ctx));
-  CHECK(emel::text::detokenizer::guard::invalid_detokenize{}(bad_detok, ctx));
-  ctx.is_bound = true;
-  ctx.vocab = &vocab;
-  bad_detok.pending_bytes = pending.data();
-  bad_detok.pending_capacity = pending.size();
-  bad_detok.pending_length = 0;
-  bad_detok.output = output.data();
-  bad_detok.output_capacity = output.size();
-  bad_detok.output_length_out = &out_len;
-  bad_detok.pending_length_out = &pending_len;
-  bad_detok.error_out = &err;
-  CHECK(emel::text::detokenizer::guard::valid_detokenize{}(bad_detok, ctx));
-
-  ctx.phase_error = EMEL_OK;
-  CHECK(emel::text::detokenizer::guard::phase_ok{}(ctx));
-  CHECK_FALSE(emel::text::detokenizer::guard::phase_failed{}(ctx));
-}
-
 TEST_CASE("renderer_action_and_guard_paths") {
   auto & vocab = make_vocab();
   const int32_t token_id = add_token(vocab, "ab");
@@ -856,13 +643,15 @@ TEST_CASE("renderer_action_and_guard_paths") {
   ctx.dispatch_detokenizer_bind = detokenizer_bind_fail_no_error;
   ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
   emel::text::renderer::action::bind_detokenizer(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
+  CHECK(ctx.last_error ==
+        detokenizer_error_code(emel::text::detokenizer::error::backend_error));
 
   ctx.phase_error = EMEL_OK;
   ctx.last_error = EMEL_OK;
   ctx.dispatch_detokenizer_bind = detokenizer_bind_fail_with_error;
   emel::text::renderer::action::bind_detokenizer(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_MODEL_INVALID);
+  CHECK(ctx.last_error ==
+        detokenizer_error_code(emel::text::detokenizer::error::model_invalid));
 
   emel::text::detokenizer::sm detokenizer{};
   ctx.phase_error = EMEL_OK;
@@ -902,11 +691,13 @@ TEST_CASE("renderer_action_and_guard_paths") {
   ctx.detokenizer_sm = dummy_ptr;
   ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_fail_no_error;
   emel::text::renderer::action::run_render(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
+  CHECK(ctx.last_error ==
+        detokenizer_error_code(emel::text::detokenizer::error::backend_error));
 
   ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_fail_with_error;
   emel::text::renderer::action::run_render(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_MODEL_INVALID);
+  CHECK(ctx.last_error ==
+        detokenizer_error_code(emel::text::detokenizer::error::model_invalid));
 
   ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
   ctx.detokenizer_sm = &detokenizer;

@@ -771,8 +771,9 @@ TEST_CASE("encoder_detail_misc_branches") {
   CHECK(emel::text::encoders::detail::token_text(*builder.vocab, -1).empty());
   CHECK(!emel::text::encoders::detail::is_token_type(*builder.vocab, -1, 1));
 
-  const auto empty_view = emel::text::encoders::detail::string_view_from_array(
-    std::array<char, 1>{{'\0'}});
+  const std::array<char, 1> empty_arr{{'\0'}};
+  const auto empty_view =
+    emel::text::encoders::detail::string_view_from_array(empty_arr);
   CHECK(empty_view.empty());
 }
 
@@ -802,11 +803,11 @@ TEST_CASE("encoder_detail_helpers") {
   ctx.vocab = builder.vocab;
   CHECK(emel::text::encoders::detail::ensure_tables(ctx));
 
-  const auto view = emel::text::encoders::detail::string_view_from_array(
-    std::array<char, 6>{{'h', 'e', 'l', 'l', 'o', '\0'}});
+  const std::array<char, 6> hello_arr{{'h', 'e', 'l', 'l', 'o', '\0'}};
+  const auto view = emel::text::encoders::detail::string_view_from_array(hello_arr);
   CHECK(view == "hello");
-  const auto view_full = emel::text::encoders::detail::string_view_from_array(
-    std::array<char, 3>{{'x', 'y', 'z'}});
+  const std::array<char, 3> xyz_arr{{'x', 'y', 'z'}};
+  const auto view_full = emel::text::encoders::detail::string_view_from_array(xyz_arr);
   CHECK(view_full.size() == 3);
   CHECK(emel::text::encoders::detail::utf8_len(static_cast<char>(0x7F)) == 1);
   CHECK(emel::text::encoders::detail::utf8_len(static_cast<char>(0xC2)) == 2);

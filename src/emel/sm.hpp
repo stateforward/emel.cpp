@@ -25,8 +25,15 @@ constexpr bool normalize_event_result(const event & ev, const bool accepted) noe
     return false;
   }
   if constexpr (requires { ev.error_out; }) {
-    if (ev.error_out != nullptr && *ev.error_out != 0) {
-      return false;
+    using error_member = std::remove_reference_t<decltype(ev.error_out)>;
+    if constexpr (std::is_pointer_v<error_member>) {
+      if (ev.error_out != nullptr && *ev.error_out != 0) {
+        return false;
+      }
+    } else {
+      if (ev.error_out != 0) {
+        return false;
+      }
     }
   }
   return true;
