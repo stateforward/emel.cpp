@@ -4,8 +4,10 @@
 #include <cstdint>
 #include <string_view>
 
+#include "emel/error/error.hpp"
 #include "emel/model/data.hpp"
 #include "emel/text/detokenizer/events.hpp"
+#include "emel/text/renderer/errors.hpp"
 
 namespace emel::text::renderer {
 
@@ -77,6 +79,46 @@ struct flush {
                         const events::flush_done &) = nullptr;
   bool (*dispatch_error)(void * owner_sm,
                          const events::flush_error &) = nullptr;
+};
+
+struct bind_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+  int32_t detokenizer_err = 0;
+  bool detokenizer_accepted = false;
+};
+
+struct render_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+  size_t output_length = 0;
+  sequence_status status = sequence_status::running;
+  size_t sequence_index = 0;
+  int32_t detokenizer_err = 0;
+  bool detokenizer_accepted = false;
+  size_t detokenizer_output_length = 0;
+  size_t detokenizer_pending_length = 0;
+  size_t produced_length = 0;
+};
+
+struct flush_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+  size_t output_length = 0;
+  sequence_status status = sequence_status::running;
+  size_t sequence_index = 0;
+};
+
+struct bind_runtime {
+  const bind & request;
+  bind_ctx & ctx;
+};
+
+struct render_runtime {
+  const render & request;
+  render_ctx & ctx;
+};
+
+struct flush_runtime {
+  const flush & request;
+  flush_ctx & ctx;
 };
 
 }  // namespace emel::text::renderer::event
