@@ -10,7 +10,7 @@ This checklist is architecture-only and merge-blocking for machine design/orches
 ## 1) SML Actor Architecture
 
 - [ ] Orchestration uses Boost.SML state machines (`boost::sml::sm<...>`); no alternate orchestration framework.
-- [ ] Each machine defines transitions in `struct model` and exposes `using sm = boost::sml::sm<model>;`.
+- [ ] Each machine defines transitions in `struct model` and exposes a canonical machine type (`struct sm : emel::sm<model, ...>` or an equivalent local alias pattern).
 - [ ] Transition rows use destination-first form only: `sml::state<dst> <= src + event [guard] / action`.
 - [ ] No source-first transition syntax is introduced in new/modified code.
 - [ ] Transition tables use canonical layout: first row, then leading commas for subsequent rows.
