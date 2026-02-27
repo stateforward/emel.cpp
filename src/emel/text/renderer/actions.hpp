@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "emel/emel.h"
+#include "emel/text/detokenizer/errors.hpp"
 #include "emel/text/renderer/context.hpp"
 #include "emel/text/renderer/events.hpp"
 
@@ -266,18 +267,23 @@ struct bind_detokenizer {
       return;
     }
 
-    int32_t err = EMEL_OK;
+    const int32_t detok_ok =
+        emel::text::detokenizer::error_code(emel::text::detokenizer::error::none);
+    const int32_t detok_backend =
+        emel::text::detokenizer::error_code(emel::text::detokenizer::error::backend_error);
+    int32_t err = detok_ok;
+
     emel::text::detokenizer::event::bind bind_ev = {};
     bind_ev.vocab = ctx.vocab;
     bind_ev.error_out = &err;
 
     const bool accepted =
         ctx.dispatch_detokenizer_bind(ctx.detokenizer_sm, bind_ev);
-    if (!accepted && err == EMEL_OK) {
-      set_error(ctx, EMEL_ERR_BACKEND);
+    if (!accepted && err == detok_ok) {
+      set_error(ctx, detok_backend);
       return;
     }
-    if (err != EMEL_OK) {
+    if (err != detok_ok) {
       set_error(ctx, err);
       return;
     }
@@ -348,7 +354,12 @@ struct run_render {
 
     size_t pending_length = sequence.pending_length;
     size_t detok_output_length = 0;
-    int32_t err = EMEL_OK;
+
+    const int32_t detok_ok =
+        emel::text::detokenizer::error_code(emel::text::detokenizer::error::none);
+    const int32_t detok_backend =
+        emel::text::detokenizer::error_code(emel::text::detokenizer::error::backend_error);
+    int32_t err = detok_ok;
 
     emel::text::detokenizer::event::detokenize detok_ev = {};
     detok_ev.token_id = ctx.token_id;
@@ -364,11 +375,11 @@ struct run_render {
 
     const bool accepted =
         ctx.dispatch_detokenizer_detokenize(ctx.detokenizer_sm, detok_ev);
-    if (!accepted && err == EMEL_OK) {
-      set_error(ctx, EMEL_ERR_BACKEND);
+    if (!accepted && err == detok_ok) {
+      set_error(ctx, detok_backend);
       return;
     }
-    if (err != EMEL_OK) {
+    if (err != detok_ok) {
       set_error(ctx, err);
       return;
     }
