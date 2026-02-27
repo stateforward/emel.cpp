@@ -69,19 +69,23 @@ design doc: docs/designs/text/renderer.design.md
  
  ## error codes
  
- this actor can produce the following error codes:
+ this actor can produce the following local error flags:
  
- - `EMEL_ERR_CAPACITY` — output buffer too small for the rendered bytes.
- - `EMEL_ERR_INVALID_ARGUMENT` — invalid sequence id.
- - `EMEL_ERR_STOPPED` — render attempted on a sequence that has already been stopped.
+ - `error::invalid_request` — invalid bind/render/flush request payload.
+ - `error::backend_error` — downstream detokenizer dispatch failed without an explicit code.
+ - `error::model_invalid` — downstream detokenizer reported model/token validity failure.
+ - `error::internal_error` — internal unexpected path.
+ - `error::untracked` — downstream returned an unmapped legacy code.
 */
 
 
 #include <cstdint>
+#include <array>
 
-#include "emel/emel.h"
+#include "emel/error/error.hpp"
 #include "emel/sm.hpp"
 #include "emel/text/renderer/actions.hpp"
+#include "emel/text/renderer/errors.hpp"
 #include "emel/text/renderer/events.hpp"
 #include "emel/text/renderer/guards.hpp"
 
@@ -92,6 +96,11 @@ struct binding {};
 struct binding_decision {};
 struct idle {};
 struct rendering {};
+struct render_sequence_decision {};
+struct render_dispatch_decision {};
+struct render_strip_decision {};
+struct render_apply_decision {};
+struct render_stop_decision {};
 struct render_decision {};
 struct flushing {};
 struct flush_decision {};
@@ -104,9 +113,9 @@ renderer architecture notes (single source of truth)
 
 state purpose
 - uninitialized: awaiting dependency and vocab binding.
-- binding/binding_decision: binds detokenizer dependency for the selected vocab.
+- binding/binding_decision: bind request acceptance and detokenizer bind outcome.
 - idle: ready for render and flush requests.
-- rendering/render_decision: detokenizes one token and applies stop matching.
+- rendering/render_*: render request setup, per-sequence routing, detokenizer dispatch, strip/stop phases.
 - flushing/flush_decision: emits buffered bytes (utf-8 pending + stop holdback).
 - done/errored: terminal outcomes for the latest request.
 - unexpected: sequencing contract violation.
@@ -117,141 +126,325 @@ key invariants
 - output bytes are written only to caller-provided buffers.
 
 guard semantics
-- valid_bind: dependency pointers and bind inputs are present.
+- valid_bind: dependency pointers and stop sequence constraints are valid.
 - valid_render/valid_flush: output pointers and sequence id are valid.
-- phase_ok/phase_failed: branch on action-set error codes.
+- request_ok/request_failed: branch on runtime action outcomes.
+- bind/render/flush decision guards model all runtime routing branches.
 
 action side effects
-- begin_bind/bind_detokenizer: configure dependencies and bind child actor.
-- begin_render/run_render: decode token and apply strip/stop policy.
-- begin_flush/run_flush: force buffered output emission.
+- begin_bind/bind_detokenizer: configure dependencies and dispatch child bind.
+- begin_render/dispatch_render_detokenizer: initialize render runtime ctx and dispatch child detokenize.
+- strip/apply actions: apply leading-strip policy and stop sequence matching.
+- begin_flush/flush_copy_sequence_buffers: emit pending and holdback bytes.
 - mark_done/ensure_last_error: finalize terminal request result.
 */
 struct model {
   auto operator()() const {
     namespace sml = boost::sml;
 
+    // clang-format off
     return sml::make_transition_table(
-        *sml::state<uninitialized> +
-            sml::event<event::bind>[guard::valid_bind{}] / action::begin_bind =
-            sml::state<binding>,
-        sml::state<uninitialized> +
-            sml::event<event::bind>[guard::invalid_bind{}] /
-                action::reject_bind = sml::state<errored>,
-        sml::state<uninitialized> + sml::event<event::render> /
-            action::reject_render = sml::state<errored>,
-        sml::state<uninitialized> + sml::event<event::flush> /
-            action::reject_flush = sml::state<errored>,
+      //------------------------------------------------------------------------------//
+        sml::state<binding> <= *sml::state<uninitialized>
+          + sml::event<event::bind_runtime>[ guard::valid_bind{} ]
+          / action::begin_bind
+      , sml::state<errored> <= sml::state<uninitialized>
+          + sml::event<event::bind_runtime>[ guard::invalid_bind{} ]
+          / action::reject_bind
+      , sml::state<errored> <= sml::state<uninitialized> + sml::event<event::render_runtime>
+          / action::reject_render
+      , sml::state<errored> <= sml::state<uninitialized> + sml::event<event::flush_runtime>
+          / action::reject_flush
 
-        sml::state<idle> + sml::event<event::bind>[guard::valid_bind{}] /
-                               action::begin_bind = sml::state<binding>,
-        sml::state<idle> + sml::event<event::bind>[guard::invalid_bind{}] /
-                               action::reject_bind = sml::state<errored>,
-        sml::state<idle> + sml::event<event::render>[guard::valid_render{}] /
-                               action::begin_render = sml::state<rendering>,
-        sml::state<idle> +
-            sml::event<event::render>[guard::invalid_render{}] /
-                action::reject_render = sml::state<errored>,
-        sml::state<idle> + sml::event<event::flush>[guard::valid_flush{}] /
-                               action::begin_flush = sml::state<flushing>,
-        sml::state<idle> + sml::event<event::flush>[guard::invalid_flush{}] /
-                               action::reject_flush = sml::state<errored>,
+      , sml::state<binding> <= sml::state<idle>
+          + sml::event<event::bind_runtime>[ guard::valid_bind{} ]
+          / action::begin_bind
+      , sml::state<errored> <= sml::state<idle>
+          + sml::event<event::bind_runtime>[ guard::invalid_bind{} ]
+          / action::reject_bind
+      , sml::state<rendering> <= sml::state<idle>
+          + sml::event<event::render_runtime>[ guard::valid_render{} ]
+          / action::begin_render
+      , sml::state<errored> <= sml::state<idle>
+          + sml::event<event::render_runtime>[ guard::invalid_render{} ]
+          / action::reject_render
+      , sml::state<flushing> <= sml::state<idle>
+          + sml::event<event::flush_runtime>[ guard::valid_flush{} ]
+          / action::begin_flush
+      , sml::state<errored> <= sml::state<idle>
+          + sml::event<event::flush_runtime>[ guard::invalid_flush{} ]
+          / action::reject_flush
 
-        sml::state<done> + sml::event<event::bind>[guard::valid_bind{}] /
-                               action::begin_bind = sml::state<binding>,
-        sml::state<done> + sml::event<event::bind>[guard::invalid_bind{}] /
-                               action::reject_bind = sml::state<errored>,
-        sml::state<done> + sml::event<event::render>[guard::valid_render{}] /
-                               action::begin_render = sml::state<rendering>,
-        sml::state<done> +
-            sml::event<event::render>[guard::invalid_render{}] /
-                action::reject_render = sml::state<errored>,
-        sml::state<done> + sml::event<event::flush>[guard::valid_flush{}] /
-                               action::begin_flush = sml::state<flushing>,
-        sml::state<done> + sml::event<event::flush>[guard::invalid_flush{}] /
-                               action::reject_flush = sml::state<errored>,
+      , sml::state<binding> <= sml::state<done>
+          + sml::event<event::bind_runtime>[ guard::valid_bind{} ]
+          / action::begin_bind
+      , sml::state<errored> <= sml::state<done>
+          + sml::event<event::bind_runtime>[ guard::invalid_bind{} ]
+          / action::reject_bind
+      , sml::state<rendering> <= sml::state<done>
+          + sml::event<event::render_runtime>[ guard::valid_render{} ]
+          / action::begin_render
+      , sml::state<errored> <= sml::state<done>
+          + sml::event<event::render_runtime>[ guard::invalid_render{} ]
+          / action::reject_render
+      , sml::state<flushing> <= sml::state<done>
+          + sml::event<event::flush_runtime>[ guard::valid_flush{} ]
+          / action::begin_flush
+      , sml::state<errored> <= sml::state<done>
+          + sml::event<event::flush_runtime>[ guard::invalid_flush{} ]
+          / action::reject_flush
 
-        sml::state<errored> +
-            sml::event<event::bind>[guard::valid_bind{}] / action::begin_bind =
-                sml::state<binding>,
-        sml::state<errored> +
-            sml::event<event::bind>[guard::invalid_bind{}] /
-                action::reject_bind = sml::state<errored>,
-        sml::state<errored> +
-            sml::event<event::render>[guard::valid_render{}] /
-                action::begin_render = sml::state<rendering>,
-        sml::state<errored> +
-            sml::event<event::render>[guard::invalid_render{}] /
-                action::reject_render = sml::state<errored>,
-        sml::state<errored> +
-            sml::event<event::flush>[guard::valid_flush{}] /
-                action::begin_flush = sml::state<flushing>,
-        sml::state<errored> +
-            sml::event<event::flush>[guard::invalid_flush{}] /
-                action::reject_flush = sml::state<errored>,
+      , sml::state<binding> <= sml::state<errored>
+          + sml::event<event::bind_runtime>[ guard::valid_bind{} ]
+          / action::begin_bind
+      , sml::state<errored> <= sml::state<errored>
+          + sml::event<event::bind_runtime>[ guard::invalid_bind{} ]
+          / action::reject_bind
+      , sml::state<rendering> <= sml::state<errored>
+          + sml::event<event::render_runtime>[ guard::valid_render{} ]
+          / action::begin_render
+      , sml::state<errored> <= sml::state<errored>
+          + sml::event<event::render_runtime>[ guard::invalid_render{} ]
+          / action::reject_render
+      , sml::state<flushing> <= sml::state<errored>
+          + sml::event<event::flush_runtime>[ guard::valid_flush{} ]
+          / action::begin_flush
+      , sml::state<errored> <= sml::state<errored>
+          + sml::event<event::flush_runtime>[ guard::invalid_flush{} ]
+          / action::reject_flush
 
-        sml::state<unexpected> +
-            sml::event<event::bind>[guard::valid_bind{}] / action::begin_bind =
-                sml::state<binding>,
-        sml::state<unexpected> +
-            sml::event<event::bind>[guard::invalid_bind{}] /
-                action::reject_bind = sml::state<unexpected>,
-        sml::state<unexpected> +
-            sml::event<event::render>[guard::valid_render{}] /
-                action::begin_render = sml::state<rendering>,
-        sml::state<unexpected> +
-            sml::event<event::render>[guard::invalid_render{}] /
-                action::reject_render = sml::state<unexpected>,
-        sml::state<unexpected> +
-            sml::event<event::flush>[guard::valid_flush{}] /
-                action::begin_flush = sml::state<flushing>,
-        sml::state<unexpected> +
-            sml::event<event::flush>[guard::invalid_flush{}] /
-                action::reject_flush = sml::state<unexpected>,
+      , sml::state<binding> <= sml::state<unexpected>
+          + sml::event<event::bind_runtime>[ guard::valid_bind{} ]
+          / action::begin_bind
+      , sml::state<unexpected> <= sml::state<unexpected>
+          + sml::event<event::bind_runtime>[ guard::invalid_bind{} ]
+          / action::reject_bind
+      , sml::state<rendering> <= sml::state<unexpected>
+          + sml::event<event::render_runtime>[ guard::valid_render{} ]
+          / action::begin_render
+      , sml::state<unexpected> <= sml::state<unexpected>
+          + sml::event<event::render_runtime>[ guard::invalid_render{} ]
+          / action::reject_render
+      , sml::state<flushing> <= sml::state<unexpected>
+          + sml::event<event::flush_runtime>[ guard::valid_flush{} ]
+          / action::begin_flush
+      , sml::state<unexpected> <= sml::state<unexpected>
+          + sml::event<event::flush_runtime>[ guard::invalid_flush{} ]
+          / action::reject_flush
 
-        sml::state<binding> / action::bind_detokenizer =
-            sml::state<binding_decision>,
-        sml::state<binding_decision>[guard::phase_ok{}] = sml::state<idle>,
-        sml::state<binding_decision>[guard::phase_failed{}] /
-            action::ensure_last_error = sml::state<errored>,
+      //------------------------------------------------------------------------------//
+      , sml::state<binding_decision> <= sml::state<binding>
+          + sml::completion<event::bind_runtime> / action::bind_detokenizer
+      , sml::state<idle> <= sml::state<binding_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_dispatch_ok{} ]
+          / action::commit_bind_success
+      , sml::state<errored> <= sml::state<binding_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_dispatch_backend_failure{} ]
+          / action::set_backend_error
+      , sml::state<errored> <= sml::state<binding_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_dispatch_reported_error{} ]
+          / action::set_error_from_detokenizer
+      , sml::state<errored> <= sml::state<binding_decision>
+          + sml::completion<event::bind_runtime>
+          / action::ensure_last_error
 
-        sml::state<rendering> / action::run_render =
-            sml::state<render_decision>,
-        sml::state<render_decision>[guard::phase_ok{}] / action::mark_done =
-            sml::state<done>,
-        sml::state<render_decision>[guard::phase_failed{}] /
-            action::ensure_last_error = sml::state<errored>,
+      , sml::state<render_sequence_decision> <= sml::state<rendering>
+          + sml::completion<event::render_runtime>
+      , sml::state<done> <= sml::state<render_sequence_decision>
+          + sml::completion<event::render_runtime> [ guard::sequence_stop_matched{} ]
+          / action::render_sequence_already_stopped
+      , sml::state<render_dispatch_decision> <= sml::state<render_sequence_decision>
+          + sml::completion<event::render_runtime> [ guard::sequence_running{} ]
+          / action::dispatch_render_detokenizer
+      , sml::state<errored> <= sml::state<render_dispatch_decision>
+          + sml::completion<event::render_runtime> [ guard::render_dispatch_backend_failure{} ]
+          / action::set_backend_error
+      , sml::state<errored> <= sml::state<render_dispatch_decision>
+          + sml::completion<event::render_runtime> [ guard::render_dispatch_reported_error{} ]
+          / action::set_error_from_detokenizer
+      , sml::state<errored> <= sml::state<render_dispatch_decision>
+          + sml::completion<event::render_runtime> [ guard::render_dispatch_lengths_invalid{} ]
+          / action::set_invalid_request
+      , sml::state<render_strip_decision> <= sml::state<render_dispatch_decision>
+          + sml::completion<event::render_runtime> [ guard::render_dispatch_ok{} ]
+          / action::commit_render_detokenizer_output
+      , sml::state<render_apply_decision> <= sml::state<render_strip_decision>
+          + sml::completion<event::render_runtime> [ guard::strip_needed{} ]
+          / action::strip_render_leading_space
+      , sml::state<render_apply_decision> <= sml::state<render_strip_decision>
+          + sml::completion<event::render_runtime> [ guard::strip_not_needed{} ]
+      , sml::state<render_stop_decision> <= sml::state<render_apply_decision>
+          + sml::completion<event::render_runtime> / action::update_render_strip_state
+      , sml::state<render_decision> <= sml::state<render_stop_decision>
+          + sml::completion<event::render_runtime> / action::apply_render_stop_matching
+      , sml::state<done> <= sml::state<render_decision>
+          + sml::completion<event::render_runtime> [ guard::request_ok{} ]
+          / action::mark_done
+      , sml::state<errored> <= sml::state<render_decision>
+          + sml::completion<event::render_runtime> [ guard::request_failed{} ]
+          / action::ensure_last_error
 
-        sml::state<flushing> / action::run_flush = sml::state<flush_decision>,
-        sml::state<flush_decision>[guard::phase_ok{}] / action::mark_done =
-            sml::state<done>,
-        sml::state<flush_decision>[guard::phase_failed{}] /
-            action::ensure_last_error = sml::state<errored>,
+      , sml::state<flush_decision> <= sml::state<flushing>
+          + sml::completion<event::flush_runtime>
+      , sml::state<done> <= sml::state<flush_decision>
+          + sml::completion<event::flush_runtime> [ guard::flush_output_fits{} ]
+          / action::flush_copy_sequence_buffers
+      , sml::state<errored> <= sml::state<flush_decision>
+          + sml::completion<event::flush_runtime> [ guard::flush_output_too_large{} ]
+          / action::set_invalid_request
 
-        sml::state<uninitialized> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<unexpected>,
-        sml::state<binding> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<unexpected>,
-        sml::state<binding_decision> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<unexpected>,
-        sml::state<idle> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<unexpected>,
-        sml::state<rendering> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<unexpected>,
-        sml::state<render_decision> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<unexpected>,
-        sml::state<flushing> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<unexpected>,
-        sml::state<flush_decision> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<unexpected>,
-        sml::state<done> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<unexpected>,
-        sml::state<errored> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<unexpected>,
-        sml::state<unexpected> + sml::unexpected_event<sml::_> /
-            action::on_unexpected = sml::state<unexpected>);
+      //------------------------------------------------------------------------------//
+      , sml::state<unexpected> <= sml::state<uninitialized> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<binding> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<binding_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<idle> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<rendering> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_sequence_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_dispatch_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_strip_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_apply_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_stop_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<flushing> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<flush_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<done> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<errored> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<unexpected> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+    );
+    // clang-format on
   }
 };
+
+namespace detail {
+
+template <class value_type>
+inline void write_optional(value_type * destination,
+                           value_type & sink,
+                           const value_type value) noexcept {
+  value_type * destinations[2] = {&sink, destination};
+  value_type * const target =
+      destinations[static_cast<size_t>(destination != nullptr)];
+  *target = value;
+}
+
+template <class event_type>
+inline bool ignore_callback(void *, const event_type &) noexcept {
+  return true;
+}
+
+template <class event_type>
+inline void dispatch_optional_callback(
+    void * owner,
+    bool (*callback)(void * owner, const event_type &),
+    const event_type & payload) noexcept {
+  const size_t callback_ready = static_cast<size_t>(callback != nullptr);
+  const size_t owner_ready = static_cast<size_t>(owner != nullptr);
+  const size_t valid = callback_ready & owner_ready;
+  bool (*callbacks[2])(void *, const event_type &) = {
+      ignore_callback<event_type>,
+      callback};
+  void * owners[2] = {nullptr, owner};
+  callbacks[valid](owners[valid], payload);
+}
+
+inline emel::error::type select_error_code(
+    const bool ok,
+    const emel::error::type runtime_error) noexcept {
+  const std::array<emel::error::type, 2> fallback_errors = {
+      emel::error::cast(error::backend_error),
+      runtime_error};
+  const emel::error::type failure_error =
+      fallback_errors[static_cast<size_t>(runtime_error != emel::error::cast(error::none))];
+  const std::array<emel::error::type, 2> final_errors = {
+      failure_error,
+      emel::error::cast(error::none)};
+  return final_errors[static_cast<size_t>(ok)];
+}
+
+inline void dispatch_bind_done(const event::bind & ev,
+                               const int32_t,
+                               const events::binding_done & done_ev,
+                               const events::binding_error &) noexcept {
+  dispatch_optional_callback(ev.owner_sm, ev.dispatch_done, done_ev);
+}
+
+inline void dispatch_bind_error(const event::bind & ev,
+                                const int32_t,
+                                const events::binding_done &,
+                                const events::binding_error & error_ev) noexcept {
+  dispatch_optional_callback(ev.owner_sm, ev.dispatch_error, error_ev);
+}
+
+inline void dispatch_render_done(const event::render & ev,
+                                 const int32_t,
+                                 const events::rendering_done & done_ev,
+                                 const events::rendering_error &) noexcept {
+  dispatch_optional_callback(ev.owner_sm, ev.dispatch_done, done_ev);
+}
+
+inline void dispatch_render_error(const event::render & ev,
+                                  const int32_t,
+                                  const events::rendering_done &,
+                                  const events::rendering_error & error_ev) noexcept {
+  dispatch_optional_callback(ev.owner_sm, ev.dispatch_error, error_ev);
+}
+
+inline void dispatch_flush_done(const event::flush & ev,
+                                const int32_t,
+                                const events::flush_done & done_ev,
+                                const events::flush_error &) noexcept {
+  dispatch_optional_callback(ev.owner_sm, ev.dispatch_done, done_ev);
+}
+
+inline void dispatch_flush_error(const event::flush & ev,
+                                 const int32_t,
+                                 const events::flush_done &,
+                                 const events::flush_error & error_ev) noexcept {
+  dispatch_optional_callback(ev.owner_sm, ev.dispatch_error, error_ev);
+}
+
+template <class request_type, class done_event_type, class error_event_type>
+inline void dispatch_result_callback(
+    const bool ok,
+    const request_type & request,
+    const int32_t err,
+    const done_event_type & done_ev,
+    const error_event_type & error_ev,
+    void (*on_done)(
+        const request_type &,
+        const int32_t,
+        const done_event_type &,
+        const error_event_type &) noexcept,
+    void (*on_error)(
+        const request_type &,
+        const int32_t,
+        const done_event_type &,
+        const error_event_type &) noexcept) noexcept {
+  using dispatch_fn_type = void (*)(const request_type &,
+                                    const int32_t,
+                                    const done_event_type &,
+                                    const error_event_type &) noexcept;
+  const std::array<dispatch_fn_type, 2> dispatchers = {on_error, on_done};
+  dispatchers[static_cast<size_t>(ok)](request, err, done_ev, error_ev);
+}
+
+}  // namespace detail
 
 struct sm : public emel::sm<model, action::context> {
   using base_type = emel::sm<model, action::context>;
@@ -261,103 +454,102 @@ struct sm : public emel::sm<model, action::context> {
   bool process_event(const event::bind & ev) {
     namespace sml = boost::sml;
 
-    const bool accepted = base_type::process_event(ev);
+    event::bind_ctx runtime_ctx{};
+    event::bind_runtime runtime_ev{ev, runtime_ctx};
+    const bool accepted = base_type::process_event(runtime_ev);
     const bool ok = this->is(sml::state<idle>);
-    const int32_t err = ok ? EMEL_OK
-                           : (this->context_.last_error != EMEL_OK ? this->context_.last_error
-                                                             : EMEL_ERR_BACKEND);
+    const emel::error::type err_code = detail::select_error_code(ok, runtime_ctx.err);
+    this->last_error_ = err_code;
+    const int32_t err = static_cast<int32_t>(err_code);
 
-    if (ev.error_out != nullptr) {
-      *ev.error_out = err;
-    }
-    if (ok) {
-      if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
-        ev.dispatch_done(ev.owner_sm, events::binding_done{&ev});
-      }
-    } else {
-      if (ev.dispatch_error != nullptr && ev.owner_sm != nullptr) {
-        ev.dispatch_error(ev.owner_sm, events::binding_error{&ev, err});
-      }
-    }
+    int32_t error_sink = 0;
+    detail::write_optional(ev.error_out, error_sink, err);
 
-    action::clear_request(this->context_);
+    const events::binding_done done_ev{&ev};
+    const events::binding_error error_ev{&ev, err};
+    detail::dispatch_result_callback(
+        ok,
+        ev,
+        err,
+        done_ev,
+        error_ev,
+        detail::dispatch_bind_done,
+        detail::dispatch_bind_error);
+
     return accepted && ok;
   }
 
   bool process_event(const event::render & ev) {
     namespace sml = boost::sml;
 
-    const bool accepted = base_type::process_event(ev);
+    event::render_ctx runtime_ctx{};
+    event::render_runtime runtime_ev{ev, runtime_ctx};
+    const bool accepted = base_type::process_event(runtime_ev);
     const bool ok = this->is(sml::state<done>);
-    const int32_t err = ok ? EMEL_OK
-                           : (this->context_.last_error != EMEL_OK ? this->context_.last_error
-                                                             : EMEL_ERR_BACKEND);
+    const emel::error::type err_code = detail::select_error_code(ok, runtime_ctx.err);
+    this->last_error_ = err_code;
+    const int32_t err = static_cast<int32_t>(err_code);
 
-    if (ev.output_length_out != nullptr) {
-      *ev.output_length_out = this->context_.output_length;
-    }
-    if (ev.status_out != nullptr) {
-      *ev.status_out = this->context_.status;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = err;
-    }
-    if (ok) {
-      if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
-        ev.dispatch_done(
-            ev.owner_sm,
-            events::rendering_done{&ev, this->context_.output_length, this->context_.status});
-      }
-    } else {
-      if (ev.dispatch_error != nullptr && ev.owner_sm != nullptr) {
-        ev.dispatch_error(ev.owner_sm, events::rendering_error{&ev, err});
-      }
-    }
+    size_t output_length_sink = 0;
+    detail::write_optional(ev.output_length_out, output_length_sink, runtime_ctx.output_length);
+    sequence_status status_sink = sequence_status::running;
+    detail::write_optional(ev.status_out, status_sink, runtime_ctx.status);
+    int32_t error_sink = 0;
+    detail::write_optional(ev.error_out, error_sink, err);
 
-    action::clear_request(this->context_);
+    const events::rendering_done done_ev{&ev, runtime_ctx.output_length, runtime_ctx.status};
+    const events::rendering_error error_ev{&ev, err};
+    detail::dispatch_result_callback(
+        ok,
+        ev,
+        err,
+        done_ev,
+        error_ev,
+        detail::dispatch_render_done,
+        detail::dispatch_render_error);
+
     return accepted && ok;
   }
 
   bool process_event(const event::flush & ev) {
     namespace sml = boost::sml;
 
-    const bool accepted = base_type::process_event(ev);
+    event::flush_ctx runtime_ctx{};
+    event::flush_runtime runtime_ev{ev, runtime_ctx};
+    const bool accepted = base_type::process_event(runtime_ev);
     const bool ok = this->is(sml::state<done>);
-    const int32_t err = ok ? EMEL_OK
-                           : (this->context_.last_error != EMEL_OK ? this->context_.last_error
-                                                             : EMEL_ERR_BACKEND);
+    const emel::error::type err_code = detail::select_error_code(ok, runtime_ctx.err);
+    this->last_error_ = err_code;
+    const int32_t err = static_cast<int32_t>(err_code);
 
-    if (ev.output_length_out != nullptr) {
-      *ev.output_length_out = this->context_.output_length;
-    }
-    if (ev.status_out != nullptr) {
-      *ev.status_out = this->context_.status;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = err;
-    }
-    if (ok) {
-      if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
-        ev.dispatch_done(
-            ev.owner_sm,
-            events::flush_done{&ev, this->context_.output_length, this->context_.status});
-      }
-    } else {
-      if (ev.dispatch_error != nullptr && ev.owner_sm != nullptr) {
-        ev.dispatch_error(ev.owner_sm, events::flush_error{&ev, err});
-      }
-    }
+    size_t output_length_sink = 0;
+    detail::write_optional(ev.output_length_out, output_length_sink, runtime_ctx.output_length);
+    sequence_status status_sink = sequence_status::running;
+    detail::write_optional(ev.status_out, status_sink, runtime_ctx.status);
+    int32_t error_sink = 0;
+    detail::write_optional(ev.error_out, error_sink, err);
 
-    action::clear_request(this->context_);
+    const events::flush_done done_ev{&ev, runtime_ctx.output_length, runtime_ctx.status};
+    const events::flush_error error_ev{&ev, err};
+    detail::dispatch_result_callback(
+        ok,
+        ev,
+        err,
+        done_ev,
+        error_ev,
+        detail::dispatch_flush_done,
+        detail::dispatch_flush_error);
+
     return accepted && ok;
   }
 
   using base_type::process_event;
   using base_type::visit_current_states;
 
-  int32_t last_error() const noexcept { return this->context_.last_error; }
+  int32_t last_error() const noexcept { return static_cast<int32_t>(this->last_error_); }
 
  private:
+  emel::error::type last_error_ = emel::error::cast(error::none);
 };
 
 }  // namespace emel::text::renderer

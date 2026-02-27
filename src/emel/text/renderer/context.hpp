@@ -4,10 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "emel/emel.h"
 #include "emel/model/data.hpp"
 #include "emel/text/detokenizer/events.hpp"
-#include "emel/text/renderer/events.hpp"
 
 namespace emel::text::renderer::action {
 
@@ -53,17 +51,6 @@ struct context {
 
   std::array<sequence_state, k_max_sequences> sequences = {};
   bool is_bound = false;
-
-  int32_t token_id = -1;
-  int32_t sequence_id = 0;
-  bool emit_special = false;
-  char * output = nullptr;
-  size_t output_capacity = 0;
-  size_t output_length = 0;
-  sequence_status status = sequence_status::running;
-
-  int32_t phase_error = EMEL_OK;
-  int32_t last_error = EMEL_OK;
 };
 
 }  // namespace emel::text::renderer::action

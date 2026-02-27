@@ -6,26 +6,105 @@
 #include <cstdint>
 #include <cstring>
 
-#include "emel/emel.h"
+#include "emel/error/error.hpp"
 #include "emel/text/detokenizer/errors.hpp"
 #include "emel/text/renderer/context.hpp"
+#include "emel/text/renderer/errors.hpp"
 #include "emel/text/renderer/events.hpp"
 
 namespace emel::text::renderer::action {
 
-inline void set_error(context & ctx, const int32_t err) noexcept {
-  ctx.phase_error = err;
-  ctx.last_error = err;
+namespace detail {
+
+template <class runtime_event_type>
+constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noexcept {
+  if constexpr (requires { ev.event_; }) {
+    return ev.event_;
+  } else {
+    return (ev);
+  }
 }
 
-inline void clear_request(context & ctx) noexcept {
-  ctx.token_id = -1;
-  ctx.sequence_id = 0;
-  ctx.emit_special = false;
-  ctx.output = nullptr;
-  ctx.output_capacity = 0;
-  ctx.output_length = 0;
-  ctx.status = sequence_status::running;
+inline bool dispatch_bind_fallback(
+    void *,
+    const emel::text::detokenizer::event::bind &) noexcept {
+  return false;
+}
+
+inline const emel::model::data::vocab k_fallback_vocab = {};
+
+}  // namespace detail
+
+inline constexpr emel::error::type k_error_none = emel::error::cast(error::none);
+
+inline constexpr int32_t to_detokenizer_error_code(
+    const emel::text::detokenizer::error err) noexcept {
+  return static_cast<int32_t>(emel::error::cast(err));
+}
+
+inline constexpr int32_t k_detokenizer_ok =
+    to_detokenizer_error_code(emel::text::detokenizer::error::none);
+
+inline constexpr int32_t to_error_out(const emel::error::type err) noexcept {
+  return static_cast<int32_t>(err);
+}
+
+inline emel::error::type from_detokenizer_error(const int32_t err) noexcept {
+  switch (err) {
+    case to_detokenizer_error_code(emel::text::detokenizer::error::none):
+      return emel::error::cast(error::none);
+    case to_detokenizer_error_code(emel::text::detokenizer::error::invalid_request):
+      return emel::error::cast(error::invalid_request);
+    case to_detokenizer_error_code(emel::text::detokenizer::error::model_invalid):
+      return emel::error::cast(error::model_invalid);
+    case to_detokenizer_error_code(emel::text::detokenizer::error::backend_error):
+      return emel::error::cast(error::backend_error);
+    case to_detokenizer_error_code(emel::text::detokenizer::error::internal_error):
+      return emel::error::cast(error::internal_error);
+    default:
+      return emel::error::cast(error::untracked);
+  }
+}
+
+template <class runtime_ctx_type>
+inline void set_error(runtime_ctx_type & runtime_ctx,
+                      const emel::error::type err) noexcept {
+  runtime_ctx.err = err;
+}
+
+template <class runtime_ctx_type>
+inline void set_error(runtime_ctx_type & runtime_ctx,
+                      const error err) noexcept {
+  set_error(runtime_ctx, emel::error::cast(err));
+}
+
+template <class runtime_ctx_type>
+inline void reset_outcome(runtime_ctx_type & runtime_ctx) noexcept {
+  runtime_ctx.err = k_error_none;
+  if constexpr (requires { runtime_ctx.output_length; }) {
+    runtime_ctx.output_length = 0;
+  }
+  if constexpr (requires { runtime_ctx.status; }) {
+    runtime_ctx.status = sequence_status::running;
+  }
+  if constexpr (requires { runtime_ctx.sequence_index; }) {
+    runtime_ctx.sequence_index = 0;
+  }
+  if constexpr (requires { runtime_ctx.detokenizer_err; }) {
+    runtime_ctx.detokenizer_err = k_detokenizer_ok;
+  }
+  if constexpr (requires { runtime_ctx.detokenizer_accepted; }) {
+    runtime_ctx.detokenizer_accepted = false;
+  }
+  if constexpr (requires { runtime_ctx.detokenizer_output_length; }) {
+    runtime_ctx.detokenizer_output_length = 0;
+  }
+  if constexpr (requires { runtime_ctx.detokenizer_pending_length; }) {
+    runtime_ctx.detokenizer_pending_length = 0;
+  }
+  if constexpr (requires { runtime_ctx.produced_length; }) {
+    runtime_ctx.produced_length = 0;
+  }
 }
 
 inline void reset_sequence_state(sequence_state & state,
@@ -42,21 +121,6 @@ inline void reset_sequences(context & ctx) noexcept {
   }
 }
 
-inline bool resolve_sequence(context & ctx,
-                             size_t & index_out) noexcept {
-  if (ctx.sequence_id < 0) {
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    return false;
-  }
-  const size_t index = static_cast<size_t>(ctx.sequence_id);
-  if (index >= ctx.sequences.size()) {
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    return false;
-  }
-  index_out = index;
-  return true;
-}
-
 inline bool is_leading_space(const char value) noexcept {
   return value == ' ' || value == '\t' || value == '\n' || value == '\r';
 }
@@ -64,37 +128,22 @@ inline bool is_leading_space(const char value) noexcept {
 inline char concat_char(const sequence_state & sequence,
                         const char * new_bytes,
                         const size_t index) noexcept {
-  if (index < sequence.holdback_length) {
-    return sequence.holdback[index];
-  }
-  return new_bytes[index - sequence.holdback_length];
+  const size_t from_new = static_cast<size_t>(index >= sequence.holdback_length);
+  const char * sources[2] = {sequence.holdback.data(), new_bytes};
+  const size_t adjusted_indices[2] = {
+      index,
+      index - (sequence.holdback_length * from_new)};
+  return sources[from_new][adjusted_indices[from_new]];
 }
 
 inline bool copy_stop_sequences(const event::bind & ev,
                                 context & ctx) noexcept {
-  ctx.stop_sequence_count = 0;
+  ctx.stop_sequence_count = ev.stop_sequence_count;
   ctx.stop_storage_used = 0;
   ctx.stop_max_length = 0;
 
-  if (ev.stop_sequence_count == 0) {
-    return true;
-  }
-  if (ev.stop_sequences == nullptr ||
-      ev.stop_sequence_count > ctx.stop_sequences.size()) {
-    return false;
-  }
-
   for (size_t index = 0; index < ev.stop_sequence_count; ++index) {
     const std::string_view stop = ev.stop_sequences[index];
-    if (stop.empty()) {
-      continue;
-    }
-    if (stop.size() > k_max_stop_length ||
-        ctx.stop_storage_used + stop.size() > ctx.stop_storage.size() ||
-        ctx.stop_sequence_count >= ctx.stop_sequences.size()) {
-      return false;
-    }
-
     const uint16_t offset = static_cast<uint16_t>(ctx.stop_storage_used);
     std::memcpy(ctx.stop_storage.data() + ctx.stop_storage_used,
                 stop.data(),
@@ -104,434 +153,503 @@ inline bool copy_stop_sequences(const event::bind & ev,
     stop_sequence_entry entry = {};
     entry.offset = offset;
     entry.length = static_cast<uint16_t>(stop.size());
-    ctx.stop_sequences[ctx.stop_sequence_count] = entry;
-    ctx.stop_sequence_count += 1;
+    ctx.stop_sequences[index] = entry;
     ctx.stop_max_length = std::max(ctx.stop_max_length, stop.size());
   }
 
   return true;
 }
 
-inline bool compose_output(const sequence_state & sequence,
-                           context & ctx,
-                           const size_t emit_from_holdback,
-                           const size_t emit_from_new,
-                           const size_t new_length) noexcept {
-  const size_t emit_total = emit_from_holdback + emit_from_new;
-  if (emit_total > ctx.output_capacity || emit_from_new > new_length) {
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    return false;
-  }
-
-  if (emit_from_holdback > 0) {
-    if (emit_from_new > 0) {
-      std::memmove(ctx.output + emit_from_holdback,
-                   ctx.output,
-                   emit_from_new);
-    }
-    std::memcpy(ctx.output, sequence.holdback.data(), emit_from_holdback);
-  }
-
-  ctx.output_length = emit_total;
-  return true;
+template <class value_type>
+inline void write_optional(value_type * destination,
+                           value_type & sink,
+                           const value_type value) noexcept {
+  value_type * destinations[2] = {&sink, destination};
+  value_type * const target =
+      destinations[static_cast<size_t>(destination != nullptr)];
+  *target = value;
 }
 
+template <class runtime_ctx_type>
+inline bool compose_output(const sequence_state & sequence,
+                           char * output,
+                           const size_t output_capacity,
+                           const size_t emit_from_holdback,
+                           const size_t emit_from_new,
+                           const size_t new_length,
+                           size_t & output_length_out,
+                           runtime_ctx_type & runtime_ctx) noexcept {
+  const size_t emit_total = emit_from_holdback + emit_from_new;
+  const size_t output_required = static_cast<size_t>(emit_total > 0);
+  const size_t has_output = static_cast<size_t>(output != nullptr);
+  const size_t output_ready = has_output | static_cast<size_t>(output_required == 0);
+  const size_t total_within_bounds = static_cast<size_t>(emit_total <= output_capacity);
+  const size_t new_within_bounds = static_cast<size_t>(emit_from_new <= new_length);
+  const size_t valid = output_ready & total_within_bounds & new_within_bounds;
+
+  const std::array<emel::error::type, 2> errors = {
+      emel::error::cast(error::invalid_request),
+      emel::error::cast(error::none)};
+  set_error(runtime_ctx, errors[valid]);
+
+  std::array<char, k_max_pending_bytes + k_max_holdback_bytes> output_sink = {};
+  char * destinations[2] = {output_sink.data(), output};
+  char * const target = destinations[has_output & valid];
+  const size_t safe_emit_from_holdback = emit_from_holdback * valid;
+  const size_t safe_emit_from_new = emit_from_new * valid;
+
+  std::memmove(target + safe_emit_from_holdback,
+               target,
+               safe_emit_from_new);
+  std::memcpy(target, sequence.holdback.data(), safe_emit_from_holdback);
+
+  output_length_out = emit_total * valid;
+  return valid != 0;
+}
+
+template <class runtime_ctx_type>
 inline bool apply_stop_matching(sequence_state & sequence,
                                 context & ctx,
-                                const size_t new_length) noexcept {
+                                char * output,
+                                const size_t output_capacity,
+                                const size_t new_length,
+                                size_t & output_length_out,
+                                sequence_status & status_out,
+                                runtime_ctx_type & runtime_ctx) noexcept {
   const size_t total = sequence.holdback_length + new_length;
 
   size_t matched_start = total;
   size_t matched_length = 0;
 
-  if (ctx.stop_sequence_count > 0) {
-    for (size_t stop_index = 0; stop_index < ctx.stop_sequence_count;
-         ++stop_index) {
-      const stop_sequence_entry stop = ctx.stop_sequences[stop_index];
-      const size_t stop_length = static_cast<size_t>(stop.length);
-      if (stop_length == 0 || stop_length > total) {
-        continue;
+  for (size_t stop_index = 0; stop_index < ctx.stop_sequence_count;
+       ++stop_index) {
+    const stop_sequence_entry stop = ctx.stop_sequences[stop_index];
+    const size_t stop_length = static_cast<size_t>(stop.length);
+    const size_t bounded_stop_length = std::min(stop_length, total + 1);
+    const size_t stop_non_zero = static_cast<size_t>(stop_length != 0);
+    const size_t cursor_limit = (total + 1 - bounded_stop_length) * stop_non_zero;
+
+    for (size_t cursor = 0; cursor < cursor_limit; ++cursor) {
+      bool matched = true;
+      for (size_t offset = 0; offset < stop_length; ++offset) {
+        const char lhs = concat_char(sequence, output, cursor + offset);
+        const char rhs =
+            ctx.stop_storage[static_cast<size_t>(stop.offset) + offset];
+        matched = matched && (lhs == rhs);
       }
 
-      for (size_t cursor = 0; cursor + stop_length <= total; ++cursor) {
-        bool matched = true;
-        for (size_t offset = 0; offset < stop_length; ++offset) {
-          const char lhs = concat_char(sequence, ctx.output, cursor + offset);
-          const char rhs =
-              ctx.stop_storage[static_cast<size_t>(stop.offset) + offset];
-          if (lhs != rhs) {
-            matched = false;
-            break;
-          }
-        }
-
-        if (matched && cursor < matched_start) {
-          matched_start = cursor;
-          matched_length = stop_length;
-        }
-      }
+      const size_t should_update =
+          static_cast<size_t>(matched) & static_cast<size_t>(cursor < matched_start);
+      const size_t starts[2] = {matched_start, cursor};
+      const size_t lengths[2] = {matched_length, stop_length};
+      matched_start = starts[should_update];
+      matched_length = lengths[should_update];
     }
   }
 
-  if (matched_length > 0) {
-    const size_t emit_before_stop = matched_start;
-    const size_t emit_from_holdback =
-        std::min(emit_before_stop, sequence.holdback_length);
-    const size_t emit_from_new = emit_before_stop - emit_from_holdback;
+  const size_t matched = static_cast<size_t>(matched_length > 0);
+  const size_t emit_before_stop_match = matched_start;
+  const size_t emit_from_holdback_match =
+      std::min(emit_before_stop_match, sequence.holdback_length);
+  const size_t emit_from_new_match = emit_before_stop_match - emit_from_holdback_match;
+  const size_t holdback_target_match = 0;
 
-    if (!compose_output(sequence, ctx, emit_from_holdback, emit_from_new,
-                        new_length)) {
-      return false;
-    }
-
-    sequence.holdback_length = 0;
-    sequence.stop_matched = true;
-    ctx.status = sequence_status::stop_sequence_matched;
-    return true;
-  }
-
-  const size_t holdback_target =
-      ctx.stop_max_length > 1
-          ? std::min(total, static_cast<size_t>(ctx.stop_max_length - 1))
-          : 0;
-  const size_t emit_total = total - holdback_target;
-  const size_t emit_from_holdback =
-      std::min(emit_total, sequence.holdback_length);
-  const size_t emit_from_new = emit_total - emit_from_holdback;
+  const size_t has_holdback_window = static_cast<size_t>(ctx.stop_max_length > 1);
+  const size_t holdback_limits[2] = {0, ctx.stop_max_length - 1};
+  const size_t holdback_target_nomatch = std::min(total, holdback_limits[has_holdback_window]);
+  const size_t emit_total_nomatch = total - holdback_target_nomatch;
+  const size_t emit_from_holdback_nomatch =
+      std::min(emit_total_nomatch, sequence.holdback_length);
+  const size_t emit_from_new_nomatch = emit_total_nomatch - emit_from_holdback_nomatch;
 
   std::array<char, k_max_holdback_bytes> next_holdback = {};
-  for (size_t idx = 0; idx < holdback_target; ++idx) {
+  for (size_t idx = 0; idx < holdback_target_nomatch; ++idx) {
     next_holdback[idx] =
-        concat_char(sequence, ctx.output, total - holdback_target + idx);
+        concat_char(sequence, output, total - holdback_target_nomatch + idx);
   }
 
-  if (!compose_output(sequence, ctx, emit_from_holdback, emit_from_new,
-                      new_length)) {
-    return false;
-  }
+  const size_t emit_from_holdback_options[2] = {
+      emit_from_holdback_nomatch,
+      emit_from_holdback_match};
+  const size_t emit_from_new_options[2] = {
+      emit_from_new_nomatch,
+      emit_from_new_match};
+  const size_t holdback_targets[2] = {
+      holdback_target_nomatch,
+      holdback_target_match};
+  const bool stop_matched_values[2] = {false, true};
+  const std::array<sequence_status, 2> statuses = {
+      sequence_status::running,
+      sequence_status::stop_sequence_matched};
 
-  sequence.holdback_length = holdback_target;
-  if (holdback_target > 0) {
-    std::memcpy(sequence.holdback.data(), next_holdback.data(), holdback_target);
-  }
-  ctx.status = sequence_status::running;
-  return true;
+  const size_t selected_emit_from_holdback = emit_from_holdback_options[matched];
+  const size_t selected_emit_from_new = emit_from_new_options[matched];
+  const size_t selected_holdback_target = holdback_targets[matched];
+  const bool selected_stop_matched = stop_matched_values[matched];
+  const sequence_status selected_status = statuses[matched];
+
+  const size_t compose_ok = static_cast<size_t>(
+      compose_output(sequence,
+                     output,
+                     output_capacity,
+                     selected_emit_from_holdback,
+                     selected_emit_from_new,
+                     new_length,
+                     output_length_out,
+                     runtime_ctx));
+
+  const size_t holdback_lengths_after_compose[2] = {
+      sequence.holdback_length,
+      selected_holdback_target};
+  sequence.holdback_length = holdback_lengths_after_compose[compose_ok];
+  std::memcpy(sequence.holdback.data(),
+              next_holdback.data(),
+              selected_holdback_target * compose_ok);
+
+  const bool stop_matched_after_compose[2] = {
+      sequence.stop_matched,
+      selected_stop_matched};
+  sequence.stop_matched = stop_matched_after_compose[compose_ok];
+
+  const std::array<sequence_status, 2> status_after_compose = {
+      status_out,
+      selected_status};
+  status_out = status_after_compose[compose_ok];
+
+  return compose_ok != 0;
 }
 
 struct begin_bind {
-  void operator()(const event::bind & ev, context & ctx) const noexcept {
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-    ctx.vocab = ev.vocab;
-    ctx.detokenizer_sm = ev.detokenizer_sm;
-    ctx.dispatch_detokenizer_bind = ev.dispatch_detokenizer_bind;
-    ctx.dispatch_detokenizer_detokenize = ev.dispatch_detokenizer_detokenize;
-    ctx.strip_leading_space_default = ev.strip_leading_space;
+  void operator()(const event::bind_runtime & ev, context & ctx) const noexcept {
+    reset_outcome(ev.ctx);
+    int32_t error_sink = to_error_out(k_error_none);
+    write_optional(ev.request.error_out, error_sink, to_error_out(k_error_none));
+
+    ctx.vocab = ev.request.vocab;
+    ctx.detokenizer_sm = ev.request.detokenizer_sm;
+    ctx.dispatch_detokenizer_bind = ev.request.dispatch_detokenizer_bind;
+    ctx.dispatch_detokenizer_detokenize = ev.request.dispatch_detokenizer_detokenize;
+    ctx.strip_leading_space_default = ev.request.strip_leading_space;
     ctx.is_bound = false;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-    clear_request(ctx);
 
-    if (!copy_stop_sequences(ev, ctx)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-
+    copy_stop_sequences(ev.request, ctx);
     reset_sequences(ctx);
   }
 };
 
 struct reject_bind {
-  void operator()(const event::bind &, context & ctx) const noexcept {
+  void operator()(const event::bind_runtime & ev, context & ctx) const noexcept {
     ctx.is_bound = false;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+    set_error(ev.ctx, error::invalid_request);
   }
 };
 
 struct bind_detokenizer {
-  void operator()(context & ctx) const noexcept {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context & ctx) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
     ctx.is_bound = false;
-    if (ctx.phase_error != EMEL_OK) {
-      if (ctx.last_error == EMEL_OK) {
-        ctx.last_error = ctx.phase_error;
-      }
-      return;
-    }
-    ctx.phase_error = EMEL_OK;
 
-    if (ctx.vocab == nullptr || ctx.detokenizer_sm == nullptr ||
-        ctx.dispatch_detokenizer_bind == nullptr ||
-        ctx.dispatch_detokenizer_detokenize == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
+    const size_t has_vocab = static_cast<size_t>(ctx.vocab != nullptr);
+    const size_t has_sm = static_cast<size_t>(ctx.detokenizer_sm != nullptr);
+    const size_t has_bind_dispatch = static_cast<size_t>(ctx.dispatch_detokenizer_bind != nullptr);
+    const size_t has_detokenize_dispatch =
+        static_cast<size_t>(ctx.dispatch_detokenizer_detokenize != nullptr);
+    const size_t has_dependencies =
+        has_vocab & has_sm & has_bind_dispatch & has_detokenize_dispatch;
 
-    const int32_t detok_ok =
-        emel::text::detokenizer::error_code(emel::text::detokenizer::error::none);
-    const int32_t detok_backend =
-        emel::text::detokenizer::error_code(emel::text::detokenizer::error::backend_error);
-    int32_t err = detok_ok;
+    const emel::model::data::vocab * vocabs[2] = {&detail::k_fallback_vocab, ctx.vocab};
+    void * dispatch_sms[2] = {nullptr, ctx.detokenizer_sm};
+    bool (*dispatchers[2])(void *, const emel::text::detokenizer::event::bind &) = {
+        detail::dispatch_bind_fallback,
+        ctx.dispatch_detokenizer_bind};
 
-    emel::text::detokenizer::event::bind bind_ev{*ctx.vocab, err};
+    int32_t err = k_detokenizer_ok;
+    const emel::text::detokenizer::event::bind bind_ev{
+        *vocabs[has_vocab],
+        err};
 
-    const bool accepted =
-        ctx.dispatch_detokenizer_bind(ctx.detokenizer_sm, bind_ev);
-    if (!accepted && err == detok_ok) {
-      set_error(ctx, detok_backend);
-      return;
-    }
-    if (err != detok_ok) {
-      set_error(ctx, err);
-      return;
-    }
+    runtime_ev.ctx.detokenizer_accepted =
+        dispatchers[has_bind_dispatch](dispatch_sms[has_sm], bind_ev) && (has_dependencies != 0);
+    const int32_t dependency_error = to_detokenizer_error_code(
+        emel::text::detokenizer::error::invalid_request);
+    const int32_t errors[2] = {dependency_error, err};
+    runtime_ev.ctx.detokenizer_err = errors[has_dependencies];
+  }
+};
 
+struct set_backend_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context &) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    set_error(runtime_ev.ctx, error::backend_error);
+  }
+};
+
+struct set_invalid_request {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context &) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    set_error(runtime_ev.ctx, error::invalid_request);
+  }
+};
+
+struct set_error_from_detokenizer {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context &) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    set_error(runtime_ev.ctx, from_detokenizer_error(runtime_ev.ctx.detokenizer_err));
+  }
+};
+
+struct commit_bind_success {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context & ctx) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
     ctx.is_bound = true;
-    ctx.last_error = EMEL_OK;
+    set_error(runtime_ev.ctx, error::none);
   }
 };
 
 struct begin_render {
-  void operator()(const event::render & ev, context & ctx) const noexcept {
-    if (ev.output_length_out != nullptr) {
-      *ev.output_length_out = 0;
-    }
-    if (ev.status_out != nullptr) {
-      *ev.status_out = sequence_status::running;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-
-    ctx.token_id = ev.token_id;
-    ctx.sequence_id = ev.sequence_id;
-    ctx.emit_special = ev.emit_special;
-    ctx.output = ev.output;
-    ctx.output_capacity = ev.output_capacity;
-    ctx.output_length = 0;
-    ctx.status = sequence_status::running;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
+  void operator()(const event::render_runtime & ev,
+                  context &) const noexcept {
+    reset_outcome(ev.ctx);
+    int32_t error_sink = to_error_out(k_error_none);
+    size_t output_length_sink = 0;
+    sequence_status status_sink = sequence_status::running;
+    write_optional(ev.request.output_length_out, output_length_sink, size_t{0});
+    write_optional(ev.request.status_out, status_sink, sequence_status::running);
+    write_optional(ev.request.error_out, error_sink, to_error_out(k_error_none));
+    ev.ctx.sequence_index = static_cast<size_t>(ev.request.sequence_id);
   }
 };
 
 struct reject_render {
-  void operator()(const event::render &, context & ctx) const noexcept {
-    ctx.output_length = 0;
-    ctx.status = sequence_status::running;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+  void operator()(const event::render_runtime & ev,
+                  context &) const noexcept {
+    reset_outcome(ev.ctx);
+    set_error(ev.ctx, error::invalid_request);
   }
 };
 
-struct run_render {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.output_length = 0;
-    ctx.status = sequence_status::running;
+struct render_sequence_already_stopped {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context &) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.output_length = 0;
+    runtime_ev.ctx.status = sequence_status::stop_sequence_matched;
+    runtime_ev.ctx.produced_length = 0;
+    set_error(runtime_ev.ctx, error::none);
+  }
+};
 
-    if (!ctx.is_bound || ctx.vocab == nullptr ||
-        (ctx.output == nullptr && ctx.output_capacity > 0) ||
-        ctx.detokenizer_sm == nullptr ||
-        ctx.dispatch_detokenizer_detokenize == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
+struct dispatch_render_detokenizer {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context & ctx) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    sequence_state & sequence = ctx.sequences[runtime_ev.ctx.sequence_index];
 
-    size_t sequence_index = 0;
-    if (!resolve_sequence(ctx, sequence_index)) {
-      return;
-    }
-
-    sequence_state & sequence = ctx.sequences[sequence_index];
-    if (sequence.stop_matched) {
-      ctx.output_length = 0;
-      ctx.status = sequence_status::stop_sequence_matched;
-      ctx.last_error = EMEL_OK;
-      return;
-    }
-
-    size_t pending_length = sequence.pending_length;
+    int32_t err = k_detokenizer_ok;
     size_t detok_output_length = 0;
+    size_t detok_pending_length = sequence.pending_length;
 
-    const int32_t detok_ok =
-        emel::text::detokenizer::error_code(emel::text::detokenizer::error::none);
-    const int32_t detok_backend =
-        emel::text::detokenizer::error_code(emel::text::detokenizer::error::backend_error);
-    int32_t err = detok_ok;
-
-    emel::text::detokenizer::event::detokenize detok_ev{
-        ctx.token_id,
-        ctx.emit_special,
+    const emel::text::detokenizer::event::detokenize detok_ev{
+        runtime_ev.request.token_id,
+        runtime_ev.request.emit_special,
         sequence.pending_bytes.data(),
         sequence.pending_length,
         sequence.pending_bytes.size(),
-        ctx.output,
-        ctx.output_capacity,
+        runtime_ev.request.output,
+        runtime_ev.request.output_capacity,
         detok_output_length,
-        pending_length,
+        detok_pending_length,
         err};
 
-    const bool accepted =
+    runtime_ev.ctx.detokenizer_accepted =
         ctx.dispatch_detokenizer_detokenize(ctx.detokenizer_sm, detok_ev);
-    if (!accepted && err == detok_ok) {
-      set_error(ctx, detok_backend);
-      return;
-    }
-    if (err != detok_ok) {
-      set_error(ctx, err);
-      return;
-    }
-    if (detok_output_length > ctx.output_capacity ||
-        pending_length > detok_ev.pending_capacity) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
+    runtime_ev.ctx.detokenizer_err = err;
+    runtime_ev.ctx.detokenizer_output_length = detok_output_length;
+    runtime_ev.ctx.detokenizer_pending_length = detok_pending_length;
+  }
+};
+
+struct commit_render_detokenizer_output {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context & ctx) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    sequence_state & sequence = ctx.sequences[runtime_ev.ctx.sequence_index];
+    sequence.pending_length = runtime_ev.ctx.detokenizer_pending_length;
+    runtime_ev.ctx.produced_length = runtime_ev.ctx.detokenizer_output_length;
+  }
+};
+
+struct strip_render_leading_space {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context &) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    size_t strip_count = 0;
+    const size_t produced = runtime_ev.ctx.produced_length;
+    while (strip_count < produced &&
+           is_leading_space(runtime_ev.request.output[strip_count])) {
+      strip_count += 1;
     }
 
-    sequence.pending_length = pending_length;
+    std::memmove(runtime_ev.request.output,
+                 runtime_ev.request.output + strip_count,
+                 produced - strip_count);
+    runtime_ev.ctx.produced_length = produced - strip_count;
+  }
+};
 
-    size_t produced = detok_output_length;
-    if (sequence.strip_leading_space && produced > 0) {
-      size_t strip_count = 0;
-      while (strip_count < produced && is_leading_space(ctx.output[strip_count])) {
-        strip_count += 1;
-      }
-      if (strip_count > 0) {
-        std::memmove(ctx.output,
-                     ctx.output + strip_count,
-                     produced - strip_count);
-        produced -= strip_count;
-      }
-      if (produced > 0) {
-        sequence.strip_leading_space = false;
-      }
-    }
+struct update_render_strip_state {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context & ctx) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    sequence_state & sequence = ctx.sequences[runtime_ev.ctx.sequence_index];
+    const bool keep_strip = runtime_ev.ctx.produced_length == 0;
+    sequence.strip_leading_space = sequence.strip_leading_space && keep_strip;
+  }
+};
 
-    if (!apply_stop_matching(sequence, ctx, produced)) {
-      return;
-    }
-
-    ctx.last_error = EMEL_OK;
+struct apply_render_stop_matching {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context & ctx) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    sequence_state & sequence = ctx.sequences[runtime_ev.ctx.sequence_index];
+    apply_stop_matching(sequence,
+                             ctx,
+                             runtime_ev.request.output,
+                             runtime_ev.request.output_capacity,
+                             runtime_ev.ctx.produced_length,
+                             runtime_ev.ctx.output_length,
+                             runtime_ev.ctx.status,
+                             runtime_ev.ctx);
   }
 };
 
 struct begin_flush {
-  void operator()(const event::flush & ev, context & ctx) const noexcept {
-    if (ev.output_length_out != nullptr) {
-      *ev.output_length_out = 0;
-    }
-    if (ev.status_out != nullptr) {
-      *ev.status_out = sequence_status::running;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-
-    ctx.token_id = -1;
-    ctx.sequence_id = ev.sequence_id;
-    ctx.emit_special = false;
-    ctx.output = ev.output;
-    ctx.output_capacity = ev.output_capacity;
-    ctx.output_length = 0;
-    ctx.status = sequence_status::running;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
+  void operator()(const event::flush_runtime & ev,
+                  context &) const noexcept {
+    reset_outcome(ev.ctx);
+    int32_t error_sink = to_error_out(k_error_none);
+    size_t output_length_sink = 0;
+    sequence_status status_sink = sequence_status::running;
+    write_optional(ev.request.output_length_out, output_length_sink, size_t{0});
+    write_optional(ev.request.status_out, status_sink, sequence_status::running);
+    write_optional(ev.request.error_out, error_sink, to_error_out(k_error_none));
+    ev.ctx.sequence_index = static_cast<size_t>(ev.request.sequence_id);
   }
 };
 
 struct reject_flush {
-  void operator()(const event::flush &, context & ctx) const noexcept {
-    ctx.output_length = 0;
-    ctx.status = sequence_status::running;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+  void operator()(const event::flush_runtime & ev,
+                  context &) const noexcept {
+    reset_outcome(ev.ctx);
+    set_error(ev.ctx, error::invalid_request);
   }
 };
 
-struct run_flush {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.output_length = 0;
-    ctx.status = sequence_status::running;
+struct flush_copy_sequence_buffers {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context & ctx) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    sequence_state & sequence = ctx.sequences[runtime_ev.ctx.sequence_index];
+    const size_t pending_length = sequence.pending_length;
+    const size_t holdback_length = sequence.holdback_length;
+    std::array<char, k_max_pending_bytes + k_max_holdback_bytes> output_sink = {};
+    char * destinations[2] = {output_sink.data(), runtime_ev.request.output};
+    char * const output =
+        destinations[static_cast<size_t>(runtime_ev.request.output != nullptr)];
 
-    if (!ctx.is_bound || ctx.vocab == nullptr ||
-        (ctx.output == nullptr && ctx.output_capacity > 0)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
+    std::memcpy(output,
+                sequence.pending_bytes.data(),
+                pending_length);
+    std::memcpy(output + pending_length,
+                sequence.holdback.data(),
+                holdback_length);
+    runtime_ev.ctx.output_length = pending_length + holdback_length;
+    sequence.pending_length = 0;
+    sequence.holdback_length = 0;
 
-    size_t sequence_index = 0;
-    if (!resolve_sequence(ctx, sequence_index)) {
-      return;
-    }
+    const bool keep_strip = runtime_ev.ctx.output_length == 0;
+    sequence.strip_leading_space = sequence.strip_leading_space && keep_strip;
 
-    sequence_state & sequence = ctx.sequences[sequence_index];
-    const size_t required = sequence.pending_length + sequence.holdback_length;
-    if (required > ctx.output_capacity) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-
-    if (sequence.pending_length > 0) {
-      std::memcpy(ctx.output,
-                  sequence.pending_bytes.data(),
-                  sequence.pending_length);
-      ctx.output_length += sequence.pending_length;
-      sequence.pending_length = 0;
-    }
-
-    if (sequence.holdback_length > 0) {
-      std::memcpy(ctx.output + ctx.output_length,
-                  sequence.holdback.data(),
-                  sequence.holdback_length);
-      ctx.output_length += sequence.holdback_length;
-      sequence.holdback_length = 0;
-    }
-
-    if (ctx.output_length > 0) {
-      sequence.strip_leading_space = false;
-    }
-
-    ctx.status =
-        sequence.stop_matched ? sequence_status::stop_sequence_matched
-                              : sequence_status::running;
-    ctx.last_error = EMEL_OK;
+    const std::array<sequence_status, 2> statuses = {
+        sequence_status::running,
+        sequence_status::stop_sequence_matched};
+    runtime_ev.ctx.status = statuses[static_cast<size_t>(sequence.stop_matched)];
   }
 };
 
 struct mark_done {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context &) const noexcept {
+    const auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    set_error(runtime_ev.ctx, error::none);
   }
 };
 
 struct ensure_last_error {
-  void operator()(context & ctx) const noexcept {
-    if (ctx.last_error != EMEL_OK) {
-      return;
-    }
-    ctx.last_error =
-        ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context &) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    const std::array<emel::error::type, 2> errors = {
+        emel::error::cast(error::backend_error),
+        runtime_ev.ctx.err};
+    set_error(runtime_ev.ctx, errors[static_cast<size_t>(runtime_ev.ctx.err != k_error_none)]);
   }
 };
 
 struct on_unexpected {
   template <class event_type>
-  void operator()(const event_type &, context & ctx) const noexcept {
-    ctx.output_length = 0;
-    ctx.status = sequence_status::running;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+  void operator()(const event_type & ev,
+                  context &) const noexcept {
+    if constexpr (requires { detail::unwrap_runtime_event(ev).ctx; }) {
+      auto & runtime_ev = detail::unwrap_runtime_event(ev);
+      set_error(runtime_ev.ctx, error::invalid_request);
+      if constexpr (requires { runtime_ev.ctx.output_length; }) {
+        runtime_ev.ctx.output_length = 0;
+      }
+      if constexpr (requires { runtime_ev.ctx.status; }) {
+        runtime_ev.ctx.status = sequence_status::running;
+      }
+    }
   }
 };
 
 inline constexpr begin_bind begin_bind{};
 inline constexpr reject_bind reject_bind{};
 inline constexpr bind_detokenizer bind_detokenizer{};
+inline constexpr set_backend_error set_backend_error{};
+inline constexpr set_invalid_request set_invalid_request{};
+inline constexpr set_error_from_detokenizer set_error_from_detokenizer{};
+inline constexpr commit_bind_success commit_bind_success{};
 inline constexpr begin_render begin_render{};
 inline constexpr reject_render reject_render{};
-inline constexpr run_render run_render{};
+inline constexpr render_sequence_already_stopped render_sequence_already_stopped{};
+inline constexpr dispatch_render_detokenizer dispatch_render_detokenizer{};
+inline constexpr commit_render_detokenizer_output commit_render_detokenizer_output{};
+inline constexpr strip_render_leading_space strip_render_leading_space{};
+inline constexpr update_render_strip_state update_render_strip_state{};
+inline constexpr apply_render_stop_matching apply_render_stop_matching{};
 inline constexpr begin_flush begin_flush{};
 inline constexpr reject_flush reject_flush{};
-inline constexpr run_flush run_flush{};
+inline constexpr flush_copy_sequence_buffers flush_copy_sequence_buffers{};
 inline constexpr mark_done mark_done{};
 inline constexpr ensure_last_error ensure_last_error{};
 inline constexpr on_unexpected on_unexpected{};
