@@ -25,6 +25,14 @@ constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noe
   }
 }
 
+inline bool dispatch_bind_fallback(
+    void *,
+    const emel::text::detokenizer::event::bind &) noexcept {
+  return false;
+}
+
+inline const emel::model::data::vocab k_fallback_vocab = {};
+
 }  // namespace detail
 
 inline constexpr emel::error::type k_error_none = emel::error::cast(error::none);
@@ -120,10 +128,12 @@ inline bool is_leading_space(const char value) noexcept {
 inline char concat_char(const sequence_state & sequence,
                         const char * new_bytes,
                         const size_t index) noexcept {
-  if (index < sequence.holdback_length) {
-    return sequence.holdback[index];
-  }
-  return new_bytes[index - sequence.holdback_length];
+  const size_t from_new = static_cast<size_t>(index >= sequence.holdback_length);
+  const char * sources[2] = {sequence.holdback.data(), new_bytes};
+  const size_t adjusted_indices[2] = {
+      index,
+      index - (sequence.holdback_length * from_new)};
+  return sources[from_new][adjusted_indices[from_new]];
 }
 
 inline bool copy_stop_sequences(const event::bind & ev,
@@ -170,23 +180,31 @@ inline bool compose_output(const sequence_state & sequence,
                            size_t & output_length_out,
                            runtime_ctx_type & runtime_ctx) noexcept {
   const size_t emit_total = emit_from_holdback + emit_from_new;
-  if (emit_total > output_capacity || emit_from_new > new_length ||
-      (output == nullptr && emit_total > 0)) {
-    set_error(runtime_ctx, error::invalid_request);
-    return false;
-  }
+  const size_t output_required = static_cast<size_t>(emit_total > 0);
+  const size_t has_output = static_cast<size_t>(output != nullptr);
+  const size_t output_ready = has_output | static_cast<size_t>(output_required == 0);
+  const size_t total_within_bounds = static_cast<size_t>(emit_total <= output_capacity);
+  const size_t new_within_bounds = static_cast<size_t>(emit_from_new <= new_length);
+  const size_t valid = output_ready & total_within_bounds & new_within_bounds;
 
-  if (emit_from_holdback > 0) {
-    if (emit_from_new > 0) {
-      std::memmove(output + emit_from_holdback,
-                   output,
-                   emit_from_new);
-    }
-    std::memcpy(output, sequence.holdback.data(), emit_from_holdback);
-  }
+  const std::array<emel::error::type, 2> errors = {
+      emel::error::cast(error::invalid_request),
+      emel::error::cast(error::none)};
+  set_error(runtime_ctx, errors[valid]);
 
-  output_length_out = emit_total;
-  return true;
+  std::array<char, k_max_pending_bytes + k_max_holdback_bytes> output_sink = {};
+  char * destinations[2] = {output_sink.data(), output};
+  char * const target = destinations[has_output & valid];
+  const size_t safe_emit_from_holdback = emit_from_holdback * valid;
+  const size_t safe_emit_from_new = emit_from_new * valid;
+
+  std::memmove(target + safe_emit_from_holdback,
+               target,
+               safe_emit_from_new);
+  std::memcpy(target, sequence.holdback.data(), safe_emit_from_holdback);
+
+  output_length_out = emit_total * valid;
+  return valid != 0;
 }
 
 template <class runtime_ctx_type>
@@ -203,90 +221,102 @@ inline bool apply_stop_matching(sequence_state & sequence,
   size_t matched_start = total;
   size_t matched_length = 0;
 
-  if (ctx.stop_sequence_count > 0) {
-    for (size_t stop_index = 0; stop_index < ctx.stop_sequence_count;
-         ++stop_index) {
-      const stop_sequence_entry stop = ctx.stop_sequences[stop_index];
-      const size_t stop_length = static_cast<size_t>(stop.length);
-      if (stop_length == 0 || stop_length > total) {
-        continue;
+  for (size_t stop_index = 0; stop_index < ctx.stop_sequence_count;
+       ++stop_index) {
+    const stop_sequence_entry stop = ctx.stop_sequences[stop_index];
+    const size_t stop_length = static_cast<size_t>(stop.length);
+    const size_t bounded_stop_length = std::min(stop_length, total + 1);
+    const size_t stop_non_zero = static_cast<size_t>(stop_length != 0);
+    const size_t cursor_limit = (total + 1 - bounded_stop_length) * stop_non_zero;
+
+    for (size_t cursor = 0; cursor < cursor_limit; ++cursor) {
+      bool matched = true;
+      for (size_t offset = 0; offset < stop_length; ++offset) {
+        const char lhs = concat_char(sequence, output, cursor + offset);
+        const char rhs =
+            ctx.stop_storage[static_cast<size_t>(stop.offset) + offset];
+        matched = matched && (lhs == rhs);
       }
 
-      for (size_t cursor = 0; cursor + stop_length <= total; ++cursor) {
-        bool matched = true;
-        for (size_t offset = 0; offset < stop_length; ++offset) {
-          const char lhs = concat_char(sequence, output, cursor + offset);
-          const char rhs =
-              ctx.stop_storage[static_cast<size_t>(stop.offset) + offset];
-          if (lhs != rhs) {
-            matched = false;
-            break;
-          }
-        }
-
-        if (matched && cursor < matched_start) {
-          matched_start = cursor;
-          matched_length = stop_length;
-        }
-      }
+      const size_t should_update =
+          static_cast<size_t>(matched) & static_cast<size_t>(cursor < matched_start);
+      const size_t starts[2] = {matched_start, cursor};
+      const size_t lengths[2] = {matched_length, stop_length};
+      matched_start = starts[should_update];
+      matched_length = lengths[should_update];
     }
   }
 
-  if (matched_length > 0) {
-    const size_t emit_before_stop = matched_start;
-    const size_t emit_from_holdback =
-        std::min(emit_before_stop, sequence.holdback_length);
-    const size_t emit_from_new = emit_before_stop - emit_from_holdback;
+  const size_t matched = static_cast<size_t>(matched_length > 0);
+  const size_t emit_before_stop_match = matched_start;
+  const size_t emit_from_holdback_match =
+      std::min(emit_before_stop_match, sequence.holdback_length);
+  const size_t emit_from_new_match = emit_before_stop_match - emit_from_holdback_match;
+  const size_t holdback_target_match = 0;
 
-    if (!compose_output(sequence,
-                        output,
-                        output_capacity,
-                        emit_from_holdback,
-                        emit_from_new,
-                        new_length,
-                        output_length_out,
-                        runtime_ctx)) {
-      return false;
-    }
-
-    sequence.holdback_length = 0;
-    sequence.stop_matched = true;
-    status_out = sequence_status::stop_sequence_matched;
-    return true;
-  }
-
-  const size_t holdback_target =
-      ctx.stop_max_length > 1
-          ? std::min(total, static_cast<size_t>(ctx.stop_max_length - 1))
-          : 0;
-  const size_t emit_total = total - holdback_target;
-  const size_t emit_from_holdback =
-      std::min(emit_total, sequence.holdback_length);
-  const size_t emit_from_new = emit_total - emit_from_holdback;
+  const size_t has_holdback_window = static_cast<size_t>(ctx.stop_max_length > 1);
+  const size_t holdback_limits[2] = {0, ctx.stop_max_length - 1};
+  const size_t holdback_target_nomatch = std::min(total, holdback_limits[has_holdback_window]);
+  const size_t emit_total_nomatch = total - holdback_target_nomatch;
+  const size_t emit_from_holdback_nomatch =
+      std::min(emit_total_nomatch, sequence.holdback_length);
+  const size_t emit_from_new_nomatch = emit_total_nomatch - emit_from_holdback_nomatch;
 
   std::array<char, k_max_holdback_bytes> next_holdback = {};
-  for (size_t idx = 0; idx < holdback_target; ++idx) {
+  for (size_t idx = 0; idx < holdback_target_nomatch; ++idx) {
     next_holdback[idx] =
-        concat_char(sequence, output, total - holdback_target + idx);
+        concat_char(sequence, output, total - holdback_target_nomatch + idx);
   }
 
-  if (!compose_output(sequence,
-                      output,
-                      output_capacity,
-                      emit_from_holdback,
-                      emit_from_new,
-                      new_length,
-                      output_length_out,
-                      runtime_ctx)) {
-    return false;
-  }
+  const size_t emit_from_holdback_options[2] = {
+      emit_from_holdback_nomatch,
+      emit_from_holdback_match};
+  const size_t emit_from_new_options[2] = {
+      emit_from_new_nomatch,
+      emit_from_new_match};
+  const size_t holdback_targets[2] = {
+      holdback_target_nomatch,
+      holdback_target_match};
+  const bool stop_matched_values[2] = {false, true};
+  const std::array<sequence_status, 2> statuses = {
+      sequence_status::running,
+      sequence_status::stop_sequence_matched};
 
-  sequence.holdback_length = holdback_target;
-  if (holdback_target > 0) {
-    std::memcpy(sequence.holdback.data(), next_holdback.data(), holdback_target);
-  }
-  status_out = sequence_status::running;
-  return true;
+  const size_t selected_emit_from_holdback = emit_from_holdback_options[matched];
+  const size_t selected_emit_from_new = emit_from_new_options[matched];
+  const size_t selected_holdback_target = holdback_targets[matched];
+  const bool selected_stop_matched = stop_matched_values[matched];
+  const sequence_status selected_status = statuses[matched];
+
+  const size_t compose_ok = static_cast<size_t>(
+      compose_output(sequence,
+                     output,
+                     output_capacity,
+                     selected_emit_from_holdback,
+                     selected_emit_from_new,
+                     new_length,
+                     output_length_out,
+                     runtime_ctx));
+
+  const size_t holdback_lengths_after_compose[2] = {
+      sequence.holdback_length,
+      selected_holdback_target};
+  sequence.holdback_length = holdback_lengths_after_compose[compose_ok];
+  std::memcpy(sequence.holdback.data(),
+              next_holdback.data(),
+              selected_holdback_target * compose_ok);
+
+  const bool stop_matched_after_compose[2] = {
+      sequence.stop_matched,
+      selected_stop_matched};
+  sequence.stop_matched = stop_matched_after_compose[compose_ok];
+
+  const std::array<sequence_status, 2> status_after_compose = {
+      status_out,
+      selected_status};
+  status_out = status_after_compose[compose_ok];
+
+  return compose_ok != 0;
 }
 
 struct begin_bind {
@@ -321,14 +351,31 @@ struct bind_detokenizer {
     auto & runtime_ev = detail::unwrap_runtime_event(ev);
     ctx.is_bound = false;
 
+    const size_t has_vocab = static_cast<size_t>(ctx.vocab != nullptr);
+    const size_t has_sm = static_cast<size_t>(ctx.detokenizer_sm != nullptr);
+    const size_t has_bind_dispatch = static_cast<size_t>(ctx.dispatch_detokenizer_bind != nullptr);
+    const size_t has_detokenize_dispatch =
+        static_cast<size_t>(ctx.dispatch_detokenizer_detokenize != nullptr);
+    const size_t has_dependencies =
+        has_vocab & has_sm & has_bind_dispatch & has_detokenize_dispatch;
+
+    const emel::model::data::vocab * vocabs[2] = {&detail::k_fallback_vocab, ctx.vocab};
+    void * dispatch_sms[2] = {nullptr, ctx.detokenizer_sm};
+    bool (*dispatchers[2])(void *, const emel::text::detokenizer::event::bind &) = {
+        detail::dispatch_bind_fallback,
+        ctx.dispatch_detokenizer_bind};
+
     int32_t err = k_detokenizer_ok;
     const emel::text::detokenizer::event::bind bind_ev{
-        *ctx.vocab,
+        *vocabs[has_vocab],
         err};
 
     runtime_ev.ctx.detokenizer_accepted =
-        ctx.dispatch_detokenizer_bind(ctx.detokenizer_sm, bind_ev);
-    runtime_ev.ctx.detokenizer_err = err;
+        dispatchers[has_bind_dispatch](dispatch_sms[has_sm], bind_ev) && (has_dependencies != 0);
+    const int32_t dependency_error = to_detokenizer_error_code(
+        emel::text::detokenizer::error::invalid_request);
+    const int32_t errors[2] = {dependency_error, err};
+    runtime_ev.ctx.detokenizer_err = errors[has_dependencies];
   }
 };
 

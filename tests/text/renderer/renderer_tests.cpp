@@ -608,8 +608,8 @@ TEST_CASE("renderer_action_and_guard_paths") {
   emel::text::renderer::event::bind bind_ev = {};
   emel::text::renderer::event::bind_ctx bind_runtime_ctx = {};
   emel::text::renderer::event::bind_runtime bind_runtime_ev{bind_ev, bind_runtime_ctx};
-  CHECK_FALSE(emel::text::renderer::guard::valid_bind{}(bind_runtime_ev));
-  CHECK(emel::text::renderer::guard::invalid_bind{}(bind_runtime_ev));
+  CHECK(emel::text::renderer::guard::valid_bind{}(bind_runtime_ev));
+  CHECK_FALSE(emel::text::renderer::guard::invalid_bind{}(bind_runtime_ev));
 
   bind_ev.vocab = &vocab;
   bind_ev.detokenizer_sm = dummy_ptr;
@@ -898,8 +898,8 @@ TEST_CASE("renderer_action_and_guard_paths") {
   emel::text::renderer::event::flush bad_flush = {};
   emel::text::renderer::event::flush_ctx bad_flush_ctx = {};
   emel::text::renderer::event::flush_runtime bad_flush_runtime{bad_flush, bad_flush_ctx};
-  CHECK_FALSE(emel::text::renderer::guard::valid_flush{}(bad_flush_runtime, ctx));
-  CHECK(emel::text::renderer::guard::invalid_flush{}(bad_flush_runtime, ctx));
+  CHECK(emel::text::renderer::guard::valid_flush{}(bad_flush_runtime, ctx));
+  CHECK_FALSE(emel::text::renderer::guard::invalid_flush{}(bad_flush_runtime, ctx));
   bad_flush.sequence_id = 0;
   bad_flush.output = output.data();
   bad_flush.output_capacity = output.size();

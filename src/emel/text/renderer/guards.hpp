@@ -38,11 +38,6 @@ struct valid_bind {
       return false;
     }
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    if (runtime_ev.request.vocab == nullptr || runtime_ev.request.detokenizer_sm == nullptr ||
-        runtime_ev.request.dispatch_detokenizer_bind == nullptr ||
-        runtime_ev.request.dispatch_detokenizer_detokenize == nullptr) {
-      return false;
-    }
     if (runtime_ev.request.stop_sequence_count > 0 &&
         runtime_ev.request.stop_sequences == nullptr) {
       return false;
@@ -93,9 +88,7 @@ struct valid_render {
         runtime_ev.request.output_capacity > 0) {
       return false;
     }
-    return runtime_ev.request.output_length_out != nullptr &&
-           runtime_ev.request.status_out != nullptr &&
-           runtime_ev.request.error_out != nullptr;
+    return true;
   }
 };
 
@@ -126,9 +119,7 @@ struct valid_flush {
         runtime_ev.request.output_capacity > 0) {
       return false;
     }
-    return runtime_ev.request.output_length_out != nullptr &&
-           runtime_ev.request.status_out != nullptr &&
-           runtime_ev.request.error_out != nullptr;
+    return true;
   }
 };
 
