@@ -17,6 +17,10 @@ endif()
 
 option(EMEL_ENABLE_TESTS "Build tests" ON)
 option(EMEL_ENABLE_FUZZ "Build fuzz targets" OFF)
+option(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES
+  "Build tensor/parser/text machine surfaces"
+  OFF
+)
 
 include(FetchContent)
 include(cmake/sml_version.cmake)
@@ -46,21 +50,23 @@ target_link_libraries(emel
 )
 
 
-add_executable(mock_model_load
-  tools/mock_main.cpp
-)
+if(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES)
+  add_executable(mock_model_load
+    tools/mock_main.cpp
+  )
 
-target_link_libraries(mock_model_load
-  PRIVATE
-    emel_core
-)
+  target_link_libraries(mock_model_load
+    PRIVATE
+      emel_core
+  )
 
-target_include_directories(mock_model_load
-  PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${boost_sml_SOURCE_DIR}/include
-)
+  target_include_directories(mock_model_load
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${boost_sml_SOURCE_DIR}/include
+  )
+endif()
 
 if(EMEL_ENABLE_TESTS)
   include(CTest)
@@ -71,18 +77,14 @@ if(EMEL_ENABLE_TESTS)
     message(FATAL_ERROR "Missing doctest header at ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h")
   endif()
 
-  add_executable(emel_tests_bin
+  set(EMEL_TEST_SOURCES
     tests/doctest_main.cpp
     tests/model/loader/lifecycle_tests.cpp
     tests/model/weight_loader/lifecycle_tests.cpp
-    tests/parser/gguf/lifecycle_tests.cpp
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp
     tests/generator/lifecycle_tests.cpp
-    tests/text/jinja/parser_tests.cpp
-    tests/text/jinja/lexer_tests.cpp
-    tests/text/jinja/formatter_tests.cpp
     tests/logits/validator/validator_tests.cpp
     tests/logits/sampler/pipeline_tests.cpp
     tests/sm/callback_tests.cpp
@@ -98,21 +100,6 @@ if(EMEL_ENABLE_TESTS)
     tests/kernel/lifecycle_tests.cpp
     # Legacy processor tests target pre-cutover API shape and are disabled until migrated.
     # Keep them out of gate builds during the hard cutover.
-    tests/text/encoders/encoder_tests.cpp
-    tests/text/conditioner/conditioner_tests.cpp
-    tests/text/renderer/renderer_tests.cpp
-    tests/text/unicode/unicode_tests.cpp
-    tests/text/tokenizer/preprocessor_tests.cpp
-    tests/text/tokenizer/preprocessor_spm_tests.cpp
-    tests/text/tokenizer/preprocessor_wpm_tests.cpp
-    tests/text/tokenizer/preprocessor_rwkv_tests.cpp
-    tests/text/tokenizer/preprocessor_plamo2_tests.cpp
-    tests/text/tokenizer/preprocessor_fallback_tests.cpp
-    tests/text/tokenizer/bpe_regex_tests.cpp
-    tests/text/tokenizer/bpe_split_tests.cpp
-    tests/text/tokenizer/tokenizer_tests.cpp
-    tests/text/tokenizer/tokenizer_parity_tests.cpp
-    tests/text/tokenizer/tokenizer_action_guard_tests.cpp
     tests/batch/planner/planner_tests.cpp
     tests/batch/planner/planner_actions_tests.cpp
     tests/batch/planner/modes/detail_tests.cpp
@@ -127,6 +114,34 @@ if(EMEL_ENABLE_TESTS)
     tests/memory/kv/lifecycle_tests.cpp
     tests/memory/recurrent/lifecycle_tests.cpp
     tests/memory/hybrid/lifecycle_tests.cpp
+  )
+
+  if(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES)
+    list(APPEND EMEL_TEST_SOURCES
+      tests/parser/gguf/lifecycle_tests.cpp
+      tests/text/jinja/parser_tests.cpp
+      tests/text/jinja/lexer_tests.cpp
+      tests/text/jinja/formatter_tests.cpp
+      tests/text/encoders/encoder_tests.cpp
+      tests/text/conditioner/conditioner_tests.cpp
+      tests/text/renderer/renderer_tests.cpp
+      tests/text/unicode/unicode_tests.cpp
+      tests/text/tokenizer/preprocessor_tests.cpp
+      tests/text/tokenizer/preprocessor_spm_tests.cpp
+      tests/text/tokenizer/preprocessor_wpm_tests.cpp
+      tests/text/tokenizer/preprocessor_rwkv_tests.cpp
+      tests/text/tokenizer/preprocessor_plamo2_tests.cpp
+      tests/text/tokenizer/preprocessor_fallback_tests.cpp
+      tests/text/tokenizer/bpe_regex_tests.cpp
+      tests/text/tokenizer/bpe_split_tests.cpp
+      tests/text/tokenizer/tokenizer_tests.cpp
+      tests/text/tokenizer/tokenizer_parity_tests.cpp
+      tests/text/tokenizer/tokenizer_action_guard_tests.cpp
+    )
+  endif()
+
+  add_executable(emel_tests_bin
+    ${EMEL_TEST_SOURCES}
   )
 
   target_link_libraries(emel_tests_bin
@@ -216,10 +231,12 @@ if(EMEL_ENABLE_FUZZ)
     )
   endfunction()
 
-  add_executable(emel_fuzz_gguf_parser
-    tests/fuzz/gguf_parser_fuzz.cpp
-  )
-  emel_configure_fuzzer(emel_fuzz_gguf_parser)
+  if(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES)
+    add_executable(emel_fuzz_gguf_parser
+      tests/fuzz/gguf_parser_fuzz.cpp
+    )
+    emel_configure_fuzzer(emel_fuzz_gguf_parser)
+  endif()
 
   add_executable(emel_fuzz_gbnf_parser
     tests/fuzz/gbnf_parser_fuzz.cpp
