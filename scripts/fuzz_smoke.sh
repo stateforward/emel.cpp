@@ -59,6 +59,7 @@ cmake -S "$ROOT_DIR" -B "$BUILD_DIR" -G Ninja \
   -DCMAKE_CXX_FLAGS="$fuzz_cxx_flags" \
   -DCMAKE_EXE_LINKER_FLAGS="$fuzz_link_flags" \
   -DEMEL_ENABLE_FUZZ=ON \
+  -DEMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES=OFF \
   -DEMEL_ENABLE_TESTS=OFF
 
 cmake --build "$BUILD_DIR" --parallel
@@ -69,5 +70,7 @@ run_fuzzer() {
   "$BUILD_DIR/$name" -seed=1 -max_total_time=10 -max_len=4096 "$corpus"
 }
 
-run_fuzzer emel_fuzz_gguf_parser "$ROOT_DIR/tests/fuzz/corpus/gguf_parser"
+if [[ -x "$BUILD_DIR/emel_fuzz_gguf_parser" ]]; then
+  run_fuzzer emel_fuzz_gguf_parser "$ROOT_DIR/tests/fuzz/corpus/gguf_parser"
+fi
 run_fuzzer emel_fuzz_gbnf_parser "$ROOT_DIR/tests/fuzz/corpus/gbnf_parser"

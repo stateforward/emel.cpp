@@ -1,38 +1,36 @@
 stateDiagram-v2
   direction TB
-  [*] --> initialized
-  initialized --> validating : execute [valid_execute_request_] / begin_execute_
-  initialized --> errored : execute [invalid_execute_request_] / reject_invalid_execute_
-  validating --> validate_decision : [always] / run_validate_
-  validate_decision --> errored : [lambda_guards_19_38] / none
-  validate_decision --> prepare_decision : [lambda_guards_15_34] / run_prepare_graph_
-  prepare_decision --> errored : [lambda_guards_19_38] / none
-  prepare_decision --> binding_inputs : [lambda_guards_7_38] / none
-  prepare_decision --> allocating_graph : [lambda_guards_11_48] / none
-  allocating_graph --> alloc_decision : [always] / run_alloc_graph_
-  alloc_decision --> errored : [lambda_guards_19_38] / none
-  alloc_decision --> binding_inputs : [lambda_guards_15_34] / none
-  binding_inputs --> bind_decision : [always] / run_bind_inputs_
-  bind_decision --> errored : [lambda_guards_19_38] / none
-  bind_decision --> running_backend : [lambda_guards_15_34] / none
-  running_backend --> backend_decision : [always] / run_backend_
-  backend_decision --> errored : [lambda_guards_19_38] / none
-  backend_decision --> extracting_outputs : [lambda_guards_15_34] / none
-  extracting_outputs --> extract_decision : [always] / run_extract_outputs_
-  extract_decision --> errored : [lambda_guards_19_38] / none
-  extract_decision --> done : [lambda_guards_15_34] / none
-  done --> initialized : [always] / mark_done_
-  errored --> initialized : [always] / ensure_last_error_
-  validating --> errored : execute [always] / on_unexpected_
-  validate_decision --> errored : execute [always] / on_unexpected_
-  prepare_decision --> errored : execute [always] / on_unexpected_
-  allocating_graph --> errored : execute [always] / on_unexpected_
-  alloc_decision --> errored : execute [always] / on_unexpected_
-  binding_inputs --> errored : execute [always] / on_unexpected_
-  bind_decision --> errored : execute [always] / on_unexpected_
-  running_backend --> errored : execute [always] / on_unexpected_
-  backend_decision --> errored : execute [always] / on_unexpected_
-  extracting_outputs --> errored : execute [always] / on_unexpected_
-  extract_decision --> errored : execute [always] / on_unexpected_
-  done --> errored : execute [always] / on_unexpected_
-  errored --> errored : execute [always] / on_unexpected_
+  [*] --> ready
+  ready --> model__ : execute_step [valid_execute_] / begin_execute_
+  ready --> ready : execute_step [invalid_execute_with_dispatchable_output_] / reject_invalid_execute_with_dispatch_
+  ready --> ready : execute_step [invalid_execute_with_output_only_] / reject_invalid_execute_with_output_only_
+  ready --> ready : execute_step [invalid_execute_without_output_] / reject_invalid_execute_without_output_
+  model__ --> validate_decision : completion [always] / none
+  validate_decision --> model__ : completion [validate_done_] / none
+  validate_decision --> execution_decision : completion [validate_failed_] / none
+  model__ --> prepare_decision : completion [always] / none
+  prepare_decision --> model__ : completion [prepare_done_reused_] / none
+  prepare_decision --> model__ : completion [prepare_done_needs_allocation_] / none
+  prepare_decision --> execution_decision : completion [prepare_failed_] / none
+  model__ --> alloc_decision : completion [always] / none
+  alloc_decision --> model__ : completion [alloc_done_] / none
+  alloc_decision --> execution_decision : completion [alloc_failed_] / none
+  model__ --> bind_decision : completion [always] / none
+  bind_decision --> model__ : completion [bind_done_] / none
+  bind_decision --> execution_decision : completion [bind_failed_] / none
+  model__ --> kernel_decision : completion [always] / none
+  kernel_decision --> model__ : completion [kernel_done_] / none
+  kernel_decision --> execution_decision : completion [kernel_failed_] / none
+  model__ --> extract_decision : completion [always] / none
+  extract_decision --> execution_decision : completion [extract_done_] / commit_output_
+  extract_decision --> execution_decision : completion [extract_failed_] / none
+  execution_decision --> ready : completion [phase_ok_] / dispatch_done_
+  execution_decision --> ready : completion [phase_failed_] / dispatch_error_
+  ready --> ready : _ [always] / on_unexpected_
+  validate_decision --> execution_decision : _ [always] / on_unexpected_
+  prepare_decision --> execution_decision : _ [always] / on_unexpected_
+  alloc_decision --> execution_decision : _ [always] / on_unexpected_
+  bind_decision --> execution_decision : _ [always] / on_unexpected_
+  kernel_decision --> execution_decision : _ [always] / on_unexpected_
+  extract_decision --> execution_decision : _ [always] / on_unexpected_
+  execution_decision --> ready : _ [always] / on_unexpected_

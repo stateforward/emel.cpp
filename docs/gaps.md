@@ -69,7 +69,7 @@ decoder audit (llama.cpp parity)
   - embedding inputs and pooled embedding outputs (pooling modes, per-sequence embeddings).
   - auto-generation and validation of batch fields (`n_seq_id`, `seq_id`, `pos`, `logits` masks).
   - sequence coupling, continuity checks, and disallowing partial sequence subsets.
-  - ubatch metadata parity (`n_seqs`, `n_seq_tokens`, `n_seqs_unq`, `seq_id_unq`, `seq_idx`) and
+  - step metadata parity (`n_seqs`, `n_seq_tokens`, `n_seqs_unq`, `seq_id_unq`, `seq_idx`) and
     output ordering/reordering (`out_ids`, swap tracking).
   - backend sampling integration (samplers, sampled/logits/probs/candidates buffers).
   - output buffer reservation/resizing and host-buffer transfer orchestration.

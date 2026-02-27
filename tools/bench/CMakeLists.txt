@@ -3,6 +3,10 @@ project(emel_bench_tools C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+option(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES
+  "Build tensor/parser/text machine surfaces"
+  OFF
+)
 
 if(NOT EMEL_ROOT)
   get_filename_component(EMEL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
@@ -97,31 +101,48 @@ add_subdirectory(${reference_impl_SOURCE_DIR}/ggml ggml)
 add_subdirectory(${reference_impl_SOURCE_DIR}/src llama_src)
 
 set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES
+  ${EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES} CACHE BOOL "" FORCE
+)
 add_subdirectory(${EMEL_ROOT} emel)
 
-add_executable(bench_runner
+find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
+
+set(BENCH_RUNNER_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/batch/planner_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/buffer_allocator_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/text/jinja/parser_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/text/jinja/formatter_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/memory_coordinator_recurrent_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/parser_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/logits_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/memory/kv_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/memory/recurrent_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/memory/hybrid_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/sm_any_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/bpe_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/spm_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/ugm_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/wpm_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/rwkv_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/plamo2_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/tokenizer_bench.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/lexer.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/parser.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/runtime.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/value.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/string.cpp
-  ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_cases.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_main.cpp
+)
+
+if(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES)
+  list(APPEND BENCH_RUNNER_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/text/jinja/parser_bench.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/text/jinja/formatter_bench.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/bpe_bench.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/spm_bench.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/ugm_bench.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/wpm_bench.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/rwkv_bench.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/preprocessor/plamo2_bench.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/text/tokenizer/tokenizer_bench.cpp
+    ${reference_impl_SOURCE_DIR}/common/jinja/lexer.cpp
+    ${reference_impl_SOURCE_DIR}/common/jinja/parser.cpp
+    ${reference_impl_SOURCE_DIR}/common/jinja/runtime.cpp
+    ${reference_impl_SOURCE_DIR}/common/jinja/value.cpp
+    ${reference_impl_SOURCE_DIR}/common/jinja/string.cpp
+    ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
+  )
+endif()
+
+add_executable(bench_runner
+  ${BENCH_RUNNER_SOURCES}
 )
 
 target_link_libraries(bench_runner
@@ -133,6 +154,45 @@ target_link_libraries(bench_runner
 )
 
 target_include_directories(bench_runner
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${EMEL_ROOT}/src
+    ${EMEL_ROOT}/include
+    ${reference_impl_SOURCE_DIR}/src
+    ${reference_impl_SOURCE_DIR}/common
+    ${reference_impl_SOURCE_DIR}/ggml/include
+    ${reference_impl_SOURCE_DIR}/include
+    ${NLOHMANN_JSON_INCLUDE_DIR}
+)
+
+if(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES)
+  target_compile_definitions(bench_runner
+    PRIVATE
+      EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES=1
+  )
+else()
+  target_compile_definitions(bench_runner
+    PRIVATE
+      EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES=0
+  )
+endif()
+
+add_executable(gbnf_bench_runner
+  ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/parser_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/bench_main.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/bench_cases.hpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp
+)
+
+target_link_libraries(gbnf_bench_runner
+  PRIVATE
+    emel_core
+    emel
+    ggml
+    llama
+)
+
+target_include_directories(gbnf_bench_runner
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${EMEL_ROOT}/src

@@ -3,178 +3,78 @@
 #include <cstdint>
 #include <string_view>
 
-#include "emel/emel.h"
+#include "emel/callback.hpp"
+#include "emel/error/error.hpp"
 #include "emel/model/data.hpp"
+#include "emel/model/loader/errors.hpp"
 
-namespace emel::parser::event {
-struct parse_model;
-}  // namespace emel::parser::event
+namespace emel::model::loader::events {
 
-namespace emel::parser {
-struct map;
-}  // namespace emel::parser
+struct load_done;
+struct load_error;
 
-namespace emel::model::weight_loader::event {
-struct load_weights;
-}  // namespace emel::model::weight_loader::event
+}  // namespace emel::model::loader::events
 
 namespace emel::model::loader::event {
 
 struct load;
 
-}  // namespace emel::model::loader::event
+using parse_model_fn = emel::callback<emel::error::type(const load &)>;
+using load_weights_fn = emel::callback<
+  emel::error::type(const load &, uint64_t &, uint64_t &, bool &)>;
+using map_layers_fn = emel::callback<emel::error::type(const load &)>;
+using validate_structure_fn = emel::callback<emel::error::type(const load &)>;
+using validate_architecture_fn = emel::callback<emel::error::type(const load &)>;
 
-namespace emel::model::loader::events {
+struct load {
+  emel::model::data & model_data;
+  parse_model_fn & parse_model;
 
-struct mapping_parser_done {
-  const event::load * request = nullptr;
+  std::string_view model_path = {};
+  const void * file_image = nullptr;
+  uint64_t file_size = 0;
+  bool check_tensors = true;
+  bool vocab_only = false;
+  bool validate_architecture = true;
+
+  load_weights_fn load_weights = {};
+  map_layers_fn map_layers = {};
+  validate_structure_fn validate_structure = {};
+  validate_architecture_fn validate_architecture_impl = {};
+
+  emel::callback<void(const events::load_done &)> on_done = {};
+  emel::callback<void(const events::load_error &)> on_error = {};
+
+  load(emel::model::data & model_data_in, parse_model_fn & parse_model_in) noexcept
+      : model_data(model_data_in), parse_model(parse_model_in) {}
 };
 
-struct mapping_parser_error {
-  const event::load * request = nullptr;
-  int32_t err = EMEL_ERR_BACKEND;
-};
-
-struct parsing_done {
-  const event::load * request = nullptr;
-};
-
-struct parsing_error {
-  const event::load * request = nullptr;
-  int32_t err = EMEL_ERR_PARSE_FAILED;
-};
-
-struct loading_done {
-  const event::load * request = nullptr;
+struct load_ctx {
+  emel::error::type err = emel::error::cast(error::none);
   uint64_t bytes_total = 0;
   uint64_t bytes_done = 0;
   bool used_mmap = false;
 };
 
-struct loading_error {
-  const event::load * request = nullptr;
-  int32_t err = EMEL_ERR_BACKEND;
+struct load_runtime {
+  const load & request;
+  load_ctx & ctx;
 };
 
-struct layers_mapped {
-  const event::load * request = nullptr;
-};
+}  // namespace emel::model::loader::event
 
-struct layers_map_error {
-  const event::load * request = nullptr;
-  int32_t err = EMEL_ERR_BACKEND;
-};
-
-struct structure_validated {
-  const event::load * request = nullptr;
-};
-
-struct structure_error {
-  const event::load * request = nullptr;
-  int32_t err = EMEL_ERR_MODEL_INVALID;
-};
-
-struct architecture_validated {
-  const event::load * request = nullptr;
-};
-
-struct architecture_error {
-  const event::load * request = nullptr;
-  int32_t err = EMEL_ERR_MODEL_INVALID;
-};
+namespace emel::model::loader::events {
 
 struct load_done {
-  const event::load * request = nullptr;
+  const event::load & request;
   uint64_t bytes_total = 0;
   uint64_t bytes_done = 0;
   bool used_mmap = false;
 };
 
 struct load_error {
-  const event::load * request = nullptr;
-  int32_t err = EMEL_ERR_BACKEND;
+  const event::load & request;
+  emel::error::type err = emel::error::cast(error::none);
 };
 
 }  // namespace emel::model::loader::events
-
-namespace emel::model::loader::event {
-
-using map_layers_fn = bool (*)(const load &, int32_t * err_out);
-using validate_structure_fn = bool (*)(const load &, int32_t * err_out);
-using validate_architecture_fn = bool (*)(const load &, int32_t * err_out);
-using init_mappings_fn = bool (*)(const emel::model::weight_loader::event::load_weights &,
-                                  int32_t * err_out);
-using validate_weights_fn = bool (*)(const emel::model::weight_loader::event::load_weights &,
-                                     int32_t * err_out);
-using clean_up_weights_fn = bool (*)(const emel::model::weight_loader::event::load_weights &,
-                                     int32_t * err_out);
-using upload_begin_fn = bool (*)(void * upload_ctx, uint64_t total_bytes, int32_t * err_out);
-using upload_chunk_fn = bool (*)(void * upload_ctx,
-                                 const void * data,
-                                 uint64_t size,
-                                 uint64_t offset,
-                                 int32_t * err_out);
-using upload_end_fn = bool (*)(void * upload_ctx, int32_t * err_out);
-
-struct load {
-  emel::model::data & model_data;
-  std::string_view model_path = {};
-  bool request_mmap = true;
-  bool request_direct_io = false;
-  bool check_tensors = true;
-  bool vocab_only = false;
-  bool no_alloc = false;
-  bool validate_architecture = true;
-  bool mmap_supported = true;
-  bool direct_io_supported = false;
-  const void * architectures = nullptr;
-  int32_t n_architectures = 0;
-  void * weights_buffer = nullptr;
-  uint64_t weights_buffer_size = 0;
-  void * file_handle = nullptr;
-  void * format_ctx = nullptr;
-  bool (*progress_callback)(float progress, void * user_data) = nullptr;
-  void * progress_user_data = nullptr;
-  void * upload_ctx = nullptr;
-  upload_begin_fn upload_begin = nullptr;
-  upload_chunk_fn upload_chunk = nullptr;
-  upload_end_fn upload_end = nullptr;
-
-  const emel::parser::map * parser_map = nullptr;
-  bool (*map_mmap)(const emel::model::weight_loader::event::load_weights &,
-                   uint64_t * bytes_done,
-                   uint64_t * bytes_total,
-                   int32_t * err_out) = nullptr;
-  bool (*load_streamed)(const emel::model::weight_loader::event::load_weights &,
-                        uint64_t * bytes_done,
-                        uint64_t * bytes_total,
-                        int32_t * err_out) = nullptr;
-  init_mappings_fn init_mappings = nullptr;
-  validate_weights_fn validate_weights = nullptr;
-  clean_up_weights_fn clean_up_weights = nullptr;
-  map_layers_fn map_layers = nullptr;
-  validate_structure_fn validate_structure = nullptr;
-  validate_architecture_fn validate_architecture_impl = nullptr;
-
-  void * weight_loader_sm = nullptr;
-  bool (*dispatch_load_weights)(void * weight_loader_sm,
-                                const emel::model::weight_loader::event::load_weights &) = nullptr;
-  void * buffer_allocator_sm = nullptr;
-  void * loader_sm = nullptr;
-  bool (*dispatch_parsing_done)(void * loader_sm,
-                                const emel::model::loader::events::parsing_done &) = nullptr;
-  bool (*dispatch_parsing_error)(void * loader_sm,
-                                 const emel::model::loader::events::parsing_error &) = nullptr;
-  bool (*dispatch_loading_done)(void * loader_sm,
-                                const emel::model::loader::events::loading_done &) = nullptr;
-  bool (*dispatch_loading_error)(void * loader_sm,
-                                 const emel::model::loader::events::loading_error &) = nullptr;
-
-  int32_t * error_out = nullptr;
-
-  void * owner_sm = nullptr;
-  bool (*dispatch_done)(void * owner_sm, const events::load_done &) = nullptr;
-  bool (*dispatch_error)(void * owner_sm, const events::load_error &) = nullptr;
-};
-
-}  // namespace emel::model::loader::event

@@ -494,6 +494,38 @@ TEST_CASE("tokenizer_preprocessor_bpe_regex_split") {
         std::string_view(encoded_word, sizeof(encoded_word) - 1));
 }
 
+TEST_CASE("tokenizer_preprocessor_bpe_machine_does_not_branch_on_model_metadata") {
+  static emel::model::data::vocab vocab = {};
+  std::memset(&vocab, 0, sizeof(vocab));
+  vocab.n_tokens = 0;
+  vocab.tokenizer_model_id = emel::model::data::tokenizer_model::SPM;
+  vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
+
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
+      fragments = {};
+  size_t count = 0;
+  int32_t err = EMEL_OK;
+
+  emel::text::tokenizer::preprocessor::bpe::sm machine;
+  emel::text::tokenizer::preprocessor::event::preprocess ev = {};
+  ev.vocab = &vocab;
+  ev.text = std::string_view("hello world");
+  ev.parse_special = false;
+  ev.fragments_out = fragments.data();
+  ev.fragment_capacity = fragments.size();
+  ev.fragment_count_out = &count;
+  ev.error_out = &err;
+
+  CHECK(machine.process_event(ev));
+  CHECK(err == EMEL_OK);
+  CHECK(count == 2);
+  CHECK(fragments[0].text == std::string_view("hello"));
+  const char encoded_word[] = "\xC4\xA0""world";
+  CHECK(fragments[1].text ==
+        std::string_view(encoded_word, sizeof(encoded_word) - 1));
+}
+
 TEST_CASE("tokenizer_preprocessor_bpe_capacity_overflow") {
   auto & vocab = make_bpe_vocab();
   std::array<emel::text::tokenizer::preprocessor::fragment,

@@ -7,7 +7,9 @@ these rules apply to:
 - boost.SML state machines (`boost::sml::sm<...>`) and their composition (composite state machines, orthogonal regions).
 - synchronous dispatch only (no background workers, no mailboxes, no async buffering).
 
-the rules assume boost.SML v1.1.x semantics as implemented in the public header and utility dispatch table.
+the rules assume the project-pinned boost.SML semantics as implemented in the
+local header and utility dispatch table, including typed completion propagation
+via `sml::completion<TEvent>`.
 
 primary sources consulted (non-exhaustive)
 - docs: https://boost-ext.github.io/sml/ (introduction), https://boost-ext.github.io/sml/tutorial.html (tutorial), https://boost-ext.github.io/sml/user_guide.html (user guide), https://boost-ext.github.io/sml/benchmarks.html (benchmarks), https://boost-ext.github.io/sml/overview.html (overview)
@@ -16,7 +18,9 @@ primary sources consulted (non-exhaustive)
 
 ## 2. definitions
 - actor: an isolated unit owning (1) exactly one SML `sm` instance and (2) its private context, processed only via event dispatch.
-- event: an immutable value (usually a trivial type) passed to `process_event`.
+- event: a value (usually a trivial type) passed to `process_event`. publicly
+  exposed events are immutable. internal-only events that are not publicly
+  exposed MAY carry mutable fields when needed for synchronous RTC handoff.
 - RTC chain: the complete, synchronous computation triggered by one top-level dispatch call, including SML internal anonymous transitions.
 - quiescence: a stable configuration where no further internal (anonymous) transitions are enabled.
 - orchestrator: the external driver that calls `process_event` on actors and provides time and ordering.
@@ -32,17 +36,45 @@ primary sources consulted (non-exhaustive)
 
 ## 4. event model
 1. event types SHOULD be small, trivially copyable, and contain only immutable payload.
+   exception: internal-only events that are not publicly exposed MAY use mutable
+   pointers/references for synchronous same-RTC handoff. such mutable payload
+   MUST NOT be exposed via public API types, MUST NOT be retained beyond the
+   top-level dispatch call, and MUST preserve deterministic bounded behavior.
 2. events MUST NOT contain owning pointers or dynamic containers (e.g., `std::string`, `std::vector`) unless a custom allocator and strict “no allocate during dispatch” enforcement is in place.
 3. event dispatch SHOULD be compile-time typed (`sm.process_event(TEvent{...})`). runtime-polymorphic “base event” dispatch SHOULD be avoided.
 4. if runtime event IDs are required, the system MAY use `sml::utility::make_dispatch_table` (static jump table indexed by ID) and MUST validate the ID range before indexing. see `make_dispatch_table` implementation using a static function-pointer table indexed by `(id - event_range_begin)`. (source: `dispatch_table.hpp` in SML repo.)
 5. each event MUST have a single “owning” actor responsible for interpreting it. cross-actor effects MUST be explicit (see section 8).
+6. when internal RTC phases need the originating event payload, transitions
+   SHOULD use typed completion propagation (`sml::completion<TEvent>`) so
+   guards/actions can consume the original event directly.
+7. event payload pointers/references MUST remain valid for the full top-level
+   `process_event` call (including internal completion/anonymous progress and
+   synchronous nested actor dispatch triggered within that RTC chain).
+8. required event fields MUST be references, not pointers. pointers in event
+   payloads MUST be reserved for optional/nullable fields or C ABI boundary
+   types where references cannot be expressed.
 
 ## 5. state and context
 1. state types SHOULD be “labels”, not storage. actor data MUST live in an explicit context object owned by the actor and passed into SML via dependency injection (constructor args to `sml::sm`).
 2. actor context MUST have stable addresses for the lifetime of the state machine (no moves that change addresses) if references are injected.
 3. construction-time dependencies order MUST NOT be relied on. the tutorial explicitly notes parameter order is “not specified”. prefer a single context aggregate or named dependency wrappers. (docs: tutorial section “create a state machine”.)
 4. context mutation MUST be confined to actions (not guards) unless a guard mutation is proven to be side-effect free in terms of externally observable behavior (recommended: treat guards as pure).
-5. state queries for external observers MUST be done using `visit_current_states` or `is(...)` and MUST NOT require locks in the steady state.
+5. state machine member functions MUST NOT read or write context directly. context
+   access MUST be explicit via action/guard parameters or internal transitions.
+6. state queries for external observers MUST be done using `visit_current_states` or `is(...)` and MUST NOT require locks in the steady state.
+7. context MUST NOT mirror per-dispatch event payload solely to hand data from
+   one internal phase to another.
+8. context SHOULD store only machine-owned runtime state that truly spans
+   phases/events; ephemeral request payload SHOULD stay in events and be
+   propagated with typed transitions (for example `event<TEvent>`,
+   `completion<TEvent>`).
+9. context is for persistent actor-owned state only; per-dispatch orchestration
+   scratch MUST NOT be stored in context.
+10. per-dispatch phase handoff MUST use typed internal events
+    (`events::*_done`, `events::*_error`, `sml::completion<TEvent>`) and MUST
+    NOT mirror request/event data into context.
+11. error progression MUST be modeled by explicit error states/events; do not
+    use context error/status fields as control state.
 
 ## 6. actions and guards
 ### selection and evaluation order
@@ -57,32 +89,46 @@ primary sources consulted (non-exhaustive)
 7. actions MUST NOT contain orchestration branching or validation logic. any conditional logic that
    changes control flow (success vs error, retries, mode selection) MUST be expressed as guarded
    transitions or explicit states.
-8. actions SHOULD be short. long-running work MUST be split:
+8. runtime conditional logic MUST NOT appear inside actions, state machine member methods, or
+   functions called from actions/member methods. all runtime conditional behavior MUST be modeled as
+   explicit guarded transitions or explicit choices/states in the transition graph. only
+   compile-time conditionals (e.g., `if constexpr`, `#if`) are allowed inside actions, member
+   methods, or functions called from actions/member methods.
+9. actions SHOULD be short. long-running work MUST be split:
    - action initiates work and transitions to a “waiting” state.
    - A later external event represents completion (still no queues).
-9. actions SHOULD be `noexcept` in production builds. if exceptions are enabled, the system MUST define a hard policy for exception events and document action-throws semantics (overview page notes different semantics for guard-throws vs action-throws).
-10. avoid try/catch in guards/actions. exceptions MUST be avoided unless
+10. actions SHOULD be `noexcept` in production builds. if exceptions are enabled, the system MUST define a hard policy for exception events and document action-throws semantics (overview page notes different semantics for guard-throws vs action-throws).
+11. avoid try/catch in guards/actions. exceptions MUST be avoided unless
     absolutely necessary and explicitly justified.
-11. actors are independent: do not share a model between actors unless
+12. actors are independent: do not share a model between actors unless
     explicitly authorized by the user. only common actions/guards that are not
     variant-specific may be shared.
-10. unexpected-event handling MUST NOT consume internal SML events. do NOT use
+13. unexpected-event handling MUST NOT consume internal SML events. do NOT use
     `event<sml::_>` as an unexpected-event wildcard. use `sml::unexpected_event`
     for unexpected-event handling; it is only raised for unhandled external events.
-11. when modeling unexpected events, always prefer:
+14. when modeling unexpected events, always prefer:
     - `sml::unexpected_event<specific_external_event>` for explicit unexpected handling, or
     - `sml::unexpected_event<sml::_>` as the catchall (NO guard). guards that exclude
       `boost::sml::back::internal_event` will suppress the unexpected event itself because
       `unexpected_event<_>` is an internal_event.
+15. guards MAY branch only on `(event, persistent_context)` and MUST NOT depend
+    on dispatch-local context fields.
 
 ## 7. reentrancy and nested dispatch
 1. an actor MUST NOT call its own `process_event` (directly or indirectly) from inside a guard/action. this prevents unbounded recursion and makes WCET analysis tractable. (motivation: `process_event` is synchronous and can be re-entered; SML users report deep call stacks if they do this.)
-2. internal multi-step “microflows” within a single RTC chain MUST be modeled using anonymous transitions (eventless transitions) and/or entry actions, not by self-dispatch.
-3. anonymous transition graphs MUST be acyclic or MUST have a statically provable bound on firings per top-level event. SML’s `process_event` loops internal anonymous processing to quiescence (`while (process_internal_events(anonymous{}, ...)) {}`), so cycles can create unbounded work. (source: `boost/sml.hpp`, `sm_impl::process_event` loop.)
-4. cross-actor nested dispatch (A calls B synchronously) MAY be used, but MUST obey:
+2. internal multi-step “microflows” within a single RTC chain MUST be modeled
+   using typed completion transitions (`sml::completion<TEvent>`), anonymous
+   transitions (eventless transitions), and/or entry actions, not by
+   self-dispatch.
+3. `sml::completion<TEvent>` and anonymous transitions MUST NOT be used to
+   model per-element or per-item data loops. those loops MUST execute inside
+   one allocation-free action/detail kernel per phase so compiler
+   vectorization and predictable throughput are preserved.
+4. anonymous transition graphs MUST be acyclic or MUST have a statically provable bound on firings per top-level event. SML’s `process_event` loops internal anonymous processing to quiescence (`while (process_internal_events(anonymous{}, ...)) {}`), so cycles can create unbounded work. (source: `boost/sml.hpp`, `sm_impl::process_event` loop.)
+5. cross-actor nested dispatch (A calls B synchronously) MAY be used, but MUST obey:
    - no re-entrancy into the same actor instance within a single RTC chain.
    - acyclic call graph per top-level dispatch (enforced by orchestrator stack tracking or design discipline).
-5. if multi-thread calls are possible, thread-safety MUST be enforced outside SML using a single external scheduler; using `sml::thread_safe<std::mutex>` inside actors SHOULD be avoided for real-time because lock acquisition is not bounded. (docs: overview “thread safety” shows optional locking policy.)
+6. if multi-thread calls are possible, thread-safety MUST be enforced outside SML using a single external scheduler; using `sml::thread_safe<std::mutex>` inside actors SHOULD be avoided for real-time because lock acquisition is not bounded. (docs: overview “thread safety” shows optional locking policy.)
 
 ## 8. cross-actor interaction (no queues)
 ### allowed interaction patterns
@@ -140,7 +186,7 @@ primary sources consulted (non-exhaustive)
    - submachine gets first chance to handle events,
    - if unhandled, parent transitions may run (fallback). (source: `boost/sml.hpp`, `transitions_sub<sm<tsm>, ...>::execute_impl`.)
 3. entry into a composite state MUST initialize its submachine(s) deterministically. SML updates composite state initialization during state updates. (source: `boost/sml.hpp`, `update_current_state` overload for `state<back::sm<T>>`.)
-4. do NOT introduce shared base classes for machine wrappers (e.g. `sm_base`). each machine MUST own its context and define its own `process_event` wrapper. share behavior via `actions.hpp`/`detail.hpp` helpers and `sm_any` dispatch, not inheritance.
+4. do NOT introduce ad-hoc shared base classes for machine wrappers (e.g. `sm_base`). inheritance from project base wrappers in `emel/sm.hpp` (for example `emel::sm<model>`) is acceptable. each machine MUST own its context and define its own `process_event` wrapper. share behavior via `actions.hpp`/`detail.hpp` helpers and `sm_any` dispatch.
 
 ### orthogonal regions
 4. orthogonal regions (multiple initial states) MUST be designed so that the same event does not cause side effects in more than one region, unless those side effects commute and ordering does not matter.
@@ -225,6 +271,19 @@ struct sm {
 1. exported/public C++ types MUST use PascalCase (not C API types).
 2. non-exported/internal types MUST use lower_snake_case.
 3. SML state names and events MUST use lower_snake_case unless explicitly exported.
+4. transition rows in `make_transition_table(...)` MUST be written in
+   destination-first form (`sml::state<dst> <= src + event [guard] / action`)
+   for all new and modified state machines.
+5. in destination-first rows, the destination state and `<=` MUST appear on
+   the same line.
+6. transition tables with more than a few rows MUST be organized in explicit
+   visual sections (for example `//------------------------------------------------------------------------------//`
+   and phase labels).
+7. transition rows after the first row in a table MUST use leading-comma style
+   to keep diffs stable and scanning consistent.
+8. when table readability would be degraded by auto-formatting, transition
+   tables MAY be wrapped with narrowly scoped `// clang-format off/on`.
+9. NEVER use macros in models.
 rule check: the anonymous self-loop is bounded by `i < 3`; cycles without bounds are forbidden.
 rule check: the anonymous self-loop is bounded by `i < 3`; cycles without bounds are forbidden.
 

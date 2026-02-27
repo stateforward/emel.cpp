@@ -2,23 +2,50 @@
 
 #include <cstdint>
 
+#include "emel/callback.hpp"
+#include "emel/error/error.hpp"
+#include "emel/graph/processor/alloc_step/events.hpp"
+#include "emel/graph/processor/kernel_step/events.hpp"
+#include "emel/graph/processor/bind_step/events.hpp"
+#include "emel/graph/processor/errors.hpp"
+#include "emel/graph/processor/extract_step/events.hpp"
+#include "emel/graph/processor/prepare_step/events.hpp"
+#include "emel/graph/processor/validate_step/events.hpp"
+#include "emel/memory/view.hpp"
+
+namespace emel::graph::processor::events {
+
+struct execution_done;
+struct execution_error;
+
+}  // namespace emel::graph::processor::events
+
 namespace emel::graph::processor::event {
 
 struct execute;
 
-using validate_fn = bool (*)(const execute &, int32_t * err_out);
-using prepare_graph_fn = bool (*)(const execute &, bool * reused_out, int32_t * err_out);
-using alloc_graph_fn = bool (*)(const execute &, int32_t * err_out);
-using bind_inputs_fn = bool (*)(const execute &, int32_t * err_out);
-using run_backend_fn = bool (*)(const execute &, int32_t * err_out);
-using extract_outputs_fn = bool (*)(const execute &, int32_t * outputs_out, int32_t * err_out);
+using validate_fn = bool (*)(const execute & request, int32_t * err_out);
+using prepare_graph_fn =
+    bool (*)(const execute & request, bool * reused_out, int32_t * err_out);
+using alloc_graph_fn = bool (*)(const execute & request, int32_t * err_out);
+using bind_inputs_fn = bool (*)(const execute & request, int32_t * err_out);
+using run_kernel_fn = bool (*)(const execute & request, int32_t * err_out);
+using extract_outputs_fn =
+    bool (*)(const execute & request, int32_t * outputs_out, int32_t * err_out);
+
+struct execution_output {
+  int32_t outputs_produced = 0;
+  uint8_t graph_reused = 0;
+};
 
 struct execute {
-  int32_t ubatch_index = 0;
-  int32_t ubatch_size = 0;
+  const void * step_plan = nullptr;
+  execution_output * output_out = nullptr;
+  int32_t step_index = 0;
+  int32_t step_size = 0;
   int32_t kv_tokens = 0;
-  void * memory_coordinator_sm = nullptr;
-  void * kv_cache_sm = nullptr;
+  void * memory_sm = nullptr;
+  const emel::memory::view::snapshot * memory_view = nullptr;
   int32_t expected_outputs = 0;
   void * compute_ctx = nullptr;
   const int32_t * positions = nullptr;
@@ -32,108 +59,52 @@ struct execute {
   prepare_graph_fn prepare_graph = nullptr;
   alloc_graph_fn alloc_graph = nullptr;
   bind_inputs_fn bind_inputs = nullptr;
-  run_backend_fn run_backend = nullptr;
+  run_kernel_fn run_kernel = nullptr;
   extract_outputs_fn extract_outputs = nullptr;
-  int32_t * outputs_produced_out = nullptr;
-  int32_t * kv_tokens_out = nullptr;
-  bool * rollback_attempted_out = nullptr;
-  int32_t * error_out = nullptr;
+  ::emel::callback<bool(const ::emel::graph::processor::events::execution_done &)> dispatch_done =
+      {};
+  ::emel::callback<bool(const ::emel::graph::processor::events::execution_error &)> dispatch_error =
+      {};
 };
 
-struct validate {
-  const execute * request = nullptr;
-  int32_t * error_out = nullptr;
+// Internal context object carried via completion<execute_step>.
+struct execute_ctx {
+  validate_step::events::phase_outcome validate_outcome =
+      validate_step::events::phase_outcome::unknown;
+  prepare_step::events::phase_outcome prepare_outcome =
+      prepare_step::events::phase_outcome::unknown;
+  alloc_step::events::phase_outcome alloc_outcome =
+      alloc_step::events::phase_outcome::unknown;
+  bind_step::events::phase_outcome bind_outcome =
+      bind_step::events::phase_outcome::unknown;
+  kernel_step::events::phase_outcome kernel_outcome =
+      kernel_step::events::phase_outcome::unknown;
+  extract_step::events::phase_outcome extract_outcome =
+      extract_step::events::phase_outcome::unknown;
+  uint8_t graph_reused = 0;
+  int32_t outputs_produced = 0;
+  bool phase_callback_ok = false;
+  int32_t phase_callback_err = 0;
+  emel::error::type err = emel::error::cast(error::none);
 };
 
-struct prepare_graph {
-  const execute * request = nullptr;
-  bool * reused_out = nullptr;
-  int32_t * error_out = nullptr;
-};
-
-struct alloc_graph {
-  const execute * request = nullptr;
-  int32_t * error_out = nullptr;
-};
-
-struct bind_inputs {
-  const execute * request = nullptr;
-  int32_t * error_out = nullptr;
-};
-
-struct run_backend {
-  const execute * request = nullptr;
-  int32_t * error_out = nullptr;
-};
-
-struct extract_outputs {
-  const execute * request = nullptr;
-  int32_t * error_out = nullptr;
+// Internal event used by processor::sm wrapper; not part of public API.
+struct execute_step {
+  const execute & request;
+  execute_ctx & ctx;
 };
 
 }  // namespace emel::graph::processor::event
 
 namespace emel::graph::processor::events {
 
-struct validate_done {
-  const event::execute * request = nullptr;
-};
-struct validate_error {
-  int32_t err = 0;
-  const event::execute * request = nullptr;
+struct execution_done {
+  event::execution_output & output;
 };
 
-struct prepare_graph_done {
-  const event::execute * request = nullptr;
-  bool reused = false;
-};
-struct prepare_graph_error {
+struct execution_error {
+  event::execution_output & output;
   int32_t err = 0;
-  const event::execute * request = nullptr;
-};
-
-struct alloc_graph_done {
-  const event::execute * request = nullptr;
-};
-struct alloc_graph_error {
-  int32_t err = 0;
-  const event::execute * request = nullptr;
-};
-
-struct bind_inputs_done {
-  const event::execute * request = nullptr;
-};
-struct bind_inputs_error {
-  int32_t err = 0;
-  const event::execute * request = nullptr;
-};
-
-struct run_backend_done {
-  const event::execute * request = nullptr;
-};
-struct run_backend_error {
-  int32_t err = 0;
-  const event::execute * request = nullptr;
-};
-
-struct extract_outputs_done {
-  const event::execute * request = nullptr;
-};
-struct extract_outputs_error {
-  int32_t err = 0;
-  const event::execute * request = nullptr;
-};
-
-struct compute_done {
-  int32_t outputs_produced = 0;
-  int32_t * error_out = nullptr;
-  const event::execute * request = nullptr;
-};
-
-struct compute_error {
-  int32_t err = 0;
-  int32_t * error_out = nullptr;
-  const event::execute * request = nullptr;
 };
 
 }  // namespace emel::graph::processor::events

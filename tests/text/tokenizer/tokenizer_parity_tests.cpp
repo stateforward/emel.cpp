@@ -100,6 +100,50 @@ void init_plamo2_vocab(emel::model::data::vocab & vocab) {
   vocab.eos_id = add_token(vocab, "<eos>");
 }
 
+emel::text::encoders::encoder_kind encoder_kind_for_model(
+    const emel::model::data::tokenizer_model model) {
+  switch (model) {
+    case emel::model::data::tokenizer_model::SPM:
+      return emel::text::encoders::encoder_kind::spm;
+    case emel::model::data::tokenizer_model::BPE:
+      return emel::text::encoders::encoder_kind::bpe;
+    case emel::model::data::tokenizer_model::WPM:
+      return emel::text::encoders::encoder_kind::wpm;
+    case emel::model::data::tokenizer_model::UGM:
+      return emel::text::encoders::encoder_kind::ugm;
+    case emel::model::data::tokenizer_model::RWKV:
+      return emel::text::encoders::encoder_kind::rwkv;
+    case emel::model::data::tokenizer_model::PLAMO2:
+      return emel::text::encoders::encoder_kind::plamo2;
+    case emel::model::data::tokenizer_model::NONE:
+    case emel::model::data::tokenizer_model::UNKNOWN:
+    default:
+      return emel::text::encoders::encoder_kind::fallback;
+  }
+}
+
+emel::text::tokenizer::preprocessor::preprocessor_kind preprocessor_kind_for_model(
+    const emel::model::data::tokenizer_model model) {
+  switch (model) {
+    case emel::model::data::tokenizer_model::SPM:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::spm;
+    case emel::model::data::tokenizer_model::BPE:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
+    case emel::model::data::tokenizer_model::WPM:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::wpm;
+    case emel::model::data::tokenizer_model::UGM:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::ugm;
+    case emel::model::data::tokenizer_model::RWKV:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::rwkv;
+    case emel::model::data::tokenizer_model::PLAMO2:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::plamo2;
+    case emel::model::data::tokenizer_model::NONE:
+    case emel::model::data::tokenizer_model::UNKNOWN:
+    default:
+      return emel::text::tokenizer::preprocessor::preprocessor_kind::fallback;
+  }
+}
+
 bool reference_tokenize(const emel::model::data::vocab & vocab,
                         const std::string_view text,
                         const bool add_special,
@@ -112,8 +156,7 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
   err = EMEL_OK;
 
   emel::text::tokenizer::preprocessor::any preprocessor;
-  preprocessor.set_kind(
-    emel::text::tokenizer::detail::preprocessor_kind_from_model(vocab.tokenizer_model_id));
+  preprocessor.set_kind(preprocessor_kind_for_model(vocab.tokenizer_model_id));
 
   std::array<emel::text::tokenizer::preprocessor::fragment,
              emel::text::tokenizer::preprocessor::k_max_fragments> fragments = {};
@@ -152,8 +195,7 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
   }
 
   emel::text::encoders::any encoder;
-  encoder.set_kind(emel::text::tokenizer::detail::encoder_kind_from_model(
-    vocab.tokenizer_model_id));
+  encoder.set_kind(encoder_kind_for_model(vocab.tokenizer_model_id));
 
   for (size_t idx = 0; idx < fragment_count; ++idx) {
     const auto & frag = fragments[idx];
@@ -206,6 +248,8 @@ void run_parity_case(const emel::model::data::vocab & vocab,
   int32_t bind_err = EMEL_OK;
   emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
+  bind_ev.preprocessor_variant = preprocessor_kind_for_model(vocab.tokenizer_model_id);
+  bind_ev.encoder_variant = encoder_kind_for_model(vocab.tokenizer_model_id);
   bind_ev.error_out = &bind_err;
   REQUIRE(machine.process_event(bind_ev));
   REQUIRE(bind_err == EMEL_OK);

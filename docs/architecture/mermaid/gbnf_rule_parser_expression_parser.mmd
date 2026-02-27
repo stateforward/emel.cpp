@@ -1,0 +1,14 @@
+stateDiagram-v2
+  direction TB
+  [*] --> deciding
+  deciding --> parsed_identifier : completion [token_identifier_] / consume_identifier_
+  deciding --> parsed_non_identifier : completion [token_non_identifier_] / consume_non_identifier_
+  deciding --> parse_failed : completion [parse_failed_] / dispatch_parse_failed_
+  parsed_identifier --> terminate : [always] / none
+  parsed_non_identifier --> terminate : [always] / none
+  parse_failed --> terminate : [always] / none
+  deciding --> unexpected_event : _ [always] / on_unexpected_
+  parsed_identifier --> unexpected_event : _ [always] / on_unexpected_
+  parsed_non_identifier --> unexpected_event : _ [always] / on_unexpected_
+  parse_failed --> unexpected_event : _ [always] / on_unexpected_
+  unexpected_event --> unexpected_event : _ [always] / on_unexpected_

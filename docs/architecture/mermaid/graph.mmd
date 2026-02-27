@@ -1,0 +1,39 @@
+stateDiagram-v2
+  direction TB
+  [*] --> uninitialized
+  uninitialized --> reserving : reserve_graph [valid_reserve_] / begin_reserve_
+  uninitialized --> uninitialized : reserve_graph [invalid_reserve_with_dispatchable_output_] / reject_invalid_reserve_with_dispatch_
+  uninitialized --> uninitialized : reserve_graph [invalid_reserve_with_output_only_] / reject_invalid_reserve_with_output_only_
+  uninitialized --> uninitialized : reserve_graph [invalid_reserve_without_output_] / reject_invalid_reserve_without_output_
+  reserved --> reserved : reserve_graph [valid_reserve_] / reject_invalid_reserve_with_dispatch_
+  reserved --> reserved : reserve_graph [invalid_reserve_with_dispatchable_output_] / reject_invalid_reserve_with_dispatch_
+  reserved --> reserved : reserve_graph [invalid_reserve_with_output_only_] / reject_invalid_reserve_with_output_only_
+  reserved --> reserved : reserve_graph [invalid_reserve_without_output_] / reject_invalid_reserve_without_output_
+  reserving --> reserve_decision : completion [always] / request_reserve_
+  reserve_decision --> reserved : completion [reserve_done_] / dispatch_reserve_done_
+  reserve_decision --> uninitialized : completion [reserve_failed_] / dispatch_reserve_error_
+  reserved --> assembling : compute_graph [valid_compute_] / begin_compute_
+  reserved --> reserved : compute_graph [invalid_compute_with_dispatchable_output_] / reject_invalid_compute_with_dispatch_
+  reserved --> reserved : compute_graph [invalid_compute_with_output_only_] / reject_invalid_compute_with_output_only_
+  reserved --> reserved : compute_graph [invalid_compute_without_output_] / reject_invalid_compute_without_output_
+  uninitialized --> uninitialized : compute_graph [valid_compute_] / reject_invalid_compute_with_dispatch_
+  uninitialized --> uninitialized : compute_graph [invalid_compute_with_dispatchable_output_] / reject_invalid_compute_with_dispatch_
+  uninitialized --> uninitialized : compute_graph [invalid_compute_with_output_only_] / reject_invalid_compute_with_output_only_
+  uninitialized --> uninitialized : compute_graph [invalid_compute_without_output_] / reject_invalid_compute_without_output_
+  assembling --> assemble_decision : completion [always] / request_assemble_
+  assemble_decision --> executing : completion [assemble_done_] / none
+  assemble_decision --> compute_decision : completion [assemble_failed_] / none
+  executing --> execute_decision : completion [always] / request_execute_
+  execute_decision --> compute_decision : completion [execute_done_] / none
+  execute_decision --> compute_decision : completion [execute_failed_] / none
+  compute_decision --> reserved : completion [compute_phase_ok_] / dispatch_compute_done_
+  compute_decision --> reserved : completion [compute_phase_failed_] / dispatch_compute_error_
+  uninitialized --> uninitialized : _ [always] / on_unexpected_
+  reserved --> reserved : _ [always] / on_unexpected_
+  reserving --> uninitialized : _ [always] / on_unexpected_
+  reserve_decision --> uninitialized : _ [always] / on_unexpected_
+  assembling --> reserved : _ [always] / on_unexpected_
+  assemble_decision --> reserved : _ [always] / on_unexpected_
+  executing --> reserved : _ [always] / on_unexpected_
+  execute_decision --> reserved : _ [always] / on_unexpected_
+  compute_decision --> reserved : _ [always] / on_unexpected_

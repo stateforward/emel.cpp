@@ -12,8 +12,9 @@ This inference engine is being implemented by AI under human engineering and arc
 
 > [!WARNING]
 > EMEL is currently going through a major re-architecture expected to complete by end of day on
-> Friday, February 27, 2026. See [Architecture](docs/architecture/) and
-> [Design Docs](docs/designs/) for the latest improvements.
+> Friday, February 27, 2026. The only domain left to rearchitect is the text domain.
+> The source of truth for architecture and design lives in `src/emel/**/sm.hpp` docstrings and
+> the generated docs under `docs/architecture/`.
 
 ## Implementation priorities
 
@@ -34,10 +35,28 @@ That enables:
 3. High-performance, C-compatible boundaries without dynamic dispatch in hot paths.
 4. Auditable parity work against reference implementations without copying their control flow.
 
+### Why state machines everywhere
+
+It might look like over-engineering — "I have a hammer so everything looks like a nail." But a
+state machine with two states has virtually zero overhead, and the goal is explicit behavior
+modeling, not complexity for its own sake. Stateless functions inevitably accumulate conditional
+logic as the code evolves: mode flags, error booleans, retry counters, phase enums. Taming that
+accidental complexity before it starts is the whole point of EMEL. Every actor has a visible
+state model, every transition is declared, and every unexpected event has a defined handler.
+That's the trade I'm making.
+
+End-to-end performance will be inferior to llama.cpp and other engines initially — that's
+expected and accepted, even though many individual machines will perform comparably or better in
+isolation. Having explicit actions and states makes it straightforward to find hotspots, and if
+profiling shows a state machine itself is the bottleneck, it gets removed. Concurrency is
+intentionally deferred until single-threaded behavior is verified. That doesn't mean there's no
+plan for it — the actor model makes adding concurrency easier than it looks, and it will be
+introduced only where measurement says it's necessary.
+
 ## The name
 
 “EMEL” is pronounced like “ML”. It’s a short, neutral name that doesn’t carry existing
-assumptions or baggage. It’s intentionally low-ceremony while we iterate on the core design.
+assumptions or baggage. It’s intentionally low-ceremony while I iterate on the core design.
 
 ## Acknowledgements
 
@@ -80,50 +99,33 @@ environments, while Zig remains the default for day-to-day builds.
 ## Docs index
 
 - [`docs/benchmarks.md`](docs/benchmarks.md)
-- [`docs/architecture/batch_planner.md`](docs/architecture/batch_planner.md)
-- [`docs/architecture/buffer_allocator.md`](docs/architecture/buffer_allocator.md)
-- [`docs/architecture/buffer_chunk_allocator.md`](docs/architecture/buffer_chunk_allocator.md)
-- [`docs/architecture/buffer_planner.md`](docs/architecture/buffer_planner.md)
-- [`docs/architecture/buffer_realloc_analyzer.md`](docs/architecture/buffer_realloc_analyzer.md)
-- [`docs/architecture/decoder.md`](docs/architecture/decoder.md)
-- [`docs/architecture/gbnf_parser.md`](docs/architecture/gbnf_parser.md)
-- [`docs/architecture/generator.md`](docs/architecture/generator.md)
-- [`docs/architecture/graph_processor.md`](docs/architecture/graph_processor.md)
-- [`docs/architecture/logits_sampler.md`](docs/architecture/logits_sampler.md)
-- [`docs/architecture/logits_sampler_token_selector.md`](docs/architecture/logits_sampler_token_selector.md)
-- [`docs/architecture/logits_validator.md`](docs/architecture/logits_validator.md)
-- [`docs/architecture/memory_coordinator_hybrid.md`](docs/architecture/memory_coordinator_hybrid.md)
-- [`docs/architecture/memory_coordinator_kv.md`](docs/architecture/memory_coordinator_kv.md)
-- [`docs/architecture/memory_coordinator_recurrent.md`](docs/architecture/memory_coordinator_recurrent.md)
-- [`docs/architecture/memory_coordinator.md`](docs/architecture/memory_coordinator.md)
-- [`docs/architecture/memory_kv.md`](docs/architecture/memory_kv.md)
-- [`docs/architecture/model_loader.md`](docs/architecture/model_loader.md)
-- [`docs/architecture/model_weight_loader.md`](docs/architecture/model_weight_loader.md)
-- [`docs/architecture/parser_gguf.md`](docs/architecture/parser_gguf.md)
-- [`docs/architecture/parser.md`](docs/architecture/parser.md)
-- [`docs/architecture/telemetry_exporter.md`](docs/architecture/telemetry_exporter.md)
-- [`docs/architecture/telemetry_provider.md`](docs/architecture/telemetry_provider.md)
-- [`docs/architecture/tensor_allocator.md`](docs/architecture/tensor_allocator.md)
-- [`docs/architecture/tensor_lifetime_analyzer.md`](docs/architecture/tensor_lifetime_analyzer.md)
-- [`docs/architecture/text_encoders_bpe.md`](docs/architecture/text_encoders_bpe.md)
-- [`docs/architecture/text_encoders_fallback.md`](docs/architecture/text_encoders_fallback.md)
-- [`docs/architecture/text_encoders_plamo2.md`](docs/architecture/text_encoders_plamo2.md)
-- [`docs/architecture/text_encoders_rwkv.md`](docs/architecture/text_encoders_rwkv.md)
-- [`docs/architecture/text_encoders.md`](docs/architecture/text_encoders.md)
-- [`docs/architecture/text_encoders_spm.md`](docs/architecture/text_encoders_spm.md)
-- [`docs/architecture/text_encoders_ugm.md`](docs/architecture/text_encoders_ugm.md)
-- [`docs/architecture/text_encoders_wpm.md`](docs/architecture/text_encoders_wpm.md)
-- [`docs/architecture/text_jinja_formatter.md`](docs/architecture/text_jinja_formatter.md)
-- [`docs/architecture/text_jinja_parser.md`](docs/architecture/text_jinja_parser.md)
-- [`docs/architecture/text_tokenizer_preprocessor_bpe.md`](docs/architecture/text_tokenizer_preprocessor_bpe.md)
-- [`docs/architecture/text_tokenizer_preprocessor_fallback.md`](docs/architecture/text_tokenizer_preprocessor_fallback.md)
-- [`docs/architecture/text_tokenizer_preprocessor_plamo2.md`](docs/architecture/text_tokenizer_preprocessor_plamo2.md)
-- [`docs/architecture/text_tokenizer_preprocessor_rwkv.md`](docs/architecture/text_tokenizer_preprocessor_rwkv.md)
-- [`docs/architecture/text_tokenizer_preprocessor_spm.md`](docs/architecture/text_tokenizer_preprocessor_spm.md)
-- [`docs/architecture/text_tokenizer_preprocessor_ugm.md`](docs/architecture/text_tokenizer_preprocessor_ugm.md)
-- [`docs/architecture/text_tokenizer_preprocessor_wpm.md`](docs/architecture/text_tokenizer_preprocessor_wpm.md)
-- [`docs/architecture/text_tokenizer.md`](docs/architecture/text_tokenizer.md)
-- [`docs/architecture/token_batcher.md`](docs/architecture/token_batcher.md)
+- [`docs/architecture/batch_planner_modes_equal.md`](docs/architecture/batch_planner_modes_equal.md)
+- [`docs/architecture/batch_planner_modes_sequential.md`](docs/architecture/batch_planner_modes_sequential.md)
+- [`docs/architecture/batch_planner_modes_simple.md`](docs/architecture/batch_planner_modes_simple.md)
+- [`docs/architecture/gbnf_rule_parser_definition_parser.md`](docs/architecture/gbnf_rule_parser_definition_parser.md)
+- [`docs/architecture/gbnf_rule_parser_expression_parser.md`](docs/architecture/gbnf_rule_parser_expression_parser.md)
+- [`docs/architecture/gbnf_rule_parser_nonterm_parser.md`](docs/architecture/gbnf_rule_parser_nonterm_parser.md)
+- [`docs/architecture/gbnf_rule_parser_term_parser.md`](docs/architecture/gbnf_rule_parser_term_parser.md)
+- [`docs/architecture/gbnf_sampler_accept_parser.md`](docs/architecture/gbnf_sampler_accept_parser.md)
+- [`docs/architecture/gbnf_sampler_candidate_parser.md`](docs/architecture/gbnf_sampler_candidate_parser.md)
+- [`docs/architecture/gbnf_sampler_matcher_parser.md`](docs/architecture/gbnf_sampler_matcher_parser.md)
+- [`docs/architecture/gbnf_sampler_token_parser.md`](docs/architecture/gbnf_sampler_token_parser.md)
+- [`docs/architecture/graph_allocator_liveness_pass.md`](docs/architecture/graph_allocator_liveness_pass.md)
+- [`docs/architecture/graph_allocator_ordering_pass.md`](docs/architecture/graph_allocator_ordering_pass.md)
+- [`docs/architecture/graph_allocator_placement_pass.md`](docs/architecture/graph_allocator_placement_pass.md)
+- [`docs/architecture/graph_assembler_assemble_alloc_pass.md`](docs/architecture/graph_assembler_assemble_alloc_pass.md)
+- [`docs/architecture/graph_assembler_assemble_build_pass.md`](docs/architecture/graph_assembler_assemble_build_pass.md)
+- [`docs/architecture/graph_assembler_assemble_validate_pass.md`](docs/architecture/graph_assembler_assemble_validate_pass.md)
+- [`docs/architecture/graph_assembler_reserve_alloc_pass.md`](docs/architecture/graph_assembler_reserve_alloc_pass.md)
+- [`docs/architecture/graph_assembler_reserve_build_pass.md`](docs/architecture/graph_assembler_reserve_build_pass.md)
+- [`docs/architecture/graph_assembler_reserve_validate_pass.md`](docs/architecture/graph_assembler_reserve_validate_pass.md)
+- [`docs/architecture/graph_assembler_reuse_decision_pass.md`](docs/architecture/graph_assembler_reuse_decision_pass.md)
+- [`docs/architecture/graph_processor_alloc_step.md`](docs/architecture/graph_processor_alloc_step.md)
+- [`docs/architecture/graph_processor_bind_step.md`](docs/architecture/graph_processor_bind_step.md)
+- [`docs/architecture/graph_processor_extract_step.md`](docs/architecture/graph_processor_extract_step.md)
+- [`docs/architecture/graph_processor_kernel_step.md`](docs/architecture/graph_processor_kernel_step.md)
+- [`docs/architecture/graph_processor_prepare_step.md`](docs/architecture/graph_processor_prepare_step.md)
+- [`docs/architecture/graph_processor_validate_step.md`](docs/architecture/graph_processor_validate_step.md)
 
 
 ## Regenerating docs

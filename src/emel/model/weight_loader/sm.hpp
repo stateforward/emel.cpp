@@ -1,139 +1,186 @@
 #pragma once
 
-#include "boost/sml.hpp"
 #include "emel/model/weight_loader/actions.hpp"
+#include "emel/model/weight_loader/context.hpp"
+#include "emel/model/weight_loader/errors.hpp"
 #include "emel/model/weight_loader/events.hpp"
 #include "emel/model/weight_loader/guards.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::model::weight_loader {
 
-struct initialized {};
-struct selecting {};
-struct strategy_decision {};
-struct initializing {};
-struct init_decision {};
-struct loading_mmap {};
-struct loading_streamed {};
-struct load_decision {};
-struct validating {};
-struct validation_decision {};
-struct cleanup_decision {};
-struct cleaning_up {};
-struct cleanup_result {};
-struct done {};
+struct unbound {};
+struct bound {};
+struct awaiting_effects {};
+struct ready {};
 struct errored {};
 
 struct model {
-  using context = action::context;
-
   auto operator()() const {
     namespace sml = boost::sml;
+    // clang-format off
     return sml::make_transition_table(
-      *sml::state<initialized> + sml::event<event::load_weights> / action::begin_load =
-        sml::state<selecting>,
+      //------------------------------------------------------------------------------//
+        sml::state<bound> <= *sml::state<unbound> + sml::event<event::bind_runtime>
+          [ guard::valid_bind{} ]
+          / action::exec_bind
+      , sml::state<errored> <= *sml::state<unbound> + sml::event<event::bind_runtime>
+          [ guard::invalid_bind{} ]
+          / action::mark_invalid_request
 
-      sml::state<selecting> / action::select_strategy = sml::state<strategy_decision>,
-      sml::state<strategy_decision> [guard::phase_failed{}] = sml::state<errored>,
-      sml::state<strategy_decision> [guard::phase_ok_and_use_mmap_and_can_init_mappings{}] =
-        sml::state<initializing>,
-      sml::state<strategy_decision> [guard::phase_ok_and_use_mmap_and_skip_init_mappings{}] =
-        sml::state<loading_mmap>,
-      sml::state<strategy_decision> [guard::phase_ok_and_use_mmap_and_cannot_init_mappings{}]
-        / action::set_invalid_argument = sml::state<errored>,
-      sml::state<strategy_decision> [guard::phase_ok_and_use_stream_and_can_load_streamed{}] =
-        sml::state<loading_streamed>,
-      sml::state<strategy_decision> [guard::phase_ok_and_use_stream_and_cannot_load_streamed{}]
-        / action::set_invalid_argument = sml::state<errored>,
+      , sml::state<bound> <= sml::state<bound> + sml::event<event::bind_runtime>
+          [ guard::valid_bind{} ]
+          / action::exec_bind
+      , sml::state<errored> <= sml::state<bound> + sml::event<event::bind_runtime>
+          [ guard::invalid_bind{} ]
+          / action::mark_invalid_request
 
-      sml::state<initializing> / action::run_init_mappings = sml::state<init_decision>,
-      sml::state<init_decision> [guard::phase_failed{}] = sml::state<errored>,
-      sml::state<init_decision> [guard::phase_ok_and_can_load_mmap{}] =
-        sml::state<loading_mmap>,
-      sml::state<init_decision> [guard::phase_ok_and_cannot_load_mmap{}]
-        / action::set_invalid_argument = sml::state<errored>,
+      , sml::state<bound> <= sml::state<awaiting_effects> + sml::event<event::bind_runtime>
+          [ guard::valid_bind{} ]
+          / action::exec_bind
+      , sml::state<errored> <= sml::state<awaiting_effects> + sml::event<event::bind_runtime>
+          [ guard::invalid_bind{} ]
+          / action::mark_invalid_request
 
-      sml::state<loading_mmap> / action::run_load_mmap = sml::state<load_decision>,
-      sml::state<loading_streamed> / action::run_load_streamed = sml::state<load_decision>,
-      sml::state<load_decision> [guard::phase_failed{}] = sml::state<errored>,
-      sml::state<load_decision> [guard::phase_ok_and_can_validate{}] =
-        sml::state<validating>,
-      sml::state<load_decision> [guard::phase_ok_and_skip_validate{}] =
-        sml::state<cleanup_decision>,
-      sml::state<load_decision> [guard::phase_ok_and_cannot_validate{}]
-        / action::set_invalid_argument = sml::state<errored>,
+      , sml::state<bound> <= sml::state<ready> + sml::event<event::bind_runtime>
+          [ guard::valid_bind{} ]
+          / action::exec_bind
+      , sml::state<errored> <= sml::state<ready> + sml::event<event::bind_runtime>
+          [ guard::invalid_bind{} ]
+          / action::mark_invalid_request
 
-      sml::state<validating> / action::run_validate = sml::state<validation_decision>,
-      sml::state<validation_decision> [guard::phase_failed{}] = sml::state<errored>,
-      sml::state<validation_decision> [guard::phase_ok{}] = sml::state<cleanup_decision>,
+      , sml::state<bound> <= sml::state<errored> + sml::event<event::bind_runtime>
+          [ guard::valid_bind{} ]
+          / action::exec_bind
+      , sml::state<errored> <= sml::state<errored> + sml::event<event::bind_runtime>
+          [ guard::invalid_bind{} ]
+          / action::mark_invalid_request
 
-      sml::state<cleanup_decision> [guard::phase_failed{}] = sml::state<errored>,
-      sml::state<cleanup_decision> [guard::phase_ok_and_can_clean_up{}] =
-        sml::state<cleaning_up>,
-      sml::state<cleanup_decision> [guard::phase_ok_and_skip_clean_up{}] =
-        sml::state<done>,
-      sml::state<cleanup_decision> [guard::phase_ok_and_cannot_clean_up{}]
-        / action::set_invalid_argument = sml::state<errored>,
+      //------------------------------------------------------------------------------//
+      , sml::state<awaiting_effects> <= sml::state<bound> + sml::event<event::plan_runtime>
+          [ guard::valid_plan{} ]
+          / action::exec_plan
+      , sml::state<errored> <= sml::state<bound> + sml::event<event::plan_runtime>
+          [ guard::invalid_plan_request{} ]
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<bound> + sml::event<event::plan_runtime>
+          [ guard::invalid_plan_capacity{} ]
+          / action::mark_capacity
 
-      sml::state<cleaning_up> / action::run_clean_up = sml::state<cleanup_result>,
-      sml::state<cleanup_result> [guard::phase_failed{}] = sml::state<errored>,
-      sml::state<cleanup_result> [guard::phase_ok{}] = sml::state<done>,
+      , sml::state<awaiting_effects> <= sml::state<ready> + sml::event<event::plan_runtime>
+          [ guard::valid_plan{} ]
+          / action::exec_plan
+      , sml::state<errored> <= sml::state<ready> + sml::event<event::plan_runtime>
+          [ guard::invalid_plan_request{} ]
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<ready> + sml::event<event::plan_runtime>
+          [ guard::invalid_plan_capacity{} ]
+          / action::mark_capacity
 
-      sml::state<done> / action::publish_done = sml::state<initialized>,
-      sml::state<errored> / action::publish_error = sml::state<initialized>,
+      , sml::state<errored> <= sml::state<unbound> + sml::event<event::plan_runtime>
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<awaiting_effects> + sml::event<event::plan_runtime>
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<errored> + sml::event<event::plan_runtime>
+          / action::mark_invalid_request
 
-      sml::state<initialized> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<selecting> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<strategy_decision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<initializing> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<init_decision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<loading_mmap> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<loading_streamed> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<load_decision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<validating> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<validation_decision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<cleanup_decision> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<cleaning_up> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<cleanup_result> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<done> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>,
-      sml::state<errored> + sml::unexpected_event<sml::_> /
-        action::on_unexpected = sml::state<errored>
+      //------------------------------------------------------------------------------//
+      , sml::state<ready> <= sml::state<awaiting_effects> + sml::event<event::apply_runtime>
+          [ guard::valid_apply{} ]
+          / action::exec_apply
+      , sml::state<errored> <= sml::state<awaiting_effects> + sml::event<event::apply_runtime>
+          [ guard::invalid_apply_request{} ]
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<awaiting_effects> + sml::event<event::apply_runtime>
+          [ guard::apply_has_effect_errors{} ]
+          / action::mark_backend_error
+
+      , sml::state<errored> <= sml::state<unbound> + sml::event<event::apply_runtime>
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<bound> + sml::event<event::apply_runtime>
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<ready> + sml::event<event::apply_runtime>
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<errored> + sml::event<event::apply_runtime>
+          / action::mark_invalid_request
+
+      //------------------------------------------------------------------------------//
+      , sml::state<errored> <= sml::state<unbound> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<errored> <= sml::state<bound> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<errored> <= sml::state<awaiting_effects> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<errored> <= sml::state<ready> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<errored> <= sml::state<errored> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
     );
+    // clang-format on
   }
 };
 
-struct sm : public emel::sm<model> {
-  using base_type = emel::sm<model>;
-
-  sm() : base_type(context_) {}
-
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
+  using base_type::is;
   using base_type::process_event;
   using base_type::visit_current_states;
 
- private:
-  action::context context_{};
-};
+  sm() : base_type() {}
 
-inline bool dispatch_load_weights(void * loader_sm, const event::load_weights & ev) {
-  auto * machine = static_cast<sm *>(loader_sm);
-  if (machine == nullptr) {
-    return false;
+  bool process_event(const event::bind_storage & ev) {
+    event::bind_ctx ctx{};
+    event::bind_runtime runtime{ev, ctx};
+    const bool accepted = base_type::process_event(runtime);
+    if (ctx.err == emel::error::cast(error::none)) {
+      if (ev.on_done) {
+        ev.on_done(events::bind_done{.request = ev});
+      }
+    } else if (ev.on_error) {
+      ev.on_error(events::bind_error{
+        .request = ev,
+        .err = ctx.err,
+      });
+    }
+    return accepted && ctx.err == emel::error::cast(error::none);
   }
-  return machine->process_event(ev);
-}
+
+  bool process_event(const event::plan_load & ev) {
+    event::plan_ctx ctx{};
+    event::plan_runtime runtime{ev, ctx};
+    const bool accepted = base_type::process_event(runtime);
+    if (ctx.err == emel::error::cast(error::none)) {
+      if (ev.on_done) {
+        ev.on_done(events::plan_done{
+          .request = ev,
+          .effect_count = ctx.effect_count,
+        });
+      }
+    } else if (ev.on_error) {
+      ev.on_error(events::plan_error{
+        .request = ev,
+        .err = ctx.err,
+      });
+    }
+    return accepted && ctx.err == emel::error::cast(error::none);
+  }
+
+  bool process_event(const event::apply_effect_results & ev) {
+    event::apply_ctx ctx{};
+    event::apply_runtime runtime{ev, ctx};
+    const bool accepted = base_type::process_event(runtime);
+    if (ctx.err == emel::error::cast(error::none)) {
+      if (ev.on_done) {
+        ev.on_done(events::apply_done{.request = ev});
+      }
+    } else if (ev.on_error) {
+      ev.on_error(events::apply_error{
+        .request = ev,
+        .err = ctx.err,
+      });
+    }
+    return accepted && ctx.err == emel::error::cast(error::none);
+  }
+};
 
 }  // namespace emel::model::weight_loader

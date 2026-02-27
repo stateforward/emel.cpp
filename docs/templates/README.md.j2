@@ -12,8 +12,9 @@ This inference engine is being implemented by AI under human engineering and arc
 
 > [!WARNING]
 > EMEL is currently going through a major re-architecture expected to complete by end of day on
-> Monday, February 23, 2026. See [Architecture](docs/architecture/) and
-> [Design Docs](docs/designs/) for the latest improvements.
+> Friday, February 27, 2026. The only domain left to rearchitect is the text domain.
+> The source of truth for architecture and design lives in `src/emel/**/sm.hpp` docstrings and
+> the generated docs under `docs/architecture/`.
 
 ## Implementation priorities
 
@@ -34,10 +35,28 @@ That enables:
 3. High-performance, C-compatible boundaries without dynamic dispatch in hot paths.
 4. Auditable parity work against reference implementations without copying their control flow.
 
+### Why state machines everywhere
+
+It might look like over-engineering — "I have a hammer so everything looks like a nail." But a
+state machine with two states has virtually zero overhead, and the goal is explicit behavior
+modeling, not complexity for its own sake. Stateless functions inevitably accumulate conditional
+logic as the code evolves: mode flags, error booleans, retry counters, phase enums. Taming that
+accidental complexity before it starts is the whole point of EMEL. Every actor has a visible
+state model, every transition is declared, and every unexpected event has a defined handler.
+That's the trade I'm making.
+
+End-to-end performance will be inferior to llama.cpp and other engines initially — that's
+expected and accepted, even though many individual machines will perform comparably or better in
+isolation. Having explicit actions and states makes it straightforward to find hotspots, and if
+profiling shows a state machine itself is the bottleneck, it gets removed. Concurrency is
+intentionally deferred until single-threaded behavior is verified. That doesn't mean there's no
+plan for it — the actor model makes adding concurrency easier than it looks, and it will be
+introduced only where measurement says it's necessary.
+
 ## The name
 
 “EMEL” is pronounced like “ML”. It’s a short, neutral name that doesn’t carry existing
-assumptions or baggage. It’s intentionally low-ceremony while we iterate on the core design.
+assumptions or baggage. It’s intentionally low-ceremony while I iterate on the core design.
 
 ## Acknowledgements
 

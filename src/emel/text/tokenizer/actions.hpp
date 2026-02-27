@@ -26,50 +26,6 @@ namespace emel::text::tokenizer::detail {
 using action::encoder_kind;
 using action::preprocessor_kind;
 
-inline encoder_kind encoder_kind_from_model(
-    const emel::model::data::tokenizer_model model) {
-  switch (model) {
-    case emel::model::data::tokenizer_model::SPM:
-      return encoder_kind::spm;
-    case emel::model::data::tokenizer_model::BPE:
-      return encoder_kind::bpe;
-    case emel::model::data::tokenizer_model::WPM:
-      return encoder_kind::wpm;
-    case emel::model::data::tokenizer_model::UGM:
-      return encoder_kind::ugm;
-    case emel::model::data::tokenizer_model::RWKV:
-      return encoder_kind::rwkv;
-    case emel::model::data::tokenizer_model::PLAMO2:
-      return encoder_kind::plamo2;
-    case emel::model::data::tokenizer_model::NONE:
-    case emel::model::data::tokenizer_model::UNKNOWN:
-    default:
-      return encoder_kind::fallback;
-  }
-}
-
-inline preprocessor_kind preprocessor_kind_from_model(
-    const emel::model::data::tokenizer_model model) {
-  switch (model) {
-    case emel::model::data::tokenizer_model::SPM:
-      return preprocessor_kind::spm;
-    case emel::model::data::tokenizer_model::BPE:
-      return preprocessor_kind::bpe;
-    case emel::model::data::tokenizer_model::WPM:
-      return preprocessor_kind::wpm;
-    case emel::model::data::tokenizer_model::UGM:
-      return preprocessor_kind::ugm;
-    case emel::model::data::tokenizer_model::RWKV:
-      return preprocessor_kind::rwkv;
-    case emel::model::data::tokenizer_model::PLAMO2:
-      return preprocessor_kind::plamo2;
-    case emel::model::data::tokenizer_model::NONE:
-    case emel::model::data::tokenizer_model::UNKNOWN:
-    default:
-      return preprocessor_kind::fallback;
-  }
-}
-
 inline bool append_token(action::context &ctx, const int32_t token) {
   if (token < 0) {
     return false;
@@ -109,8 +65,8 @@ struct begin_bind {
     }
     ctx.vocab = ev.vocab;
     ctx.is_bound = false;
-    ctx.preprocess_kind = preprocessor_kind::fallback;
-    ctx.model_kind = encoder_kind::fallback;
+    ctx.preprocess_kind = ev.preprocessor_variant;
+    ctx.model_kind = ev.encoder_variant;
     ctx.phase_error = EMEL_OK;
     ctx.last_error = EMEL_OK;
   }
@@ -159,10 +115,7 @@ struct bind_preprocessor {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
     }
-    const auto kind = detail::preprocessor_kind_from_model(
-        ctx.vocab->tokenizer_model_id);
-    ctx.preprocess_kind = kind;
-    ctx.preprocessor_any.set_kind(kind);
+    ctx.preprocessor_any.set_kind(ctx.preprocess_kind);
   }
 };
 
@@ -174,10 +127,7 @@ struct bind_encoder {
       set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
       return;
     }
-    const auto kind = detail::encoder_kind_from_model(
-        ctx.vocab->tokenizer_model_id);
-    ctx.model_kind = kind;
-    ctx.encoder_any.set_kind(kind);
+    ctx.encoder_any.set_kind(ctx.model_kind);
     ctx.is_bound = true;
   }
 };

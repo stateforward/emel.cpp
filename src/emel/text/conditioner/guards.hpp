@@ -7,10 +7,37 @@ namespace emel::text::conditioner::guard {
 
 struct valid_bind {
   bool operator()(const event::bind & ev) const noexcept {
-    return ev.vocab != nullptr && ev.tokenizer_sm != nullptr &&
-           ev.dispatch_tokenizer_bind != nullptr &&
-           ev.dispatch_tokenizer_tokenize != nullptr &&
-           ev.format_prompt != nullptr;
+    if (ev.vocab == nullptr || ev.tokenizer_sm == nullptr ||
+        ev.dispatch_tokenizer_bind == nullptr ||
+        ev.dispatch_tokenizer_tokenize == nullptr ||
+        ev.format_prompt == nullptr) {
+      return false;
+    }
+    switch (ev.preprocessor_variant) {
+      case emel::text::tokenizer::preprocessor::preprocessor_kind::spm:
+      case emel::text::tokenizer::preprocessor::preprocessor_kind::bpe:
+      case emel::text::tokenizer::preprocessor::preprocessor_kind::wpm:
+      case emel::text::tokenizer::preprocessor::preprocessor_kind::ugm:
+      case emel::text::tokenizer::preprocessor::preprocessor_kind::rwkv:
+      case emel::text::tokenizer::preprocessor::preprocessor_kind::plamo2:
+      case emel::text::tokenizer::preprocessor::preprocessor_kind::fallback:
+        break;
+      default:
+        return false;
+    }
+    switch (ev.encoder_variant) {
+      case emel::text::encoders::encoder_kind::spm:
+      case emel::text::encoders::encoder_kind::bpe:
+      case emel::text::encoders::encoder_kind::wpm:
+      case emel::text::encoders::encoder_kind::ugm:
+      case emel::text::encoders::encoder_kind::rwkv:
+      case emel::text::encoders::encoder_kind::plamo2:
+      case emel::text::encoders::encoder_kind::fallback:
+        break;
+      default:
+        return false;
+    }
+    return true;
   }
 };
 

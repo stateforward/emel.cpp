@@ -1,0 +1,13 @@
+stateDiagram-v2
+  direction TB
+  [*] --> initialized
+  initialized --> initialized : next [invalid_next_] / reject_invalid_next_
+  initialized --> initialized : next [invalid_cursor_position_] / reject_invalid_cursor_
+  initialized --> scanning : next [has_remaining_input_] / emit_next_token_
+  initialized --> scanning : next [at_eof_] / emit_eof_
+  scanning --> scanning : next [invalid_next_] / reject_invalid_next_
+  scanning --> scanning : next [invalid_cursor_position_] / reject_invalid_cursor_
+  scanning --> scanning : next [has_remaining_input_] / emit_next_token_
+  scanning --> scanning : next [at_eof_] / emit_eof_
+  initialized --> initialized : _ [always] / on_unexpected_
+  scanning --> scanning : _ [always] / on_unexpected_

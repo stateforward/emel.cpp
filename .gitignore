@@ -1,3 +1,6 @@
 build*/
 cmake-build*/
 tests/fuzz/corpus/**
+.DS_Store
+**/.DS_Store
+Testing/Temporary/

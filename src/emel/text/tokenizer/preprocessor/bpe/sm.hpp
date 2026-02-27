@@ -13,7 +13,6 @@ struct preparing {};
 struct partitioning_select {};
 struct partitioning_bpe_no_specials {};
 struct partitioning_bpe_with_specials {};
-struct partitioning_non_bpe {};
 struct partition_decision {};
 struct done {};
 struct errored {};
@@ -25,10 +24,9 @@ struct unexpected {};
  * state purposes:
  * - `idle`: wait for preprocess intent.
  * - `preparing`: build special-token cache for the vocab.
- * - `partitioning_select`: route to the correct partitioning behavior.
+ * - `partitioning_select`: route to BPE partitioning behavior.
  * - `partitioning_bpe_no_specials`: split raw text into BPE fragments without specials.
  * - `partitioning_bpe_with_specials`: split raw text into fragments with specials isolated.
- * - `partitioning_non_bpe`: split raw text into fragments with specials isolated.
  * - `partition_decision`: branch on partition success/failure.
  * - `done`/`errored`: terminal outcomes for a request.
  * - `unexpected`: sequencing contract violation.
@@ -36,12 +34,11 @@ struct unexpected {};
  * guard semantics:
  * - `valid_request`/`invalid_request`: validate request pointers and capacity.
  * - `phase_ok`/`phase_failed`: observe error set by actions.
- * - `bpe_no_specials`/`bpe_with_specials`/`not_bpe`: choose partition strategy.
+ * - `no_specials`/`has_specials`: choose BPE partition strategy.
  *
  * action side effects:
  * - `begin_preprocess`: capture inputs and reset outputs.
  * - `build_specials`: build cached special-token inventory.
- * - `partition_non_bpe`: populate output fragments for non-BPE vocabularies.
  * - `partition_bpe_no_specials`: populate output fragments without special tokens.
  * - `partition_bpe_with_specials`: populate output fragments with special tokens.
  * - `mark_done`: clear error state.
@@ -60,18 +57,14 @@ struct model {
 
         sml::state<preparing> / action::build_specials =
                 sml::state<partitioning_select>,
-        sml::state<partitioning_select>[guard::bpe_no_specials{}] =
+        sml::state<partitioning_select>[guard::no_specials{}] =
                 sml::state<partitioning_bpe_no_specials>,
-        sml::state<partitioning_select>[guard::bpe_with_specials{}] =
+        sml::state<partitioning_select>[guard::has_specials{}] =
                 sml::state<partitioning_bpe_with_specials>,
-        sml::state<partitioning_select>[guard::not_bpe{}] =
-                sml::state<partitioning_non_bpe>,
 
         sml::state<partitioning_bpe_no_specials> / action::partition_bpe_no_specials =
                 sml::state<partition_decision>,
         sml::state<partitioning_bpe_with_specials> / action::partition_bpe_with_specials =
-                sml::state<partition_decision>,
-        sml::state<partitioning_non_bpe> / action::partition_non_bpe =
                 sml::state<partition_decision>,
 
         sml::state<partition_decision>[guard::phase_failed{}] /
@@ -104,8 +97,6 @@ struct model {
                 action::on_unexpected = sml::state<unexpected>,
         sml::state<partitioning_bpe_with_specials> + sml::unexpected_event<sml::_> /
                 action::on_unexpected = sml::state<unexpected>,
-        sml::state<partitioning_non_bpe> + sml::unexpected_event<sml::_> /
-                action::on_unexpected = sml::state<unexpected>,
         sml::state<partition_decision> + sml::unexpected_event<sml::_> /
                 action::on_unexpected = sml::state<unexpected>,
         sml::state<done> + sml::unexpected_event<sml::_> /
@@ -117,10 +108,10 @@ struct model {
   }
 };
 
-struct sm : public emel::sm<model> {
-  using base_type = emel::sm<model>;
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
 
-  sm() : base_type(context_) {}
+  sm() : base_type() {}
 
   bool process_event(const event::preprocess & ev) {
     namespace sml = boost::sml;
@@ -129,14 +120,14 @@ struct sm : public emel::sm<model> {
     const bool ok = this->is(sml::state<done>);
     const int32_t err =
         ok ? EMEL_OK
-           : (context_.last_error != EMEL_OK ? context_.last_error
+           : (this->context_.last_error != EMEL_OK ? this->context_.last_error
                                              : EMEL_ERR_BACKEND);
 
     if (ev.fragment_count_out != nullptr) {
-      *ev.fragment_count_out = context_.fragment_count;
+      *ev.fragment_count_out = this->context_.fragment_count;
     }
     if (ev.preprocessed_out != nullptr) {
-      *ev.preprocessed_out = context_.preprocessed;
+      *ev.preprocessed_out = this->context_.preprocessed;
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
@@ -144,7 +135,7 @@ struct sm : public emel::sm<model> {
     if (ok) {
       if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
         ev.dispatch_done(ev.owner_sm,
-                         events::preprocess_done{&ev, context_.fragment_count});
+                         events::preprocess_done{&ev, this->context_.fragment_count});
       }
     } else {
       if (ev.dispatch_error != nullptr && ev.owner_sm != nullptr) {
@@ -152,18 +143,17 @@ struct sm : public emel::sm<model> {
       }
     }
 
-    action::clear_request(context_);
+    action::clear_request(this->context_);
     return accepted && ok;
   }
 
   using base_type::process_event;
   using base_type::visit_current_states;
 
-  int32_t last_error() const noexcept { return context_.last_error; }
-  size_t fragment_count() const noexcept { return context_.fragment_count; }
+  int32_t last_error() const noexcept { return this->context_.last_error; }
+  size_t fragment_count() const noexcept { return this->context_.fragment_count; }
 
  private:
-  action::context context_{};
 };
 
 }  // namespace emel::text::tokenizer::preprocessor::bpe

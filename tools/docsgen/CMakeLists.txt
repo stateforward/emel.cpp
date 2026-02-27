@@ -4,12 +4,17 @@ project(docsgen LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+option(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES
+  "Build tensor/parser/text machine surfaces"
+  OFF
+)
 
 include(FetchContent)
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/sml_version.cmake")
 FetchContent_Declare(
   boost_sml
-  GIT_REPOSITORY https://github.com/stateforward/sml.cpp
-  GIT_TAG 3f04b240585789931a5d5dabf1de2526707fe11b
+  GIT_REPOSITORY ${EMEL_BOOST_SML_GIT_REPOSITORY}
+  GIT_TAG ${EMEL_BOOST_SML_GIT_TAG}
 )
 FetchContent_MakeAvailable(boost_sml)
 
@@ -17,6 +22,11 @@ set(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../..")
 
 file(GLOB_RECURSE SM_HEADERS CONFIGURE_DEPENDS "${ROOT_DIR}/src/emel/**/sm.hpp")
 list(FILTER SM_HEADERS EXCLUDE REGEX ".*/src/emel/sm.hpp$")
+if(NOT EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES)
+  list(FILTER SM_HEADERS EXCLUDE REGEX ".*/src/emel/parser/.*")
+  list(FILTER SM_HEADERS EXCLUDE REGEX ".*/src/emel/text/.*")
+  list(FILTER SM_HEADERS EXCLUDE REGEX ".*/src/emel/tensor/.*")
+endif()
 list(SORT SM_HEADERS)
 
 set(DOCS_ENABLED_SM_HEADERS "")
@@ -38,6 +48,11 @@ endforeach()
 
 file(APPEND "${GEN_HEADER}" "\ninline void register_machines(std::vector<machine_spec> & out) {\n")
 foreach(sm_header IN LISTS SM_HEADERS)
+  file(STRINGS "${sm_header}" model_type_markers REGEX "using model_type = model;")
+  if(NOT model_type_markers)
+    continue()
+  endif()
+
   file(RELATIVE_PATH rel_emel "${ROOT_DIR}/src/emel" "${sm_header}")
   string(REPLACE "/sm.hpp" "" dir "${rel_emel}")
   string(REPLACE "/" "_" name "${dir}")

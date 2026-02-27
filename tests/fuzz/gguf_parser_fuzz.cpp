@@ -1,54 +1,68 @@
+#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
-#include <memory>
-#include <string_view>
+#include <span>
 
-#include "emel/emel.h"
+#include "emel/gguf/loader/sm.hpp"
 #include "emel/model/data.hpp"
-#include "emel/model/loader/events.hpp"
-#include "emel/parser/events.hpp"
-#include "emel/parser/gguf/actions.hpp"
-#include "emel/parser/gguf/context.hpp"
-#include "emel/parser/gguf/sm.hpp"
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-#if defined(_WIN32)
-  (void)data;
-  (void)size;
-  return 0;
-#else
-  std::FILE *file = std::tmpfile();
-  if (file == nullptr) {
+namespace {
+
+void on_probe_done(const emel::gguf::loader::events::probe_done &) {}
+void on_probe_error(const emel::gguf::loader::events::probe_error &) {}
+void on_bind_done(const emel::gguf::loader::events::bind_done &) {}
+void on_bind_error(const emel::gguf::loader::events::bind_error &) {}
+void on_parse_done(const emel::gguf::loader::events::parse_done &) {}
+void on_parse_error(const emel::gguf::loader::events::parse_error &) {}
+
+}  // namespace
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
+  if (data == nullptr || size == 0) {
     return 0;
   }
-  if (size > 0) {
-    (void)std::fwrite(data, 1, size, file);
-  }
-  std::rewind(file);
 
-  auto gguf_ctx = std::make_unique<emel::parser::gguf::context>();
-  auto model = std::make_unique<emel::model::data>();
-  emel::model::loader::event::load load_ev{*model};
-  load_ev.file_handle = file;
-  load_ev.format_ctx = gguf_ctx.get();
+  emel::gguf::loader::sm machine{};
+  emel::gguf::loader::requirements req = {};
+  const emel::gguf::loader::event::probe_done_fn probe_done_cb =
+      emel::gguf::loader::event::probe_done_fn::from<&on_probe_done>();
+  const emel::gguf::loader::event::probe_error_fn probe_error_cb =
+      emel::gguf::loader::event::probe_error_fn::from<&on_probe_error>();
+  const emel::gguf::loader::event::bind_done_fn bind_done_cb =
+      emel::gguf::loader::event::bind_done_fn::from<&on_bind_done>();
+  const emel::gguf::loader::event::bind_error_fn bind_error_cb =
+      emel::gguf::loader::event::bind_error_fn::from<&on_bind_error>();
+  const emel::gguf::loader::event::parse_done_fn parse_done_cb =
+      emel::gguf::loader::event::parse_done_fn::from<&on_parse_done>();
+  const emel::gguf::loader::event::parse_error_fn parse_error_cb =
+      emel::gguf::loader::event::parse_error_fn::from<&on_parse_error>();
 
-  int32_t map_err = EMEL_OK;
-  (void)emel::parser::gguf::map_parser(load_ev, &map_err);
+  const emel::gguf::loader::event::probe probe{
+    std::span<const uint8_t>{data, size},
+    req,
+    probe_done_cb,
+    probe_error_cb,
+  };
+  (void)machine.process_event(probe);
 
-  emel::parser::event::parse_model parse_ev{};
-  parse_ev.model = model.get();
-  parse_ev.file_handle = file;
-  parse_ev.format_ctx = gguf_ctx.get();
-  parse_ev.map_tensors = false;
-  parse_ev.architectures = nullptr;
-  parse_ev.n_architectures = 0;
-  parse_ev.loader_request = &load_ev;
+  std::array<uint8_t, 8> kv_arena = {};
+  std::array<emel::gguf::loader::kv_entry, 1> kv_entries = {};
+  std::array<emel::model::data::tensor_record, 1> tensors = {};
+  const emel::gguf::loader::event::bind_storage bind{
+    std::span<uint8_t>{kv_arena},
+    std::span<emel::gguf::loader::kv_entry>{kv_entries},
+    std::span<emel::model::data::tensor_record>{tensors},
+    bind_done_cb,
+    bind_error_cb,
+  };
+  (void)machine.process_event(bind);
 
-  emel::parser::gguf::sm machine{};
-  (void)machine.process_event(parse_ev);
+  const emel::gguf::loader::event::parse parse{
+    std::span<const uint8_t>{data, size},
+    parse_done_cb,
+    parse_error_cb,
+  };
+  (void)machine.process_event(parse);
 
-  std::fclose(file);
   return 0;
-#endif
 }

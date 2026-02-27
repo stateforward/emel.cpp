@@ -1,1918 +1,425 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 
 #include "emel/memory/kv/context.hpp"
+#include "emel/memory/kv/detail.hpp"
+#include "emel/memory/kv/events.hpp"
 
 namespace emel::memory::kv::action {
 
-inline void reset_stream(stream_state & s) {
-  s.head = 0;
-  s.used_count = 0;
-  s.used_max_p1 = 0;
-  s.has_shift = false;
-  s.pos.fill(POS_NONE);
-  s.shift.fill(0);
-  s.ext_x.fill(0);
-  s.ext_y.fill(0);
-  s.seq_count.fill(0);
-  for (auto & mask : s.seq_mask) {
-    mask.fill(0);
+namespace detail {
+
+inline int32_t resolve_positive_or_default(const int32_t value, const int32_t fallback) noexcept {
+  const int32_t use_value = static_cast<int32_t>(value > 0);
+  return use_value * value + (1 - use_value) * fallback;
+}
+
+inline int32_t blocks_for_length(const int32_t block_tokens, const int32_t token_count) noexcept {
+  const int32_t positive_tokens = static_cast<int32_t>(token_count > 0);
+  const int32_t positive_block_tokens = static_cast<int32_t>(block_tokens > 0);
+  const int32_t safe_block_tokens = block_tokens + static_cast<int32_t>(block_tokens <= 0);
+  const int32_t effective_tokens = positive_tokens * positive_block_tokens * token_count;
+  const int32_t rounded = (effective_tokens + safe_block_tokens - 1) / safe_block_tokens;
+  return rounded * positive_block_tokens;
+}
+
+inline void reset_runtime(context & ctx) noexcept {
+  ctx.sequence_active.fill(false);
+  ctx.sequence_length.fill(0);
+  ctx.sequence_block_count.fill(0);
+  for (auto & row : ctx.seq_to_blocks) {
+    row.fill(0);
   }
-  s.seq_pos_min.fill(POS_NONE);
-  s.seq_pos_max.fill(POS_NONE);
-  s.seq_pos_min_count.fill(0);
-  s.seq_pos_max_count.fill(0);
-}
 
-inline void reset_context_state(context & ctx) {
-  ctx.ubatch_sizes.fill(0);
-  ctx.slot_offsets.fill(0);
-  ctx.slot_indices.fill(0);
-  ctx.slot_stream_ids.fill(0);
-  ctx.slot_index_count = 0;
-  ctx.ubatch_stream_ids.fill(0);
-  ctx.ubatch_seq_ids.fill(0);
-  ctx.ubatch_count = 0;
-  ctx.planned_ubatch_count = 0;
-  ctx.applied_ubatches = 0;
-  ctx.kv_size = 0;
-  ctx.n_stream = 1;
-  ctx.n_pad = 1;
-  ctx.n_swa = 0;
-  ctx.swa_type = 0;
-  ctx.seq_to_stream.fill(0);
-  ctx.next_pos.fill(0);
-  for (auto & stream : ctx.streams) {
-    reset_stream(stream);
-  }
-  ctx.pending_copy_src.fill(0);
-  ctx.pending_copy_dst.fill(0);
-  ctx.pending_copy_count = 0;
-  ctx.kv_tokens = 0;
-  ctx.phase_error = EMEL_OK;
-  ctx.last_error = EMEL_OK;
-  ctx.prepare_request = {};
-  ctx.apply_request = {};
-  ctx.rollback_request = {};
-  ctx.seq_remove_request = {};
-  ctx.seq_copy_request = {};
-  ctx.seq_keep_request = {};
-  ctx.seq_add_request = {};
-  ctx.seq_div_request = {};
-  ctx.updates_request = {};
-}
-
-inline context::context() {
-  reset_context_state(*this);
-}
-
-inline int32_t count_used_cells(const stream_state & s) {
-  return s.used_count;
-}
-
-inline int32_t used_max_p1(const stream_state & s) {
-  return s.used_max_p1;
-}
-
-inline void snapshot_cell(const stream_state & s, int32_t idx, cell_snapshot & snap) {
-  snap.pos = s.pos[idx];
-  snap.shift = s.shift[idx];
-  snap.ext_x = s.ext_x[idx];
-  snap.ext_y = s.ext_y[idx];
-  snap.seq_count = s.seq_count[idx];
-  snap.seq_mask = s.seq_mask[idx];
-}
-
-inline void restore_cell(stream_state & s, int32_t idx, const cell_snapshot & snap) {
-  s.pos[idx] = snap.pos;
-  s.shift[idx] = snap.shift;
-  s.ext_x[idx] = snap.ext_x;
-  s.ext_y[idx] = snap.ext_y;
-  s.seq_count[idx] = snap.seq_count;
-  s.seq_mask[idx] = snap.seq_mask;
-}
-
-inline void snapshot_stream_state(const stream_state & s, stream_snapshot & snap) {
-  snap.head = s.head;
-  snap.used_count = s.used_count;
-  snap.used_max_p1 = s.used_max_p1;
-  snap.has_shift = s.has_shift;
-  snap.seq_pos_min = s.seq_pos_min;
-  snap.seq_pos_max = s.seq_pos_max;
-  snap.seq_pos_min_count = s.seq_pos_min_count;
-  snap.seq_pos_max_count = s.seq_pos_max_count;
-}
-
-inline void restore_stream_state(stream_state & s, const stream_snapshot & snap) {
-  s.head = snap.head;
-  s.used_count = snap.used_count;
-  s.used_max_p1 = snap.used_max_p1;
-  s.has_shift = snap.has_shift;
-  s.seq_pos_min = snap.seq_pos_min;
-  s.seq_pos_max = snap.seq_pos_max;
-  s.seq_pos_min_count = snap.seq_pos_min_count;
-  s.seq_pos_max_count = snap.seq_pos_max_count;
-}
-
-inline int32_t single_seq_id(const stream_state & s, int32_t idx) {
-  if (s.seq_count[idx] != 1) {
-    return POS_NONE;
-  }
-  for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-    const uint64_t mask = s.seq_mask[idx][word];
-    if (mask == 0) {
-      continue;
-    }
-    const int32_t bit = __builtin_ctzll(mask);
-    return word * 64 + bit;
-  }
-  return POS_NONE;
-}
-
-inline int32_t pad_to(int32_t value, int32_t pad) {
-  if (pad <= 0) {
-    return value;
-  }
-  return ((value + pad - 1) / pad) * pad;
-}
-
-inline bool ranges_overlap(int32_t start_a, int32_t size_a, int32_t start_b, int32_t size_b) {
-  return start_a < start_b + size_b && start_b < start_a + size_a;
-}
-
-inline bool pos_in_range(int32_t pos, int32_t p0, int32_t p1) {
-  if (p0 < 0 && p1 < 0) {
-    return true;
-  }
-  if (p0 < 0) {
-    return pos < p1;
-  }
-  if (p1 < 0) {
-    return pos >= p0;
-  }
-  return pos >= p0 && pos < p1;
-}
-
-inline bool is_full_copy_range(int32_t pos0, int32_t pos1, int32_t kv_size) {
-  if (kv_size <= 0) {
-    return false;
-  }
-  bool full = true;
-  if (pos0 > 0 && pos0 + 1 < kv_size) {
-    full = false;
-  }
-  if (pos1 > 0 && pos1 + 1 < kv_size) {
-    full = false;
-  }
-  return full;
-}
-
-inline bool cell_has_seq(const stream_state & s, int32_t idx, int32_t seq_id) {
-  if (seq_id < 0 || seq_id >= MAX_SEQ) {
-    return false;
-  }
-  const int32_t word = seq_id / 64;
-  const int32_t bit = seq_id % 64;
-  return (s.seq_mask[idx][word] & (uint64_t(1) << bit)) != 0;
-}
-
-inline void set_seq_bit(stream_state & s, int32_t idx, int32_t seq_id) {
-  const int32_t word = seq_id / 64;
-  const int32_t bit = seq_id % 64;
-  s.seq_mask[idx][word] |= (uint64_t(1) << bit);
-}
-
-inline void clear_seq_bit(stream_state & s, int32_t idx, int32_t seq_id) {
-  const int32_t word = seq_id / 64;
-  const int32_t bit = seq_id % 64;
-  s.seq_mask[idx][word] &= ~(uint64_t(1) << bit);
-}
-
-inline void recompute_seq_pos_min(stream_state & s, int32_t seq_id) {
-  int32_t min_pos = POS_NONE;
-  uint16_t count = 0;
-  for (int32_t i = 0; i < MAX_KV_CELLS; ++i) {
-    if (s.pos[i] == POS_NONE) {
-      continue;
-    }
-    if (!cell_has_seq(s, i, seq_id)) {
-      continue;
-    }
-    if (min_pos == POS_NONE || s.pos[i] < min_pos) {
-      min_pos = s.pos[i];
-      count = 1;
-    } else if (s.pos[i] == min_pos) {
-      ++count;
-    }
-  }
-  s.seq_pos_min[seq_id] = min_pos;
-  s.seq_pos_min_count[seq_id] = count;
-}
-
-inline void recompute_seq_pos_max(stream_state & s, int32_t seq_id) {
-  int32_t max_pos = POS_NONE;
-  uint16_t count = 0;
-  for (int32_t i = 0; i < MAX_KV_CELLS; ++i) {
-    if (s.pos[i] == POS_NONE) {
-      continue;
-    }
-    if (!cell_has_seq(s, i, seq_id)) {
-      continue;
-    }
-    if (max_pos == POS_NONE || s.pos[i] > max_pos) {
-      max_pos = s.pos[i];
-      count = 1;
-    } else if (s.pos[i] == max_pos) {
-      ++count;
-    }
-  }
-  s.seq_pos_max[seq_id] = max_pos;
-  s.seq_pos_max_count[seq_id] = count;
-}
-
-inline void seq_pos_add(stream_state & s, int32_t seq_id, int32_t pos) {
-  if (seq_id < 0 || seq_id >= MAX_SEQ || pos < 0) {
-    return;
-  }
-  if (s.seq_pos_min[seq_id] == POS_NONE || pos < s.seq_pos_min[seq_id]) {
-    s.seq_pos_min[seq_id] = pos;
-    s.seq_pos_min_count[seq_id] = 1;
-  } else if (pos == s.seq_pos_min[seq_id]) {
-    ++s.seq_pos_min_count[seq_id];
-  }
-  if (s.seq_pos_max[seq_id] == POS_NONE || pos > s.seq_pos_max[seq_id]) {
-    s.seq_pos_max[seq_id] = pos;
-    s.seq_pos_max_count[seq_id] = 1;
-  } else if (pos == s.seq_pos_max[seq_id]) {
-    ++s.seq_pos_max_count[seq_id];
+  ctx.block_refs.reset();
+  ctx.free_count = ctx.max_blocks;
+  for (int32_t i = 0; i < ctx.max_blocks; ++i) {
+    ctx.free_stack[static_cast<size_t>(i)] = static_cast<uint16_t>(i);
   }
 }
 
-inline void seq_pos_remove(stream_state & s, int32_t seq_id, int32_t pos) {
-  if (seq_id < 0 || seq_id >= MAX_SEQ || pos < 0) {
-    return;
-  }
-  if (pos == s.seq_pos_min[seq_id]) {
-    if (s.seq_pos_min_count[seq_id] > 0) {
-      --s.seq_pos_min_count[seq_id];
-    }
-    if (s.seq_pos_min_count[seq_id] == 0) {
-      recompute_seq_pos_min(s, seq_id);
-    }
-  }
-  if (pos == s.seq_pos_max[seq_id]) {
-    if (s.seq_pos_max_count[seq_id] > 0) {
-      --s.seq_pos_max_count[seq_id];
-    }
-    if (s.seq_pos_max_count[seq_id] == 0) {
-      recompute_seq_pos_max(s, seq_id);
+inline void fill_snapshot(const context & ctx, view::snapshot & snapshot) noexcept {
+  snapshot = view::snapshot{};
+  snapshot.max_sequences = ctx.max_sequences;
+  snapshot.block_tokens = ctx.block_tokens;
+  for (int32_t seq_id = 0; seq_id < ctx.max_sequences; ++seq_id) {
+    const size_t seq_index = static_cast<size_t>(seq_id);
+    const int32_t active = static_cast<int32_t>(ctx.sequence_active[seq_index]);
+    snapshot.sequence_active[seq_index] = static_cast<uint8_t>(active);
+    snapshot.sequence_recurrent_slot[seq_index] = -1;
+    snapshot.sequence_length_values[seq_index] = ctx.sequence_length[seq_index] * active;
+    const int32_t block_count = ctx.sequence_block_count[seq_index] * active;
+    snapshot.sequence_kv_block_count[seq_index] = block_count;
+    for (size_t block = 0; block < kv::detail::max_blocks_per_sequence; ++block) {
+      const int32_t in_range = static_cast<int32_t>(static_cast<int32_t>(block) < block_count);
+      snapshot.sequence_kv_blocks[seq_index][block] =
+          static_cast<uint16_t>(ctx.seq_to_blocks[seq_index][block] * in_range);
     }
   }
 }
 
-inline void recompute_used_max_p1(stream_state & s) {
-  int32_t max_p1 = 0;
-  for (int32_t i = MAX_KV_CELLS - 1; i >= 0; --i) {
-    if (s.pos[i] != POS_NONE) {
-      max_p1 = i + 1;
-      break;
-    }
+}  // namespace detail
+
+struct begin_reserve {
+  void operator()(const event::reserve_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.ctx.resolved_max_sequences = 0;
+    ev.ctx.resolved_max_blocks = 0;
+    ev.ctx.resolved_block_tokens = 0;
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
-  s.used_max_p1 = max_p1;
-}
-
-inline void set_cell_empty(stream_state & s, int32_t idx) {
-  if (s.pos[idx] == POS_NONE) {
-    return;
-  }
-  for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-    uint64_t mask = s.seq_mask[idx][word];
-    while (mask != 0) {
-      const int32_t bit = __builtin_ctzll(mask);
-      const int32_t seq_id = word * 64 + bit;
-      seq_pos_remove(s, seq_id, s.pos[idx]);
-      mask &= (mask - 1);
-    }
-  }
-  s.pos[idx] = POS_NONE;
-  s.shift[idx] = 0;
-  s.ext_x[idx] = 0;
-  s.ext_y[idx] = 0;
-  s.seq_count[idx] = 0;
-  for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-    s.seq_mask[idx][word] = 0;
-  }
-  if (s.used_count > 0) {
-    --s.used_count;
-  }
-  if (idx + 1 == s.used_max_p1) {
-    recompute_used_max_p1(s);
-  }
-  if (s.head > idx) {
-    s.head = idx;
-  }
-}
-
-inline void set_cell_pos(stream_state & s, int32_t idx, int32_t pos) {
-  if (s.pos[idx] == POS_NONE) {
-    ++s.used_count;
-    if (idx + 1 > s.used_max_p1) {
-      s.used_max_p1 = idx + 1;
-    }
-  } else {
-    for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-      uint64_t mask = s.seq_mask[idx][word];
-      while (mask != 0) {
-        const int32_t bit = __builtin_ctzll(mask);
-        const int32_t seq_id = word * 64 + bit;
-        seq_pos_remove(s, seq_id, s.pos[idx]);
-        mask &= (mask - 1);
-      }
-    }
-  }
-  s.pos[idx] = pos;
-  for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-    uint64_t mask = s.seq_mask[idx][word];
-    while (mask != 0) {
-      const int32_t bit = __builtin_ctzll(mask);
-      const int32_t seq_id = word * 64 + bit;
-      seq_pos_add(s, seq_id, pos);
-      mask &= (mask - 1);
-    }
-  }
-}
-
-inline void add_seq_to_cell(stream_state & s, int32_t idx, int32_t seq_id) {
-  if (seq_id < 0 || seq_id >= MAX_SEQ) {
-    return;
-  }
-  if (cell_has_seq(s, idx, seq_id)) {
-    return;
-  }
-  set_seq_bit(s, idx, seq_id);
-  ++s.seq_count[idx];
-  if (s.pos[idx] != POS_NONE) {
-    seq_pos_add(s, seq_id, s.pos[idx]);
-  }
-}
-
-inline void remove_seq_from_cell(stream_state & s, int32_t idx, int32_t seq_id) {
-  if (!cell_has_seq(s, idx, seq_id)) {
-    return;
-  }
-  clear_seq_bit(s, idx, seq_id);
-  if (s.seq_count[idx] > 0) {
-    --s.seq_count[idx];
-  }
-  if (s.pos[idx] != POS_NONE) {
-    seq_pos_remove(s, seq_id, s.pos[idx]);
-  }
-  if (s.seq_count[idx] == 0) {
-    set_cell_empty(s, idx);
-  }
-}
-
-inline bool pos_add_cell(stream_state & s, int32_t idx, int32_t delta) {
-  if (s.pos[idx] == POS_NONE) {
-    return false;
-  }
-  const int32_t old_pos = s.pos[idx];
-  const int32_t new_pos = old_pos + delta;
-  for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-    uint64_t mask = s.seq_mask[idx][word];
-    while (mask != 0) {
-      const int32_t bit = __builtin_ctzll(mask);
-      const int32_t seq_id = word * 64 + bit;
-      seq_pos_remove(s, seq_id, old_pos);
-      mask &= (mask - 1);
-    }
-  }
-  if (new_pos < 0) {
-    set_cell_empty(s, idx);
-    return true;
-  }
-  s.pos[idx] = new_pos;
-  s.shift[idx] += delta;
-  s.has_shift = true;
-  for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-    uint64_t mask = s.seq_mask[idx][word];
-    while (mask != 0) {
-      const int32_t bit = __builtin_ctzll(mask);
-      const int32_t seq_id = word * 64 + bit;
-      seq_pos_add(s, seq_id, new_pos);
-      mask &= (mask - 1);
-    }
-  }
-  return false;
-}
-
-inline void pos_div_cell(stream_state & s, int32_t idx, int32_t divisor) {
-  if (s.pos[idx] == POS_NONE) {
-    return;
-  }
-  const int32_t old_pos = s.pos[idx];
-  const int32_t new_pos = divisor == 0 ? old_pos : old_pos / divisor;
-  for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-    uint64_t mask = s.seq_mask[idx][word];
-    while (mask != 0) {
-      const int32_t bit = __builtin_ctzll(mask);
-      const int32_t seq_id = word * 64 + bit;
-      seq_pos_remove(s, seq_id, old_pos);
-      mask &= (mask - 1);
-    }
-  }
-  s.pos[idx] = new_pos;
-  s.shift[idx] += old_pos - new_pos;
-  s.has_shift = true;
-  for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-    uint64_t mask = s.seq_mask[idx][word];
-    while (mask != 0) {
-      const int32_t bit = __builtin_ctzll(mask);
-      const int32_t seq_id = word * 64 + bit;
-      seq_pos_add(s, seq_id, new_pos);
-      mask &= (mask - 1);
-    }
-  }
-}
-
-inline int32_t max_used_max_p1(const context & ctx) {
-  int32_t max_used = 0;
-  for (int32_t s = 0; s < ctx.n_stream; ++s) {
-    max_used = std::max(max_used, ctx.streams[s].used_max_p1);
-  }
-  return max_used;
-}
-
-inline int32_t compute_kv_tokens(const context & ctx) {
-  if (ctx.kv_size <= 0) {
-    return 0;
-  }
-  const int32_t n_pad_cur = std::max(ctx.n_pad, 256);
-  int32_t result = 0;
-  for (int32_t s = 0; s < ctx.n_stream; ++s) {
-    const int32_t used = ctx.streams[s].used_max_p1;
-    int32_t padded = std::max(n_pad_cur, pad_to(used, n_pad_cur));
-    if (padded > ctx.kv_size) {
-      padded = ctx.kv_size;
-    }
-    result = std::max(result, padded);
-  }
-  return result;
-}
-
-inline bool is_masked_swa(int32_t n_swa, int32_t swa_type, int32_t pos_cell, int32_t pos_max_p1) {
-  if (n_swa <= 0 || swa_type == 0) {
-    return false;
-  }
-  if (pos_max_p1 <= 0) {
-    return false;
-  }
-  return pos_cell + n_swa < pos_max_p1;
-}
-
-inline bool range_overlaps_planned(
-    const context & ctx,
-    int32_t stream_id,
-    int32_t start,
-    int32_t size,
-    int32_t upto) {
-  for (int32_t i = 0; i < upto; ++i) {
-    if (ctx.ubatch_stream_ids[i] != stream_id) {
-      continue;
-    }
-    if (ranges_overlap(start, size, ctx.slot_offsets[i], ctx.ubatch_sizes[i])) {
-      return true;
-    }
-  }
-  return false;
-}
-
-inline int32_t find_contiguous_slot(
-    const context & ctx,
-    const stream_state & s,
-    int32_t kv_size,
-    int32_t head_start,
-    int32_t n_tokens,
-    int32_t used_cells,
-    int32_t stream_id,
-    int32_t ubatch_index,
-    int32_t & head_after) {
-  if (kv_size <= 0 || n_tokens <= 0 || n_tokens > kv_size) {
-    return -1;
-  }
-
-  int32_t head_cur = head_start;
-  if (head_cur > used_cells + 2 * n_tokens) {
-    head_cur = 0;
-  }
-
-  int32_t n_tested = 0;
-  while (n_tested < kv_size) {
-    if (head_cur + n_tokens > kv_size) {
-      n_tested += kv_size - head_cur;
-      head_cur = 0;
-      continue;
-    }
-
-    bool can_use = true;
-    for (int32_t i = 0; i < n_tokens; ++i) {
-      if (s.pos[head_cur + i] != POS_NONE) {
-        can_use = false;
-        break;
-      }
-    }
-    if (can_use &&
-        range_overlaps_planned(ctx, stream_id, head_cur, n_tokens, ubatch_index)) {
-      can_use = false;
-    }
-
-    if (can_use) {
-      head_after = head_cur + n_tokens;
-      if (head_after >= kv_size) {
-        head_after %= kv_size;
-      }
-      return head_cur;
-    }
-
-    ++head_cur;
-    ++n_tested;
-  }
-
-  return -1;
-}
-
-inline bool find_slot_indices(
-    const context & ctx,
-    const stream_state & s,
-    int32_t kv_size,
-    int32_t n_tokens,
-    int32_t * indices_out) {
-  if (kv_size <= 0 || n_tokens <= 0 || n_tokens > kv_size) {
-    return false;
-  }
-
-  int32_t head_cur = s.head;
-  if (head_cur > s.used_count + 2 * n_tokens) {
-    head_cur = 0;
-  }
-
-  int32_t n_tested = 0;
-  int32_t found = 0;
-  while (n_tested < kv_size) {
-    if (head_cur + 1 > kv_size) {
-      n_tested += kv_size - head_cur;
-      head_cur = 0;
-      continue;
-    }
-
-    bool can_use = s.pos[head_cur] == POS_NONE;
-    if (!can_use && s.seq_count[head_cur] == 1) {
-      const int32_t seq_id_cell = single_seq_id(s, head_cur);
-      if (seq_id_cell != POS_NONE) {
-        const int32_t pos_cell = s.pos[head_cur];
-        const int32_t pos_max = s.seq_pos_max[seq_id_cell];
-        if (pos_max != POS_NONE &&
-            is_masked_swa(ctx.n_swa, ctx.swa_type, pos_cell, pos_max + 1)) {
-          can_use = true;
-        }
-      }
-    }
-
-    if (can_use) {
-      indices_out[found++] = head_cur;
-      if (found == n_tokens) {
-        return true;
-      }
-    }
-
-    ++head_cur;
-    ++n_tested;
-  }
-
-  return false;
-}
-
-inline void ensure_next_pos_for_seq(context & ctx, int32_t seq_id, const stream_state & s) {
-  if (seq_id < 0 || seq_id >= MAX_SEQ) {
-    return;
-  }
-  if (s.seq_pos_max[seq_id] != POS_NONE &&
-      ctx.next_pos[seq_id] <= s.seq_pos_max[seq_id]) {
-    ctx.next_pos[seq_id] = s.seq_pos_max[seq_id] + 1;
-  }
-}
-
-inline void reset_next_pos_for_seq(context & ctx, int32_t seq_id, const stream_state & s) {
-  if (seq_id < 0 || seq_id >= MAX_SEQ) {
-    return;
-  }
-  if (s.seq_pos_max[seq_id] == POS_NONE) {
-    ctx.next_pos[seq_id] = 0;
-  } else {
-    ctx.next_pos[seq_id] = s.seq_pos_max[seq_id] + 1;
-  }
-}
-
-inline void add_pending_copy(context & ctx, int32_t src_stream, int32_t dst_stream) {
-  if (src_stream == dst_stream) {
-    return;
-  }
-  for (int32_t i = 0; i < ctx.pending_copy_count; ++i) {
-    if (ctx.pending_copy_src[i] == src_stream && ctx.pending_copy_dst[i] == dst_stream) {
-      return;
-    }
-  }
-  if (ctx.pending_copy_count < MAX_STREAM_COPY) {
-    ctx.pending_copy_src[ctx.pending_copy_count] = src_stream;
-    ctx.pending_copy_dst[ctx.pending_copy_count] = dst_stream;
-    ++ctx.pending_copy_count;
-  }
-}
-
-inline bool apply_slots(
-    context & ctx,
-    int32_t slot_offset,
-    int32_t slot_count,
-    int32_t default_seq_id,
-    const int32_t * positions,
-    int32_t positions_count,
-    const uint64_t * seq_masks,
-    int32_t seq_mask_words,
-    int32_t seq_masks_count,
-    const int32_t * seq_primary_ids,
-    int32_t seq_primary_ids_count,
-    bool update_next_pos) {
-  if (slot_offset < 0 || slot_count <= 0) {
-    return false;
-  }
-  if (slot_offset + slot_count > ctx.slot_index_count) {
-    return false;
-  }
-  if (positions != nullptr && positions_count < slot_count) {
-    return false;
-  }
-  if (seq_masks != nullptr) {
-    if (seq_mask_words <= 0 || seq_mask_words > SEQ_WORDS) {
-      return false;
-    }
-    if (seq_masks_count < slot_count) {
-      return false;
-    }
-  }
-  if (seq_primary_ids != nullptr && seq_primary_ids_count < slot_count) {
-    return false;
-  }
-  if (seq_masks == nullptr && seq_primary_ids == nullptr) {
-    if (default_seq_id < 0 || default_seq_id >= MAX_SEQ) {
-      return false;
-    }
-  }
-
-  std::array<int32_t, MAX_SEQ> seq_pos_max_rm = {};
-  seq_pos_max_rm.fill(POS_NONE);
-  std::array<int32_t, MAX_SEQ> seq_pos_max_add = {};
-  seq_pos_max_add.fill(POS_NONE);
-  std::array<uint8_t, MAX_SEQ> seq_touched = {};
-  std::array<int32_t, MAX_SEQ> next_pos_local = ctx.next_pos;
-
-  const bool has_positions = positions != nullptr && positions_count >= slot_count;
-  const bool has_pos_2d = positions != nullptr && positions_count >= slot_count * 3;
-
-  auto ensure_next_pos_local = [&](int32_t seq_id) {
-    if (seq_id < 0 || seq_id >= MAX_SEQ) {
-      return;
-    }
-    const int32_t stream_id = ctx.seq_to_stream[seq_id];
-    if (stream_id < 0 || stream_id >= ctx.n_stream) {
-      return;
-    }
-    const stream_state & stream = ctx.streams[stream_id];
-    if (stream.seq_pos_max[seq_id] != POS_NONE &&
-        next_pos_local[seq_id] <= stream.seq_pos_max[seq_id]) {
-      next_pos_local[seq_id] = stream.seq_pos_max[seq_id] + 1;
-    }
-  };
-
-  auto load_mask = [&](int32_t token_idx, std::array<uint64_t, SEQ_WORDS> & mask) -> bool {
-    mask.fill(0);
-    if (seq_masks != nullptr) {
-      const size_t base =
-          static_cast<size_t>(token_idx) * static_cast<size_t>(seq_mask_words);
-      for (int32_t w = 0; w < seq_mask_words; ++w) {
-        mask[static_cast<size_t>(w)] = seq_masks[base + static_cast<size_t>(w)];
-      }
-    } else if (seq_primary_ids != nullptr) {
-      const int32_t seq_id = seq_primary_ids[token_idx];
-      if (seq_id < 0 || seq_id >= MAX_SEQ) {
-        return false;
-      }
-      mask[static_cast<size_t>(seq_id / 64)] = (uint64_t{1} << (seq_id % 64));
-    } else {
-      mask[static_cast<size_t>(default_seq_id / 64)] =
-          (uint64_t{1} << (default_seq_id % 64));
-    }
-    for (const uint64_t word : mask) {
-      if (word != 0) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  auto primary_seq_from_mask =
-      [&](const std::array<uint64_t, SEQ_WORDS> & mask, int32_t token_idx) -> int32_t {
-    if (seq_primary_ids != nullptr) {
-      const int32_t seq_id = seq_primary_ids[token_idx];
-      if (seq_id >= 0 && seq_id < MAX_SEQ) {
-        return seq_id;
-      }
-    }
-    for (int32_t w = 0; w < SEQ_WORDS; ++w) {
-      uint64_t word = mask[static_cast<size_t>(w)];
-      if (word == 0) {
-        continue;
-      }
-      const int32_t bit = __builtin_ctzll(word);
-      return w * 64 + bit;
-    }
-    return default_seq_id;
-  };
-
-  std::array<int32_t, MAX_STREAMS> last_idx = {};
-  last_idx.fill(POS_NONE);
-
-  for (int32_t i = 0; i < slot_count; ++i) {
-    const int32_t slot = slot_offset + i;
-    const int32_t idx = ctx.slot_indices[slot];
-    const int32_t stream_id = ctx.slot_stream_ids[slot];
-    if (stream_id < 0 || stream_id >= ctx.n_stream) {
-      return false;
-    }
-    if (idx < 0 || idx >= ctx.kv_size) {
-      return false;
-    }
-    stream_state & stream = ctx.streams[stream_id];
-
-    std::array<uint64_t, SEQ_WORDS> mask = {};
-    if (!load_mask(i, mask)) {
-      return false;
-    }
-
-    if (seq_masks != nullptr && seq_primary_ids != nullptr) {
-      const int32_t seq_id = seq_primary_ids[i];
-      if (seq_id < 0 || seq_id >= MAX_SEQ) {
-        return false;
-      }
-      const int32_t word = seq_id / 64;
-      const int32_t bit = seq_id % 64;
-      if ((mask[static_cast<size_t>(word)] & (uint64_t{1} << bit)) == 0) {
-        return false;
-      }
-    }
-
-    int32_t token_stream = POS_NONE;
-    for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-      uint64_t word_mask = mask[static_cast<size_t>(word)];
-      while (word_mask != 0) {
-        const int32_t bit = __builtin_ctzll(word_mask);
-        const int32_t seq_id = word * 64 + bit;
-        if (seq_id < 0 || seq_id >= MAX_SEQ) {
-          return false;
-        }
-        const int32_t seq_stream = ctx.seq_to_stream[seq_id];
-        if (seq_stream < 0 || seq_stream >= ctx.n_stream) {
-          return false;
-        }
-        if (token_stream == POS_NONE) {
-          token_stream = seq_stream;
-        } else if (token_stream != seq_stream) {
-          return false;
-        }
-        seq_touched[seq_id] = 1;
-        word_mask &= (word_mask - 1);
-      }
-    }
-    if (token_stream != stream_id) {
-      return false;
-    }
-
-    if (stream.pos[idx] != POS_NONE) {
-      for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-        uint64_t word_mask = stream.seq_mask[idx][word];
-        while (word_mask != 0) {
-          const int32_t bit = __builtin_ctzll(word_mask);
-          const int32_t seq_over = word * 64 + bit;
-          seq_pos_max_rm[seq_over] =
-              std::max(seq_pos_max_rm[seq_over], stream.pos[idx]);
-          word_mask &= (word_mask - 1);
-        }
-      }
-      set_cell_empty(stream, idx);
-    }
-
-    int32_t pos = 0;
-    if (has_positions) {
-      pos = positions[i];
-    } else {
-      const int32_t primary_seq = primary_seq_from_mask(mask, i);
-      if (primary_seq < 0 || primary_seq >= MAX_SEQ) {
-        return false;
-      }
-      ensure_next_pos_local(primary_seq);
-      pos = next_pos_local[primary_seq];
-      next_pos_local[primary_seq] = pos + 1;
-      for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-        uint64_t word_mask = mask[static_cast<size_t>(word)];
-        while (word_mask != 0) {
-          const int32_t bit = __builtin_ctzll(word_mask);
-          const int32_t seq_id = word * 64 + bit;
-          if (next_pos_local[seq_id] < pos + 1) {
-            next_pos_local[seq_id] = pos + 1;
-          }
-          word_mask &= (word_mask - 1);
-        }
-      }
-    }
-
-    set_cell_pos(stream, idx, pos);
-    if (has_pos_2d) {
-      stream.ext_y[idx] = positions[i + slot_count];
-      stream.ext_x[idx] = positions[i + slot_count * 2];
-    }
-    for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-      uint64_t word_mask = mask[static_cast<size_t>(word)];
-      while (word_mask != 0) {
-        const int32_t bit = __builtin_ctzll(word_mask);
-        const int32_t seq_id = word * 64 + bit;
-        add_seq_to_cell(stream, idx, seq_id);
-        if (seq_pos_max_add[seq_id] == POS_NONE || pos > seq_pos_max_add[seq_id]) {
-          seq_pos_max_add[seq_id] = pos;
-        }
-        word_mask &= (word_mask - 1);
-      }
-    }
-
-    if (last_idx[stream_id] == POS_NONE || idx > last_idx[stream_id]) {
-      last_idx[stream_id] = idx;
-    }
-  }
-
-  if (update_next_pos) {
-    if (has_positions) {
-      for (int32_t seq = 0; seq < MAX_SEQ; ++seq) {
-        if (seq_pos_max_add[seq] == POS_NONE) {
-          continue;
-        }
-        if (ctx.next_pos[seq] <= seq_pos_max_add[seq]) {
-          ctx.next_pos[seq] = seq_pos_max_add[seq] + 1;
-        }
-      }
-    } else {
-      for (int32_t seq = 0; seq < MAX_SEQ; ++seq) {
-        if (seq_touched[seq] == 0) {
-          continue;
-        }
-        ctx.next_pos[seq] = next_pos_local[seq];
-      }
-    }
-  }
-
-  for (int32_t seq = 0; seq < MAX_SEQ; ++seq) {
-    if (seq_pos_max_rm[seq] == POS_NONE) {
-      continue;
-    }
-    const int32_t stream_id = ctx.seq_to_stream[seq];
-    if (stream_id < 0 || stream_id >= ctx.n_stream) {
-      continue;
-    }
-    stream_state & stream = ctx.streams[stream_id];
-    const int32_t min_pos = stream.seq_pos_min[seq];
-    if (min_pos == POS_NONE) {
-      continue;
-    }
-    if (min_pos > seq_pos_max_rm[seq]) {
-      continue;
-    }
-    const int32_t end_pos = seq_pos_max_rm[seq] + 1;
-    for (int32_t i = 0; i < ctx.kv_size; ++i) {
-      if (stream.pos[i] == POS_NONE) {
-        continue;
-      }
-      if (!cell_has_seq(stream, i, seq)) {
-        continue;
-      }
-      if (!pos_in_range(stream.pos[i], min_pos, end_pos)) {
-        continue;
-      }
-      remove_seq_from_cell(stream, i, seq);
-    }
-    reset_next_pos_for_seq(ctx, seq, stream);
-  }
-
-  for (int32_t s = 0; s < ctx.n_stream; ++s) {
-    if (last_idx[s] == POS_NONE) {
-      continue;
-    }
-    int32_t head = last_idx[s] + 1;
-    if (head >= ctx.kv_size) {
-      head = 0;
-    }
-    ctx.streams[s].head = head;
-  }
-
-  return true;
-}
-
-inline void store_prepare_request(const event::prepare & ev, context & ctx) noexcept {
-  ctx.prepare_request = ev;
-  ctx.prepare_request.slot_offsets_out = nullptr;
-  ctx.prepare_request.ubatch_count_out = nullptr;
-  ctx.prepare_request.error_out = nullptr;
-}
-
-inline void store_apply_request(const event::apply_ubatch & ev, context & ctx) noexcept {
-  ctx.apply_request = ev;
-  ctx.apply_request.kv_tokens_out = nullptr;
-  ctx.apply_request.error_out = nullptr;
-}
-
-inline void store_rollback_request(const event::rollback & ev, context & ctx) noexcept {
-  ctx.rollback_request = ev;
-  ctx.rollback_request.error_out = nullptr;
-}
-
-inline void store_seq_remove_request(const event::seq_remove & ev, context & ctx) noexcept {
-  ctx.seq_remove_request = ev;
-  ctx.seq_remove_request.error_out = nullptr;
-}
-
-inline void store_seq_copy_request(const event::seq_copy & ev, context & ctx) noexcept {
-  ctx.seq_copy_request = ev;
-  ctx.seq_copy_request.error_out = nullptr;
-}
-
-inline void store_seq_keep_request(const event::seq_keep & ev, context & ctx) noexcept {
-  ctx.seq_keep_request = ev;
-  ctx.seq_keep_request.error_out = nullptr;
-}
-
-inline void store_seq_add_request(const event::seq_add & ev, context & ctx) noexcept {
-  ctx.seq_add_request = ev;
-  ctx.seq_add_request.error_out = nullptr;
-}
-
-inline void store_seq_div_request(const event::seq_div & ev, context & ctx) noexcept {
-  ctx.seq_div_request = ev;
-  ctx.seq_div_request.error_out = nullptr;
-}
-
-inline void store_updates_request(const event::apply_updates & ev, context & ctx) noexcept {
-  ctx.updates_request = ev;
-  ctx.updates_request.error_out = nullptr;
-}
-
-inline void clear_requests(context & ctx) noexcept {
-  ctx.prepare_request = {};
-  ctx.apply_request = {};
-  ctx.rollback_request = {};
-  ctx.seq_remove_request = {};
-  ctx.seq_copy_request = {};
-  ctx.seq_keep_request = {};
-  ctx.seq_add_request = {};
-  ctx.seq_div_request = {};
-  ctx.updates_request = {};
-}
-
-inline constexpr auto begin_prepare = [](const event::prepare & ev, context & ctx) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
-  }
-  if (ev.ubatch_count_out != nullptr) {
-    *ev.ubatch_count_out = 0;
-  }
-  ctx.phase_error = EMEL_OK;
-  ctx.last_error = EMEL_OK;
-  store_prepare_request(ev, ctx);
-  ctx.ubatch_count = ev.ubatch_count;
-  ctx.planned_ubatch_count = 0;
-
-  ctx.ubatch_sizes.fill(0);
-  ctx.slot_offsets.fill(0);
-  ctx.slot_index_count = 0;
-  ctx.ubatch_stream_ids.fill(0);
-  ctx.ubatch_seq_ids.fill(0);
-
-  if (ev.ubatch_sizes != nullptr && ev.ubatch_count > 0 && ev.ubatch_count <= MAX_UBATCHES) {
-    for (int32_t i = 0; i < ev.ubatch_count; ++i) {
-      ctx.ubatch_sizes[i] = ev.ubatch_sizes[i];
-    }
-  }
-
-  if (ev.ubatch_stream_ids != nullptr && ev.ubatch_stream_ids_count >= ev.ubatch_count) {
-    for (int32_t i = 0; i < ev.ubatch_count; ++i) {
-      ctx.ubatch_stream_ids[i] = ev.ubatch_stream_ids[i];
-    }
-  }
-
-  if (ev.ubatch_seq_ids != nullptr && ev.ubatch_seq_ids_count >= ev.ubatch_count) {
-    for (int32_t i = 0; i < ev.ubatch_count; ++i) {
-      ctx.ubatch_seq_ids[i] = ev.ubatch_seq_ids[i];
-    }
-  } else {
-    for (int32_t i = 0; i < ev.ubatch_count; ++i) {
-      ctx.ubatch_seq_ids[i] = ctx.ubatch_stream_ids[i];
-    }
-  }
-
-  const int32_t prev_streams = ctx.n_stream;
-  if (ev.n_stream > 0) {
-    ctx.n_stream = std::min(ev.n_stream, MAX_STREAMS);
-  } else if (ctx.n_stream <= 0) {
-    ctx.n_stream = 1;
-  }
-
-  if (ev.n_pad > 0) {
-    ctx.n_pad = ev.n_pad;
-  } else if (ctx.n_pad <= 0) {
-    ctx.n_pad = 1;
-  }
-  if (ev.n_swa >= 0) {
-    ctx.n_swa = ev.n_swa;
-  }
-  ctx.swa_type = ev.swa_type;
-
-  if (ev.seq_to_stream != nullptr && ev.seq_to_stream_count > 0) {
-    const int32_t count = std::min(ev.seq_to_stream_count, MAX_SEQ);
-    ctx.seq_to_stream.fill(0);
-    for (int32_t i = 0; i < count; ++i) {
-      ctx.seq_to_stream[i] = ev.seq_to_stream[i];
-    }
-  } else {
-    ctx.seq_to_stream.fill(0);
-    if (ctx.n_stream > 1) {
-      for (int32_t i = 0; i < ctx.n_stream; ++i) {
-        ctx.seq_to_stream[i] = i;
-      }
-    }
-  }
-
-  const int32_t prev_kv_size = ctx.kv_size;
-  if (ev.requested_capacity > 0 && ev.requested_capacity <= MAX_KV_CELLS) {
-    ctx.kv_size = std::max(ctx.kv_size, ev.requested_capacity);
-  }
-
-  if (prev_kv_size == 0 || prev_streams != ctx.n_stream) {
-    for (int32_t s = 0; s < ctx.n_stream; ++s) {
-      reset_stream(ctx.streams[s]);
-    }
-    ctx.next_pos.fill(0);
-  } else if (ctx.kv_size > prev_kv_size) {
-    for (int32_t s = 0; s < ctx.n_stream; ++s) {
-      auto & stream = ctx.streams[s];
-      for (int32_t i = prev_kv_size; i < ctx.kv_size; ++i) {
-        stream.pos[i] = POS_NONE;
-        stream.shift[i] = 0;
-        stream.ext_x[i] = 0;
-        stream.ext_y[i] = 0;
-        stream.seq_count[i] = 0;
-        for (int32_t w = 0; w < SEQ_WORDS; ++w) {
-          stream.seq_mask[i][w] = 0;
-        }
-      }
-      if (stream.head >= ctx.kv_size) {
-        stream.head = 0;
-      }
-      recompute_used_max_p1(stream);
-    }
-  }
-
-  if (ctx.kv_size > 0) {
-    for (int32_t s = 0; s < ctx.n_stream; ++s) {
-      auto & stream = ctx.streams[s];
-      if (stream.head >= ctx.kv_size) {
-        stream.head %= ctx.kv_size;
-        recompute_used_max_p1(stream);
-      }
-    }
-  }
-
-  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
-inline constexpr auto begin_apply = [](const event::apply_ubatch & ev, context & ctx) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
+struct begin_allocate_sequence {
+  void operator()(const event::allocate_sequence_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
-  if (ev.kv_tokens_out != nullptr) {
-    *ev.kv_tokens_out = 0;
+};
+
+struct begin_allocate_slots {
+  void operator()(const event::allocate_slots_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.ctx.block_count = 0;
+    ev.ctx.old_length = 0;
+    ev.ctx.new_length = 0;
+    ev.ctx.old_blocks = 0;
+    ev.ctx.new_blocks = 0;
+    ev.ctx.existing_block_count = 0;
+    ev.ctx.blocks_needed = 0;
+    ev.ctx.linked_count = 0;
+    ev.block_count_out = 0;
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
-  ctx.phase_error = EMEL_OK;
-  ctx.last_error = EMEL_OK;
-  store_apply_request(ev, ctx);
 };
 
-inline constexpr auto begin_rollback = [](const event::rollback & ev, context & ctx) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
+struct begin_branch_sequence {
+  void operator()(const event::branch_sequence_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.ctx.parent_blocks = 0;
+    ev.ctx.linked_count = 0;
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
-  ctx.phase_error = EMEL_OK;
-  ctx.last_error = EMEL_OK;
-  store_rollback_request(ev, ctx);
 };
 
-inline constexpr auto run_validate_prepare = [](const event::validate_prepare & ev, context & ctx) {
-  (void)ctx;
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-};
-
-inline constexpr auto run_validate_apply = [](const event::validate_apply & ev, context & ctx) {
-  (void)ctx;
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-};
-
-inline constexpr auto run_validate_rollback = [](const event::validate_rollback & ev, context & ctx) {
-  (void)ctx;
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-};
-
-inline constexpr auto run_prepare_slots = [](const event::prepare_slots & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-
-  ctx.slot_index_count = 0;
-  std::array<int32_t, MAX_SEQ> next_pos_snapshot = ctx.next_pos;
-  for (int32_t s = 0; s < ctx.n_stream; ++s) {
-    snapshot_stream_state(ctx.streams[s], ctx.prepare_snapshot[s]);
+struct begin_free_sequence {
+  void operator()(const event::free_sequence_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.ctx.block_count = 0;
+    ev.ctx.unlinked_count = 0;
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
+};
 
-  bool success = true;
-  for (int32_t i = 0; i < ctx.ubatch_count; ++i) {
-    const int32_t size = ctx.ubatch_sizes[i];
-    const int32_t stream_id = ctx.ubatch_stream_ids[i];
-    const int32_t seq_id = ctx.ubatch_seq_ids[i];
-    if (size <= 0 || stream_id < 0 || stream_id >= ctx.n_stream) {
-      *ev.error_out = EMEL_ERR_BACKEND;
-      success = false;
-      break;
+struct begin_rollback_slots {
+  void operator()(const event::rollback_slots_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.ctx.block_count = 0;
+    ev.ctx.current_length = 0;
+    ev.ctx.new_length = 0;
+    ev.ctx.existing_block_count = 0;
+    ev.ctx.new_blocks = 0;
+    ev.ctx.remove_count = 0;
+    ev.ctx.unlinked_count = 0;
+    ev.block_count_out = 0;
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
+  }
+};
+
+struct begin_capture_view {
+  void operator()(const event::capture_view_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
+  }
+};
+
+struct exec_reserve {
+  void operator()(const event::reserve_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.resolved_max_sequences =
+        detail::resolve_positive_or_default(ev.request.max_sequences, kv::detail::max_sequences);
+    ev.ctx.resolved_max_blocks =
+        detail::resolve_positive_or_default(ev.request.max_blocks, kv::detail::max_blocks);
+    ev.ctx.resolved_block_tokens =
+        detail::resolve_positive_or_default(ev.request.block_tokens, kv::detail::default_block_tokens);
+
+    ctx.max_sequences = ev.ctx.resolved_max_sequences;
+    ctx.max_blocks = ev.ctx.resolved_max_blocks;
+    ctx.block_tokens = ev.ctx.resolved_block_tokens;
+    detail::reset_runtime(ctx);
+    ev.ctx.accepted = true;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+  }
+};
+
+struct exec_allocate_sequence {
+  void operator()(const event::allocate_sequence_runtime & ev, context & ctx) const noexcept {
+    const size_t seq_index = static_cast<size_t>(ev.request.seq_id);
+    const int32_t was_active = static_cast<int32_t>(ctx.sequence_active[seq_index]);
+    const int32_t keep_existing = was_active;
+
+    ctx.sequence_active[seq_index] = true;
+    ctx.sequence_length[seq_index] *= keep_existing;
+    ctx.sequence_block_count[seq_index] *= keep_existing;
+    ev.ctx.accepted = true;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+  }
+};
+
+struct exec_allocate_slots {
+  void operator()(const event::allocate_slots_runtime & ev, context & ctx) const noexcept {
+    const size_t seq_index = static_cast<size_t>(ev.request.seq_id);
+    ev.ctx.old_length = ctx.sequence_length[seq_index];
+    ev.ctx.new_length = ev.ctx.old_length + ev.request.token_count;
+    ev.ctx.existing_block_count = ctx.sequence_block_count[seq_index];
+    ev.ctx.old_blocks = detail::blocks_for_length(ctx.block_tokens, ev.ctx.old_length);
+    ev.ctx.new_blocks = detail::blocks_for_length(ctx.block_tokens, ev.ctx.new_length);
+    ev.ctx.blocks_needed = ev.ctx.new_blocks - ev.ctx.old_blocks;
+    ev.ctx.linked_count = 0;
+
+    for (int32_t i = 0; i < ev.ctx.blocks_needed; ++i) {
+      const int32_t stack_index = ctx.free_count - 1 - i;
+      const uint16_t block_id = ctx.free_stack[static_cast<size_t>(stack_index)];
+      ctx.seq_to_blocks[seq_index][static_cast<size_t>(ev.ctx.existing_block_count + i)] = block_id;
+      ev.ctx.linked_count += static_cast<int32_t>(
+          ctx.block_refs.process_indexed<kv::detail::block_link>(static_cast<size_t>(block_id)));
     }
-    const int32_t slot_offset = ctx.slot_index_count;
-    ctx.slot_index_count += size;
-    if (ctx.slot_index_count > ctx.kv_size || ctx.slot_index_count > MAX_KV_CELLS) {
-      *ev.error_out = EMEL_ERR_BACKEND;
-      success = false;
-      break;
-    }
+    ctx.free_count -= ev.ctx.blocks_needed;
 
-    ctx.slot_offsets[i] = slot_offset;
-    if (!find_slot_indices(
-          ctx,
-          ctx.streams[stream_id],
-          ctx.kv_size,
-          size,
-          &ctx.slot_indices[slot_offset])) {
-      *ev.error_out = EMEL_ERR_BACKEND;
-      success = false;
-      break;
-    }
-
-    for (int32_t j = 0; j < size; ++j) {
-      const int32_t slot = slot_offset + j;
-      const int32_t idx = ctx.slot_indices[slot];
-      ctx.slot_stream_ids[slot] = stream_id;
-      snapshot_cell(ctx.streams[stream_id], idx, ctx.slot_snapshots[slot]);
-    }
-
-    if (!apply_slots(
-          ctx,
-          slot_offset,
-          size,
-          seq_id,
-          nullptr,
-          0,
-          nullptr,
-          0,
-          0,
-          nullptr,
-          0,
-          true)) {
-      *ev.error_out = EMEL_ERR_BACKEND;
-      success = false;
-      break;
-    }
+    const int32_t linked_all = static_cast<int32_t>(ev.ctx.linked_count == ev.ctx.blocks_needed);
+    ctx.sequence_block_count[seq_index] =
+        linked_all * ev.ctx.new_blocks + (1 - linked_all) * ctx.sequence_block_count[seq_index];
+    ctx.sequence_length[seq_index] =
+        linked_all * ev.ctx.new_length + (1 - linked_all) * ctx.sequence_length[seq_index];
+    ev.ctx.block_count = linked_all * ev.ctx.blocks_needed;
+    ev.ctx.accepted = linked_all != 0;
+    ev.ctx.operation_error = emel::error::cast(error::none);
   }
-
-  for (int32_t slot = 0; slot < ctx.slot_index_count; ++slot) {
-    const int32_t stream_id = ctx.slot_stream_ids[slot];
-    const int32_t idx = ctx.slot_indices[slot];
-    if (stream_id < 0 || stream_id >= ctx.n_stream) {
-      continue;
-    }
-    restore_cell(ctx.streams[stream_id], idx, ctx.slot_snapshots[slot]);
-  }
-  for (int32_t s = 0; s < ctx.n_stream; ++s) {
-    restore_stream_state(ctx.streams[s], ctx.prepare_snapshot[s]);
-  }
-  ctx.next_pos = next_pos_snapshot;
-
-  if (!success) {
-    ctx.slot_index_count = 0;
-    ctx.planned_ubatch_count = 0;
-    ctx.applied_ubatches = 0;
-    ctx.slot_offsets.fill(0);
-    return;
-  }
-
-  ctx.planned_ubatch_count = ctx.ubatch_count;
-  ctx.applied_ubatches = 0;
-  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
-inline constexpr auto run_apply_step = [](const event::apply_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
+struct exec_branch_sequence {
+  void operator()(const event::branch_sequence_runtime & ev, context & ctx) const noexcept {
+    const size_t parent_index = static_cast<size_t>(ev.request.parent_seq_id);
+    const size_t child_index = static_cast<size_t>(ev.request.child_seq_id);
+    ev.ctx.parent_blocks = ctx.sequence_block_count[parent_index];
+    ev.ctx.linked_count = 0;
 
-  const event::apply_ubatch * request = ev.request;
-  const int32_t ubatch_index = request->ubatch_index;
-  const int32_t size = ctx.ubatch_sizes[ubatch_index];
-  const int32_t start = ctx.slot_offsets[ubatch_index];
-  const int32_t seq_id = ctx.ubatch_seq_ids[ubatch_index];
-  const int32_t * positions = request->positions;
-  const int32_t positions_count = request->positions_count;
-
-  if (!apply_slots(
-        ctx,
-        start,
-        size,
-        seq_id,
-        positions,
-        positions_count,
-        request->seq_masks,
-        request->seq_mask_words,
-        request->seq_masks_count,
-        request->seq_primary_ids,
-        request->seq_primary_ids_count,
-        true)) {
-    *ev.error_out = EMEL_ERR_BACKEND;
-    return;
-  }
-
-  ctx.applied_ubatches = ubatch_index + 1;
-  ctx.kv_tokens = compute_kv_tokens(ctx);
-};
-
-inline constexpr auto run_rollback_step = [](const event::rollback_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-
-  const event::rollback * request = ev.request;
-  const int32_t from_index = request->from_ubatch_index;
-  std::array<int32_t, MAX_STREAMS> new_head = {};
-  for (int32_t s = 0; s < ctx.n_stream; ++s) {
-    new_head[s] = ctx.kv_size;
-  }
-  for (int32_t i = from_index; i < ctx.applied_ubatches; ++i) {
-    const int32_t size = ctx.ubatch_sizes[i];
-    const int32_t start = ctx.slot_offsets[i];
-    if (start < 0 || start + size > ctx.slot_index_count) {
-      *ev.error_out = EMEL_ERR_BACKEND;
-      return;
-    }
-    for (int32_t j = 0; j < size; ++j) {
-      const int32_t slot = start + j;
-      const int32_t stream_id = ctx.slot_stream_ids[slot];
-      const int32_t idx = ctx.slot_indices[slot];
-      if (stream_id < 0 || stream_id >= ctx.n_stream) {
-        *ev.error_out = EMEL_ERR_BACKEND;
-        return;
-      }
-      if (idx < 0 || idx >= ctx.kv_size) {
-        *ev.error_out = EMEL_ERR_BACKEND;
-        return;
-      }
-      stream_state & stream = ctx.streams[stream_id];
-      std::array<uint64_t, SEQ_WORDS> mask = stream.seq_mask[idx];
-      set_cell_empty(stream, idx);
-      for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-        uint64_t word_mask = mask[static_cast<size_t>(word)];
-        while (word_mask != 0) {
-          const int32_t bit = __builtin_ctzll(word_mask);
-          const int32_t seq_id = word * 64 + bit;
-          reset_next_pos_for_seq(ctx, seq_id, stream);
-          word_mask &= (word_mask - 1);
-        }
-      }
-      new_head[stream_id] = std::min(new_head[stream_id], idx);
-    }
-  }
-
-  for (int32_t s = 0; s < ctx.n_stream; ++s) {
-    if (new_head[s] < ctx.kv_size && new_head[s] < ctx.streams[s].head) {
-      ctx.streams[s].head = new_head[s];
-    }
-  }
-
-  ctx.applied_ubatches = from_index;
-  ctx.kv_tokens = compute_kv_tokens(ctx);
-};
-
-inline constexpr auto begin_seq_remove = [](const event::seq_remove & ev, context & ctx) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
-  }
-  ctx.phase_error = EMEL_OK;
-  ctx.last_error = EMEL_OK;
-  store_seq_remove_request(ev, ctx);
-};
-
-inline constexpr auto begin_seq_copy = [](const event::seq_copy & ev, context & ctx) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
-  }
-  ctx.phase_error = EMEL_OK;
-  ctx.last_error = EMEL_OK;
-  store_seq_copy_request(ev, ctx);
-};
-
-inline constexpr auto begin_seq_keep = [](const event::seq_keep & ev, context & ctx) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
-  }
-  ctx.phase_error = EMEL_OK;
-  ctx.last_error = EMEL_OK;
-  store_seq_keep_request(ev, ctx);
-};
-
-inline constexpr auto begin_seq_add = [](const event::seq_add & ev, context & ctx) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
-  }
-  ctx.phase_error = EMEL_OK;
-  ctx.last_error = EMEL_OK;
-  store_seq_add_request(ev, ctx);
-};
-
-inline constexpr auto begin_seq_div = [](const event::seq_div & ev, context & ctx) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
-  }
-  ctx.phase_error = EMEL_OK;
-  ctx.last_error = EMEL_OK;
-  store_seq_div_request(ev, ctx);
-};
-
-inline constexpr auto begin_apply_updates = [](const event::apply_updates & ev, context & ctx) {
-  if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
-  }
-  ctx.phase_error = EMEL_OK;
-  ctx.last_error = EMEL_OK;
-  store_updates_request(ev, ctx);
-};
-
-inline constexpr auto run_validate_seq_remove = [](const event::validate_seq_remove & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-};
-
-inline constexpr auto run_validate_seq_copy = [](const event::validate_seq_copy & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-};
-
-inline constexpr auto run_validate_seq_keep = [](const event::validate_seq_keep & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-};
-
-inline constexpr auto run_validate_seq_add = [](const event::validate_seq_add & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-};
-
-inline constexpr auto run_validate_seq_div = [](const event::validate_seq_div & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-};
-
-inline constexpr auto run_validate_updates = [](const event::validate_updates & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-};
-
-inline constexpr auto reject_invalid_prepare = [](const event::validate_prepare & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto reject_invalid_apply = [](const event::validate_apply & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto reject_invalid_rollback = [](const event::validate_rollback & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto reject_invalid_prepare_slots = [](const event::prepare_slots & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto reject_invalid_apply_step = [](const event::apply_step & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto reject_invalid_rollback_step = [](const event::rollback_step & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto reject_invalid_seq_remove = [](const event::validate_seq_remove & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto reject_invalid_seq_copy = [](const event::validate_seq_copy & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto reject_invalid_seq_keep = [](const event::validate_seq_keep & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto reject_invalid_seq_add = [](const event::validate_seq_add & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto reject_invalid_seq_div = [](const event::validate_seq_div & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto reject_invalid_updates = [](const event::validate_updates & ev, context &) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-};
-
-inline constexpr auto run_seq_remove_step = [](const event::seq_remove_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-
-  const event::seq_remove * request = ev.request;
-  const int32_t seq_id = request->seq_id;
-  const int32_t pos0 = request->pos_start;
-  const int32_t pos1 = request->pos_end;
-
-  if (seq_id == -1) {
-    for (int32_t s = 0; s < ctx.n_stream; ++s) {
-      stream_state & stream = ctx.streams[s];
-      for (int32_t i = 0; i < ctx.kv_size; ++i) {
-        if (stream.pos[i] == POS_NONE) {
-          continue;
-        }
-        if (!pos_in_range(stream.pos[i], pos0, pos1)) {
-          continue;
-        }
-        set_cell_empty(stream, i);
-      }
-      for (int32_t seq = 0; seq < MAX_SEQ; ++seq) {
-        if (ctx.seq_to_stream[seq] != s) {
-          continue;
-        }
-        reset_next_pos_for_seq(ctx, seq, stream);
-      }
-    }
-  } else {
-    const int32_t stream_id = ctx.seq_to_stream[seq_id];
-    stream_state & stream = ctx.streams[stream_id];
-    for (int32_t i = 0; i < ctx.kv_size; ++i) {
-      if (stream.pos[i] == POS_NONE) {
-        continue;
-      }
-      if (!cell_has_seq(stream, i, seq_id)) {
-        continue;
-      }
-      if (!pos_in_range(stream.pos[i], pos0, pos1)) {
-        continue;
-      }
-      remove_seq_from_cell(stream, i, seq_id);
-    }
-    reset_next_pos_for_seq(ctx, seq_id, stream);
-  }
-
-  ctx.kv_tokens = compute_kv_tokens(ctx);
-};
-
-inline constexpr auto run_seq_copy_step = [](const event::seq_copy_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-
-  const event::seq_copy * request = ev.request;
-  const int32_t src_seq = request->seq_id_src;
-  const int32_t dst_seq = request->seq_id_dst;
-  if (src_seq == dst_seq) {
-    return;
-  }
-
-  const int32_t src_stream_id = ctx.seq_to_stream[src_seq];
-  const int32_t dst_stream_id = ctx.seq_to_stream[dst_seq];
-  stream_state & src_stream = ctx.streams[src_stream_id];
-  stream_state & dst_stream = ctx.streams[dst_stream_id];
-
-  const int32_t pos0 = request->pos_start;
-  const int32_t pos1 = request->pos_end;
-
-  if (src_stream_id != dst_stream_id &&
-      !is_full_copy_range(pos0, pos1, ctx.kv_size)) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
-  }
-
-  if (src_stream_id != dst_stream_id) {
-    bool found_pair = false;
-    for (int32_t i = 0; i < ctx.pending_copy_count; ++i) {
-      if (ctx.pending_copy_src[i] == src_stream_id &&
-          ctx.pending_copy_dst[i] == dst_stream_id) {
-        found_pair = true;
-        break;
-      }
-    }
-    if (!found_pair && ctx.pending_copy_count >= MAX_STREAM_COPY) {
-      *ev.error_out = EMEL_ERR_BACKEND;
-      return;
-    }
-    if (!found_pair) {
-      add_pending_copy(ctx, src_stream_id, dst_stream_id);
-    }
-    reset_stream(dst_stream);
-  }
-
-  for (int32_t i = 0; i < ctx.kv_size; ++i) {
-    if (src_stream.pos[i] == POS_NONE) {
-      continue;
-    }
-    if (!cell_has_seq(src_stream, i, src_seq)) {
-      continue;
-    }
-    if (!pos_in_range(src_stream.pos[i], pos0, pos1)) {
-      continue;
+    for (int32_t i = 0; i < ev.ctx.parent_blocks; ++i) {
+      const uint16_t block_id = ctx.seq_to_blocks[parent_index][static_cast<size_t>(i)];
+      ctx.seq_to_blocks[child_index][static_cast<size_t>(i)] = block_id;
+      ev.ctx.linked_count += static_cast<int32_t>(
+          ctx.block_refs.process_indexed<kv::detail::block_link>(static_cast<size_t>(block_id)));
     }
 
-    if (src_stream_id == dst_stream_id) {
-      add_seq_to_cell(dst_stream, i, dst_seq);
-      continue;
-    }
-
-    set_cell_pos(dst_stream, i, src_stream.pos[i]);
-    dst_stream.shift[i] = src_stream.shift[i];
-    dst_stream.ext_x[i] = src_stream.ext_x[i];
-    dst_stream.ext_y[i] = src_stream.ext_y[i];
-    if (dst_stream.shift[i] != 0) {
-      dst_stream.has_shift = true;
-    }
-    add_seq_to_cell(dst_stream, i, dst_seq);
+    const int32_t linked_all = static_cast<int32_t>(ev.ctx.linked_count == ev.ctx.parent_blocks);
+    ctx.sequence_active[child_index] = linked_all != 0;
+    ctx.sequence_length[child_index] =
+        linked_all * ctx.sequence_length[parent_index] +
+        (1 - linked_all) * ctx.sequence_length[child_index];
+    ctx.sequence_block_count[child_index] =
+        linked_all * ev.ctx.parent_blocks + (1 - linked_all) * ctx.sequence_block_count[child_index];
+    ev.ctx.accepted = linked_all != 0;
+    ev.ctx.operation_error = emel::error::cast(error::none);
   }
-
-  if (src_stream_id != dst_stream_id) {
-    dst_stream.head = src_stream.head;
-  }
-  reset_next_pos_for_seq(ctx, dst_seq, dst_stream);
-  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
-inline constexpr auto run_seq_keep_step = [](const event::seq_keep_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
+struct exec_free_sequence {
+  void operator()(const event::free_sequence_runtime & ev, context & ctx) const noexcept {
+    const size_t seq_index = static_cast<size_t>(ev.request.seq_id);
+    const int32_t was_active = static_cast<int32_t>(ctx.sequence_active[seq_index]);
+    ev.ctx.block_count = ctx.sequence_block_count[seq_index] * was_active;
+    ev.ctx.unlinked_count = 0;
 
-  const event::seq_keep * request = ev.request;
-  const int32_t seq_id = request->seq_id;
-  const int32_t stream_id = ctx.seq_to_stream[seq_id];
-  stream_state & stream = ctx.streams[stream_id];
-  for (int32_t i = 0; i < ctx.kv_size; ++i) {
-    if (stream.pos[i] == POS_NONE) {
-      continue;
+    for (int32_t i = 0; i < ev.ctx.block_count; ++i) {
+      const uint16_t block_id = ctx.seq_to_blocks[seq_index][static_cast<size_t>(i)];
+      ev.ctx.unlinked_count += static_cast<int32_t>(
+          ctx.block_refs.process_indexed<kv::detail::block_unlink>(static_cast<size_t>(block_id)));
     }
-    if (!cell_has_seq(stream, i, seq_id)) {
-      set_cell_empty(stream, i);
-      continue;
+
+    const int32_t unlink_ok = static_cast<int32_t>(ev.ctx.unlinked_count == ev.ctx.block_count);
+    const int32_t allow_recycle = was_active * unlink_ok;
+    const auto & refs = ctx.block_refs.storage().refs;
+    int32_t free_write = ctx.free_count;
+    for (int32_t i = 0; i < ev.ctx.block_count; ++i) {
+      const uint16_t block_id = ctx.seq_to_blocks[seq_index][static_cast<size_t>(i)];
+      const int32_t should_recycle =
+          allow_recycle * static_cast<int32_t>(refs[static_cast<size_t>(block_id)] == 0);
+      ctx.free_stack[static_cast<size_t>(free_write)] = block_id;
+      free_write += should_recycle;
     }
-    for (int32_t word = 0; word < SEQ_WORDS; ++word) {
-      uint64_t mask = stream.seq_mask[i][word];
-      while (mask != 0) {
-        const int32_t bit = __builtin_ctzll(mask);
-        const int32_t other_seq = word * 64 + bit;
-        mask &= (mask - 1);
-        if (other_seq == seq_id) {
-          continue;
-        }
-        remove_seq_from_cell(stream, i, other_seq);
-      }
-    }
+
+    ctx.free_count = allow_recycle * free_write + (1 - allow_recycle) * ctx.free_count;
+    const int32_t keep_sequence = 1 - allow_recycle;
+    ctx.sequence_active[seq_index] = (keep_sequence != 0) && ctx.sequence_active[seq_index];
+    ctx.sequence_length[seq_index] *= keep_sequence;
+    ctx.sequence_block_count[seq_index] *= keep_sequence;
+
+    const int32_t accepted = (1 - was_active) + allow_recycle;
+    ev.ctx.accepted = accepted != 0;
+    ev.ctx.operation_error = emel::error::cast(error::none);
   }
-
-  reset_next_pos_for_seq(ctx, seq_id, stream);
-  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
-inline constexpr auto run_seq_add_step = [](const event::seq_add_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
+struct exec_rollback_slots {
+  void operator()(const event::rollback_slots_runtime & ev, context & ctx) const noexcept {
+    const size_t seq_index = static_cast<size_t>(ev.request.seq_id);
+    ev.ctx.current_length = ctx.sequence_length[seq_index];
+    ev.ctx.new_length = std::max(0, ev.ctx.current_length - ev.request.token_count);
+    ev.ctx.existing_block_count = ctx.sequence_block_count[seq_index];
+    ev.ctx.new_blocks = detail::blocks_for_length(ctx.block_tokens, ev.ctx.new_length);
+    ev.ctx.remove_count = ev.ctx.existing_block_count - ev.ctx.new_blocks;
+    ev.ctx.unlinked_count = 0;
 
-  const event::seq_add * request = ev.request;
-  const int32_t seq_id = request->seq_id;
-  const int32_t stream_id = ctx.seq_to_stream[seq_id];
-  stream_state & stream = ctx.streams[stream_id];
-  const int32_t pos0 = request->pos_start;
-  const int32_t pos1 = request->pos_end;
-  const int32_t delta = request->shift;
-
-  if (delta == 0) {
-    return;
-  }
-  if (pos0 == pos1) {
-    return;
-  }
-
-  for (int32_t i = 0; i < ctx.kv_size; ++i) {
-    if (stream.pos[i] == POS_NONE) {
-      continue;
+    const int32_t plan_valid =
+        static_cast<int32_t>(ev.ctx.current_length >= 0 && ev.ctx.new_blocks <= ev.ctx.existing_block_count);
+    const int32_t effective_remove_count = plan_valid * ev.ctx.remove_count;
+    for (int32_t i = 0; i < effective_remove_count; ++i) {
+      const int32_t block_index = ev.ctx.existing_block_count - 1 - i;
+      const uint16_t block_id = ctx.seq_to_blocks[seq_index][static_cast<size_t>(block_index)];
+      ev.ctx.unlinked_count += static_cast<int32_t>(
+          ctx.block_refs.process_indexed<kv::detail::block_unlink>(static_cast<size_t>(block_id)));
     }
-    if (!cell_has_seq(stream, i, seq_id)) {
-      continue;
-    }
-    if (!pos_in_range(stream.pos[i], pos0, pos1)) {
-      continue;
-    }
-    pos_add_cell(stream, i, delta);
-  }
 
-  reset_next_pos_for_seq(ctx, seq_id, stream);
-  ctx.kv_tokens = compute_kv_tokens(ctx);
+    const int32_t unlink_ok = static_cast<int32_t>(ev.ctx.unlinked_count == effective_remove_count);
+    const int32_t apply_update = plan_valid * unlink_ok;
+    const auto & refs = ctx.block_refs.storage().refs;
+    int32_t free_write = ctx.free_count;
+    for (int32_t i = 0; i < effective_remove_count; ++i) {
+      const int32_t block_index = ev.ctx.existing_block_count - 1 - i;
+      const uint16_t block_id = ctx.seq_to_blocks[seq_index][static_cast<size_t>(block_index)];
+      const int32_t should_recycle =
+          apply_update * static_cast<int32_t>(refs[static_cast<size_t>(block_id)] == 0);
+      ctx.free_stack[static_cast<size_t>(free_write)] = block_id;
+      free_write += should_recycle;
+    }
+
+    ctx.free_count = apply_update * free_write + (1 - apply_update) * ctx.free_count;
+    ctx.sequence_block_count[seq_index] =
+        apply_update * ev.ctx.new_blocks + (1 - apply_update) * ctx.sequence_block_count[seq_index];
+    ctx.sequence_length[seq_index] =
+        apply_update * ev.ctx.new_length + (1 - apply_update) * ctx.sequence_length[seq_index];
+    ev.ctx.block_count = apply_update * effective_remove_count;
+    ev.ctx.accepted = apply_update != 0;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+  }
 };
 
-inline constexpr auto run_seq_div_step = [](const event::seq_div_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-
-  const event::seq_div * request = ev.request;
-  const int32_t seq_id = request->seq_id;
-  const int32_t stream_id = ctx.seq_to_stream[seq_id];
-  stream_state & stream = ctx.streams[stream_id];
-  const int32_t pos0 = request->pos_start;
-  const int32_t pos1 = request->pos_end;
-  const int32_t divisor = request->divisor;
-
-  if (divisor == 1) {
-    return;
+struct exec_capture_view {
+  void operator()(const event::capture_view_runtime & ev, context & ctx) const noexcept {
+    detail::fill_snapshot(ctx, ev.snapshot_out);
+    ev.ctx.accepted = true;
+    ev.ctx.operation_error = emel::error::cast(error::none);
   }
-  if (pos0 == pos1) {
-    return;
-  }
-
-  for (int32_t i = 0; i < ctx.kv_size; ++i) {
-    if (stream.pos[i] == POS_NONE) {
-      continue;
-    }
-    if (!cell_has_seq(stream, i, seq_id)) {
-      continue;
-    }
-    if (!pos_in_range(stream.pos[i], pos0, pos1)) {
-      continue;
-    }
-    pos_div_cell(stream, i, divisor);
-  }
-
-  reset_next_pos_for_seq(ctx, seq_id, stream);
-  ctx.kv_tokens = compute_kv_tokens(ctx);
 };
 
-inline constexpr auto run_apply_updates = [](const event::apply_updates_step & ev, context & ctx) {
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-
-  const event::apply_updates * request = ev.request;
-  if (request == nullptr) {
-    *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-    return;
+struct mark_invalid_request {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = kv::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
+    runtime_ev.error_code_out = static_cast<int32_t>(runtime_ev.ctx.err);
   }
+};
 
-  if (ctx.pending_copy_count > 0) {
-    if (request->stream_copy == nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-    for (int32_t i = 0; i < ctx.pending_copy_count; ++i) {
-      int32_t err = EMEL_OK;
-      const bool ok = request->stream_copy(
-          ctx.pending_copy_src[i],
-          ctx.pending_copy_dst[i],
-          request->user_data,
-          &err);
-      if (!ok || err != EMEL_OK) {
-        *ev.error_out = err == EMEL_OK ? EMEL_ERR_BACKEND : err;
-        return;
-      }
-    }
-    ctx.pending_copy_count = 0;
+struct mark_backend_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = kv::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::backend_error);
+    runtime_ev.error_code_out = static_cast<int32_t>(runtime_ev.ctx.err);
   }
+};
 
-  bool needs_shift = false;
-  for (int32_t s = 0; s < ctx.n_stream; ++s) {
-    if (ctx.streams[s].has_shift) {
-      needs_shift = true;
-      break;
-    }
+struct mark_out_of_memory {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = kv::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::out_of_memory);
+    runtime_ev.error_code_out = static_cast<int32_t>(runtime_ev.ctx.err);
   }
-  if (needs_shift) {
-    if (request->apply_shift == nullptr) {
-      *ev.error_out = EMEL_ERR_INVALID_ARGUMENT;
-      return;
-    }
-    for (int32_t s = 0; s < ctx.n_stream; ++s) {
-      stream_state & stream = ctx.streams[s];
-      if (!stream.has_shift) {
-        continue;
-      }
-      int32_t err = EMEL_OK;
-      const bool ok = request->apply_shift(
-          s,
-          stream.shift.data(),
-          ctx.kv_size,
-          request->user_data,
-          &err);
-      if (!ok || err != EMEL_OK) {
-        *ev.error_out = err == EMEL_OK ? EMEL_ERR_BACKEND : err;
-        return;
-      }
-      stream.has_shift = false;
-      stream.shift.fill(0);
+};
+
+struct mark_error_from_operation {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = kv::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = kv::detail::cast_api_error(runtime_ev.ctx.operation_error);
+    runtime_ev.error_code_out = static_cast<int32_t>(runtime_ev.ctx.err);
+  }
+};
+
+struct publish_done {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = kv::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::none);
+    runtime_ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
+    if constexpr (requires { runtime_ev.block_count_out; runtime_ev.ctx.block_count; }) {
+      runtime_ev.block_count_out = runtime_ev.ctx.block_count;
     }
   }
 };
 
-inline constexpr auto run_publish = [](const event::publish & ev, context & ctx) {
-  (void)ctx;
-  if (ev.error_out == nullptr) return;
-  *ev.error_out = EMEL_OK;
-};
-
-struct set_invalid_argument {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-    ctx.last_error = EMEL_ERR_INVALID_ARGUMENT;
-  }
-};
-
-struct run_prepare_slots_phase {
-  void operator()(context & ctx) const noexcept {
-    int32_t err = EMEL_OK;
-    event::prepare_slots ev{.error_out = &err};
-    run_prepare_slots(ev, ctx);
-    ctx.phase_error = err;
-  }
-};
-
-struct run_apply_step_phase {
-  void operator()(context & ctx) const noexcept {
-    int32_t err = EMEL_OK;
-    event::apply_step ev{.request = &ctx.apply_request, .error_out = &err};
-    run_apply_step(ev, ctx);
-    ctx.phase_error = err;
-  }
-};
-
-struct run_rollback_step_phase {
-  void operator()(context & ctx) const noexcept {
-    int32_t err = EMEL_OK;
-    event::rollback_step ev{.request = &ctx.rollback_request, .error_out = &err};
-    run_rollback_step(ev, ctx);
-    ctx.phase_error = err;
-  }
-};
-
-struct run_seq_remove_phase {
-  void operator()(context & ctx) const noexcept {
-    int32_t err = EMEL_OK;
-    event::seq_remove_step ev{.request = &ctx.seq_remove_request, .error_out = &err};
-    run_seq_remove_step(ev, ctx);
-    ctx.phase_error = err;
-  }
-};
-
-struct run_seq_copy_phase {
-  void operator()(context & ctx) const noexcept {
-    int32_t err = EMEL_OK;
-    event::seq_copy_step ev{.request = &ctx.seq_copy_request, .error_out = &err};
-    run_seq_copy_step(ev, ctx);
-    ctx.phase_error = err;
-  }
-};
-
-struct run_seq_keep_phase {
-  void operator()(context & ctx) const noexcept {
-    int32_t err = EMEL_OK;
-    event::seq_keep_step ev{.request = &ctx.seq_keep_request, .error_out = &err};
-    run_seq_keep_step(ev, ctx);
-    ctx.phase_error = err;
-  }
-};
-
-struct run_seq_add_phase {
-  void operator()(context & ctx) const noexcept {
-    int32_t err = EMEL_OK;
-    event::seq_add_step ev{.request = &ctx.seq_add_request, .error_out = &err};
-    run_seq_add_step(ev, ctx);
-    ctx.phase_error = err;
-  }
-};
-
-struct run_seq_div_phase {
-  void operator()(context & ctx) const noexcept {
-    int32_t err = EMEL_OK;
-    event::seq_div_step ev{.request = &ctx.seq_div_request, .error_out = &err};
-    run_seq_div_step(ev, ctx);
-    ctx.phase_error = err;
-  }
-};
-
-struct run_updates_phase {
-  void operator()(context & ctx) const noexcept {
-    int32_t err = EMEL_OK;
-    event::apply_updates_step ev{.request = &ctx.updates_request, .error_out = &err};
-    run_apply_updates(ev, ctx);
-    ctx.phase_error = err;
-  }
-};
-
-struct run_publish_phase {
-  void operator()(context & ctx) const noexcept {
-    int32_t err = EMEL_OK;
-    event::publish ev{.error_out = &err};
-    run_publish(ev, ctx);
-    ctx.phase_error = err;
-  }
-};
-
-struct mark_done {
-  void operator()(context & ctx) const noexcept {
-    ctx.last_error = EMEL_OK;
-  }
-};
-
-struct ensure_last_error {
-  void operator()(context & ctx) const noexcept {
-    if (ctx.last_error != EMEL_OK) {
-      return;
+struct publish_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = kv::detail::unwrap_runtime_event(ev);
+    runtime_ev.error_code_out = static_cast<int32_t>(runtime_ev.ctx.err);
+    if constexpr (requires { runtime_ev.block_count_out; }) {
+      runtime_ev.block_count_out = 0;
     }
-    ctx.last_error = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
   }
 };
-
-struct clear_request {
-  void operator()(context & ctx) const noexcept {
-    clear_requests(ctx);
-  }
-};
-
-inline constexpr auto on_kv_done = [](const events::kv_done &, context &) {};
-
-inline constexpr auto on_kv_error = [](const events::kv_error &, context &) {};
 
 struct on_unexpected {
-  template <class event>
-  void operator()(const event & ev, context & ctx) const noexcept {
-    if constexpr (requires { ev.error_out; }) {
-      if (ev.error_out != nullptr) {
-        *ev.error_out = EMEL_ERR_BACKEND;
+  template <class event_type>
+  void operator()(const event_type & ev, context &) const noexcept {
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = emel::error::cast(error::internal_error);
+      ev.error_code_out = static_cast<int32_t>(ev.ctx.err);
+      if constexpr (requires { ev.block_count_out; }) {
+        ev.block_count_out = 0;
       }
     }
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    ctx.last_error = EMEL_ERR_BACKEND;
   }
 };
 
-inline constexpr set_invalid_argument set_invalid_argument{};
-inline constexpr run_prepare_slots_phase run_prepare_slots_phase{};
-inline constexpr run_apply_step_phase run_apply_step_phase{};
-inline constexpr run_rollback_step_phase run_rollback_step_phase{};
-inline constexpr run_seq_remove_phase run_seq_remove_phase{};
-inline constexpr run_seq_copy_phase run_seq_copy_phase{};
-inline constexpr run_seq_keep_phase run_seq_keep_phase{};
-inline constexpr run_seq_add_phase run_seq_add_phase{};
-inline constexpr run_seq_div_phase run_seq_div_phase{};
-inline constexpr run_updates_phase run_updates_phase{};
-inline constexpr run_publish_phase run_publish_phase{};
-inline constexpr mark_done mark_done{};
-inline constexpr ensure_last_error ensure_last_error{};
-inline constexpr clear_request clear_request{};
+inline constexpr begin_reserve begin_reserve{};
+inline constexpr begin_allocate_sequence begin_allocate_sequence{};
+inline constexpr begin_allocate_slots begin_allocate_slots{};
+inline constexpr begin_branch_sequence begin_branch_sequence{};
+inline constexpr begin_free_sequence begin_free_sequence{};
+inline constexpr begin_rollback_slots begin_rollback_slots{};
+inline constexpr begin_capture_view begin_capture_view{};
+inline constexpr exec_reserve exec_reserve{};
+inline constexpr exec_allocate_sequence exec_allocate_sequence{};
+inline constexpr exec_allocate_slots exec_allocate_slots{};
+inline constexpr exec_branch_sequence exec_branch_sequence{};
+inline constexpr exec_free_sequence exec_free_sequence{};
+inline constexpr exec_rollback_slots exec_rollback_slots{};
+inline constexpr exec_capture_view exec_capture_view{};
+inline constexpr mark_invalid_request mark_invalid_request{};
+inline constexpr mark_backend_error mark_backend_error{};
+inline constexpr mark_out_of_memory mark_out_of_memory{};
+inline constexpr mark_error_from_operation mark_error_from_operation{};
+inline constexpr publish_done publish_done{};
+inline constexpr publish_error publish_error{};
+inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::memory::kv::action

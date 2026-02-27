@@ -1,0 +1,13 @@
+stateDiagram-v2
+  direction TB
+  [*] --> deciding
+  deciding --> assembled : completion [phase_done_] / mark_done_
+  deciding --> assemble_failed : completion [phase_prereq_failed_] / mark_failed_prereq_
+  deciding --> assemble_failed : completion [phase_capacity_exceeded_] / mark_failed_capacity_
+  deciding --> assemble_failed : completion [phase_invalid_request_] / mark_failed_invalid_request_
+  assembled --> terminate : [always] / none
+  assemble_failed --> terminate : [always] / none
+  deciding --> unexpected_event : _ [always] / on_unexpected_
+  assembled --> unexpected_event : _ [always] / on_unexpected_
+  assemble_failed --> unexpected_event : _ [always] / on_unexpected_
+  unexpected_event --> unexpected_event : _ [always] / on_unexpected_

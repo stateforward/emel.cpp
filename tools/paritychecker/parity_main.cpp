@@ -10,8 +10,10 @@ using emel::paritychecker::parity_options;
 
 void print_usage(const char * exe) {
   std::fprintf(stderr,
-               "usage: %s --model <path> (--text <text> | --text-file <path>) "
-               "[--add-special] [--parse-special] [--dump]\n",
+               "usage: %s [--gbnf] [--model <path>] (--text <text> | --text-file <path>) "
+               "[--add-special] [--parse-special] [--dump]\n"
+               "  default mode compares tokenizer parity and requires --model\n"
+               "  --gbnf mode compares GBNF parser parity and ignores --model\n",
                exe);
 }
 
@@ -38,6 +40,10 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
   bool have_text = false;
   for (int i = 1; i < argc; ++i) {
     std::string_view arg(argv[i]);
+    if (arg == "--gbnf") {
+      out.mode = emel::paritychecker::parity_mode::gbnf_parser;
+      continue;
+    }
     if (arg == "--model") {
       if (i + 1 >= argc) {
         return false;
@@ -72,7 +78,7 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
       continue;
     }
     if (arg == "--dump") {
-      out.dump_tokens = true;
+      out.dump = true;
       continue;
     }
     if (arg == "--help" || arg == "-h") {
@@ -80,7 +86,15 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
     }
     return false;
   }
-  if (out.model_path.empty() || !have_text) {
+  if (!have_text) {
+    return false;
+  }
+  if (out.mode == emel::paritychecker::parity_mode::tokenizer &&
+      out.model_path.empty()) {
+    return false;
+  }
+  if (out.mode == emel::paritychecker::parity_mode::gbnf_parser &&
+      (out.add_special || out.parse_special)) {
     return false;
   }
   return true;

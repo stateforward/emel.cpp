@@ -1,48 +1,16 @@
 stateDiagram-v2
   direction TB
-  [*] --> initialized
-  initialized --> selecting : load_weights [always] / begin_load_
-  selecting --> strategy_decision : [always] / select_strategy_
-  strategy_decision --> errored : [phase_failed_] / none
-  strategy_decision --> initializing : [phase_ok_and_use_mmap_and_can_init_mappings_] / none
-  strategy_decision --> loading_mmap : [phase_ok_and_use_mmap_and_skip_init_mappings_] / none
-  strategy_decision --> errored : [phase_ok_and_use_mmap_and_cannot_init_mappings_] / set_invalid_argument_
-  strategy_decision --> loading_streamed : [phase_ok_and_use_stream_and_can_load_streamed_] / none
-  strategy_decision --> errored : [phase_ok_and_use_stream_and_cannot_load_streamed_] / set_invalid_argument_
-  initializing --> init_decision : [always] / run_init_mappings_
-  init_decision --> errored : [phase_failed_] / none
-  init_decision --> loading_mmap : [phase_ok_and_can_load_mmap_] / none
-  init_decision --> errored : [phase_ok_and_cannot_load_mmap_] / set_invalid_argument_
-  loading_mmap --> load_decision : [always] / run_load_mmap_
-  loading_streamed --> load_decision : [always] / run_load_streamed_
-  load_decision --> errored : [phase_failed_] / none
-  load_decision --> validating : [phase_ok_and_can_validate_] / none
-  load_decision --> cleanup_decision : [phase_ok_and_skip_validate_] / none
-  load_decision --> errored : [phase_ok_and_cannot_validate_] / set_invalid_argument_
-  validating --> validation_decision : [always] / run_validate_
-  validation_decision --> errored : [phase_failed_] / none
-  validation_decision --> cleanup_decision : [phase_ok_] / none
-  cleanup_decision --> errored : [phase_failed_] / none
-  cleanup_decision --> cleaning_up : [phase_ok_and_can_clean_up_] / none
-  cleanup_decision --> done : [phase_ok_and_skip_clean_up_] / none
-  cleanup_decision --> errored : [phase_ok_and_cannot_clean_up_] / set_invalid_argument_
-  cleaning_up --> cleanup_result : [always] / run_clean_up_
-  cleanup_result --> errored : [phase_failed_] / none
-  cleanup_result --> done : [phase_ok_] / none
-  done --> initialized : [always] / publish_done_
-  errored --> initialized : [always] / publish_error_
-  initialized --> errored : _ [always] / on_unexpected_
-  selecting --> errored : _ [always] / on_unexpected_
-  strategy_decision --> errored : _ [always] / on_unexpected_
-  initializing --> errored : _ [always] / on_unexpected_
-  init_decision --> errored : _ [always] / on_unexpected_
-  loading_mmap --> errored : _ [always] / on_unexpected_
-  loading_streamed --> errored : _ [always] / on_unexpected_
-  load_decision --> errored : _ [always] / on_unexpected_
-  validating --> errored : _ [always] / on_unexpected_
-  validation_decision --> errored : _ [always] / on_unexpected_
-  cleanup_decision --> errored : _ [always] / on_unexpected_
-  cleaning_up --> errored : _ [always] / on_unexpected_
-  cleanup_result --> errored : _ [always] / on_unexpected_
-  done --> errored : _ [always] / on_unexpected_
+  [*] --> unbound
+  unbound --> bound : bind_storage [valid_bind_] / run_bind_storage_
+  unbound --> errored : bind_storage [invalid_bind_] / set_invalid_argument_
+  bound --> awaiting_effects : plan_load [valid_plan_] / run_plan_load_
+  bound --> errored : plan_load [invalid_plan_] / set_invalid_argument_
+  awaiting_effects --> ready : apply_effect_results [valid_apply_] / run_apply_effects_
+  awaiting_effects --> errored : apply_effect_results [invalid_apply_] / set_invalid_argument_
+  ready --> bound : bind_storage [valid_bind_] / run_bind_storage_
+  errored --> bound : bind_storage [valid_bind_] / run_bind_storage_
+  unbound --> errored : _ [always] / on_unexpected_
+  bound --> errored : _ [always] / on_unexpected_
+  awaiting_effects --> errored : _ [always] / on_unexpected_
+  ready --> errored : _ [always] / on_unexpected_
   errored --> errored : _ [always] / on_unexpected_

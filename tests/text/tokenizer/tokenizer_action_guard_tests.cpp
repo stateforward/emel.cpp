@@ -23,44 +23,24 @@ emel::model::data::vocab & make_vocab_for_specials() {
 
 }  // namespace
 
-TEST_CASE("tokenizer_detail_model_kind_mappings") {
-  using model = emel::model::data::tokenizer_model;
-  using encoder_kind = emel::text::tokenizer::action::encoder_kind;
-  using pre_kind = emel::text::tokenizer::action::preprocessor_kind;
+TEST_CASE("tokenizer_guard_can_bind_requires_explicit_valid_variants") {
+  auto & vocab = make_vocab_for_specials();
+  emel::text::tokenizer::event::bind bind_ev = {};
 
-  CHECK(emel::text::tokenizer::detail::encoder_kind_from_model(model::SPM) ==
-        encoder_kind::spm);
-  CHECK(emel::text::tokenizer::detail::encoder_kind_from_model(model::BPE) ==
-        encoder_kind::bpe);
-  CHECK(emel::text::tokenizer::detail::encoder_kind_from_model(model::WPM) ==
-        encoder_kind::wpm);
-  CHECK(emel::text::tokenizer::detail::encoder_kind_from_model(model::UGM) ==
-        encoder_kind::ugm);
-  CHECK(emel::text::tokenizer::detail::encoder_kind_from_model(model::RWKV) ==
-        encoder_kind::rwkv);
-  CHECK(emel::text::tokenizer::detail::encoder_kind_from_model(model::PLAMO2) ==
-        encoder_kind::plamo2);
-  CHECK(emel::text::tokenizer::detail::encoder_kind_from_model(model::NONE) ==
-        encoder_kind::fallback);
-  CHECK(emel::text::tokenizer::detail::encoder_kind_from_model(model::UNKNOWN) ==
-        encoder_kind::fallback);
+  CHECK_FALSE(emel::text::tokenizer::guard::can_bind{}(bind_ev));
 
-  CHECK(emel::text::tokenizer::detail::preprocessor_kind_from_model(model::SPM) ==
-        pre_kind::spm);
-  CHECK(emel::text::tokenizer::detail::preprocessor_kind_from_model(model::BPE) ==
-        pre_kind::bpe);
-  CHECK(emel::text::tokenizer::detail::preprocessor_kind_from_model(model::WPM) ==
-        pre_kind::wpm);
-  CHECK(emel::text::tokenizer::detail::preprocessor_kind_from_model(model::UGM) ==
-        pre_kind::ugm);
-  CHECK(emel::text::tokenizer::detail::preprocessor_kind_from_model(model::RWKV) ==
-        pre_kind::rwkv);
-  CHECK(emel::text::tokenizer::detail::preprocessor_kind_from_model(model::PLAMO2) ==
-        pre_kind::plamo2);
-  CHECK(emel::text::tokenizer::detail::preprocessor_kind_from_model(model::NONE) ==
-        pre_kind::fallback);
-  CHECK(emel::text::tokenizer::detail::preprocessor_kind_from_model(model::UNKNOWN) ==
-        pre_kind::fallback);
+  bind_ev.vocab = &vocab;
+  bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::spm;
+  bind_ev.encoder_variant = emel::text::encoders::encoder_kind::spm;
+  CHECK(emel::text::tokenizer::guard::can_bind{}(bind_ev));
+
+  bind_ev.preprocessor_variant =
+      static_cast<emel::text::tokenizer::preprocessor::preprocessor_kind>(255);
+  CHECK_FALSE(emel::text::tokenizer::guard::can_bind{}(bind_ev));
+
+  bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::spm;
+  bind_ev.encoder_variant = static_cast<emel::text::encoders::encoder_kind>(255);
+  CHECK_FALSE(emel::text::tokenizer::guard::can_bind{}(bind_ev));
 }
 
 TEST_CASE("tokenizer_guard_prefix_suffix_cases") {
@@ -150,6 +130,8 @@ TEST_CASE("tokenizer_actions_error_paths") {
 
   emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = nullptr;
+  bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
+  bind_ev.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   emel::text::tokenizer::action::reject_bind(bind_ev, ctx);
   CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
 

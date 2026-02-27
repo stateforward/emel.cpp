@@ -25,6 +25,30 @@ struct can_bind {
     if (ev.vocab == nullptr) {
       return false;
     }
+    switch (ev.preprocessor_variant) {
+      case action::preprocessor_kind::spm:
+      case action::preprocessor_kind::bpe:
+      case action::preprocessor_kind::wpm:
+      case action::preprocessor_kind::ugm:
+      case action::preprocessor_kind::rwkv:
+      case action::preprocessor_kind::plamo2:
+      case action::preprocessor_kind::fallback:
+        break;
+      default:
+        return false;
+    }
+    switch (ev.encoder_variant) {
+      case action::encoder_kind::spm:
+      case action::encoder_kind::bpe:
+      case action::encoder_kind::wpm:
+      case action::encoder_kind::ugm:
+      case action::encoder_kind::rwkv:
+      case action::encoder_kind::plamo2:
+      case action::encoder_kind::fallback:
+        break;
+      default:
+        return false;
+    }
     return true;
   }
 };

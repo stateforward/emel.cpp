@@ -55,30 +55,4 @@ struct no_specials {
   }
 };
 
-struct is_bpe {
-  bool operator()(const action::context & ctx) const noexcept {
-    return ctx.vocab != nullptr &&
-           ctx.vocab->tokenizer_model_id ==
-               emel::model::data::tokenizer_model::BPE;
-  }
-};
-
-struct not_bpe {
-  bool operator()(const action::context & ctx) const noexcept {
-    return !is_bpe{}(ctx);
-  }
-};
-
-struct bpe_no_specials {
-  bool operator()(const action::context & ctx) const noexcept {
-    return is_bpe{}(ctx) && no_specials{}(ctx);
-  }
-};
-
-struct bpe_with_specials {
-  bool operator()(const action::context & ctx) const noexcept {
-    return is_bpe{}(ctx) && has_specials{}(ctx);
-  }
-};
-
 }  // namespace emel::text::tokenizer::preprocessor::guard
