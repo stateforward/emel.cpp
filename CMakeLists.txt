@@ -78,6 +78,7 @@ if(EMEL_ENABLE_TESTS)
     tests/parser/gguf/lifecycle_tests.cpp
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
+    tests/gbnf/sampler_tests.cpp
     tests/generator/lifecycle_tests.cpp
     tests/text/jinja/parser_tests.cpp
     tests/text/jinja/lexer_tests.cpp

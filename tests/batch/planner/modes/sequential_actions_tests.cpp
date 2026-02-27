@@ -28,10 +28,20 @@ inline emel::callback<void(const emel::batch::planner::events::plan_error &)> ma
       &error_capture::on_error>(capture);
 }
 
+inline emel::batch::planner::event::request_runtime make_runtime(
+    const emel::batch::planner::event::request & request,
+    emel::batch::planner::event::request_ctx & request_ctx) {
+  return emel::batch::planner::event::request_runtime{
+    .request = request,
+    .ctx = request_ctx,
+  };
+}
+
 }  // namespace
 
 TEST_CASE("batch_planner_modes_sequential_create_plan_with_masks") {
-  emel::batch::planner::action::context ctx{};
+  emel::batch::planner::action::context planner_ctx{};
+  emel::batch::planner::event::request_ctx request_ctx{};
   std::array<int32_t, 4> tokens = {{1, 2, 3, 4}};
   std::array<uint64_t, 4> masks = {{3U, 1U, 2U, 1U}};
   done_capture done{};
@@ -45,16 +55,18 @@ TEST_CASE("batch_planner_modes_sequential_create_plan_with_masks") {
     .on_done = make_done(&done),
     .on_error = make_error(&error),
   };
-  ctx.effective_step_size = 3;
+  request_ctx.effective_step_size = 3;
 
-  emel::batch::planner::modes::sequential::action::create_plan(request, ctx);
-  CHECK(ctx.step_count == 2);
-  CHECK(ctx.step_sizes[0] == 3);
-  CHECK(ctx.step_sizes[1] == 1);
+  emel::batch::planner::modes::sequential::action::create_plan(
+      make_runtime(request, request_ctx), planner_ctx);
+  CHECK(request_ctx.step_count == 2);
+  CHECK(request_ctx.step_sizes[0] == 3);
+  CHECK(request_ctx.step_sizes[1] == 1);
 }
 
 TEST_CASE("batch_planner_modes_sequential_create_plan_without_masks_failure") {
-  emel::batch::planner::action::context ctx{};
+  emel::batch::planner::action::context planner_ctx{};
+  emel::batch::planner::event::request_ctx request_ctx{};
   std::array<int32_t, 2> tokens = {{1, 2}};
   done_capture done{};
   error_capture error{};
@@ -67,9 +79,11 @@ TEST_CASE("batch_planner_modes_sequential_create_plan_without_masks_failure") {
     .on_done = make_done(&done),
     .on_error = make_error(&error),
   };
-  ctx.effective_step_size = 0;
+  request_ctx.effective_step_size = 0;
 
-  emel::batch::planner::modes::sequential::action::create_plan(request, ctx);
-  CHECK(ctx.step_count == 0);
-  CHECK(ctx.total_outputs == 0);
+  emel::batch::planner::modes::sequential::action::create_plan(
+      make_runtime(request, request_ctx), planner_ctx);
+  CHECK(request_ctx.step_count == 0);
+  CHECK(request_ctx.total_outputs == 0);
+  CHECK(request_ctx.err == emel::error::cast(emel::batch::planner::error::invalid_step_size));
 }

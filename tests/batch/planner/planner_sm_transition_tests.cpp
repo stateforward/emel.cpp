@@ -74,6 +74,8 @@ TEST_CASE("batch_planner_sm_validation_error_path") {
   });
 
   CHECK(capture.error_called);
-  CHECK(capture.err == emel::error::cast(emel::batch::planner::error::invalid_request));
+  CHECK(capture.err == emel::error::set(
+      emel::error::cast(emel::batch::planner::error::invalid_request),
+      emel::batch::planner::error::invalid_token_data));
   CHECK(machine.is(boost::sml::state<emel::batch::planner::invalid_request>));
 }

@@ -253,10 +253,10 @@ struct model {
   }
 };
 
-struct sm : public emel::sm<model> {
-  using base_type = emel::sm<model>;
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
 
-  sm() : base_type(context_) {}
+  sm() : base_type() {}
 
   bool process_event(const event::bind & ev) {
     namespace sml = boost::sml;
@@ -264,7 +264,7 @@ struct sm : public emel::sm<model> {
     const bool accepted = base_type::process_event(ev);
     const bool ok = this->is(sml::state<idle>);
     const int32_t err = ok ? EMEL_OK
-                           : (context_.last_error != EMEL_OK ? context_.last_error
+                           : (this->context_.last_error != EMEL_OK ? this->context_.last_error
                                                              : EMEL_ERR_BACKEND);
 
     if (ev.error_out != nullptr) {
@@ -280,7 +280,7 @@ struct sm : public emel::sm<model> {
       }
     }
 
-    action::clear_request(context_);
+    action::clear_request(this->context_);
     return accepted && ok;
   }
 
@@ -290,14 +290,14 @@ struct sm : public emel::sm<model> {
     const bool accepted = base_type::process_event(ev);
     const bool ok = this->is(sml::state<done>);
     const int32_t err = ok ? EMEL_OK
-                           : (context_.last_error != EMEL_OK ? context_.last_error
+                           : (this->context_.last_error != EMEL_OK ? this->context_.last_error
                                                              : EMEL_ERR_BACKEND);
 
     if (ev.output_length_out != nullptr) {
-      *ev.output_length_out = context_.output_length;
+      *ev.output_length_out = this->context_.output_length;
     }
     if (ev.status_out != nullptr) {
-      *ev.status_out = context_.status;
+      *ev.status_out = this->context_.status;
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
@@ -306,7 +306,7 @@ struct sm : public emel::sm<model> {
       if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
         ev.dispatch_done(
             ev.owner_sm,
-            events::rendering_done{&ev, context_.output_length, context_.status});
+            events::rendering_done{&ev, this->context_.output_length, this->context_.status});
       }
     } else {
       if (ev.dispatch_error != nullptr && ev.owner_sm != nullptr) {
@@ -314,7 +314,7 @@ struct sm : public emel::sm<model> {
       }
     }
 
-    action::clear_request(context_);
+    action::clear_request(this->context_);
     return accepted && ok;
   }
 
@@ -324,14 +324,14 @@ struct sm : public emel::sm<model> {
     const bool accepted = base_type::process_event(ev);
     const bool ok = this->is(sml::state<done>);
     const int32_t err = ok ? EMEL_OK
-                           : (context_.last_error != EMEL_OK ? context_.last_error
+                           : (this->context_.last_error != EMEL_OK ? this->context_.last_error
                                                              : EMEL_ERR_BACKEND);
 
     if (ev.output_length_out != nullptr) {
-      *ev.output_length_out = context_.output_length;
+      *ev.output_length_out = this->context_.output_length;
     }
     if (ev.status_out != nullptr) {
-      *ev.status_out = context_.status;
+      *ev.status_out = this->context_.status;
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
@@ -340,7 +340,7 @@ struct sm : public emel::sm<model> {
       if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
         ev.dispatch_done(
             ev.owner_sm,
-            events::flush_done{&ev, context_.output_length, context_.status});
+            events::flush_done{&ev, this->context_.output_length, this->context_.status});
       }
     } else {
       if (ev.dispatch_error != nullptr && ev.owner_sm != nullptr) {
@@ -348,17 +348,16 @@ struct sm : public emel::sm<model> {
       }
     }
 
-    action::clear_request(context_);
+    action::clear_request(this->context_);
     return accepted && ok;
   }
 
   using base_type::process_event;
   using base_type::visit_current_states;
 
-  int32_t last_error() const noexcept { return context_.last_error; }
+  int32_t last_error() const noexcept { return this->context_.last_error; }
 
  private:
-  action::context context_{};
 };
 
 }  // namespace emel::text::renderer

@@ -6,107 +6,69 @@
 
 namespace emel::gbnf::sampler::guard {
 
-struct valid_apply {
-  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return static_cast<bool>(ev.request.on_done) &&
-           static_cast<bool>(ev.request.on_error) &&
-           ev.request.start_rule_id < ev.request.grammar.rule_count;
+struct valid_sample_request {
+  bool operator()(const event::sample_runtime & ev, const action::context & ctx) const noexcept {
+    const auto & grammar = ctx.grammar.get();
+    return ev.request.candidate_count > 0 &&
+           grammar.rule_count > 0u &&
+           ctx.start_rule_id < grammar.rule_count;
   }
 };
 
-struct invalid_apply {
-  bool operator()(const event::apply_runtime & ev, const action::context & ctx) const noexcept {
-    return !valid_apply{}(ev, ctx);
+struct invalid_sample_request {
+  bool operator()(const event::sample_runtime & ev, const action::context & ctx) const noexcept {
+    return !valid_sample_request{}(ev, ctx);
   }
 };
 
-struct valid_accept {
-  bool operator()(const event::accept_runtime & ev, const action::context &) const noexcept {
-    return static_cast<bool>(ev.request.on_done) &&
-           static_cast<bool>(ev.request.on_error) &&
-           ev.request.grammar.rule_count != 0u;
+struct has_more_candidates {
+  bool operator()(const event::sample_runtime & ev) const noexcept {
+    return ev.ctx.read_index < ev.request.candidate_count;
   }
 };
 
-struct invalid_accept {
-  bool operator()(const event::accept_runtime & ev, const action::context & ctx) const noexcept {
-    return !valid_accept{}(ev, ctx);
-  }
-};
-
-struct phase_ok_apply {
-  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
-  }
-};
-
-struct phase_failed_apply {
-  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
-  }
-};
-
-struct candidate_done {
-  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none) &&
-           ev.ctx.candidate_kind != candidate_parser::events::candidate_kind::unknown;
-  }
-};
-
-struct candidate_failed {
-  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
-  }
-};
-
-struct token_done {
-  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none) &&
-           ev.ctx.token_kind != token_parser::events::token_kind::unknown;
-  }
-};
-
-struct token_failed {
-  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
-  }
-};
-
-struct matcher_done {
-  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none) &&
-           ev.ctx.match_result != matcher_parser::events::match_result::unknown;
-  }
-};
-
-struct matcher_failed {
-  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
-  }
-};
-
-struct phase_ok_accept {
-  bool operator()(const event::accept_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
-  }
-};
-
-struct phase_failed_accept {
-  bool operator()(const event::accept_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+struct no_more_candidates {
+  bool operator()(const event::sample_runtime & ev) const noexcept {
+    return ev.ctx.read_index >= ev.request.candidate_count;
   }
 };
 
 struct accept_done {
-  bool operator()(const event::accept_runtime & ev, const action::context &) const noexcept {
+  bool operator()(const event::sample_runtime & ev) const noexcept {
     return ev.ctx.err == emel::error::cast(error::none) &&
            ev.ctx.accept_result != accept_parser::events::accept_result::unknown;
   }
 };
 
 struct accept_failed {
-  bool operator()(const event::accept_runtime & ev, const action::context &) const noexcept {
+  bool operator()(const event::sample_runtime & ev) const noexcept {
     return ev.ctx.err != emel::error::cast(error::none);
+  }
+};
+
+struct candidate_accepted {
+  bool operator()(const event::sample_runtime & ev) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.accept_result == accept_parser::events::accept_result::accepted;
+  }
+};
+
+struct candidate_rejected {
+  bool operator()(const event::sample_runtime & ev) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.accept_result == accept_parser::events::accept_result::rejected;
+  }
+};
+
+struct filtered_candidates_available {
+  bool operator()(const event::sample_runtime & ev) const noexcept {
+    return ev.ctx.write_index > 0;
+  }
+};
+
+struct no_filtered_candidates {
+  bool operator()(const event::sample_runtime & ev) const noexcept {
+    return ev.ctx.write_index == 0;
   }
 };
 

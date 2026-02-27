@@ -3,12 +3,12 @@
 #include <array>
 #include <cstdint>
 
-#include "emel/batch/planner/context.hpp"
+#include "emel/batch/planner/events.hpp"
 
 namespace emel::batch::planner::modes::detail {
 
 using seq_mask_t = std::array<uint64_t, action::SEQ_WORDS>;
-using context = action::context;
+using request_ctx = event::request_ctx;
 
 inline seq_mask_t normalized_seq_mask(const event::request & ev, const int32_t idx) noexcept;
 inline bool mask_any_set(const seq_mask_t & mask) noexcept;
@@ -175,7 +175,7 @@ inline int32_t count_total_outputs(const event::request & ev) noexcept {
   return total;
 }
 
-inline bool append_token_index(context & ctx, const int32_t idx) noexcept {
+inline bool append_token_index(request_ctx & ctx, const int32_t idx) noexcept {
   if (ctx.token_indices_count >= action::MAX_PLAN_STEPS) {
     return false;
   }
@@ -184,7 +184,7 @@ inline bool append_token_index(context & ctx, const int32_t idx) noexcept {
   return true;
 }
 
-inline bool begin_step(context & ctx) noexcept {
+inline bool begin_step(request_ctx & ctx) noexcept {
   if (ctx.step_count >= action::MAX_PLAN_STEPS) {
     return false;
   }
@@ -192,13 +192,13 @@ inline bool begin_step(context & ctx) noexcept {
   return true;
 }
 
-inline void finalize_token_offsets(context & ctx) noexcept {
+inline void finalize_token_offsets(request_ctx & ctx) noexcept {
   if (ctx.step_count <= action::MAX_PLAN_STEPS) {
     ctx.step_token_offsets[ctx.step_count] = ctx.token_indices_count;
   }
 }
 
-inline bool push_step_size(context & ctx, const int32_t size) noexcept {
+inline bool push_step_size(request_ctx & ctx, const int32_t size) noexcept {
   if (size <= 0) {
     return false;
   }
@@ -210,21 +210,23 @@ inline bool push_step_size(context & ctx, const int32_t size) noexcept {
   return true;
 }
 
-inline void fail_plan(context & ctx, const error code) noexcept {
-  (void)code;
+inline void clear_plan(request_ctx & ctx) noexcept {
   ctx.step_sizes.fill(0);
   ctx.step_count = 0;
   ctx.total_outputs = 0;
+  ctx.step_token_indices.fill(0);
   ctx.token_indices_count = 0;
   ctx.step_token_offsets.fill(0);
 }
 
-inline void prepare_plan(const event::request & ev, context & ctx) noexcept {
-  ctx.step_sizes.fill(0);
-  ctx.step_count = 0;
-  ctx.total_outputs = count_total_outputs(ev);
-  ctx.token_indices_count = 0;
-  ctx.step_token_offsets.fill(0);
+inline void fail_plan(const event::request_runtime & ev, const error code) noexcept {
+  ev.ctx.err = emel::error::set(ev.ctx.err, code);
+  clear_plan(ev.ctx);
+}
+
+inline void prepare_plan(const event::request_runtime & ev) noexcept {
+  clear_plan(ev.ctx);
+  ev.ctx.total_outputs = count_total_outputs(ev.request);
 }
 
 }  // namespace emel::batch::planner::modes::detail

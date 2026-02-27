@@ -1,355 +1,349 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 
 #include "emel/memory/recurrent/context.hpp"
+#include "emel/memory/recurrent/detail.hpp"
 #include "emel/memory/recurrent/events.hpp"
 
 namespace emel::memory::recurrent::action {
 
-inline void write_error(const int32_t err, int32_t * error_out) noexcept {
-  if (error_out != nullptr) {
-    *error_out = err;
-  }
-}
+namespace detail {
 
-inline void begin_phase(context & ctx) noexcept {
-  ctx.phase_error = EMEL_OK;
-  ctx.phase_out_of_memory = false;
-}
-
-inline void end_phase(context & ctx) noexcept {
-  ctx.last_error = ctx.phase_error;
-}
-
-inline bool valid_sequence_id(const context & ctx, const int32_t seq_id) noexcept {
-  return seq_id >= 0 && seq_id < ctx.max_sequences;
-}
-
-inline bool is_active(const context & ctx, const int32_t seq_id) noexcept {
-  return valid_sequence_id(ctx, seq_id) &&
-         ctx.seq_to_slot[static_cast<size_t>(seq_id)] != INVALID_SLOT;
-}
-
-inline int32_t lookup_slot(const context & ctx, const int32_t seq_id) noexcept {
-  if (!is_active(ctx, seq_id)) {
-    return INVALID_SLOT;
-  }
-  return ctx.seq_to_slot[static_cast<size_t>(seq_id)];
-}
-
-inline int32_t sequence_length_value(const context & ctx, const int32_t seq_id) noexcept {
-  if (!is_active(ctx, seq_id)) {
-    return 0;
-  }
-  return ctx.sequence_length[static_cast<size_t>(seq_id)];
+inline int32_t resolve_positive_or_default(const int32_t value, const int32_t fallback) noexcept {
+  const int32_t use_value = static_cast<int32_t>(value > 0);
+  return use_value * value + (1 - use_value) * fallback;
 }
 
 inline void reset_runtime(context & ctx) noexcept {
   ctx.slots.reset();
-  ctx.seq_to_slot.fill(INVALID_SLOT);
-  ctx.slot_owner_seq.fill(INVALID_SLOT);
+  ctx.seq_to_slot.fill(recurrent::detail::invalid_slot);
+  ctx.slot_owner_seq.fill(recurrent::detail::invalid_slot);
   ctx.sequence_length.fill(0);
+  ctx.free_count = ctx.max_slots;
+  for (int32_t i = 0; i < ctx.max_slots; ++i) {
+    ctx.free_stack[static_cast<size_t>(i)] = ctx.max_slots - 1 - i;
+  }
 }
 
 inline void fill_snapshot(const context & ctx, view::snapshot & snapshot) noexcept {
   snapshot = view::snapshot{};
   snapshot.max_sequences = ctx.max_sequences;
   snapshot.block_tokens = 16;
+
   for (int32_t seq_id = 0; seq_id < ctx.max_sequences; ++seq_id) {
-    const size_t seq = static_cast<size_t>(seq_id);
-    const bool active = is_active(ctx, seq_id);
-    snapshot.sequence_active[seq] = active ? 1u : 0u;
-    if (!active) {
-      continue;
-    }
-    snapshot.sequence_length_values[seq] = ctx.sequence_length[seq];
-    snapshot.sequence_recurrent_slot[seq] = ctx.seq_to_slot[seq];
+    const size_t seq_index = static_cast<size_t>(seq_id);
+    const int32_t active =
+        static_cast<int32_t>(ctx.seq_to_slot[seq_index] != recurrent::detail::invalid_slot);
+    snapshot.sequence_active[seq_index] = static_cast<uint8_t>(active);
+    snapshot.sequence_length_values[seq_index] = ctx.sequence_length[seq_index] * active;
+    snapshot.sequence_recurrent_slot[seq_index] =
+        active * ctx.seq_to_slot[seq_index] + (1 - active) * recurrent::detail::invalid_slot;
   }
 }
 
-struct capture_view {
-  void operator()(const event::capture_view & ev, context & ctx) const noexcept {
-    if (ev.snapshot_out == nullptr) {
-      write_error(EMEL_ERR_INVALID_ARGUMENT, ev.error_out);
-      return;
-    }
-    fill_snapshot(ctx, *ev.snapshot_out);
-    write_error(EMEL_OK, ev.error_out);
-  }
-};
-
-inline int32_t find_first_free_slot(const context & ctx) noexcept {
-  const auto & active = ctx.slots.storage().active;
-  for (int32_t i = 0; i < ctx.max_slots; ++i) {
-    if (active[static_cast<size_t>(i)] == 0) {
-      return i;
-    }
-  }
-  return INVALID_SLOT;
-}
-
-inline bool activate_slot(context & ctx, const int32_t slot_id) noexcept {
-  if (slot_id < 0 || slot_id >= ctx.max_slots) {
-    return false;
-  }
-  return ctx.slots.process_indexed<slot_activate>(static_cast<size_t>(slot_id));
-}
-
-inline bool deactivate_slot(context & ctx, const int32_t slot_id) noexcept {
-  if (slot_id < 0 || slot_id >= ctx.max_slots) {
-    return false;
-  }
-  return ctx.slots.process_indexed<slot_deactivate>(static_cast<size_t>(slot_id));
-}
-
-inline void run_reserve_phase(const event::reserve & ev, context & ctx) noexcept {
-  begin_phase(ctx);
-
-  const int32_t max_sequences = ev.max_sequences > 0 ? ev.max_sequences : MAX_SEQUENCES;
-  const int32_t requested_slots = ev.max_blocks > 0 ? ev.max_blocks : max_sequences;
-  if (max_sequences <= 0 || max_sequences > MAX_SEQUENCES || requested_slots <= 0) {
-    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  ctx.max_sequences = max_sequences;
-  ctx.max_slots = std::min(max_sequences, requested_slots);
-  reset_runtime(ctx);
-
-  end_phase(ctx);
-  write_error(ctx.phase_error, ev.error_out);
-}
-
-inline void run_allocate_sequence_phase(const event::allocate_sequence & ev,
-                                        context & ctx) noexcept {
-  begin_phase(ctx);
-
-  if (!valid_sequence_id(ctx, ev.seq_id)) {
-    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  if (is_active(ctx, ev.seq_id)) {
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  const int32_t slot_id = find_first_free_slot(ctx);
-  if (slot_id == INVALID_SLOT) {
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    ctx.phase_out_of_memory = true;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  if (!activate_slot(ctx, slot_id)) {
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  ctx.seq_to_slot[static_cast<size_t>(ev.seq_id)] = slot_id;
-  ctx.slot_owner_seq[static_cast<size_t>(slot_id)] = ev.seq_id;
-  ctx.sequence_length[static_cast<size_t>(ev.seq_id)] = 0;
-
-  end_phase(ctx);
-  write_error(ctx.phase_error, ev.error_out);
-}
-
-inline void run_allocate_slots_phase(const event::allocate_slots & ev, context & ctx) noexcept {
-  begin_phase(ctx);
-
-  if (!is_active(ctx, ev.seq_id) || ev.token_count <= 0) {
-    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  ctx.sequence_length[static_cast<size_t>(ev.seq_id)] += ev.token_count;
-  if (ev.block_count_out != nullptr) {
-    *ev.block_count_out = 0;
-  }
-
-  end_phase(ctx);
-  write_error(ctx.phase_error, ev.error_out);
-}
-
-inline void run_branch_sequence_phase(const event::branch_sequence & ev,
-                                      context & ctx) noexcept {
-  begin_phase(ctx);
-
-  if (!is_active(ctx, ev.parent_seq_id) || !valid_sequence_id(ctx, ev.child_seq_id) ||
-      ev.parent_seq_id == ev.child_seq_id || is_active(ctx, ev.child_seq_id)) {
-    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  if (ev.copy_state == nullptr) {
-    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  const int32_t child_slot = find_first_free_slot(ctx);
-  if (child_slot == INVALID_SLOT) {
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    ctx.phase_out_of_memory = true;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  if (!activate_slot(ctx, child_slot)) {
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  const int32_t src_slot = lookup_slot(ctx, ev.parent_seq_id);
-  int32_t copy_error = EMEL_OK;
-  const bool copied = ev.copy_state(src_slot, child_slot, ev.copy_state_user_data, &copy_error);
-  if (!copied || copy_error != EMEL_OK) {
-    (void)deactivate_slot(ctx, child_slot);
-    ctx.phase_error = copy_error != EMEL_OK ? copy_error : EMEL_ERR_BACKEND;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  ctx.seq_to_slot[static_cast<size_t>(ev.child_seq_id)] = child_slot;
-  ctx.slot_owner_seq[static_cast<size_t>(child_slot)] = ev.child_seq_id;
-  ctx.sequence_length[static_cast<size_t>(ev.child_seq_id)] =
-      ctx.sequence_length[static_cast<size_t>(ev.parent_seq_id)];
-
-  end_phase(ctx);
-  write_error(ctx.phase_error, ev.error_out);
-}
-
-inline void run_free_sequence_phase(const event::free_sequence & ev, context & ctx) noexcept {
-  begin_phase(ctx);
-
-  if (!valid_sequence_id(ctx, ev.seq_id)) {
-    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  const int32_t slot_id = lookup_slot(ctx, ev.seq_id);
-  if (slot_id != INVALID_SLOT) {
-    if (!deactivate_slot(ctx, slot_id)) {
-      ctx.phase_error = EMEL_ERR_BACKEND;
-      end_phase(ctx);
-      write_error(ctx.phase_error, ev.error_out);
-      return;
-    }
-
-    ctx.slot_owner_seq[static_cast<size_t>(slot_id)] = INVALID_SLOT;
-    ctx.seq_to_slot[static_cast<size_t>(ev.seq_id)] = INVALID_SLOT;
-    ctx.sequence_length[static_cast<size_t>(ev.seq_id)] = 0;
-  }
-
-  end_phase(ctx);
-  write_error(ctx.phase_error, ev.error_out);
-}
-
-inline void run_rollback_slots_phase(const event::rollback_slots & ev,
-                                     context & ctx) noexcept {
-  begin_phase(ctx);
-
-  if (!is_active(ctx, ev.seq_id) || ev.token_count <= 0) {
-    ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-    end_phase(ctx);
-    write_error(ctx.phase_error, ev.error_out);
-    return;
-  }
-
-  const size_t index = static_cast<size_t>(ev.seq_id);
-  ctx.sequence_length[index] = std::max(0, ctx.sequence_length[index] - ev.token_count);
-  if (ev.block_count_out != nullptr) {
-    *ev.block_count_out = 0;
-  }
-
-  end_phase(ctx);
-  write_error(ctx.phase_error, ev.error_out);
-}
+}  // namespace detail
 
 struct begin_reserve {
-  void operator()(const event::reserve & ev, context & ctx) const noexcept {
-    run_reserve_phase(ev, ctx);
+  void operator()(const event::reserve_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.ctx.resolved_max_sequences = 0;
+    ev.ctx.resolved_slots = 0;
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
 struct begin_allocate_sequence {
-  void operator()(const event::allocate_sequence & ev, context & ctx) const noexcept {
-    run_allocate_sequence_phase(ev, ctx);
+  void operator()(const event::allocate_sequence_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.ctx.slot_id = recurrent::detail::invalid_slot;
+    ev.ctx.slot_activated = false;
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
 struct begin_allocate_slots {
-  void operator()(const event::allocate_slots & ev, context & ctx) const noexcept {
-    run_allocate_slots_phase(ev, ctx);
+  void operator()(const event::allocate_slots_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.ctx.block_count = 0;
+    ev.ctx.old_length = 0;
+    ev.ctx.new_length = 0;
+    ev.block_count_out = 0;
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
 struct begin_branch_sequence {
-  void operator()(const event::branch_sequence & ev, context & ctx) const noexcept {
-    run_branch_sequence_phase(ev, ctx);
+  void operator()(const event::branch_sequence_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.ctx.child_slot = recurrent::detail::invalid_slot;
+    ev.ctx.slot_activated = false;
+    ev.ctx.copy_accepted = false;
+    ev.ctx.copy_error = static_cast<int32_t>(emel::error::cast(error::none));
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
 struct begin_free_sequence {
-  void operator()(const event::free_sequence & ev, context & ctx) const noexcept {
-    run_free_sequence_phase(ev, ctx);
+  void operator()(const event::free_sequence_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.ctx.slot_id = recurrent::detail::invalid_slot;
+    ev.ctx.slot_deactivated = false;
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
 struct begin_rollback_slots {
-  void operator()(const event::rollback_slots & ev, context & ctx) const noexcept {
-    run_rollback_slots_phase(ev, ctx);
+  void operator()(const event::rollback_slots_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.ctx.block_count = 0;
+    ev.ctx.current_length = 0;
+    ev.ctx.new_length = 0;
+    ev.block_count_out = 0;
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
-struct clear_out_of_memory {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.phase_out_of_memory = false;
-    ctx.last_error = EMEL_ERR_BACKEND;
+struct begin_capture_view {
+  void operator()(const event::capture_view_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.accepted = false;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+    ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
-struct ensure_last_error {
-  void operator()(context & ctx) const noexcept {
-    if (ctx.last_error == EMEL_OK) {
-      ctx.last_error = EMEL_ERR_BACKEND;
+struct mark_operation_success {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = recurrent::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.accepted = true;
+    runtime_ev.ctx.operation_error = emel::error::cast(error::none);
+  }
+};
+
+struct exec_reserve {
+  void operator()(const event::reserve_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.resolved_max_sequences = detail::resolve_positive_or_default(
+        ev.request.max_sequences, recurrent::detail::max_sequences);
+    const int32_t requested_slots =
+        detail::resolve_positive_or_default(ev.request.max_blocks, ev.ctx.resolved_max_sequences);
+    ev.ctx.resolved_slots = std::min(ev.ctx.resolved_max_sequences, requested_slots);
+
+    ctx.max_sequences = ev.ctx.resolved_max_sequences;
+    ctx.max_slots = ev.ctx.resolved_slots;
+    detail::reset_runtime(ctx);
+    ev.ctx.accepted = true;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+  }
+};
+
+struct exec_allocate_sequence_inactive {
+  void operator()(const event::allocate_sequence_runtime & ev, context & ctx) const noexcept {
+    const size_t seq_index = static_cast<size_t>(ev.request.seq_id);
+    ev.ctx.slot_id = ctx.free_stack[static_cast<size_t>(ctx.free_count - 1)];
+    ctx.free_count -= 1;
+    ev.ctx.slot_activated =
+        ctx.slots.process_indexed<recurrent::detail::slot_activate>(static_cast<size_t>(ev.ctx.slot_id));
+    const int32_t activated = static_cast<int32_t>(ev.ctx.slot_activated);
+
+    ctx.free_count += (1 - activated);
+    ctx.seq_to_slot[seq_index] =
+        activated * ev.ctx.slot_id + (1 - activated) * ctx.seq_to_slot[seq_index];
+    ctx.slot_owner_seq[static_cast<size_t>(ev.ctx.slot_id)] =
+        activated * ev.request.seq_id +
+        (1 - activated) * ctx.slot_owner_seq[static_cast<size_t>(ev.ctx.slot_id)];
+    ctx.sequence_length[seq_index] = (1 - activated) * ctx.sequence_length[seq_index];
+    ev.ctx.accepted = activated != 0;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+  }
+};
+
+struct exec_allocate_slots {
+  void operator()(const event::allocate_slots_runtime & ev, context & ctx) const noexcept {
+    const size_t seq_index = static_cast<size_t>(ev.request.seq_id);
+    ev.ctx.old_length = ctx.sequence_length[seq_index];
+    ev.ctx.new_length = ev.ctx.old_length + ev.request.token_count;
+    ctx.sequence_length[seq_index] = ev.ctx.new_length;
+    ev.ctx.block_count = 0;
+    ev.ctx.accepted = true;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+  }
+};
+
+struct exec_branch_sequence_prepare_child_slot {
+  void operator()(const event::branch_sequence_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.child_slot = ctx.free_stack[static_cast<size_t>(ctx.free_count - 1)];
+    ctx.free_count -= 1;
+    ev.ctx.slot_activated = ctx.slots.process_indexed<recurrent::detail::slot_activate>(
+        static_cast<size_t>(ev.ctx.child_slot));
+    const int32_t activated = static_cast<int32_t>(ev.ctx.slot_activated);
+    ctx.free_count += (1 - activated);
+  }
+};
+
+struct exec_branch_sequence_copy_callback {
+  void operator()(const event::branch_sequence_runtime & ev, context & ctx) const noexcept {
+    const size_t parent_index = static_cast<size_t>(ev.request.parent_seq_id);
+    const int32_t parent_slot = ctx.seq_to_slot[parent_index];
+    ev.ctx.copy_error = static_cast<int32_t>(emel::error::cast(error::none));
+    ev.ctx.copy_accepted = ev.request.copy_state(
+        parent_slot,
+        ev.ctx.child_slot,
+        ev.request.copy_state_user_data,
+        &ev.ctx.copy_error);
+
+    const int32_t copy_error_is_none = static_cast<int32_t>(
+        ev.ctx.copy_error == static_cast<int32_t>(emel::error::cast(error::none)));
+    const int32_t copy_success = static_cast<int32_t>(ev.ctx.copy_accepted) * copy_error_is_none;
+    const int32_t copy_failed_with_error = (1 - copy_success) * (1 - copy_error_is_none);
+    ev.ctx.accepted = copy_success != 0;
+    ev.ctx.operation_error = static_cast<emel::error::type>(
+        copy_failed_with_error * ev.ctx.copy_error);
+  }
+};
+
+struct exec_branch_sequence_rollback_child_slot {
+  void operator()(const event::branch_sequence_runtime & ev, context & ctx) const noexcept {
+    const bool deactivated = ctx.slots.process_indexed<recurrent::detail::slot_deactivate>(
+        static_cast<size_t>(ev.ctx.child_slot));
+    const int32_t deactivated_int = static_cast<int32_t>(deactivated);
+    ctx.slot_owner_seq[static_cast<size_t>(ev.ctx.child_slot)] =
+        deactivated_int * recurrent::detail::invalid_slot +
+        (1 - deactivated_int) * ctx.slot_owner_seq[static_cast<size_t>(ev.ctx.child_slot)];
+    ctx.free_stack[static_cast<size_t>(ctx.free_count)] = ev.ctx.child_slot;
+    ctx.free_count += deactivated_int;
+  }
+};
+
+struct finalize_branch_sequence_success {
+  void operator()(const event::branch_sequence_runtime & ev, context & ctx) const noexcept {
+    const size_t parent_index = static_cast<size_t>(ev.request.parent_seq_id);
+    const size_t child_index = static_cast<size_t>(ev.request.child_seq_id);
+    ctx.seq_to_slot[child_index] = ev.ctx.child_slot;
+    ctx.slot_owner_seq[static_cast<size_t>(ev.ctx.child_slot)] = ev.request.child_seq_id;
+    ctx.sequence_length[child_index] = ctx.sequence_length[parent_index];
+    ev.ctx.accepted = true;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+  }
+};
+
+struct exec_free_sequence_active {
+  void operator()(const event::free_sequence_runtime & ev, context & ctx) const noexcept {
+    const size_t seq_index = static_cast<size_t>(ev.request.seq_id);
+    ev.ctx.slot_id = ctx.seq_to_slot[seq_index];
+    ev.ctx.slot_deactivated = ctx.slots.process_indexed<recurrent::detail::slot_deactivate>(
+        static_cast<size_t>(ev.ctx.slot_id));
+    const int32_t deactivated = static_cast<int32_t>(ev.ctx.slot_deactivated);
+
+    ctx.slot_owner_seq[static_cast<size_t>(ev.ctx.slot_id)] =
+        deactivated * recurrent::detail::invalid_slot +
+        (1 - deactivated) * ctx.slot_owner_seq[static_cast<size_t>(ev.ctx.slot_id)];
+    ctx.seq_to_slot[seq_index] =
+        deactivated * recurrent::detail::invalid_slot + (1 - deactivated) * ctx.seq_to_slot[seq_index];
+    ctx.sequence_length[seq_index] = (1 - deactivated) * ctx.sequence_length[seq_index];
+    ctx.free_stack[static_cast<size_t>(ctx.free_count)] = ev.ctx.slot_id;
+    ctx.free_count += deactivated;
+
+    ev.ctx.accepted = deactivated != 0;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+  }
+};
+
+struct exec_rollback_slots {
+  void operator()(const event::rollback_slots_runtime & ev, context & ctx) const noexcept {
+    const size_t seq_index = static_cast<size_t>(ev.request.seq_id);
+    ev.ctx.current_length = ctx.sequence_length[seq_index];
+    ev.ctx.new_length = std::max(0, ev.ctx.current_length - ev.request.token_count);
+    ctx.sequence_length[seq_index] = ev.ctx.new_length;
+    ev.ctx.block_count = 0;
+    ev.ctx.accepted = true;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+  }
+};
+
+struct exec_capture_view {
+  void operator()(const event::capture_view_runtime & ev, context & ctx) const noexcept {
+    detail::fill_snapshot(ctx, ev.snapshot_out);
+    ev.ctx.accepted = true;
+    ev.ctx.operation_error = emel::error::cast(error::none);
+  }
+};
+
+struct mark_invalid_request {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = recurrent::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
+    runtime_ev.error_code_out = static_cast<int32_t>(runtime_ev.ctx.err);
+  }
+};
+
+struct mark_backend_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = recurrent::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::backend_error);
+    runtime_ev.error_code_out = static_cast<int32_t>(runtime_ev.ctx.err);
+  }
+};
+
+struct mark_error_from_operation {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = recurrent::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = recurrent::detail::cast_api_error(runtime_ev.ctx.operation_error);
+    runtime_ev.error_code_out = static_cast<int32_t>(runtime_ev.ctx.err);
+  }
+};
+
+struct publish_done {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = recurrent::detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::none);
+    runtime_ev.error_code_out = static_cast<int32_t>(emel::error::cast(error::none));
+    if constexpr (requires { runtime_ev.block_count_out; runtime_ev.ctx.block_count; }) {
+      runtime_ev.block_count_out = runtime_ev.ctx.block_count;
     }
-    ctx.phase_error = ctx.last_error;
-    ctx.phase_out_of_memory = false;
+  }
+};
+
+struct publish_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    auto & runtime_ev = recurrent::detail::unwrap_runtime_event(ev);
+    runtime_ev.error_code_out = static_cast<int32_t>(runtime_ev.ctx.err);
+    if constexpr (requires { runtime_ev.block_count_out; }) {
+      runtime_ev.block_count_out = 0;
+    }
   }
 };
 
 struct on_unexpected {
-  template <class ev>
-  void operator()(const ev & event, context & ctx) const noexcept {
-    if constexpr (requires { event.error_out; }) {
-      write_error(EMEL_ERR_BACKEND, event.error_out);
+  template <class event_type>
+  void operator()(const event_type & ev, context &) const noexcept {
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = emel::error::cast(error::internal_error);
+      ev.error_code_out = static_cast<int32_t>(ev.ctx.err);
+      if constexpr (requires { ev.block_count_out; }) {
+        ev.block_count_out = 0;
+      }
     }
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    ctx.phase_out_of_memory = false;
-    ctx.last_error = EMEL_ERR_BACKEND;
   }
 };
 
@@ -359,8 +353,23 @@ inline constexpr begin_allocate_slots begin_allocate_slots{};
 inline constexpr begin_branch_sequence begin_branch_sequence{};
 inline constexpr begin_free_sequence begin_free_sequence{};
 inline constexpr begin_rollback_slots begin_rollback_slots{};
-inline constexpr clear_out_of_memory clear_out_of_memory{};
-inline constexpr ensure_last_error ensure_last_error{};
+inline constexpr begin_capture_view begin_capture_view{};
+inline constexpr mark_operation_success mark_operation_success{};
+inline constexpr exec_reserve exec_reserve{};
+inline constexpr exec_allocate_sequence_inactive exec_allocate_sequence_inactive{};
+inline constexpr exec_allocate_slots exec_allocate_slots{};
+inline constexpr exec_branch_sequence_prepare_child_slot exec_branch_sequence_prepare_child_slot{};
+inline constexpr exec_branch_sequence_copy_callback exec_branch_sequence_copy_callback{};
+inline constexpr exec_branch_sequence_rollback_child_slot exec_branch_sequence_rollback_child_slot{};
+inline constexpr finalize_branch_sequence_success finalize_branch_sequence_success{};
+inline constexpr exec_free_sequence_active exec_free_sequence_active{};
+inline constexpr exec_rollback_slots exec_rollback_slots{};
+inline constexpr exec_capture_view exec_capture_view{};
+inline constexpr mark_invalid_request mark_invalid_request{};
+inline constexpr mark_backend_error mark_backend_error{};
+inline constexpr mark_error_from_operation mark_error_from_operation{};
+inline constexpr publish_done publish_done{};
+inline constexpr publish_error publish_error{};
 inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::memory::recurrent::action

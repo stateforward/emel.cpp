@@ -1,9 +1,11 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
-#include "emel/callback.hpp"
+#include "emel/batch/planner/context.hpp"
 #include "emel/batch/planner/errors.hpp"
+#include "emel/callback.hpp"
 
 namespace emel::batch::planner::events {
 struct plan_done;
@@ -37,6 +39,22 @@ struct request {
   // callbacks are required for all plan requests.
   const emel::callback<void(const events::plan_done &)> & on_done;
   const emel::callback<void(const events::plan_error &)> & on_error;
+};
+
+struct request_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+  int32_t effective_step_size = 0;
+  std::array<int32_t, action::MAX_PLAN_STEPS> step_sizes = {};
+  int32_t step_count = 0;
+  int32_t total_outputs = 0;
+  std::array<int32_t, action::MAX_PLAN_STEPS> step_token_indices = {};
+  std::array<int32_t, action::MAX_PLAN_STEPS + 1> step_token_offsets = {};
+  int32_t token_indices_count = 0;
+};
+
+struct request_runtime {
+  const request & request;
+  request_ctx & ctx;
 };
 
 }  // namespace emel::batch::planner::event

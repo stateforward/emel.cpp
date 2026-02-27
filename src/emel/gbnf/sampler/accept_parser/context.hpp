@@ -1,8 +1,6 @@
 #pragma once
 
-namespace emel::gbnf::sampler::action {
-struct context;
-}
+#include "emel/gbnf/sampler/context.hpp"
 
 namespace emel::gbnf::sampler::accept_parser::action {
 

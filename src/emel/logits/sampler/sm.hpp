@@ -138,22 +138,22 @@ struct model {
   }
 };
 
-struct sm : public emel::sm<model> {
-  using base_type = emel::sm<model>;
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
   using base_type::is;
   using base_type::process_event;
   using base_type::visit_current_states;
 
-  sm() : base_type(context_) {}
+  sm() : base_type() {}
 
-  explicit sm(const action::context & sampler_context) : base_type(context_) {
-    context_ = sampler_context;
+  explicit sm(const action::context & sampler_context) : base_type() {
+    this->context_ = sampler_context;
   }
 
   sm(event::sampler_fn * sampler_fns, int32_t sampler_count)
-      : base_type(context_) {
-    context_.sampler_fns = sampler_fns;
-    context_.sampler_count = sampler_count;
+      : base_type() {
+    this->context_.sampler_fns = sampler_fns;
+    this->context_.sampler_count = sampler_count;
   }
 
   bool process_event(const event::sample_logits & ev) {
@@ -171,7 +171,6 @@ struct sm : public emel::sm<model> {
   }
 
  private:
-  action::context context_{};
 };
 
 using Sampler = sm;

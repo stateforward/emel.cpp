@@ -1,151 +1,154 @@
 #pragma once
 
 #include "emel/logits/validator/context.hpp"
+#include "emel/logits/validator/events.hpp"
 
 namespace emel::logits::validator::action {
 
-inline void clear_request(context & ctx) noexcept {
-  ctx.request = nullptr;
+namespace detail {
+
+template <class runtime_event_type>
+constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noexcept {
+  if constexpr (requires { ev.event_; }) {
+    return ev.event_;
+  } else {
+    return (ev);
+  }
 }
 
-inline void set_error(context & ctx, const int32_t err) noexcept {
-  ctx.phase_error = err;
-  ctx.last_error = err;
-}
+}  // namespace detail
 
 struct begin_build {
-  void operator()(const event::build & ev, context & ctx) const noexcept {
-    ctx.request = &ev;
-    ctx.candidate_count = 0;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
+  void operator()(const event::build_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.ctx.candidate_count = 0;
+    ev.ctx.build_cursor = 0;
+    ev.ctx.max_cursor = 0;
+    ev.ctx.normalize_cursor = 0;
+    ev.ctx.max_score = 0.0F;
+    ev.request.candidate_count_out = 0;
+    ev.request.error_out = emel::error::cast(error::none);
   }
 };
 
-struct set_invalid_argument {
-  void operator()(context & ctx) const noexcept { set_error(ctx, EMEL_ERR_INVALID_ARGUMENT); }
-};
-
-struct set_backend_error {
-  void operator()(context & ctx) const noexcept { set_error(ctx, EMEL_ERR_BACKEND); }
-};
-
-struct run_validate {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-    const event::build * request = ctx.request;
-    if (request == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    if (request->logits == nullptr ||
-        request->vocab_size <= 0 ||
-        request->candidate_ids_out == nullptr ||
-        request->candidate_scores_out == nullptr ||
-        request->candidate_capacity < request->vocab_size ||
-        request->candidate_count_out == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    }
+struct mark_invalid_request {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    const auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::invalid_request);
+    runtime_ev.request.error_out = runtime_ev.ctx.err;
   }
 };
 
-struct run_build_candidates {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-    const event::build * request = ctx.request;
-    if (request == nullptr ||
-        request->logits == nullptr ||
-        request->vocab_size <= 0 ||
-        request->candidate_ids_out == nullptr ||
-        request->candidate_scores_out == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    for (int32_t i = 0; i < request->vocab_size; ++i) {
-      request->candidate_ids_out[i] = i;
-      request->candidate_scores_out[i] = request->logits[i];
-    }
-    ctx.candidate_count = request->vocab_size;
+struct prepare_candidates_begin {
+  void operator()(const event::build_runtime & ev, context &) const noexcept {
+    ev.ctx.build_cursor = 0;
   }
 };
 
-struct run_normalize_scores {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-    const event::build * request = ctx.request;
-    if (request == nullptr || request->candidate_scores_out == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    if (ctx.candidate_count <= 0) {
-      set_error(ctx, EMEL_ERR_BACKEND);
-      return;
-    }
-    float max_score = request->candidate_scores_out[0];
-    for (int32_t i = 1; i < ctx.candidate_count; ++i) {
-      if (request->candidate_scores_out[i] > max_score) {
-        max_score = request->candidate_scores_out[i];
-      }
-    }
-    for (int32_t i = 0; i < ctx.candidate_count; ++i) {
-      request->candidate_scores_out[i] -= max_score;
-    }
+struct prepare_candidate_step {
+  void operator()(const event::build_runtime & ev, context &) const noexcept {
+    (&ev.request.candidate_ids)[ev.ctx.build_cursor] = ev.ctx.build_cursor;
+    (&ev.request.candidate_scores)[ev.ctx.build_cursor] =
+        (&ev.request.logits)[ev.ctx.build_cursor];
+  }
+};
+
+struct advance_prepare_cursor {
+  void operator()(const event::build_runtime & ev, context &) const noexcept {
+    ev.ctx.build_cursor += 1;
+  }
+};
+
+struct set_candidate_count_from_vocab {
+  void operator()(const event::build_runtime & ev, context &) const noexcept {
+    ev.ctx.candidate_count = ev.request.vocab_size;
+  }
+};
+
+struct begin_max_scan {
+  void operator()(const event::build_runtime & ev, context &) const noexcept {
+    ev.ctx.max_cursor = 1;
+    ev.ctx.max_score = (&ev.request.candidate_scores)[0];
+  }
+};
+
+struct update_max_score {
+  void operator()(const event::build_runtime & ev, context &) const noexcept {
+    ev.ctx.max_score = (&ev.request.candidate_scores)[ev.ctx.max_cursor];
+  }
+};
+
+struct advance_max_cursor {
+  void operator()(const event::build_runtime & ev, context &) const noexcept {
+    ev.ctx.max_cursor += 1;
+  }
+};
+
+struct begin_normalize {
+  void operator()(const event::build_runtime & ev, context &) const noexcept {
+    ev.ctx.normalize_cursor = 0;
+  }
+};
+
+struct normalize_score_step {
+  void operator()(const event::build_runtime & ev, context &) const noexcept {
+    (&ev.request.candidate_scores)[ev.ctx.normalize_cursor] -= ev.ctx.max_score;
+  }
+};
+
+struct advance_normalize_cursor {
+  void operator()(const event::build_runtime & ev, context &) const noexcept {
+    ev.ctx.normalize_cursor += 1;
   }
 };
 
 struct publish_done {
-  void operator()(context & ctx) const noexcept {
-    const event::build * request = ctx.request;
-    if (request == nullptr) {
-      return;
-    }
-    if (request->error_out != nullptr) {
-      *request->error_out = EMEL_OK;
-    }
-    if (request->candidate_count_out != nullptr) {
-      *request->candidate_count_out = ctx.candidate_count;
-    }
-    clear_request(ctx);
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    const auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    runtime_ev.ctx.err = emel::error::cast(error::none);
+    runtime_ev.request.error_out = emel::error::cast(error::none);
+    runtime_ev.request.candidate_count_out = runtime_ev.ctx.candidate_count;
   }
 };
 
 struct publish_error {
-  void operator()(context & ctx) const noexcept {
-    const event::build * request = ctx.request;
-    if (request == nullptr) {
-      return;
-    }
-    int32_t err = ctx.last_error;
-    if (err == EMEL_OK) {
-      err = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
-    }
-    ctx.last_error = err;
-    if (request->error_out != nullptr) {
-      *request->error_out = err;
-    }
-    if (request->candidate_count_out != nullptr) {
-      *request->candidate_count_out = 0;
-    }
-    clear_request(ctx);
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev, context &) const noexcept {
+    const auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    runtime_ev.request.candidate_count_out = 0;
+    runtime_ev.request.error_out = runtime_ev.ctx.err;
   }
 };
 
 struct on_unexpected {
-  void operator()(context & ctx) const noexcept { set_error(ctx, EMEL_ERR_BACKEND); }
+  template <class event_type>
+  void operator()(const event_type & ev, context &) const noexcept {
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = emel::error::cast(error::internal_error);
+      if constexpr (requires { ev.request.error_out; }) {
+        ev.request.error_out = emel::error::cast(error::internal_error);
+      }
+      if constexpr (requires { ev.request.candidate_count_out; }) {
+        ev.request.candidate_count_out = 0;
+      }
+    }
+  }
 };
 
 inline constexpr begin_build begin_build{};
-inline constexpr set_invalid_argument set_invalid_argument{};
-inline constexpr set_backend_error set_backend_error{};
-inline constexpr run_validate run_validate{};
-inline constexpr run_build_candidates run_build_candidates{};
-inline constexpr run_normalize_scores run_normalize_scores{};
+inline constexpr mark_invalid_request mark_invalid_request{};
+inline constexpr prepare_candidates_begin prepare_candidates_begin{};
+inline constexpr prepare_candidate_step prepare_candidate_step{};
+inline constexpr advance_prepare_cursor advance_prepare_cursor{};
+inline constexpr set_candidate_count_from_vocab set_candidate_count_from_vocab{};
+inline constexpr begin_max_scan begin_max_scan{};
+inline constexpr update_max_score update_max_score{};
+inline constexpr advance_max_cursor advance_max_cursor{};
+inline constexpr begin_normalize begin_normalize{};
+inline constexpr normalize_score_step normalize_score_step{};
+inline constexpr advance_normalize_cursor advance_normalize_cursor{};
 inline constexpr publish_done publish_done{};
 inline constexpr publish_error publish_error{};
 inline constexpr on_unexpected on_unexpected{};

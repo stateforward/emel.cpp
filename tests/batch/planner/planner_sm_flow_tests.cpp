@@ -60,7 +60,7 @@ TEST_CASE("batch_planner_sm_recover_after_error") {
   emel::batch::planner::sm machine{};
   plan_capture error_capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK_FALSE(machine.process_event(emel::batch::planner::event::request{
     .token_ids = nullptr,
     .n_tokens = 0,
     .n_steps = 1,
@@ -69,6 +69,9 @@ TEST_CASE("batch_planner_sm_recover_after_error") {
     .on_error = make_error(&error_capture),
   }));
   CHECK(error_capture.error_called);
+  CHECK(error_capture.err == emel::error::set(
+      emel::error::cast(emel::batch::planner::error::invalid_request),
+      emel::batch::planner::error::invalid_token_data));
   CHECK(machine.is(boost::sml::state<emel::batch::planner::invalid_request>));
 
   std::array<int32_t, 3> tokens = {{1, 2, 3}};
@@ -127,7 +130,7 @@ TEST_CASE("batch_planner_sm_template_dispatch_keeps_done_callback_behavior") {
     .on_error = make_error(&capture),
   };
 
-  CHECK(machine.process_event<emel::batch::planner::event::request>(request));
+  CHECK(machine.process_event(request));
   CHECK(capture.done_called);
   CHECK_FALSE(capture.error_called);
   CHECK(machine.is(boost::sml::state<emel::batch::planner::done>));

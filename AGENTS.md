@@ -84,7 +84,6 @@ ALWAYS structure machine docs and code namespaces using the pattern
 ALWAYS colocate machine definition, data, guards, actions, and events within the
 same component directory.
 NEVER place orchestration logic in data-only files.
-NEVER introduce shared base classes for machine wrappers (for example `sm_base`).
 ALWAYS give each machine its own `process_event` wrapper and context ownership.
 SHARE behavior via `actions.hpp`/`detail.hpp` helpers or `sm_any`, not inheritance.
 ALWAYS keep child-machine data owned by the parent-machine data when composing

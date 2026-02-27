@@ -1,25 +1,25 @@
 #pragma once
-// benchmark: scaffold
+
+#include <functional>
 
 #include "emel/gbnf/sampler/accept_parser/sm.hpp"
 #include "emel/gbnf/sampler/actions.hpp"
-#include "emel/gbnf/sampler/candidate_parser/sm.hpp"
 #include "emel/gbnf/sampler/events.hpp"
 #include "emel/gbnf/sampler/guards.hpp"
-#include "emel/gbnf/sampler/matcher_parser/sm.hpp"
-#include "emel/gbnf/sampler/token_parser/sm.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::gbnf::sampler {
 
 struct ready {};
-
-struct apply_begin {};
-struct apply_loop_decision {};
-struct apply_result_decision {};
-
-struct accept_begin {};
-struct accept_result_decision {};
+struct sample_begin {};
+struct sample_loop_decision {};
+struct sample_candidate_prepare {};
+struct sample_candidate_decision {};
+struct sample_candidate_compact {};
+struct sample_candidate_advance {};
+struct sample_finalize_decision {};
+struct done {};
+struct errored {};
 
 struct model {
   auto operator()() const {
@@ -28,126 +28,143 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
-      // Apply request validation.
-        sml::state<apply_begin> <= *sml::state<ready> + sml::event<event::apply_runtime>
-                 [ guard::valid_apply{} ]
-                 / action::begin_apply
+      // Sample request validation.
+        sml::state<sample_begin> <= *sml::state<ready> + sml::event<event::sample_runtime>
+                 / action::begin_sample
 
-      , sml::state<ready> <= sml::state<ready> + sml::event<event::apply_runtime>
-                 [ guard::invalid_apply{} ]
-                 / action::reject_invalid_apply
+      , sml::state<sample_loop_decision> <= sml::state<sample_begin> + sml::completion<event::sample_runtime>
+                 [ guard::valid_sample_request{} ]
 
-      //------------------------------------------------------------------------------//
-      // Apply ctx.
-      , sml::state<apply_loop_decision> <= sml::state<apply_begin> + sml::completion<event::apply_runtime>
-                 / action::prepare_candidate_parse
-
-      , sml::state<apply_result_decision> <= sml::state<apply_loop_decision> + sml::completion<event::apply_runtime>
-                 [ guard::phase_failed_apply{} ]
-
-      , sml::state<candidate_parser::model> <= sml::state<apply_loop_decision> + sml::completion<event::apply_runtime>
-                 [ guard::phase_ok_apply{} ]
-
-      , sml::state<apply_result_decision> <= sml::state<candidate_parser::model> + sml::completion<event::apply_runtime>
-                 [ guard::candidate_failed{} ]
-
-      , sml::state<token_parser::model> <= sml::state<candidate_parser::model> + sml::completion<event::apply_runtime>
-                 [ guard::candidate_done{} ]
-                 / action::prepare_token_parse
-
-      , sml::state<apply_result_decision> <= sml::state<token_parser::model> + sml::completion<event::apply_runtime>
-                 [ guard::token_failed{} ]
-
-      , sml::state<matcher_parser::model> <= sml::state<token_parser::model> + sml::completion<event::apply_runtime>
-                 [ guard::token_done{} ]
-                 / action::prepare_match_parse
-
-      , sml::state<apply_result_decision> <= sml::state<matcher_parser::model> + sml::completion<event::apply_runtime>
-                 [ guard::matcher_done{} ]
-
-      , sml::state<apply_result_decision> <= sml::state<matcher_parser::model> + sml::completion<event::apply_runtime>
-                 [ guard::matcher_failed{} ]
-
-      , sml::state<ready> <= sml::state<apply_result_decision> + sml::completion<event::apply_runtime>
-                 [ guard::phase_ok_apply{} ]
-                 / action::dispatch_apply_done
-
-      , sml::state<ready> <= sml::state<apply_result_decision> + sml::completion<event::apply_runtime>
-                 [ guard::phase_failed_apply{} ]
-                 / action::dispatch_apply_error
+      , sml::state<errored> <= sml::state<sample_begin> + sml::completion<event::sample_runtime>
+                 [ guard::invalid_sample_request{} ]
+                 / action::mark_invalid_request
 
       //------------------------------------------------------------------------------//
-      // Accept request validation.
-      , sml::state<accept_begin> <= sml::state<ready> + sml::event<event::accept_runtime>
-                 [ guard::valid_accept{} ]
-                 / action::begin_accept
+      // Candidate filter loop.
+      , sml::state<sample_candidate_prepare> <= sml::state<sample_loop_decision>
+                 + sml::completion<event::sample_runtime>
+                 [ guard::has_more_candidates{} ]
 
-      , sml::state<ready> <= sml::state<ready> + sml::event<event::accept_runtime>
-                 [ guard::invalid_accept{} ]
-                 / action::reject_invalid_accept
+      , sml::state<sample_finalize_decision> <= sml::state<sample_loop_decision>
+                 + sml::completion<event::sample_runtime>
+                 [ guard::no_more_candidates{} ]
 
-      //------------------------------------------------------------------------------//
-      // Accept ctx.
-      , sml::state<accept_result_decision> <= sml::state<accept_begin> + sml::completion<event::accept_runtime>
-                 / action::prepare_accept_parse
+      , sml::state<accept_parser::model> <= sml::state<sample_candidate_prepare>
+                 + sml::completion<event::sample_runtime>
+                 / action::load_candidate_token
 
-      , sml::state<ready> <= sml::state<accept_result_decision> + sml::completion<event::accept_runtime>
-                 [ guard::phase_failed_accept{} ]
-                 / action::dispatch_accept_error
-
-      , sml::state<accept_parser::model> <= sml::state<accept_result_decision> + sml::completion<event::accept_runtime>
-                 [ guard::phase_ok_accept{} ]
-
-      , sml::state<ready> <= sml::state<accept_parser::model> + sml::completion<event::accept_runtime>
+      , sml::state<sample_candidate_decision> <= sml::state<accept_parser::model>
+                 + sml::completion<event::sample_runtime>
                  [ guard::accept_done{} ]
-                 / action::dispatch_accept_done
 
-      , sml::state<ready> <= sml::state<accept_parser::model> + sml::completion<event::accept_runtime>
+      , sml::state<errored> <= sml::state<accept_parser::model>
+                 + sml::completion<event::sample_runtime>
                  [ guard::accept_failed{} ]
-                 / action::dispatch_accept_error
+
+      , sml::state<sample_candidate_compact> <= sml::state<sample_candidate_decision>
+                 + sml::completion<event::sample_runtime>
+                 [ guard::candidate_accepted{} ]
+
+      , sml::state<sample_candidate_advance> <= sml::state<sample_candidate_decision>
+                 + sml::completion<event::sample_runtime>
+                 [ guard::candidate_rejected{} ]
+
+      , sml::state<sample_candidate_advance> <= sml::state<sample_candidate_compact>
+                 + sml::completion<event::sample_runtime>
+                 / action::compact_candidate
+
+      , sml::state<sample_loop_decision> <= sml::state<sample_candidate_advance>
+                 + sml::completion<event::sample_runtime>
+                 / action::advance_candidate_cursor
+
+      //------------------------------------------------------------------------------//
+      // Sample finalization.
+      , sml::state<done> <= sml::state<sample_finalize_decision> + sml::completion<event::sample_runtime>
+                 [ guard::filtered_candidates_available{} ]
+
+      , sml::state<errored> <= sml::state<sample_finalize_decision> + sml::completion<event::sample_runtime>
+                 [ guard::no_filtered_candidates{} ]
+                 / action::mark_parse_failed
+
+      //------------------------------------------------------------------------------//
+      // Dispatch completion.
+      , sml::state<ready> <= sml::state<done> + sml::completion<event::sample_runtime>
+                 / action::publish_done
+
+      , sml::state<ready> <= sml::state<errored> + sml::completion<event::sample_runtime>
+                 / action::publish_error
 
       //------------------------------------------------------------------------------//
       // Unexpected events.
       , sml::state<ready> <= sml::state<ready> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
-      , sml::state<apply_result_decision> <= sml::state<apply_begin> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<sample_begin> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-
-      , sml::state<apply_result_decision> <= sml::state<apply_loop_decision> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<sample_loop_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-
-      , sml::state<apply_result_decision> <= sml::state<apply_result_decision> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<sample_candidate_prepare> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-
-      , sml::state<accept_result_decision> <= sml::state<accept_begin> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<sample_candidate_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-
-      , sml::state<accept_result_decision> <= sml::state<accept_result_decision> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<sample_candidate_compact> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<sample_candidate_advance> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<sample_finalize_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<done> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<errored> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
     );
     // clang-format on
   }
 };
 
-struct sm : public emel::sm_with_context<model, action::context> {
-  using base_type = emel::sm_with_context<model, action::context>;
-  using base_type::base_type;
-  using base_type::process_event;
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
+  using base_type::is;
+  using base_type::visit_current_states;
 
-  bool process_event(const event::apply & ev) {
-    event::apply_ctx ctx{};
-    event::apply_runtime runtime{ev, ctx};
+  sm() = default;
+  explicit sm(const action::context & ctx) : base_type(ctx) {}
+  explicit sm(const emel::gbnf::grammar & grammar, const uint32_t start_rule_id = 0)
+      : base_type(make_context(grammar, start_rule_id)) {}
+
+  bool process_event(const event::sample & ev) {
+    event::sample_ctx ctx{};
+    event::sample_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.err == emel::error::cast(error::none);
   }
 
-  bool process_event(const event::accept & ev) {
-    event::accept_ctx ctx{};
-    event::accept_runtime runtime{ev, ctx};
-    const bool accepted = base_type::process_event(runtime);
-    return accepted && ctx.err == emel::error::cast(error::none);
+  emel::error::type sample(int32_t & candidate_ids,
+                           float & candidate_scores,
+                           int32_t & candidate_count,
+                           int32_t & selected_token_out) {
+    emel::error::type err = emel::error::cast(error::none);
+    const event::sample request{
+      candidate_ids,
+      candidate_scores,
+      candidate_count,
+      selected_token_out,
+      err,
+    };
+    (void)process_event(request);
+    return err;
+  }
+
+ private:
+  static action::context make_context(const emel::gbnf::grammar & grammar,
+                                      const uint32_t start_rule_id) {
+    action::context ctx{};
+    ctx.grammar = std::cref(grammar);
+    ctx.start_rule_id = start_rule_id;
+    return ctx;
   }
 };
+
+using Sampler = sm;
 
 }  // namespace emel::gbnf::sampler

@@ -108,10 +108,10 @@ struct model {
   }
 };
 
-struct sm : public emel::sm<model> {
-  using base_type = emel::sm<model>;
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
 
-  sm() : base_type(context_) {}
+  sm() : base_type() {}
 
   bool process_event(const event::preprocess & ev) {
     namespace sml = boost::sml;
@@ -120,14 +120,14 @@ struct sm : public emel::sm<model> {
     const bool ok = this->is(sml::state<done>);
     const int32_t err =
         ok ? EMEL_OK
-           : (context_.last_error != EMEL_OK ? context_.last_error
+           : (this->context_.last_error != EMEL_OK ? this->context_.last_error
                                              : EMEL_ERR_BACKEND);
 
     if (ev.fragment_count_out != nullptr) {
-      *ev.fragment_count_out = context_.fragment_count;
+      *ev.fragment_count_out = this->context_.fragment_count;
     }
     if (ev.preprocessed_out != nullptr) {
-      *ev.preprocessed_out = context_.preprocessed;
+      *ev.preprocessed_out = this->context_.preprocessed;
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
@@ -135,7 +135,7 @@ struct sm : public emel::sm<model> {
     if (ok) {
       if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
         ev.dispatch_done(ev.owner_sm,
-                         events::preprocess_done{&ev, context_.fragment_count});
+                         events::preprocess_done{&ev, this->context_.fragment_count});
       }
     } else {
       if (ev.dispatch_error != nullptr && ev.owner_sm != nullptr) {
@@ -143,18 +143,17 @@ struct sm : public emel::sm<model> {
       }
     }
 
-    action::clear_request(context_);
+    action::clear_request(this->context_);
     return accepted && ok;
   }
 
   using base_type::process_event;
   using base_type::visit_current_states;
 
-  int32_t last_error() const noexcept { return context_.last_error; }
-  size_t fragment_count() const noexcept { return context_.fragment_count; }
+  int32_t last_error() const noexcept { return this->context_.last_error; }
+  size_t fragment_count() const noexcept { return this->context_.fragment_count; }
 
  private:
-  action::context context_{};
 };
 
 }  // namespace emel::text::tokenizer::preprocessor::bpe

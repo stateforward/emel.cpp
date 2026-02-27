@@ -75,10 +75,11 @@ bool prepare_graph_checks_memory_payload(const execute_t & ev, bool * reused_out
     *reused_out = true;
   }
   g_saw_unified_payload = ev.memory_sm == g_expected_memory_sm &&
-                          ev.memory_view.is_sequence_active(7) &&
-                          ev.memory_view.sequence_length(7) == 13 &&
-                          ev.memory_view.lookup_kv_block(7, 0) == 42 &&
-                          ev.memory_view.lookup_recurrent_slot(7) == 3;
+                          ev.memory_view != nullptr &&
+                          ev.memory_view->is_sequence_active(7) &&
+                          ev.memory_view->sequence_length(7) == 13 &&
+                          ev.memory_view->lookup_kv_block(7, 0) == 42 &&
+                          ev.memory_view->lookup_recurrent_slot(7) == 3;
   if (err_out != nullptr) {
     *err_out = g_saw_unified_payload ? EMEL_OK : EMEL_ERR_BACKEND;
   }
@@ -148,16 +149,12 @@ TEST_CASE("graph_processor_propagates_unified_memory_payload") {
   memory_snapshot.sequence_kv_block_count[7] = 1;
   memory_snapshot.sequence_kv_blocks[7][0] = 42;
   memory_snapshot.sequence_recurrent_slot[7] = 3;
-  const emel::memory::view::any memory_view{
-    .frozen = &memory_snapshot,
-  };
-
   CHECK(machine.process_event(emel::graph::processor::event::execute{
     .step_index = 0,
     .step_size = 1,
     .kv_tokens = 1,
     .memory_sm = &memory_tag,
-    .memory_view = memory_view,
+    .memory_view = &memory_snapshot,
     .validate = validate_ok,
     .prepare_graph = prepare_graph_checks_memory_payload,
     .alloc_graph = alloc_graph_ok,

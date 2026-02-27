@@ -6,19 +6,28 @@
 
 namespace emel::gbnf::sampler::accept_parser::guard {
 
-struct valid_accept_token {
-  bool operator()(const sampler::event::accept_runtime & ev,
-                  const action::context &) const noexcept {
+struct token_accepted_by_grammar {
+  bool operator()(const sampler::event::sample_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    const auto & grammar = ctx.grammar.get();
     return ev.ctx.err == emel::error::cast(sampler::error::none) &&
-           ev.request.token_id < ev.request.grammar.rule_count;
+           ev.ctx.current_token_id >= 0 &&
+           static_cast<uint32_t>(ev.ctx.current_token_id) < grammar.rule_count;
+  }
+};
+
+struct token_rejected_by_grammar {
+  bool operator()(const sampler::event::sample_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    return ev.ctx.err == emel::error::cast(sampler::error::none) &&
+           !token_accepted_by_grammar{}(ev, ctx);
   }
 };
 
 struct parse_failed {
-  bool operator()(const sampler::event::accept_runtime & ev,
-                  const action::context & ctx) const noexcept {
-    return ev.ctx.err == emel::error::cast(sampler::error::none) &&
-           !valid_accept_token{}(ev, ctx);
+  bool operator()(const sampler::event::sample_runtime & ev,
+                  const action::context &) const noexcept {
+    return ev.ctx.err != emel::error::cast(sampler::error::none);
   }
 };
 

@@ -146,17 +146,17 @@ struct model {
   }
 };
 
-struct sm : public emel::sm<model> {
-  using base_type = emel::sm<model>;
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
 
-  sm() : base_type(context_) {}
+  sm() : base_type() {}
 
   bool process_event(const event::probe & ev) {
     const bool accepted = this->raw_sm().process_event(ev);
-    const int32_t err = context_.last_error;
+    const int32_t err = this->context_.last_error;
     if (err == EMEL_OK) {
       if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
-        ev.dispatch_done(ev.owner_sm, events::probe_done{&ev, context_.probed});
+        ev.dispatch_done(ev.owner_sm, events::probe_done{&ev, this->context_.probed});
       }
     } else if (ev.dispatch_error != nullptr && ev.owner_sm != nullptr) {
       ev.dispatch_error(ev.owner_sm, events::probe_error{&ev, err});
@@ -166,7 +166,7 @@ struct sm : public emel::sm<model> {
 
   bool process_event(const event::bind_storage & ev) {
     const bool accepted = this->raw_sm().process_event(ev);
-    const int32_t err = context_.last_error;
+    const int32_t err = this->context_.last_error;
     if (err == EMEL_OK) {
       if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
         ev.dispatch_done(ev.owner_sm, events::bind_done{&ev});
@@ -179,7 +179,7 @@ struct sm : public emel::sm<model> {
 
   bool process_event(const event::parse & ev) {
     const bool accepted = this->raw_sm().process_event(ev);
-    const int32_t err = context_.last_error;
+    const int32_t err = this->context_.last_error;
     if (err == EMEL_OK) {
       if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
         ev.dispatch_done(ev.owner_sm, events::parse_done{&ev});
@@ -193,12 +193,10 @@ struct sm : public emel::sm<model> {
   using base_type::process_event;
   using base_type::visit_current_states;
 
-  int32_t last_error() const noexcept { return context_.last_error; }
+  int32_t last_error() const noexcept { return this->context_.last_error; }
 
  private:
   using base_type::raw_sm;
-
-  action::context context_{};
 };
 
 }  // namespace emel::parser::gguf

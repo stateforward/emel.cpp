@@ -62,7 +62,7 @@ TEST_CASE("batch_planner_modes_detail_sequence_mask_normalization_variants") {
 }
 
 TEST_CASE("batch_planner_modes_detail_push_step_size_limits") {
-  emel::batch::planner::action::context ctx{};
+  emel::batch::planner::event::request_ctx ctx{};
 
   CHECK_FALSE(emel::batch::planner::modes::detail::push_step_size(ctx, 0));
 
@@ -128,7 +128,7 @@ TEST_CASE("batch_planner_modes_detail_count_total_outputs_variants") {
 }
 
 TEST_CASE("batch_planner_modes_detail_reject_overflow_helpers") {
-  emel::batch::planner::action::context ctx{};
+  emel::batch::planner::event::request_ctx ctx{};
 
   ctx.token_indices_count = emel::batch::planner::action::MAX_PLAN_STEPS;
   CHECK_FALSE(emel::batch::planner::modes::detail::append_token_index(ctx, 0));

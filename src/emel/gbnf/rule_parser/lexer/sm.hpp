@@ -64,6 +64,6 @@ struct model {
   }
 };
 
-using sm = emel::sm_with_context<model, action::context>;
+using sm = emel::sm<model, action::context>;
 
 }  // namespace emel::gbnf::rule_parser::lexer

@@ -50,13 +50,15 @@ inline emel::callback<void(const emel::batch::planner::events::plan_error &)> ma
 }  // namespace
 
 TEST_CASE("batch_planner_actions_begin_plan_copies_request") {
-  emel::batch::planner::action::context ctx{};
+  emel::batch::planner::action::context planner_ctx{};
+  emel::batch::planner::event::request_ctx request_ctx{};
   done_capture done{};
   error_capture error{};
-  ctx.effective_step_size = 7;
-  ctx.step_count = 2;
-  ctx.total_outputs = 9;
-  ctx.token_indices_count = 3;
+  request_ctx.err = emel::error::cast(emel::batch::planner::error::internal_error);
+  request_ctx.effective_step_size = 7;
+  request_ctx.step_count = 2;
+  request_ctx.total_outputs = 9;
+  request_ctx.token_indices_count = 3;
 
   emel::batch::planner::event::request request{
     .n_tokens = 3,
@@ -66,16 +68,22 @@ TEST_CASE("batch_planner_actions_begin_plan_copies_request") {
     .on_error = make_error(&error),
   };
 
-  emel::batch::planner::action::begin_plan(request, ctx);
+  emel::batch::planner::event::request_runtime runtime{
+    .request = request,
+    .ctx = request_ctx,
+  };
+  emel::batch::planner::action::begin_plan(runtime, planner_ctx);
 
-  CHECK(ctx.effective_step_size == 0);
-  CHECK(ctx.step_count == 0);
-  CHECK(ctx.total_outputs == 0);
-  CHECK(ctx.token_indices_count == 0);
+  CHECK(request_ctx.err == emel::error::cast(emel::batch::planner::error::none));
+  CHECK(request_ctx.effective_step_size == 0);
+  CHECK(request_ctx.step_count == 0);
+  CHECK(request_ctx.total_outputs == 0);
+  CHECK(request_ctx.token_indices_count == 0);
 }
 
 TEST_CASE("batch_planner_actions_normalize_batch_clamps_requested") {
-  emel::batch::planner::action::context ctx{};
+  emel::batch::planner::action::context planner_ctx{};
+  emel::batch::planner::event::request_ctx request_ctx{};
   done_capture done{};
   error_capture error{};
 
@@ -86,29 +94,39 @@ TEST_CASE("batch_planner_actions_normalize_batch_clamps_requested") {
     .on_error = make_error(&error),
   };
 
-  emel::batch::planner::action::normalize_batch(request, ctx);
-  CHECK(ctx.effective_step_size == 4);
+  emel::batch::planner::event::request_runtime runtime{
+    .request = request,
+    .ctx = request_ctx,
+  };
+
+  emel::batch::planner::action::normalize_batch(runtime, planner_ctx);
+  CHECK(request_ctx.effective_step_size == 4);
 
   request.n_steps = 10;
-  emel::batch::planner::action::normalize_batch(request, ctx);
-  CHECK(ctx.effective_step_size == 4);
+  emel::batch::planner::action::normalize_batch(runtime, planner_ctx);
+  CHECK(request_ctx.effective_step_size == 4);
 }
 
 TEST_CASE("batch_planner_actions_dispatch_helpers_cover_callbacks") {
-  emel::batch::planner::action::context ctx{};
+  emel::batch::planner::action::context planner_ctx{};
+  emel::batch::planner::event::request_ctx request_ctx{};
   done_capture done{};
   error_capture error{};
 
-  ctx.step_sizes[0] = 2;
-  ctx.step_count = 1;
-  ctx.total_outputs = 2;
+  request_ctx.step_sizes[0] = 2;
+  request_ctx.step_count = 1;
+  request_ctx.total_outputs = 2;
 
   emel::batch::planner::event::request request{
     .on_done = make_done(&done),
     .on_error = make_error(&error),
   };
 
-  emel::batch::planner::action::dispatch_done(request, ctx);
+  emel::batch::planner::event::request_runtime runtime{
+    .request = request,
+    .ctx = request_ctx,
+  };
+  emel::batch::planner::action::dispatch_done(runtime, planner_ctx);
   CHECK(done.calls == 1);
   CHECK(done.step_count == 1);
   CHECK(done.total_outputs == 2);
@@ -125,14 +143,14 @@ TEST_CASE("batch_planner_actions_dispatch_helpers_cover_callbacks") {
   CHECK(error.calls == 2);
   CHECK(error.err == emel::error::cast(emel::batch::planner::error::internal_error));
 
-  emel::batch::planner::action::dispatch_unexpected(request);
+  emel::batch::planner::action::on_unexpected(runtime);
   CHECK(error.calls == 3);
-  CHECK(error.err ==
-        emel::error::cast(emel::batch::planner::error::invalid_request));
+  CHECK(error.err == emel::error::cast(emel::batch::planner::error::untracked));
 }
 
 TEST_CASE("batch_planner_actions_dispatch_helpers_require_callbacks") {
-  emel::batch::planner::action::context ctx{};
+  emel::batch::planner::action::context planner_ctx{};
+  emel::batch::planner::event::request_ctx request_ctx{};
   done_capture done{};
   error_capture error{};
   auto on_done =
@@ -149,14 +167,19 @@ TEST_CASE("batch_planner_actions_dispatch_helpers_require_callbacks") {
     .on_error = on_error,
   };
 
-  emel::batch::planner::action::dispatch_done(request, ctx);
+  emel::batch::planner::event::request_runtime runtime{
+    .request = request,
+    .ctx = request_ctx,
+  };
+
+  emel::batch::planner::action::dispatch_done(runtime, planner_ctx);
   emel::batch::planner::action::dispatch_invalid_request(
     request,
     emel::error::cast(emel::batch::planner::error::invalid_request));
   emel::batch::planner::action::dispatch_plan_failed(
     request,
     emel::error::cast(emel::batch::planner::error::internal_error));
-  emel::batch::planner::action::dispatch_unexpected(request);
+  emel::batch::planner::action::on_unexpected(runtime);
   CHECK(done.calls == 1);
   CHECK(error.calls == 3);
 }

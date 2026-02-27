@@ -233,10 +233,10 @@ struct model {
   }
 };
 
-struct sm : public emel::sm<model> {
-  using base_type = emel::sm<model>;
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
 
-  sm() : base_type(context_) {}
+  sm() : base_type() {}
 
   bool process_event(const event::bind & ev) {
     namespace sml = boost::sml;
@@ -244,7 +244,7 @@ struct sm : public emel::sm<model> {
     const bool accepted = base_type::process_event(ev);
     const bool ok = this->is(sml::state<idle>);
     const int32_t err = ok ? EMEL_OK
-                           : (context_.last_error != EMEL_OK ? context_.last_error
+                           : (this->context_.last_error != EMEL_OK ? this->context_.last_error
                                                              : EMEL_ERR_BACKEND);
 
     if (ev.error_out != nullptr) {
@@ -260,7 +260,7 @@ struct sm : public emel::sm<model> {
       }
     }
 
-    action::clear_prepare_request(context_);
+    action::clear_prepare_request(this->context_);
     return accepted && ok;
   }
 
@@ -270,11 +270,11 @@ struct sm : public emel::sm<model> {
     const bool accepted = base_type::process_event(ev);
     const bool ok = this->is(sml::state<done>);
     const int32_t err = ok ? EMEL_OK
-                           : (context_.last_error != EMEL_OK ? context_.last_error
+                           : (this->context_.last_error != EMEL_OK ? this->context_.last_error
                                                              : EMEL_ERR_BACKEND);
 
     if (ev.token_count_out != nullptr) {
-      *ev.token_count_out = context_.token_count;
+      *ev.token_count_out = this->context_.token_count;
     }
     if (ev.error_out != nullptr) {
       *ev.error_out = err;
@@ -282,7 +282,7 @@ struct sm : public emel::sm<model> {
     if (ok) {
       if (ev.dispatch_done != nullptr && ev.owner_sm != nullptr) {
         ev.dispatch_done(ev.owner_sm,
-                         events::conditioning_done{&ev, context_.token_count});
+                         events::conditioning_done{&ev, this->context_.token_count});
       }
     } else {
       if (ev.dispatch_error != nullptr && ev.owner_sm != nullptr) {
@@ -290,17 +290,16 @@ struct sm : public emel::sm<model> {
       }
     }
 
-    action::clear_prepare_request(context_);
+    action::clear_prepare_request(this->context_);
     return accepted && ok;
   }
 
   using base_type::process_event;
   using base_type::visit_current_states;
 
-  int32_t last_error() const noexcept { return context_.last_error; }
+  int32_t last_error() const noexcept { return this->context_.last_error; }
 
  private:
-  action::context context_{};
 };
 
 }  // namespace emel::text::conditioner

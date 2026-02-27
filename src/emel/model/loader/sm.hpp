@@ -130,18 +130,17 @@ struct model {
   }
 };
 
-struct sm : public emel::sm<model> {
-  using base_type = emel::sm<model>;
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
 
-  sm() : base_type(context_) {}
+  sm() : base_type() {}
 
   using base_type::process_event;
   using base_type::visit_current_states;
 
-  int32_t last_error() const noexcept { return context_.last_error; }
+  int32_t last_error() const noexcept { return this->context_.last_error; }
 
  private:
-  action::context context_{};
 };
 
 }  // namespace emel::model::loader

@@ -8,7 +8,6 @@
 #include "emel/callback.hpp"
 #include "emel/emel.h"
 
-
 namespace {
 
 struct plan_capture {
@@ -27,9 +26,7 @@ struct plan_capture {
     if (ev.step_sizes == nullptr) {
       return;
     }
-    const int32_t count = std::min<int32_t>(
-      step_count,
-      static_cast<int32_t>(sizes.size()));
+    const int32_t count = std::min<int32_t>(step_count, static_cast<int32_t>(sizes.size()));
     for (int32_t i = 0; i < count; ++i) {
       sizes[i] = ev.step_sizes[i];
     }
@@ -44,15 +41,15 @@ struct plan_capture {
 inline emel::callback<void(const emel::batch::planner::events::plan_done &)> make_done(
     plan_capture * capture) {
   return emel::callback<void(const emel::batch::planner::events::plan_done &)>::from<
-    plan_capture,
-    &plan_capture::on_done>(capture);
+      plan_capture,
+      &plan_capture::on_done>(capture);
 }
 
 inline emel::callback<void(const emel::batch::planner::events::plan_error &)> make_error(
     plan_capture * capture) {
   return emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
-    plan_capture,
-    &plan_capture::on_error>(capture);
+      plan_capture,
+      &plan_capture::on_error>(capture);
 }
 
 }  // namespace
@@ -68,13 +65,13 @@ TEST_CASE("batch_planner_splits_tokens_into_steps") {
   plan_capture capture{};
 
   CHECK(machine.process_event(emel::batch::planner::event::request{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
-    .n_steps = 2,
-    .mode = emel::batch::planner::event::plan_mode::simple,
-    .output_all = true,
-    .on_done = make_done(&capture),
-    .on_error = make_error(&capture),
+      .token_ids = tokens.data(),
+      .n_tokens = static_cast<int32_t>(tokens.size()),
+      .n_steps = 2,
+      .mode = emel::batch::planner::event::plan_mode::simple,
+      .output_all = true,
+      .on_done = make_done(&capture),
+      .on_error = make_error(&capture),
   }));
 
   CHECK(capture.done_called);
@@ -92,14 +89,14 @@ TEST_CASE("batch_planner_equal_mode_fills_single_sequence_steps") {
   plan_capture capture{};
 
   CHECK(machine.process_event(emel::batch::planner::event::request{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
-    .n_steps = 4,
-    .mode = emel::batch::planner::event::plan_mode::equal,
-    .equal_sequential = false,
-    .output_all = true,
-    .on_done = make_done(&capture),
-    .on_error = make_error(&capture),
+      .token_ids = tokens.data(),
+      .n_tokens = static_cast<int32_t>(tokens.size()),
+      .n_steps = 4,
+      .mode = emel::batch::planner::event::plan_mode::equal,
+      .equal_sequential = false,
+      .output_all = true,
+      .on_done = make_done(&capture),
+      .on_error = make_error(&capture),
   }));
 
   CHECK(capture.done_called);
@@ -115,13 +112,13 @@ TEST_CASE("batch_planner_seq_mode_uses_sequential_chunking") {
   plan_capture capture{};
 
   CHECK(machine.process_event(emel::batch::planner::event::request{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
-    .n_steps = 3,
-    .mode = emel::batch::planner::event::plan_mode::seq,
-    .output_all = true,
-    .on_done = make_done(&capture),
-    .on_error = make_error(&capture),
+      .token_ids = tokens.data(),
+      .n_tokens = static_cast<int32_t>(tokens.size()),
+      .n_steps = 3,
+      .mode = emel::batch::planner::event::plan_mode::seq,
+      .output_all = true,
+      .on_done = make_done(&capture),
+      .on_error = make_error(&capture),
   }));
 
   CHECK(capture.done_called);
@@ -137,13 +134,13 @@ TEST_CASE("batch_planner_sequential_mode_aliases_seq") {
   plan_capture capture{};
 
   CHECK(machine.process_event(emel::batch::planner::event::request{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
-    .n_steps = 3,
-    .mode = emel::batch::planner::event::plan_mode::sequential,
-    .output_all = true,
-    .on_done = make_done(&capture),
-    .on_error = make_error(&capture),
+      .token_ids = tokens.data(),
+      .n_tokens = static_cast<int32_t>(tokens.size()),
+      .n_steps = 3,
+      .mode = emel::batch::planner::event::plan_mode::sequential,
+      .output_all = true,
+      .on_done = make_done(&capture),
+      .on_error = make_error(&capture),
   }));
 
   CHECK(capture.done_called);
@@ -161,18 +158,18 @@ TEST_CASE("batch_planner_equal_mode_supports_sequence_masks") {
   plan_capture capture{};
 
   CHECK(machine.process_event(emel::batch::planner::event::request{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
-    .n_steps = 4,
-    .mode = emel::batch::planner::event::plan_mode::equal,
-    .seq_masks = seq_masks.data(),
-    .seq_masks_count = static_cast<int32_t>(seq_masks.size()),
-    .seq_primary_ids = seq_primary_ids.data(),
-    .seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size()),
-    .equal_sequential = true,
-    .output_all = true,
-    .on_done = make_done(&capture),
-    .on_error = make_error(&capture),
+      .token_ids = tokens.data(),
+      .n_tokens = static_cast<int32_t>(tokens.size()),
+      .n_steps = 4,
+      .mode = emel::batch::planner::event::plan_mode::equal,
+      .seq_masks = seq_masks.data(),
+      .seq_masks_count = static_cast<int32_t>(seq_masks.size()),
+      .seq_primary_ids = seq_primary_ids.data(),
+      .seq_primary_ids_count = static_cast<int32_t>(seq_primary_ids.size()),
+      .equal_sequential = true,
+      .output_all = true,
+      .on_done = make_done(&capture),
+      .on_error = make_error(&capture),
   }));
 
   CHECK(capture.done_called);
@@ -189,15 +186,15 @@ TEST_CASE("batch_planner_seq_mode_supports_sequence_masks") {
   plan_capture capture{};
 
   CHECK(machine.process_event(emel::batch::planner::event::request{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
-    .n_steps = 3,
-    .mode = emel::batch::planner::event::plan_mode::seq,
-    .seq_masks = seq_masks.data(),
-    .seq_masks_count = static_cast<int32_t>(seq_masks.size()),
-    .output_all = true,
-    .on_done = make_done(&capture),
-    .on_error = make_error(&capture),
+      .token_ids = tokens.data(),
+      .n_tokens = static_cast<int32_t>(tokens.size()),
+      .n_steps = 3,
+      .mode = emel::batch::planner::event::plan_mode::seq,
+      .seq_masks = seq_masks.data(),
+      .seq_masks_count = static_cast<int32_t>(seq_masks.size()),
+      .output_all = true,
+      .on_done = make_done(&capture),
+      .on_error = make_error(&capture),
   }));
 
   CHECK(capture.done_called);
@@ -214,14 +211,14 @@ TEST_CASE("batch_planner_counts_outputs_with_output_mask") {
   plan_capture capture{};
 
   CHECK(machine.process_event(emel::batch::planner::event::request{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
-    .n_steps = 2,
-    .mode = emel::batch::planner::event::plan_mode::simple,
-    .output_mask = outputs.data(),
-    .output_mask_count = static_cast<int32_t>(outputs.size()),
-    .on_done = make_done(&capture),
-    .on_error = make_error(&capture),
+      .token_ids = tokens.data(),
+      .n_tokens = static_cast<int32_t>(tokens.size()),
+      .n_steps = 2,
+      .mode = emel::batch::planner::event::plan_mode::simple,
+      .output_mask = outputs.data(),
+      .output_mask_count = static_cast<int32_t>(outputs.size()),
+      .on_done = make_done(&capture),
+      .on_error = make_error(&capture),
   }));
 
   CHECK(capture.done_called);
@@ -232,28 +229,32 @@ TEST_CASE("batch_planner_reports_invalid_arguments") {
   emel::batch::planner::sm machine{};
   plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
-    .token_ids = nullptr,
-    .n_tokens = 4,
-    .n_steps = 2,
-    .mode = emel::batch::planner::event::plan_mode::simple,
-    .on_done = make_done(&capture),
-    .on_error = make_error(&capture),
+  CHECK_FALSE(machine.process_event(emel::batch::planner::event::request{
+      .token_ids = nullptr,
+      .n_tokens = 4,
+      .n_steps = 2,
+      .mode = emel::batch::planner::event::plan_mode::simple,
+      .on_done = make_done(&capture),
+      .on_error = make_error(&capture),
   }));
   CHECK(capture.error_called);
-  CHECK(capture.err == emel::error::cast(emel::batch::planner::error::invalid_request));
+  CHECK(capture.err == emel::error::set(
+      emel::error::cast(emel::batch::planner::error::invalid_request),
+      emel::batch::planner::error::invalid_token_data));
 
   std::array<int32_t, 3> tokens = {{1, 2, 3}};
   plan_capture mode_capture{};
-  CHECK(machine.process_event(emel::batch::planner::event::request{
-    .token_ids = tokens.data(),
-    .n_tokens = static_cast<int32_t>(tokens.size()),
-    .n_steps = 1,
-    .mode = static_cast<emel::batch::planner::event::plan_mode>(99),
-    .equal_sequential = false,
-    .on_done = make_done(&mode_capture),
-    .on_error = make_error(&mode_capture),
+  CHECK_FALSE(machine.process_event(emel::batch::planner::event::request{
+      .token_ids = tokens.data(),
+      .n_tokens = static_cast<int32_t>(tokens.size()),
+      .n_steps = 1,
+      .mode = static_cast<emel::batch::planner::event::plan_mode>(99),
+      .equal_sequential = false,
+      .on_done = make_done(&mode_capture),
+      .on_error = make_error(&mode_capture),
   }));
   CHECK(mode_capture.error_called);
-  CHECK(mode_capture.err == emel::error::cast(emel::batch::planner::error::invalid_request));
+  CHECK(mode_capture.err == emel::error::set(
+      emel::error::cast(emel::batch::planner::error::invalid_request),
+      emel::batch::planner::error::invalid_mode));
 }

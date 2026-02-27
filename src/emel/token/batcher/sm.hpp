@@ -168,9 +168,9 @@ struct model {
   }
 };
 
-struct sm : public emel::sm<model> {
-  using base_type = emel::sm<model>;
-  sm() : base_type(context_) {}
+struct sm : public emel::sm<model, action::context> {
+  using base_type = emel::sm<model, action::context>;
+  sm() : base_type() {}
 
   bool process_event(const event::batch & ev) {
     namespace sml = boost::sml;
@@ -178,7 +178,7 @@ struct sm : public emel::sm<model> {
     if (this->is(sml::state<done>)) {
       action::dispatch_done(ev);
     } else if (this->is(sml::state<errored>) || this->is(sml::state<unexpected>)) {
-      const int32_t err = context_.last_error == EMEL_OK ? EMEL_ERR_BACKEND : context_.last_error;
+      const int32_t err = this->context_.last_error == EMEL_OK ? EMEL_ERR_BACKEND : this->context_.last_error;
       action::dispatch_error(ev, err);
     }
     return accepted;
@@ -190,7 +190,6 @@ struct sm : public emel::sm<model> {
   }
 
  private:
-  action::context context_{};
 };
 
 }  // namespace emel::token::batcher
