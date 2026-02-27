@@ -12,9 +12,9 @@ This inference engine is being implemented by AI under human engineering and arc
 
 > [!WARNING]
 > EMEL is currently going through a major re-architecture expected to complete by end of day on
-> Friday, February 27, 2026. The source of truth for architecture and design lives in
-> `src/emel/**/sm.hpp` docstrings. See [Architecture](docs/architecture/) and
-> [Design Docs](docs/designs/) for the latest improvements.
+> Friday, February 27, 2026. The only domain left to rearchitect is the text domain.
+> The source of truth for architecture and design lives in `src/emel/**/sm.hpp` docstrings and
+> the generated docs under `docs/architecture/`.
 
 ## Implementation priorities
 
