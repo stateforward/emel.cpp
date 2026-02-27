@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
 #include "emel/model/data.hpp"
+#include "emel/text/conditioner/errors.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/tokenizer/events.hpp"
 
@@ -19,7 +21,10 @@ struct conditioning_error;
 namespace emel::text::conditioner::event {
 
 struct bind {
-  const emel::model::data::vocab * vocab = nullptr;
+  explicit bind(const emel::model::data::vocab & vocab_ref) noexcept
+      : vocab(vocab_ref) {}
+
+  const emel::model::data::vocab & vocab;
   emel::text::tokenizer::preprocessor::preprocessor_kind preprocessor_variant =
       emel::text::tokenizer::preprocessor::preprocessor_kind::fallback;
   emel::text::encoders::encoder_kind encoder_variant =
@@ -45,19 +50,55 @@ struct bind {
 };
 
 struct prepare {
+  prepare(int32_t & token_count_out_ref, int32_t & error_out_ref) noexcept
+      : token_count_out(token_count_out_ref),
+        error_out(error_out_ref) {}
+
   std::string_view input = {};
   bool add_special = true;
   bool parse_special = false;
   bool use_bind_defaults = true;
   int32_t * token_ids_out = nullptr;
   int32_t token_capacity = 0;
-  int32_t * token_count_out = nullptr;
-  int32_t * error_out = nullptr;
+  int32_t & token_count_out;
+  int32_t & error_out;
   void * owner_sm = nullptr;
   bool (*dispatch_done)(void * owner_sm,
                         const events::conditioning_done &) = nullptr;
   bool (*dispatch_error)(void * owner_sm,
                          const events::conditioning_error &) = nullptr;
+};
+
+struct bind_ctx {
+  error err = error::none;
+  bool result = false;
+  bool bind_accepted = false;
+  int32_t bind_err_code = 0;
+};
+
+struct bind_runtime {
+  const bind & request;
+  bind_ctx & ctx;
+};
+
+struct prepare_ctx {
+  error err = error::none;
+  char * formatted = nullptr;
+  size_t formatted_capacity = 0;
+  size_t formatted_length = 0;
+  bool add_special = true;
+  bool parse_special = false;
+  int32_t token_count = 0;
+  bool result = false;
+  bool format_accepted = false;
+  int32_t format_err_code = 0;
+  bool tokenize_accepted = false;
+  int32_t tokenize_err_code = 0;
+};
+
+struct prepare_runtime {
+  const prepare & request;
+  prepare_ctx & ctx;
 };
 
 }  // namespace emel::text::conditioner::event

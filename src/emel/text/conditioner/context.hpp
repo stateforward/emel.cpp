@@ -1,11 +1,8 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <string_view>
 
-#include "emel/emel.h"
 #include "emel/model/data.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/tokenizer/events.hpp"
@@ -33,18 +30,6 @@ struct context {
   bool add_special_default = true;
   bool parse_special_default = false;
   bool is_bound = false;
-
-  std::array<char, k_max_formatted_bytes> formatted = {};
-  std::string_view input = {};
-  size_t formatted_length = 0;
-  bool add_special = true;
-  bool parse_special = false;
-  int32_t * token_ids_out = nullptr;
-  int32_t token_capacity = 0;
-  int32_t token_count = 0;
-
-  int32_t phase_error = EMEL_OK;
-  int32_t last_error = EMEL_OK;
 };
 
 }  // namespace emel::text::conditioner::action

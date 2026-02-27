@@ -124,8 +124,9 @@ if(EMEL_ENABLE_TESTS)
       tests/text/jinja/parser_tests.cpp
       tests/text/jinja/lexer_tests.cpp
       tests/text/jinja/formatter_tests.cpp
+      tests/text/formatter/formatter_tests.cpp
       tests/text/encoders/encoder_tests.cpp
-      tests/text/conditioner/conditioner_tests.cpp
+      tests/text/conditioner/text_conditioner_tests.cpp
       tests/text/detokenizer/detokenizer_tests.cpp
       tests/text/renderer/renderer_tests.cpp
       tests/text/unicode/unicode_tests.cpp

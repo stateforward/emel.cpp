@@ -6,12 +6,15 @@
 
 #include <doctest/doctest.h>
 
-#include "emel/emel.h"
 #include "emel/model/data.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 
 namespace {
+
+constexpr int32_t conditioner_code(const emel::text::conditioner::error err) noexcept {
+  return static_cast<int32_t>(err);
+}
 
 int32_t add_token(emel::model::data::vocab & vocab,
                   const char * text,
@@ -73,7 +76,7 @@ struct callback_recorder {
   int prepare_done = 0;
   int prepare_error = 0;
   int32_t last_token_count = 0;
-  int32_t last_error = EMEL_OK;
+  int32_t last_error = conditioner_code(emel::text::conditioner::error::none);
 };
 
 bool on_bind_done(void * owner,
@@ -127,14 +130,14 @@ bool format_fixed(void * formatter_ctx,
                   const emel::text::formatter::format_request & request,
                   int32_t * error_out) {
   if (error_out != nullptr) {
-    *error_out = EMEL_OK;
+    *error_out = conditioner_code(emel::text::conditioner::error::none);
   }
   if (request.output_length_out != nullptr) {
     *request.output_length_out = 0;
   }
   if (formatter_ctx == nullptr) {
     if (error_out != nullptr) {
-      *error_out = EMEL_ERR_INVALID_ARGUMENT;
+      *error_out = conditioner_code(emel::text::conditioner::error::invalid_argument);
     }
     return false;
   }
@@ -143,7 +146,7 @@ bool format_fixed(void * formatter_ctx,
   if ((request.output == nullptr && request.output_capacity > 0) ||
       request.output_capacity < ctx->text.size()) {
     if (error_out != nullptr) {
-      *error_out = EMEL_ERR_INVALID_ARGUMENT;
+      *error_out = conditioner_code(emel::text::conditioner::error::invalid_argument);
     }
     return false;
   }
@@ -167,7 +170,7 @@ bool tokenizer_bind_fail_with_error(
     void *,
     const emel::text::tokenizer::event::bind & ev) {
   if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_ERR_MODEL_INVALID;
+    *ev.error_out = conditioner_code(emel::text::conditioner::error::model_invalid);
   }
   return true;
 }
@@ -182,7 +185,7 @@ bool tokenizer_tokenize_fail_with_error(
     void *,
     const emel::text::tokenizer::event::tokenize & ev) {
   if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_ERR_MODEL_INVALID;
+    *ev.error_out = conditioner_code(emel::text::conditioner::error::model_invalid);
   }
   return true;
 }
@@ -191,7 +194,7 @@ bool tokenizer_tokenize_negative_count(
     void *,
     const emel::text::tokenizer::event::tokenize & ev) {
   if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
+    *ev.error_out = conditioner_code(emel::text::conditioner::error::none);
   }
   if (ev.token_count_out != nullptr) {
     *ev.token_count_out = -1;
@@ -203,7 +206,7 @@ bool tokenizer_tokenize_over_capacity(
     void *,
     const emel::text::tokenizer::event::tokenize & ev) {
   if (ev.error_out != nullptr) {
-    *ev.error_out = EMEL_OK;
+    *ev.error_out = conditioner_code(emel::text::conditioner::error::none);
   }
   if (ev.token_count_out != nullptr) {
     *ev.token_count_out = ev.token_capacity + 1;
@@ -229,7 +232,7 @@ bool formatter_fail_with_error(
     *request.output_length_out = 0;
   }
   if (error_out != nullptr) {
-    *error_out = EMEL_ERR_MODEL_INVALID;
+    *error_out = conditioner_code(emel::text::conditioner::error::model_invalid);
   }
   return false;
 }
@@ -239,7 +242,7 @@ bool formatter_oversized_length(
     const emel::text::formatter::format_request & request,
     int32_t * error_out) {
   if (error_out != nullptr) {
-    *error_out = EMEL_OK;
+    *error_out = conditioner_code(emel::text::conditioner::error::none);
   }
   if (request.output_length_out != nullptr) {
     *request.output_length_out = request.output_capacity + 1;
@@ -255,9 +258,8 @@ TEST_CASE("conditioner_bind_and_prepare_with_default_formatter") {
   emel::text::conditioner::sm conditioner{};
   callback_recorder recorder{};
 
-  int32_t bind_err = EMEL_OK;
-  emel::text::conditioner::event::bind bind_ev = {};
-  bind_ev.vocab = &vocab;
+  int32_t bind_err = conditioner_code(emel::text::conditioner::error::none);
+  emel::text::conditioner::event::bind bind_ev{vocab};
   bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
   bind_ev.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   bind_ev.tokenizer_sm = &tokenizer;
@@ -269,26 +271,24 @@ TEST_CASE("conditioner_bind_and_prepare_with_default_formatter") {
   bind_ev.dispatch_error = on_bind_error;
 
   CHECK(conditioner.process_event(bind_ev));
-  CHECK(bind_err == EMEL_OK);
+  CHECK(bind_err == conditioner_code(emel::text::conditioner::error::none));
   CHECK(recorder.bind_done == 1);
   CHECK(recorder.bind_error == 0);
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
-  int32_t prepare_err = EMEL_OK;
-  emel::text::conditioner::event::prepare prepare_ev = {};
+  int32_t prepare_err = conditioner_code(emel::text::conditioner::error::none);
+  emel::text::conditioner::event::prepare prepare_ev{token_count, prepare_err};
   prepare_ev.input = "hello world";
   prepare_ev.use_bind_defaults = true;
   prepare_ev.token_ids_out = tokens.data();
   prepare_ev.token_capacity = static_cast<int32_t>(tokens.size());
-  prepare_ev.token_count_out = &token_count;
-  prepare_ev.error_out = &prepare_err;
   prepare_ev.owner_sm = &recorder;
   prepare_ev.dispatch_done = on_prepare_done;
   prepare_ev.dispatch_error = on_prepare_error;
 
   CHECK(conditioner.process_event(prepare_ev));
-  CHECK(prepare_err == EMEL_OK);
+  CHECK(prepare_err == conditioner_code(emel::text::conditioner::error::none));
   CHECK(token_count == 4);
   CHECK(tokens[0] == vocab.bos_id);
   CHECK(tokens[1] == 0);
@@ -306,23 +306,22 @@ TEST_CASE("conditioner_prepare_requires_bind") {
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
-  int32_t prepare_err = EMEL_OK;
-  emel::text::conditioner::event::prepare prepare_ev = {};
+  int32_t prepare_err = conditioner_code(emel::text::conditioner::error::none);
+  emel::text::conditioner::event::prepare prepare_ev{token_count, prepare_err};
   prepare_ev.input = "hello";
   prepare_ev.token_ids_out = tokens.data();
   prepare_ev.token_capacity = static_cast<int32_t>(tokens.size());
-  prepare_ev.token_count_out = &token_count;
-  prepare_ev.error_out = &prepare_err;
   prepare_ev.owner_sm = &recorder;
   prepare_ev.dispatch_done = on_prepare_done;
   prepare_ev.dispatch_error = on_prepare_error;
 
   CHECK_FALSE(conditioner.process_event(prepare_ev));
-  CHECK(prepare_err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(prepare_err == conditioner_code(emel::text::conditioner::error::invalid_argument));
   CHECK(token_count == 0);
   CHECK(recorder.prepare_done == 0);
   CHECK(recorder.prepare_error == 1);
-  CHECK(recorder.last_error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(recorder.last_error ==
+        conditioner_code(emel::text::conditioner::error::invalid_argument));
   CHECK(vocab.n_tokens >= 2);
 }
 
@@ -334,9 +333,8 @@ TEST_CASE("conditioner_uses_injected_formatter_function") {
   fixed_formatter_ctx formatter_ctx{};
   formatter_ctx.text = "hello world";
 
-  int32_t bind_err = EMEL_OK;
-  emel::text::conditioner::event::bind bind_ev = {};
-  bind_ev.vocab = &vocab;
+  int32_t bind_err = conditioner_code(emel::text::conditioner::error::none);
+  emel::text::conditioner::event::bind bind_ev{vocab};
   bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
   bind_ev.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   bind_ev.tokenizer_sm = &tokenizer;
@@ -349,193 +347,180 @@ TEST_CASE("conditioner_uses_injected_formatter_function") {
   bind_ev.error_out = &bind_err;
 
   CHECK(conditioner.process_event(bind_ev));
-  CHECK(bind_err == EMEL_OK);
+  CHECK(bind_err == conditioner_code(emel::text::conditioner::error::none));
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
-  int32_t prepare_err = EMEL_OK;
-  emel::text::conditioner::event::prepare prepare_ev = {};
+  int32_t prepare_err = conditioner_code(emel::text::conditioner::error::none);
+  emel::text::conditioner::event::prepare prepare_ev{token_count, prepare_err};
   prepare_ev.input = "ignored";
   prepare_ev.use_bind_defaults = true;
   prepare_ev.token_ids_out = tokens.data();
   prepare_ev.token_capacity = static_cast<int32_t>(tokens.size());
-  prepare_ev.token_count_out = &token_count;
-  prepare_ev.error_out = &prepare_err;
 
   CHECK(conditioner.process_event(prepare_ev));
-  CHECK(prepare_err == EMEL_OK);
+  CHECK(prepare_err == conditioner_code(emel::text::conditioner::error::none));
   CHECK(token_count == 2);
   CHECK(tokens[0] == 0);
   CHECK(tokens[1] == 1);
 }
 
 TEST_CASE("conditioner_action_and_guard_error_paths") {
+  using conditioner_error = emel::text::conditioner::error;
+
   auto & vocab = make_bpe_vocab();
   int dummy = 0;
   void * dummy_ptr = &dummy;
+  int32_t token_count = 0;
+  int32_t err = conditioner_code(emel::text::conditioner::error::none);
 
   emel::text::conditioner::action::context ctx = {};
-  emel::text::conditioner::event::bind bind_ev = {};
-  emel::text::conditioner::event::prepare prepare_ev = {};
+  emel::text::conditioner::event::bind bind_ev{vocab};
+  emel::text::conditioner::event::bind_ctx bind_ctx = {};
+  emel::text::conditioner::event::bind_runtime bind_runtime{bind_ev, bind_ctx};
+  emel::text::conditioner::event::prepare prepare_ev{token_count, err};
+  emel::text::conditioner::event::prepare_ctx prepare_ctx = {};
+  std::array<char, emel::text::conditioner::action::k_max_formatted_bytes> formatted = {};
+  prepare_ctx.formatted = formatted.data();
+  prepare_ctx.formatted_capacity = formatted.size();
+  emel::text::conditioner::event::prepare_runtime prepare_runtime{prepare_ev, prepare_ctx};
 
-  CHECK_FALSE(emel::text::conditioner::guard::valid_bind{}(bind_ev));
-  CHECK(emel::text::conditioner::guard::invalid_bind{}(bind_ev));
+  CHECK_FALSE(emel::text::conditioner::guard::valid_bind{}(bind_runtime));
+  CHECK(emel::text::conditioner::guard::invalid_bind{}(bind_runtime));
 
-  bind_ev.vocab = &vocab;
   bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
   bind_ev.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   bind_ev.tokenizer_sm = dummy_ptr;
   bind_ev.dispatch_tokenizer_bind = tokenizer_bind_dispatch;
   bind_ev.dispatch_tokenizer_tokenize = tokenizer_tokenize_dispatch;
   bind_ev.format_prompt = emel::text::formatter::format_raw;
-  CHECK(emel::text::conditioner::guard::valid_bind{}(bind_ev));
+  CHECK(emel::text::conditioner::guard::valid_bind{}(bind_runtime));
 
-  emel::text::conditioner::action::reject_bind(bind_ev, ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
+  emel::text::conditioner::action::reject_bind(bind_runtime, ctx);
+  CHECK(bind_ctx.err == conditioner_error::invalid_argument);
+  CHECK_FALSE(bind_ctx.result);
 
-  prepare_ev.token_ids_out = nullptr;
-  prepare_ev.token_count_out = nullptr;
-  prepare_ev.error_out = nullptr;
-  CHECK(emel::text::conditioner::guard::invalid_prepare{}(prepare_ev, ctx));
+  CHECK(emel::text::conditioner::guard::invalid_prepare{}(prepare_runtime, ctx));
 
-  emel::text::conditioner::action::begin_bind(bind_ev, ctx);
+  emel::text::conditioner::action::begin_bind(bind_runtime, ctx);
   CHECK(ctx.vocab == &vocab);
   CHECK_FALSE(ctx.is_bound);
+  CHECK(bind_ctx.err == conditioner_error::none);
+  CHECK_FALSE(bind_ctx.result);
 
-  ctx.vocab = nullptr;
-  emel::text::conditioner::action::bind_tokenizer(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
-
-  ctx.vocab = &vocab;
   ctx.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
   ctx.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   ctx.tokenizer_sm = dummy_ptr;
   ctx.dispatch_tokenizer_bind = tokenizer_bind_fail_no_error;
   ctx.dispatch_tokenizer_tokenize = tokenizer_tokenize_dispatch;
   ctx.format_prompt = emel::text::formatter::format_raw;
-  emel::text::conditioner::action::bind_tokenizer(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
+  emel::text::conditioner::action::dispatch_bind_tokenizer(bind_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::bind_rejected_no_error{}(bind_runtime));
+  emel::text::conditioner::action::bind_error_backend(bind_runtime, ctx);
+  CHECK(bind_ctx.err == conditioner_error::backend);
+  CHECK_FALSE(bind_ctx.result);
 
   ctx.dispatch_tokenizer_bind = tokenizer_bind_fail_with_error;
-  emel::text::conditioner::action::bind_tokenizer(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_MODEL_INVALID);
+  emel::text::conditioner::action::dispatch_bind_tokenizer(bind_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::bind_error_code_present{}(bind_runtime));
+  emel::text::conditioner::action::bind_error_from_code(bind_runtime, ctx);
+  CHECK(bind_ctx.err == conditioner_error::model_invalid);
+  CHECK_FALSE(bind_ctx.result);
 
   ctx.dispatch_tokenizer_bind = tokenizer_bind_dispatch;
   emel::text::tokenizer::sm tokenizer{};
   ctx.tokenizer_sm = &tokenizer;
-  emel::text::conditioner::action::bind_tokenizer(ctx);
-  CHECK(ctx.last_error == EMEL_OK);
+  emel::text::conditioner::action::dispatch_bind_tokenizer(bind_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::bind_successful{}(bind_runtime));
+  emel::text::conditioner::action::bind_success(bind_runtime, ctx);
+  CHECK(bind_ctx.err == conditioner_error::none);
+  CHECK(bind_ctx.result);
   CHECK(ctx.is_bound);
 
   std::array<int32_t, 8> tokens = {};
-  int32_t token_count = 0;
-  int32_t err = EMEL_OK;
   prepare_ev.input = "hello world";
   prepare_ev.use_bind_defaults = false;
   prepare_ev.add_special = false;
   prepare_ev.parse_special = true;
   prepare_ev.token_ids_out = tokens.data();
   prepare_ev.token_capacity = static_cast<int32_t>(tokens.size());
-  prepare_ev.token_count_out = &token_count;
-  prepare_ev.error_out = &err;
 
-  emel::text::conditioner::action::begin_prepare(prepare_ev, ctx);
-  CHECK_FALSE(ctx.add_special);
-  CHECK(ctx.parse_special);
-  CHECK(ctx.token_count == 0);
-  CHECK(emel::text::conditioner::guard::valid_prepare{}(prepare_ev, ctx));
+  CHECK(emel::text::conditioner::guard::use_request_overrides{}(prepare_runtime));
+  emel::text::conditioner::action::begin_prepare_from_request(prepare_runtime, ctx);
+  CHECK_FALSE(prepare_ctx.add_special);
+  CHECK(prepare_ctx.parse_special);
+  CHECK(prepare_ctx.token_count == 0);
+  CHECK(emel::text::conditioner::guard::valid_prepare{}(prepare_runtime, ctx));
 
   ctx.format_prompt = formatter_fail_no_error;
-  emel::text::conditioner::action::run_format(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
+  emel::text::conditioner::action::dispatch_format(prepare_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::format_rejected_no_error{}(prepare_runtime));
+  emel::text::conditioner::action::format_error_backend(prepare_runtime, ctx);
+  CHECK(prepare_ctx.err == conditioner_error::backend);
+  CHECK_FALSE(prepare_ctx.result);
 
   ctx.format_prompt = formatter_fail_with_error;
-  emel::text::conditioner::action::run_format(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_MODEL_INVALID);
+  emel::text::conditioner::action::dispatch_format(prepare_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::format_error_code_present{}(prepare_runtime));
+  emel::text::conditioner::action::format_error_from_code(prepare_runtime, ctx);
+  CHECK(prepare_ctx.err == conditioner_error::model_invalid);
+  CHECK_FALSE(prepare_ctx.result);
 
   ctx.format_prompt = formatter_oversized_length;
-  emel::text::conditioner::action::run_format(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
+  emel::text::conditioner::action::dispatch_format(prepare_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::format_length_overflow{}(prepare_runtime));
+  emel::text::conditioner::action::format_error_invalid_argument(prepare_runtime, ctx);
+  CHECK(prepare_ctx.err == conditioner_error::invalid_argument);
+  CHECK_FALSE(prepare_ctx.result);
 
   ctx.format_prompt = emel::text::formatter::format_raw;
-  ctx.last_error = EMEL_OK;
-  emel::text::conditioner::action::run_format(ctx);
-  CHECK(ctx.last_error == EMEL_OK);
-
-  ctx.dispatch_tokenizer_tokenize = nullptr;
-  emel::text::conditioner::action::run_tokenize(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
+  emel::text::conditioner::action::dispatch_format(prepare_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::format_successful{}(prepare_runtime));
+  CHECK(prepare_ctx.formatted_length > 0);
 
   ctx.dispatch_tokenizer_tokenize = tokenizer_tokenize_fail_no_error;
-  emel::text::conditioner::action::run_tokenize(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
+  emel::text::conditioner::action::dispatch_tokenize(prepare_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::tokenize_rejected_no_error{}(prepare_runtime));
+  emel::text::conditioner::action::tokenize_error_backend(prepare_runtime, ctx);
+  CHECK(prepare_ctx.err == conditioner_error::backend);
+  CHECK_FALSE(prepare_ctx.result);
 
   ctx.dispatch_tokenizer_tokenize = tokenizer_tokenize_fail_with_error;
-  emel::text::conditioner::action::run_tokenize(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_MODEL_INVALID);
+  emel::text::conditioner::action::dispatch_tokenize(prepare_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::tokenize_error_code_present{}(prepare_runtime));
+  emel::text::conditioner::action::tokenize_error_from_code(prepare_runtime, ctx);
+  CHECK(prepare_ctx.err == conditioner_error::model_invalid);
+  CHECK_FALSE(prepare_ctx.result);
 
   ctx.dispatch_tokenizer_tokenize = tokenizer_tokenize_negative_count;
-  emel::text::conditioner::action::run_tokenize(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
+  emel::text::conditioner::action::dispatch_tokenize(prepare_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::tokenize_count_invalid{}(prepare_runtime));
+  emel::text::conditioner::action::tokenize_error_backend(prepare_runtime, ctx);
+  CHECK(prepare_ctx.err == conditioner_error::backend);
+  CHECK_FALSE(prepare_ctx.result);
 
   ctx.dispatch_tokenizer_tokenize = tokenizer_tokenize_over_capacity;
-  emel::text::conditioner::action::run_tokenize(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
+  emel::text::conditioner::action::dispatch_tokenize(prepare_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::tokenize_count_invalid{}(prepare_runtime));
+  emel::text::conditioner::action::tokenize_error_backend(prepare_runtime, ctx);
+  CHECK(prepare_ctx.err == conditioner_error::backend);
+  CHECK_FALSE(prepare_ctx.result);
 
   ctx.dispatch_tokenizer_tokenize = tokenizer_tokenize_dispatch;
   ctx.tokenizer_sm = &tokenizer;
-  ctx.parse_special = false;
-  emel::text::conditioner::action::run_tokenize(ctx);
-  CHECK(ctx.last_error == EMEL_OK);
-  CHECK(ctx.token_count > 0);
+  prepare_ctx.parse_special = false;
+  emel::text::conditioner::action::dispatch_tokenize(prepare_runtime, ctx);
+  CHECK(emel::text::conditioner::guard::tokenize_successful{}(prepare_runtime));
+  emel::text::conditioner::action::prepare_success(prepare_runtime, ctx);
+  CHECK(prepare_ctx.err == conditioner_error::none);
+  CHECK(prepare_ctx.result);
+  CHECK(prepare_ctx.token_count > 0);
 
-  ctx.last_error = EMEL_OK;
-  ctx.phase_error = EMEL_OK;
-  emel::text::conditioner::action::ensure_last_error(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
-
-  ctx.last_error = EMEL_ERR_MODEL_INVALID;
-  ctx.phase_error = EMEL_ERR_INVALID_ARGUMENT;
-  emel::text::conditioner::action::ensure_last_error(ctx);
-  CHECK(ctx.last_error == EMEL_ERR_MODEL_INVALID);
-
-  emel::text::conditioner::action::mark_done(ctx);
-  CHECK(ctx.last_error == EMEL_OK);
-  CHECK(ctx.phase_error == EMEL_OK);
-
-  emel::text::conditioner::action::on_unexpected(bind_ev, ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(ctx.token_count == 0);
-
-  emel::text::conditioner::action::clear_prepare_request(ctx);
-  CHECK(ctx.token_ids_out == nullptr);
-
-  ctx.phase_error = EMEL_OK;
-  CHECK(emel::text::conditioner::guard::phase_ok{}(ctx));
-  CHECK_FALSE(emel::text::conditioner::guard::phase_failed{}(ctx));
-}
-
-TEST_CASE("formatter_format_raw_handles_invalid_and_empty_inputs") {
-  int32_t err = EMEL_OK;
-  size_t out_len = 7;
-
-  emel::text::formatter::format_request bad_req = {};
-  bad_req.input = "x";
-  bad_req.output = nullptr;
-  bad_req.output_capacity = 1;
-  bad_req.output_length_out = &out_len;
-  CHECK_FALSE(emel::text::formatter::format_raw(nullptr, bad_req, &err));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(out_len == 0);
-
-  err = EMEL_OK;
-  out_len = 9;
-  emel::text::formatter::format_request empty_req = {};
-  empty_req.input = "";
-  empty_req.output = nullptr;
-  empty_req.output_capacity = 0;
-  empty_req.output_length_out = &out_len;
-  CHECK(emel::text::formatter::format_raw(nullptr, empty_req, &err));
-  CHECK(err == EMEL_OK);
-  CHECK(out_len == 0);
+  emel::text::conditioner::action::on_unexpected(bind_runtime, ctx);
+  CHECK(bind_ctx.err == conditioner_error::invalid_argument);
+  CHECK_FALSE(bind_ctx.result);
+  emel::text::conditioner::action::on_unexpected(prepare_runtime, ctx);
+  CHECK(prepare_ctx.token_count == 0);
+  CHECK(prepare_ctx.err == conditioner_error::invalid_argument);
+  CHECK_FALSE(prepare_ctx.result);
 }

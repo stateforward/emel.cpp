@@ -2,223 +2,339 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
-#include "emel/emel.h"
 #include "emel/text/conditioner/context.hpp"
+#include "emel/text/conditioner/detail.hpp"
+#include "emel/text/conditioner/errors.hpp"
 #include "emel/text/conditioner/events.hpp"
 
 namespace emel::text::conditioner::action {
 
-inline void set_error(context & ctx, const int32_t err) noexcept {
-  ctx.phase_error = err;
-  ctx.last_error = err;
-}
-
-inline void clear_prepare_request(context & ctx) noexcept {
-  ctx.input = {};
-  ctx.formatted_length = 0;
-  ctx.add_special = true;
-  ctx.parse_special = false;
-  ctx.token_ids_out = nullptr;
-  ctx.token_capacity = 0;
-  ctx.token_count = 0;
+template <class runtime_event_type>
+inline void set_error(const runtime_event_type & runtime_ev,
+                      context &,
+                      const error err) noexcept {
+  const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+  ev.ctx.err = err;
+  ev.ctx.result = false;
 }
 
 struct begin_bind {
-  void operator()(const event::bind & ev, context & ctx) const noexcept {
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-    ctx.vocab = ev.vocab;
-    ctx.preprocessor_variant = ev.preprocessor_variant;
-    ctx.encoder_variant = ev.encoder_variant;
-    ctx.tokenizer_sm = ev.tokenizer_sm;
-    ctx.dispatch_tokenizer_bind = ev.dispatch_tokenizer_bind;
-    ctx.dispatch_tokenizer_tokenize = ev.dispatch_tokenizer_tokenize;
-    ctx.formatter_ctx = ev.formatter_ctx;
-    ctx.format_prompt = ev.format_prompt;
-    ctx.add_special_default = ev.add_special;
-    ctx.parse_special_default = ev.parse_special;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+
+    ctx.vocab = &ev.request.vocab;
+    ctx.preprocessor_variant = ev.request.preprocessor_variant;
+    ctx.encoder_variant = ev.request.encoder_variant;
+    ctx.tokenizer_sm = ev.request.tokenizer_sm;
+    ctx.dispatch_tokenizer_bind = ev.request.dispatch_tokenizer_bind;
+    ctx.dispatch_tokenizer_tokenize = ev.request.dispatch_tokenizer_tokenize;
+    ctx.formatter_ctx = ev.request.formatter_ctx;
+    ctx.format_prompt = ev.request.format_prompt;
+    ctx.add_special_default = ev.request.add_special;
+    ctx.parse_special_default = ev.request.parse_special;
     ctx.is_bound = false;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-    clear_prepare_request(ctx);
+
+    ev.ctx.err = error::none;
+    ev.ctx.result = false;
+    ev.ctx.bind_accepted = false;
+    ev.ctx.bind_err_code = detail::to_local_error_code(error::none);
   }
 };
 
 struct reject_bind {
-  void operator()(const event::bind &, context & ctx) const noexcept {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
     ctx.is_bound = false;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+    set_error(runtime_ev, ctx, error::invalid_argument);
   }
 };
 
-struct bind_tokenizer {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.is_bound = false;
-    if (ctx.vocab == nullptr || ctx.tokenizer_sm == nullptr ||
-        ctx.dispatch_tokenizer_bind == nullptr ||
-        ctx.dispatch_tokenizer_tokenize == nullptr ||
-        ctx.format_prompt == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
+struct dispatch_bind_tokenizer {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
 
-    int32_t err = EMEL_OK;
-    emel::text::tokenizer::event::bind tokenize_bind = {};
-    tokenize_bind.vocab = ctx.vocab;
-    tokenize_bind.preprocessor_variant = ctx.preprocessor_variant;
-    tokenize_bind.encoder_variant = ctx.encoder_variant;
-    tokenize_bind.error_out = &err;
-    const bool accepted =
-        ctx.dispatch_tokenizer_bind(ctx.tokenizer_sm, tokenize_bind);
-    if (!accepted && err == EMEL_OK) {
-      set_error(ctx, EMEL_ERR_BACKEND);
-      return;
-    }
-    if (err != EMEL_OK) {
-      set_error(ctx, err);
-      return;
-    }
+    int32_t err = detail::to_local_error_code(error::none);
+    emel::text::tokenizer::event::bind tokenizer_bind = {};
+    tokenizer_bind.vocab = ctx.vocab;
+    tokenizer_bind.preprocessor_variant = ctx.preprocessor_variant;
+    tokenizer_bind.encoder_variant = ctx.encoder_variant;
+    tokenizer_bind.error_out = &err;
 
+    ev.ctx.bind_accepted =
+        ctx.dispatch_tokenizer_bind(ctx.tokenizer_sm, tokenizer_bind);
+    ev.ctx.bind_err_code = err;
+  }
+};
+
+struct bind_error_from_code {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    set_error(ev, ctx, detail::from_local_error_code(ev.ctx.bind_err_code));
+  }
+};
+
+struct bind_error_backend {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    set_error(runtime_ev, ctx, error::backend);
+  }
+};
+
+struct bind_success {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
     ctx.is_bound = true;
-    ctx.last_error = EMEL_OK;
+    ev.ctx.err = error::none;
+    ev.ctx.result = true;
   }
 };
 
-struct begin_prepare {
-  void operator()(const event::prepare & ev, context & ctx) const noexcept {
-    if (ev.token_count_out != nullptr) {
-      *ev.token_count_out = 0;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-    ctx.input = ev.input;
-    ctx.formatted_length = 0;
-    ctx.add_special =
-        ev.use_bind_defaults ? ctx.add_special_default : ev.add_special;
-    ctx.parse_special =
-        ev.use_bind_defaults ? ctx.parse_special_default : ev.parse_special;
-    ctx.token_ids_out = ev.token_ids_out;
-    ctx.token_capacity = ev.token_capacity;
-    ctx.token_count = 0;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
+struct begin_prepare_bind_defaults {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+
+    ev.ctx.err = error::none;
+    ev.ctx.formatted_length = 0;
+    ev.ctx.add_special = ctx.add_special_default;
+    ev.ctx.parse_special = ctx.parse_special_default;
+    ev.ctx.token_count = 0;
+    ev.ctx.result = false;
+    ev.ctx.format_accepted = false;
+    ev.ctx.format_err_code = detail::to_local_error_code(error::none);
+    ev.ctx.tokenize_accepted = false;
+    ev.ctx.tokenize_err_code = detail::to_local_error_code(error::none);
+  }
+};
+
+struct begin_prepare_from_request {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+
+    ev.ctx.err = error::none;
+    ev.ctx.formatted_length = 0;
+    ev.ctx.add_special = ev.request.add_special;
+    ev.ctx.parse_special = ev.request.parse_special;
+    ev.ctx.token_count = 0;
+    ev.ctx.result = false;
+    ev.ctx.format_accepted = false;
+    ev.ctx.format_err_code = detail::to_local_error_code(error::none);
+    ev.ctx.tokenize_accepted = false;
+    ev.ctx.tokenize_err_code = detail::to_local_error_code(error::none);
   }
 };
 
 struct reject_prepare {
-  void operator()(const event::prepare &, context & ctx) const noexcept {
-    ctx.token_count = 0;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.token_count = 0;
+    set_error(ev, ctx, error::invalid_argument);
   }
 };
 
-struct run_format {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
+struct dispatch_format {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
 
     emel::text::formatter::format_request request = {};
-    request.input = ctx.input;
-    request.output = ctx.formatted.data();
-    request.output_capacity = ctx.formatted.size();
-    request.output_length_out = &ctx.formatted_length;
+    request.input = ev.request.input;
+    request.output = ev.ctx.formatted;
+    request.output_capacity = ev.ctx.formatted_capacity;
+    request.output_length_out = &ev.ctx.formatted_length;
 
-    int32_t err = EMEL_OK;
-    const bool accepted =
-        ctx.format_prompt(ctx.formatter_ctx, request, &err);
-    if (!accepted && err == EMEL_OK) {
-      set_error(ctx, EMEL_ERR_BACKEND);
-      return;
-    }
-    if (err != EMEL_OK) {
-      set_error(ctx, err);
-      return;
-    }
-    if (ctx.formatted_length > ctx.formatted.size()) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
+    int32_t err = detail::to_local_error_code(error::none);
+    ev.ctx.format_accepted = ctx.format_prompt(ctx.formatter_ctx, request, &err);
+    ev.ctx.format_err_code = err;
   }
 };
 
-struct run_tokenize {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.dispatch_tokenizer_tokenize == nullptr || ctx.tokenizer_sm == nullptr ||
-        ctx.vocab == nullptr || ctx.token_ids_out == nullptr ||
-        ctx.token_capacity <= 0) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
+struct format_error_from_code {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    set_error(ev, ctx, detail::from_local_error_code(ev.ctx.format_err_code));
+  }
+};
 
-    int32_t err = EMEL_OK;
+struct format_error_backend {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    set_error(runtime_ev, ctx, error::backend);
+  }
+};
+
+struct format_error_invalid_argument {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    set_error(runtime_ev, ctx, error::invalid_argument);
+  }
+};
+
+struct dispatch_tokenize {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+
+    int32_t err = detail::to_local_error_code(error::none);
     int32_t count = 0;
     emel::text::tokenizer::event::tokenize tokenize_ev = {};
     tokenize_ev.vocab = ctx.vocab;
-    tokenize_ev.text = std::string_view(ctx.formatted.data(), ctx.formatted_length);
-    tokenize_ev.add_special = ctx.add_special;
-    tokenize_ev.parse_special = ctx.parse_special;
-    tokenize_ev.token_ids_out = ctx.token_ids_out;
-    tokenize_ev.token_capacity = ctx.token_capacity;
+    tokenize_ev.text = std::string_view(ev.ctx.formatted, ev.ctx.formatted_length);
+    tokenize_ev.add_special = ev.ctx.add_special;
+    tokenize_ev.parse_special = ev.ctx.parse_special;
+    tokenize_ev.token_ids_out = ev.request.token_ids_out;
+    tokenize_ev.token_capacity = ev.request.token_capacity;
     tokenize_ev.token_count_out = &count;
     tokenize_ev.error_out = &err;
 
-    const bool accepted =
+    ev.ctx.tokenize_accepted =
         ctx.dispatch_tokenizer_tokenize(ctx.tokenizer_sm, tokenize_ev);
-    if (!accepted && err == EMEL_OK) {
-      set_error(ctx, EMEL_ERR_BACKEND);
-      return;
-    }
-    if (err != EMEL_OK) {
-      set_error(ctx, err);
-      return;
-    }
-    if (count < 0 || count > ctx.token_capacity) {
-      set_error(ctx, EMEL_ERR_BACKEND);
-      return;
-    }
-
-    ctx.token_count = count;
-    ctx.last_error = EMEL_OK;
+    ev.ctx.tokenize_err_code = err;
+    ev.ctx.token_count = count;
   }
 };
 
-struct mark_done {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
+struct tokenize_error_from_code {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    set_error(ev, ctx, detail::from_local_error_code(ev.ctx.tokenize_err_code));
   }
 };
 
-struct ensure_last_error {
-  void operator()(context & ctx) const noexcept {
-    if (ctx.last_error != EMEL_OK) {
-      return;
-    }
-    ctx.last_error = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
+struct tokenize_error_backend {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+    set_error(runtime_ev, ctx, error::backend);
+  }
+};
+
+struct prepare_success {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.err = error::none;
+    ev.ctx.result = true;
+  }
+};
+
+struct write_bind_error_out {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    *ev.request.error_out = detail::to_local_error_code(ev.ctx.err);
+  }
+};
+
+struct emit_bind_done {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.request.dispatch_done(ev.request.owner_sm, events::binding_done{&ev.request});
+  }
+};
+
+struct emit_bind_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.request.dispatch_error(ev.request.owner_sm,
+                              events::binding_error{
+                                  &ev.request,
+                                  detail::to_local_error_code(ev.ctx.err),
+                              });
+  }
+};
+
+struct write_prepare_token_count {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.request.token_count_out = ev.ctx.token_count;
+  }
+};
+
+struct write_prepare_error_out {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.request.error_out = detail::to_local_error_code(ev.ctx.err);
+  }
+};
+
+struct emit_prepare_done {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.request.dispatch_done(ev.request.owner_sm,
+                             events::conditioning_done{
+                                 &ev.request,
+                                 ev.ctx.token_count,
+                             });
+  }
+};
+
+struct emit_prepare_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    ev.request.dispatch_error(ev.request.owner_sm,
+                              events::conditioning_error{
+                                  &ev.request,
+                                  detail::to_local_error_code(ev.ctx.err),
+                              });
   }
 };
 
 struct on_unexpected {
-  template <class event_type>
-  void operator()(const event_type &, context & ctx) const noexcept {
-    ctx.token_count = 0;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    if constexpr (requires { ev.ctx.token_count; }) {
+      ev.ctx.token_count = 0;
+    }
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = error::invalid_argument;
+    }
+    if constexpr (requires { ev.ctx.result; }) {
+      ev.ctx.result = false;
+    }
   }
 };
 
 inline constexpr begin_bind begin_bind{};
 inline constexpr reject_bind reject_bind{};
-inline constexpr bind_tokenizer bind_tokenizer{};
-inline constexpr begin_prepare begin_prepare{};
+inline constexpr dispatch_bind_tokenizer dispatch_bind_tokenizer{};
+inline constexpr bind_error_from_code bind_error_from_code{};
+inline constexpr bind_error_backend bind_error_backend{};
+inline constexpr bind_success bind_success{};
+inline constexpr begin_prepare_bind_defaults begin_prepare_bind_defaults{};
+inline constexpr begin_prepare_from_request begin_prepare_from_request{};
 inline constexpr reject_prepare reject_prepare{};
-inline constexpr run_format run_format{};
-inline constexpr run_tokenize run_tokenize{};
-inline constexpr mark_done mark_done{};
-inline constexpr ensure_last_error ensure_last_error{};
+inline constexpr dispatch_format dispatch_format{};
+inline constexpr format_error_from_code format_error_from_code{};
+inline constexpr format_error_backend format_error_backend{};
+inline constexpr format_error_invalid_argument format_error_invalid_argument{};
+inline constexpr dispatch_tokenize dispatch_tokenize{};
+inline constexpr tokenize_error_from_code tokenize_error_from_code{};
+inline constexpr tokenize_error_backend tokenize_error_backend{};
+inline constexpr prepare_success prepare_success{};
+inline constexpr write_bind_error_out write_bind_error_out{};
+inline constexpr emit_bind_done emit_bind_done{};
+inline constexpr emit_bind_error emit_bind_error{};
+inline constexpr write_prepare_token_count write_prepare_token_count{};
+inline constexpr write_prepare_error_out write_prepare_error_out{};
+inline constexpr emit_prepare_done emit_prepare_done{};
+inline constexpr emit_prepare_error emit_prepare_error{};
 inline constexpr on_unexpected on_unexpected{};
 
 }  // namespace emel::text::conditioner::action
