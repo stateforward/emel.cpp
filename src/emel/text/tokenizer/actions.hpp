@@ -150,8 +150,8 @@ struct dispatch_preprocess {
     pre_ev.vocab = ctx.vocab;
     pre_ev.text = ev.request.text;
     pre_ev.parse_special = ev.request.parse_special;
-    pre_ev.fragments_out = ev.ctx.fragments.data();
-    pre_ev.fragment_capacity = ev.ctx.fragments.size();
+    pre_ev.fragments_out = ev.ctx.fragments;
+    pre_ev.fragment_capacity = ev.ctx.fragment_capacity;
     pre_ev.fragment_count_out = &fragment_count;
     pre_ev.preprocessed_out = &preprocessed;
     pre_ev.error_out = &err;
@@ -302,8 +302,12 @@ struct on_unexpected {
     if constexpr (requires { ev.ctx.token_count; }) {
       ev.ctx.token_count = 0;
     }
-    ev.ctx.err = error_code(error::invalid_request);
-    ev.ctx.result = false;
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = error_code(error::invalid_request);
+    }
+    if constexpr (requires { ev.ctx.result; }) {
+      ev.ctx.result = false;
+    }
   }
 };
 

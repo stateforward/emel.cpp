@@ -116,7 +116,7 @@ struct preprocess_fragment_count_invalid {
         emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
     return ev.ctx.preprocess_accepted &&
            ev.ctx.preprocess_err_code == k_none_code &&
-           ev.ctx.fragment_count > ev.ctx.fragments.size();
+           ev.ctx.fragment_count > ev.ctx.fragment_capacity;
   }
 };
 
@@ -127,7 +127,7 @@ struct preprocess_success {
         emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
     return ev.ctx.preprocess_accepted &&
            ev.ctx.preprocess_err_code == k_none_code &&
-           ev.ctx.fragment_count <= ev.ctx.fragments.size();
+           ev.ctx.fragment_count <= ev.ctx.fragment_capacity;
   }
 };
 

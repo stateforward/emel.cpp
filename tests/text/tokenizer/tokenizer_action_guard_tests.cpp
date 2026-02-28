@@ -73,6 +73,10 @@ TEST_CASE("tokenizer_guard_can_tokenize") {
   CHECK(emel::text::tokenizer::guard::can_tokenize{}(ev, ctx));
   CHECK(emel::text::tokenizer::guard::can_tokenize{}(runtime_ev, ctx));
 
+  ev.vocab = nullptr;
+  CHECK_FALSE(emel::text::tokenizer::guard::can_tokenize{}(ev, ctx));
+  CHECK_FALSE(emel::text::tokenizer::guard::can_tokenize{}(runtime_ev, ctx));
+
   ev.vocab = &other_vocab;
   CHECK_FALSE(emel::text::tokenizer::guard::can_tokenize{}(runtime_ev, ctx));
 
@@ -185,7 +189,10 @@ TEST_CASE("tokenizer_preprocess_decision_guards") {
   tok_ev.token_capacity = static_cast<int32_t>(tokens.size());
   tok_ev.token_count_out = &token_count;
 
+  std::array<emel::text::tokenizer::action::fragment, 2> fragments = {};
   emel::text::tokenizer::event::tokenize_ctx tok_ctx = {};
+  tok_ctx.fragments = fragments.data();
+  tok_ctx.fragment_capacity = fragments.size();
   emel::text::tokenizer::event::tokenize_runtime runtime_ev{tok_ev, tok_ctx};
 
   tok_ctx.preprocess_accepted = false;
@@ -202,7 +209,7 @@ TEST_CASE("tokenizer_preprocess_decision_guards") {
   tok_ctx.preprocess_accepted = true;
   tok_ctx.preprocess_err_code =
       emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
-  tok_ctx.fragment_count = tok_ctx.fragments.size() + 1;
+  tok_ctx.fragment_count = tok_ctx.fragment_capacity + 1;
   CHECK(emel::text::tokenizer::guard::preprocess_fragment_count_invalid{}(
       runtime_ev));
 
@@ -262,7 +269,10 @@ TEST_CASE("tokenizer_fragment_guards_and_append_action") {
   tok_ev.token_capacity = static_cast<int32_t>(tokens.size());
   tok_ev.token_count_out = &count;
 
+  std::array<emel::text::tokenizer::action::fragment, 2> fragments = {};
   emel::text::tokenizer::event::tokenize_ctx tok_ctx = {};
+  tok_ctx.fragments = fragments.data();
+  tok_ctx.fragment_capacity = fragments.size();
   emel::text::tokenizer::event::tokenize_runtime runtime_ev{tok_ev, tok_ctx};
 
   tok_ctx.fragment_count = 1;

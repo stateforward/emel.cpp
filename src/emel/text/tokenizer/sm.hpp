@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include "emel/sm.hpp"
@@ -154,7 +155,7 @@ struct model {
                    + sml::completion<event::tokenize_runtime> / action::dispatch_encode_raw_fragment
       , sml::state<errored> <= sml::state<encoding_raw_decision>
                    + sml::completion<event::tokenize_runtime>[ guard::encode_rejected_no_error{} ]
-                   / action::set_backend_error
+                   / action::set_invalid_id_error
       , sml::state<errored> <= sml::state<encoding_raw_decision>
                    + sml::completion<event::tokenize_runtime>[ guard::encode_reported_error{} ]
                    / action::set_error_from_encode
@@ -295,6 +296,8 @@ struct sm : public emel::sm<model, action::context> {
     namespace sml = boost::sml;
 
     event::tokenize_ctx runtime_ctx{};
+    runtime_ctx.fragments = tokenize_fragments_.data();
+    runtime_ctx.fragment_capacity = tokenize_fragments_.size();
     event::tokenize_runtime runtime_ev{ev, runtime_ctx};
     const bool accepted = base_type::process_event(runtime_ev);
     const bool ok = this->is(sml::state<done>);
@@ -327,8 +330,7 @@ struct sm : public emel::sm<model, action::context> {
 private:
   int32_t last_error_ = error_code(error::none);
   int32_t token_count_ = 0;
+  std::array<action::fragment, action::k_max_fragments> tokenize_fragments_{};
 };
-
-using Tokenizer = sm;
 
 } // namespace emel::text::tokenizer

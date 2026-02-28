@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -56,9 +55,8 @@ struct bind_ctx {
 };
 
 struct tokenize_ctx {
-  std::array<emel::text::tokenizer::preprocessor::fragment,
-             emel::text::tokenizer::preprocessor::k_max_fragments>
-      fragments = {};
+  emel::text::tokenizer::preprocessor::fragment *fragments = nullptr;
+  size_t fragment_capacity = 0;
   size_t fragment_count = 0;
   size_t fragment_index = 0;
   bool preprocessed = false;
