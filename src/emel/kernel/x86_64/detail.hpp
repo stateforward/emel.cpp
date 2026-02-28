@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -329,7 +330,7 @@ inline bool execute_avx2_mul_mat(const event::op_mul_mat & request) noexcept {
   constexpr uint64_t col_vec = 8;
   constexpr uint64_t col_block = 64;
   constexpr uint64_t depth_block = 64;
-  alignas(64) float packed_b[depth_block * col_block];
+  alignas(64) static thread_local float packed_b[depth_block * col_block];
 
   for (uint64_t jb = 0; jb < n; jb += col_block) {
     const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
@@ -344,9 +345,7 @@ inline bool execute_avx2_mul_mat(const event::op_mul_mat & request) noexcept {
         for (uint64_t kk = 0; kk < depth; ++kk) {
           const float * b_src = b + (pb + kk) * n + jb;
           float * b_dst = packed_b + kk * vec_cols;
-          for (uint64_t jj = 0; jj < vec_cols; ++jj) {
-            b_dst[jj] = b_src[jj];
-          }
+          std::memcpy(b_dst, b_src, static_cast<size_t>(vec_cols) * sizeof(float));
 #if defined(__GNUC__) || defined(__clang__)
           if ((kk & 15u) == 0 && kk + 16u < depth) {
             _mm_prefetch(reinterpret_cast<const char *>(b + (pb + kk + 16u) * n + jb),
