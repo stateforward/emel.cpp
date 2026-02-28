@@ -1,5 +1,7 @@
 #include <doctest/doctest.h>
 
+#include <array>
+#include <cstdint>
 #include <cmath>
 
 #include "test_helpers.hpp"
@@ -176,6 +178,53 @@ TEST_CASE("kernel_x86_64_rejects_unimplemented_ops") {
 
   x86_64_sm machine{};
   CHECK_FALSE(machine.process_event(sum_ev));
+}
+
+TEST_CASE("kernel_x86_64_mul_mat_simd_matches_scalar_tiled_edges") {
+  const bool host_avx2 = emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+                         emel::kernel::x86_64::detail::detect_avx2();
+  if (!host_avx2) {
+    return;
+  }
+
+  constexpr uint64_t k = 13;
+  constexpr uint64_t m = 5;
+  constexpr uint64_t n = 19;
+
+  std::array<float, k * m> src0{};
+  std::array<float, k * n> src1{};
+  std::array<float, n * m> dst_simd{};
+  std::array<float, n * m> dst_scalar{};
+
+  for (uint64_t i = 0; i < src0.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 17u) - 8;
+    src0[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.0625f;
+  }
+  for (uint64_t i = 0; i < src1.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 23u) - 11;
+    src1[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.03125f;
+  }
+
+  const emel::kernel::event::op_mul_mat simd_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_simd.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+
+  CHECK(emel::kernel::x86_64::detail::execute_avx2_mul_mat(simd_ev));
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  for (uint64_t idx = 0; idx < dst_simd.size(); ++idx) {
+    CHECK(dst_simd[static_cast<size_t>(idx)] ==
+          doctest::Approx(dst_scalar[static_cast<size_t>(idx)]).epsilon(1e-5f));
+  }
 }
 
 TEST_CASE("kernel_x86_64_detail_branch_paths") {
