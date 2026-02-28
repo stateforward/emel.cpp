@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "emel/text/encoders/events.hpp"
 #include "emel/text/tokenizer/context.hpp"
@@ -146,15 +147,12 @@ struct dispatch_preprocess {
     bool preprocessed = false;
     int32_t err = error_code(error::none);
 
-    emel::text::tokenizer::preprocessor::event::preprocess pre_ev = {};
-    pre_ev.vocab = ctx.vocab;
-    pre_ev.text = ev.request.text;
-    pre_ev.parse_special = ev.request.parse_special;
-    pre_ev.fragments_out = ev.ctx.fragments;
-    pre_ev.fragment_capacity = ev.ctx.fragment_capacity;
-    pre_ev.fragment_count_out = &fragment_count;
+    emel::text::tokenizer::preprocessor::event::preprocess pre_ev(
+        *ctx.vocab, ev.request.text, ev.request.parse_special,
+        std::span<emel::text::tokenizer::preprocessor::fragment>(
+            ev.ctx.fragments, ev.ctx.fragment_capacity),
+        fragment_count, err);
     pre_ev.preprocessed_out = &preprocessed;
-    pre_ev.error_out = &err;
 
     ev.ctx.preprocess_accepted = ctx.preprocessor_any.process_event(pre_ev);
     ev.ctx.preprocess_err_code = err;

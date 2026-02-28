@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <string_view>
 
 #include <doctest/doctest.h>
@@ -162,15 +163,11 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
              emel::text::tokenizer::preprocessor::k_max_fragments> fragments = {};
   size_t fragment_count = 0;
   bool preprocessed = false;
-  emel::text::tokenizer::preprocessor::event::preprocess pre_ev = {};
-  pre_ev.vocab = &vocab;
-  pre_ev.text = text;
-  pre_ev.parse_special = parse_special;
-  pre_ev.fragments_out = fragments.data();
-  pre_ev.fragment_capacity = fragments.size();
-  pre_ev.fragment_count_out = &fragment_count;
+  emel::text::tokenizer::preprocessor::event::preprocess pre_ev(
+      vocab, text, parse_special,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments),
+      fragment_count, err);
   pre_ev.preprocessed_out = &preprocessed;
-  pre_ev.error_out = &err;
   if (!preprocessor.process_event(pre_ev) || err != EMEL_OK) {
     return false;
   }
