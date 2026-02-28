@@ -90,7 +90,7 @@ struct ggml_graph_case {
   ggml_tensor * out = nullptr;
   ggml_cgraph * graph = nullptr;
 
-  explicit ggml_graph_case(const size_t arena_bytes = 32u * 1024u * 1024u)
+  explicit ggml_graph_case(const size_t arena_bytes = 64u * 1024u * 1024u)
       : arena(arena_bytes) {
     ggml_init_params params{};
     params.mem_size = arena.size();

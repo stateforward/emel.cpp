@@ -68,7 +68,15 @@ EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_DECLARE_RUN_TYPE)
 
 using exec_simd_op_dup_t = detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_dup>;
 using exec_simd_op_add_t = detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_add>;
+using exec_simd_op_sub_t = detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_sub>;
 using exec_simd_op_mul_t = detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_mul>;
+using exec_simd_op_div_t = detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_div>;
+using exec_simd_op_sqr_t = detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_sqr>;
+using exec_simd_op_sqrt_t = detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_sqrt>;
+using exec_simd_op_mul_mat_t =
+    detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_mul_mat>;
+using exec_simd_op_unary_t =
+    detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_unary>;
 
 #define EMEL_KERNEL_DECLARE_REJECT_TYPE(op_name)                                      \
   using reject_invalid_##op_name##_t =                                                \
@@ -90,7 +98,13 @@ struct on_unexpected {
 inline constexpr exec_dispatch_t exec_dispatch{};
 inline constexpr exec_simd_op_dup_t exec_simd_op_dup{};
 inline constexpr exec_simd_op_add_t exec_simd_op_add{};
+inline constexpr exec_simd_op_sub_t exec_simd_op_sub{};
 inline constexpr exec_simd_op_mul_t exec_simd_op_mul{};
+inline constexpr exec_simd_op_div_t exec_simd_op_div{};
+inline constexpr exec_simd_op_sqr_t exec_simd_op_sqr{};
+inline constexpr exec_simd_op_sqrt_t exec_simd_op_sqrt{};
+inline constexpr exec_simd_op_mul_mat_t exec_simd_op_mul_mat{};
+inline constexpr exec_simd_op_unary_t exec_simd_op_unary{};
 
 #define EMEL_KERNEL_DEFINE_RUN_ACTION(op_name) \
   inline constexpr exec_##op_name##_t exec_##op_name{};

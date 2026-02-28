@@ -13,13 +13,7 @@ struct simd_op {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    if constexpr (std::is_same_v<dispatch_event_type, event::dispatch_op_dup> ||
-                  std::is_same_v<dispatch_event_type, event::dispatch_op_add> ||
-                  std::is_same_v<dispatch_event_type, event::dispatch_op_mul>) {
-      return ::emel::kernel::aarch64::detail::can_use_neon(ev.request, ctx.neon_available);
-    }
-    (void) ctx;
-    return false;
+    return ::emel::kernel::aarch64::detail::can_use_neon(ev.request, ctx.neon_available);
   }
 };
 

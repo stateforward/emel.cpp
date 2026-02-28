@@ -162,6 +162,9 @@ enum class mode {
   k_emel,
   k_reference,
   k_compare,
+  k_kernel_emel,
+  k_kernel_reference,
+  k_kernel_compare,
 };
 
 mode parse_mode(int argc, char ** argv) {
@@ -175,6 +178,15 @@ mode parse_mode(int argc, char ** argv) {
     }
     if (arg == "--mode=compare") {
       return mode::k_compare;
+    }
+    if (arg == "--mode=kernel-emel") {
+      return mode::k_kernel_emel;
+    }
+    if (arg == "--mode=kernel-reference") {
+      return mode::k_kernel_reference;
+    }
+    if (arg == "--mode=kernel-compare") {
+      return mode::k_kernel_compare;
     }
   }
   return mode::k_emel;
@@ -192,6 +204,29 @@ int main(int argc, char ** argv) {
   cfg.warmup_runs = read_env_size("EMEL_BENCH_WARMUP_RUNS", k_default_warmup_runs);
 
   const mode run_mode = parse_mode(argc, argv);
+
+  if (run_mode == mode::k_kernel_emel) {
+    std::vector<bench::result> results;
+    bench::append_emel_kernel_cases(results, cfg);
+    print_snapshot(results);
+    return 0;
+  }
+
+  if (run_mode == mode::k_kernel_reference) {
+    std::vector<bench::result> results;
+    bench::append_reference_kernel_cases(results, cfg);
+    print_snapshot(results);
+    return 0;
+  }
+
+  if (run_mode == mode::k_kernel_compare) {
+    std::vector<bench::result> emel_results;
+    std::vector<bench::result> ref_results;
+    bench::append_emel_kernel_cases(emel_results, cfg);
+    bench::append_reference_kernel_cases(ref_results, cfg);
+    print_compare(emel_results, ref_results);
+    return 0;
+  }
 
   if (run_mode == mode::k_emel) {
     const auto results = run_emel_benchmarks(cfg, true);

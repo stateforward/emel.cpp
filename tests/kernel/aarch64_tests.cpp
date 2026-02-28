@@ -1,5 +1,7 @@
 #include <doctest/doctest.h>
 
+#include <cmath>
+
 #include "test_helpers.hpp"
 #include "emel/kernel/aarch64/actions.hpp"
 #include "emel/kernel/aarch64/detail.hpp"
@@ -171,30 +173,114 @@ TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
       .dst = make_dst(dst0, dtype::f32, 4),
       .nth = 1,
   };
+  const emel::kernel::event::op_div div_ev{
+      .src0 = make_src(src0, dtype::f32, 4),
+      .src1 = make_src(src0, dtype::f32, 4),
+      .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_sqr sqr_ev{
+      .src0 = make_src(src0, dtype::f32, 4),
+      .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_sqrt sqrt_ev{
+      .src0 = make_src(src0, dtype::f32, 4),
+      .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
+  };
   const emel::kernel::event::op_sub sub_ev{
       .src0 = make_src(src0, dtype::f32, 4),
       .src1 = make_src(src0, dtype::f32, 4),
       .dst = make_dst(dst0, dtype::f32, 4),
       .nth = 1,
   };
+  float src_mm0[8] = {1.0f, 0.5f, -1.0f, 2.0f, 0.0f, -0.5f, 3.0f, 1.0f};
+  float src_mm1[32] = {
+      1.0f,  0.0f,  0.5f, -1.0f, 0.5f, 1.0f, -0.5f, 2.0f,
+      0.0f,  1.0f,  1.0f,  0.0f, 2.0f, 0.5f,  0.0f, 1.0f,
+      -1.0f, 2.0f,  0.0f,  1.0f, 1.5f, 0.0f,  2.0f, -0.5f,
+      2.0f,  -1.0f, 1.0f,  0.5f, 0.0f, 1.0f, -1.0f, 1.0f,
+  };
+  float dst_mm[16] = {};
+  const emel::kernel::event::op_mul_mat mul_mat_ev{
+      .src0 = make_src(src_mm0, dtype::f32, 4, 2),
+      .src1 = make_src(src_mm1, dtype::f32, 8, 4),
+      .dst = make_dst(dst_mm, dtype::f32, 8, 2),
+      .nth = 1,
+  };
+  emel::kernel::event::op_unary unary_ev{
+      .src0 = make_src(src0, dtype::f32, 4),
+      .dst = make_dst(dst0, dtype::f32, 4),
+      .nth = 1,
+      .subop = emel::kernel::event::unary_subop::relu,
+  };
 
 #if defined(__aarch64__) || defined(__ARM_NEON)
   CHECK(emel::kernel::aarch64::detail::execute_neon_dup(dup_ev));
   CHECK(emel::kernel::aarch64::detail::execute_neon_add(add_ev));
+  CHECK(emel::kernel::aarch64::detail::execute_neon_sub(sub_ev));
   CHECK(emel::kernel::aarch64::detail::execute_neon_mul(mul_ev));
+  CHECK(emel::kernel::aarch64::detail::execute_neon_div(div_ev));
+  CHECK(emel::kernel::aarch64::detail::execute_neon_sqr(sqr_ev));
+  CHECK(emel::kernel::aarch64::detail::execute_neon_sqrt(sqrt_ev));
+  CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat(mul_mat_ev));
+  CHECK(emel::kernel::aarch64::detail::execute_neon_unary(unary_ev));
 #else
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_dup(dup_ev));
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_add(add_ev));
+  CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_sub(sub_ev));
   CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_mul(mul_ev));
+  CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_div(div_ev));
+  CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_sqr(sqr_ev));
+  CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_sqrt(sqrt_ev));
+  CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_mul_mat(mul_mat_ev));
+  CHECK_FALSE(emel::kernel::aarch64::detail::execute_neon_unary(unary_ev));
 #endif
 
   const bool simd_dup = emel::kernel::aarch64::detail::execute_simd(dup_ev);
   const bool simd_add = emel::kernel::aarch64::detail::execute_simd(add_ev);
+  const bool simd_sub = emel::kernel::aarch64::detail::execute_simd(sub_ev);
   const bool simd_mul = emel::kernel::aarch64::detail::execute_simd(mul_ev);
+  const bool simd_div = emel::kernel::aarch64::detail::execute_simd(div_ev);
+  const bool simd_sqr = emel::kernel::aarch64::detail::execute_simd(sqr_ev);
+  const bool simd_sqrt = emel::kernel::aarch64::detail::execute_simd(sqrt_ev);
+  const bool simd_mul_mat = emel::kernel::aarch64::detail::execute_simd(mul_mat_ev);
+  const bool simd_unary = emel::kernel::aarch64::detail::execute_simd(unary_ev);
   (void) simd_dup;
   (void) simd_add;
+  (void) simd_sub;
   (void) simd_mul;
-  CHECK_FALSE(emel::kernel::aarch64::detail::execute_simd(sub_ev));
+  (void) simd_div;
+  (void) simd_sqr;
+  (void) simd_sqrt;
+  (void) simd_mul_mat;
+  (void) simd_unary;
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(simd_dup);
+  CHECK(simd_add);
+  CHECK(simd_sub);
+  CHECK(simd_mul);
+  CHECK(simd_div);
+  CHECK(simd_sqr);
+  CHECK(simd_sqrt);
+  CHECK(simd_mul_mat);
+  CHECK(simd_unary);
+#else
+  CHECK_FALSE(simd_dup);
+  CHECK_FALSE(simd_add);
+  CHECK_FALSE(simd_sub);
+  CHECK_FALSE(simd_mul);
+  CHECK_FALSE(simd_div);
+  CHECK_FALSE(simd_sqr);
+  CHECK_FALSE(simd_sqrt);
+  CHECK_FALSE(simd_mul_mat);
+  CHECK_FALSE(simd_unary);
+#endif
+
+  unary_ev.subop = emel::kernel::event::unary_subop::exp;
+  CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(unary_ev, true));
 }
 
 TEST_CASE("kernel_aarch64_rejects_unimplemented_ops") {
