@@ -1,9 +1,9 @@
 stateDiagram-v2
   direction TB
   [*] --> deciding
-  deciding --> parsed_identifier : completion [token_identifier_] / consume_identifier_
-  deciding --> parsed_non_identifier : completion [token_non_identifier_] / consume_non_identifier_
-  deciding --> parse_failed : completion [parse_failed_] / dispatch_parse_failed_
+  deciding --> parsed_identifier : completion_parse_rules_ [token_identifier_] / consume_identifier_
+  deciding --> parsed_non_identifier : completion_parse_rules_ [token_non_identifier_] / consume_non_identifier_
+  deciding --> parse_failed : completion_parse_rules_ [parse_failed_] / dispatch_parse_failed_
   parsed_identifier --> terminate : [always] / none
   parsed_non_identifier --> terminate : [always] / none
   parse_failed --> terminate : [always] / none

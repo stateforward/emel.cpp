@@ -1,7 +1,9 @@
 #include <boost/sml.hpp>
 #include <cstdint>
 #include <doctest/doctest.h>
+#include <string>
 
+#include "emel/docs/detail.hpp"
 #include "emel/emel.h"
 #include "emel/generator/errors.hpp"
 #include "emel/generator/sm.hpp"
@@ -26,6 +28,11 @@ void dispatch_error_test(void * owner, const emel::generator::events::generation
   tracker->error_called = true;
   tracker->tokens_generated = ev.tokens_generated;
   tracker->err = static_cast<emel::error::type>(ev.err);
+}
+
+template <class... Ts, class fn>
+constexpr void for_each_type(boost::sml::aux::type_list<Ts...>, fn && visitor) {
+  (visitor.template operator()<Ts>(), ...);
 }
 
 }  // namespace
@@ -84,4 +91,42 @@ TEST_CASE("generator_invalid_generate_dispatches_error") {
   CHECK(error == emel::error::cast(emel::generator::error::invalid_request));
   CHECK(tracker.err == emel::error::cast(emel::generator::error::invalid_request));
   CHECK(tracker.tokens_generated == 0);
+}
+
+TEST_CASE("generator_docs_table_uses_typed_completion_event_name") {
+  using machine_t = boost::sml::sm<emel::generator::model>;
+  using transitions = typename machine_t::transitions;
+
+  bool has_completion_transition = false;
+  bool has_typed_completion = false;
+
+  for_each_type(transitions{}, [&]<class transition_t>() {
+    using event = typename transition_t::event;
+    const std::string event_name = emel::docs::detail::table_event_name<event>();
+    if (event_name == "completion") {
+      has_completion_transition = true;
+      return;
+    }
+    if (event_name == "completion<generate_run>") {
+      has_completion_transition = true;
+      has_typed_completion = true;
+    }
+  });
+
+  CHECK(has_completion_transition);
+  CHECK(has_typed_completion);
+}
+
+TEST_CASE("docs_detail_shortens_lambda_type_names_for_mermaid") {
+  using emel::docs::detail::shorten_type_name;
+
+  CHECK(shorten_type_name("lambda at /tmp/path/my_action.cpp:42:7>") == "lambda_my_action_42_7");
+  CHECK(shorten_type_name("lambda at my_action.cpp:42>") == "lambda_my_action_42");
+  CHECK(shorten_type_name("lambda at my_action.cpp>") == "lambda_my_action");
+}
+
+TEST_CASE("docs_detail_table_event_name_supports_non_completion_event") {
+  const auto event_name =
+      emel::docs::detail::table_event_name<emel::generator::event::generate_run>();
+  CHECK(event_name == "generate_run");
 }

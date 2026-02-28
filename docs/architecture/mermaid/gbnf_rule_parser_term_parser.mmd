@@ -1,16 +1,16 @@
 stateDiagram-v2
   direction TB
   [*] --> deciding
-  deciding --> parsed : completion [token_string_literal_] / string_literal__
-  deciding --> parsed : completion [token_character_class_] / character_class__
-  deciding --> parsed : completion [token_rule_reference_] / rule_reference__
-  deciding --> parsed : completion [token_dot_] / dot__
-  deciding --> parsed : completion [token_open_group_] / open_group__
-  deciding --> parsed : completion [token_close_group_] / close_group__
-  deciding --> parsed : completion [token_quantifier_] / quantifier__
-  deciding --> parsed : completion [token_alternation_] / alternation__
-  deciding --> parsed : completion [token_newline_] / newline__
-  deciding --> parse_failed : completion [parse_failed_] / dispatch_parse_failed_
+  deciding --> parsed : completion_parse_rules_ [token_string_literal_] / string_literal__
+  deciding --> parsed : completion_parse_rules_ [token_character_class_] / character_class__
+  deciding --> parsed : completion_parse_rules_ [token_rule_reference_] / rule_reference__
+  deciding --> parsed : completion_parse_rules_ [token_dot_] / dot__
+  deciding --> parsed : completion_parse_rules_ [token_open_group_] / open_group__
+  deciding --> parsed : completion_parse_rules_ [token_close_group_] / close_group__
+  deciding --> parsed : completion_parse_rules_ [token_quantifier_] / quantifier__
+  deciding --> parsed : completion_parse_rules_ [token_alternation_] / alternation__
+  deciding --> parsed : completion_parse_rules_ [token_newline_] / newline__
+  deciding --> parse_failed : completion_parse_rules_ [parse_failed_] / dispatch_parse_failed_
   parsed --> terminate : [always] / none
   parse_failed --> terminate : [always] / none
   deciding --> unexpected_event : _ [always] / on_unexpected_

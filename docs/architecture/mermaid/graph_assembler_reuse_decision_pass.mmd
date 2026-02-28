@@ -1,10 +1,10 @@
 stateDiagram-v2
   direction TB
   [*] --> deciding
-  deciding --> reuse_selected : completion [phase_reuse_] / mark_reuse_
-  deciding --> rebuild_selected : completion [phase_rebuild_] / mark_rebuild_
-  deciding --> assemble_failed : completion [phase_prereq_failed_] / mark_failed_prereq_
-  deciding --> assemble_failed : completion [phase_invalid_request_] / mark_failed_invalid_request_
+  deciding --> reuse_selected : completion_assemble_graph_ [phase_reuse_] / mark_reuse_
+  deciding --> rebuild_selected : completion_assemble_graph_ [phase_rebuild_] / mark_rebuild_
+  deciding --> assemble_failed : completion_assemble_graph_ [phase_prereq_failed_] / mark_failed_prereq_
+  deciding --> assemble_failed : completion_assemble_graph_ [phase_invalid_request_] / mark_failed_invalid_request_
   reuse_selected --> terminate : [always] / none
   rebuild_selected --> terminate : [always] / none
   assemble_failed --> terminate : [always] / none

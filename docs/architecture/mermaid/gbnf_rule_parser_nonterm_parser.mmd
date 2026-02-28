@@ -1,11 +1,11 @@
 stateDiagram-v2
   direction TB
   [*] --> deciding
-  deciding --> parsed : completion [definition_existing_valid_] / consume_definition_existing_
-  deciding --> parsed : completion [definition_new_valid_] / consume_definition_new_
-  deciding --> parsed : completion [reference_existing_valid_] / consume_reference_existing_
-  deciding --> parsed : completion [reference_new_valid_] / consume_reference_new_
-  deciding --> parse_failed : completion [parse_failed_] / dispatch_parse_failed_
+  deciding --> parsed : completion_parse_rules_ [definition_existing_valid_] / consume_definition_existing_
+  deciding --> parsed : completion_parse_rules_ [definition_new_valid_] / consume_definition_new_
+  deciding --> parsed : completion_parse_rules_ [reference_existing_valid_] / consume_reference_existing_
+  deciding --> parsed : completion_parse_rules_ [reference_new_valid_] / consume_reference_new_
+  deciding --> parse_failed : completion_parse_rules_ [parse_failed_] / dispatch_parse_failed_
   parsed --> terminate : [always] / none
   parse_failed --> terminate : [always] / none
   deciding --> unexpected_event : _ [always] / on_unexpected_
