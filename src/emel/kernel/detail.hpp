@@ -287,7 +287,7 @@ inline bool validate_dispatch_request(const request_type & request) noexcept {
   if (!has_required_src0(request) || !has_required_src1(request) || !has_required_dst(request)) {
     return false;
   }
-  if (request.nth == 0 || request.ith >= request.nth) {
+  if (request.ith != 0 || request.nth != 1) {
     return false;
   }
   if (request.op_params_size > request.op_params.size()) {

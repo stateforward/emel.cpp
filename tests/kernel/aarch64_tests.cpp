@@ -83,6 +83,26 @@ TEST_CASE("kernel_aarch64_scalar_path_honors_strides") {
   CHECK(dst_storage[6] == doctest::Approx(44.0f));
 }
 
+TEST_CASE("kernel_aarch64_rejects_non_single_thread_dispatch") {
+  float lhs[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+  float rhs[4] = {5.0f, 6.0f, 7.0f, 8.0f};
+  float out[4] = {};
+
+  emel::kernel::event::op_add invalid_nth{
+      .src0 = make_src(lhs, dtype::f32, 4),
+      .src1 = make_src(rhs, dtype::f32, 4),
+      .dst = make_dst(out, dtype::f32, 4),
+      .nth = 2,
+  };
+  emel::kernel::event::op_add invalid_ith = invalid_nth;
+  invalid_ith.nth = 1;
+  invalid_ith.ith = 1;
+
+  aarch64_sm machine{};
+  CHECK_FALSE(machine.process_event(invalid_nth));
+  CHECK_FALSE(machine.process_event(invalid_ith));
+}
+
 TEST_CASE("kernel_aarch64_forced_neon_context_path") {
   float lhs[4] = {2.0f, 4.0f, 6.0f, 8.0f};
   float rhs[4] = {1.0f, 3.0f, 5.0f, 7.0f};
