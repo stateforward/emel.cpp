@@ -187,9 +187,9 @@ TEST_CASE("kernel_x86_64_mul_mat_simd_matches_scalar_tiled_edges") {
     return;
   }
 
-  constexpr uint64_t k = 13;
-  constexpr uint64_t m = 5;
-  constexpr uint64_t n = 19;
+  constexpr uint64_t k = 131;
+  constexpr uint64_t m = 7;
+  constexpr uint64_t n = 73;
 
   std::array<float, k * m> src0{};
   std::array<float, k * n> src1{};

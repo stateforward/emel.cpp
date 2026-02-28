@@ -129,9 +129,9 @@ TEST_CASE("kernel_aarch64_mul_mat_simd_matches_scalar_tiled_edges") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;
 #else
-  constexpr uint64_t k = 11;
+  constexpr uint64_t k = 131;
   constexpr uint64_t m = 7;
-  constexpr uint64_t n = 21;
+  constexpr uint64_t n = 73;
 
   std::array<float, k * m> src0{};
   std::array<float, k * n> src1{};

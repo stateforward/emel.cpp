@@ -276,79 +276,79 @@ inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {
   constexpr uint64_t row_block = 4;
   constexpr uint64_t col_vec = 4;
   constexpr uint64_t col_block = 64;
+  constexpr uint64_t depth_block = 64;
+  alignas(64) float packed_b[depth_block * col_block];
 
-  uint64_t i = 0;
-  for (; i + row_block <= m; i += row_block) {
-    for (uint64_t jb = 0; jb < n; jb += col_block) {
-      const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
-      uint64_t j = jb;
-      for (; j + col_vec <= j_end; j += col_vec) {
-        float32x4_t acc0 = vdupq_n_f32(0.0f);
-        float32x4_t acc1 = vdupq_n_f32(0.0f);
-        float32x4_t acc2 = vdupq_n_f32(0.0f);
-        float32x4_t acc3 = vdupq_n_f32(0.0f);
-        for (uint64_t p = 0; p < k; ++p) {
-          const float32x4_t bv = vld1q_f32(b + p * n + j);
-          acc0 = vmlaq_n_f32(acc0, bv, a[(i + 0) * k + p]);
-          acc1 = vmlaq_n_f32(acc1, bv, a[(i + 1) * k + p]);
-          acc2 = vmlaq_n_f32(acc2, bv, a[(i + 2) * k + p]);
-          acc3 = vmlaq_n_f32(acc3, bv, a[(i + 3) * k + p]);
+  for (uint64_t jb = 0; jb < n; jb += col_block) {
+    const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
+    const uint64_t vec_cols = ((j_end - jb) / col_vec) * col_vec;
+    const uint64_t j_vec_end = jb + vec_cols;
+
+    for (uint64_t pb = 0; pb < k; pb += depth_block) {
+      const uint64_t depth = std::min<uint64_t>(depth_block, k - pb);
+      const bool first_depth_block = (pb == 0);
+
+      if (vec_cols != 0) {
+        for (uint64_t kk = 0; kk < depth; ++kk) {
+          const float * b_src = b + (pb + kk) * n + jb;
+          float * b_dst = packed_b + kk * vec_cols;
+          for (uint64_t jj = 0; jj < vec_cols; ++jj) {
+            b_dst[jj] = b_src[jj];
+          }
 #if defined(__GNUC__) || defined(__clang__)
-          if ((p & 15u) == 0 && p + 16u < k) {
-            __builtin_prefetch(b + (p + 16u) * n + j, 0, 1);
+          if ((kk & 15u) == 0 && kk + 16u < depth) {
+            __builtin_prefetch(b + (pb + kk + 16u) * n + jb, 0, 1);
           }
 #endif
         }
-        vst1q_f32(c + (i + 0) * n + j, acc0);
-        vst1q_f32(c + (i + 1) * n + j, acc1);
-        vst1q_f32(c + (i + 2) * n + j, acc2);
-        vst1q_f32(c + (i + 3) * n + j, acc3);
-      }
 
-      for (; j < j_end; ++j) {
-        float acc0 = 0.0f;
-        float acc1 = 0.0f;
-        float acc2 = 0.0f;
-        float acc3 = 0.0f;
-        for (uint64_t p = 0; p < k; ++p) {
-          const float bv = b[p * n + j];
-          acc0 += a[(i + 0) * k + p] * bv;
-          acc1 += a[(i + 1) * k + p] * bv;
-          acc2 += a[(i + 2) * k + p] * bv;
-          acc3 += a[(i + 3) * k + p] * bv;
-        }
-        c[(i + 0) * n + j] = acc0;
-        c[(i + 1) * n + j] = acc1;
-        c[(i + 2) * n + j] = acc2;
-        c[(i + 3) * n + j] = acc3;
-      }
-    }
-  }
+        for (uint64_t j = jb; j < j_vec_end; j += col_vec) {
+          const uint64_t j_offset = j - jb;
+          uint64_t i = 0;
+          for (; i + row_block <= m; i += row_block) {
+            float32x4_t acc0 = first_depth_block ? vdupq_n_f32(0.0f)
+                                                 : vld1q_f32(c + (i + 0) * n + j);
+            float32x4_t acc1 = first_depth_block ? vdupq_n_f32(0.0f)
+                                                 : vld1q_f32(c + (i + 1) * n + j);
+            float32x4_t acc2 = first_depth_block ? vdupq_n_f32(0.0f)
+                                                 : vld1q_f32(c + (i + 2) * n + j);
+            float32x4_t acc3 = first_depth_block ? vdupq_n_f32(0.0f)
+                                                 : vld1q_f32(c + (i + 3) * n + j);
 
-  for (; i < m; ++i) {
-    for (uint64_t jb = 0; jb < n; jb += col_block) {
-      const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
-      uint64_t j = jb;
-      for (; j + col_vec <= j_end; j += col_vec) {
-        float32x4_t acc = vdupq_n_f32(0.0f);
-        for (uint64_t p = 0; p < k; ++p) {
-          const float32x4_t bv = vld1q_f32(b + p * n + j);
-          acc = vmlaq_n_f32(acc, bv, a[i * k + p]);
-#if defined(__GNUC__) || defined(__clang__)
-          if ((p & 15u) == 0 && p + 16u < k) {
-            __builtin_prefetch(b + (p + 16u) * n + j, 0, 1);
+            for (uint64_t kk = 0; kk < depth; ++kk) {
+              const float32x4_t bv = vld1q_f32(packed_b + kk * vec_cols + j_offset);
+              acc0 = vmlaq_n_f32(acc0, bv, a[(i + 0) * k + pb + kk]);
+              acc1 = vmlaq_n_f32(acc1, bv, a[(i + 1) * k + pb + kk]);
+              acc2 = vmlaq_n_f32(acc2, bv, a[(i + 2) * k + pb + kk]);
+              acc3 = vmlaq_n_f32(acc3, bv, a[(i + 3) * k + pb + kk]);
+            }
+
+            vst1q_f32(c + (i + 0) * n + j, acc0);
+            vst1q_f32(c + (i + 1) * n + j, acc1);
+            vst1q_f32(c + (i + 2) * n + j, acc2);
+            vst1q_f32(c + (i + 3) * n + j, acc3);
           }
-#endif
+
+          for (; i < m; ++i) {
+            float32x4_t acc = first_depth_block ? vdupq_n_f32(0.0f)
+                                                : vld1q_f32(c + i * n + j);
+            for (uint64_t kk = 0; kk < depth; ++kk) {
+              const float32x4_t bv = vld1q_f32(packed_b + kk * vec_cols + j_offset);
+              acc = vmlaq_n_f32(acc, bv, a[i * k + pb + kk]);
+            }
+            vst1q_f32(c + i * n + j, acc);
+          }
         }
-        vst1q_f32(c + i * n + j, acc);
       }
 
-      for (; j < j_end; ++j) {
-        float acc = 0.0f;
-        for (uint64_t p = 0; p < k; ++p) {
-          acc += a[i * k + p] * b[p * n + j];
+      for (uint64_t j = j_vec_end; j < j_end; ++j) {
+        for (uint64_t i = 0; i < m; ++i) {
+          float acc = first_depth_block ? 0.0f : c[i * n + j];
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            acc += a[i * k + pb + kk] * b[(pb + kk) * n + j];
+          }
+          c[i * n + j] = acc;
         }
-        c[i * n + j] = acc;
       }
     }
   }
