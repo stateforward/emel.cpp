@@ -3,209 +3,165 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include "emel/emel.h"
-#include "emel/text/tokenizer/bpe/split.hpp"
+
 #include "emel/text/tokenizer/preprocessor/context.hpp"
 #include "emel/text/tokenizer/preprocessor/detail.hpp"
 #include "emel/text/tokenizer/preprocessor/events.hpp"
 
 namespace emel::text::tokenizer::preprocessor::action {
 
-inline void set_error(context & ctx, const int32_t err) noexcept {
-  ctx.phase_error = err;
-  ctx.last_error = err;
+namespace pdetail = emel::text::tokenizer::preprocessor::detail;
+
+namespace detail {
+
+template <class runtime_event_type>
+inline void clear_runtime(const runtime_event_type & runtime_ev) noexcept {
+  auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+  ev.request.fragment_count_out = 0;
+  bool preprocessed_sink = false;
+  pdetail::write_optional(ev.request.preprocessed_out, preprocessed_sink, false);
+  ev.request.error_out = preprocessor::error_code(preprocessor::error::none);
+  ev.ctx.fragment_count = 0;
+  ev.ctx.preprocessed = false;
+  ev.ctx.phase_error = preprocessor::error::none;
+  ev.ctx.err = preprocessor::error::none;
+  ev.ctx.result = false;
 }
 
-inline void clear_request(context & ctx) noexcept {
-  ctx.vocab = nullptr;
-  ctx.text = {};
-  ctx.fragments_out = nullptr;
-  ctx.parse_special = false;
-  ctx.preprocessed = false;
-  ctx.fragment_capacity = 0;
-  ctx.fragment_count = 0;
-  ctx.bpe_scratch.reset();
+template <class runtime_event_type>
+inline void set_phase_error(const runtime_event_type & runtime_ev,
+                            const preprocessor::error err) noexcept {
+  auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+  ev.ctx.fragment_count = 0;
+  ev.ctx.preprocessed = false;
+  ev.ctx.phase_error = err;
+  ev.ctx.err = err;
+  ev.ctx.result = false;
 }
+
+template <class runtime_event_type>
+inline void set_phase_result(const runtime_event_type & runtime_ev, const bool ok,
+                             const size_t fragment_count,
+                             const bool preprocessed) noexcept {
+  auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+  const size_t idx = static_cast<size_t>(ok);
+  const std::array<preprocessor::error, 2> errors = {
+      preprocessor::error::invalid_request, preprocessor::error::none};
+  const std::array<size_t, 2> counts = {0, fragment_count};
+  const std::array<bool, 2> preprocessed_states = {false, preprocessed};
+  ev.ctx.fragment_count = counts[idx];
+  ev.ctx.preprocessed = preprocessed_states[idx];
+  ev.ctx.phase_error = errors[idx];
+  ev.ctx.err = errors[idx];
+  ev.ctx.result = false;
+}
+
+}  // namespace detail
+
+inline void clear_request(context &) noexcept {}
 
 struct begin_preprocess {
-  void operator()(const event::preprocess & ev, context & ctx) const noexcept {
-    if (ev.fragment_count_out != nullptr) {
-      *ev.fragment_count_out = 0;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-    ctx.vocab = ev.vocab;
-    ctx.text = ev.text;
-    ctx.fragments_out = ev.fragments_out;
-    ctx.parse_special = ev.parse_special;
-    ctx.preprocessed = false;
-    ctx.fragment_capacity = ev.fragment_capacity;
-    ctx.fragment_count = 0;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context & ctx) const noexcept {
+    detail::clear_runtime(runtime_ev);
     ctx.bpe_scratch.reset();
-    if (ev.preprocessed_out != nullptr) {
-      *ev.preprocessed_out = false;
-    }
   }
 };
 
 struct reject_invalid {
-  void operator()(const event::preprocess &, context & ctx) const noexcept {
-    ctx.fragment_count = 0;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context &) const noexcept {
+    detail::set_phase_error(runtime_ev, preprocessor::error::invalid_request);
   }
 };
 
 struct build_specials {
-  void operator()(context & ctx) const {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.vocab == nullptr ||
-        !detail::build_special_tokens(ctx.special_cache, *ctx.vocab)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    }
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const {
+    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    const bool ok = pdetail::build_special_tokens(ctx.special_cache, ev.request.vocab);
+    detail::set_phase_result(runtime_ev, ok, 0, false);
   }
 };
 
 struct partition_non_bpe {
-  void operator()(context & ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.fragments_out == nullptr || ctx.vocab == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    if (!detail::partition_with_specials(
-            ctx.text, ctx.special_cache, ctx.parse_special,
-            ctx.fragments_out, ctx.fragment_capacity,
-            &ctx.fragment_count)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      ctx.preprocessed = false;
-      return;
-    }
-    ctx.preprocessed = true;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context & ctx) const noexcept {
+    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    size_t fragment_count = 0;
+    const bool ok = pdetail::partition_with_specials(
+        ev.request.text, ctx.special_cache, ev.request.parse_special,
+        ev.request.fragments_out, fragment_count);
+    detail::set_phase_result(runtime_ev, ok, fragment_count, true);
   }
 };
 
 struct partition_bpe_no_specials {
-  void operator()(context & ctx) const {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.fragments_out == nullptr || ctx.vocab == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-
-    size_t out_count = 0;
-    ctx.bpe_scratch.reset();
-    emel::text::tokenizer::bpe::detail::split_view view = {};
-    if (!emel::text::tokenizer::bpe::detail::split_and_encode_append(
-            ctx.text, *ctx.vocab, ctx.bpe_scratch, view)) {
-      ctx.fragment_count = 0;
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    for (size_t idx = 0; idx < view.count; ++idx) {
-      const std::string_view word = view.words[idx];
-      if (word.empty()) {
-        continue;
-      }
-      if (!detail::push_raw_fragment(ctx.fragments_out,
-                                     ctx.fragment_capacity, out_count,
-                                     word)) {
-        ctx.fragment_count = 0;
-        set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-        return;
-      }
-    }
-
-    ctx.fragment_count = out_count;
-    ctx.preprocessed = true;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const {
+    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    size_t fragment_count = 0;
+    const bool ok =
+        pdetail::partition_bpe_no_specials(ev.request, ctx.bpe_scratch, fragment_count);
+    detail::set_phase_result(runtime_ev, ok, fragment_count, true);
   }
 };
 
 struct partition_bpe_with_specials {
-  void operator()(context & ctx) const {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.fragments_out == nullptr || ctx.vocab == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-
-    std::array<fragment, k_max_fragments> partitions = {};
-    size_t partition_count = 0;
-    if (!detail::partition_with_specials(ctx.text, ctx.special_cache,
-                                         ctx.parse_special, partitions.data(),
-                                         ctx.fragment_capacity,
-                                         &partition_count)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-
-    ctx.bpe_scratch.reset();
-    size_t out_count = 0;
-    for (size_t idx = 0; idx < partition_count; ++idx) {
-      const fragment & frag = partitions[idx];
-      if (frag.kind == fragment_kind::token) {
-        if (!detail::push_token_fragment(ctx.fragments_out,
-                                         ctx.fragment_capacity, out_count,
-                                         frag.token)) {
-          ctx.fragment_count = 0;
-          set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-          return;
-        }
-        continue;
-      }
-
-      if (frag.text.empty()) {
-        continue;
-      }
-      emel::text::tokenizer::bpe::detail::split_view view = {};
-      if (!emel::text::tokenizer::bpe::detail::split_and_encode_append(
-              frag.text, *ctx.vocab, ctx.bpe_scratch, view)) {
-        ctx.fragment_count = 0;
-        set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-        return;
-      }
-      for (size_t word_idx = 0; word_idx < view.count; ++word_idx) {
-        const std::string_view word = view.words[word_idx];
-        if (word.empty()) {
-          continue;
-        }
-        if (!detail::push_raw_fragment(ctx.fragments_out,
-                                       ctx.fragment_capacity, out_count,
-                                       word)) {
-          ctx.fragment_count = 0;
-          set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-          return;
-        }
-      }
-    }
-
-    ctx.fragment_count = out_count;
-    ctx.preprocessed = true;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context & ctx) const {
+    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    size_t fragment_count = 0;
+    const bool ok = pdetail::partition_bpe_with_specials(
+        ev.request, ctx.special_cache, ctx.bpe_scratch, fragment_count);
+    detail::set_phase_result(runtime_ev, ok, fragment_count, true);
   }
 };
 
 struct mark_done {
-  void operator()(context & ctx) const noexcept {
-    ctx.last_error = EMEL_OK;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context &) const noexcept {
+    auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.phase_error = preprocessor::error::none;
+    ev.ctx.err = preprocessor::error::none;
+    ev.ctx.result = true;
   }
 };
 
 struct ensure_last_error {
-  void operator()(context & ctx) const noexcept {
-    if (ctx.last_error != EMEL_OK) {
-      return;
-    }
-    ctx.last_error = ctx.phase_error == EMEL_OK ? EMEL_ERR_BACKEND : ctx.phase_error;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context &) const noexcept {
+    auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.err = preprocessor::resolve_failure_error(ev.ctx.phase_error);
+    ev.ctx.result = false;
   }
 };
 
 struct on_unexpected {
-  template <class event>
-  void operator()(const event &, context & ctx) const noexcept {
-    ctx.fragment_count = 0;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context &) const noexcept {
+    auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    if constexpr (requires { ev.ctx.fragment_count; }) {
+      ev.ctx.fragment_count = 0;
+    }
+    if constexpr (requires { ev.ctx.preprocessed; }) {
+      ev.ctx.preprocessed = false;
+    }
+    if constexpr (requires { ev.ctx.phase_error; }) {
+      ev.ctx.phase_error = preprocessor::error::invalid_request;
+    }
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = preprocessor::error::invalid_request;
+    }
+    if constexpr (requires { ev.ctx.result; }) {
+      ev.ctx.result = false;
+    }
   }
 };
 

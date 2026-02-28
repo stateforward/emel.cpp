@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -95,7 +96,8 @@ inline reference_fragments build_reference_special_fragments(
   std::array<fragment, k_fragment_capacity> fragments = {};
   size_t count = 0;
   if (!emel::text::tokenizer::preprocessor::detail::partition_with_specials(
-          out.text, cache, parse_special, fragments.data(), fragments.size(), &count)) {
+          out.text, cache, parse_special,
+          std::span<fragment>(fragments), count)) {
     std::fprintf(stderr, "error: %s reference partition failed\n", label);
     std::abort();
   }
@@ -115,14 +117,8 @@ bool collect_emel_fragments(machine_type & machine,
                             int32_t & err) {
   count = 0;
   err = EMEL_OK;
-  emel::text::tokenizer::preprocessor::event::preprocess request = {};
-  request.vocab = &vocab;
-  request.text = text;
-  request.parse_special = parse_special;
-  request.fragments_out = fragments.data();
-  request.fragment_capacity = fragments.size();
-  request.fragment_count_out = &count;
-  request.error_out = &err;
+  emel::text::tokenizer::preprocessor::event::preprocess request(
+      vocab, text, parse_special, std::span<fragment>(fragments), count, err);
   return machine.process_event(request);
 }
 

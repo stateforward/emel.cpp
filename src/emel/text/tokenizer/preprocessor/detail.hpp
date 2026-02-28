@@ -1,15 +1,91 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 #include "emel/model/data.hpp"
+#include "emel/text/tokenizer/bpe/split.hpp"
+#include "emel/text/tokenizer/preprocessor/events.hpp"
 #include "emel/text/tokenizer/preprocessor/types.hpp"
 
 namespace emel::text::tokenizer::preprocessor::detail {
+
+template <class runtime_event_type>
+constexpr decltype(auto)
+unwrap_runtime_event(const runtime_event_type & ev) noexcept {
+  if constexpr (requires { ev.event_; }) {
+    return (ev.event_);
+  } else {
+    return (ev);
+  }
+}
+
+template <class value_type>
+inline void write_optional(value_type * destination,
+                           value_type & sink,
+                           const value_type value) noexcept {
+  value_type * destinations[2] = {&sink, destination};
+  value_type * const target =
+      destinations[static_cast<size_t>(destination != nullptr)];
+  *target = value;
+}
+
+template <class event_type>
+inline bool ignore_callback(void *, const event_type &) noexcept {
+  return true;
+}
+
+template <class event_type>
+inline void dispatch_optional_callback(void * owner,
+                                       bool (*callback)(void * owner,
+                                                        const event_type &),
+                                       const event_type & payload) noexcept {
+  const size_t callback_ready = static_cast<size_t>(callback != nullptr);
+  const size_t owner_ready = static_cast<size_t>(owner != nullptr);
+  const size_t valid = callback_ready & owner_ready;
+  bool (*callbacks[2])(void *, const event_type &) = {
+      ignore_callback<event_type>, callback};
+  void * owners[2] = {nullptr, owner};
+  callbacks[valid](owners[valid], payload);
+}
+
+inline preprocessor::error select_error(const bool ok,
+                                        const preprocessor::error runtime_error) noexcept {
+  return preprocessor::select_result_error(ok, runtime_error);
+}
+
+template <class request_type, class done_event_type, class error_event_type>
+inline void dispatch_result_callback(
+    const bool ok, const request_type & request, const done_event_type & done_ev,
+    const error_event_type & error_ev,
+    void (*on_done)(const request_type &, const done_event_type &,
+                    const error_event_type &) noexcept,
+    void (*on_error)(const request_type &, const done_event_type &,
+                     const error_event_type &) noexcept) noexcept {
+  using dispatch_fn_type =
+      void (*)(const request_type &, const done_event_type &,
+               const error_event_type &) noexcept;
+  const std::array<dispatch_fn_type, 2> dispatchers = {on_error, on_done};
+  dispatchers[static_cast<size_t>(ok)](request, done_ev, error_ev);
+}
+
+inline void dispatch_preprocess_done(const event::preprocess & request,
+                                     const events::preprocess_done & done_ev,
+                                     const events::preprocess_error &) noexcept {
+  dispatch_optional_callback(request.owner_sm, request.dispatch_done, done_ev);
+}
+
+inline void
+dispatch_preprocess_error(const event::preprocess & request,
+                          const events::preprocess_done &,
+                          const events::preprocess_error & error_ev) noexcept {
+  dispatch_optional_callback(request.owner_sm, request.dispatch_error, error_ev);
+}
 
 constexpr int32_t k_token_type_unknown = 2;
 constexpr int32_t k_token_type_control = 3;
@@ -136,23 +212,21 @@ inline bool push_token_fragment(fragment * out, const size_t capacity,
 inline bool partition_with_specials(const std::string_view text,
                                     const special_token_cache & cache,
                                     const bool parse_special,
-                                    fragment * fragments_out,
-                                    const size_t fragment_capacity,
-                                    size_t * fragment_count_out) {
-  if (fragments_out == nullptr || fragment_count_out == nullptr) {
-    return false;
-  }
-  *fragment_count_out = 0;
-  if (fragment_capacity == 0 || fragment_capacity > k_max_fragments) {
+                                    const std::span<fragment> fragments_out,
+                                    size_t & fragment_count_out) {
+  fragment_count_out = 0;
+  const size_t fragment_capacity = fragments_out.size();
+  if (fragments_out.data() == nullptr || fragment_capacity == 0 ||
+      fragment_capacity > k_max_fragments) {
     return false;
   }
 
   if (cache.count == 0) {
     size_t count = 0;
-    if (!push_raw_fragment(fragments_out, fragment_capacity, count, text)) {
+    if (!push_raw_fragment(fragments_out.data(), fragment_capacity, count, text)) {
       return false;
     }
-    *fragment_count_out = count;
+    fragment_count_out = count;
     return true;
   }
 
@@ -234,7 +308,88 @@ inline bool partition_with_specials(const std::string_view text,
   for (size_t i = 0; i < current_count; ++i) {
     fragments_out[i] = current_fragments[i];
   }
-  *fragment_count_out = current_count;
+  fragment_count_out = current_count;
+  return true;
+}
+
+inline bool
+partition_bpe_no_specials(const event::preprocess & request,
+                          emel::text::tokenizer::bpe::detail::split_scratch & scratch,
+                          size_t & fragment_count_out) {
+  fragment_count_out = 0;
+  scratch.reset();
+
+  emel::text::tokenizer::bpe::detail::split_view view = {};
+  if (!emel::text::tokenizer::bpe::detail::split_and_encode_append(
+          request.text, request.vocab, scratch, view)) {
+    return false;
+  }
+
+  size_t out_count = 0;
+  for (size_t idx = 0; idx < view.count; ++idx) {
+    const std::string_view word = view.words[idx];
+    if (word.empty()) {
+      continue;
+    }
+    if (!push_raw_fragment(request.fragments_out.data(),
+                           request.fragments_out.size(), out_count, word)) {
+      return false;
+    }
+  }
+
+  fragment_count_out = out_count;
+  return true;
+}
+
+inline bool partition_bpe_with_specials(
+    const event::preprocess & request, const special_token_cache & cache,
+    emel::text::tokenizer::bpe::detail::split_scratch & scratch,
+    size_t & fragment_count_out) {
+  fragment_count_out = 0;
+
+  std::array<fragment, k_max_fragments> partitions = {};
+  size_t partition_count = 0;
+  if (!partition_with_specials(
+          request.text, cache, request.parse_special,
+          std::span<fragment>(partitions.data(), request.fragments_out.size()),
+          partition_count)) {
+    return false;
+  }
+
+  scratch.reset();
+  size_t out_count = 0;
+  for (size_t idx = 0; idx < partition_count; ++idx) {
+    const fragment & frag = partitions[idx];
+    if (frag.kind == fragment_kind::token) {
+      if (!push_token_fragment(request.fragments_out.data(),
+                               request.fragments_out.size(), out_count,
+                               frag.token)) {
+        return false;
+      }
+      continue;
+    }
+    if (frag.text.empty()) {
+      continue;
+    }
+
+    emel::text::tokenizer::bpe::detail::split_view view = {};
+    if (!emel::text::tokenizer::bpe::detail::split_and_encode_append(
+            frag.text, request.vocab, scratch, view)) {
+      return false;
+    }
+    for (size_t word_idx = 0; word_idx < view.count; ++word_idx) {
+      const std::string_view word = view.words[word_idx];
+      if (word.empty()) {
+        continue;
+      }
+      if (!push_raw_fragment(request.fragments_out.data(),
+                             request.fragments_out.size(), out_count, word)) {
+        return false;
+      }
+    }
+  }
+
+  fragment_count_out = out_count;
   return true;
 }
 

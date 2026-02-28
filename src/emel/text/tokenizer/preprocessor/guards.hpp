@@ -1,24 +1,21 @@
 #pragma once
 
 #include "emel/text/tokenizer/preprocessor/context.hpp"
+#include "emel/text/tokenizer/preprocessor/detail.hpp"
 #include "emel/text/tokenizer/preprocessor/events.hpp"
 #include "emel/text/tokenizer/preprocessor/types.hpp"
 
 namespace emel::text::tokenizer::preprocessor::guard {
 
 struct valid_request {
-  bool operator()(const event::preprocess & ev, const action::context &) const noexcept {
-    if (ev.vocab == nullptr) {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    if (ev.request.fragments_out.data() == nullptr) {
       return false;
     }
-    if (ev.fragments_out == nullptr || ev.fragment_count_out == nullptr) {
-      return false;
-    }
-    if (ev.error_out == nullptr) {
-      return false;
-    }
-    if (ev.fragment_capacity == 0 ||
-        ev.fragment_capacity > k_max_fragments) {
+    if (ev.request.fragments_out.empty() ||
+        ev.request.fragments_out.size() > k_max_fragments) {
       return false;
     }
     return true;
@@ -26,20 +23,25 @@ struct valid_request {
 };
 
 struct invalid_request {
-  bool operator()(const event::preprocess & ev, const action::context & ctx) const noexcept {
-    return !valid_request{}(ev, ctx);
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return !valid_request{}(runtime_ev, ctx);
   }
 };
 
 struct phase_ok {
-  bool operator()(const action::context & ctx) const noexcept {
-    return ctx.phase_error == EMEL_OK;
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    return preprocessor::is_ok(ev.ctx.phase_error);
   }
 };
 
 struct phase_failed {
-  bool operator()(const action::context & ctx) const noexcept {
-    return ctx.phase_error != EMEL_OK;
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    return !preprocessor::is_ok(ev.ctx.phase_error);
   }
 };
 

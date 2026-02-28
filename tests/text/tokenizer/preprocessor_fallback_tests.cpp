@@ -1,6 +1,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <span>
 #include <string_view>
 
 #include <doctest/doctest.h>
@@ -51,14 +52,10 @@ TEST_CASE("tokenizer_preprocessor_fallback_identity_even_for_bpe_vocab") {
   int32_t err = EMEL_OK;
 
   emel::text::tokenizer::preprocessor::fallback::sm machine{};
-  emel::text::tokenizer::preprocessor::event::preprocess ev = {};
-  ev.vocab = &vocab;
-  ev.text = std::string_view("hello world");
-  ev.parse_special = false;
-  ev.fragments_out = fragments.data();
-  ev.fragment_capacity = fragments.size();
-  ev.fragment_count_out = &count;
-  ev.error_out = &err;
+  emel::text::tokenizer::preprocessor::event::preprocess ev(
+      vocab, std::string_view("hello world"), false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count,
+      err);
 
   CHECK(machine.process_event(ev));
   CHECK(err == EMEL_OK);
@@ -78,14 +75,10 @@ TEST_CASE("tokenizer_preprocessor_fallback_parse_special_true") {
   int32_t err = EMEL_OK;
 
   emel::text::tokenizer::preprocessor::fallback::sm machine{};
-  emel::text::tokenizer::preprocessor::event::preprocess ev = {};
-  ev.vocab = &vocab;
-  ev.text = std::string_view("ABBB");
-  ev.parse_special = true;
-  ev.fragments_out = fragments.data();
-  ev.fragment_capacity = fragments.size();
-  ev.fragment_count_out = &count;
-  ev.error_out = &err;
+  emel::text::tokenizer::preprocessor::event::preprocess ev(
+      vocab, std::string_view("ABBB"), true,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count,
+      err);
 
   CHECK(machine.process_event(ev));
   CHECK(err == EMEL_OK);
@@ -108,14 +101,10 @@ TEST_CASE("tokenizer_preprocessor_fallback_parse_special_false") {
   int32_t err = EMEL_OK;
 
   emel::text::tokenizer::preprocessor::fallback::sm machine{};
-  emel::text::tokenizer::preprocessor::event::preprocess ev = {};
-  ev.vocab = &vocab;
-  ev.text = std::string_view("ABBB");
-  ev.parse_special = false;
-  ev.fragments_out = fragments.data();
-  ev.fragment_capacity = fragments.size();
-  ev.fragment_count_out = &count;
-  ev.error_out = &err;
+  emel::text::tokenizer::preprocessor::event::preprocess ev(
+      vocab, std::string_view("ABBB"), false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count,
+      err);
 
   CHECK(machine.process_event(ev));
   CHECK(err == EMEL_OK);
