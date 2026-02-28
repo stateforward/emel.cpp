@@ -13,6 +13,8 @@ namespace emel::text::encoders::bpe {
 
 struct initialized {};
 struct encode_precheck_decision {};
+struct encode_table_prepare {};
+struct encode_path_decision {};
 struct encode_exec {};
 struct encode_result_decision {};
 struct done {};
@@ -25,7 +27,9 @@ struct unexpected {};
  * state purposes:
  * - 'initialized': idle state awaiting encode intent.
  * - 'encode_precheck_decision': explicit request prechecks before kernel execution.
- * - 'encode_exec'/'encode_result_decision': run kernel and branch on phase error.
+ * - 'encode_table_prepare': ensure per-vocab tables for deterministic path guards.
+ * - 'encode_path_decision': explicit BPE path routing (`ignore_merges` fast path vs merge path).
+ * - 'encode_exec'/'encode_result_decision': run selected kernel and branch on phase error.
  * - 'done'/'errored': terminal outcomes.
  * - 'unexpected': sequencing contract violation.
  *
@@ -33,12 +37,14 @@ struct unexpected {};
  * - 'valid_encode'/'invalid_encode' validate request pointers and context.
  * - 'vocab_changed'/'vocab_unchanged' route vocabulary sync work.
  * - 'text_empty' and 'text_non_empty_and_*' route explicit precheck decisions.
+ * - 'ignore_merges_fast_path'/'merge_path_required' route algorithm path selection.
  * - 'phase_*' guards observe runtime phase errors.
  *
  * action side effects:
  * - 'begin_encode' resets runtime per-request outputs.
  * - 'begin_encode_sync_vocab' refreshes per-vocab cached tables.
- * - 'run_encode' performs bounded encoding work.
+ * - 'prepare_tables' builds lookup tables before path routing.
+ * - 'run_encode_ignore_merges' and 'run_encode_merge_path' execute bounded kernels.
  * - 'mark_done'/'ensure_last_error' finalize runtime status.
  * - 'on_unexpected' reports sequencing violations.
  */
@@ -99,14 +105,33 @@ struct model {
       , sml::state<errored> <= sml::state<encode_precheck_decision>
           + sml::completion<event::encode_runtime>[guard::text_non_empty_and_not_preprocessed{}]
           / action::reject_invalid_encode
-      , sml::state<encode_exec> <= sml::state<encode_precheck_decision>
+      , sml::state<encode_table_prepare> <= sml::state<encode_precheck_decision>
           + sml::completion<event::encode_runtime>[guard::text_non_empty_and_preprocessed{}]
+          / action::prepare_tables
+
+      //------------------------------------------------------------------------------//
+      // Table Preparation
+      //------------------------------------------------------------------------------//
+      , sml::state<encode_path_decision> <= sml::state<encode_table_prepare>
+          + sml::completion<event::encode_runtime>[guard::phase_ok{}]
+      , sml::state<errored> <= sml::state<encode_table_prepare>
+          + sml::completion<event::encode_runtime>[guard::phase_failed{}]
+          / action::ensure_last_error
+
+      //------------------------------------------------------------------------------//
+      // Encode Path Decision
+      //------------------------------------------------------------------------------//
+      , sml::state<encode_result_decision> <= sml::state<encode_path_decision>
+          + sml::completion<event::encode_runtime>[guard::ignore_merges_fast_path{}]
+          / action::run_encode_ignore_merges
+      , sml::state<encode_exec> <= sml::state<encode_path_decision>
+          + sml::completion<event::encode_runtime>[guard::merge_path_required{}]
 
       //------------------------------------------------------------------------------//
       // Encode Execution
       //------------------------------------------------------------------------------//
       , sml::state<encode_result_decision> <= sml::state<encode_exec>
-          + sml::completion<event::encode_runtime> / action::run_encode
+          + sml::completion<event::encode_runtime> / action::run_encode_merge_path
       , sml::state<done> <= sml::state<encode_result_decision>
           + sml::completion<event::encode_runtime>[guard::phase_ok{}] / action::mark_done
       , sml::state<errored> <= sml::state<encode_result_decision>
@@ -117,6 +142,10 @@ struct model {
       // Explicit Unexpected-Event Handling
       //------------------------------------------------------------------------------//
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::event<event::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_table_prepare>
+          + sml::event<event::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_path_decision>
           + sml::event<event::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<event::encode_runtime> / action::on_unexpected
@@ -130,6 +159,14 @@ struct model {
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_table_prepare>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_table_prepare>
+          + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_path_decision>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_path_decision>
           + sml::event<events::encoding_error> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<events::encoding_done> / action::on_unexpected
@@ -155,6 +192,10 @@ struct model {
       , sml::state<unexpected> <= sml::state<initialized>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_table_prepare>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_path_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::unexpected_event<sml::_> / action::on_unexpected

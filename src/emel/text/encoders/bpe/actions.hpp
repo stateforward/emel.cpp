@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+
 #include "emel/text/encoders/actions.hpp"
 #include "emel/text/encoders/bpe/context.hpp"
 #include "emel/text/encoders/bpe/detail.hpp"
@@ -16,7 +19,6 @@ struct begin_encode_sync_vocab {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
     emel::text::encoders::action::begin_encode(ev, ctx);
     emel::text::encoders::action::sync_vocab(ev, ctx);
-
   }
 };
 
@@ -26,9 +28,27 @@ struct reject_invalid_encode {
   }
 };
 
-struct run_encode {
+struct prepare_tables {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
-    const auto result = emel::text::encoders::bpe::detail::encode_bpe(ev.request, ctx, *ctx.vocab);
+    const bool ready = emel::text::encoders::detail::ensure_tables(ctx);
+    const std::array<int32_t, 2> errors{EMEL_ERR_BACKEND, EMEL_OK};
+    ev.ctx.err = errors[static_cast<size_t>(ready)];
+  }
+};
+
+struct run_encode_ignore_merges {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    const auto result = emel::text::encoders::bpe::detail::encode_bpe_ignore_merges(
+      ev.request, ctx);
+    ev.ctx.token_count = result.token_count;
+    ev.ctx.err = result.error;
+  }
+};
+
+struct run_encode_merge_path {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    const auto result = emel::text::encoders::bpe::detail::encode_bpe_merge_path(
+      ev.request, ctx, *ctx.vocab);
     ev.ctx.token_count = result.token_count;
     ev.ctx.err = result.error;
   }
@@ -56,7 +76,9 @@ struct on_unexpected {
 inline constexpr begin_encode begin_encode{};
 inline constexpr begin_encode_sync_vocab begin_encode_sync_vocab{};
 inline constexpr reject_invalid_encode reject_invalid_encode{};
-inline constexpr run_encode run_encode{};
+inline constexpr prepare_tables prepare_tables{};
+inline constexpr run_encode_ignore_merges run_encode_ignore_merges{};
+inline constexpr run_encode_merge_path run_encode_merge_path{};
 inline constexpr mark_done mark_done{};
 inline constexpr ensure_last_error ensure_last_error{};
 inline constexpr on_unexpected on_unexpected{};

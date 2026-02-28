@@ -14,24 +14,14 @@ namespace emel::text::encoders::bpe::detail {
 using emel::text::encoders::detail::encode_result;
 using emel::text::encoders::detail::k_token_null;
 
-inline bool encode_bpe_word(const event::encode &ev,
-                            emel::text::encoders::bpe::action::context &ctx,
-                            const emel::model::data::vocab &vocab,
-                            const std::string_view word,
-                            int32_t &count,
-                            encode_result &result) {
+inline bool encode_bpe_word_merge_path(const event::encode &ev,
+                                       emel::text::encoders::bpe::action::context &ctx,
+                                       const emel::model::data::vocab &vocab,
+                                       const std::string_view word,
+                                       int32_t &count,
+                                       encode_result &result) {
   if (word.empty()) {
     return true;
-  }
-  if (vocab.ignore_merges) {
-    const int32_t token = emel::text::encoders::detail::lookup_token(ctx, word);
-    if (token != k_token_null) {
-      if (!emel::text::encoders::detail::push_token(ev, token, count)) {
-        result.error = EMEL_ERR_INVALID_ARGUMENT;
-        return false;
-      }
-      return true;
-    }
   }
 
   if (!emel::text::encoders::detail::build_symbols(word, ctx.scratch, result)) {
@@ -108,6 +98,37 @@ inline bool encode_bpe_word(const event::encode &ev,
   return true;
 }
 
+inline encode_result encode_bpe_ignore_merges(const event::encode &ev,
+                                              emel::text::encoders::bpe::action::context &ctx) {
+  encode_result result{};
+  int32_t count = 0;
+  const int32_t token = emel::text::encoders::detail::lookup_token(ctx, ev.text);
+  if (token == k_token_null) {
+    result.error = EMEL_ERR_BACKEND;
+    return result;
+  }
+  if (!emel::text::encoders::detail::push_token(ev, token, count)) {
+    result.error = EMEL_ERR_INVALID_ARGUMENT;
+    return result;
+  }
+  result.token_count = count;
+  result.error = EMEL_OK;
+  return result;
+}
+
+inline encode_result encode_bpe_merge_path(const event::encode &ev,
+                                           emel::text::encoders::bpe::action::context &ctx,
+                                           const emel::model::data::vocab &vocab) {
+  encode_result result{};
+  int32_t count = 0;
+  if (!encode_bpe_word_merge_path(ev, ctx, vocab, ev.text, count, result)) {
+    return result;
+  }
+  result.token_count = count;
+  result.error = EMEL_OK;
+  return result;
+}
+
 inline encode_result encode_bpe(const event::encode &ev,
                                 emel::text::encoders::bpe::action::context &ctx,
                                 const emel::model::data::vocab &vocab) {
@@ -117,17 +138,17 @@ inline encode_result encode_bpe(const event::encode &ev,
   }
   emel::text::encoders::detail::ensure_tables(ctx);
 
-  int32_t count = 0;
   if (!ev.preprocessed) {
     result.error = EMEL_ERR_INVALID_ARGUMENT;
     return result;
   }
-  if (!encode_bpe_word(ev, ctx, vocab, ev.text, count, result)) {
-    return result;
+  if (vocab.ignore_merges) {
+    const auto direct = encode_bpe_ignore_merges(ev, ctx);
+    if (direct.error != EMEL_ERR_BACKEND) {
+      return direct;
+    }
   }
-  result.token_count = count;
-  result.error = EMEL_OK;
-  return result;
+  return encode_bpe_merge_path(ev, ctx, vocab);
 }
 
 }  // namespace emel::text::encoders::bpe::detail

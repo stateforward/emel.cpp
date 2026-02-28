@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+
 #include "emel/text/encoders/actions.hpp"
 #include "emel/text/encoders/fallback/context.hpp"
 #include "emel/text/encoders/fallback/detail.hpp"
@@ -16,7 +19,6 @@ struct begin_encode_sync_vocab {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
     emel::text::encoders::action::begin_encode(ev, ctx);
     emel::text::encoders::action::sync_vocab(ev, ctx);
-
   }
 };
 
@@ -26,9 +28,27 @@ struct reject_invalid_encode {
   }
 };
 
+struct prepare_tables {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    const bool ready = emel::text::encoders::detail::ensure_tables(ctx);
+    const std::array<int32_t, 2> errors{EMEL_ERR_BACKEND, EMEL_OK};
+    ev.ctx.err = errors[static_cast<size_t>(ready)];
+  }
+};
+
+struct run_encode_exec {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    const auto result = emel::text::encoders::fallback::detail::encode_fallback_exec(
+      ev.request, ctx, *ctx.vocab);
+    ev.ctx.token_count = result.token_count;
+    ev.ctx.err = result.error;
+  }
+};
+
 struct run_encode {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
-    const auto result = emel::text::encoders::fallback::detail::encode_fallback(ev.request, ctx, *ctx.vocab);
+    const auto result = emel::text::encoders::fallback::detail::encode_fallback(
+      ev.request, ctx, *ctx.vocab);
     ev.ctx.token_count = result.token_count;
     ev.ctx.err = result.error;
   }
@@ -56,6 +76,8 @@ struct on_unexpected {
 inline constexpr begin_encode begin_encode{};
 inline constexpr begin_encode_sync_vocab begin_encode_sync_vocab{};
 inline constexpr reject_invalid_encode reject_invalid_encode{};
+inline constexpr prepare_tables prepare_tables{};
+inline constexpr run_encode_exec run_encode_exec{};
 inline constexpr run_encode run_encode{};
 inline constexpr mark_done mark_done{};
 inline constexpr ensure_last_error ensure_last_error{};

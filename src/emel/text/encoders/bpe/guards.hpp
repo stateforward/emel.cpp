@@ -1,5 +1,6 @@
 #pragma once
 
+#include "emel/text/encoders/detail.hpp"
 #include "emel/text/encoders/bpe/context.hpp"
 #include "emel/text/encoders/guards.hpp"
 
@@ -62,6 +63,31 @@ struct text_non_empty_and_preprocessed {
 struct text_non_empty_and_not_preprocessed {
   bool operator()(const event::encode_runtime & ev) const noexcept {
     return text_non_empty{}(ev) && not_preprocessed{}(ev);
+  }
+};
+
+struct ignore_merges_enabled {
+  bool operator()(const event::encode_runtime &, const action::context & ctx) const noexcept {
+    return ctx.vocab != nullptr && ctx.vocab->ignore_merges;
+  }
+};
+
+struct direct_word_token_available {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return emel::text::encoders::detail::lookup_token(ctx, ev.request.text) !=
+           emel::text::encoders::detail::k_token_null;
+  }
+};
+
+struct ignore_merges_fast_path {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return ignore_merges_enabled{}(ev, ctx) && direct_word_token_available{}(ev, ctx);
+  }
+};
+
+struct merge_path_required {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return !ignore_merges_fast_path{}(ev, ctx);
   }
 };
 

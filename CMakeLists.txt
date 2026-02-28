@@ -127,7 +127,14 @@ if(EMEL_ENABLE_TESTS)
       tests/text/jinja/lexer_tests.cpp
       tests/text/jinja/formatter_tests.cpp
       tests/text/formatter/formatter_tests.cpp
-      tests/text/encoders/encoder_tests.cpp
+      tests/text/encoders/common_tests.cpp
+      tests/text/encoders/bpe_tests.cpp
+      tests/text/encoders/spm_tests.cpp
+      tests/text/encoders/wpm_tests.cpp
+      tests/text/encoders/ugm_tests.cpp
+      tests/text/encoders/rwkv_tests.cpp
+      tests/text/encoders/plamo2_tests.cpp
+      tests/text/encoders/fallback_tests.cpp
       tests/text/conditioner/text_conditioner_tests.cpp
       tests/text/detokenizer/detokenizer_tests.cpp
       tests/text/renderer/renderer_tests.cpp

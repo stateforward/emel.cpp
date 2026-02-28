@@ -13,6 +13,7 @@ namespace emel::text::encoders::fallback {
 
 struct initialized {};
 struct encode_precheck_decision {};
+struct encode_table_prepare {};
 struct encode_exec {};
 struct encode_result_decision {};
 struct done {};
@@ -25,6 +26,7 @@ struct unexpected {};
  * state purposes:
  * - 'initialized': idle state awaiting encode intent.
  * - 'encode_precheck_decision': explicit request prechecks before kernel execution.
+ * - 'encode_table_prepare': ensure per-vocab tables before encode execution.
  * - 'encode_exec'/'encode_result_decision': run kernel and branch on phase error.
  * - 'done'/'errored': terminal outcomes.
  * - 'unexpected': sequencing contract violation.
@@ -38,7 +40,8 @@ struct unexpected {};
  * action side effects:
  * - 'begin_encode' resets runtime per-request outputs.
  * - 'begin_encode_sync_vocab' refreshes per-vocab cached tables.
- * - 'run_encode' performs bounded encoding work.
+ * - 'prepare_tables' builds lookup tables before execution.
+ * - 'run_encode_exec' performs bounded encoding work.
  * - 'mark_done'/'ensure_last_error' finalize runtime status.
  * - 'on_unexpected' reports sequencing violations.
  */
@@ -96,14 +99,24 @@ struct model {
       //------------------------------------------------------------------------------//
       , sml::state<done> <= sml::state<encode_precheck_decision>
           + sml::completion<event::encode_runtime>[guard::text_empty{}] / action::mark_done
-      , sml::state<encode_exec> <= sml::state<encode_precheck_decision>
+      , sml::state<encode_table_prepare> <= sml::state<encode_precheck_decision>
           + sml::completion<event::encode_runtime>[guard::text_non_empty{}]
+          / action::prepare_tables
+
+      //------------------------------------------------------------------------------//
+      // Table Preparation
+      //------------------------------------------------------------------------------//
+      , sml::state<encode_exec> <= sml::state<encode_table_prepare>
+          + sml::completion<event::encode_runtime>[guard::phase_ok{}]
+      , sml::state<errored> <= sml::state<encode_table_prepare>
+          + sml::completion<event::encode_runtime>[guard::phase_failed{}]
+          / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
       // Encode Execution
       //------------------------------------------------------------------------------//
       , sml::state<encode_result_decision> <= sml::state<encode_exec>
-          + sml::completion<event::encode_runtime> / action::run_encode
+          + sml::completion<event::encode_runtime> / action::run_encode_exec
       , sml::state<done> <= sml::state<encode_result_decision>
           + sml::completion<event::encode_runtime>[guard::phase_ok{}] / action::mark_done
       , sml::state<errored> <= sml::state<encode_result_decision>
@@ -114,6 +127,8 @@ struct model {
       // Explicit Unexpected-Event Handling
       //------------------------------------------------------------------------------//
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::event<event::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_table_prepare>
           + sml::event<event::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<event::encode_runtime> / action::on_unexpected
@@ -127,6 +142,10 @@ struct model {
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_table_prepare>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_table_prepare>
           + sml::event<events::encoding_error> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<events::encoding_done> / action::on_unexpected
@@ -152,6 +171,8 @@ struct model {
       , sml::state<unexpected> <= sml::state<initialized>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_table_prepare>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::unexpected_event<sml::_> / action::on_unexpected
