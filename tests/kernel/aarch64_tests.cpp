@@ -1,5 +1,7 @@
 #include <doctest/doctest.h>
 
+#include <array>
+#include <cstdint>
 #include <cmath>
 
 #include "test_helpers.hpp"
@@ -121,6 +123,49 @@ TEST_CASE("kernel_aarch64_forced_neon_context_path") {
   CHECK(out[1] == doctest::Approx(7.0f));
   CHECK(out[2] == doctest::Approx(11.0f));
   CHECK(out[3] == doctest::Approx(15.0f));
+}
+
+TEST_CASE("kernel_aarch64_mul_mat_simd_matches_scalar_tiled_edges") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t k = 11;
+  constexpr uint64_t m = 7;
+  constexpr uint64_t n = 21;
+
+  std::array<float, k * m> src0{};
+  std::array<float, k * n> src1{};
+  std::array<float, n * m> dst_simd{};
+  std::array<float, n * m> dst_scalar{};
+
+  for (uint64_t i = 0; i < src0.size(); ++i) {
+    src0[static_cast<size_t>(i)] = static_cast<float>((i % 19) - 9) * 0.0625f;
+  }
+  for (uint64_t i = 0; i < src1.size(); ++i) {
+    src1[static_cast<size_t>(i)] = static_cast<float>((i % 29) - 14) * 0.03125f;
+  }
+
+  const emel::kernel::event::op_mul_mat simd_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_simd.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+
+  CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat(simd_ev));
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  for (uint64_t idx = 0; idx < dst_simd.size(); ++idx) {
+    CHECK(dst_simd[static_cast<size_t>(idx)] ==
+          doctest::Approx(dst_scalar[static_cast<size_t>(idx)]).epsilon(1e-5f));
+  }
+#endif
 }
 
 TEST_CASE("kernel_aarch64_detail_branch_paths") {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -324,24 +325,92 @@ inline bool execute_avx2_mul_mat(const event::op_mul_mat & request) noexcept {
   const float * b = static_cast<const float *>(request.src1.data);
   float * c = static_cast<float *>(request.dst.data);
 
-  for (uint64_t i = 0; i < m; ++i) {
-    uint64_t j = 0;
-    for (; j + 8 <= n; j += 8) {
-      __m256 acc = _mm256_setzero_ps();
-      for (uint64_t p = 0; p < k; ++p) {
-        const __m256 bv = _mm256_loadu_ps(b + p * n + j);
-        const __m256 av = _mm256_set1_ps(a[i * k + p]);
-        acc = _mm256_add_ps(acc, _mm256_mul_ps(av, bv));
-      }
-      _mm256_storeu_ps(c + i * n + j, acc);
-    }
+  constexpr uint64_t row_block = 4;
+  constexpr uint64_t col_vec = 8;
+  constexpr uint64_t col_block = 64;
 
-    for (; j < n; ++j) {
-      float acc = 0.0f;
-      for (uint64_t p = 0; p < k; ++p) {
-        acc += a[i * k + p] * b[p * n + j];
+  uint64_t i = 0;
+  for (; i + row_block <= m; i += row_block) {
+    for (uint64_t jb = 0; jb < n; jb += col_block) {
+      const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
+      uint64_t j = jb;
+      for (; j + col_vec <= j_end; j += col_vec) {
+        __m256 acc0 = _mm256_setzero_ps();
+        __m256 acc1 = _mm256_setzero_ps();
+        __m256 acc2 = _mm256_setzero_ps();
+        __m256 acc3 = _mm256_setzero_ps();
+
+        for (uint64_t p = 0; p < k; ++p) {
+          const __m256 bv = _mm256_loadu_ps(b + p * n + j);
+
+          const __m256 a0 = _mm256_set1_ps(a[(i + 0) * k + p]);
+          const __m256 a1 = _mm256_set1_ps(a[(i + 1) * k + p]);
+          const __m256 a2 = _mm256_set1_ps(a[(i + 2) * k + p]);
+          const __m256 a3 = _mm256_set1_ps(a[(i + 3) * k + p]);
+
+          acc0 = _mm256_add_ps(acc0, _mm256_mul_ps(a0, bv));
+          acc1 = _mm256_add_ps(acc1, _mm256_mul_ps(a1, bv));
+          acc2 = _mm256_add_ps(acc2, _mm256_mul_ps(a2, bv));
+          acc3 = _mm256_add_ps(acc3, _mm256_mul_ps(a3, bv));
+#if defined(__GNUC__) || defined(__clang__)
+          if ((p & 15u) == 0 && p + 16u < k) {
+            _mm_prefetch(reinterpret_cast<const char *>(b + (p + 16u) * n + j), _MM_HINT_T0);
+          }
+#endif
+        }
+
+        _mm256_storeu_ps(c + (i + 0) * n + j, acc0);
+        _mm256_storeu_ps(c + (i + 1) * n + j, acc1);
+        _mm256_storeu_ps(c + (i + 2) * n + j, acc2);
+        _mm256_storeu_ps(c + (i + 3) * n + j, acc3);
       }
-      c[i * n + j] = acc;
+
+      for (; j < j_end; ++j) {
+        float acc0 = 0.0f;
+        float acc1 = 0.0f;
+        float acc2 = 0.0f;
+        float acc3 = 0.0f;
+        for (uint64_t p = 0; p < k; ++p) {
+          const float bv = b[p * n + j];
+          acc0 += a[(i + 0) * k + p] * bv;
+          acc1 += a[(i + 1) * k + p] * bv;
+          acc2 += a[(i + 2) * k + p] * bv;
+          acc3 += a[(i + 3) * k + p] * bv;
+        }
+        c[(i + 0) * n + j] = acc0;
+        c[(i + 1) * n + j] = acc1;
+        c[(i + 2) * n + j] = acc2;
+        c[(i + 3) * n + j] = acc3;
+      }
+    }
+  }
+
+  for (; i < m; ++i) {
+    for (uint64_t jb = 0; jb < n; jb += col_block) {
+      const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
+      uint64_t j = jb;
+      for (; j + col_vec <= j_end; j += col_vec) {
+        __m256 acc = _mm256_setzero_ps();
+        for (uint64_t p = 0; p < k; ++p) {
+          const __m256 bv = _mm256_loadu_ps(b + p * n + j);
+          const __m256 av = _mm256_set1_ps(a[i * k + p]);
+          acc = _mm256_add_ps(acc, _mm256_mul_ps(av, bv));
+#if defined(__GNUC__) || defined(__clang__)
+          if ((p & 15u) == 0 && p + 16u < k) {
+            _mm_prefetch(reinterpret_cast<const char *>(b + (p + 16u) * n + j), _MM_HINT_T0);
+          }
+#endif
+        }
+        _mm256_storeu_ps(c + i * n + j, acc);
+      }
+
+      for (; j < j_end; ++j) {
+        float acc = 0.0f;
+        for (uint64_t p = 0; p < k; ++p) {
+          acc += a[i * k + p] * b[p * n + j];
+        }
+        c[i * n + j] = acc;
+      }
     }
   }
 
