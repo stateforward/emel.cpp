@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <span>
 #include <string>
 #include <vector>
 #include <doctest/doctest.h>
@@ -195,11 +196,10 @@ TEST_CASE("encoder_bpe_ignore_merges_prefers_full_token") {
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "hello",
     .preprocessed = true,
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -222,10 +222,9 @@ TEST_CASE("encoder_wpm_emits_longest_token") {
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "hello",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -251,10 +250,9 @@ TEST_CASE("encoder_ugm_applies_precompiled_charsmap") {
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "a",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -280,10 +278,9 @@ TEST_CASE("encoder_spm_merges_bigram") {
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "hi",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -309,11 +306,10 @@ TEST_CASE("encoder_bpe_merges_ranked_pair") {
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "he",
     .preprocessed = true,
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -336,11 +332,10 @@ TEST_CASE("encoder_bpe_byte_fallback") {
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "!",
     .preprocessed = true,
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -371,11 +366,10 @@ TEST_CASE("encoder_bpe_byte_fallback_multibyte_symbols") {
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = word,
     .preprocessed = true,
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -470,11 +464,10 @@ TEST_CASE("encoder_rejects_invalid_input") {
   int32_t err = EMEL_OK;
 
   CHECK(!machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "hello",
     .preprocessed = true,
-    .token_ids = nullptr,
-    .token_capacity = 0,
+    .token_ids = std::span<int32_t>(),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -497,11 +490,10 @@ TEST_CASE("encoder_dispatch_callbacks") {
   dispatch_recorder recorder{};
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "hello",
     .preprocessed = true,
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
     .owner_sm = &recorder,
@@ -526,10 +518,9 @@ TEST_CASE("encoder_dispatch_error_on_missing_bytes") {
   dispatch_recorder recorder{};
 
   CHECK(!machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "x",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
     .owner_sm = &recorder,
@@ -555,10 +546,9 @@ TEST_CASE("encoder_wpm_falls_back_to_unk") {
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "hello",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -581,10 +571,9 @@ TEST_CASE("encoder_fallback_byte_tokens") {
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "xy",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -609,10 +598,9 @@ TEST_CASE("encoder_plamo2_byte_tokens") {
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "p",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -634,10 +622,9 @@ TEST_CASE("encoder_rwkv_byte_tokens") {
   int32_t err = EMEL_OK;
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "r",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   }));
@@ -647,7 +634,7 @@ TEST_CASE("encoder_rwkv_byte_tokens") {
   CHECK(tokens[0] == byte_id);
 }
 
-TEST_CASE("encoder_unexpected_event_sets_error") {
+TEST_CASE("encoder_unexpected_event_is_handled") {
   vocab_builder builder{};
   builder.set_model("gpt2");
   builder.set_pre("gpt2");
@@ -661,11 +648,10 @@ TEST_CASE("encoder_unexpected_event_sets_error") {
   dispatch_recorder recorder{};
 
   emel::text::encoders::event::encode request{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "hello",
     .preprocessed = true,
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
     .owner_sm = &recorder,
@@ -673,9 +659,9 @@ TEST_CASE("encoder_unexpected_event_sets_error") {
     .dispatch_error = record_error,
   };
 
-  CHECK(machine.process_event(emel::text::encoders::events::encoding_done{&request, 0}));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(recorder.error_count == 1);
+  CHECK(machine.process_event(emel::text::encoders::events::encoding_done{request, 0}));
+  CHECK(err == EMEL_OK);
+  CHECK(recorder.error_count == 0);
 }
 
 TEST_CASE("encoder_detail_trie_basic") {
@@ -718,28 +704,25 @@ TEST_CASE("encoder_guard_validates_inputs") {
   int32_t err = EMEL_OK;
 
   emel::text::encoders::event::encode valid{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "ok",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   emel::text::encoders::event::encode invalid{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "bad",
-    .token_ids = nullptr,
-    .token_capacity = 0,
+    .token_ids = std::span<int32_t>(),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   emel::text::encoders::event::encode missing_count{
-    .vocab = builder.vocab,
+    .vocab = *builder.vocab,
     .text = "bad",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = nullptr,
     .error_out = &err,
   };
@@ -747,12 +730,20 @@ TEST_CASE("encoder_guard_validates_inputs") {
   emel::text::encoders::action::context ctx{};
   ctx.vocab = builder.vocab;
 
-  CHECK(emel::text::encoders::guard::valid_encode{}(valid, ctx));
-  CHECK(!emel::text::encoders::guard::valid_encode{}(invalid, ctx));
-  CHECK(!emel::text::encoders::guard::valid_encode{}(missing_count, ctx));
+  emel::text::encoders::event::encode_ctx valid_ctx{};
+  emel::text::encoders::event::encode_ctx invalid_ctx{};
+  emel::text::encoders::event::encode_ctx missing_count_ctx{};
+  emel::text::encoders::event::encode_runtime valid_runtime{valid, valid_ctx};
+  emel::text::encoders::event::encode_runtime invalid_runtime{invalid, invalid_ctx};
+  emel::text::encoders::event::encode_runtime missing_count_runtime{missing_count,
+                                                                    missing_count_ctx};
+
+  CHECK(emel::text::encoders::guard::valid_encode{}(valid_runtime, ctx));
+  CHECK(!emel::text::encoders::guard::valid_encode{}(invalid_runtime, ctx));
+  CHECK(emel::text::encoders::guard::valid_encode{}(missing_count_runtime, ctx));
 
   emel::text::encoders::action::context empty_ctx{};
-  CHECK(emel::text::encoders::guard::valid_encode{}(valid, empty_ctx));
+  CHECK(emel::text::encoders::guard::valid_encode{}(valid_runtime, empty_ctx));
 }
 
 TEST_CASE("encoder_detail_misc_branches") {
@@ -825,8 +816,7 @@ TEST_CASE("encoder_detail_helpers") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "hello",
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
@@ -896,8 +886,7 @@ TEST_CASE("encoder_encode_impl_variants") {
       int32_t err = EMEL_OK;
       emel::text::encoders::event::encode ev{
         .text = text,
-        .token_ids = out_tokens.data(),
-        .token_capacity = static_cast<int32_t>(out_tokens.size()),
+        .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
         .token_count_out = &token_count,
         .error_out = &err,
       };
@@ -956,14 +945,14 @@ TEST_CASE("encoder_encode_impl_variants") {
           break;
         }
         case emel::model::data::tokenizer_model::NONE:
-          result.error = EMEL_ERR_BACKEND;
+          result.error = emel::text::encoders::error::code::backend;
           break;
       }
       if (ev.token_count_out != nullptr) {
         *ev.token_count_out = result.token_count;
       }
       if (ev.error_out != nullptr) {
-        *ev.error_out = result.error;
+        *ev.error_out = emel::text::encoders::error::to_emel(result.error);
       }
       (void)result;
       CHECK(err == EMEL_OK);
@@ -1011,8 +1000,7 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "hello world",
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
@@ -1301,8 +1289,7 @@ TEST_CASE("encoder_detail_empty_encode_variants") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
@@ -1310,16 +1297,16 @@ TEST_CASE("encoder_detail_empty_encode_variants") {
   const auto fallback =
     emel::text::encoders::fallback::detail::encode_fallback(ev, fallback_ctx, *builder.vocab);
   CHECK(fallback.token_count == 0);
-  CHECK(fallback.error == EMEL_OK);
+  CHECK(fallback.error == emel::text::encoders::error::code::ok);
 
   const auto rwkv = emel::text::encoders::rwkv::detail::encode_rwkv(ev, rwkv_ctx, *builder.vocab);
   CHECK(rwkv.token_count == 0);
-  CHECK(rwkv.error == EMEL_OK);
+  CHECK(rwkv.error == emel::text::encoders::error::code::ok);
 
   const auto plamo2 =
     emel::text::encoders::plamo2::detail::encode_plamo2(ev, plamo2_ctx, *builder.vocab);
   CHECK(plamo2.token_count == 0);
-  CHECK(plamo2.error == EMEL_OK);
+  CHECK(plamo2.error == emel::text::encoders::error::code::ok);
 }
 
 TEST_CASE("encoder_detail_encode_cpt_utf8_branches") {
@@ -1378,14 +1365,13 @@ TEST_CASE("encoder_detail_bpe_merge_and_errors") {
   emel::text::encoders::event::encode ev{
     .text = "he",
     .preprocessed = true,
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto merged = emel::text::encoders::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
-  CHECK(merged.error == EMEL_OK);
+  CHECK(merged.error == emel::text::encoders::error::code::ok);
   CHECK(merged.token_count >= 1);
   CHECK(tokens[0] == he_id);
 
@@ -1397,15 +1383,14 @@ TEST_CASE("encoder_detail_bpe_merge_and_errors") {
   emel::text::encoders::event::encode ev_fail{
     .text = "he",
     .preprocessed = true,
-    .token_ids = nullptr,
-    .token_capacity = 0,
+    .token_ids = std::span<int32_t>(),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result_fail = emel::text::encoders::bpe::detail::encode_bpe(
     ev_fail, ctx_fail, *builder.vocab);
-  CHECK(result_fail.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result_fail.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_detail_xcda_error_paths") {
@@ -1440,14 +1425,13 @@ TEST_CASE("encoder_detail_spm_merge_capacity_error") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "hi",
-    .token_ids = tokens.data(),
-    .token_capacity = 0,
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(0)),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_detail_spm_add_space_prefix") {
@@ -1471,14 +1455,13 @@ TEST_CASE("encoder_detail_spm_add_space_prefix") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "hi",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::code::ok);
   CHECK(result.token_count >= 1);
 }
 
@@ -1500,14 +1483,13 @@ TEST_CASE("encoder_detail_spm_prefix_after_leading_spaces") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "  hi",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::code::ok);
   CHECK(result.token_count >= 1);
 }
 
@@ -1528,14 +1510,13 @@ TEST_CASE("encoder_detail_spm_unescaped_spaces") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "h i",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::code::ok);
   CHECK(result.token_count >= 1);
 }
 
@@ -1557,14 +1538,13 @@ TEST_CASE("encoder_detail_spm_suffix_escape_spaces") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "hi",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::code::ok);
   CHECK(result.token_count >= 1);
 }
 
@@ -1586,14 +1566,13 @@ TEST_CASE("encoder_detail_spm_suffix_unescaped_space") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "hi",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::code::ok);
   CHECK(result.token_count >= 1);
 }
 
@@ -1614,14 +1593,13 @@ TEST_CASE("encoder_detail_bpe_buffer_overflow") {
   emel::text::encoders::event::encode ev{
     .text = text,
     .preprocessed = true,
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_detail_wpm_empty_text") {
@@ -1635,14 +1613,13 @@ TEST_CASE("encoder_detail_wpm_empty_text") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "",
-    .token_ids = tokens.data(),
-    .token_capacity = static_cast<int32_t>(tokens.size()),
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::code::ok);
   CHECK(result.token_count == 0);
 }
 
@@ -1734,14 +1711,13 @@ TEST_CASE("encoder_rwkv_skips_unknown_without_unk") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "b",
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::code::ok);
   CHECK(result.token_count == 0);
 }
 
@@ -1767,14 +1743,13 @@ TEST_CASE("encoder_detail_wpm_skips_unknown_without_unk") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "unknown",
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::code::ok);
   CHECK(result.token_count == 0);
 }
 
@@ -1791,13 +1766,12 @@ TEST_CASE("encoder_detail_spm_prefix_overflow") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = text,
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_detail_spm_space_overflow") {
@@ -1813,13 +1787,12 @@ TEST_CASE("encoder_detail_spm_space_overflow") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = text,
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_detail_spm_missing_byte_token") {
@@ -1833,13 +1806,12 @@ TEST_CASE("encoder_detail_spm_missing_byte_token") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "b",
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_BACKEND);
+  CHECK(result.error == emel::text::encoders::error::code::backend);
 }
 
 TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
@@ -1857,20 +1829,19 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "\xEF\xBB\xBF" "a",
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
   const auto result = emel::text::encoders::plamo2::detail::encode_plamo2(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::code::ok);
   CHECK(result.token_count > 0);
 
   emel::text::encoders::event::encode ev_bom_only = ev;
   ev_bom_only.text = "\xEF\xBB\xBF";
   const auto bom_only =
       emel::text::encoders::plamo2::detail::encode_plamo2(ev_bom_only, ctx, *builder.vocab);
-  CHECK(bom_only.error == EMEL_OK);
+  CHECK(bom_only.error == emel::text::encoders::error::code::ok);
   CHECK(bom_only.token_count == 0);
 
   emel::text::encoders::event::encode ev_long = ev;
@@ -1879,7 +1850,7 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
   ev_long.text = long_text;
   const auto too_long =
       emel::text::encoders::plamo2::detail::encode_plamo2(ev_long, ctx, *builder.vocab);
-  CHECK(too_long.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(too_long.error == emel::text::encoders::error::code::invalid_argument);
 
   vocab_builder incomplete_builder{};
   incomplete_builder.set_model("plamo2");
@@ -1892,7 +1863,7 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
   const auto invalid =
       emel::text::encoders::plamo2::detail::encode_plamo2(ev_incomplete, ctx_incomplete,
                                                    *incomplete_builder.vocab);
-  CHECK(invalid.error == EMEL_ERR_MODEL_INVALID);
+  CHECK(invalid.error == emel::text::encoders::error::code::model_invalid);
 }
 
 TEST_CASE("encoder_detail_ugm_helper_branches") {
@@ -1954,13 +1925,12 @@ TEST_CASE("encoder_detail_ugm_normalize_overflow") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = text,
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
   const auto result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_detail_ugm_normalize_empty") {
@@ -1978,13 +1948,12 @@ TEST_CASE("encoder_detail_ugm_normalize_empty") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "   ",
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
   const auto result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::code::ok);
   CHECK(result.token_count == 0);
 }
 
@@ -2004,14 +1973,13 @@ TEST_CASE("encoder_detail_bpe_byte_push_overflow") {
   emel::text::encoders::event::encode ev{
     .text = "ab",
     .preprocessed = true,
-    .token_ids = out_tokens.data(),
-    .token_capacity = 0,
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(0)),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_detail_wpm_prefix_overflow") {
@@ -2026,14 +1994,13 @@ TEST_CASE("encoder_detail_wpm_prefix_overflow") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = text,
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_detail_wpm_push_overflow") {
@@ -2047,14 +2014,13 @@ TEST_CASE("encoder_detail_wpm_push_overflow") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "a",
-    .token_ids = out_tokens.data(),
-    .token_capacity = 0,
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(0)),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_detail_spm_empty_text") {
@@ -2067,14 +2033,13 @@ TEST_CASE("encoder_detail_spm_empty_text") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "",
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::code::ok);
   CHECK(result.token_count == 0);
 }
 
@@ -2090,14 +2055,13 @@ TEST_CASE("encoder_detail_spm_symbol_overflow") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = text,
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_detail_insert_token_map_full") {
@@ -2179,13 +2143,12 @@ TEST_CASE("encoder_rwkv_encode_reports_invalid_table") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "a",
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
   const auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_detail_ugm_append_space_and_overflow") {
@@ -2245,13 +2208,12 @@ TEST_CASE("encoder_rwkv_push_unk_overflow") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "z",
-    .token_ids = out_tokens.data(),
-    .token_capacity = 0,
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(0)),
     .token_count_out = &token_count,
     .error_out = &err,
   };
   const auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
 TEST_CASE("encoder_encode_branch_cases") {
@@ -2260,8 +2222,7 @@ TEST_CASE("encoder_encode_branch_cases") {
   int32_t err = EMEL_OK;
   emel::text::encoders::event::encode ev{
     .text = "hello",
-    .token_ids = out_tokens.data(),
-    .token_capacity = static_cast<int32_t>(out_tokens.size()),
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
   };
@@ -2370,11 +2331,10 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
   auto make_event = [&](const char * text, const int32_t capacity,
                         const emel::model::data::vocab * vocab) {
     return emel::text::encoders::event::encode{
-      .vocab = vocab,
+      .vocab = *vocab,
       .text = text,
       .preprocessed = true,
-      .token_ids = tokens.data(),
-      .token_capacity = capacity,
+      .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(capacity)),
       .token_count_out = &token_count,
       .error_out = &err,
     };
@@ -2382,11 +2342,10 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
   auto make_invalid_event = [&](const emel::model::data::vocab * vocab) {
     return emel::text::encoders::event::encode{
-      .vocab = vocab,
+      .vocab = *vocab,
       .text = "x",
       .preprocessed = true,
-      .token_ids = nullptr,
-      .token_capacity = 0,
+      .token_ids = std::span<int32_t>(),
       .token_count_out = &token_count,
       .error_out = &err,
     };
@@ -2399,27 +2358,36 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
   emel::text::encoders::action::context base_ctx{};
   base_ctx.vocab = base_builder.vocab;
-  base_ctx.phase_error = EMEL_ERR_BACKEND;
-  base_ctx.last_error = EMEL_OK;
-  emel::text::encoders::action::ensure_last_error(base_ctx);
-  CHECK(base_ctx.last_error == EMEL_ERR_BACKEND);
-  base_ctx.phase_error = EMEL_OK;
-  base_ctx.last_error = EMEL_OK;
-  emel::text::encoders::action::ensure_last_error(base_ctx);
-  CHECK(base_ctx.last_error == EMEL_ERR_BACKEND);
-
   auto base_ev = make_event("x", 1, base_builder.vocab);
-  emel::text::encoders::action::on_unexpected(base_ev, base_ctx);
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
-  emel::text::encoders::action::on_unexpected(emel::text::encoders::events::encoding_done{nullptr, 0}, base_ctx);
-
   auto invalid_ev = make_invalid_event(base_builder.vocab);
-  CHECK(emel::text::encoders::guard::valid_encode{}(base_ev, base_ctx));
-  CHECK(emel::text::encoders::guard::invalid_encode{}(invalid_ev, base_ctx));
-  base_ctx.phase_error = EMEL_OK;
-  CHECK(emel::text::encoders::guard::phase_ok{}(base_ctx));
-  base_ctx.phase_error = EMEL_ERR_BACKEND;
-  CHECK(emel::text::encoders::guard::phase_failed{}(base_ctx));
+  emel::text::encoders::event::encode_ctx base_runtime{};
+  emel::text::encoders::event::encode_ctx base_invalid_runtime{};
+  emel::text::encoders::event::encode_runtime base_runtime_ev{base_ev, base_runtime};
+  emel::text::encoders::event::encode_runtime base_invalid_runtime_ev{invalid_ev,
+                                                                      base_invalid_runtime};
+
+  emel::text::encoders::action::reject_invalid_encode(base_runtime_ev, base_ctx);
+  CHECK(base_runtime.err == emel::text::encoders::error::code::invalid_argument);
+  CHECK(base_runtime.token_count == 0);
+
+  base_runtime.err = emel::text::encoders::error::code::ok;
+  emel::text::encoders::action::ensure_last_error(base_runtime_ev, base_ctx);
+  CHECK(base_runtime.err == emel::text::encoders::error::code::backend);
+
+  emel::text::encoders::action::on_unexpected(base_runtime_ev, base_ctx);
+  CHECK(base_runtime.err == emel::text::encoders::error::code::invalid_argument);
+  emel::text::encoders::action::on_unexpected(
+      emel::text::encoders::events::encoding_done{base_ev, 0}, base_ctx);
+
+  CHECK(emel::text::encoders::guard::valid_encode{}(base_runtime_ev, base_ctx));
+  CHECK(emel::text::encoders::guard::invalid_encode{}(base_invalid_runtime_ev, base_ctx));
+  base_runtime.err = emel::text::encoders::error::code::ok;
+  CHECK(emel::text::encoders::guard::phase_ok{}(base_runtime_ev));
+  base_runtime.err = emel::text::encoders::error::code::backend;
+  CHECK(emel::text::encoders::guard::phase_failed{}(base_runtime_ev));
+  CHECK(emel::text::encoders::guard::vocab_unchanged{}(base_runtime_ev, base_ctx));
+  base_ctx.vocab = nullptr;
+  CHECK(emel::text::encoders::guard::vocab_changed{}(base_runtime_ev, base_ctx));
 
   {
     vocab_builder builder{};
@@ -2429,25 +2397,30 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     builder.add_byte_token(static_cast<uint8_t>('x'));
 
     emel::text::encoders::bpe::action::context ctx{};
-    ctx.vocab = builder.vocab;
     auto ev_ok = make_event("x", 1, builder.vocab);
     auto ev_error = make_event("x", 0, builder.vocab);
     auto ev_invalid = make_invalid_event(builder.vocab);
+    emel::text::encoders::event::encode_ctx runtime_ok{};
+    emel::text::encoders::event::encode_ctx runtime_error{};
+    emel::text::encoders::event::encode_ctx runtime_invalid{};
+    emel::text::encoders::event::encode_runtime runtime_ok_ev{ev_ok, runtime_ok};
+    emel::text::encoders::event::encode_runtime runtime_error_ev{ev_error, runtime_error};
+    emel::text::encoders::event::encode_runtime runtime_invalid_ev{ev_invalid, runtime_invalid};
 
-    emel::text::encoders::bpe::action::reject_invalid_encode(ev_ok, ctx);
-    emel::text::encoders::bpe::action::run_encode(ctx);
-    emel::text::encoders::bpe::action::mark_done(ctx);
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    emel::text::encoders::bpe::action::ensure_last_error(ctx);
-    emel::text::encoders::bpe::action::on_unexpected(ev_ok, ctx);
-    emel::text::encoders::bpe::action::begin_encode(ev_error, ctx);
+    emel::text::encoders::bpe::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
+    CHECK(ctx.vocab == builder.vocab);
+    emel::text::encoders::bpe::action::run_encode(runtime_error_ev, ctx);
+    emel::text::encoders::bpe::action::mark_done(runtime_ok_ev, ctx);
+    emel::text::encoders::bpe::action::ensure_last_error(runtime_error_ev, ctx);
+    emel::text::encoders::bpe::action::on_unexpected(runtime_ok_ev, ctx);
+    emel::text::encoders::bpe::action::begin_encode(runtime_error_ev, ctx);
 
-    CHECK(emel::text::encoders::bpe::guard::valid_encode{}(ev_ok, ctx));
-    CHECK(emel::text::encoders::bpe::guard::invalid_encode{}(ev_invalid, ctx));
-    ctx.phase_error = EMEL_OK;
-    CHECK(emel::text::encoders::bpe::guard::phase_ok{}(ctx));
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    CHECK(emel::text::encoders::bpe::guard::phase_failed{}(ctx));
+    CHECK(emel::text::encoders::bpe::guard::valid_encode{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::bpe::guard::invalid_encode{}(runtime_invalid_ev, ctx));
+    runtime_ok.err = emel::text::encoders::error::code::ok;
+    CHECK(emel::text::encoders::bpe::guard::phase_ok{}(runtime_ok_ev));
+    runtime_ok.err = emel::text::encoders::error::code::backend;
+    CHECK(emel::text::encoders::bpe::guard::phase_failed{}(runtime_ok_ev));
   }
 
   {
@@ -2458,25 +2431,30 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     builder.add_token("x", 0.1f, 1);
 
     emel::text::encoders::wpm::action::context ctx{};
-    ctx.vocab = builder.vocab;
     auto ev_ok = make_event("x", 1, builder.vocab);
     auto ev_error = make_event("x", 0, builder.vocab);
     auto ev_invalid = make_invalid_event(builder.vocab);
+    emel::text::encoders::event::encode_ctx runtime_ok{};
+    emel::text::encoders::event::encode_ctx runtime_error{};
+    emel::text::encoders::event::encode_ctx runtime_invalid{};
+    emel::text::encoders::event::encode_runtime runtime_ok_ev{ev_ok, runtime_ok};
+    emel::text::encoders::event::encode_runtime runtime_error_ev{ev_error, runtime_error};
+    emel::text::encoders::event::encode_runtime runtime_invalid_ev{ev_invalid, runtime_invalid};
 
-    emel::text::encoders::wpm::action::reject_invalid_encode(ev_ok, ctx);
-    emel::text::encoders::wpm::action::run_encode(ctx);
-    emel::text::encoders::wpm::action::mark_done(ctx);
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    emel::text::encoders::wpm::action::ensure_last_error(ctx);
-    emel::text::encoders::wpm::action::on_unexpected(ev_ok, ctx);
-    emel::text::encoders::wpm::action::begin_encode(ev_error, ctx);
+    emel::text::encoders::wpm::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
+    CHECK(ctx.vocab == builder.vocab);
+    emel::text::encoders::wpm::action::run_encode(runtime_error_ev, ctx);
+    emel::text::encoders::wpm::action::mark_done(runtime_ok_ev, ctx);
+    emel::text::encoders::wpm::action::ensure_last_error(runtime_error_ev, ctx);
+    emel::text::encoders::wpm::action::on_unexpected(runtime_ok_ev, ctx);
+    emel::text::encoders::wpm::action::begin_encode(runtime_error_ev, ctx);
 
-    CHECK(emel::text::encoders::wpm::guard::valid_encode{}(ev_ok, ctx));
-    CHECK(emel::text::encoders::wpm::guard::invalid_encode{}(ev_invalid, ctx));
-    ctx.phase_error = EMEL_OK;
-    CHECK(emel::text::encoders::wpm::guard::phase_ok{}(ctx));
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    CHECK(emel::text::encoders::wpm::guard::phase_failed{}(ctx));
+    CHECK(emel::text::encoders::wpm::guard::valid_encode{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::wpm::guard::invalid_encode{}(runtime_invalid_ev, ctx));
+    runtime_ok.err = emel::text::encoders::error::code::ok;
+    CHECK(emel::text::encoders::wpm::guard::phase_ok{}(runtime_ok_ev));
+    runtime_ok.err = emel::text::encoders::error::code::backend;
+    CHECK(emel::text::encoders::wpm::guard::phase_failed{}(runtime_ok_ev));
   }
 
   {
@@ -2486,25 +2464,30 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     builder.add_token("x", 0.1f, 1);
 
     emel::text::encoders::spm::action::context ctx{};
-    ctx.vocab = builder.vocab;
     auto ev_ok = make_event("x", 1, builder.vocab);
     auto ev_error = make_event("x", 0, builder.vocab);
     auto ev_invalid = make_invalid_event(builder.vocab);
+    emel::text::encoders::event::encode_ctx runtime_ok{};
+    emel::text::encoders::event::encode_ctx runtime_error{};
+    emel::text::encoders::event::encode_ctx runtime_invalid{};
+    emel::text::encoders::event::encode_runtime runtime_ok_ev{ev_ok, runtime_ok};
+    emel::text::encoders::event::encode_runtime runtime_error_ev{ev_error, runtime_error};
+    emel::text::encoders::event::encode_runtime runtime_invalid_ev{ev_invalid, runtime_invalid};
 
-    emel::text::encoders::spm::action::reject_invalid_encode(ev_ok, ctx);
-    emel::text::encoders::spm::action::run_encode(ctx);
-    emel::text::encoders::spm::action::mark_done(ctx);
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    emel::text::encoders::spm::action::ensure_last_error(ctx);
-    emel::text::encoders::spm::action::on_unexpected(ev_ok, ctx);
-    emel::text::encoders::spm::action::begin_encode(ev_error, ctx);
+    emel::text::encoders::spm::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
+    CHECK(ctx.vocab == builder.vocab);
+    emel::text::encoders::spm::action::run_encode(runtime_error_ev, ctx);
+    emel::text::encoders::spm::action::mark_done(runtime_ok_ev, ctx);
+    emel::text::encoders::spm::action::ensure_last_error(runtime_error_ev, ctx);
+    emel::text::encoders::spm::action::on_unexpected(runtime_ok_ev, ctx);
+    emel::text::encoders::spm::action::begin_encode(runtime_error_ev, ctx);
 
-    CHECK(emel::text::encoders::spm::guard::valid_encode{}(ev_ok, ctx));
-    CHECK(emel::text::encoders::spm::guard::invalid_encode{}(ev_invalid, ctx));
-    ctx.phase_error = EMEL_OK;
-    CHECK(emel::text::encoders::spm::guard::phase_ok{}(ctx));
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    CHECK(emel::text::encoders::spm::guard::phase_failed{}(ctx));
+    CHECK(emel::text::encoders::spm::guard::valid_encode{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::spm::guard::invalid_encode{}(runtime_invalid_ev, ctx));
+    runtime_ok.err = emel::text::encoders::error::code::ok;
+    CHECK(emel::text::encoders::spm::guard::phase_ok{}(runtime_ok_ev));
+    runtime_ok.err = emel::text::encoders::error::code::backend;
+    CHECK(emel::text::encoders::spm::guard::phase_failed{}(runtime_ok_ev));
   }
 
   {
@@ -2515,25 +2498,30 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     builder.add_token("x", 0.1f, 1);
 
     emel::text::encoders::ugm::action::context ctx{};
-    ctx.vocab = builder.vocab;
     auto ev_ok = make_event("x", 1, builder.vocab);
     auto ev_error = make_event("x", 0, builder.vocab);
     auto ev_invalid = make_invalid_event(builder.vocab);
+    emel::text::encoders::event::encode_ctx runtime_ok{};
+    emel::text::encoders::event::encode_ctx runtime_error{};
+    emel::text::encoders::event::encode_ctx runtime_invalid{};
+    emel::text::encoders::event::encode_runtime runtime_ok_ev{ev_ok, runtime_ok};
+    emel::text::encoders::event::encode_runtime runtime_error_ev{ev_error, runtime_error};
+    emel::text::encoders::event::encode_runtime runtime_invalid_ev{ev_invalid, runtime_invalid};
 
-    emel::text::encoders::ugm::action::reject_invalid_encode(ev_ok, ctx);
-    emel::text::encoders::ugm::action::run_encode(ctx);
-    emel::text::encoders::ugm::action::mark_done(ctx);
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    emel::text::encoders::ugm::action::ensure_last_error(ctx);
-    emel::text::encoders::ugm::action::on_unexpected(ev_ok, ctx);
-    emel::text::encoders::ugm::action::begin_encode(ev_error, ctx);
+    emel::text::encoders::ugm::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
+    CHECK(ctx.vocab == builder.vocab);
+    emel::text::encoders::ugm::action::run_encode(runtime_error_ev, ctx);
+    emel::text::encoders::ugm::action::mark_done(runtime_ok_ev, ctx);
+    emel::text::encoders::ugm::action::ensure_last_error(runtime_error_ev, ctx);
+    emel::text::encoders::ugm::action::on_unexpected(runtime_ok_ev, ctx);
+    emel::text::encoders::ugm::action::begin_encode(runtime_error_ev, ctx);
 
-    CHECK(emel::text::encoders::ugm::guard::valid_encode{}(ev_ok, ctx));
-    CHECK(emel::text::encoders::ugm::guard::invalid_encode{}(ev_invalid, ctx));
-    ctx.phase_error = EMEL_OK;
-    CHECK(emel::text::encoders::ugm::guard::phase_ok{}(ctx));
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    CHECK(emel::text::encoders::ugm::guard::phase_failed{}(ctx));
+    CHECK(emel::text::encoders::ugm::guard::valid_encode{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::ugm::guard::invalid_encode{}(runtime_invalid_ev, ctx));
+    runtime_ok.err = emel::text::encoders::error::code::ok;
+    CHECK(emel::text::encoders::ugm::guard::phase_ok{}(runtime_ok_ev));
+    runtime_ok.err = emel::text::encoders::error::code::backend;
+    CHECK(emel::text::encoders::ugm::guard::phase_failed{}(runtime_ok_ev));
   }
 
   {
@@ -2542,25 +2530,30 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     builder.add_byte_token(static_cast<uint8_t>('x'));
 
     emel::text::encoders::rwkv::action::context ctx{};
-    ctx.vocab = builder.vocab;
     auto ev_ok = make_event("x", 1, builder.vocab);
     auto ev_error = make_event("x", 0, builder.vocab);
     auto ev_invalid = make_invalid_event(builder.vocab);
+    emel::text::encoders::event::encode_ctx runtime_ok{};
+    emel::text::encoders::event::encode_ctx runtime_error{};
+    emel::text::encoders::event::encode_ctx runtime_invalid{};
+    emel::text::encoders::event::encode_runtime runtime_ok_ev{ev_ok, runtime_ok};
+    emel::text::encoders::event::encode_runtime runtime_error_ev{ev_error, runtime_error};
+    emel::text::encoders::event::encode_runtime runtime_invalid_ev{ev_invalid, runtime_invalid};
 
-    emel::text::encoders::rwkv::action::reject_invalid_encode(ev_ok, ctx);
-    emel::text::encoders::rwkv::action::run_encode(ctx);
-    emel::text::encoders::rwkv::action::mark_done(ctx);
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    emel::text::encoders::rwkv::action::ensure_last_error(ctx);
-    emel::text::encoders::rwkv::action::on_unexpected(ev_ok, ctx);
-    emel::text::encoders::rwkv::action::begin_encode(ev_error, ctx);
+    emel::text::encoders::rwkv::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
+    CHECK(ctx.vocab == builder.vocab);
+    emel::text::encoders::rwkv::action::run_encode(runtime_error_ev, ctx);
+    emel::text::encoders::rwkv::action::mark_done(runtime_ok_ev, ctx);
+    emel::text::encoders::rwkv::action::ensure_last_error(runtime_error_ev, ctx);
+    emel::text::encoders::rwkv::action::on_unexpected(runtime_ok_ev, ctx);
+    emel::text::encoders::rwkv::action::begin_encode(runtime_error_ev, ctx);
 
-    CHECK(emel::text::encoders::rwkv::guard::valid_encode{}(ev_ok, ctx));
-    CHECK(emel::text::encoders::rwkv::guard::invalid_encode{}(ev_invalid, ctx));
-    ctx.phase_error = EMEL_OK;
-    CHECK(emel::text::encoders::rwkv::guard::phase_ok{}(ctx));
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    CHECK(emel::text::encoders::rwkv::guard::phase_failed{}(ctx));
+    CHECK(emel::text::encoders::rwkv::guard::valid_encode{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::rwkv::guard::invalid_encode{}(runtime_invalid_ev, ctx));
+    runtime_ok.err = emel::text::encoders::error::code::ok;
+    CHECK(emel::text::encoders::rwkv::guard::phase_ok{}(runtime_ok_ev));
+    runtime_ok.err = emel::text::encoders::error::code::backend;
+    CHECK(emel::text::encoders::rwkv::guard::phase_failed{}(runtime_ok_ev));
   }
 
   {
@@ -2571,25 +2564,30 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     builder.add_plamo2_byte_token(static_cast<uint8_t>('x'));
 
     emel::text::encoders::plamo2::action::context ctx{};
-    ctx.vocab = builder.vocab;
     auto ev_ok = make_event("x", 1, builder.vocab);
     auto ev_error = make_event("x", 0, builder.vocab);
     auto ev_invalid = make_invalid_event(builder.vocab);
+    emel::text::encoders::event::encode_ctx runtime_ok{};
+    emel::text::encoders::event::encode_ctx runtime_error{};
+    emel::text::encoders::event::encode_ctx runtime_invalid{};
+    emel::text::encoders::event::encode_runtime runtime_ok_ev{ev_ok, runtime_ok};
+    emel::text::encoders::event::encode_runtime runtime_error_ev{ev_error, runtime_error};
+    emel::text::encoders::event::encode_runtime runtime_invalid_ev{ev_invalid, runtime_invalid};
 
-    emel::text::encoders::plamo2::action::reject_invalid_encode(ev_ok, ctx);
-    emel::text::encoders::plamo2::action::run_encode(ctx);
-    emel::text::encoders::plamo2::action::mark_done(ctx);
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    emel::text::encoders::plamo2::action::ensure_last_error(ctx);
-    emel::text::encoders::plamo2::action::on_unexpected(ev_ok, ctx);
-    emel::text::encoders::plamo2::action::begin_encode(ev_error, ctx);
+    emel::text::encoders::plamo2::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
+    CHECK(ctx.vocab == builder.vocab);
+    emel::text::encoders::plamo2::action::run_encode(runtime_error_ev, ctx);
+    emel::text::encoders::plamo2::action::mark_done(runtime_ok_ev, ctx);
+    emel::text::encoders::plamo2::action::ensure_last_error(runtime_error_ev, ctx);
+    emel::text::encoders::plamo2::action::on_unexpected(runtime_ok_ev, ctx);
+    emel::text::encoders::plamo2::action::begin_encode(runtime_error_ev, ctx);
 
-    CHECK(emel::text::encoders::plamo2::guard::valid_encode{}(ev_ok, ctx));
-    CHECK(emel::text::encoders::plamo2::guard::invalid_encode{}(ev_invalid, ctx));
-    ctx.phase_error = EMEL_OK;
-    CHECK(emel::text::encoders::plamo2::guard::phase_ok{}(ctx));
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    CHECK(emel::text::encoders::plamo2::guard::phase_failed{}(ctx));
+    CHECK(emel::text::encoders::plamo2::guard::valid_encode{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::plamo2::guard::invalid_encode{}(runtime_invalid_ev, ctx));
+    runtime_ok.err = emel::text::encoders::error::code::ok;
+    CHECK(emel::text::encoders::plamo2::guard::phase_ok{}(runtime_ok_ev));
+    runtime_ok.err = emel::text::encoders::error::code::backend;
+    CHECK(emel::text::encoders::plamo2::guard::phase_failed{}(runtime_ok_ev));
   }
 
   {
@@ -2598,24 +2596,29 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     builder.add_byte_token(static_cast<uint8_t>('x'));
 
     emel::text::encoders::fallback::action::context ctx{};
-    ctx.vocab = builder.vocab;
     auto ev_ok = make_event("x", 1, builder.vocab);
     auto ev_error = make_event("x", 0, builder.vocab);
     auto ev_invalid = make_invalid_event(builder.vocab);
+    emel::text::encoders::event::encode_ctx runtime_ok{};
+    emel::text::encoders::event::encode_ctx runtime_error{};
+    emel::text::encoders::event::encode_ctx runtime_invalid{};
+    emel::text::encoders::event::encode_runtime runtime_ok_ev{ev_ok, runtime_ok};
+    emel::text::encoders::event::encode_runtime runtime_error_ev{ev_error, runtime_error};
+    emel::text::encoders::event::encode_runtime runtime_invalid_ev{ev_invalid, runtime_invalid};
 
-    emel::text::encoders::fallback::action::reject_invalid_encode(ev_ok, ctx);
-    emel::text::encoders::fallback::action::run_encode(ctx);
-    emel::text::encoders::fallback::action::mark_done(ctx);
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    emel::text::encoders::fallback::action::ensure_last_error(ctx);
-    emel::text::encoders::fallback::action::on_unexpected(ev_ok, ctx);
-    emel::text::encoders::fallback::action::begin_encode(ev_error, ctx);
+    emel::text::encoders::fallback::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
+    CHECK(ctx.vocab == builder.vocab);
+    emel::text::encoders::fallback::action::run_encode(runtime_error_ev, ctx);
+    emel::text::encoders::fallback::action::mark_done(runtime_ok_ev, ctx);
+    emel::text::encoders::fallback::action::ensure_last_error(runtime_error_ev, ctx);
+    emel::text::encoders::fallback::action::on_unexpected(runtime_ok_ev, ctx);
+    emel::text::encoders::fallback::action::begin_encode(runtime_error_ev, ctx);
 
-    CHECK(emel::text::encoders::fallback::guard::valid_encode{}(ev_ok, ctx));
-    CHECK(emel::text::encoders::fallback::guard::invalid_encode{}(ev_invalid, ctx));
-    ctx.phase_error = EMEL_OK;
-    CHECK(emel::text::encoders::fallback::guard::phase_ok{}(ctx));
-    ctx.phase_error = EMEL_ERR_BACKEND;
-    CHECK(emel::text::encoders::fallback::guard::phase_failed{}(ctx));
+    CHECK(emel::text::encoders::fallback::guard::valid_encode{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::fallback::guard::invalid_encode{}(runtime_invalid_ev, ctx));
+    runtime_ok.err = emel::text::encoders::error::code::ok;
+    CHECK(emel::text::encoders::fallback::guard::phase_ok{}(runtime_ok_ev));
+    runtime_ok.err = emel::text::encoders::error::code::backend;
+    CHECK(emel::text::encoders::fallback::guard::phase_failed{}(runtime_ok_ev));
   }
 }

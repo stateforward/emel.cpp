@@ -24,7 +24,7 @@ design doc: docs/designs/text/encoders/encoder.design.md
  
  ## public interface (current contract)
  - `event::encode`:
-   - inputs: `vocab`, `text`, `preprocessed`, `token_ids`, `token_capacity`,
+   - inputs: `vocab`, `text`, `preprocessed`, `token_ids`,
      `token_count_out`, `error_out`, optional sync callbacks.
    - outputs: `token_count_out` and `error_out`.
  
@@ -69,5 +69,6 @@ design doc: docs/designs/text/encoders/encoder.design.md
 namespace emel::text::encoders {
 
 using sm = emel::text::encoders::bpe::sm;
+using Encoder = sm;
 
 }  // namespace emel::text::encoders

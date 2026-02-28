@@ -19,6 +19,69 @@
 
 namespace emel::text::encoders::detail {
 
+template <class value_type>
+inline void write_optional(value_type * destination, value_type & sink,
+                           const value_type value) noexcept {
+  value_type * destinations[2] = {&sink, destination};
+  *destinations[static_cast<size_t>(destination != nullptr)] = value;
+}
+
+inline void dispatch_done_noop(const event::encode &, const int32_t) noexcept {
+}
+
+inline void dispatch_done_call(const event::encode & request,
+                               const int32_t token_count) noexcept {
+  request.dispatch_done(request.owner_sm, events::encoding_done{request, token_count});
+}
+
+inline void dispatch_done_if_bound(const event::encode & request,
+                                   const int32_t token_count) noexcept {
+  using dispatch_fn = void (*)(const event::encode &, int32_t);
+  const std::array<dispatch_fn, 2> dispatchers{&dispatch_done_noop, &dispatch_done_call};
+  const bool can_dispatch = request.dispatch_done != nullptr && request.owner_sm != nullptr;
+  dispatchers[static_cast<size_t>(can_dispatch)](request, token_count);
+}
+
+inline void dispatch_error_noop(const event::encode &, const int32_t) noexcept {
+}
+
+inline void dispatch_error_call(const event::encode & request, const int32_t err) noexcept {
+  request.dispatch_error(request.owner_sm, events::encoding_error{request, err});
+}
+
+inline void dispatch_error_if_bound(const event::encode & request, const int32_t err) noexcept {
+  using dispatch_fn = void (*)(const event::encode &, int32_t);
+  const std::array<dispatch_fn, 2> dispatchers{&dispatch_error_noop, &dispatch_error_call};
+  const bool can_dispatch = request.dispatch_error != nullptr && request.owner_sm != nullptr;
+  dispatchers[static_cast<size_t>(can_dispatch)](request, err);
+}
+
+inline void publish_error(const event::encode & request, const event::encode_ctx & ctx) noexcept {
+  dispatch_error_if_bound(request, ctx.err);
+}
+
+inline void publish_done(const event::encode & request, const event::encode_ctx & ctx) noexcept {
+  dispatch_done_if_bound(request, ctx.token_count);
+}
+
+inline void publish_result(const event::encode & request,
+                           const event::encode_ctx & ctx) noexcept {
+  using publish_fn = void (*)(const event::encode &, const event::encode_ctx &);
+  const std::array<publish_fn, 2> publishers{&publish_error, &publish_done};
+  publishers[static_cast<size_t>(ctx.err == EMEL_OK)](request, ctx);
+}
+
+inline int32_t select_final_error(const bool accepted,
+                                  const int32_t runtime_error) noexcept {
+  const std::array<int32_t, 2> accepted_errors{EMEL_ERR_INVALID_ARGUMENT, runtime_error};
+  const std::array<int32_t, 2> final_errors{
+      accepted_errors[static_cast<size_t>(accepted)],
+      EMEL_OK,
+  };
+  const bool succeeded = accepted && runtime_error == EMEL_OK;
+  return final_errors[static_cast<size_t>(succeeded)];
+}
+
 template <size_t N>
 inline std::string_view string_view_from_array(const std::array<char, N> &data) {
   size_t len = 0;
@@ -270,13 +333,13 @@ inline int32_t lookup_merge_rank(const action::context &ctx,
 }
 
 inline bool push_token(const event::encode &ev, const int32_t token, int32_t &count) {
-  if (token < 0 || ev.token_capacity <= 0 || ev.token_ids == nullptr) {
+  if (token < 0 || ev.token_ids.empty()) {
     return false;
   }
-  if (count >= ev.token_capacity) {
+  if (static_cast<size_t>(count) >= ev.token_ids.size()) {
     return false;
   }
-  ev.token_ids[count++] = token;
+  ev.token_ids[static_cast<size_t>(count++)] = token;
   return true;
 }
 

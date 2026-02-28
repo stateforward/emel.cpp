@@ -206,14 +206,17 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
       continue;
     }
     int32_t fragment_tokens = 0;
-    emel::text::encoders::event::encode enc_ev = {};
-    enc_ev.vocab = &vocab;
-    enc_ev.text = frag.text;
-    enc_ev.preprocessed = preprocessed;
-    enc_ev.token_ids = token_ids + token_count;
-    enc_ev.token_capacity = token_capacity - token_count;
-    enc_ev.token_count_out = &fragment_tokens;
-    enc_ev.error_out = &err;
+    const int32_t fragment_capacity = token_capacity - token_count;
+    const size_t fragment_capacity_size =
+        fragment_capacity > 0 ? static_cast<size_t>(fragment_capacity) : 0;
+    emel::text::encoders::event::encode enc_ev{
+        .vocab = vocab,
+        .text = frag.text,
+        .preprocessed = preprocessed,
+        .token_ids = std::span<int32_t>(token_ids + token_count, fragment_capacity_size),
+        .token_count_out = &fragment_tokens,
+        .error_out = &err,
+    };
     if (!encoder.process_event(enc_ev) || err != EMEL_OK) {
       return false;
     }
