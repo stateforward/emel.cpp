@@ -26,14 +26,20 @@ if(REF_IMPL_REF STREQUAL "")
 endif()
 
 include(FetchContent)
-FetchContent_Declare(
-  reference_impl
-  GIT_REPOSITORY ${REF_IMPL_REPOSITORY}
-  GIT_TAG ${REF_IMPL_REF}
-)
-FetchContent_GetProperties(reference_impl)
-if(NOT reference_impl_POPULATED)
-  FetchContent_Populate(reference_impl)
+set(REF_IMPL_LOCAL_PATH "${EMEL_ROOT}/tmp/llama.cpp" CACHE PATH "")
+if(EXISTS "${REF_IMPL_LOCAL_PATH}/ggml/CMakeLists.txt" AND
+   EXISTS "${REF_IMPL_LOCAL_PATH}/src/CMakeLists.txt")
+  set(reference_impl_SOURCE_DIR "${REF_IMPL_LOCAL_PATH}")
+else()
+  FetchContent_Declare(
+    reference_impl
+    GIT_REPOSITORY ${REF_IMPL_REPOSITORY}
+    GIT_TAG ${REF_IMPL_REF}
+  )
+  FetchContent_GetProperties(reference_impl)
+  if(NOT reference_impl_POPULATED)
+    FetchContent_Populate(reference_impl)
+  endif()
 endif()
 
 set(LLAMA_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
@@ -111,6 +117,7 @@ find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
 set(BENCH_RUNNER_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/batch/planner_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/parser_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/kernel_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/logits_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory/kv_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory/recurrent_bench.cpp

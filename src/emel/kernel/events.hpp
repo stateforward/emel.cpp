@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include "emel/emel.h"
@@ -18,12 +19,61 @@ struct dispatch {};
 // GGML/GGUF opcode events.
 //
 // Reference source-of-truth:
-// - tmp/llama.cpp/ggml/include/ggml.h (enum ggml_op)
-// - tmp/llama.cpp/ggml/src/ggml.c (GGML_OP_NAME / GGML_OP_SYMBOL)
-//
-// NOTE: These are typed dispatch events. Most op payloads share this
-// generic shape until op-specific contracts are finalized.
+// - tmp/llama.cpp/ggml/include/ggml.h (enum ggml_op / enum ggml_type)
+// - tmp/llama.cpp/ggml/src/ggml-cpu/ops.cpp
 //------------------------------------------------------------------------------
+
+enum class dtype : uint8_t {
+  f32 = 0,
+  f16 = 1,
+  q4_0 = 2,
+  q4_1 = 3,
+  q5_0 = 6,
+  q5_1 = 7,
+  q8_0 = 8,
+  q8_1 = 9,
+  q2_k = 10,
+  q3_k = 11,
+  q4_k = 12,
+  q5_k = 13,
+  q6_k = 14,
+  q8_k = 15,
+  iq2_xxs = 16,
+  iq2_xs = 17,
+  iq3_xxs = 18,
+  iq1_s = 19,
+  iq4_nl = 20,
+  iq3_s = 21,
+  iq2_s = 22,
+  iq4_xs = 23,
+  i8 = 24,
+  i16 = 25,
+  i32 = 26,
+  i64 = 27,
+  f64 = 28,
+  iq1_m = 29,
+  bf16 = 30,
+  q4_0_4_4 = 31,
+  q4_0_4_8 = 32,
+  q4_0_8_8 = 33,
+  tq1_0 = 34,
+  tq2_0 = 35,
+  unknown = 255,
+};
+
+struct tensor_view {
+  const void * data = nullptr;
+  dtype type = dtype::unknown;
+  std::array<uint64_t, 4> ne = {0, 1, 1, 1};
+  std::array<uint64_t, 4> nb = {0, 0, 0, 0};
+};
+
+struct tensor_view_mut {
+  void * data = nullptr;
+  dtype type = dtype::unknown;
+  std::array<uint64_t, 4> ne = {0, 1, 1, 1};
+  std::array<uint64_t, 4> nb = {0, 0, 0, 0};
+};
 
 enum class pool_subop : uint8_t {
   max = 0,
@@ -64,47 +114,28 @@ enum class glu_subop : uint8_t {
   geglu_quick = 5,
 };
 
-#define EMEL_KERNEL_GENERIC_OP_FIELDS \
-  const void * src0 = nullptr;        \
-  const void * src1 = nullptr;        \
-  const void * src2 = nullptr;        \
-  void * dst = nullptr;               \
-  uint32_t element_count = 0;         \
-  uint32_t dim0 = 0;                  \
-  uint32_t dim1 = 0;                  \
-  uint32_t dim2 = 0;                  \
-  uint32_t dim3 = 0;
+#define EMEL_KERNEL_GENERIC_OP_FIELDS        \
+  tensor_view src0 = {};                     \
+  tensor_view src1 = {};                     \
+  tensor_view src2 = {};                     \
+  tensor_view_mut dst = {};                  \
+  std::array<uint8_t, 64> op_params = {};    \
+  uint32_t op_params_size = 0;               \
+  uint32_t ith = 0;                          \
+  uint32_t nth = 1;
 
 #define EMEL_KERNEL_DECLARE_OP(name) \
   struct name {                      \
     EMEL_KERNEL_GENERIC_OP_FIELDS    \
   };
 
-struct op_dup {
-  const void * src0 = nullptr;
-  void * dst = nullptr;
-  uint32_t element_count = 0;
-};
-
-struct op_add {
-  const void * src0 = nullptr;
-  const void * src1 = nullptr;
-  void * dst = nullptr;
-  uint32_t element_count = 0;
-};
-
+EMEL_KERNEL_DECLARE_OP(op_dup);
+EMEL_KERNEL_DECLARE_OP(op_add);
 EMEL_KERNEL_DECLARE_OP(op_add_id);
 EMEL_KERNEL_DECLARE_OP(op_add1);
 EMEL_KERNEL_DECLARE_OP(op_acc);
 EMEL_KERNEL_DECLARE_OP(op_sub);
-
-struct op_mul {
-  const void * src0 = nullptr;
-  const void * src1 = nullptr;
-  void * dst = nullptr;
-  uint32_t element_count = 0;
-};
-
+EMEL_KERNEL_DECLARE_OP(op_mul);
 EMEL_KERNEL_DECLARE_OP(op_div);
 EMEL_KERNEL_DECLARE_OP(op_sqr);
 EMEL_KERNEL_DECLARE_OP(op_sqrt);
@@ -126,15 +157,7 @@ EMEL_KERNEL_DECLARE_OP(op_rms_norm);
 EMEL_KERNEL_DECLARE_OP(op_rms_norm_back);
 EMEL_KERNEL_DECLARE_OP(op_group_norm);
 EMEL_KERNEL_DECLARE_OP(op_l2_norm);
-
-struct op_mul_mat {
-  const void * src0 = nullptr;
-  const void * src1 = nullptr;
-  void * dst = nullptr;
-  uint32_t row_count = 0;
-  uint32_t col_count = 0;
-};
-
+EMEL_KERNEL_DECLARE_OP(op_mul_mat);
 EMEL_KERNEL_DECLARE_OP(op_mul_mat_id);
 EMEL_KERNEL_DECLARE_OP(op_out_prod);
 EMEL_KERNEL_DECLARE_OP(op_scale);
@@ -151,20 +174,9 @@ EMEL_KERNEL_DECLARE_OP(op_set_rows);
 EMEL_KERNEL_DECLARE_OP(op_diag);
 EMEL_KERNEL_DECLARE_OP(op_diag_mask_inf);
 EMEL_KERNEL_DECLARE_OP(op_diag_mask_zero);
-
-struct op_rope {
-  const void * src0 = nullptr;
-  void * dst = nullptr;
-  uint32_t token_count = 0;
-};
-
-struct op_soft_max {
-  const void * src0 = nullptr;
-  void * dst = nullptr;
-  uint32_t element_count = 0;
-};
-
+EMEL_KERNEL_DECLARE_OP(op_soft_max);
 EMEL_KERNEL_DECLARE_OP(op_soft_max_back);
+EMEL_KERNEL_DECLARE_OP(op_rope);
 EMEL_KERNEL_DECLARE_OP(op_rope_back);
 EMEL_KERNEL_DECLARE_OP(op_clamp);
 EMEL_KERNEL_DECLARE_OP(op_conv_transpose_1d);

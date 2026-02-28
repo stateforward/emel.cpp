@@ -4,8 +4,8 @@
 // docs: disabled
 
 #include "emel/emel.h"
-#include "emel/kernel/errors.hpp"
 #include "emel/kernel/x86_64/actions.hpp"
+#include "emel/kernel/x86_64/errors.hpp"
 #include "emel/kernel/x86_64/events.hpp"
 #include "emel/kernel/x86_64/guards.hpp"
 #include "emel/kernel/detail.hpp"
@@ -31,6 +31,11 @@ struct model {
       // Explicit op transitions.
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_dup>
+                 [ guard::simd_op_dup{} ]
+                 / action::exec_simd_op_dup
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_dup>
                  [ guard::valid_op_dup{} ]
                  / action::exec_op_dup
 
@@ -38,6 +43,11 @@ struct model {
                sml::event<::emel::kernel::x86_64::event::dispatch_op_dup>
                  [ guard::invalid_op_dup{} ]
                  / action::reject_invalid_op_dup
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_add>
+                 [ guard::simd_op_add{} ]
+                 / action::exec_simd_op_add
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_add>
@@ -81,6 +91,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_sub>
+                 [ guard::simd_op_sub{} ]
+                 / action::exec_simd_op_sub
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_sub>
                  [ guard::valid_op_sub{} ]
                  / action::exec_op_sub
 
@@ -88,6 +103,11 @@ struct model {
                sml::event<::emel::kernel::x86_64::event::dispatch_op_sub>
                  [ guard::invalid_op_sub{} ]
                  / action::reject_invalid_op_sub
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul>
+                 [ guard::simd_op_mul{} ]
+                 / action::exec_simd_op_mul
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_mul>
@@ -101,6 +121,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_div>
+                 [ guard::simd_op_div{} ]
+                 / action::exec_simd_op_div
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_div>
                  [ guard::valid_op_div{} ]
                  / action::exec_op_div
 
@@ -111,6 +136,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_sqr>
+                 [ guard::simd_op_sqr{} ]
+                 / action::exec_simd_op_sqr
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_sqr>
                  [ guard::valid_op_sqr{} ]
                  / action::exec_op_sqr
 
@@ -118,6 +148,11 @@ struct model {
                sml::event<::emel::kernel::x86_64::event::dispatch_op_sqr>
                  [ guard::invalid_op_sqr{} ]
                  / action::reject_invalid_op_sqr
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_sqrt>
+                 [ guard::simd_op_sqrt{} ]
+                 / action::exec_simd_op_sqrt
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_sqrt>
@@ -308,6 +343,11 @@ struct model {
                sml::event<::emel::kernel::x86_64::event::dispatch_op_l2_norm>
                  [ guard::invalid_op_l2_norm{} ]
                  / action::reject_invalid_op_l2_norm
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat{} ]
+                 / action::exec_simd_op_mul_mat
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_mul_mat>
@@ -868,6 +908,11 @@ struct model {
                sml::event<::emel::kernel::x86_64::event::dispatch_op_solve_tri>
                  [ guard::invalid_op_solve_tri{} ]
                  / action::reject_invalid_op_solve_tri
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::x86_64::event::dispatch_op_unary>
+                 [ guard::simd_op_unary{} ]
+                 / action::exec_simd_op_unary
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::x86_64::event::dispatch_op_unary>

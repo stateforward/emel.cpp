@@ -10,10 +10,11 @@ using emel::paritychecker::parity_options;
 
 void print_usage(const char * exe) {
   std::fprintf(stderr,
-               "usage: %s [--gbnf] [--model <path>] (--text <text> | --text-file <path>) "
+               "usage: %s [--gbnf | --kernel] [--model <path>] (--text <text> | --text-file <path>) "
                "[--add-special] [--parse-special] [--dump]\n"
                "  default mode compares tokenizer parity and requires --model\n"
-               "  --gbnf mode compares GBNF parser parity and ignores --model\n",
+               "  --gbnf mode compares GBNF parser parity and ignores --model\n"
+               "  --kernel mode compares kernel parity and ignores --model\n",
                exe);
 }
 
@@ -42,6 +43,10 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
     std::string_view arg(argv[i]);
     if (arg == "--gbnf") {
       out.mode = emel::paritychecker::parity_mode::gbnf_parser;
+      continue;
+    }
+    if (arg == "--kernel") {
+      out.mode = emel::paritychecker::parity_mode::kernel;
       continue;
     }
     if (arg == "--model") {
@@ -86,7 +91,7 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
     }
     return false;
   }
-  if (!have_text) {
+  if (!have_text && out.mode != emel::paritychecker::parity_mode::kernel) {
     return false;
   }
   if (out.mode == emel::paritychecker::parity_mode::tokenizer &&

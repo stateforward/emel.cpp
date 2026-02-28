@@ -192,6 +192,27 @@ bool run_gbnf_paritychecker_process(const std::filesystem::path & grammar_path) 
 #endif
 }
 
+bool run_kernel_paritychecker_process() {
+  std::string command;
+#if defined(_WIN32)
+  command = ".\\paritychecker --kernel --text kernel";
+#else
+  command = "ulimit -s 8192; ./paritychecker --kernel --text kernel";
+#endif
+  const int status = std::system(command.c_str());
+  if (status == -1) {
+    return false;
+  }
+#if defined(_WIN32)
+  return status == 0;
+#else
+  if (!WIFEXITED(status)) {
+    return false;
+  }
+  return WEXITSTATUS(status) == 0;
+#endif
+}
+
 }  // namespace
 
 TEST_CASE("paritychecker matches llama tokens across tiny models") {
@@ -242,4 +263,8 @@ TEST_CASE("paritychecker matches llama gbnf parser outputs") {
     REQUIRE(file_exists(grammar_path));
     CHECK(run_gbnf_paritychecker_process(grammar_path));
   }
+}
+
+TEST_CASE("paritychecker matches llama kernel outputs") {
+  CHECK(run_kernel_paritychecker_process());
 }
