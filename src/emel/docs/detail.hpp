@@ -2,6 +2,7 @@
 
 #include <boost/sml.hpp>
 
+#include <cstddef>
 #include <cctype>
 #include <string>
 #include <string_view>
