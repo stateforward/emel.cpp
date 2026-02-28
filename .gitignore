@@ -4,4 +4,10 @@ tests/fuzz/corpus/**
 .DS_Store
 **/.DS_Store
 Testing/Temporary/
+<<<<<<< Updated upstream
 tmp/llama.cpp/
+=======
+
+.gemini/
+gha-creds-*.json
+>>>>>>> Stashed changes
