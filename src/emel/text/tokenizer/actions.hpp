@@ -2,308 +2,334 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string_view>
 
-#include "emel/emel.h"
 #include "emel/text/encoders/events.hpp"
 #include "emel/text/tokenizer/context.hpp"
+#include "emel/text/tokenizer/detail.hpp"
+#include "emel/text/tokenizer/errors.hpp"
+#include "emel/text/tokenizer/events.hpp"
 #include "emel/text/tokenizer/preprocessor/events.hpp"
 
 namespace emel::text::tokenizer::action {
 
-inline context::context()
-    : encoder_any() {
+inline context::context() : encoder_any() {
   preprocessor_any.set_kind(preprocessor_kind::fallback);
   encoder_any.set_kind(encoder_kind::fallback);
   preprocess_kind = preprocessor_kind::fallback;
   model_kind = encoder_kind::fallback;
   is_bound = false;
 }
-} // namespace emel::text::tokenizer::action
 
-namespace emel::text::tokenizer::detail {
+namespace detail {
 
-using action::encoder_kind;
-using action::preprocessor_kind;
-
-inline bool append_token(action::context &ctx, const int32_t token) {
-  if (token < 0) {
-    return false;
-  }
-  if (ctx.token_ids_out == nullptr) {
-    return false;
-  }
-  if (ctx.token_capacity <= 0 || ctx.token_count >= ctx.token_capacity) {
-    return false;
-  }
-  ctx.token_ids_out[ctx.token_count] = token;
-  ctx.token_count += 1;
-  return true;
+template <class runtime_event_type>
+inline void append_token(const runtime_event_type &runtime_ev,
+                         const int32_t token) noexcept {
+  auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+  ev.request.token_ids_out[ev.ctx.token_count] = token;
+  ev.ctx.token_count += 1;
 }
 
-} // namespace emel::text::tokenizer::detail
-
-namespace emel::text::tokenizer::action {
-
-inline void set_error(context &ctx, const int32_t err) noexcept {
-  ctx.phase_error = err;
-  ctx.last_error = err;
+template <class runtime_event_type>
+inline void set_error(const runtime_event_type &runtime_ev,
+                      const int32_t err) noexcept {
+  auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+  ev.ctx.err = err;
+  ev.ctx.result = false;
 }
 
-inline void clear_request(context &ctx) noexcept {
-  ctx.text = {};
-  ctx.add_special = false;
-  ctx.parse_special = false;
-  ctx.token_ids_out = nullptr;
-  ctx.token_capacity = 0;
+template <class runtime_event_type>
+inline void clear_bind_runtime(const runtime_event_type &runtime_ev) noexcept {
+  auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+  ev.ctx.err = error_code(error::none);
+  ev.ctx.result = false;
 }
+
+template <class runtime_event_type>
+inline void
+clear_tokenize_runtime(const runtime_event_type &runtime_ev) noexcept {
+  auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+  ev.ctx.fragment_count = 0;
+  ev.ctx.fragment_index = 0;
+  ev.ctx.preprocessed = false;
+  ev.ctx.preprocess_accepted = false;
+  ev.ctx.preprocess_err_code = error_code(error::none);
+  ev.ctx.encode_accepted = false;
+  ev.ctx.encode_err_code = error_code(error::none);
+  ev.ctx.encode_token_count = 0;
+  ev.ctx.token_count = 0;
+  ev.ctx.err = error_code(error::none);
+  ev.ctx.result = false;
+}
+
+} // namespace detail
 
 struct begin_bind {
-  void operator()(const event::bind &ev, context &ctx) const noexcept {
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-    ctx.vocab = ev.vocab;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
+    const auto &ev =
+        emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    detail::clear_bind_runtime(ev);
+    ctx.vocab = ev.request.vocab;
+    ctx.preprocess_kind = ev.request.preprocessor_variant;
+    ctx.model_kind = ev.request.encoder_variant;
     ctx.is_bound = false;
-    ctx.preprocess_kind = ev.preprocessor_variant;
-    ctx.model_kind = ev.encoder_variant;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
   }
 };
 
 struct reject_bind {
-  void operator()(const event::bind &, context &ctx) const noexcept {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
     ctx.is_bound = false;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-  }
-};
-
-struct begin_tokenize {
-  void operator()(const event::tokenize &ev, context &ctx) const noexcept {
-    if (ev.token_count_out != nullptr) {
-      *ev.token_count_out = 0;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-    ctx.text = ev.text;
-    ctx.add_special = ev.add_special;
-    ctx.parse_special = ev.parse_special;
-    ctx.fragments_preprocessed = false;
-    ctx.token_ids_out = ev.token_ids_out;
-    ctx.token_capacity = ev.token_capacity;
-    ctx.fragment_count = 0;
-    ctx.fragment_index = 0;
-    ctx.token_count = 0;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-  }
-};
-
-struct reject_invalid {
-  void operator()(const event::tokenize &, context &ctx) const noexcept {
-    ctx.token_count = 0;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+    detail::set_error(runtime_ev, error_code(error::invalid_request));
   }
 };
 
 struct bind_preprocessor {
-  void operator()(context &ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.vocab == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
     ctx.preprocessor_any.set_kind(ctx.preprocess_kind);
+    ev.ctx.err = error_code(error::none);
   }
 };
 
 struct bind_encoder {
-  void operator()(context &ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
     ctx.is_bound = false;
-    if (ctx.vocab == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
     ctx.encoder_any.set_kind(ctx.model_kind);
-    ctx.is_bound = true;
+    ev.ctx.err = error_code(error::none);
   }
 };
 
-struct run_preprocess {
-  void operator()(context &ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.fragment_count = 0;
-    ctx.fragment_index = 0;
-    if (ctx.vocab == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
+struct mark_bind_success {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    ctx.is_bound = true;
+    ev.ctx.err = error_code(error::none);
+    ev.ctx.result = true;
+  }
+};
+
+struct begin_tokenize {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    detail::clear_tokenize_runtime(runtime_ev);
+  }
+};
+
+struct reject_invalid {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.token_count = 0;
+    detail::set_error(ev, error_code(error::invalid_request));
+  }
+};
+
+struct dispatch_preprocess {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
     size_t fragment_count = 0;
     bool preprocessed = false;
-    int32_t err = EMEL_OK;
-    emel::text::tokenizer::preprocessor::event::preprocess ev = {};
-    ev.vocab = ctx.vocab;
-    ev.text = ctx.text;
-    ev.parse_special = ctx.parse_special;
-    ev.fragments_out = ctx.fragments.data();
-    ev.fragment_capacity = ctx.fragments.size();
-    ev.fragment_count_out = &fragment_count;
-    ev.preprocessed_out = &preprocessed;
-    ev.error_out = &err;
-    const bool accepted = ctx.preprocessor_any.process_event(ev);
-    if (!accepted && err == EMEL_OK) {
-      set_error(ctx, EMEL_ERR_BACKEND);
-      return;
-    }
-    if (err != EMEL_OK) {
-      set_error(ctx, err);
-      return;
-    }
-    ctx.fragment_count = fragment_count;
-    ctx.fragments_preprocessed = preprocessed;
+    int32_t err = error_code(error::none);
+
+    emel::text::tokenizer::preprocessor::event::preprocess pre_ev = {};
+    pre_ev.vocab = ctx.vocab;
+    pre_ev.text = ev.request.text;
+    pre_ev.parse_special = ev.request.parse_special;
+    pre_ev.fragments_out = ev.ctx.fragments;
+    pre_ev.fragment_capacity = ev.ctx.fragment_capacity;
+    pre_ev.fragment_count_out = &fragment_count;
+    pre_ev.preprocessed_out = &preprocessed;
+    pre_ev.error_out = &err;
+
+    ev.ctx.preprocess_accepted = ctx.preprocessor_any.process_event(pre_ev);
+    ev.ctx.preprocess_err_code = err;
+    ev.ctx.fragment_count = fragment_count;
+    ev.ctx.fragment_index = 0;
+    ev.ctx.preprocessed = preprocessed;
+  }
+};
+
+struct set_backend_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    detail::set_error(runtime_ev, error_code(error::backend_error));
+  }
+};
+
+struct set_error_from_preprocess {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    detail::set_error(ev, ev.ctx.preprocess_err_code);
   }
 };
 
 struct append_bos {
-  void operator()(context &ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (!detail::append_token(ctx, ctx.vocab->bos_id)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    }
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    detail::append_token(ev, ctx.vocab->bos_id);
+    ev.ctx.err = error_code(error::none);
   }
 };
 
 struct append_sep {
-  void operator()(context &ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (!detail::append_token(ctx, ctx.vocab->sep_id)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    }
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    detail::append_token(ev, ctx.vocab->sep_id);
+    ev.ctx.err = error_code(error::none);
   }
 };
 
 struct append_eos {
-  void operator()(context &ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (!detail::append_token(ctx, ctx.vocab->eos_id)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-    }
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    detail::append_token(ev, ctx.vocab->eos_id);
+    ev.ctx.err = error_code(error::none);
   }
 };
 
 struct append_fragment_token {
-  void operator()(context &ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.fragment_index >= ctx.fragment_count) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    const fragment &frag = ctx.fragments[ctx.fragment_index];
-    if (frag.kind != fragment_kind::token) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    if (!detail::append_token(ctx, frag.token)) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    ctx.fragment_index += 1;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    const fragment &frag = ev.ctx.fragments[ev.ctx.fragment_index];
+    detail::append_token(ev, frag.token);
+    ev.ctx.fragment_index += 1;
+    ev.ctx.err = error_code(error::none);
   }
 };
 
-struct encode_raw_fragment {
-  void operator()(context &ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    if (ctx.fragment_index >= ctx.fragment_count) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    const fragment &frag = ctx.fragments[ctx.fragment_index];
-    if (frag.kind != fragment_kind::raw_text) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    if (ctx.token_ids_out == nullptr) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    const int32_t capacity = ctx.token_capacity - ctx.token_count;
-    if (capacity < 0) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
+struct dispatch_encode_raw_fragment {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    const fragment &frag = ev.ctx.fragments[ev.ctx.fragment_index];
+    const int32_t capacity = ev.request.token_capacity - ev.ctx.token_count;
+
     int32_t fragment_count = 0;
-    int32_t err = EMEL_OK;
+    int32_t err = error_code(error::none);
     emel::text::encoders::event::encode encode_ev = {};
     encode_ev.vocab = ctx.vocab;
     encode_ev.text = frag.text;
-    encode_ev.preprocessed = ctx.fragments_preprocessed;
-    encode_ev.token_ids = ctx.token_ids_out + ctx.token_count;
+    encode_ev.preprocessed = ev.ctx.preprocessed;
+    encode_ev.token_ids = ev.request.token_ids_out + ev.ctx.token_count;
     encode_ev.token_capacity = capacity;
     encode_ev.token_count_out = &fragment_count;
     encode_ev.error_out = &err;
-    const bool accepted = ctx.encoder_any.process_event(encode_ev);
-    if (!accepted && err == EMEL_OK) {
-      set_error(ctx, EMEL_ERR_MODEL_INVALID);
-      return;
-    }
-    if (err != EMEL_OK) {
-      set_error(ctx, err);
-      return;
-    }
-    if (fragment_count < 0 || fragment_count > capacity) {
-      set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
-      return;
-    }
-    ctx.token_count += fragment_count;
-    ctx.fragment_index += 1;
+
+    ev.ctx.encode_accepted = ctx.encoder_any.process_event(encode_ev);
+    ev.ctx.encode_err_code = err;
+    ev.ctx.encode_token_count = fragment_count;
+  }
+};
+
+struct set_error_from_encode {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    detail::set_error(ev, ev.ctx.encode_err_code);
+  }
+};
+
+struct commit_encoded_fragment {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.token_count += ev.ctx.encode_token_count;
+    ev.ctx.fragment_index += 1;
+    ev.ctx.err = error_code(error::none);
   }
 };
 
 struct finalize {
-  void operator()(context &ctx) const noexcept {
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.err = error_code(error::none);
+    ev.ctx.result = true;
   }
 };
 
-struct set_capacity_error {
-  void operator()(context &ctx) const noexcept {
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+struct set_invalid_request_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    detail::set_error(runtime_ev, error_code(error::invalid_request));
   }
 };
 
 struct set_invalid_id_error {
-  void operator()(context &ctx) const noexcept {
-    set_error(ctx, EMEL_ERR_MODEL_INVALID);
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    detail::set_error(runtime_ev, error_code(error::model_invalid));
   }
 };
 
 struct on_unexpected {
-  template <class event>
-  void operator()(const event &, context &ctx) const noexcept {
-    ctx.token_count = 0;
-    set_error(ctx, EMEL_ERR_INVALID_ARGUMENT);
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &) const noexcept {
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    if constexpr (requires { ev.ctx.token_count; }) {
+      ev.ctx.token_count = 0;
+    }
+    if constexpr (requires { ev.ctx.err; }) {
+      ev.ctx.err = error_code(error::invalid_request);
+    }
+    if constexpr (requires { ev.ctx.result; }) {
+      ev.ctx.result = false;
+    }
   }
 };
 
 inline constexpr begin_bind begin_bind{};
 inline constexpr reject_bind reject_bind{};
-inline constexpr begin_tokenize begin_tokenize{};
-inline constexpr reject_invalid reject_invalid{};
 inline constexpr bind_preprocessor bind_preprocessor{};
 inline constexpr bind_encoder bind_encoder{};
-inline constexpr run_preprocess run_preprocess{};
+inline constexpr mark_bind_success mark_bind_success{};
+inline constexpr begin_tokenize begin_tokenize{};
+inline constexpr reject_invalid reject_invalid{};
+inline constexpr dispatch_preprocess dispatch_preprocess{};
+inline constexpr set_backend_error set_backend_error{};
+inline constexpr set_error_from_preprocess set_error_from_preprocess{};
 inline constexpr append_bos append_bos{};
 inline constexpr append_sep append_sep{};
 inline constexpr append_eos append_eos{};
 inline constexpr append_fragment_token append_fragment_token{};
-inline constexpr encode_raw_fragment encode_raw_fragment{};
+inline constexpr dispatch_encode_raw_fragment dispatch_encode_raw_fragment{};
+inline constexpr set_error_from_encode set_error_from_encode{};
+inline constexpr commit_encoded_fragment commit_encoded_fragment{};
 inline constexpr finalize finalize{};
-inline constexpr set_capacity_error set_capacity_error{};
+inline constexpr set_invalid_request_error set_invalid_request_error{};
 inline constexpr set_invalid_id_error set_invalid_id_error{};
 inline constexpr on_unexpected on_unexpected{};
 
