@@ -1,9 +1,9 @@
 stateDiagram-v2
   direction TB
   [*] --> deciding
-  deciding --> assembled : completion [phase_request_allocator_] / request_allocator_plan_
-  deciding --> assemble_failed : completion [phase_prereq_failed_] / mark_failed_prereq_
-  deciding --> assemble_failed : completion [phase_invalid_request_] / mark_failed_invalid_request_
+  deciding --> assembled : completion_reserve_graph_ [phase_request_allocator_] / request_allocator_plan_
+  deciding --> assemble_failed : completion_reserve_graph_ [phase_prereq_failed_] / mark_failed_prereq_
+  deciding --> assemble_failed : completion_reserve_graph_ [phase_invalid_request_] / mark_failed_invalid_request_
   assembled --> terminate : [always] / none
   assemble_failed --> terminate : [always] / none
   deciding --> unexpected_event : _ [always] / on_unexpected_

@@ -1,11 +1,11 @@
 stateDiagram-v2
   direction TB
   [*] --> deciding
-  deciding --> allocated : completion [phase_done_] / mark_done_
-  deciding --> allocate_failed : completion [phase_prereq_failed_] / mark_failed_prereq_
-  deciding --> allocate_failed : completion [phase_capacity_exceeded_] / mark_failed_capacity_
-  deciding --> allocate_failed : completion [phase_invalid_request_] / mark_failed_invalid_request_
-  deciding --> allocate_failed : completion [phase_unclassified_failure_] / mark_failed_internal_
+  deciding --> allocated : completion_allocate_graph_plan_ [phase_done_] / mark_done_
+  deciding --> allocate_failed : completion_allocate_graph_plan_ [phase_prereq_failed_] / mark_failed_prereq_
+  deciding --> allocate_failed : completion_allocate_graph_plan_ [phase_capacity_exceeded_] / mark_failed_capacity_
+  deciding --> allocate_failed : completion_allocate_graph_plan_ [phase_invalid_request_] / mark_failed_invalid_request_
+  deciding --> allocate_failed : completion_allocate_graph_plan_ [phase_unclassified_failure_] / mark_failed_internal_
   allocated --> terminate : [always] / none
   allocate_failed --> terminate : [always] / none
   deciding --> unexpected_event : _ [always] / on_unexpected_
