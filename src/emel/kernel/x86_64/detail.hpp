@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -328,88 +329,83 @@ inline bool execute_avx2_mul_mat(const event::op_mul_mat & request) noexcept {
   constexpr uint64_t row_block = 4;
   constexpr uint64_t col_vec = 8;
   constexpr uint64_t col_block = 64;
+  constexpr uint64_t depth_block = 64;
+  alignas(64) static thread_local float packed_b[depth_block * col_block];
 
-  uint64_t i = 0;
-  for (; i + row_block <= m; i += row_block) {
-    for (uint64_t jb = 0; jb < n; jb += col_block) {
-      const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
-      uint64_t j = jb;
-      for (; j + col_vec <= j_end; j += col_vec) {
-        __m256 acc0 = _mm256_setzero_ps();
-        __m256 acc1 = _mm256_setzero_ps();
-        __m256 acc2 = _mm256_setzero_ps();
-        __m256 acc3 = _mm256_setzero_ps();
+  for (uint64_t jb = 0; jb < n; jb += col_block) {
+    const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
+    const uint64_t vec_cols = ((j_end - jb) / col_vec) * col_vec;
+    const uint64_t j_vec_end = jb + vec_cols;
 
-        for (uint64_t p = 0; p < k; ++p) {
-          const __m256 bv = _mm256_loadu_ps(b + p * n + j);
+    for (uint64_t pb = 0; pb < k; pb += depth_block) {
+      const uint64_t depth = std::min<uint64_t>(depth_block, k - pb);
+      const bool first_depth_block = (pb == 0);
 
-          const __m256 a0 = _mm256_set1_ps(a[(i + 0) * k + p]);
-          const __m256 a1 = _mm256_set1_ps(a[(i + 1) * k + p]);
-          const __m256 a2 = _mm256_set1_ps(a[(i + 2) * k + p]);
-          const __m256 a3 = _mm256_set1_ps(a[(i + 3) * k + p]);
-
-          acc0 = _mm256_add_ps(acc0, _mm256_mul_ps(a0, bv));
-          acc1 = _mm256_add_ps(acc1, _mm256_mul_ps(a1, bv));
-          acc2 = _mm256_add_ps(acc2, _mm256_mul_ps(a2, bv));
-          acc3 = _mm256_add_ps(acc3, _mm256_mul_ps(a3, bv));
+      if (vec_cols != 0) {
+        for (uint64_t kk = 0; kk < depth; ++kk) {
+          const float * b_src = b + (pb + kk) * n + jb;
+          float * b_dst = packed_b + kk * vec_cols;
+          std::memcpy(b_dst, b_src, static_cast<size_t>(vec_cols) * sizeof(float));
 #if defined(__GNUC__) || defined(__clang__)
-          if ((p & 15u) == 0 && p + 16u < k) {
-            _mm_prefetch(reinterpret_cast<const char *>(b + (p + 16u) * n + j), _MM_HINT_T0);
+          if ((kk & 15u) == 0 && kk + 16u < depth) {
+            _mm_prefetch(reinterpret_cast<const char *>(b + (pb + kk + 16u) * n + jb),
+                         _MM_HINT_T0);
           }
 #endif
         }
 
-        _mm256_storeu_ps(c + (i + 0) * n + j, acc0);
-        _mm256_storeu_ps(c + (i + 1) * n + j, acc1);
-        _mm256_storeu_ps(c + (i + 2) * n + j, acc2);
-        _mm256_storeu_ps(c + (i + 3) * n + j, acc3);
-      }
+        for (uint64_t j = jb; j < j_vec_end; j += col_vec) {
+          const uint64_t j_offset = j - jb;
+          uint64_t i = 0;
+          for (; i + row_block <= m; i += row_block) {
+            __m256 acc0 = first_depth_block ? _mm256_setzero_ps()
+                                            : _mm256_loadu_ps(c + (i + 0) * n + j);
+            __m256 acc1 = first_depth_block ? _mm256_setzero_ps()
+                                            : _mm256_loadu_ps(c + (i + 1) * n + j);
+            __m256 acc2 = first_depth_block ? _mm256_setzero_ps()
+                                            : _mm256_loadu_ps(c + (i + 2) * n + j);
+            __m256 acc3 = first_depth_block ? _mm256_setzero_ps()
+                                            : _mm256_loadu_ps(c + (i + 3) * n + j);
 
-      for (; j < j_end; ++j) {
-        float acc0 = 0.0f;
-        float acc1 = 0.0f;
-        float acc2 = 0.0f;
-        float acc3 = 0.0f;
-        for (uint64_t p = 0; p < k; ++p) {
-          const float bv = b[p * n + j];
-          acc0 += a[(i + 0) * k + p] * bv;
-          acc1 += a[(i + 1) * k + p] * bv;
-          acc2 += a[(i + 2) * k + p] * bv;
-          acc3 += a[(i + 3) * k + p] * bv;
-        }
-        c[(i + 0) * n + j] = acc0;
-        c[(i + 1) * n + j] = acc1;
-        c[(i + 2) * n + j] = acc2;
-        c[(i + 3) * n + j] = acc3;
-      }
-    }
-  }
+            for (uint64_t kk = 0; kk < depth; ++kk) {
+              const __m256 bv = _mm256_loadu_ps(packed_b + kk * vec_cols + j_offset);
+              acc0 = _mm256_add_ps(
+                  acc0, _mm256_mul_ps(_mm256_set1_ps(a[(i + 0) * k + pb + kk]), bv));
+              acc1 = _mm256_add_ps(
+                  acc1, _mm256_mul_ps(_mm256_set1_ps(a[(i + 1) * k + pb + kk]), bv));
+              acc2 = _mm256_add_ps(
+                  acc2, _mm256_mul_ps(_mm256_set1_ps(a[(i + 2) * k + pb + kk]), bv));
+              acc3 = _mm256_add_ps(
+                  acc3, _mm256_mul_ps(_mm256_set1_ps(a[(i + 3) * k + pb + kk]), bv));
+            }
 
-  for (; i < m; ++i) {
-    for (uint64_t jb = 0; jb < n; jb += col_block) {
-      const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
-      uint64_t j = jb;
-      for (; j + col_vec <= j_end; j += col_vec) {
-        __m256 acc = _mm256_setzero_ps();
-        for (uint64_t p = 0; p < k; ++p) {
-          const __m256 bv = _mm256_loadu_ps(b + p * n + j);
-          const __m256 av = _mm256_set1_ps(a[i * k + p]);
-          acc = _mm256_add_ps(acc, _mm256_mul_ps(av, bv));
-#if defined(__GNUC__) || defined(__clang__)
-          if ((p & 15u) == 0 && p + 16u < k) {
-            _mm_prefetch(reinterpret_cast<const char *>(b + (p + 16u) * n + j), _MM_HINT_T0);
+            _mm256_storeu_ps(c + (i + 0) * n + j, acc0);
+            _mm256_storeu_ps(c + (i + 1) * n + j, acc1);
+            _mm256_storeu_ps(c + (i + 2) * n + j, acc2);
+            _mm256_storeu_ps(c + (i + 3) * n + j, acc3);
           }
-#endif
+
+          for (; i < m; ++i) {
+            __m256 acc = first_depth_block ? _mm256_setzero_ps()
+                                           : _mm256_loadu_ps(c + i * n + j);
+            for (uint64_t kk = 0; kk < depth; ++kk) {
+              const __m256 bv = _mm256_loadu_ps(packed_b + kk * vec_cols + j_offset);
+              acc = _mm256_add_ps(
+                  acc, _mm256_mul_ps(_mm256_set1_ps(a[i * k + pb + kk]), bv));
+            }
+            _mm256_storeu_ps(c + i * n + j, acc);
+          }
         }
-        _mm256_storeu_ps(c + i * n + j, acc);
       }
 
-      for (; j < j_end; ++j) {
-        float acc = 0.0f;
-        for (uint64_t p = 0; p < k; ++p) {
-          acc += a[i * k + p] * b[p * n + j];
+      for (uint64_t j = j_vec_end; j < j_end; ++j) {
+        for (uint64_t i = 0; i < m; ++i) {
+          float acc = first_depth_block ? 0.0f : c[i * n + j];
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            acc += a[i * k + pb + kk] * b[(pb + kk) * n + j];
+          }
+          c[i * n + j] = acc;
         }
-        c[i * n + j] = acc;
       }
     }
   }
