@@ -197,10 +197,12 @@ TEST_CASE("kernel_x86_64_mul_mat_simd_matches_scalar_tiled_edges") {
   std::array<float, n * m> dst_scalar{};
 
   for (uint64_t i = 0; i < src0.size(); ++i) {
-    src0[static_cast<size_t>(i)] = static_cast<float>((i % 17) - 8) * 0.0625f;
+    const int64_t centered = static_cast<int64_t>(i % 17u) - 8;
+    src0[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.0625f;
   }
   for (uint64_t i = 0; i < src1.size(); ++i) {
-    src1[static_cast<size_t>(i)] = static_cast<float>((i % 23) - 11) * 0.03125f;
+    const int64_t centered = static_cast<int64_t>(i % 23u) - 11;
+    src1[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.03125f;
   }
 
   const emel::kernel::event::op_mul_mat simd_ev{
