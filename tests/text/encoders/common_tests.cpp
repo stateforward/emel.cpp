@@ -426,6 +426,7 @@ TEST_CASE("encoder_encode_impl_variants") {
           emel::text::encoders::rwkv::action::context ctx{};
           ctx.vocab = builder.vocab;
           CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+          CHECK(emel::text::encoders::rwkv::detail::ensure_rwkv_tables(ctx, *builder.vocab));
           result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
           break;
         }
@@ -587,6 +588,7 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     emel::text::encoders::rwkv::action::context ctx{};
     ctx.vocab = builder.vocab;
     CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+    CHECK(emel::text::encoders::rwkv::detail::ensure_rwkv_tables(ctx, *builder.vocab));
     auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
     (void)result;
   }
@@ -986,6 +988,7 @@ TEST_CASE("encoder_encode_branch_cases") {
     emel::text::encoders::rwkv::action::context ctx{};
     ctx.vocab = builder.vocab;
     CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+    CHECK(emel::text::encoders::rwkv::detail::ensure_rwkv_tables(ctx, *builder.vocab));
     emel::text::encoders::event::encode ev_rwkv = ev;
     ev_rwkv.text = "x";
     auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev_rwkv, ctx, *builder.vocab);
@@ -1274,6 +1277,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
     emel::text::encoders::rwkv::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
     CHECK(ctx.vocab == builder.vocab);
+    CHECK(emel::text::encoders::rwkv::guard::tables_missing{}(runtime_ok_ev, ctx));
+    emel::text::encoders::rwkv::action::sync_tables(runtime_ok_ev, ctx);
+    CHECK(emel::text::encoders::rwkv::guard::tables_ready{}(runtime_ok_ev, ctx));
     emel::text::encoders::rwkv::action::run_encode(runtime_error_ev, ctx);
     emel::text::encoders::rwkv::action::mark_done(runtime_ok_ev, ctx);
     emel::text::encoders::rwkv::action::ensure_last_error(runtime_error_ev, ctx);

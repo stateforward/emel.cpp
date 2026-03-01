@@ -13,6 +13,8 @@ namespace emel::text::encoders::rwkv {
 
 struct initialized {};
 struct encode_precheck_decision {};
+struct table_sync_exec {};
+struct table_sync_result_decision {};
 struct encode_exec {};
 struct encode_result_decision {};
 struct done {};
@@ -25,6 +27,7 @@ struct unexpected {};
  * state purposes:
  * - 'initialized': idle state awaiting encode intent.
  * - 'encode_precheck_decision': explicit request prechecks before kernel execution.
+ * - 'table_sync_exec'/'table_sync_result_decision': explicit RWKV table-prep phase.
  * - 'encode_exec'/'encode_result_decision': run kernel and branch on phase error.
  * - 'done'/'errored': terminal outcomes.
  * - 'unexpected': sequencing contract violation.
@@ -32,12 +35,14 @@ struct unexpected {};
  * guard semantics:
  * - 'valid_encode'/'invalid_encode' validate request pointers and context.
  * - 'vocab_changed'/'vocab_unchanged' route vocabulary sync work.
- * - 'text_empty'/'text_non_empty' route explicit precheck decisions.
+ * - 'text_empty'/'text_non_empty_and_tables_*' route explicit precheck decisions.
+ * - 'tables_ready'/'tables_missing' route table-sync execution.
  * - 'phase_*' guards observe runtime phase errors.
  *
  * action side effects:
  * - 'begin_encode' resets runtime per-request outputs.
  * - 'begin_encode_sync_vocab' refreshes per-vocab cached tables.
+ * - 'sync_tables' builds RWKV lookup tables in an explicit phase.
  * - 'run_encode' performs bounded encoding work.
  * - 'mark_done'/'ensure_last_error' finalize runtime status.
  * - 'on_unexpected' reports sequencing violations.
@@ -96,8 +101,21 @@ struct model {
       //------------------------------------------------------------------------------//
       , sml::state<done> <= sml::state<encode_precheck_decision>
           + sml::completion<event::encode_runtime>[guard::text_empty{}] / action::mark_done
+      , sml::state<table_sync_exec> <= sml::state<encode_precheck_decision>
+          + sml::completion<event::encode_runtime>[guard::text_non_empty_and_tables_missing{}]
       , sml::state<encode_exec> <= sml::state<encode_precheck_decision>
-          + sml::completion<event::encode_runtime>[guard::text_non_empty{}]
+          + sml::completion<event::encode_runtime>[guard::text_non_empty_and_tables_ready{}]
+
+      //------------------------------------------------------------------------------//
+      // RWKV Table Sync
+      //------------------------------------------------------------------------------//
+      , sml::state<table_sync_result_decision> <= sml::state<table_sync_exec>
+          + sml::completion<event::encode_runtime> / action::sync_tables
+      , sml::state<encode_exec> <= sml::state<table_sync_result_decision>
+          + sml::completion<event::encode_runtime>[guard::phase_ok{}]
+      , sml::state<errored> <= sml::state<table_sync_result_decision>
+          + sml::completion<event::encode_runtime>[guard::phase_failed{}]
+          / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
       // Encode Execution
@@ -115,6 +133,10 @@ struct model {
       //------------------------------------------------------------------------------//
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
           + sml::event<event::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<table_sync_exec>
+          + sml::event<event::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<table_sync_result_decision>
+          + sml::event<event::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<event::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_result_decision>
@@ -127,6 +149,14 @@ struct model {
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<table_sync_exec>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<table_sync_exec>
+          + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<table_sync_result_decision>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<table_sync_result_decision>
           + sml::event<events::encoding_error> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<events::encoding_done> / action::on_unexpected
@@ -152,6 +182,10 @@ struct model {
       , sml::state<unexpected> <= sml::state<initialized>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<table_sync_exec>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<table_sync_result_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::unexpected_event<sml::_> / action::on_unexpected

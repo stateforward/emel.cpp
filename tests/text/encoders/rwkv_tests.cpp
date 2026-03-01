@@ -54,6 +54,7 @@ TEST_CASE("encoder_rwkv_skips_unknown_without_unk") {
 
   emel::text::encoders::rwkv::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::rwkv::detail::ensure_rwkv_tables(ctx, *builder.vocab));
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
@@ -106,6 +107,7 @@ TEST_CASE("encoder_rwkv_push_unk_overflow") {
   builder.vocab->unk_id = unk_id;
   emel::text::encoders::rwkv::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::rwkv::detail::ensure_rwkv_tables(ctx, *builder.vocab));
   std::array<int32_t, 1> out_tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
@@ -119,3 +121,27 @@ TEST_CASE("encoder_rwkv_push_unk_overflow") {
   CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
 
+TEST_CASE("encoder_rwkv_encode_requires_prepared_tables") {
+  vocab_builder builder{};
+  builder.set_model("rwkv");
+  builder.add_byte_token(static_cast<uint8_t>('a'));
+
+  emel::text::encoders::rwkv::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  ctx.rwkv_tables_ready = false;
+  ctx.rwkv_vocab = nullptr;
+
+  std::array<int32_t, 2> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::text::encoders::event::encode ev{
+    .text = "a",
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(out_tokens.size())),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+
+  const auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.token_count == 0);
+}

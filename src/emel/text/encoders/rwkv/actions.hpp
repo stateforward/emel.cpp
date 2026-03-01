@@ -36,6 +36,14 @@ struct run_encode {
   }
 };
 
+struct sync_tables {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    const bool ready = emel::text::encoders::rwkv::detail::ensure_rwkv_tables(ctx, *ctx.vocab);
+    ev.ctx.err = emel::text::encoders::rwkv::detail::select_i32(
+      ready, EMEL_OK, EMEL_ERR_INVALID_ARGUMENT);
+  }
+};
+
 struct mark_done {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
     emel::text::encoders::action::mark_done(ev, ctx);
@@ -59,6 +67,7 @@ inline constexpr begin_encode begin_encode{};
 inline constexpr begin_encode_sync_vocab begin_encode_sync_vocab{};
 inline constexpr reject_invalid_encode reject_invalid_encode{};
 inline constexpr run_encode run_encode{};
+inline constexpr sync_tables sync_tables{};
 inline constexpr mark_done mark_done{};
 inline constexpr ensure_last_error ensure_last_error{};
 inline constexpr on_unexpected on_unexpected{};
