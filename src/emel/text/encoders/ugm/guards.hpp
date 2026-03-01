@@ -65,4 +65,29 @@ struct valid_encode_and_vocab_unchanged {
   }
 };
 
+struct tables_ready {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    (void)ev;
+    return ctx.ugm_tables_ready && ctx.ugm_vocab == ctx.vocab;
+  }
+};
+
+struct tables_missing {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return !tables_ready{}(ev, ctx);
+  }
+};
+
+struct text_non_empty_and_tables_ready {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return text_non_empty{}(ev) && tables_ready{}(ev, ctx);
+  }
+};
+
+struct text_non_empty_and_tables_missing {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return text_non_empty{}(ev) && tables_missing{}(ev, ctx);
+  }
+};
+
 }  // namespace emel::text::encoders::ugm::guard

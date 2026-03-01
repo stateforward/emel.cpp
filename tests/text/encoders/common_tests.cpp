@@ -418,7 +418,7 @@ TEST_CASE("encoder_encode_impl_variants") {
         case emel::model::data::tokenizer_model::UGM: {
           emel::text::encoders::ugm::action::context ctx{};
           ctx.vocab = builder.vocab;
-          CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+          CHECK(emel::text::encoders::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
           result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
           break;
         }
@@ -574,7 +574,7 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     builder.add_token("world", 0.4f, 1);
     emel::text::encoders::ugm::action::context ctx{};
     ctx.vocab = builder.vocab;
-    CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+    CHECK(emel::text::encoders::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
     emel::text::encoders::event::encode ev_ugm = ev;
     ev_ugm.text = "hello";
     auto result = emel::text::encoders::ugm::detail::encode_ugm(ev_ugm, ctx, *builder.vocab);
@@ -973,7 +973,7 @@ TEST_CASE("encoder_encode_branch_cases") {
     builder.vocab->unk_id = unk_id;
     emel::text::encoders::ugm::action::context ctx{};
     ctx.vocab = builder.vocab;
-    CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+    CHECK(emel::text::encoders::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
     emel::text::encoders::event::encode ev_ugm = ev;
     ev_ugm.text = "xyz";
     auto result = emel::text::encoders::ugm::detail::encode_ugm(ev_ugm, ctx, *builder.vocab);
@@ -1252,6 +1252,11 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
     emel::text::encoders::ugm::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
     CHECK(ctx.vocab == builder.vocab);
+    CHECK(emel::text::encoders::ugm::guard::tables_missing{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::ugm::guard::text_non_empty_and_tables_missing{}(runtime_ok_ev, ctx));
+    emel::text::encoders::ugm::action::sync_tables(runtime_ok_ev, ctx);
+    CHECK(emel::text::encoders::ugm::guard::tables_ready{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::ugm::guard::text_non_empty_and_tables_ready{}(runtime_ok_ev, ctx));
     emel::text::encoders::ugm::action::run_encode(runtime_error_ev, ctx);
     emel::text::encoders::ugm::action::mark_done(runtime_ok_ev, ctx);
     emel::text::encoders::ugm::action::ensure_last_error(runtime_error_ev, ctx);

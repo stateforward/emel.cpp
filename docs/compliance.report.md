@@ -3,7 +3,7 @@
 - Generated: 2026-03-01
 - Checklist reference: `docs/compliance-checklist.md`
 - Scope: `src/emel/text/encoders` (7 encoder state machines + shared encoder orchestration files)
-- Result: **FAIL** (1 merge-blocking checklist item remains in 3/7 encoders)
+- Result: **FAIL** (1 merge-blocking checklist item remains in 2/7 encoders)
 
 ## Audit Summary
 
@@ -11,7 +11,7 @@
   - `bpe`, `fallback`, `plamo2`, `rwkv`, `spm`, `ugm`, `wpm`
 - Structural SML checks (destination-first rows, wrappers, explicit unexpected-event handling): **PASS**
 - Event/context/error orchestration checks: **PASS** after this refactor
-- Action/guard architecture checks: **FAIL** on strict checklist item `2.5` for `fallback`, `ugm`, `wpm`; **PASS** for `bpe`, `plamo2`, `rwkv`, `spm`
+- Action/guard architecture checks: **FAIL** on strict checklist item `2.5` for `fallback`, `wpm`; **PASS** for `bpe`, `plamo2`, `rwkv`, `spm`, `ugm`
 
 ## Fixed In This Pass
 
@@ -54,6 +54,18 @@
      `src/emel/text/encoders/spm/actions.hpp` (`run_prepare`, `run_merge`, `run_encode`)
    - Split monolithic detail encode path into explicit phase kernels:
      `src/emel/text/encoders/spm/detail.hpp` (`prepare_spm`, `merge_spm`, `emit_spm`)
+8. UGM encoder now models table-sync as explicit machine phases and uses branchless local detail kernels.
+   - Added explicit table-sync states and transitions:
+     `src/emel/text/encoders/ugm/sm.hpp` (`table_sync_exec`, `table_sync_result_decision`)
+   - Added UGM table-sync action and table-ready/table-missing guards:
+     `src/emel/text/encoders/ugm/actions.hpp`, `src/emel/text/encoders/ugm/guards.hpp`
+   - `encode_ugm` now requires prepared tables for non-empty text and no longer performs hidden table construction:
+     `src/emel/text/encoders/ugm/detail.hpp`
+   - UGM detail call-path no longer depends on shared branching helpers (`token_text`, `push_token`, `utf8_len`) and no longer
+     performs dispatch-time `std::string` copy during normalization:
+     `src/emel/text/encoders/ugm/detail.hpp`
+   - Added regression test for this contract:
+     `tests/text/encoders/ugm_tests.cpp` (`encoder_ugm_encode_requires_prepared_tables`)
 
 ## Remaining Non-Compliance (Merge-Blocking)
 
@@ -66,11 +78,9 @@ Checklist mapping:
 Evidence:
 - Actions call variant detail kernels from `run_encode`:
   - `src/emel/text/encoders/fallback/actions.hpp:41`
-  - `src/emel/text/encoders/ugm/actions.hpp:34`
   - `src/emel/text/encoders/wpm/actions.hpp:31`
 - These detail kernels contain runtime branching (`if (...)`) for algorithmic encoding behavior:
   - `src/emel/text/encoders/fallback/detail.hpp`
-  - `src/emel/text/encoders/ugm/detail.hpp`
   - `src/emel/text/encoders/wpm/detail.hpp`
 
 ## Per-Machine Compliance Status
@@ -80,7 +90,7 @@ Evidence:
 - `src/emel/text/encoders/fallback/sm.hpp`: **FAIL** (item 2.5 only)
 - `src/emel/text/encoders/rwkv/sm.hpp`: **PASS** (checked off)
 - `src/emel/text/encoders/spm/sm.hpp`: **PASS**
-- `src/emel/text/encoders/ugm/sm.hpp`: **FAIL** (item 2.5 only)
+- `src/emel/text/encoders/ugm/sm.hpp`: **PASS**
 - `src/emel/text/encoders/wpm/sm.hpp`: **FAIL** (item 2.5 only)
 
 ## Validation Commands Used
@@ -89,7 +99,10 @@ Evidence:
 - `rg -n "\\bif\\b|\\belse\\b|\\bswitch\\b|\\?" src/emel/text/encoders/bpe/actions.hpp src/emel/text/encoders/bpe/guards.hpp src/emel/text/encoders/bpe/detail.hpp src/emel/text/encoders/bpe/sm.hpp` (no matches)
 - `rg -n "\\bif\\b|\\belse\\b|\\bswitch\\b|\\?" src/emel/text/encoders/plamo2/actions.hpp src/emel/text/encoders/plamo2/guards.hpp src/emel/text/encoders/plamo2/detail.hpp src/emel/text/encoders/plamo2/sm.hpp` (no matches)
 - `rg -n "\\bif\\b|\\belse\\b|\\bswitch\\b|\\?" src/emel/text/encoders/rwkv/actions.hpp src/emel/text/encoders/rwkv/guards.hpp src/emel/text/encoders/rwkv/detail.hpp src/emel/text/encoders/rwkv/sm.hpp` (no matches)
+- `rg -n "\\bif\\b|\\belse\\b|\\bswitch\\b|\\?" src/emel/text/encoders/ugm/actions.hpp src/emel/text/encoders/ugm/guards.hpp src/emel/text/encoders/ugm/detail.hpp src/emel/text/encoders/ugm/sm.hpp` (no matches)
+- `rg -n "encoders::detail::token_text|encoders::detail::push_token|encoders::detail::utf8_len|\\.insert\\(|\\.traverse\\(" src/emel/text/encoders/ugm/detail.hpp` (no matches)
+- `rg -n "std::string input\\(" src/emel/text/encoders/ugm/detail.hpp` (no matches)
 - `zig c++ ... /tmp/rwkv_compile_check.cpp` (RWKV `sm.hpp` compile smoke passes)
 - `zig c++ ... /tmp/rwkv_behavior_check.cpp && /tmp/rwkv_behavior_check` (unprepared-table failure and prepared-table success contract passes)
-- `rg -n "\\bif \\(" src/emel/text/encoders/fallback/detail.hpp src/emel/text/encoders/ugm/detail.hpp src/emel/text/encoders/wpm/detail.hpp` (matches remain)
+- `rg -n "\\bif \\(" src/emel/text/encoders/fallback/detail.hpp src/emel/text/encoders/wpm/detail.hpp` (matches remain)
 - `rg -n "\\bif\\b|\\belse\\b|\\bswitch\\b|\\?" src/emel/text/encoders/spm/actions.hpp src/emel/text/encoders/spm/guards.hpp src/emel/text/encoders/spm/detail.hpp src/emel/text/encoders/spm/sm.hpp` (no matches)

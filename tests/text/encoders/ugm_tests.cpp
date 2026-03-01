@@ -120,6 +120,7 @@ TEST_CASE("encoder_detail_ugm_normalize_overflow") {
 
   emel::text::encoders::ugm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
   const size_t max_bytes = ctx.scratch.buffer.size();
   std::string text(max_bytes, 'a');
   std::string_view normalized;
@@ -149,6 +150,7 @@ TEST_CASE("encoder_detail_ugm_normalize_empty") {
 
   emel::text::encoders::ugm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
@@ -160,6 +162,31 @@ TEST_CASE("encoder_detail_ugm_normalize_empty") {
   };
   const auto result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
   CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.token_count == 0);
+}
+
+TEST_CASE("encoder_ugm_encode_requires_prepared_tables") {
+  vocab_builder builder{};
+  builder.set_model("t5");
+  builder.add_token("a", 0.0f, 1);
+
+  emel::text::encoders::ugm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  ctx.ugm_tables_ready = false;
+  ctx.ugm_vocab = nullptr;
+
+  std::array<int32_t, 2> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::text::encoders::event::encode ev{
+    .text = "a",
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(out_tokens.size())),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+
+  const auto result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
   CHECK(result.token_count == 0);
 }
 
@@ -207,4 +234,3 @@ TEST_CASE("encoder_detail_ugm_xcda_break_and_trie_paths") {
                                                                  input, 0);
   CHECK(norm.consumed_input == 1);
 }
-
