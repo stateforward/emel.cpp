@@ -394,9 +394,9 @@ TEST_CASE("encoder_encode_impl_variants") {
       emel::text::encoders::detail::encode_result result{};
       switch (model_id) {
         case emel::model::data::tokenizer_model::SPM: {
-          emel::text::encoders::action::context ctx{};
+          emel::text::encoders::spm::action::context ctx{};
           ctx.vocab = builder.vocab;
-          CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+          CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
           result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
           break;
         }
@@ -558,9 +558,9 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     builder.add_token("\xE2\x96\x81hello", 0.5f, 1);
     builder.add_token("world", 0.4f, 1);
     builder.set_charsmap_a_to_b();
-    emel::text::encoders::action::context ctx{};
+    emel::text::encoders::spm::action::context ctx{};
     ctx.vocab = builder.vocab;
-    CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+    CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
     emel::text::encoders::event::encode ev_spm = ev;
     ev_spm.text = "hello world";
     auto result = emel::text::encoders::spm::detail::encode_spm(ev_spm, ctx, *builder.vocab);
@@ -1211,6 +1211,11 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
     emel::text::encoders::spm::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
     CHECK(ctx.vocab == builder.vocab);
+    CHECK(emel::text::encoders::spm::guard::tables_missing{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::spm::guard::text_non_empty_and_tables_missing{}(runtime_ok_ev, ctx));
+    emel::text::encoders::spm::action::sync_tables(runtime_ok_ev, ctx);
+    CHECK(emel::text::encoders::spm::guard::tables_ready{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::spm::guard::text_non_empty_and_tables_ready{}(runtime_ok_ev, ctx));
     emel::text::encoders::spm::action::run_encode(runtime_error_ev, ctx);
     emel::text::encoders::spm::action::mark_done(runtime_ok_ev, ctx);
     emel::text::encoders::spm::action::ensure_last_error(runtime_error_ev, ctx);

@@ -36,9 +36,9 @@ TEST_CASE("encoder_detail_spm_merge_capacity_error") {
   builder.add_token("i", 0.1f, 1);
   builder.add_token("hi", 0.9f, 1);
 
-  emel::text::encoders::action::context ctx{};
+  emel::text::encoders::spm::action::context ctx{};
   ctx.vocab = builder.vocab;
-  CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+  CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
 
   std::array<int32_t, 1> tokens = {};
   int32_t token_count = 0;
@@ -66,9 +66,9 @@ TEST_CASE("encoder_detail_spm_add_space_prefix") {
   builder.add_token(" ", 0.1f, 1);
   builder.vocab->add_space_prefix = true;
 
-  emel::text::encoders::action::context ctx{};
+  emel::text::encoders::spm::action::context ctx{};
   ctx.vocab = builder.vocab;
-  CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+  CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
@@ -95,8 +95,9 @@ TEST_CASE("encoder_detail_spm_prefix_after_leading_spaces") {
   builder.add_token(" ", 0.1f, 1);
   builder.vocab->add_space_prefix = true;
 
-  emel::text::encoders::action::context ctx{};
+  emel::text::encoders::spm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
@@ -122,8 +123,9 @@ TEST_CASE("encoder_detail_spm_unescaped_spaces") {
   builder.add_token("h", 0.1f, 1);
   builder.add_token("i", 0.1f, 1);
 
-  emel::text::encoders::action::context ctx{};
+  emel::text::encoders::spm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
@@ -150,8 +152,9 @@ TEST_CASE("encoder_detail_spm_suffix_escape_spaces") {
   builder.vocab->add_space_prefix = true;
   builder.vocab->treat_whitespace_as_suffix = true;
 
-  emel::text::encoders::action::context ctx{};
+  emel::text::encoders::spm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
@@ -178,8 +181,9 @@ TEST_CASE("encoder_detail_spm_suffix_unescaped_space") {
   builder.add_token("h", 0.1f, 1);
   builder.add_token("i", 0.1f, 1);
 
-  emel::text::encoders::action::context ctx{};
+  emel::text::encoders::spm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
@@ -202,6 +206,7 @@ TEST_CASE("encoder_detail_spm_prefix_overflow") {
   builder.vocab->add_space_prefix = true;
   emel::text::encoders::spm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
   const size_t max_bytes = ctx.scratch.buffer.size();
   std::string text(max_bytes, 'a');
   std::array<int32_t, 4> out_tokens = {};
@@ -222,6 +227,7 @@ TEST_CASE("encoder_detail_spm_space_overflow") {
   builder.set_model("llama");
   emel::text::encoders::spm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
   const size_t max_bytes = ctx.scratch.buffer.size();
   std::string text(max_bytes - 1, 'a');
   text.back() = ' ';
@@ -244,6 +250,7 @@ TEST_CASE("encoder_detail_spm_missing_byte_token") {
   builder.add_token("a", 0.0f, 1);
   emel::text::encoders::spm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
@@ -277,11 +284,36 @@ TEST_CASE("encoder_detail_spm_empty_text") {
   CHECK(result.token_count == 0);
 }
 
+TEST_CASE("encoder_spm_encode_requires_prepared_tables") {
+  vocab_builder builder{};
+  builder.set_model("llama");
+  builder.add_token("a", 0.1f, 1);
+
+  emel::text::encoders::spm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+  ctx.tables_ready = false;
+
+  std::array<int32_t, 2> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::text::encoders::event::encode ev{
+    .text = "a",
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(out_tokens.size())),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+
+  const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.token_count == 0);
+}
+
 TEST_CASE("encoder_detail_spm_symbol_overflow") {
   vocab_builder builder{};
   builder.set_model("llama");
   emel::text::encoders::spm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
   const size_t max_symbols = ctx.scratch.offsets.size();
   std::string text(max_symbols + 1, 'a');
   std::array<int32_t, 4> out_tokens = {};
@@ -297,4 +329,3 @@ TEST_CASE("encoder_detail_spm_symbol_overflow") {
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
   CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
-

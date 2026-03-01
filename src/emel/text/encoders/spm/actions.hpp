@@ -16,7 +16,6 @@ struct begin_encode_sync_vocab {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
     emel::text::encoders::action::begin_encode(ev, ctx);
     emel::text::encoders::action::sync_vocab(ev, ctx);
-
   }
 };
 
@@ -31,6 +30,14 @@ struct run_encode {
     const auto result = emel::text::encoders::spm::detail::encode_spm(ev.request, ctx, *ctx.vocab);
     ev.ctx.token_count = result.token_count;
     ev.ctx.err = result.error;
+  }
+};
+
+struct sync_tables {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    const bool ready = emel::text::encoders::spm::detail::ensure_spm_tables(ctx);
+    ev.ctx.err = emel::text::encoders::spm::detail::select_i32(
+      ready, EMEL_OK, EMEL_ERR_INVALID_ARGUMENT);
   }
 };
 
@@ -57,6 +64,7 @@ inline constexpr begin_encode begin_encode{};
 inline constexpr begin_encode_sync_vocab begin_encode_sync_vocab{};
 inline constexpr reject_invalid_encode reject_invalid_encode{};
 inline constexpr run_encode run_encode{};
+inline constexpr sync_tables sync_tables{};
 inline constexpr mark_done mark_done{};
 inline constexpr ensure_last_error ensure_last_error{};
 inline constexpr on_unexpected on_unexpected{};
