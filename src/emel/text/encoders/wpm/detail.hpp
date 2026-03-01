@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -188,7 +189,7 @@ inline std::vector<std::string> wpm_preprocess(const std::string_view text) {
         emel::text::unicode_cpt_to_utf8(emel::text::unicode_tolower(cpt));
       const bool split_token =
         flags.is_punctuation || (cpt < 0x7Fu && flags.is_symbol) ||
-        emel::text::encoders::detail::is_chinese_char(cpt)) {
+        emel::text::encoders::detail::is_chinese_char(cpt);
       for (bool split = split_token; split; split = false) {
         for (bool start_new_word = !words.back().empty(); start_new_word; start_new_word = false) {
           words.emplace_back();
