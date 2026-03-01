@@ -411,7 +411,7 @@ TEST_CASE("encoder_encode_impl_variants") {
         case emel::model::data::tokenizer_model::WPM: {
           emel::text::encoders::wpm::action::context ctx{};
           ctx.vocab = builder.vocab;
-          CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+          CHECK(emel::text::encoders::wpm::detail::ensure_wpm_tables(ctx, *builder.vocab));
           result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
           break;
         }
@@ -540,7 +540,7 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     builder.add_token("<unk>", 0.0f, 2);
     emel::text::encoders::wpm::action::context ctx{};
     ctx.vocab = builder.vocab;
-    CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+    CHECK(emel::text::encoders::wpm::detail::ensure_wpm_tables(ctx, *builder.vocab));
     emel::text::encoders::event::encode ev_wpm = ev;
     ev_wpm.text = "unaffable";
     auto result = emel::text::encoders::wpm::detail::encode_wpm(ev_wpm, ctx, *builder.vocab);
@@ -1178,6 +1178,11 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
     emel::text::encoders::wpm::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
     CHECK(ctx.vocab == builder.vocab);
+    CHECK(emel::text::encoders::wpm::guard::tables_missing{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::wpm::guard::text_non_empty_and_tables_missing{}(runtime_ok_ev, ctx));
+    emel::text::encoders::wpm::action::sync_tables(runtime_ok_ev, ctx);
+    CHECK(emel::text::encoders::wpm::guard::tables_ready{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::wpm::guard::text_non_empty_and_tables_ready{}(runtime_ok_ev, ctx));
     emel::text::encoders::wpm::action::run_encode(runtime_error_ev, ctx);
     emel::text::encoders::wpm::action::mark_done(runtime_ok_ev, ctx);
     emel::text::encoders::wpm::action::ensure_last_error(runtime_error_ev, ctx);

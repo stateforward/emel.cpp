@@ -78,6 +78,29 @@ TEST_CASE("encoder_detail_wpm_empty_text") {
   CHECK(result.token_count == 0);
 }
 
+TEST_CASE("encoder_wpm_encode_requires_prepared_tables") {
+  vocab_builder builder{};
+  builder.set_model("bert");
+  builder.add_token("\xE2\x96\x81hello", 0.2f, 1);
+
+  emel::text::encoders::wpm::action::context ctx{};
+  ctx.vocab = builder.vocab;
+
+  std::array<int32_t, 8> tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::text::encoders::event::encode ev{
+    .text = "hello",
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  };
+
+  const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
+  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.token_count == 0);
+}
+
 TEST_CASE("encoder_detail_wpm_preprocess_punctuation_and_control") {
   const std::string input = std::string("hi,") + "\xEF\xBF\xBD" + "\xE4\xB8\xAD";
   const auto parts = emel::text::encoders::wpm::detail::wpm_preprocess(input);
@@ -95,6 +118,7 @@ TEST_CASE("encoder_detail_wpm_skips_unknown_without_unk") {
 
   emel::text::encoders::wpm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::wpm::detail::ensure_wpm_tables(ctx, *builder.vocab));
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
@@ -115,6 +139,7 @@ TEST_CASE("encoder_detail_wpm_prefix_overflow") {
   builder.set_model("bert");
   emel::text::encoders::wpm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::wpm::detail::ensure_wpm_tables(ctx, *builder.vocab));
   const size_t max_bytes = ctx.scratch.buffer.size();
   std::string text(max_bytes, 'a');
   std::array<int32_t, 4> out_tokens = {};
@@ -137,6 +162,7 @@ TEST_CASE("encoder_detail_wpm_push_overflow") {
   builder.add_token("\xE2\x96\x81" "a", 0.0f, 1);
   emel::text::encoders::wpm::action::context ctx{};
   ctx.vocab = builder.vocab;
+  CHECK(emel::text::encoders::wpm::detail::ensure_wpm_tables(ctx, *builder.vocab));
   std::array<int32_t, 1> out_tokens = {};
   int32_t token_count = 0;
   int32_t err = EMEL_OK;
@@ -150,4 +176,3 @@ TEST_CASE("encoder_detail_wpm_push_overflow") {
   const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
   CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
 }
-
