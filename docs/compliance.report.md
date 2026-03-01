@@ -75,6 +75,8 @@
      `src/emel/text/encoders/wpm/detail.hpp`
    - WPM detail call-path no longer depends on shared branching helpers (`ensure_tables`, `lookup_token`, `push_token`):
      `src/emel/text/encoders/wpm/detail.hpp`
+   - Strict re-audit follow-up fixed `wpm_preprocess` split-token declaration syntax to keep the compliant path build-valid:
+     `src/emel/text/encoders/wpm/detail.hpp`
    - Added regression test for this contract:
      `tests/text/encoders/wpm_tests.cpp` (`encoder_wpm_encode_requires_prepared_tables`)
 
