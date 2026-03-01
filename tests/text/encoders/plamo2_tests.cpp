@@ -46,14 +46,14 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::plamo2::detail::encode_plamo2(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.error == EMEL_OK);
   CHECK(result.token_count > 0);
 
   emel::text::encoders::event::encode ev_bom_only = ev;
   ev_bom_only.text = "\xEF\xBB\xBF";
   const auto bom_only =
       emel::text::encoders::plamo2::detail::encode_plamo2(ev_bom_only, ctx, *builder.vocab);
-  CHECK(bom_only.error == emel::text::encoders::error::code::ok);
+  CHECK(bom_only.error == EMEL_OK);
   CHECK(bom_only.token_count == 0);
 
   emel::text::encoders::event::encode ev_long = ev;
@@ -62,7 +62,7 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
   ev_long.text = long_text;
   const auto too_long =
       emel::text::encoders::plamo2::detail::encode_plamo2(ev_long, ctx, *builder.vocab);
-  CHECK(too_long.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(too_long.error == EMEL_ERR_INVALID_ARGUMENT);
 
   vocab_builder incomplete_builder{};
   incomplete_builder.set_model("plamo2");
@@ -75,6 +75,6 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
   const auto invalid =
       emel::text::encoders::plamo2::detail::encode_plamo2(ev_incomplete, ctx_incomplete,
                                                    *incomplete_builder.vocab);
-  CHECK(invalid.error == emel::text::encoders::error::code::model_invalid);
+  CHECK(invalid.error == EMEL_ERR_MODEL_INVALID);
 }
 

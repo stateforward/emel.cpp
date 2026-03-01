@@ -137,7 +137,7 @@ TEST_CASE("encoder_detail_ugm_normalize_overflow") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("encoder_detail_ugm_normalize_empty") {
@@ -161,7 +161,7 @@ TEST_CASE("encoder_detail_ugm_normalize_empty") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.error == EMEL_OK);
   CHECK(result.token_count == 0);
 }
 
@@ -186,7 +186,7 @@ TEST_CASE("encoder_ugm_encode_requires_prepared_tables") {
   };
 
   const auto result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(result.token_count == 0);
 }
 

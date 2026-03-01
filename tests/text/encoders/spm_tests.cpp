@@ -51,7 +51,7 @@ TEST_CASE("encoder_detail_spm_merge_capacity_error") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("encoder_detail_spm_add_space_prefix") {
@@ -81,7 +81,7 @@ TEST_CASE("encoder_detail_spm_add_space_prefix") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.error == EMEL_OK);
   CHECK(result.token_count >= 1);
 }
 
@@ -110,7 +110,7 @@ TEST_CASE("encoder_detail_spm_prefix_after_leading_spaces") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.error == EMEL_OK);
   CHECK(result.token_count >= 1);
 }
 
@@ -138,7 +138,7 @@ TEST_CASE("encoder_detail_spm_unescaped_spaces") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.error == EMEL_OK);
   CHECK(result.token_count >= 1);
 }
 
@@ -167,7 +167,7 @@ TEST_CASE("encoder_detail_spm_suffix_escape_spaces") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.error == EMEL_OK);
   CHECK(result.token_count >= 1);
 }
 
@@ -196,7 +196,7 @@ TEST_CASE("encoder_detail_spm_suffix_unescaped_space") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.error == EMEL_OK);
   CHECK(result.token_count >= 1);
 }
 
@@ -219,7 +219,7 @@ TEST_CASE("encoder_detail_spm_prefix_overflow") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("encoder_detail_spm_space_overflow") {
@@ -241,7 +241,7 @@ TEST_CASE("encoder_detail_spm_space_overflow") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("encoder_detail_spm_missing_byte_token") {
@@ -261,7 +261,7 @@ TEST_CASE("encoder_detail_spm_missing_byte_token") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::backend);
+  CHECK(result.error == EMEL_ERR_BACKEND);
 }
 
 TEST_CASE("encoder_detail_spm_empty_text") {
@@ -280,7 +280,7 @@ TEST_CASE("encoder_detail_spm_empty_text") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.error == EMEL_OK);
   CHECK(result.token_count == 0);
 }
 
@@ -304,7 +304,7 @@ TEST_CASE("encoder_spm_encode_requires_prepared_tables") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(result.token_count == 0);
 }
 
@@ -327,5 +327,5 @@ TEST_CASE("encoder_detail_spm_symbol_overflow") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }

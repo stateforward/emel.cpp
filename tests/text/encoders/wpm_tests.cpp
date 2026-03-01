@@ -74,7 +74,7 @@ TEST_CASE("encoder_detail_wpm_empty_text") {
   };
 
   const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.error == EMEL_OK);
   CHECK(result.token_count == 0);
 }
 
@@ -97,7 +97,7 @@ TEST_CASE("encoder_wpm_encode_requires_prepared_tables") {
   };
 
   const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(result.token_count == 0);
 }
 
@@ -130,7 +130,7 @@ TEST_CASE("encoder_detail_wpm_skips_unknown_without_unk") {
   };
 
   const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.error == EMEL_OK);
   CHECK(result.token_count == 0);
 }
 
@@ -153,7 +153,7 @@ TEST_CASE("encoder_detail_wpm_prefix_overflow") {
   };
 
   const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("encoder_detail_wpm_push_overflow") {
@@ -174,5 +174,5 @@ TEST_CASE("encoder_detail_wpm_push_overflow") {
   };
 
   const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }

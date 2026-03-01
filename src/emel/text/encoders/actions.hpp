@@ -4,6 +4,7 @@
 #include <cstddef>
 
 #include "emel/text/encoders/context.hpp"
+#include "emel/text/encoders/detail.hpp"
 #include "emel/text/encoders/events.hpp"
 
 namespace emel::text::encoders::action {
@@ -16,6 +17,19 @@ constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noe
     return ev.event_;
   }
   return (ev);
+}
+
+inline void signal_unexpected_request(const event::encode & request) noexcept {
+  int32_t token_count_sink = 0;
+  int32_t error_sink = EMEL_OK;
+  emel::text::encoders::detail::write_optional(request.token_count_out, token_count_sink, 0);
+  emel::text::encoders::detail::write_optional(
+    request.error_out, error_sink, EMEL_ERR_INVALID_ARGUMENT);
+
+  event::encode_ctx runtime_ctx{};
+  runtime_ctx.token_count = 0;
+  runtime_ctx.err = EMEL_ERR_INVALID_ARGUMENT;
+  emel::text::encoders::detail::publish_result(request, runtime_ctx);
 }
 
 }  // namespace detail
@@ -67,6 +81,8 @@ struct on_unexpected {
     if constexpr (requires { runtime_ev.ctx.err; runtime_ev.ctx.token_count; }) {
       runtime_ev.ctx.token_count = 0;
       runtime_ev.ctx.err = EMEL_ERR_INVALID_ARGUMENT;
+    } else if constexpr (requires { runtime_ev.request; }) {
+      detail::signal_unexpected_request(runtime_ev.request);
     }
   }
 };

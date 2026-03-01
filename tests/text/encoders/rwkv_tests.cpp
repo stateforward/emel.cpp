@@ -66,7 +66,7 @@ TEST_CASE("encoder_rwkv_skips_unknown_without_unk") {
   };
 
   const auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::ok);
+  CHECK(result.error == EMEL_OK);
   CHECK(result.token_count == 0);
 }
 
@@ -97,7 +97,7 @@ TEST_CASE("encoder_rwkv_encode_reports_invalid_table") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("encoder_rwkv_push_unk_overflow") {
@@ -118,7 +118,7 @@ TEST_CASE("encoder_rwkv_push_unk_overflow") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("encoder_rwkv_encode_requires_prepared_tables") {
@@ -142,6 +142,6 @@ TEST_CASE("encoder_rwkv_encode_requires_prepared_tables") {
   };
 
   const auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(result.token_count == 0);
 }

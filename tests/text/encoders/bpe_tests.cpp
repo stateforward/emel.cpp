@@ -142,7 +142,7 @@ TEST_CASE("encoder_detail_bpe_merge_and_errors") {
   };
 
   const auto merged = emel::text::encoders::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
-  CHECK(merged.error == emel::text::encoders::error::code::ok);
+  CHECK(merged.error == EMEL_OK);
   CHECK(merged.token_count >= 1);
   CHECK(tokens[0] == he_id);
 
@@ -161,7 +161,7 @@ TEST_CASE("encoder_detail_bpe_merge_and_errors") {
 
   const auto result_fail = emel::text::encoders::bpe::detail::encode_bpe(
     ev_fail, ctx_fail, *builder.vocab);
-  CHECK(result_fail.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result_fail.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("encoder_detail_bpe_buffer_overflow") {
@@ -187,7 +187,7 @@ TEST_CASE("encoder_detail_bpe_buffer_overflow") {
   };
 
   const auto result = emel::text::encoders::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
 TEST_CASE("encoder_detail_bpe_byte_push_overflow") {
@@ -212,6 +212,6 @@ TEST_CASE("encoder_detail_bpe_byte_push_overflow") {
   };
 
   const auto result = emel::text::encoders::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
-  CHECK(result.error == emel::text::encoders::error::code::invalid_argument);
+  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
