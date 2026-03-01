@@ -3,7 +3,7 @@
 - Generated: 2026-03-01
 - Checklist reference: `docs/compliance-checklist.md`
 - Scope: `src/emel/text/encoders` (7 encoder state machines + shared encoder orchestration files)
-- Result: **FAIL** (1 merge-blocking checklist item remains in 1/7 encoders)
+- Result: **PASS** (all audited encoder state machines satisfy checklist requirements)
 
 ## Audit Summary
 
@@ -11,7 +11,7 @@
   - `bpe`, `fallback`, `plamo2`, `rwkv`, `spm`, `ugm`, `wpm`
 - Structural SML checks (destination-first rows, wrappers, explicit unexpected-event handling): **PASS**
 - Event/context/error orchestration checks: **PASS** after this refactor
-- Action/guard architecture checks: **FAIL** on strict checklist item `2.5` for `fallback`; **PASS** for `bpe`, `plamo2`, `rwkv`, `spm`, `ugm`, `wpm`
+- Action/guard architecture checks: **PASS** for `bpe`, `fallback`, `plamo2`, `rwkv`, `spm`, `ugm`, `wpm`
 
 ## Fixed In This Pass
 
@@ -82,23 +82,13 @@
 
 ## Remaining Non-Compliance (Merge-Blocking)
 
-### 1) Runtime conditionals in functions called from actions (Checklist Section 2, item 2.5)
-
-Checklist mapping:
-- `2) Action and Guard Architecture`
-- `Runtime control-flow conditionals are not implemented in functions called from actions`
-
-Evidence:
-- Actions call variant detail kernels from `run_encode`:
-  - `src/emel/text/encoders/fallback/actions.hpp:41`
-- These detail kernels contain runtime branching (`if (...)`) for algorithmic encoding behavior:
-  - `src/emel/text/encoders/fallback/detail.hpp`
+- None.
 
 ## Per-Machine Compliance Status
 
 - `src/emel/text/encoders/bpe/sm.hpp`: **PASS**
 - `src/emel/text/encoders/plamo2/sm.hpp`: **PASS** (checked off)
-- `src/emel/text/encoders/fallback/sm.hpp`: **FAIL** (item 2.5 only)
+- `src/emel/text/encoders/fallback/sm.hpp`: **PASS**
 - `src/emel/text/encoders/rwkv/sm.hpp`: **PASS** (checked off)
 - `src/emel/text/encoders/spm/sm.hpp`: **PASS**
 - `src/emel/text/encoders/ugm/sm.hpp`: **PASS**
@@ -117,5 +107,7 @@ Evidence:
 - `rg -n "encoders::detail::ensure_tables|encoders::detail::lookup_token|encoders::detail::push_token" src/emel/text/encoders/wpm/detail.hpp` (no matches)
 - `zig c++ ... /tmp/rwkv_compile_check.cpp` (RWKV `sm.hpp` compile smoke passes)
 - `zig c++ ... /tmp/rwkv_behavior_check.cpp && /tmp/rwkv_behavior_check` (unprepared-table failure and prepared-table success contract passes)
-- `rg -n "\\bif \\(" src/emel/text/encoders/fallback/detail.hpp` (matches remain)
+- `rg -n "\\bif\\b|\\belse\\b|\\bswitch\\b|\\?" src/emel/text/encoders/fallback/actions.hpp src/emel/text/encoders/fallback/guards.hpp src/emel/text/encoders/fallback/detail.hpp src/emel/text/encoders/fallback/sm.hpp` (no matches)
+- `rg -n "encoders::detail::ensure_tables|encoders::detail::lookup_token|encoders::detail::push_token|encoders::detail::encode_bytes|encoders::detail::byte_to_token|encoders::detail::token_text|encoders::detail::utf8_len" src/emel/text/encoders/fallback/actions.hpp src/emel/text/encoders/fallback/detail.hpp` (no matches)
+- `zig c++ -std=c++20 -Wall -Wextra -Wpedantic -Werror -c /tmp/fallback_sm_compile_check.cpp -o /tmp/fallback_sm_compile_check.o -I.../src -I.../include -I.../build/zig/_deps/boost_sml-src/include` (compile smoke passes)
 - `rg -n "\\bif\\b|\\belse\\b|\\bswitch\\b|\\?" src/emel/text/encoders/spm/actions.hpp src/emel/text/encoders/spm/guards.hpp src/emel/text/encoders/spm/detail.hpp src/emel/text/encoders/spm/sm.hpp` (no matches)

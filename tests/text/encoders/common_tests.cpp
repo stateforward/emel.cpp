@@ -440,7 +440,7 @@ TEST_CASE("encoder_encode_impl_variants") {
         case emel::model::data::tokenizer_model::UNKNOWN: {
           emel::text::encoders::action::context ctx{};
           ctx.vocab = builder.vocab;
-          CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+          CHECK(emel::text::encoders::fallback::detail::ensure_fallback_tables(ctx, *builder.vocab));
           result = emel::text::encoders::fallback::detail::encode_fallback(ev, ctx, *builder.vocab);
           break;
         }
@@ -612,7 +612,7 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     builder.add_byte_token(static_cast<uint8_t>('x'));
     emel::text::encoders::action::context ctx{};
     ctx.vocab = builder.vocab;
-    CHECK(emel::text::encoders::detail::ensure_tables(ctx));
+    CHECK(emel::text::encoders::fallback::detail::ensure_fallback_tables(ctx, *builder.vocab));
     auto result = emel::text::encoders::fallback::detail::encode_fallback(ev, ctx, *builder.vocab);
     (void)result;
   }
