@@ -396,23 +396,9 @@ inline int32_t spm_byte_to_token(const emel::text::encoders::spm::action::contex
   return select_i32(hex_token != k_token_null, hex_token, raw_token);
 }
 
-inline encode_result encode_spm(const event::encode &ev,
-                                emel::text::encoders::spm::action::context &ctx,
-                                const emel::model::data::vocab &vocab) {
-  encode_result result{};
-  result.token_count = 0;
-
-  for (bool empty_text = ev.text.empty(); empty_text; empty_text = false) {
-    result.error = EMEL_OK;
-    return result;
-  }
-
-  const bool tables_ready = spm_tables_ready(ctx, vocab);
-  for (bool tables_missing = !tables_ready; tables_missing; tables_missing = false) {
-    result.error = EMEL_ERR_INVALID_ARGUMENT;
-    return result;
-  }
-
+inline int32_t prepare_spm(const event::encode &ev,
+                           emel::text::encoders::spm::action::context &ctx,
+                           const emel::model::data::vocab &vocab) noexcept {
   size_t out_len = 0;
   const bool add_prefix = vocab.add_space_prefix && !vocab.treat_whitespace_as_suffix;
   const bool add_suffix = vocab.add_space_prefix && vocab.treat_whitespace_as_suffix;
@@ -426,8 +412,7 @@ inline encode_result encode_spm(const event::encode &ev,
       prefix_ok = spm_emit_space_marker(ctx.scratch, out_len, escape_spaces);
     }
     for (bool prefix_fail = prefix_now && !prefix_ok; prefix_fail; prefix_fail = false) {
-      result.error = EMEL_ERR_INVALID_ARGUMENT;
-      return result;
+      return EMEL_ERR_INVALID_ARGUMENT;
     }
     prefix_inserted = prefix_inserted || prefix_now;
 
@@ -437,8 +422,7 @@ inline encode_result encode_spm(const event::encode &ev,
       space_ok = spm_emit_space_marker(ctx.scratch, out_len, escape_spaces);
     }
     for (bool space_fail = is_space && !space_ok; space_fail; space_fail = false) {
-      result.error = EMEL_ERR_INVALID_ARGUMENT;
-      return result;
+      return EMEL_ERR_INVALID_ARGUMENT;
     }
 
     bool char_ok = true;
@@ -446,8 +430,7 @@ inline encode_result encode_spm(const event::encode &ev,
       char_ok = spm_emit_char(ctx.scratch, out_len, c);
     }
     for (bool char_fail = !is_space && !char_ok; char_fail; char_fail = false) {
-      result.error = EMEL_ERR_INVALID_ARGUMENT;
-      return result;
+      return EMEL_ERR_INVALID_ARGUMENT;
     }
   }
 
@@ -456,16 +439,18 @@ inline encode_result encode_spm(const event::encode &ev,
     suffix_ok = spm_emit_space_marker(ctx.scratch, out_len, escape_spaces);
   }
   for (bool suffix_fail = add_suffix && !suffix_ok; suffix_fail; suffix_fail = false) {
-    result.error = EMEL_ERR_INVALID_ARGUMENT;
-    return result;
+    return EMEL_ERR_INVALID_ARGUMENT;
   }
 
+  encode_result result{};
   const std::string_view escaped(ctx.scratch.buffer.data(), out_len);
   const bool symbols_ok = spm_build_symbols(escaped, ctx.scratch, result);
-  for (bool build_fail = !symbols_ok; build_fail; build_fail = false) {
-    return result;
-  }
+  return select_i32(symbols_ok, EMEL_OK, result.error);
+}
 
+inline int32_t merge_spm(emel::text::encoders::spm::action::context &ctx,
+                         const emel::model::data::vocab &vocab) noexcept {
+  const std::string_view escaped(ctx.scratch.buffer.data(), ctx.scratch.buffer.size());
   for (bool keep_merging = ctx.scratch.symbol_count > 1; keep_merging;) {
     float best_score = -std::numeric_limits<float>::infinity();
     int32_t best_left = -1;
@@ -502,6 +487,16 @@ inline encode_result encode_spm(const event::encode &ev,
     keep_merging = has_best;
   }
 
+  (void)vocab;
+  return EMEL_OK;
+}
+
+inline encode_result emit_spm(const event::encode &ev,
+                              emel::text::encoders::spm::action::context &ctx,
+                              const emel::model::data::vocab &vocab) noexcept {
+  (void)vocab;
+  const std::string_view escaped(ctx.scratch.buffer.data(), ctx.scratch.buffer.size());
+  encode_result result{};
   int32_t count = 0;
   for (int32_t idx = 0; idx != -1; idx = ctx.scratch.next[static_cast<size_t>(idx)]) {
     const bool has_symbol = ctx.scratch.lengths[static_cast<size_t>(idx)] != 0u;
@@ -542,6 +537,38 @@ inline encode_result encode_spm(const event::encode &ev,
   result.token_count = count;
   result.error = EMEL_OK;
   return result;
+}
+
+inline encode_result encode_spm(const event::encode &ev,
+                                emel::text::encoders::spm::action::context &ctx,
+                                const emel::model::data::vocab &vocab) {
+  encode_result result{};
+  result.token_count = 0;
+
+  for (bool empty_text = ev.text.empty(); empty_text; empty_text = false) {
+    result.error = EMEL_OK;
+    return result;
+  }
+
+  const bool tables_ready = spm_tables_ready(ctx, vocab);
+  for (bool tables_missing = !tables_ready; tables_missing; tables_missing = false) {
+    result.error = EMEL_ERR_INVALID_ARGUMENT;
+    return result;
+  }
+
+  const int32_t prepare_error = prepare_spm(ev, ctx, vocab);
+  for (bool prepare_failed = prepare_error != EMEL_OK; prepare_failed; prepare_failed = false) {
+    result.error = prepare_error;
+    return result;
+  }
+
+  const int32_t merge_error = merge_spm(ctx, vocab);
+  for (bool merge_failed = merge_error != EMEL_OK; merge_failed; merge_failed = false) {
+    result.error = merge_error;
+    return result;
+  }
+
+  return emit_spm(ev, ctx, vocab);
 }
 
 }  // namespace emel::text::encoders::spm::detail

@@ -3,7 +3,7 @@
 - Generated: 2026-03-01
 - Checklist reference: `docs/compliance-checklist.md`
 - Scope: `src/emel/text/encoders` (7 encoder state machines + shared encoder orchestration files)
-- Result: **FAIL** (1 merge-blocking checklist item remains in 4/7 encoders)
+- Result: **FAIL** (1 merge-blocking checklist item remains in 3/7 encoders)
 
 ## Audit Summary
 
@@ -11,7 +11,7 @@
   - `bpe`, `fallback`, `plamo2`, `rwkv`, `spm`, `ugm`, `wpm`
 - Structural SML checks (destination-first rows, wrappers, explicit unexpected-event handling): **PASS**
 - Event/context/error orchestration checks: **PASS** after this refactor
-- Action/guard architecture checks: **FAIL** on strict checklist item `2.5` for `fallback`, `spm`, `ugm`, `wpm`; **PASS** for `bpe`, `plamo2`, `rwkv`
+- Action/guard architecture checks: **FAIL** on strict checklist item `2.5` for `fallback`, `ugm`, `wpm`; **PASS** for `bpe`, `plamo2`, `rwkv`, `spm`
 
 ## Fixed In This Pass
 
@@ -46,6 +46,14 @@
      `src/emel/text/encoders/rwkv/detail.hpp:199-237`
    - Added regression test for this contract:
      `tests/text/encoders/rwkv_tests.cpp` (`encoder_rwkv_encode_requires_prepared_tables`)
+7. SPM encoder now models table-sync + explicit prepare/merge/emit phases and keeps each phase action-local.
+   - Added explicit prepare and merge phase states/transitions:
+     `src/emel/text/encoders/spm/sm.hpp` (`encode_prepare_exec`, `encode_prepare_result_decision`,
+     `encode_merge_exec`, `encode_merge_result_decision`)
+   - Added dedicated phase actions:
+     `src/emel/text/encoders/spm/actions.hpp` (`run_prepare`, `run_merge`, `run_encode`)
+   - Split monolithic detail encode path into explicit phase kernels:
+     `src/emel/text/encoders/spm/detail.hpp` (`prepare_spm`, `merge_spm`, `emit_spm`)
 
 ## Remaining Non-Compliance (Merge-Blocking)
 
@@ -58,12 +66,10 @@ Checklist mapping:
 Evidence:
 - Actions call variant detail kernels from `run_encode`:
   - `src/emel/text/encoders/fallback/actions.hpp:41`
-  - `src/emel/text/encoders/spm/actions.hpp:31`
   - `src/emel/text/encoders/ugm/actions.hpp:34`
   - `src/emel/text/encoders/wpm/actions.hpp:31`
 - These detail kernels contain runtime branching (`if (...)`) for algorithmic encoding behavior:
   - `src/emel/text/encoders/fallback/detail.hpp`
-  - `src/emel/text/encoders/spm/detail.hpp`
   - `src/emel/text/encoders/ugm/detail.hpp`
   - `src/emel/text/encoders/wpm/detail.hpp`
 
@@ -73,7 +79,7 @@ Evidence:
 - `src/emel/text/encoders/plamo2/sm.hpp`: **PASS** (checked off)
 - `src/emel/text/encoders/fallback/sm.hpp`: **FAIL** (item 2.5 only)
 - `src/emel/text/encoders/rwkv/sm.hpp`: **PASS** (checked off)
-- `src/emel/text/encoders/spm/sm.hpp`: **FAIL** (item 2.5 only)
+- `src/emel/text/encoders/spm/sm.hpp`: **PASS**
 - `src/emel/text/encoders/ugm/sm.hpp`: **FAIL** (item 2.5 only)
 - `src/emel/text/encoders/wpm/sm.hpp`: **FAIL** (item 2.5 only)
 
@@ -85,4 +91,5 @@ Evidence:
 - `rg -n "\\bif\\b|\\belse\\b|\\bswitch\\b|\\?" src/emel/text/encoders/rwkv/actions.hpp src/emel/text/encoders/rwkv/guards.hpp src/emel/text/encoders/rwkv/detail.hpp src/emel/text/encoders/rwkv/sm.hpp` (no matches)
 - `zig c++ ... /tmp/rwkv_compile_check.cpp` (RWKV `sm.hpp` compile smoke passes)
 - `zig c++ ... /tmp/rwkv_behavior_check.cpp && /tmp/rwkv_behavior_check` (unprepared-table failure and prepared-table success contract passes)
-- `rg -n "\\bif \\(" src/emel/text/encoders/fallback/detail.hpp src/emel/text/encoders/spm/detail.hpp src/emel/text/encoders/ugm/detail.hpp src/emel/text/encoders/wpm/detail.hpp` (matches remain)
+- `rg -n "\\bif \\(" src/emel/text/encoders/fallback/detail.hpp src/emel/text/encoders/ugm/detail.hpp src/emel/text/encoders/wpm/detail.hpp` (matches remain)
+- `rg -n "\\bif\\b|\\belse\\b|\\bswitch\\b|\\?" src/emel/text/encoders/spm/actions.hpp src/emel/text/encoders/spm/guards.hpp src/emel/text/encoders/spm/detail.hpp src/emel/text/encoders/spm/sm.hpp` (no matches)

@@ -1216,6 +1216,8 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     emel::text::encoders::spm::action::sync_tables(runtime_ok_ev, ctx);
     CHECK(emel::text::encoders::spm::guard::tables_ready{}(runtime_ok_ev, ctx));
     CHECK(emel::text::encoders::spm::guard::text_non_empty_and_tables_ready{}(runtime_ok_ev, ctx));
+    emel::text::encoders::spm::action::run_prepare(runtime_ok_ev, ctx);
+    emel::text::encoders::spm::action::run_merge(runtime_ok_ev, ctx);
     emel::text::encoders::spm::action::run_encode(runtime_error_ev, ctx);
     emel::text::encoders::spm::action::mark_done(runtime_ok_ev, ctx);
     emel::text::encoders::spm::action::ensure_last_error(runtime_error_ev, ctx);

@@ -27,9 +27,21 @@ struct reject_invalid_encode {
 
 struct run_encode {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
-    const auto result = emel::text::encoders::spm::detail::encode_spm(ev.request, ctx, *ctx.vocab);
+    const auto result = emel::text::encoders::spm::detail::emit_spm(ev.request, ctx, *ctx.vocab);
     ev.ctx.token_count = result.token_count;
     ev.ctx.err = result.error;
+  }
+};
+
+struct run_prepare {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.err = emel::text::encoders::spm::detail::prepare_spm(ev.request, ctx, *ctx.vocab);
+  }
+};
+
+struct run_merge {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.err = emel::text::encoders::spm::detail::merge_spm(ctx, *ctx.vocab);
   }
 };
 
@@ -63,6 +75,8 @@ struct on_unexpected {
 inline constexpr begin_encode begin_encode{};
 inline constexpr begin_encode_sync_vocab begin_encode_sync_vocab{};
 inline constexpr reject_invalid_encode reject_invalid_encode{};
+inline constexpr run_prepare run_prepare{};
+inline constexpr run_merge run_merge{};
 inline constexpr run_encode run_encode{};
 inline constexpr sync_tables sync_tables{};
 inline constexpr mark_done mark_done{};
