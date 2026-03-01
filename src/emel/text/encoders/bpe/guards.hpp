@@ -1,6 +1,6 @@
 #pragma once
 
-#include "emel/text/encoders/detail.hpp"
+#include "emel/text/encoders/bpe/detail.hpp"
 #include "emel/text/encoders/bpe/context.hpp"
 #include "emel/text/encoders/guards.hpp"
 
@@ -74,8 +74,8 @@ struct ignore_merges_enabled {
 
 struct direct_word_token_available {
   bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return emel::text::encoders::detail::lookup_token(ctx, ev.request.text) !=
-           emel::text::encoders::detail::k_token_null;
+    return emel::text::encoders::bpe::detail::bpe_lookup_token(ctx, ev.request.text) !=
+           emel::text::encoders::bpe::detail::k_token_null;
   }
 };
 
