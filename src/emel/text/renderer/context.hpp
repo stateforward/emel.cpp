@@ -5,7 +5,7 @@
 #include <cstdint>
 
 #include "emel/model/data.hpp"
-#include "emel/text/detokenizer/events.hpp"
+#include "emel/text/detokenizer/sm.hpp"
 
 namespace emel::text::renderer::action {
 
@@ -34,13 +34,7 @@ struct sequence_state {
 
 struct context {
   const emel::model::data::vocab * vocab = nullptr;
-  void * detokenizer_sm = nullptr;
-  bool (*dispatch_detokenizer_bind)(
-      void * detokenizer_sm,
-      const emel::text::detokenizer::event::bind &) = nullptr;
-  bool (*dispatch_detokenizer_detokenize)(
-      void * detokenizer_sm,
-      const emel::text::detokenizer::event::detokenize &) = nullptr;
+  emel::text::detokenizer::sm detokenizer = {};
 
   bool strip_leading_space_default = false;
   std::array<stop_sequence_entry, k_max_stop_sequences> stop_sequences = {};
@@ -50,7 +44,6 @@ struct context {
   size_t stop_max_length = 0;
 
   std::array<sequence_state, k_max_sequences> sequences = {};
-  bool is_bound = false;
 };
 
 }  // namespace emel::text::renderer::action

@@ -20,8 +20,8 @@ enum class sequence_status : uint8_t {
 
 namespace emel::text::renderer::events {
 
-struct binding_done;
-struct binding_error;
+struct initialize_done;
+struct initialize_error;
 struct rendering_done;
 struct rendering_error;
 struct flush_done;
@@ -31,24 +31,20 @@ struct flush_error;
 
 namespace emel::text::renderer::event {
 
-struct bind {
-  const emel::model::data::vocab * vocab = nullptr;
-  void * detokenizer_sm = nullptr;
-  bool (*dispatch_detokenizer_bind)(
-      void * detokenizer_sm,
-      const emel::text::detokenizer::event::bind &) = nullptr;
-  bool (*dispatch_detokenizer_detokenize)(
-      void * detokenizer_sm,
-      const emel::text::detokenizer::event::detokenize &) = nullptr;
+struct initialize {
+  explicit initialize(const emel::model::data::vocab & vocab_ref) noexcept
+      : vocab(vocab_ref) {}
+
+  const emel::model::data::vocab & vocab;
   bool strip_leading_space = false;
   const std::string_view * stop_sequences = nullptr;
   size_t stop_sequence_count = 0;
   int32_t * error_out = nullptr;
   void * owner_sm = nullptr;
   bool (*dispatch_done)(void * owner_sm,
-                        const events::binding_done &) = nullptr;
+                        const events::initialize_done &) = nullptr;
   bool (*dispatch_error)(void * owner_sm,
-                         const events::binding_error &) = nullptr;
+                         const events::initialize_error &) = nullptr;
 };
 
 struct render {
@@ -81,10 +77,9 @@ struct flush {
                          const events::flush_error &) = nullptr;
 };
 
-struct bind_ctx {
+struct initialize_ctx {
   emel::error::type err = emel::error::cast(error::none);
   int32_t detokenizer_err = 0;
-  bool detokenizer_accepted = false;
 };
 
 struct render_ctx {
@@ -93,7 +88,6 @@ struct render_ctx {
   sequence_status status = sequence_status::running;
   size_t sequence_index = 0;
   int32_t detokenizer_err = 0;
-  bool detokenizer_accepted = false;
   size_t detokenizer_output_length = 0;
   size_t detokenizer_pending_length = 0;
   size_t produced_length = 0;
@@ -106,9 +100,9 @@ struct flush_ctx {
   size_t sequence_index = 0;
 };
 
-struct bind_runtime {
-  const bind & request;
-  bind_ctx & ctx;
+struct initialize_runtime {
+  const initialize & request;
+  initialize_ctx & ctx;
 };
 
 struct render_runtime {
@@ -125,12 +119,12 @@ struct flush_runtime {
 
 namespace emel::text::renderer::events {
 
-struct binding_done {
-  const event::bind * request = nullptr;
+struct initialize_done {
+  const event::initialize * request = nullptr;
 };
 
-struct binding_error {
-  const event::bind * request = nullptr;
+struct initialize_error {
+  const event::initialize * request = nullptr;
   int32_t err = 0;
 };
 
