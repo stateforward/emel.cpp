@@ -37,28 +37,40 @@ struct model {
           + sml::event<event::parse_runtime>[ guard::valid_parse{} ]
           / action::begin_parse
       , sml::state<parse_result_decision> <= sml::state<initialized>
-          + sml::event<event::parse_runtime>[ guard::invalid_parse{} ]
+          + sml::event<event::parse_runtime>[ guard::invalid_parse_with_callbacks{} ]
+          / action::reject_invalid_parse
+      , sml::state<errored> <= sml::state<initialized>
+          + sml::event<event::parse_runtime>[ guard::invalid_parse_without_callbacks{} ]
           / action::reject_invalid_parse
 
       , sml::state<request_decision> <= sml::state<done>
           + sml::event<event::parse_runtime>[ guard::valid_parse{} ]
           / action::begin_parse
       , sml::state<parse_result_decision> <= sml::state<done>
-          + sml::event<event::parse_runtime>[ guard::invalid_parse{} ]
+          + sml::event<event::parse_runtime>[ guard::invalid_parse_with_callbacks{} ]
+          / action::reject_invalid_parse
+      , sml::state<errored> <= sml::state<done>
+          + sml::event<event::parse_runtime>[ guard::invalid_parse_without_callbacks{} ]
           / action::reject_invalid_parse
 
       , sml::state<request_decision> <= sml::state<errored>
           + sml::event<event::parse_runtime>[ guard::valid_parse{} ]
           / action::begin_parse
       , sml::state<parse_result_decision> <= sml::state<errored>
-          + sml::event<event::parse_runtime>[ guard::invalid_parse{} ]
+          + sml::event<event::parse_runtime>[ guard::invalid_parse_with_callbacks{} ]
+          / action::reject_invalid_parse
+      , sml::state<errored> <= sml::state<errored>
+          + sml::event<event::parse_runtime>[ guard::invalid_parse_without_callbacks{} ]
           / action::reject_invalid_parse
 
       , sml::state<request_decision> <= sml::state<unexpected>
           + sml::event<event::parse_runtime>[ guard::valid_parse{} ]
           / action::begin_parse
       , sml::state<parse_result_decision> <= sml::state<unexpected>
-          + sml::event<event::parse_runtime>[ guard::invalid_parse{} ]
+          + sml::event<event::parse_runtime>[ guard::invalid_parse_with_callbacks{} ]
+          / action::reject_invalid_parse
+      , sml::state<errored> <= sml::state<unexpected>
+          + sml::event<event::parse_runtime>[ guard::invalid_parse_without_callbacks{} ]
           / action::reject_invalid_parse
 
       //------------------------------------------------------------------------------//

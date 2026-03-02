@@ -107,6 +107,29 @@ TEST_CASE("jinja_parser_invalid_request_with_callbacks_dispatches_error") {
   CHECK(program.body.empty());
 }
 
+TEST_CASE("jinja_parser_missing_callbacks_returns_error_without_dispatch") {
+  emel::text::jinja::parser::action::context ctx{};
+  emel::text::jinja::parser::sm machine{ctx};
+  emel::text::jinja::program program{};
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 999;
+
+  parse ev{
+      "{{ foo }}",
+      program,
+      done_cb{},
+      error_cb{},
+      err,
+      error_pos,
+  };
+
+  CHECK_FALSE(machine.process_event(ev));
+  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::errored>));
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::invalid_request));
+  CHECK(error_pos == 0);
+  CHECK(program.body.empty());
+}
+
 TEST_CASE("jinja_parser_parse_failure_reports_error") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};

@@ -80,9 +80,13 @@ struct dispatch_error {
 };
 
 struct on_unexpected {
-  template <class runtime_event_type>
-  void operator()(const runtime_event_type & ev) const noexcept {
-    (void)ev;
+  void operator()(const event::render_runtime & ev) const noexcept {
+    detail::mark_error(ev.ctx, error::invalid_request, true, 0);
+    detail::emit_error(ev.request, ev.ctx);
+  }
+
+  template <class event_type>
+  void operator()(const event_type &) const noexcept {
   }
 };
 

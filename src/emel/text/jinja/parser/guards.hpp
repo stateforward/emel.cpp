@@ -24,6 +24,12 @@ valid_parse_request(const emel::text::jinja::event::parse &ev) noexcept {
   return ev.template_text.data() != nullptr && !ev.template_text.empty();
 }
 
+inline bool
+callbacks_present(const emel::text::jinja::event::parse &ev) noexcept {
+  return static_cast<bool>(ev.dispatch_done) &&
+         static_cast<bool>(ev.dispatch_error);
+}
+
 } // namespace helper
 
 struct valid_parse {
@@ -31,16 +37,27 @@ struct valid_parse {
   bool operator()(const runtime_event_type &ev,
                   const action::context &) const noexcept {
     const auto &runtime_ev = helper::unwrap_runtime_event(ev);
-    return helper::valid_parse_request(runtime_ev.request);
+    return helper::valid_parse_request(runtime_ev.request) &&
+           helper::callbacks_present(runtime_ev.request);
   }
 };
 
-struct invalid_parse {
+struct invalid_parse_with_callbacks {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type &ev,
                   const action::context &) const noexcept {
     const auto &runtime_ev = helper::unwrap_runtime_event(ev);
-    return !helper::valid_parse_request(runtime_ev.request);
+    return !helper::valid_parse_request(runtime_ev.request) &&
+           helper::callbacks_present(runtime_ev.request);
+  }
+};
+
+struct invalid_parse_without_callbacks {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &ev,
+                  const action::context &) const noexcept {
+    const auto &runtime_ev = helper::unwrap_runtime_event(ev);
+    return !helper::callbacks_present(runtime_ev.request);
   }
 };
 
