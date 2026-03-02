@@ -1,0 +1,31 @@
+stateDiagram-v2
+  direction TB
+  [*] --> deciding
+  deciding --> parse_begin : completion_parse_runtime_ [always] / start_program_parse_
+  parse_begin --> dispatch_decision : completion_parse_runtime_ [always] / none
+  dispatch_decision --> parsed : completion_parse_runtime_ [at_eof_] / finish_parsed_
+  dispatch_decision --> text_emit : completion_parse_runtime_ [token_text_] / none
+  dispatch_decision --> comment_emit : completion_parse_runtime_ [token_comment_] / none
+  dispatch_decision --> model__ : completion_parse_runtime_ [token_open_statement_] / none
+  dispatch_decision --> model__ : completion_parse_runtime_ [token_open_expression_] / none
+  dispatch_decision --> parse_failed : completion_parse_runtime_ [token_unexpected_] / fail_current_token_
+  text_emit --> dispatch_decision : completion_parse_runtime_ [always] / consume_text_
+  comment_emit --> dispatch_decision : completion_parse_runtime_ [always] / consume_comment_
+  model__ --> statement_parse_result_decision : completion_parse_runtime_ [always] / none
+  statement_parse_result_decision --> dispatch_decision : completion_parse_runtime_ [phase_ok_] / none
+  statement_parse_result_decision --> parse_failed : completion_parse_runtime_ [phase_failed_] / none
+  model__ --> expression_parse_result_decision : completion_parse_runtime_ [always] / none
+  expression_parse_result_decision --> dispatch_decision : completion_parse_runtime_ [phase_ok_] / none
+  expression_parse_result_decision --> parse_failed : completion_parse_runtime_ [phase_failed_] / none
+  parsed --> terminate : [always] / none
+  parse_failed --> terminate : [always] / none
+  deciding --> unexpected_event : _ [always] / on_unexpected_
+  parse_begin --> unexpected_event : _ [always] / on_unexpected_
+  dispatch_decision --> unexpected_event : _ [always] / on_unexpected_
+  text_emit --> unexpected_event : _ [always] / on_unexpected_
+  comment_emit --> unexpected_event : _ [always] / on_unexpected_
+  statement_parse_result_decision --> unexpected_event : _ [always] / on_unexpected_
+  expression_parse_result_decision --> unexpected_event : _ [always] / on_unexpected_
+  parsed --> unexpected_event : _ [always] / on_unexpected_
+  parse_failed --> unexpected_event : _ [always] / on_unexpected_
+  unexpected_event --> unexpected_event : _ [always] / on_unexpected_

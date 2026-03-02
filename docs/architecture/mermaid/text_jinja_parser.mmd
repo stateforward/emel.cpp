@@ -1,18 +1,31 @@
 stateDiagram-v2
   direction TB
   [*] --> initialized
-  initialized --> parse_decision : parse [valid_parse_] / run_parse_
-  initialized --> errored : parse [invalid_parse_] / reject_invalid_parse_
-  done --> parse_decision : parse [valid_parse_] / run_parse_
-  done --> errored : parse [invalid_parse_] / reject_invalid_parse_
-  errored --> parse_decision : parse [valid_parse_] / run_parse_
-  errored --> errored : parse [invalid_parse_] / reject_invalid_parse_
-  unexpected --> parse_decision : parse [valid_parse_] / run_parse_
-  unexpected --> unexpected : parse [invalid_parse_] / reject_invalid_parse_
-  parse_decision --> done : [phase_ok_] / none
-  parse_decision --> errored : [phase_failed_] / none
+  initialized --> request_decision : parse_runtime [valid_parse_] / begin_parse_
+  initialized --> parse_result_decision : parse_runtime [invalid_parse_with_callbacks_] / reject_invalid_parse_
+  initialized --> errored : parse_runtime [invalid_parse_without_callbacks_] / reject_invalid_parse_
+  done --> request_decision : parse_runtime [valid_parse_] / begin_parse_
+  done --> parse_result_decision : parse_runtime [invalid_parse_with_callbacks_] / reject_invalid_parse_
+  done --> errored : parse_runtime [invalid_parse_without_callbacks_] / reject_invalid_parse_
+  errored --> request_decision : parse_runtime [valid_parse_] / begin_parse_
+  errored --> parse_result_decision : parse_runtime [invalid_parse_with_callbacks_] / reject_invalid_parse_
+  errored --> errored : parse_runtime [invalid_parse_without_callbacks_] / reject_invalid_parse_
+  unexpected --> request_decision : parse_runtime [valid_parse_] / begin_parse_
+  unexpected --> parse_result_decision : parse_runtime [invalid_parse_with_callbacks_] / reject_invalid_parse_
+  unexpected --> errored : parse_runtime [invalid_parse_without_callbacks_] / reject_invalid_parse_
+  request_decision --> tokenize_exec : [always] / tokenize_template_
+  tokenize_exec --> tokenize_result_decision : [always] / none
+  tokenize_result_decision --> parse_exec : [tokenize_ok_] / classify_tokens_
+  tokenize_result_decision --> parse_result_decision : [tokenize_failed_] / none
+  parse_exec --> parse_result_decision : [always] / parse_tokens_
+  parse_result_decision --> done : [request_ok_] / dispatch_done_
+  parse_result_decision --> errored : [request_failed_] / dispatch_error_
   initialized --> unexpected : _ [always] / on_unexpected_
-  parse_decision --> unexpected : _ [always] / on_unexpected_
+  request_decision --> unexpected : _ [always] / on_unexpected_
+  tokenize_exec --> unexpected : _ [always] / on_unexpected_
+  tokenize_result_decision --> unexpected : _ [always] / on_unexpected_
+  parse_exec --> unexpected : _ [always] / on_unexpected_
+  parse_result_decision --> unexpected : _ [always] / on_unexpected_
   done --> unexpected : _ [always] / on_unexpected_
   errored --> unexpected : _ [always] / on_unexpected_
   unexpected --> unexpected : _ [always] / on_unexpected_

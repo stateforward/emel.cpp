@@ -3,15 +3,23 @@
 #include <cstdio>
 #include <string>
 
-#include "emel/text/jinja/lexer.hpp"
-#include "emel/text/jinja/parser/detail.hpp"
 #include "emel/text/jinja/formatter/sm.hpp"
+#include "emel/text/jinja/parser/errors.hpp"
+#include "emel/text/jinja/parser/sm.hpp"
 
 #include "jinja/lexer.h"
 #include "jinja/parser.h"
 #include "jinja/runtime.h"
 
 namespace {
+
+bool parser_done_sink(const emel::text::jinja::events::parsing_done &) {
+  return true;
+}
+
+bool parser_error_sink(const emel::text::jinja::events::parsing_error &) {
+  return true;
+}
 
 std::string make_long_template() {
   std::string out;
@@ -24,16 +32,22 @@ std::string make_long_template() {
 }
 
 emel::text::jinja::program parse_emel(const std::string & templ) {
-  emel::text::jinja::lexer lex;
-  emel::text::jinja::lexer_result lex_res = lex.tokenize(templ);
-  if (lex_res.error != EMEL_OK) {
-    std::fprintf(stderr, "error: emel jinja lexer failed at %zu\n", lex_res.error_pos);
-    std::abort();
-  }
   emel::text::jinja::program program{};
-  emel::text::jinja::parser::detail::recursive_descent_parser parser{program};
-  if (!parser.parse(lex_res)) {
-    std::fprintf(stderr, "error: emel jinja parser failed at %zu\n", parser.error_pos());
+  int32_t parse_err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t parse_error_pos = 0;
+  emel::text::jinja::parser::action::context parse_ctx{};
+  emel::text::jinja::parser::sm parser{parse_ctx};
+  const emel::text::jinja::event::parse parse_ev{
+      templ,
+      program,
+      emel::text::jinja::event::parse::done_callback::from<&parser_done_sink>(),
+      emel::text::jinja::event::parse::error_callback::from<&parser_error_sink>(),
+      parse_err,
+      parse_error_pos,
+  };
+  if (!parser.process_event(parse_ev) ||
+      parse_err != static_cast<int32_t>(emel::text::jinja::parser::error::none)) {
+    std::fprintf(stderr, "error: emel jinja parser failed at %zu\n", parse_error_pos);
     std::abort();
   }
   return program;

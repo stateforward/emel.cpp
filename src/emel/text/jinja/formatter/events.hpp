@@ -5,9 +5,8 @@
 #include <string_view>
 
 #include "emel/callback.hpp"
-#include "emel/text/jinja/ast.hpp"
 #include "emel/text/jinja/formatter/errors.hpp"
-#include "emel/text/jinja/value.hpp"
+#include "emel/text/jinja/parser/detail.hpp"
 
 namespace emel::text::jinja::events {
 

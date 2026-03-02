@@ -21,7 +21,7 @@
 #include "emel/docs/detail.hpp"
 #include "emel/text/jinja/parser/sm.hpp"
 #include "emel/text/jinja/formatter/sm.hpp"
-#include "emel/text/jinja/value.hpp"
+#include "emel/text/jinja/parser/detail.hpp"
 
 namespace fs = std::filesystem;
 
@@ -295,6 +295,14 @@ bool formatter_render_error_sink(const emel::text::jinja::events::rendering_erro
   return true;
 }
 
+bool parser_parse_done_sink(const emel::text::jinja::events::parsing_done &) {
+  return true;
+}
+
+bool parser_parse_error_sink(const emel::text::jinja::events::parsing_error &) {
+  return true;
+}
+
 std::optional<std::string> render_template(const fs::path & template_path,
                                            const std::vector<template_var> & vars) {
   const std::string template_text = read_file(template_path);
@@ -305,17 +313,21 @@ std::optional<std::string> render_template(const fs::path & template_path,
   }
 
   emel::text::jinja::program program;
-  int32_t parse_err = EMEL_OK;
+  int32_t parse_err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t parse_error_pos = 0;
   emel::text::jinja::parser::action::context parse_ctx;
   emel::text::jinja::parser::sm parser{parse_ctx};
   emel::text::jinja::event::parse parse_ev{
-    .template_text = template_text,
-    .program_out = &program,
-    .error_out = &parse_err,
+      template_text,
+      program,
+      emel::text::jinja::event::parse::done_callback::from<&parser_parse_done_sink>(),
+      emel::text::jinja::event::parse::error_callback::from<&parser_parse_error_sink>(),
+      parse_err,
+      parse_error_pos,
   };
 
   parser.process_event(parse_ev);
-  if (parse_err != EMEL_OK ||
+  if (parse_err != static_cast<int32_t>(emel::text::jinja::parser::error::none) ||
       !parser.is(boost::sml::state<emel::text::jinja::parser::done>)) {
     std::fprintf(stderr, "error: jinja parse failed\n");
     return std::nullopt;
