@@ -59,7 +59,6 @@ cmake -S "$ROOT_DIR" -B "$BUILD_DIR" -G Ninja \
   -DCMAKE_CXX_FLAGS="$fuzz_cxx_flags" \
   -DCMAKE_EXE_LINKER_FLAGS="$fuzz_link_flags" \
   -DEMEL_ENABLE_FUZZ=ON \
-  -DEMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES=OFF \
   -DEMEL_ENABLE_TESTS=OFF
 
 cmake --build "$BUILD_DIR" --parallel

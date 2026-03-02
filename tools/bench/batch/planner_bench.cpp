@@ -360,7 +360,7 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
     };
 
     auto fn = [&]() { (void)machine.process_event(request); };
-    results.push_back(measure_case("batch/splitter_simple", cfg, fn));
+    results.push_back(measure_case("batch/planner_simple", cfg, fn));
   }
 
   {
@@ -392,7 +392,7 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
     };
 
     auto fn = [&]() { (void)machine.process_event(request); };
-    results.push_back(measure_case("batch/splitter_equal", cfg, fn));
+    results.push_back(measure_case("batch/planner_equal", cfg, fn));
   }
 
   {
@@ -424,7 +424,7 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
     };
 
     auto fn = [&]() { (void)machine.process_event(request); };
-    results.push_back(measure_case("batch/splitter_seq", cfg, fn));
+    results.push_back(measure_case("batch/planner_seq", cfg, fn));
   }
 }
 
@@ -440,7 +440,7 @@ void append_reference_batch_planner_cases(std::vector<result> & results, const c
         }
       }
     };
-    results.push_back(measure_case("batch/splitter_simple", cfg, fn));
+    results.push_back(measure_case("batch/planner_simple", cfg, fn));
   }
 
   {
@@ -454,7 +454,7 @@ void append_reference_batch_planner_cases(std::vector<result> & results, const c
         }
       }
     };
-    results.push_back(measure_case("batch/splitter_equal", cfg, fn));
+    results.push_back(measure_case("batch/planner_equal", cfg, fn));
   }
 
   {
@@ -468,7 +468,7 @@ void append_reference_batch_planner_cases(std::vector<result> & results, const c
         }
       }
     };
-    results.push_back(measure_case("batch/splitter_seq", cfg, fn));
+    results.push_back(measure_case("batch/planner_seq", cfg, fn));
   }
 }
 

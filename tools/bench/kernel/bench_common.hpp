@@ -1,3 +1,4 @@
+#pragma once
 #include "bench_cases.hpp"
 
 #include <cmath>
@@ -651,26 +652,3 @@ void append_reference_backend_cases(std::vector<emel::bench::result> & results,
 
 }  // namespace
 
-namespace emel::bench {
-
-void append_emel_kernel_cases(std::vector<result> & results, const config & cfg) {
-  const emel::kernel::x86_64::action::context x86_ctx{};
-  const emel::kernel::aarch64::action::context aarch_ctx{};
-
-  auto x86_exec = [&](const auto & ev) {
-    return emel::kernel::x86_64::detail::execute_request(ev, x86_ctx);
-  };
-  auto aarch_exec = [&](const auto & ev) {
-    return emel::kernel::aarch64::detail::execute_request(ev, aarch_ctx);
-  };
-
-  append_emel_backend_cases(results, cfg, "x86_64", x86_exec);
-  append_emel_backend_cases(results, cfg, "aarch64", aarch_exec);
-}
-
-void append_reference_kernel_cases(std::vector<result> & results, const config & cfg) {
-  append_reference_backend_cases(results, cfg, "x86_64");
-  append_reference_backend_cases(results, cfg, "aarch64");
-}
-
-}  // namespace emel::bench

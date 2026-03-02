@@ -226,11 +226,7 @@ TEST_CASE("paritychecker matches llama tokens across tiny models") {
     for (const auto & test_case : cases) {
       INFO("case: " << test_case.label);
       REQUIRE(file_exists(test_case.text_path));
-      if (!run_paritychecker_process(model, test_case)) {
-        WARN("paritychecker skipped (emel parser scaffolded)");
-        return;
-      }
-      CHECK(true);
+      CHECK(run_paritychecker_process(model, test_case));
     }
     const std::string special_text = special_text_for_model(model);
     if (!special_text.empty()) {
@@ -241,11 +237,7 @@ TEST_CASE("paritychecker matches llama tokens across tiny models") {
       special_case.text_path = special_text;
       special_case.add_special = true;
       special_case.parse_special = true;
-      if (!run_paritychecker_process(model, special_case)) {
-        WARN("paritychecker skipped (emel parser scaffolded)");
-        return;
-      }
-      CHECK(true);
+      CHECK(run_paritychecker_process(model, special_case));
     }
   }
 }

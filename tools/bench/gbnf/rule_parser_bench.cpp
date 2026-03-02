@@ -152,23 +152,23 @@ void ensure_case_parity(const char * case_name,
   }
 }
 
-void ensure_gbnf_parser_parity() {
+void ensure_gbnf_rule_parser_parity() {
   static bool checked = false;
   if (checked) {
     return;
   }
   checked = true;
 
-  ensure_case_parity("gbnf/parser_basic", k_basic_grammar, k_basic_grammar_view);
-  ensure_case_parity("gbnf/parser_complex", k_complex_grammar, k_complex_grammar_view);
+  ensure_case_parity("gbnf/rule_parser_basic", k_basic_grammar, k_basic_grammar_view);
+  ensure_case_parity("gbnf/rule_parser_complex", k_complex_grammar, k_complex_grammar_view);
 }
 
 }  // namespace
 
 namespace emel::bench {
 
-void append_emel_gbnf_parser_cases(std::vector<result> & results, const config & cfg) {
-  ensure_gbnf_parser_parity();
+void append_emel_gbnf_rule_parser_cases(std::vector<result> & results, const config & cfg) {
+  ensure_gbnf_rule_parser_parity();
 
   {
     emel_parse_state state{k_basic_grammar_view};
@@ -177,7 +177,7 @@ void append_emel_gbnf_parser_cases(std::vector<result> & results, const config &
         std::abort();
       }
     };
-    results.push_back(measure_case("gbnf/parser_basic", cfg, basic_fn));
+    results.push_back(measure_case("gbnf/rule_parser_basic", cfg, basic_fn));
   }
 
   {
@@ -187,12 +187,12 @@ void append_emel_gbnf_parser_cases(std::vector<result> & results, const config &
         std::abort();
       }
     };
-    results.push_back(measure_case("gbnf/parser_complex", cfg, complex_fn));
+    results.push_back(measure_case("gbnf/rule_parser_complex", cfg, complex_fn));
   }
 }
 
-void append_reference_gbnf_parser_cases(std::vector<result> & results, const config & cfg) {
-  ensure_gbnf_parser_parity();
+void append_reference_gbnf_rule_parser_cases(std::vector<result> & results, const config & cfg) {
+  ensure_gbnf_rule_parser_parity();
 
   {
     reference_parse_state state{k_basic_grammar};
@@ -201,7 +201,7 @@ void append_reference_gbnf_parser_cases(std::vector<result> & results, const con
         std::abort();
       }
     };
-    results.push_back(measure_case("gbnf/parser_basic", cfg, basic_fn));
+    results.push_back(measure_case("gbnf/rule_parser_basic", cfg, basic_fn));
   }
 
   {
@@ -211,7 +211,7 @@ void append_reference_gbnf_parser_cases(std::vector<result> & results, const con
         std::abort();
       }
     };
-    results.push_back(measure_case("gbnf/parser_complex", cfg, complex_fn));
+    results.push_back(measure_case("gbnf/rule_parser_complex", cfg, complex_fn));
   }
 }
 

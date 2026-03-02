@@ -17,10 +17,6 @@ endif()
 
 option(EMEL_ENABLE_TESTS "Build tests" ON)
 option(EMEL_ENABLE_FUZZ "Build fuzz targets" OFF)
-option(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES
-  "Build tensor/parser/text machine surfaces"
-  OFF
-)
 
 include(FetchContent)
 include(cmake/sml_version.cmake)
@@ -49,24 +45,6 @@ target_link_libraries(emel
     emel_core
 )
 
-
-if(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES)
-  add_executable(mock_model_load
-    tools/mock_main.cpp
-  )
-
-  target_link_libraries(mock_model_load
-    PRIVATE
-      emel_core
-  )
-
-  target_include_directories(mock_model_load
-    PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/src
-      ${CMAKE_CURRENT_SOURCE_DIR}/include
-      ${boost_sml_SOURCE_DIR}/include
-  )
-endif()
 
 if(EMEL_ENABLE_TESTS)
   include(CTest)
@@ -120,38 +98,36 @@ if(EMEL_ENABLE_TESTS)
     tests/tensor/view/lifecycle_tests.cpp
   )
 
-  if(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES)
-    list(APPEND EMEL_TEST_SOURCES
-      tests/gguf/loader/lifecycle_tests.cpp
-      tests/text/jinja/parser_tests.cpp
-      tests/text/jinja/lexer_tests.cpp
-      tests/text/jinja/formatter_tests.cpp
-      tests/text/formatter/formatter_tests.cpp
-      tests/text/encoders/common_tests.cpp
-      tests/text/encoders/bpe_tests.cpp
-      tests/text/encoders/spm_tests.cpp
-      tests/text/encoders/wpm_tests.cpp
-      tests/text/encoders/ugm_tests.cpp
-      tests/text/encoders/rwkv_tests.cpp
-      tests/text/encoders/plamo2_tests.cpp
-      tests/text/encoders/fallback_tests.cpp
-      tests/text/conditioner/text_conditioner_tests.cpp
-      tests/text/detokenizer/detokenizer_tests.cpp
-      tests/text/renderer/renderer_tests.cpp
-      tests/text/unicode/unicode_tests.cpp
-      tests/text/tokenizer/preprocessor_tests.cpp
-      tests/text/tokenizer/preprocessor_spm_tests.cpp
-      tests/text/tokenizer/preprocessor_wpm_tests.cpp
-      tests/text/tokenizer/preprocessor_rwkv_tests.cpp
-      tests/text/tokenizer/preprocessor_plamo2_tests.cpp
-      tests/text/tokenizer/preprocessor_fallback_tests.cpp
-      tests/text/tokenizer/bpe_regex_tests.cpp
-      tests/text/tokenizer/bpe_split_tests.cpp
-      tests/text/tokenizer/tokenizer_tests.cpp
-      tests/text/tokenizer/tokenizer_parity_tests.cpp
-      tests/text/tokenizer/tokenizer_action_guard_tests.cpp
-    )
-  endif()
+  list(APPEND EMEL_TEST_SOURCES
+    tests/gguf/loader/lifecycle_tests.cpp
+    tests/text/jinja/parser_tests.cpp
+    tests/text/jinja/lexer_tests.cpp
+    tests/text/jinja/formatter_tests.cpp
+    tests/text/formatter/formatter_tests.cpp
+    tests/text/encoders/common_tests.cpp
+    tests/text/encoders/bpe_tests.cpp
+    tests/text/encoders/spm_tests.cpp
+    tests/text/encoders/wpm_tests.cpp
+    tests/text/encoders/ugm_tests.cpp
+    tests/text/encoders/rwkv_tests.cpp
+    tests/text/encoders/plamo2_tests.cpp
+    tests/text/encoders/fallback_tests.cpp
+    tests/text/conditioner/text_conditioner_tests.cpp
+    tests/text/detokenizer/detokenizer_tests.cpp
+    tests/text/renderer/renderer_tests.cpp
+    tests/text/unicode/unicode_tests.cpp
+    tests/text/tokenizer/preprocessor_tests.cpp
+    tests/text/tokenizer/preprocessor_spm_tests.cpp
+    tests/text/tokenizer/preprocessor_wpm_tests.cpp
+    tests/text/tokenizer/preprocessor_rwkv_tests.cpp
+    tests/text/tokenizer/preprocessor_plamo2_tests.cpp
+    tests/text/tokenizer/preprocessor_fallback_tests.cpp
+    tests/text/tokenizer/bpe_regex_tests.cpp
+    tests/text/tokenizer/bpe_split_tests.cpp
+    tests/text/tokenizer/tokenizer_tests.cpp
+    tests/text/tokenizer/tokenizer_parity_tests.cpp
+    tests/text/tokenizer/tokenizer_action_guard_tests.cpp
+  )
 
   add_executable(emel_tests_bin
     ${EMEL_TEST_SOURCES}
@@ -244,12 +220,10 @@ if(EMEL_ENABLE_FUZZ)
     )
   endfunction()
 
-  if(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES)
-    add_executable(emel_fuzz_gguf_parser
-      tests/fuzz/gguf_parser_fuzz.cpp
-    )
-    emel_configure_fuzzer(emel_fuzz_gguf_parser)
-  endif()
+  add_executable(emel_fuzz_gguf_parser
+    tests/fuzz/gguf_parser_fuzz.cpp
+  )
+  emel_configure_fuzzer(emel_fuzz_gguf_parser)
 
   add_executable(emel_fuzz_gbnf_parser
     tests/fuzz/gbnf_parser_fuzz.cpp

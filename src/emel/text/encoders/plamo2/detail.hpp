@@ -219,9 +219,12 @@ inline bool ensure_plamo2_tables(emel::text::encoders::plamo2::action::context &
       for (bool emit_piece = has_score; emit_piece; emit_piece = false) {
         auto token_it = token_to_id.find(piece);
         const bool has_token = token_it != token_to_id.end();
+        int32_t token_id = -1;
+        for (bool use_token = has_token; use_token; use_token = false) {
+          token_id = token_it->second;
+        }
         ctx.table[static_cast<size_t>(table_idx)].piece_length = piece_len;
-        ctx.table[static_cast<size_t>(table_idx)].token_id =
-            select_i32(has_token, token_it->second, -1);
+        ctx.table[static_cast<size_t>(table_idx)].token_id = token_id;
         const float score = score_it->second;
         const int32_t rounded = static_cast<int32_t>(std::round(score * 1e4f));
         ctx.table[static_cast<size_t>(table_idx)].score =
@@ -290,7 +293,11 @@ inline encode_result encode_plamo2(const event::encode &ev,
             static_cast<uint32_t>(ctx.table[p].piece_id);
         const auto it = ctx.suffix_map.find(piece_code);
         const bool found = it != ctx.suffix_map.end();
-        suffix_id = select_i32(found, it->second, 0);
+        int32_t found_suffix_id = 0;
+        for (bool use_suffix = found; use_suffix; use_suffix = false) {
+          found_suffix_id = it->second;
+        }
+        suffix_id = found_suffix_id;
         const bool stop = suffix_id > 0 || ctx.table[p].score == k_unknown_score;
         for (bool stop_scan = stop; stop_scan; stop_scan = false) {
           p = ctx.table.size();
