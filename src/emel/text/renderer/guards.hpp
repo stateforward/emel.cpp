@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <string_view>
 
 #include "emel/error/error.hpp"
@@ -24,6 +23,8 @@ constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noe
 
 inline constexpr int32_t k_detokenizer_ok = static_cast<int32_t>(
     emel::error::cast(emel::text::detokenizer::error::none));
+inline constexpr int32_t k_detokenizer_backend_error = static_cast<int32_t>(
+    emel::error::cast(emel::text::detokenizer::error::backend_error));
 
 inline bool is_leading_space(const char value) noexcept {
   return value == ' ' || value == '\t' || value == '\n' || value == '\r';
@@ -31,7 +32,7 @@ inline bool is_leading_space(const char value) noexcept {
 
 }  // namespace detail
 
-struct valid_bind {
+struct valid_initialize {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type & ev) const noexcept {
     if constexpr (requires { ev.event_; }) {
@@ -62,10 +63,10 @@ struct valid_bind {
   }
 };
 
-struct invalid_bind {
+struct invalid_initialize {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type & ev) const noexcept {
-    return !valid_bind{}(ev);
+    return !valid_initialize{}(ev);
   }
 };
 
@@ -77,7 +78,10 @@ struct valid_render {
       return false;
     }
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    if (!ctx.is_bound || ctx.vocab == nullptr) {
+    if (ctx.vocab == nullptr) {
+      return false;
+    }
+    if (runtime_ev.request.token_id < 0) {
       return false;
     }
     if (runtime_ev.request.sequence_id < 0 ||
@@ -108,7 +112,7 @@ struct valid_flush {
       return false;
     }
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    if (!ctx.is_bound || ctx.vocab == nullptr) {
+    if (ctx.vocab == nullptr) {
       return false;
     }
     if (runtime_ev.request.sequence_id < 0 ||
@@ -147,50 +151,28 @@ struct request_failed {
   }
 };
 
-struct bind_context_ready {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type & ev,
-                  const action::context & ctx) const noexcept {
-    const auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    return runtime_ev.ctx.err == emel::error::cast(error::none) &&
-           ctx.vocab != nullptr &&
-           ctx.detokenizer_sm != nullptr &&
-           ctx.dispatch_detokenizer_bind != nullptr &&
-           ctx.dispatch_detokenizer_detokenize != nullptr;
-  }
-};
-
-struct bind_context_invalid {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type & ev,
-                  const action::context & ctx) const noexcept {
-    return !bind_context_ready{}(ev, ctx);
-  }
-};
-
-struct bind_dispatch_backend_failure {
+struct initialize_dispatch_backend_failure {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type & ev) const noexcept {
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    return !runtime_ev.ctx.detokenizer_accepted &&
-           runtime_ev.ctx.detokenizer_err == detail::k_detokenizer_ok;
+    return runtime_ev.ctx.detokenizer_err == detail::k_detokenizer_backend_error;
   }
 };
 
-struct bind_dispatch_reported_error {
+struct initialize_dispatch_reported_error {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type & ev) const noexcept {
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    return runtime_ev.ctx.detokenizer_err != detail::k_detokenizer_ok;
+    return runtime_ev.ctx.detokenizer_err != detail::k_detokenizer_ok &&
+           runtime_ev.ctx.detokenizer_err != detail::k_detokenizer_backend_error;
   }
 };
 
-struct bind_dispatch_ok {
+struct initialize_dispatch_ok {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type & ev) const noexcept {
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    return runtime_ev.ctx.detokenizer_accepted &&
-           runtime_ev.ctx.detokenizer_err == detail::k_detokenizer_ok;
+    return runtime_ev.ctx.detokenizer_err == detail::k_detokenizer_ok;
   }
 };
 
@@ -215,8 +197,7 @@ struct render_dispatch_backend_failure {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type & ev) const noexcept {
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    return !runtime_ev.ctx.detokenizer_accepted &&
-           runtime_ev.ctx.detokenizer_err == detail::k_detokenizer_ok;
+    return runtime_ev.ctx.detokenizer_err == detail::k_detokenizer_backend_error;
   }
 };
 
@@ -224,7 +205,8 @@ struct render_dispatch_reported_error {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type & ev) const noexcept {
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    return runtime_ev.ctx.detokenizer_err != detail::k_detokenizer_ok;
+    return runtime_ev.ctx.detokenizer_err != detail::k_detokenizer_ok &&
+           runtime_ev.ctx.detokenizer_err != detail::k_detokenizer_backend_error;
   }
 };
 
@@ -252,8 +234,7 @@ struct render_dispatch_ok {
   bool operator()(const runtime_event_type & ev,
                   const action::context & ctx) const noexcept {
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    return runtime_ev.ctx.detokenizer_accepted &&
-           runtime_ev.ctx.detokenizer_err == detail::k_detokenizer_ok &&
+    return runtime_ev.ctx.detokenizer_err == detail::k_detokenizer_ok &&
            render_dispatch_lengths_valid{}(ev, ctx);
   }
 };
@@ -264,7 +245,9 @@ struct strip_needed {
                   const action::context & ctx) const noexcept {
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
     const auto & sequence = ctx.sequences[runtime_ev.ctx.sequence_index];
-    return sequence.strip_leading_space && runtime_ev.ctx.produced_length > 0 &&
+    return render_dispatch_ok{}(ev, ctx) &&
+           sequence.strip_leading_space &&
+           runtime_ev.ctx.detokenizer_output_length > 0 &&
            detail::is_leading_space(runtime_ev.request.output[0]);
   }
 };
@@ -273,7 +256,7 @@ struct strip_not_needed {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type & ev,
                   const action::context & ctx) const noexcept {
-    return !strip_needed{}(ev, ctx);
+    return render_dispatch_ok{}(ev, ctx) && !strip_needed{}(ev, ctx);
   }
 };
 

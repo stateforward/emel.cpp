@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <cstring>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 
 #include <doctest/doctest.h>
 
@@ -57,74 +59,21 @@ constexpr int32_t k_renderer_model_invalid =
     renderer_error_code(emel::text::renderer::error::model_invalid);
 constexpr int32_t k_detok_ok = static_cast<int32_t>(
     emel::error::cast(emel::text::detokenizer::error::none));
+constexpr int32_t k_detok_backend_error = static_cast<int32_t>(
+    emel::error::cast(emel::text::detokenizer::error::backend_error));
 constexpr int32_t k_detok_model_invalid = static_cast<int32_t>(
     emel::error::cast(emel::text::detokenizer::error::model_invalid));
 
-bool detokenizer_bind_dispatch(
-    void * detokenizer_sm,
-    const emel::text::detokenizer::event::bind & ev) {
-  if (detokenizer_sm == nullptr) {
-    return false;
-  }
-  return static_cast<emel::text::detokenizer::sm *>(detokenizer_sm)->process_event(ev);
-}
-
-bool detokenizer_detokenize_dispatch(
-    void * detokenizer_sm,
-    const emel::text::detokenizer::event::detokenize & ev) {
-  if (detokenizer_sm == nullptr) {
-    return false;
-  }
-  return static_cast<emel::text::detokenizer::sm *>(detokenizer_sm)->process_event(ev);
-}
-
-bool detokenizer_bind_fail_no_error(
-    void *,
-    const emel::text::detokenizer::event::bind &) {
-  return false;
-}
-
-bool detokenizer_bind_fail_with_error(
-    void *,
-    const emel::text::detokenizer::event::bind & ev) {
-  ev.error_out = k_detok_model_invalid;
-  return true;
-}
-
-bool detokenizer_detokenize_fail_no_error(
-    void *,
-    const emel::text::detokenizer::event::detokenize &) {
-  return false;
-}
-
-bool detokenizer_detokenize_fail_with_error(
-    void *,
-    const emel::text::detokenizer::event::detokenize & ev) {
-  ev.error_out = k_detok_model_invalid;
-  return true;
-}
-
-bool detokenizer_detokenize_bad_output_length(
-    void *,
-    const emel::text::detokenizer::event::detokenize & ev) {
-  ev.error_out = k_detok_ok;
-  ev.output_length_out = ev.output_capacity + 1;
-  ev.pending_length_out = ev.pending_length;
-  return true;
-}
-
-bool detokenizer_detokenize_bad_pending_length(
-    void *,
-    const emel::text::detokenizer::event::detokenize & ev) {
-  ev.error_out = k_detok_ok;
-  ev.output_length_out = 0;
-  ev.pending_length_out = ev.pending_capacity + 1;
-  return true;
-}
+static_assert(
+    std::is_reference_v<decltype(std::declval<const emel::text::renderer::event::initialize &>().vocab)>);
+static_assert(std::is_same_v<
+              std::remove_reference_t<
+                  decltype(std::declval<emel::text::renderer::action::context &>().detokenizer)>,
+              emel::text::detokenizer::sm>);
 
 struct callback_recorder {
-  int bind_done = 0;
-  int bind_error = 0;
+  int initialize_done_count = 0;
+  int initialize_error_count = 0;
   int render_done = 0;
   int render_error = 0;
   int flush_done = 0;
@@ -135,22 +84,22 @@ struct callback_recorder {
   int32_t last_error = k_renderer_ok;
 };
 
-bool on_bind_done(void * owner,
-                  const emel::text::renderer::events::binding_done &) {
+bool on_initialize_done(void * owner,
+                  const emel::text::renderer::events::initialize_done &) {
   if (owner == nullptr) {
     return false;
   }
-  static_cast<callback_recorder *>(owner)->bind_done += 1;
+  static_cast<callback_recorder *>(owner)->initialize_done_count += 1;
   return true;
 }
 
-bool on_bind_error(void * owner,
-                   const emel::text::renderer::events::binding_error & ev) {
+bool on_initialize_error(void * owner,
+                   const emel::text::renderer::events::initialize_error & ev) {
   if (owner == nullptr) {
     return false;
   }
   auto * recorder = static_cast<callback_recorder *>(owner);
-  recorder->bind_error += 1;
+  recorder->initialize_error_count += 1;
   recorder->last_error = ev.err;
   return true;
 }
@@ -201,38 +150,32 @@ bool on_flush_error(void * owner,
   return true;
 }
 
-bool bind_renderer(emel::text::renderer::sm & renderer,
-                   emel::text::detokenizer::sm & detokenizer,
+bool initialize_renderer(emel::text::renderer::sm & renderer,
                    const emel::model::data::vocab & vocab,
                    const bool strip_leading_space,
                    const std::string_view * stop_sequences,
                    const size_t stop_count,
                    int32_t & err_out) {
-  emel::text::renderer::event::bind bind_ev = {};
-  bind_ev.vocab = &vocab;
-  bind_ev.detokenizer_sm = &detokenizer;
-  bind_ev.dispatch_detokenizer_bind = detokenizer_bind_dispatch;
-  bind_ev.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
-  bind_ev.strip_leading_space = strip_leading_space;
-  bind_ev.stop_sequences = stop_sequences;
-  bind_ev.stop_sequence_count = stop_count;
-  bind_ev.error_out = &err_out;
-  return renderer.process_event(bind_ev);
+  emel::text::renderer::event::initialize initialize_ev{vocab};
+  initialize_ev.strip_leading_space = strip_leading_space;
+  initialize_ev.stop_sequences = stop_sequences;
+  initialize_ev.stop_sequence_count = stop_count;
+  initialize_ev.error_out = &err_out;
+  return renderer.process_event(initialize_ev);
 }
 
 }  // namespace
 
-TEST_CASE("renderer_bind_render_and_flush_without_stop_sequences") {
+TEST_CASE("renderer_initialize_render_and_flush_without_stop_sequences") {
   auto & vocab = make_vocab();
   const int32_t hi_id = add_token(vocab, "hi");
   CHECK(hi_id == 0);
 
-  emel::text::detokenizer::sm detokenizer{};
   emel::text::renderer::sm renderer{};
 
-  int32_t bind_err = k_renderer_ok;
-  CHECK(bind_renderer(renderer, detokenizer, vocab, false, nullptr, 0, bind_err));
-  CHECK(bind_err == k_renderer_ok);
+  int32_t initialize_err = k_renderer_ok;
+  CHECK(initialize_renderer(renderer, vocab, false, nullptr, 0, initialize_err));
+  CHECK(initialize_err == k_renderer_ok);
 
   std::array<char, 16> output = {};
   size_t output_length = 0;
@@ -273,26 +216,33 @@ TEST_CASE("renderer_bind_render_and_flush_without_stop_sequences") {
   CHECK(status == emel::text::renderer::sequence_status::running);
 }
 
-TEST_CASE("renderer_bind_rejects_invalid_stop_sequences") {
+TEST_CASE("renderer_initialize_succeeds_without_external_detokenizer_injection") {
   auto & vocab = make_vocab();
-  emel::text::detokenizer::sm detokenizer{};
+  emel::text::renderer::sm renderer{};
+
+  int32_t initialize_err = k_renderer_ok;
+  emel::text::renderer::event::initialize initialize_ev{vocab};
+  initialize_ev.error_out = &initialize_err;
+
+  CHECK(renderer.process_event(initialize_ev));
+  CHECK(initialize_err == k_renderer_ok);
+}
+
+TEST_CASE("renderer_initialize_rejects_invalid_stop_sequences") {
+  auto & vocab = make_vocab();
   emel::text::renderer::sm renderer{};
 
   const std::array<std::string_view, 1> invalid_stops = {
       std::string_view("0123456789012345678901234567890123456789")};
 
-  int32_t bind_err = k_renderer_ok;
-  emel::text::renderer::event::bind bind_ev = {};
-  bind_ev.vocab = &vocab;
-  bind_ev.detokenizer_sm = &detokenizer;
-  bind_ev.dispatch_detokenizer_bind = detokenizer_bind_dispatch;
-  bind_ev.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
-  bind_ev.stop_sequences = invalid_stops.data();
-  bind_ev.stop_sequence_count = invalid_stops.size();
-  bind_ev.error_out = &bind_err;
+  int32_t initialize_err = k_renderer_ok;
+  emel::text::renderer::event::initialize initialize_ev{vocab};
+  initialize_ev.stop_sequences = invalid_stops.data();
+  initialize_ev.stop_sequence_count = invalid_stops.size();
+  initialize_ev.error_out = &initialize_err;
 
-  CHECK_FALSE(renderer.process_event(bind_ev));
-  CHECK(bind_err == k_renderer_invalid_request);
+  CHECK_FALSE(renderer.process_event(initialize_ev));
+  CHECK(initialize_err == k_renderer_invalid_request);
 }
 
 TEST_CASE("renderer_handles_plamo2_byte_fallback_utf8") {
@@ -301,12 +251,11 @@ TEST_CASE("renderer_handles_plamo2_byte_fallback_utf8") {
   const int32_t b1 = add_token(vocab, "<0x82>");
   const int32_t b2 = add_token(vocab, "<0xAC>");
 
-  emel::text::detokenizer::sm detokenizer{};
   emel::text::renderer::sm renderer{};
 
-  int32_t bind_err = k_renderer_ok;
-  CHECK(bind_renderer(renderer, detokenizer, vocab, false, nullptr, 0, bind_err));
-  CHECK(bind_err == k_renderer_ok);
+  int32_t initialize_err = k_renderer_ok;
+  CHECK(initialize_renderer(renderer, vocab, false, nullptr, 0, initialize_err));
+  CHECK(initialize_err == k_renderer_ok);
 
   std::array<char, 16> output = {};
   size_t output_length = 0;
@@ -348,18 +297,16 @@ TEST_CASE("renderer_stop_sequence_matches_across_token_boundary") {
   const int32_t cd_id = add_token(vocab, "cd");
   const std::array<std::string_view, 1> stops = {"bc"};
 
-  emel::text::detokenizer::sm detokenizer{};
   emel::text::renderer::sm renderer{};
 
-  int32_t bind_err = k_renderer_ok;
-  CHECK(bind_renderer(renderer,
-                      detokenizer,
+  int32_t initialize_err = k_renderer_ok;
+  CHECK(initialize_renderer(renderer,
                       vocab,
                       false,
                       stops.data(),
                       stops.size(),
-                      bind_err));
-  CHECK(bind_err == k_renderer_ok);
+                      initialize_err));
+  CHECK(initialize_err == k_renderer_ok);
 
   std::array<char, 16> output = {};
   size_t output_length = 0;
@@ -406,23 +353,77 @@ TEST_CASE("renderer_stop_sequence_matches_across_token_boundary") {
   CHECK(status == emel::text::renderer::sequence_status::stop_sequence_matched);
 }
 
+TEST_CASE("renderer_stop_sequence_state_latches_across_calls") {
+  auto & vocab = make_vocab();
+  const int32_t ab_id = add_token(vocab, "ab");
+  const int32_t cd_id = add_token(vocab, "cd");
+  const std::array<std::string_view, 1> stops = {"bc"};
+
+  emel::text::renderer::sm renderer{};
+
+  int32_t initialize_err = k_renderer_ok;
+  CHECK(initialize_renderer(renderer,
+                           vocab,
+                           false,
+                           stops.data(),
+                           stops.size(),
+                           initialize_err));
+  CHECK(initialize_err == k_renderer_ok);
+
+  std::array<char, 16> output = {};
+  size_t output_length = 0;
+  emel::text::renderer::sequence_status status =
+      emel::text::renderer::sequence_status::running;
+  int32_t err = k_renderer_ok;
+
+  emel::text::renderer::event::render render_ev = {};
+  render_ev.sequence_id = 0;
+  render_ev.output = output.data();
+  render_ev.output_capacity = output.size();
+  render_ev.output_length_out = &output_length;
+  render_ev.status_out = &status;
+  render_ev.error_out = &err;
+
+  render_ev.token_id = ab_id;
+  CHECK(renderer.process_event(render_ev));
+  CHECK(err == k_renderer_ok);
+  CHECK(output_length == 1);
+  CHECK(std::string_view(output.data(), output_length) == "a");
+  CHECK(status == emel::text::renderer::sequence_status::running);
+
+  output.fill('\0');
+  render_ev.token_id = cd_id;
+  CHECK(renderer.process_event(render_ev));
+  CHECK(err == k_renderer_ok);
+  CHECK(output_length == 0);
+  CHECK(status == emel::text::renderer::sequence_status::stop_sequence_matched);
+
+  output.fill('\0');
+  output_length = 99;
+  status = emel::text::renderer::sequence_status::running;
+  err = k_renderer_ok;
+  render_ev.token_id = ab_id;
+  CHECK(renderer.process_event(render_ev));
+  CHECK(err == k_renderer_ok);
+  CHECK(output_length == 0);
+  CHECK(status == emel::text::renderer::sequence_status::stop_sequence_matched);
+}
+
 TEST_CASE("renderer_flush_emits_holdback_when_no_stop_match") {
   auto & vocab = make_vocab();
   const int32_t ab_id = add_token(vocab, "ab");
   const std::array<std::string_view, 1> stops = {"xyz"};
 
-  emel::text::detokenizer::sm detokenizer{};
   emel::text::renderer::sm renderer{};
 
-  int32_t bind_err = k_renderer_ok;
-  CHECK(bind_renderer(renderer,
-                      detokenizer,
+  int32_t initialize_err = k_renderer_ok;
+  CHECK(initialize_renderer(renderer,
                       vocab,
                       false,
                       stops.data(),
                       stops.size(),
-                      bind_err));
-  CHECK(bind_err == k_renderer_ok);
+                      initialize_err));
+  CHECK(initialize_err == k_renderer_ok);
 
   std::array<char, 16> output = {};
   size_t output_length = 0;
@@ -465,12 +466,11 @@ TEST_CASE("renderer_strips_leading_whitespace_when_enabled") {
   auto & vocab = make_vocab();
   const int32_t spaced = add_token(vocab, "  hi");
 
-  emel::text::detokenizer::sm detokenizer{};
   emel::text::renderer::sm renderer{};
 
-  int32_t bind_err = k_renderer_ok;
-  CHECK(bind_renderer(renderer, detokenizer, vocab, true, nullptr, 0, bind_err));
-  CHECK(bind_err == k_renderer_ok);
+  int32_t initialize_err = k_renderer_ok;
+  CHECK(initialize_renderer(renderer, vocab, true, nullptr, 0, initialize_err));
+  CHECK(initialize_err == k_renderer_ok);
 
   std::array<char, 16> output = {};
   size_t output_length = 0;
@@ -497,25 +497,20 @@ TEST_CASE("renderer_dispatches_done_and_error_callbacks") {
   auto & vocab = make_vocab();
   const int32_t hi_id = add_token(vocab, "hi");
 
-  emel::text::detokenizer::sm detokenizer{};
   emel::text::renderer::sm renderer{};
   callback_recorder recorder{};
 
-  int32_t bind_err = k_renderer_ok;
-  emel::text::renderer::event::bind bind_ev = {};
-  bind_ev.vocab = &vocab;
-  bind_ev.detokenizer_sm = &detokenizer;
-  bind_ev.dispatch_detokenizer_bind = detokenizer_bind_dispatch;
-  bind_ev.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
-  bind_ev.error_out = &bind_err;
-  bind_ev.owner_sm = &recorder;
-  bind_ev.dispatch_done = on_bind_done;
-  bind_ev.dispatch_error = on_bind_error;
+  int32_t initialize_err = k_renderer_ok;
+  emel::text::renderer::event::initialize initialize_ev{vocab};
+  initialize_ev.error_out = &initialize_err;
+  initialize_ev.owner_sm = &recorder;
+  initialize_ev.dispatch_done = on_initialize_done;
+  initialize_ev.dispatch_error = on_initialize_error;
 
-  CHECK(renderer.process_event(bind_ev));
-  CHECK(bind_err == k_renderer_ok);
-  CHECK(recorder.bind_done == 1);
-  CHECK(recorder.bind_error == 0);
+  CHECK(renderer.process_event(initialize_ev));
+  CHECK(initialize_err == k_renderer_ok);
+  CHECK(recorder.initialize_done_count == 1);
+  CHECK(recorder.initialize_error_count == 0);
 
   std::array<char, 16> output = {};
   size_t output_length = 0;
@@ -577,21 +572,81 @@ TEST_CASE("renderer_dispatches_done_and_error_callbacks") {
   CHECK(recorder.flush_error == 0);
 }
 
-TEST_CASE("renderer_surfaces_local_model_invalid_error_on_bind_failure") {
+TEST_CASE("renderer_invalid_render_and_flush_set_output_status_defaults") {
   auto & vocab = make_vocab();
-  emel::text::detokenizer::sm detokenizer{};
+  add_token(vocab, "hi");
+
   emel::text::renderer::sm renderer{};
 
-  int32_t bind_err = 0;
-  emel::text::renderer::event::bind bind_ev = {};
-  bind_ev.vocab = &vocab;
-  bind_ev.detokenizer_sm = &detokenizer;
-  bind_ev.dispatch_detokenizer_bind = detokenizer_bind_fail_with_error;
-  bind_ev.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
-  bind_ev.error_out = &bind_err;
+  int32_t initialize_err = k_renderer_ok;
+  CHECK(initialize_renderer(renderer, vocab, false, nullptr, 0, initialize_err));
+  CHECK(initialize_err == k_renderer_ok);
 
-  CHECK_FALSE(renderer.process_event(bind_ev));
-  CHECK(bind_err == k_renderer_model_invalid);
+  std::array<char, 16> output = {};
+  size_t output_length = 123;
+  emel::text::renderer::sequence_status status =
+      emel::text::renderer::sequence_status::stop_sequence_matched;
+  int32_t render_err = k_renderer_ok;
+
+  emel::text::renderer::event::render render_ev = {};
+  render_ev.token_id = 0;
+  render_ev.sequence_id =
+      static_cast<int32_t>(emel::text::renderer::action::k_max_sequences);
+  render_ev.output = output.data();
+  render_ev.output_capacity = output.size();
+  render_ev.output_length_out = &output_length;
+  render_ev.status_out = &status;
+  render_ev.error_out = &render_err;
+
+  CHECK_FALSE(renderer.process_event(render_ev));
+  CHECK(render_err == k_renderer_invalid_request);
+  CHECK(output_length == 0);
+  CHECK(status == emel::text::renderer::sequence_status::running);
+
+  size_t flush_output_length = 123;
+  status = emel::text::renderer::sequence_status::stop_sequence_matched;
+  int32_t flush_err = k_renderer_ok;
+  emel::text::renderer::event::flush flush_ev = {};
+  flush_ev.sequence_id =
+      static_cast<int32_t>(emel::text::renderer::action::k_max_sequences);
+  flush_ev.output = output.data();
+  flush_ev.output_capacity = output.size();
+  flush_ev.output_length_out = &flush_output_length;
+  flush_ev.status_out = &status;
+  flush_ev.error_out = &flush_err;
+
+  CHECK_FALSE(renderer.process_event(flush_ev));
+  CHECK(flush_err == k_renderer_invalid_request);
+  CHECK(flush_output_length == 0);
+  CHECK(status == emel::text::renderer::sequence_status::running);
+}
+
+TEST_CASE("renderer_surfaces_local_model_invalid_error_on_render_failure") {
+  auto & vocab = make_vocab();
+  add_token(vocab, "ok");
+  emel::text::renderer::sm renderer{};
+
+  int32_t initialize_err = k_renderer_ok;
+  CHECK(initialize_renderer(renderer, vocab, false, nullptr, 0, initialize_err));
+  CHECK(initialize_err == k_renderer_ok);
+
+  std::array<char, 16> output = {};
+  size_t output_length = 0;
+  emel::text::renderer::sequence_status status =
+      emel::text::renderer::sequence_status::running;
+  int32_t render_err = k_renderer_ok;
+
+  emel::text::renderer::event::render render_ev = {};
+  render_ev.token_id = 99999;
+  render_ev.sequence_id = 0;
+  render_ev.output = output.data();
+  render_ev.output_capacity = output.size();
+  render_ev.output_length_out = &output_length;
+  render_ev.status_out = &status;
+  render_ev.error_out = &render_err;
+
+  CHECK_FALSE(renderer.process_event(render_ev));
+  CHECK(render_err == k_renderer_model_invalid);
 }
 
 TEST_CASE("renderer_action_and_guard_paths") {
@@ -599,40 +654,32 @@ TEST_CASE("renderer_action_and_guard_paths") {
   const int32_t token_id = add_token(vocab, "ab");
   const int32_t special_id = add_token(vocab, "<special>", 3);
   (void)token_id;
-  int dummy = 0;
-  void * dummy_ptr = &dummy;
 
   emel::text::renderer::action::context ctx = {};
   std::array<char, 8> output = {};
 
-  emel::text::renderer::event::bind bind_ev = {};
-  emel::text::renderer::event::bind_ctx bind_runtime_ctx = {};
-  emel::text::renderer::event::bind_runtime bind_runtime_ev{bind_ev, bind_runtime_ctx};
-  CHECK(emel::text::renderer::guard::valid_bind{}(bind_runtime_ev));
-  CHECK_FALSE(emel::text::renderer::guard::invalid_bind{}(bind_runtime_ev));
-
-  bind_ev.vocab = &vocab;
-  bind_ev.detokenizer_sm = dummy_ptr;
-  bind_ev.dispatch_detokenizer_bind = detokenizer_bind_dispatch;
-  bind_ev.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
-  CHECK(emel::text::renderer::guard::valid_bind{}(bind_runtime_ev));
+  emel::text::renderer::event::initialize initialize_ev{vocab};
+  emel::text::renderer::event::initialize_ctx initialize_runtime_ctx = {};
+  emel::text::renderer::event::initialize_runtime initialize_runtime_ev{initialize_ev, initialize_runtime_ctx};
+  CHECK(emel::text::renderer::guard::valid_initialize{}(initialize_runtime_ev));
+  CHECK_FALSE(emel::text::renderer::guard::invalid_initialize{}(initialize_runtime_ev));
 
   std::array<std::string_view, 1> long_stop = {
       std::string_view("0123456789012345678901234567890123456789")};
-  bind_ev.stop_sequences = long_stop.data();
-  bind_ev.stop_sequence_count = long_stop.size();
-  CHECK_FALSE(emel::text::renderer::guard::valid_bind{}(bind_runtime_ev));
+  initialize_ev.stop_sequences = long_stop.data();
+  initialize_ev.stop_sequence_count = long_stop.size();
+  CHECK_FALSE(emel::text::renderer::guard::valid_initialize{}(initialize_runtime_ev));
   emel::text::renderer::action::set_error(
-      bind_runtime_ctx,
+      initialize_runtime_ctx,
       emel::text::renderer::error::invalid_request);
-  CHECK(bind_runtime_ctx.err ==
+  CHECK(initialize_runtime_ctx.err ==
         renderer_error_type(emel::text::renderer::error::invalid_request));
 
-  bind_ev.stop_sequences = nullptr;
-  bind_ev.stop_sequence_count = 0;
-  bind_runtime_ctx = {};
-  emel::text::renderer::action::begin_bind(bind_runtime_ev, ctx);
-  CHECK(ctx.vocab == &vocab);
+  initialize_ev.stop_sequences = nullptr;
+  initialize_ev.stop_sequence_count = 0;
+  initialize_runtime_ctx = {};
+  emel::text::renderer::action::begin_initialize(initialize_runtime_ev, ctx);
+  CHECK(ctx.vocab == nullptr);
 
   ctx.sequences[0].holdback_length = 1;
   ctx.sequences[0].holdback[0] = 'x';
@@ -642,23 +689,23 @@ TEST_CASE("renderer_action_and_guard_paths") {
       ctx.sequences[0], output.data(), 0, 1, 0, 0, output_length, compose_ctx));
   CHECK(compose_ctx.err == renderer_error_type(emel::text::renderer::error::invalid_request));
 
-  ctx = emel::text::renderer::action::context{};
-  ctx.stop_sequence_count = 1;
-  ctx.stop_sequences[0].offset = 0;
-  ctx.stop_sequences[0].length = 2;
-  ctx.stop_storage[0] = 'b';
-  ctx.stop_storage[1] = 'c';
-  ctx.stop_max_length = 2;
-  ctx.sequences[0].holdback_length = 1;
-  ctx.sequences[0].holdback[0] = 'b';
+  emel::text::renderer::action::context match_context = {};
+  match_context.stop_sequence_count = 1;
+  match_context.stop_sequences[0].offset = 0;
+  match_context.stop_sequences[0].length = 2;
+  match_context.stop_storage[0] = 'b';
+  match_context.stop_storage[1] = 'c';
+  match_context.stop_max_length = 2;
+  match_context.sequences[0].holdback_length = 1;
+  match_context.sequences[0].holdback[0] = 'b';
   output[0] = 'c';
   emel::text::renderer::event::render_ctx match_ctx = {};
   output_length = 0;
   emel::text::renderer::sequence_status status =
       emel::text::renderer::sequence_status::running;
   CHECK(emel::text::renderer::action::apply_stop_matching(
-      ctx.sequences[0],
-      ctx,
+      match_context.sequences[0],
+      match_context,
       output.data(),
       output.size(),
       1,
@@ -667,22 +714,22 @@ TEST_CASE("renderer_action_and_guard_paths") {
       match_ctx));
   CHECK(status == emel::text::renderer::sequence_status::stop_sequence_matched);
 
-  ctx = emel::text::renderer::action::context{};
-  ctx.stop_sequence_count = 1;
-  ctx.stop_sequences[0].offset = 0;
-  ctx.stop_sequences[0].length = 2;
-  ctx.stop_storage[0] = 'z';
-  ctx.stop_storage[1] = 'z';
-  ctx.stop_max_length = 2;
-  ctx.sequences[0].holdback_length = 1;
-  ctx.sequences[0].holdback[0] = 'a';
+  emel::text::renderer::action::context no_match_context = {};
+  no_match_context.stop_sequence_count = 1;
+  no_match_context.stop_sequences[0].offset = 0;
+  no_match_context.stop_sequences[0].length = 2;
+  no_match_context.stop_storage[0] = 'z';
+  no_match_context.stop_storage[1] = 'z';
+  no_match_context.stop_max_length = 2;
+  no_match_context.sequences[0].holdback_length = 1;
+  no_match_context.sequences[0].holdback[0] = 'a';
   output[0] = 'b';
   emel::text::renderer::event::render_ctx no_match_ctx = {};
   output_length = 0;
   status = emel::text::renderer::sequence_status::running;
   CHECK(emel::text::renderer::action::apply_stop_matching(
-      ctx.sequences[0],
-      ctx,
+      no_match_context.sequences[0],
+      no_match_context,
       output.data(),
       output.size(),
       1,
@@ -691,40 +738,26 @@ TEST_CASE("renderer_action_and_guard_paths") {
       no_match_ctx));
   CHECK(output_length == 1);
 
-  CHECK_FALSE(emel::text::renderer::guard::bind_context_ready{}(bind_runtime_ev, ctx));
-  emel::text::renderer::action::set_invalid_request(bind_runtime_ev, ctx);
-  CHECK(bind_runtime_ctx.err ==
-        renderer_error_type(emel::text::renderer::error::invalid_request));
-
-  ctx.vocab = &vocab;
-  ctx.detokenizer_sm = dummy_ptr;
-  ctx.dispatch_detokenizer_bind = detokenizer_bind_fail_no_error;
-  ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
-  bind_runtime_ctx = {};
-  emel::text::renderer::action::bind_detokenizer(bind_runtime_ev, ctx);
-  CHECK(emel::text::renderer::guard::bind_dispatch_backend_failure{}(bind_runtime_ev));
-  emel::text::renderer::action::set_backend_error(bind_runtime_ev, ctx);
-  CHECK(bind_runtime_ctx.err ==
+  initialize_runtime_ctx.detokenizer_err = k_detok_backend_error;
+  CHECK(emel::text::renderer::guard::initialize_dispatch_backend_failure{}(initialize_runtime_ev));
+  emel::text::renderer::action::set_backend_error(initialize_runtime_ev, ctx);
+  CHECK(initialize_runtime_ctx.err ==
         renderer_error_type(emel::text::renderer::error::backend_error));
 
-  ctx.dispatch_detokenizer_bind = detokenizer_bind_fail_with_error;
-  bind_runtime_ctx = {};
-  emel::text::renderer::action::bind_detokenizer(bind_runtime_ev, ctx);
-  CHECK(emel::text::renderer::guard::bind_dispatch_reported_error{}(bind_runtime_ev));
-  emel::text::renderer::action::set_error_from_detokenizer(bind_runtime_ev, ctx);
-  CHECK(bind_runtime_ctx.err ==
+  initialize_runtime_ctx.err = renderer_error_type(emel::text::renderer::error::none);
+  initialize_runtime_ctx.detokenizer_err = k_detok_model_invalid;
+  CHECK(emel::text::renderer::guard::initialize_dispatch_reported_error{}(initialize_runtime_ev));
+  emel::text::renderer::action::set_error_from_detokenizer(initialize_runtime_ev, ctx);
+  CHECK(initialize_runtime_ctx.err ==
         renderer_error_type(emel::text::renderer::error::model_invalid));
 
-  emel::text::detokenizer::sm detokenizer{};
-  ctx.detokenizer_sm = &detokenizer;
-  ctx.dispatch_detokenizer_bind = detokenizer_bind_dispatch;
-  ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
-  bind_runtime_ctx = {};
-  emel::text::renderer::action::bind_detokenizer(bind_runtime_ev, ctx);
-  CHECK(emel::text::renderer::guard::bind_dispatch_ok{}(bind_runtime_ev));
-  emel::text::renderer::action::commit_bind_success(bind_runtime_ev, ctx);
-  CHECK(bind_runtime_ctx.err == renderer_error_type(emel::text::renderer::error::none));
-  CHECK(ctx.is_bound);
+  initialize_runtime_ctx = {};
+  emel::text::renderer::action::begin_initialize(initialize_runtime_ev, ctx);
+  emel::text::renderer::action::dispatch_initialize_detokenizer(initialize_runtime_ev, ctx);
+  CHECK(emel::text::renderer::guard::initialize_dispatch_ok{}(initialize_runtime_ev));
+  emel::text::renderer::action::commit_initialize_success(initialize_runtime_ev, ctx);
+  CHECK(initialize_runtime_ctx.err == renderer_error_type(emel::text::renderer::error::none));
+  CHECK(ctx.vocab == &vocab);
 
   emel::text::renderer::event::render render_ev = {};
   size_t out_len = 0;
@@ -742,39 +775,26 @@ TEST_CASE("renderer_action_and_guard_paths") {
   emel::text::renderer::action::begin_render(render_runtime_ev, ctx);
   CHECK(render_runtime_ctx.output_length == 0);
 
-  ctx.vocab = &vocab;
-  ctx.detokenizer_sm = dummy_ptr;
-  ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_fail_no_error;
-  render_ev.output = output.data();
-  render_ev.output_capacity = output.size();
-  render_ev.sequence_id = 0;
-  render_ev.token_id = 0;
-  render_runtime_ctx = {};
-  emel::text::renderer::action::begin_render(render_runtime_ev, ctx);
-  emel::text::renderer::action::dispatch_render_detokenizer(render_runtime_ev, ctx);
+  render_runtime_ctx.detokenizer_err = k_detok_backend_error;
   CHECK(emel::text::renderer::guard::render_dispatch_backend_failure{}(render_runtime_ev));
   emel::text::renderer::action::set_backend_error(render_runtime_ev, ctx);
   CHECK(render_runtime_ctx.err ==
         renderer_error_type(emel::text::renderer::error::backend_error));
 
-  ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_fail_with_error;
-  render_runtime_ctx = {};
-  emel::text::renderer::action::begin_render(render_runtime_ev, ctx);
-  emel::text::renderer::action::dispatch_render_detokenizer(render_runtime_ev, ctx);
+  render_runtime_ctx.err = renderer_error_type(emel::text::renderer::error::none);
+  render_runtime_ctx.detokenizer_err = k_detok_model_invalid;
   CHECK(emel::text::renderer::guard::render_dispatch_reported_error{}(render_runtime_ev));
   emel::text::renderer::action::set_error_from_detokenizer(render_runtime_ev, ctx);
   CHECK(render_runtime_ctx.err ==
         renderer_error_type(emel::text::renderer::error::model_invalid));
 
-  ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
-  ctx.detokenizer_sm = &detokenizer;
+  render_runtime_ctx = {};
   render_ev.output = nullptr;
   render_ev.output_capacity = 0;
   render_ev.token_id = special_id;
   render_ev.emit_special = false;
   ctx.sequences[0].pending_length = 0;
   ctx.sequences[0].holdback_length = 0;
-  render_runtime_ctx = {};
   emel::text::renderer::action::begin_render(render_runtime_ev, ctx);
   CHECK(emel::text::renderer::guard::sequence_running{}(render_runtime_ev, ctx));
   emel::text::renderer::action::dispatch_render_detokenizer(render_runtime_ev, ctx);
@@ -790,25 +810,27 @@ TEST_CASE("renderer_action_and_guard_paths") {
   render_ev.output = output.data();
   render_ev.output_capacity = output.size();
   render_ev.token_id = token_id;
-  ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_bad_output_length;
   render_runtime_ctx = {};
   emel::text::renderer::action::begin_render(render_runtime_ev, ctx);
-  emel::text::renderer::action::dispatch_render_detokenizer(render_runtime_ev, ctx);
+  render_runtime_ctx.detokenizer_err = k_detok_ok;
+  render_runtime_ctx.detokenizer_output_length = render_ev.output_capacity + 1;
+  render_runtime_ctx.detokenizer_pending_length = 0;
   CHECK(emel::text::renderer::guard::render_dispatch_lengths_invalid{}(render_runtime_ev, ctx));
   emel::text::renderer::action::set_invalid_request(render_runtime_ev, ctx);
   CHECK(render_runtime_ctx.err ==
         renderer_error_type(emel::text::renderer::error::invalid_request));
 
-  ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_bad_pending_length;
   render_runtime_ctx = {};
   emel::text::renderer::action::begin_render(render_runtime_ev, ctx);
-  emel::text::renderer::action::dispatch_render_detokenizer(render_runtime_ev, ctx);
+  render_runtime_ctx.detokenizer_err = k_detok_ok;
+  render_runtime_ctx.detokenizer_output_length = 0;
+  render_runtime_ctx.detokenizer_pending_length =
+      ctx.sequences[0].pending_bytes.size() + 1;
   CHECK(emel::text::renderer::guard::render_dispatch_lengths_invalid{}(render_runtime_ev, ctx));
   emel::text::renderer::action::set_invalid_request(render_runtime_ev, ctx);
   CHECK(render_runtime_ctx.err ==
         renderer_error_type(emel::text::renderer::error::invalid_request));
 
-  ctx.dispatch_detokenizer_detokenize = detokenizer_detokenize_dispatch;
   ctx.sequences[0].stop_matched = true;
   render_runtime_ctx = {};
   emel::text::renderer::action::begin_render(render_runtime_ev, ctx);
@@ -861,39 +883,44 @@ TEST_CASE("renderer_action_and_guard_paths") {
   emel::text::renderer::action::reject_flush(flush_runtime_ev, ctx);
   CHECK(flush_runtime_ctx.err ==
         renderer_error_type(emel::text::renderer::error::invalid_request));
-  bind_runtime_ctx = {};
-  emel::text::renderer::action::reject_bind(bind_runtime_ev, ctx);
-  CHECK(bind_runtime_ctx.err ==
+  initialize_runtime_ctx = {};
+  emel::text::renderer::action::reject_initialize(initialize_runtime_ev, ctx);
+  CHECK(initialize_runtime_ctx.err ==
         renderer_error_type(emel::text::renderer::error::invalid_request));
 
-  bind_runtime_ctx.err = renderer_error_type(emel::text::renderer::error::none);
-  emel::text::renderer::action::ensure_last_error(bind_runtime_ev, ctx);
-  CHECK(bind_runtime_ctx.err ==
+  initialize_runtime_ctx.err = renderer_error_type(emel::text::renderer::error::none);
+  emel::text::renderer::action::ensure_last_error(initialize_runtime_ev, ctx);
+  CHECK(initialize_runtime_ctx.err ==
         renderer_error_type(emel::text::renderer::error::backend_error));
-  emel::text::renderer::action::mark_done(bind_runtime_ev, ctx);
-  CHECK(bind_runtime_ctx.err == renderer_error_type(emel::text::renderer::error::none));
-  emel::text::renderer::action::on_unexpected(bind_runtime_ev, ctx);
-  CHECK(bind_runtime_ctx.err ==
+  emel::text::renderer::action::mark_done(initialize_runtime_ev, ctx);
+  CHECK(initialize_runtime_ctx.err == renderer_error_type(emel::text::renderer::error::none));
+  emel::text::renderer::action::on_unexpected(initialize_runtime_ev, ctx);
+  CHECK(initialize_runtime_ctx.err ==
         renderer_error_type(emel::text::renderer::error::invalid_request));
 
   emel::text::renderer::event::render bad_render = {};
   emel::text::renderer::event::render_ctx bad_render_ctx = {};
-  emel::text::renderer::event::render_runtime bad_render_runtime{bad_render, bad_render_ctx};
-  CHECK_FALSE(emel::text::renderer::guard::valid_render{}(bad_render_runtime, ctx));
-  CHECK(emel::text::renderer::guard::invalid_render{}(bad_render_runtime, ctx));
-  ctx.is_bound = true;
+  bad_render.token_id = -1;
+  CHECK_FALSE(emel::text::renderer::guard::valid_render{}(
+      emel::text::renderer::event::render_runtime{bad_render, bad_render_ctx}, ctx));
+  CHECK(emel::text::renderer::guard::invalid_render{}(
+      emel::text::renderer::event::render_runtime{bad_render, bad_render_ctx}, ctx));
   ctx.vocab = &vocab;
+  bad_render_ctx = {};
+  bad_render.token_id = 0;
   bad_render.output = output.data();
   bad_render.output_capacity = output.size();
   bad_render.output_length_out = &out_len;
   bad_render.status_out = &status;
   bad_render.error_out = &err;
   bad_render.sequence_id = 0;
-  CHECK(emel::text::renderer::guard::valid_render{}(bad_render_runtime, ctx));
+  CHECK(emel::text::renderer::guard::valid_render{}(
+      emel::text::renderer::event::render_runtime{bad_render, bad_render_ctx}, ctx));
 
   bad_render.output = nullptr;
   bad_render.output_capacity = 0;
-  CHECK(emel::text::renderer::guard::valid_render{}(bad_render_runtime, ctx));
+  CHECK(emel::text::renderer::guard::valid_render{}(
+      emel::text::renderer::event::render_runtime{bad_render, bad_render_ctx}, ctx));
 
   emel::text::renderer::event::flush bad_flush = {};
   emel::text::renderer::event::flush_ctx bad_flush_ctx = {};

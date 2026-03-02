@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -25,14 +26,6 @@ constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noe
   }
 }
 
-inline bool dispatch_bind_fallback(
-    void *,
-    const emel::text::detokenizer::event::bind &) noexcept {
-  return false;
-}
-
-inline const emel::model::data::vocab k_fallback_vocab = {};
-
 }  // namespace detail
 
 inline constexpr emel::error::type k_error_none = emel::error::cast(error::none);
@@ -44,26 +37,39 @@ inline constexpr int32_t to_detokenizer_error_code(
 
 inline constexpr int32_t k_detokenizer_ok =
     to_detokenizer_error_code(emel::text::detokenizer::error::none);
+inline constexpr int32_t k_detokenizer_backend_error =
+    to_detokenizer_error_code(emel::text::detokenizer::error::backend_error);
 
 inline constexpr int32_t to_error_out(const emel::error::type err) noexcept {
   return static_cast<int32_t>(err);
 }
 
+struct detokenizer_error_map_entry {
+  int32_t detokenizer_code = k_detokenizer_ok;
+  emel::error::type renderer_code = emel::error::cast(error::none);
+};
+
 inline emel::error::type from_detokenizer_error(const int32_t err) noexcept {
-  switch (err) {
-    case to_detokenizer_error_code(emel::text::detokenizer::error::none):
-      return emel::error::cast(error::none);
-    case to_detokenizer_error_code(emel::text::detokenizer::error::invalid_request):
-      return emel::error::cast(error::invalid_request);
-    case to_detokenizer_error_code(emel::text::detokenizer::error::model_invalid):
-      return emel::error::cast(error::model_invalid);
-    case to_detokenizer_error_code(emel::text::detokenizer::error::backend_error):
-      return emel::error::cast(error::backend_error);
-    case to_detokenizer_error_code(emel::text::detokenizer::error::internal_error):
-      return emel::error::cast(error::internal_error);
-    default:
-      return emel::error::cast(error::untracked);
+  constexpr std::array<detokenizer_error_map_entry, 5> k_error_map = {{
+      {to_detokenizer_error_code(emel::text::detokenizer::error::none),
+       emel::error::cast(error::none)},
+      {to_detokenizer_error_code(emel::text::detokenizer::error::invalid_request),
+       emel::error::cast(error::invalid_request)},
+      {to_detokenizer_error_code(emel::text::detokenizer::error::model_invalid),
+       emel::error::cast(error::model_invalid)},
+      {to_detokenizer_error_code(emel::text::detokenizer::error::backend_error),
+       emel::error::cast(error::backend_error)},
+      {to_detokenizer_error_code(emel::text::detokenizer::error::internal_error),
+       emel::error::cast(error::internal_error)},
+  }};
+
+  emel::error::type mapped = emel::error::cast(error::untracked);
+  for (const auto & entry : k_error_map) {
+    const size_t matched = static_cast<size_t>(entry.detokenizer_code == err);
+    const emel::error::type candidates[2] = {mapped, entry.renderer_code};
+    mapped = candidates[matched];
   }
+  return mapped;
 }
 
 template <class runtime_ctx_type>
@@ -92,9 +98,6 @@ inline void reset_outcome(runtime_ctx_type & runtime_ctx) noexcept {
   }
   if constexpr (requires { runtime_ctx.detokenizer_err; }) {
     runtime_ctx.detokenizer_err = k_detokenizer_ok;
-  }
-  if constexpr (requires { runtime_ctx.detokenizer_accepted; }) {
-    runtime_ctx.detokenizer_accepted = false;
   }
   if constexpr (requires { runtime_ctx.detokenizer_output_length; }) {
     runtime_ctx.detokenizer_output_length = 0;
@@ -136,7 +139,7 @@ inline char concat_char(const sequence_state & sequence,
   return sources[from_new][adjusted_indices[from_new]];
 }
 
-inline bool copy_stop_sequences(const event::bind & ev,
+inline bool copy_stop_sequences(const event::initialize & ev,
                                 context & ctx) noexcept {
   ctx.stop_sequence_count = ev.stop_sequence_count;
   ctx.stop_storage_used = 0;
@@ -319,63 +322,35 @@ inline bool apply_stop_matching(sequence_state & sequence,
   return compose_ok != 0;
 }
 
-struct begin_bind {
-  void operator()(const event::bind_runtime & ev, context & ctx) const noexcept {
+struct begin_initialize {
+  void operator()(const event::initialize_runtime & ev, context &) const noexcept {
     reset_outcome(ev.ctx);
     int32_t error_sink = to_error_out(k_error_none);
     write_optional(ev.request.error_out, error_sink, to_error_out(k_error_none));
-
-    ctx.vocab = ev.request.vocab;
-    ctx.detokenizer_sm = ev.request.detokenizer_sm;
-    ctx.dispatch_detokenizer_bind = ev.request.dispatch_detokenizer_bind;
-    ctx.dispatch_detokenizer_detokenize = ev.request.dispatch_detokenizer_detokenize;
-    ctx.strip_leading_space_default = ev.request.strip_leading_space;
-    ctx.is_bound = false;
-
-    copy_stop_sequences(ev.request, ctx);
-    reset_sequences(ctx);
   }
 };
 
-struct reject_bind {
-  void operator()(const event::bind_runtime & ev, context & ctx) const noexcept {
-    ctx.is_bound = false;
+struct reject_initialize {
+  void operator()(const event::initialize_runtime & ev, context &) const noexcept {
     set_error(ev.ctx, error::invalid_request);
   }
 };
 
-struct bind_detokenizer {
+struct dispatch_initialize_detokenizer {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & ev,
                   context & ctx) const noexcept {
     auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    ctx.is_bound = false;
-
-    const size_t has_vocab = static_cast<size_t>(ctx.vocab != nullptr);
-    const size_t has_sm = static_cast<size_t>(ctx.detokenizer_sm != nullptr);
-    const size_t has_bind_dispatch = static_cast<size_t>(ctx.dispatch_detokenizer_bind != nullptr);
-    const size_t has_detokenize_dispatch =
-        static_cast<size_t>(ctx.dispatch_detokenizer_detokenize != nullptr);
-    const size_t has_dependencies =
-        has_vocab & has_sm & has_bind_dispatch & has_detokenize_dispatch;
-
-    const emel::model::data::vocab * vocabs[2] = {&detail::k_fallback_vocab, ctx.vocab};
-    void * dispatch_sms[2] = {nullptr, ctx.detokenizer_sm};
-    bool (*dispatchers[2])(void *, const emel::text::detokenizer::event::bind &) = {
-        detail::dispatch_bind_fallback,
-        ctx.dispatch_detokenizer_bind};
-
     int32_t err = k_detokenizer_ok;
     const emel::text::detokenizer::event::bind bind_ev{
-        *vocabs[has_vocab],
+        runtime_ev.request.vocab,
         err};
 
-    runtime_ev.ctx.detokenizer_accepted =
-        dispatchers[has_bind_dispatch](dispatch_sms[has_sm], bind_ev) && (has_dependencies != 0);
-    const int32_t dependency_error = to_detokenizer_error_code(
-        emel::text::detokenizer::error::invalid_request);
-    const int32_t errors[2] = {dependency_error, err};
-    runtime_ev.ctx.detokenizer_err = errors[has_dependencies];
+    const bool accepted = ctx.detokenizer.process_event(bind_ev);
+    if (!accepted && err == k_detokenizer_ok) {
+      err = k_detokenizer_backend_error;
+    }
+    runtime_ev.ctx.detokenizer_err = err;
   }
 };
 
@@ -406,13 +381,51 @@ struct set_error_from_detokenizer {
   }
 };
 
-struct commit_bind_success {
+struct commit_initialize_success {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & ev,
                   context & ctx) const noexcept {
     auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    ctx.is_bound = true;
+    ctx.vocab = &runtime_ev.request.vocab;
+    ctx.strip_leading_space_default = runtime_ev.request.strip_leading_space;
+    copy_stop_sequences(runtime_ev.request, ctx);
+    reset_sequences(ctx);
     set_error(runtime_ev.ctx, error::none);
+  }
+};
+
+struct publish_initialize_done {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context &) const noexcept {
+    auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    int32_t error_sink = to_error_out(k_error_none);
+    write_optional(ev.request.error_out,
+                  error_sink,
+                  to_error_out(ev.ctx.err));
+    if (ev.request.owner_sm != nullptr &&
+        ev.request.dispatch_done != nullptr) {
+      ev.request.dispatch_done(ev.request.owner_sm,
+                               events::initialize_done{&ev.request});
+    }
+  }
+};
+
+struct publish_initialize_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context &) const noexcept {
+    auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    int32_t error_sink = to_error_out(k_error_none);
+    write_optional(ev.request.error_out,
+                  error_sink,
+                  to_error_out(ev.ctx.err));
+    if (ev.request.owner_sm != nullptr &&
+        ev.request.dispatch_error != nullptr) {
+      ev.request.dispatch_error(ev.request.owner_sm,
+                               events::initialize_error{&ev.request,
+                                                       to_error_out(ev.ctx.err)});
+    }
   }
 };
 
@@ -473,8 +486,10 @@ struct dispatch_render_detokenizer {
         detok_pending_length,
         err};
 
-    runtime_ev.ctx.detokenizer_accepted =
-        ctx.dispatch_detokenizer_detokenize(ctx.detokenizer_sm, detok_ev);
+    const bool accepted = ctx.detokenizer.process_event(detok_ev);
+    if (!accepted && err == k_detokenizer_ok) {
+      err = k_detokenizer_backend_error;
+    }
     runtime_ev.ctx.detokenizer_err = err;
     runtime_ev.ctx.detokenizer_output_length = detok_output_length;
     runtime_ev.ctx.detokenizer_pending_length = detok_pending_length;
@@ -539,6 +554,27 @@ struct apply_render_stop_matching {
   }
 };
 
+struct commit_render_output {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context & ctx) const noexcept {
+    commit_render_detokenizer_output{}(ev, ctx);
+    update_render_strip_state{}(ev, ctx);
+    apply_render_stop_matching{}(ev, ctx);
+  }
+};
+
+struct commit_and_strip_render_output {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context & ctx) const noexcept {
+    commit_render_detokenizer_output{}(ev, ctx);
+    strip_render_leading_space{}(ev, ctx);
+    update_render_strip_state{}(ev, ctx);
+    apply_render_stop_matching{}(ev, ctx);
+  }
+};
+
 struct begin_flush {
   void operator()(const event::flush_runtime & ev,
                   context &) const noexcept {
@@ -594,6 +630,106 @@ struct flush_copy_sequence_buffers {
   }
 };
 
+struct publish_render_done {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context &) const noexcept {
+    auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    int32_t error_sink = to_error_out(k_error_none);
+    size_t output_length_sink = 0;
+    sequence_status status_sink = sequence_status::running;
+
+    write_optional(ev.request.output_length_out,
+                   output_length_sink,
+                   ev.ctx.output_length);
+    write_optional(ev.request.status_out, status_sink, ev.ctx.status);
+    write_optional(ev.request.error_out,
+                   error_sink,
+                   to_error_out(ev.ctx.err));
+    if (ev.request.owner_sm != nullptr && ev.request.dispatch_done != nullptr) {
+      ev.request.dispatch_done(
+          ev.request.owner_sm,
+          events::rendering_done{&ev.request,
+                                 ev.ctx.output_length,
+                                 ev.ctx.status});
+    }
+  }
+};
+
+struct publish_render_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context &) const noexcept {
+    auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    int32_t error_sink = to_error_out(k_error_none);
+    size_t output_length_sink = 0;
+    sequence_status status_sink = sequence_status::running;
+    write_optional(ev.request.output_length_out,
+                   output_length_sink,
+                   ev.ctx.output_length);
+    write_optional(ev.request.status_out, status_sink, ev.ctx.status);
+    write_optional(ev.request.error_out,
+                   error_sink,
+                   to_error_out(ev.ctx.err));
+    if (ev.request.owner_sm != nullptr &&
+        ev.request.dispatch_error != nullptr) {
+      ev.request.dispatch_error(
+          ev.request.owner_sm,
+          events::rendering_error{&ev.request, to_error_out(ev.ctx.err)});
+    }
+  }
+};
+
+struct publish_flush_done {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context &) const noexcept {
+    auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    int32_t error_sink = to_error_out(k_error_none);
+    size_t output_length_sink = 0;
+    sequence_status status_sink = sequence_status::running;
+
+    write_optional(ev.request.output_length_out,
+                   output_length_sink,
+                   ev.ctx.output_length);
+    write_optional(ev.request.status_out, status_sink, ev.ctx.status);
+    write_optional(ev.request.error_out,
+                   error_sink,
+                   to_error_out(ev.ctx.err));
+    if (ev.request.owner_sm != nullptr && ev.request.dispatch_done != nullptr) {
+      ev.request.dispatch_done(
+          ev.request.owner_sm,
+          events::flush_done{&ev.request,
+                             ev.ctx.output_length,
+                             ev.ctx.status});
+    }
+  }
+};
+
+struct publish_flush_error {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context &) const noexcept {
+    auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    int32_t error_sink = to_error_out(k_error_none);
+    size_t output_length_sink = 0;
+    sequence_status status_sink = sequence_status::running;
+    write_optional(ev.request.output_length_out,
+                   output_length_sink,
+                   ev.ctx.output_length);
+    write_optional(ev.request.status_out, status_sink, ev.ctx.status);
+    write_optional(ev.request.error_out,
+                   error_sink,
+                   to_error_out(ev.ctx.err));
+    if (ev.request.owner_sm != nullptr &&
+        ev.request.dispatch_error != nullptr) {
+      ev.request.dispatch_error(
+          ev.request.owner_sm,
+          events::flush_error{&ev.request, to_error_out(ev.ctx.err)});
+    }
+  }
+};
+
 struct mark_done {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & ev,
@@ -632,24 +768,32 @@ struct on_unexpected {
   }
 };
 
-inline constexpr begin_bind begin_bind{};
-inline constexpr reject_bind reject_bind{};
-inline constexpr bind_detokenizer bind_detokenizer{};
+inline constexpr begin_initialize begin_initialize{};
+inline constexpr reject_initialize reject_initialize{};
+inline constexpr dispatch_initialize_detokenizer dispatch_initialize_detokenizer{};
 inline constexpr set_backend_error set_backend_error{};
 inline constexpr set_invalid_request set_invalid_request{};
 inline constexpr set_error_from_detokenizer set_error_from_detokenizer{};
-inline constexpr commit_bind_success commit_bind_success{};
+inline constexpr commit_initialize_success commit_initialize_success{};
+inline constexpr publish_initialize_done publish_initialize_done{};
+inline constexpr publish_initialize_error publish_initialize_error{};
 inline constexpr begin_render begin_render{};
 inline constexpr reject_render reject_render{};
 inline constexpr render_sequence_already_stopped render_sequence_already_stopped{};
 inline constexpr dispatch_render_detokenizer dispatch_render_detokenizer{};
 inline constexpr commit_render_detokenizer_output commit_render_detokenizer_output{};
+inline constexpr commit_render_output commit_render_output{};
+inline constexpr commit_and_strip_render_output commit_and_strip_render_output{};
 inline constexpr strip_render_leading_space strip_render_leading_space{};
 inline constexpr update_render_strip_state update_render_strip_state{};
 inline constexpr apply_render_stop_matching apply_render_stop_matching{};
 inline constexpr begin_flush begin_flush{};
 inline constexpr reject_flush reject_flush{};
 inline constexpr flush_copy_sequence_buffers flush_copy_sequence_buffers{};
+inline constexpr publish_render_done publish_render_done{};
+inline constexpr publish_render_error publish_render_error{};
+inline constexpr publish_flush_done publish_flush_done{};
+inline constexpr publish_flush_error publish_flush_error{};
 inline constexpr mark_done mark_done{};
 inline constexpr ensure_last_error ensure_last_error{};
 inline constexpr on_unexpected on_unexpected{};
