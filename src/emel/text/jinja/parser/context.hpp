@@ -1,14 +1,11 @@
 #pragma once
 
-#include <cstdint>
-
-#include "emel/emel.h"
+#include "emel/text/jinja/parser/lexer/sm.hpp"
 
 namespace emel::text::jinja::parser::action {
 
 struct context {
-  int32_t phase_error = EMEL_OK;
-  int32_t last_error = EMEL_OK;
+  emel::text::jinja::parser::lexer::sm lexer = {};
 };
 
 } // namespace emel::text::jinja::parser::action

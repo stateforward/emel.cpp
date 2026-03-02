@@ -3,15 +3,23 @@
 #include <cstdio>
 #include <string>
 
-#include "emel/text/jinja/lexer.hpp"
-#include "emel/text/jinja/parser/detail.hpp"
 #include "emel/text/jinja/formatter/sm.hpp"
+#include "emel/text/jinja/parser/errors.hpp"
+#include "emel/text/jinja/parser/sm.hpp"
 
 #include "jinja/lexer.h"
 #include "jinja/parser.h"
 #include "jinja/runtime.h"
 
 namespace {
+
+bool parser_done_sink(const emel::text::jinja::events::parsing_done &) {
+  return true;
+}
+
+bool parser_error_sink(const emel::text::jinja::events::parsing_error &) {
+  return true;
+}
 
 std::string make_long_template() {
   std::string out;
@@ -24,16 +32,22 @@ std::string make_long_template() {
 }
 
 emel::text::jinja::program parse_emel(const std::string & templ) {
-  emel::text::jinja::lexer lex;
-  emel::text::jinja::lexer_result lex_res = lex.tokenize(templ);
-  if (lex_res.error != EMEL_OK) {
-    std::fprintf(stderr, "error: emel jinja lexer failed at %zu\n", lex_res.error_pos);
-    std::abort();
-  }
   emel::text::jinja::program program{};
-  emel::text::jinja::parser::detail::recursive_descent_parser parser{program};
-  if (!parser.parse(lex_res)) {
-    std::fprintf(stderr, "error: emel jinja parser failed at %zu\n", parser.error_pos());
+  int32_t parse_err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t parse_error_pos = 0;
+  emel::text::jinja::parser::action::context parse_ctx{};
+  emel::text::jinja::parser::sm parser{parse_ctx};
+  const emel::text::jinja::event::parse parse_ev{
+      templ,
+      program,
+      emel::text::jinja::event::parse::done_callback::from<&parser_done_sink>(),
+      emel::text::jinja::event::parse::error_callback::from<&parser_error_sink>(),
+      parse_err,
+      parse_error_pos,
+  };
+  if (!parser.process_event(parse_ev) ||
+      parse_err != static_cast<int32_t>(emel::text::jinja::parser::error::none)) {
+    std::fprintf(stderr, "error: emel jinja parser failed at %zu\n", parse_error_pos);
     std::abort();
   }
   return program;
@@ -81,6 +95,14 @@ emel::text::jinja::value make_array(emel::text::jinja::value * items, size_t cou
   return out;
 }
 
+bool formatter_done_sink(const emel::text::jinja::events::rendering_done &) {
+  return true;
+}
+
+bool formatter_error_sink(const emel::text::jinja::events::rendering_error &) {
+  return true;
+}
+
 }  // namespace
 
 namespace emel::bench {
@@ -106,38 +128,66 @@ void append_emel_jinja_formatter_cases(std::vector<result> & results, const conf
 
   emel::text::jinja::formatter::action::context ctx{};
   emel::text::jinja::formatter::sm machine{ctx};
+  const emel::text::jinja::event::render::done_callback done_cb =
+      emel::text::jinja::event::render::done_callback::from<&formatter_done_sink>();
+  const emel::text::jinja::event::render::error_callback error_cb =
+      emel::text::jinja::event::render::error_callback::from<&formatter_error_sink>();
+  static volatile uint64_t sink = 0;
 
   auto short_fn = [&]() {
     std::array<char, 256> buffer = {};
     size_t out_len = 0;
-    int32_t err = EMEL_OK;
+    int32_t err = static_cast<int32_t>(emel::text::jinja::formatter::error::none);
     emel::text::jinja::event::render ev{
-      .program = &short_program,
-      .globals = &globals,
-      .output = buffer.data(),
-      .output_capacity = buffer.size(),
-      .output_length = &out_len,
-      .error_out = &err,
+        short_program,
+        short_template,
+        buffer[0],
+        buffer.size(),
+        done_cb,
+        error_cb,
+        &globals,
+        &out_len,
+        nullptr,
+        &err,
     };
-    (void)machine.process_event(ev);
+    const bool ok = machine.process_event(ev);
+    if (!ok || err != static_cast<int32_t>(emel::text::jinja::formatter::error::none)) {
+      std::abort();
+    }
+    sink += out_len;
+    if (out_len > 0) {
+      sink += static_cast<uint64_t>(buffer[out_len - 1]);
+    }
   };
   results.push_back(measure_case("text/jinja/formatter_short", cfg, short_fn));
 
   auto long_fn = [&]() {
-    std::array<char, 1024> buffer = {};
+    std::array<char, 4096> buffer = {};
     size_t out_len = 0;
-    int32_t err = EMEL_OK;
+    int32_t err = static_cast<int32_t>(emel::text::jinja::formatter::error::none);
     emel::text::jinja::event::render ev{
-      .program = &long_program,
-      .globals = &globals,
-      .output = buffer.data(),
-      .output_capacity = buffer.size(),
-      .output_length = &out_len,
-      .error_out = &err,
+        long_program,
+        long_template,
+        buffer[0],
+        buffer.size(),
+        done_cb,
+        error_cb,
+        &globals,
+        &out_len,
+        nullptr,
+        &err,
     };
-    (void)machine.process_event(ev);
+    const bool ok = machine.process_event(ev);
+    if (!ok || err != static_cast<int32_t>(emel::text::jinja::formatter::error::none)) {
+      std::abort();
+    }
+    sink += out_len;
+    if (out_len > 0) {
+      sink += static_cast<uint64_t>(buffer[out_len - 1]);
+    }
   };
   results.push_back(measure_case("text/jinja/formatter_long", cfg, long_fn));
+  (void)sink;
 }
 
 void append_reference_jinja_formatter_cases(std::vector<result> & results, const config & cfg) {
@@ -146,6 +196,7 @@ void append_reference_jinja_formatter_cases(std::vector<result> & results, const
 
   const ::jinja::program short_program = parse_reference(short_template);
   const ::jinja::program long_program = parse_reference(long_template);
+  static volatile uint64_t sink = 0;
 
   auto short_fn = [&]() {
     ::jinja::context ctx;
@@ -153,7 +204,11 @@ void append_reference_jinja_formatter_cases(std::vector<result> & results, const
     ::jinja::runtime runtime{ctx};
     auto result = runtime.execute(short_program);
     auto parts = ::jinja::runtime::gather_string_parts(result);
-    (void)::jinja::render_string_parts(parts);
+    const std::string rendered = ::jinja::render_string_parts(parts);
+    sink += rendered.size();
+    if (!rendered.empty()) {
+      sink += static_cast<uint64_t>(rendered.back());
+    }
   };
   results.push_back(measure_case("text/jinja/formatter_short", cfg, short_fn));
 
@@ -169,9 +224,14 @@ void append_reference_jinja_formatter_cases(std::vector<result> & results, const
     ::jinja::runtime runtime{ctx};
     auto result = runtime.execute(long_program);
     auto parts = ::jinja::runtime::gather_string_parts(result);
-    (void)::jinja::render_string_parts(parts);
+    const std::string rendered = ::jinja::render_string_parts(parts);
+    sink += rendered.size();
+    if (!rendered.empty()) {
+      sink += static_cast<uint64_t>(rendered.back());
+    }
   };
   results.push_back(measure_case("text/jinja/formatter_long", cfg, long_fn));
+  (void)sink;
 }
 
 }  // namespace emel::bench

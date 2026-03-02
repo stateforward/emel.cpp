@@ -66,8 +66,8 @@ text/encoders/wpm_long emel.cpp 26858.621 ns/op, llama.cpp 26355.825 ns/op, rati
 text/encoders/wpm_short emel.cpp 531.438 ns/op, llama.cpp 540.237 ns/op, ratio=0.984x
 text/jinja/formatter_long emel.cpp 87073.829 ns/op, llama.cpp 400326.883 ns/op, ratio=0.218x
 text/jinja/formatter_short emel.cpp 1144.017 ns/op, llama.cpp 6368.133 ns/op, ratio=0.180x
-text/jinja/parser_long emel.cpp 35030.512 ns/op, llama.cpp 52803.367 ns/op, ratio=0.663x
-text/jinja/parser_short emel.cpp 547.888 ns/op, llama.cpp 632.633 ns/op, ratio=0.866x
+text/jinja/parser_long emel.cpp 35902.459 ns/op, llama.cpp 42470.375 ns/op, ratio=0.845x
+text/jinja/parser_short emel.cpp 1100.708 ns/op, llama.cpp 532.792 ns/op, ratio=2.066x
 tokenizer/full_bpe_long emel.cpp 9967.413 ns/op, llama.cpp 9607.096 ns/op, ratio=1.038x
 tokenizer/full_bpe_short emel.cpp 220.113 ns/op, llama.cpp 218.846 ns/op, ratio=1.006x
 tokenizer/full_plamo2_long emel.cpp 9890.796 ns/op, llama.cpp 9985.525 ns/op, ratio=0.991x

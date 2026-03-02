@@ -3,8 +3,8 @@
 #include <cstdio>
 #include <string>
 
-#include "emel/text/jinja/lexer.hpp"
-#include "emel/text/jinja/parser/detail.hpp"
+#include "emel/text/jinja/parser/errors.hpp"
+#include "emel/text/jinja/parser/sm.hpp"
 
 #include "jinja/lexer.h"
 #include "jinja/parser.h"
@@ -21,17 +21,32 @@ std::string make_long_template() {
   return out;
 }
 
+bool parser_done_sink(const emel::text::jinja::events::parsing_done &) {
+  return true;
+}
+
+bool parser_error_sink(const emel::text::jinja::events::parsing_error &) {
+  return true;
+}
+
 void ensure_emel_parses(const std::string & templ) {
-  emel::text::jinja::lexer lex;
-  emel::text::jinja::lexer_result lex_res = lex.tokenize(templ);
-  if (lex_res.error != EMEL_OK) {
-    std::fprintf(stderr, "error: emel jinja lexer failed at %zu\n", lex_res.error_pos);
-    std::abort();
-  }
   emel::text::jinja::program program{};
-  emel::text::jinja::parser::detail::recursive_descent_parser parser{program};
-  if (!parser.parse(lex_res)) {
-    std::fprintf(stderr, "error: emel jinja parser failed at %zu\n", parser.error_pos());
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 0;
+  emel::text::jinja::parser::action::context ctx{};
+  emel::text::jinja::parser::sm machine{ctx};
+
+  const emel::text::jinja::event::parse ev{
+      templ,
+      program,
+      emel::text::jinja::event::parse::done_callback::from<&parser_done_sink>(),
+      emel::text::jinja::event::parse::error_callback::from<&parser_error_sink>(),
+      err,
+      error_pos,
+  };
+  const bool ok = machine.process_event(ev);
+  if (!ok || err != static_cast<int32_t>(emel::text::jinja::parser::error::none)) {
+    std::fprintf(stderr, "error: emel jinja parser failed at %zu\n", error_pos);
     std::abort();
   }
 }
@@ -58,22 +73,60 @@ void append_emel_jinja_parser_cases(std::vector<result> & results, const config 
   ensure_emel_parses(short_template);
   ensure_emel_parses(long_template);
 
-  emel::text::jinja::lexer lex;
+  emel::text::jinja::parser::action::context parser_ctx{};
+  emel::text::jinja::parser::sm machine{parser_ctx};
+  const emel::text::jinja::event::parse::done_callback done_cb =
+      emel::text::jinja::event::parse::done_callback::from<&parser_done_sink>();
+  const emel::text::jinja::event::parse::error_callback error_cb =
+      emel::text::jinja::event::parse::error_callback::from<&parser_error_sink>();
+  static volatile uint64_t sink = 0;
+
   auto short_fn = [&]() {
-    emel::text::jinja::lexer_result lex_res = lex.tokenize(short_template);
     emel::text::jinja::program program{};
-    emel::text::jinja::parser::detail::recursive_descent_parser parser{program};
-    (void)parser.parse(lex_res);
+    int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+    size_t error_pos = 0;
+    const emel::text::jinja::event::parse ev{
+        short_template,
+        program,
+        done_cb,
+        error_cb,
+        err,
+        error_pos,
+    };
+    const bool ok = machine.process_event(ev);
+    if (!ok || err != static_cast<int32_t>(emel::text::jinja::parser::error::none)) {
+      std::abort();
+    }
+    sink += program.body.size();
+    if (!program.body.empty()) {
+      sink += static_cast<uint64_t>(program.body.back()->pos);
+    }
   };
   results.push_back(measure_case("text/jinja/parser_short", cfg, short_fn));
 
   auto long_fn = [&]() {
-    emel::text::jinja::lexer_result lex_res = lex.tokenize(long_template);
     emel::text::jinja::program program{};
-    emel::text::jinja::parser::detail::recursive_descent_parser parser{program};
-    (void)parser.parse(lex_res);
+    int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+    size_t error_pos = 0;
+    const emel::text::jinja::event::parse ev{
+        long_template,
+        program,
+        done_cb,
+        error_cb,
+        err,
+        error_pos,
+    };
+    const bool ok = machine.process_event(ev);
+    if (!ok || err != static_cast<int32_t>(emel::text::jinja::parser::error::none)) {
+      std::abort();
+    }
+    sink += program.body.size();
+    if (!program.body.empty()) {
+      sink += static_cast<uint64_t>(program.body.back()->pos);
+    }
   };
   results.push_back(measure_case("text/jinja/parser_long", cfg, long_fn));
+  (void)sink;
 }
 
 void append_reference_jinja_parser_cases(std::vector<result> & results, const config & cfg) {

@@ -1,0 +1,22 @@
+stateDiagram-v2
+  direction TB
+  [*] --> deciding
+  deciding --> statement_decision : completion_parse_runtime_ [always] / begin_classification_
+  statement_decision --> classified : completion_parse_runtime_ [no_tokens_] / set_statement_unknown_
+  statement_decision --> classified : completion_parse_runtime_ [token_text_] / set_statement_text_
+  statement_decision --> classified : completion_parse_runtime_ [token_comment_] / set_statement_comment_
+  statement_decision --> expression_decision : completion_parse_runtime_ [token_open_expression_] / set_statement_expression_
+  statement_decision --> classified : completion_parse_runtime_ [token_open_statement_] / set_statement_statement_
+  statement_decision --> classified : completion_parse_runtime_ [token_unknown_] / set_statement_unknown_
+  expression_decision --> classified : completion_parse_runtime_ [expr_no_token_] / set_expression_unknown_
+  expression_decision --> classified : completion_parse_runtime_ [expr_token_literal_] / set_expression_literal_
+  expression_decision --> classified : completion_parse_runtime_ [expr_token_identifier_] / set_expression_identifier_
+  expression_decision --> classified : completion_parse_runtime_ [expr_token_unary_] / set_expression_unary_
+  expression_decision --> classified : completion_parse_runtime_ [expr_token_compound_] / set_expression_compound_
+  expression_decision --> classified : completion_parse_runtime_ [expr_token_unknown_] / set_expression_unknown_
+  classified --> terminate : [always] / none
+  deciding --> unexpected_event : _ [always] / on_unexpected_
+  statement_decision --> unexpected_event : _ [always] / on_unexpected_
+  expression_decision --> unexpected_event : _ [always] / on_unexpected_
+  classified --> unexpected_event : _ [always] / on_unexpected_
+  unexpected_event --> unexpected_event : _ [always] / on_unexpected_

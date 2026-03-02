@@ -10,6 +10,11 @@ allocator, and execution pipelines stabilize.
 
 This inference engine is being implemented by AI under human engineering and architecture direction.
 
+> [!WARNING]
+> EMEL is currently going through a major re-architecture expected to complete by end of day on
+> Friday, February 27, 2026. The only domain left to rearchitect is the text domain.
+> The source of truth for architecture and design lives in `src/emel/**/sm.hpp` docstrings and
+> the generated docs under `docs/architecture/`.
 
 ## Implementation priorities
 
@@ -93,35 +98,7 @@ environments, while Zig remains the default for day-to-day builds.
 
 ## Docs index
 
-- [`docs/benchmarks.md`](docs/benchmarks.md)
-- [`docs/architecture/batch_planner_modes_equal.md`](docs/architecture/batch_planner_modes_equal.md)
-- [`docs/architecture/batch_planner_modes_sequential.md`](docs/architecture/batch_planner_modes_sequential.md)
-- [`docs/architecture/batch_planner_modes_simple.md`](docs/architecture/batch_planner_modes_simple.md)
-- [`docs/architecture/gbnf_rule_parser_definition_parser.md`](docs/architecture/gbnf_rule_parser_definition_parser.md)
-- [`docs/architecture/gbnf_rule_parser_expression_parser.md`](docs/architecture/gbnf_rule_parser_expression_parser.md)
-- [`docs/architecture/gbnf_rule_parser_nonterm_parser.md`](docs/architecture/gbnf_rule_parser_nonterm_parser.md)
-- [`docs/architecture/gbnf_rule_parser_term_parser.md`](docs/architecture/gbnf_rule_parser_term_parser.md)
-- [`docs/architecture/gbnf_sampler_accept_parser.md`](docs/architecture/gbnf_sampler_accept_parser.md)
-- [`docs/architecture/gbnf_sampler_candidate_parser.md`](docs/architecture/gbnf_sampler_candidate_parser.md)
-- [`docs/architecture/gbnf_sampler_matcher_parser.md`](docs/architecture/gbnf_sampler_matcher_parser.md)
-- [`docs/architecture/gbnf_sampler_token_parser.md`](docs/architecture/gbnf_sampler_token_parser.md)
-- [`docs/architecture/graph_allocator_liveness_pass.md`](docs/architecture/graph_allocator_liveness_pass.md)
-- [`docs/architecture/graph_allocator_ordering_pass.md`](docs/architecture/graph_allocator_ordering_pass.md)
-- [`docs/architecture/graph_allocator_placement_pass.md`](docs/architecture/graph_allocator_placement_pass.md)
-- [`docs/architecture/graph_assembler_assemble_alloc_pass.md`](docs/architecture/graph_assembler_assemble_alloc_pass.md)
-- [`docs/architecture/graph_assembler_assemble_build_pass.md`](docs/architecture/graph_assembler_assemble_build_pass.md)
-- [`docs/architecture/graph_assembler_assemble_validate_pass.md`](docs/architecture/graph_assembler_assemble_validate_pass.md)
-- [`docs/architecture/graph_assembler_reserve_alloc_pass.md`](docs/architecture/graph_assembler_reserve_alloc_pass.md)
-- [`docs/architecture/graph_assembler_reserve_build_pass.md`](docs/architecture/graph_assembler_reserve_build_pass.md)
-- [`docs/architecture/graph_assembler_reserve_validate_pass.md`](docs/architecture/graph_assembler_reserve_validate_pass.md)
-- [`docs/architecture/graph_assembler_reuse_decision_pass.md`](docs/architecture/graph_assembler_reuse_decision_pass.md)
-- [`docs/architecture/graph_processor_alloc_step.md`](docs/architecture/graph_processor_alloc_step.md)
-- [`docs/architecture/graph_processor_bind_step.md`](docs/architecture/graph_processor_bind_step.md)
-- [`docs/architecture/graph_processor_extract_step.md`](docs/architecture/graph_processor_extract_step.md)
-- [`docs/architecture/graph_processor_kernel_step.md`](docs/architecture/graph_processor_kernel_step.md)
-- [`docs/architecture/graph_processor_prepare_step.md`](docs/architecture/graph_processor_prepare_step.md)
-- [`docs/architecture/graph_processor_validate_step.md`](docs/architecture/graph_processor_validate_step.md)
-
+{{ docs_toc }}
 
 ## Regenerating docs
 

@@ -1,29 +1,52 @@
 #include <boost/sml.hpp>
 #include <doctest/doctest.h>
+#include <array>
 #include <string_view>
 
-#include "emel/emel.h"
-#include "emel/text/jinja/ast.hpp"
-#include "emel/text/jinja/parser/actions.hpp"
+#include "emel/text/jinja/parser/detail.hpp"
+#include "emel/text/jinja/parser/errors.hpp"
 #include "emel/text/jinja/parser/events.hpp"
 #include "emel/text/jinja/parser/sm.hpp"
-#include "emel/text/jinja/types.hpp"
 
 namespace {
 
-bool dispatch_done_test(void * owner,
-                        const emel::text::jinja::events::parsing_done &) {
-  *static_cast<bool *>(owner) = true;
+using emel::text::jinja::event::parse;
+using emel::text::jinja::events::parsing_done;
+using emel::text::jinja::events::parsing_error;
+using done_cb = parse::done_callback;
+using error_cb = parse::error_callback;
+
+bool ignore_done_callback(const parsing_done &) {
   return true;
 }
 
-bool dispatch_error_test(void * owner,
-                         const emel::text::jinja::events::parsing_error &) {
-  *static_cast<bool *>(owner) = true;
+bool ignore_error_callback(const parsing_error &) {
   return true;
 }
 
-} // namespace
+constexpr done_cb k_ignore_done_callback = done_cb::from<&ignore_done_callback>();
+constexpr error_cb k_ignore_error_callback = error_cb::from<&ignore_error_callback>();
+
+struct callback_tracker {
+  bool done_called = false;
+  bool error_called = false;
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 0;
+
+  bool on_done(const parsing_done &) {
+    done_called = true;
+    return true;
+  }
+
+  bool on_error(const parsing_error & ev) {
+    error_called = true;
+    err = ev.err;
+    error_pos = ev.error_pos;
+    return true;
+  }
+};
+
+}  // namespace
 
 TEST_CASE("jinja_parser_starts_initialized") {
   emel::text::jinja::parser::action::context ctx{};
@@ -34,107 +57,137 @@ TEST_CASE("jinja_parser_starts_initialized") {
 TEST_CASE("jinja_parser_valid_parse_reaches_done") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};
-  int32_t error = -1;
   emel::text::jinja::program program{};
-  bool done_called = false;
-  bool error_called = false;
+  int32_t err = -1;
+  size_t error_pos = 999;
+  callback_tracker tracker{};
 
-  ::emel::text::jinja::event::parse ev{
-      .template_text = "{{ foo }}",
-      .program_out = &program,
-      .error_out = &error,
-      .owner_sm = &error_called,
-      .dispatch_done =
-          ::emel::callback<bool(const ::emel::text::jinja::events::parsing_done &)>(
-              &done_called, dispatch_done_test),
-      .dispatch_error =
-          ::emel::callback<bool(const ::emel::text::jinja::events::parsing_error &)>(
-              &error_called, dispatch_error_test)};
+  parse ev{
+      "{{ foo }}",
+      program,
+      done_cb::from<callback_tracker, &callback_tracker::on_done>(&tracker),
+      error_cb::from<callback_tracker, &callback_tracker::on_error>(&tracker),
+      err,
+      error_pos,
+  };
 
   CHECK(machine.process_event(ev));
   CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::done>));
-  CHECK(done_called);
-  CHECK_FALSE(error_called);
-  CHECK(error == EMEL_OK);
+  CHECK(tracker.done_called);
+  CHECK_FALSE(tracker.error_called);
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::none));
+  CHECK(error_pos == 0);
   CHECK(program.body.size() == 1);
   CHECK(dynamic_cast<emel::text::jinja::identifier *>(program.body[0].get()) != nullptr);
 }
 
-TEST_CASE("jinja_parser_invalid_parse_reaches_errored") {
+TEST_CASE("jinja_parser_invalid_request_with_callbacks_dispatches_error") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};
-  int32_t error = EMEL_OK;
   emel::text::jinja::program program{};
-  bool error_called = false;
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 999;
+  callback_tracker tracker{};
 
-  ::emel::text::jinja::event::parse ev{
-      .template_text = "",
-      .program_out = &program,
-      .error_out = &error,
-      .owner_sm = &error_called,
-      .dispatch_error =
-          ::emel::callback<bool(const ::emel::text::jinja::events::parsing_error &)>(
-              &error_called, dispatch_error_test)};
+  parse ev{
+      "",
+      program,
+      done_cb::from<callback_tracker, &callback_tracker::on_done>(&tracker),
+      error_cb::from<callback_tracker, &callback_tracker::on_error>(&tracker),
+      err,
+      error_pos,
+  };
 
   CHECK_FALSE(machine.process_event(ev));
   CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::errored>));
-  CHECK(error_called);
-  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK_FALSE(tracker.done_called);
+  CHECK(tracker.error_called);
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::invalid_request));
+  CHECK(error_pos == 0);
   CHECK(program.body.empty());
 }
 
-TEST_CASE("jinja_parser_parse_failure_reports_parse_error") {
+TEST_CASE("jinja_parser_missing_callbacks_returns_error_without_dispatch") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};
-  int32_t error = EMEL_OK;
   emel::text::jinja::program program{};
-  bool error_called = false;
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 999;
 
-  ::emel::text::jinja::event::parse ev{
-      .template_text = "{{ }}",
-      .program_out = &program,
-      .error_out = &error,
-      .owner_sm = &error_called,
-      .dispatch_error =
-          ::emel::callback<bool(const ::emel::text::jinja::events::parsing_error &)>(
-              &error_called, dispatch_error_test)};
+  parse ev{
+      "{{ foo }}",
+      program,
+      done_cb{},
+      error_cb{},
+      err,
+      error_pos,
+  };
 
   CHECK_FALSE(machine.process_event(ev));
   CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::errored>));
-  CHECK(error_called);
-  CHECK(error == EMEL_ERR_PARSE_FAILED);
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::invalid_request));
+  CHECK(error_pos == 0);
   CHECK(program.body.empty());
 }
 
-TEST_CASE("jinja_parser_lex_failure_reports_parse_error") {
+TEST_CASE("jinja_parser_parse_failure_reports_error") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};
-  int32_t error = EMEL_OK;
   emel::text::jinja::program program{};
-  bool error_called = false;
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 0;
+  callback_tracker tracker{};
 
-  ::emel::text::jinja::event::parse ev{
-      .template_text = "{{ \"\\x\" }}",
-      .program_out = &program,
-      .error_out = &error,
-      .owner_sm = &error_called,
-      .dispatch_error =
-          ::emel::callback<bool(const ::emel::text::jinja::events::parsing_error &)>(
-              &error_called, dispatch_error_test)};
+  parse ev{
+      "{{ }}",
+      program,
+      done_cb::from<callback_tracker, &callback_tracker::on_done>(&tracker),
+      error_cb::from<callback_tracker, &callback_tracker::on_error>(&tracker),
+      err,
+      error_pos,
+  };
 
   CHECK_FALSE(machine.process_event(ev));
   CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::errored>));
-  CHECK(error_called);
-  CHECK(error == EMEL_ERR_PARSE_FAILED);
+  CHECK_FALSE(tracker.done_called);
+  CHECK(tracker.error_called);
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::parse_failed));
+  CHECK(error_pos > 0);
+  CHECK(program.body.empty());
+}
+
+TEST_CASE("jinja_parser_lex_failure_reports_error") {
+  emel::text::jinja::parser::action::context ctx{};
+  emel::text::jinja::parser::sm machine{ctx};
+  emel::text::jinja::program program{};
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 0;
+  callback_tracker tracker{};
+
+  parse ev{
+      "{{ \"\\x\" }}",
+      program,
+      done_cb::from<callback_tracker, &callback_tracker::on_done>(&tracker),
+      error_cb::from<callback_tracker, &callback_tracker::on_error>(&tracker),
+      err,
+      error_pos,
+  };
+
+  CHECK_FALSE(machine.process_event(ev));
+  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::errored>));
+  CHECK_FALSE(tracker.done_called);
+  CHECK(tracker.error_called);
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::parse_failed));
+  CHECK(error_pos > 0);
   CHECK(program.body.empty());
 }
 
 TEST_CASE("jinja_parser_parses_control_statements") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};
-  int32_t error = EMEL_OK;
   emel::text::jinja::program program{};
-  bool done_called = false;
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 0;
 
   const std::string_view tmpl =
       "{% if cond %}{{ value }}{% elif other %}x{% else %}y{% endif %}"
@@ -147,27 +200,27 @@ TEST_CASE("jinja_parser_parses_control_statements") {
       "{% filter upper(value) %}x{% endfilter %}"
       "{% generation %}{% endgeneration %}";
 
-  ::emel::text::jinja::event::parse ev{
-      .template_text = tmpl,
-      .program_out = &program,
-      .error_out = &error,
-      .owner_sm = &done_called,
-      .dispatch_done =
-          ::emel::callback<bool(const ::emel::text::jinja::events::parsing_done &)>(
-              &done_called, dispatch_done_test)};
+  parse ev{
+      tmpl,
+      program,
+      k_ignore_done_callback,
+      k_ignore_error_callback,
+      err,
+      error_pos,
+  };
 
   CHECK(machine.process_event(ev));
   CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::done>));
-  CHECK(done_called);
-  CHECK(error == EMEL_OK);
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::none));
   CHECK(program.body.size() >= 7);
 }
 
 TEST_CASE("jinja_parser_parses_expressions") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};
-  int32_t error = EMEL_OK;
   emel::text::jinja::program program{};
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 0;
 
   const std::string_view tmpl =
       "{{ foo.bar[1:2:3](a=1, *args)|filter }}"
@@ -180,23 +233,27 @@ TEST_CASE("jinja_parser_parses_expressions") {
       "{{ 'a' 'b' }}"
       "{{ -1 + 2 * 3 }}";
 
-  ::emel::text::jinja::event::parse ev{
-      .template_text = tmpl,
-      .program_out = &program,
-      .error_out = &error,
+  parse ev{
+      tmpl,
+      program,
+      k_ignore_done_callback,
+      k_ignore_error_callback,
+      err,
+      error_pos,
   };
 
   CHECK(machine.process_event(ev));
   CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::done>));
-  CHECK(error == EMEL_OK);
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::none));
   CHECK(program.body.size() >= 9);
 }
 
 TEST_CASE("jinja_parser_parses_additional_expressions") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};
-  int32_t error = EMEL_OK;
   emel::text::jinja::program program{};
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 0;
 
   const std::string_view tmpl =
       "{# note #}"
@@ -209,92 +266,78 @@ TEST_CASE("jinja_parser_parses_additional_expressions") {
       "{{ foo()() }}"
       "{{ 1.5 }}";
 
-  ::emel::text::jinja::event::parse ev{
-      .template_text = tmpl,
-      .program_out = &program,
-      .error_out = &error,
+  parse ev{
+      tmpl,
+      program,
+      k_ignore_done_callback,
+      k_ignore_error_callback,
+      err,
+      error_pos,
   };
 
   CHECK(machine.process_event(ev));
   CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::done>));
-  CHECK(error == EMEL_OK);
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::none));
   CHECK(program.body.size() >= 8);
 }
 
 TEST_CASE("jinja_parser_parses_slices_and_loops") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};
-  int32_t error = EMEL_OK;
   emel::text::jinja::program program{};
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 0;
 
   const std::string_view tmpl =
       "{% set name = value %}"
       "{% for item in items %}{% break %}{% continue %}{% endfor %}"
       "{{ arr[:] }}{{ arr[1:] }}{{ arr[:2] }}{{ arr[1:2] }}";
 
-  ::emel::text::jinja::event::parse ev{
-      .template_text = tmpl,
-      .program_out = &program,
-      .error_out = &error,
+  parse ev{
+      tmpl,
+      program,
+      k_ignore_done_callback,
+      k_ignore_error_callback,
+      err,
+      error_pos,
   };
 
   CHECK(machine.process_event(ev));
   CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::done>));
-  CHECK(error == EMEL_OK);
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::none));
   CHECK(program.body.size() >= 5);
 }
 
 TEST_CASE("jinja_parser_rejects_unknown_statement") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};
-  int32_t error = EMEL_OK;
   emel::text::jinja::program program{};
+  int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t error_pos = 0;
 
-  ::emel::text::jinja::event::parse ev{
-      .template_text = "{% unknown %}",
-      .program_out = &program,
-      .error_out = &error,
+  parse ev{
+      "{% unknown %}",
+      program,
+      k_ignore_done_callback,
+      k_ignore_error_callback,
+      err,
+      error_pos,
   };
 
   CHECK_FALSE(machine.process_event(ev));
   CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::errored>));
-  CHECK(error == EMEL_ERR_PARSE_FAILED);
+  CHECK(err == static_cast<int32_t>(emel::text::jinja::parser::error::parse_failed));
   CHECK(program.body.empty());
 }
 
-TEST_CASE("jinja_parser_action_rejects_missing_program") {
-  emel::text::jinja::parser::action::context ctx{};
-  int32_t error = EMEL_OK;
-  bool error_called = false;
-
-  ::emel::text::jinja::event::parse ev{
-      .template_text = "{{ foo }}",
-      .program_out = nullptr,
-      .error_out = &error,
-      .owner_sm = &error_called,
-      .dispatch_error =
-          ::emel::callback<bool(const ::emel::text::jinja::events::parsing_error &)>(
-              &error_called, dispatch_error_test)};
-
-  emel::text::jinja::parser::action::run_parse(ev, ctx);
-  CHECK(ctx.last_error == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(ctx.phase_error == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(error_called);
-}
-
-TEST_CASE("jinja_parser_on_unexpected_sets_backend_error") {
-  emel::text::jinja::parser::action::context ctx{};
-  emel::text::jinja::program program{};
-  int32_t error = EMEL_OK;
-
-  ::emel::text::jinja::event::parse ev{
-      .template_text = "{{ foo }}",
-      .program_out = &program,
-      .error_out = &error,
+TEST_CASE("jinja_parser_unexpected_event_transitions_state") {
+  struct unknown_event {
+    int value = 0;
   };
 
-  emel::text::jinja::parser::action::on_unexpected(ev, ctx);
-  CHECK(ctx.last_error == EMEL_ERR_BACKEND);
-  CHECK(ctx.phase_error == EMEL_ERR_BACKEND);
+  emel::text::jinja::parser::action::context ctx{};
+  emel::text::jinja::parser::sm machine{ctx};
+  machine.process_event(unknown_event{});
+
+  CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::unexpected>));
 }

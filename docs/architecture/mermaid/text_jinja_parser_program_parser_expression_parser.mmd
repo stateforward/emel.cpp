@@ -1,0 +1,27 @@
+stateDiagram-v2
+  direction TB
+  [*] --> deciding
+  deciding --> expression_first_decision : completion_parse_runtime_ [always] / begin_expression_parse_
+  expression_first_decision --> parse_failed : completion_parse_runtime_ [expr_scan_eof_] / fail_expression_start_token_
+  expression_first_decision --> parse_failed : completion_parse_runtime_ [expr_first_is_close_] / fail_expression_close_token_
+  expression_first_decision --> expression_scan : completion_parse_runtime_ [expr_first_is_identifier_] / consume_expression_identifier_
+  expression_first_decision --> expression_scan : completion_parse_runtime_ [expr_first_is_literal_] / consume_expression_literal_
+  expression_first_decision --> expression_scan : completion_parse_runtime_ [expr_first_is_unary_] / consume_expression_unary_
+  expression_first_decision --> expression_scan : completion_parse_runtime_ [expr_first_is_other_content_] / consume_expression_compound_
+  expression_scan --> expression_emit_decision : completion_parse_runtime_ [expr_scan_at_close_] / none
+  expression_scan --> expression_scan : completion_parse_runtime_ [expr_scan_continue_] / consume_expression_token_
+  expression_scan --> parse_failed : completion_parse_runtime_ [expr_scan_eof_] / fail_expression_start_token_
+  expression_emit_decision --> expression_close : completion_parse_runtime_ [expression_identifier_] / emit_expression_identifier_
+  expression_emit_decision --> expression_close : completion_parse_runtime_ [expression_non_identifier_] / emit_expression_generic_
+  expression_close --> parsed : completion_parse_runtime_ [expr_scan_at_close_] / consume_expression_close_
+  expression_close --> parse_failed : completion_parse_runtime_ [expr_scan_eof_] / fail_expression_start_token_
+  parsed --> terminate : [always] / none
+  parse_failed --> terminate : [always] / none
+  deciding --> unexpected_event : _ [always] / on_unexpected_
+  expression_first_decision --> unexpected_event : _ [always] / on_unexpected_
+  expression_scan --> unexpected_event : _ [always] / on_unexpected_
+  expression_emit_decision --> unexpected_event : _ [always] / on_unexpected_
+  expression_close --> unexpected_event : _ [always] / on_unexpected_
+  parsed --> unexpected_event : _ [always] / on_unexpected_
+  parse_failed --> unexpected_event : _ [always] / on_unexpected_
+  unexpected_event --> unexpected_event : _ [always] / on_unexpected_
