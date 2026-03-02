@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -661,6 +662,12 @@ struct publish_render_error {
                   context &) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
     int32_t error_sink = to_error_out(k_error_none);
+    size_t output_length_sink = 0;
+    sequence_status status_sink = sequence_status::running;
+    write_optional(ev.request.output_length_out,
+                   output_length_sink,
+                   ev.ctx.output_length);
+    write_optional(ev.request.status_out, status_sink, ev.ctx.status);
     write_optional(ev.request.error_out,
                    error_sink,
                    to_error_out(ev.ctx.err));
@@ -705,6 +712,12 @@ struct publish_flush_error {
                   context &) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
     int32_t error_sink = to_error_out(k_error_none);
+    size_t output_length_sink = 0;
+    sequence_status status_sink = sequence_status::running;
+    write_optional(ev.request.output_length_out,
+                   output_length_sink,
+                   ev.ctx.output_length);
+    write_optional(ev.request.status_out, status_sink, ev.ctx.status);
     write_optional(ev.request.error_out,
                    error_sink,
                    to_error_out(ev.ctx.err));

@@ -163,7 +163,7 @@ struct model {
       , sml::state<initialize_publish_error> <= sml::state<initialization_decision>
             + sml::completion<event::initialize_runtime>
           / action::set_error_from_detokenizer
-      , sml::state<done> <= sml::state<initialize_publish_success>
+      , sml::state<initialized> <= sml::state<initialize_publish_success>
             + sml::completion<event::initialize_runtime>
           / action::publish_initialize_done
       , sml::state<errored> <= sml::state<initialize_publish_error>
@@ -175,7 +175,7 @@ struct model {
           / action::dispatch_initialize_detokenizer
 
       //------------------------------------------------------------------------------//
-      , sml::state<render_result_decision> <= sml::state<rendering>
+      , sml::state<render_publish_success> <= sml::state<rendering>
             + sml::completion<event::render_runtime> [ guard::sequence_stop_matched{} ]
           / action::render_sequence_already_stopped
       , sml::state<render_dispatch_decision> <= sml::state<rendering>

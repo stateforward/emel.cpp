@@ -353,6 +353,62 @@ TEST_CASE("renderer_stop_sequence_matches_across_token_boundary") {
   CHECK(status == emel::text::renderer::sequence_status::stop_sequence_matched);
 }
 
+TEST_CASE("renderer_stop_sequence_state_latches_across_calls") {
+  auto & vocab = make_vocab();
+  const int32_t ab_id = add_token(vocab, "ab");
+  const int32_t cd_id = add_token(vocab, "cd");
+  const std::array<std::string_view, 1> stops = {"bc"};
+
+  emel::text::renderer::sm renderer{};
+
+  int32_t initialize_err = k_renderer_ok;
+  CHECK(initialize_renderer(renderer,
+                           vocab,
+                           false,
+                           stops.data(),
+                           stops.size(),
+                           initialize_err));
+  CHECK(initialize_err == k_renderer_ok);
+
+  std::array<char, 16> output = {};
+  size_t output_length = 0;
+  emel::text::renderer::sequence_status status =
+      emel::text::renderer::sequence_status::running;
+  int32_t err = k_renderer_ok;
+
+  emel::text::renderer::event::render render_ev = {};
+  render_ev.sequence_id = 0;
+  render_ev.output = output.data();
+  render_ev.output_capacity = output.size();
+  render_ev.output_length_out = &output_length;
+  render_ev.status_out = &status;
+  render_ev.error_out = &err;
+
+  render_ev.token_id = ab_id;
+  CHECK(renderer.process_event(render_ev));
+  CHECK(err == k_renderer_ok);
+  CHECK(output_length == 1);
+  CHECK(std::string_view(output.data(), output_length) == "a");
+  CHECK(status == emel::text::renderer::sequence_status::running);
+
+  output.fill('\0');
+  render_ev.token_id = cd_id;
+  CHECK(renderer.process_event(render_ev));
+  CHECK(err == k_renderer_ok);
+  CHECK(output_length == 0);
+  CHECK(status == emel::text::renderer::sequence_status::stop_sequence_matched);
+
+  output.fill('\0');
+  output_length = 99;
+  status = emel::text::renderer::sequence_status::running;
+  err = k_renderer_ok;
+  render_ev.token_id = ab_id;
+  CHECK(renderer.process_event(render_ev));
+  CHECK(err == k_renderer_ok);
+  CHECK(output_length == 0);
+  CHECK(status == emel::text::renderer::sequence_status::stop_sequence_matched);
+}
+
 TEST_CASE("renderer_flush_emits_holdback_when_no_stop_match") {
   auto & vocab = make_vocab();
   const int32_t ab_id = add_token(vocab, "ab");
@@ -514,6 +570,55 @@ TEST_CASE("renderer_dispatches_done_and_error_callbacks") {
   CHECK(flush_err == k_renderer_ok);
   CHECK(recorder.flush_done == 1);
   CHECK(recorder.flush_error == 0);
+}
+
+TEST_CASE("renderer_invalid_render_and_flush_set_output_status_defaults") {
+  auto & vocab = make_vocab();
+  add_token(vocab, "hi");
+
+  emel::text::renderer::sm renderer{};
+
+  int32_t initialize_err = k_renderer_ok;
+  CHECK(initialize_renderer(renderer, vocab, false, nullptr, 0, initialize_err));
+  CHECK(initialize_err == k_renderer_ok);
+
+  std::array<char, 16> output = {};
+  size_t output_length = 123;
+  emel::text::renderer::sequence_status status =
+      emel::text::renderer::sequence_status::stop_sequence_matched;
+  int32_t render_err = k_renderer_ok;
+
+  emel::text::renderer::event::render render_ev = {};
+  render_ev.token_id = 0;
+  render_ev.sequence_id =
+      static_cast<int32_t>(emel::text::renderer::action::k_max_sequences);
+  render_ev.output = output.data();
+  render_ev.output_capacity = output.size();
+  render_ev.output_length_out = &output_length;
+  render_ev.status_out = &status;
+  render_ev.error_out = &render_err;
+
+  CHECK_FALSE(renderer.process_event(render_ev));
+  CHECK(render_err == k_renderer_invalid_request);
+  CHECK(output_length == 0);
+  CHECK(status == emel::text::renderer::sequence_status::running);
+
+  size_t flush_output_length = 123;
+  status = emel::text::renderer::sequence_status::stop_sequence_matched;
+  int32_t flush_err = k_renderer_ok;
+  emel::text::renderer::event::flush flush_ev = {};
+  flush_ev.sequence_id =
+      static_cast<int32_t>(emel::text::renderer::action::k_max_sequences);
+  flush_ev.output = output.data();
+  flush_ev.output_capacity = output.size();
+  flush_ev.output_length_out = &flush_output_length;
+  flush_ev.status_out = &status;
+  flush_ev.error_out = &flush_err;
+
+  CHECK_FALSE(renderer.process_event(flush_ev));
+  CHECK(flush_err == k_renderer_invalid_request);
+  CHECK(flush_output_length == 0);
+  CHECK(status == emel::text::renderer::sequence_status::running);
 }
 
 TEST_CASE("renderer_surfaces_local_model_invalid_error_on_render_failure") {
