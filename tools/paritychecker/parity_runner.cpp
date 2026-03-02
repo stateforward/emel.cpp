@@ -1,8 +1,12 @@
 #include "parity_runner.hpp"
+#include "tokenizer_parity.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -15,10 +19,12 @@
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/x86_64/context.hpp"
 #include "emel/kernel/x86_64/detail.hpp"
+#include "emel/model/data.hpp"
 
 #include "ggml-cpu.h"
 #include "ggml.h"
 #include "llama-grammar.h"
+#include "llama-vocab.h"
 
 namespace {
 
@@ -171,6 +177,330 @@ void dump_llama_grammar(const llama_grammar_rules & rules) {
     }
     std::fprintf(stdout, "\n");
   }
+}
+
+struct llama_backend_guard {
+  llama_backend_guard() {
+    llama_backend_init();
+  }
+
+  ~llama_backend_guard() {
+    llama_backend_free();
+  }
+};
+
+template <size_t k_array_size>
+void copy_name(std::array<char, k_array_size> & dst, const std::string & value) {
+  static_assert(k_array_size > 0, "copy_name requires non-empty destination");
+  dst.fill('\0');
+  const size_t copy_len = std::min(value.size(), k_array_size - 1);
+  if (copy_len > 0) {
+    std::memcpy(dst.data(), value.data(), copy_len);
+  }
+}
+
+template <size_t k_array_size>
+void set_token_flag(std::array<uint8_t, k_array_size> & flags, const uint32_t token_id) {
+  const uint32_t byte_index = token_id >> 3u;
+  if (byte_index >= k_array_size) {
+    return;
+  }
+  const uint8_t bit = static_cast<uint8_t>(1u << (token_id & 7u));
+  flags[byte_index] = static_cast<uint8_t>(flags[byte_index] | bit);
+}
+
+bool attr_has(const llama_token_attr attr, const llama_token_attr flag) {
+  const uint32_t attr_bits = static_cast<uint32_t>(attr);
+  const uint32_t flag_bits = static_cast<uint32_t>(flag);
+  return (attr_bits & flag_bits) != 0u;
+}
+
+int32_t token_type_from_attr(const llama_token_attr attr) {
+  if (attr_has(attr, LLAMA_TOKEN_ATTR_UNKNOWN)) {
+    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_UNKNOWN);
+  }
+  if (attr_has(attr, LLAMA_TOKEN_ATTR_CONTROL)) {
+    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_CONTROL);
+  }
+  if (attr_has(attr, LLAMA_TOKEN_ATTR_USER_DEFINED)) {
+    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_USER_DEFINED);
+  }
+  if (attr_has(attr, LLAMA_TOKEN_ATTR_UNUSED)) {
+    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_UNUSED);
+  }
+  if (attr_has(attr, LLAMA_TOKEN_ATTR_BYTE)) {
+    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_BYTE);
+  }
+  if (attr_has(attr, LLAMA_TOKEN_ATTR_NORMAL)) {
+    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_NORMAL);
+  }
+  return static_cast<int32_t>(LLAMA_TOKEN_TYPE_UNDEFINED);
+}
+
+emel::model::data::tokenizer_model to_emel_tokenizer_model(
+    const enum llama_vocab_type type) {
+  using tokenizer_model = emel::model::data::tokenizer_model;
+
+  switch (type) {
+    case LLAMA_VOCAB_TYPE_NONE:
+      return tokenizer_model::NONE;
+    case LLAMA_VOCAB_TYPE_SPM:
+      return tokenizer_model::SPM;
+    case LLAMA_VOCAB_TYPE_BPE:
+      return tokenizer_model::BPE;
+    case LLAMA_VOCAB_TYPE_WPM:
+      return tokenizer_model::WPM;
+    case LLAMA_VOCAB_TYPE_UGM:
+      return tokenizer_model::UGM;
+    case LLAMA_VOCAB_TYPE_RWKV:
+      return tokenizer_model::RWKV;
+    case LLAMA_VOCAB_TYPE_PLAMO2:
+      return tokenizer_model::PLAMO2;
+    default:
+      return tokenizer_model::UNKNOWN;
+  }
+}
+
+emel::model::data::tokenizer_pre to_emel_tokenizer_pre(
+    const llama_vocab_pre_type type) {
+  using tokenizer_pre = emel::model::data::tokenizer_pre;
+
+  switch (type) {
+    case LLAMA_VOCAB_PRE_TYPE_DEFAULT:
+      return tokenizer_pre::DEFAULT;
+    case LLAMA_VOCAB_PRE_TYPE_LLAMA3:
+      return tokenizer_pre::LLAMA3;
+    case LLAMA_VOCAB_PRE_TYPE_JAIS2:
+      return tokenizer_pre::JAIS2;
+    case LLAMA_VOCAB_PRE_TYPE_DBRX:
+      return tokenizer_pre::DBRX;
+    case LLAMA_VOCAB_PRE_TYPE_SMAUG:
+      return tokenizer_pre::SMAUG;
+    case LLAMA_VOCAB_PRE_TYPE_DEEPSEEK_LLM:
+      return tokenizer_pre::DEEPSEEK_LLM;
+    case LLAMA_VOCAB_PRE_TYPE_DEEPSEEK_CODER:
+      return tokenizer_pre::DEEPSEEK_CODER;
+    case LLAMA_VOCAB_PRE_TYPE_DEEPSEEK3_LLM:
+      return tokenizer_pre::DEEPSEEK3_LLM;
+    case LLAMA_VOCAB_PRE_TYPE_YOUTU:
+      return tokenizer_pre::YOUTU;
+    case LLAMA_VOCAB_PRE_TYPE_FALCON:
+      return tokenizer_pre::FALCON;
+    case LLAMA_VOCAB_PRE_TYPE_MPT:
+      return tokenizer_pre::MPT;
+    case LLAMA_VOCAB_PRE_TYPE_STARCODER:
+      return tokenizer_pre::STARCODER;
+    case LLAMA_VOCAB_PRE_TYPE_GPT2:
+      return tokenizer_pre::GPT2;
+    case LLAMA_VOCAB_PRE_TYPE_JAIS:
+      return tokenizer_pre::JAIS;
+    case LLAMA_VOCAB_PRE_TYPE_REFACT:
+      return tokenizer_pre::REFACT;
+    case LLAMA_VOCAB_PRE_TYPE_COMMAND_R:
+      return tokenizer_pre::COMMAND_R;
+    case LLAMA_VOCAB_PRE_TYPE_QWEN2:
+      return tokenizer_pre::QWEN2;
+    case LLAMA_VOCAB_PRE_TYPE_QWEN35:
+      return tokenizer_pre::QWEN35;
+    case LLAMA_VOCAB_PRE_TYPE_STABLELM2:
+      return tokenizer_pre::STABLELM2;
+    case LLAMA_VOCAB_PRE_TYPE_OLMO:
+      return tokenizer_pre::OLMO;
+    case LLAMA_VOCAB_PRE_TYPE_PORO:
+      return tokenizer_pre::PORO;
+    case LLAMA_VOCAB_PRE_TYPE_CHATGLM4:
+      return tokenizer_pre::CHATGLM4;
+    case LLAMA_VOCAB_PRE_TYPE_VIKING:
+      return tokenizer_pre::VIKING;
+    case LLAMA_VOCAB_PRE_TYPE_TEKKEN:
+      return tokenizer_pre::TEKKEN;
+    case LLAMA_VOCAB_PRE_TYPE_SMOLLM:
+      return tokenizer_pre::SMOLLM;
+    case LLAMA_VOCAB_PRE_TYPE_CODESHELL:
+      return tokenizer_pre::CODESHELL;
+    case LLAMA_VOCAB_PRE_TYPE_BLOOM:
+      return tokenizer_pre::BLOOM;
+    case LLAMA_VOCAB_PRE_TYPE_GPT3_FINNISH:
+      return tokenizer_pre::GPT3_FINNISH;
+    case LLAMA_VOCAB_PRE_TYPE_EXAONE:
+      return tokenizer_pre::EXAONE;
+    case LLAMA_VOCAB_PRE_TYPE_EXAONE_MOE:
+      return tokenizer_pre::EXAONE_MOE;
+    case LLAMA_VOCAB_PRE_TYPE_CHAMELEON:
+      return tokenizer_pre::CHAMELEON;
+    case LLAMA_VOCAB_PRE_TYPE_MINERVA:
+      return tokenizer_pre::MINERVA;
+    case LLAMA_VOCAB_PRE_TYPE_GPT4O:
+      return tokenizer_pre::GPT4O;
+    case LLAMA_VOCAB_PRE_TYPE_TINY_AYA:
+      return tokenizer_pre::TINY_AYA;
+    case LLAMA_VOCAB_PRE_TYPE_SUPERBPE:
+      return tokenizer_pre::SUPERBPE;
+    case LLAMA_VOCAB_PRE_TYPE_TRILLION:
+      return tokenizer_pre::TRILLION;
+    case LLAMA_VOCAB_PRE_TYPE_GRANITE_DOCLING:
+      return tokenizer_pre::GRANITE_DOCLING;
+    case LLAMA_VOCAB_PRE_TYPE_BAILINGMOE:
+      return tokenizer_pre::BAILINGMOE;
+    case LLAMA_VOCAB_PRE_TYPE_SEED_CODER:
+      return tokenizer_pre::SEED_CODER;
+    case LLAMA_VOCAB_PRE_TYPE_HUNYUAN:
+      return tokenizer_pre::HUNYUAN;
+    case LLAMA_VOCAB_PRE_TYPE_HUNYUAN_DENSE:
+      return tokenizer_pre::HUNYUAN_DENSE;
+    case LLAMA_VOCAB_PRE_TYPE_JOYAI_LLM:
+      return tokenizer_pre::JOYAI_LLM;
+    case LLAMA_VOCAB_PRE_TYPE_KIMI_K2:
+      return tokenizer_pre::KIMI_K2;
+    case LLAMA_VOCAB_PRE_TYPE_GROK_2:
+      return tokenizer_pre::GROK_2;
+    case LLAMA_VOCAB_PRE_TYPE_AFMOE:
+      return tokenizer_pre::AFMOE;
+    case LLAMA_VOCAB_PRE_TYPE_MINIMAX_M2:
+      return tokenizer_pre::MINIMAX_M2;
+    case LLAMA_VOCAB_PRE_TYPE_SOLAR_OPEN:
+      return tokenizer_pre::SOLAR_OPEN;
+    case LLAMA_VOCAB_PRE_TYPE_CHATGLM3:
+    case LLAMA_VOCAB_PRE_TYPE_LLAMA4:
+    case LLAMA_VOCAB_PRE_TYPE_PIXTRAL:
+      return tokenizer_pre::UNKNOWN;
+    default:
+      return tokenizer_pre::UNKNOWN;
+  }
+}
+
+bool load_emel_vocab_from_llama(const llama_vocab & src, emel::model::data::vocab & dst) {
+  dst = {};
+  dst.tokenizer_model_id = to_emel_tokenizer_model(src.get_type());
+  dst.tokenizer_pre_id = to_emel_tokenizer_pre(src.get_pre_type());
+  copy_name(dst.tokenizer_model_name, src.get_tokenizer_model());
+  copy_name(dst.tokenizer_pre_name, src.get_tokenizer_pre());
+
+  const uint32_t token_count = src.n_tokens();
+  if (token_count > emel::model::data::k_max_vocab_tokens) {
+    std::fprintf(stderr,
+                 "vocab token count exceeds emel capacity: %u > %d\n",
+                 token_count,
+                 emel::model::data::k_max_vocab_tokens);
+    return false;
+  }
+  dst.n_tokens = token_count;
+  dst.n_token_types = src.n_token_types();
+
+  uint32_t token_bytes_used = 0;
+  for (uint32_t token_id = 0; token_id < token_count; ++token_id) {
+    const llama_token llama_id = static_cast<llama_token>(token_id);
+    const auto & token = src.get_token_data(llama_id);
+    const uint32_t token_len = static_cast<uint32_t>(token.text.size());
+    if (token_bytes_used + token_len > emel::model::data::k_max_vocab_bytes) {
+      std::fprintf(stderr,
+                   "token storage exceeds emel capacity at token %u (%u + %u > %d)\n",
+                   token_id,
+                   token_bytes_used,
+                   token_len,
+                   emel::model::data::k_max_vocab_bytes);
+      return false;
+    }
+
+    if (token_len > 0) {
+      std::memcpy(dst.token_storage.data() + token_bytes_used,
+                  token.text.data(),
+                  token_len);
+    }
+
+    emel::model::data::vocab_entry & entry = dst.entries[token_id];
+    entry.text_offset = token_bytes_used;
+    entry.text_length = token_len;
+    entry.score = token.score;
+    entry.type = token_type_from_attr(token.attr);
+    token_bytes_used += token_len;
+
+    if (attr_has(token.attr, LLAMA_TOKEN_ATTR_LSTRIP)) {
+      set_token_flag(dst.lstrip_flags, token_id);
+    }
+    if (attr_has(token.attr, LLAMA_TOKEN_ATTR_RSTRIP)) {
+      set_token_flag(dst.rstrip_flags, token_id);
+    }
+  }
+  dst.token_bytes_used = token_bytes_used;
+
+  const std::vector<std::string> merges = src.get_bpe_merges();
+  if (merges.size() > emel::model::data::k_max_merges) {
+    std::fprintf(stderr,
+                 "merge count exceeds emel capacity: %zu > %d\n",
+                 merges.size(),
+                 emel::model::data::k_max_merges);
+    return false;
+  }
+
+  uint32_t merge_bytes_used = 0;
+  for (size_t i = 0; i < merges.size(); ++i) {
+    const std::string & merge = merges[i];
+    const uint32_t merge_len = static_cast<uint32_t>(merge.size());
+    if (merge_bytes_used + merge_len > emel::model::data::k_max_merge_bytes) {
+      std::fprintf(stderr,
+                   "merge storage exceeds emel capacity at merge %zu (%u + %u > %d)\n",
+                   i,
+                   merge_bytes_used,
+                   merge_len,
+                   emel::model::data::k_max_merge_bytes);
+      return false;
+    }
+    if (merge_len > 0) {
+      std::memcpy(dst.merge_storage.data() + merge_bytes_used,
+                  merge.data(),
+                  merge_len);
+    }
+    dst.merge_offsets[i] = merge_bytes_used;
+    dst.merge_lengths[i] = merge_len;
+    merge_bytes_used += merge_len;
+  }
+  dst.n_merges = static_cast<uint32_t>(merges.size());
+  dst.merge_bytes_used = merge_bytes_used;
+
+  const std::vector<char> precompiled_charsmap = src.get_precompiled_charsmap();
+  if (precompiled_charsmap.size() > emel::model::data::k_max_precompiled_charsmap_bytes) {
+    std::fprintf(stderr,
+                 "precompiled charsmap exceeds emel capacity: %zu > %d\n",
+                 precompiled_charsmap.size(),
+                 emel::model::data::k_max_precompiled_charsmap_bytes);
+    return false;
+  }
+  if (!precompiled_charsmap.empty()) {
+    std::memcpy(dst.precompiled_charsmap.data(),
+                precompiled_charsmap.data(),
+                precompiled_charsmap.size());
+  }
+  dst.precompiled_charsmap_size = static_cast<uint32_t>(precompiled_charsmap.size());
+
+  dst.bos_id = src.token_bos();
+  dst.eos_id = src.token_eos();
+  dst.eot_id = src.token_eot();
+  dst.eom_id = src.token_eom();
+  dst.unk_id = src.token_unk();
+  dst.sep_id = src.token_sep();
+  dst.pad_id = src.token_pad();
+  dst.mask_id = src.token_mask();
+  dst.prefix_id = src.token_prefix();
+  dst.suffix_id = src.token_suffix();
+  dst.middle_id = src.token_middle();
+  dst.fim_pre_id = src.token_fim_pre();
+  dst.fim_suf_id = src.token_fim_suf();
+  dst.fim_mid_id = src.token_fim_mid();
+  dst.fim_pad_id = src.token_fim_pad();
+  dst.fim_rep_id = src.token_fim_rep();
+  dst.fim_sep_id = src.token_fim_sep();
+
+  dst.add_bos = src.get_add_bos();
+  dst.add_eos = src.get_add_eos();
+  dst.add_sep = src.get_add_sep();
+  dst.add_space_prefix = src.get_add_space_prefix();
+  dst.ignore_merges = src.get_ignore_merges();
+  dst.remove_extra_whitespaces = src.get_remove_extra_whitespaces();
+  dst.escape_whitespaces = src.get_escape_whitespaces();
+  dst.treat_whitespace_as_suffix = src.get_treat_whitespace_as_suffix();
+
+  return true;
 }
 
 constexpr double k_f32_rtol = 1e-5;
@@ -739,9 +1069,59 @@ int run_kernel_parity(const emel::paritychecker::parity_options &) {
   return 1;
 }
 
-int run_tokenizer_parity(const emel::paritychecker::parity_options &) {
-  std::fprintf(stderr, "tokenizer parity is scaffolded\n");
-  return 1;
+int run_tokenizer_parity(const emel::paritychecker::parity_options & opts) {
+  llama_backend_guard backend_guard{};
+
+  llama_model_params model_params = llama_model_default_params();
+  model_params.vocab_only = true;
+  model_params.check_tensors = false;
+
+  std::unique_ptr<llama_model, decltype(&llama_model_free)> model(
+      llama_model_load_from_file(opts.model_path.c_str(), model_params),
+      llama_model_free);
+  if (model == nullptr) {
+    std::fprintf(stderr, "failed to load model: %s\n", opts.model_path.c_str());
+    return 1;
+  }
+
+  const llama_vocab * llama_vocab_ptr = llama_model_get_vocab(model.get());
+  if (llama_vocab_ptr == nullptr) {
+    std::fprintf(stderr, "model has no vocabulary: %s\n", opts.model_path.c_str());
+    return 1;
+  }
+
+  auto emel_vocab = std::make_unique<emel::model::data::vocab>();
+  if (!load_emel_vocab_from_llama(*llama_vocab_ptr, *emel_vocab)) {
+    std::fprintf(stderr, "failed to map llama vocab into emel layout\n");
+    return 1;
+  }
+
+  using tokenizer_model = emel::model::data::tokenizer_model;
+  switch (emel_vocab->tokenizer_model_id) {
+    case tokenizer_model::SPM:
+      return emel::paritychecker::run_tokenizer_spm_parity(
+          opts, *llama_vocab_ptr, *emel_vocab);
+    case tokenizer_model::BPE:
+      return emel::paritychecker::run_tokenizer_bpe_parity(
+          opts, *llama_vocab_ptr, *emel_vocab);
+    case tokenizer_model::WPM:
+      return emel::paritychecker::run_tokenizer_wpm_parity(
+          opts, *llama_vocab_ptr, *emel_vocab);
+    case tokenizer_model::UGM:
+      return emel::paritychecker::run_tokenizer_ugm_parity(
+          opts, *llama_vocab_ptr, *emel_vocab);
+    case tokenizer_model::RWKV:
+      return emel::paritychecker::run_tokenizer_rwkv_parity(
+          opts, *llama_vocab_ptr, *emel_vocab);
+    case tokenizer_model::PLAMO2:
+      return emel::paritychecker::run_tokenizer_plamo2_parity(
+          opts, *llama_vocab_ptr, *emel_vocab);
+    case tokenizer_model::NONE:
+    case tokenizer_model::UNKNOWN:
+    default:
+      return emel::paritychecker::run_tokenizer_fallback_parity(
+          opts, *llama_vocab_ptr, *emel_vocab);
+  }
 }
 
 int run_gbnf_parser_parity(const emel::paritychecker::parity_options & opts) {

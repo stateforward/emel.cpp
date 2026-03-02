@@ -4,10 +4,6 @@ project(docsgen LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-option(EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES
-  "Build tensor/parser/text machine surfaces"
-  OFF
-)
 
 include(FetchContent)
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/sml_version.cmake")
@@ -22,11 +18,6 @@ set(ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}/../..")
 
 file(GLOB_RECURSE SM_HEADERS CONFIGURE_DEPENDS "${ROOT_DIR}/src/emel/**/sm.hpp")
 list(FILTER SM_HEADERS EXCLUDE REGEX ".*/src/emel/sm.hpp$")
-if(NOT EMEL_ENABLE_TENSOR_PARSER_TEXT_MACHINES)
-  list(FILTER SM_HEADERS EXCLUDE REGEX ".*/src/emel/parser/.*")
-  list(FILTER SM_HEADERS EXCLUDE REGEX ".*/src/emel/text/.*")
-  list(FILTER SM_HEADERS EXCLUDE REGEX ".*/src/emel/tensor/.*")
-endif()
 list(SORT SM_HEADERS)
 
 set(DOCS_ENABLED_SM_HEADERS "")

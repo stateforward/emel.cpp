@@ -50,6 +50,20 @@ void append_emel_tokenizer_preprocessor_plamo2_cases(std::vector<result> & resul
                                                      const config & cfg);
 void append_reference_tokenizer_preprocessor_plamo2_cases(std::vector<result> & results,
                                                           const config & cfg);
+void append_emel_encoder_bpe_cases(std::vector<result> & results, const config & cfg);
+void append_reference_encoder_bpe_cases(std::vector<result> & results, const config & cfg);
+void append_emel_encoder_spm_cases(std::vector<result> & results, const config & cfg);
+void append_reference_encoder_spm_cases(std::vector<result> & results, const config & cfg);
+void append_emel_encoder_wpm_cases(std::vector<result> & results, const config & cfg);
+void append_reference_encoder_wpm_cases(std::vector<result> & results, const config & cfg);
+void append_emel_encoder_ugm_cases(std::vector<result> & results, const config & cfg);
+void append_reference_encoder_ugm_cases(std::vector<result> & results, const config & cfg);
+void append_emel_encoder_rwkv_cases(std::vector<result> & results, const config & cfg);
+void append_reference_encoder_rwkv_cases(std::vector<result> & results, const config & cfg);
+void append_emel_encoder_plamo2_cases(std::vector<result> & results, const config & cfg);
+void append_reference_encoder_plamo2_cases(std::vector<result> & results, const config & cfg);
+void append_emel_encoder_fallback_cases(std::vector<result> & results, const config & cfg);
+void append_reference_encoder_fallback_cases(std::vector<result> & results, const config & cfg);
 void append_emel_tokenizer_cases(std::vector<result> & results, const config & cfg);
 void append_reference_tokenizer_cases(std::vector<result> & results, const config & cfg);
 

@@ -39,7 +39,7 @@ emel::model::data::vocab & vocab_storage() {
   return storage;
 }
 
-size_t sum_offsets(const std::vector<size_t> & offsets) {
+[[maybe_unused]] size_t sum_offsets(const std::vector<size_t> & offsets) {
   size_t sum = 0;
   for (const size_t value : offsets) {
     sum += value;
@@ -52,7 +52,8 @@ struct dispatch_recorder {
   int error_count = 0;
 };
 
-bool record_done(void * owner, const emel::text::encoders::events::encoding_done &) {
+[[maybe_unused]] bool record_done(void * owner,
+                                  const emel::text::encoders::events::encoding_done &) {
   if (owner == nullptr) {
     return false;
   }
@@ -60,7 +61,8 @@ bool record_done(void * owner, const emel::text::encoders::events::encoding_done
   return true;
 }
 
-bool record_error(void * owner, const emel::text::encoders::events::encoding_error &) {
+[[maybe_unused]] bool record_error(void * owner,
+                                   const emel::text::encoders::events::encoding_error &) {
   if (owner == nullptr) {
     return false;
   }
@@ -183,4 +185,3 @@ struct vocab_builder {
 };
 
 }  // namespace
-

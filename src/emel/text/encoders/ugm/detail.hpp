@@ -332,7 +332,7 @@ inline normalization_result normalize_prefix(const emel::model::data::vocab &voc
     return {replacement, replacement_len, longest_prefix_length};
   }
 
-  constexpr std::array<char, 3> replacement = {'\xEF', '\xBF', '\xBD'};
+  static constexpr std::array<char, 3> replacement = {'\xEF', '\xBF', '\xBD'};
   const uint8_t first = static_cast<uint8_t>(input[input_offset]);
   const bool continuation = (first & 0xC0u) == 0x80u;
   const size_t len_raw = ugm_utf8_len(static_cast<char>(first));
