@@ -287,6 +287,14 @@ struct template_var {
   std::string value;
 };
 
+bool formatter_render_done_sink(const emel::text::jinja::events::rendering_done &) {
+  return true;
+}
+
+bool formatter_render_error_sink(const emel::text::jinja::events::rendering_error &) {
+  return true;
+}
+
 std::optional<std::string> render_template(const fs::path & template_path,
                                            const std::vector<template_var> & vars) {
   const std::string template_text = read_file(template_path);
@@ -348,22 +356,29 @@ std::optional<std::string> render_template(const fs::path & template_path,
 
   size_t out_len = 0;
   size_t error_pos = 0;
-  int32_t render_err = EMEL_OK;
+  int32_t render_err = static_cast<int32_t>(emel::text::jinja::formatter::error::none);
   emel::text::jinja::formatter::action::context render_ctx;
   emel::text::jinja::formatter::sm renderer{render_ctx};
+  const emel::text::jinja::event::render::done_callback render_done_cb =
+      emel::text::jinja::event::render::done_callback::from<&formatter_render_done_sink>();
+  const emel::text::jinja::event::render::error_callback render_error_cb =
+      emel::text::jinja::event::render::error_callback::from<&formatter_render_error_sink>();
   emel::text::jinja::event::render render_ev{
-    .program = &program,
-    .globals = entries.empty() ? nullptr : &globals,
-    .source_text = template_text,
-    .output = output_buffer.data(),
-    .output_capacity = output_buffer.size(),
-    .output_length = &out_len,
-    .error_out = &render_err,
-    .error_pos_out = &error_pos,
+      program,
+      template_text,
+      output_buffer[0],
+      output_buffer.size(),
+      render_done_cb,
+      render_error_cb,
+      entries.empty() ? nullptr : &globals,
+      &out_len,
+      nullptr,
+      &render_err,
+      &error_pos,
   };
 
   renderer.process_event(render_ev);
-  if (render_err != EMEL_OK ||
+  if (render_err != static_cast<int32_t>(emel::text::jinja::formatter::error::none) ||
       !renderer.is(boost::sml::state<emel::text::jinja::formatter::done>)) {
     std::fprintf(stderr, "error: jinja render failed\n");
     return std::nullopt;
