@@ -1,3 +1,4 @@
+#pragma once
 #include "bench_cases.hpp"
 
 #include <algorithm>
@@ -167,85 +168,5 @@ emel::error::type run_sampler_raw(const emel::logits::sampler::event::sample_log
   return ev.error_out;
 }
 
-void append_component_cases(std::vector<emel::bench::result> & results,
-                            const emel::bench::config & cfg) {
-  volatile std::int64_t sink = 0;
-
-  for (const int32_t vocab_size : k_vocab_sizes) {
-    logits_case_data validator_data{vocab_size};
-    int32_t candidate_count_out = 0;
-    emel::error::type validator_error_out = emel::error::cast(emel::logits::validator::error::none);
-    emel::logits::validator::event::build build_event{
-      validator_data.logits[0],
-      vocab_size,
-      validator_data.candidate_ids[0],
-      validator_data.candidate_scores[0],
-      vocab_size,
-      candidate_count_out,
-      validator_error_out};
-
-    emel::logits::validator::sm validator_machine{};
-    const std::string validator_sml_case = make_case_name("validator", "sml", vocab_size);
-    auto validator_sml_fn = [&]() {
-      (void)validator_machine.process_event(build_event);
-      sink ^= static_cast<std::int64_t>(candidate_count_out);
-    };
-    results.push_back(emel::bench::measure_case(validator_sml_case.c_str(), cfg, validator_sml_fn));
-
-    const std::string validator_raw_case = make_case_name("validator", "raw", vocab_size);
-    auto validator_raw_fn = [&]() {
-      (void)run_validator_raw(build_event);
-      sink ^= static_cast<std::int64_t>(candidate_count_out);
-    };
-    results.push_back(emel::bench::measure_case(validator_raw_case.c_str(), cfg, validator_raw_fn));
-
-    logits_case_data sampler_data{vocab_size};
-    int32_t selected_token_out = -1;
-    emel::error::type sampler_error_out = emel::error::cast(emel::logits::sampler::error::none);
-    emel::logits::sampler::event::sample_logits sample_event{
-      sampler_data.logits[0],
-      vocab_size,
-      sampler_data.candidate_ids[0],
-      sampler_data.candidate_scores[0],
-      vocab_size,
-      selected_token_out,
-      sampler_error_out};
-
-    emel::logits::sampler::fn sampler_chain[] = {
-      emel::logits::sampler::fn::from<top_k_sampler>(),
-      emel::logits::sampler::fn::from<argmax_sampler>(),
-    };
-    constexpr int32_t sampler_count = static_cast<int32_t>(std::size(sampler_chain));
-
-    emel::logits::sampler::sm sampler_machine{sampler_chain, sampler_count};
-    const std::string sampler_sml_case = make_case_name("sampler", "sml", vocab_size);
-    auto sampler_sml_fn = [&]() {
-      (void)sampler_machine.process_event(sample_event);
-      sink ^= static_cast<std::int64_t>(selected_token_out);
-    };
-    results.push_back(emel::bench::measure_case(sampler_sml_case.c_str(), cfg, sampler_sml_fn));
-
-    const std::string sampler_raw_case = make_case_name("sampler", "raw", vocab_size);
-    auto sampler_raw_fn = [&]() {
-      (void)run_sampler_raw(sample_event, sampler_chain, sampler_count);
-      sink ^= static_cast<std::int64_t>(selected_token_out);
-    };
-    results.push_back(emel::bench::measure_case(sampler_raw_case.c_str(), cfg, sampler_raw_fn));
-  }
-
-  (void)sink;
-}
 
 }  // namespace
-
-namespace emel::bench {
-
-void append_emel_logits_cases(std::vector<result> & results, const config & cfg) {
-  append_component_cases(results, cfg);
-}
-
-void append_reference_logits_cases(std::vector<result> & results, const config & cfg) {
-  append_component_cases(results, cfg);
-}
-
-}  // namespace emel::bench

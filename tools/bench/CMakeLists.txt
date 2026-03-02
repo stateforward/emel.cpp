@@ -109,9 +109,11 @@ find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
 
 set(BENCH_RUNNER_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/batch/planner_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/parser_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/kernel_bench.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/logits_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/rule_parser_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/kernel/aarch64_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/kernel/x86_64_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/logits/sampler_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/logits/validator_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory/kv_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory/recurrent_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory/hybrid_bench.cpp
@@ -140,6 +142,8 @@ set(BENCH_RUNNER_SOURCES
   ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_cases.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/kernel/bench_common.hpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/logits/bench_common.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_main.cpp
 )
 
@@ -168,7 +172,7 @@ target_include_directories(bench_runner
 )
 
 add_executable(gbnf_bench_runner
-  ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/parser_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/rule_parser_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/bench_main.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_cases.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp

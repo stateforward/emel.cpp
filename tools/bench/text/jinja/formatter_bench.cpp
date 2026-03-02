@@ -11,9 +11,6 @@
 #include "jinja/parser.h"
 #include "jinja/runtime.h"
 
-// TODO(rearchitecture-cleanup): Keep legacy "renderer" benchmark IDs until
-// downstream references and snapshot consumers are migrated.
-
 namespace {
 
 std::string make_long_template() {
@@ -124,7 +121,7 @@ void append_emel_jinja_formatter_cases(std::vector<result> & results, const conf
     };
     (void)machine.process_event(ev);
   };
-  results.push_back(measure_case("jinja/renderer_short", cfg, short_fn));
+  results.push_back(measure_case("text/jinja/formatter_short", cfg, short_fn));
 
   auto long_fn = [&]() {
     std::array<char, 1024> buffer = {};
@@ -140,7 +137,7 @@ void append_emel_jinja_formatter_cases(std::vector<result> & results, const conf
     };
     (void)machine.process_event(ev);
   };
-  results.push_back(measure_case("jinja/renderer_long", cfg, long_fn));
+  results.push_back(measure_case("text/jinja/formatter_long", cfg, long_fn));
 }
 
 void append_reference_jinja_formatter_cases(std::vector<result> & results, const config & cfg) {
@@ -158,7 +155,7 @@ void append_reference_jinja_formatter_cases(std::vector<result> & results, const
     auto parts = ::jinja::runtime::gather_string_parts(result);
     (void)::jinja::render_string_parts(parts);
   };
-  results.push_back(measure_case("jinja/renderer_short", cfg, short_fn));
+  results.push_back(measure_case("text/jinja/formatter_short", cfg, short_fn));
 
   auto long_fn = [&]() {
     ::jinja::context ctx;
@@ -174,7 +171,7 @@ void append_reference_jinja_formatter_cases(std::vector<result> & results, const
     auto parts = ::jinja::runtime::gather_string_parts(result);
     (void)::jinja::render_string_parts(parts);
   };
-  results.push_back(measure_case("jinja/renderer_long", cfg, long_fn));
+  results.push_back(measure_case("text/jinja/formatter_long", cfg, long_fn));
 }
 
 }  // namespace emel::bench

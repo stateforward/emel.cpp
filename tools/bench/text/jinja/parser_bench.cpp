@@ -65,7 +65,7 @@ void append_emel_jinja_parser_cases(std::vector<result> & results, const config 
     emel::text::jinja::parser::detail::recursive_descent_parser parser{program};
     (void)parser.parse(lex_res);
   };
-  results.push_back(measure_case("jinja/parser_short", cfg, short_fn));
+  results.push_back(measure_case("text/jinja/parser_short", cfg, short_fn));
 
   auto long_fn = [&]() {
     emel::text::jinja::lexer_result lex_res = lex.tokenize(long_template);
@@ -73,7 +73,7 @@ void append_emel_jinja_parser_cases(std::vector<result> & results, const config 
     emel::text::jinja::parser::detail::recursive_descent_parser parser{program};
     (void)parser.parse(lex_res);
   };
-  results.push_back(measure_case("jinja/parser_long", cfg, long_fn));
+  results.push_back(measure_case("text/jinja/parser_long", cfg, long_fn));
 }
 
 void append_reference_jinja_parser_cases(std::vector<result> & results, const config & cfg) {
@@ -88,13 +88,13 @@ void append_reference_jinja_parser_cases(std::vector<result> & results, const co
     ::jinja::lexer_result lex_res = lex.tokenize(short_template);
     (void)::jinja::parse_from_tokens(lex_res);
   };
-  results.push_back(measure_case("jinja/parser_short", cfg, short_fn));
+  results.push_back(measure_case("text/jinja/parser_short", cfg, short_fn));
 
   auto long_fn = [&]() {
     ::jinja::lexer_result lex_res = lex.tokenize(long_template);
     (void)::jinja::parse_from_tokens(lex_res);
   };
-  results.push_back(measure_case("jinja/parser_long", cfg, long_fn));
+  results.push_back(measure_case("text/jinja/parser_long", cfg, long_fn));
 }
 
 }  // namespace emel::bench
