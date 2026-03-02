@@ -228,17 +228,20 @@ struct dispatch_encode_raw_fragment {
     auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
     const fragment &frag = ev.ctx.fragments[ev.ctx.fragment_index];
     const int32_t capacity = ev.request.token_capacity - ev.ctx.token_count;
+    const size_t output_capacity =
+        capacity > 0 ? static_cast<size_t>(capacity) : 0;
 
     int32_t fragment_count = 0;
     int32_t err = error_code(error::none);
-    emel::text::encoders::event::encode encode_ev = {};
-    encode_ev.vocab = ctx.vocab;
-    encode_ev.text = frag.text;
-    encode_ev.preprocessed = ev.ctx.preprocessed;
-    encode_ev.token_ids = ev.request.token_ids_out + ev.ctx.token_count;
-    encode_ev.token_capacity = capacity;
-    encode_ev.token_count_out = &fragment_count;
-    encode_ev.error_out = &err;
+    emel::text::encoders::event::encode encode_ev{
+        .vocab = *ctx.vocab,
+        .text = frag.text,
+        .preprocessed = ev.ctx.preprocessed,
+        .token_ids =
+            std::span<int32_t>(ev.request.token_ids_out + ev.ctx.token_count, output_capacity),
+        .token_count_out = &fragment_count,
+        .error_out = &err,
+    };
 
     ev.ctx.encode_accepted = ctx.encoder_any.process_event(encode_ev);
     ev.ctx.encode_err_code = err;

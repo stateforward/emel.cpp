@@ -1,31 +1,92 @@
 #pragma once
 
-#include "emel/text/encoders/guards.hpp"
 #include "emel/text/encoders/ugm/context.hpp"
+#include "emel/text/encoders/guards.hpp"
 
 namespace emel::text::encoders::ugm::guard {
 
 struct valid_encode {
-  bool operator()(const event::encode & ev, const action::context & ctx) const noexcept {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
     return emel::text::encoders::guard::valid_encode{}(ev, ctx);
   }
 };
 
 struct invalid_encode {
-  bool operator()(const event::encode & ev, const action::context & ctx) const noexcept {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
     return emel::text::encoders::guard::invalid_encode{}(ev, ctx);
   }
 };
 
 struct phase_ok {
-  bool operator()(const action::context & ctx) const noexcept {
-    return emel::text::encoders::guard::phase_ok{}(ctx);
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    return emel::text::encoders::guard::phase_ok{}(ev);
   }
 };
 
 struct phase_failed {
-  bool operator()(const action::context & ctx) const noexcept {
-    return emel::text::encoders::guard::phase_failed{}(ctx);
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    return emel::text::encoders::guard::phase_failed{}(ev);
+  }
+};
+
+struct text_empty {
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    return emel::text::encoders::guard::text_empty{}(ev);
+  }
+};
+
+struct text_non_empty {
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    return emel::text::encoders::guard::text_non_empty{}(ev);
+  }
+};
+
+struct vocab_changed {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return emel::text::encoders::guard::vocab_changed{}(ev, ctx);
+  }
+};
+
+struct vocab_unchanged {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return emel::text::encoders::guard::vocab_unchanged{}(ev, ctx);
+  }
+};
+
+struct valid_encode_and_vocab_changed {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return emel::text::encoders::guard::valid_encode_and_vocab_changed{}(ev, ctx);
+  }
+};
+
+struct valid_encode_and_vocab_unchanged {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return emel::text::encoders::guard::valid_encode_and_vocab_unchanged{}(ev, ctx);
+  }
+};
+
+struct tables_ready {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    (void)ev;
+    return ctx.ugm_tables_ready && ctx.ugm_vocab == ctx.vocab;
+  }
+};
+
+struct tables_missing {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return !tables_ready{}(ev, ctx);
+  }
+};
+
+struct text_non_empty_and_tables_ready {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return text_non_empty{}(ev) && tables_ready{}(ev, ctx);
+  }
+};
+
+struct text_non_empty_and_tables_missing {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return text_non_empty{}(ev) && tables_missing{}(ev, ctx);
   }
 };
 

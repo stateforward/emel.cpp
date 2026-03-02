@@ -1,76 +1,84 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+
 #include "emel/text/encoders/actions.hpp"
 #include "emel/text/encoders/bpe/context.hpp"
 #include "emel/text/encoders/bpe/detail.hpp"
 
 namespace emel::text::encoders::bpe::action {
 
+struct begin_encode {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    emel::text::encoders::action::begin_encode(ev, ctx);
+  }
+};
+
+struct begin_encode_sync_vocab {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    emel::text::encoders::action::begin_encode(ev, ctx);
+    emel::text::encoders::action::sync_vocab(ev, ctx);
+  }
+};
+
 struct reject_invalid_encode {
-  void operator()(const event::encode & ev, context & ctx) const {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
     emel::text::encoders::action::reject_invalid_encode(ev, ctx);
   }
 };
 
-struct run_encode {
-  void operator()(context & ctx) const noexcept {
-    emel::text::encoders::action::run_encode(ctx);
+struct prepare_tables {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    const bool ready = emel::text::encoders::bpe::detail::ensure_bpe_tables(ctx);
+    const std::array<int32_t, 2> errors{EMEL_ERR_BACKEND, EMEL_OK};
+    ev.ctx.err = errors[static_cast<size_t>(ready)];
+  }
+};
+
+struct run_encode_ignore_merges {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    const auto result = emel::text::encoders::bpe::detail::encode_bpe_ignore_merges(
+      ev.request, ctx);
+    ev.ctx.token_count = result.token_count;
+    ev.ctx.err = result.error;
+  }
+};
+
+struct run_encode_merge_path {
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    const auto result = emel::text::encoders::bpe::detail::encode_bpe_merge_path(
+      ev.request, ctx, *ctx.vocab);
+    ev.ctx.token_count = result.token_count;
+    ev.ctx.err = result.error;
   }
 };
 
 struct mark_done {
-  void operator()(context & ctx) const noexcept {
-    emel::text::encoders::action::mark_done(ctx);
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    emel::text::encoders::action::mark_done(ev, ctx);
   }
 };
 
 struct ensure_last_error {
-  void operator()(context & ctx) const noexcept {
-    emel::text::encoders::action::ensure_last_error(ctx);
+  void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
+    emel::text::encoders::action::ensure_last_error(ev, ctx);
   }
 };
 
 struct on_unexpected {
-  template <class event>
-  void operator()(const event & ev, context & ctx) const noexcept {
+  template <class event_type>
+  void operator()(const event_type & ev, context & ctx) const noexcept {
     emel::text::encoders::action::on_unexpected(ev, ctx);
   }
 };
 
-struct begin_encode {
-  void operator()(const event::encode & ev, context & ctx) const noexcept {
-    ctx.token_count = 0;
-    ctx.phase_error = EMEL_OK;
-    ctx.last_error = EMEL_OK;
-    if (emel::text::encoders::action::detail::sync_vocab(ctx, ev.vocab)) {
-    }
-    if (ev.token_count_out != nullptr) {
-      *ev.token_count_out = 0;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = EMEL_OK;
-    }
-    const auto result = emel::text::encoders::bpe::detail::encode_bpe(ev, ctx, *ctx.vocab);
-    ctx.token_count = result.token_count;
-    ctx.phase_error = result.error;
-    if (ev.token_count_out != nullptr) {
-      *ev.token_count_out = result.token_count;
-    }
-    if (ev.error_out != nullptr) {
-      *ev.error_out = result.error;
-    }
-    if (result.error != EMEL_OK) {
-      ctx.last_error = result.error;
-      emel::text::encoders::action::detail::dispatch_error(ev, result.error);
-      return;
-    }
-    emel::text::encoders::action::detail::dispatch_done(ev, result.token_count);
-  }
-};
-
 inline constexpr begin_encode begin_encode{};
+inline constexpr begin_encode_sync_vocab begin_encode_sync_vocab{};
 inline constexpr reject_invalid_encode reject_invalid_encode{};
-inline constexpr run_encode run_encode{};
+inline constexpr prepare_tables prepare_tables{};
+inline constexpr run_encode_ignore_merges run_encode_ignore_merges{};
+inline constexpr run_encode_merge_path run_encode_merge_path{};
 inline constexpr mark_done mark_done{};
 inline constexpr ensure_last_error ensure_last_error{};
 inline constexpr on_unexpected on_unexpected{};
