@@ -124,16 +124,14 @@ inline void ensure_encodes(machine_type & machine,
 }
 
 template <class machine_type, class build_vocab_fn>
-inline void append_emel_encoder_cases(std::vector<result> & results,
-                                      const config & cfg,
-                                      const char * short_name,
-                                      const char * long_name,
-                                      build_vocab_fn build_vocab,
-                                      const bool preprocessed,
-                                      const int short_repeats = 1,
-                                      const int long_repeats = 64) {
-  const std::string short_text = make_repeated_text(short_repeats);
-  const std::string long_text = make_repeated_text(long_repeats);
+inline void append_emel_encoder_cases_with_text(std::vector<result> & results,
+                                                const config & cfg,
+                                                const char * short_name,
+                                                const char * long_name,
+                                                build_vocab_fn build_vocab,
+                                                const bool preprocessed,
+                                                const std::string_view short_text,
+                                                const std::string_view long_text) {
   auto vocab = build_vocab();
 
   machine_type machine{};
@@ -166,6 +164,28 @@ inline void append_emel_encoder_cases(std::vector<result> & results,
 
   results.push_back(measure_case(short_name, cfg, short_fn));
   results.push_back(measure_case(long_name, cfg, long_fn));
+}
+
+template <class machine_type, class build_vocab_fn>
+inline void append_emel_encoder_cases(std::vector<result> & results,
+                                      const config & cfg,
+                                      const char * short_name,
+                                      const char * long_name,
+                                      build_vocab_fn build_vocab,
+                                      const bool preprocessed,
+                                      const int short_repeats = 1,
+                                      const int long_repeats = 64) {
+  const std::string short_text = make_repeated_text(short_repeats);
+  const std::string long_text = make_repeated_text(long_repeats);
+  append_emel_encoder_cases_with_text<machine_type>(
+    results,
+    cfg,
+    short_name,
+    long_name,
+    build_vocab,
+    preprocessed,
+    short_text,
+    long_text);
 }
 
 }  // namespace emel::bench::encoder_bench

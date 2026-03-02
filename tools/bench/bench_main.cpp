@@ -19,6 +19,33 @@ constexpr std::size_t k_default_runs = 5;
 constexpr std::uint64_t k_default_warmup_iterations = 1000;
 constexpr std::size_t k_default_warmup_runs = 1;
 constexpr std::size_t k_max_runs = 25;
+
+constexpr bool k_host_is_x86_64 =
+#if defined(__x86_64__) || defined(_M_X64)
+  true;
+#else
+  false;
+#endif
+
+constexpr bool k_host_is_aarch64 =
+#if defined(__aarch64__) || defined(_M_ARM64)
+  true;
+#else
+  false;
+#endif
+
+bool case_supported_on_host(const bench::test_case & tc) {
+  if (tc.append_emel == bench::append_emel_kernel_x86_64_cases ||
+      tc.append_reference == bench::append_reference_kernel_x86_64_cases) {
+    return k_host_is_x86_64;
+  }
+  if (tc.append_emel == bench::append_emel_kernel_aarch64_cases ||
+      tc.append_reference == bench::append_reference_kernel_aarch64_cases) {
+    return k_host_is_aarch64;
+  }
+  return true;
+}
+
 std::uint64_t read_env_u64(const char * name, std::uint64_t fallback) {
   const char * value = std::getenv(name);
   if (value == nullptr || value[0] == '\0') {
@@ -123,6 +150,9 @@ std::vector<bench::result> run_benchmarks(const bench::config & cfg,
 
   for (const bench::test_case & tc : cases) {
     if (tc.tokenizer_case && !include_tokenizer) {
+      continue;
+    }
+    if (!case_supported_on_host(tc)) {
       continue;
     }
     bench::append_test_case(results, cfg, tc, reference);

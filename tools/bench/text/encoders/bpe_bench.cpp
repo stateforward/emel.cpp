@@ -16,8 +16,7 @@ std::unique_ptr<emel::model::data::vocab> make_bpe_vocab() {
   vocab->ignore_merges = true;
   emel::bench::encoder_bench::add_all_byte_tokens(*vocab);
   (void)emel::bench::encoder_bench::add_token(*vocab, "hello", 0.5f, 1);
-  (void)emel::bench::encoder_bench::add_token(*vocab, "world", 0.5f, 1);
-  (void)emel::bench::encoder_bench::add_token(*vocab, " ", 0.1f, 1);
+  (void)emel::bench::encoder_bench::add_token(*vocab, " world", 0.5f, 1);
   return vocab;
 }
 
@@ -26,8 +25,15 @@ std::unique_ptr<emel::model::data::vocab> make_bpe_vocab() {
 namespace emel::bench {
 
 void append_emel_encoder_bpe_cases(std::vector<result> & results, const config & cfg) {
-  encoder_bench::append_emel_encoder_cases<emel::text::encoders::bpe::sm>(
-    results, cfg, "text/encoders/bpe_short", "text/encoders/bpe_long", make_bpe_vocab, true);
+  encoder_bench::append_emel_encoder_cases_with_text<emel::text::encoders::bpe::sm>(
+    results,
+    cfg,
+    "text/encoders/bpe_short",
+    "text/encoders/bpe_long",
+    make_bpe_vocab,
+    true,
+    "hello",
+    " world");
 }
 
 void append_reference_encoder_bpe_cases(std::vector<result> & results, const config & cfg) {
