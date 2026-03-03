@@ -30,6 +30,7 @@ explicitly in the state machine.
 - [x] `src/emel/gbnf/rule_parser/actions.hpp`
 - [x] `src/emel/token/batcher/actions.hpp`
 - [x] `src/emel/docs/detail.hpp`
+- [x] `src/emel/text/encoders/fallback/detail.hpp`
 
 ## High-Priority Findings (Action Files)
 
