@@ -1,7 +1,7 @@
 #pragma once
 
+#include "emel/kernel/x86_64/actions.hpp"
 #include "emel/kernel/detail.hpp"
-#include "emel/kernel/x86_64/detail.hpp"
 #include "emel/kernel/x86_64/context.hpp"
 #include "emel/kernel/x86_64/events.hpp"
 

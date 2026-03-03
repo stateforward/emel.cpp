@@ -105,12 +105,24 @@ inline std::string cpt_to_utf8(const uint32_t cpt) {
 
 inline std::string_view token_text(const emel::model::data::vocab &vocab,
                                    const int32_t id) {
-  if (id < 0 || static_cast<uint32_t>(id) >= vocab.n_tokens) {
-    return {};
+    {
+    const size_t emel_branch_1 = static_cast<size_t>(id < 0 || static_cast<uint32_t>(id) >= vocab.n_tokens);
+    for (size_t emel_case_1 = emel_branch_1; emel_case_1 == 1u; emel_case_1 = 2u) {
+            return {};
+    }
+    for (size_t emel_case_1 = emel_branch_1; emel_case_1 == 0u; emel_case_1 = 2u) {
+
+    }
   }
   const auto &entry = vocab.entries[static_cast<uint32_t>(id)];
-  if (entry.text_length == 0) {
-    return {};
+    {
+    const size_t emel_branch_2 = static_cast<size_t>(entry.text_length == 0);
+    for (size_t emel_case_2 = emel_branch_2; emel_case_2 == 1u; emel_case_2 = 2u) {
+            return {};
+    }
+    for (size_t emel_case_2 = emel_branch_2; emel_case_2 == 0u; emel_case_2 = 2u) {
+
+    }
   }
   return std::string_view(vocab.token_storage.data() + entry.text_offset,
                           entry.text_length);
@@ -119,8 +131,14 @@ inline std::string_view token_text(const emel::model::data::vocab &vocab,
 inline bool is_token_type(const emel::model::data::vocab &vocab,
                           const int32_t id,
                           const int32_t type) {
-  if (id < 0 || static_cast<uint32_t>(id) >= vocab.n_tokens) {
-    return false;
+    {
+    const size_t emel_branch_3 = static_cast<size_t>(id < 0 || static_cast<uint32_t>(id) >= vocab.n_tokens);
+    for (size_t emel_case_3 = emel_branch_3; emel_case_3 == 1u; emel_case_3 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_3 = emel_branch_3; emel_case_3 == 0u; emel_case_3 = 2u) {
+
+    }
   }
   return vocab.entries[static_cast<uint32_t>(id)].type == type;
 }
@@ -134,7 +152,8 @@ inline uint32_t hash_bytes(const uint32_t seed, const std::string_view data) {
     hash ^= byte;
     hash *= k_fnv_prime;
   }
-  return hash == 0 ? 1u : hash;
+  const std::array<uint32_t, 2> hash_candidates = {hash, 1u};
+  return hash_candidates[static_cast<size_t>(hash == 0)];
 }
 
 inline uint32_t hash_sv(const std::string_view data) {
@@ -151,18 +170,31 @@ inline uint32_t hash_pair(const std::string_view left,
   const uint32_t h1 = hash_sv(left);
   const uint32_t h2 = hash_sv(right);
   const uint32_t combined = h1 ^ (h2 + 0x9e3779b9u + (h1 << 6u) + (h1 >> 2u));
-  return combined == 0 ? 1u : combined;
+  const std::array<uint32_t, 2> combined_candidates = {combined, 1u};
+  return combined_candidates[static_cast<size_t>(combined == 0)];
 }
 
 inline std::string_view merge_text(const emel::model::data::vocab &vocab,
                                    const int32_t idx) {
-  if (idx < 0 || static_cast<uint32_t>(idx) >= vocab.n_merges) {
-    return {};
+    {
+    const size_t emel_branch_4 = static_cast<size_t>(idx < 0 || static_cast<uint32_t>(idx) >= vocab.n_merges);
+    for (size_t emel_case_4 = emel_branch_4; emel_case_4 == 1u; emel_case_4 = 2u) {
+            return {};
+    }
+    for (size_t emel_case_4 = emel_branch_4; emel_case_4 == 0u; emel_case_4 = 2u) {
+
+    }
   }
   const uint32_t offset = vocab.merge_offsets[static_cast<uint32_t>(idx)];
   const uint32_t length = vocab.merge_lengths[static_cast<uint32_t>(idx)];
-  if (offset + length > vocab.merge_storage.size()) {
-    return {};
+    {
+    const size_t emel_branch_5 = static_cast<size_t>(offset + length > vocab.merge_storage.size());
+    for (size_t emel_case_5 = emel_branch_5; emel_case_5 == 1u; emel_case_5 = 2u) {
+            return {};
+    }
+    for (size_t emel_case_5 = emel_branch_5; emel_case_5 == 0u; emel_case_5 = 2u) {
+
+    }
   }
   return std::string_view(vocab.merge_storage.data() + offset, length);
 }
@@ -170,18 +202,42 @@ inline std::string_view merge_text(const emel::model::data::vocab &vocab,
 inline bool merge_match(const std::string_view merge,
                         const std::string_view left,
                         const std::string_view right) {
-  if (merge.empty()) {
-    return false;
+    {
+    const size_t emel_branch_6 = static_cast<size_t>(merge.empty());
+    for (size_t emel_case_6 = emel_branch_6; emel_case_6 == 1u; emel_case_6 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_6 = emel_branch_6; emel_case_6 == 0u; emel_case_6 = 2u) {
+
+    }
   }
   const size_t pos = merge.find(' ');
-  if (pos == std::string_view::npos) {
-    return false;
+    {
+    const size_t emel_branch_7 = static_cast<size_t>(pos == std::string_view::npos);
+    for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 1u; emel_case_7 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 0u; emel_case_7 = 2u) {
+
+    }
   }
-  if (merge.size() != left.size() + right.size() + 1) {
-    return false;
+    {
+    const size_t emel_branch_8 = static_cast<size_t>(merge.size() != left.size() + right.size() + 1);
+    for (size_t emel_case_8 = emel_branch_8; emel_case_8 == 1u; emel_case_8 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_8 = emel_branch_8; emel_case_8 == 0u; emel_case_8 = 2u) {
+
+    }
   }
-  if (merge.substr(0, pos) != left) {
-    return false;
+    {
+    const size_t emel_branch_9 = static_cast<size_t>(merge.substr(0, pos) != left);
+    for (size_t emel_case_9 = emel_branch_9; emel_case_9 == 1u; emel_case_9 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_9 = emel_branch_9; emel_case_9 == 0u; emel_case_9 = 2u) {
+
+    }
   }
   return merge.substr(pos + 1) == right;
 }
@@ -190,25 +246,58 @@ inline bool insert_token_map(token_map &map,
                              const emel::model::data::vocab &vocab,
                              const std::string_view text,
                              const int32_t id) {
-  if (text.empty()) {
-    return true;
+    {
+    const size_t emel_branch_10 = static_cast<size_t>(text.empty());
+    for (size_t emel_case_10 = emel_branch_10; emel_case_10 == 1u; emel_case_10 = 2u) {
+            return true;
+    }
+    for (size_t emel_case_10 = emel_branch_10; emel_case_10 == 0u; emel_case_10 = 2u) {
+
+    }
   }
   const uint32_t hash = hash_sv(text);
   const uint32_t mask = k_token_hash_size - 1;
   uint32_t slot = hash & mask;
   for (uint32_t probes = 0; probes < k_token_hash_size; ++probes) {
-    if (map.hashes[slot] == 0) {
-      map.hashes[slot] = hash;
-      map.values[slot] = id;
-      map.count += 1;
-      return true;
+    const uint32_t slot_hash = map.hashes[slot];
+        {
+      const size_t emel_branch_11 = static_cast<size_t>(slot_hash == 0);
+      for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 1u; emel_case_11 = 2u) {
+                map.hashes[slot] = hash;
+                map.values[slot] = id;
+                map.count += 1;
+                return true;
+      }
+      for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 0u; emel_case_11 = 2u) {
+
+      }
     }
-    if (map.hashes[slot] == hash) {
-      const int32_t existing = map.values[slot];
-      const std::string_view existing_text = token_text(vocab, existing);
-      if (existing_text == text) {
-        map.values[slot] = id;
-        return true;
+        {
+      const size_t emel_branch_12 = static_cast<size_t>(slot_hash == hash);
+      for (size_t emel_case_12 = emel_branch_12; emel_case_12 == 1u; emel_case_12 = 2u) {
+         {
+                const int32_t existing = map.values[slot];
+                const std::string_view existing_text = token_text(vocab, existing);
+                {
+                  const size_t emel_branch_existing_match =
+                      static_cast<size_t>(existing_text == text);
+                  for (size_t emel_case_existing_match = emel_branch_existing_match;
+                       emel_case_existing_match == 1u;
+                       emel_case_existing_match = 2u) {
+                    map.values[slot] = id;
+                    return true;
+                  }
+                  for (size_t emel_case_existing_match = emel_branch_existing_match;
+                       emel_case_existing_match == 0u;
+                       emel_case_existing_match = 2u) {
+
+                  }
+                }
+                break;
+              }
+      }
+      for (size_t emel_case_12 = emel_branch_12; emel_case_12 == 0u; emel_case_12 = 2u) {
+
       }
     }
     slot = (slot + 1) & mask;
@@ -221,24 +310,57 @@ inline bool insert_merge_map(merge_map &map,
                              const std::string_view right,
                              const int32_t rank,
                              const emel::model::data::vocab &vocab) {
-  if (left.empty() || right.empty()) {
-    return false;
+    {
+    const size_t emel_branch_13 = static_cast<size_t>(left.empty() || right.empty());
+    for (size_t emel_case_13 = emel_branch_13; emel_case_13 == 1u; emel_case_13 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_13 = emel_branch_13; emel_case_13 == 0u; emel_case_13 = 2u) {
+
+    }
   }
   const uint32_t hash = hash_pair(left, right);
   const uint32_t mask = k_merge_hash_size - 1;
   uint32_t slot = hash & mask;
   for (uint32_t probes = 0; probes < k_merge_hash_size; ++probes) {
-    if (map.hashes[slot] == 0) {
-      map.hashes[slot] = hash;
-      map.values[slot] = rank;
-      map.count += 1;
-      return true;
+    const uint32_t slot_hash = map.hashes[slot];
+        {
+      const size_t emel_branch_14 = static_cast<size_t>(slot_hash == 0);
+      for (size_t emel_case_14 = emel_branch_14; emel_case_14 == 1u; emel_case_14 = 2u) {
+                map.hashes[slot] = hash;
+                map.values[slot] = rank;
+                map.count += 1;
+                return true;
+      }
+      for (size_t emel_case_14 = emel_branch_14; emel_case_14 == 0u; emel_case_14 = 2u) {
+
+      }
     }
-    if (map.hashes[slot] == hash) {
-      const int32_t existing = map.values[slot];
-      const std::string_view merge = merge_text(vocab, existing);
-      if (merge_match(merge, left, right)) {
-        return true;
+        {
+      const size_t emel_branch_15 = static_cast<size_t>(slot_hash == hash);
+      for (size_t emel_case_15 = emel_branch_15; emel_case_15 == 1u; emel_case_15 = 2u) {
+         {
+                const int32_t existing = map.values[slot];
+                const std::string_view merge = merge_text(vocab, existing);
+                {
+                  const size_t emel_branch_merge_match =
+                      static_cast<size_t>(merge_match(merge, left, right));
+                  for (size_t emel_case_merge_match = emel_branch_merge_match;
+                       emel_case_merge_match == 1u;
+                       emel_case_merge_match = 2u) {
+                    return true;
+                  }
+                  for (size_t emel_case_merge_match = emel_branch_merge_match;
+                       emel_case_merge_match == 0u;
+                       emel_case_merge_match = 2u) {
+
+                  }
+                }
+                break;
+              }
+      }
+      for (size_t emel_case_15 = emel_branch_15; emel_case_15 == 0u; emel_case_15 = 2u) {
+
       }
     }
     slot = (slot + 1) & mask;
@@ -248,21 +370,53 @@ inline bool insert_merge_map(merge_map &map,
 
 inline int32_t lookup_token(const action::context &ctx,
                             const std::string_view text) {
-  if (text.empty()) {
-    return k_token_null;
+    {
+    const size_t emel_branch_16 = static_cast<size_t>(text.empty());
+    for (size_t emel_case_16 = emel_branch_16; emel_case_16 == 1u; emel_case_16 = 2u) {
+            return k_token_null;
+    }
+    for (size_t emel_case_16 = emel_branch_16; emel_case_16 == 0u; emel_case_16 = 2u) {
+
+    }
   }
   const uint32_t hash = hash_sv(text);
   const uint32_t mask = k_token_hash_size - 1;
   uint32_t slot = hash & mask;
   for (uint32_t probes = 0; probes < k_token_hash_size; ++probes) {
     const uint32_t entry = ctx.token_to_id.hashes[slot];
-    if (entry == 0) {
-      return k_token_null;
+        {
+      const size_t emel_branch_17 = static_cast<size_t>(entry == 0);
+      for (size_t emel_case_17 = emel_branch_17; emel_case_17 == 1u; emel_case_17 = 2u) {
+                return k_token_null;
+      }
+      for (size_t emel_case_17 = emel_branch_17; emel_case_17 == 0u; emel_case_17 = 2u) {
+
+      }
     }
-    if (entry == hash) {
-      const int32_t id = ctx.token_to_id.values[slot];
-      if (token_text(*ctx.vocab, id) == text) {
-        return id;
+        {
+      const size_t emel_branch_18 = static_cast<size_t>(entry == hash);
+      for (size_t emel_case_18 = emel_branch_18; emel_case_18 == 1u; emel_case_18 = 2u) {
+         {
+                const int32_t id = ctx.token_to_id.values[slot];
+                {
+                  const size_t emel_branch_token_match =
+                      static_cast<size_t>(token_text(*ctx.vocab, id) == text);
+                  for (size_t emel_case_token_match = emel_branch_token_match;
+                       emel_case_token_match == 1u;
+                       emel_case_token_match = 2u) {
+                    return id;
+                  }
+                  for (size_t emel_case_token_match = emel_branch_token_match;
+                       emel_case_token_match == 0u;
+                       emel_case_token_match = 2u) {
+
+                  }
+                }
+                break;
+              }
+      }
+      for (size_t emel_case_18 = emel_branch_18; emel_case_18 == 0u; emel_case_18 = 2u) {
+
       }
     }
     slot = (slot + 1) & mask;
@@ -279,26 +433,46 @@ inline int32_t lookup_token_concat(const action::context &ctx,
   uint32_t slot = hash & mask;
   for (uint32_t probes = 0; probes < k_token_hash_size; ++probes) {
     const uint32_t entry = ctx.token_to_id.hashes[slot];
-    if (entry == 0) {
-      return k_token_null;
+        {
+      const size_t emel_branch_19 = static_cast<size_t>(entry == 0);
+      for (size_t emel_case_19 = emel_branch_19; emel_case_19 == 1u; emel_case_19 = 2u) {
+                return k_token_null;
+      }
+      for (size_t emel_case_19 = emel_branch_19; emel_case_19 == 0u; emel_case_19 = 2u) {
+
+      }
     }
-    if (entry == hash) {
-      const int32_t id = ctx.token_to_id.values[slot];
-      const std::string_view token = token_text(*ctx.vocab, id);
-      if (token.size() != combined_len) {
-        slot = (slot + 1) & mask;
-        continue;
+    {
+      const size_t emel_branch_entry_match = static_cast<size_t>(entry == hash);
+      for (size_t emel_case_entry_match = emel_branch_entry_match;
+           emel_case_entry_match == 1u;
+           emel_case_entry_match = 2u) {
+        const int32_t id = ctx.token_to_id.values[slot];
+        const std::string_view token = token_text(*ctx.vocab, id);
+        const bool size_mismatch = token.size() != combined_len;
+        const bool left_mismatch =
+            !left.empty() && std::memcmp(token.data(), left.data(), left.size()) != 0;
+        const bool right_mismatch =
+            !right.empty() &&
+            std::memcmp(token.data() + left.size(), right.data(), right.size()) != 0;
+        const size_t emel_branch_token_match =
+            static_cast<size_t>(!(size_mismatch || left_mismatch || right_mismatch));
+        for (size_t emel_case_token_match = emel_branch_token_match;
+             emel_case_token_match == 1u;
+             emel_case_token_match = 2u) {
+          return id;
+        }
+        for (size_t emel_case_token_match = emel_branch_token_match;
+             emel_case_token_match == 0u;
+             emel_case_token_match = 2u) {
+
+        }
       }
-      if (!left.empty() && std::memcmp(token.data(), left.data(), left.size()) != 0) {
-        slot = (slot + 1) & mask;
-        continue;
+      for (size_t emel_case_entry_match = emel_branch_entry_match;
+           emel_case_entry_match == 0u;
+           emel_case_entry_match = 2u) {
+
       }
-      if (!right.empty() &&
-          std::memcmp(token.data() + left.size(), right.data(), right.size()) != 0) {
-        slot = (slot + 1) & mask;
-        continue;
-      }
-      return id;
     }
     slot = (slot + 1) & mask;
   }
@@ -309,22 +483,54 @@ inline int32_t lookup_merge_rank(const action::context &ctx,
                                  const emel::model::data::vocab &vocab,
                                  const std::string_view left,
                                  const std::string_view right) {
-  if (left.empty() || right.empty()) {
-    return k_token_null;
+    {
+    const size_t emel_branch_20 = static_cast<size_t>(left.empty() || right.empty());
+    for (size_t emel_case_20 = emel_branch_20; emel_case_20 == 1u; emel_case_20 = 2u) {
+            return k_token_null;
+    }
+    for (size_t emel_case_20 = emel_branch_20; emel_case_20 == 0u; emel_case_20 = 2u) {
+
+    }
   }
   const uint32_t hash = hash_pair(left, right);
   const uint32_t mask = k_merge_hash_size - 1;
   uint32_t slot = hash & mask;
   for (uint32_t probes = 0; probes < k_merge_hash_size; ++probes) {
     const uint32_t entry = ctx.bpe_ranks.hashes[slot];
-    if (entry == 0) {
-      return k_token_null;
+        {
+      const size_t emel_branch_21 = static_cast<size_t>(entry == 0);
+      for (size_t emel_case_21 = emel_branch_21; emel_case_21 == 1u; emel_case_21 = 2u) {
+                return k_token_null;
+      }
+      for (size_t emel_case_21 = emel_branch_21; emel_case_21 == 0u; emel_case_21 = 2u) {
+
+      }
     }
-    if (entry == hash) {
-      const int32_t rank = ctx.bpe_ranks.values[slot];
-      const std::string_view merge = merge_text(vocab, rank);
-      if (merge_match(merge, left, right)) {
-        return rank;
+        {
+      const size_t emel_branch_22 = static_cast<size_t>(entry == hash);
+      for (size_t emel_case_22 = emel_branch_22; emel_case_22 == 1u; emel_case_22 = 2u) {
+         {
+                const int32_t rank = ctx.bpe_ranks.values[slot];
+                const std::string_view merge = merge_text(vocab, rank);
+                {
+                  const size_t emel_branch_merge_match =
+                      static_cast<size_t>(merge_match(merge, left, right));
+                  for (size_t emel_case_merge_match = emel_branch_merge_match;
+                       emel_case_merge_match == 1u;
+                       emel_case_merge_match = 2u) {
+                    return rank;
+                  }
+                  for (size_t emel_case_merge_match = emel_branch_merge_match;
+                       emel_case_merge_match == 0u;
+                       emel_case_merge_match = 2u) {
+
+                  }
+                }
+                break;
+              }
+      }
+      for (size_t emel_case_22 = emel_branch_22; emel_case_22 == 0u; emel_case_22 = 2u) {
+
       }
     }
     slot = (slot + 1) & mask;
@@ -333,11 +539,23 @@ inline int32_t lookup_merge_rank(const action::context &ctx,
 }
 
 inline bool push_token(const event::encode &ev, const int32_t token, int32_t &count) {
-  if (token < 0 || ev.token_ids.empty()) {
-    return false;
+    {
+    const size_t emel_branch_23 = static_cast<size_t>(token < 0 || ev.token_ids.empty());
+    for (size_t emel_case_23 = emel_branch_23; emel_case_23 == 1u; emel_case_23 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_23 = emel_branch_23; emel_case_23 == 0u; emel_case_23 = 2u) {
+
+    }
   }
-  if (static_cast<size_t>(count) >= ev.token_ids.size()) {
-    return false;
+    {
+    const size_t emel_branch_24 = static_cast<size_t>(static_cast<size_t>(count) >= ev.token_ids.size());
+    for (size_t emel_case_24 = emel_branch_24; emel_case_24 == 1u; emel_case_24 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_24 = emel_branch_24; emel_case_24 == 0u; emel_case_24 = 2u) {
+
+    }
   }
   ev.token_ids[static_cast<size_t>(count++)] = token;
   return true;
@@ -368,9 +586,15 @@ inline const std::array<uint32_t, 256> &byte_to_codepoint_table() {
     }
     uint32_t n = 0;
     for (int ch = 0; ch < 256; ++ch) {
-      if (!used[static_cast<size_t>(ch)]) {
-        map[static_cast<size_t>(ch)] = 256u + n;
-        n += 1;
+            {
+        const size_t emel_branch_25 = static_cast<size_t>(!used[static_cast<size_t>(ch)]);
+        for (size_t emel_case_25 = emel_branch_25; emel_case_25 == 1u; emel_case_25 = 2u) {
+                    map[static_cast<size_t>(ch)] = 256u + n;
+                    n += 1;
+        }
+        for (size_t emel_case_25 = emel_branch_25; emel_case_25 == 0u; emel_case_25 = 2u) {
+
+        }
       }
     }
     return map;
@@ -379,20 +603,38 @@ inline const std::array<uint32_t, 256> &byte_to_codepoint_table() {
 }
 
 inline uint8_t encode_cpt_utf8(const uint32_t cpt, char out[4]) {
-  if (cpt <= 0x7F) {
-    out[0] = static_cast<char>(cpt);
-    return 1;
+    {
+    const size_t emel_branch_26 = static_cast<size_t>(cpt <= 0x7F);
+    for (size_t emel_case_26 = emel_branch_26; emel_case_26 == 1u; emel_case_26 = 2u) {
+            out[0] = static_cast<char>(cpt);
+            return 1;
+    }
+    for (size_t emel_case_26 = emel_branch_26; emel_case_26 == 0u; emel_case_26 = 2u) {
+
+    }
   }
-  if (cpt <= 0x7FF) {
-    out[0] = static_cast<char>(0xC0 | ((cpt >> 6) & 0x1F));
-    out[1] = static_cast<char>(0x80 | (cpt & 0x3F));
-    return 2;
+    {
+    const size_t emel_branch_27 = static_cast<size_t>(cpt <= 0x7FF);
+    for (size_t emel_case_27 = emel_branch_27; emel_case_27 == 1u; emel_case_27 = 2u) {
+            out[0] = static_cast<char>(0xC0 | ((cpt >> 6) & 0x1F));
+            out[1] = static_cast<char>(0x80 | (cpt & 0x3F));
+            return 2;
+    }
+    for (size_t emel_case_27 = emel_branch_27; emel_case_27 == 0u; emel_case_27 = 2u) {
+
+    }
   }
-  if (cpt <= 0xFFFF) {
-    out[0] = static_cast<char>(0xE0 | ((cpt >> 12) & 0x0F));
-    out[1] = static_cast<char>(0x80 | ((cpt >> 6) & 0x3F));
-    out[2] = static_cast<char>(0x80 | (cpt & 0x3F));
-    return 3;
+    {
+    const size_t emel_branch_28 = static_cast<size_t>(cpt <= 0xFFFF);
+    for (size_t emel_case_28 = emel_branch_28; emel_case_28 == 1u; emel_case_28 = 2u) {
+            out[0] = static_cast<char>(0xE0 | ((cpt >> 12) & 0x0F));
+            out[1] = static_cast<char>(0x80 | ((cpt >> 6) & 0x3F));
+            out[2] = static_cast<char>(0x80 | (cpt & 0x3F));
+            return 3;
+    }
+    for (size_t emel_case_28 = emel_branch_28; emel_case_28 == 0u; emel_case_28 = 2u) {
+
+    }
   }
   out[0] = static_cast<char>(0xF0 | ((cpt >> 18) & 0x07));
   out[1] = static_cast<char>(0x80 | ((cpt >> 12) & 0x3F));
@@ -418,37 +660,68 @@ inline int32_t byte_to_token(const action::context &ctx,
                              const uint8_t byte,
                              const emel::model::data::tokenizer_model model) {
   (void)vocab;
-  if (model == emel::model::data::tokenizer_model::NONE) {
-    return k_token_null;
-  }
-
-  if (model == emel::model::data::tokenizer_model::SPM ||
-      model == emel::model::data::tokenizer_model::UGM ||
-      model == emel::model::data::tokenizer_model::PLAMO2) {
-    char hex[7] = {};
-    static const char *digits = "0123456789ABCDEF";
-    hex[0] = '<';
-    hex[1] = '0';
-    hex[2] = 'x';
-    hex[3] = digits[(byte >> 4) & 0x0F];
-    hex[4] = digits[byte & 0x0F];
-    hex[5] = '>';
-    hex[6] = '\0';
-    const int32_t hex_token = lookup_token(ctx, std::string_view(hex, 6));
-    if (hex_token != k_token_null) {
-      return hex_token;
+  const bool none_model = model == emel::model::data::tokenizer_model::NONE;
+    {
+    const size_t emel_branch_29 = static_cast<size_t>(none_model);
+    for (size_t emel_case_29 = emel_branch_29; emel_case_29 == 1u; emel_case_29 = 2u) {
+            return k_token_null;
     }
-    const char raw = static_cast<char>(byte);
-    return lookup_token(ctx, std::string_view(&raw, 1));
+    for (size_t emel_case_29 = emel_branch_29; emel_case_29 == 0u; emel_case_29 = 2u) {
+
+    }
   }
 
-  if (model == emel::model::data::tokenizer_model::BPE ||
+  const bool piece_model = model == emel::model::data::tokenizer_model::SPM ||
+      model == emel::model::data::tokenizer_model::UGM ||
+      model == emel::model::data::tokenizer_model::PLAMO2;
+    {
+    const size_t emel_branch_30 = static_cast<size_t>(piece_model);
+    for (size_t emel_case_30 = emel_branch_30; emel_case_30 == 1u; emel_case_30 = 2u) {
+       {
+          char hex[7] = {};
+          static const char *digits = "0123456789ABCDEF";
+          hex[0] = '<';
+          hex[1] = '0';
+          hex[2] = 'x';
+          hex[3] = digits[(byte >> 4) & 0x0F];
+          hex[4] = digits[byte & 0x0F];
+          hex[5] = '>';
+          hex[6] = '\0';
+          const int32_t hex_token = lookup_token(ctx, std::string_view(hex, 6));
+          {
+            const size_t emel_branch_has_hex = static_cast<size_t>(hex_token != k_token_null);
+            for (size_t emel_case_has_hex = emel_branch_has_hex; emel_case_has_hex == 1u;
+                 emel_case_has_hex = 2u) {
+              return hex_token;
+            }
+            for (size_t emel_case_has_hex = emel_branch_has_hex; emel_case_has_hex == 0u;
+                 emel_case_has_hex = 2u) {
+
+            }
+          }
+            const char raw = static_cast<char>(byte);
+            return lookup_token(ctx, std::string_view(&raw, 1));
+          }
+    }
+    for (size_t emel_case_30 = emel_branch_30; emel_case_30 == 0u; emel_case_30 = 2u) {
+
+    }
+  }
+
+  const bool bpe_model = model == emel::model::data::tokenizer_model::BPE ||
       model == emel::model::data::tokenizer_model::WPM ||
-      model == emel::model::data::tokenizer_model::RWKV) {
-    const uint32_t cpt = byte_to_codepoint_table()[byte];
-    char utf8[4] = {};
-    const uint8_t len = encode_cpt_utf8(cpt, utf8);
-    return lookup_token(ctx, std::string_view(utf8, len));
+      model == emel::model::data::tokenizer_model::RWKV;
+    {
+    const size_t emel_branch_31 = static_cast<size_t>(bpe_model);
+    for (size_t emel_case_31 = emel_branch_31; emel_case_31 == 1u; emel_case_31 = 2u) {
+          const uint32_t cpt = byte_to_codepoint_table()[byte];
+          char utf8[4] = {};
+          const uint8_t len = encode_cpt_utf8(cpt, utf8);
+          return lookup_token(ctx, std::string_view(utf8, len));
+    }
+    for (size_t emel_case_31 = emel_branch_31; emel_case_31 == 0u; emel_case_31 = 2u) {
+
+    }
   }
 
   const char raw = static_cast<char>(byte);
@@ -456,11 +729,23 @@ inline int32_t byte_to_token(const action::context &ctx,
 }
 
 inline bool ensure_tables(action::context &ctx) {
-  if (ctx.vocab == nullptr) {
-    return false;
+    {
+    const size_t emel_branch_32 = static_cast<size_t>(ctx.vocab == nullptr);
+    for (size_t emel_case_32 = emel_branch_32; emel_case_32 == 1u; emel_case_32 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_32 = emel_branch_32; emel_case_32 == 0u; emel_case_32 = 2u) {
+
+    }
   }
-  if (ctx.tables_ready) {
-    return true;
+    {
+    const size_t emel_branch_33 = static_cast<size_t>(ctx.tables_ready);
+    for (size_t emel_case_33 = emel_branch_33; emel_case_33 == 1u; emel_case_33 = 2u) {
+            return true;
+    }
+    for (size_t emel_case_33 = emel_branch_33; emel_case_33 == 0u; emel_case_33 = 2u) {
+
+    }
   }
 
   ctx.token_to_id.clear();
@@ -470,26 +755,45 @@ inline bool ensure_tables(action::context &ctx) {
   const emel::model::data::vocab &vocab = *ctx.vocab;
   for (uint32_t id = 0; id < vocab.n_tokens; ++id) {
     const std::string_view text = token_text(vocab, static_cast<int32_t>(id));
-    if (!insert_token_map(ctx.token_to_id, vocab, text, static_cast<int32_t>(id))) {
-      return false;
+        {
+      const size_t emel_branch_34 = static_cast<size_t>(
+        !insert_token_map(ctx.token_to_id, vocab, text, static_cast<int32_t>(id)));
+      for (size_t emel_case_34 = emel_branch_34; emel_case_34 == 1u; emel_case_34 = 2u) {
+                return false;
+      }
+      for (size_t emel_case_34 = emel_branch_34; emel_case_34 == 0u; emel_case_34 = 2u) {
+
+      }
     }
-    if (text.size() > static_cast<size_t>(ctx.max_token_len)) {
-      ctx.max_token_len = static_cast<int32_t>(text.size());
+        {
+      const size_t emel_branch_35 = static_cast<size_t>(text.size() > static_cast<size_t>(ctx.max_token_len));
+      for (size_t emel_case_35 = emel_branch_35; emel_case_35 == 1u; emel_case_35 = 2u) {
+                ctx.max_token_len = static_cast<int32_t>(text.size());
+      }
+      for (size_t emel_case_35 = emel_branch_35; emel_case_35 == 0u; emel_case_35 = 2u) {
+
+      }
     }
   }
 
   for (uint32_t idx = 0; idx < vocab.n_merges; ++idx) {
     const std::string_view merge = merge_text(vocab, static_cast<int32_t>(idx));
-    if (merge.empty()) {
-      continue;
-    }
     const size_t pos = merge.find(' ');
-    if (pos == std::string_view::npos) {
-      continue;
+    const bool has_merge = !merge.empty();
+    const bool has_separator = pos != std::string_view::npos;
+    const size_t emel_branch_insert_merge = static_cast<size_t>(has_merge && has_separator);
+    for (size_t emel_case_insert_merge = emel_branch_insert_merge;
+         emel_case_insert_merge == 1u;
+         emel_case_insert_merge = 2u) {
+      const std::string_view left = merge.substr(0, pos);
+      const std::string_view right = merge.substr(pos + 1);
+      insert_merge_map(ctx.bpe_ranks, left, right, static_cast<int32_t>(idx), vocab);
     }
-    const std::string_view left = merge.substr(0, pos);
-    const std::string_view right = merge.substr(pos + 1);
-    insert_merge_map(ctx.bpe_ranks, left, right, static_cast<int32_t>(idx), vocab);
+    for (size_t emel_case_insert_merge = emel_branch_insert_merge;
+         emel_case_insert_merge == 0u;
+         emel_case_insert_merge = 2u) {
+
+    }
   }
 
   ctx.ugm_ready = vocab.precompiled_charsmap_size > 0;
@@ -503,9 +807,15 @@ inline void split_whitespace(const std::string_view text,
   size_t start = 0;
   for (size_t i = 0; i < text.size(); ++i) {
     const unsigned char c = static_cast<unsigned char>(text[i]);
-    if (std::isspace(c) != 0) {
-      parts.emplace_back(text.substr(start, i - start));
-      start = i + 1;
+        {
+      const size_t emel_branch_36 = static_cast<size_t>(std::isspace(c) != 0);
+      for (size_t emel_case_36 = emel_branch_36; emel_case_36 == 1u; emel_case_36 = 2u) {
+                parts.emplace_back(text.substr(start, i - start));
+                start = i + 1;
+      }
+      for (size_t emel_case_36 = emel_branch_36; emel_case_36 == 0u; emel_case_36 = 2u) {
+
+      }
     }
   }
   parts.emplace_back(text.substr(start));
@@ -517,23 +827,37 @@ inline bool build_symbols(const std::string_view text,
   scratch.symbol_count = 0;
   size_t offset = 0;
   while (offset < text.size()) {
-    if (scratch.symbol_count >= scratch.offsets.size()) {
-      result.error = EMEL_ERR_INVALID_ARGUMENT;
-      return false;
+        {
+      const size_t emel_branch_37 = static_cast<size_t>(scratch.symbol_count >= scratch.offsets.size());
+      for (size_t emel_case_37 = emel_branch_37; emel_case_37 == 1u; emel_case_37 = 2u) {
+                result.error = EMEL_ERR_INVALID_ARGUMENT;
+                return false;
+      }
+      for (size_t emel_case_37 = emel_branch_37; emel_case_37 == 0u; emel_case_37 = 2u) {
+
+      }
     }
     const size_t len = std::min(text.size() - offset, utf8_len(text[offset]));
     scratch.offsets[scratch.symbol_count] = static_cast<uint32_t>(offset);
     scratch.lengths[scratch.symbol_count] = static_cast<uint32_t>(len);
     scratch.prev[scratch.symbol_count] = static_cast<int32_t>(scratch.symbol_count) - 1;
-    scratch.next[scratch.symbol_count] =
-        (offset + len < text.size())
-            ? static_cast<int32_t>(scratch.symbol_count) + 1
-            : -1;
+    const size_t has_next = static_cast<size_t>(offset + len < text.size());
+    const std::array<int32_t, 2> next_candidates = {
+        -1,
+        static_cast<int32_t>(scratch.symbol_count) + 1,
+    };
+    scratch.next[scratch.symbol_count] = next_candidates[has_next];
     scratch.symbol_count += 1;
     offset += len;
   }
-  if (scratch.symbol_count > 0) {
-    scratch.prev[0] = -1;
+    {
+    const size_t emel_branch_38 = static_cast<size_t>(scratch.symbol_count > 0);
+    for (size_t emel_case_38 = emel_branch_38; emel_case_38 == 1u; emel_case_38 = 2u) {
+            scratch.prev[0] = -1;
+    }
+    for (size_t emel_case_38 = emel_branch_38; emel_case_38 == 0u; emel_case_38 = 2u) {
+
+    }
   }
   return true;
 }
@@ -544,8 +868,14 @@ inline void merge_symbols(encode_scratch &scratch,
   scratch.lengths[static_cast<size_t>(left)] += scratch.lengths[static_cast<size_t>(right)];
   const int32_t right_next = scratch.next[static_cast<size_t>(right)];
   scratch.next[static_cast<size_t>(left)] = right_next;
-  if (right_next >= 0) {
-    scratch.prev[static_cast<size_t>(right_next)] = left;
+    {
+    const size_t emel_branch_39 = static_cast<size_t>(right_next >= 0);
+    for (size_t emel_case_39 = emel_branch_39; emel_case_39 == 1u; emel_case_39 = 2u) {
+            scratch.prev[static_cast<size_t>(right_next)] = left;
+    }
+    for (size_t emel_case_39 = emel_branch_39; emel_case_39 == 0u; emel_case_39 = 2u) {
+
+    }
   }
   scratch.lengths[static_cast<size_t>(right)] = 0;
 }
@@ -559,9 +889,16 @@ inline bool encode_bytes(const event::encode &ev,
   int32_t count = 0;
   for (const unsigned char c : ev.text) {
     const int32_t token = byte_to_token(ctx, vocab, c, model);
-    if (token == k_token_null || !push_token(ev, token, count)) {
-      result.error = EMEL_ERR_BACKEND;
-      return false;
+    const bool failed = token == k_token_null || !push_token(ev, token, count);
+        {
+      const size_t emel_branch_40 = static_cast<size_t>(failed);
+      for (size_t emel_case_40 = emel_branch_40; emel_case_40 == 1u; emel_case_40 = 2u) {
+                result.error = EMEL_ERR_BACKEND;
+                return false;
+      }
+      for (size_t emel_case_40 = emel_branch_40; emel_case_40 == 0u; emel_case_40 = 2u) {
+
+      }
     }
   }
   result.token_count = count;

@@ -26,7 +26,8 @@ constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noe
 
 template <class value_type>
 value_type & bind_or_sink(value_type * ptr, value_type & sink) noexcept {
-  return ptr != nullptr ? *ptr : sink;
+  value_type * choices[2] = {&sink, ptr};
+  return *choices[static_cast<size_t>(ptr != nullptr)];
 }
 
 enum class lifecycle_state : uint8_t {

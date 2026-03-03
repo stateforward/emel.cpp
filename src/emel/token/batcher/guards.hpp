@@ -1,8 +1,8 @@
 #pragma once
 
+#include "emel/token/batcher/actions.hpp"
 #include "emel/error/error.hpp"
 #include "emel/token/batcher/context.hpp"
-#include "emel/token/batcher/detail.hpp"
 #include "emel/token/batcher/errors.hpp"
 #include "emel/token/batcher/events.hpp"
 

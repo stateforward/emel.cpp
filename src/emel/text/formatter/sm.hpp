@@ -48,7 +48,7 @@ design doc: docs/designs/text/formatter.design.md
 */
 
 
-// benchmark: scaffold
+// benchmark: designed
 // docs: disabled
 
 #include "emel/sm.hpp"

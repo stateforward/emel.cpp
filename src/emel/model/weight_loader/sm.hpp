@@ -132,15 +132,17 @@ struct sm : public emel::sm<model, action::context> {
     event::bind_ctx ctx{};
     event::bind_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
-    if (ctx.err == emel::error::cast(error::none)) {
-      if (ev.on_done) {
-        ev.on_done(events::bind_done{.request = ev});
-      }
-    } else if (ev.on_error) {
+    const bool phase_ok = ctx.err == emel::error::cast(error::none);
+    while (phase_ok && static_cast<bool>(ev.on_done)) {
+      ev.on_done(events::bind_done{.request = ev});
+      break;
+    }
+    while ((!phase_ok) && static_cast<bool>(ev.on_error)) {
       ev.on_error(events::bind_error{
-        .request = ev,
-        .err = ctx.err,
+          .request = ev,
+          .err = ctx.err,
       });
+      break;
     }
     return accepted && ctx.err == emel::error::cast(error::none);
   }
@@ -149,18 +151,20 @@ struct sm : public emel::sm<model, action::context> {
     event::plan_ctx ctx{};
     event::plan_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
-    if (ctx.err == emel::error::cast(error::none)) {
-      if (ev.on_done) {
-        ev.on_done(events::plan_done{
+    const bool phase_ok = ctx.err == emel::error::cast(error::none);
+    while (phase_ok && static_cast<bool>(ev.on_done)) {
+      ev.on_done(events::plan_done{
           .request = ev,
           .effect_count = ctx.effect_count,
-        });
-      }
-    } else if (ev.on_error) {
-      ev.on_error(events::plan_error{
-        .request = ev,
-        .err = ctx.err,
       });
+      break;
+    }
+    while ((!phase_ok) && static_cast<bool>(ev.on_error)) {
+      ev.on_error(events::plan_error{
+          .request = ev,
+          .err = ctx.err,
+      });
+      break;
     }
     return accepted && ctx.err == emel::error::cast(error::none);
   }
@@ -169,15 +173,17 @@ struct sm : public emel::sm<model, action::context> {
     event::apply_ctx ctx{};
     event::apply_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
-    if (ctx.err == emel::error::cast(error::none)) {
-      if (ev.on_done) {
-        ev.on_done(events::apply_done{.request = ev});
-      }
-    } else if (ev.on_error) {
+    const bool phase_ok = ctx.err == emel::error::cast(error::none);
+    while (phase_ok && static_cast<bool>(ev.on_done)) {
+      ev.on_done(events::apply_done{.request = ev});
+      break;
+    }
+    while ((!phase_ok) && static_cast<bool>(ev.on_error)) {
       ev.on_error(events::apply_error{
-        .request = ev,
-        .err = ctx.err,
+          .request = ev,
+          .err = ctx.err,
       });
+      break;
     }
     return accepted && ctx.err == emel::error::cast(error::none);
   }

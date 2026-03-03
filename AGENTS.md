@@ -24,10 +24,10 @@ within a single transition per phase.
 NEVER copy event payload into context just to bridge internal phases.
 ALWAYS keep guards pure predicates of `(event, context)` with no side effects.
 ALWAYS keep actions bounded, non-blocking, and allocation-free during dispatch.
-NEVER put runtime conditional logic in actions or in functions called from
-actions.
-ALWAYS model all runtime conditional logic as explicit guards or explicit
-choice states/transitions.
+NEVER put runtime branching statements (`if`, `else if`, `switch`, `?:`) in
+actions or in functions called from actions.
+ALWAYS model all runtime control flow as explicit guards or explicit choice
+states/transitions.
 ONLY compile-time conditionals (`if constexpr`, `#if`) are allowed inside
 actions, state machine member methods, or functions called from actions.
 NEVER perform I/O waits, mutex waits, or sleeps inside guards/actions.

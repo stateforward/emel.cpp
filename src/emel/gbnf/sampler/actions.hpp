@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include "emel/gbnf/sampler/context.hpp"
 #include "emel/gbnf/sampler/errors.hpp"
 #include "emel/gbnf/sampler/events.hpp"
@@ -51,21 +53,36 @@ struct filter_candidates {
       const bool accepted = token_id >= 0 &&
                             static_cast<uint32_t>(token_id) < grammar.rule_count;
       ev.ctx.current_token_id = token_id;
-      ev.ctx.candidate_kind = token_id >= 0 ? candidate_parser::events::candidate_kind::text
-                                             : candidate_parser::events::candidate_kind::empty;
-      ev.ctx.token_kind = token_id >= 0 ? token_parser::events::token_kind::text_token
-                                         : token_parser::events::token_kind::empty_token;
-      ev.ctx.accept_result = accepted
-                                 ? accept_parser::events::accept_result::accepted
-                                 : accept_parser::events::accept_result::rejected;
-      ev.ctx.match_result = accepted ? matcher_parser::events::match_result::accepted
-                                     : matcher_parser::events::match_result::rejected;
+      const size_t token_kind_idx = static_cast<size_t>(token_id >= 0);
+      constexpr std::array<candidate_parser::events::candidate_kind, 2>
+          candidate_kind_choices = {
+              candidate_parser::events::candidate_kind::empty,
+              candidate_parser::events::candidate_kind::text,
+          };
+      constexpr std::array<token_parser::events::token_kind, 2>
+          token_kind_choices = {
+              token_parser::events::token_kind::empty_token,
+              token_parser::events::token_kind::text_token,
+          };
+      constexpr std::array<accept_parser::events::accept_result, 2>
+          accept_result_choices = {
+              accept_parser::events::accept_result::rejected,
+              accept_parser::events::accept_result::accepted,
+          };
+      constexpr std::array<matcher_parser::events::match_result, 2>
+          match_result_choices = {
+              matcher_parser::events::match_result::rejected,
+              matcher_parser::events::match_result::accepted,
+          };
+      ev.ctx.candidate_kind = candidate_kind_choices[token_kind_idx];
+      ev.ctx.token_kind = token_kind_choices[token_kind_idx];
+      const size_t accepted_idx = static_cast<size_t>(accepted);
+      ev.ctx.accept_result = accept_result_choices[accepted_idx];
+      ev.ctx.match_result = match_result_choices[accepted_idx];
       ev.ctx.candidate_allowed = accepted;
-      if (accepted) {
-        candidate_ids[write_index] = candidate_ids[read_index];
-        candidate_scores[write_index] = candidate_scores[read_index];
-        write_index += 1;
-      }
+      candidate_ids[write_index] = candidate_ids[read_index];
+      candidate_scores[write_index] = candidate_scores[read_index];
+      write_index += static_cast<int32_t>(accepted);
     }
 
     ev.ctx.write_index = write_index;

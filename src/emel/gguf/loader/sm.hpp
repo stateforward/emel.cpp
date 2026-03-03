@@ -153,8 +153,10 @@ struct sm : public emel::sm<model, action::context> {
     event::probe_ctx ctx{};
     event::probe_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
-    if (accepted && ctx.err == emel::error::cast(error::none)) {
+    const bool phase_ok = accepted && ctx.err == emel::error::cast(error::none);
+    while (phase_ok) {
       ev.requirements_out = ctx.requirements_out;
+      break;
     }
     return accepted && ctx.err == emel::error::cast(error::none);
   }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 
 #include "emel/batch/planner/context.hpp"
 #include "emel/batch/planner/modes/detail.hpp"
@@ -36,7 +37,12 @@ inline constexpr auto begin_plan = [](const event::request_runtime & ev, context
 
 inline constexpr auto normalize_batch = [](const event::request_runtime & ev, context &) noexcept {
   const int32_t default_step = ev.request.n_tokens;
-  const int32_t requested = ev.request.n_steps > 0 ? ev.request.n_steps : default_step;
+  const std::array<int32_t, 2> requested_candidates = {
+      default_step,
+      ev.request.n_steps,
+  };
+  const int32_t requested =
+      requested_candidates[static_cast<size_t>(ev.request.n_steps > 0)];
   ev.ctx.effective_step_size =
       std::max<int32_t>(1, std::min<int32_t>(requested, ev.request.n_tokens));
 };

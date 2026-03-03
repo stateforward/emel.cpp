@@ -35,8 +35,8 @@ This checklist is architecture-only and merge-blocking for machine design/orches
 - [ ] Guards are pure predicates of `(event, context)` and have no side effects.
 - [ ] Guards never mutate context.
 - [ ] Actions are bounded and non-blocking.
-- [ ] Runtime control-flow conditionals are not implemented inside actions.
-- [ ] Runtime control-flow conditionals are not implemented in functions called from actions.
+- [ ] Runtime branching statements (`if`, `else if`, `switch`, `?:`) are not implemented inside actions/member methods.
+- [ ] Runtime branching statements (`if`, `else if`, `switch`, `?:`) are not implemented in functions called from actions/member methods.
 - [ ] Runtime control flow is modeled only as explicit guarded transitions or explicit choice states.
 - [ ] Only compile-time conditionals (`if constexpr`, `#if`) appear in actions/member methods/action callees.
 - [ ] State-machine member functions do not read/write context directly.

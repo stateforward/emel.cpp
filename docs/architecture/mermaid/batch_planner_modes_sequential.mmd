@@ -1,8 +1,8 @@
 stateDiagram-v2
   direction TB
   [*] --> preparing
-  preparing --> planning : completion_request_runtime_ [always] / lambda_actions_76_39
-  planning --> planning_decision : completion_request_runtime_ [always] / lambda_actions_80_37
+  preparing --> planning : completion_request_runtime_ [always] / lambda_actions_12_39
+  planning --> planning_decision : completion_request_runtime_ [always] / lambda_actions_16_37
   planning_decision --> planning_done : completion_request_runtime_ [lambda_guards_8_5] / none
   planning_decision --> planning_failed : completion_request_runtime_ [lambda_guards_13_41] / none
   planning_done --> terminate : [always] / none

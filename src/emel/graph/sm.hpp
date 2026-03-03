@@ -1,5 +1,5 @@
 #pragma once
-// benchmark: scaffold
+// benchmark: designed
 
 #include "emel/graph/actions.hpp"
 #include "emel/graph/errors.hpp"

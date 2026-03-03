@@ -2,9 +2,19 @@
 
 #include <cstdint>
 
-#include "emel/kernel/aarch64/detail.hpp"
-
 namespace emel::kernel::aarch64::action {
+
+namespace detail {
+
+inline bool detect_neon() noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  return true;
+#else
+  return false;
+#endif
+}
+
+}  // namespace detail
 
 struct context {
   const bool neon_available = detail::detect_neon();

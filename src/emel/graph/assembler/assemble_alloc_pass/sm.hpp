@@ -1,5 +1,5 @@
 #pragma once
-// benchmark: scaffold
+// benchmark: designed
 
 #include "emel/graph/assembler/assemble_alloc_pass/actions.hpp"
 #include "emel/graph/assembler/assemble_alloc_pass/guards.hpp"

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -29,9 +31,7 @@ inline void add_rule_unchecked(emel::gbnf::grammar & grammar,
               elements,
               sizeof(emel::gbnf::element) * count);
   grammar.element_count += count;
-  if (rule_id + 1u > grammar.rule_count) {
-    grammar.rule_count = rule_id + 1u;
-  }
+  grammar.rule_count = std::max(grammar.rule_count, rule_id + 1u);
 }
 
 inline bool on_lexer_done(void * owner, const lexer::events::next_done & ev) noexcept {
@@ -214,25 +214,42 @@ struct consume_token_character_class {
     const std::string_view text = ev.ctx.token.text;
     const char * pos = text.data() + 1u;
     const char * end = text.data() + text.size() - 1u;
-    emel::gbnf::element_type start_type = emel::gbnf::element_type::character;
-    if (pos < end && *pos == '^') {
-      start_type = emel::gbnf::element_type::char_not;
-      ++pos;
-    }
+    const size_t leading_not = static_cast<size_t>(pos < end && *pos == '^');
+    const emel::gbnf::element_type start_types[2] = {
+        emel::gbnf::element_type::character,
+        emel::gbnf::element_type::char_not};
+    const emel::gbnf::element_type start_type = start_types[leading_not];
+    pos += leading_not;
 
     bool first = true;
     while (pos < end) {
       const auto first_char = emel::gbnf::rule_parser::detail::parse_char(pos, end);
-      const auto lead_type = first ? start_type : emel::gbnf::element_type::char_alt;
+      constexpr std::array<emel::gbnf::element_type, 2> lead_types = {
+          emel::gbnf::element_type::char_alt,
+          emel::gbnf::element_type::char_alt,
+      };
+      std::array<emel::gbnf::element_type, 2> lead_type_candidates = lead_types;
+      lead_type_candidates[1] = start_type;
+      const auto lead_type = lead_type_candidates[static_cast<size_t>(first)];
       append_unchecked(ctx, {lead_type, first_char.first});
       first = false;
       pos = first_char.second;
 
-      if (pos + 1u < end && pos[0] == '-' && pos[1] != ']') {
-        ++pos;
-        const auto range_char = emel::gbnf::rule_parser::detail::parse_char(pos, end);
-        append_unchecked(ctx, {emel::gbnf::element_type::char_rng_upper, range_char.first});
-        pos = range_char.second;
+      const size_t has_range = static_cast<size_t>(pos + 1u < end && pos[0] == '-' &&
+                                                   pos[1] != ']');
+      {
+        const size_t emel_branch_has_range = has_range;
+        for (size_t emel_case_has_range = emel_branch_has_range; emel_case_has_range == 1u;
+             emel_case_has_range = 2u) {
+          ++pos;
+          const auto range_char = emel::gbnf::rule_parser::detail::parse_char(pos, end);
+          append_unchecked(ctx, {emel::gbnf::element_type::char_rng_upper, range_char.first});
+          pos = range_char.second;
+        }
+        for (size_t emel_case_has_range = emel_branch_has_range; emel_case_has_range == 0u;
+             emel_case_has_range = 2u) {
+
+        }
       }
     }
   }
@@ -243,11 +260,9 @@ struct consume_token_rule_reference {
     bool token_not = false;
     uint32_t token_id = 0;
     const std::string_view text = ev.ctx.token.text;
-    std::size_t pos = 0;
-    if (text[0] == '!') {
-      token_not = true;
-      pos = 1u;
-    }
+    const size_t has_negation = static_cast<size_t>(text[0] == '!');
+    token_not = has_negation != 0;
+    std::size_t pos = has_negation;
     pos += 2u;
 
     uint64_t value = 0;
@@ -257,8 +272,11 @@ struct consume_token_rule_reference {
     (void)emel::gbnf::rule_parser::detail::parse_uint64(cursor, end, value, &next);
     token_id = static_cast<uint32_t>(value);
 
-    const auto type = token_not ? emel::gbnf::element_type::token_not
-                                : emel::gbnf::element_type::token;
+    constexpr std::array<emel::gbnf::element_type, 2> type_candidates = {
+        emel::gbnf::element_type::token,
+        emel::gbnf::element_type::token_not,
+    };
+    const auto type = type_candidates[static_cast<size_t>(token_not)];
     ctx.last_sym_start = ctx.current_rule.size;
     append_unchecked(ctx, {type, token_id});
   }
@@ -320,28 +338,57 @@ struct consume_token_quantifier {
     uint64_t min_times = 0;
     uint64_t max_times = 0;
     const std::string_view text = ev.ctx.token.text;
+    const size_t is_star = static_cast<size_t>(text == "*");
+    const size_t is_plus = static_cast<size_t>(text == "+");
+    const size_t is_question =
+        static_cast<size_t>(text.size() == 1u && static_cast<unsigned char>(text[0]) == 63u);
+    const size_t has_symbol_quantifier =
+        static_cast<size_t>((is_star | is_plus | is_question) != 0u);
+    const size_t quantifier_kind =
+        is_plus * 1u + is_question * 2u + (1u - has_symbol_quantifier) * 3u;
 
-    if (text == "*") {
-      min_times = 0;
-      max_times = k_no_max;
-    } else if (text == "+") {
-      min_times = 1;
-      max_times = k_no_max;
-    } else if (text == "?") {
-      min_times = 0;
-      max_times = 1;
-    } else {
-      const char * cursor = text.data() + 1u;
-      const char * end = text.data() + text.size() - 1u;
-      const char * next = nullptr;
-      (void)emel::gbnf::rule_parser::detail::parse_uint64(cursor, end, min_times, &next);
-      if (next == end) {
-        max_times = min_times;
-      } else if (next + 1u == end) {
-        max_times = k_no_max;
-      } else {
-        ++next;
-        (void)emel::gbnf::rule_parser::detail::parse_uint64(next, end, max_times, &next);
+    constexpr std::array<uint64_t, 4> min_defaults = {0, 1, 0, 0};
+    constexpr std::array<uint64_t, 4> max_defaults = {k_no_max, k_no_max, 1, 0};
+    min_times = min_defaults[quantifier_kind];
+    max_times = max_defaults[quantifier_kind];
+    const size_t has_braced_range = static_cast<size_t>(quantifier_kind == 3u);
+    {
+      const size_t emel_branch_braced_range = has_braced_range;
+      for (size_t emel_case_braced_range = emel_branch_braced_range;
+           emel_case_braced_range == 1u;
+           emel_case_braced_range = 2u) {
+        const char * cursor = text.data() + 1u;
+        const char * end = text.data() + text.size() - 1u;
+        const char * next = nullptr;
+        (void)emel::gbnf::rule_parser::detail::parse_uint64(cursor, end, min_times, &next);
+        const size_t at_end = static_cast<size_t>(next == end);
+        const size_t at_open_end = static_cast<size_t>(next != end && next + 1u == end);
+        const size_t range_mode = at_end + (at_open_end * 2u);
+        const size_t has_exact_max = static_cast<size_t>(range_mode == 1u);
+        const size_t has_open_max = static_cast<size_t>(range_mode == 2u);
+        const size_t has_explicit_max = static_cast<size_t>(range_mode == 0u);
+        const size_t max_mode = has_exact_max * 1u + has_open_max * 2u;
+        const std::array<uint64_t, 3> max_candidates = {max_times, min_times, k_no_max};
+        max_times = max_candidates[max_mode];
+        {
+          const size_t emel_branch_explicit_max = has_explicit_max;
+          for (size_t emel_case_explicit_max = emel_branch_explicit_max;
+               emel_case_explicit_max == 1u;
+               emel_case_explicit_max = 2u) {
+            ++next;
+            (void)emel::gbnf::rule_parser::detail::parse_uint64(next, end, max_times, &next);
+          }
+          for (size_t emel_case_explicit_max = emel_branch_explicit_max;
+               emel_case_explicit_max == 0u;
+               emel_case_explicit_max = 2u) {
+
+          }
+        }
+      }
+      for (size_t emel_case_braced_range = emel_branch_braced_range;
+           emel_case_braced_range == 0u;
+           emel_case_braced_range = 2u) {
+
       }
     }
 
@@ -351,19 +398,28 @@ struct consume_token_quantifier {
                 ctx.current_rule.elements.data() + ctx.last_sym_start,
                 sizeof(emel::gbnf::element) * prev_len);
 
-    if (min_times == 0) {
-      ctx.current_rule.size = ctx.last_sym_start;
-    } else {
-      for (uint64_t i = 1; i < min_times; ++i) {
-        std::memcpy(ctx.current_rule.elements.data() + ctx.current_rule.size,
-                    prev_elements,
-                    sizeof(emel::gbnf::element) * prev_len);
-        ctx.current_rule.size += prev_len;
-      }
+    for (uint64_t i = 1; i < min_times; ++i) {
+      std::memcpy(ctx.current_rule.elements.data() + ctx.current_rule.size,
+                  prev_elements,
+                  sizeof(emel::gbnf::element) * prev_len);
+      ctx.current_rule.size += prev_len;
     }
+    const std::array<uint32_t, 2> rule_sizes = {ctx.current_rule.size, ctx.last_sym_start};
+    ctx.current_rule.size = rule_sizes[static_cast<size_t>(min_times == 0)];
 
     const bool no_max = max_times == k_no_max;
-    const uint64_t n_opt = no_max ? 1 : (max_times - min_times);
+    uint64_t n_opt = max_times - min_times;
+    {
+      const size_t emel_branch_no_max = static_cast<size_t>(no_max);
+      for (size_t emel_case_no_max = emel_branch_no_max; emel_case_no_max == 1u;
+           emel_case_no_max = 2u) {
+        n_opt = 1u;
+      }
+      for (size_t emel_case_no_max = emel_branch_no_max; emel_case_no_max == 0u;
+           emel_case_no_max = 2u) {
+
+      }
+    }
     uint32_t last_rec_rule_id = 0;
     emel::gbnf::element * const rec_elements = ctx.rec_scratch.get();
 
@@ -374,18 +430,29 @@ struct consume_token_quantifier {
 
       const uint32_t rec_rule_id = ctx.next_symbol_id++;
       ctx.rule_defined[rec_rule_id] = true;
-      if (i > 0 || no_max) {
-        const uint32_t ref_id = no_max ? rec_rule_id : last_rec_rule_id;
-        rec_elements[rec_len++] = {emel::gbnf::element_type::rule_ref, ref_id};
-      }
+      const size_t append_ref = static_cast<size_t>(i > 0 || no_max);
+      const std::array<uint32_t, 2> ref_id_candidates = {last_rec_rule_id, rec_rule_id};
+      const uint32_t ref_id = ref_id_candidates[static_cast<size_t>(no_max)];
+      rec_elements[rec_len] = {emel::gbnf::element_type::rule_ref, ref_id};
+      rec_len += static_cast<uint32_t>(append_ref);
       rec_elements[rec_len++] = {emel::gbnf::element_type::alt, 0};
       rec_elements[rec_len++] = {emel::gbnf::element_type::end, 0};
       add_rule_unchecked(*ev.request.grammar_out, rec_rule_id, rec_elements, rec_len);
       last_rec_rule_id = rec_rule_id;
     }
 
-    if (n_opt > 0) {
-      append_unchecked(ctx, {emel::gbnf::element_type::rule_ref, last_rec_rule_id});
+    {
+      const size_t emel_branch_has_optional = static_cast<size_t>(n_opt > 0);
+      for (size_t emel_case_has_optional = emel_branch_has_optional;
+           emel_case_has_optional == 1u;
+           emel_case_has_optional = 2u) {
+        append_unchecked(ctx, {emel::gbnf::element_type::rule_ref, last_rec_rule_id});
+      }
+      for (size_t emel_case_has_optional = emel_branch_has_optional;
+           emel_case_has_optional == 0u;
+           emel_case_has_optional = 2u) {
+
+      }
     }
   }
 };

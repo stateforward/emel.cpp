@@ -1,5 +1,5 @@
 #pragma once
-// benchmark: scaffold
+// benchmark: designed
 
 #include "emel/graph/assembler/reuse_decision_pass/actions.hpp"
 #include "emel/graph/assembler/reuse_decision_pass/guards.hpp"

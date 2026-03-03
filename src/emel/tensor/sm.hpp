@@ -1,5 +1,5 @@
 #pragma once
-// benchmark: scaffold
+// benchmark: designed
 
 #include "emel/sm.hpp"
 #include "emel/tensor/actions.hpp"

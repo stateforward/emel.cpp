@@ -56,7 +56,7 @@ design doc: docs/designs/text/encoders/encoder.design.md
 */
 
 
-// benchmark: scaffold
+// benchmark: designed
 
 #include "emel/text/encoders/bpe/sm.hpp"
 #include "emel/text/encoders/fallback/sm.hpp"

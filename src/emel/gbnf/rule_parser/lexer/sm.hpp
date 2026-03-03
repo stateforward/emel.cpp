@@ -1,5 +1,5 @@
 #pragma once
-// benchmark: scaffold
+// benchmark: designed
 
 #include "emel/gbnf/rule_parser/lexer/actions.hpp"
 #include "emel/gbnf/rule_parser/lexer/events.hpp"
