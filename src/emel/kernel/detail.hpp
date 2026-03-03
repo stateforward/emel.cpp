@@ -327,14 +327,14 @@ inline float read_f32(const tensor_type & tensor, const uint64_t idx) noexcept {
   const float * data = static_cast<const float *>(tensor.data);
   const char * base = static_cast<const char *>(tensor.data);
   const size_t offset = tensor_offset_bytes(tensor, idx);
-  float out = data[idx * static_cast<uint64_t>(dense)];
-    {
+  float out = 0.0f;
+  {
     const size_t emel_branch_7 = static_cast<size_t>(dense);
     for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 1u; emel_case_7 = 2u) {
-
+      out = data[idx];
     }
     for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 0u; emel_case_7 = 2u) {
-            std::memcpy(&out, base + offset, sizeof(out));
+      std::memcpy(&out, base + offset, sizeof(out));
     }
   }
   return out;

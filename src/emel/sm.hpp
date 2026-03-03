@@ -25,11 +25,9 @@ constexpr bool normalize_event_result(const event & ev, const bool accepted) noe
   if constexpr (requires { ev.error_out; }) {
     using error_member = std::remove_reference_t<decltype(ev.error_out)>;
     if constexpr (std::is_pointer_v<error_member>) {
-      const bool error_is_clear = ev.error_out == nullptr || *ev.error_out == 0;
-      return accepted_ok && error_is_clear;
+      return accepted_ok && (ev.error_out == nullptr || *ev.error_out == 0);
     } else {
-      const bool error_is_clear = ev.error_out == 0;
-      return accepted_ok && error_is_clear;
+      return accepted_ok && (ev.error_out == 0);
     }
   }
   return accepted_ok;

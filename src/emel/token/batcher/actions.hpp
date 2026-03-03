@@ -246,8 +246,15 @@ inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
 
            uint64_t * cur_mask = cur_seq_set.data() + static_cast<size_t>(seq_id * mask_words);
            const bool first_seen = seq_seen[seq_id] == 0U;
-           active_seq_ids[active_seq_count] = seq_id;
-           active_seq_count += static_cast<int32_t>(first_seen);
+           const bool has_active_slot = active_seq_count < action::MAX_SEQ;
+           const bool track_active = first_seen && has_active_slot;
+           {
+             const size_t emel_branch_11 = static_cast<size_t>(track_active);
+             for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 1u; emel_case_11 = 2u) {
+               active_seq_ids[active_seq_count] = seq_id;
+             }
+           }
+           active_seq_count += static_cast<int32_t>(track_active);
            seq_seen[seq_id] =
                static_cast<uint8_t>(seq_seen[seq_id] | static_cast<uint8_t>(first_seen));
 
@@ -259,7 +266,7 @@ inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
              cur_mask[static_cast<size_t>(mw)] &= mask[static_cast<size_t>(mw)];
            }
 
-           return monotonic && !mask_empty(cur_mask, mask_words);
+           return (!first_seen || has_active_slot) && monotonic && !mask_empty(cur_mask, mask_words);
          });
   }
 
