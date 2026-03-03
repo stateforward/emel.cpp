@@ -189,6 +189,28 @@ inline bool primary_in_mask_when_both_inputs(const event::batch & req) noexcept 
   return !check_required || primary_present;
 }
 
+inline void continuity_track_active_none(std::array<int32_t, action::MAX_SEQ> &,
+                                         const int32_t,
+                                         const int32_t) noexcept {}
+
+inline void continuity_track_active_some(std::array<int32_t, action::MAX_SEQ> & active_seq_ids,
+                                         const int32_t active_seq_count,
+                                         const int32_t seq_id) noexcept {
+  active_seq_ids[static_cast<size_t>(active_seq_count)] = seq_id;
+}
+
+inline void continuity_track_active(std::array<int32_t, action::MAX_SEQ> & active_seq_ids,
+                                    const int32_t active_seq_count,
+                                    const int32_t seq_id,
+                                    const bool track_active) noexcept {
+  constexpr std::array<void (*)(std::array<int32_t, action::MAX_SEQ> &, int32_t, int32_t), 2>
+      handlers = {
+          continuity_track_active_none,
+          continuity_track_active_some,
+      };
+  handlers[static_cast<size_t>(track_active)](active_seq_ids, active_seq_count, seq_id);
+}
+
 inline bool single_output_per_seq_ok(const event::batch_runtime & ev) noexcept {
   const auto & req = ev.request;
   const int32_t mask_words = ev.ctx.normalized_seq_mask_words;
@@ -248,12 +270,7 @@ inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
            const bool first_seen = seq_seen[seq_id] == 0U;
            const bool has_active_slot = active_seq_count < action::MAX_SEQ;
            const bool track_active = first_seen && has_active_slot;
-           {
-             const size_t emel_branch_11 = static_cast<size_t>(track_active);
-             for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 1u; emel_case_11 = 2u) {
-               active_seq_ids[active_seq_count] = seq_id;
-             }
-           }
+           continuity_track_active(active_seq_ids, active_seq_count, seq_id, track_active);
            active_seq_count += static_cast<int32_t>(track_active);
            seq_seen[seq_id] =
                static_cast<uint8_t>(seq_seen[seq_id] | static_cast<uint8_t>(first_seen));
