@@ -177,7 +177,7 @@ if $COMBINED; then
 
   ready_names=()
   for sm in "${new_sms[@]+${new_sms[@]}}"; do
-    marker="$(grep -E "benchmark: (scaffold|ready)" "$ROOT_DIR/$sm" | head -n 1 || true)"
+    marker="$(grep -E "benchmark: (scaffold|designed|ready)" "$ROOT_DIR/$sm" | head -n 1 || true)"
     if [[ -z "$marker" ]]; then
       echo "error: missing benchmark marker in $sm" >&2
       exit 1
@@ -326,7 +326,7 @@ if $SNAPSHOT; then
 
   ready_names=()
   for sm in "${new_sms[@]+${new_sms[@]}}"; do
-    marker="$(grep -E "benchmark: (scaffold|ready)" "$ROOT_DIR/$sm" | head -n 1 || true)"
+    marker="$(grep -E "benchmark: (scaffold|designed|ready)" "$ROOT_DIR/$sm" | head -n 1 || true)"
     if [[ -z "$marker" ]]; then
       echo "error: missing benchmark marker in $sm" >&2
       exit 1

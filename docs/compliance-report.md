@@ -23,7 +23,7 @@ Method:
 - Machines with canonical `sm` type (struct or alias): **81 / 81**
 - Machines with public `process_event` wrapper: **45 / 81**
 - State-table machines without public `process_event` wrapper: **34**
-- Benchmark marker distribution: scaffold **37**, ready **0**, none **44**
+- Benchmark marker distribution: designed **37**, ready **0**, none **44**
 - Actions files with runtime `if (...)`: **7**
 - Detail files with runtime `if (...)`: **12**
 - Guards files with direct `ctx.*` mutation patterns: **0**
@@ -168,43 +168,43 @@ Scoring rule for `StaticStatus`:
 
 | Machine | StaticStatus | Model | Table | SMType | ProcessWrapper | SourceFirstRows | Unexpected | QueuePolicy | EventSmlAny | Divider | LeadingComma | Benchmark |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `src/emel/batch/planner/modes/equal/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/batch/planner/modes/sequential/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/batch/planner/modes/simple/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
+| `src/emel/batch/planner/modes/equal/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/batch/planner/modes/sequential/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/batch/planner/modes/simple/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/batch/planner/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/gbnf/rule_parser/definition_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/gbnf/rule_parser/expression_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/gbnf/rule_parser/lexer/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/gbnf/rule_parser/nonterm_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/gbnf/rule_parser/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/gbnf/rule_parser/term_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/gbnf/sampler/accept_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/gbnf/sampler/candidate_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/gbnf/sampler/matcher_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/gbnf/sampler/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/gbnf/sampler/token_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
+| `src/emel/gbnf/rule_parser/definition_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/gbnf/rule_parser/expression_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/gbnf/rule_parser/lexer/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/gbnf/rule_parser/nonterm_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/gbnf/rule_parser/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/gbnf/rule_parser/term_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/gbnf/sampler/accept_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/gbnf/sampler/candidate_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/gbnf/sampler/matcher_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/gbnf/sampler/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/gbnf/sampler/token_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/generator/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/gguf/loader/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/graph/allocator/liveness_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/allocator/ordering_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/allocator/placement_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
+| `src/emel/graph/allocator/liveness_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/allocator/ordering_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/allocator/placement_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/graph/allocator/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/graph/assembler/assemble_alloc_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/assembler/assemble_build_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/assembler/assemble_validate_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/assembler/reserve_alloc_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/assembler/reserve_build_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/assembler/reserve_validate_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/assembler/reuse_decision_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
+| `src/emel/graph/assembler/assemble_alloc_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/assembler/assemble_build_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/assembler/assemble_validate_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/assembler/reserve_alloc_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/assembler/reserve_build_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/assembler/reserve_validate_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/assembler/reuse_decision_pass/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/graph/assembler/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/graph/processor/alloc_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/processor/bind_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/processor/extract_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/processor/kernel_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/processor/prepare_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
+| `src/emel/graph/processor/alloc_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/processor/bind_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/processor/extract_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/processor/kernel_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/processor/prepare_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/graph/processor/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/graph/processor/validate_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/graph/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
+| `src/emel/graph/processor/validate_step/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/graph/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/kernel/aarch64/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/kernel/cuda/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/kernel/metal/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
@@ -214,24 +214,24 @@ Scoring rule for `StaticStatus`:
 | `src/emel/kernel/x86_64/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/logits/sampler/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/logits/validator/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/memory/hybrid/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
+| `src/emel/memory/hybrid/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/memory/kv/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/memory/recurrent/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
+| `src/emel/memory/recurrent/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/model/loader/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/model/weight_loader/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/tensor/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
-| `src/emel/tensor/view/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | scaffold |
+| `src/emel/tensor/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
+| `src/emel/tensor/view/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | designed |
 | `src/emel/text/conditioner/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/text/detokenizer/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/text/encoders/bpe/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/text/encoders/fallback/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/text/encoders/plamo2/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/text/encoders/rwkv/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/text/encoders/sm.hpp` | FAIL | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | scaffold |
+| `src/emel/text/encoders/sm.hpp` | FAIL | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | designed |
 | `src/emel/text/encoders/spm/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/text/encoders/ugm/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/text/encoders/wpm/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
-| `src/emel/text/formatter/sm.hpp` | FAIL | 1 | 1 | 1 | 0 | 2 | 1 | 0 | 0 | 0 | 0 | scaffold |
+| `src/emel/text/formatter/sm.hpp` | FAIL | 1 | 1 | 1 | 0 | 2 | 1 | 0 | 0 | 0 | 0 | designed |
 | `src/emel/text/jinja/formatter/sm.hpp` | PASS | 1 | 1 | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/text/jinja/parser/classifier_parser/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | none |
 | `src/emel/text/jinja/parser/lexer/sm.hpp` | PASS | 1 | 1 | 1 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | none |

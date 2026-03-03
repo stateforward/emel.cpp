@@ -8,7 +8,7 @@ performance characterization for each machine.
 
 - every **new** `src/emel/**/sm.hpp` must include a benchmark readiness marker.
 - markers live in the `sm.hpp` file header comment:
-  - `// benchmark: scaffold` means no benchmark required yet.
+  - `// benchmark: designed` means no benchmark required yet.
   - `// benchmark: ready` means a benchmark **is required** and will be enforced by gates.
 - benchmarks are only required for machines marked `ready`.
 - benchmarks are enforced via a snapshot diff with a **30% regression tolerance in quality gates during rearchitecture**.
@@ -49,7 +49,7 @@ when updating the comparison snapshot used by documentation, run:
 
 the benchmark gate script enforces the following:
 - if a new `sm.hpp` file is added:
-  - it must declare `// benchmark: scaffold` or `// benchmark: ready`.
+  - it must declare `// benchmark: designed` or `// benchmark: ready`.
   - if `ready`, a benchmark case **must** exist and be registered.
 - snapshot regression failure if `ns_per_op` exceeds baseline by > tolerance.
   - default (`scripts/bench.sh`): 10% (`BENCH_TOLERANCE=0.10`)
@@ -65,6 +65,6 @@ the benchmark gate script enforces the following:
 
 ## rationale
 
-scaffolded machines often produce trivial workloads that distort baselines. the readiness marker
-allows incremental scaffolding without blocking CI, while still forcing benchmarks once behavior
-is complete.
+designed-but-unbenchmarked machines often produce trivial workloads that distort baselines. the
+readiness marker allows incremental rollout without blocking CI, while still forcing benchmarks
+once behavior is complete.

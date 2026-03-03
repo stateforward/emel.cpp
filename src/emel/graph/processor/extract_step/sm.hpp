@@ -1,5 +1,5 @@
 #pragma once
-// benchmark: scaffold
+// benchmark: designed
 
 #include "emel/graph/processor/extract_step/actions.hpp"
 #include "emel/graph/processor/extract_step/guards.hpp"

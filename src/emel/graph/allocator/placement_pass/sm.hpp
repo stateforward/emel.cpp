@@ -1,5 +1,5 @@
 #pragma once
-// benchmark: scaffold
+// benchmark: designed
 
 #include "emel/graph/allocator/placement_pass/actions.hpp"
 #include "emel/graph/allocator/placement_pass/guards.hpp"
