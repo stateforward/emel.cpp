@@ -116,6 +116,12 @@ add_executable(paritychecker
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_rwkv_parity.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_plamo2_parity.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_fallback_parity.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/lexer.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/parser.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/runtime.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/value.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/string.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
 )
 
 target_link_libraries(paritychecker
@@ -131,6 +137,7 @@ target_include_directories(paritychecker
     ${EMEL_ROOT}/src
     ${EMEL_ROOT}/include
     ${reference_impl_SOURCE_DIR}/src
+    ${reference_impl_SOURCE_DIR}/common
     ${reference_impl_SOURCE_DIR}/ggml/include
     ${reference_impl_SOURCE_DIR}/include
 )
@@ -151,6 +158,12 @@ add_executable(paritychecker_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_rwkv_parity.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_plamo2_parity.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_fallback_parity.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/lexer.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/parser.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/runtime.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/value.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/string.cpp
+  ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
 )
 
 target_link_libraries(paritychecker_tests
@@ -166,6 +179,7 @@ target_include_directories(paritychecker_tests
     ${EMEL_ROOT}/src
     ${EMEL_ROOT}/include
     ${reference_impl_SOURCE_DIR}/src
+    ${reference_impl_SOURCE_DIR}/common
     ${reference_impl_SOURCE_DIR}/ggml/include
     ${reference_impl_SOURCE_DIR}/include
     ${DOCTEST_INCLUDE_DIR}

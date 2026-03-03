@@ -66,6 +66,7 @@ cmake --build "$BUILD_DIR" --parallel
 run_fuzzer() {
   local name="$1"
   local corpus="$2"
+  mkdir -p "$corpus"
   "$BUILD_DIR/$name" -seed=1 -max_total_time=10 -max_len=4096 "$corpus"
 }
 
@@ -73,3 +74,5 @@ if [[ -x "$BUILD_DIR/emel_fuzz_gguf_parser" ]]; then
   run_fuzzer emel_fuzz_gguf_parser "$ROOT_DIR/tests/fuzz/corpus/gguf_parser"
 fi
 run_fuzzer emel_fuzz_gbnf_parser "$ROOT_DIR/tests/fuzz/corpus/gbnf_parser"
+run_fuzzer emel_fuzz_jinja_parser "$ROOT_DIR/tests/fuzz/corpus/jinja_parser"
+run_fuzzer emel_fuzz_jinja_formatter "$ROOT_DIR/tests/fuzz/corpus/jinja_formatter"

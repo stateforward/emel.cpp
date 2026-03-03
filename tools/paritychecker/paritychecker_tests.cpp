@@ -42,6 +42,15 @@ std::filesystem::path gbnf_parity_texts_dir() {
 #endif
 }
 
+std::filesystem::path jinja_parity_texts_dir() {
+#ifdef PARITYCHECKER_REPO_ROOT
+  std::filesystem::path root = PARITYCHECKER_REPO_ROOT;
+  return root / "tests" / "text" / "jinja" / "parity_texts";
+#else
+  return std::filesystem::path("tests") / "text" / "jinja" / "parity_texts";
+#endif
+}
+
 bool file_exists(const std::filesystem::path & path) {
   std::FILE * file = std::fopen(path.string().c_str(), "rb");
   if (file == nullptr) {
@@ -213,6 +222,29 @@ bool run_kernel_paritychecker_process() {
 #endif
 }
 
+bool run_jinja_paritychecker_process(const std::filesystem::path & template_path) {
+  std::string command;
+#if defined(_WIN32)
+  command = ".\\paritychecker --jinja --text-file ";
+  command += quote_arg_windows(template_path.string());
+#else
+  command = "ulimit -s 8192; ./paritychecker --jinja --text-file ";
+  command += quote_arg_posix(template_path.string());
+#endif
+  const int status = std::system(command.c_str());
+  if (status == -1) {
+    return false;
+  }
+#if defined(_WIN32)
+  return status == 0;
+#else
+  if (!WIFEXITED(status)) {
+    return false;
+  }
+  return WEXITSTATUS(status) == 0;
+#endif
+}
+
 }  // namespace
 
 TEST_CASE("paritychecker matches llama tokens across tiny models") {
@@ -259,4 +291,18 @@ TEST_CASE("paritychecker matches llama gbnf parser outputs") {
 
 TEST_CASE("paritychecker matches llama kernel outputs") {
   CHECK(run_kernel_paritychecker_process());
+}
+
+TEST_CASE("paritychecker matches llama jinja parser and formatter outputs") {
+  const auto template_dir = jinja_parity_texts_dir();
+  const std::vector<std::filesystem::path> cases = {
+      template_dir / "literal_text.j2",
+      template_dir / "invalid_unclosed_expression.j2",
+  };
+
+  for (const auto & template_path : cases) {
+    INFO("case: " << template_path.string());
+    REQUIRE(file_exists(template_path));
+    CHECK(run_jinja_paritychecker_process(template_path));
+  }
 }

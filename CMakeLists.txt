@@ -229,4 +229,14 @@ if(EMEL_ENABLE_FUZZ)
     tests/fuzz/gbnf_parser_fuzz.cpp
   )
   emel_configure_fuzzer(emel_fuzz_gbnf_parser)
+
+  add_executable(emel_fuzz_jinja_parser
+    tests/fuzz/jinja_parser_fuzz.cpp
+  )
+  emel_configure_fuzzer(emel_fuzz_jinja_parser)
+
+  add_executable(emel_fuzz_jinja_formatter
+    tests/fuzz/jinja_formatter_fuzz.cpp
+  )
+  emel_configure_fuzzer(emel_fuzz_jinja_formatter)
 endif()

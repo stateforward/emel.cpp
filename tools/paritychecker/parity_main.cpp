@@ -10,11 +10,13 @@ using emel::paritychecker::parity_options;
 
 void print_usage(const char * exe) {
   std::fprintf(stderr,
-               "usage: %s [--gbnf | --kernel] [--model <path>] (--text <text> | --text-file <path>) "
+               "usage: %s [--gbnf | --kernel | --jinja] [--model <path>] "
+               "(--text <text> | --text-file <path>) "
                "[--add-special] [--parse-special] [--dump]\n"
                "  default mode compares tokenizer parity and requires --model\n"
                "  --gbnf mode compares GBNF parser parity and ignores --model\n"
-               "  --kernel mode compares kernel parity and ignores --model\n",
+               "  --kernel mode compares kernel parity and ignores --model\n"
+               "  --jinja mode compares jinja parser/formatter parity and ignores --model\n",
                exe);
 }
 
@@ -47,6 +49,10 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
     }
     if (arg == "--kernel") {
       out.mode = emel::paritychecker::parity_mode::kernel;
+      continue;
+    }
+    if (arg == "--jinja") {
+      out.mode = emel::paritychecker::parity_mode::jinja;
       continue;
     }
     if (arg == "--model") {
@@ -99,6 +105,10 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
     return false;
   }
   if (out.mode == emel::paritychecker::parity_mode::gbnf_parser &&
+      (out.add_special || out.parse_special)) {
+    return false;
+  }
+  if (out.mode == emel::paritychecker::parity_mode::jinja &&
       (out.add_special || out.parse_special)) {
     return false;
   }

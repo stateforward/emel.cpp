@@ -9,6 +9,7 @@ enum class parity_mode : uint8_t {
   tokenizer = 0,
   gbnf_parser = 1,
   kernel = 2,
+  jinja = 3,
 };
 
 struct parity_options {
