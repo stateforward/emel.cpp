@@ -35,6 +35,7 @@ explicitly in the state machine.
 - [x] `src/emel/text/encoders/rwkv/detail.hpp`
 - [x] `src/emel/text/encoders/wpm/detail.hpp`
 - [x] `src/emel/text/encoders/detail.hpp`
+- [x] `src/emel/text/jinja/lexer/detail.hpp`
 - [x] `src/emel/batch/planner/modes/detail.hpp`
 - [x] `src/emel/gbnf/rule_parser/detail.hpp`
 - [x] `src/emel/text/encoders/bpe/detail.hpp`
