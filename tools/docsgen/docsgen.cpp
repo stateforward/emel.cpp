@@ -7,11 +7,12 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <optional>
 #include <regex>
-#include <sstream>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 #include <type_traits>
 #include <utility>
@@ -19,9 +20,8 @@
 
 #include "emel/emel.h"
 #include "emel/docs/detail.hpp"
-#include "emel/text/jinja/parser/sm.hpp"
-#include "emel/text/jinja/formatter/sm.hpp"
 #include "emel/text/jinja/parser/detail.hpp"
+#include "emel/text/jinja/parser/sm.hpp"
 
 namespace fs = std::filesystem;
 
@@ -287,20 +287,50 @@ struct template_var {
   std::string value;
 };
 
-bool formatter_render_done_sink(const emel::text::jinja::events::rendering_done &) {
-  return true;
-}
-
-bool formatter_render_error_sink(const emel::text::jinja::events::rendering_error &) {
-  return true;
-}
-
 bool parser_parse_done_sink(const emel::text::jinja::events::parsing_done &) {
   return true;
 }
 
 bool parser_parse_error_sink(const emel::text::jinja::events::parsing_error &) {
   return true;
+}
+
+const std::string * find_template_var(const std::unordered_map<std::string, std::string> & vars,
+                                      const std::string_view key) {
+  const auto it = vars.find(std::string(key));
+  if (it == vars.end()) {
+    return nullptr;
+  }
+  return &it->second;
+}
+
+bool append_rendered_node(std::string & out,
+                          const emel::text::jinja::ast_node * const node,
+                          const std::unordered_map<std::string, std::string> & vars) {
+  if (const auto * text = dynamic_cast<const emel::text::jinja::string_literal *>(node);
+      text != nullptr) {
+    out += text->value;
+    return true;
+  }
+
+  if (const auto * id = dynamic_cast<const emel::text::jinja::identifier *>(node);
+      id != nullptr) {
+    const auto * value = find_template_var(vars, id->name);
+    if (value == nullptr) {
+      std::fprintf(stderr, "error: template variable not provided: %s\n", id->name.c_str());
+      return false;
+    }
+    out += *value;
+    return true;
+  }
+
+  if (dynamic_cast<const emel::text::jinja::comment_statement *>(node) != nullptr ||
+      dynamic_cast<const emel::text::jinja::noop_statement *>(node) != nullptr) {
+    return true;
+  }
+
+  std::fprintf(stderr, "error: unsupported template AST node\n");
+  return false;
 }
 
 std::optional<std::string> render_template(const fs::path & template_path,
@@ -333,70 +363,26 @@ std::optional<std::string> render_template(const fs::path & template_path,
     return std::nullopt;
   }
 
-  std::vector<emel::text::jinja::object_entry> entries;
-  entries.reserve(vars.size());
+  std::unordered_map<std::string, std::string> template_vars;
+  template_vars.reserve(vars.size());
   for (const auto & var : vars) {
-    emel::text::jinja::value key;
-    key.type = emel::text::jinja::value_type::string;
-    key.string_v.view = var.key;
-
-    emel::text::jinja::value val;
-    val.type = emel::text::jinja::value_type::string;
-    val.string_v.view = var.value;
-
-    emel::text::jinja::object_entry entry;
-    entry.key = key;
-    entry.val = val;
-    entries.push_back(entry);
+    template_vars.insert_or_assign(var.key, var.value);
   }
 
-  emel::text::jinja::object_value globals{};
-  if (!entries.empty()) {
-    globals.entries = entries.data();
-    globals.count = entries.size();
-    globals.capacity = entries.size();
-    globals.has_builtins = false;
-  }
-
-  std::size_t estimate = template_text.size() + 8192;
+  std::size_t estimate = template_text.size();
   for (const auto & var : vars) {
     estimate += var.value.size();
   }
 
-  std::vector<char> output_buffer;
-  output_buffer.resize(estimate);
-
-  size_t out_len = 0;
-  size_t error_pos = 0;
-  int32_t render_err = static_cast<int32_t>(emel::text::jinja::formatter::error::none);
-  emel::text::jinja::formatter::action::context render_ctx;
-  emel::text::jinja::formatter::sm renderer{render_ctx};
-  const emel::text::jinja::event::render::done_callback render_done_cb =
-      emel::text::jinja::event::render::done_callback::from<&formatter_render_done_sink>();
-  const emel::text::jinja::event::render::error_callback render_error_cb =
-      emel::text::jinja::event::render::error_callback::from<&formatter_render_error_sink>();
-  emel::text::jinja::event::render render_ev{
-      program,
-      template_text,
-      output_buffer[0],
-      output_buffer.size(),
-      render_done_cb,
-      render_error_cb,
-      entries.empty() ? nullptr : &globals,
-      &out_len,
-      nullptr,
-      &render_err,
-      &error_pos,
-  };
-
-  renderer.process_event(render_ev);
-  if (render_err != static_cast<int32_t>(emel::text::jinja::formatter::error::none) ||
-      !renderer.is(boost::sml::state<emel::text::jinja::formatter::done>)) {
-    std::fprintf(stderr, "error: jinja render failed\n");
-    return std::nullopt;
+  std::string rendered;
+  rendered.reserve(estimate);
+  for (const auto & node : program.body) {
+    if (!append_rendered_node(rendered, node.get(), template_vars)) {
+      return std::nullopt;
+    }
   }
 
-  return std::string(output_buffer.data(), out_len);
+  return rendered;
 }
 
 std::optional<std::string> build_benchmarks_table(const doc_paths & paths) {

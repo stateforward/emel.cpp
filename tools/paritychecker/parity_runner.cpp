@@ -3,8 +3,8 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdio>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -20,9 +20,16 @@
 #include "emel/kernel/x86_64/context.hpp"
 #include "emel/kernel/x86_64/detail.hpp"
 #include "emel/model/data.hpp"
+#include "emel/text/jinja/formatter/sm.hpp"
+#include "emel/text/jinja/parser/detail.hpp"
+#include "emel/text/jinja/parser/errors.hpp"
+#include "emel/text/jinja/parser/sm.hpp"
 
 #include "ggml-cpu.h"
 #include "ggml.h"
+#include "jinja/lexer.h"
+#include "jinja/parser.h"
+#include "jinja/runtime.h"
 #include "llama-grammar.h"
 #include "llama-vocab.h"
 
@@ -99,6 +106,151 @@ bool run_llama_gbnf_parse(std::string_view grammar_text, llama_grammar_rules & r
   }
   rules_out = std::move(parser.rules);
   return true;
+}
+
+struct jinja_parse_capture {
+  bool done_called = false;
+  bool error_called = false;
+};
+
+struct jinja_render_capture {
+  bool done_called = false;
+  bool error_called = false;
+};
+
+bool on_jinja_parse_done(void * owner,
+                         const emel::text::jinja::events::parsing_done &) {
+  auto * capture = static_cast<jinja_parse_capture *>(owner);
+  capture->done_called = true;
+  return true;
+}
+
+bool on_jinja_parse_error(void * owner,
+                          const emel::text::jinja::events::parsing_error &) {
+  auto * capture = static_cast<jinja_parse_capture *>(owner);
+  capture->error_called = true;
+  return true;
+}
+
+bool on_jinja_render_done(void * owner,
+                          const emel::text::jinja::events::rendering_done &) {
+  auto * capture = static_cast<jinja_render_capture *>(owner);
+  capture->done_called = true;
+  return true;
+}
+
+bool on_jinja_render_error(void * owner,
+                           const emel::text::jinja::events::rendering_error &) {
+  auto * capture = static_cast<jinja_render_capture *>(owner);
+  capture->error_called = true;
+  return true;
+}
+
+bool run_emel_jinja_parse(std::string_view template_text,
+                          emel::text::jinja::program & program_out,
+                          int32_t & parse_err_out,
+                          size_t & parse_error_pos_out) {
+  jinja_parse_capture capture{};
+  emel::text::jinja::parser::action::context parse_ctx{};
+  emel::text::jinja::parser::sm parser{parse_ctx};
+  const emel::text::jinja::event::parse::done_callback done_cb{
+      &capture,
+      on_jinja_parse_done};
+  const emel::text::jinja::event::parse::error_callback error_cb{
+      &capture,
+      on_jinja_parse_error};
+  const emel::text::jinja::event::parse parse_ev{
+      template_text,
+      program_out,
+      done_cb,
+      error_cb,
+      parse_err_out,
+      parse_error_pos_out,
+  };
+  const bool accepted = parser.process_event(parse_ev);
+  return accepted && capture.done_called && !capture.error_called &&
+         parse_err_out == static_cast<int32_t>(emel::text::jinja::parser::error::none);
+}
+
+bool run_reference_jinja_parse(std::string_view template_text,
+                               ::jinja::program & program_out) {
+  try {
+    ::jinja::lexer lex;
+    ::jinja::lexer_result lex_res = lex.tokenize(std::string(template_text));
+    program_out = ::jinja::parse_from_tokens(lex_res);
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+bool run_emel_jinja_render(const emel::text::jinja::program & program,
+                           std::string_view template_text,
+                           std::string & rendered_out) {
+  jinja_render_capture capture{};
+  emel::text::jinja::formatter::action::context formatter_ctx{};
+  emel::text::jinja::formatter::sm formatter{formatter_ctx};
+  std::vector<char> output_buffer(
+      std::max<size_t>(1, static_cast<size_t>(template_text.size() + 1)));
+  size_t output_len = 0;
+  int32_t render_err = static_cast<int32_t>(emel::text::jinja::formatter::error::none);
+  size_t render_error_pos = 0;
+  const emel::text::jinja::event::render::done_callback done_cb{
+      &capture,
+      on_jinja_render_done};
+  const emel::text::jinja::event::render::error_callback error_cb{
+      &capture,
+      on_jinja_render_error};
+  const emel::text::jinja::event::render render_ev{
+      program,
+      template_text,
+      output_buffer[0],
+      output_buffer.size(),
+      done_cb,
+      error_cb,
+      nullptr,
+      &output_len,
+      nullptr,
+      &render_err,
+      &render_error_pos,
+  };
+
+  const bool accepted = formatter.process_event(render_ev);
+  if (!accepted || capture.error_called ||
+      render_err != static_cast<int32_t>(emel::text::jinja::formatter::error::none)) {
+    return false;
+  }
+  rendered_out.assign(output_buffer.data(), output_len);
+  return true;
+}
+
+bool run_reference_jinja_render(const ::jinja::program & program,
+                                std::string & rendered_out) {
+  try {
+    ::jinja::context ctx;
+    ctx.set_val("name", ::jinja::mk_val<::jinja::value_string>("world"));
+    ctx.set_val("cond", ::jinja::mk_val<::jinja::value_bool>(true));
+    auto items = ::jinja::mk_val<::jinja::value_array>();
+    items->push_back(::jinja::mk_val<::jinja::value_int>(1));
+    items->push_back(::jinja::mk_val<::jinja::value_int>(2));
+    items->push_back(::jinja::mk_val<::jinja::value_int>(3));
+    ctx.set_val("items", items);
+    ::jinja::runtime runtime{ctx};
+    auto result = runtime.execute(program);
+    auto parts = ::jinja::runtime::gather_string_parts(result);
+    rendered_out = ::jinja::render_string_parts(parts);
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+std::string_view strip_trailing_newline(const std::string & value) {
+  size_t len = value.size();
+  if (len > 0 && value[len - 1] == '\n') {
+    --len;
+  }
+  return std::string_view(value.data(), len);
 }
 
 bool compare_grammars(const emel::gbnf::grammar & emel_grammar,
@@ -1173,6 +1325,61 @@ int run_gbnf_parser_parity(const emel::paritychecker::parity_options & opts) {
   return 0;
 }
 
+int run_jinja_parity(const emel::paritychecker::parity_options & opts) {
+  emel::text::jinja::program emel_program{};
+  int32_t emel_parse_err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
+  size_t emel_parse_error_pos = 0;
+  const bool emel_parse_ok = run_emel_jinja_parse(
+      opts.text, emel_program, emel_parse_err, emel_parse_error_pos);
+
+  ::jinja::program reference_program;
+  const bool reference_parse_ok = run_reference_jinja_parse(opts.text, reference_program);
+
+  if (emel_parse_ok != reference_parse_ok) {
+    std::fprintf(stderr,
+                 "jinja parse outcome mismatch: emel=%s reference=%s (emel_err=%d at %zu)\n",
+                 emel_parse_ok ? "ok" : "error",
+                 reference_parse_ok ? "ok" : "error",
+                 emel_parse_err,
+                 emel_parse_error_pos);
+    return 1;
+  }
+
+  if (!emel_parse_ok) {
+    std::fprintf(stdout, "jinja parity ok (both parsers rejected template)\n");
+    return 0;
+  }
+
+  std::string emel_rendered;
+  if (!run_emel_jinja_render(emel_program, opts.text, emel_rendered)) {
+    std::fprintf(stderr, "jinja render failed in emel formatter\n");
+    return 1;
+  }
+
+  std::string reference_rendered;
+  if (!run_reference_jinja_render(reference_program, reference_rendered)) {
+    std::fprintf(stderr, "jinja render failed in reference runtime\n");
+    return 1;
+  }
+
+  const std::string_view emel_cmp = strip_trailing_newline(emel_rendered);
+  const std::string_view reference_cmp = strip_trailing_newline(reference_rendered);
+  if (emel_cmp != reference_cmp) {
+    std::fprintf(stderr,
+                 "jinja render mismatch: emel_len=%zu reference_len=%zu\n",
+                 emel_rendered.size(),
+                 reference_rendered.size());
+    if (opts.dump) {
+      std::fprintf(stdout, "emel:\n%s\n", emel_rendered.c_str());
+      std::fprintf(stdout, "reference:\n%s\n", reference_rendered.c_str());
+    }
+    return 1;
+  }
+
+  std::fprintf(stdout, "jinja parity ok (output bytes=%zu)\n", emel_rendered.size());
+  return 0;
+}
+
 }  // namespace
 
 namespace emel::paritychecker {
@@ -1183,6 +1390,8 @@ int run_parity(const parity_options & opts) {
       return run_gbnf_parser_parity(opts);
     case parity_mode::kernel:
       return run_kernel_parity(opts);
+    case parity_mode::jinja:
+      return run_jinja_parity(opts);
     case parity_mode::tokenizer:
     default:
       return run_tokenizer_parity(opts);
