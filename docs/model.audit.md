@@ -32,6 +32,7 @@ explicitly in the state machine.
 - [x] `src/emel/docs/detail.hpp`
 - [x] `src/emel/text/encoders/fallback/detail.hpp`
 - [x] `src/emel/text/encoders/rwkv/detail.hpp`
+- [x] `src/emel/text/encoders/wpm/detail.hpp`
 
 ## High-Priority Findings (Action Files)
 

@@ -33,6 +33,13 @@ inline uint32_t select_u32(const bool choose_true,
   return (false_value & ~mask) | (true_value & mask);
 }
 
+inline size_t select_size(const bool choose_true,
+                          const size_t true_value,
+                          const size_t false_value) noexcept {
+  const size_t mask = static_cast<size_t>(0) - static_cast<size_t>(choose_true);
+  return (false_value & ~mask) | (true_value & mask);
+}
+
 constexpr uint32_t k_fnv_offset = 2166136261u;
 constexpr uint32_t k_fnv_prime = 16777619u;
 
@@ -96,30 +103,43 @@ inline bool wpm_insert_token_map(emel::text::encoders::detail::token_map &map,
   return success;
 }
 
+inline void ensure_wpm_tables_rebuild_none(emel::text::encoders::action::context &,
+                                           const emel::model::data::vocab &,
+                                           bool &) noexcept {}
+
+inline void ensure_wpm_tables_rebuild_some(emel::text::encoders::action::context &ctx,
+                                           const emel::model::data::vocab &vocab,
+                                           bool &ok) noexcept {
+  ctx.vocab = &vocab;
+  ctx.tables_ready = false;
+  ctx.token_to_id.clear();
+  ctx.max_token_len = 0;
+
+  for (uint32_t id = 0; id < vocab.n_tokens; ++id) {
+    const std::string_view text = wpm_token_text(vocab, static_cast<int32_t>(id));
+    const bool inserted = wpm_insert_token_map(
+      ctx.token_to_id, vocab, text, static_cast<int32_t>(id));
+    ok = ok && inserted;
+    const int32_t text_len = static_cast<int32_t>(text.size());
+    const bool longer = text_len > ctx.max_token_len;
+    ctx.max_token_len = select_i32(longer, text_len, ctx.max_token_len);
+  }
+
+  ctx.tables_ready = ok;
+}
+
 inline bool ensure_wpm_tables(emel::text::encoders::action::context &ctx,
                               const emel::model::data::vocab &vocab) noexcept {
   const bool already_ready = ctx.tables_ready && ctx.vocab == &vocab;
   bool ok = true;
-
-  for (bool rebuild = !already_ready; rebuild; rebuild = false) {
-    ctx.vocab = &vocab;
-    ctx.tables_ready = false;
-    ctx.token_to_id.clear();
-    ctx.max_token_len = 0;
-
-    for (uint32_t id = 0; id < vocab.n_tokens; ++id) {
-      const std::string_view text = wpm_token_text(vocab, static_cast<int32_t>(id));
-      const bool inserted = wpm_insert_token_map(
-        ctx.token_to_id, vocab, text, static_cast<int32_t>(id));
-      ok = ok && inserted;
-      const int32_t text_len = static_cast<int32_t>(text.size());
-      const bool longer = text_len > ctx.max_token_len;
-      ctx.max_token_len = select_i32(longer, text_len, ctx.max_token_len);
-    }
-
-    ctx.tables_ready = ok;
-  }
-
+  using rebuild_handler_t = void (*)(emel::text::encoders::action::context &,
+                                     const emel::model::data::vocab &,
+                                     bool &) noexcept;
+  const rebuild_handler_t rebuild_handlers[2] = {
+      ensure_wpm_tables_rebuild_none,
+      ensure_wpm_tables_rebuild_some,
+  };
+  rebuild_handlers[static_cast<size_t>(!already_ready)](ctx, vocab, ok);
   return already_ready || ctx.tables_ready;
 }
 
@@ -167,6 +187,77 @@ inline bool wpm_push_token(const event::encode &ev, const int32_t token, int32_t
   return write;
 }
 
+inline void wpm_preprocess_start_new_word_none(std::vector<std::string> &) {}
+
+inline void wpm_preprocess_start_new_word_some(std::vector<std::string> &words) {
+  words.emplace_back();
+}
+
+inline void wpm_preprocess_start_new_word_if_needed(std::vector<std::string> &words) {
+  using start_handler_t = void (*)(std::vector<std::string> &);
+  const start_handler_t start_handlers[2] = {
+      wpm_preprocess_start_new_word_none,
+      wpm_preprocess_start_new_word_some,
+  };
+  start_handlers[static_cast<size_t>(!words.back().empty())](words);
+}
+
+inline void wpm_preprocess_whitespace_none(std::vector<std::string> &) {}
+
+inline void wpm_preprocess_whitespace_some(std::vector<std::string> &words) {
+  wpm_preprocess_start_new_word_if_needed(words);
+}
+
+inline void wpm_preprocess_split_none(std::vector<std::string> &, const std::string &) {}
+
+inline void wpm_preprocess_split_some(std::vector<std::string> &words,
+                                      const std::string &token) {
+  wpm_preprocess_start_new_word_if_needed(words);
+  words.back() = token;
+  words.emplace_back();
+}
+
+inline void wpm_preprocess_append_none(std::vector<std::string> &, const std::string &) {}
+
+inline void wpm_preprocess_append_some(std::vector<std::string> &words,
+                                       const std::string &token) {
+  words.back() += token;
+}
+
+inline void wpm_preprocess_emit_none(std::vector<std::string> &,
+                                     uint32_t,
+                                     emel::text::unicode_cpt_flags) {}
+
+inline void wpm_preprocess_emit_some(std::vector<std::string> &words,
+                                     const uint32_t cpt,
+                                     const emel::text::unicode_cpt_flags flags) {
+  const std::string token =
+      emel::text::unicode_cpt_to_utf8(emel::text::unicode_tolower(cpt));
+  const bool split_token =
+      flags.is_punctuation || (cpt < 0x7Fu && flags.is_symbol) ||
+      emel::text::encoders::detail::is_chinese_char(cpt);
+
+  using split_handler_t = void (*)(std::vector<std::string> &, const std::string &);
+  const split_handler_t split_handlers[2] = {
+      wpm_preprocess_split_none,
+      wpm_preprocess_split_some,
+  };
+  split_handlers[static_cast<size_t>(split_token)](words, token);
+
+  using append_handler_t = void (*)(std::vector<std::string> &, const std::string &);
+  const append_handler_t append_handlers[2] = {
+      wpm_preprocess_append_none,
+      wpm_preprocess_append_some,
+  };
+  append_handlers[static_cast<size_t>(!split_token)](words, token);
+}
+
+inline void wpm_preprocess_trim_tail_none(std::vector<std::string> &) {}
+
+inline void wpm_preprocess_trim_tail_some(std::vector<std::string> &words) {
+  words.pop_back();
+}
+
 inline std::vector<std::string> wpm_preprocess(const std::string_view text) {
   const std::string utf8_text(text);
   const std::vector<uint32_t> cpts =
@@ -175,120 +266,237 @@ inline std::vector<std::string> wpm_preprocess(const std::string_view text) {
   std::vector<std::string> words(1, "");
   for (const uint32_t cpt : cpts) {
     const auto flags = emel::text::unicode_cpt_flags_from_cpt(cpt);
-
-    for (bool is_whitespace = flags.is_whitespace; is_whitespace; is_whitespace = false) {
-      for (bool start_new_word = !words.back().empty(); start_new_word; start_new_word = false) {
-        words.emplace_back();
-      }
-    }
+    using whitespace_handler_t = void (*)(std::vector<std::string> &);
+    const whitespace_handler_t whitespace_handlers[2] = {
+        wpm_preprocess_whitespace_none,
+        wpm_preprocess_whitespace_some,
+    };
+    whitespace_handlers[static_cast<size_t>(flags.is_whitespace)](words);
 
     const bool invalid = cpt == 0u || cpt == 0xFFFDu || flags.is_control;
     const bool emit = !flags.is_whitespace && !invalid;
-    for (bool process = emit; process; process = false) {
-      const std::string s =
-        emel::text::unicode_cpt_to_utf8(emel::text::unicode_tolower(cpt));
-      const bool split_token =
-        flags.is_punctuation || (cpt < 0x7Fu && flags.is_symbol) ||
-        emel::text::encoders::detail::is_chinese_char(cpt);
-      for (bool split = split_token; split; split = false) {
-        for (bool start_new_word = !words.back().empty(); start_new_word; start_new_word = false) {
-          words.emplace_back();
-        }
-        words.back() = s;
-        words.emplace_back();
-      }
-      for (bool append = !split_token; append; append = false) {
-        words.back() += s;
-      }
-    }
+    using emit_handler_t = void (*)(std::vector<std::string> &,
+                                    uint32_t,
+                                    emel::text::unicode_cpt_flags);
+    const emit_handler_t emit_handlers[2] = {
+        wpm_preprocess_emit_none,
+        wpm_preprocess_emit_some,
+    };
+    emit_handlers[static_cast<size_t>(emit)](words, cpt, flags);
   }
-  for (bool trim_tail = !words.empty() && words.back().empty(); trim_tail; trim_tail = false) {
-    words.pop_back();
-  }
+  using trim_tail_handler_t = void (*)(std::vector<std::string> &);
+  const trim_tail_handler_t trim_tail_handlers[2] = {
+      wpm_preprocess_trim_tail_none,
+      wpm_preprocess_trim_tail_some,
+  };
+  trim_tail_handlers[static_cast<size_t>(!words.empty() && words.back().empty())](words);
   return words;
+}
+
+inline constexpr size_t k_wpm_prefix_len = 3u;
+inline constexpr char k_wpm_prefix[] = "\xE2\x96\x81";
+
+inline void wpm_copy_word_none(emel::text::encoders::action::context &,
+                               const std::string &) noexcept {}
+
+inline void wpm_copy_word_some(emel::text::encoders::action::context &ctx,
+                               const std::string &word) noexcept {
+  std::memcpy(ctx.scratch.buffer.data(), k_wpm_prefix, k_wpm_prefix_len);
+  std::memcpy(ctx.scratch.buffer.data() + k_wpm_prefix_len, word.data(), word.size());
+}
+
+inline void wpm_push_candidate_none(const event::encode &,
+                                    const int32_t,
+                                    int32_t &,
+                                    bool &pushed) noexcept {
+  pushed = true;
+}
+
+inline void wpm_push_candidate_some(const event::encode &ev,
+                                    const int32_t token,
+                                    int32_t &count,
+                                    bool &pushed) noexcept {
+  pushed = wpm_push_token(ev, token, count);
+}
+
+inline void wpm_resolve_unk_none(const emel::text::encoders::action::context &,
+                                 const emel::model::data::vocab &,
+                                 int32_t &) noexcept {}
+
+inline void wpm_resolve_unk_some(const emel::text::encoders::action::context &ctx,
+                                 const emel::model::data::vocab &vocab,
+                                 int32_t &unk) noexcept {
+  unk = wpm_lookup_token(ctx, vocab, "<unk>");
+}
+
+inline bool encode_wpm_process_word_none(const event::encode &,
+                                         emel::text::encoders::action::context &,
+                                         const emel::model::data::vocab &,
+                                         const std::string &,
+                                         int32_t &,
+                                         encode_result &) {
+  return true;
+}
+
+inline bool encode_wpm_process_word_some(const event::encode &ev,
+                                         emel::text::encoders::action::context &ctx,
+                                         const emel::model::data::vocab &vocab,
+                                         const std::string &word,
+                                         int32_t &count,
+                                         encode_result &result) {
+  const int32_t word_token_start = count;
+  const size_t word_len = word.size();
+  const bool has_capacity = k_wpm_prefix_len + word_len <= ctx.scratch.buffer.size();
+  using copy_handler_t = void (*)(emel::text::encoders::action::context &,
+                                  const std::string &) noexcept;
+  const copy_handler_t copy_handlers[2] = {
+      wpm_copy_word_none,
+      wpm_copy_word_some,
+  };
+  copy_handlers[static_cast<size_t>(has_capacity)](ctx, word);
+
+  result.error = select_i32(!has_capacity, EMEL_ERR_INVALID_ARGUMENT, result.error);
+  bool ok = has_capacity;
+  const size_t word_view_len = select_size(has_capacity, k_wpm_prefix_len + word_len, 0u);
+  const std::string_view word_view(ctx.scratch.buffer.data(), word_view_len);
+  const int32_t n = static_cast<int32_t>(word_view.size());
+
+  for (int32_t i = 0; i < n && ok; ++i) {
+    bool found = false;
+    int32_t matched_end = i;
+    const int32_t end = std::min(n, i + ctx.max_token_len + 1);
+    for (int32_t j = end; j > i && ok && !found; --j) {
+      const std::string_view piece = word_view.substr(
+        static_cast<size_t>(i),
+        static_cast<size_t>(j - i));
+      const int32_t token = wpm_lookup_token(ctx, vocab, piece);
+      const bool hit = token != k_token_null && !found;
+      bool pushed = true;
+      using push_handler_t = void (*)(const event::encode &,
+                                      int32_t,
+                                      int32_t &,
+                                      bool &) noexcept;
+      const push_handler_t push_handlers[2] = {
+          wpm_push_candidate_none,
+          wpm_push_candidate_some,
+      };
+      push_handlers[static_cast<size_t>(hit)](ev, token, count, pushed);
+      const bool push_fail = hit && !pushed;
+      result.error = select_i32(push_fail, EMEL_ERR_INVALID_ARGUMENT, result.error);
+      ok = ok && !push_fail;
+      found = found || hit;
+      matched_end = select_i32(hit, j, matched_end);
+    }
+
+    i = select_i32(found, matched_end - 1, i);
+    const bool rollback = !found;
+    count = select_i32(rollback, word_token_start, count);
+    i = select_i32(rollback, n, i);
+  }
+
+  const bool needs_unk = ok && count == word_token_start;
+  int32_t unk = vocab.unk_id;
+  using resolve_handler_t = void (*)(const emel::text::encoders::action::context &,
+                                     const emel::model::data::vocab &,
+                                     int32_t &) noexcept;
+  const resolve_handler_t resolve_handlers[2] = {
+      wpm_resolve_unk_none,
+      wpm_resolve_unk_some,
+  };
+  resolve_handlers[static_cast<size_t>(needs_unk && unk == k_token_null)](ctx, vocab, unk);
+
+  const bool have_unk = needs_unk && unk != k_token_null;
+  bool pushed_unk = true;
+  using push_handler_t = void (*)(const event::encode &,
+                                  int32_t,
+                                  int32_t &,
+                                  bool &) noexcept;
+  const push_handler_t push_handlers[2] = {
+      wpm_push_candidate_none,
+      wpm_push_candidate_some,
+  };
+  push_handlers[static_cast<size_t>(have_unk)](ev, unk, count, pushed_unk);
+  const bool push_fail_unk = have_unk && !pushed_unk;
+  result.error = select_i32(push_fail_unk, EMEL_ERR_INVALID_ARGUMENT, result.error);
+  ok = ok && !push_fail_unk;
+  return ok;
+}
+
+inline encode_result encode_wpm_ready_tables(const event::encode &ev,
+                                             emel::text::encoders::action::context &ctx,
+                                             const emel::model::data::vocab &vocab) {
+  encode_result result{};
+  result.token_count = 0;
+  result.error = EMEL_OK;
+
+  int32_t count = 0;
+  const std::vector<std::string> words = wpm_preprocess(ev.text);
+  bool ok = true;
+
+  for (const std::string &word : words) {
+    using process_word_handler_t = bool (*)(const event::encode &,
+                                            emel::text::encoders::action::context &,
+                                            const emel::model::data::vocab &,
+                                            const std::string &,
+                                            int32_t &,
+                                            encode_result &);
+    const process_word_handler_t process_word_handlers[2] = {
+        encode_wpm_process_word_none,
+        encode_wpm_process_word_some,
+    };
+    const bool processed_ok = process_word_handlers[static_cast<size_t>(!word.empty())](
+        ev, ctx, vocab, word, count, result);
+    ok = ok && processed_ok;
+  }
+
+  const bool success = ok && result.error == EMEL_OK;
+  result.token_count = select_i32(success, count, 0);
+  return result;
+}
+
+inline encode_result encode_wpm_missing_tables(const event::encode &,
+                                               emel::text::encoders::action::context &,
+                                               const emel::model::data::vocab &) {
+  encode_result result{};
+  result.token_count = 0;
+  result.error = EMEL_ERR_INVALID_ARGUMENT;
+  return result;
+}
+
+inline encode_result encode_wpm_non_empty(const event::encode &ev,
+                                          emel::text::encoders::action::context &ctx,
+                                          const emel::model::data::vocab &vocab) {
+  using tables_handler_t = encode_result (*)(const event::encode &,
+                                             emel::text::encoders::action::context &,
+                                             const emel::model::data::vocab &);
+  const tables_handler_t tables_handlers[2] = {
+      encode_wpm_missing_tables,
+      encode_wpm_ready_tables,
+  };
+  const bool tables_ready = ctx.tables_ready && ctx.vocab == &vocab;
+  return tables_handlers[static_cast<size_t>(tables_ready)](ev, ctx, vocab);
+}
+
+inline encode_result encode_wpm_empty(const event::encode &,
+                                      emel::text::encoders::action::context &,
+                                      const emel::model::data::vocab &) {
+  encode_result result{};
+  result.token_count = 0;
+  result.error = EMEL_OK;
+  return result;
 }
 
 inline encode_result encode_wpm(const event::encode &ev,
                                 emel::text::encoders::action::context &ctx,
                                 const emel::model::data::vocab &vocab) {
-  encode_result result{};
-  result.token_count = 0;
-
-  for (bool empty_text = ev.text.empty(); empty_text; empty_text = false) {
-    result.error = EMEL_OK;
-    return result;
-  }
-
-  const bool tables_ready = ctx.tables_ready && ctx.vocab == &vocab;
-  for (bool missing_tables = !tables_ready; missing_tables; missing_tables = false) {
-    result.error = EMEL_ERR_INVALID_ARGUMENT;
-    return result;
-  }
-
-  int32_t count = 0;
-  const std::vector<std::string> words = wpm_preprocess(ev.text);
-  const char *prefix = "\xE2\x96\x81";
-  constexpr size_t prefix_len = 3;
-
-  for (const std::string &word : words) {
-    for (bool process_word = !word.empty(); process_word; process_word = false) {
-      const int32_t word_token_start = count;
-      const size_t word_len = word.size();
-      const bool has_capacity = prefix_len + word_len <= ctx.scratch.buffer.size();
-      for (bool overflow = !has_capacity; overflow; overflow = false) {
-        result.error = EMEL_ERR_INVALID_ARGUMENT;
-        return result;
-      }
-      std::memcpy(ctx.scratch.buffer.data(), prefix, prefix_len);
-      std::memcpy(ctx.scratch.buffer.data() + prefix_len, word.data(), word_len);
-      const std::string_view word_view(ctx.scratch.buffer.data(),
-                                       prefix_len + word_len);
-      const int32_t n = static_cast<int32_t>(word_view.size());
-      for (int32_t i = 0; i < n; ++i) {
-        bool found = false;
-        int32_t matched_end = i;
-        const int32_t end = std::min(n, i + ctx.max_token_len + 1);
-        for (int32_t j = end; j > i; --j) {
-          const std::string_view piece = word_view.substr(
-            static_cast<size_t>(i),
-            static_cast<size_t>(j - i));
-          const int32_t token = wpm_lookup_token(ctx, vocab, piece);
-          for (bool hit = token != k_token_null && !found; hit; hit = false) {
-            const bool pushed = wpm_push_token(ev, token, count);
-            for (bool push_fail = !pushed; push_fail; push_fail = false) {
-              result.error = EMEL_ERR_INVALID_ARGUMENT;
-              return result;
-            }
-            found = true;
-            matched_end = j;
-          }
-        }
-        i = select_i32(found, matched_end - 1, i);
-        for (bool rollback = !found; rollback; rollback = false) {
-          count = word_token_start;
-          i = n;
-        }
-      }
-
-      for (bool needs_unk = count == word_token_start; needs_unk; needs_unk = false) {
-        int32_t unk = vocab.unk_id;
-        for (bool resolve_unk = unk == k_token_null; resolve_unk; resolve_unk = false) {
-          unk = wpm_lookup_token(ctx, vocab, "<unk>");
-        }
-        for (bool have_unk = unk != k_token_null; have_unk; have_unk = false) {
-          const bool pushed = wpm_push_token(ev, unk, count);
-          for (bool push_fail = !pushed; push_fail; push_fail = false) {
-            result.error = EMEL_ERR_INVALID_ARGUMENT;
-            return result;
-          }
-        }
-      }
-    }
-  }
-
-  result.token_count = count;
-  result.error = EMEL_OK;
-  return result;
+  using empty_handler_t = encode_result (*)(const event::encode &,
+                                            emel::text::encoders::action::context &,
+                                            const emel::model::data::vocab &);
+  const empty_handler_t empty_handlers[2] = {
+      encode_wpm_non_empty,
+      encode_wpm_empty,
+  };
+  return empty_handlers[static_cast<size_t>(ev.text.empty())](ev, ctx, vocab);
 }
 
 }  // namespace emel::text::encoders::wpm::detail
