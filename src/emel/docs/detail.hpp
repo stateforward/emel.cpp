@@ -43,6 +43,111 @@ inline std::string sanitize_mermaid(std::string_view name) {
   return out;
 }
 
+inline void append_non_empty_none(std::string &, const std::string &) {}
+
+inline void append_non_empty_some(std::string & out_value, const std::string & suffix) {
+  out_value += "_" + suffix;
+}
+
+inline void append_non_empty(std::string & out_value, const std::string & suffix) {
+  using append_handler_t = void (*)(std::string &, const std::string &);
+  static constexpr std::array<append_handler_t, 2> APPEND_HANDLERS = {
+      append_non_empty_none,
+      append_non_empty_some,
+  };
+  APPEND_HANDLERS[static_cast<size_t>(!suffix.empty())](out_value, suffix);
+}
+
+inline std::string shorten_type_name_no_lambda(std::string out,
+                                               std::size_t,
+                                               const std::string &) {
+  return out;
+}
+
+inline std::string shorten_type_name_with_lambda(std::string out,
+                                                 const std::size_t lambda_pos,
+                                                 const std::string & marker) {
+  std::string_view rest(out);
+  rest.remove_prefix(lambda_pos + marker.size());
+  const std::size_t end = rest.find('>');
+  const size_t has_end = static_cast<size_t>(end != std::string::npos);
+  std::string_view end_candidates[2] = {rest, rest.substr(0, end * has_end)};
+  rest = end_candidates[has_end];
+
+  const std::size_t slash = rest.find_last_of("/\\");
+  const size_t has_slash = static_cast<size_t>(slash != std::string::npos);
+  std::string_view slash_candidates[2] = {rest, rest.substr((slash + 1) * has_slash)};
+  rest = slash_candidates[has_slash];
+
+  std::string file;
+  std::string line;
+  std::string col;
+  const std::size_t colon1 = rest.find(':');
+  const size_t has_colon1 = static_cast<size_t>(colon1 != std::string::npos);
+  const std::size_t colon2 = rest.find(':', colon1 + has_colon1);
+  const size_t has_colon2 = has_colon1 & static_cast<size_t>(colon2 != std::string::npos);
+  const size_t colon_mode = has_colon1 + has_colon2;
+
+  using colon_handler_t = void (*)(std::string_view,
+                                   std::size_t,
+                                   std::size_t,
+                                   std::string &,
+                                   std::string &,
+                                   std::string &) noexcept;
+  static constexpr std::array<colon_handler_t, 3> COLON_HANDLERS = {
+      +[](std::string_view value,
+          std::size_t,
+          std::size_t,
+          std::string & file_out,
+          std::string &,
+          std::string &) noexcept {
+        file_out.assign(value);
+      },
+      +[](std::string_view value,
+          std::size_t colon1_value,
+          std::size_t,
+          std::string & file_out,
+          std::string & line_out,
+          std::string &) noexcept {
+        file_out.assign(value.substr(0, colon1_value));
+        line_out.assign(value.substr(colon1_value + 1));
+      },
+      +[](std::string_view value,
+          std::size_t colon1_value,
+          std::size_t colon2_value,
+          std::string & file_out,
+          std::string & line_out,
+          std::string & col_out) noexcept {
+        file_out.assign(value.substr(0, colon1_value));
+        line_out.assign(value.substr(colon1_value + 1, colon2_value - colon1_value - 1));
+        col_out.assign(value.substr(colon2_value + 1));
+      },
+  };
+
+  COLON_HANDLERS[colon_mode](rest, colon1, colon2, file, line, col);
+
+  auto trim_trailing_non_alnum = [](std::string & value) {
+    while (!value.empty() &&
+           std::isalnum(static_cast<unsigned char>(value.back())) == 0) {
+      value.pop_back();
+    }
+  };
+  trim_trailing_non_alnum(file);
+  trim_trailing_non_alnum(line);
+  trim_trailing_non_alnum(col);
+
+  const std::size_t dot = file.rfind('.');
+  const size_t has_dot = static_cast<size_t>(dot != std::string::npos);
+  std::string dot_candidates[2] = {file, file.substr(0, dot * has_dot)};
+  file = std::move(dot_candidates[has_dot]);
+
+  std::string shortened = "lambda";
+  append_non_empty(shortened, file);
+  append_non_empty(shortened, line);
+  append_non_empty(shortened, col);
+  return shortened;
+}
+
 inline std::string shorten_type_name(std::string_view name) {
   std::string out(name);
   const std::size_t pos = out.rfind("::");
@@ -53,111 +158,12 @@ inline std::string shorten_type_name(std::string_view name) {
   const std::string marker = "lambda at ";
   const std::size_t lambda_pos = out.find(marker);
   const size_t has_lambda = static_cast<size_t>(lambda_pos != std::string::npos);
-  {
-    const size_t emel_branch_has_lambda = has_lambda;
-    for (size_t emel_case_has_lambda = emel_branch_has_lambda; emel_case_has_lambda == 0u;
-         emel_case_has_lambda = 2u) {
-      return out;
-    }
-    for (size_t emel_case_has_lambda = emel_branch_has_lambda; emel_case_has_lambda == 1u;
-         emel_case_has_lambda = 2u) {
-      std::string_view rest(out);
-      rest.remove_prefix(lambda_pos + marker.size());
-      const std::size_t end = rest.find('>');
-      const size_t has_end = static_cast<size_t>(end != std::string::npos);
-      std::string_view end_candidates[2] = {rest, rest.substr(0, end * has_end)};
-      rest = end_candidates[has_end];
-
-      const std::size_t slash = rest.find_last_of("/\\");
-      const size_t has_slash = static_cast<size_t>(slash != std::string::npos);
-      std::string_view slash_candidates[2] = {rest, rest.substr((slash + 1) * has_slash)};
-      rest = slash_candidates[has_slash];
-
-      std::string file;
-      std::string line;
-      std::string col;
-      const std::size_t colon1 = rest.find(':');
-      const size_t has_colon1 = static_cast<size_t>(colon1 != std::string::npos);
-      const std::size_t colon2 = rest.find(':', colon1 + has_colon1);
-      const size_t has_colon2 = has_colon1 & static_cast<size_t>(colon2 != std::string::npos);
-      const size_t colon_mode = has_colon1 + has_colon2;
-
-      using colon_handler_t = void (*)(std::string_view,
-                                       std::size_t,
-                                       std::size_t,
-                                       std::string &,
-                                       std::string &,
-                                       std::string &) noexcept;
-      static constexpr std::array<colon_handler_t, 3> COLON_HANDLERS = {
-          +[](std::string_view value,
-              std::size_t,
-              std::size_t,
-              std::string & file_out,
-              std::string &,
-              std::string &) noexcept {
-            file_out.assign(value);
-          },
-          +[](std::string_view value,
-              std::size_t colon1_value,
-              std::size_t,
-              std::string & file_out,
-              std::string & line_out,
-              std::string &) noexcept {
-            file_out.assign(value.substr(0, colon1_value));
-            line_out.assign(value.substr(colon1_value + 1));
-          },
-          +[](std::string_view value,
-              std::size_t colon1_value,
-              std::size_t colon2_value,
-              std::string & file_out,
-              std::string & line_out,
-              std::string & col_out) noexcept {
-            file_out.assign(value.substr(0, colon1_value));
-            line_out.assign(value.substr(colon1_value + 1, colon2_value - colon1_value - 1));
-            col_out.assign(value.substr(colon2_value + 1));
-          },
-      };
-
-      COLON_HANDLERS[colon_mode](rest, colon1, colon2, file, line, col);
-
-      auto trim_trailing_non_alnum = [](std::string & value) {
-        while (!value.empty() &&
-               std::isalnum(static_cast<unsigned char>(value.back())) == 0) {
-          value.pop_back();
-        }
-      };
-      trim_trailing_non_alnum(file);
-      trim_trailing_non_alnum(line);
-      trim_trailing_non_alnum(col);
-
-      const std::size_t dot = file.rfind('.');
-      const size_t has_dot = static_cast<size_t>(dot != std::string::npos);
-      std::string dot_candidates[2] = {file, file.substr(0, dot * has_dot)};
-      file = std::move(dot_candidates[has_dot]);
-
-      auto append_non_empty = [](std::string & out_value,
-                                 const std::string & suffix) {
-        const size_t emel_branch_has_suffix = static_cast<size_t>(!suffix.empty());
-        for (size_t emel_case_has_suffix = emel_branch_has_suffix;
-             emel_case_has_suffix == 1u;
-             emel_case_has_suffix = 2u) {
-          out_value += "_" + suffix;
-        }
-        for (size_t emel_case_has_suffix = emel_branch_has_suffix;
-             emel_case_has_suffix == 0u;
-             emel_case_has_suffix = 2u) {
-
-        }
-      };
-
-      std::string shortened = "lambda";
-      append_non_empty(shortened, file);
-      append_non_empty(shortened, line);
-      append_non_empty(shortened, col);
-      return shortened;
-    }
-  }
-  return out;
+  using lambda_handler_t = std::string (*)(std::string, std::size_t, const std::string &);
+  static constexpr std::array<lambda_handler_t, 2> LAMBDA_HANDLERS = {
+      shorten_type_name_no_lambda,
+      shorten_type_name_with_lambda,
+  };
+  return LAMBDA_HANDLERS[has_lambda](std::move(out), lambda_pos, marker);
 }
 
 inline std::string mermaid_label(std::string_view name) {
