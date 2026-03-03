@@ -39,6 +39,7 @@ explicitly in the state machine.
 - [x] `src/emel/text/encoders/bpe/detail.hpp`
 - [x] `src/emel/text/encoders/spm/detail.hpp`
 - [x] `src/emel/text/encoders/plamo2/detail.hpp`
+- [x] `src/emel/text/encoders/ugm/detail.hpp`
 
 ## High-Priority Findings (Action Files)
 
