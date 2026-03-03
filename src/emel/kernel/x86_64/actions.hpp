@@ -402,165 +402,100 @@ inline bool execute_avx2_mul_mat(const event::op_mul_mat & request) noexcept {
   const bool valid_dims = k != 0 && m != 0 && n != 0;
   const bool valid_layout =
       request.src1.ne[1] == k && request.dst.ne[0] == n && request.dst.ne[1] == m;
-  {
-    const size_t emel_branch_valid = static_cast<size_t>(valid_dims && valid_layout);
-    for (size_t emel_case_valid = emel_branch_valid; emel_case_valid == 0u;
-         emel_case_valid = 2u) {
-      return false;
-    }
-    for (size_t emel_case_valid = emel_branch_valid; emel_case_valid == 1u;
-         emel_case_valid = 2u) {
-      const float * a = static_cast<const float *>(request.src0.data);
-      const float * b = static_cast<const float *>(request.src1.data);
-      float * c = static_cast<float *>(request.dst.data);
+  const bool valid = valid_dims && valid_layout;
+  const uint64_t valid_u64 = static_cast<uint64_t>(valid);
+  const float * a = static_cast<const float *>(request.src0.data);
+  const float * b = static_cast<const float *>(request.src1.data);
+  float * c = static_cast<float *>(request.dst.data);
 
-      constexpr uint64_t row_block = 4;
-      constexpr uint64_t col_vec = 8;
-      constexpr uint64_t col_block = 64;
-      constexpr uint64_t depth_block = 64;
-      alignas(64) static thread_local float packed_b[depth_block * col_block];
+  constexpr uint64_t row_block = 4;
+  constexpr uint64_t col_vec = 8;
+  constexpr uint64_t col_block = 64;
+  constexpr uint64_t depth_block = 64;
+  alignas(64) static thread_local float packed_b[depth_block * col_block];
 
-      for (uint64_t jb = 0; jb < n; jb += col_block) {
-        const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
-        const uint64_t vec_cols = ((j_end - jb) / col_vec) * col_vec;
-        const uint64_t j_vec_end = jb + vec_cols;
+  for (uint64_t jb = 0; jb < n * valid_u64; jb += col_block) {
+    const uint64_t j_end = std::min<uint64_t>(n, jb + col_block);
+    const uint64_t vec_cols = ((j_end - jb) / col_vec) * col_vec;
+    const uint64_t j_vec_end = jb + vec_cols;
 
-        for (uint64_t pb = 0; pb < k; pb += depth_block) {
-          const uint64_t depth = std::min<uint64_t>(depth_block, k - pb);
-          const bool first_depth_block = (pb == 0);
+    for (uint64_t pb = 0; pb < k * valid_u64; pb += depth_block) {
+      const uint64_t depth = std::min<uint64_t>(depth_block, k - pb);
+      const bool first_depth_block = (pb == 0);
+      const __m256 zero = _mm256_setzero_ps();
+      const __m256 depth_reset_mask =
+          _mm256_castsi256_ps(_mm256_set1_epi32(-static_cast<int32_t>(first_depth_block)));
 
-          {
-            const size_t emel_branch_vec_cols = static_cast<size_t>(vec_cols != 0);
-            for (size_t emel_case_vec_cols = emel_branch_vec_cols; emel_case_vec_cols == 1u;
-                 emel_case_vec_cols = 2u) {
-              for (uint64_t kk = 0; kk < depth; ++kk) {
-                const float * b_src = b + (pb + kk) * n + jb;
-                float * b_dst = packed_b + kk * vec_cols;
-                std::memcpy(b_dst, b_src, static_cast<size_t>(vec_cols) * sizeof(float));
+      for (uint64_t kk = 0; kk < depth; ++kk) {
+        const float * b_src = b + (pb + kk) * n + jb;
+        float * b_dst = packed_b + kk * vec_cols;
+        std::memcpy(b_dst, b_src, static_cast<size_t>(vec_cols) * sizeof(float));
 #if defined(__GNUC__) || defined(__clang__)
-                {
-                  const size_t emel_branch_prefetch =
-                      static_cast<size_t>((kk & 15u) == 0 && kk + 16u < depth);
-                  for (size_t emel_case_prefetch = emel_branch_prefetch;
-                       emel_case_prefetch == 1u;
-                       emel_case_prefetch = 2u) {
-                    _mm_prefetch(
-                        reinterpret_cast<const char *>(b + (pb + kk + 16u) * n + jb),
-                        _MM_HINT_T0);
-                  }
-                  for (size_t emel_case_prefetch = emel_branch_prefetch;
-                       emel_case_prefetch == 0u;
-                       emel_case_prefetch = 2u) {
-
-                  }
-                }
+        const uint64_t prefetch_distance =
+            16u * static_cast<uint64_t>((kk & 15u) == 0u && kk + 16u < depth);
+        _mm_prefetch(
+            reinterpret_cast<const char *>(b + (pb + kk + prefetch_distance) * n + jb),
+            _MM_HINT_T0);
 #endif
-              }
+      }
 
-              for (uint64_t j = jb; j < j_vec_end; j += col_vec) {
-                const uint64_t j_offset = j - jb;
-                uint64_t i = 0;
-                for (; i + row_block <= m; i += row_block) {
-                  __m256 acc0 = _mm256_loadu_ps(c + (i + 0) * n + j);
-                  __m256 acc1 = _mm256_loadu_ps(c + (i + 1) * n + j);
-                  __m256 acc2 = _mm256_loadu_ps(c + (i + 2) * n + j);
-                  __m256 acc3 = _mm256_loadu_ps(c + (i + 3) * n + j);
-                  {
-                    const size_t emel_branch_first_depth =
-                        static_cast<size_t>(first_depth_block);
-                    for (size_t emel_case_first_depth = emel_branch_first_depth;
-                         emel_case_first_depth == 1u;
-                         emel_case_first_depth = 2u) {
-                      acc0 = _mm256_setzero_ps();
-                      acc1 = _mm256_setzero_ps();
-                      acc2 = _mm256_setzero_ps();
-                      acc3 = _mm256_setzero_ps();
-                    }
-                    for (size_t emel_case_first_depth = emel_branch_first_depth;
-                         emel_case_first_depth == 0u;
-                         emel_case_first_depth = 2u) {
+      for (uint64_t j = jb; j < j_vec_end; j += col_vec) {
+        const uint64_t j_offset = j - jb;
+        uint64_t i = 0;
+        for (; i + row_block <= m; i += row_block) {
+          __m256 acc0 = _mm256_loadu_ps(c + (i + 0) * n + j);
+          __m256 acc1 = _mm256_loadu_ps(c + (i + 1) * n + j);
+          __m256 acc2 = _mm256_loadu_ps(c + (i + 2) * n + j);
+          __m256 acc3 = _mm256_loadu_ps(c + (i + 3) * n + j);
+          acc0 = _mm256_blendv_ps(acc0, zero, depth_reset_mask);
+          acc1 = _mm256_blendv_ps(acc1, zero, depth_reset_mask);
+          acc2 = _mm256_blendv_ps(acc2, zero, depth_reset_mask);
+          acc3 = _mm256_blendv_ps(acc3, zero, depth_reset_mask);
 
-                    }
-                  }
-
-                  for (uint64_t kk = 0; kk < depth; ++kk) {
-                    const __m256 bv = _mm256_loadu_ps(packed_b + kk * vec_cols + j_offset);
-                    acc0 = _mm256_add_ps(
-                        acc0, _mm256_mul_ps(_mm256_set1_ps(a[(i + 0) * k + pb + kk]), bv));
-                    acc1 = _mm256_add_ps(
-                        acc1, _mm256_mul_ps(_mm256_set1_ps(a[(i + 1) * k + pb + kk]), bv));
-                    acc2 = _mm256_add_ps(
-                        acc2, _mm256_mul_ps(_mm256_set1_ps(a[(i + 2) * k + pb + kk]), bv));
-                    acc3 = _mm256_add_ps(
-                        acc3, _mm256_mul_ps(_mm256_set1_ps(a[(i + 3) * k + pb + kk]), bv));
-                  }
-
-                  _mm256_storeu_ps(c + (i + 0) * n + j, acc0);
-                  _mm256_storeu_ps(c + (i + 1) * n + j, acc1);
-                  _mm256_storeu_ps(c + (i + 2) * n + j, acc2);
-                  _mm256_storeu_ps(c + (i + 3) * n + j, acc3);
-                }
-
-                for (; i < m; ++i) {
-                  __m256 acc = _mm256_loadu_ps(c + i * n + j);
-                  {
-                    const size_t emel_branch_first_depth =
-                        static_cast<size_t>(first_depth_block);
-                    for (size_t emel_case_first_depth = emel_branch_first_depth;
-                         emel_case_first_depth == 1u;
-                         emel_case_first_depth = 2u) {
-                      acc = _mm256_setzero_ps();
-                    }
-                    for (size_t emel_case_first_depth = emel_branch_first_depth;
-                         emel_case_first_depth == 0u;
-                         emel_case_first_depth = 2u) {
-
-                    }
-                  }
-                  for (uint64_t kk = 0; kk < depth; ++kk) {
-                    const __m256 bv = _mm256_loadu_ps(packed_b + kk * vec_cols + j_offset);
-                    acc = _mm256_add_ps(
-                        acc, _mm256_mul_ps(_mm256_set1_ps(a[i * k + pb + kk]), bv));
-                  }
-                  _mm256_storeu_ps(c + i * n + j, acc);
-                }
-              }
-            }
-            for (size_t emel_case_vec_cols = emel_branch_vec_cols; emel_case_vec_cols == 0u;
-                 emel_case_vec_cols = 2u) {
-
-            }
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            const __m256 bv = _mm256_loadu_ps(packed_b + kk * vec_cols + j_offset);
+            acc0 = _mm256_add_ps(
+                acc0, _mm256_mul_ps(_mm256_set1_ps(a[(i + 0) * k + pb + kk]), bv));
+            acc1 = _mm256_add_ps(
+                acc1, _mm256_mul_ps(_mm256_set1_ps(a[(i + 1) * k + pb + kk]), bv));
+            acc2 = _mm256_add_ps(
+                acc2, _mm256_mul_ps(_mm256_set1_ps(a[(i + 2) * k + pb + kk]), bv));
+            acc3 = _mm256_add_ps(
+                acc3, _mm256_mul_ps(_mm256_set1_ps(a[(i + 3) * k + pb + kk]), bv));
           }
 
-          for (uint64_t j = j_vec_end; j < j_end; ++j) {
-            for (uint64_t i = 0; i < m; ++i) {
-              float acc = c[i * n + j];
-              {
-                const size_t emel_branch_first_depth = static_cast<size_t>(first_depth_block);
-                for (size_t emel_case_first_depth = emel_branch_first_depth;
-                     emel_case_first_depth == 1u;
-                     emel_case_first_depth = 2u) {
-                  acc = 0.0f;
-                }
-                for (size_t emel_case_first_depth = emel_branch_first_depth;
-                     emel_case_first_depth == 0u;
-                     emel_case_first_depth = 2u) {
+          _mm256_storeu_ps(c + (i + 0) * n + j, acc0);
+          _mm256_storeu_ps(c + (i + 1) * n + j, acc1);
+          _mm256_storeu_ps(c + (i + 2) * n + j, acc2);
+          _mm256_storeu_ps(c + (i + 3) * n + j, acc3);
+        }
 
-                }
-              }
-              for (uint64_t kk = 0; kk < depth; ++kk) {
-                acc += a[i * k + pb + kk] * b[(pb + kk) * n + j];
-              }
-              c[i * n + j] = acc;
-            }
+        for (; i < m; ++i) {
+          __m256 acc = _mm256_loadu_ps(c + i * n + j);
+          acc = _mm256_blendv_ps(acc, zero, depth_reset_mask);
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            const __m256 bv = _mm256_loadu_ps(packed_b + kk * vec_cols + j_offset);
+            acc = _mm256_add_ps(
+                acc, _mm256_mul_ps(_mm256_set1_ps(a[i * k + pb + kk]), bv));
           }
+          _mm256_storeu_ps(c + i * n + j, acc);
         }
       }
 
-      return true;
+      const float preserve_existing = static_cast<float>(!first_depth_block);
+      for (uint64_t j = j_vec_end; j < j_end; ++j) {
+        for (uint64_t i = 0; i < m; ++i) {
+          float acc = c[i * n + j] * preserve_existing;
+          for (uint64_t kk = 0; kk < depth; ++kk) {
+            acc += a[i * k + pb + kk] * b[(pb + kk) * n + j];
+          }
+          c[i * n + j] = acc;
+        }
+      }
     }
   }
-  return false;
+
+  return valid;
 #else
   (void) request;
   return false;
@@ -575,9 +510,6 @@ EMEL_KERNEL_X86_AVX2_TARGET
 inline bool execute_avx2_unary(const event::op_unary & request) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
 #if defined(__AVX2__) || defined(__GNUC__) || defined(__clang__)
-  const uint64_t count = ::emel::kernel::detail::tensor_element_count(request.dst);
-  const float * src = static_cast<const float *>(request.src0.data);
-  float * dst = static_cast<float *>(request.dst.data);
   const uint8_t subop_code = static_cast<uint8_t>(request.subop);
   const size_t is_abs =
       static_cast<size_t>(subop_code == static_cast<uint8_t>(event::unary_subop::abs));
@@ -586,35 +518,88 @@ inline bool execute_avx2_unary(const event::op_unary & request) noexcept {
   const size_t is_relu =
       static_cast<size_t>(subop_code == static_cast<uint8_t>(event::unary_subop::relu));
   const size_t kernel_index = is_abs * 1u + is_neg * 2u + is_relu * 3u;
+  const uint64_t count = ::emel::kernel::detail::tensor_element_count(request.dst);
+  const float * src = static_cast<const float *>(request.src0.data);
+  float * dst = static_cast<float *>(request.dst.data);
   using unary_kernel_t = void (*)(const float *, float *, uint64_t) noexcept;
-  constexpr std::array<unary_kernel_t, 3> kernels = {
+  constexpr unary_kernel_t noop_kernel = +[](const float *, float *, uint64_t) noexcept {};
+  constexpr std::array<unary_kernel_t, 4> kernels = {
+      noop_kernel,
       execute_avx2_unary_abs,
       execute_avx2_unary_neg,
       execute_avx2_unary_relu,
   };
+  kernels[kernel_index](src, dst, count);
+  return kernel_index != 0u;
+#else
+  (void) request;
+  return false;
+#endif
+#else
+  (void) request;
+  return false;
+#endif
+}
 
-  bool executed = false;
-  {
-    const size_t emel_branch_has_kernel = static_cast<size_t>(kernel_index != 0);
-    for (size_t emel_case_has_kernel = emel_branch_has_kernel; emel_case_has_kernel == 1u;
-         emel_case_has_kernel = 2u) {
-      kernels[kernel_index - 1u](src, dst, count);
-      executed = true;
-    }
-    for (size_t emel_case_has_kernel = emel_branch_has_kernel; emel_case_has_kernel == 0u;
-         emel_case_has_kernel = 2u) {
+EMEL_KERNEL_X86_AVX2_TARGET
+inline void execute_avx2_unary_abs_request(const event::op_unary & request) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__AVX2__) || defined(__GNUC__) || defined(__clang__)
+  const uint64_t count = ::emel::kernel::detail::tensor_element_count(request.dst);
+  const float * src = static_cast<const float *>(request.src0.data);
+  float * dst = static_cast<float *>(request.dst.data);
+  execute_avx2_unary_abs(src, dst, count);
+#else
+  (void) request;
+#endif
+#else
+  (void) request;
+#endif
+}
 
-    }
+EMEL_KERNEL_X86_AVX2_TARGET
+inline void execute_avx2_unary_neg_request(const event::op_unary & request) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__AVX2__) || defined(__GNUC__) || defined(__clang__)
+  const uint64_t count = ::emel::kernel::detail::tensor_element_count(request.dst);
+  const float * src = static_cast<const float *>(request.src0.data);
+  float * dst = static_cast<float *>(request.dst.data);
+  execute_avx2_unary_neg(src, dst, count);
+#else
+  (void) request;
+#endif
+#else
+  (void) request;
+#endif
+}
+
+EMEL_KERNEL_X86_AVX2_TARGET
+inline void execute_avx2_unary_relu_request(const event::op_unary & request) noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__AVX2__) || defined(__GNUC__) || defined(__clang__)
+  const uint64_t count = ::emel::kernel::detail::tensor_element_count(request.dst);
+  const float * src = static_cast<const float *>(request.src0.data);
+  float * dst = static_cast<float *>(request.dst.data);
+  execute_avx2_unary_relu(src, dst, count);
+#else
+  (void) request;
+#endif
+#else
+  (void) request;
+#endif
+}
+
+template <event::unary_subop subop>
+inline void execute_simd_unary_subop_unchecked(const event::op_unary & request) noexcept {
+  if constexpr (subop == event::unary_subop::abs) {
+    execute_avx2_unary_abs_request(request);
   }
-  return executed;
-#else
-  (void) request;
-  return false;
-#endif
-#else
-  (void) request;
-  return false;
-#endif
+  if constexpr (subop == event::unary_subop::neg) {
+    execute_avx2_unary_neg_request(request);
+  }
+  if constexpr (subop == event::unary_subop::relu) {
+    execute_avx2_unary_relu_request(request);
+  }
 }
 
 template <class request_type>
@@ -683,17 +668,8 @@ inline bool execute_simd(const request_type & request) noexcept {
 template <class request_type, class context_type>
 inline bool execute_request(const request_type & request, const context_type & ctx) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
-  const size_t simd_succeeded =
-      static_cast<size_t>(can_use_avx2(request, ctx.avx2_available) && execute_simd(request));
-  for (size_t emel_case_simd_succeeded = simd_succeeded; emel_case_simd_succeeded == 1u;
-       emel_case_simd_succeeded = 2u) {
-    return true;
-  }
-  for (size_t emel_case_simd_succeeded = simd_succeeded; emel_case_simd_succeeded == 0u;
-       emel_case_simd_succeeded = 2u) {
-    return ::emel::kernel::detail::execute_scalar(request);
-  }
-  return false;
+  const bool simd_succeeded = can_use_avx2(request, ctx.avx2_available) && execute_simd(request);
+  return simd_succeeded || ::emel::kernel::detail::execute_scalar(request);
 #else
   (void) ctx;
   return ::emel::kernel::detail::execute_scalar(request);
@@ -743,6 +719,15 @@ struct exec_simd_op {
   }
 };
 
+template <::emel::kernel::event::unary_subop subop>
+struct exec_simd_unary_op {
+  void operator()(const ::emel::kernel::x86_64::event::dispatch_op_unary & ev,
+                  context & ctx) const noexcept {
+    ::emel::kernel::x86_64::detail::execute_simd_unary_subop_unchecked<subop>(ev.request);
+    detail::mark_done(ev, ctx);
+  }
+};
+
 template <class dispatch_event_type>
 struct reject_op {
   void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
@@ -769,8 +754,12 @@ using exec_simd_op_sqr_t = detail::exec_simd_op<::emel::kernel::x86_64::event::d
 using exec_simd_op_sqrt_t = detail::exec_simd_op<::emel::kernel::x86_64::event::dispatch_op_sqrt>;
 using exec_simd_op_mul_mat_t =
     detail::exec_simd_op<::emel::kernel::x86_64::event::dispatch_op_mul_mat>;
-using exec_simd_op_unary_t =
-    detail::exec_simd_op<::emel::kernel::x86_64::event::dispatch_op_unary>;
+using exec_simd_op_unary_abs_t =
+    detail::exec_simd_unary_op<::emel::kernel::event::unary_subop::abs>;
+using exec_simd_op_unary_neg_t =
+    detail::exec_simd_unary_op<::emel::kernel::event::unary_subop::neg>;
+using exec_simd_op_unary_relu_t =
+    detail::exec_simd_unary_op<::emel::kernel::event::unary_subop::relu>;
 
 #define EMEL_KERNEL_DECLARE_REJECT_TYPE(op_name)                                      \
   using reject_invalid_##op_name##_t =                                                \
@@ -798,7 +787,9 @@ inline constexpr exec_simd_op_div_t exec_simd_op_div{};
 inline constexpr exec_simd_op_sqr_t exec_simd_op_sqr{};
 inline constexpr exec_simd_op_sqrt_t exec_simd_op_sqrt{};
 inline constexpr exec_simd_op_mul_mat_t exec_simd_op_mul_mat{};
-inline constexpr exec_simd_op_unary_t exec_simd_op_unary{};
+inline constexpr exec_simd_op_unary_abs_t exec_simd_op_unary_abs{};
+inline constexpr exec_simd_op_unary_neg_t exec_simd_op_unary_neg{};
+inline constexpr exec_simd_op_unary_relu_t exec_simd_op_unary_relu{};
 
 #define EMEL_KERNEL_DEFINE_RUN_ACTION(op_name) \
   inline constexpr exec_##op_name##_t exec_##op_name{};

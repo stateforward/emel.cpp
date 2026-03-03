@@ -22,6 +22,14 @@ Patterns audited:
 These loops implement runtime branching inside actions/details instead of modeling the flow
 explicitly in the state machine.
 
+## Remediation Status (This Branch)
+
+- [x] `src/emel/gbnf/rule_parser/lexer/actions.hpp`
+- [x] `src/emel/kernel/x86_64/actions.hpp`
+- [ ] `src/emel/kernel/aarch64/actions.hpp`
+- [ ] `src/emel/gbnf/rule_parser/actions.hpp`
+- [ ] `src/emel/token/batcher/actions.hpp`
+
 ## High-Priority Findings (Action Files)
 
 1. `src/emel/gbnf/rule_parser/lexer/actions.hpp` (24 sites, lines 40-303)
