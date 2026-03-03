@@ -37,6 +37,7 @@ explicitly in the state machine.
 - [x] `src/emel/batch/planner/modes/detail.hpp`
 - [x] `src/emel/gbnf/rule_parser/detail.hpp`
 - [x] `src/emel/text/encoders/bpe/detail.hpp`
+- [x] `src/emel/text/encoders/spm/detail.hpp`
 
 ## High-Priority Findings (Action Files)
 
