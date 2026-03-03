@@ -34,6 +34,7 @@ explicitly in the state machine.
 - [x] `src/emel/text/encoders/rwkv/detail.hpp`
 - [x] `src/emel/text/encoders/wpm/detail.hpp`
 - [x] `src/emel/text/encoders/detail.hpp`
+- [x] `src/emel/batch/planner/modes/detail.hpp`
 
 ## High-Priority Findings (Action Files)
 
