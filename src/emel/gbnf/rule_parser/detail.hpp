@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -13,64 +14,78 @@
 
 namespace emel::gbnf::rule_parser::detail {
 
-inline constexpr int32_t error_code(const emel::gbnf::rule_parser::error err) noexcept {
+inline constexpr int32_t
+error_code(const emel::gbnf::rule_parser::error err) noexcept {
   return static_cast<int32_t>(emel::error::cast(err));
 }
 
+inline uint32_t select_u32(const bool choose_true, const uint32_t true_value,
+                           const uint32_t false_value) noexcept {
+  const uint32_t mask =
+      static_cast<uint32_t>(0) - static_cast<uint32_t>(choose_true);
+  return (false_value & ~mask) | (true_value & mask);
+}
+
+inline uint64_t select_u64(const bool choose_true, const uint64_t true_value,
+                           const uint64_t false_value) noexcept {
+  const uint64_t mask =
+      static_cast<uint64_t>(0) - static_cast<uint64_t>(choose_true);
+  return (false_value & ~mask) | (true_value & mask);
+}
+
+inline size_t select_size(const bool choose_true, const size_t true_value,
+                          const size_t false_value) noexcept {
+  const size_t mask = static_cast<size_t>(0) - static_cast<size_t>(choose_true);
+  return (false_value & ~mask) | (true_value & mask);
+}
+
+inline uintptr_t select_uptr(const bool choose_true, const uintptr_t true_value,
+                             const uintptr_t false_value) noexcept {
+  const uintptr_t mask =
+      static_cast<uintptr_t>(0) - static_cast<uintptr_t>(choose_true);
+  return (false_value & ~mask) | (true_value & mask);
+}
+
+inline bool select_bool(const bool choose_true, const bool true_value,
+                        const bool false_value) noexcept {
+  return select_u32(choose_true, static_cast<uint32_t>(true_value),
+                    static_cast<uint32_t>(false_value)) != 0u;
+}
+
 struct rule_builder {
-  std::array<emel::gbnf::element, emel::gbnf::k_max_gbnf_rule_elements> elements = {};
+  std::array<emel::gbnf::element, emel::gbnf::k_max_gbnf_rule_elements>
+      elements = {};
   uint32_t size = 0;
 
   bool push(const emel::gbnf::element elem) noexcept {
-        {
-      const size_t emel_branch_1 = static_cast<size_t>(size < elements.size());
-      for (size_t emel_case_1 = emel_branch_1; emel_case_1 == 1u; emel_case_1 = 2u) {
-                elements[size++] = elem;
-                return true;
-      }
-      for (size_t emel_case_1 = emel_branch_1; emel_case_1 == 0u; emel_case_1 = 2u) {
-                return false;
-      }
-    }
-    return false;
+    const bool can_write = size < elements.size();
+    const uint32_t write_index = select_u32(can_write, size, 0u);
+    const size_t copy_bytes =
+        sizeof(emel::gbnf::element) * static_cast<size_t>(can_write);
+    std::memcpy(elements.data() + write_index, &elem, copy_bytes);
+    size += static_cast<uint32_t>(can_write);
+    return can_write;
   }
 
   bool append(const emel::gbnf::element *src, uint32_t count) noexcept {
-        {
-      const size_t emel_branch_2 = static_cast<size_t>(count == 0);
-      for (size_t emel_case_2 = emel_branch_2; emel_case_2 == 1u; emel_case_2 = 2u) {
-                return true;
-      }
-      for (size_t emel_case_2 = emel_branch_2; emel_case_2 == 0u; emel_case_2 = 2u) {
+    const bool has_count = count != 0u;
+    const bool has_room = size + count <= elements.size();
+    const bool do_copy = has_count && has_room;
+    const uint32_t copy_count = count * static_cast<uint32_t>(do_copy);
+    const uint32_t write_index = select_u32(do_copy, size, 0u);
 
-      }
+    for (uint32_t i = 0; i < copy_count; ++i) {
+      elements[write_index + i] = src[i];
     }
-        {
-      const size_t emel_branch_3 = static_cast<size_t>(size + count <= elements.size());
-      for (size_t emel_case_3 = emel_branch_3; emel_case_3 == 1u; emel_case_3 = 2u) {
-                std::memcpy(elements.data() + size, src, sizeof(emel::gbnf::element) * count);
-                size += count;
-                return true;
-      }
-      for (size_t emel_case_3 = emel_branch_3; emel_case_3 == 0u; emel_case_3 = 2u) {
-                return false;
-      }
-    }
-    return false;
+
+    size += copy_count;
+    return !has_count || has_room;
   }
 
   bool resize(uint32_t new_size) noexcept {
-        {
-      const size_t emel_branch_4 = static_cast<size_t>(new_size <= size);
-      for (size_t emel_case_4 = emel_branch_4; emel_case_4 == 1u; emel_case_4 = 2u) {
-                size = new_size;
-                return true;
-      }
-      for (size_t emel_case_4 = emel_branch_4; emel_case_4 == 0u; emel_case_4 = 2u) {
-                return false;
-      }
-    }
-    return false;
+    const bool can_resize = new_size <= size;
+    size = select_u32(can_resize, new_size, size);
+    return can_resize;
   }
 };
 
@@ -99,8 +114,7 @@ struct symbol_table {
       hash ^= byte;
       hash *= k_fnv_prime;
     }
-    const std::array<uint32_t, 2> hash_candidates = {hash, 1u};
-    return hash_candidates[static_cast<size_t>(hash == 0)];
+    return select_u32(hash == 0u, 1u, hash);
   }
 
   void clear() noexcept {
@@ -111,70 +125,68 @@ struct symbol_table {
     count = 0;
   }
 
-  bool find(const std::string_view name, const uint32_t hash, uint32_t &id) const noexcept {
+  bool find(const std::string_view name, const uint32_t hash,
+            uint32_t &id) const noexcept {
     const uint32_t slot_count = static_cast<uint32_t>(entries.size());
     const uint32_t mask = slot_count - 1u;
     uint32_t slot = hash & mask;
-    for (uint32_t probes = 0; probes < slot_count; ++probes) {
+    bool found = false;
+    bool done = false;
+
+    for (uint32_t probes = 0; probes < slot_count && !done; ++probes) {
       const auto &entry = entries[slot];
-            {
-        const size_t emel_branch_5 = static_cast<size_t>(entry.occupied);
-        for (size_t emel_case_5 = emel_branch_5; emel_case_5 == 1u; emel_case_5 = 2u) {
-
-        }
-        for (size_t emel_case_5 = emel_branch_5; emel_case_5 == 0u; emel_case_5 = 2u) {
-                    return false;
-        }
-      }
-            {
-        const size_t emel_branch_6 = static_cast<size_t>(entry.hash == hash && entry.name == name);
-        for (size_t emel_case_6 = emel_branch_6; emel_case_6 == 1u; emel_case_6 = 2u) {
-                    id = entry.id;
-                    return true;
-        }
-        for (size_t emel_case_6 = emel_branch_6; emel_case_6 == 0u; emel_case_6 = 2u) {
-
-        }
-      }
+      const bool occupied = entry.occupied;
+      const bool match = occupied && entry.hash == hash && entry.name == name;
+      id = select_u32(match, entry.id, id);
+      found = found || match;
+      done = !occupied || match;
       slot = (slot + 1u) & mask;
     }
-    return false;
+
+    return found;
   }
 
-  bool insert(const std::string_view name, const uint32_t hash, const uint32_t id) noexcept {
+  bool insert(const std::string_view name, const uint32_t hash,
+              const uint32_t id) noexcept {
     const uint32_t slot_count = static_cast<uint32_t>(entries.size());
     const uint32_t mask = slot_count - 1u;
     uint32_t slot = hash & mask;
-    for (uint32_t probes = 0; probes < slot_count; ++probes) {
+    bool done = false;
+    bool success = false;
+    bool inserted_new = false;
+    uint32_t inserted_slot = 0;
+
+    for (uint32_t probes = 0; probes < slot_count && !done; ++probes) {
       auto &entry = entries[slot];
-            {
-        const size_t emel_branch_7 = static_cast<size_t>(entry.occupied);
-        for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 1u; emel_case_7 = 2u) {
+      const bool occupied = entry.occupied;
+      const bool empty_slot = !occupied;
+      const bool same_slot =
+          occupied && entry.hash == hash && entry.name == name;
+      const bool claim_empty = empty_slot;
+      const bool claim_existing = same_slot;
+      const bool claim = claim_empty || claim_existing;
 
-        }
-        for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 0u; emel_case_7 = 2u) {
-                    entry.name = name;
-                    entry.id = id;
-                    entry.hash = hash;
-                    entry.occupied = true;
-                    touched_slots.push_back(slot);
-                    count += 1;
-                    return true;
-        }
-      }
-            {
-        const size_t emel_branch_8 = static_cast<size_t>(entry.hash == hash && entry.name == name);
-        for (size_t emel_case_8 = emel_branch_8; emel_case_8 == 1u; emel_case_8 = 2u) {
-                    entry.id = id;
-                    return true;
-        }
-        for (size_t emel_case_8 = emel_branch_8; emel_case_8 == 0u; emel_case_8 = 2u) {
+      const size_t name_bytes =
+          sizeof(entry.name) * static_cast<size_t>(claim_empty);
+      std::memcpy(&entry.name, &name, name_bytes);
+      entry.id = select_u32(claim, id, entry.id);
+      entry.hash = select_u32(claim_empty, hash, entry.hash);
+      entry.occupied = entry.occupied || claim_empty;
 
-        }
-      }
+      inserted_slot = select_u32(claim_empty, slot, inserted_slot);
+      inserted_new = inserted_new || claim_empty;
+      success = success || claim;
+      done = claim;
       slot = (slot + 1u) & mask;
     }
-    return false;
+
+    const size_t prior_touched_size = touched_slots.size();
+    touched_slots.push_back(inserted_slot);
+    touched_slots.resize(prior_touched_size +
+                         static_cast<size_t>(inserted_new));
+    count += static_cast<uint32_t>(inserted_new);
+
+    return success;
   }
 };
 
@@ -185,43 +197,36 @@ inline bool is_digit_char(const char c) noexcept {
 }
 
 inline bool is_word_char(const char c) noexcept {
-  return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '-' || is_digit_char(c);
+  return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '-' ||
+         is_digit_char(c);
 }
 
-inline bool parse_uint64(const char *src,
-                         const char *end,
-                         uint64_t &value_out,
+inline bool parse_uint64(const char *src, const char *end, uint64_t &value_out,
                          const char **next_out) noexcept {
-    {
-    const size_t emel_branch_9 = static_cast<size_t>(src < end && is_digit_char(*src));
-    for (size_t emel_case_9 = emel_branch_9; emel_case_9 == 1u; emel_case_9 = 2u) {
-
-    }
-    for (size_t emel_case_9 = emel_branch_9; emel_case_9 == 0u; emel_case_9 = 2u) {
-            return false;
-    }
-  }
+  const bool has_digit = src < end && is_digit_char(*src);
   uint64_t value = 0;
   const uint64_t max_div_10 = std::numeric_limits<uint64_t>::max() / 10u;
-  for (; src < end && is_digit_char(*src); ++src) {
-    const uint64_t digit = static_cast<uint64_t>(*src - '0');
-        {
-      const size_t emel_branch_10 = static_cast<size_t>(
+  const char *pos = src;
+  bool ok = has_digit;
+
+  while (ok && pos < end && is_digit_char(*pos)) {
+    const uint64_t digit = static_cast<uint64_t>(*pos - '0');
+    const bool overflow =
         value > max_div_10 ||
         (value == max_div_10 &&
-         digit > (std::numeric_limits<uint64_t>::max() % 10u)));
-      for (size_t emel_case_10 = emel_branch_10; emel_case_10 == 1u; emel_case_10 = 2u) {
-                return false;
-      }
-      for (size_t emel_case_10 = emel_branch_10; emel_case_10 == 0u; emel_case_10 = 2u) {
-
-      }
-    }
-    value = value * 10u + digit;
+         digit > (std::numeric_limits<uint64_t>::max() % 10u));
+    const uint64_t next_value = value * 10u + digit;
+    value = select_u64(!overflow, next_value, value);
+    pos += static_cast<size_t>(!overflow);
+    ok = ok && !overflow;
   }
-  value_out = value;
-  *next_out = src;
-  return true;
+
+  const size_t out_bytes = sizeof(uint64_t) * static_cast<size_t>(ok);
+  std::memcpy(&value_out, &value, out_bytes);
+  const size_t next_bytes = sizeof(pos) * static_cast<size_t>(ok);
+  std::memcpy(next_out, &pos, next_bytes);
+
+  return ok;
 }
 
 inline const char *parse_name(const char *src, const char *end) noexcept {
@@ -229,198 +234,158 @@ inline const char *parse_name(const char *src, const char *end) noexcept {
   while (pos < end && is_word_char(*pos)) {
     pos++;
   }
-  const size_t has_name = static_cast<size_t>(pos != src);
-  const char *results[2] = {nullptr, pos};
-  return results[has_name];
+
+  const bool has_name = pos != src;
+  const uintptr_t pos_addr = reinterpret_cast<uintptr_t>(pos);
+  const uintptr_t out_addr = select_uptr(has_name, pos_addr, 0u);
+  return reinterpret_cast<const char *>(out_addr);
 }
 
-inline std::pair<uint32_t, const char *> parse_hex(const char *src,
-                                                   const char *end,
-                                                   const int size) noexcept {
-    {
-    const size_t emel_branch_11 = static_cast<size_t>(src + size <= end);
-    for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 1u; emel_case_11 = 2u) {
+inline std::pair<uint32_t, const char *>
+parse_hex(const char *src, const char *end, const int size) noexcept {
+  const bool src_le_end = src <= end;
+  const ptrdiff_t distance = (end - src) * static_cast<ptrdiff_t>(src_le_end);
+  const bool in_range = src_le_end && distance >= static_cast<ptrdiff_t>(size);
+  const int parse_len = size * static_cast<int>(in_range);
 
-    }
-    for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 0u; emel_case_11 = 2u) {
-            return std::make_pair(0, nullptr);
-    }
-  }
   const char *pos = src;
-  const char *limit = src + size;
+  const char *limit = src + parse_len;
   uint32_t value = 0;
+  bool valid = in_range;
+
   constexpr std::array<uint32_t, 22> k_hex_values = {
-      0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-      10, 11, 12, 13, 14, 15,
-      10, 11, 12, 13, 14, 15};
+      0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10,
+      11, 12, 13, 14, 15, 10, 11, 12, 13, 14, 15};
   constexpr std::string_view k_hex_digits = "0123456789abcdefABCDEF";
-  for (; pos < limit; ++pos) {
-    value <<= 4;
-    const char c = *pos;
-    const size_t digit_index = k_hex_digits.find(c);
-        {
-      const size_t emel_branch_12 = static_cast<size_t>(digit_index != std::string_view::npos);
-      for (size_t emel_case_12 = emel_branch_12; emel_case_12 == 1u; emel_case_12 = 2u) {
-                value += k_hex_values[digit_index];
-      }
-      for (size_t emel_case_12 = emel_branch_12; emel_case_12 == 0u; emel_case_12 = 2u) {
-                return std::make_pair(0, nullptr);
-      }
-    }
+
+  while (pos < limit && valid) {
+    const size_t digit_index = k_hex_digits.find(*pos);
+    const bool is_hex_digit = digit_index != std::string_view::npos;
+    const size_t safe_index = select_size(is_hex_digit, digit_index, 0u);
+    const uint32_t shifted = value << 4;
+    const uint32_t parsed = shifted + k_hex_values[safe_index];
+    value = select_u32(is_hex_digit, parsed, value);
+    pos += static_cast<size_t>(is_hex_digit);
+    valid = valid && is_hex_digit;
   }
-  return std::make_pair(value, pos);
+
+  const bool success = valid && pos == limit;
+  const uint32_t out_value = select_u32(success, value, 0u);
+  const uintptr_t out_next_addr =
+      select_uptr(success, reinterpret_cast<uintptr_t>(pos), 0u);
+  return std::make_pair(out_value,
+                        reinterpret_cast<const char *>(out_next_addr));
 }
 
 inline std::pair<uint32_t, const char *> decode_utf8(const char *src,
                                                      const char *end) noexcept {
-    {
-    const size_t emel_branch_13 = static_cast<size_t>(src < end);
-    for (size_t emel_case_13 = emel_branch_13; emel_case_13 == 1u; emel_case_13 = 2u) {
+  static constexpr char k_zero = '\0';
+  const bool has_src = src < end;
+  const uintptr_t first_addr =
+      select_uptr(has_src, reinterpret_cast<uintptr_t>(src),
+                  reinterpret_cast<uintptr_t>(&k_zero));
+  const uint8_t first_byte =
+      static_cast<uint8_t>(*reinterpret_cast<const char *>(first_addr));
 
-    }
-    for (size_t emel_case_13 = emel_branch_13; emel_case_13 == 0u; emel_case_13 = 2u) {
-            return std::make_pair(0, nullptr);
-    }
-  }
-  static const int lookup[] = {1, 1, 1, 1, 1, 1, 1, 1,
-                               1, 1, 1, 1, 2, 2, 3, 4};
-  const uint8_t first_byte = static_cast<uint8_t>(*src);
+  static const int lookup[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
   const uint8_t highbits = first_byte >> 4;
   const int len = lookup[highbits];
-    {
-    const size_t emel_branch_14 = static_cast<size_t>(src + len <= end);
-    for (size_t emel_case_14 = emel_branch_14; emel_case_14 == 1u; emel_case_14 = 2u) {
 
-    }
-    for (size_t emel_case_14 = emel_branch_14; emel_case_14 == 0u; emel_case_14 = 2u) {
-            return std::make_pair(0, nullptr);
-    }
-  }
+  const bool src_le_end = src <= end;
+  const ptrdiff_t distance = (end - src) * static_cast<ptrdiff_t>(src_le_end);
+  const bool has_bytes = has_src && distance >= static_cast<ptrdiff_t>(len);
+  const int decode_len = len * static_cast<int>(has_bytes);
+
   const uint8_t mask = static_cast<uint8_t>((1u << (8 - len)) - 1u);
   uint32_t value = first_byte & mask;
-  for (int i = 1; i < len; ++i) {
+  for (int i = 1; i < decode_len; ++i) {
     const uint8_t byte = static_cast<uint8_t>(src[i]);
-    value = (value << 6) + (byte & 0x3F);
+    value = (value << 6) + (byte & 0x3Fu);
   }
-  return std::make_pair(value, src + len);
+
+  const uint32_t out_value = select_u32(has_bytes, value, 0u);
+  const uintptr_t next_addr =
+      select_uptr(has_bytes, reinterpret_cast<uintptr_t>(src + decode_len), 0u);
+  return std::make_pair(out_value, reinterpret_cast<const char *>(next_addr));
 }
 
 inline std::pair<uint32_t, const char *> parse_char(const char *src,
                                                     const char *end) noexcept {
-    {
-    const size_t emel_branch_15 = static_cast<size_t>(src < end);
-    for (size_t emel_case_15 = emel_branch_15; emel_case_15 == 1u; emel_case_15 = 2u) {
+  static constexpr char k_zero = '\0';
+  const bool has_src = src < end;
+  const uintptr_t first_addr =
+      select_uptr(has_src, reinterpret_cast<uintptr_t>(src),
+                  reinterpret_cast<uintptr_t>(&k_zero));
+  const char first = *reinterpret_cast<const char *>(first_addr);
+  const bool is_escape = has_src && first == '\\';
 
-    }
-    for (size_t emel_case_15 = emel_branch_15; emel_case_15 == 0u; emel_case_15 = 2u) {
-            return std::make_pair(0, nullptr);
-    }
-  }
-    {
-    const size_t emel_branch_16 = static_cast<size_t>(*src == '\\');
-    for (size_t emel_case_16 = emel_branch_16; emel_case_16 == 1u; emel_case_16 = 2u) {
-      {
-        const size_t emel_branch_17 = static_cast<size_t>(src + 1 < end);
-        for (size_t emel_case_17 = emel_branch_17; emel_case_17 == 1u; emel_case_17 = 2u) {
+  const bool src_le_end = src <= end;
+  const ptrdiff_t distance = (end - src) * static_cast<ptrdiff_t>(src_le_end);
+  const bool has_escape_next = is_escape && distance >= 2;
 
-        }
-        for (size_t emel_case_17 = emel_branch_17; emel_case_17 == 0u; emel_case_17 = 2u) {
-          return std::make_pair(0, nullptr);
-        }
-      }
-      const char escaped = src[1];
-      const size_t is_hex2 = static_cast<size_t>(escaped == 'x');
-      const size_t is_hex4 = static_cast<size_t>(escaped == 'u');
-      const size_t is_hex8 = static_cast<size_t>(escaped == 'U');
-      const size_t is_tab = static_cast<size_t>(escaped == 't');
-      const size_t is_cr = static_cast<size_t>(escaped == 'r');
-      const size_t is_lf = static_cast<size_t>(escaped == 'n');
-      const size_t is_literal = static_cast<size_t>(escaped == '\\' || escaped == '"' ||
-                                                    escaped == '[' || escaped == ']');
-      {
-        const size_t emel_branch_hex2 = is_hex2;
-        for (size_t emel_case_hex2 = emel_branch_hex2; emel_case_hex2 == 1u;
-             emel_case_hex2 = 2u) {
-          return parse_hex(src + 2, end, 2);
-        }
-        for (size_t emel_case_hex2 = emel_branch_hex2; emel_case_hex2 == 0u;
-             emel_case_hex2 = 2u) {
+  const uintptr_t escaped_addr =
+      select_uptr(has_escape_next, reinterpret_cast<uintptr_t>(src + 1),
+                  reinterpret_cast<uintptr_t>(&k_zero));
+  const char escaped = *reinterpret_cast<const char *>(escaped_addr);
 
-        }
-      }
-      {
-        const size_t emel_branch_hex4 = is_hex4;
-        for (size_t emel_case_hex4 = emel_branch_hex4; emel_case_hex4 == 1u;
-             emel_case_hex4 = 2u) {
-          return parse_hex(src + 2, end, 4);
-        }
-        for (size_t emel_case_hex4 = emel_branch_hex4; emel_case_hex4 == 0u;
-             emel_case_hex4 = 2u) {
+  const uintptr_t hex_src_addr =
+      select_uptr(has_escape_next, reinterpret_cast<uintptr_t>(src + 2),
+                  reinterpret_cast<uintptr_t>(src));
+  const char *hex_src = reinterpret_cast<const char *>(hex_src_addr);
 
-        }
-      }
-      {
-        const size_t emel_branch_hex8 = is_hex8;
-        for (size_t emel_case_hex8 = emel_branch_hex8; emel_case_hex8 == 1u;
-             emel_case_hex8 = 2u) {
-          return parse_hex(src + 2, end, 8);
-        }
-        for (size_t emel_case_hex8 = emel_branch_hex8; emel_case_hex8 == 0u;
-             emel_case_hex8 = 2u) {
+  const auto hex2 = parse_hex(hex_src, end, 2);
+  const auto hex4 = parse_hex(hex_src, end, 4);
+  const auto hex8 = parse_hex(hex_src, end, 8);
 
-        }
-      }
-      {
-        const size_t emel_branch_tab = is_tab;
-        for (size_t emel_case_tab = emel_branch_tab; emel_case_tab == 1u;
-             emel_case_tab = 2u) {
-          return std::make_pair(static_cast<uint32_t>('\t'), src + 2);
-        }
-        for (size_t emel_case_tab = emel_branch_tab; emel_case_tab == 0u;
-             emel_case_tab = 2u) {
+  const size_t is_hex2 = static_cast<size_t>(escaped == 'x');
+  const size_t is_hex4 = static_cast<size_t>(escaped == 'u');
+  const size_t is_hex8 = static_cast<size_t>(escaped == 'U');
+  const size_t is_tab = static_cast<size_t>(escaped == 't');
+  const size_t is_cr = static_cast<size_t>(escaped == 'r');
+  const size_t is_lf = static_cast<size_t>(escaped == 'n');
+  const size_t is_literal = static_cast<size_t>(
+      escaped == '\\' || escaped == '"' || escaped == '[' || escaped == ']');
 
-        }
-      }
-      {
-        const size_t emel_branch_cr = is_cr;
-        for (size_t emel_case_cr = emel_branch_cr; emel_case_cr == 1u;
-             emel_case_cr = 2u) {
-          return std::make_pair(static_cast<uint32_t>('\r'), src + 2);
-        }
-        for (size_t emel_case_cr = emel_branch_cr; emel_case_cr == 0u;
-             emel_case_cr = 2u) {
+  const bool hex2_ok = is_hex2 != 0u && hex2.second != nullptr;
+  const bool hex4_ok = is_hex4 != 0u && hex4.second != nullptr;
+  const bool hex8_ok = is_hex8 != 0u && hex8.second != nullptr;
+  const bool direct_kind = (is_tab | is_cr | is_lf | is_literal) != 0u;
+  const bool direct_ok = has_escape_next && direct_kind;
+  const bool escape_ok = hex2_ok || hex4_ok || hex8_ok || direct_ok;
 
-        }
-      }
-      {
-        const size_t emel_branch_lf = is_lf;
-        for (size_t emel_case_lf = emel_branch_lf; emel_case_lf == 1u;
-             emel_case_lf = 2u) {
-          return std::make_pair(static_cast<uint32_t>('\n'), src + 2);
-        }
-        for (size_t emel_case_lf = emel_branch_lf; emel_case_lf == 0u;
-             emel_case_lf = 2u) {
+  const uint32_t escape_value =
+      static_cast<uint32_t>(is_hex2) * hex2.first +
+      static_cast<uint32_t>(is_hex4) * hex4.first +
+      static_cast<uint32_t>(is_hex8) * hex8.first +
+      static_cast<uint32_t>(is_tab) * static_cast<uint32_t>('\t') +
+      static_cast<uint32_t>(is_cr) * static_cast<uint32_t>('\r') +
+      static_cast<uint32_t>(is_lf) * static_cast<uint32_t>('\n') +
+      static_cast<uint32_t>(is_literal) *
+          static_cast<uint32_t>(static_cast<unsigned char>(escaped));
 
-        }
-      }
-      {
-        const size_t emel_branch_literal = is_literal;
-        for (size_t emel_case_literal = emel_branch_literal; emel_case_literal == 1u;
-             emel_case_literal = 2u) {
-          return std::make_pair(static_cast<uint32_t>(escaped), src + 2);
-        }
-        for (size_t emel_case_literal = emel_branch_literal; emel_case_literal == 0u;
-             emel_case_literal = 2u) {
+  const uintptr_t escape_next_addr =
+      static_cast<uintptr_t>(is_hex2) *
+          reinterpret_cast<uintptr_t>(hex2.second) +
+      static_cast<uintptr_t>(is_hex4) *
+          reinterpret_cast<uintptr_t>(hex4.second) +
+      static_cast<uintptr_t>(is_hex8) *
+          reinterpret_cast<uintptr_t>(hex8.second) +
+      static_cast<uintptr_t>(direct_kind) *
+          select_uptr(has_escape_next, reinterpret_cast<uintptr_t>(src + 2),
+                      0u);
 
-        }
-      }
-      return std::make_pair(0u, nullptr);
-    }
-    for (size_t emel_case_16 = emel_branch_16; emel_case_16 == 0u; emel_case_16 = 2u) {
+  const auto utf8 = decode_utf8(src, end);
+  const bool utf8_ok = utf8.second != nullptr;
 
-    }
-  }
-  return decode_utf8(src, end);
+  const uint32_t selected_value =
+      select_u32(is_escape, escape_value, utf8.first);
+  const uintptr_t selected_next = select_uptr(
+      is_escape, escape_next_addr, reinterpret_cast<uintptr_t>(utf8.second));
+  const bool selected_ok = select_bool(is_escape, escape_ok, utf8_ok);
+
+  const uint32_t out_value = select_u32(selected_ok, selected_value, 0u);
+  const uintptr_t out_next = select_uptr(selected_ok, selected_next, 0u);
+  return std::make_pair(out_value, reinterpret_cast<const char *>(out_next));
 }
 
 } // namespace emel::gbnf::rule_parser::detail
