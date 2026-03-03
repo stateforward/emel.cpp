@@ -114,6 +114,21 @@ primary sources consulted (non-exhaustive)
       `unexpected_event<_>` is an internal_event.
 15. guards MAY branch only on `(event, persistent_context)` and MUST NOT depend
     on dispatch-local context fields.
+16. runtime control-flow emulation is forbidden in actions, state-machine member
+    methods, and any function they call. forbidden patterns include:
+    - single-pass conditional loops (for example `for (bool c = cond; c; c = false)`).
+    - branch-case loops (for example `for (size_t k = branch; k == 0u/1u; k = 2u)`).
+    - any loop whose purpose is choosing a control path rather than iterating data.
+17. runtime-indexed selection used as branch substitution is forbidden in actions,
+    state-machine member methods, and action callees. examples include choosing
+    handlers/callbacks/return behavior from arrays using runtime branch indices.
+    runtime control decisions MUST be modeled in transitions/guards.
+18. loops in actions/details/member-method callees are allowed only for data-plane
+    iteration with monotonic progress and bounded work. loops MUST NOT encode
+    success/error/mode/retry/routing control decisions.
+19. compile-time conditionals remain allowed in actions/member methods/action
+    callees (`if constexpr`, `#if`, `#ifdef`). this allowance does not permit
+    runtime control-flow emulation.
 
 ## 7. reentrancy and nested dispatch
 1. an actor MUST NOT call its own `process_event` (directly or indirectly) from inside a guard/action. this prevents unbounded recursion and makes WCET analysis tractable. (motivation: `process_event` is synchronous and can be re-entered; SML users report deep call stacks if they do this.)
