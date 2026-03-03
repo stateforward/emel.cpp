@@ -34,6 +34,62 @@ inline void add_rule_unchecked(emel::gbnf::grammar & grammar,
   grammar.rule_count = std::max(grammar.rule_count, rule_id + 1u);
 }
 
+inline void consume_char_class_range_none(context &, const char *&, const char *) noexcept {}
+
+inline void consume_char_class_range_some(context & ctx,
+                                          const char *& pos,
+                                          const char * end) noexcept {
+  ++pos;
+  const auto range_char = emel::gbnf::rule_parser::detail::parse_char(pos, end);
+  append_unchecked(ctx, {emel::gbnf::element_type::char_rng_upper, range_char.first});
+  pos = range_char.second;
+}
+
+inline void quantifier_parse_explicit_max_none(uint64_t &, const char *&, const char *) noexcept {}
+
+inline void quantifier_parse_explicit_max_some(uint64_t & max_times,
+                                               const char *& next,
+                                               const char * end) noexcept {
+  ++next;
+  (void)emel::gbnf::rule_parser::detail::parse_uint64(next, end, max_times, &next);
+}
+
+inline void quantifier_parse_braced_range_none(std::string_view,
+                                               uint64_t &,
+                                               uint64_t &) noexcept {}
+
+inline void quantifier_parse_braced_range_some(const std::string_view text,
+                                               uint64_t & min_times,
+                                               uint64_t & max_times) noexcept {
+  constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
+  const char * cursor = text.data() + 1u;
+  const char * end = text.data() + text.size() - 1u;
+  const char * next = nullptr;
+  (void)emel::gbnf::rule_parser::detail::parse_uint64(cursor, end, min_times, &next);
+  const size_t at_end = static_cast<size_t>(next == end);
+  const size_t at_open_end = static_cast<size_t>(next != end && next + 1u == end);
+  const size_t range_mode = at_end + (at_open_end * 2u);
+  const size_t has_exact_max = static_cast<size_t>(range_mode == 1u);
+  const size_t has_open_max = static_cast<size_t>(range_mode == 2u);
+  const size_t has_explicit_max = static_cast<size_t>(range_mode == 0u);
+  const size_t max_mode = has_exact_max * 1u + has_open_max * 2u;
+  const std::array<uint64_t, 3> max_candidates = {max_times, min_times, k_no_max};
+  max_times = max_candidates[max_mode];
+
+  constexpr std::array<void (*)(uint64_t &, const char *&, const char *), 2>
+      explicit_max_handlers = {
+          quantifier_parse_explicit_max_none,
+          quantifier_parse_explicit_max_some,
+      };
+  explicit_max_handlers[has_explicit_max](max_times, next, end);
+}
+
+inline void append_optional_rule_ref_none(context &, const uint32_t) noexcept {}
+
+inline void append_optional_rule_ref_some(context & ctx, const uint32_t rule_id) noexcept {
+  append_unchecked(ctx, {emel::gbnf::element_type::rule_ref, rule_id});
+}
+
 inline bool on_lexer_done(void * owner, const lexer::events::next_done & ev) noexcept {
   auto * ctx = static_cast<event::parse_rules_ctx *>(owner);
   ctx->err = emel::error::cast(error::none);
@@ -237,20 +293,11 @@ struct consume_token_character_class {
 
       const size_t has_range = static_cast<size_t>(pos + 1u < end && pos[0] == '-' &&
                                                    pos[1] != ']');
-      {
-        const size_t emel_branch_has_range = has_range;
-        for (size_t emel_case_has_range = emel_branch_has_range; emel_case_has_range == 1u;
-             emel_case_has_range = 2u) {
-          ++pos;
-          const auto range_char = emel::gbnf::rule_parser::detail::parse_char(pos, end);
-          append_unchecked(ctx, {emel::gbnf::element_type::char_rng_upper, range_char.first});
-          pos = range_char.second;
-        }
-        for (size_t emel_case_has_range = emel_branch_has_range; emel_case_has_range == 0u;
-             emel_case_has_range = 2u) {
-
-        }
-      }
+      constexpr std::array<void (*)(context &, const char *&, const char *), 2> range_handlers = {
+          consume_char_class_range_none,
+          consume_char_class_range_some,
+      };
+      range_handlers[has_range](ctx, pos, end);
     }
   }
 };
@@ -352,45 +399,12 @@ struct consume_token_quantifier {
     min_times = min_defaults[quantifier_kind];
     max_times = max_defaults[quantifier_kind];
     const size_t has_braced_range = static_cast<size_t>(quantifier_kind == 3u);
-    {
-      const size_t emel_branch_braced_range = has_braced_range;
-      for (size_t emel_case_braced_range = emel_branch_braced_range;
-           emel_case_braced_range == 1u;
-           emel_case_braced_range = 2u) {
-        const char * cursor = text.data() + 1u;
-        const char * end = text.data() + text.size() - 1u;
-        const char * next = nullptr;
-        (void)emel::gbnf::rule_parser::detail::parse_uint64(cursor, end, min_times, &next);
-        const size_t at_end = static_cast<size_t>(next == end);
-        const size_t at_open_end = static_cast<size_t>(next != end && next + 1u == end);
-        const size_t range_mode = at_end + (at_open_end * 2u);
-        const size_t has_exact_max = static_cast<size_t>(range_mode == 1u);
-        const size_t has_open_max = static_cast<size_t>(range_mode == 2u);
-        const size_t has_explicit_max = static_cast<size_t>(range_mode == 0u);
-        const size_t max_mode = has_exact_max * 1u + has_open_max * 2u;
-        const std::array<uint64_t, 3> max_candidates = {max_times, min_times, k_no_max};
-        max_times = max_candidates[max_mode];
-        {
-          const size_t emel_branch_explicit_max = has_explicit_max;
-          for (size_t emel_case_explicit_max = emel_branch_explicit_max;
-               emel_case_explicit_max == 1u;
-               emel_case_explicit_max = 2u) {
-            ++next;
-            (void)emel::gbnf::rule_parser::detail::parse_uint64(next, end, max_times, &next);
-          }
-          for (size_t emel_case_explicit_max = emel_branch_explicit_max;
-               emel_case_explicit_max == 0u;
-               emel_case_explicit_max = 2u) {
-
-          }
-        }
-      }
-      for (size_t emel_case_braced_range = emel_branch_braced_range;
-           emel_case_braced_range == 0u;
-           emel_case_braced_range = 2u) {
-
-      }
-    }
+    constexpr std::array<void (*)(std::string_view, uint64_t &, uint64_t &), 2>
+        braced_range_handlers = {
+            quantifier_parse_braced_range_none,
+            quantifier_parse_braced_range_some,
+        };
+    braced_range_handlers[has_braced_range](text, min_times, max_times);
 
     const uint32_t prev_len = ctx.current_rule.size - ctx.last_sym_start;
     emel::gbnf::element * const prev_elements = ctx.prev_scratch.get();
@@ -408,18 +422,8 @@ struct consume_token_quantifier {
     ctx.current_rule.size = rule_sizes[static_cast<size_t>(min_times == 0)];
 
     const bool no_max = max_times == k_no_max;
-    uint64_t n_opt = max_times - min_times;
-    {
-      const size_t emel_branch_no_max = static_cast<size_t>(no_max);
-      for (size_t emel_case_no_max = emel_branch_no_max; emel_case_no_max == 1u;
-           emel_case_no_max = 2u) {
-        n_opt = 1u;
-      }
-      for (size_t emel_case_no_max = emel_branch_no_max; emel_case_no_max == 0u;
-           emel_case_no_max = 2u) {
-
-      }
-    }
+    const std::array<uint64_t, 2> n_opt_candidates = {max_times - min_times, 1u};
+    const uint64_t n_opt = n_opt_candidates[static_cast<size_t>(no_max)];
     uint32_t last_rec_rule_id = 0;
     emel::gbnf::element * const rec_elements = ctx.rec_scratch.get();
 
@@ -441,19 +445,11 @@ struct consume_token_quantifier {
       last_rec_rule_id = rec_rule_id;
     }
 
-    {
-      const size_t emel_branch_has_optional = static_cast<size_t>(n_opt > 0);
-      for (size_t emel_case_has_optional = emel_branch_has_optional;
-           emel_case_has_optional == 1u;
-           emel_case_has_optional = 2u) {
-        append_unchecked(ctx, {emel::gbnf::element_type::rule_ref, last_rec_rule_id});
-      }
-      for (size_t emel_case_has_optional = emel_branch_has_optional;
-           emel_case_has_optional == 0u;
-           emel_case_has_optional = 2u) {
-
-      }
-    }
+    constexpr std::array<void (*)(context &, uint32_t), 2> optional_rule_ref_handlers = {
+        append_optional_rule_ref_none,
+        append_optional_rule_ref_some,
+    };
+    optional_rule_ref_handlers[static_cast<size_t>(n_opt > 0)](ctx, last_rec_rule_id);
   }
 };
 

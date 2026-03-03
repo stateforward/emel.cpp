@@ -27,7 +27,7 @@ explicitly in the state machine.
 - [x] `src/emel/gbnf/rule_parser/lexer/actions.hpp`
 - [x] `src/emel/kernel/x86_64/actions.hpp`
 - [x] `src/emel/kernel/aarch64/actions.hpp`
-- [ ] `src/emel/gbnf/rule_parser/actions.hpp`
+- [x] `src/emel/gbnf/rule_parser/actions.hpp`
 - [ ] `src/emel/token/batcher/actions.hpp`
 
 ## High-Priority Findings (Action Files)
