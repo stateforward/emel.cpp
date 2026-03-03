@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cctype>
+#include <array>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -11,22 +12,33 @@
 namespace emel::docs::detail {
 
 inline std::string sanitize_mermaid(std::string_view name) {
+  using mode_handler_t = void (*)(std::string &, char, std::size_t &) noexcept;
+  static constexpr std::array<mode_handler_t, 3> MODE_HANDLERS = {
+      +[](std::string & value, char, std::size_t &) noexcept {
+        value.push_back('_');
+      },
+      +[](std::string & value, char ch, std::size_t &) noexcept {
+        value.push_back(ch);
+      },
+      +[](std::string & value, char, std::size_t & i) noexcept {
+        value.push_back('_');
+        value.push_back('_');
+        i += 1;
+      },
+  };
+
   std::string out;
   out.reserve(name.size());
   for (std::size_t i = 0; i < name.size(); ++i) {
     const char ch = name[i];
-    if (ch == ':' && i + 1 < name.size() && name[i + 1] == ':') {
-      out.push_back('_');
-      out.push_back('_');
-      ++i;
-      continue;
-    }
+    const size_t has_next = static_cast<size_t>(i + 1 < name.size());
+    const size_t is_scope =
+        static_cast<size_t>(ch == ':' && has_next != 0 && name[i + 1] == ':');
     const unsigned char uch = static_cast<unsigned char>(ch);
-    if (std::isalnum(uch) != 0 || ch == '_') {
-      out.push_back(ch);
-      continue;
-    }
-    out.push_back('_');
+    const size_t is_ident = static_cast<size_t>(std::isalnum(uch) != 0 || ch == '_');
+    const std::array<size_t, 2> mode_candidates = {is_ident, 2u};
+    const size_t mode = mode_candidates[static_cast<size_t>(is_scope != 0)];
+    MODE_HANDLERS[mode](out, ch, i);
   }
   return out;
 }
@@ -34,68 +46,116 @@ inline std::string sanitize_mermaid(std::string_view name) {
 inline std::string shorten_type_name(std::string_view name) {
   std::string out(name);
   const std::size_t pos = out.rfind("::");
-  if (pos != std::string::npos) {
-    out = out.substr(pos + 2);
-  }
+  const size_t has_namespace = static_cast<size_t>(pos != std::string::npos);
+  std::string namespace_candidates[2] = {out, out.substr((pos + 2) * has_namespace)};
+  out = std::move(namespace_candidates[has_namespace]);
+
   const std::string marker = "lambda at ";
   const std::size_t lambda_pos = out.find(marker);
-  if (lambda_pos != std::string::npos) {
-    std::string_view rest(out);
-    rest.remove_prefix(lambda_pos + marker.size());
-    const std::size_t end = rest.find('>');
-    if (end != std::string::npos) {
-      rest = rest.substr(0, end);
+  const size_t has_lambda = static_cast<size_t>(lambda_pos != std::string::npos);
+  {
+    const size_t emel_branch_has_lambda = has_lambda;
+    for (size_t emel_case_has_lambda = emel_branch_has_lambda; emel_case_has_lambda == 0u;
+         emel_case_has_lambda = 2u) {
+      return out;
     }
-    const std::size_t slash = rest.find_last_of("/\\");
-    if (slash != std::string::npos) {
-      rest = rest.substr(slash + 1);
-    }
-    std::string file;
-    std::string line;
-    std::string col;
-    const std::size_t colon1 = rest.find(':');
-    if (colon1 != std::string::npos) {
-      file.assign(rest.substr(0, colon1));
-      const std::size_t colon2 = rest.find(':', colon1 + 1);
-      if (colon2 != std::string::npos) {
-        line.assign(rest.substr(colon1 + 1, colon2 - colon1 - 1));
-        col.assign(rest.substr(colon2 + 1));
-      } else {
-        line.assign(rest.substr(colon1 + 1));
-      }
-    } else {
-      file.assign(rest);
-    }
-    auto trim_trailing_non_alnum = [](std::string & value) {
-      while (!value.empty()) {
-        const unsigned char ch = static_cast<unsigned char>(value.back());
-        if (std::isalnum(ch) != 0) {
-          break;
+    for (size_t emel_case_has_lambda = emel_branch_has_lambda; emel_case_has_lambda == 1u;
+         emel_case_has_lambda = 2u) {
+      std::string_view rest(out);
+      rest.remove_prefix(lambda_pos + marker.size());
+      const std::size_t end = rest.find('>');
+      const size_t has_end = static_cast<size_t>(end != std::string::npos);
+      std::string_view end_candidates[2] = {rest, rest.substr(0, end * has_end)};
+      rest = end_candidates[has_end];
+
+      const std::size_t slash = rest.find_last_of("/\\");
+      const size_t has_slash = static_cast<size_t>(slash != std::string::npos);
+      std::string_view slash_candidates[2] = {rest, rest.substr((slash + 1) * has_slash)};
+      rest = slash_candidates[has_slash];
+
+      std::string file;
+      std::string line;
+      std::string col;
+      const std::size_t colon1 = rest.find(':');
+      const size_t has_colon1 = static_cast<size_t>(colon1 != std::string::npos);
+      const std::size_t colon2 = rest.find(':', colon1 + has_colon1);
+      const size_t has_colon2 = has_colon1 & static_cast<size_t>(colon2 != std::string::npos);
+      const size_t colon_mode = has_colon1 + has_colon2;
+
+      using colon_handler_t = void (*)(std::string_view,
+                                       std::size_t,
+                                       std::size_t,
+                                       std::string &,
+                                       std::string &,
+                                       std::string &) noexcept;
+      static constexpr std::array<colon_handler_t, 3> COLON_HANDLERS = {
+          +[](std::string_view value,
+              std::size_t,
+              std::size_t,
+              std::string & file_out,
+              std::string &,
+              std::string &) noexcept {
+            file_out.assign(value);
+          },
+          +[](std::string_view value,
+              std::size_t colon1_value,
+              std::size_t,
+              std::string & file_out,
+              std::string & line_out,
+              std::string &) noexcept {
+            file_out.assign(value.substr(0, colon1_value));
+            line_out.assign(value.substr(colon1_value + 1));
+          },
+          +[](std::string_view value,
+              std::size_t colon1_value,
+              std::size_t colon2_value,
+              std::string & file_out,
+              std::string & line_out,
+              std::string & col_out) noexcept {
+            file_out.assign(value.substr(0, colon1_value));
+            line_out.assign(value.substr(colon1_value + 1, colon2_value - colon1_value - 1));
+            col_out.assign(value.substr(colon2_value + 1));
+          },
+      };
+
+      COLON_HANDLERS[colon_mode](rest, colon1, colon2, file, line, col);
+
+      auto trim_trailing_non_alnum = [](std::string & value) {
+        while (!value.empty() &&
+               std::isalnum(static_cast<unsigned char>(value.back())) == 0) {
+          value.pop_back();
         }
-        value.pop_back();
-      }
-    };
-    trim_trailing_non_alnum(file);
-    trim_trailing_non_alnum(line);
-    trim_trailing_non_alnum(col);
-    const std::size_t dot = file.rfind('.');
-    if (dot != std::string::npos) {
-      file = file.substr(0, dot);
+      };
+      trim_trailing_non_alnum(file);
+      trim_trailing_non_alnum(line);
+      trim_trailing_non_alnum(col);
+
+      const std::size_t dot = file.rfind('.');
+      const size_t has_dot = static_cast<size_t>(dot != std::string::npos);
+      std::string dot_candidates[2] = {file, file.substr(0, dot * has_dot)};
+      file = std::move(dot_candidates[has_dot]);
+
+      auto append_non_empty = [](std::string & out_value,
+                                 const std::string & suffix) {
+        const size_t emel_branch_has_suffix = static_cast<size_t>(!suffix.empty());
+        for (size_t emel_case_has_suffix = emel_branch_has_suffix;
+             emel_case_has_suffix == 1u;
+             emel_case_has_suffix = 2u) {
+          out_value += "_" + suffix;
+        }
+        for (size_t emel_case_has_suffix = emel_branch_has_suffix;
+             emel_case_has_suffix == 0u;
+             emel_case_has_suffix = 2u) {
+
+        }
+      };
+
+      std::string shortened = "lambda";
+      append_non_empty(shortened, file);
+      append_non_empty(shortened, line);
+      append_non_empty(shortened, col);
+      return shortened;
     }
-    std::string shortened = "lambda";
-    if (!file.empty()) {
-      shortened += "_";
-      shortened += file;
-    }
-    if (!line.empty()) {
-      shortened += "_";
-      shortened += line;
-    }
-    if (!col.empty()) {
-      shortened += "_";
-      shortened += col;
-    }
-    return shortened;
   }
   return out;
 }

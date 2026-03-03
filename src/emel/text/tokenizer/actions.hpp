@@ -228,8 +228,9 @@ struct dispatch_encode_raw_fragment {
     auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
     const fragment &frag = ev.ctx.fragments[ev.ctx.fragment_index];
     const int32_t capacity = ev.request.token_capacity - ev.ctx.token_count;
-    const size_t output_capacity =
-        capacity > 0 ? static_cast<size_t>(capacity) : 0;
+    const int32_t non_negative_capacity =
+        capacity * static_cast<int32_t>(capacity > 0);
+    const size_t output_capacity = static_cast<size_t>(non_negative_capacity);
 
     int32_t fragment_count = 0;
     int32_t err = error_code(error::none);

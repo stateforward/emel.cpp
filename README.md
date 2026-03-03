@@ -10,6 +10,11 @@ allocator, and execution pipelines stabilize.
 
 This inference engine is being implemented by AI under human engineering and architecture direction.
 
+> [!WARNING]
+> EMEL is currently going through a major re-architecture expected to complete by end of day on
+> Friday, February 27, 2026. The only domain left to rearchitect is the text domain.
+> The source of truth for architecture and design lives in `src/emel/**/sm.hpp` docstrings and
+> the generated docs under `docs/architecture/`.
 
 ## Implementation priorities
 

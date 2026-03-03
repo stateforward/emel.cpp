@@ -148,16 +148,14 @@ inline bool is_supported_dtype(const uint8_t code) noexcept {
 }
 
 inline size_t dtype_size_bytes(const uint8_t code) noexcept {
-  return code == dtype_f32 ? 4u : 0u;
+  const std::array<size_t, 2> size_candidates = {0u, 4u};
+  return size_candidates[static_cast<size_t>(code == dtype_f32)];
 }
 
 template <class tensor_type>
 inline uint64_t tensor_element_count(const tensor_type & tensor) noexcept {
   uint64_t count = 1;
   for (size_t i = 0; i < 4; ++i) {
-    if (tensor.ne[i] == 0) {
-      return 0;
-    }
     count *= tensor.ne[i];
   }
   return count;
@@ -165,35 +163,57 @@ inline uint64_t tensor_element_count(const tensor_type & tensor) noexcept {
 
 template <class tensor_type>
 inline uint64_t tensor_stride_bytes(const tensor_type & tensor, const size_t dim) noexcept {
-  if (tensor.nb[0] != 0) {
-    return tensor.nb[dim];
-  }
-
   uint64_t stride = dtype_size_bytes(dtype_code(tensor.type));
   for (size_t i = 0; i < dim; ++i) {
     stride *= tensor.ne[i];
   }
-  return stride;
+  const std::array<uint64_t, 2> candidates{stride, tensor.nb[dim]};
+  return candidates[static_cast<size_t>(tensor.nb[0] != 0)];
 }
 
 template <class tensor_type>
 inline bool has_valid_tensor_layout(const tensor_type & tensor) noexcept {
   const uint64_t elem_size = dtype_size_bytes(dtype_code(tensor.type));
-  if (elem_size == 0) {
-    return false;
+    {
+    const size_t emel_branch_1 = static_cast<size_t>(elem_size == 0);
+    for (size_t emel_case_1 = emel_branch_1; emel_case_1 == 1u; emel_case_1 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_1 = emel_branch_1; emel_case_1 == 0u; emel_case_1 = 2u) {
+
+    }
   }
 
-  if (tensor.nb[0] == 0) {
-    return true;
+    {
+    const size_t emel_branch_2 = static_cast<size_t>(tensor.nb[0] == 0);
+    for (size_t emel_case_2 = emel_branch_2; emel_case_2 == 1u; emel_case_2 = 2u) {
+            return true;
+    }
+    for (size_t emel_case_2 = emel_branch_2; emel_case_2 == 0u; emel_case_2 = 2u) {
+
+    }
   }
 
-  if (tensor.nb[0] < elem_size || (tensor.nb[0] % elem_size) != 0) {
-    return false;
+    {
+    const size_t emel_branch_3 = static_cast<size_t>(tensor.nb[0] < elem_size || (tensor.nb[0] % elem_size) != 0);
+    for (size_t emel_case_3 = emel_branch_3; emel_case_3 == 1u; emel_case_3 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_3 = emel_branch_3; emel_case_3 == 0u; emel_case_3 = 2u) {
+
+    }
   }
 
   for (size_t i = 0; i < 4; ++i) {
-    if (tensor.ne[i] > 1 && tensor.nb[i] == 0) {
-      return false;
+    const bool invalid_dim = tensor.ne[i] > 1 && tensor.nb[i] == 0;
+        {
+      const size_t emel_branch_4 = static_cast<size_t>(invalid_dim);
+      for (size_t emel_case_4 = emel_branch_4; emel_case_4 == 1u; emel_case_4 = 2u) {
+                return false;
+      }
+      for (size_t emel_case_4 = emel_branch_4; emel_case_4 == 0u; emel_case_4 = 2u) {
+
+      }
     }
   }
 
@@ -202,14 +222,27 @@ inline bool has_valid_tensor_layout(const tensor_type & tensor) noexcept {
 
 template <class tensor_type>
 inline bool is_dense_contiguous(const tensor_type & tensor) noexcept {
-  if (!has_valid_tensor_layout(tensor)) {
-    return false;
+    {
+    const size_t emel_branch_5 = static_cast<size_t>(!has_valid_tensor_layout(tensor));
+    for (size_t emel_case_5 = emel_branch_5; emel_case_5 == 1u; emel_case_5 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_5 = emel_branch_5; emel_case_5 == 0u; emel_case_5 = 2u) {
+
+    }
   }
 
   uint64_t expected = dtype_size_bytes(dtype_code(tensor.type));
   for (size_t i = 0; i < 4; ++i) {
-    if (tensor_stride_bytes(tensor, i) != expected) {
-      return false;
+    const bool mismatch = tensor_stride_bytes(tensor, i) != expected;
+        {
+      const size_t emel_branch_6 = static_cast<size_t>(mismatch);
+      for (size_t emel_case_6 = emel_branch_6; emel_case_6 == 1u; emel_case_6 = 2u) {
+                return false;
+      }
+      for (size_t emel_case_6 = emel_branch_6; emel_case_6 == 0u; emel_case_6 = 2u) {
+
+      }
     }
     expected *= tensor.ne[i];
   }
@@ -220,11 +253,8 @@ template <class tensor_type>
 inline size_t tensor_offset_bytes(const tensor_type & tensor, const uint64_t idx) noexcept {
   uint64_t remaining = idx;
   size_t offset = 0;
-  for (size_t d = 0; d < 4; ++d) {
+  for (size_t d = 0; d < 4 && tensor.ne[d] != 0; ++d) {
     const uint64_t dim = tensor.ne[d];
-    if (dim == 0) {
-      break;
-    }
     const uint64_t coord = remaining % dim;
     remaining /= dim;
     offset += static_cast<size_t>(coord * tensor_stride_bytes(tensor, d));
@@ -284,43 +314,47 @@ inline bool has_required_dst(const request_type & request) noexcept {
 
 template <class request_type>
 inline bool validate_dispatch_request(const request_type & request) noexcept {
-  if (!has_required_src0(request) || !has_required_src1(request) || !has_required_dst(request)) {
-    return false;
-  }
-  if (request.ith != 0 || request.nth != 1) {
-    return false;
-  }
-  if (request.op_params_size > request.op_params.size()) {
-    return false;
-  }
-  return true;
+  const bool has_required_buffers =
+      has_required_src0(request) && has_required_src1(request) && has_required_dst(request);
+  const bool has_valid_threading = request.ith == 0 && request.nth == 1;
+  const bool has_valid_params = request.op_params_size <= request.op_params.size();
+  return has_required_buffers && has_valid_threading && has_valid_params;
 }
 
 template <class tensor_type>
 inline float read_f32(const tensor_type & tensor, const uint64_t idx) noexcept {
-  if (is_dense_contiguous(tensor)) {
-    const float * data = static_cast<const float *>(tensor.data);
-    return data[idx];
-  }
-
-  float out = 0.0f;
+  const bool dense = is_dense_contiguous(tensor);
+  const float * data = static_cast<const float *>(tensor.data);
   const char * base = static_cast<const char *>(tensor.data);
   const size_t offset = tensor_offset_bytes(tensor, idx);
-  std::memcpy(&out, base + offset, sizeof(out));
+  float out = data[idx * static_cast<uint64_t>(dense)];
+    {
+    const size_t emel_branch_7 = static_cast<size_t>(dense);
+    for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 1u; emel_case_7 = 2u) {
+
+    }
+    for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 0u; emel_case_7 = 2u) {
+            std::memcpy(&out, base + offset, sizeof(out));
+    }
+  }
   return out;
 }
 
 template <class tensor_type>
 inline void write_f32(const tensor_type & tensor, const uint64_t idx, const float value) noexcept {
-  if (is_dense_contiguous(tensor)) {
-    float * data = static_cast<float *>(tensor.data);
-    data[idx] = value;
-    return;
-  }
-
+  const bool dense = is_dense_contiguous(tensor);
+  float * data = static_cast<float *>(tensor.data);
   char * base = static_cast<char *>(tensor.data);
   const size_t offset = tensor_offset_bytes(tensor, idx);
-  std::memcpy(base + offset, &value, sizeof(value));
+    {
+    const size_t emel_branch_8 = static_cast<size_t>(dense);
+    for (size_t emel_case_8 = emel_branch_8; emel_case_8 == 1u; emel_case_8 = 2u) {
+            data[idx] = value;
+    }
+    for (size_t emel_case_8 = emel_branch_8; emel_case_8 == 0u; emel_case_8 = 2u) {
+            std::memcpy(base + offset, &value, sizeof(value));
+    }
+  }
 }
 
 template <class tensor_type>
@@ -345,17 +379,32 @@ inline void write_f32_at(const tensor_type & tensor, const uint64_t i0, const ui
 template <class request_type>
 inline bool run_copy(const request_type & request) noexcept {
   const uint64_t count = tensor_element_count(request.dst);
-  if (count != tensor_element_count(request.src0)) {
-    return false;
+    {
+    const size_t emel_branch_9 = static_cast<size_t>(count != tensor_element_count(request.src0));
+    for (size_t emel_case_9 = emel_branch_9; emel_case_9 == 1u; emel_case_9 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_9 = emel_branch_9; emel_case_9 == 0u; emel_case_9 = 2u) {
+
+    }
   }
 
-  if (is_dense_contiguous(request.src0) && is_dense_contiguous(request.dst)) {
-    const float * src = static_cast<const float *>(request.src0.data);
-    float * dst = static_cast<float *>(request.dst.data);
-    for (uint64_t i = 0; i < count; ++i) {
-      dst[i] = src[i];
+  const bool dense = is_dense_contiguous(request.src0) && is_dense_contiguous(request.dst);
+    {
+    const size_t emel_branch_10 = static_cast<size_t>(dense);
+    for (size_t emel_case_10 = emel_branch_10; emel_case_10 == 1u; emel_case_10 = 2u) {
+       {
+            const float * src = static_cast<const float *>(request.src0.data);
+            float * dst = static_cast<float *>(request.dst.data);
+            for (uint64_t i = 0; i < count; ++i) {
+              dst[i] = src[i];
+            }
+            return true;
+          }
     }
-    return true;
+    for (size_t emel_case_10 = emel_branch_10; emel_case_10 == 0u; emel_case_10 = 2u) {
+
+    }
   }
 
   for (uint64_t i = 0; i < count; ++i) {
@@ -367,21 +416,37 @@ inline bool run_copy(const request_type & request) noexcept {
 template <class request_type, class op_type>
 inline bool run_binary(const request_type & request, op_type op) noexcept {
   const uint64_t count = tensor_element_count(request.dst);
-  if (count != tensor_element_count(request.src0) ||
-      count != tensor_element_count(request.src1)) {
-    return false;
+  const bool incompatible_shape =
+      count != tensor_element_count(request.src0) || count != tensor_element_count(request.src1);
+    {
+    const size_t emel_branch_11 = static_cast<size_t>(incompatible_shape);
+    for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 1u; emel_case_11 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 0u; emel_case_11 = 2u) {
+
+    }
   }
 
-  if (is_dense_contiguous(request.src0) &&
+  const bool dense = is_dense_contiguous(request.src0) &&
       is_dense_contiguous(request.src1) &&
-      is_dense_contiguous(request.dst)) {
-    const float * lhs = static_cast<const float *>(request.src0.data);
-    const float * rhs = static_cast<const float *>(request.src1.data);
-    float * dst = static_cast<float *>(request.dst.data);
-    for (uint64_t i = 0; i < count; ++i) {
-      dst[i] = op(lhs[i], rhs[i]);
+      is_dense_contiguous(request.dst);
+    {
+    const size_t emel_branch_12 = static_cast<size_t>(dense);
+    for (size_t emel_case_12 = emel_branch_12; emel_case_12 == 1u; emel_case_12 = 2u) {
+       {
+            const float * lhs = static_cast<const float *>(request.src0.data);
+            const float * rhs = static_cast<const float *>(request.src1.data);
+            float * dst = static_cast<float *>(request.dst.data);
+            for (uint64_t i = 0; i < count; ++i) {
+              dst[i] = op(lhs[i], rhs[i]);
+            }
+            return true;
+          }
     }
-    return true;
+    for (size_t emel_case_12 = emel_branch_12; emel_case_12 == 0u; emel_case_12 = 2u) {
+
+    }
   }
 
   for (uint64_t i = 0; i < count; ++i) {
@@ -393,17 +458,32 @@ inline bool run_binary(const request_type & request, op_type op) noexcept {
 template <class request_type, class op_type>
 inline bool run_unary(const request_type & request, op_type op) noexcept {
   const uint64_t count = tensor_element_count(request.dst);
-  if (count != tensor_element_count(request.src0)) {
-    return false;
+    {
+    const size_t emel_branch_13 = static_cast<size_t>(count != tensor_element_count(request.src0));
+    for (size_t emel_case_13 = emel_branch_13; emel_case_13 == 1u; emel_case_13 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_13 = emel_branch_13; emel_case_13 == 0u; emel_case_13 = 2u) {
+
+    }
   }
 
-  if (is_dense_contiguous(request.src0) && is_dense_contiguous(request.dst)) {
-    const float * src = static_cast<const float *>(request.src0.data);
-    float * dst = static_cast<float *>(request.dst.data);
-    for (uint64_t i = 0; i < count; ++i) {
-      dst[i] = op(src[i]);
+  const bool dense = is_dense_contiguous(request.src0) && is_dense_contiguous(request.dst);
+    {
+    const size_t emel_branch_14 = static_cast<size_t>(dense);
+    for (size_t emel_case_14 = emel_branch_14; emel_case_14 == 1u; emel_case_14 = 2u) {
+       {
+            const float * src = static_cast<const float *>(request.src0.data);
+            float * dst = static_cast<float *>(request.dst.data);
+            for (uint64_t i = 0; i < count; ++i) {
+              dst[i] = op(src[i]);
+            }
+            return true;
+          }
     }
-    return true;
+    for (size_t emel_case_14 = emel_branch_14; emel_case_14 == 0u; emel_case_14 = 2u) {
+
+    }
   }
 
   for (uint64_t i = 0; i < count; ++i) {
@@ -417,36 +497,50 @@ inline bool run_mul_mat(const request_type & request) noexcept {
   const uint64_t k = request.src0.ne[0];
   const uint64_t m = request.src0.ne[1];
   const uint64_t n = request.src1.ne[0];
-  if (k == 0 || m == 0 || n == 0) {
-    return false;
-  }
-  if (request.src1.ne[1] != k || request.dst.ne[0] != n || request.dst.ne[1] != m) {
-    return false;
-  }
-
-  if (request.src0.ne[2] != 1 || request.src0.ne[3] != 1 ||
+  const bool has_empty_dim = k == 0 || m == 0 || n == 0;
+  const bool shape_mismatch =
+      request.src1.ne[1] != k || request.dst.ne[0] != n || request.dst.ne[1] != m;
+  const bool invalid_rank =
+      request.src0.ne[2] != 1 || request.src0.ne[3] != 1 ||
       request.src1.ne[2] != 1 || request.src1.ne[3] != 1 ||
-      request.dst.ne[2] != 1 || request.dst.ne[3] != 1) {
-    return false;
+      request.dst.ne[2] != 1 || request.dst.ne[3] != 1;
+    {
+    const size_t emel_branch_15 = static_cast<size_t>(has_empty_dim || shape_mismatch || invalid_rank);
+    for (size_t emel_case_15 = emel_branch_15; emel_case_15 == 1u; emel_case_15 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_15 = emel_branch_15; emel_case_15 == 0u; emel_case_15 = 2u) {
+
+    }
   }
 
-  if (is_dense_contiguous(request.src0) &&
+  const bool dense =
+      is_dense_contiguous(request.src0) &&
       is_dense_contiguous(request.src1) &&
-      is_dense_contiguous(request.dst)) {
-    const float * a = static_cast<const float *>(request.src0.data);
-    const float * b = static_cast<const float *>(request.src1.data);
-    float * c = static_cast<float *>(request.dst.data);
+      is_dense_contiguous(request.dst);
+    {
+    const size_t emel_branch_16 = static_cast<size_t>(dense);
+    for (size_t emel_case_16 = emel_branch_16; emel_case_16 == 1u; emel_case_16 = 2u) {
+       {
+            const float * a = static_cast<const float *>(request.src0.data);
+            const float * b = static_cast<const float *>(request.src1.data);
+            float * c = static_cast<float *>(request.dst.data);
 
-    for (uint64_t i = 0; i < m; ++i) {
-      for (uint64_t j = 0; j < n; ++j) {
-        float acc = 0.0f;
-        for (uint64_t p = 0; p < k; ++p) {
-          acc += a[i * k + p] * b[p * n + j];
-        }
-        c[i * n + j] = acc;
-      }
+            for (uint64_t i = 0; i < m; ++i) {
+              for (uint64_t j = 0; j < n; ++j) {
+                float acc = 0.0f;
+                for (uint64_t p = 0; p < k; ++p) {
+                  acc += a[i * k + p] * b[p * n + j];
+                }
+                c[i * n + j] = acc;
+              }
+            }
+            return true;
+          }
     }
-    return true;
+    for (size_t emel_case_16 = emel_branch_16; emel_case_16 == 0u; emel_case_16 = 2u) {
+
+    }
   }
 
   for (uint64_t i = 0; i < m; ++i) {
@@ -466,33 +560,50 @@ template <class request_type>
 inline bool run_soft_max(const request_type & request) noexcept {
   const uint64_t width = request.src0.ne[0];
   const uint64_t count = tensor_element_count(request.src0);
-  if (width == 0 || count == 0 || count % width != 0 || count != tensor_element_count(request.dst)) {
-    return false;
+  const bool invalid_shape = width == 0 || count == 0 || count % width != 0 ||
+      count != tensor_element_count(request.dst);
+    {
+    const size_t emel_branch_17 = static_cast<size_t>(invalid_shape);
+    for (size_t emel_case_17 = emel_branch_17; emel_case_17 == 1u; emel_case_17 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_17 = emel_branch_17; emel_case_17 == 0u; emel_case_17 = 2u) {
+
+    }
   }
   const uint64_t rows = count / width;
 
-  if (is_dense_contiguous(request.src0) && is_dense_contiguous(request.dst)) {
-    const float * src = static_cast<const float *>(request.src0.data);
-    float * dst = static_cast<float *>(request.dst.data);
-    for (uint64_t row = 0; row < rows; ++row) {
-      const uint64_t offset = row * width;
-      float max_v = src[offset];
-      for (uint64_t i = 1; i < width; ++i) {
-        max_v = std::max(max_v, src[offset + i]);
-      }
+  const bool dense = is_dense_contiguous(request.src0) && is_dense_contiguous(request.dst);
+    {
+    const size_t emel_branch_18 = static_cast<size_t>(dense);
+    for (size_t emel_case_18 = emel_branch_18; emel_case_18 == 1u; emel_case_18 = 2u) {
+       {
+            const float * src = static_cast<const float *>(request.src0.data);
+            float * dst = static_cast<float *>(request.dst.data);
+            for (uint64_t row = 0; row < rows; ++row) {
+              const uint64_t offset = row * width;
+              float max_v = src[offset];
+              for (uint64_t i = 1; i < width; ++i) {
+                max_v = std::max(max_v, src[offset + i]);
+              }
 
-      float sum = 0.0f;
-      for (uint64_t i = 0; i < width; ++i) {
-        const float e = std::exp(src[offset + i] - max_v);
-        dst[offset + i] = e;
-        sum += e;
-      }
+              float sum = 0.0f;
+              for (uint64_t i = 0; i < width; ++i) {
+                const float e = std::exp(src[offset + i] - max_v);
+                dst[offset + i] = e;
+                sum += e;
+              }
 
-      for (uint64_t i = 0; i < width; ++i) {
-        dst[offset + i] /= sum;
-      }
+              for (uint64_t i = 0; i < width; ++i) {
+                dst[offset + i] /= sum;
+              }
+            }
+            return true;
+          }
     }
-    return true;
+    for (size_t emel_case_18 = emel_branch_18; emel_case_18 == 0u; emel_case_18 = 2u) {
+
+    }
   }
 
   for (uint64_t row = 0; row < rows; ++row) {
@@ -520,17 +631,46 @@ inline bool run_soft_max(const request_type & request) noexcept {
 template <class request_type>
 inline bool run_unary_subop(const request_type & request) noexcept {
   const auto subop = static_cast<uint8_t>(request.subop);
-  if (subop == 0) {
-    return run_unary(request, [](const float v) { return std::fabs(v); });
+  const size_t is_abs = static_cast<size_t>(subop == 0);
+  const size_t is_neg = static_cast<size_t>(subop == 2);
+  const size_t is_relu = static_cast<size_t>(subop == 6);
+  const size_t is_exp = static_cast<size_t>(subop == 13);
+  {
+    const size_t emel_branch_abs = is_abs;
+    for (size_t emel_case_abs = emel_branch_abs; emel_case_abs == 1u; emel_case_abs = 2u) {
+      return run_unary(request, [](const float v) { return std::fabs(v); });
+    }
+    for (size_t emel_case_abs = emel_branch_abs; emel_case_abs == 0u; emel_case_abs = 2u) {
+
+    }
   }
-  if (subop == 2) {
-    return run_unary(request, [](const float v) { return -v; });
+  {
+    const size_t emel_branch_neg = is_neg;
+    for (size_t emel_case_neg = emel_branch_neg; emel_case_neg == 1u; emel_case_neg = 2u) {
+      return run_unary(request, [](const float v) { return -v; });
+    }
+    for (size_t emel_case_neg = emel_branch_neg; emel_case_neg == 0u; emel_case_neg = 2u) {
+
+    }
   }
-  if (subop == 6) {
-    return run_unary(request, [](const float v) { return std::max(0.0f, v); });
+  {
+    const size_t emel_branch_relu = is_relu;
+    for (size_t emel_case_relu = emel_branch_relu; emel_case_relu == 1u; emel_case_relu = 2u) {
+      return run_unary(request, [](const float v) { return std::max(0.0f, v); });
+    }
+    for (size_t emel_case_relu = emel_branch_relu; emel_case_relu == 0u;
+         emel_case_relu = 2u) {
+
+    }
   }
-  if (subop == 13) {
-    return run_unary(request, [](const float v) { return std::exp(v); });
+  {
+    const size_t emel_branch_exp = is_exp;
+    for (size_t emel_case_exp = emel_branch_exp; emel_case_exp == 1u; emel_case_exp = 2u) {
+      return run_unary(request, [](const float v) { return std::exp(v); });
+    }
+    for (size_t emel_case_exp = emel_branch_exp; emel_case_exp == 0u; emel_case_exp = 2u) {
+
+    }
   }
   return false;
 }
@@ -557,14 +697,13 @@ inline bool can_run_mul_mat(const request_type & request) noexcept {
   const uint64_t k = request.src0.ne[0];
   const uint64_t m = request.src0.ne[1];
   const uint64_t n = request.src1.ne[0];
-  if (k == 0 || m == 0 || n == 0) {
-    return false;
-  }
-  return request.src1.ne[1] == k && request.dst.ne[0] == n &&
+  const bool has_empty_dim = k == 0 || m == 0 || n == 0;
+  const bool valid_shape = request.src1.ne[1] == k && request.dst.ne[0] == n &&
          request.dst.ne[1] == m && request.src0.ne[2] == 1 &&
          request.src0.ne[3] == 1 && request.src1.ne[2] == 1 &&
          request.src1.ne[3] == 1 && request.dst.ne[2] == 1 &&
          request.dst.ne[3] == 1;
+  return !has_empty_dim && valid_shape;
 }
 
 template <class request_type>
@@ -578,10 +717,8 @@ inline bool can_run_soft_max(const request_type & request) noexcept {
 template <class request_type>
 inline bool can_run_unary_subop(const request_type & request) noexcept {
   const auto subop = static_cast<uint8_t>(request.subop);
-  if (subop != 0 && subop != 2 && subop != 6 && subop != 13) {
-    return false;
-  }
-  return can_run_unary(request);
+  const bool supported_subop = subop == 0 || subop == 2 || subop == 6 || subop == 13;
+  return supported_subop && can_run_unary(request);
 }
 
 template <class request_type>
@@ -649,8 +786,14 @@ inline void execute_scalar_unchecked(const request_type & request) noexcept {
 
 template <class request_type>
 inline bool execute_scalar(const request_type & request) noexcept {
-  if (!can_execute_scalar(request)) {
-    return false;
+    {
+    const size_t emel_branch_19 = static_cast<size_t>(!can_execute_scalar(request));
+    for (size_t emel_case_19 = emel_branch_19; emel_case_19 == 1u; emel_case_19 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_19 = emel_branch_19; emel_case_19 == 0u; emel_case_19 = 2u) {
+
+    }
   }
   execute_scalar_unchecked(request);
   return true;

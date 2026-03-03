@@ -10,7 +10,8 @@ namespace emel::tensor::view::detail {
 
 template <class value_type>
 value_type & bind_or_sink(value_type * ptr, value_type & sink) noexcept {
-  return ptr != nullptr ? *ptr : sink;
+  value_type * choices[2] = {&sink, ptr};
+  return *choices[static_cast<size_t>(ptr != nullptr)];
 }
 
 template <class runtime_event_type>

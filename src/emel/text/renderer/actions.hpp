@@ -173,6 +173,21 @@ inline void write_optional(value_type * destination,
   *target = value;
 }
 
+template <class callback_type, class event_type>
+inline void dispatch_optional_callback(void * owner_sm,
+                                       callback_type callback,
+                                       const event_type & payload) noexcept {
+  constexpr callback_type noop = +[](void *,
+                                     const event_type &) noexcept -> bool {
+    return true;
+  };
+  const size_t should_call =
+      static_cast<size_t>(owner_sm != nullptr && callback != nullptr);
+  void * const owners[2] = {nullptr, owner_sm};
+  const callback_type callbacks[2] = {noop, callback};
+  (void)callbacks[should_call](owners[should_call], payload);
+}
+
 template <class runtime_ctx_type>
 inline bool compose_output(const sequence_state & sequence,
                            char * output,
@@ -347,9 +362,12 @@ struct dispatch_initialize_detokenizer {
         err};
 
     const bool accepted = ctx.detokenizer.process_event(bind_ev);
-    if (!accepted && err == k_detokenizer_ok) {
-      err = k_detokenizer_backend_error;
-    }
+    const int32_t err_candidates[2] = {
+        err,
+        k_detokenizer_backend_error};
+    const size_t needs_backend_error =
+        static_cast<size_t>((!accepted) && (err == k_detokenizer_ok));
+    err = err_candidates[needs_backend_error];
     runtime_ev.ctx.detokenizer_err = err;
   }
 };
@@ -403,11 +421,10 @@ struct publish_initialize_done {
     write_optional(ev.request.error_out,
                   error_sink,
                   to_error_out(ev.ctx.err));
-    if (ev.request.owner_sm != nullptr &&
-        ev.request.dispatch_done != nullptr) {
-      ev.request.dispatch_done(ev.request.owner_sm,
-                               events::initialize_done{&ev.request});
-    }
+    dispatch_optional_callback(
+        ev.request.owner_sm,
+        ev.request.dispatch_done,
+        events::initialize_done{&ev.request});
   }
 };
 
@@ -420,12 +437,12 @@ struct publish_initialize_error {
     write_optional(ev.request.error_out,
                   error_sink,
                   to_error_out(ev.ctx.err));
-    if (ev.request.owner_sm != nullptr &&
-        ev.request.dispatch_error != nullptr) {
-      ev.request.dispatch_error(ev.request.owner_sm,
-                               events::initialize_error{&ev.request,
-                                                       to_error_out(ev.ctx.err)});
-    }
+    dispatch_optional_callback(
+        ev.request.owner_sm,
+        ev.request.dispatch_error,
+        events::initialize_error{
+            &ev.request,
+            to_error_out(ev.ctx.err)});
   }
 };
 
@@ -487,9 +504,12 @@ struct dispatch_render_detokenizer {
         err};
 
     const bool accepted = ctx.detokenizer.process_event(detok_ev);
-    if (!accepted && err == k_detokenizer_ok) {
-      err = k_detokenizer_backend_error;
-    }
+    const int32_t err_candidates[2] = {
+        err,
+        k_detokenizer_backend_error};
+    const size_t needs_backend_error =
+        static_cast<size_t>((!accepted) && (err == k_detokenizer_ok));
+    err = err_candidates[needs_backend_error];
     runtime_ev.ctx.detokenizer_err = err;
     runtime_ev.ctx.detokenizer_output_length = detok_output_length;
     runtime_ev.ctx.detokenizer_pending_length = detok_pending_length;
@@ -646,13 +666,13 @@ struct publish_render_done {
     write_optional(ev.request.error_out,
                    error_sink,
                    to_error_out(ev.ctx.err));
-    if (ev.request.owner_sm != nullptr && ev.request.dispatch_done != nullptr) {
-      ev.request.dispatch_done(
-          ev.request.owner_sm,
-          events::rendering_done{&ev.request,
-                                 ev.ctx.output_length,
-                                 ev.ctx.status});
-    }
+    dispatch_optional_callback(
+        ev.request.owner_sm,
+        ev.request.dispatch_done,
+        events::rendering_done{
+            &ev.request,
+            ev.ctx.output_length,
+            ev.ctx.status});
   }
 };
 
@@ -671,12 +691,12 @@ struct publish_render_error {
     write_optional(ev.request.error_out,
                    error_sink,
                    to_error_out(ev.ctx.err));
-    if (ev.request.owner_sm != nullptr &&
-        ev.request.dispatch_error != nullptr) {
-      ev.request.dispatch_error(
-          ev.request.owner_sm,
-          events::rendering_error{&ev.request, to_error_out(ev.ctx.err)});
-    }
+    dispatch_optional_callback(
+        ev.request.owner_sm,
+        ev.request.dispatch_error,
+        events::rendering_error{
+            &ev.request,
+            to_error_out(ev.ctx.err)});
   }
 };
 
@@ -696,13 +716,13 @@ struct publish_flush_done {
     write_optional(ev.request.error_out,
                    error_sink,
                    to_error_out(ev.ctx.err));
-    if (ev.request.owner_sm != nullptr && ev.request.dispatch_done != nullptr) {
-      ev.request.dispatch_done(
-          ev.request.owner_sm,
-          events::flush_done{&ev.request,
-                             ev.ctx.output_length,
-                             ev.ctx.status});
-    }
+    dispatch_optional_callback(
+        ev.request.owner_sm,
+        ev.request.dispatch_done,
+        events::flush_done{
+            &ev.request,
+            ev.ctx.output_length,
+            ev.ctx.status});
   }
 };
 
@@ -721,12 +741,12 @@ struct publish_flush_error {
     write_optional(ev.request.error_out,
                    error_sink,
                    to_error_out(ev.ctx.err));
-    if (ev.request.owner_sm != nullptr &&
-        ev.request.dispatch_error != nullptr) {
-      ev.request.dispatch_error(
-          ev.request.owner_sm,
-          events::flush_error{&ev.request, to_error_out(ev.ctx.err)});
-    }
+    dispatch_optional_callback(
+        ev.request.owner_sm,
+        ev.request.dispatch_error,
+        events::flush_error{
+            &ev.request,
+            to_error_out(ev.ctx.err)});
   }
 };
 

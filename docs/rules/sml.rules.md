@@ -86,14 +86,15 @@ primary sources consulted (non-exhaustive)
 4. guards and actions MUST be bounded time and MUST NOT block (no I/O waits, no mutex waits, no sleeps).
 5. guards and actions MUST NOT allocate. if an action MUST allocate for rare paths (e.g., error reporting), it MUST do so outside dispatch and only pass references into dispatch.
 6. guards MUST NOT read wall-clock time. time MUST be provided explicitly via events (section 10).
-7. actions MUST NOT contain orchestration branching or validation logic. any conditional logic that
-   changes control flow (success vs error, retries, mode selection) MUST be expressed as guarded
-   transitions or explicit states.
-8. runtime conditional logic MUST NOT appear inside actions, state machine member methods, or
-   functions called from actions/member methods. all runtime conditional behavior MUST be modeled as
-   explicit guarded transitions or explicit choices/states in the transition graph. only
-   compile-time conditionals (e.g., `if constexpr`, `#if`) are allowed inside actions, member
-   methods, or functions called from actions/member methods.
+7. actions MUST NOT contain orchestration branching or validation logic. any runtime control-flow
+   decision (success vs error, retries, mode selection) MUST be expressed as guarded transitions or
+   explicit choice states.
+8. runtime branching statements MUST NOT appear inside actions, state machine member methods, or
+   functions called from actions/member methods. this ban includes `if`, `else if`, `switch`, and
+   conditional operators (`?:`). all runtime control flow MUST be modeled as explicit guarded
+   transitions or explicit choices/states in the transition graph. only compile-time conditionals
+   (e.g., `if constexpr`, `#if`) are allowed inside actions, member methods, or functions called
+   from actions/member methods.
 9. actions SHOULD be short. long-running work MUST be split:
    - action initiates work and transitions to a “waiting” state.
    - A later external event represents completion (still no queues).

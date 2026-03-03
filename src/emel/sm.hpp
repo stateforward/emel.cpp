@@ -21,22 +21,18 @@ namespace detail {
 
 template <class event>
 constexpr bool normalize_event_result(const event & ev, const bool accepted) noexcept {
-  if (!accepted) {
-    return false;
-  }
+  const bool accepted_ok = accepted;
   if constexpr (requires { ev.error_out; }) {
     using error_member = std::remove_reference_t<decltype(ev.error_out)>;
     if constexpr (std::is_pointer_v<error_member>) {
-      if (ev.error_out != nullptr && *ev.error_out != 0) {
-        return false;
-      }
+      const bool error_is_clear = ev.error_out == nullptr || *ev.error_out == 0;
+      return accepted_ok && error_is_clear;
     } else {
-      if (ev.error_out != 0) {
-        return false;
-      }
+      const bool error_is_clear = ev.error_out == 0;
+      return accepted_ok && error_is_clear;
     }
   }
-  return true;
+  return accepted_ok;
 }
 
 template <class owner, class process>
@@ -47,8 +43,9 @@ struct process_support {
 
     template <class event>
     void push(const event & ev) noexcept {
-      if (owner_ptr != nullptr) {
-        owner_ptr->process_event(ev);
+      while (owner_ptr != nullptr) {
+        (void)owner_ptr->process_event(ev);
+        break;
       }
     }
   };
@@ -173,26 +170,34 @@ template <class... types>
 struct sm_any_visit<boost::sml::aux::type_list<types...>> {
   template <std::size_t idx, class visitor, class first, class... rest>
   static void apply_index(std::size_t target, void * storage, visitor && visitor_fn) {
-    if (target == idx) {
+    const bool matched = target == idx;
+    while (matched) {
       visitor_fn(*sm_any_ptr<first>(storage));
       return;
     }
     if constexpr (sizeof...(rest) > 0) {
-      apply_index<idx + 1, visitor, rest...>(
-          target, storage, std::forward<visitor>(visitor_fn));
+      while (!matched) {
+        apply_index<idx + 1, visitor, rest...>(
+            target, storage, std::forward<visitor>(visitor_fn));
+        break;
+      }
     }
   }
 
   template <std::size_t idx, class visitor, class first, class... rest>
   static void apply_index(std::size_t target, const void * storage,
                           visitor && visitor_fn) {
-    if (target == idx) {
+    const bool matched = target == idx;
+    while (matched) {
       visitor_fn(*sm_any_ptr<first>(storage));
       return;
     }
     if constexpr (sizeof...(rest) > 0) {
-      apply_index<idx + 1, visitor, rest...>(
-          target, storage, std::forward<visitor>(visitor_fn));
+      while (!matched) {
+        apply_index<idx + 1, visitor, rest...>(
+            target, storage, std::forward<visitor>(visitor_fn));
+        break;
+      }
     }
   }
 
@@ -330,11 +335,12 @@ class sm_any {
 
   void set_kind(const kind_enum kind) {
     const std::size_t next = index_from_kind(kind);
-    if (next == index_) {
+    const bool changed = next != index_;
+    while (changed) {
+      destroy();
+      construct(next);
       return;
     }
-    destroy();
-    construct(next);
   }
 
   kind_enum kind() const noexcept { return kind_; }
@@ -372,7 +378,8 @@ class sm_any {
 
   static constexpr std::size_t index_from_kind(const kind_enum kind) noexcept {
     const std::size_t idx = static_cast<std::size_t>(kind);
-    return idx < k_sm_count ? idx : default_index();
+    const std::size_t in_range = static_cast<std::size_t>(idx < k_sm_count);
+    return in_range * idx + (std::size_t{1} - in_range) * default_index();
   }
 
   void construct(const std::size_t idx) {

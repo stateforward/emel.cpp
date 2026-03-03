@@ -2,15 +2,366 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <limits>
 
 #include "emel/error/error.hpp"
 #include "emel/token/batcher/context.hpp"
-#include "emel/token/batcher/detail.hpp"
 #include "emel/token/batcher/errors.hpp"
 #include "emel/token/batcher/events.hpp"
 
+namespace emel::token::batcher::detail {
+
+template <class runtime_event_type>
+constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noexcept {
+  if constexpr (requires { ev.event_; }) {
+    return ev.event_;
+  } else {
+    return (ev);
+  }
+}
+
+enum class probe_status : uint8_t {
+  ok = 0u,
+  backend_error = 1u,
+  invalid = 2u,
+};
+
+inline bool has_seq_masks_input(const event::batch & req) noexcept {
+  return req.seq_masks != nullptr && req.seq_masks_count >= req.n_tokens;
+}
+
+inline bool has_seq_primary_input(const event::batch & req) noexcept {
+  return req.seq_primary_ids != nullptr && req.seq_primary_ids_count >= req.n_tokens;
+}
+
+inline bool has_output_mask_input(const event::batch & req) noexcept {
+  return req.output_mask != nullptr && req.output_mask_count >= req.n_tokens;
+}
+
+inline int32_t effective_mask_words(const event::batch & req) noexcept {
+  const std::array<int32_t, 2> word_candidates = {1, req.seq_mask_words};
+  return word_candidates[static_cast<size_t>(has_seq_masks_input(req))];
+}
+
+inline int32_t positions_stride(const event::batch & req) noexcept {
+  constexpr std::array<int32_t, 2> stride_one_or_invalid = {-1, 1};
+  const bool has_positions = req.positions != nullptr;
+  const bool stride_three = req.positions_count >= req.n_tokens * 3;
+  const bool stride_one = req.positions_count >= req.n_tokens;
+  const int32_t with_positions =
+      static_cast<int32_t>(stride_three) * 3 +
+      (1 - static_cast<int32_t>(stride_three)) *
+          stride_one_or_invalid[static_cast<size_t>(stride_one)];
+  return static_cast<int32_t>(has_positions) * with_positions;
+}
+
+inline int32_t normalized_positions_count(const event::batch & req) noexcept {
+  const size_t is_stride_three = static_cast<size_t>(positions_stride(req) == 3);
+  const std::array<int32_t, 2> count_candidates = {req.n_tokens, req.n_tokens * 3};
+  return count_candidates[is_stride_three];
+}
+
+inline const int32_t * token_ids_ptr(const event::batch & req) noexcept {
+  return &req.token_ids;
+}
+
+inline int32_t * seq_primary_ids_out_ptr(const event::batch & req) noexcept {
+  return &req.seq_primary_ids_out;
+}
+
+inline uint64_t * seq_masks_out_ptr(const event::batch & req) noexcept {
+  return &req.seq_masks_out;
+}
+
+inline int32_t * positions_out_ptr(const event::batch & req) noexcept {
+  return &req.positions_out;
+}
+
+inline int8_t * output_mask_out_ptr(const event::batch & req) noexcept {
+  return &req.output_mask_out;
+}
+
+inline void write_error(const event::batch_runtime & ev, const emel::error::type value) noexcept {
+  ev.request.error_out = value;
+}
+
+inline bool mask_empty(const uint64_t * mask, const int32_t words) noexcept {
+  uint64_t combined = 0U;
+  for (int32_t w = 0; w < words; ++w) {
+    combined |= mask[static_cast<size_t>(w)];
+  }
+  return combined == 0U;
+}
+
+inline void clear_mask(uint64_t * mask, const int32_t words) noexcept {
+  for (int32_t w = 0; w < words; ++w) {
+    mask[static_cast<size_t>(w)] = 0U;
+  }
+}
+
+inline void set_mask_bit(uint64_t * mask, const int32_t words, const int32_t seq_id) noexcept {
+  const int32_t word = seq_id / 64;
+  const uint32_t bit = static_cast<uint32_t>(seq_id) & 63U;
+  const bool valid = words > 0 && word >= 0 && word < words;
+  while (valid) {
+    mask[static_cast<size_t>(word)] |= (uint64_t{1} << bit);
+    break;
+  }
+}
+
+inline bool mask_has_bit(const uint64_t * mask,
+                         const int32_t words,
+                         const int32_t seq_id) noexcept {
+  const bool non_negative = seq_id >= 0;
+  const int32_t word = seq_id / 64;
+  const bool in_range = word >= 0 && word < words;
+  const bool valid = non_negative && in_range;
+  const uint32_t bit = static_cast<uint32_t>(seq_id) & 63U;
+  return valid && ((mask[static_cast<size_t>(word)] & (uint64_t{1} << bit)) != 0U);
+}
+
+inline int32_t mask_primary_id(const uint64_t * mask, const int32_t words) noexcept {
+  int32_t w = 0;
+  while (w < words && mask[static_cast<size_t>(w)] == 0U) {
+    ++w;
+  }
+  const bool found = w < words;
+  int32_t bit = 0;
+  while (found) {
+    bit = static_cast<int32_t>(std::countr_zero(mask[static_cast<size_t>(w)]));
+    break;
+  }
+  return static_cast<int32_t>(found) * (w * 64 + bit) + static_cast<int32_t>(!found) * -1;
+}
+
+template <class fn_type>
+inline bool for_each_mask_seq_id(const uint64_t * mask,
+                                 const int32_t words,
+                                 const fn_type & fn) noexcept {
+  bool ok = true;
+  for (int32_t w = 0; w < words && ok; ++w) {
+    uint64_t bits = mask[static_cast<size_t>(w)];
+    while (bits != 0U && ok) {
+      const int32_t bit = static_cast<int32_t>(std::countr_zero(bits));
+      const int32_t seq_id = w * 64 + bit;
+      ok = ok && fn(seq_id);
+      bits &= (bits - 1U);
+    }
+  }
+  return ok;
+}
+
+inline bool primary_ids_in_range(const int32_t * primary_ids,
+                                 const int32_t count,
+                                 const int32_t seq_limit) noexcept {
+  bool in_range = true;
+  for (int32_t i = 0; i < count && in_range; ++i) {
+    const int32_t seq_id = primary_ids[i];
+    in_range = in_range && seq_id >= 0 && seq_id < seq_limit;
+  }
+  return in_range;
+}
+
+inline bool masks_have_non_empty_rows(const event::batch & req) noexcept {
+  const bool has_masks = has_seq_masks_input(req);
+  const int32_t mask_words = req.seq_mask_words;
+  bool non_empty_rows = true;
+  for (int32_t i = 0; i < req.n_tokens && has_masks && non_empty_rows; ++i) {
+    const uint64_t * in_mask = req.seq_masks + static_cast<size_t>(i) * mask_words;
+    non_empty_rows = non_empty_rows && !mask_empty(in_mask, mask_words);
+  }
+  return !has_masks || non_empty_rows;
+}
+
+inline bool primary_in_mask_when_both_inputs(const event::batch & req) noexcept {
+  const bool has_masks = has_seq_masks_input(req);
+  const bool has_primary = has_seq_primary_input(req);
+  const bool check_required = has_masks && has_primary;
+  const int32_t mask_words = req.seq_mask_words;
+  bool primary_present = true;
+  for (int32_t i = 0; i < req.n_tokens && check_required && primary_present; ++i) {
+    const int32_t primary = req.seq_primary_ids[i];
+    const uint64_t * in_mask = req.seq_masks + static_cast<size_t>(i) * mask_words;
+    primary_present = primary_present && mask_has_bit(in_mask, mask_words, primary);
+  }
+  return !check_required || primary_present;
+}
+
+inline bool single_output_per_seq_ok(const event::batch_runtime & ev) noexcept {
+  const auto & req = ev.request;
+  const int32_t mask_words = ev.ctx.normalized_seq_mask_words;
+  const uint64_t * seq_masks_out = seq_masks_out_ptr(req);
+  const int8_t * output_mask_out = output_mask_out_ptr(req);
+  std::array<int32_t, action::MAX_SEQ> seq_output_count = {};
+
+  bool ok = true;
+  for (int32_t i = 0; i < req.n_tokens && ok; ++i) {
+    const bool active = output_mask_out[i] != 0;
+    const uint64_t * mask = seq_masks_out + static_cast<size_t>(i) * mask_words;
+    const bool row_ok = !active || for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
+                          seq_output_count[seq_id] += 1;
+                          return seq_output_count[seq_id] <= 1;
+                        });
+    ok = ok && row_ok;
+  }
+
+  return ok;
+}
+
+inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
+  const auto & req = ev.request;
+  const int32_t mask_words = ev.ctx.normalized_seq_mask_words;
+  const uint64_t * seq_masks_out = seq_masks_out_ptr(req);
+  const int32_t * positions_out = positions_out_ptr(req);
+
+  std::array<int32_t, action::MAX_SEQ> seq_last_pos = {};
+  std::array<int32_t, action::MAX_SEQ> seq_pos_min = {};
+  std::array<int32_t, action::MAX_SEQ> seq_pos_max = {};
+  std::array<int32_t, action::MAX_SEQ> seq_pos_count = {};
+  std::array<uint8_t, action::MAX_SEQ> seq_seen = {};
+  std::array<int32_t, action::MAX_SEQ> active_seq_ids = {};
+  std::array<uint64_t, static_cast<size_t>(action::MAX_SEQ * action::SEQ_WORDS)> cur_seq_set = {};
+  int32_t active_seq_count = 0;
+
+  seq_last_pos.fill(-1);
+  seq_pos_min.fill(std::numeric_limits<int32_t>::max());
+  seq_pos_max.fill(std::numeric_limits<int32_t>::min());
+
+  bool ok = true;
+  for (int32_t i = 0; i < req.n_tokens && ok; ++i) {
+    const int32_t pos = positions_out[i];
+    const uint64_t * mask = seq_masks_out + static_cast<size_t>(i) * mask_words;
+
+    ok = ok && for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
+           const int32_t last = seq_last_pos[seq_id];
+           const bool monotonic = (last < 0) || pos >= last;
+
+           const bool pos_changed = pos != last;
+           seq_pos_count[seq_id] += static_cast<int32_t>(pos_changed);
+           seq_last_pos[seq_id] = pos;
+           seq_pos_min[seq_id] = std::min(seq_pos_min[seq_id], pos);
+           seq_pos_max[seq_id] = std::max(seq_pos_max[seq_id], pos);
+
+           uint64_t * cur_mask = cur_seq_set.data() + static_cast<size_t>(seq_id * mask_words);
+           const bool first_seen = seq_seen[seq_id] == 0U;
+           active_seq_ids[active_seq_count] = seq_id;
+           active_seq_count += static_cast<int32_t>(first_seen);
+           seq_seen[seq_id] =
+               static_cast<uint8_t>(seq_seen[seq_id] | static_cast<uint8_t>(first_seen));
+
+           const uint64_t first_seen_mask = uint64_t{0} - static_cast<uint64_t>(first_seen);
+           for (int32_t mw = 0; mw < mask_words; ++mw) {
+             cur_mask[static_cast<size_t>(mw)] =
+                 (~uint64_t{0} & first_seen_mask) |
+                 (cur_mask[static_cast<size_t>(mw)] & ~first_seen_mask);
+             cur_mask[static_cast<size_t>(mw)] &= mask[static_cast<size_t>(mw)];
+           }
+
+           return monotonic && !mask_empty(cur_mask, mask_words);
+         });
+  }
+
+  for (int32_t i = 0; i < active_seq_count && ok; ++i) {
+    const int32_t seq_id = active_seq_ids[i];
+    const int32_t min_pos = seq_pos_min[seq_id];
+    const int32_t max_pos = seq_pos_max[seq_id];
+    const int32_t count = seq_pos_count[seq_id];
+    const bool has_bounds = min_pos != std::numeric_limits<int32_t>::max() &&
+                            max_pos != std::numeric_limits<int32_t>::min();
+    const int64_t span = static_cast<int64_t>(max_pos) - static_cast<int64_t>(min_pos) + 1;
+    ok = ok && (!has_bounds || span <= count);
+  }
+
+  return ok;
+}
+
+inline probe_status seeded_generation_probe(
+    const event::batch_runtime & ev,
+    std::array<int32_t, action::MAX_SEQ> & seeded_next_pos_out) noexcept {
+  constexpr std::array<std::array<probe_status, 2>, 2> status_lut = {{
+      {probe_status::backend_error, probe_status::backend_error},
+      {probe_status::invalid, probe_status::ok},
+  }};
+
+  const auto & req = ev.request;
+  const int32_t mask_words = ev.ctx.normalized_seq_mask_words;
+  const int32_t * seq_primary_ids_out = seq_primary_ids_out_ptr(req);
+  const uint64_t * seq_masks_out = seq_masks_out_ptr(req);
+  std::array<int32_t, action::MAX_SEQ> next_pos = {};
+
+  bool backend_ok = true;
+  bool valid = true;
+  for (int32_t seq_id = 0; seq_id < action::MAX_SEQ && backend_ok && valid; ++seq_id) {
+    int32_t seed = 0;
+    const bool resolved = req.resolve_position_seed(req.position_seed_ctx, seq_id, &seed);
+    backend_ok = backend_ok && resolved;
+    valid = valid && seed >= 0;
+    next_pos[seq_id] = seed;
+  }
+  seeded_next_pos_out = next_pos;
+
+  for (int32_t i = 0; i < req.n_tokens && backend_ok && valid; ++i) {
+    const int32_t primary = seq_primary_ids_out[i];
+    const int32_t pos = next_pos[primary];
+    valid = valid && pos != std::numeric_limits<int32_t>::max();
+
+    const uint64_t * mask = seq_masks_out + static_cast<size_t>(i) * mask_words;
+    const bool compatible =
+        valid &&
+        for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
+          return next_pos[seq_id] == pos;
+        });
+    valid = valid && compatible;
+    while (valid) {
+      for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
+        next_pos[seq_id] = pos + 1;
+        return true;
+      });
+      break;
+    }
+  }
+
+  return status_lut[static_cast<size_t>(backend_ok)][static_cast<size_t>(valid)];
+}
+
+inline bool unseeded_generation_probe(const event::batch_runtime & ev) noexcept {
+  const auto & req = ev.request;
+  const int32_t mask_words = ev.ctx.normalized_seq_mask_words;
+  const int32_t * seq_primary_ids_out = seq_primary_ids_out_ptr(req);
+  const uint64_t * seq_masks_out = seq_masks_out_ptr(req);
+  std::array<int32_t, action::MAX_SEQ> next_pos = {};
+  std::array<uint8_t, action::MAX_SEQ> seeded = {};
+
+  bool valid = true;
+  for (int32_t i = 0; i < req.n_tokens && valid; ++i) {
+    const int32_t primary = seq_primary_ids_out[i];
+    const int32_t pos = next_pos[primary];
+    valid = valid && pos != std::numeric_limits<int32_t>::max();
+
+    const uint64_t * mask = seq_masks_out + static_cast<size_t>(i) * mask_words;
+    const bool aligned = valid && for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
+                           const bool first_seen = seeded[seq_id] == 0U;
+                           const int32_t current = static_cast<int32_t>(!first_seen) * next_pos[seq_id] +
+                                                   static_cast<int32_t>(first_seen) * pos;
+                           return current == pos;
+                         });
+    valid = valid && aligned;
+    while (valid) {
+      for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
+        seeded[seq_id] = 1U;
+        next_pos[seq_id] = pos + 1;
+        return true;
+      });
+      break;
+    }
+  }
+
+  return valid;
+}
+
+}  // namespace emel::token::batcher::detail
 namespace emel::token::batcher::action {
 
 struct begin_batch {
@@ -131,17 +482,15 @@ struct copy_positions_stride_one {
 struct probe_positions_seeded {
   void operator()(const event::batch_runtime & ev, context & ctx) const noexcept {
     const detail::probe_status status = detail::seeded_generation_probe(ev, ctx.seeded_next_pos);
-    switch (status) {
-      case detail::probe_status::ok:
-        ctx.seeded_probe_status = position_probe_status::ok;
-        break;
-      case detail::probe_status::backend_error:
-        ctx.seeded_probe_status = position_probe_status::backend_error;
-        break;
-      default:
-        ctx.seeded_probe_status = position_probe_status::invalid;
-        break;
-    }
+    const size_t is_ok = static_cast<size_t>(status == detail::probe_status::ok);
+    const size_t is_backend =
+        static_cast<size_t>(status == detail::probe_status::backend_error);
+    constexpr std::array<position_probe_status, 3> mapped_status = {
+        position_probe_status::invalid,
+        position_probe_status::ok,
+        position_probe_status::backend_error,
+    };
+    ctx.seeded_probe_status = mapped_status[is_ok + (is_backend << 1u)];
   }
 };
 

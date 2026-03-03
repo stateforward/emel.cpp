@@ -102,12 +102,24 @@ inline bool token_type_skip_when_no_parse(const int32_t type) noexcept {
 
 inline std::string_view token_text(const emel::model::data::vocab & vocab,
                                    const uint32_t id) {
-  if (id >= vocab.n_tokens) {
-    return {};
+    {
+    const size_t emel_branch_1 = static_cast<size_t>(id >= vocab.n_tokens);
+    for (size_t emel_case_1 = emel_branch_1; emel_case_1 == 1u; emel_case_1 = 2u) {
+            return {};
+    }
+    for (size_t emel_case_1 = emel_branch_1; emel_case_1 == 0u; emel_case_1 = 2u) {
+
+    }
   }
   const auto & entry = vocab.entries[id];
-  if (entry.text_length == 0) {
-    return {};
+    {
+    const size_t emel_branch_2 = static_cast<size_t>(entry.text_length == 0);
+    for (size_t emel_case_2 = emel_branch_2; emel_case_2 == 1u; emel_case_2 = 2u) {
+            return {};
+    }
+    for (size_t emel_case_2 = emel_branch_2; emel_case_2 == 0u; emel_case_2 = 2u) {
+
+    }
   }
   return std::string_view(vocab.token_storage.data() + entry.text_offset,
                           entry.text_length);
@@ -117,8 +129,14 @@ inline bool flag_set(
     const emel::model::data::vocab & vocab,
     const std::array<uint8_t, emel::model::data::vocab::k_attr_flag_bytes> & flags,
     const uint32_t id) noexcept {
-  if (id >= vocab.n_tokens) {
-    return false;
+    {
+    const size_t emel_branch_3 = static_cast<size_t>(id >= vocab.n_tokens);
+    for (size_t emel_case_3 = emel_branch_3; emel_case_3 == 1u; emel_case_3 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_3 = emel_branch_3; emel_case_3 == 0u; emel_case_3 = 2u) {
+
+    }
   }
   const uint32_t byte = id >> 3;
   const uint8_t mask = static_cast<uint8_t>(1u << (id & 7u));
@@ -137,37 +155,61 @@ inline bool has_rstrip(const emel::model::data::vocab & vocab,
 
 inline bool is_special_type(const emel::model::data::vocab & vocab,
                             const uint32_t id) noexcept {
-  if (id >= vocab.n_tokens) {
-    return false;
+    {
+    const size_t emel_branch_4 = static_cast<size_t>(id >= vocab.n_tokens);
+    for (size_t emel_case_4 = emel_branch_4; emel_case_4 == 1u; emel_case_4 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_4 = emel_branch_4; emel_case_4 == 0u; emel_case_4 = 2u) {
+
+    }
   }
   return token_type_is_special(vocab.entries[id].type);
 }
 
 inline bool build_special_tokens(special_token_cache & cache,
                                  const emel::model::data::vocab & vocab) {
-  if (cache.vocab == &vocab) {
-    return true;
+    {
+    const size_t emel_branch_5 = static_cast<size_t>(cache.vocab == &vocab);
+    for (size_t emel_case_5 = emel_branch_5; emel_case_5 == 1u; emel_case_5 = 2u) {
+            return true;
+    }
+    for (size_t emel_case_5 = emel_branch_5; emel_case_5 == 0u; emel_case_5 = 2u) {
+
+    }
   }
   cache.vocab = &vocab;
   cache.count = 0;
   for (uint32_t i = 0; i < vocab.n_tokens; ++i) {
-    if (!is_special_type(vocab, i)) {
-      continue;
-    }
+    const bool include_token = is_special_type(vocab, i);
     const std::string_view text = token_text(vocab, i);
-    if (text.empty()) {
-      continue;
+    const size_t emel_branch_include =
+        static_cast<size_t>(include_token && !text.empty());
+    for (size_t emel_case_include = emel_branch_include; emel_case_include == 1u;
+         emel_case_include = 2u) {
+      {
+        const size_t emel_branch_full = static_cast<size_t>(cache.count >= cache.tokens.size());
+        for (size_t emel_case_full = emel_branch_full; emel_case_full == 1u;
+             emel_case_full = 2u) {
+          return false;
+        }
+        for (size_t emel_case_full = emel_branch_full; emel_case_full == 0u;
+             emel_case_full = 2u) {
+
+        }
+      }
+      special_token & entry = cache.tokens[cache.count];
+      entry.text = text;
+      entry.token = static_cast<int32_t>(i);
+      entry.type = vocab.entries[i].type;
+      entry.lstrip = has_lstrip(vocab, i);
+      entry.rstrip = has_rstrip(vocab, i);
+      cache.count += 1;
     }
-    if (cache.count >= cache.tokens.size()) {
-      return false;
+    for (size_t emel_case_include = emel_branch_include; emel_case_include == 0u;
+         emel_case_include = 2u) {
+
     }
-    special_token & entry = cache.tokens[cache.count];
-    entry.text = text;
-    entry.token = static_cast<int32_t>(i);
-    entry.type = vocab.entries[i].type;
-    entry.lstrip = has_lstrip(vocab, i);
-    entry.rstrip = has_rstrip(vocab, i);
-    cache.count += 1;
   }
   std::sort(cache.tokens.begin(),
             cache.tokens.begin() + static_cast<std::ptrdiff_t>(cache.count),
@@ -179,11 +221,23 @@ inline bool build_special_tokens(special_token_cache & cache,
 
 inline bool push_raw_fragment(fragment * out, const size_t capacity,
                               size_t & count, const std::string_view text) {
-  if (text.empty()) {
-    return true;
+    {
+    const size_t emel_branch_6 = static_cast<size_t>(text.empty());
+    for (size_t emel_case_6 = emel_branch_6; emel_case_6 == 1u; emel_case_6 = 2u) {
+            return true;
+    }
+    for (size_t emel_case_6 = emel_branch_6; emel_case_6 == 0u; emel_case_6 = 2u) {
+
+    }
   }
-  if (count >= capacity) {
-    return false;
+    {
+    const size_t emel_branch_7 = static_cast<size_t>(count >= capacity);
+    for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 1u; emel_case_7 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 0u; emel_case_7 = 2u) {
+
+    }
   }
   fragment & entry = out[count];
   entry.kind = fragment_kind::raw_text;
@@ -195,11 +249,23 @@ inline bool push_raw_fragment(fragment * out, const size_t capacity,
 
 inline bool push_token_fragment(fragment * out, const size_t capacity,
                                 size_t & count, const int32_t token) {
-  if (token < 0) {
-    return false;
+    {
+    const size_t emel_branch_8 = static_cast<size_t>(token < 0);
+    for (size_t emel_case_8 = emel_branch_8; emel_case_8 == 1u; emel_case_8 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_8 = emel_branch_8; emel_case_8 == 0u; emel_case_8 = 2u) {
+
+    }
   }
-  if (count >= capacity) {
-    return false;
+    {
+    const size_t emel_branch_9 = static_cast<size_t>(count >= capacity);
+    for (size_t emel_case_9 = emel_branch_9; emel_case_9 == 1u; emel_case_9 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_9 = emel_branch_9; emel_case_9 == 0u; emel_case_9 = 2u) {
+
+    }
   }
   fragment & entry = out[count];
   entry.kind = fragment_kind::token;
@@ -216,93 +282,210 @@ inline bool partition_with_specials(const std::string_view text,
                                     size_t & fragment_count_out) {
   fragment_count_out = 0;
   const size_t fragment_capacity = fragments_out.size();
-  if (fragments_out.data() == nullptr || fragment_capacity == 0 ||
-      fragment_capacity > k_max_fragments) {
-    return false;
+  const bool invalid_output =
+      fragments_out.data() == nullptr || fragment_capacity == 0 ||
+      fragment_capacity > k_max_fragments;
+    {
+    const size_t emel_branch_10 = static_cast<size_t>(invalid_output);
+    for (size_t emel_case_10 = emel_branch_10; emel_case_10 == 1u; emel_case_10 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_10 = emel_branch_10; emel_case_10 == 0u; emel_case_10 = 2u) {
+
+    }
   }
 
-  if (cache.count == 0) {
-    size_t count = 0;
-    if (!push_raw_fragment(fragments_out.data(), fragment_capacity, count, text)) {
-      return false;
+    {
+    const size_t emel_branch_11 = static_cast<size_t>(cache.count == 0);
+    for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 1u; emel_case_11 = 2u) {
+       {
+            size_t count = 0;
+            {
+              const size_t emel_branch_push = static_cast<size_t>(
+                  !push_raw_fragment(fragments_out.data(), fragment_capacity, count, text));
+              for (size_t emel_case_push = emel_branch_push; emel_case_push == 1u;
+                   emel_case_push = 2u) {
+                return false;
+              }
+              for (size_t emel_case_push = emel_branch_push; emel_case_push == 0u;
+                   emel_case_push = 2u) {
+
+              }
+            }
+            fragment_count_out = count;
+            return true;
+          }
     }
-    fragment_count_out = count;
-    return true;
+    for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 0u; emel_case_11 = 2u) {
+
+    }
   }
 
   std::array<fragment, k_max_fragments> current_fragments = {};
   size_t current_count = 0;
-  if (!push_raw_fragment(current_fragments.data(), fragment_capacity,
-                         current_count, text)) {
-    return false;
+    {
+    const size_t emel_branch_12 = static_cast<size_t>(
+      !push_raw_fragment(current_fragments.data(), fragment_capacity, current_count, text));
+    for (size_t emel_case_12 = emel_branch_12; emel_case_12 == 1u; emel_case_12 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_12 = emel_branch_12; emel_case_12 == 0u; emel_case_12 = 2u) {
+
+    }
   }
 
   std::array<fragment, k_max_fragments> next_fragments = {};
   for (size_t token_idx = 0; token_idx < cache.count; ++token_idx) {
     const special_token & token = cache.tokens[token_idx];
-    if (token.text.empty()) {
-      continue;
-    }
-    if (!parse_special && token_type_skip_when_no_parse(token.type)) {
-      continue;
-    }
+    const bool skip_without_parse = !parse_special && token_type_skip_when_no_parse(token.type);
+    const size_t emel_branch_process_token =
+        static_cast<size_t>(!token.text.empty() && !skip_without_parse);
+    for (size_t emel_case_process_token = emel_branch_process_token;
+         emel_case_process_token == 1u;
+         emel_case_process_token = 2u) {
+      size_t next_count = 0;
+      for (size_t frag_idx = 0; frag_idx < current_count; ++frag_idx) {
+        const fragment & frag = current_fragments[frag_idx];
+        const bool is_raw = frag.kind == fragment_kind::raw_text;
+        {
+          const size_t emel_branch_copy_token = static_cast<size_t>(!is_raw);
+          for (size_t emel_case_copy_token = emel_branch_copy_token;
+               emel_case_copy_token == 1u;
+               emel_case_copy_token = 2u) {
+            {
+              const size_t emel_branch_push_token = static_cast<size_t>(
+                  !push_token_fragment(next_fragments.data(), fragment_capacity, next_count,
+                                       frag.token));
+              for (size_t emel_case_push_token = emel_branch_push_token;
+                   emel_case_push_token == 1u;
+                   emel_case_push_token = 2u) {
+                return false;
+              }
+              for (size_t emel_case_push_token = emel_branch_push_token;
+                   emel_case_push_token == 0u;
+                   emel_case_push_token = 2u) {
 
-    size_t next_count = 0;
-    for (size_t frag_idx = 0; frag_idx < current_count; ++frag_idx) {
-      const fragment & frag = current_fragments[frag_idx];
-      if (frag.kind != fragment_kind::raw_text) {
-        if (!push_token_fragment(next_fragments.data(), fragment_capacity,
-                                 next_count, frag.token)) {
-          return false;
+              }
+            }
+          }
+          for (size_t emel_case_copy_token = emel_branch_copy_token;
+               emel_case_copy_token == 0u;
+               emel_case_copy_token = 2u) {
+            const std::string_view raw = frag.text;
+            size_t base_offset = 0;
+            while (base_offset < raw.size()) {
+              const size_t match = raw.find(token.text, base_offset);
+              const size_t emel_branch_has_match =
+                  static_cast<size_t>(match != std::string_view::npos);
+              for (size_t emel_case_has_match = emel_branch_has_match;
+                   emel_case_has_match == 1u;
+                   emel_case_has_match = 2u) {
+                size_t left_len = match - base_offset;
+                {
+                  const size_t emel_branch_13 = static_cast<size_t>(token.lstrip);
+                  for (size_t emel_case_13 = emel_branch_13; emel_case_13 == 1u;
+                       emel_case_13 = 2u) {
+                    while (left_len > 0 &&
+                           std::isspace(static_cast<unsigned char>(
+                               raw[base_offset + left_len - 1])) != 0) {
+                      left_len -= 1;
+                    }
+                  }
+                  for (size_t emel_case_13 = emel_branch_13; emel_case_13 == 0u;
+                       emel_case_13 = 2u) {
+
+                  }
+                }
+                {
+                  const size_t emel_branch_14 = static_cast<size_t>(left_len > 0);
+                  for (size_t emel_case_14 = emel_branch_14; emel_case_14 == 1u;
+                       emel_case_14 = 2u) {
+                    {
+                      const size_t emel_branch_push_left = static_cast<size_t>(
+                          !push_raw_fragment(next_fragments.data(), fragment_capacity, next_count,
+                                             raw.substr(base_offset, left_len)));
+                      for (size_t emel_case_push_left = emel_branch_push_left;
+                           emel_case_push_left == 1u;
+                           emel_case_push_left = 2u) {
+                        return false;
+                      }
+                      for (size_t emel_case_push_left = emel_branch_push_left;
+                           emel_case_push_left == 0u;
+                           emel_case_push_left = 2u) {
+
+                      }
+                    }
+                  }
+                  for (size_t emel_case_14 = emel_branch_14; emel_case_14 == 0u;
+                       emel_case_14 = 2u) {
+
+                  }
+                }
+
+                {
+                  const size_t emel_branch_15 = static_cast<size_t>(
+                      !push_token_fragment(next_fragments.data(), fragment_capacity, next_count,
+                                           token.token));
+                  for (size_t emel_case_15 = emel_branch_15; emel_case_15 == 1u;
+                       emel_case_15 = 2u) {
+                    return false;
+                  }
+                  for (size_t emel_case_15 = emel_branch_15; emel_case_15 == 0u;
+                       emel_case_15 = 2u) {
+
+                  }
+                }
+
+                size_t right_offset = match + token.text.size();
+                {
+                  const size_t emel_branch_16 = static_cast<size_t>(token.rstrip);
+                  for (size_t emel_case_16 = emel_branch_16; emel_case_16 == 1u;
+                       emel_case_16 = 2u) {
+                    while (right_offset < raw.size() &&
+                           std::isspace(static_cast<unsigned char>(raw[right_offset])) != 0) {
+                      right_offset += 1;
+                    }
+                  }
+                  for (size_t emel_case_16 = emel_branch_16; emel_case_16 == 0u;
+                       emel_case_16 = 2u) {
+
+                  }
+                }
+                base_offset = right_offset;
+              }
+              for (size_t emel_case_has_match = emel_branch_has_match;
+                   emel_case_has_match == 0u;
+                   emel_case_has_match = 2u) {
+                {
+                  const size_t emel_branch_push_tail = static_cast<size_t>(
+                      !push_raw_fragment(next_fragments.data(), fragment_capacity, next_count,
+                                         raw.substr(base_offset)));
+                  for (size_t emel_case_push_tail = emel_branch_push_tail;
+                       emel_case_push_tail == 1u;
+                       emel_case_push_tail = 2u) {
+                    return false;
+                  }
+                  for (size_t emel_case_push_tail = emel_branch_push_tail;
+                       emel_case_push_tail == 0u;
+                       emel_case_push_tail = 2u) {
+
+                  }
+                }
+                base_offset = raw.size();
+              }
+            }
+          }
         }
-        continue;
       }
 
-      const std::string_view raw = frag.text;
-      size_t base_offset = 0;
-      while (base_offset < raw.size()) {
-        const size_t match = raw.find(token.text, base_offset);
-        if (match == std::string_view::npos) {
-          if (!push_raw_fragment(next_fragments.data(), fragment_capacity,
-                                 next_count, raw.substr(base_offset))) {
-            return false;
-          }
-          break;
-        }
-
-        size_t left_len = match - base_offset;
-        if (token.lstrip) {
-          while (left_len > 0 &&
-                 std::isspace(static_cast<unsigned char>(
-                     raw[base_offset + left_len - 1])) != 0) {
-            left_len -= 1;
-          }
-        }
-        if (left_len > 0) {
-          if (!push_raw_fragment(next_fragments.data(), fragment_capacity,
-                                 next_count, raw.substr(base_offset, left_len))) {
-            return false;
-          }
-        }
-
-        if (!push_token_fragment(next_fragments.data(), fragment_capacity,
-                                 next_count, token.token)) {
-          return false;
-        }
-
-        size_t right_offset = match + token.text.size();
-        if (token.rstrip) {
-          while (right_offset < raw.size() &&
-                 std::isspace(static_cast<unsigned char>(raw[right_offset])) != 0) {
-            right_offset += 1;
-          }
-        }
-        base_offset = right_offset;
-      }
+      current_fragments = next_fragments;
+      current_count = next_count;
     }
+    for (size_t emel_case_process_token = emel_branch_process_token;
+         emel_case_process_token == 0u;
+         emel_case_process_token = 2u) {
 
-    current_fragments = next_fragments;
-    current_count = next_count;
+    }
   }
 
   for (size_t i = 0; i < current_count; ++i) {
@@ -320,20 +503,41 @@ partition_bpe_no_specials(const event::preprocess & request,
   scratch.reset();
 
   emel::text::tokenizer::bpe::detail::split_view view = {};
-  if (!emel::text::tokenizer::bpe::detail::split_and_encode_append(
-          request.text, request.vocab, scratch, view)) {
-    return false;
+    {
+    const size_t emel_branch_17 = static_cast<size_t>(
+      !emel::text::tokenizer::bpe::detail::split_and_encode_append(
+          request.text, request.vocab, scratch, view));
+    for (size_t emel_case_17 = emel_branch_17; emel_case_17 == 1u; emel_case_17 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_17 = emel_branch_17; emel_case_17 == 0u; emel_case_17 = 2u) {
+
+    }
   }
 
   size_t out_count = 0;
   for (size_t idx = 0; idx < view.count; ++idx) {
     const std::string_view word = view.words[idx];
-    if (word.empty()) {
-      continue;
-    }
-    if (!push_raw_fragment(request.fragments_out.data(),
-                           request.fragments_out.size(), out_count, word)) {
-      return false;
+    {
+      const size_t emel_branch_emit_word = static_cast<size_t>(!word.empty());
+      for (size_t emel_case_emit_word = emel_branch_emit_word; emel_case_emit_word == 1u;
+           emel_case_emit_word = 2u) {
+            {
+          const size_t emel_branch_18 = static_cast<size_t>(
+            !push_raw_fragment(request.fragments_out.data(), request.fragments_out.size(), out_count,
+                               word));
+          for (size_t emel_case_18 = emel_branch_18; emel_case_18 == 1u; emel_case_18 = 2u) {
+                    return false;
+          }
+          for (size_t emel_case_18 = emel_branch_18; emel_case_18 == 0u; emel_case_18 = 2u) {
+
+          }
+        }
+      }
+      for (size_t emel_case_emit_word = emel_branch_emit_word; emel_case_emit_word == 0u;
+           emel_case_emit_word = 2u) {
+
+      }
     }
   }
 
@@ -349,42 +553,96 @@ inline bool partition_bpe_with_specials(
 
   std::array<fragment, k_max_fragments> partitions = {};
   size_t partition_count = 0;
-  if (!partition_with_specials(
+    {
+    const size_t emel_branch_19 = static_cast<size_t>(
+      !partition_with_specials(
           request.text, cache, request.parse_special,
           std::span<fragment>(partitions.data(), request.fragments_out.size()),
-          partition_count)) {
-    return false;
+          partition_count));
+    for (size_t emel_case_19 = emel_branch_19; emel_case_19 == 1u; emel_case_19 = 2u) {
+            return false;
+    }
+    for (size_t emel_case_19 = emel_branch_19; emel_case_19 == 0u; emel_case_19 = 2u) {
+
+    }
   }
 
   scratch.reset();
   size_t out_count = 0;
   for (size_t idx = 0; idx < partition_count; ++idx) {
     const fragment & frag = partitions[idx];
-    if (frag.kind == fragment_kind::token) {
-      if (!push_token_fragment(request.fragments_out.data(),
-                               request.fragments_out.size(), out_count,
-                               frag.token)) {
-        return false;
-      }
-      continue;
-    }
-    if (frag.text.empty()) {
-      continue;
-    }
+    {
+      const size_t emel_branch_token = static_cast<size_t>(frag.kind == fragment_kind::token);
+      for (size_t emel_case_token = emel_branch_token; emel_case_token == 1u;
+           emel_case_token = 2u) {
+        {
+          const size_t emel_branch_push = static_cast<size_t>(
+              !push_token_fragment(request.fragments_out.data(), request.fragments_out.size(),
+                                   out_count, frag.token));
+          for (size_t emel_case_push = emel_branch_push; emel_case_push == 1u;
+               emel_case_push = 2u) {
+            return false;
+          }
+          for (size_t emel_case_push = emel_branch_push; emel_case_push == 0u;
+               emel_case_push = 2u) {
 
-    emel::text::tokenizer::bpe::detail::split_view view = {};
-    if (!emel::text::tokenizer::bpe::detail::split_and_encode_append(
-            frag.text, request.vocab, scratch, view)) {
-      return false;
-    }
-    for (size_t word_idx = 0; word_idx < view.count; ++word_idx) {
-      const std::string_view word = view.words[word_idx];
-      if (word.empty()) {
-        continue;
+          }
+        }
       }
-      if (!push_raw_fragment(request.fragments_out.data(),
-                             request.fragments_out.size(), out_count, word)) {
-        return false;
+      for (size_t emel_case_token = emel_branch_token; emel_case_token == 0u;
+           emel_case_token = 2u) {
+        {
+          const size_t emel_branch_text = static_cast<size_t>(!frag.text.empty());
+          for (size_t emel_case_text = emel_branch_text; emel_case_text == 1u;
+               emel_case_text = 2u) {
+            emel::text::tokenizer::bpe::detail::split_view view = {};
+                {
+              const size_t emel_branch_20 = static_cast<size_t>(
+                !emel::text::tokenizer::bpe::detail::split_and_encode_append(
+                    frag.text, request.vocab, scratch, view));
+              for (size_t emel_case_20 = emel_branch_20; emel_case_20 == 1u;
+                   emel_case_20 = 2u) {
+                        return false;
+              }
+              for (size_t emel_case_20 = emel_branch_20; emel_case_20 == 0u;
+                   emel_case_20 = 2u) {
+
+              }
+            }
+            for (size_t word_idx = 0; word_idx < view.count; ++word_idx) {
+              const std::string_view word = view.words[word_idx];
+              {
+                const size_t emel_branch_emit_word = static_cast<size_t>(!word.empty());
+                for (size_t emel_case_emit_word = emel_branch_emit_word;
+                     emel_case_emit_word == 1u;
+                     emel_case_emit_word = 2u) {
+                        {
+                    const size_t emel_branch_21 = static_cast<size_t>(
+                      !push_raw_fragment(request.fragments_out.data(), request.fragments_out.size(),
+                                         out_count, word));
+                    for (size_t emel_case_21 = emel_branch_21; emel_case_21 == 1u;
+                         emel_case_21 = 2u) {
+                                return false;
+                    }
+                    for (size_t emel_case_21 = emel_branch_21; emel_case_21 == 0u;
+                         emel_case_21 = 2u) {
+
+                    }
+                  }
+                }
+                for (size_t emel_case_emit_word = emel_branch_emit_word;
+                     emel_case_emit_word == 0u;
+                     emel_case_emit_word = 2u) {
+
+                }
+              }
+            }
+          }
+          for (size_t emel_case_text = emel_branch_text; emel_case_text == 0u;
+               emel_case_text = 2u) {
+
+          }
+        }
       }
     }
   }

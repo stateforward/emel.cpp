@@ -65,18 +65,18 @@ struct grammar {
   }
 
   rule_view rule(uint32_t rule_id) const noexcept {
-    if (rule_id >= rule_count) {
-      return {};
-    }
-    const uint32_t length = rule_lengths[rule_id];
-    if (length == 0) {
-      return {};
-    }
-    const uint32_t offset = rule_offsets[rule_id];
-    if (offset + length > element_count) {
-      return {};
-    }
-    return {elements.data() + offset, length};
+    const size_t valid_rule_id = static_cast<size_t>(rule_id < rule_count);
+    const size_t safe_rule_id = static_cast<size_t>(rule_id) * valid_rule_id;
+    const uint32_t length = rule_lengths[safe_rule_id];
+    const uint32_t offset = rule_offsets[safe_rule_id];
+    const size_t non_zero_length = static_cast<size_t>(length != 0);
+    const size_t within_elements = static_cast<size_t>(offset + length <= element_count);
+    const size_t valid = valid_rule_id & non_zero_length & within_elements;
+
+    const element * const data_ptr = elements.data() + offset;
+    const element * const ptr_options[2] = {nullptr, data_ptr};
+    const uint32_t length_options[2] = {0u, length};
+    return {ptr_options[valid], length_options[valid]};
   }
 };
 
