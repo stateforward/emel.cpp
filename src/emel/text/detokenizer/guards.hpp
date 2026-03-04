@@ -35,6 +35,22 @@ struct invalid_detokenize {
   }
 };
 
+struct detokenize_token_in_vocab {
+  bool operator()(const event::detokenize & ev,
+                  const action::context & ctx) const noexcept {
+    return ctx.vocab != nullptr &&
+           ev.token_id >= 0 &&
+           static_cast<uint32_t>(ev.token_id) < ctx.vocab->n_tokens;
+  }
+};
+
+struct detokenize_token_out_of_vocab {
+  bool operator()(const event::detokenize & ev,
+                  const action::context & ctx) const noexcept {
+    return !detokenize_token_in_vocab{}(ev, ctx);
+  }
+};
+
 struct bind_phase_ok {
   bool operator()(const event::bind & ev) const noexcept {
     return ev.error_out == error_code(error::none);

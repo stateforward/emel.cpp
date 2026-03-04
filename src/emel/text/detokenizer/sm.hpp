@@ -89,6 +89,7 @@ struct binding_error_decision {};
 struct binding_error_callback {};
 struct idle {};
 struct decoding {};
+struct decode_token_validation {};
 struct decode_decision {};
 struct detokenize_done_decision {};
 struct detokenize_done_callback {};
@@ -106,7 +107,7 @@ struct unexpected {};
  * - `binding`/`binding_decision`: validate and apply vocab binding.
  * - `binding_*_callback`: synchronous callback delivery before terminal state.
  * - `idle`: ready for detokenize requests.
- * - `decoding`/`decode_decision`: translate token id into output bytes.
+ * - `decoding`/`decode_token_validation`/`decode_decision`: validate token id and translate bytes.
  * - `detokenize_*_callback`: synchronous callback delivery before terminal state.
  * - `done`/`errored`: terminal outcomes for the latest request.
  * - `unexpected`: sequencing contract violation.
@@ -201,6 +202,10 @@ struct model {
                    / action::reject_bind
       , sml::state<detokenize_error_decision> <= sml::state<decoding> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<decode_token_validation> + sml::unexpected_event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<decode_token_validation> + sml::unexpected_event<event::detokenize>
+                   / action::reject_detokenize
       , sml::state<binding_error_decision> <= sml::state<decode_decision> + sml::unexpected_event<event::bind>
                    / action::reject_bind
       , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::unexpected_event<event::detokenize>
@@ -241,8 +246,11 @@ struct model {
                    [ guard::no_bind_error_callback{} ]
       , sml::state<errored> <= sml::state<binding_error_callback> + sml::completion<event::bind>
 
-      , sml::state<decode_decision> <= sml::state<decoding> + sml::completion<event::detokenize>
-                   / action::decode_token
+      , sml::state<decode_token_validation> <= sml::state<decoding> + sml::completion<event::detokenize>
+      , sml::state<decode_decision> <= sml::state<decode_token_validation> + sml::completion<event::detokenize>
+                   [ guard::detokenize_token_in_vocab{} ] / action::decode_token
+      , sml::state<detokenize_error_decision> <= sml::state<decode_token_validation> + sml::completion<event::detokenize>
+                   [ guard::detokenize_token_out_of_vocab{} ] / action::mark_model_invalid
       , sml::state<detokenize_done_decision> <= sml::state<decode_decision> + sml::completion<event::detokenize>
                    [ guard::detokenize_phase_ok{} ] / action::mark_done
       , sml::state<detokenize_done_callback> <= sml::state<detokenize_done_decision> + sml::completion<event::detokenize>
@@ -278,6 +286,8 @@ struct model {
       , sml::state<unexpected> <= sml::state<idle> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<decoding> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<decode_token_validation> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<decode_decision> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
