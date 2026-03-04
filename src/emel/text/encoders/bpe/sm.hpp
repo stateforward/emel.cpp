@@ -12,9 +12,13 @@
 namespace emel::text::encoders::bpe {
 
 struct initialized {};
+struct encode_validity_decision {};
+struct encode_vocab_sync_decision {};
 struct encode_precheck_decision {};
+struct encode_input_policy_decision {};
 struct encode_table_prepare {};
 struct encode_path_decision {};
+struct encode_direct_word_policy_decision {};
 struct encode_exec {};
 struct encode_result_decision {};
 struct done {};
@@ -26,9 +30,13 @@ struct unexpected {};
  *
  * state purposes:
  * - 'initialized': idle state awaiting encode intent.
+ * - 'encode_validity_decision': explicit request validity routing before runtime setup.
+ * - 'encode_vocab_sync_decision': explicit vocabulary-sync policy routing.
  * - 'encode_precheck_decision': explicit request prechecks before kernel execution.
+ * - 'encode_input_policy_decision': explicit preprocessed-input policy routing.
  * - 'encode_table_prepare': ensure per-vocab tables for deterministic path guards.
- * - 'encode_path_decision': explicit BPE path routing (`ignore_merges` fast path vs merge path).
+ * - 'encode_path_decision': explicit `ignore_merges` policy routing.
+ * - 'encode_direct_word_policy_decision': explicit direct-word availability routing.
  * - 'encode_exec'/'encode_result_decision': run selected kernel and branch on phase error.
  * - 'done'/'errored': terminal outcomes.
  * - 'unexpected': sequencing contract violation.
@@ -36,8 +44,8 @@ struct unexpected {};
  * guard semantics:
  * - 'valid_encode'/'invalid_encode' validate request pointers and context.
  * - 'vocab_changed'/'vocab_unchanged' route vocabulary sync work.
- * - 'text_empty' and 'text_non_empty_and_*' route explicit precheck decisions.
- * - 'ignore_merges_fast_path'/'merge_path_required' route algorithm path selection.
+ * - 'text_empty'/'text_non_empty' and 'preprocessed'/'not_preprocessed' route precheck decisions.
+ * - 'ignore_merges_enabled' and 'direct_word_token_available' route algorithm path selection.
  * - 'phase_*' guards observe runtime phase errors.
  *
  * action side effects:
@@ -57,44 +65,32 @@ struct model {
       //------------------------------------------------------------------------------//
       // Encode Intake
       //------------------------------------------------------------------------------//
-      sml::state<encode_precheck_decision> <= *sml::state<initialized>
-          + sml::event<event::encode_runtime>[guard::valid_encode_and_vocab_changed{}]
-          / action::begin_encode_sync_vocab
-      , sml::state<encode_precheck_decision> <= sml::state<initialized>
-          + sml::event<event::encode_runtime>[guard::valid_encode_and_vocab_unchanged{}]
-          / action::begin_encode
-      , sml::state<errored> <= sml::state<initialized>
-          + sml::event<event::encode_runtime>[guard::invalid_encode{}]
+        sml::state<encode_validity_decision> <= *sml::state<initialized>
+          + sml::event<event::encode_runtime>
+      , sml::state<encode_validity_decision> <= sml::state<done>
+          + sml::event<event::encode_runtime>
+      , sml::state<encode_validity_decision> <= sml::state<errored>
+          + sml::event<event::encode_runtime>
+      , sml::state<encode_validity_decision> <= sml::state<unexpected>
+          + sml::event<event::encode_runtime>
+
+      , sml::state<encode_vocab_sync_decision> <= sml::state<encode_validity_decision>
+          + sml::completion<event::encode_runtime>[guard::valid_encode{}]
+      , sml::state<errored> <= sml::state<encode_validity_decision>
+          + sml::completion<event::encode_runtime>[guard::invalid_encode{}]
+          / action::reject_invalid_encode
+      , sml::state<errored> <= sml::state<encode_validity_decision>
+          + sml::completion<event::encode_runtime>
           / action::reject_invalid_encode
 
-      , sml::state<encode_precheck_decision> <= sml::state<done>
-          + sml::event<event::encode_runtime>[guard::valid_encode_and_vocab_changed{}]
+      , sml::state<encode_precheck_decision> <= sml::state<encode_vocab_sync_decision>
+          + sml::completion<event::encode_runtime>[guard::vocab_changed{}]
           / action::begin_encode_sync_vocab
-      , sml::state<encode_precheck_decision> <= sml::state<done>
-          + sml::event<event::encode_runtime>[guard::valid_encode_and_vocab_unchanged{}]
+      , sml::state<encode_precheck_decision> <= sml::state<encode_vocab_sync_decision>
+          + sml::completion<event::encode_runtime>[guard::vocab_unchanged{}]
           / action::begin_encode
-      , sml::state<errored> <= sml::state<done>
-          + sml::event<event::encode_runtime>[guard::invalid_encode{}]
-          / action::reject_invalid_encode
-
-      , sml::state<encode_precheck_decision> <= sml::state<errored>
-          + sml::event<event::encode_runtime>[guard::valid_encode_and_vocab_changed{}]
-          / action::begin_encode_sync_vocab
-      , sml::state<encode_precheck_decision> <= sml::state<errored>
-          + sml::event<event::encode_runtime>[guard::valid_encode_and_vocab_unchanged{}]
-          / action::begin_encode
-      , sml::state<errored> <= sml::state<errored>
-          + sml::event<event::encode_runtime>[guard::invalid_encode{}]
-          / action::reject_invalid_encode
-
-      , sml::state<encode_precheck_decision> <= sml::state<unexpected>
-          + sml::event<event::encode_runtime>[guard::valid_encode_and_vocab_changed{}]
-          / action::begin_encode_sync_vocab
-      , sml::state<encode_precheck_decision> <= sml::state<unexpected>
-          + sml::event<event::encode_runtime>[guard::valid_encode_and_vocab_unchanged{}]
-          / action::begin_encode
-      , sml::state<unexpected> <= sml::state<unexpected>
-          + sml::event<event::encode_runtime>[guard::invalid_encode{}]
+      , sml::state<errored> <= sml::state<encode_vocab_sync_decision>
+          + sml::completion<event::encode_runtime>
           / action::reject_invalid_encode
 
       //------------------------------------------------------------------------------//
@@ -102,12 +98,24 @@ struct model {
       //------------------------------------------------------------------------------//
       , sml::state<done> <= sml::state<encode_precheck_decision>
           + sml::completion<event::encode_runtime>[guard::text_empty{}] / action::mark_done
+      , sml::state<encode_input_policy_decision> <= sml::state<encode_precheck_decision>
+          + sml::completion<event::encode_runtime>[guard::text_non_empty{}]
       , sml::state<errored> <= sml::state<encode_precheck_decision>
-          + sml::completion<event::encode_runtime>[guard::text_non_empty_and_not_preprocessed{}]
-          / action::reject_invalid_encode
-      , sml::state<encode_table_prepare> <= sml::state<encode_precheck_decision>
-          + sml::completion<event::encode_runtime>[guard::text_non_empty_and_preprocessed{}]
+          + sml::completion<event::encode_runtime>
+          / action::ensure_last_error
+
+      //------------------------------------------------------------------------------//
+      // Input Policy Decision
+      //------------------------------------------------------------------------------//
+      , sml::state<encode_table_prepare> <= sml::state<encode_input_policy_decision>
+          + sml::completion<event::encode_runtime>[guard::preprocessed{}]
           / action::prepare_tables
+      , sml::state<errored> <= sml::state<encode_input_policy_decision>
+          + sml::completion<event::encode_runtime>[guard::not_preprocessed{}]
+          / action::reject_invalid_encode
+      , sml::state<errored> <= sml::state<encode_input_policy_decision>
+          + sml::completion<event::encode_runtime>
+          / action::reject_invalid_encode
 
       //------------------------------------------------------------------------------//
       // Table Preparation
@@ -117,15 +125,23 @@ struct model {
       , sml::state<errored> <= sml::state<encode_table_prepare>
           + sml::completion<event::encode_runtime>[guard::phase_failed{}]
           / action::ensure_last_error
+      , sml::state<errored> <= sml::state<encode_table_prepare>
+          + sml::completion<event::encode_runtime>
+          / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
       // Encode Path Decision
       //------------------------------------------------------------------------------//
-      , sml::state<encode_result_decision> <= sml::state<encode_path_decision>
-          + sml::completion<event::encode_runtime>[guard::ignore_merges_fast_path{}]
-          / action::run_encode_ignore_merges
+      , sml::state<encode_direct_word_policy_decision> <= sml::state<encode_path_decision>
+          + sml::completion<event::encode_runtime>[guard::ignore_merges_enabled{}]
       , sml::state<encode_exec> <= sml::state<encode_path_decision>
-          + sml::completion<event::encode_runtime>[guard::merge_path_required{}]
+          + sml::completion<event::encode_runtime>
+
+      , sml::state<encode_result_decision> <= sml::state<encode_direct_word_policy_decision>
+          + sml::completion<event::encode_runtime>[guard::direct_word_token_available{}]
+          / action::run_encode_ignore_merges
+      , sml::state<encode_exec> <= sml::state<encode_direct_word_policy_decision>
+          + sml::completion<event::encode_runtime>
 
       //------------------------------------------------------------------------------//
       // Encode Execution
@@ -141,11 +157,19 @@ struct model {
       //------------------------------------------------------------------------------//
       // Explicit Unexpected-Event Handling
       //------------------------------------------------------------------------------//
+      , sml::state<unexpected> <= sml::state<encode_validity_decision>
+          + sml::event<event::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_vocab_sync_decision>
+          + sml::event<event::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::event<event::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_input_policy_decision>
           + sml::event<event::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_table_prepare>
           + sml::event<event::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_path_decision>
+          + sml::event<event::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_direct_word_policy_decision>
           + sml::event<event::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<event::encode_runtime> / action::on_unexpected
@@ -156,9 +180,21 @@ struct model {
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<initialized>
           + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_validity_decision>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_validity_decision>
+          + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_vocab_sync_decision>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_vocab_sync_decision>
+          + sml::event<events::encoding_error> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_input_policy_decision>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_input_policy_decision>
           + sml::event<events::encoding_error> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_table_prepare>
           + sml::event<events::encoding_done> / action::on_unexpected
@@ -167,6 +203,10 @@ struct model {
       , sml::state<unexpected> <= sml::state<encode_path_decision>
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_path_decision>
+          + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_direct_word_policy_decision>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_direct_word_policy_decision>
           + sml::event<events::encoding_error> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<events::encoding_done> / action::on_unexpected
@@ -191,11 +231,19 @@ struct model {
 
       , sml::state<unexpected> <= sml::state<initialized>
           + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_validity_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_vocab_sync_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_input_policy_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_table_prepare>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_path_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_direct_word_policy_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::unexpected_event<sml::_> / action::on_unexpected

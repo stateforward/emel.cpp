@@ -156,27 +156,6 @@ struct rollback_rejected_without_error {
   }
 };
 
-struct rollback_accepted_and_recurrent_rejected_out_of_memory {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type & ev) const noexcept {
-    return rollback_accepted{}(ev) && recurrent_rejected_out_of_memory{}(ev);
-  }
-};
-
-struct rollback_accepted_and_recurrent_rejected_backend_or_none {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type & ev) const noexcept {
-    return rollback_accepted{}(ev) && recurrent_rejected_backend_or_none{}(ev);
-  }
-};
-
-struct rollback_accepted_and_recurrent_rejected_non_backend_error {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type & ev) const noexcept {
-    return rollback_accepted{}(ev) && recurrent_rejected_non_backend_error{}(ev);
-  }
-};
-
 struct capture_request_valid {
   bool operator()(const event::capture_view_runtime & ev) const noexcept {
     return ev.has_snapshot_out;

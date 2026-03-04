@@ -53,30 +53,135 @@ struct apply_count_matches {
   }
 };
 
-struct apply_has_effect_errors {
+struct valid_apply_request {
   bool operator()(const event::apply_runtime & ev, const action::context & ctx) const noexcept {
-    if (!apply_count_matches{}(ev, ctx)) {
-      return false;
-    }
-    for (const auto & result : ev.request.results) {
-      if (result.err != emel::error::cast(error::none)) {
-        return true;
-      }
-    }
-    return false;
-  }
-};
-
-struct valid_apply {
-  bool operator()(const event::apply_runtime & ev, const action::context & ctx) const noexcept {
-    return has_bound_tensors{}(ctx) && apply_count_matches{}(ev, ctx) &&
-           !apply_has_effect_errors{}(ev, ctx);
+    return has_bound_tensors{}(ctx) && apply_count_matches{}(ev, ctx);
   }
 };
 
 struct invalid_apply_request {
   bool operator()(const event::apply_runtime & ev, const action::context & ctx) const noexcept {
-    return !has_bound_tensors{}(ctx) || !apply_count_matches{}(ev, ctx);
+    return !valid_apply_request{}(ev, ctx);
+  }
+};
+
+struct apply_effect_errors_present {
+  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
+    return ev.ctx.has_effect_errors;
+  }
+};
+
+struct apply_effect_errors_absent {
+  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
+    return !ev.ctx.has_effect_errors;
+  }
+};
+
+struct bind_phase_ok {
+  bool operator()(const event::bind_runtime & ev, const action::context &) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none);
+  }
+};
+
+struct bind_phase_failed {
+  bool operator()(const event::bind_runtime & ev, const action::context & ctx) const noexcept {
+    return !bind_phase_ok{}(ev, ctx);
+  }
+};
+
+struct plan_phase_ok {
+  bool operator()(const event::plan_runtime & ev, const action::context &) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none);
+  }
+};
+
+struct plan_phase_failed {
+  bool operator()(const event::plan_runtime & ev, const action::context & ctx) const noexcept {
+    return !plan_phase_ok{}(ev, ctx);
+  }
+};
+
+struct apply_phase_ok {
+  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none);
+  }
+};
+
+struct apply_phase_failed {
+  bool operator()(const event::apply_runtime & ev, const action::context & ctx) const noexcept {
+    return !apply_phase_ok{}(ev, ctx);
+  }
+};
+
+struct bind_done_callback_present {
+  bool operator()(const event::bind_runtime & ev, const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_done);
+  }
+};
+
+struct bind_done_callback_absent {
+  bool operator()(const event::bind_runtime & ev, const action::context & ctx) const noexcept {
+    return !bind_done_callback_present{}(ev, ctx);
+  }
+};
+
+struct bind_error_callback_present {
+  bool operator()(const event::bind_runtime & ev, const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct bind_error_callback_absent {
+  bool operator()(const event::bind_runtime & ev, const action::context & ctx) const noexcept {
+    return !bind_error_callback_present{}(ev, ctx);
+  }
+};
+
+struct plan_done_callback_present {
+  bool operator()(const event::plan_runtime & ev, const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_done);
+  }
+};
+
+struct plan_done_callback_absent {
+  bool operator()(const event::plan_runtime & ev, const action::context & ctx) const noexcept {
+    return !plan_done_callback_present{}(ev, ctx);
+  }
+};
+
+struct plan_error_callback_present {
+  bool operator()(const event::plan_runtime & ev, const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct plan_error_callback_absent {
+  bool operator()(const event::plan_runtime & ev, const action::context & ctx) const noexcept {
+    return !plan_error_callback_present{}(ev, ctx);
+  }
+};
+
+struct apply_done_callback_present {
+  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_done);
+  }
+};
+
+struct apply_done_callback_absent {
+  bool operator()(const event::apply_runtime & ev, const action::context & ctx) const noexcept {
+    return !apply_done_callback_present{}(ev, ctx);
+  }
+};
+
+struct apply_error_callback_present {
+  bool operator()(const event::apply_runtime & ev, const action::context &) const noexcept {
+    return static_cast<bool>(ev.request.on_error);
+  }
+};
+
+struct apply_error_callback_absent {
+  bool operator()(const event::apply_runtime & ev, const action::context & ctx) const noexcept {
+    return !apply_error_callback_present{}(ev, ctx);
   }
 };
 

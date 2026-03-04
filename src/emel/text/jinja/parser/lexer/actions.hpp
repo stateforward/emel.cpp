@@ -12,6 +12,92 @@ namespace emel::text::jinja::parser::lexer::action {
 
 namespace helper {
 
+inline bool decode_escape_char(const char ch, char &out) noexcept {
+  const size_t is_n = static_cast<size_t>(ch == 'n');
+  const size_t is_t = static_cast<size_t>(ch == 't');
+  const size_t is_r = static_cast<size_t>(ch == 'r');
+  const size_t is_b = static_cast<size_t>(ch == 'b');
+  const size_t is_f = static_cast<size_t>(ch == 'f');
+  const size_t is_v = static_cast<size_t>(ch == 'v');
+  const size_t is_backslash = static_cast<size_t>(ch == '\\');
+  const size_t is_single_quote = static_cast<size_t>(ch == '\'');
+  const size_t is_double_quote = static_cast<size_t>(ch == '"');
+  const size_t code = is_n * 1u + is_t * 2u + is_r * 3u + is_b * 4u + is_f * 5u +
+                      is_v * 6u + is_backslash * 7u + is_single_quote * 8u +
+                      is_double_quote * 9u;
+  constexpr std::array<char, 10> decoded = {
+      '\0',
+      '\n',
+      '\t',
+      '\r',
+      '\b',
+      '\f',
+      '\v',
+      '\\',
+      '\'',
+      '"',
+  };
+  out = decoded[code];
+  return code != 0u;
+}
+
+inline void append_char_none(std::string &, const char) noexcept {}
+
+inline void append_char_some(std::string &value, const char ch) noexcept {
+  value.push_back(ch);
+}
+
+inline void set_escape_error_none(event::next_runtime, const size_t) noexcept {}
+
+inline void set_escape_error_some(event::next_runtime ev, const size_t pos) noexcept {
+  ::emel::text::jinja::lexer::detail::set_error(ev.ctx.scan, pos);
+}
+
+inline void consume_escape_literal(event::next_runtime ev, std::string &value) noexcept {
+  value.push_back(ev.ctx.source[ev.ctx.pos]);
+  ++ev.ctx.pos;
+}
+
+inline void consume_escape_sequence(event::next_runtime ev, std::string &value) noexcept {
+  ++ev.ctx.pos;
+  const bool in_range = ev.ctx.pos < ev.ctx.source.size();
+  const char escaped = ::emel::text::jinja::lexer::detail::view_char_at_or(ev.ctx.source,
+                                                                            ev.ctx.pos,
+                                                                            '\0');
+  char decoded = '\0';
+  const bool decode_ok = in_range && decode_escape_char(escaped, decoded);
+  const bool set_error = !decode_ok && ev.ctx.scan.err == detail::error_code(error::none);
+
+  using error_handler_t = void (*)(event::next_runtime, size_t) noexcept;
+  const error_handler_t error_handlers[2] = {
+      set_escape_error_none,
+      set_escape_error_some,
+  };
+  error_handlers[static_cast<size_t>(set_error)](ev, ev.ctx.pos);
+
+  using append_handler_t = void (*)(std::string &, char) noexcept;
+  const append_handler_t append_handlers[2] = {
+      append_char_none,
+      append_char_some,
+  };
+  append_handlers[static_cast<size_t>(decode_ok)](value, decoded);
+  ev.ctx.pos += static_cast<size_t>(decode_ok);
+}
+
+inline std::string consume_escaped_until(event::next_runtime ev, const char terminal) {
+  std::string value;
+  using consume_handler_t = void (*)(event::next_runtime, std::string &) noexcept;
+  const consume_handler_t consume_handlers[2] = {
+      consume_escape_sequence,
+      consume_escape_literal,
+  };
+  while (ev.ctx.pos < ev.ctx.source.size() && ev.ctx.source[ev.ctx.pos] != terminal) {
+    const bool literal = ev.ctx.source[ev.ctx.pos] != '\\';
+    consume_handlers[static_cast<size_t>(literal)](ev, value);
+  }
+  return value;
+}
+
 inline void reset_phase(event::next_runtime &ev) noexcept {
   ev.ctx.handled = false;
   ev.ctx.scan.token_value = {};
@@ -20,30 +106,6 @@ inline void reset_phase(event::next_runtime &ev) noexcept {
   ev.ctx.scan.error_pos = 0;
   ev.ctx.scan.next_cursor = ev.request.cursor;
   ev.ctx.scan.next_cursor.offset = ev.ctx.pos;
-}
-
-inline void trim_text_before_opening_block(const std::string_view source,
-                                           const size_t start,
-                                           size_t &end) noexcept {
-  size_t current = end;
-  bool keep_trimming = true;
-  while (current > start && keep_trimming) {
-    const char c = source[current - 1];
-    const bool at_start = current == 1u;
-    const bool newline = c == '\n';
-
-    if (at_start) {
-      end = 0u;
-      keep_trimming = false;
-    } else if (newline) {
-      end = current;
-      keep_trimming = false;
-    } else if (::emel::text::jinja::lexer::detail::is_space(c)) {
-      --current;
-    } else {
-      keep_trimming = false;
-    }
-  }
 }
 
 inline void emit_scanned_token(const event::next_runtime &ev) noexcept {
@@ -105,9 +167,27 @@ struct scan_text_boundary {
   }
 };
 
-struct trim_text_before_opening_block {
+struct probe_text_opening_trim {
   void operator()(event::next_runtime ev, context &) const noexcept {
-    helper::trim_text_before_opening_block(ev.ctx.source, ev.ctx.text_start, ev.ctx.text_end);
+    size_t probe = ev.ctx.text_end;
+    while (probe > ev.ctx.text_start &&
+           ::emel::text::jinja::lexer::detail::is_space(ev.ctx.source[probe - 1u]) &&
+           ev.ctx.source[probe - 1u] != '\n') {
+      --probe;
+    }
+    ev.ctx.text_trim_probe = probe;
+  }
+};
+
+struct apply_text_opening_trim_to_newline {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    ev.ctx.text_end = ev.ctx.text_trim_probe;
+  }
+};
+
+struct apply_text_opening_trim_to_zero {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    ev.ctx.text_end = 0u;
   }
 };
 
@@ -320,9 +400,7 @@ struct scan_string {
     const size_t start = pos;
     const char terminal = source[pos];
     ++pos;
-    std::string value =
-        ::emel::text::jinja::lexer::detail::consume_escaped_until(source, pos, terminal,
-                                                                   ev.ctx.scan);
+    std::string value = helper::consume_escaped_until(ev, terminal);
     ev.ctx.handled = true;
     ev.ctx.scan.token_value = token{token_type::string_literal, std::move(value), start};
   }
@@ -449,7 +527,9 @@ struct on_unexpected {
 
 inline constexpr begin_scan begin_scan{};
 inline constexpr scan_text_boundary scan_text_boundary{};
-inline constexpr trim_text_before_opening_block trim_text_before_opening_block{};
+inline constexpr probe_text_opening_trim probe_text_opening_trim{};
+inline constexpr apply_text_opening_trim_to_newline apply_text_opening_trim_to_newline{};
+inline constexpr apply_text_opening_trim_to_zero apply_text_opening_trim_to_zero{};
 inline constexpr materialize_text_token materialize_text_token{};
 inline constexpr trim_text_leading_newline trim_text_leading_newline{};
 inline constexpr lstrip_text_token lstrip_text_token{};

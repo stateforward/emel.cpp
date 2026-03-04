@@ -10,37 +10,6 @@
 
 namespace emel::memory::recurrent::guard {
 
-namespace detail {
-
-struct allocate_slots_analysis {
-  bool request_shape_valid = false;
-  bool length_valid = false;
-};
-
-inline allocate_slots_analysis analyze_allocate_slots_request(
-    const action::context & ctx, const event::allocate_slots & request) noexcept {
-  allocate_slots_analysis analysis{};
-  analysis.request_shape_valid = recurrent::detail::valid_sequence_id(ctx.max_sequences, request.seq_id) &&
-                                 request.token_count > 0;
-  if (!analysis.request_shape_valid) {
-    return analysis;
-  }
-
-  const size_t seq_index = static_cast<size_t>(request.seq_id);
-  analysis.request_shape_valid = ctx.seq_to_slot[seq_index] != recurrent::detail::invalid_slot;
-  if (!analysis.request_shape_valid) {
-    return analysis;
-  }
-
-  const int64_t new_length_wide =
-      static_cast<int64_t>(ctx.sequence_length[seq_index]) + request.token_count;
-  analysis.length_valid =
-      new_length_wide >= 0 && new_length_wide <= std::numeric_limits<int32_t>::max();
-  return analysis;
-}
-
-}  // namespace detail
-
 struct reserve_request_valid {
   bool operator()(const event::reserve_runtime & ev) const noexcept {
     const int32_t max_sequence_count =
@@ -120,58 +89,83 @@ struct allocate_sequence_request_inactive_without_slot {
   }
 };
 
-struct allocate_slots_request_valid {
+struct allocate_slots_request_shape_valid {
   bool operator()(const event::allocate_slots_runtime & ev,
                   const action::context & ctx) const noexcept {
-    const detail::allocate_slots_analysis analysis =
-        detail::analyze_allocate_slots_request(ctx, ev.request);
-    return analysis.request_shape_valid && analysis.length_valid;
+    const bool seq_id_valid =
+        recurrent::detail::valid_sequence_id(ctx.max_sequences, ev.request.seq_id);
+    const int32_t safe_seq_id = static_cast<int32_t>(seq_id_valid) * ev.request.seq_id;
+    const size_t seq_index = static_cast<size_t>(safe_seq_id);
+    const bool seq_active = ctx.seq_to_slot[seq_index] != recurrent::detail::invalid_slot;
+    return seq_id_valid && ev.request.token_count > 0 && seq_active;
   }
 };
 
-struct allocate_slots_request_invalid {
+struct allocate_slots_request_shape_invalid {
   bool operator()(const event::allocate_slots_runtime & ev,
                   const action::context & ctx) const noexcept {
-    return !allocate_slots_request_valid{}(ev, ctx);
+    return !allocate_slots_request_shape_valid{}(ev, ctx);
+  }
+};
+
+struct allocate_slots_request_length_valid {
+  bool operator()(const event::allocate_slots_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    const bool shape_valid = allocate_slots_request_shape_valid{}(ev, ctx);
+    const int32_t safe_seq_id = static_cast<int32_t>(shape_valid) * ev.request.seq_id;
+    const size_t seq_index = static_cast<size_t>(safe_seq_id);
+    const int64_t new_length_wide =
+        static_cast<int64_t>(ctx.sequence_length[seq_index]) + ev.request.token_count;
+    return shape_valid && new_length_wide >= 0 &&
+           new_length_wide <= std::numeric_limits<int32_t>::max();
+  }
+};
+
+struct allocate_slots_request_length_invalid {
+  bool operator()(const event::allocate_slots_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    return !allocate_slots_request_length_valid{}(ev, ctx);
   }
 };
 
 struct branch_sequence_request_shape_valid {
   bool operator()(const event::branch_sequence_runtime & ev,
                   const action::context & ctx) const noexcept {
-    if (ev.request.copy_state == nullptr ||
-        !recurrent::detail::valid_sequence_id(ctx.max_sequences, ev.request.parent_seq_id) ||
-        !recurrent::detail::valid_sequence_id(ctx.max_sequences, ev.request.child_seq_id) ||
-        ev.request.parent_seq_id == ev.request.child_seq_id) {
-      return false;
-    }
-
-    const size_t parent_index = static_cast<size_t>(ev.request.parent_seq_id);
-    const size_t child_index = static_cast<size_t>(ev.request.child_seq_id);
+    const bool has_copy_callback = ev.request.copy_state != nullptr;
+    const bool parent_id_valid =
+        recurrent::detail::valid_sequence_id(ctx.max_sequences, ev.request.parent_seq_id);
+    const bool child_id_valid =
+        recurrent::detail::valid_sequence_id(ctx.max_sequences, ev.request.child_seq_id);
+    const bool ids_distinct = ev.request.parent_seq_id != ev.request.child_seq_id;
+    const int32_t safe_parent_id = static_cast<int32_t>(parent_id_valid) * ev.request.parent_seq_id;
+    const int32_t safe_child_id = static_cast<int32_t>(child_id_valid) * ev.request.child_seq_id;
+    const size_t parent_index = static_cast<size_t>(safe_parent_id);
+    const size_t child_index = static_cast<size_t>(safe_child_id);
     const bool parent_active = ctx.seq_to_slot[parent_index] != recurrent::detail::invalid_slot;
-    const bool child_active = ctx.seq_to_slot[child_index] != recurrent::detail::invalid_slot;
-    return parent_active && !child_active;
+    const bool child_inactive = ctx.seq_to_slot[child_index] == recurrent::detail::invalid_slot;
+    return has_copy_callback && parent_id_valid && child_id_valid && ids_distinct &&
+           parent_active && child_inactive;
   }
 };
 
-struct branch_sequence_request_valid {
+struct branch_sequence_request_shape_invalid {
+  bool operator()(const event::branch_sequence_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    return !branch_sequence_request_shape_valid{}(ev, ctx);
+  }
+};
+
+struct branch_sequence_request_capacity_available {
   bool operator()(const event::branch_sequence_runtime & ev,
                   const action::context & ctx) const noexcept {
     return branch_sequence_request_shape_valid{}(ev, ctx) && ctx.free_count > 0;
   }
 };
 
-struct branch_sequence_request_backend_error {
+struct branch_sequence_request_capacity_exhausted {
   bool operator()(const event::branch_sequence_runtime & ev,
                   const action::context & ctx) const noexcept {
     return branch_sequence_request_shape_valid{}(ev, ctx) && ctx.free_count <= 0;
-  }
-};
-
-struct branch_sequence_request_invalid {
-  bool operator()(const event::branch_sequence_runtime & ev,
-                  const action::context & ctx) const noexcept {
-    return !branch_sequence_request_shape_valid{}(ev, ctx);
   }
 };
 

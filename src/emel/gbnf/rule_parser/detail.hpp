@@ -1,5 +1,6 @@
 #pragma once
 
+#include <charconv>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -204,29 +205,28 @@ inline bool is_word_char(const char c) noexcept {
 
 inline bool parse_uint64(const char *src, const char *end, uint64_t &value_out,
                          const char **next_out) noexcept {
-  const bool has_digit = src < end && is_digit_char(*src);
-  uint64_t value = 0;
-  const uint64_t max_div_10 = std::numeric_limits<uint64_t>::max() / 10u;
-  const char *pos = src;
-  bool ok = has_digit;
+  const bool ordered = src <= end;
+  static constexpr char k_zero = '\0';
+  const uintptr_t begin_addr = select_uptr(ordered,
+                                           reinterpret_cast<uintptr_t>(src),
+                                           reinterpret_cast<uintptr_t>(&k_zero));
+  const uintptr_t end_addr = select_uptr(ordered,
+                                         reinterpret_cast<uintptr_t>(end),
+                                         reinterpret_cast<uintptr_t>(&k_zero));
+  const char *begin = reinterpret_cast<const char *>(begin_addr);
+  const char *safe_end = reinterpret_cast<const char *>(end_addr);
 
-  while (ok && pos < end && is_digit_char(*pos)) {
-    const uint64_t digit = static_cast<uint64_t>(*pos - '0');
-    const bool overflow =
-        value > max_div_10 ||
-        (value == max_div_10 &&
-         digit > (std::numeric_limits<uint64_t>::max() % 10u));
-    const uint64_t next_value = value * 10u + digit;
-    value = select_u64(!overflow, next_value, value);
-    pos += static_cast<size_t>(!overflow);
-    ok = ok && !overflow;
-  }
+  uint64_t parsed = 0;
+  const auto result = std::from_chars(begin, safe_end, parsed, 10);
+  const bool has_digit = result.ptr != begin;
+  const bool no_error = result.ec == std::errc{};
+  const bool ok = ordered && has_digit && no_error;
+  const char *next = result.ptr;
 
   const size_t out_bytes = sizeof(uint64_t) * static_cast<size_t>(ok);
-  std::memcpy(&value_out, &value, out_bytes);
-  const size_t next_bytes = sizeof(pos) * static_cast<size_t>(ok);
-  std::memcpy(next_out, &pos, next_bytes);
-
+  std::memcpy(&value_out, &parsed, out_bytes);
+  const size_t next_bytes = sizeof(next) * static_cast<size_t>(ok);
+  std::memcpy(next_out, &next, next_bytes);
   return ok;
 }
 

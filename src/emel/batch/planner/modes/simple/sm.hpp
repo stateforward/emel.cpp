@@ -10,6 +10,8 @@
 namespace emel::batch::planner::modes::simple {
 
 struct preparing {};
+struct planning_input_decision {};
+struct planning_capacity_decision {};
 struct planning {};
 struct planning_decision {};
 struct planning_done {};
@@ -23,8 +25,24 @@ struct model {
       //------------------------------------------------------------------------------//
         sml::state<planning> <= *sml::state<preparing>
           + sml::completion<event::request_runtime> / action::prepare_steps
-      , sml::state<planning_decision> <= sml::state<planning>
-          + sml::completion<event::request_runtime> / action::create_plan
+      , sml::state<planning_input_decision> <= sml::state<planning>
+          + sml::completion<event::request_runtime>
+      //------------------------------------------------------------------------------//
+      , sml::state<planning_failed> <= sml::state<planning_input_decision>
+          + sml::completion<event::request_runtime> [ guard::has_invalid_step_size ]
+          / action::mark_invalid_step_size
+      , sml::state<planning_capacity_decision> <= sml::state<planning_input_decision>
+          + sml::completion<event::request_runtime> [ guard::has_valid_step_size ]
+      //------------------------------------------------------------------------------//
+      , sml::state<planning_failed> <= sml::state<planning_capacity_decision>
+          + sml::completion<event::request_runtime> [ guard::exceeds_step_capacity ]
+          / action::mark_output_steps_full
+      , sml::state<planning_failed> <= sml::state<planning_capacity_decision>
+          + sml::completion<event::request_runtime> [ guard::exceeds_index_capacity ]
+          / action::mark_output_indices_full
+      , sml::state<planning_decision> <= sml::state<planning_capacity_decision>
+          + sml::completion<event::request_runtime> [ guard::simple_plan_capacity_ok ]
+          / action::create_plan
       , sml::state<planning_done> <= sml::state<planning_decision>
           + sml::completion<event::request_runtime> [ guard::planning_succeeded ]
       , sml::state<planning_failed> <= sml::state<planning_decision>
@@ -40,6 +58,10 @@ struct model {
       , sml::state<planning_failed> <= sml::state<preparing>
           + sml::unexpected_event<sml::_>
       , sml::state<planning_failed> <= sml::state<planning>
+          + sml::unexpected_event<sml::_>
+      , sml::state<planning_failed> <= sml::state<planning_input_decision>
+          + sml::unexpected_event<sml::_>
+      , sml::state<planning_failed> <= sml::state<planning_capacity_decision>
           + sml::unexpected_event<sml::_>
       , sml::state<planning_failed> <= sml::state<planning_decision>
           + sml::unexpected_event<sml::_>

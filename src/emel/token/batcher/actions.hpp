@@ -150,19 +150,14 @@ inline bool for_each_mask_seq_id(const uint64_t * mask,
                                  const int32_t words,
                                  const fn_type & fn) noexcept {
   bool ok = true;
-  int32_t word_limit = words;
-  for (int32_t w = 0; w < word_limit; ++w) {
+  for (int32_t w = 0; w < words; ++w) {
     uint64_t bits = mask[static_cast<size_t>(w)];
     while (bits != 0U) {
       const int32_t bit = static_cast<int32_t>(std::countr_zero(bits));
       const int32_t seq_id = w * 64 + bit;
       ok = ok && fn(seq_id);
-      const uint64_t next_bits = bits & (bits - 1U);
-      const uint64_t continue_mask = uint64_t{0} - static_cast<uint64_t>(ok);
-      bits = next_bits & continue_mask;
+      bits &= (bits - 1U);
     }
-    const int32_t keep_limit = static_cast<int32_t>(ok);
-    word_limit = keep_limit * word_limit + (1 - keep_limit) * (w + 1);
   }
   return ok;
 }
@@ -171,12 +166,9 @@ inline bool primary_ids_in_range(const int32_t * primary_ids,
                                  const int32_t count,
                                  const int32_t seq_limit) noexcept {
   bool in_range = true;
-  int32_t scan_limit = count;
-  for (int32_t i = 0; i < scan_limit; ++i) {
+  for (int32_t i = 0; i < count; ++i) {
     const int32_t seq_id = primary_ids[i];
     in_range = in_range && seq_id >= 0 && seq_id < seq_limit;
-    const int32_t keep_limit = static_cast<int32_t>(in_range);
-    scan_limit = keep_limit * scan_limit + (1 - keep_limit) * (i + 1);
   }
   return in_range;
 }
@@ -185,12 +177,10 @@ inline bool masks_have_non_empty_rows(const event::batch & req) noexcept {
   const bool has_masks = has_seq_masks_input(req);
   const int32_t mask_words = req.seq_mask_words;
   bool non_empty_rows = true;
-  int32_t row_limit = static_cast<int32_t>(has_masks) * req.n_tokens;
-  for (int32_t i = 0; i < row_limit; ++i) {
+  const int32_t row_count = static_cast<int32_t>(has_masks) * req.n_tokens;
+  for (int32_t i = 0; i < row_count; ++i) {
     const uint64_t * in_mask = req.seq_masks + static_cast<size_t>(i) * mask_words;
     non_empty_rows = non_empty_rows && !mask_empty(in_mask, mask_words);
-    const int32_t keep_limit = static_cast<int32_t>(non_empty_rows);
-    row_limit = keep_limit * row_limit + (1 - keep_limit) * (i + 1);
   }
   return !has_masks || non_empty_rows;
 }
@@ -201,15 +191,73 @@ inline bool primary_in_mask_when_both_inputs(const event::batch & req) noexcept 
   const bool check_required = has_masks && has_primary;
   const int32_t mask_words = req.seq_mask_words;
   bool primary_present = true;
-  int32_t row_limit = static_cast<int32_t>(check_required) * req.n_tokens;
-  for (int32_t i = 0; i < row_limit; ++i) {
+  const int32_t row_count = static_cast<int32_t>(check_required) * req.n_tokens;
+  for (int32_t i = 0; i < row_count; ++i) {
     const int32_t primary = req.seq_primary_ids[i];
     const uint64_t * in_mask = req.seq_masks + static_cast<size_t>(i) * mask_words;
     primary_present = primary_present && mask_has_bit(in_mask, mask_words, primary);
-    const int32_t keep_limit = static_cast<int32_t>(primary_present);
-    row_limit = keep_limit * row_limit + (1 - keep_limit) * (i + 1);
   }
   return !check_required || primary_present;
+}
+
+inline bool required_outputs_present(const event::batch &) noexcept {
+  return true;
+}
+
+inline bool token_counts_valid(const event::batch & req) noexcept {
+  return req.n_tokens > 0 && req.n_tokens <= action::MAX_TOKENS;
+}
+
+inline bool capacities_valid(const event::batch & req) noexcept {
+  const int32_t mask_words = effective_mask_words(req);
+  const int32_t stride = positions_stride(req);
+  const bool stride_valid = stride >= 0;
+  const std::array<int32_t, 2> positions_count_candidates = {req.n_tokens, req.n_tokens * 3};
+  const int32_t positions_count =
+      positions_count_candidates[static_cast<size_t>(stride == 3)];
+  const bool capacities_ok =
+      req.seq_primary_ids_capacity >= req.n_tokens &&
+      req.seq_masks_capacity >= req.n_tokens * mask_words &&
+      req.positions_capacity >= positions_count &&
+      req.output_mask_capacity >= req.n_tokens;
+  return stride_valid && capacities_ok;
+}
+
+inline bool token_ids_in_vocab(const event::batch & req) noexcept {
+  const int32_t * token_ids = token_ids_ptr(req);
+  const bool vocab_non_negative = req.vocab_size >= 0;
+  const bool enforce_vocab = req.vocab_size > 0;
+  bool in_vocab = true;
+  for (int32_t i = 0; i < req.n_tokens; ++i) {
+    const int32_t token_id = token_ids[i];
+    const bool token_ok = token_id >= 0 && token_id < req.vocab_size;
+    in_vocab = in_vocab && (!enforce_vocab || token_ok);
+  }
+  return vocab_non_negative && in_vocab;
+}
+
+inline bool seq_payload_valid(const event::batch & req) noexcept {
+  const bool has_masks = has_seq_masks_input(req);
+  const bool has_primary = has_seq_primary_input(req);
+  const bool mask_words_valid = req.seq_mask_words > 0 && req.seq_mask_words <= action::SEQ_WORDS;
+  const bool masks_non_empty = masks_have_non_empty_rows(req);
+  const bool masks_ok = !has_masks || (mask_words_valid && masks_non_empty);
+
+  const int32_t mask_words = effective_mask_words(req);
+  const int32_t seq_limit = mask_words * 64;
+  const bool primary_range_ok =
+      !has_primary || primary_ids_in_range(req.seq_primary_ids, req.n_tokens, seq_limit);
+  const bool primary_in_mask_ok =
+      !(has_masks && has_primary) || primary_in_mask_when_both_inputs(req);
+  return masks_ok && primary_range_ok && primary_in_mask_ok;
+}
+
+inline bool request_valid(const event::batch & req) noexcept {
+  return required_outputs_present(req) &&
+         token_counts_valid(req) &&
+         capacities_valid(req) &&
+         token_ids_in_vocab(req) &&
+         seq_payload_valid(req);
 }
 
 inline void continuity_track_active_none(std::array<int32_t, action::MAX_SEQ> &,
@@ -242,8 +290,7 @@ inline bool single_output_per_seq_ok(const event::batch_runtime & ev) noexcept {
   std::array<int32_t, action::MAX_SEQ> seq_output_count = {};
 
   bool ok = true;
-  int32_t row_limit = req.n_tokens;
-  for (int32_t i = 0; i < row_limit; ++i) {
+  for (int32_t i = 0; i < req.n_tokens; ++i) {
     const bool active = output_mask_out[i] != 0;
     const uint64_t * mask = seq_masks_out + static_cast<size_t>(i) * mask_words;
     const bool row_ok = !active || for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
@@ -251,8 +298,6 @@ inline bool single_output_per_seq_ok(const event::batch_runtime & ev) noexcept {
                           return seq_output_count[seq_id] <= 1;
                         });
     ok = ok && row_ok;
-    const int32_t keep_limit = static_cast<int32_t>(ok);
-    row_limit = keep_limit * row_limit + (1 - keep_limit) * (i + 1);
   }
 
   return ok;
@@ -278,8 +323,7 @@ inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
   seq_pos_max.fill(std::numeric_limits<int32_t>::min());
 
   bool ok = true;
-  int32_t token_limit = req.n_tokens;
-  for (int32_t i = 0; i < token_limit; ++i) {
+  for (int32_t i = 0; i < req.n_tokens; ++i) {
     const int32_t pos = positions_out[i];
     const uint64_t * mask = seq_masks_out + static_cast<size_t>(i) * mask_words;
 
@@ -312,12 +356,9 @@ inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
 
            return (!first_seen || has_active_slot) && monotonic && !mask_empty(cur_mask, mask_words);
          });
-    const int32_t keep_limit = static_cast<int32_t>(ok);
-    token_limit = keep_limit * token_limit + (1 - keep_limit) * (i + 1);
   }
 
-  int32_t active_limit = active_seq_count;
-  for (int32_t i = 0; i < active_limit; ++i) {
+  for (int32_t i = 0; i < active_seq_count; ++i) {
     const int32_t seq_id = active_seq_ids[i];
     const int32_t min_pos = seq_pos_min[seq_id];
     const int32_t max_pos = seq_pos_max[seq_id];
@@ -326,8 +367,6 @@ inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
                             max_pos != std::numeric_limits<int32_t>::min();
     const int64_t span = static_cast<int64_t>(max_pos) - static_cast<int64_t>(min_pos) + 1;
     ok = ok && (!has_bounds || span <= count);
-    const int32_t keep_limit = static_cast<int32_t>(ok);
-    active_limit = keep_limit * active_limit + (1 - keep_limit) * (i + 1);
   }
 
   return ok;
@@ -340,15 +379,12 @@ inline probe_status seeded_generation_seed_scan(
   std::array<int32_t, action::MAX_SEQ> next_pos = {};
   bool backend_ok = true;
   bool valid = true;
-  int32_t seed_limit = action::MAX_SEQ;
-  for (int32_t seq_id = 0; seq_id < seed_limit; ++seq_id) {
+  for (int32_t seq_id = 0; seq_id < action::MAX_SEQ; ++seq_id) {
     int32_t seed = 0;
     const bool resolved = req.resolve_position_seed(req.position_seed_ctx, seq_id, &seed);
     backend_ok = backend_ok && resolved;
     valid = valid && seed >= 0;
     next_pos[seq_id] = seed;
-    const int32_t keep_limit = static_cast<int32_t>(backend_ok && valid);
-    seed_limit = keep_limit * seed_limit + (1 - keep_limit) * (seq_id + 1);
   }
 
   seeded_next_pos_out = next_pos;
@@ -368,8 +404,7 @@ inline probe_status seeded_generation_probe(
   bool valid = seed_status == probe_status::ok;
   seeded_next_pos_out = next_pos;
 
-  int32_t token_limit = static_cast<int32_t>(valid) * req.n_tokens;
-  for (int32_t i = 0; i < token_limit; ++i) {
+  for (int32_t i = 0; i < req.n_tokens; ++i) {
     const int32_t primary = seq_primary_ids_out[i];
     const int32_t pos = next_pos[primary];
     valid = valid && pos != std::numeric_limits<int32_t>::max();
@@ -387,8 +422,6 @@ inline probe_status seeded_generation_probe(
       next_pos[seq_id] = advance * (pos + 1) + (1 - advance) * current;
       return true;
     });
-    const int32_t keep_limit = static_cast<int32_t>(backend_ok && valid);
-    token_limit = keep_limit * token_limit + (1 - keep_limit) * (i + 1);
   }
 
   return probe_status_from_flags(backend_ok, valid);
@@ -403,8 +436,7 @@ inline bool unseeded_generation_probe(const event::batch_runtime & ev) noexcept 
   std::array<uint8_t, action::MAX_SEQ> seeded = {};
 
   bool valid = true;
-  int32_t token_limit = req.n_tokens;
-  for (int32_t i = 0; i < token_limit; ++i) {
+  for (int32_t i = 0; i < req.n_tokens; ++i) {
     const int32_t primary = seq_primary_ids_out[i];
     const int32_t pos = next_pos[primary];
     valid = valid && pos != std::numeric_limits<int32_t>::max();
@@ -425,8 +457,6 @@ inline bool unseeded_generation_probe(const event::batch_runtime & ev) noexcept 
       next_pos[seq_id] = advance * (pos + 1) + (1 - advance) * current;
       return true;
     });
-    const int32_t keep_limit = static_cast<int32_t>(valid);
-    token_limit = keep_limit * token_limit + (1 - keep_limit) * (i + 1);
   }
 
   return valid;
@@ -441,6 +471,7 @@ struct begin_batch {
     ev.ctx.outputs_total = 0;
     ev.ctx.normalized_seq_mask_words = detail::effective_mask_words(ev.request);
     ev.ctx.normalized_positions_count = ev.request.n_tokens;
+    ev.ctx.seeded_next_pos.fill(0);
     detail::write_error(ev, ev.ctx.err);
   }
 };
@@ -469,6 +500,42 @@ struct mark_backend_error {
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
     runtime_ev.ctx.err = emel::error::cast(error::backend_error);
     detail::write_error(runtime_ev, runtime_ev.ctx.err);
+  }
+};
+
+struct probe_request_validity {
+  void operator()(const event::batch_runtime & ev, context &) const noexcept {
+    constexpr std::array<emel::error::type, 2> error_lut = {
+        emel::error::cast(error::invalid_request),
+        emel::error::cast(error::none),
+    };
+    const bool valid = detail::request_valid(ev.request);
+    ev.ctx.err = error_lut[static_cast<size_t>(valid)];
+    detail::write_error(ev, ev.ctx.err);
+  }
+};
+
+struct probe_single_output_per_seq {
+  void operator()(const event::batch_runtime & ev, context &) const noexcept {
+    constexpr std::array<emel::error::type, 2> error_lut = {
+        emel::error::cast(error::invalid_request),
+        emel::error::cast(error::none),
+    };
+    const bool valid = detail::single_output_per_seq_ok(ev);
+    ev.ctx.err = error_lut[static_cast<size_t>(valid)];
+    detail::write_error(ev, ev.ctx.err);
+  }
+};
+
+struct probe_continuity {
+  void operator()(const event::batch_runtime & ev, context &) const noexcept {
+    constexpr std::array<emel::error::type, 2> error_lut = {
+        emel::error::cast(error::invalid_request),
+        emel::error::cast(error::none),
+    };
+    const bool valid = detail::continuity_ok(ev);
+    ev.ctx.err = error_lut[static_cast<size_t>(valid)];
+    detail::write_error(ev, ev.ctx.err);
   }
 };
 
@@ -549,8 +616,7 @@ struct copy_positions_stride_one {
 
 struct probe_positions_seeded {
   void operator()(const event::batch_runtime & ev, context &) const noexcept {
-    std::array<int32_t, MAX_SEQ> next_pos = {};
-    const detail::probe_status status = detail::seeded_generation_probe(ev, next_pos);
+    const detail::probe_status status = detail::seeded_generation_probe(ev, ev.ctx.seeded_next_pos);
     constexpr std::array<emel::error::type, 3> error_lut = {
         emel::error::cast(error::none),
         emel::error::cast(error::backend_error),
@@ -580,19 +646,12 @@ struct generate_positions_seeded {
     const int32_t * seq_primary_ids_out = detail::seq_primary_ids_out_ptr(req);
     uint64_t * seq_masks_out = detail::seq_masks_out_ptr(req);
     int32_t * positions_out = detail::positions_out_ptr(req);
-    std::array<int32_t, MAX_SEQ> next_pos = {};
+    std::array<int32_t, MAX_SEQ> next_pos = ev.ctx.seeded_next_pos;
 
-    const detail::probe_status seed_status = detail::seeded_generation_seed_scan(ev, next_pos);
-    constexpr std::array<emel::error::type, 3> error_lut = {
-        emel::error::cast(error::none),
-        emel::error::cast(error::backend_error),
-        emel::error::cast(error::invalid_request),
-    };
-    ev.ctx.err = error_lut[static_cast<size_t>(seed_status)];
+    ev.ctx.err = emel::error::cast(error::none);
     detail::write_error(ev, ev.ctx.err);
 
-    int32_t token_limit = static_cast<int32_t>(seed_status == detail::probe_status::ok) * req.n_tokens;
-    for (int32_t i = 0; i < token_limit; ++i) {
+    for (int32_t i = 0; i < req.n_tokens; ++i) {
       const int32_t primary = seq_primary_ids_out[i];
       const int32_t pos = next_pos[primary];
       positions_out[i] = pos;
@@ -604,9 +663,7 @@ struct generate_positions_seeded {
       });
     }
 
-    const int32_t generated = static_cast<int32_t>(seed_status == detail::probe_status::ok);
-    ev.ctx.normalized_positions_count =
-        generated * req.n_tokens + (1 - generated) * ev.ctx.normalized_positions_count;
+    ev.ctx.normalized_positions_count = req.n_tokens;
   }
 };
 
@@ -749,6 +806,9 @@ inline constexpr begin_batch begin_batch{};
 inline constexpr mark_invalid_request mark_invalid_request{};
 inline constexpr mark_internal_error mark_internal_error{};
 inline constexpr mark_backend_error mark_backend_error{};
+inline constexpr probe_request_validity probe_request_validity{};
+inline constexpr probe_single_output_per_seq probe_single_output_per_seq{};
+inline constexpr probe_continuity probe_continuity{};
 inline constexpr normalize_seq_from_masks normalize_seq_from_masks{};
 inline constexpr normalize_seq_from_primary_ids normalize_seq_from_primary_ids{};
 inline constexpr normalize_seq_default normalize_seq_default{};

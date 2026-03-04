@@ -1,14 +1,21 @@
 stateDiagram-v2
   direction TB
   [*] --> preparing
-  preparing --> planning : completion_request_runtime_ [always] / lambda_actions_13_39
-  planning --> planning_decision : completion_request_runtime_ [always] / lambda_actions_17_37
-  planning_decision --> planning_done : completion_request_runtime_ [lambda_guards_7_44] / none
-  planning_decision --> planning_failed : completion_request_runtime_ [lambda_guards_13_5] / none
+  preparing --> planning : completion_request_runtime_ [always] / lambda_actions_34_39
+  planning --> planning_input_decision : completion_request_runtime_ [always] / none
+  planning_input_decision --> planning_failed : completion_request_runtime_ [lambda_guards_25_5] / lambda_actions_38_48
+  planning_input_decision --> planning_capacity_decision : completion_request_runtime_ [lambda_guards_19_5] / none
+  planning_capacity_decision --> planning_failed : completion_request_runtime_ [lambda_guards_31_5] / lambda_actions_43_48
+  planning_capacity_decision --> planning_failed : completion_request_runtime_ [lambda_guards_37_5] / lambda_actions_48_50
+  planning_capacity_decision --> planning_decision : completion_request_runtime_ [lambda_guards_43_5] / lambda_actions_53_37
+  planning_decision --> planning_done : completion_request_runtime_ [lambda_guards_50_44] / none
+  planning_decision --> planning_failed : completion_request_runtime_ [lambda_guards_56_5] / none
   planning_done --> terminate : [always] / none
   planning_failed --> terminate : [always] / none
   planning_done --> planning_failed : _ [always] / none
   planning_failed --> planning_failed : _ [always] / none
   preparing --> planning_failed : _ [always] / none
   planning --> planning_failed : _ [always] / none
+  planning_input_decision --> planning_failed : _ [always] / none
+  planning_capacity_decision --> planning_failed : _ [always] / none
   planning_decision --> planning_failed : _ [always] / none

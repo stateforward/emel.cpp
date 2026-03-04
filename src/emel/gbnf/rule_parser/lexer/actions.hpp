@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <string_view>
 
@@ -51,8 +50,29 @@ inline void emit_range_token(const event::next & ev,
   emit_token(ev, make_token(ev.cursor.input, start, end, kind), end);
 }
 
-inline bool noop_error_callback(const events::next_error &) noexcept {
-  return true;
+inline uint32_t scan_quoted(const std::string_view input,
+                            uint32_t pos,
+                            const char terminator) noexcept {
+  const uint32_t size = static_cast<uint32_t>(input.size());
+  ++pos;
+  uint32_t matched = 0u;
+  while (pos < size && matched == 0u) {
+    const char c = input[pos];
+    const size_t escaped = static_cast<size_t>(c == '\\' && pos + 1u < size);
+    pos += static_cast<uint32_t>(escaped + 1u);
+    matched = static_cast<uint32_t>(static_cast<size_t>(c == terminator) & (1u - escaped));
+  }
+  return pos;
+}
+
+inline uint32_t scan_braced_quantifier(const std::string_view input, uint32_t pos) noexcept {
+  const uint32_t size = static_cast<uint32_t>(input.size());
+  ++pos;
+  while (pos < size && input[pos] != '}') {
+    ++pos;
+  }
+  pos += static_cast<uint32_t>(pos < size && input[pos] == '}');
+  return pos;
 }
 
 }  // namespace detail
@@ -64,14 +84,11 @@ struct emit_layout_exhausted_unknown {
   }
 };
 
-struct emit_newline_token {
+template <uint32_t width>
+struct emit_newline_token_width {
   void operator()(const event::next & ev, context &) const noexcept {
     const uint32_t start = lexer::detail::token_start(ev.cursor);
-    const uint32_t size = static_cast<uint32_t>(ev.cursor.input.size());
-    const bool crlf = ev.cursor.input[start] == '\r' && start + 1u < size &&
-                      ev.cursor.input[start + 1u] == '\n';
-    const std::array<uint32_t, 2> newline_steps = {1u, 2u};
-    const uint32_t end = static_cast<uint32_t>(start + newline_steps[static_cast<size_t>(crlf)]);
+    const uint32_t end = static_cast<uint32_t>(start + width);
     detail::emit_range_token(ev, start, end, event::token_kind::newline);
   }
 };
@@ -102,7 +119,7 @@ struct emit_unknown : emit_single_char_token<event::token_kind::unknown> {};
 struct emit_string_literal {
   void operator()(const event::next & ev, context &) const noexcept {
     const uint32_t start = lexer::detail::token_start(ev.cursor);
-    const uint32_t end = lexer::detail::scan_quoted(ev.cursor.input, start, '"');
+    const uint32_t end = detail::scan_quoted(ev.cursor.input, start, '"');
     detail::emit_range_token(ev, start, end, event::token_kind::string_literal);
   }
 };
@@ -110,7 +127,7 @@ struct emit_string_literal {
 struct emit_character_class {
   void operator()(const event::next & ev, context &) const noexcept {
     const uint32_t start = lexer::detail::token_start(ev.cursor);
-    const uint32_t end = lexer::detail::scan_quoted(ev.cursor.input, start, ']');
+    const uint32_t end = detail::scan_quoted(ev.cursor.input, start, ']');
     detail::emit_range_token(ev, start, end, event::token_kind::character_class);
   }
 };
@@ -118,15 +135,23 @@ struct emit_character_class {
 struct emit_braced_quantifier {
   void operator()(const event::next & ev, context &) const noexcept {
     const uint32_t start = lexer::detail::token_start(ev.cursor);
-    const uint32_t end = lexer::detail::scan_braced_quantifier(ev.cursor.input, start);
+    const uint32_t end = detail::scan_braced_quantifier(ev.cursor.input, start);
     detail::emit_range_token(ev, start, end, event::token_kind::quantifier);
   }
 };
 
-struct emit_rule_reference {
+struct emit_rule_reference_plain {
   void operator()(const event::next & ev, context &) const noexcept {
     const uint32_t start = lexer::detail::token_start(ev.cursor);
-    const uint32_t end = lexer::detail::scan_token_ref(ev.cursor.input, start);
+    const uint32_t end = lexer::detail::scan_token_ref_plain(ev.cursor.input, start);
+    detail::emit_range_token(ev, start, end, event::token_kind::rule_reference);
+  }
+};
+
+struct emit_rule_reference_negated {
+  void operator()(const event::next & ev, context &) const noexcept {
+    const uint32_t start = lexer::detail::token_start(ev.cursor);
+    const uint32_t end = lexer::detail::scan_token_ref_plain(ev.cursor.input, start + 1u);
     detail::emit_range_token(ev, start, end, event::token_kind::rule_reference);
   }
 };
@@ -165,22 +190,23 @@ struct reject_invalid_cursor {
   }
 };
 
-struct on_unexpected {
+struct dispatch_unexpected_error {
   template <class event_type>
   void operator()(const event_type & ev, context &) const noexcept {
     if constexpr (requires { ev.on_error; }) {
-      const size_t has_callback = static_cast<size_t>(static_cast<bool>(ev.on_error));
-      const callback<bool(const events::next_error &)> callbacks[2] = {
-          callback<bool(const events::next_error &)>::from<detail::noop_error_callback>(),
-          ev.on_error,
-      };
-      (void)callbacks[has_callback](events::next_error{error_code(error::internal_error)});
+      (void)ev.on_error(events::next_error{error_code(error::internal_error)});
     }
   }
 };
 
+struct ignore_unexpected {
+  template <class event_type>
+  void operator()(const event_type &, context &) const noexcept {}
+};
+
 inline constexpr emit_layout_exhausted_unknown emit_layout_exhausted_unknown{};
-inline constexpr emit_newline_token emit_newline_token{};
+inline constexpr emit_newline_token_width<1u> emit_newline_single_token{};
+inline constexpr emit_newline_token_width<2u> emit_newline_crlf_token{};
 inline constexpr emit_definition_operator emit_definition_operator{};
 inline constexpr emit_alternation emit_alternation{};
 inline constexpr emit_dot emit_dot{};
@@ -190,12 +216,14 @@ inline constexpr emit_quantifier emit_quantifier{};
 inline constexpr emit_string_literal emit_string_literal{};
 inline constexpr emit_character_class emit_character_class{};
 inline constexpr emit_braced_quantifier emit_braced_quantifier{};
-inline constexpr emit_rule_reference emit_rule_reference{};
+inline constexpr emit_rule_reference_plain emit_rule_reference_plain{};
+inline constexpr emit_rule_reference_negated emit_rule_reference_negated{};
 inline constexpr emit_identifier emit_identifier{};
 inline constexpr emit_unknown emit_unknown{};
 inline constexpr emit_eof emit_eof{};
 inline constexpr reject_invalid_next reject_invalid_next{};
 inline constexpr reject_invalid_cursor reject_invalid_cursor{};
-inline constexpr on_unexpected on_unexpected{};
+inline constexpr dispatch_unexpected_error dispatch_unexpected_error{};
+inline constexpr ignore_unexpected ignore_unexpected{};
 
 }  // namespace emel::gbnf::rule_parser::lexer::action

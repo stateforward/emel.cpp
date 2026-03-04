@@ -26,10 +26,14 @@ struct allocate_sequence_exec {};
 struct allocate_sequence_result_decision {};
 
 struct allocate_slots_request_decision {};
+struct allocate_slots_request_shape_decision {};
+struct allocate_slots_request_length_decision {};
 struct allocate_slots_exec {};
 struct allocate_slots_result_decision {};
 
 struct branch_sequence_request_decision {};
+struct branch_sequence_request_shape_decision {};
+struct branch_sequence_request_capacity_decision {};
 struct branch_sequence_exec {};
 struct branch_sequence_result_decision {};
 struct branch_sequence_copy_exec {};
@@ -109,10 +113,24 @@ struct model {
       //------------------------------------------------------------------------------//
       , sml::state<allocate_slots_request_decision> <= sml::state<ready>
           + sml::event<event::allocate_slots_runtime> / action::begin_allocate_slots
-      , sml::state<allocate_slots_exec> <= sml::state<allocate_slots_request_decision>
-          + sml::completion<event::allocate_slots_runtime> [ guard::allocate_slots_request_valid{} ]
-      , sml::state<errored> <= sml::state<allocate_slots_request_decision>
-          + sml::completion<event::allocate_slots_runtime> [ guard::allocate_slots_request_invalid{} ]
+      , sml::state<allocate_slots_request_shape_decision> <= sml::state<allocate_slots_request_decision>
+          + sml::completion<event::allocate_slots_runtime>
+
+      , sml::state<allocate_slots_request_length_decision>
+          <= sml::state<allocate_slots_request_shape_decision>
+          + sml::completion<event::allocate_slots_runtime>
+          [ guard::allocate_slots_request_shape_valid{} ]
+      , sml::state<errored> <= sml::state<allocate_slots_request_shape_decision>
+          + sml::completion<event::allocate_slots_runtime>
+          [ guard::allocate_slots_request_shape_invalid{} ]
+          / action::mark_invalid_request
+
+      , sml::state<allocate_slots_exec> <= sml::state<allocate_slots_request_length_decision>
+          + sml::completion<event::allocate_slots_runtime>
+          [ guard::allocate_slots_request_length_valid{} ]
+      , sml::state<errored> <= sml::state<allocate_slots_request_length_decision>
+          + sml::completion<event::allocate_slots_runtime>
+          [ guard::allocate_slots_request_length_invalid{} ]
           / action::mark_invalid_request
       , sml::state<allocate_slots_result_decision> <= sml::state<allocate_slots_exec>
           + sml::completion<event::allocate_slots_runtime> / action::exec_allocate_slots
@@ -128,17 +146,24 @@ struct model {
       //------------------------------------------------------------------------------//
       , sml::state<branch_sequence_request_decision> <= sml::state<ready>
           + sml::event<event::branch_sequence_runtime> / action::begin_branch_sequence
-      , sml::state<branch_sequence_exec> <= sml::state<branch_sequence_request_decision>
+      , sml::state<branch_sequence_request_shape_decision>
+          <= sml::state<branch_sequence_request_decision>
           + sml::completion<event::branch_sequence_runtime>
-          [ guard::branch_sequence_request_valid{} ]
-      , sml::state<errored> <= sml::state<branch_sequence_request_decision>
+      , sml::state<branch_sequence_request_capacity_decision>
+          <= sml::state<branch_sequence_request_shape_decision>
           + sml::completion<event::branch_sequence_runtime>
-          [ guard::branch_sequence_request_backend_error{} ]
-          / action::mark_backend_error
-      , sml::state<errored> <= sml::state<branch_sequence_request_decision>
+          [ guard::branch_sequence_request_shape_valid{} ]
+      , sml::state<errored> <= sml::state<branch_sequence_request_shape_decision>
           + sml::completion<event::branch_sequence_runtime>
-          [ guard::branch_sequence_request_invalid{} ]
+          [ guard::branch_sequence_request_shape_invalid{} ]
           / action::mark_invalid_request
+      , sml::state<branch_sequence_exec> <= sml::state<branch_sequence_request_capacity_decision>
+          + sml::completion<event::branch_sequence_runtime>
+          [ guard::branch_sequence_request_capacity_available{} ]
+      , sml::state<errored> <= sml::state<branch_sequence_request_capacity_decision>
+          + sml::completion<event::branch_sequence_runtime>
+          [ guard::branch_sequence_request_capacity_exhausted{} ]
+          / action::mark_backend_error
       , sml::state<branch_sequence_result_decision> <= sml::state<branch_sequence_exec>
           + sml::completion<event::branch_sequence_runtime>
           / action::exec_branch_sequence_prepare_child_slot
@@ -279,11 +304,19 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<allocate_slots_request_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<allocate_slots_request_shape_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<allocate_slots_request_length_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<allocate_slots_exec> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<allocate_slots_result_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<branch_sequence_request_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<branch_sequence_request_shape_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<branch_sequence_request_capacity_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<branch_sequence_exec> + sml::unexpected_event<sml::_>
           / action::on_unexpected

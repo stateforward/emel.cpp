@@ -46,7 +46,13 @@ struct parse_rules_ctx {
       emel::gbnf::rule_parser::term_parser::events::term_kind::unknown;
   term_origin current_term_origin = term_origin::none;
   uint32_t nonterm_rule_id = 0;
+  uint32_t parsed_rule_reference_id = 0;
+  uint64_t parsed_quantifier_min = 0;
+  uint64_t parsed_quantifier_max = 0;
   bool has_token = false;
+  bool parsed_rule_reference_valid = false;
+  bool parsed_rule_reference_negated = false;
+  bool parsed_quantifier_valid = false;
   emel::error::type err = emel::error::cast(error::none);
 };
 

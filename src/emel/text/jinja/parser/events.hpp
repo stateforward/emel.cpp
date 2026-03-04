@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 #include "emel/callback.hpp"
@@ -69,10 +70,8 @@ struct parse_ctx {
   parse_ctx(std::string_view template_text_ref, int32_t &error_out_ref,
             size_t &error_pos_out_ref) noexcept
       : error_out(error_out_ref), error_pos_out(error_pos_out_ref) {
-    const auto plan =
-        ::emel::text::jinja::lexer::detail::build_scan_plan(template_text_ref);
-    lex_result.source = plan.source;
-    lex_plan = plan.outcomes;
+    lex_result.source = std::string(template_text_ref);
+    ::emel::text::jinja::lexer::detail::normalize_source(lex_result.source);
   }
 
   parser::error err = parser::error::none;
@@ -90,8 +89,6 @@ struct parse_ctx {
   emel::text::jinja::token lex_token = {};
   bool lex_has_token = false;
   emel::text::jinja::lexer_result lex_result = {};
-  std::vector<emel::text::jinja::lexer::detail::scan_outcome> lex_plan = {};
-  size_t lex_plan_index = 0;
 
   int32_t &error_out;
   size_t &error_pos_out;

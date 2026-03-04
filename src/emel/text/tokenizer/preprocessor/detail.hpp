@@ -206,11 +206,21 @@ inline bool push_token_fragment(fragment * out, const size_t capacity,
   return true;
 }
 
-inline bool partition_with_specials(const std::string_view text,
-                                    const special_token_cache & cache,
-                                    const bool parse_special,
-                                    const std::span<fragment> fragments_out,
-                                    size_t & fragment_count_out) {
+inline bool special_token_allowed_parse_enabled(const special_token & token) noexcept {
+  return !token.text.empty();
+}
+
+inline bool special_token_allowed_parse_disabled(const special_token & token) noexcept {
+  return !token.text.empty() && !token_type_skip_when_no_parse(token.type);
+}
+
+using special_token_allowed_fn = bool (*)(const special_token &) noexcept;
+
+inline bool partition_with_specials_filtered(const std::string_view text,
+                                             const special_token_cache & cache,
+                                             const std::span<fragment> fragments_out,
+                                             size_t & fragment_count_out,
+                                             const special_token_allowed_fn token_allowed) {
   fragment_count_out = 0;
   const size_t fragment_capacity = fragments_out.size();
   const bool invalid_output =
@@ -238,8 +248,8 @@ inline bool partition_with_specials(const std::string_view text,
   std::array<fragment, k_max_fragments> next_fragments = {};
   for (size_t token_idx = 0; token_idx < cache.count; ++token_idx) {
     const special_token & token = cache.tokens[token_idx];
-    const bool skip_without_parse = !parse_special && token_type_skip_when_no_parse(token.type);
-    if (!token.text.empty() && !skip_without_parse) {
+    const bool process_token = token_allowed(token);
+    if (process_token) {
       size_t next_count = 0;
       for (size_t frag_idx = 0; frag_idx < current_count; ++frag_idx) {
         const fragment & frag = current_fragments[frag_idx];
@@ -304,6 +314,37 @@ inline bool partition_with_specials(const std::string_view text,
   }
   fragment_count_out = current_count;
   return true;
+}
+
+inline bool partition_with_specials_parse_enabled(const std::string_view text,
+                                                  const special_token_cache & cache,
+                                                  const std::span<fragment> fragments_out,
+                                                  size_t & fragment_count_out) {
+  return partition_with_specials_filtered(text, cache, fragments_out, fragment_count_out,
+                                          special_token_allowed_parse_enabled);
+}
+
+inline bool partition_with_specials_parse_disabled(const std::string_view text,
+                                                   const special_token_cache & cache,
+                                                   const std::span<fragment> fragments_out,
+                                                   size_t & fragment_count_out) {
+  return partition_with_specials_filtered(text, cache, fragments_out, fragment_count_out,
+                                          special_token_allowed_parse_disabled);
+}
+
+inline bool partition_with_specials(const std::string_view text,
+                                    const special_token_cache & cache,
+                                    const bool parse_special,
+                                    const std::span<fragment> fragments_out,
+                                    size_t & fragment_count_out) {
+  using partition_fn_type = bool (*)(std::string_view, const special_token_cache &,
+                                     std::span<fragment>, size_t &);
+  const std::array<partition_fn_type, 2> partitioners = {
+      partition_with_specials_parse_disabled,
+      partition_with_specials_parse_enabled,
+  };
+  return partitioners[static_cast<size_t>(parse_special)](text, cache, fragments_out,
+                                                          fragment_count_out);
 }
 
 inline bool

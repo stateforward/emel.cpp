@@ -13,14 +13,21 @@ struct ready {};
 struct request_decision {};
 struct parsing {};
 struct parse_decision {};
+struct parse_phase_decision {};
+struct parse_load_weights_policy_decision {};
+struct parse_load_weights_handler_decision {};
 struct loading_weights {};
 struct load_decision {};
+struct load_phase_decision {};
+struct load_map_policy_decision {};
 struct mapping_layers {};
 struct map_layers_decision {};
 struct structure_decision {};
+struct structure_policy_decision {};
 struct validating_structure {};
 struct structure_validation_decision {};
 struct architecture_decision {};
+struct architecture_policy_decision {};
 struct validating_architecture {};
 struct architecture_validation_decision {};
 struct done {};
@@ -45,29 +52,52 @@ struct model {
       , sml::state<parse_decision> <= sml::state<parsing>
           + sml::completion<event::load_runtime> / action::run_parse
 
-      , sml::state<loading_weights> <= sml::state<parse_decision>
+      , sml::state<parse_phase_decision> <= sml::state<parse_decision>
           + sml::completion<event::load_runtime>
-          [ guard::phase_ok_and_should_load_weights_and_can_load_weights{} ]
-      , sml::state<errored> <= sml::state<parse_decision>
+      , sml::state<errored> <= sml::state<parse_phase_decision>
           + sml::completion<event::load_runtime> [ guard::phase_failed{} ]
-      , sml::state<errored> <= sml::state<parse_decision>
+      , sml::state<parse_load_weights_policy_decision> <= sml::state<parse_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<parse_phase_decision>
+          + sml::completion<event::load_runtime> / action::mark_internal_error
+
+      , sml::state<parse_load_weights_handler_decision> <=
+          sml::state<parse_load_weights_policy_decision> + sml::completion<event::load_runtime>
+          [ guard::should_load_weights{} ]
+      , sml::state<structure_decision> <= sml::state<parse_load_weights_policy_decision>
+          + sml::completion<event::load_runtime> [ guard::skip_load_weights{} ]
+      , sml::state<errored> <= sml::state<parse_load_weights_policy_decision>
+          + sml::completion<event::load_runtime> / action::mark_internal_error
+
+      , sml::state<loading_weights> <= sml::state<parse_load_weights_handler_decision>
+          + sml::completion<event::load_runtime> [ guard::can_load_weights{} ]
+      , sml::state<errored> <= sml::state<parse_load_weights_handler_decision>
           + sml::completion<event::load_runtime>
-          [ guard::phase_ok_and_should_load_weights_and_cannot_load_weights{} ]
+          [ guard::cannot_load_weights{} ]
           / action::mark_invalid_request
-      , sml::state<structure_decision> <= sml::state<parse_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok_and_skip_load_weights{} ]
+      , sml::state<errored> <= sml::state<parse_load_weights_handler_decision>
+          + sml::completion<event::load_runtime> / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<load_decision> <= sml::state<loading_weights>
           + sml::completion<event::load_runtime> / action::run_load_weights
 
-      , sml::state<mapping_layers> <= sml::state<load_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok_and_can_map_layers{} ]
-      , sml::state<errored> <= sml::state<load_decision>
+      , sml::state<load_phase_decision> <= sml::state<load_decision>
+          + sml::completion<event::load_runtime>
+      , sml::state<errored> <= sml::state<load_phase_decision>
           + sml::completion<event::load_runtime> [ guard::phase_failed{} ]
-      , sml::state<errored> <= sml::state<load_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok_and_cannot_map_layers{} ]
+      , sml::state<load_map_policy_decision> <= sml::state<load_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<load_phase_decision>
+          + sml::completion<event::load_runtime> / action::mark_internal_error
+
+      , sml::state<mapping_layers> <= sml::state<load_map_policy_decision>
+          + sml::completion<event::load_runtime> [ guard::can_map_layers{} ]
+      , sml::state<errored> <= sml::state<load_map_policy_decision>
+          + sml::completion<event::load_runtime> [ guard::cannot_map_layers{} ]
           / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<load_map_policy_decision>
+          + sml::completion<event::load_runtime> / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<map_layers_decision> <= sml::state<mapping_layers>
@@ -79,13 +109,17 @@ struct model {
           + sml::completion<event::load_runtime> [ guard::phase_failed{} ]
 
       //------------------------------------------------------------------------------//
-      , sml::state<architecture_decision> <= sml::state<structure_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok_and_skip_validate_structure{} ]
-      , sml::state<validating_structure> <= sml::state<structure_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok_and_can_validate_structure{} ]
-      , sml::state<errored> <= sml::state<structure_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok_and_cannot_validate_structure{} ]
+      , sml::state<structure_policy_decision> <= sml::state<structure_decision>
+          + sml::completion<event::load_runtime>
+      , sml::state<architecture_decision> <= sml::state<structure_policy_decision>
+          + sml::completion<event::load_runtime> [ guard::skip_validate_structure{} ]
+      , sml::state<validating_structure> <= sml::state<structure_policy_decision>
+          + sml::completion<event::load_runtime> [ guard::can_validate_structure{} ]
+      , sml::state<errored> <= sml::state<structure_policy_decision>
+          + sml::completion<event::load_runtime> [ guard::cannot_validate_structure{} ]
           / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<structure_policy_decision>
+          + sml::completion<event::load_runtime> / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<structure_validation_decision> <= sml::state<validating_structure>
@@ -97,14 +131,18 @@ struct model {
           + sml::completion<event::load_runtime> [ guard::phase_failed{} ]
 
       //------------------------------------------------------------------------------//
-      , sml::state<done> <= sml::state<architecture_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok_and_skip_validate_architecture{} ]
-      , sml::state<validating_architecture> <= sml::state<architecture_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok_and_can_validate_architecture{} ]
-      , sml::state<errored> <= sml::state<architecture_decision>
+      , sml::state<architecture_policy_decision> <= sml::state<architecture_decision>
           + sml::completion<event::load_runtime>
-          [ guard::phase_ok_and_cannot_validate_architecture{} ]
+      , sml::state<done> <= sml::state<architecture_policy_decision>
+          + sml::completion<event::load_runtime> [ guard::skip_validate_architecture{} ]
+      , sml::state<validating_architecture> <= sml::state<architecture_policy_decision>
+          + sml::completion<event::load_runtime> [ guard::can_validate_architecture{} ]
+      , sml::state<errored> <= sml::state<architecture_policy_decision>
+          + sml::completion<event::load_runtime>
+          [ guard::cannot_validate_architecture{} ]
           / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<architecture_policy_decision>
+          + sml::completion<event::load_runtime> / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<architecture_validation_decision> <= sml::state<validating_architecture>
@@ -138,9 +176,19 @@ struct model {
           / action::on_unexpected
       , sml::state<ready> <= sml::state<parse_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
+      , sml::state<ready> <= sml::state<parse_phase_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<parse_load_weights_policy_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<parse_load_weights_handler_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
       , sml::state<ready> <= sml::state<loading_weights> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<load_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<load_phase_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<load_map_policy_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<mapping_layers> + sml::unexpected_event<sml::_>
           / action::on_unexpected
@@ -148,11 +196,15 @@ struct model {
           / action::on_unexpected
       , sml::state<ready> <= sml::state<structure_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
+      , sml::state<ready> <= sml::state<structure_policy_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
       , sml::state<ready> <= sml::state<validating_structure> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<structure_validation_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<architecture_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<architecture_policy_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<validating_architecture> + sml::unexpected_event<sml::_>
           / action::on_unexpected

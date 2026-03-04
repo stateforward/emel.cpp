@@ -51,8 +51,7 @@ lexer_result tokenize_with_machine(std::string_view source) {
   result.source = std::string(source);
   emel::text::jinja::parser::lexer::detail::normalize_source(result.source);
 
-  emel::text::jinja::parser::lexer::action::context ctx{};
-  emel::text::jinja::parser::lexer::sm machine{ctx};
+  emel::text::jinja::parser::lexer::sm machine{};
   cursor cur{
       result.source,
       0,
@@ -72,12 +71,7 @@ lexer_result tokenize_with_machine(std::string_view source) {
         next::error_callback::from<token_step_result,
                                    &token_step_result::on_error>(&step),
     };
-    const auto scan = emel::text::jinja::lexer::detail::scan_next_token_safe(cur);
-    const emel::text::jinja::parser::lexer::event::next_runtime runtime_ev{
-        ev,
-        scan,
-    };
-    const bool accepted = machine.process_event(runtime_ev);
+    const bool accepted = machine.process_event(ev);
     if (!accepted) {
       result.error = step.error_called ? step.err : k_parse_failed;
       result.error_pos = step.error_called ? step.error_pos : cur.offset;

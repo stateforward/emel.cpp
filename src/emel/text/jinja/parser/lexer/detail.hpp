@@ -14,6 +14,7 @@ struct next_ctx {
   size_t pos = 0;
   size_t text_start = 0;
   size_t text_end = 0;
+  size_t text_trim_probe = 0;
   bool handled = false;
 };
 

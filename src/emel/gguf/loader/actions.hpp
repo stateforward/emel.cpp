@@ -59,6 +59,12 @@ struct exec_probe {
   }
 };
 
+struct commit_probe_requirements {
+  void operator()(const event::probe_runtime & ev, context &) const noexcept {
+    ev.request.requirements_out = ev.ctx.requirements_out;
+  }
+};
+
 struct exec_bind {
   void operator()(const event::bind_runtime & ev, context & ctx) const noexcept {
     ev.ctx.err = emel::error::cast(error::none);
@@ -145,6 +151,7 @@ inline constexpr mark_bind_invalid_request mark_bind_invalid_request{};
 inline constexpr mark_parse_invalid_request mark_parse_invalid_request{};
 inline constexpr mark_bind_capacity mark_bind_capacity{};
 inline constexpr exec_probe exec_probe{};
+inline constexpr commit_probe_requirements commit_probe_requirements{};
 inline constexpr exec_bind exec_bind{};
 inline constexpr exec_parse exec_parse{};
 inline constexpr publish_probe_done publish_probe_done{};

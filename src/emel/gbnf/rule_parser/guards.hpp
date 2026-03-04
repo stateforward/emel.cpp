@@ -21,82 +21,6 @@ struct lexer_token_is {
   }
 };
 
-inline bool is_quantifier_text(const std::string_view text) noexcept {
-  return text == "+" || text == "*" || text == "?" ||
-         (text.size() >= 2u && text.front() == '{' && text.back() == '}');
-}
-
-inline bool parse_rule_reference_text(const std::string_view text) noexcept {
-  std::size_t pos = 0;
-  if (text.size() >= 1u && text[0] == '!') {
-    pos = 1u;
-  }
-  if (text.size() < pos + 4u || text[pos] != '<' || text[pos + 1u] != '[') {
-    return false;
-  }
-  pos += 2u;
-
-  uint64_t value = 0;
-  const char * cursor = text.data() + pos;
-  const char * end = text.data() + text.size();
-  const char * next = nullptr;
-  if (!emel::gbnf::rule_parser::detail::parse_uint64(cursor, end, value, &next)) {
-    return false;
-  }
-  pos = static_cast<std::size_t>(next - text.data());
-  if (value > std::numeric_limits<uint32_t>::max()) {
-    return false;
-  }
-  return text.size() == pos + 2u && text[pos] == ']' && text[pos + 1u] == '>';
-}
-
-inline bool parse_quantifier_bounds(const std::string_view text,
-                                    uint64_t & min_times,
-                                    uint64_t & max_times) noexcept {
-  constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
-  if (text == "*") {
-    min_times = 0;
-    max_times = k_no_max;
-    return true;
-  }
-  if (text == "+") {
-    min_times = 1;
-    max_times = k_no_max;
-    return true;
-  }
-  if (text == "?") {
-    min_times = 0;
-    max_times = 1;
-    return true;
-  }
-  if (text.size() < 3u || text.front() != '{' || text.back() != '}') {
-    return false;
-  }
-
-  const char * cursor = text.data() + 1u;
-  const char * end = text.data() + text.size() - 1u;
-  const char * next = nullptr;
-  if (!emel::gbnf::rule_parser::detail::parse_uint64(cursor, end, min_times, &next)) {
-    return false;
-  }
-  if (next == end) {
-    max_times = min_times;
-    return true;
-  }
-  if (*next != ',') {
-    return false;
-  }
-  ++next;
-  if (next == end) {
-    max_times = k_no_max;
-    return true;
-  }
-  if (!emel::gbnf::rule_parser::detail::parse_uint64(next, end, max_times, &next)) {
-    return false;
-  }
-  return next == end;
-}
-
 inline bool current_rule_has_space(const action::context & ctx, const uint32_t count) noexcept {
   return ctx.current_rule.size + count <= emel::gbnf::k_max_gbnf_rule_elements;
 }
@@ -183,19 +107,16 @@ inline bool character_class_element_count(const std::string_view text, uint32_t 
   return !first;
 }
 
-inline bool can_apply_quantifier(const event::parse_rules & ev,
-                                 const action::context & ctx) noexcept {
+inline bool can_apply_quantifier_bounds(const event::parse_rules & ev,
+                                        const action::context & ctx,
+                                        const uint64_t min_times,
+                                        const uint64_t max_times) noexcept {
   constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
   constexpr uint64_t k_max_repetition_threshold = 2000;
   if (ctx.last_sym_start == ctx.current_rule.size) {
     return false;
   }
 
-  uint64_t min_times = 0;
-  uint64_t max_times = 0;
-  if (!parse_quantifier_bounds(ev.ctx.token.text, min_times, max_times)) {
-    return false;
-  }
   if (min_times > k_max_repetition_threshold) {
     return false;
   }
@@ -434,11 +355,85 @@ struct token_character_class_valid {
   }
 };
 
-struct token_rule_reference_valid {
+struct token_rule_reference_candidate {
   bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
     return term_kind_is<term_parser::events::term_kind::rule_reference>{}(ev, ctx) &&
-           current_rule_has_space(ctx, 1u) &&
-           parse_rule_reference_text(ev.ctx.token.text);
+           current_rule_has_space(ctx, 1u);
+  }
+};
+
+struct rule_reference_token_negated_shape {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return token_rule_reference_candidate{}(ev, ctx) &&
+           ev.ctx.token.text.size() >= 1u &&
+           ev.ctx.token.text.front() == '!';
+  }
+};
+
+struct rule_reference_token_plain_shape {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return token_rule_reference_candidate{}(ev, ctx) &&
+           !rule_reference_token_negated_shape{}(ev, ctx);
+  }
+};
+
+struct rule_reference_plain_envelope_valid {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return rule_reference_token_plain_shape{}(ev, ctx) &&
+           ev.ctx.token.text.size() >= 4u &&
+           ev.ctx.token.text[0] == '<' &&
+           ev.ctx.token.text[1] == '[' &&
+           ev.ctx.token.text[ev.ctx.token.text.size() - 2u] == ']' &&
+           ev.ctx.token.text[ev.ctx.token.text.size() - 1u] == '>';
+  }
+};
+
+struct rule_reference_plain_envelope_invalid {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return rule_reference_token_plain_shape{}(ev, ctx) &&
+           !rule_reference_plain_envelope_valid{}(ev, ctx);
+  }
+};
+
+struct rule_reference_negated_envelope_valid {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return rule_reference_token_negated_shape{}(ev, ctx) &&
+           ev.ctx.token.text.size() >= 5u &&
+           ev.ctx.token.text[0] == '!' &&
+           ev.ctx.token.text[1] == '<' &&
+           ev.ctx.token.text[2] == '[' &&
+           ev.ctx.token.text[ev.ctx.token.text.size() - 2u] == ']' &&
+           ev.ctx.token.text[ev.ctx.token.text.size() - 1u] == '>';
+  }
+};
+
+struct rule_reference_negated_envelope_invalid {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return rule_reference_token_negated_shape{}(ev, ctx) &&
+           !rule_reference_negated_envelope_valid{}(ev, ctx);
+  }
+};
+
+struct parsed_rule_reference_plain_valid {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return token_rule_reference_candidate{}(ev, ctx) &&
+           ev.ctx.parsed_rule_reference_valid &&
+           !ev.ctx.parsed_rule_reference_negated;
+  }
+};
+
+struct parsed_rule_reference_negated_valid {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return token_rule_reference_candidate{}(ev, ctx) &&
+           ev.ctx.parsed_rule_reference_valid &&
+           ev.ctx.parsed_rule_reference_negated;
+  }
+};
+
+struct parsed_rule_reference_invalid {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return token_rule_reference_candidate{}(ev, ctx) &&
+           !ev.ctx.parsed_rule_reference_valid;
   }
 };
 
@@ -499,11 +494,116 @@ struct token_close_group_valid {
   }
 };
 
-struct token_quantifier_valid {
+struct quantifier_candidate {
   bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return term_kind_is<term_parser::events::term_kind::quantifier>{}(ev, ctx) &&
-           is_quantifier_text(ev.ctx.token.text) &&
-           can_apply_quantifier(ev, ctx);
+    return term_kind_is<term_parser::events::term_kind::quantifier>{}(ev, ctx);
+  }
+};
+
+struct quantifier_token_star {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return quantifier_candidate{}(ev, ctx) && ev.ctx.token.text == "*";
+  }
+};
+
+struct quantifier_token_plus {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return quantifier_candidate{}(ev, ctx) && ev.ctx.token.text == "+";
+  }
+};
+
+struct quantifier_token_question {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return quantifier_candidate{}(ev, ctx) && ev.ctx.token.text == "?";
+  }
+};
+
+struct quantifier_token_braced {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return quantifier_candidate{}(ev, ctx) &&
+           ev.ctx.token.text.size() >= 3u &&
+           ev.ctx.token.text.front() == '{' &&
+           ev.ctx.token.text.back() == '}';
+  }
+};
+
+struct quantifier_braced_exact_shape {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    const bool braced = quantifier_token_braced{}(ev, ctx);
+    const std::string_view text = ev.ctx.token.text;
+    const std::string_view core = text.substr(1u, text.size() - 2u);
+    const size_t comma_pos = core.find(',');
+    return braced && comma_pos == std::string_view::npos;
+  }
+};
+
+struct quantifier_braced_open_shape {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    const bool braced = quantifier_token_braced{}(ev, ctx);
+    const std::string_view text = ev.ctx.token.text;
+    const std::string_view core = text.substr(1u, text.size() - 2u);
+    const size_t comma_pos = core.find(',');
+    const bool has_comma = comma_pos != std::string_view::npos;
+    const size_t suffix_offset = comma_pos + static_cast<size_t>(has_comma);
+    return braced && has_comma && suffix_offset == core.size();
+  }
+};
+
+struct quantifier_braced_range_shape {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    const bool braced = quantifier_token_braced{}(ev, ctx);
+    const std::string_view text = ev.ctx.token.text;
+    const std::string_view core = text.substr(1u, text.size() - 2u);
+    const size_t comma_pos = core.find(',');
+    const bool has_comma = comma_pos != std::string_view::npos;
+    const size_t suffix_offset = comma_pos + static_cast<size_t>(has_comma);
+    return braced && has_comma && suffix_offset < core.size();
+  }
+};
+
+struct quantifier_braced_invalid_shape {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return quantifier_token_braced{}(ev, ctx) &&
+           !quantifier_braced_exact_shape{}(ev, ctx) &&
+           !quantifier_braced_open_shape{}(ev, ctx) &&
+           !quantifier_braced_range_shape{}(ev, ctx);
+  }
+};
+
+struct quantifier_token_unknown {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return quantifier_candidate{}(ev, ctx) &&
+           !quantifier_token_star{}(ev, ctx) &&
+           !quantifier_token_plus{}(ev, ctx) &&
+           !quantifier_token_question{}(ev, ctx) &&
+           !quantifier_token_braced{}(ev, ctx);
+  }
+};
+
+struct parsed_quantifier_applicable {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return quantifier_candidate{}(ev, ctx) &&
+           ev.ctx.parsed_quantifier_valid &&
+           can_apply_quantifier_bounds(ev, ctx,
+                                       ev.ctx.parsed_quantifier_min,
+                                       ev.ctx.parsed_quantifier_max);
+  }
+};
+
+struct parsed_quantifier_invalid {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return quantifier_candidate{}(ev, ctx) &&
+           !ev.ctx.parsed_quantifier_valid;
+  }
+};
+
+struct parsed_quantifier_not_applicable {
+  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
+    return quantifier_candidate{}(ev, ctx) &&
+           ev.ctx.parsed_quantifier_valid &&
+           !can_apply_quantifier_bounds(ev, ctx,
+                                        ev.ctx.parsed_quantifier_min,
+                                        ev.ctx.parsed_quantifier_max);
   }
 };
 
@@ -519,9 +619,10 @@ struct term_need_character_class_valid {
   }
 };
 
-struct term_need_rule_reference_valid {
+struct term_need_rule_reference_candidate {
   bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return term_from_need_term{}(ev, ctx) && token_rule_reference_valid{}(ev, ctx);
+    return term_from_need_term{}(ev, ctx) &&
+           term_kind_is<term_parser::events::term_kind::rule_reference>{}(ev, ctx);
   }
 };
 
@@ -556,9 +657,10 @@ struct term_after_character_class_valid {
   }
 };
 
-struct term_after_rule_reference_valid {
+struct term_after_rule_reference_candidate {
   bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return term_from_after_term{}(ev, ctx) && token_rule_reference_valid{}(ev, ctx);
+    return term_from_after_term{}(ev, ctx) &&
+           term_kind_is<term_parser::events::term_kind::rule_reference>{}(ev, ctx);
   }
 };
 
@@ -600,9 +702,9 @@ struct term_after_close_group_valid {
   }
 };
 
-struct term_after_quantifier_valid {
+struct term_after_quantifier_candidate {
   bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return term_from_after_term{}(ev, ctx) && token_quantifier_valid{}(ev, ctx);
+    return term_from_after_term{}(ev, ctx) && quantifier_candidate{}(ev, ctx);
   }
 };
 

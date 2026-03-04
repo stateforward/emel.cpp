@@ -53,19 +53,76 @@ Status correction: the following files still contain implicit runtime control fl
 
 - [x] `src/emel/token/batcher/actions.hpp` (rearchitected via explicit probe phases in `sm.hpp`)
 - [x] `src/emel/gbnf/rule_parser/actions.hpp` (rearchitected with explicit
-  `rule_reference_decision` and `quantifier_decision` phases in `sm.hpp`)
+  `rule_reference_decision`, `rule_reference_shape_decision`, `quantifier_decision`, and
+  `quantifier_shape_decision` phases in `sm.hpp` with explicit rule-reference
+  plain/negated-shape and envelope-validity guards/actions and explicit
+  `*`/`+`/`?`/braced quantifier-shape guards/actions plus explicit braced
+  `exact`/`open`/`range` shape decision transitions in `sm.hpp`)
 - [x] `src/emel/gbnf/rule_parser/lexer/actions.hpp` (rearchitected with explicit
   newline/rule-reference/unexpected-event branches in `sm.hpp`)
 - [x] `src/emel/text/detokenizer/actions.hpp` (rearchitected with explicit
   special/byte/text decode phases and branch guards in `sm.hpp`)
 - [x] `src/emel/text/encoders/rwkv/actions.hpp` (rearchitected with explicit
-  `unk_lookup_result_decision` branch in `rwkv/sm.hpp`; unknown-token lookup outcome routed
-  via guards/actions instead of implicit action-finalization)
+  `encode_validity_decision`, `encode_vocab_sync_decision`, `table_policy_decision`, and
+  `unk_lookup_result_decision` phases in `rwkv/sm.hpp`; removed composite
+  `valid_encode_and_vocab_*` and `text_non_empty_and_tables_*` guard routers and routed
+  unknown-token lookup outcome via explicit guards/actions instead of implicit
+  action-finalization)
+- [x] `src/emel/text/encoders/ugm/guards.hpp` (rearchitected encode intake and
+  table-policy routing into explicit `encode_validity_decision`,
+  `encode_vocab_sync_decision`, and `table_policy_decision` phases in
+  `text/encoders/ugm/sm.hpp`; removed composite
+  `valid_encode_and_vocab_*` and `text_non_empty_and_tables_*` guard routers;
+  single-use lookup/output helpers moved from `ugm/detail.hpp` into
+  `ugm/actions.hpp`)
+- [x] `src/emel/model/weight_loader/guards.hpp` (rearchitected apply result
+  error classification into explicit `apply_request_decision`,
+  `apply_error_scan_exec`, and `apply_scan_result_decision` phases in
+  `model/weight_loader/sm.hpp`; removed guard-internal per-result backend-error scan loop)
+- [x] `src/emel/gguf/loader/guards.hpp` (rearchitected bind/parse request
+  classification into explicit `bind_request_shape_decision`,
+  `bind_capacity_decision`, `parse_file_image_decision`,
+  `parse_bound_storage_decision`, and `parse_capacity_decision` phases in
+  `gguf/loader/sm.hpp`; removed combined validity+capacity guards as flow routers)
+- [x] `src/emel/model/loader/guards.hpp` (rearchitected parse/load/validate
+  policy routing into explicit `parse_phase_decision`,
+  `parse_load_weights_policy_decision`, `parse_load_weights_handler_decision`,
+  `load_phase_decision`, `load_map_policy_decision`, `structure_policy_decision`,
+  and `architecture_policy_decision` phases in `model/loader/sm.hpp`; removed
+  composite `phase_ok_and_*` guard routers)
+- [x] `src/emel/text/encoders/wpm/guards.hpp` (rearchitected encode intake and
+  table-policy routing into explicit `encode_validity_decision`,
+  `encode_vocab_sync_decision`, and `table_policy_decision` phases in
+  `text/encoders/wpm/sm.hpp`; removed composite
+  `valid_encode_and_vocab_*` and `text_non_empty_and_tables_*` guard routers)
+- [x] `src/emel/text/encoders/spm/guards.hpp` (rearchitected encode intake and
+  table-policy routing into explicit `encode_validity_decision`,
+  `encode_vocab_sync_decision`, and `table_policy_decision` phases in
+  `text/encoders/spm/sm.hpp`; removed composite
+  `valid_encode_and_vocab_*` and `text_non_empty_and_tables_*` guard routers)
+- [x] `src/emel/text/encoders/fallback/guards.hpp` (rearchitected encode intake
+  routing into explicit `encode_validity_decision` and
+  `encode_vocab_sync_decision` phases in `text/encoders/fallback/sm.hpp`;
+  removed composite `valid_encode_and_vocab_*` guard routers)
+- [x] `src/emel/text/encoders/bpe/guards.hpp` (rearchitected encode intake,
+  preprocessed-input policy, and ignore-merges/direct-word path routing into
+  explicit `encode_validity_decision`, `encode_vocab_sync_decision`,
+  `encode_input_policy_decision`, `encode_path_decision`, and
+  `encode_direct_word_policy_decision` phases in `text/encoders/bpe/sm.hpp`;
+  removed composite `valid_encode_and_vocab_*`,
+  `text_non_empty_and_{preprocessed,not_preprocessed}`, and
+  `ignore_merges_fast_path`/`merge_path_required` guard routers)
+- [x] `src/emel/text/encoders/plamo2/guards.hpp` (rearchitected encode intake
+  routing into explicit `encode_validity_decision` and
+  `encode_vocab_sync_decision` phases in `text/encoders/plamo2/sm.hpp`;
+  removed composite `valid_encode_and_vocab_*` guard routers)
 - [x] `src/emel/text/jinja/parser/lexer/actions.hpp` (rearchitected lexer token handling with
   explicit `text_boundary_candidate_decision`, `unary_candidate_decision`,
   `unary_prefix_context_decision`, `unary_prefix_allowed_decision`,
   `text_opening_block_decision` and `text_finalize_exec` with explicit opening-block trim,
-  leading-newline trim, and lstrip/rstrip branch guards,
+  `text_trim_opening_block_result_decision` with explicit newline/zero/keep trim guards
+  (no hidden `trim_text_before_opening_block` branch), leading-newline trim, and
+  lstrip/rstrip branch guards,
   unary numeric-suffix decision guards, `comment_candidate_decision`,
   `comment_unterminated_exec`, `comment_finalize_exec`, `trim_prefix_candidate_decision`,
   `trim_prefix_eof_exec`, `space_eof_exec`, `mapping_close_curly_exec`,
@@ -90,6 +147,25 @@ Status correction: the following files still contain implicit runtime control fl
 - [x] `src/emel/gbnf/rule_parser/lexer/detail.hpp` (rearchitected with explicit
   `next_decision` and `rule_reference_*_parse_*` phases in `rule_parser/lexer/sm.hpp`; removed
   guard-composed unknown fallback and action-only scanners from shared `detail.hpp`)
+
+### Additional Explicit-Model Remediations (Non-loop Guard Routing)
+
+- [x] `src/emel/memory/hybrid/sm.hpp` + `src/emel/memory/hybrid/guards.hpp`
+  (rearchitected rollback-result/recurrent-error routing for `allocate_sequence`,
+  `allocate_slots`, and `branch_sequence` into explicit `*_rollback_result_decision` and
+  `*_recurrent_error_decision` states in `sm.hpp`; removed composite guard routers
+  `rollback_accepted_and_recurrent_rejected_*` from `guards.hpp`)
+- [x] `src/emel/memory/kv/sm.hpp` + `src/emel/memory/kv/guards.hpp`
+  (rearchitected `allocate_slots` request classification into explicit
+  `allocate_slots_request_{shape,length,block_layout,capacity}_decision` phases in `sm.hpp`;
+  removed guard-internal `analyze_allocate_slots_request` routing and composite
+  `allocate_slots_request_{valid,invalid,backend_error,out_of_memory}` guards)
+- [x] `src/emel/memory/recurrent/sm.hpp` + `src/emel/memory/recurrent/guards.hpp`
+  (rearchitected `allocate_slots` request classification into explicit
+  `allocate_slots_request_{shape,length}_decision` phases and `branch_sequence`
+  intake routing into explicit `branch_sequence_request_{shape,capacity}_decision`
+  phases in `sm.hpp`; removed guard-internal `analyze_allocate_slots_request`
+  and composite `branch_sequence_request_{valid,backend_error,invalid}` routers)
 
 ## High-Priority Findings (Action Files)
 
@@ -147,3 +223,88 @@ Representative examples:
 - No direct runtime `if (...)`, `switch (...)`, or `?:` were found in these files during this
   pass; branching is largely encoded through loop constructs.
 - This report is intentionally focused on `for`-loop circumvention patterns per request.
+
+## Audit Update (2026-03-04)
+
+A comprehensive re-audit of all state machines was performed against `docs/compliance-checklist.md`, specifically looking for explicit `if`/`switch` branching and hidden error-control routing encoded in loops (`while`, `for`). 
+
+### 1. Explicit Branching Violations
+Despite earlier remediations, explicit `if` statements were found introduced/remaining in:
+- `src/emel/text/tokenizer/preprocessor/detail.hpp` (18 occurrences of explicit `if` checks like `if (id >= vocab.n_tokens)`, `if (invalid_output)`, etc.)
+
+### 2. Preprocessor Explicit-Model Progress
+- [x] `src/emel/text/tokenizer/preprocessor/spm/sm.hpp` + `spm/actions.hpp` +
+  `spm/guards.hpp` rearchitected with explicit request-shape phases
+  (`request_buffer_decision`, `request_capacity_nonzero_decision`,
+  `request_capacity_limit_decision`) and explicit parse policy phase
+  (`partition_parse_special_decision`) so `parse_special` routing is modeled in
+  `sm.hpp` instead of hidden inside shared partition actions/details.
+- [x] `src/emel/text/tokenizer/preprocessor/wpm/sm.hpp` + `wpm/actions.hpp` +
+  `wpm/guards.hpp` rearchitected with explicit request-shape phases
+  (`request_buffer_decision`, `request_capacity_nonzero_decision`,
+  `request_capacity_limit_decision`) and explicit parse policy phase
+  (`partition_parse_special_decision`) so `parse_special` routing is modeled in
+  `sm.hpp` instead of hidden inside shared partition actions/details.
+- [x] `src/emel/text/tokenizer/preprocessor/ugm/sm.hpp` + `ugm/actions.hpp` +
+  `ugm/guards.hpp` rearchitected with explicit request-shape phases
+  (`request_buffer_decision`, `request_capacity_nonzero_decision`,
+  `request_capacity_limit_decision`) and explicit parse policy phase
+  (`partition_parse_special_decision`) so `parse_special` routing is modeled in
+  `sm.hpp` instead of hidden inside shared partition actions/details.
+- [x] `src/emel/text/tokenizer/preprocessor/rwkv/sm.hpp` + `rwkv/actions.hpp` +
+  `rwkv/guards.hpp` rearchitected with explicit request-shape phases
+  (`request_buffer_decision`, `request_capacity_nonzero_decision`,
+  `request_capacity_limit_decision`) and explicit parse policy phase
+  (`partition_parse_special_decision`) so `parse_special` routing is modeled in
+  `sm.hpp` instead of hidden inside shared partition actions/details.
+- [x] `src/emel/text/tokenizer/preprocessor/plamo2/sm.hpp` + `plamo2/actions.hpp` +
+  `plamo2/guards.hpp` rearchitected with explicit request-shape phases
+  (`request_buffer_decision`, `request_capacity_nonzero_decision`,
+  `request_capacity_limit_decision`) and explicit parse policy phase
+  (`partition_parse_special_decision`) so `parse_special` routing is modeled in
+  `sm.hpp` instead of hidden inside shared partition actions/details.
+- [ ] `src/emel/text/tokenizer/preprocessor/{fallback,bpe}/sm.hpp`
+  still require the same explicit request-shape and parse-policy rearchitecture
+  to fully eliminate hidden control routing across the preprocessor family.
+
+### 3. Hidden Error-Control Loop Violations
+The following data-plane loops terminate early on error/status checks instead of explicitly modeling the failure path in the state machine (violating the rule: "Loops in actions/detail are data-plane iteration only... not success/error/mode/retry/routing control"):
+- [x] `src/emel/gbnf/rule_parser/detail.hpp` rearchitected with explicit quantifier
+  braced parse-exec phases in `gbnf/rule_parser/sm.hpp`
+  (`quantifier_braced_{exact,open,range}_parse_exec`), structural-only braced-shape
+  guards in `guards.hpp`, and loop-control-free `parse_uint64` in `detail.hpp`
+  (`std::from_chars`), removing hidden status-loop routing from parse control flow.
+- [x] `src/emel/batch/planner/modes/equal/actions.hpp` rearchitected in
+  `batch/planner/modes/equal/sm.hpp` with explicit
+  `planning_{general,fast}_group_scan_decision` phases and
+  `*_first_group_scan_{exceeds,within}_step_size` guards; removed hidden
+  scan-stop loop routing (`&& !stop_group_scan`) from equal mode actions/guards.
+- [x] `src/emel/text/detokenizer/actions.hpp` rearchitected in `text/detokenizer/sm.hpp` with explicit
+  `decode_byte_pending_decision`, `decode_byte_pending_write`,
+  `decode_text_pending_decision`, and `decode_text_pending_write` phases plus explicit
+  `detokenize_pending_head_{complete,incomplete,invalid}` guards; loop-based
+  `flush_pending_complete_sequences` removed.
+- [x] `src/emel/text/jinja/lexer/detail.hpp` rearchitected by moving single-use
+  string-escape scan helpers out of shared `jinja/lexer/detail.hpp` into
+  `text/jinja/parser/lexer/actions.hpp` (per "detail only for shared helpers"),
+  removing `while (ok && ...)` early-stop routing; `text/jinja/parser/lexer/sm.hpp`
+  now has explicit `string_status_decision` phase for failed vs terminated vs
+  unterminated string routing.
+- [x] `src/emel/text/encoders/ugm/actions.hpp` + `src/emel/text/encoders/ugm/sm.hpp`
+  rearchitected by splitting DP orchestration into explicit `dp_forward_exec` /
+  `dp_forward_result_decision` and `dp_backtrace_exec` /
+  `dp_backtrace_result_decision` phases in `ugm/sm.hpp`; removed hidden
+  error-gated backtrace/emit loop routing in `ugm/actions.hpp`.
+- [x] `src/emel/text/encoders/ugm/detail.hpp` normalized-input loop reworked to
+  remove `while (... && state.ok)` early-stop control; loop now advances
+  deterministically over input with error state carried as data and finalized
+  by explicit phase status in `ugm/sm.hpp`.
+- [x] `src/emel/text/encoders/plamo2/detail.hpp` rearchitected with explicit
+  `table_policy_decision`, `table_sync_result_decision`, `decode_result_decision`,
+  `dp_prepare_exec`, `dp_exec`, and `emit_exec` phases in
+  `text/encoders/plamo2/sm.hpp`; replaced error-gated output loop condition
+  (`while (pos < data_len_i32 && err == EMEL_OK)`) with deterministic
+  progression and explicit phase status routing.
+
+Remaining unchecked findings represent hidden branching control flow and must be explicitly modeled
+as phase/guard transitions in their respective `sm.hpp` files.

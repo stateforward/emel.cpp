@@ -53,16 +53,4 @@ struct vocab_unchanged {
   }
 };
 
-struct valid_encode_and_vocab_changed {
-  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return emel::text::encoders::guard::valid_encode_and_vocab_changed{}(ev, ctx);
-  }
-};
-
-struct valid_encode_and_vocab_unchanged {
-  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return emel::text::encoders::guard::valid_encode_and_vocab_unchanged{}(ev, ctx);
-  }
-};
-
 }  // namespace emel::text::encoders::fallback::guard

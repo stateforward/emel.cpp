@@ -40,9 +40,9 @@ struct bind_capacity_sufficient {
   }
 };
 
-struct bind_valid_request_and_capacity {
+struct bind_capacity_insufficient {
   bool operator()(const event::bind_runtime & ev, const action::context & ctx) const noexcept {
-    return bind_valid_request{}(ev, ctx) && bind_capacity_sufficient{}(ev, ctx);
+    return bind_valid_request{}(ev, ctx) && !bind_capacity_sufficient{}(ev, ctx);
   }
 };
 
@@ -52,27 +52,45 @@ struct bind_invalid_request {
   }
 };
 
-struct bind_invalid_capacity {
-  bool operator()(const event::bind_runtime & ev, const action::context & ctx) const noexcept {
-    return bind_valid_request{}(ev, ctx) && !bind_capacity_sufficient{}(ev, ctx);
+struct parse_has_file_image {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return has_file_image(ev.request.file_image);
   }
 };
 
-struct parse_valid_request {
+struct parse_missing_file_image {
   bool operator()(const event::parse_runtime & ev, const action::context & ctx) const noexcept {
-    return has_file_image(ev.request.file_image) &&
-           ctx.tensors.data() != nullptr &&
+    return !parse_has_file_image{}(ev, ctx);
+  }
+};
+
+struct parse_has_bound_storage {
+  bool operator()(const event::parse_runtime &, const action::context & ctx) const noexcept {
+    return ctx.tensors.data() != nullptr &&
            ctx.kv_entries.data() != nullptr &&
-           ctx.kv_arena.data() != nullptr &&
+           ctx.kv_arena.data() != nullptr;
+  }
+};
+
+struct parse_missing_bound_storage {
+  bool operator()(const event::parse_runtime & ev, const action::context & ctx) const noexcept {
+    return !parse_has_bound_storage{}(ev, ctx);
+  }
+};
+
+struct parse_bound_capacity_sufficient {
+  bool operator()(const event::parse_runtime & ev, const action::context & ctx) const noexcept {
+    return parse_has_bound_storage{}(ev, ctx) &&
            ctx.tensors.size() >= ctx.probed.tensor_count &&
            ctx.kv_entries.size() >= ctx.probed.kv_count &&
            ctx.kv_arena.size() >= detail::required_kv_arena_bytes(ctx.probed);
   }
 };
 
-struct parse_invalid_request {
+struct parse_bound_capacity_insufficient {
   bool operator()(const event::parse_runtime & ev, const action::context & ctx) const noexcept {
-    return !parse_valid_request{}(ev, ctx);
+    return parse_has_bound_storage{}(ev, ctx) &&
+           !parse_bound_capacity_sufficient{}(ev, ctx);
   }
 };
 

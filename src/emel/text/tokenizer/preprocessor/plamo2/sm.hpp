@@ -13,9 +13,14 @@ namespace emel::text::tokenizer::preprocessor::plamo2 {
 namespace pdetail = emel::text::tokenizer::preprocessor::detail;
 
 struct idle {};
+struct request_buffer_decision {};
+struct request_capacity_nonzero_decision {};
+struct request_capacity_limit_decision {};
 struct preparing {};
 struct build_specials_decision {};
-struct partitioning_non_bpe {};
+struct partition_parse_special_decision {};
+struct partitioning_non_bpe_parse_special {};
+struct partitioning_non_bpe_skip_special {};
 struct partition_decision {};
 struct done {};
 struct errored {};
@@ -29,32 +34,41 @@ struct model {
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
       // External request validation.
-        sml::state<preparing> <= *sml::state<idle>
-                   + sml::event<event::preprocess_runtime>[ guard::valid_request{} ]
-                   / action::begin_preprocess
-      , sml::state<errored> <= sml::state<idle>
-                   + sml::event<event::preprocess_runtime>[ guard::invalid_request{} ]
+        sml::state<request_buffer_decision> <= *sml::state<idle>
+                   + sml::event<event::preprocess_runtime>
+      , sml::state<request_buffer_decision> <= sml::state<done>
+                   + sml::event<event::preprocess_runtime>
+      , sml::state<request_buffer_decision> <= sml::state<errored>
+                   + sml::event<event::preprocess_runtime>
+      , sml::state<request_buffer_decision> <= sml::state<unexpected>
+                   + sml::event<event::preprocess_runtime>
+
+      , sml::state<request_capacity_nonzero_decision> <= sml::state<request_buffer_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::fragments_buffer_present{} ]
+      , sml::state<errored> <= sml::state<request_buffer_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::fragments_buffer_missing{} ]
+                   / action::reject_invalid
+      , sml::state<errored> <= sml::state<request_buffer_decision>
+                   + sml::completion<event::preprocess_runtime>
                    / action::reject_invalid
 
-      , sml::state<preparing> <= sml::state<done>
-                   + sml::event<event::preprocess_runtime>[ guard::valid_request{} ]
-                   / action::begin_preprocess
-      , sml::state<errored> <= sml::state<done>
-                   + sml::event<event::preprocess_runtime>[ guard::invalid_request{} ]
+      , sml::state<request_capacity_limit_decision> <= sml::state<request_capacity_nonzero_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::fragments_capacity_nonzero{} ]
+      , sml::state<errored> <= sml::state<request_capacity_nonzero_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::fragments_capacity_zero{} ]
+                   / action::reject_invalid
+      , sml::state<errored> <= sml::state<request_capacity_nonzero_decision>
+                   + sml::completion<event::preprocess_runtime>
                    / action::reject_invalid
 
-      , sml::state<preparing> <= sml::state<errored>
-                   + sml::event<event::preprocess_runtime>[ guard::valid_request{} ]
+      , sml::state<preparing> <= sml::state<request_capacity_limit_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::fragments_capacity_within_limit{} ]
                    / action::begin_preprocess
-      , sml::state<errored> <= sml::state<errored>
-                   + sml::event<event::preprocess_runtime>[ guard::invalid_request{} ]
+      , sml::state<errored> <= sml::state<request_capacity_limit_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::fragments_capacity_exceeds_limit{} ]
                    / action::reject_invalid
-
-      , sml::state<preparing> <= sml::state<unexpected>
-                   + sml::event<event::preprocess_runtime>[ guard::valid_request{} ]
-                   / action::begin_preprocess
-      , sml::state<errored> <= sml::state<unexpected>
-                   + sml::event<event::preprocess_runtime>[ guard::invalid_request{} ]
+      , sml::state<errored> <= sml::state<request_capacity_limit_decision>
+                   + sml::completion<event::preprocess_runtime>
                    / action::reject_invalid
 
       //------------------------------------------------------------------------------//
@@ -66,12 +80,23 @@ struct model {
       , sml::state<errored> <= sml::state<build_specials_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::phase_failed{} ]
                    / action::ensure_last_error
-      , sml::state<partitioning_non_bpe> <= sml::state<build_specials_decision>
+      , sml::state<partition_parse_special_decision> <= sml::state<build_specials_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::phase_ok{} ]
 
-      , sml::state<partition_decision> <= sml::state<partitioning_non_bpe>
+      , sml::state<partitioning_non_bpe_parse_special> <= sml::state<partition_parse_special_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::parse_special_enabled{} ]
+      , sml::state<partitioning_non_bpe_skip_special> <= sml::state<partition_parse_special_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::parse_special_disabled{} ]
+      , sml::state<errored> <= sml::state<partition_parse_special_decision>
                    + sml::completion<event::preprocess_runtime>
-                   / action::partition_non_bpe
+                   / action::ensure_last_error
+
+      , sml::state<partition_decision> <= sml::state<partitioning_non_bpe_parse_special>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::partition_non_bpe_parse_special
+      , sml::state<partition_decision> <= sml::state<partitioning_non_bpe_skip_special>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::partition_non_bpe_skip_special
 
       , sml::state<errored> <= sml::state<partition_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::phase_failed{} ]
@@ -84,11 +109,21 @@ struct model {
       // Unexpected events.
       , sml::state<unexpected> <= sml::state<idle> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<request_buffer_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<request_capacity_nonzero_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<request_capacity_limit_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
       , sml::state<unexpected> <= sml::state<preparing> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<build_specials_decision> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
-      , sml::state<unexpected> <= sml::state<partitioning_non_bpe> + sml::unexpected_event<sml::_>
+      , sml::state<unexpected> <= sml::state<partition_parse_special_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<partitioning_non_bpe_parse_special> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<partitioning_non_bpe_skip_special> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<partition_decision> + sml::unexpected_event<sml::_>
                    / action::on_unexpected

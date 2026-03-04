@@ -4,6 +4,7 @@
 
 #include "emel/batch/planner/actions.hpp"
 #include "emel/batch/planner/modes/simple/actions.hpp"
+#include "emel/batch/planner/modes/simple/guards.hpp"
 
 namespace {
 
@@ -56,8 +57,10 @@ TEST_CASE("batch_planner_modes_simple_create_plan_success") {
   };
   request_ctx.effective_step_size = 2;
 
-  emel::batch::planner::modes::simple::action::create_plan(
-      make_runtime(request, request_ctx), planner_ctx);
+  const auto runtime = make_runtime(request, request_ctx);
+  emel::batch::planner::modes::simple::action::prepare_steps(runtime, planner_ctx);
+  CHECK(emel::batch::planner::modes::simple::guard::simple_plan_capacity_ok(runtime, planner_ctx));
+  emel::batch::planner::modes::simple::action::create_plan(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 2);
   CHECK(request_ctx.step_sizes[0] == 2);
   CHECK(request_ctx.step_sizes[1] == 2);
@@ -81,8 +84,10 @@ TEST_CASE("batch_planner_modes_simple_create_plan_fails_on_index_overflow") {
   };
   request_ctx.effective_step_size = static_cast<int32_t>(tokens.size());
 
-  emel::batch::planner::modes::simple::action::create_plan(
-      make_runtime(request, request_ctx), planner_ctx);
+  const auto runtime = make_runtime(request, request_ctx);
+  emel::batch::planner::modes::simple::action::prepare_steps(runtime, planner_ctx);
+  CHECK(emel::batch::planner::modes::simple::guard::exceeds_index_capacity(runtime, planner_ctx));
+  emel::batch::planner::modes::simple::action::mark_output_indices_full(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 0);
   CHECK(request_ctx.total_outputs == 0);
   CHECK(request_ctx.err == emel::error::cast(emel::batch::planner::error::output_indices_full));
@@ -106,8 +111,10 @@ TEST_CASE("batch_planner_modes_simple_create_plan_fails_on_step_overflow") {
   };
   request_ctx.effective_step_size = 1;
 
-  emel::batch::planner::modes::simple::action::create_plan(
-      make_runtime(request, request_ctx), planner_ctx);
+  const auto runtime = make_runtime(request, request_ctx);
+  emel::batch::planner::modes::simple::action::prepare_steps(runtime, planner_ctx);
+  CHECK(emel::batch::planner::modes::simple::guard::exceeds_step_capacity(runtime, planner_ctx));
+  emel::batch::planner::modes::simple::action::mark_output_steps_full(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 0);
   CHECK(request_ctx.total_outputs == 0);
   CHECK(request_ctx.err == emel::error::cast(emel::batch::planner::error::output_steps_full));
@@ -129,8 +136,10 @@ TEST_CASE("batch_planner_modes_simple_create_plan_failure_resets_outputs") {
   };
   request_ctx.effective_step_size = 0;
 
-  emel::batch::planner::modes::simple::action::create_plan(
-      make_runtime(request, request_ctx), planner_ctx);
+  const auto runtime = make_runtime(request, request_ctx);
+  emel::batch::planner::modes::simple::action::prepare_steps(runtime, planner_ctx);
+  CHECK(emel::batch::planner::modes::simple::guard::has_invalid_step_size(runtime, planner_ctx));
+  emel::batch::planner::modes::simple::action::mark_invalid_step_size(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 0);
   CHECK(request_ctx.total_outputs == 0);
   CHECK(request_ctx.err == emel::error::cast(emel::batch::planner::error::invalid_step_size));

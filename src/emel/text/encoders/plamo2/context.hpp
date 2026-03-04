@@ -35,3 +35,12 @@ struct context : emel::text::encoders::action::context {
 };
 
 }  // namespace emel::text::encoders::plamo2::action
+
+namespace emel::text::encoders::plamo2::runtime {
+
+struct encode_runtime {
+  const emel::text::encoders::event::encode_runtime & event_;
+  mutable int32_t data_len = 0;
+};
+
+}  // namespace emel::text::encoders::plamo2::runtime

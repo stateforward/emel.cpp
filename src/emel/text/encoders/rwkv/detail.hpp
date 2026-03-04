@@ -5,12 +5,10 @@
 
 #include "emel/text/encoders/rwkv/context.hpp"
 #include "emel/text/encoders/detail.hpp"
-#include "emel/text/encoders/events.hpp"
 #include "emel/model/data.hpp"
 
 namespace emel::text::encoders::rwkv::detail {
 
-using emel::text::encoders::detail::encode_result;
 using emel::text::encoders::detail::k_token_null;
 
 inline int32_t select_i32(const bool choose_true,
@@ -34,23 +32,6 @@ inline uint8_t select_u8(const bool choose_true,
   return static_cast<uint8_t>((false_value & static_cast<uint8_t>(~mask)) | (true_value & mask));
 }
 
-inline size_t select_size(const bool choose_true,
-                          const size_t true_value,
-                          const size_t false_value) noexcept {
-  const size_t mask = static_cast<size_t>(0) - static_cast<size_t>(choose_true);
-  return (false_value & ~mask) | (true_value & mask);
-}
-
-template <class pointer_type>
-inline pointer_type *select_ptr(const bool choose_true,
-                                pointer_type *true_value,
-                                pointer_type *false_value) noexcept {
-  const uintptr_t mask = static_cast<uintptr_t>(0) - static_cast<uintptr_t>(choose_true);
-  const uintptr_t t = reinterpret_cast<uintptr_t>(true_value);
-  const uintptr_t f = reinterpret_cast<uintptr_t>(false_value);
-  return reinterpret_cast<pointer_type *>((f & ~mask) | (t & mask));
-}
-
 inline std::string_view rwkv_token_text(const emel::model::data::vocab &vocab,
                                         const int32_t id) noexcept {
   const bool valid_id = id >= 0 && static_cast<uint32_t>(id) < vocab.n_tokens;
@@ -61,23 +42,6 @@ inline std::string_view rwkv_token_text(const emel::model::data::vocab &vocab,
   const uint32_t length = select_u32(has_text, entry.text_length, 0u);
   return std::string_view(
     vocab.token_storage.data() + static_cast<size_t>(offset), static_cast<size_t>(length));
-}
-
-inline bool rwkv_push_token(const event::encode &ev, const int32_t token, int32_t &count) noexcept {
-  int32_t sink = 0;
-  const bool has_buffer = !ev.token_ids.empty();
-  int32_t *base_ptrs[2] = {&sink, ev.token_ids.data()};
-  int32_t *base = base_ptrs[static_cast<size_t>(has_buffer)];
-  const bool non_negative_count = count >= 0;
-  const int32_t safe_count = select_i32(non_negative_count, count, 0);
-  const size_t count_index = static_cast<size_t>(safe_count);
-  const bool has_space = has_buffer && non_negative_count && count_index < ev.token_ids.size();
-  const bool write = token >= 0 && has_space;
-  const size_t target_index = count_index * static_cast<size_t>(write);
-  int32_t *target = base + target_index;
-  *target = select_i32(write, token, *target);
-  count += static_cast<int32_t>(write);
-  return write;
 }
 
 inline bool unescape_rwkv_token(const std::string_view escaped,
@@ -203,181 +167,62 @@ inline bool rwkv_tables_ready(const emel::text::encoders::rwkv::action::context 
 
 inline bool ensure_rwkv_tables(emel::text::encoders::rwkv::action::context &ctx,
                                const emel::model::data::vocab &vocab) {
-  auto ready_tables = +[](emel::text::encoders::rwkv::action::context &,
-                          const emel::model::data::vocab &) {
-    return true;
-  };
-  auto rebuild_tables = +[](emel::text::encoders::rwkv::action::context &ctx_value,
-                            const emel::model::data::vocab &vocab_value) {
-    auto process_text_none = +[](emel::text::encoders::rwkv::action::context &,
-                                 const std::string_view,
-                                 int32_t,
-                                 std::string &,
-                                 bool &) {};
-    auto process_text_some = +[](emel::text::encoders::rwkv::action::context &ctx_process,
-                                 const std::string_view text_process,
-                                 int32_t id_process,
-                                 std::string &unescaped_process,
-                                 bool &ok_process) {
-      const bool unescaped_ok = unescape_rwkv_token(text_process, unescaped_process);
-      ok_process = ok_process && unescaped_ok;
-      using insert_token_handler_t =
-          void (*)(emel::text::encoders::rwkv::action::context &, const std::string &, int32_t);
-      auto insert_token_none = +[](emel::text::encoders::rwkv::action::context &,
-                                   const std::string &,
-                                   int32_t) {};
-      auto insert_token_some = +[](emel::text::encoders::rwkv::action::context &ctx_insert,
-                                   const std::string &unescaped_insert,
-                                   int32_t id_insert) {
-        ctx_insert.token_matcher.insert(
-            unescaped_insert.data(), unescaped_insert.size(), id_insert);
-      };
-      const insert_token_handler_t insert_token_handlers[2] = {
-          insert_token_none,
-          insert_token_some,
-      };
-      const bool insert_token = unescaped_ok && !unescaped_process.empty();
-      insert_token_handlers[static_cast<size_t>(insert_token)](
-          ctx_process, unescaped_process, id_process);
-    };
-
-    ctx_value.rwkv_vocab = &vocab_value;
-    ctx_value.rwkv_tables_ready = false;
-    ctx_value.token_matcher = emel::text::encoders::detail::naive_trie{};
-
-    std::string unescaped;
-    bool ok = true;
-    for (uint32_t id = 0; id < vocab_value.n_tokens; ++id) {
-      const bool step_active = ok;
-      const std::string_view text = rwkv_token_text(vocab_value, static_cast<int32_t>(id));
-      using process_text_handler_t = void (*)(emel::text::encoders::rwkv::action::context &,
-                                              std::string_view,
-                                              int32_t,
-                                              std::string &,
-                                              bool &);
-      const process_text_handler_t process_text_handlers[2] = {
-          process_text_none,
-          process_text_some,
-      };
-      process_text_handlers[static_cast<size_t>(step_active && !text.empty())](
-          ctx_value, text, static_cast<int32_t>(id), unescaped, ok);
-    }
-
-    ctx_value.rwkv_tables_ready = ok;
-    return ok;
-  };
-
-  using ready_handler_t = bool (*)(emel::text::encoders::rwkv::action::context &,
-                                   const emel::model::data::vocab &);
-  const ready_handler_t ready_handlers[2] = {
-      rebuild_tables,
-      ready_tables,
-  };
-  return ready_handlers[static_cast<size_t>(rwkv_tables_ready(ctx, vocab))](ctx, vocab);
-}
-
-inline int32_t rwkv_lookup_unescaped_token(const emel::model::data::vocab &vocab,
-                                           const std::string_view target) {
-  auto process_text_none = +[](const std::string_view,
-                               const int32_t,
+  auto process_text_none = +[](emel::text::encoders::rwkv::action::context &,
                                const std::string_view,
+                               int32_t,
                                std::string &,
-                               int32_t &,
                                bool &) {};
-  auto process_text_some = +[](const std::string_view text_value,
-                               const int32_t id_value,
-                               const std::string_view target_value,
-                               std::string &unescaped_value,
-                               int32_t &resolved_value,
-                               bool &done_value) {
-    const bool ok = unescape_rwkv_token(text_value, unescaped_value);
-    const bool match = ok && unescaped_value == target_value;
-    resolved_value = select_i32(match, id_value, resolved_value);
-    done_value = done_value || match;
+  auto process_text_some = +[](emel::text::encoders::rwkv::action::context &ctx_process,
+                               const std::string_view text_process,
+                               int32_t id_process,
+                               std::string &unescaped_process,
+                               bool &ok_process) {
+    const bool unescaped_ok = unescape_rwkv_token(text_process, unescaped_process);
+    ok_process = ok_process && unescaped_ok;
+    using insert_token_handler_t =
+      void (*)(emel::text::encoders::rwkv::action::context &, const std::string &, int32_t);
+    auto insert_token_none = +[](emel::text::encoders::rwkv::action::context &,
+                                 const std::string &,
+                                 int32_t) {};
+    auto insert_token_some = +[](emel::text::encoders::rwkv::action::context &ctx_insert,
+                                 const std::string &unescaped_insert,
+                                 int32_t id_insert) {
+      ctx_insert.token_matcher.insert(
+        unescaped_insert.data(), unescaped_insert.size(), id_insert);
+    };
+    const insert_token_handler_t insert_token_handlers[2] = {
+      insert_token_none,
+      insert_token_some,
+    };
+    const bool insert_token = unescaped_ok && !unescaped_process.empty();
+    insert_token_handlers[static_cast<size_t>(insert_token)](
+      ctx_process, unescaped_process, id_process);
   };
 
-  int32_t resolved = k_token_null;
+  ctx.rwkv_vocab = &vocab;
+  ctx.rwkv_tables_ready = false;
+  ctx.token_matcher = emel::text::encoders::detail::naive_trie{};
+
   std::string unescaped;
-  bool loop_active = true;
+  bool ok = true;
   for (uint32_t id = 0; id < vocab.n_tokens; ++id) {
-    const bool step_active = loop_active;
+    const bool step_active = ok;
     const std::string_view text = rwkv_token_text(vocab, static_cast<int32_t>(id));
-    using process_text_handler_t = void (*)(std::string_view,
-                                            int32_t,
+    using process_text_handler_t = void (*)(emel::text::encoders::rwkv::action::context &,
                                             std::string_view,
+                                            int32_t,
                                             std::string &,
-                                            int32_t &,
                                             bool &);
     const process_text_handler_t process_text_handlers[2] = {
-        process_text_none,
-        process_text_some,
+      process_text_none,
+      process_text_some,
     };
-    bool step_done = false;
     process_text_handlers[static_cast<size_t>(step_active && !text.empty())](
-        text, static_cast<int32_t>(id), target, unescaped, resolved, step_done);
-    loop_active = loop_active && !step_done;
-  }
-  return resolved;
-}
-
-inline int32_t rwkv_resolve_unk_id(const emel::model::data::vocab &vocab) {
-  auto keep_unk_id = +[](const emel::model::data::vocab &, int32_t unk_id_value) {
-    return unk_id_value;
-  };
-  auto lookup_unk_id = +[](const emel::model::data::vocab &vocab_value, int32_t) {
-    return rwkv_lookup_unescaped_token(vocab_value, "<unk>");
-  };
-  const int32_t unk_id = vocab.unk_id;
-  using resolve_handler_t = int32_t (*)(const emel::model::data::vocab &, int32_t);
-  const resolve_handler_t resolve_handlers[2] = {
-      keep_unk_id,
-      lookup_unk_id,
-  };
-  return resolve_handlers[static_cast<size_t>(unk_id == k_token_null)](vocab, unk_id);
-}
-
-inline encode_result encode_rwkv(const event::encode &ev,
-                                 emel::text::encoders::rwkv::action::context &ctx,
-                                 const emel::model::data::vocab &vocab) {
-  encode_result result{};
-  result.token_count = 0;
-  const bool has_text = !ev.text.empty();
-  const bool tables_ready = rwkv_tables_ready(ctx, vocab);
-  result.error = select_i32(has_text && !tables_ready, EMEL_ERR_INVALID_ARGUMENT, EMEL_OK);
-
-  int32_t count = 0;
-  const int32_t unk_id = rwkv_resolve_unk_id(vocab);
-  size_t position = 0;
-  bool active = has_text && tables_ready;
-
-  while (active && position < ev.text.size()) {
-    const auto *node = ctx.token_matcher.traverse(ev.text[position]);
-    int32_t token_id = unk_id;
-    size_t token_end = position + 1;
-    size_t offset = position + 1;
-    const auto *walk = node;
-
-    while (walk != nullptr) {
-      token_id = select_i32(walk->has_value, walk->value, token_id);
-      token_end = select_size(walk->has_value, offset, token_end);
-      const bool can_advance = offset < ev.text.size();
-      const size_t safe_index = select_size(can_advance, offset, position);
-      const char next_char = ev.text[safe_index];
-      const auto *next_walk = walk->traverse(next_char);
-      walk = select_ptr(can_advance, next_walk, static_cast<decltype(next_walk)>(nullptr));
-      offset += static_cast<size_t>(can_advance);
-    }
-
-    const bool emit_token = token_id != k_token_null;
-    const bool token_push_ok = rwkv_push_token(ev, token_id, count);
-    const bool push_failed = emit_token && !token_push_ok;
-    result.error = select_i32(push_failed, EMEL_ERR_INVALID_ARGUMENT, result.error);
-    active = active && !push_failed;
-    position = token_end;
+      ctx, text, static_cast<int32_t>(id), unescaped, ok);
   }
 
-  result.token_count = select_i32(result.error == EMEL_OK, count, 0);
-  return result;
+  ctx.rwkv_tables_ready = ok;
+  return ok;
 }
 
 }  // namespace emel::text::encoders::rwkv::detail

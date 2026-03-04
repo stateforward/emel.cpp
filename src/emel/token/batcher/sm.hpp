@@ -10,6 +10,7 @@ namespace emel::token::batcher {
 
 struct ready {};
 struct request_decision {};
+struct request_validation_probe {};
 struct seq_mode_decision {};
 struct seq_from_masks {};
 struct seq_from_primary_ids {};
@@ -30,7 +31,9 @@ struct output_mask_last {};
 struct output_counting {};
 struct outputs_total_publish_decision {};
 struct single_output_decision {};
+struct single_output_probe {};
 struct continuity_decision {};
+struct continuity_probe {};
 struct done {};
 struct errored {};
 
@@ -43,11 +46,13 @@ struct model {
         sml::state<request_decision> <= *sml::state<ready> + sml::event<event::batch_runtime>
           / action::begin_batch
 
-      , sml::state<seq_mode_decision> <= sml::state<request_decision>
-          + sml::completion<event::batch_runtime> [ guard::valid_request{} ]
-      , sml::state<errored> <= sml::state<request_decision>
-          + sml::completion<event::batch_runtime> [ guard::invalid_request{} ]
-          / action::mark_invalid_request
+      , sml::state<request_validation_probe> <= sml::state<request_decision>
+          + sml::completion<event::batch_runtime>
+          / action::probe_request_validity
+      , sml::state<seq_mode_decision> <= sml::state<request_validation_probe>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<request_validation_probe>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
 
       //------------------------------------------------------------------------------//
       , sml::state<seq_from_masks> <= sml::state<seq_mode_decision>
@@ -182,20 +187,24 @@ struct model {
       //------------------------------------------------------------------------------//
       , sml::state<continuity_decision> <= sml::state<single_output_decision>
           + sml::completion<event::batch_runtime> [ guard::single_output_check_skipped{} ]
-      , sml::state<continuity_decision> <= sml::state<single_output_decision>
-          + sml::completion<event::batch_runtime> [ guard::single_output_check_passed{} ]
-      , sml::state<errored> <= sml::state<single_output_decision>
-          + sml::completion<event::batch_runtime> [ guard::single_output_check_failed{} ]
-          / action::mark_invalid_request
+      , sml::state<single_output_probe> <= sml::state<single_output_decision>
+          + sml::completion<event::batch_runtime> [ guard::single_output_check_required{} ]
+          / action::probe_single_output_per_seq
+      , sml::state<continuity_decision> <= sml::state<single_output_probe>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<single_output_probe>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
 
       //------------------------------------------------------------------------------//
       , sml::state<done> <= sml::state<continuity_decision>
           + sml::completion<event::batch_runtime> [ guard::continuity_check_skipped{} ]
-      , sml::state<done> <= sml::state<continuity_decision>
-          + sml::completion<event::batch_runtime> [ guard::continuity_check_passed{} ]
-      , sml::state<errored> <= sml::state<continuity_decision>
-          + sml::completion<event::batch_runtime> [ guard::continuity_check_failed{} ]
-          / action::mark_invalid_request
+      , sml::state<continuity_probe> <= sml::state<continuity_decision>
+          + sml::completion<event::batch_runtime> [ guard::continuity_check_required{} ]
+          / action::probe_continuity
+      , sml::state<done> <= sml::state<continuity_probe>
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+      , sml::state<errored> <= sml::state<continuity_probe>
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
 
       //------------------------------------------------------------------------------//
       , sml::state<ready> <= sml::state<done> + sml::completion<event::batch_runtime>
@@ -215,6 +224,8 @@ struct model {
       , sml::state<ready> <= sml::state<ready> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<request_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_validation_probe> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<seq_mode_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
@@ -256,7 +267,11 @@ struct model {
           / action::on_unexpected
       , sml::state<ready> <= sml::state<single_output_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
+      , sml::state<ready> <= sml::state<single_output_probe> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
       , sml::state<ready> <= sml::state<continuity_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<continuity_probe> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<done> + sml::unexpected_event<sml::_>
           / action::on_unexpected

@@ -27,18 +27,24 @@ struct allocate_sequence_kv_decision {};
 struct allocate_sequence_recurrent {};
 struct allocate_sequence_recurrent_decision {};
 struct allocate_sequence_rollback_kv {};
+struct allocate_sequence_rollback_result_decision {};
+struct allocate_sequence_recurrent_error_decision {};
 
 struct allocate_slots_kv {};
 struct allocate_slots_kv_decision {};
 struct allocate_slots_recurrent {};
 struct allocate_slots_recurrent_decision {};
 struct allocate_slots_rollback_kv {};
+struct allocate_slots_rollback_result_decision {};
+struct allocate_slots_recurrent_error_decision {};
 
 struct branch_sequence_kv {};
 struct branch_sequence_kv_decision {};
 struct branch_sequence_recurrent {};
 struct branch_sequence_recurrent_decision {};
 struct branch_sequence_rollback_kv {};
+struct branch_sequence_rollback_result_decision {};
+struct branch_sequence_recurrent_error_decision {};
 
 struct free_sequence_kv {};
 struct free_sequence_kv_decision {};
@@ -112,26 +118,33 @@ struct model {
       , sml::state<allocate_sequence_rollback_kv> <= sml::state<allocate_sequence_recurrent_decision>
           + sml::completion<event::allocate_sequence_runtime> [ guard::recurrent_rejected_any{} ]
           / action::exec_allocate_sequence_rollback_kv
+      , sml::state<allocate_sequence_rollback_result_decision>
+          <= sml::state<allocate_sequence_rollback_kv>
+          + sml::completion<event::allocate_sequence_runtime>
 
-      , sml::state<out_of_memory> <= sml::state<allocate_sequence_rollback_kv>
-          + sml::completion<event::allocate_sequence_runtime>
-          [ guard::rollback_accepted_and_recurrent_rejected_out_of_memory{} ]
-          / action::mark_out_of_memory
-      , sml::state<errored> <= sml::state<allocate_sequence_rollback_kv>
-          + sml::completion<event::allocate_sequence_runtime>
-          [ guard::rollback_accepted_and_recurrent_rejected_backend_or_none{} ]
-          / action::mark_backend_error
-      , sml::state<errored> <= sml::state<allocate_sequence_rollback_kv>
-          + sml::completion<event::allocate_sequence_runtime>
-          [ guard::rollback_accepted_and_recurrent_rejected_non_backend_error{} ]
-          / action::mark_error_from_recurrent
-      , sml::state<errored> <= sml::state<allocate_sequence_rollback_kv>
+      , sml::state<allocate_sequence_recurrent_error_decision>
+          <= sml::state<allocate_sequence_rollback_result_decision>
+          + sml::completion<event::allocate_sequence_runtime> [ guard::rollback_accepted{} ]
+      , sml::state<errored> <= sml::state<allocate_sequence_rollback_result_decision>
           + sml::completion<event::allocate_sequence_runtime> [ guard::rollback_rejected_with_error{} ]
           / action::mark_error_from_rollback
-      , sml::state<errored> <= sml::state<allocate_sequence_rollback_kv>
-          + sml::completion<event::allocate_sequence_runtime>
-          [ guard::rollback_rejected_without_error{} ]
+      , sml::state<errored> <= sml::state<allocate_sequence_rollback_result_decision>
+          + sml::completion<event::allocate_sequence_runtime> [ guard::rollback_rejected_without_error{} ]
           / action::mark_internal_error
+      , sml::state<errored> <= sml::state<allocate_sequence_rollback_result_decision>
+          + sml::completion<event::allocate_sequence_runtime> / action::mark_internal_error
+
+      , sml::state<out_of_memory> <= sml::state<allocate_sequence_recurrent_error_decision>
+          + sml::completion<event::allocate_sequence_runtime> [ guard::recurrent_rejected_out_of_memory{} ]
+          / action::mark_out_of_memory
+      , sml::state<errored> <= sml::state<allocate_sequence_recurrent_error_decision>
+          + sml::completion<event::allocate_sequence_runtime> [ guard::recurrent_rejected_backend_or_none{} ]
+          / action::mark_backend_error
+      , sml::state<errored> <= sml::state<allocate_sequence_recurrent_error_decision>
+          + sml::completion<event::allocate_sequence_runtime> [ guard::recurrent_rejected_non_backend_error{} ]
+          / action::mark_error_from_recurrent
+      , sml::state<errored> <= sml::state<allocate_sequence_recurrent_error_decision>
+          + sml::completion<event::allocate_sequence_runtime> / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<allocate_slots_kv> <= sml::state<ready>
@@ -157,26 +170,33 @@ struct model {
       , sml::state<allocate_slots_rollback_kv> <= sml::state<allocate_slots_recurrent_decision>
           + sml::completion<event::allocate_slots_runtime> [ guard::recurrent_rejected_any{} ]
           / action::exec_allocate_slots_rollback_kv
+      , sml::state<allocate_slots_rollback_result_decision>
+          <= sml::state<allocate_slots_rollback_kv>
+          + sml::completion<event::allocate_slots_runtime>
 
-      , sml::state<out_of_memory> <= sml::state<allocate_slots_rollback_kv>
-          + sml::completion<event::allocate_slots_runtime>
-          [ guard::rollback_accepted_and_recurrent_rejected_out_of_memory{} ]
-          / action::mark_out_of_memory
-      , sml::state<errored> <= sml::state<allocate_slots_rollback_kv>
-          + sml::completion<event::allocate_slots_runtime>
-          [ guard::rollback_accepted_and_recurrent_rejected_backend_or_none{} ]
-          / action::mark_backend_error
-      , sml::state<errored> <= sml::state<allocate_slots_rollback_kv>
-          + sml::completion<event::allocate_slots_runtime>
-          [ guard::rollback_accepted_and_recurrent_rejected_non_backend_error{} ]
-          / action::mark_error_from_recurrent
-      , sml::state<errored> <= sml::state<allocate_slots_rollback_kv>
+      , sml::state<allocate_slots_recurrent_error_decision>
+          <= sml::state<allocate_slots_rollback_result_decision>
+          + sml::completion<event::allocate_slots_runtime> [ guard::rollback_accepted{} ]
+      , sml::state<errored> <= sml::state<allocate_slots_rollback_result_decision>
           + sml::completion<event::allocate_slots_runtime> [ guard::rollback_rejected_with_error{} ]
           / action::mark_error_from_rollback
-      , sml::state<errored> <= sml::state<allocate_slots_rollback_kv>
-          + sml::completion<event::allocate_slots_runtime>
-          [ guard::rollback_rejected_without_error{} ]
+      , sml::state<errored> <= sml::state<allocate_slots_rollback_result_decision>
+          + sml::completion<event::allocate_slots_runtime> [ guard::rollback_rejected_without_error{} ]
           / action::mark_internal_error
+      , sml::state<errored> <= sml::state<allocate_slots_rollback_result_decision>
+          + sml::completion<event::allocate_slots_runtime> / action::mark_internal_error
+
+      , sml::state<out_of_memory> <= sml::state<allocate_slots_recurrent_error_decision>
+          + sml::completion<event::allocate_slots_runtime> [ guard::recurrent_rejected_out_of_memory{} ]
+          / action::mark_out_of_memory
+      , sml::state<errored> <= sml::state<allocate_slots_recurrent_error_decision>
+          + sml::completion<event::allocate_slots_runtime> [ guard::recurrent_rejected_backend_or_none{} ]
+          / action::mark_backend_error
+      , sml::state<errored> <= sml::state<allocate_slots_recurrent_error_decision>
+          + sml::completion<event::allocate_slots_runtime> [ guard::recurrent_rejected_non_backend_error{} ]
+          / action::mark_error_from_recurrent
+      , sml::state<errored> <= sml::state<allocate_slots_recurrent_error_decision>
+          + sml::completion<event::allocate_slots_runtime> / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<branch_sequence_kv> <= sml::state<ready>
@@ -202,26 +222,33 @@ struct model {
       , sml::state<branch_sequence_rollback_kv> <= sml::state<branch_sequence_recurrent_decision>
           + sml::completion<event::branch_sequence_runtime> [ guard::recurrent_rejected_any{} ]
           / action::exec_branch_sequence_rollback_kv
+      , sml::state<branch_sequence_rollback_result_decision>
+          <= sml::state<branch_sequence_rollback_kv>
+          + sml::completion<event::branch_sequence_runtime>
 
-      , sml::state<out_of_memory> <= sml::state<branch_sequence_rollback_kv>
-          + sml::completion<event::branch_sequence_runtime>
-          [ guard::rollback_accepted_and_recurrent_rejected_out_of_memory{} ]
-          / action::mark_out_of_memory
-      , sml::state<errored> <= sml::state<branch_sequence_rollback_kv>
-          + sml::completion<event::branch_sequence_runtime>
-          [ guard::rollback_accepted_and_recurrent_rejected_backend_or_none{} ]
-          / action::mark_backend_error
-      , sml::state<errored> <= sml::state<branch_sequence_rollback_kv>
-          + sml::completion<event::branch_sequence_runtime>
-          [ guard::rollback_accepted_and_recurrent_rejected_non_backend_error{} ]
-          / action::mark_error_from_recurrent
-      , sml::state<errored> <= sml::state<branch_sequence_rollback_kv>
+      , sml::state<branch_sequence_recurrent_error_decision>
+          <= sml::state<branch_sequence_rollback_result_decision>
+          + sml::completion<event::branch_sequence_runtime> [ guard::rollback_accepted{} ]
+      , sml::state<errored> <= sml::state<branch_sequence_rollback_result_decision>
           + sml::completion<event::branch_sequence_runtime> [ guard::rollback_rejected_with_error{} ]
           / action::mark_error_from_rollback
-      , sml::state<errored> <= sml::state<branch_sequence_rollback_kv>
-          + sml::completion<event::branch_sequence_runtime>
-          [ guard::rollback_rejected_without_error{} ]
+      , sml::state<errored> <= sml::state<branch_sequence_rollback_result_decision>
+          + sml::completion<event::branch_sequence_runtime> [ guard::rollback_rejected_without_error{} ]
           / action::mark_internal_error
+      , sml::state<errored> <= sml::state<branch_sequence_rollback_result_decision>
+          + sml::completion<event::branch_sequence_runtime> / action::mark_internal_error
+
+      , sml::state<out_of_memory> <= sml::state<branch_sequence_recurrent_error_decision>
+          + sml::completion<event::branch_sequence_runtime> [ guard::recurrent_rejected_out_of_memory{} ]
+          / action::mark_out_of_memory
+      , sml::state<errored> <= sml::state<branch_sequence_recurrent_error_decision>
+          + sml::completion<event::branch_sequence_runtime> [ guard::recurrent_rejected_backend_or_none{} ]
+          / action::mark_backend_error
+      , sml::state<errored> <= sml::state<branch_sequence_recurrent_error_decision>
+          + sml::completion<event::branch_sequence_runtime> [ guard::recurrent_rejected_non_backend_error{} ]
+          / action::mark_error_from_recurrent
+      , sml::state<errored> <= sml::state<branch_sequence_recurrent_error_decision>
+          + sml::completion<event::branch_sequence_runtime> / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<free_sequence_kv> <= sml::state<ready>
@@ -378,6 +405,10 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<allocate_sequence_rollback_kv>
           + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<allocate_sequence_rollback_result_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<allocate_sequence_recurrent_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<allocate_slots_kv> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<allocate_slots_kv_decision> + sml::unexpected_event<sml::_>
@@ -388,6 +419,10 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<allocate_slots_rollback_kv>
           + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<allocate_slots_rollback_result_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<allocate_slots_recurrent_error_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<branch_sequence_kv> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<branch_sequence_kv_decision> + sml::unexpected_event<sml::_>
@@ -397,6 +432,10 @@ struct model {
       , sml::state<ready> <= sml::state<branch_sequence_recurrent_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<branch_sequence_rollback_kv>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<branch_sequence_rollback_result_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<ready> <= sml::state<branch_sequence_recurrent_error_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<ready> <= sml::state<free_sequence_kv> + sml::unexpected_event<sml::_>
           / action::on_unexpected

@@ -53,18 +53,6 @@ struct vocab_unchanged {
   }
 };
 
-struct valid_encode_and_vocab_changed {
-  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return emel::text::encoders::guard::valid_encode_and_vocab_changed{}(ev, ctx);
-  }
-};
-
-struct valid_encode_and_vocab_unchanged {
-  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return emel::text::encoders::guard::valid_encode_and_vocab_unchanged{}(ev, ctx);
-  }
-};
-
 struct tables_ready {
   bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
     (void)ev;
@@ -75,18 +63,6 @@ struct tables_ready {
 struct tables_missing {
   bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
     return !tables_ready{}(ev, ctx);
-  }
-};
-
-struct text_non_empty_and_tables_ready {
-  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return text_non_empty{}(ev) && tables_ready{}(ev, ctx);
-  }
-};
-
-struct text_non_empty_and_tables_missing {
-  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return text_non_empty{}(ev) && tables_missing{}(ev, ctx);
   }
 };
 

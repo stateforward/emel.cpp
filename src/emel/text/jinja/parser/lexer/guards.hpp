@@ -143,6 +143,36 @@ struct text_opening_block_not_ahead {
   }
 };
 
+struct text_opening_trim_stopped_on_newline {
+  bool operator()(const event::next_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.ctx.handled &&
+           ev.ctx.scan.err == detail::error_code(error::none) &&
+           ev.ctx.text_trim_probe > ev.ctx.text_start &&
+           ev.ctx.source[ev.ctx.text_trim_probe - 1u] == '\n';
+  }
+};
+
+struct text_opening_trim_to_zero {
+  bool operator()(const event::next_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.ctx.handled &&
+           ev.ctx.scan.err == detail::error_code(error::none) &&
+           ev.ctx.text_start == 0u &&
+           ev.ctx.text_trim_probe == 0u;
+  }
+};
+
+struct text_opening_trim_keep_original {
+  bool operator()(const event::next_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !text_opening_trim_stopped_on_newline{}(ev, ctx) &&
+           !text_opening_trim_to_zero{}(ev, ctx) &&
+           ev.ctx.handled &&
+           ev.ctx.scan.err == detail::error_code(error::none);
+  }
+};
+
 struct text_last_block_rstrip_enabled {
   bool operator()(const event::next_runtime &ev,
                   const action::context &) const noexcept {

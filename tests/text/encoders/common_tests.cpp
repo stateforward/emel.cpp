@@ -416,18 +416,39 @@ TEST_CASE("encoder_encode_impl_variants") {
           break;
         }
         case emel::model::data::tokenizer_model::UGM: {
-          emel::text::encoders::ugm::action::context ctx{};
-          ctx.vocab = builder.vocab;
-          CHECK(emel::text::encoders::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
-          result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
+          emel::text::encoders::ugm::sm machine{};
+          emel::text::encoders::event::encode ev_ugm{
+            .vocab = *builder.vocab,
+            .text = ev.text,
+            .preprocessed = ev.preprocessed,
+            .token_ids = ev.token_ids,
+            .token_count_out = ev.token_count_out,
+            .error_out = ev.error_out,
+            .owner_sm = ev.owner_sm,
+            .dispatch_done = ev.dispatch_done,
+            .dispatch_error = ev.dispatch_error,
+          };
+          (void)machine.process_event(ev_ugm);
+          result.token_count = token_count;
+          result.error = err;
           break;
         }
         case emel::model::data::tokenizer_model::RWKV: {
-          emel::text::encoders::rwkv::action::context ctx{};
-          ctx.vocab = builder.vocab;
-          CHECK(emel::text::encoders::detail::ensure_tables(ctx));
-          CHECK(emel::text::encoders::rwkv::detail::ensure_rwkv_tables(ctx, *builder.vocab));
-          result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
+          emel::text::encoders::rwkv::sm machine{};
+          emel::text::encoders::event::encode ev_rwkv{
+            .vocab = *builder.vocab,
+            .text = ev.text,
+            .preprocessed = ev.preprocessed,
+            .token_ids = ev.token_ids,
+            .token_count_out = ev.token_count_out,
+            .error_out = ev.error_out,
+            .owner_sm = ev.owner_sm,
+            .dispatch_done = ev.dispatch_done,
+            .dispatch_error = ev.dispatch_error,
+          };
+          (void)machine.process_event(ev_rwkv);
+          result.token_count = token_count;
+          result.error = err;
           break;
         }
         case emel::model::data::tokenizer_model::PLAMO2: {
@@ -572,25 +593,32 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     builder.set_model("t5");
     builder.add_token("\xE2\x96\x81hello", 0.5f, 1);
     builder.add_token("world", 0.4f, 1);
-    emel::text::encoders::ugm::action::context ctx{};
-    ctx.vocab = builder.vocab;
-    CHECK(emel::text::encoders::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
-    emel::text::encoders::event::encode ev_ugm = ev;
-    ev_ugm.text = "hello";
-    auto result = emel::text::encoders::ugm::detail::encode_ugm(ev_ugm, ctx, *builder.vocab);
-    (void)result;
+    emel::text::encoders::ugm::sm machine{};
+    emel::text::encoders::event::encode ev_ugm{
+      .vocab = *builder.vocab,
+      .text = "hello",
+      .token_ids = ev.token_ids,
+      .token_count_out = ev.token_count_out,
+      .error_out = ev.error_out,
+    };
+    CHECK(machine.process_event(ev_ugm));
+    CHECK(err == EMEL_OK);
   }
 
   {
     vocab_builder builder{};
     builder.set_model("rwkv");
     builder.add_byte_token(static_cast<uint8_t>('r'));
-    emel::text::encoders::rwkv::action::context ctx{};
-    ctx.vocab = builder.vocab;
-    CHECK(emel::text::encoders::detail::ensure_tables(ctx));
-    CHECK(emel::text::encoders::rwkv::detail::ensure_rwkv_tables(ctx, *builder.vocab));
-    auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev, ctx, *builder.vocab);
-    (void)result;
+    emel::text::encoders::rwkv::sm machine{};
+    emel::text::encoders::event::encode ev_rwkv{
+      .vocab = *builder.vocab,
+      .text = ev.text,
+      .token_ids = ev.token_ids,
+      .token_count_out = ev.token_count_out,
+      .error_out = ev.error_out,
+    };
+    CHECK(machine.process_event(ev_rwkv));
+    CHECK(err == EMEL_OK);
   }
 
   {
@@ -780,8 +808,6 @@ TEST_CASE("encoder_detail_empty_encode_variants") {
 
   emel::text::encoders::action::context fallback_ctx{};
   fallback_ctx.vocab = builder.vocab;
-  emel::text::encoders::rwkv::action::context rwkv_ctx{};
-  rwkv_ctx.vocab = builder.vocab;
   emel::text::encoders::plamo2::action::context plamo2_ctx{};
   plamo2_ctx.vocab = builder.vocab;
 
@@ -800,9 +826,16 @@ TEST_CASE("encoder_detail_empty_encode_variants") {
   CHECK(fallback.token_count == 0);
   CHECK(fallback.error == EMEL_OK);
 
-  const auto rwkv = emel::text::encoders::rwkv::detail::encode_rwkv(ev, rwkv_ctx, *builder.vocab);
-  CHECK(rwkv.token_count == 0);
-  CHECK(rwkv.error == EMEL_OK);
+  emel::text::encoders::rwkv::sm rwkv_machine{};
+  CHECK(rwkv_machine.process_event(emel::text::encoders::event::encode{
+    .vocab = *builder.vocab,
+    .text = ev.text,
+    .token_ids = ev.token_ids,
+    .token_count_out = ev.token_count_out,
+    .error_out = ev.error_out,
+  }));
+  CHECK(token_count == 0);
+  CHECK(err == EMEL_OK);
 
   const auto plamo2 =
     emel::text::encoders::plamo2::detail::encode_plamo2(ev, plamo2_ctx, *builder.vocab);
@@ -971,13 +1004,15 @@ TEST_CASE("encoder_encode_branch_cases") {
     builder.set_model("t5");
     const int32_t unk_id = builder.add_token("<unk>", 0.0f, 2);
     builder.vocab->unk_id = unk_id;
-    emel::text::encoders::ugm::action::context ctx{};
-    ctx.vocab = builder.vocab;
-    CHECK(emel::text::encoders::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
-    emel::text::encoders::event::encode ev_ugm = ev;
-    ev_ugm.text = "xyz";
-    auto result = emel::text::encoders::ugm::detail::encode_ugm(ev_ugm, ctx, *builder.vocab);
-    (void)result;
+    emel::text::encoders::ugm::sm machine{};
+    emel::text::encoders::event::encode ev_ugm{
+      .vocab = *builder.vocab,
+      .text = "xyz",
+      .token_ids = ev.token_ids,
+      .token_count_out = ev.token_count_out,
+      .error_out = ev.error_out,
+    };
+    (void)machine.process_event(ev_ugm);
   }
 
   {
@@ -985,14 +1020,15 @@ TEST_CASE("encoder_encode_branch_cases") {
     builder.set_model("rwkv");
     const int32_t unk_id = builder.add_token("<unk>", 0.0f, 2);
     builder.vocab->unk_id = unk_id;
-    emel::text::encoders::rwkv::action::context ctx{};
-    ctx.vocab = builder.vocab;
-    CHECK(emel::text::encoders::detail::ensure_tables(ctx));
-    CHECK(emel::text::encoders::rwkv::detail::ensure_rwkv_tables(ctx, *builder.vocab));
-    emel::text::encoders::event::encode ev_rwkv = ev;
-    ev_rwkv.text = "x";
-    auto result = emel::text::encoders::rwkv::detail::encode_rwkv(ev_rwkv, ctx, *builder.vocab);
-    (void)result;
+    emel::text::encoders::rwkv::sm machine{};
+    emel::text::encoders::event::encode ev_rwkv{
+      .vocab = *builder.vocab,
+      .text = "x",
+      .token_ids = ev.token_ids,
+      .token_count_out = ev.token_count_out,
+      .error_out = ev.error_out,
+    };
+    (void)machine.process_event(ev_rwkv);
   }
 
   {
@@ -1146,11 +1182,11 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(ctx.vocab == builder.vocab);
     emel::text::encoders::bpe::action::prepare_tables(runtime_ok_ev, ctx);
     CHECK(emel::text::encoders::bpe::guard::direct_word_token_available{}(runtime_ok_ev, ctx));
-    CHECK(emel::text::encoders::bpe::guard::merge_path_required{}(runtime_ok_ev, ctx));
+    CHECK_FALSE(emel::text::encoders::bpe::guard::ignore_merges_enabled{}(runtime_ok_ev, ctx));
 
     builder.vocab->ignore_merges = true;
-    CHECK(emel::text::encoders::bpe::guard::ignore_merges_fast_path{}(runtime_ok_ev, ctx));
-    CHECK_FALSE(emel::text::encoders::bpe::guard::merge_path_required{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::bpe::guard::ignore_merges_enabled{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::bpe::guard::direct_word_token_available{}(runtime_ok_ev, ctx));
 
     emel::text::encoders::bpe::action::run_encode_ignore_merges(runtime_ok_ev, ctx);
     emel::text::encoders::bpe::action::run_encode_merge_path(runtime_error_ev, ctx);
@@ -1188,10 +1224,12 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     emel::text::encoders::wpm::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
     CHECK(ctx.vocab == builder.vocab);
     CHECK(emel::text::encoders::wpm::guard::tables_missing{}(runtime_ok_ev, ctx));
-    CHECK(emel::text::encoders::wpm::guard::text_non_empty_and_tables_missing{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::wpm::guard::text_non_empty{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::wpm::guard::tables_missing{}(runtime_ok_ev, ctx));
     emel::text::encoders::wpm::action::sync_tables(runtime_ok_ev, ctx);
     CHECK(emel::text::encoders::wpm::guard::tables_ready{}(runtime_ok_ev, ctx));
-    CHECK(emel::text::encoders::wpm::guard::text_non_empty_and_tables_ready{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::wpm::guard::text_non_empty{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::wpm::guard::tables_ready{}(runtime_ok_ev, ctx));
     emel::text::encoders::wpm::action::run_encode(runtime_error_ev, ctx);
     emel::text::encoders::wpm::action::mark_done(runtime_ok_ev, ctx);
     emel::text::encoders::wpm::action::ensure_last_error(runtime_error_ev, ctx);
@@ -1226,10 +1264,12 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     emel::text::encoders::spm::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
     CHECK(ctx.vocab == builder.vocab);
     CHECK(emel::text::encoders::spm::guard::tables_missing{}(runtime_ok_ev, ctx));
-    CHECK(emel::text::encoders::spm::guard::text_non_empty_and_tables_missing{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::spm::guard::text_non_empty{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::spm::guard::tables_missing{}(runtime_ok_ev, ctx));
     emel::text::encoders::spm::action::sync_tables(runtime_ok_ev, ctx);
     CHECK(emel::text::encoders::spm::guard::tables_ready{}(runtime_ok_ev, ctx));
-    CHECK(emel::text::encoders::spm::guard::text_non_empty_and_tables_ready{}(runtime_ok_ev, ctx));
+    CHECK(emel::text::encoders::spm::guard::text_non_empty{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::spm::guard::tables_ready{}(runtime_ok_ev, ctx));
     emel::text::encoders::spm::action::run_prepare(runtime_ok_ev, ctx);
     emel::text::encoders::spm::action::run_merge(runtime_ok_ev, ctx);
     emel::text::encoders::spm::action::run_encode(runtime_error_ev, ctx);
@@ -1263,26 +1303,35 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     emel::text::encoders::event::encode_runtime runtime_ok_ev{ev_ok, runtime_ok};
     emel::text::encoders::event::encode_runtime runtime_error_ev{ev_error, runtime_error};
     emel::text::encoders::event::encode_runtime runtime_invalid_ev{ev_invalid, runtime_invalid};
+    emel::text::encoders::ugm::runtime::encode_runtime runtime_ok_ugm_ev{runtime_ok_ev};
+    emel::text::encoders::ugm::runtime::encode_runtime runtime_error_ugm_ev{runtime_error_ev};
+    emel::text::encoders::ugm::runtime::encode_runtime runtime_invalid_ugm_ev{runtime_invalid_ev};
 
-    emel::text::encoders::ugm::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
+    emel::text::encoders::ugm::action::begin_encode_sync_vocab(runtime_ok_ugm_ev, ctx);
     CHECK(ctx.vocab == builder.vocab);
-    CHECK(emel::text::encoders::ugm::guard::tables_missing{}(runtime_ok_ev, ctx));
-    CHECK(emel::text::encoders::ugm::guard::text_non_empty_and_tables_missing{}(runtime_ok_ev, ctx));
-    emel::text::encoders::ugm::action::sync_tables(runtime_ok_ev, ctx);
-    CHECK(emel::text::encoders::ugm::guard::tables_ready{}(runtime_ok_ev, ctx));
-    CHECK(emel::text::encoders::ugm::guard::text_non_empty_and_tables_ready{}(runtime_ok_ev, ctx));
-    emel::text::encoders::ugm::action::run_encode(runtime_error_ev, ctx);
-    emel::text::encoders::ugm::action::mark_done(runtime_ok_ev, ctx);
-    emel::text::encoders::ugm::action::ensure_last_error(runtime_error_ev, ctx);
-    emel::text::encoders::ugm::action::on_unexpected(runtime_ok_ev, ctx);
-    emel::text::encoders::ugm::action::begin_encode(runtime_error_ev, ctx);
+    CHECK(emel::text::encoders::ugm::guard::tables_missing{}(runtime_ok_ugm_ev, ctx));
+    CHECK(emel::text::encoders::ugm::guard::text_non_empty{}(runtime_ok_ugm_ev));
+    CHECK(emel::text::encoders::ugm::guard::tables_missing{}(runtime_ok_ugm_ev, ctx));
+    emel::text::encoders::ugm::action::sync_tables(runtime_ok_ugm_ev, ctx);
+    CHECK(emel::text::encoders::ugm::guard::tables_ready{}(runtime_ok_ugm_ev, ctx));
+    CHECK(emel::text::encoders::ugm::guard::text_non_empty{}(runtime_ok_ugm_ev));
+    CHECK(emel::text::encoders::ugm::guard::tables_ready{}(runtime_ok_ugm_ev, ctx));
+    emel::text::encoders::ugm::action::begin_encode(runtime_error_ugm_ev, ctx);
+    emel::text::encoders::ugm::action::resolve_vocab_unk(runtime_error_ugm_ev, ctx);
+    emel::text::encoders::ugm::action::normalize_input(runtime_error_ugm_ev, ctx);
+    emel::text::encoders::ugm::action::prepare_dp_input(runtime_error_ugm_ev, ctx);
+    emel::text::encoders::ugm::action::run_dp_trace(runtime_error_ugm_ev, ctx);
+    emel::text::encoders::ugm::action::emit_tokens(runtime_error_ugm_ev, ctx);
+    emel::text::encoders::ugm::action::mark_done(runtime_ok_ugm_ev, ctx);
+    emel::text::encoders::ugm::action::ensure_last_error(runtime_error_ugm_ev, ctx);
+    emel::text::encoders::ugm::action::on_unexpected(runtime_ok_ugm_ev, ctx);
 
-    CHECK(emel::text::encoders::ugm::guard::valid_encode{}(runtime_ok_ev, ctx));
-    CHECK(emel::text::encoders::ugm::guard::invalid_encode{}(runtime_invalid_ev, ctx));
+    CHECK(emel::text::encoders::ugm::guard::valid_encode{}(runtime_ok_ugm_ev, ctx));
+    CHECK(emel::text::encoders::ugm::guard::invalid_encode{}(runtime_invalid_ugm_ev, ctx));
     runtime_ok.err = EMEL_OK;
-    CHECK(emel::text::encoders::ugm::guard::phase_ok{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::ugm::guard::phase_ok{}(runtime_ok_ugm_ev));
     runtime_ok.err = EMEL_ERR_BACKEND;
-    CHECK(emel::text::encoders::ugm::guard::phase_failed{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::ugm::guard::phase_failed{}(runtime_ok_ugm_ev));
   }
 
   {
@@ -1300,24 +1349,28 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     emel::text::encoders::event::encode_runtime runtime_ok_ev{ev_ok, runtime_ok};
     emel::text::encoders::event::encode_runtime runtime_error_ev{ev_error, runtime_error};
     emel::text::encoders::event::encode_runtime runtime_invalid_ev{ev_invalid, runtime_invalid};
+    emel::text::encoders::rwkv::runtime::encode_runtime runtime_ok_rwkv_ev{runtime_ok_ev};
+    emel::text::encoders::rwkv::runtime::encode_runtime runtime_error_rwkv_ev{runtime_error_ev};
+    emel::text::encoders::rwkv::runtime::encode_runtime runtime_invalid_rwkv_ev{runtime_invalid_ev};
 
-    emel::text::encoders::rwkv::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
+    emel::text::encoders::rwkv::action::begin_encode_sync_vocab(runtime_ok_rwkv_ev, ctx);
     CHECK(ctx.vocab == builder.vocab);
-    CHECK(emel::text::encoders::rwkv::guard::tables_missing{}(runtime_ok_ev, ctx));
-    emel::text::encoders::rwkv::action::sync_tables(runtime_ok_ev, ctx);
-    CHECK(emel::text::encoders::rwkv::guard::tables_ready{}(runtime_ok_ev, ctx));
-    emel::text::encoders::rwkv::action::run_encode(runtime_error_ev, ctx);
-    emel::text::encoders::rwkv::action::mark_done(runtime_ok_ev, ctx);
-    emel::text::encoders::rwkv::action::ensure_last_error(runtime_error_ev, ctx);
-    emel::text::encoders::rwkv::action::on_unexpected(runtime_ok_ev, ctx);
-    emel::text::encoders::rwkv::action::begin_encode(runtime_error_ev, ctx);
+    CHECK(emel::text::encoders::rwkv::guard::tables_missing{}(runtime_ok_rwkv_ev, ctx));
+    emel::text::encoders::rwkv::action::sync_tables(runtime_ok_rwkv_ev, ctx);
+    CHECK(emel::text::encoders::rwkv::guard::tables_ready{}(runtime_ok_rwkv_ev, ctx));
+    emel::text::encoders::rwkv::action::begin_encode(runtime_error_rwkv_ev, ctx);
+    emel::text::encoders::rwkv::action::resolve_vocab_unk(runtime_error_rwkv_ev, ctx);
+    emel::text::encoders::rwkv::action::run_encode(runtime_error_rwkv_ev, ctx);
+    emel::text::encoders::rwkv::action::mark_done(runtime_ok_rwkv_ev, ctx);
+    emel::text::encoders::rwkv::action::ensure_last_error(runtime_error_rwkv_ev, ctx);
+    emel::text::encoders::rwkv::action::on_unexpected(runtime_ok_rwkv_ev, ctx);
 
-    CHECK(emel::text::encoders::rwkv::guard::valid_encode{}(runtime_ok_ev, ctx));
-    CHECK(emel::text::encoders::rwkv::guard::invalid_encode{}(runtime_invalid_ev, ctx));
+    CHECK(emel::text::encoders::rwkv::guard::valid_encode{}(runtime_ok_rwkv_ev, ctx));
+    CHECK(emel::text::encoders::rwkv::guard::invalid_encode{}(runtime_invalid_rwkv_ev, ctx));
     runtime_ok.err = EMEL_OK;
-    CHECK(emel::text::encoders::rwkv::guard::phase_ok{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::rwkv::guard::phase_ok{}(runtime_ok_rwkv_ev));
     runtime_ok.err = EMEL_ERR_BACKEND;
-    CHECK(emel::text::encoders::rwkv::guard::phase_failed{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::rwkv::guard::phase_failed{}(runtime_ok_rwkv_ev));
   }
 
   {
@@ -1337,21 +1390,32 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     emel::text::encoders::event::encode_runtime runtime_ok_ev{ev_ok, runtime_ok};
     emel::text::encoders::event::encode_runtime runtime_error_ev{ev_error, runtime_error};
     emel::text::encoders::event::encode_runtime runtime_invalid_ev{ev_invalid, runtime_invalid};
+    emel::text::encoders::plamo2::runtime::encode_runtime runtime_ok_plamo2_ev{runtime_ok_ev};
+    emel::text::encoders::plamo2::runtime::encode_runtime runtime_error_plamo2_ev{runtime_error_ev};
+    emel::text::encoders::plamo2::runtime::encode_runtime runtime_invalid_plamo2_ev{
+      runtime_invalid_ev};
 
-    emel::text::encoders::plamo2::action::begin_encode_sync_vocab(runtime_ok_ev, ctx);
+    emel::text::encoders::plamo2::action::begin_encode_sync_vocab(runtime_ok_plamo2_ev, ctx);
     CHECK(ctx.vocab == builder.vocab);
-    emel::text::encoders::plamo2::action::run_encode(runtime_error_ev, ctx);
-    emel::text::encoders::plamo2::action::mark_done(runtime_ok_ev, ctx);
-    emel::text::encoders::plamo2::action::ensure_last_error(runtime_error_ev, ctx);
-    emel::text::encoders::plamo2::action::on_unexpected(runtime_ok_ev, ctx);
-    emel::text::encoders::plamo2::action::begin_encode(runtime_error_ev, ctx);
+    emel::text::encoders::plamo2::action::sync_tables(runtime_ok_plamo2_ev, ctx);
+    CHECK(emel::text::encoders::plamo2::guard::tables_ready{}(runtime_ok_plamo2_ev, ctx));
+    emel::text::encoders::plamo2::action::decode_input(runtime_ok_plamo2_ev, ctx);
+    CHECK(emel::text::encoders::plamo2::guard::decoded_non_empty{}(runtime_ok_plamo2_ev));
+    emel::text::encoders::plamo2::action::prepare_dp(runtime_ok_plamo2_ev, ctx);
+    emel::text::encoders::plamo2::action::run_dp(runtime_ok_plamo2_ev, ctx);
+    emel::text::encoders::plamo2::action::emit_tokens(runtime_ok_plamo2_ev, ctx);
+    emel::text::encoders::plamo2::action::run_encode(runtime_error_plamo2_ev, ctx);
+    emel::text::encoders::plamo2::action::mark_done(runtime_ok_plamo2_ev, ctx);
+    emel::text::encoders::plamo2::action::ensure_last_error(runtime_error_plamo2_ev, ctx);
+    emel::text::encoders::plamo2::action::on_unexpected(runtime_ok_plamo2_ev, ctx);
+    emel::text::encoders::plamo2::action::begin_encode(runtime_error_plamo2_ev, ctx);
 
-    CHECK(emel::text::encoders::plamo2::guard::valid_encode{}(runtime_ok_ev, ctx));
-    CHECK(emel::text::encoders::plamo2::guard::invalid_encode{}(runtime_invalid_ev, ctx));
+    CHECK(emel::text::encoders::plamo2::guard::valid_encode{}(runtime_ok_plamo2_ev, ctx));
+    CHECK(emel::text::encoders::plamo2::guard::invalid_encode{}(runtime_invalid_plamo2_ev, ctx));
     runtime_ok.err = EMEL_OK;
-    CHECK(emel::text::encoders::plamo2::guard::phase_ok{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::plamo2::guard::phase_ok{}(runtime_ok_plamo2_ev));
     runtime_ok.err = EMEL_ERR_BACKEND;
-    CHECK(emel::text::encoders::plamo2::guard::phase_failed{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::plamo2::guard::phase_failed{}(runtime_ok_plamo2_ev));
   }
 
   {

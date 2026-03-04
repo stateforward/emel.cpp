@@ -16,6 +16,7 @@ struct text_scan_exec {};
 struct text_scan_result_decision {};
 struct text_opening_block_decision {};
 struct text_trim_opening_block_exec {};
+struct text_trim_opening_block_result_decision {};
 struct text_materialize_exec {};
 struct text_finalize_exec {};
 struct text_finalize_result_decision {};
@@ -49,6 +50,7 @@ struct mapping_scan_result_decision {};
 struct string_scan_decision {};
 struct string_scan_exec {};
 struct string_scan_result_decision {};
+struct string_status_decision {};
 struct string_finalize_exec {};
 struct string_finalize_result_decision {};
 struct string_unterminated_exec {};
@@ -138,9 +140,27 @@ struct model {
           + sml::completion<event::next_runtime>
           [ guard::phase_unhandled{} ]
 
-      , sml::state<text_materialize_exec> <= sml::state<text_trim_opening_block_exec>
+      , sml::state<text_trim_opening_block_result_decision> <= sml::state<text_trim_opening_block_exec>
           + sml::completion<event::next_runtime>
-          / action::trim_text_before_opening_block
+          / action::probe_text_opening_trim
+
+      , sml::state<text_materialize_exec> <= sml::state<text_trim_opening_block_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::text_opening_trim_stopped_on_newline{} ]
+          / action::apply_text_opening_trim_to_newline
+
+      , sml::state<text_materialize_exec> <= sml::state<text_trim_opening_block_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::text_opening_trim_to_zero{} ]
+          / action::apply_text_opening_trim_to_zero
+
+      , sml::state<text_materialize_exec> <= sml::state<text_trim_opening_block_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::text_opening_trim_keep_original{} ]
+
+      , sml::state<invalid_char_exec> <= sml::state<text_trim_opening_block_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::phase_unhandled{} ]
 
       , sml::state<text_finalize_exec> <= sml::state<text_materialize_exec>
           + sml::completion<event::next_runtime>
@@ -604,20 +624,23 @@ struct model {
           + sml::completion<event::next_runtime>
           / action::scan_string
 
-      , sml::state<scanning> <= sml::state<string_scan_result_decision>
+      , sml::state<string_status_decision> <= sml::state<string_scan_result_decision>
+          + sml::completion<event::next_runtime>
+
+      , sml::state<scanning> <= sml::state<string_status_decision>
           + sml::completion<event::next_runtime>
           [ guard::phase_failed{} ]
           / action::emit_scan_error
 
-      , sml::state<string_unterminated_exec> <= sml::state<string_scan_result_decision>
+      , sml::state<string_unterminated_exec> <= sml::state<string_status_decision>
           + sml::completion<event::next_runtime>
           [ guard::string_not_terminated{} ]
 
-      , sml::state<string_finalize_exec> <= sml::state<string_scan_result_decision>
+      , sml::state<string_finalize_exec> <= sml::state<string_status_decision>
           + sml::completion<event::next_runtime>
           [ guard::string_terminated{} ]
 
-      , sml::state<invalid_char_exec> <= sml::state<string_scan_result_decision>
+      , sml::state<invalid_char_exec> <= sml::state<string_status_decision>
           + sml::completion<event::next_runtime>
           [ guard::phase_unhandled{} ]
 
