@@ -298,8 +298,9 @@ inline int32_t rwkv_lookup_unescaped_token(const emel::model::data::vocab &vocab
 
   int32_t resolved = k_token_null;
   std::string unescaped;
-  bool done = false;
-  for (uint32_t id = 0; id < vocab.n_tokens && !done; ++id) {
+  bool loop_active = true;
+  for (uint32_t id = 0; id < vocab.n_tokens; ++id) {
+    const bool step_active = loop_active;
     const std::string_view text = rwkv_token_text(vocab, static_cast<int32_t>(id));
     using process_text_handler_t = void (*)(std::string_view,
                                             int32_t,
@@ -311,8 +312,10 @@ inline int32_t rwkv_lookup_unescaped_token(const emel::model::data::vocab &vocab
         process_text_none,
         process_text_some,
     };
-    process_text_handlers[static_cast<size_t>(!text.empty())](
-        text, static_cast<int32_t>(id), target, unescaped, resolved, done);
+    bool step_done = false;
+    process_text_handlers[static_cast<size_t>(step_active && !text.empty())](
+        text, static_cast<int32_t>(id), target, unescaped, resolved, step_done);
+    loop_active = loop_active && !step_done;
   }
   return resolved;
 }
