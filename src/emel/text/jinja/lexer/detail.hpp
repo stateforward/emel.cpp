@@ -541,6 +541,80 @@ inline bool scan_comment_token(const ::emel::text::jinja::lexer::cursor &cursor,
   return comment_entries[static_cast<size_t>(starts_comment)](cursor, out, source, size, pos);
 }
 
+inline bool scan_trim_prefix_phase(const ::emel::text::jinja::lexer::cursor &cursor,
+                                   scan_outcome &out,
+                                   const std::string_view source,
+                                   const size_t size,
+                                   size_t &pos) {
+  const bool starts_trim =
+      pos < size &&
+      source[pos] == '-' &&
+      (cursor.last_token_type == token_type::open_expression ||
+       cursor.last_token_type == token_type::open_statement);
+  if (!starts_trim) {
+    return false;
+  }
+  ++pos;
+  if (pos >= size) {
+    emit_no_token_cursor(out, cursor, pos);
+    return true;
+  }
+  return false;
+}
+
+inline bool scan_space_phase(const ::emel::text::jinja::lexer::cursor &cursor,
+                             scan_outcome &out,
+                             const std::string_view source,
+                             const size_t size,
+                             size_t &pos) {
+  while (pos < size && is_space(source[pos])) {
+    ++pos;
+  }
+  if (pos >= size) {
+    emit_no_token_cursor(out, cursor, pos);
+    return true;
+  }
+  return false;
+}
+
+inline bool scan_unary_phase(const ::emel::text::jinja::lexer::cursor &cursor,
+                             scan_outcome &out,
+                             const std::string_view source,
+                             size_t &pos,
+                             const char ch) {
+  const bool unary_or_sign = !is_closing_block(source, pos) && (ch == '-' || ch == '+');
+  if (!unary_or_sign) {
+    return false;
+  }
+  const bool invalid_prefix_context =
+      cursor.last_token_type == token_type::text ||
+      cursor.last_token_type == token_type::eof;
+  if (invalid_prefix_context) {
+    set_error(out, pos);
+    return true;
+  }
+  if (!unary_prefix_allowed(cursor.last_token_type)) {
+    return false;
+  }
+
+  const size_t start = pos;
+  ++pos;
+  std::string num = consume_numeric(source, pos);
+  std::string value;
+  value.reserve(num.size() + 1u);
+  value.push_back(ch);
+  value += num;
+  constexpr std::array<token_type, 2> type_candidates = {
+      token_type::numeric_literal,
+      token_type::unary_operator,
+  };
+  const token_type type = type_candidates[static_cast<size_t>(num.empty())];
+  out.has_token = true;
+  out.token_value = token{type, std::move(value), start};
+  out.next_cursor = emit_cursor(cursor, pos, out.token_value.type, out.token_value.value);
+  return true;
+}
+
 inline scan_outcome
 scan_next_token(const ::emel::text::jinja::lexer::cursor &cursor) {
   scan_outcome out{};
@@ -559,55 +633,17 @@ scan_next_token(const ::emel::text::jinja::lexer::cursor &cursor) {
       return out;
     }
 
-    const bool starts_trim =
-        pos < size &&
-        source[pos] == '-' &&
-        (cursor.last_token_type == token_type::open_expression ||
-         cursor.last_token_type == token_type::open_statement);
-    if (starts_trim) {
-      ++pos;
-      if (pos >= size) {
-        emit_no_token_cursor(out, cursor, pos);
-        return out;
-      }
+    if (scan_trim_prefix_phase(cursor, out, source, size, pos)) {
+      return out;
     }
 
-    while (pos < size && is_space(source[pos])) {
-      ++pos;
-    }
-    if (pos >= size) {
-      emit_no_token_cursor(out, cursor, pos);
+    if (scan_space_phase(cursor, out, source, size, pos)) {
       return out;
     }
 
     const char ch = source[pos];
-    const bool unary_or_sign = !is_closing_block(source, pos) && (ch == '-' || ch == '+');
-    if (unary_or_sign) {
-      const bool invalid_prefix_context =
-          cursor.last_token_type == token_type::text ||
-          cursor.last_token_type == token_type::eof;
-      if (invalid_prefix_context) {
-        set_error(out, pos);
-        return out;
-      }
-      if (unary_prefix_allowed(cursor.last_token_type)) {
-        const size_t start = pos;
-        ++pos;
-        std::string num = consume_numeric(source, pos);
-        std::string value;
-        value.reserve(num.size() + 1u);
-        value.push_back(ch);
-        value += num;
-        constexpr std::array<token_type, 2> type_candidates = {
-            token_type::numeric_literal,
-            token_type::unary_operator,
-        };
-        const token_type type = type_candidates[static_cast<size_t>(num.empty())];
-        out.has_token = true;
-        out.token_value = token{type, std::move(value), start};
-        out.next_cursor = emit_cursor(cursor, pos, out.token_value.type, out.token_value.value);
-        return out;
-      }
+    if (scan_unary_phase(cursor, out, source, pos, ch)) {
+      return out;
     }
 
     for (const auto &entry : k_mapping_table) {
