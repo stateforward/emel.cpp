@@ -260,29 +260,31 @@ inline bool insert_merge_map(merge_map &map,
                              const int32_t rank,
                              const emel::model::data::vocab &vocab) {
   const bool active = !left.empty() && !right.empty();
-  bool done = !active;
+  bool loop_active = active;
   bool success = false;
 
   const uint32_t hash = hash_pair(left, right);
   const uint32_t mask = k_merge_hash_size - 1u;
   uint32_t slot = hash & mask;
 
-  for (uint32_t probes = 0; probes < k_merge_hash_size && !done; ++probes) {
+  for (uint32_t probes = 0; probes < k_merge_hash_size; ++probes) {
+    const bool step_active = loop_active;
     const uint32_t slot_hash = map.hashes[slot];
     const bool empty_slot = slot_hash == 0u;
     const bool hash_match = slot_hash == hash;
     const int32_t existing_rank = map.values[slot];
     const std::string_view merge = merge_text(vocab, existing_rank);
-    const bool same_merge = hash_match && merge_match(merge, left, right);
-    const bool claim_slot = empty_slot;
-    const bool collision = hash_match && !same_merge;
+    const bool same_merge = step_active && hash_match && merge_match(merge, left, right);
+    const bool claim_slot = step_active && empty_slot;
+    const bool collision = step_active && hash_match && !same_merge;
 
     map.hashes[slot] = select_u32(claim_slot, hash, slot_hash);
     map.values[slot] = select_i32(claim_slot, rank, existing_rank);
     map.count += static_cast<uint32_t>(claim_slot);
 
     success = success || claim_slot || same_merge;
-    done = done || claim_slot || same_merge || collision;
+    const bool step_done = claim_slot || same_merge || collision;
+    loop_active = loop_active && !step_done;
     slot = (slot + 1u) & mask;
   }
 
