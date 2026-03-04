@@ -164,36 +164,6 @@ struct positions_mode_generate_unseeded {
   }
 };
 
-struct seeded_probe_ok {
-  bool operator()(const event::batch_runtime &, const action::context & ctx) const noexcept {
-    return ctx.seeded_probe_status == action::position_probe_status::ok;
-  }
-};
-
-struct seeded_probe_backend_error {
-  bool operator()(const event::batch_runtime &, const action::context & ctx) const noexcept {
-    return ctx.seeded_probe_status == action::position_probe_status::backend_error;
-  }
-};
-
-struct seeded_probe_invalid {
-  bool operator()(const event::batch_runtime &, const action::context & ctx) const noexcept {
-    return ctx.seeded_probe_status == action::position_probe_status::invalid;
-  }
-};
-
-struct unseeded_probe_ok {
-  bool operator()(const event::batch_runtime &, const action::context & ctx) const noexcept {
-    return ctx.unseeded_probe_valid;
-  }
-};
-
-struct unseeded_probe_invalid {
-  bool operator()(const event::batch_runtime &, const action::context & ctx) const noexcept {
-    return !ctx.unseeded_probe_valid;
-  }
-};
-
 struct positions_mode_invalid {
   bool operator()(const event::batch_runtime & ev) const noexcept {
     return !positions_mode_stride_three{}(ev) &&

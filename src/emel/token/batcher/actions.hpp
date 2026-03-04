@@ -28,6 +28,14 @@ enum class probe_status : uint8_t {
   invalid = 2u,
 };
 
+inline probe_status probe_status_from_flags(const bool backend_ok, const bool valid) noexcept {
+  constexpr std::array<std::array<probe_status, 2>, 2> status_lut = {{
+      {probe_status::backend_error, probe_status::backend_error},
+      {probe_status::invalid, probe_status::ok},
+  }};
+  return status_lut[static_cast<size_t>(backend_ok)][static_cast<size_t>(valid)];
+}
+
 inline bool has_seq_masks_input(const event::batch & req) noexcept {
   return req.seq_masks != nullptr && req.seq_masks_count >= req.n_tokens;
 }
@@ -104,10 +112,10 @@ inline void clear_mask(uint64_t * mask, const int32_t words) noexcept {
 inline void set_mask_bit(uint64_t * mask, const int32_t words, const int32_t seq_id) noexcept {
   const int32_t word = seq_id / 64;
   const uint32_t bit = static_cast<uint32_t>(seq_id) & 63U;
-  const bool valid = words > 0 && word >= 0 && word < words;
-  while (valid) {
-    mask[static_cast<size_t>(word)] |= (uint64_t{1} << bit);
-    break;
+  const uint64_t bit_mask = uint64_t{1} << bit;
+  for (int32_t w = 0; w < words; ++w) {
+    const uint64_t select = uint64_t{0} - static_cast<uint64_t>(w == word);
+    mask[static_cast<size_t>(w)] |= bit_mask & select;
   }
 }
 
@@ -123,17 +131,18 @@ inline bool mask_has_bit(const uint64_t * mask,
 }
 
 inline int32_t mask_primary_id(const uint64_t * mask, const int32_t words) noexcept {
-  int32_t w = 0;
-  while (w < words && mask[static_cast<size_t>(w)] == 0U) {
-    ++w;
+  int32_t primary = -1;
+  int32_t unresolved = 1;
+  for (int32_t w = 0; w < words; ++w) {
+    const uint64_t bits = mask[static_cast<size_t>(w)];
+    const int32_t has_bits = static_cast<int32_t>(bits != 0U);
+    const int32_t take = unresolved * has_bits;
+    const int32_t bit = static_cast<int32_t>(std::countr_zero(bits));
+    const int32_t candidate = w * 64 + bit;
+    primary = take * candidate + (1 - take) * primary;
+    unresolved = unresolved * (1 - take);
   }
-  const bool found = w < words;
-  int32_t bit = 0;
-  while (found) {
-    bit = static_cast<int32_t>(std::countr_zero(mask[static_cast<size_t>(w)]));
-    break;
-  }
-  return static_cast<int32_t>(found) * (w * 64 + bit) + static_cast<int32_t>(!found) * -1;
+  return primary;
 }
 
 template <class fn_type>
@@ -324,20 +333,11 @@ inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
   return ok;
 }
 
-inline probe_status seeded_generation_probe(
+inline probe_status seeded_generation_seed_scan(
     const event::batch_runtime & ev,
     std::array<int32_t, action::MAX_SEQ> & seeded_next_pos_out) noexcept {
-  constexpr std::array<std::array<probe_status, 2>, 2> status_lut = {{
-      {probe_status::backend_error, probe_status::backend_error},
-      {probe_status::invalid, probe_status::ok},
-  }};
-
   const auto & req = ev.request;
-  const int32_t mask_words = ev.ctx.normalized_seq_mask_words;
-  const int32_t * seq_primary_ids_out = seq_primary_ids_out_ptr(req);
-  const uint64_t * seq_masks_out = seq_masks_out_ptr(req);
   std::array<int32_t, action::MAX_SEQ> next_pos = {};
-
   bool backend_ok = true;
   bool valid = true;
   int32_t seed_limit = action::MAX_SEQ;
@@ -350,9 +350,26 @@ inline probe_status seeded_generation_probe(
     const int32_t keep_limit = static_cast<int32_t>(backend_ok && valid);
     seed_limit = keep_limit * seed_limit + (1 - keep_limit) * (seq_id + 1);
   }
+
+  seeded_next_pos_out = next_pos;
+  return probe_status_from_flags(backend_ok, valid);
+}
+
+inline probe_status seeded_generation_probe(
+    const event::batch_runtime & ev,
+    std::array<int32_t, action::MAX_SEQ> & seeded_next_pos_out) noexcept {
+  const auto & req = ev.request;
+  const int32_t mask_words = ev.ctx.normalized_seq_mask_words;
+  const int32_t * seq_primary_ids_out = seq_primary_ids_out_ptr(req);
+  const uint64_t * seq_masks_out = seq_masks_out_ptr(req);
+  std::array<int32_t, action::MAX_SEQ> next_pos = {};
+  const probe_status seed_status = seeded_generation_seed_scan(ev, next_pos);
+  const bool backend_ok = seed_status != probe_status::backend_error;
+  bool valid = seed_status == probe_status::ok;
   seeded_next_pos_out = next_pos;
 
-  for (int32_t i = 0; i < req.n_tokens && backend_ok && valid; ++i) {
+  int32_t token_limit = static_cast<int32_t>(valid) * req.n_tokens;
+  for (int32_t i = 0; i < token_limit; ++i) {
     const int32_t primary = seq_primary_ids_out[i];
     const int32_t pos = next_pos[primary];
     valid = valid && pos != std::numeric_limits<int32_t>::max();
@@ -364,16 +381,17 @@ inline probe_status seeded_generation_probe(
           return next_pos[seq_id] == pos;
         });
     valid = valid && compatible;
-    while (valid) {
-      for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
-        next_pos[seq_id] = pos + 1;
-        return true;
-      });
-      break;
-    }
+    const int32_t advance = static_cast<int32_t>(valid);
+    for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
+      const int32_t current = next_pos[seq_id];
+      next_pos[seq_id] = advance * (pos + 1) + (1 - advance) * current;
+      return true;
+    });
+    const int32_t keep_limit = static_cast<int32_t>(backend_ok && valid);
+    token_limit = keep_limit * token_limit + (1 - keep_limit) * (i + 1);
   }
 
-  return status_lut[static_cast<size_t>(backend_ok)][static_cast<size_t>(valid)];
+  return probe_status_from_flags(backend_ok, valid);
 }
 
 inline bool unseeded_generation_probe(const event::batch_runtime & ev) noexcept {
@@ -385,7 +403,8 @@ inline bool unseeded_generation_probe(const event::batch_runtime & ev) noexcept 
   std::array<uint8_t, action::MAX_SEQ> seeded = {};
 
   bool valid = true;
-  for (int32_t i = 0; i < req.n_tokens && valid; ++i) {
+  int32_t token_limit = req.n_tokens;
+  for (int32_t i = 0; i < token_limit; ++i) {
     const int32_t primary = seq_primary_ids_out[i];
     const int32_t pos = next_pos[primary];
     valid = valid && pos != std::numeric_limits<int32_t>::max();
@@ -398,14 +417,16 @@ inline bool unseeded_generation_probe(const event::batch_runtime & ev) noexcept 
                            return current == pos;
                          });
     valid = valid && aligned;
-    while (valid) {
-      for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
-        seeded[seq_id] = 1U;
-        next_pos[seq_id] = pos + 1;
-        return true;
-      });
-      break;
-    }
+    const int32_t advance = static_cast<int32_t>(valid);
+    for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
+      seeded[seq_id] = static_cast<uint8_t>(
+          seeded[seq_id] | static_cast<uint8_t>(advance));
+      const int32_t current = next_pos[seq_id];
+      next_pos[seq_id] = advance * (pos + 1) + (1 - advance) * current;
+      return true;
+    });
+    const int32_t keep_limit = static_cast<int32_t>(valid);
+    token_limit = keep_limit * token_limit + (1 - keep_limit) * (i + 1);
   }
 
   return valid;
@@ -415,14 +436,11 @@ inline bool unseeded_generation_probe(const event::batch_runtime & ev) noexcept 
 namespace emel::token::batcher::action {
 
 struct begin_batch {
-  void operator()(const event::batch_runtime & ev, context & ctx) const noexcept {
+  void operator()(const event::batch_runtime & ev, context &) const noexcept {
     ev.ctx.err = emel::error::cast(error::none);
     ev.ctx.outputs_total = 0;
     ev.ctx.normalized_seq_mask_words = detail::effective_mask_words(ev.request);
     ev.ctx.normalized_positions_count = ev.request.n_tokens;
-    ctx.seeded_probe_status = position_probe_status::none;
-    ctx.unseeded_probe_valid = false;
-    ctx.seeded_next_pos.fill(0);
     detail::write_error(ev, ev.ctx.err);
   }
 };
@@ -530,36 +548,51 @@ struct copy_positions_stride_one {
 };
 
 struct probe_positions_seeded {
-  void operator()(const event::batch_runtime & ev, context & ctx) const noexcept {
-    const detail::probe_status status = detail::seeded_generation_probe(ev, ctx.seeded_next_pos);
-    const size_t is_ok = static_cast<size_t>(status == detail::probe_status::ok);
-    const size_t is_backend =
-        static_cast<size_t>(status == detail::probe_status::backend_error);
-    constexpr std::array<position_probe_status, 3> mapped_status = {
-        position_probe_status::invalid,
-        position_probe_status::ok,
-        position_probe_status::backend_error,
+  void operator()(const event::batch_runtime & ev, context &) const noexcept {
+    std::array<int32_t, MAX_SEQ> next_pos = {};
+    const detail::probe_status status = detail::seeded_generation_probe(ev, next_pos);
+    constexpr std::array<emel::error::type, 3> error_lut = {
+        emel::error::cast(error::none),
+        emel::error::cast(error::backend_error),
+        emel::error::cast(error::invalid_request),
     };
-    ctx.seeded_probe_status = mapped_status[is_ok + (is_backend << 1u)];
+    ev.ctx.err = error_lut[static_cast<size_t>(status)];
+    detail::write_error(ev, ev.ctx.err);
   }
 };
 
 struct probe_positions_unseeded {
-  void operator()(const event::batch_runtime & ev, context & ctx) const noexcept {
-    ctx.unseeded_probe_valid = detail::unseeded_generation_probe(ev);
+  void operator()(const event::batch_runtime & ev, context &) const noexcept {
+    constexpr std::array<emel::error::type, 2> error_lut = {
+        emel::error::cast(error::invalid_request),
+        emel::error::cast(error::none),
+    };
+    const bool valid = detail::unseeded_generation_probe(ev);
+    ev.ctx.err = error_lut[static_cast<size_t>(valid)];
+    detail::write_error(ev, ev.ctx.err);
   }
 };
 
 struct generate_positions_seeded {
-  void operator()(const event::batch_runtime & ev, const context & ctx) const noexcept {
+  void operator()(const event::batch_runtime & ev, const context &) const noexcept {
     const auto & req = ev.request;
     const int32_t mask_words = ev.ctx.normalized_seq_mask_words;
     const int32_t * seq_primary_ids_out = detail::seq_primary_ids_out_ptr(req);
     uint64_t * seq_masks_out = detail::seq_masks_out_ptr(req);
     int32_t * positions_out = detail::positions_out_ptr(req);
-    std::array<int32_t, MAX_SEQ> next_pos = ctx.seeded_next_pos;
+    std::array<int32_t, MAX_SEQ> next_pos = {};
 
-    for (int32_t i = 0; i < req.n_tokens; ++i) {
+    const detail::probe_status seed_status = detail::seeded_generation_seed_scan(ev, next_pos);
+    constexpr std::array<emel::error::type, 3> error_lut = {
+        emel::error::cast(error::none),
+        emel::error::cast(error::backend_error),
+        emel::error::cast(error::invalid_request),
+    };
+    ev.ctx.err = error_lut[static_cast<size_t>(seed_status)];
+    detail::write_error(ev, ev.ctx.err);
+
+    int32_t token_limit = static_cast<int32_t>(seed_status == detail::probe_status::ok) * req.n_tokens;
+    for (int32_t i = 0; i < token_limit; ++i) {
       const int32_t primary = seq_primary_ids_out[i];
       const int32_t pos = next_pos[primary];
       positions_out[i] = pos;
@@ -571,7 +604,9 @@ struct generate_positions_seeded {
       });
     }
 
-    ev.ctx.normalized_positions_count = req.n_tokens;
+    const int32_t generated = static_cast<int32_t>(seed_status == detail::probe_status::ok);
+    ev.ctx.normalized_positions_count =
+        generated * req.n_tokens + (1 - generated) * ev.ctx.normalized_positions_count;
   }
 };
 

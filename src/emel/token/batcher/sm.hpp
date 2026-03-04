@@ -102,21 +102,16 @@ struct model {
           / action::mark_internal_error
 
       , sml::state<positions_generate_seeded> <= sml::state<positions_seeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::seeded_probe_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
           / action::generate_positions_seeded
       , sml::state<errored> <= sml::state<positions_seeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::seeded_probe_backend_error{} ]
-          / action::mark_backend_error
-      , sml::state<errored> <= sml::state<positions_seeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::seeded_probe_invalid{} ]
-          / action::mark_invalid_request
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
 
       , sml::state<positions_generate_unseeded> <= sml::state<positions_unseeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::unseeded_probe_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
           / action::generate_positions_unseeded
       , sml::state<errored> <= sml::state<positions_unseeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::unseeded_probe_invalid{} ]
-          / action::mark_invalid_request
+          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
 
       //------------------------------------------------------------------------------//
       , sml::state<positions_count_publish_decision> <= sml::state<positions_copy_stride_three>
