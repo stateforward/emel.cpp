@@ -331,3 +331,42 @@ The following data-plane loops terminate early on error/status checks instead of
 
 Remaining unchecked findings represent hidden branching control flow and must be explicitly modeled
 as phase/guard transitions in their respective `sm.hpp` files.
+
+## Additional Findings (User-Requested)
+
+User-requested machine action/detail findings and remediation status:
+
+- [x] `ugm/detail.hpp` (line 335) and `ugm/detail.hpp` (line 389)
+  reworked to deterministic range scans (no `walking/active` loop-gated termination)
+- [x] `gbnf/rule_parser/detail.hpp` (line 262)
+  reworked to fixed-length deterministic hex scan (no `valid`-gated loop termination)
+- [x] `gbnf/rule_parser/lexer/detail.hpp` (line 22)
+  reworked to deterministic layout/reference scans (no `scan_more/skip_comment`-gated termination)
+- [x] `gbnf/rule_parser/lexer/actions.hpp` (line 59)
+  reworked to deterministic quoted/braced/identifier scans with explicit emit-exec phases in
+  `gbnf/rule_parser/lexer/sm.hpp`
+- [x] `batch/planner/modes/equal/actions.hpp` (line 33), `equal/actions.hpp` (line 91),
+  `equal/actions.hpp` (line 148)
+  reworked to deterministic bounded iterations (no `while`/quota-gated loop termination),
+  with explicit fast/general execute-result phases in `batch/planner/modes/equal/sm.hpp`
+- [x] `batch/planner/modes/sequential/actions.hpp` (line 16) and
+  `sequential/actions.hpp` (line 33)
+  reworked to deterministic bounded scans (no nested `while`-gated traversal), with explicit
+  execute/result phases in `batch/planner/modes/sequential/sm.hpp`
+- [x] `text/encoders/rwkv/actions.hpp` (`run_encode_tokens`)
+  reworked to deterministic bounded traversal scans (no `while(position<...)` / `while(walk!=nullptr)`
+  gating), with explicit emit-result routing phase in `text/encoders/rwkv/sm.hpp`
+- [x] `text/encoders/ugm/actions.hpp` (`run_dp_forward`, `run_dp_backtrace`)
+  reworked to deterministic bounded traversal scans (no `while(walking)` / `while(tracing)`
+  gating), with explicit `backtrace_{ok,failed}` and `emit_{ok,failed}` decision routing in
+  `text/encoders/ugm/sm.hpp`
+- [x] `text/encoders/plamo2/actions.hpp` + `text/encoders/plamo2/sm.hpp`
+  reworked so emit outcome is modeled explicitly in `sm.hpp` via
+  `emit_result_decision` and `emit_result_{ok,failed}` guards/actions
+  (`apply_emit_result_ok` / `apply_emit_result_failed`) instead of implicit
+  finalization inside emit action/detail code
+- [x] `text/encoders/fallback/actions.hpp` + `text/encoders/fallback/sm.hpp`
+  reworked so emit outcome is modeled explicitly in `sm.hpp` via
+  `emit_result_decision` and `emit_result_{ok,failed}` guards/actions
+  (`apply_emit_result_ok` / `apply_emit_result_failed`) instead of implicit
+  finalization inside execute/detail code

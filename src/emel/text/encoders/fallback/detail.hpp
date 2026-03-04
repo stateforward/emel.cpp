@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 
@@ -179,36 +180,29 @@ inline bool fallback_push_token(const event::encode &ev,
 inline encode_result encode_fallback_exec(const event::encode &ev,
                                           emel::text::encoders::action::context &ctx,
                                           const emel::model::data::vocab &vocab) {
-  auto finalize_success = [](encode_result &result_value, const int32_t count_value) {
-    result_value.token_count = count_value;
-    result_value.error = EMEL_OK;
-  };
-  auto finalize_failure = [](encode_result &result_value, const int32_t) {
-    result_value.token_count = 0;
-    result_value.error = EMEL_ERR_BACKEND;
-  };
-
   encode_result result{};
   result.token_count = 0;
 
   int32_t count = 0;
   bool failed = false;
-  bool loop_active = true;
   for (size_t i = 0; i < ev.text.size(); ++i) {
-    const bool step_active = loop_active;
     const unsigned char byte = static_cast<unsigned char>(ev.text[i]);
     const char raw = static_cast<char>(byte);
     const int32_t token = fallback_lookup_token(ctx, vocab, std::string_view(&raw, 1));
-    const int32_t gated_token = select_i32(step_active, token, k_token_null);
-    const bool pushed = fallback_push_token(ev, gated_token, count);
-    const bool ok = step_active && token != k_token_null && pushed;
-    failed = failed || (step_active && !ok);
-    loop_active = loop_active && ok;
+    const bool token_found = token != k_token_null;
+    const int32_t emit_token = select_i32(token_found, token, k_token_null);
+    const bool pushed = fallback_push_token(ev, emit_token, count);
+    const bool ok = token_found && pushed;
+    failed = failed || !ok;
   }
 
-  using finalize_handler_t = void (*)(encode_result &, int32_t);
-  const finalize_handler_t finalize_handlers[2] = {finalize_success, finalize_failure};
-  finalize_handlers[static_cast<size_t>(failed)](result, count);
+  const std::array<int32_t, 2> token_counts{count, 0};
+  const std::array<int32_t, 2> errors{
+      emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok),
+      emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend),
+  };
+  result.token_count = token_counts[static_cast<size_t>(failed)];
+  result.error = errors[static_cast<size_t>(failed)];
   return result;
 }
 
@@ -218,7 +212,7 @@ inline encode_result encode_fallback_empty_text(
     const emel::model::data::vocab &) {
   encode_result result{};
   result.token_count = 0;
-  result.error = EMEL_OK;
+  result.error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   return result;
 }
 
@@ -228,43 +222,8 @@ inline encode_result encode_fallback_missing_tables(
     const emel::model::data::vocab &) {
   encode_result result{};
   result.token_count = 0;
-  result.error = EMEL_ERR_INVALID_ARGUMENT;
+  result.error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument);
   return result;
-}
-
-inline encode_result encode_fallback_ready_tables(
-    const event::encode &ev,
-    emel::text::encoders::action::context &ctx,
-    const emel::model::data::vocab &vocab) {
-  return encode_fallback_exec(ev, ctx, vocab);
-}
-
-inline encode_result encode_fallback_non_empty_text(
-    const event::encode &ev,
-    emel::text::encoders::action::context &ctx,
-    const emel::model::data::vocab &vocab) {
-  const bool tables_ready = ctx.tables_ready && ctx.vocab == &vocab;
-  using table_handler_t = encode_result (*)(const event::encode &,
-                                            emel::text::encoders::action::context &,
-                                            const emel::model::data::vocab &);
-  const table_handler_t table_handlers[2] = {
-      encode_fallback_ready_tables,
-      encode_fallback_missing_tables,
-  };
-  return table_handlers[static_cast<size_t>(!tables_ready)](ev, ctx, vocab);
-}
-
-inline encode_result encode_fallback(const event::encode &ev,
-                                     emel::text::encoders::action::context &ctx,
-                                     const emel::model::data::vocab &vocab) {
-  using empty_handler_t = encode_result (*)(const event::encode &,
-                                            emel::text::encoders::action::context &,
-                                            const emel::model::data::vocab &);
-  const empty_handler_t empty_handlers[2] = {
-      encode_fallback_non_empty_text,
-      encode_fallback_empty_text,
-  };
-  return empty_handlers[static_cast<size_t>(ev.text.empty())](ev, ctx, vocab);
 }
 
 }  // namespace emel::text::encoders::fallback::detail
