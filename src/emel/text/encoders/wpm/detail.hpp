@@ -329,6 +329,18 @@ inline void wpm_resolve_unk_some(const emel::text::encoders::action::context &ct
   unk = wpm_lookup_token(ctx, vocab, "<unk>");
 }
 
+inline int32_t wpm_lookup_candidate_none(const emel::text::encoders::action::context &,
+                                         const emel::model::data::vocab &,
+                                         const std::string_view) noexcept {
+  return k_token_null;
+}
+
+inline int32_t wpm_lookup_candidate_some(const emel::text::encoders::action::context &ctx,
+                                         const emel::model::data::vocab &vocab,
+                                         const std::string_view piece) noexcept {
+  return wpm_lookup_token(ctx, vocab, piece);
+}
+
 inline bool encode_wpm_process_word_none(const event::encode &,
                                          emel::text::encoders::action::context &,
                                          const emel::model::data::vocab &,
@@ -361,16 +373,26 @@ inline bool encode_wpm_process_word_some(const event::encode &ev,
   const std::string_view word_view(ctx.scratch.buffer.data(), word_view_len);
   const int32_t n = static_cast<int32_t>(word_view.size());
 
-  for (int32_t i = 0; i < n && ok; ++i) {
+  for (int32_t i = 0; i < n; ++i) {
+    const bool i_active = ok;
     bool found = false;
     int32_t matched_end = i;
-    const int32_t end = std::min(n, i + ctx.max_token_len + 1);
-    for (int32_t j = end; j > i && ok && !found; --j) {
+    const int32_t end = select_i32(i_active, std::min(n, i + ctx.max_token_len + 1), i);
+    bool j_active = i_active;
+    for (int32_t j = end; j > i; --j) {
+      const bool step_active = j_active;
       const std::string_view piece = word_view.substr(
         static_cast<size_t>(i),
         static_cast<size_t>(j - i));
-      const int32_t token = wpm_lookup_token(ctx, vocab, piece);
-      const bool hit = token != k_token_null && !found;
+      using lookup_handler_t = int32_t (*)(const emel::text::encoders::action::context &,
+                                           const emel::model::data::vocab &,
+                                           const std::string_view) noexcept;
+      const lookup_handler_t lookup_handlers[2] = {
+          wpm_lookup_candidate_none,
+          wpm_lookup_candidate_some,
+      };
+      const int32_t token = lookup_handlers[static_cast<size_t>(step_active)](ctx, vocab, piece);
+      const bool hit = token != k_token_null;
       bool pushed = true;
       using push_handler_t = void (*)(const event::encode &,
                                       int32_t,
@@ -380,18 +402,21 @@ inline bool encode_wpm_process_word_some(const event::encode &ev,
           wpm_push_candidate_none,
           wpm_push_candidate_some,
       };
-      push_handlers[static_cast<size_t>(hit)](ev, token, count, pushed);
-      const bool push_fail = hit && !pushed;
+      push_handlers[static_cast<size_t>(step_active && hit)](ev, token, count, pushed);
+      const bool found_step = step_active && hit;
+      const bool push_fail = found_step && !pushed;
       result.error = select_i32(push_fail, EMEL_ERR_INVALID_ARGUMENT, result.error);
       ok = ok && !push_fail;
-      found = found || hit;
-      matched_end = select_i32(hit, j, matched_end);
+      found = found || found_step;
+      matched_end = select_i32(found_step, j, matched_end);
+      j_active = j_active && !push_fail && !found_step;
     }
 
-    i = select_i32(found, matched_end - 1, i);
-    const bool rollback = !found;
+    i = select_i32(i_active && found, matched_end - 1, i);
+    const bool rollback = i_active && !found;
     count = select_i32(rollback, word_token_start, count);
     i = select_i32(rollback, n, i);
+    i = select_i32(!ok, n, i);
   }
 
   const bool needs_unk = ok && count == word_token_start;
