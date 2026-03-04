@@ -340,12 +340,15 @@ inline probe_status seeded_generation_probe(
 
   bool backend_ok = true;
   bool valid = true;
-  for (int32_t seq_id = 0; seq_id < action::MAX_SEQ && backend_ok && valid; ++seq_id) {
+  int32_t seed_limit = action::MAX_SEQ;
+  for (int32_t seq_id = 0; seq_id < seed_limit; ++seq_id) {
     int32_t seed = 0;
     const bool resolved = req.resolve_position_seed(req.position_seed_ctx, seq_id, &seed);
     backend_ok = backend_ok && resolved;
     valid = valid && seed >= 0;
     next_pos[seq_id] = seed;
+    const int32_t keep_limit = static_cast<int32_t>(backend_ok && valid);
+    seed_limit = keep_limit * seed_limit + (1 - keep_limit) * (seq_id + 1);
   }
   seeded_next_pos_out = next_pos;
 
