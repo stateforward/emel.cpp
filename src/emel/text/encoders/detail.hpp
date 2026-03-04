@@ -741,16 +741,19 @@ inline bool encode_bytes(const event::encode &ev,
                          const emel::model::data::tokenizer_model model,
                          encode_result &result) {
   int32_t count = 0;
-  bool success = true;
+  bool loop_active = true;
 
-  for (size_t index = 0; index < ev.text.size() && success; ++index) {
+  for (size_t index = 0; index < ev.text.size(); ++index) {
+    const bool step_active = loop_active;
     const unsigned char c = static_cast<unsigned char>(ev.text[index]);
     const int32_t token = byte_to_token(ctx, vocab, c, model);
-    const bool pushed = push_token(ev, token, count);
-    const bool token_ok = token != k_token_null;
-    success = token_ok && pushed;
+    const int32_t gated_token = select_i32(step_active, token, k_token_null);
+    const bool pushed = push_token(ev, gated_token, count);
+    const bool step_ok = step_active && token != k_token_null && pushed;
+    loop_active = loop_active && step_ok;
   }
 
+  const bool success = loop_active;
   int32_t sink = result.token_count;
   int32_t *token_count_ptr = pick_ptr(success, &result.token_count, &sink);
   *token_count_ptr = count;
