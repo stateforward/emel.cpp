@@ -176,9 +176,12 @@ inline bool masks_have_non_empty_rows(const event::batch & req) noexcept {
   const bool has_masks = has_seq_masks_input(req);
   const int32_t mask_words = req.seq_mask_words;
   bool non_empty_rows = true;
-  for (int32_t i = 0; i < req.n_tokens && has_masks && non_empty_rows; ++i) {
+  int32_t row_limit = static_cast<int32_t>(has_masks) * req.n_tokens;
+  for (int32_t i = 0; i < row_limit; ++i) {
     const uint64_t * in_mask = req.seq_masks + static_cast<size_t>(i) * mask_words;
     non_empty_rows = non_empty_rows && !mask_empty(in_mask, mask_words);
+    const int32_t keep_limit = static_cast<int32_t>(non_empty_rows);
+    row_limit = keep_limit * row_limit + (1 - keep_limit) * (i + 1);
   }
   return !has_masks || non_empty_rows;
 }
