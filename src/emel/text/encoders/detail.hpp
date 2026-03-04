@@ -294,23 +294,25 @@ inline bool insert_merge_map(merge_map &map,
 inline int32_t lookup_token(const action::context &ctx,
                             const std::string_view text) {
   const bool active = !text.empty();
-  bool done = !active;
+  bool loop_active = active;
   int32_t resolved = k_token_null;
 
   const uint32_t hash = hash_sv(text);
   const uint32_t mask = k_token_hash_size - 1u;
   uint32_t slot = hash & mask;
 
-  for (uint32_t probes = 0; probes < k_token_hash_size && !done; ++probes) {
+  for (uint32_t probes = 0; probes < k_token_hash_size; ++probes) {
+    const bool step_active = loop_active;
     const uint32_t entry = ctx.token_to_id.hashes[slot];
     const bool empty_slot = entry == 0u;
     const bool hash_match = entry == hash;
     const int32_t id = ctx.token_to_id.values[slot];
-    const bool exact_match = hash_match && token_text(*ctx.vocab, id) == text;
-    const bool collision = hash_match && !exact_match;
+    const bool exact_match = step_active && hash_match && token_text(*ctx.vocab, id) == text;
+    const bool collision = step_active && hash_match && !exact_match;
 
     resolved = select_i32(exact_match, id, resolved);
-    done = done || empty_slot || exact_match || collision;
+    const bool step_done = step_active && (empty_slot || exact_match || collision);
+    loop_active = loop_active && !step_done;
     slot = (slot + 1u) & mask;
   }
 
