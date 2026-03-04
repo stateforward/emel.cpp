@@ -233,7 +233,8 @@ inline bool single_output_per_seq_ok(const event::batch_runtime & ev) noexcept {
   std::array<int32_t, action::MAX_SEQ> seq_output_count = {};
 
   bool ok = true;
-  for (int32_t i = 0; i < req.n_tokens && ok; ++i) {
+  int32_t row_limit = req.n_tokens;
+  for (int32_t i = 0; i < row_limit; ++i) {
     const bool active = output_mask_out[i] != 0;
     const uint64_t * mask = seq_masks_out + static_cast<size_t>(i) * mask_words;
     const bool row_ok = !active || for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
@@ -241,6 +242,8 @@ inline bool single_output_per_seq_ok(const event::batch_runtime & ev) noexcept {
                           return seq_output_count[seq_id] <= 1;
                         });
     ok = ok && row_ok;
+    const int32_t keep_limit = static_cast<int32_t>(ok);
+    row_limit = keep_limit * row_limit + (1 - keep_limit) * (i + 1);
   }
 
   return ok;
