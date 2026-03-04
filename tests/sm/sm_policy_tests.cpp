@@ -1,6 +1,5 @@
 #include <doctest/doctest.h>
 
-#include "emel/emel.h"
 #include "emel/sm.hpp"
 
 namespace {
@@ -21,12 +20,12 @@ struct owner_probe {
 }  // namespace
 
 TEST_CASE("sm_normalize_event_result_handles_error_out") {
-  int32_t err = EMEL_OK;
+  int32_t err = 0;
   dummy_event ok{.error_out = &err};
   CHECK_FALSE(emel::detail::normalize_event_result(ok, false));
   CHECK(emel::detail::normalize_event_result(ok, true));
 
-  err = EMEL_ERR_BACKEND;
+  err = (1 << 1);
   CHECK_FALSE(emel::detail::normalize_event_result(ok, true));
 
   struct no_error_event {};

@@ -78,4 +78,17 @@ struct decoded_non_empty {
   }
 };
 
+struct emit_result_ok {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return ev.emit_result_error ==
+      emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
+  }
+};
+
+struct emit_result_failed {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return !emit_result_ok{}(ev);
+  }
+};
+
 }  // namespace emel::text::encoders::plamo2::guard

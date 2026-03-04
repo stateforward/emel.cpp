@@ -13,7 +13,8 @@ struct preparing {};
 struct planning {};
 struct planning_input_decision {};
 struct planning_capacity_decision {};
-struct planning_decision {};
+struct planning_execute {};
+struct planning_result_decision {};
 struct planning_done {};
 struct planning_failed {};
 
@@ -40,12 +41,13 @@ struct model {
       , sml::state<planning_failed> <= sml::state<planning_capacity_decision>
           + sml::completion<event::request_runtime> [ guard::exceeds_index_capacity ]
           / action::mark_output_indices_full
-      , sml::state<planning_decision> <= sml::state<planning_capacity_decision>
+      , sml::state<planning_execute> <= sml::state<planning_capacity_decision>
           + sml::completion<event::request_runtime> [ guard::sequential_plan_capacity_ok ]
-          / action::create_plan
-      , sml::state<planning_done> <= sml::state<planning_decision>
+      , sml::state<planning_result_decision> <= sml::state<planning_execute>
+          + sml::completion<event::request_runtime> / action::create_plan
+      , sml::state<planning_done> <= sml::state<planning_result_decision>
           + sml::completion<event::request_runtime> [ guard::planning_succeeded ]
-      , sml::state<planning_failed> <= sml::state<planning_decision>
+      , sml::state<planning_failed> <= sml::state<planning_result_decision>
           + sml::completion<event::request_runtime> [ guard::planning_failed ]
       //------------------------------------------------------------------------------//
       , sml::X <= sml::state<planning_done>
@@ -63,7 +65,9 @@ struct model {
           + sml::unexpected_event<sml::_>
       , sml::state<planning_failed> <= sml::state<planning_capacity_decision>
           + sml::unexpected_event<sml::_>
-      , sml::state<planning_failed> <= sml::state<planning_decision>
+      , sml::state<planning_failed> <= sml::state<planning_execute>
+          + sml::unexpected_event<sml::_>
+      , sml::state<planning_failed> <= sml::state<planning_result_decision>
           + sml::unexpected_event<sml::_>
     );
     // clang-format on

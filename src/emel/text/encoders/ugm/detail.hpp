@@ -327,16 +327,26 @@ inline size_t trie_longest_prefix_none(const emel::text::encoders::detail::naive
 inline size_t trie_longest_prefix_some(const emel::text::encoders::detail::naive_trie &trie,
                                        const char *text,
                                        const size_t len) noexcept {
+  using node = emel::text::encoders::detail::naive_trie::node;
+  using step_handler_t = const node *(*)(const node *, char) noexcept;
+  const auto step_inactive = +[](const node *, const char) noexcept -> const node * {
+    return nullptr;
+  };
+  const auto step_active = +[](const node *current, const char c) noexcept -> const node * {
+    return ugm_trie_step(*current, c);
+  };
+  const step_handler_t step_handlers[2] = {
+      step_inactive,
+      step_active,
+  };
+
   size_t matched = 0;
-  const auto *node = ugm_trie_root(trie, text[0]);
-  bool walking = node != nullptr;
-  size_t offset = 1;
-  matched = select_size(walking && node->has_value, static_cast<size_t>(1), matched);
-  while (walking && offset < len) {
-    node = ugm_trie_step(*node, text[offset]);
-    offset += 1u;
-    walking = node != nullptr;
-    matched = select_size(walking && node->has_value, offset, matched);
+  const node *current = ugm_trie_root(trie, text[0]);
+  matched = select_size(current != nullptr && current->has_value, static_cast<size_t>(1), matched);
+  for (size_t offset = 1; offset < len; ++offset) {
+    const bool step_active = current != nullptr;
+    current = step_handlers[static_cast<size_t>(step_active)](current, text[offset]);
+    matched = select_size(current != nullptr && current->has_value, offset + 1u, matched);
   }
   return matched;
 }
@@ -386,11 +396,12 @@ inline void normalize_prefix_scan_xcda_some(const emel::text::encoders::ugm::act
   bool active = view.valid_index(0);
   uint32_t node_index = select_u32(active, view.get_base(0), 0u);
 
-  for (size_t prefix_offset = input_offset; active && prefix_offset < input.size(); ++prefix_offset) {
+  for (size_t prefix_offset = input_offset; prefix_offset < input.size(); ++prefix_offset) {
+    const bool active_step = active;
     const uint32_t c = static_cast<unsigned char>(input[prefix_offset]);
     const bool non_zero = c != 0u;
     const uint32_t candidate = node_index ^ c;
-    const bool valid = active && non_zero && view.valid_index(candidate)
+    const bool valid = active_step && non_zero && view.valid_index(candidate)
                        && view.get_lcheck(candidate) == c;
     const bool leaf = valid && view.get_leaf(candidate);
     const uint32_t branch = candidate ^ view.get_base(candidate);

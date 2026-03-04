@@ -90,4 +90,28 @@ struct normalized_non_empty {
   }
 };
 
+struct backtrace_failed {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return ev.backtrace_failed;
+  }
+};
+
+struct backtrace_ok {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return !ev.backtrace_failed;
+  }
+};
+
+struct emit_failed {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return ev.emit_failed;
+  }
+};
+
+struct emit_ok {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return !ev.emit_failed;
+  }
+};
+
 }  // namespace emel::text::encoders::ugm::guard

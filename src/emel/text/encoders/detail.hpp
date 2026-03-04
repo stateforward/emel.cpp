@@ -105,17 +105,17 @@ inline void publish_result(const event::encode & request,
                            const event::encode_ctx & ctx) noexcept {
   using publish_fn = void (*)(const event::encode &, const event::encode_ctx &);
   const std::array<publish_fn, 2> publishers{&publish_error, &publish_done};
-  publishers[static_cast<size_t>(ctx.err == EMEL_OK)](request, ctx);
+  publishers[static_cast<size_t>(ctx.err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok))](request, ctx);
 }
 
 inline int32_t select_final_error(const bool accepted,
                                   const int32_t runtime_error) noexcept {
-  const std::array<int32_t, 2> accepted_errors{EMEL_ERR_INVALID_ARGUMENT, runtime_error};
+  const std::array<int32_t, 2> accepted_errors{emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), runtime_error};
   const std::array<int32_t, 2> final_errors{
       accepted_errors[static_cast<size_t>(accepted)],
-      EMEL_OK,
+      emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok),
   };
-  const bool succeeded = accepted && runtime_error == EMEL_OK;
+  const bool succeeded = accepted && runtime_error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   return final_errors[static_cast<size_t>(succeeded)];
 }
 
@@ -749,7 +749,7 @@ inline bool build_symbols(const std::string_view text,
   int32_t *head_ptr = pick_ptr(set_prev_head, &scratch.prev[0], &sink);
   *head_ptr = -1;
 
-  result.error = select_i32(success, result.error, EMEL_ERR_INVALID_ARGUMENT);
+  result.error = select_i32(success, result.error, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
   return success;
 }
 
@@ -793,7 +793,7 @@ inline bool encode_bytes(const event::encode &ev,
   int32_t sink = result.token_count;
   int32_t *token_count_ptr = pick_ptr(success, &result.token_count, &sink);
   *token_count_ptr = count;
-  result.error = select_i32(success, EMEL_OK, EMEL_ERR_BACKEND);
+  result.error = select_i32(success, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok), emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend));
   return success;
 }
 

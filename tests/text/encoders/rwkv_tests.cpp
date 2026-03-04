@@ -9,7 +9,7 @@ TEST_CASE("encoder_rwkv_byte_tokens") {
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -19,7 +19,7 @@ TEST_CASE("encoder_rwkv_byte_tokens") {
     .error_out = &err,
   }));
 
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(token_count == 1);
   CHECK(tokens[0] == byte_id);
 }
@@ -54,7 +54,7 @@ TEST_CASE("encoder_rwkv_skips_unknown_without_unk") {
 
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::rwkv::sm machine{};
   CHECK(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -64,7 +64,7 @@ TEST_CASE("encoder_rwkv_skips_unknown_without_unk") {
     .token_count_out = &token_count,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(token_count == 0);
 }
 
@@ -85,7 +85,7 @@ TEST_CASE("encoder_rwkv_encode_reports_invalid_table") {
   builder.add_token("\\x1", 0.0f, 1);
   std::array<int32_t, 2> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::rwkv::sm machine{};
   CHECK_FALSE(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -95,7 +95,7 @@ TEST_CASE("encoder_rwkv_encode_reports_invalid_table") {
     .token_count_out = &token_count,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 }
 
 TEST_CASE("encoder_rwkv_push_unk_overflow") {
@@ -105,7 +105,7 @@ TEST_CASE("encoder_rwkv_push_unk_overflow") {
   builder.vocab->unk_id = unk_id;
   std::array<int32_t, 1> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::rwkv::sm machine{};
   CHECK_FALSE(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -114,7 +114,7 @@ TEST_CASE("encoder_rwkv_push_unk_overflow") {
     .token_count_out = &token_count,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 }
 
 TEST_CASE("encoder_rwkv_rejects_short_output_capacity") {
@@ -124,7 +124,7 @@ TEST_CASE("encoder_rwkv_rejects_short_output_capacity") {
 
   std::array<int32_t, 1> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::rwkv::sm machine{};
   CHECK_FALSE(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -133,7 +133,7 @@ TEST_CASE("encoder_rwkv_rejects_short_output_capacity") {
     .token_count_out = &token_count,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 }
 
 TEST_CASE("encoder_rwkv_encode_builds_tables_when_missing") {
@@ -143,7 +143,7 @@ TEST_CASE("encoder_rwkv_encode_builds_tables_when_missing") {
 
   std::array<int32_t, 2> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::rwkv::sm machine{};
   CHECK(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -152,7 +152,7 @@ TEST_CASE("encoder_rwkv_encode_builds_tables_when_missing") {
     .token_count_out = &token_count,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(token_count == 1);
   CHECK(out_tokens[0] == token_id);
 }

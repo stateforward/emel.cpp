@@ -23,7 +23,9 @@ struct encode_prepare_result_decision {};
 struct encode_merge_input_capacity_decision {};
 struct encode_merge_exec {};
 struct encode_merge_result_decision {};
+struct encode_emit_input_decision {};
 struct encode_exec {};
+struct emit_result_decision {};
 struct encode_result_decision {};
 struct done {};
 struct errored {};
@@ -42,7 +44,9 @@ struct unexpected {};
  * - 'encode_prepare_exec'/'encode_prepare_result_decision': preprocess/build-symbols phase.
  * - 'encode_merge_input_capacity_decision': explicit merge-input symbol-capacity routing.
  * - 'encode_merge_exec'/'encode_merge_result_decision': merge phase.
- * - 'encode_exec'/'encode_result_decision': run kernel and branch on phase error.
+ * - 'encode_emit_input_decision': explicit routing for non-empty vs empty symbol-chain emit.
+ * - 'encode_exec'/'emit_result_decision': explicit emit phase and emit outcome routing.
+ * - 'encode_result_decision': explicit final runtime-error routing.
  * - 'done'/'errored': terminal outcomes.
  * - 'unexpected': sequencing contract violation.
  *
@@ -52,6 +56,8 @@ struct unexpected {};
  * - 'text_empty'/'text_non_empty' route explicit precheck decisions.
  * - 'tables_ready'/'tables_missing' route table-sync execution.
  * - 'merge_symbol_capacity_within_limit'/'merge_symbol_capacity_exceeded' route merge intake.
+ * - 'symbols_present'/'symbols_absent' route emit execution vs explicit empty emit result.
+ * - 'emit_result_ok'/'emit_result_failed' route explicit emit outcomes.
  * - 'phase_*' guards observe runtime phase errors.
  *
  * action side effects:
@@ -60,7 +66,9 @@ struct unexpected {};
  * - 'sync_tables' builds SPM lookup tables in an explicit phase.
  * - 'run_prepare' preprocesses input and builds symbol spans.
  * - 'run_merge' applies bounded symbol merges.
- * - 'run_encode' emits final token IDs.
+ * - 'set_emit_result_empty' commits explicit empty-chain emit result without hidden emit branching.
+ * - 'run_encode' computes explicit emit outcome data.
+ * - 'apply_emit_result_ok'/'apply_emit_result_failed' commit explicit emit outcomes.
  * - 'mark_done'/'ensure_last_error' finalize runtime status.
  * - 'on_unexpected' reports sequencing violations.
  */
@@ -74,137 +82,165 @@ struct model {
       // Encode Intake
       //------------------------------------------------------------------------------//
         sml::state<encode_validity_decision> <= *sml::state<initialized>
-          + sml::event<event::encode_runtime>
+          + sml::event<runtime::encode_runtime>
       , sml::state<encode_validity_decision> <= sml::state<done>
-          + sml::event<event::encode_runtime>
+          + sml::event<runtime::encode_runtime>
       , sml::state<encode_validity_decision> <= sml::state<errored>
-          + sml::event<event::encode_runtime>
+          + sml::event<runtime::encode_runtime>
       , sml::state<encode_validity_decision> <= sml::state<unexpected>
-          + sml::event<event::encode_runtime>
+          + sml::event<runtime::encode_runtime>
 
       , sml::state<encode_vocab_sync_decision> <= sml::state<encode_validity_decision>
-          + sml::completion<event::encode_runtime>[guard::valid_encode{}]
+          + sml::completion<runtime::encode_runtime>[guard::valid_encode{}]
       , sml::state<errored> <= sml::state<encode_validity_decision>
-          + sml::completion<event::encode_runtime>[guard::invalid_encode{}]
+          + sml::completion<runtime::encode_runtime>[guard::invalid_encode{}]
           / action::reject_invalid_encode
       , sml::state<errored> <= sml::state<encode_validity_decision>
-          + sml::completion<event::encode_runtime>
+          + sml::completion<runtime::encode_runtime>
           / action::reject_invalid_encode
 
       , sml::state<encode_precheck_decision> <= sml::state<encode_vocab_sync_decision>
-          + sml::completion<event::encode_runtime>[guard::vocab_changed{}]
+          + sml::completion<runtime::encode_runtime>[guard::vocab_changed{}]
           / action::begin_encode_sync_vocab
       , sml::state<encode_precheck_decision> <= sml::state<encode_vocab_sync_decision>
-          + sml::completion<event::encode_runtime>[guard::vocab_unchanged{}]
+          + sml::completion<runtime::encode_runtime>[guard::vocab_unchanged{}]
           / action::begin_encode
       , sml::state<errored> <= sml::state<encode_vocab_sync_decision>
-          + sml::completion<event::encode_runtime>
+          + sml::completion<runtime::encode_runtime>
           / action::reject_invalid_encode
 
       //------------------------------------------------------------------------------//
       // Encode Precheck
       //------------------------------------------------------------------------------//
       , sml::state<done> <= sml::state<encode_precheck_decision>
-          + sml::completion<event::encode_runtime>[guard::text_empty{}] / action::mark_done
+          + sml::completion<runtime::encode_runtime>[guard::text_empty{}] / action::mark_done
       , sml::state<table_policy_decision> <= sml::state<encode_precheck_decision>
-          + sml::completion<event::encode_runtime>[guard::text_non_empty{}]
+          + sml::completion<runtime::encode_runtime>[guard::text_non_empty{}]
       , sml::state<errored> <= sml::state<encode_precheck_decision>
-          + sml::completion<event::encode_runtime>
+          + sml::completion<runtime::encode_runtime>
           / action::ensure_last_error
 
       , sml::state<table_sync_exec> <= sml::state<table_policy_decision>
-          + sml::completion<event::encode_runtime>[guard::tables_missing{}]
+          + sml::completion<runtime::encode_runtime>[guard::tables_missing{}]
       , sml::state<encode_prepare_exec> <= sml::state<table_policy_decision>
-          + sml::completion<event::encode_runtime>[guard::tables_ready{}]
+          + sml::completion<runtime::encode_runtime>[guard::tables_ready{}]
       , sml::state<errored> <= sml::state<table_policy_decision>
-          + sml::completion<event::encode_runtime>
+          + sml::completion<runtime::encode_runtime>
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
       // SPM Table Sync
       //------------------------------------------------------------------------------//
       , sml::state<table_sync_result_decision> <= sml::state<table_sync_exec>
-          + sml::completion<event::encode_runtime> / action::sync_tables
+          + sml::completion<runtime::encode_runtime> / action::sync_tables
       , sml::state<encode_prepare_exec> <= sml::state<table_sync_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_ok{}]
+          + sml::completion<runtime::encode_runtime>[guard::phase_ok{}]
       , sml::state<errored> <= sml::state<table_sync_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_failed{}]
+          + sml::completion<runtime::encode_runtime>[guard::phase_failed{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
       // Encode Prepare
       //------------------------------------------------------------------------------//
       , sml::state<encode_prepare_result_decision> <= sml::state<encode_prepare_exec>
-          + sml::completion<event::encode_runtime> / action::run_prepare
+          + sml::completion<runtime::encode_runtime> / action::run_prepare
       , sml::state<encode_merge_input_capacity_decision> <= sml::state<encode_prepare_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_ok{}]
+          + sml::completion<runtime::encode_runtime>[guard::phase_ok{}]
       , sml::state<errored> <= sml::state<encode_prepare_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_failed{}]
+          + sml::completion<runtime::encode_runtime>[guard::phase_failed{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
       // Merge Input Capacity Decision
       //------------------------------------------------------------------------------//
       , sml::state<encode_merge_exec> <= sml::state<encode_merge_input_capacity_decision>
-          + sml::completion<event::encode_runtime>[guard::merge_symbol_capacity_within_limit{}]
+          + sml::completion<runtime::encode_runtime>[guard::merge_symbol_capacity_within_limit{}]
       , sml::state<errored> <= sml::state<encode_merge_input_capacity_decision>
-          + sml::completion<event::encode_runtime>[guard::merge_symbol_capacity_exceeded{}]
+          + sml::completion<runtime::encode_runtime>[guard::merge_symbol_capacity_exceeded{}]
           / action::reject_invalid_encode
       , sml::state<errored> <= sml::state<encode_merge_input_capacity_decision>
-          + sml::completion<event::encode_runtime>
+          + sml::completion<runtime::encode_runtime>
           / action::reject_invalid_encode
 
       //------------------------------------------------------------------------------//
       // Encode Merge
       //------------------------------------------------------------------------------//
       , sml::state<encode_merge_result_decision> <= sml::state<encode_merge_exec>
-          + sml::completion<event::encode_runtime> / action::run_merge
-      , sml::state<encode_exec> <= sml::state<encode_merge_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_ok{}]
+          + sml::completion<runtime::encode_runtime> / action::run_merge
+      , sml::state<encode_emit_input_decision> <= sml::state<encode_merge_result_decision>
+          + sml::completion<runtime::encode_runtime>[guard::phase_ok{}]
       , sml::state<errored> <= sml::state<encode_merge_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_failed{}]
+          + sml::completion<runtime::encode_runtime>[guard::phase_failed{}]
+          / action::ensure_last_error
+
+      //------------------------------------------------------------------------------//
+      // Emit Input Decision
+      //------------------------------------------------------------------------------//
+      , sml::state<encode_exec> <= sml::state<encode_emit_input_decision>
+          + sml::completion<runtime::encode_runtime>[guard::symbols_present{}]
+      , sml::state<encode_result_decision> <= sml::state<encode_emit_input_decision>
+          + sml::completion<runtime::encode_runtime>[guard::symbols_absent{}]
+          / action::set_emit_result_empty
+      , sml::state<errored> <= sml::state<encode_emit_input_decision>
+          + sml::completion<runtime::encode_runtime>
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
       // Encode Emit
       //------------------------------------------------------------------------------//
-      , sml::state<encode_result_decision> <= sml::state<encode_exec>
-          + sml::completion<event::encode_runtime> / action::run_encode
+      , sml::state<emit_result_decision> <= sml::state<encode_exec>
+          + sml::completion<runtime::encode_runtime> / action::run_encode
+      , sml::state<encode_result_decision> <= sml::state<emit_result_decision>
+          + sml::completion<runtime::encode_runtime>[guard::emit_result_ok{}]
+          / action::apply_emit_result_ok
+      , sml::state<encode_result_decision> <= sml::state<emit_result_decision>
+          + sml::completion<runtime::encode_runtime>[guard::emit_result_failed{}]
+          / action::apply_emit_result_failed
+      , sml::state<errored> <= sml::state<emit_result_decision>
+          + sml::completion<runtime::encode_runtime>
+          / action::ensure_last_error
       , sml::state<done> <= sml::state<encode_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_ok{}] / action::mark_done
+          + sml::completion<runtime::encode_runtime>[guard::phase_ok{}] / action::mark_done
       , sml::state<errored> <= sml::state<encode_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_failed{}]
+          + sml::completion<runtime::encode_runtime>[guard::phase_failed{}]
+          / action::ensure_last_error
+      , sml::state<errored> <= sml::state<encode_result_decision>
+          + sml::completion<runtime::encode_runtime>
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
       // Explicit Unexpected-Event Handling
       //------------------------------------------------------------------------------//
       , sml::state<unexpected> <= sml::state<encode_validity_decision>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_vocab_sync_decision>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<table_policy_decision>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<table_sync_exec>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<table_sync_result_decision>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_prepare_exec>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_prepare_result_decision>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_merge_input_capacity_decision>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_merge_exec>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_merge_result_decision>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_emit_input_decision>
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<emit_result_decision>
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_result_decision>
-          + sml::event<event::encode_runtime> / action::on_unexpected
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
 
       , sml::state<unexpected> <= sml::state<initialized>
           + sml::event<events::encoding_done> / action::on_unexpected
@@ -254,9 +290,17 @@ struct model {
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_merge_result_decision>
           + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_emit_input_decision>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_emit_input_decision>
+          + sml::event<events::encoding_error> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
+          + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<emit_result_decision>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<emit_result_decision>
           + sml::event<events::encoding_error> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_result_decision>
           + sml::event<events::encoding_done> / action::on_unexpected
@@ -299,7 +343,11 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_merge_result_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_emit_input_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<emit_result_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_result_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
@@ -324,26 +372,27 @@ struct sm : public emel::sm<model, action::context> {
 
   bool process_event(const event::encode & ev) {
     event::encode_ctx runtime_ctx{};
-    event::encode_runtime runtime_ev{ev, runtime_ctx};
+    event::encode_runtime base_runtime_ev{ev, runtime_ctx};
+    runtime::encode_runtime runtime_ev{base_runtime_ev};
     const bool accepted = base_type::process_event(runtime_ev);
 
     runtime_ctx.err = emel::text::encoders::detail::select_final_error(accepted, runtime_ctx.err);
 
     int32_t token_count_sink = 0;
-    int32_t error_sink = EMEL_OK;
+    int32_t error_sink = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
     emel::text::encoders::detail::write_optional(
       ev.token_count_out, token_count_sink, runtime_ctx.token_count);
     emel::text::encoders::detail::write_optional(ev.error_out, error_sink, runtime_ctx.err);
 
     emel::text::encoders::detail::publish_result(ev, runtime_ctx);
     last_error_ = runtime_ctx.err;
-    return runtime_ctx.err == EMEL_OK;
+    return runtime_ctx.err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   }
 
   int32_t last_error() const noexcept { return last_error_; }
 
  private:
-  int32_t last_error_ = EMEL_OK;
+  int32_t last_error_ = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 };
 
 using Spm = sm;

@@ -54,25 +54,37 @@ inline uint32_t scan_quoted(const std::string_view input,
                             uint32_t pos,
                             const char terminator) noexcept {
   const uint32_t size = static_cast<uint32_t>(input.size());
-  ++pos;
-  uint32_t matched = 0u;
-  while (pos < size && matched == 0u) {
-    const char c = input[pos];
-    const size_t escaped = static_cast<size_t>(c == '\\' && pos + 1u < size);
-    pos += static_cast<uint32_t>(escaped + 1u);
-    matched = static_cast<uint32_t>(static_cast<size_t>(c == terminator) & (1u - escaped));
+  const uint32_t scan_start = static_cast<uint32_t>(pos + 1u);
+  uint32_t end = scan_start;
+  uint32_t active = static_cast<uint32_t>(scan_start <= size);
+  uint32_t skip_escaped = 0u;
+  for (uint32_t scan = scan_start; scan < size; ++scan) {
+    const char c = input[scan];
+    const uint32_t consume_char = active & (1u - skip_escaped);
+    const uint32_t escaped =
+        consume_char & static_cast<uint32_t>(c == '\\' && scan + 1u < size);
+    const uint32_t matched =
+        consume_char & static_cast<uint32_t>(c == terminator) & (1u - escaped);
+    end += consume_char;
+    end += escaped;
+    active &= (1u - matched);
+    skip_escaped = escaped;
   }
-  return pos;
+  return end;
 }
 
 inline uint32_t scan_braced_quantifier(const std::string_view input, uint32_t pos) noexcept {
   const uint32_t size = static_cast<uint32_t>(input.size());
-  ++pos;
-  while (pos < size && input[pos] != '}') {
-    ++pos;
+  const uint32_t scan_start = static_cast<uint32_t>(pos + 1u);
+  uint32_t end = scan_start;
+  uint32_t active = static_cast<uint32_t>(scan_start <= size);
+  for (uint32_t scan = scan_start; scan < size; ++scan) {
+    const uint32_t consume_char = active;
+    const uint32_t matched = consume_char & static_cast<uint32_t>(input[scan] == '}');
+    end += consume_char;
+    active &= (1u - matched);
   }
-  pos += static_cast<uint32_t>(pos < size && input[pos] == '}');
-  return pos;
+  return end;
 }
 
 }  // namespace detail
@@ -161,8 +173,13 @@ struct emit_identifier {
     const uint32_t size = static_cast<uint32_t>(ev.cursor.input.size());
     const uint32_t start = lexer::detail::token_start(ev.cursor);
     uint32_t end = static_cast<uint32_t>(start + 1u);
-    while (end < size && lexer::detail::is_word_char(ev.cursor.input[end])) {
-      ++end;
+    uint32_t active = static_cast<uint32_t>(end <= size);
+    for (uint32_t scan = end; scan < size; ++scan) {
+      const uint32_t is_word =
+          static_cast<uint32_t>(lexer::detail::is_word_char(ev.cursor.input[scan]));
+      const uint32_t advance = active & is_word;
+      end += advance;
+      active = advance;
     }
     detail::emit_range_token(ev, start, end, event::token_kind::identifier);
   }

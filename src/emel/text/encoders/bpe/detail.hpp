@@ -298,7 +298,7 @@ bpe_build_symbols(const std::string_view text,
   const bool patch_head = scratch.symbol_count > 0;
   scratch.prev[0] = select_i32(patch_head, -1, scratch.prev[0]);
 
-  const std::array<int32_t, 2> errors{EMEL_ERR_INVALID_ARGUMENT, EMEL_OK};
+  const std::array<int32_t, 2> errors{emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok)};
   result.error = errors[static_cast<size_t>(ok)];
   return ok;
 }
@@ -481,7 +481,7 @@ inline bool encode_bpe_word_merge_path(
     idx = next_idx;
   }
 
-  const std::array<int32_t, 2> errors{EMEL_ERR_INVALID_ARGUMENT, EMEL_OK};
+  const std::array<int32_t, 2> errors{emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok)};
   result.error = errors[static_cast<size_t>(ok)];
   return ok;
 }
@@ -497,10 +497,10 @@ encode_bpe_ignore_merges(const event::encode &ev,
 
   const size_t error_index = (static_cast<size_t>(token_found) << 1u) |
                              static_cast<size_t>(token_pushed);
-  const std::array<int32_t, 4> errors{EMEL_ERR_BACKEND, EMEL_ERR_BACKEND,
-                                      EMEL_ERR_INVALID_ARGUMENT, EMEL_OK};
+  const std::array<int32_t, 4> errors{emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend), emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend),
+                                      emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok)};
   result.error = errors[error_index];
-  result.token_count = count * static_cast<int32_t>(result.error == EMEL_OK);
+  result.token_count = count * static_cast<int32_t>(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   return result;
 }
 
@@ -512,7 +512,7 @@ encode_bpe_merge_path(const event::encode &ev,
   int32_t count = 0;
   const bool ok =
       encode_bpe_word_merge_path(ev, ctx, vocab, ev.text, count, result);
-  const std::array<int32_t, 2> errors{result.error, EMEL_OK};
+  const std::array<int32_t, 2> errors{result.error, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok)};
   result.error = errors[static_cast<size_t>(ok)];
   result.token_count = count * static_cast<int32_t>(ok);
   return result;
@@ -536,19 +536,19 @@ encode_bpe_ignore_or_merge(const event::encode &ev,
       },
   };
   encode_result result = encode_bpe_ignore_merges(ev, ctx);
-  const bool fallback = result.error == EMEL_ERR_BACKEND;
+  const bool fallback = result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
   return fallback_table[static_cast<size_t>(fallback)](ev, ctx, vocab, result);
 }
 
 inline encode_result encode_bpe_backend_error() {
   encode_result result{};
-  result.error = EMEL_ERR_BACKEND;
+  result.error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
   return result;
 }
 
 inline encode_result encode_bpe_invalid_preprocessed() {
   encode_result result{};
-  result.error = EMEL_ERR_INVALID_ARGUMENT;
+  result.error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument);
   return result;
 }
 

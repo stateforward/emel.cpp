@@ -110,39 +110,85 @@ inline void run_encode_tokens(const runtime::encode_runtime & ev, context & ctx)
   int32_t count = 0;
   size_t position = 0;
   const std::string_view text = ev.event_.request.text;
+  bool push_failed = false;
+  bool scan_active = !text.empty();
+  using node_ptr_t = decltype(ctx.token_matcher.traverse(char{}));
 
-  while (position < text.size()) {
-    const auto * node = ctx.token_matcher.traverse(text[position]);
+  auto traverse_none = +[](const node_ptr_t, const char) noexcept -> node_ptr_t {
+    return nullptr;
+  };
+  auto traverse_some = +[](const node_ptr_t walk, const char next_char) noexcept -> node_ptr_t {
+    return walk->traverse(next_char);
+  };
+  auto read_has_value_none = +[](const node_ptr_t) noexcept -> bool {
+    return false;
+  };
+  auto read_has_value_some = +[](const node_ptr_t walk) noexcept -> bool {
+    return walk->has_value;
+  };
+  auto read_value_none = +[](const node_ptr_t) noexcept -> int32_t {
+    return 0;
+  };
+  auto read_value_some = +[](const node_ptr_t walk) noexcept -> int32_t {
+    return walk->value;
+  };
+
+  for (size_t token_step = 0; token_step < text.size(); ++token_step) {
+    const bool step_active = scan_active && position < text.size();
+    const size_t safe_position = select_size(step_active, position, 0u);
+    const auto * node = ctx.token_matcher.traverse(text[safe_position]);
     int32_t token_id = ev.unk_id;
-    size_t token_end = position + 1u;
-    size_t offset = position + 1u;
-    const auto * walk = node;
+    size_t token_end = select_size(step_active, safe_position + 1u, position);
+    size_t offset = token_end;
+    const auto * walk = select_ptr(step_active, node, static_cast<node_ptr_t>(nullptr));
 
-    while (walk != nullptr) {
+    using traverse_handler_t = node_ptr_t (*)(node_ptr_t, char) noexcept;
+    const traverse_handler_t traverse_handlers[2] = {
+      traverse_none,
+      traverse_some,
+    };
+    using read_has_value_handler_t = bool (*)(node_ptr_t) noexcept;
+    const read_has_value_handler_t read_has_value_handlers[2] = {
+      read_has_value_none,
+      read_has_value_some,
+    };
+    using read_value_handler_t = int32_t (*)(node_ptr_t) noexcept;
+    const read_value_handler_t read_value_handlers[2] = {
+      read_value_none,
+      read_value_some,
+    };
+
+    for (size_t depth = 0; depth < text.size(); ++depth) {
+      const bool walk_active = walk != nullptr;
+      const bool walk_has_value =
+        read_has_value_handlers[static_cast<size_t>(walk_active)](walk);
+      const int32_t walk_value =
+        read_value_handlers[static_cast<size_t>(walk_active)](walk);
       token_id = emel::text::encoders::rwkv::detail::select_i32(
-        walk->has_value, walk->value, token_id);
+        walk_has_value, walk_value, token_id);
       token_end = select_size(
-        walk->has_value, offset, token_end);
-      const bool can_advance = offset < text.size();
+        walk_has_value, offset, token_end);
+      const bool can_advance = walk_active && offset < text.size();
       const size_t safe_index =
-        select_size(can_advance, offset, position);
+        select_size(can_advance, offset, safe_position);
       const char next_char = text[safe_index];
-      const auto * next_walk = walk->traverse(next_char);
+      const auto * next_walk =
+        traverse_handlers[static_cast<size_t>(can_advance)](walk, next_char);
       walk = select_ptr(
         can_advance, next_walk, static_cast<decltype(next_walk)>(nullptr));
       offset += static_cast<size_t>(can_advance);
     }
 
-    const bool emit_token = token_id != emel::text::encoders::detail::k_token_null;
+    const bool emit_token = step_active && token_id != emel::text::encoders::detail::k_token_null;
     const bool token_push_ok = rwkv_push_token(ev.event_.request, token_id, count);
-    const bool push_failed = emit_token && !token_push_ok;
-    ev.event_.ctx.err = emel::text::encoders::rwkv::detail::select_i32(
-      push_failed, EMEL_ERR_INVALID_ARGUMENT, ev.event_.ctx.err);
-    position = token_end;
+    push_failed = push_failed || (emit_token && !token_push_ok);
+    position = select_size(step_active, token_end, position);
+    scan_active = step_active && position < text.size();
   }
 
+  ev.encode_push_failed = push_failed;
   ev.event_.ctx.token_count = emel::text::encoders::rwkv::detail::select_i32(
-    ev.event_.ctx.err == EMEL_OK, count, 0);
+    !push_failed, count, 0);
 }
 
 }  // namespace detail
@@ -152,6 +198,7 @@ struct begin_encode {
     emel::text::encoders::action::begin_encode(ev.event_, ctx);
     ev.unk_id = emel::text::encoders::detail::k_token_null;
     ev.unk_lookup_found = false;
+    ev.encode_push_failed = false;
   }
 };
 
@@ -164,6 +211,7 @@ struct begin_encode_sync_vocab {
     ctx.token_matcher = emel::text::encoders::detail::naive_trie{};
     ev.unk_id = emel::text::encoders::detail::k_token_null;
     ev.unk_lookup_found = false;
+    ev.encode_push_failed = false;
   }
 };
 
@@ -208,11 +256,19 @@ struct run_encode {
   }
 };
 
+struct mark_encode_push_failed {
+  void operator()(const runtime::encode_runtime & ev, context &) const noexcept {
+    ev.event_.ctx.token_count = 0;
+    ev.event_.ctx.err = emel::text::encoders::error::to_emel(
+      emel::text::encoders::error::code::invalid_argument);
+  }
+};
+
 struct sync_tables {
   void operator()(const runtime::encode_runtime & ev, context & ctx) const noexcept {
     const bool ready = emel::text::encoders::rwkv::detail::ensure_rwkv_tables(ctx, *ctx.vocab);
     ev.event_.ctx.err = emel::text::encoders::rwkv::detail::select_i32(
-      ready, EMEL_OK, EMEL_ERR_INVALID_ARGUMENT);
+      ready, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok), emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
   }
 };
 
@@ -233,10 +289,10 @@ struct on_unexpected {
   void operator()(const event_type & ev, context &) const noexcept {
     if constexpr (requires { ev.event_.ctx.token_count; ev.event_.ctx.err; }) {
       ev.event_.ctx.token_count = 0;
-      ev.event_.ctx.err = EMEL_ERR_INVALID_ARGUMENT;
+      ev.event_.ctx.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument);
     } else if constexpr (requires { ev.ctx.token_count; ev.ctx.err; }) {
       ev.ctx.token_count = 0;
-      ev.ctx.err = EMEL_ERR_INVALID_ARGUMENT;
+      ev.ctx.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument);
     } else if constexpr (requires { ev.request; }) {
       emel::text::encoders::action::detail::signal_unexpected_request(ev.request);
     }
@@ -251,6 +307,7 @@ inline constexpr lookup_unk_candidate lookup_unk_candidate{};
 inline constexpr set_unk_from_lookup set_unk_from_lookup{};
 inline constexpr set_unk_missing set_unk_missing{};
 inline constexpr run_encode run_encode{};
+inline constexpr mark_encode_push_failed mark_encode_push_failed{};
 inline constexpr sync_tables sync_tables{};
 inline constexpr mark_done mark_done{};
 inline constexpr ensure_last_error ensure_last_error{};

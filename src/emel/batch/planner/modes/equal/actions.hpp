@@ -22,15 +22,42 @@ inline void append_token_index_if(event::request_ctx & ctx,
   handlers[static_cast<size_t>(should_append)](ctx, idx);
 }
 
+inline void begin_step_if(event::request_ctx & ctx, const bool should_begin) noexcept {
+  using begin_handler = void (*)(event::request_ctx &) noexcept;
+  static const std::array<begin_handler, 2> handlers = {
+      +[](event::request_ctx &) noexcept {},
+      +[](event::request_ctx & inner_ctx) noexcept {
+        (void)detail::begin_step(inner_ctx);
+      },
+  };
+  handlers[static_cast<size_t>(should_begin)](ctx);
+}
+
+inline void push_step_size_if(event::request_ctx & ctx,
+                              const bool should_push,
+                              const int32_t step_size) noexcept {
+  using push_handler = void (*)(event::request_ctx &, int32_t) noexcept;
+  static const std::array<push_handler, 2> handlers = {
+      +[](event::request_ctx &, const int32_t) noexcept {},
+      +[](event::request_ctx & inner_ctx, const int32_t inner_step_size) noexcept {
+        (void)detail::push_step_size(inner_ctx, inner_step_size);
+      },
+  };
+  handlers[static_cast<size_t>(should_push)](ctx, step_size);
+}
+
 inline void create_plan_impl(const event::request_runtime & ev) noexcept {
   std::array<uint8_t, emel::batch::planner::action::MAX_PLAN_STEPS> used = {};
   int32_t used_count = 0;
-  int32_t loop_budget = emel::batch::planner::action::MAX_PLAN_STEPS;
 
   const int32_t primary_sink = 0;
   const std::array<const int32_t *, 2> primary_ptrs = {&primary_sink, ev.request.seq_primary_ids};
 
-  while (used_count < ev.request.n_tokens && loop_budget > 0) {
+  for (int32_t step_iteration = 0;
+       step_iteration < emel::batch::planner::action::MAX_PLAN_STEPS;
+       ++step_iteration) {
+    const bool iteration_active = used_count < ev.request.n_tokens;
+
     struct group_state {
       detail::seq_mask_t mask = {};
     };
@@ -56,7 +83,7 @@ inline void create_plan_impl(const event::request_runtime & ev) noexcept {
 
       const bool out_of_order =
           requires_sequential_primary && group_count > 0 && primary != last_primary + 1;
-      const bool can_add_group = is_unused && !overlap && !out_of_order;
+      const bool can_add_group = iteration_active && is_unused && !overlap && !out_of_order;
 
       const int32_t group_index = detail::select_i32(can_add_group, group_count, 0);
       detail::copy_mask_if(groups[static_cast<size_t>(group_index)].mask, mask, can_add_group);
@@ -82,14 +109,16 @@ inline void create_plan_impl(const event::request_runtime & ev) noexcept {
 
     const int32_t safe_group_count = detail::select_i32(group_count > 0, group_count, 1);
     const int32_t max_rows = ev.ctx.effective_step_size / safe_group_count;
-    const int32_t n_seq_tokens = std::min(max_rows, min_avail);
+    const int32_t n_seq_tokens_raw = std::min(max_rows, min_avail);
+    const int32_t n_seq_tokens = detail::select_i32(iteration_active, n_seq_tokens_raw, 0);
 
-    (void)detail::begin_step(ev.ctx);
+    begin_step_if(ev.ctx, iteration_active);
 
     for (int32_t g = 0; g < group_count; ++g) {
       int32_t remaining = n_seq_tokens;
-      for (int32_t i = 0; i < ev.request.n_tokens && remaining > 0; ++i) {
-        const bool match =
+      for (int32_t i = 0; i < ev.request.n_tokens; ++i) {
+        const bool has_remaining = remaining > 0;
+        const bool match = has_remaining &&
             used[static_cast<size_t>(i)] == 0 &&
             detail::mask_equal(detail::normalized_seq_mask(ev.request, i),
                                groups[static_cast<size_t>(g)].mask);
@@ -103,8 +132,7 @@ inline void create_plan_impl(const event::request_runtime & ev) noexcept {
     }
 
     const int32_t added = n_seq_tokens * group_count;
-    (void)detail::push_step_size(ev.ctx, added);
-    loop_budget -= 1;
+    push_step_size_if(ev.ctx, iteration_active, added);
   }
 
   detail::finalize_token_offsets(ev.ctx);
@@ -144,8 +172,11 @@ inline void create_plan_primary_fast_path_impl(const event::request_runtime & ev
   }
 
   int32_t remaining = ev.request.n_tokens;
-  int32_t loop_budget = emel::batch::planner::action::MAX_PLAN_STEPS;
-  while (remaining > 0 && loop_budget > 0) {
+  for (int32_t step_iteration = 0;
+       step_iteration < emel::batch::planner::action::MAX_PLAN_STEPS;
+       ++step_iteration) {
+    const bool iteration_active = remaining > 0;
+
     std::array<uint8_t, emel::batch::planner::action::MAX_SEQ> group_used = {};
     std::array<int32_t, emel::batch::planner::action::MAX_SEQ> group_ids = {};
     int32_t group_count = 0;
@@ -161,7 +192,7 @@ inline void create_plan_primary_fast_path_impl(const event::request_runtime & ev
       const bool out_of_order =
           ev.request.equal_sequential && group_count > 0 && seq_id != last_primary + 1;
       const bool skip_slot = slot_exhausted || already_grouped || out_of_order;
-      const bool use_slot = !skip_slot;
+      const bool use_slot = iteration_active && !skip_slot;
 
       group_used[slot] = detail::select_u8(use_slot, 1u, group_used[slot]);
       const int32_t group_index = detail::select_i32(use_slot, group_count, 0);
@@ -181,9 +212,10 @@ inline void create_plan_primary_fast_path_impl(const event::request_runtime & ev
 
     const int32_t safe_group_count = detail::select_i32(group_count > 0, group_count, 1);
     const int32_t max_rows = ev.ctx.effective_step_size / safe_group_count;
-    const int32_t n_seq_tokens = std::min(max_rows, min_avail);
+    const int32_t n_seq_tokens_raw = std::min(max_rows, min_avail);
+    const int32_t n_seq_tokens = detail::select_i32(iteration_active, n_seq_tokens_raw, 0);
 
-    (void)detail::begin_step(ev.ctx);
+    begin_step_if(ev.ctx, iteration_active);
 
     for (int32_t g = 0; g < group_count; ++g) {
       const int32_t seq_id = group_ids[static_cast<size_t>(g)];
@@ -203,8 +235,7 @@ inline void create_plan_primary_fast_path_impl(const event::request_runtime & ev
     }
 
     const int32_t added = n_seq_tokens * group_count;
-    (void)detail::push_step_size(ev.ctx, added);
-    loop_budget -= 1;
+    push_step_size_if(ev.ctx, iteration_active, added);
   }
 
   detail::finalize_token_offsets(ev.ctx);

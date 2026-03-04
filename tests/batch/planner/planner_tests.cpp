@@ -14,13 +14,13 @@ struct plan_capture {
   std::array<int32_t, 16> sizes = {};
   int32_t step_count = 0;
   int32_t total_outputs = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::error::cast(emel::batch::planner::error::none);
   bool done_called = false;
   bool error_called = false;
 
   void on_done(const emel::batch::planner::events::plan_done & ev) noexcept {
     done_called = true;
-    err = EMEL_OK;
+    err = emel::error::cast(emel::batch::planner::error::none);
     step_count = ev.step_count;
     total_outputs = ev.total_outputs;
     if (ev.step_sizes == nullptr) {
@@ -75,7 +75,7 @@ TEST_CASE("batch_planner_splits_tokens_into_steps") {
   }));
 
   CHECK(capture.done_called);
-  CHECK(capture.err == EMEL_OK);
+  CHECK(capture.err == emel::error::cast(emel::batch::planner::error::none));
   CHECK(capture.step_count == 3);
   CHECK(capture.total_outputs == 5);
   CHECK(capture.sizes[0] == 2);

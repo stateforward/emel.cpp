@@ -24,7 +24,7 @@ struct done_capture {
 };
 
 struct error_capture {
-  int32_t err = EMEL_OK;
+  int32_t err = emel::error::cast(emel::batch::planner::error::none);
   int32_t calls = 0;
 
   void on_error(const emel::batch::planner::events::plan_error & ev) noexcept {

@@ -269,20 +269,20 @@ struct sm : public emel::sm<model, action::context> {
     runtime_ctx.err = emel::text::encoders::detail::select_final_error(accepted, runtime_ctx.err);
 
     int32_t token_count_sink = 0;
-    int32_t error_sink = EMEL_OK;
+    int32_t error_sink = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
     emel::text::encoders::detail::write_optional(
       ev.token_count_out, token_count_sink, runtime_ctx.token_count);
     emel::text::encoders::detail::write_optional(ev.error_out, error_sink, runtime_ctx.err);
 
     emel::text::encoders::detail::publish_result(ev, runtime_ctx);
     last_error_ = runtime_ctx.err;
-    return runtime_ctx.err == EMEL_OK;
+    return runtime_ctx.err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   }
 
   int32_t last_error() const noexcept { return last_error_; }
 
  private:
-  int32_t last_error_ = EMEL_OK;
+  int32_t last_error_ = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 };
 
 using Wpm = sm;

@@ -22,7 +22,7 @@ void * fake_buffer(const uintptr_t value) {
 TEST_CASE("tensor_view_capture_tensor_view_reads_tensor_state") {
   tensor_sm tensors{};
   tensor_view_sm view{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::none));
 
   REQUIRE(tensors.process_event(emel::tensor::event::reserve_tensor{
     .tensor_id = 21,
@@ -32,7 +32,7 @@ TEST_CASE("tensor_view_capture_tensor_view_reads_tensor_state") {
     .is_leaf = false,
     .error_out = &err,
   }));
-  REQUIRE(err == EMEL_OK);
+  REQUIRE(err == static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::none)));
 
   emel::tensor::event::tensor_state state{};
   REQUIRE(view.process_event(emel::tensor::view::event::capture_tensor_view{
@@ -41,7 +41,7 @@ TEST_CASE("tensor_view_capture_tensor_view_reads_tensor_state") {
     .state_out = &state,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_OK);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::none)));
   CHECK(state.lifecycle_state == emel::tensor::event::lifecycle::empty);
   CHECK(state.seed_refs == 2u);
   CHECK(state.live_refs == 2u);
@@ -50,7 +50,7 @@ TEST_CASE("tensor_view_capture_tensor_view_reads_tensor_state") {
 TEST_CASE("tensor_view_capture_tensor_view_rejects_invalid_request") {
   tensor_sm tensors{};
   tensor_view_sm view{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::none));
   emel::tensor::event::tensor_state state{};
 
   CHECK_FALSE(view.process_event(emel::tensor::view::event::capture_tensor_view{
@@ -59,7 +59,7 @@ TEST_CASE("tensor_view_capture_tensor_view_rejects_invalid_request") {
     .state_out = &state,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::invalid_request)));
 
   CHECK_FALSE(view.process_event(emel::tensor::view::event::capture_tensor_view{
     .tensor_machine = &tensors,
@@ -67,7 +67,7 @@ TEST_CASE("tensor_view_capture_tensor_view_rejects_invalid_request") {
     .state_out = &state,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::invalid_request)));
 
   CHECK_FALSE(view.process_event(emel::tensor::view::event::capture_tensor_view{
     .tensor_machine = &tensors,
@@ -75,13 +75,13 @@ TEST_CASE("tensor_view_capture_tensor_view_rejects_invalid_request") {
     .state_out = nullptr,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::invalid_request)));
 }
 
 TEST_CASE("tensor_view_capture_tensor_view_propagates_tensor_error") {
   tensor_sm tensors{};
   tensor_view_sm view{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::none));
 
   REQUIRE(tensors.process_event(emel::tensor::event::reserve_tensor{
     .tensor_id = 31,
@@ -95,7 +95,7 @@ TEST_CASE("tensor_view_capture_tensor_view_propagates_tensor_error") {
     .tensor_id = 31,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INTERNAL);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::error::internal_error)));
 
   emel::tensor::event::tensor_state state{};
   REQUIRE(view.process_event(emel::tensor::view::event::capture_tensor_view{
@@ -104,14 +104,14 @@ TEST_CASE("tensor_view_capture_tensor_view_propagates_tensor_error") {
     .state_out = &state,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_OK);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::none)));
   CHECK(state.lifecycle_state == emel::tensor::event::lifecycle::internal_error);
 }
 
 TEST_CASE("tensor_view_unexpected_event_keeps_machine_dispatchable") {
   tensor_sm tensors{};
   tensor_view_sm view{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::none));
   emel::tensor::event::tensor_state state{};
 
   CHECK(view.process_event(emel::tensor::view::events::capture_tensor_view_done{}));
@@ -122,5 +122,5 @@ TEST_CASE("tensor_view_unexpected_event_keeps_machine_dispatchable") {
     .state_out = &state,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_OK);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::none)));
 }

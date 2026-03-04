@@ -9,8 +9,8 @@
 #include <string_view>
 #include <vector>
 
-#include "emel/emel.h"
 #include "emel/model/data.hpp"
+#include "emel/text/encoders/errors.hpp"
 
 namespace emel::text::encoders::detail {
 
@@ -191,7 +191,7 @@ struct encode_scratch {
 
 struct encode_result {
   int32_t token_count = 0;
-  int32_t error = EMEL_OK;
+  int32_t error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 };
 
 }  // namespace emel::text::encoders::detail

@@ -104,4 +104,16 @@ struct unk_lookup_missing {
   }
 };
 
+struct encode_push_failed {
+  bool operator()(const runtime::encode_runtime & ev, const action::context &) const noexcept {
+    return ev.encode_push_failed;
+  }
+};
+
+struct encode_push_ok {
+  bool operator()(const runtime::encode_runtime & ev, const action::context &) const noexcept {
+    return !ev.encode_push_failed;
+  }
+};
+
 }  // namespace emel::text::encoders::rwkv::guard

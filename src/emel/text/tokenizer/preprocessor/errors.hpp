@@ -4,8 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "emel/emel.h"
-
 namespace emel::text::tokenizer::preprocessor {
 
 enum class error : uint8_t {
@@ -18,9 +16,9 @@ inline constexpr bool is_ok(const error err) noexcept { return err == error::non
 
 inline constexpr int32_t error_code(const error err) noexcept {
   constexpr std::array<int32_t, 3> k_error_codes = {
-      EMEL_OK,
-      EMEL_ERR_INVALID_ARGUMENT,
-      EMEL_ERR_BACKEND,
+      0,
+      (1 << 0),
+      (1 << 1),
   };
   return k_error_codes[static_cast<size_t>(err)];
 }

@@ -11,6 +11,10 @@ namespace emel::gbnf::rule_parser::lexer {
 struct initialized {};
 struct scanning {};
 struct next_decision {};
+struct string_literal_emit_exec {};
+struct character_class_emit_exec {};
+struct braced_quantifier_emit_exec {};
+struct identifier_emit_exec {};
 struct rule_reference_plain_parse_exec {};
 struct rule_reference_plain_parse_result_decision {};
 struct rule_reference_negated_parse_exec {};
@@ -87,17 +91,17 @@ struct model {
                  [ guard::starts_quantifier{} ]
                  / action::emit_quantifier
 
-      , sml::state<scanning> <= sml::state<next_decision> + sml::completion<event::next>
+      , sml::state<string_literal_emit_exec> <=
+               sml::state<next_decision> + sml::completion<event::next>
                  [ guard::starts_string_literal{} ]
-                 / action::emit_string_literal
 
-      , sml::state<scanning> <= sml::state<next_decision> + sml::completion<event::next>
+      , sml::state<character_class_emit_exec> <=
+               sml::state<next_decision> + sml::completion<event::next>
                  [ guard::starts_character_class{} ]
-                 / action::emit_character_class
 
-      , sml::state<scanning> <= sml::state<next_decision> + sml::completion<event::next>
+      , sml::state<braced_quantifier_emit_exec> <=
+               sml::state<next_decision> + sml::completion<event::next>
                  [ guard::starts_braced_quantifier{} ]
-                 / action::emit_braced_quantifier
 
       , sml::state<rule_reference_negated_parse_exec> <= sml::state<next_decision> +
                sml::completion<event::next>
@@ -107,12 +111,26 @@ struct model {
                sml::completion<event::next>
                  [ guard::starts_rule_reference_plain_candidate{} ]
 
-      , sml::state<scanning> <= sml::state<next_decision> + sml::completion<event::next>
+      , sml::state<identifier_emit_exec> <=
+               sml::state<next_decision> + sml::completion<event::next>
                  [ guard::starts_identifier{} ]
-                 / action::emit_identifier
 
       , sml::state<scanning> <= sml::state<next_decision> + sml::completion<event::next>
                  / action::emit_unknown
+
+      //------------------------------------------------------------------------------//
+      // Structured token emit execution phases.
+      , sml::state<scanning> <= sml::state<string_literal_emit_exec> + sml::completion<event::next>
+                 / action::emit_string_literal
+
+      , sml::state<scanning> <= sml::state<character_class_emit_exec> + sml::completion<event::next>
+                 / action::emit_character_class
+
+      , sml::state<scanning> <= sml::state<braced_quantifier_emit_exec> + sml::completion<event::next>
+                 / action::emit_braced_quantifier
+
+      , sml::state<scanning> <= sml::state<identifier_emit_exec> + sml::completion<event::next>
+                 / action::emit_identifier
 
       //------------------------------------------------------------------------------//
       // Rule reference: negated.
@@ -171,6 +189,26 @@ struct model {
                  [ guard::unexpected_has_error_callback{} ]
                  / action::dispatch_unexpected_error
 
+      , sml::state<string_literal_emit_exec> <=
+               sml::state<string_literal_emit_exec> + sml::unexpected_event<sml::_>
+                 [ guard::unexpected_has_error_callback{} ]
+                 / action::dispatch_unexpected_error
+
+      , sml::state<character_class_emit_exec> <=
+               sml::state<character_class_emit_exec> + sml::unexpected_event<sml::_>
+                 [ guard::unexpected_has_error_callback{} ]
+                 / action::dispatch_unexpected_error
+
+      , sml::state<braced_quantifier_emit_exec> <=
+               sml::state<braced_quantifier_emit_exec> + sml::unexpected_event<sml::_>
+                 [ guard::unexpected_has_error_callback{} ]
+                 / action::dispatch_unexpected_error
+
+      , sml::state<identifier_emit_exec> <=
+               sml::state<identifier_emit_exec> + sml::unexpected_event<sml::_>
+                 [ guard::unexpected_has_error_callback{} ]
+                 / action::dispatch_unexpected_error
+
       , sml::state<rule_reference_plain_parse_result_decision> <=
                sml::state<rule_reference_plain_parse_result_decision> +
                sml::unexpected_event<sml::_>
@@ -199,6 +237,22 @@ struct model {
 
       , sml::state<rule_reference_plain_parse_exec> <=
                sml::state<rule_reference_plain_parse_exec> + sml::unexpected_event<sml::_>
+                 / action::ignore_unexpected
+
+      , sml::state<string_literal_emit_exec> <=
+               sml::state<string_literal_emit_exec> + sml::unexpected_event<sml::_>
+                 / action::ignore_unexpected
+
+      , sml::state<character_class_emit_exec> <=
+               sml::state<character_class_emit_exec> + sml::unexpected_event<sml::_>
+                 / action::ignore_unexpected
+
+      , sml::state<braced_quantifier_emit_exec> <=
+               sml::state<braced_quantifier_emit_exec> + sml::unexpected_event<sml::_>
+                 / action::ignore_unexpected
+
+      , sml::state<identifier_emit_exec> <=
+               sml::state<identifier_emit_exec> + sml::unexpected_event<sml::_>
                  / action::ignore_unexpected
 
       , sml::state<rule_reference_plain_parse_result_decision> <=

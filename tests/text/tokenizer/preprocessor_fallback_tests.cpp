@@ -49,7 +49,7 @@ TEST_CASE("tokenizer_preprocessor_fallback_identity_even_for_bpe_vocab") {
              emel::text::tokenizer::preprocessor::k_max_fragments>
       fragments = {};
   size_t count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none);
 
   emel::text::tokenizer::preprocessor::fallback::sm machine{};
   emel::text::tokenizer::preprocessor::event::preprocess ev(
@@ -58,7 +58,7 @@ TEST_CASE("tokenizer_preprocessor_fallback_identity_even_for_bpe_vocab") {
       err);
 
   CHECK(machine.process_event(ev));
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none));
   CHECK(count == 1);
   CHECK(fragments[0].kind ==
         emel::text::tokenizer::preprocessor::fragment_kind::raw_text);
@@ -72,7 +72,7 @@ TEST_CASE("tokenizer_preprocessor_fallback_parse_special_true") {
              emel::text::tokenizer::preprocessor::k_max_fragments>
       fragments = {};
   size_t count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none);
 
   emel::text::tokenizer::preprocessor::fallback::sm machine{};
   emel::text::tokenizer::preprocessor::event::preprocess ev(
@@ -81,7 +81,7 @@ TEST_CASE("tokenizer_preprocessor_fallback_parse_special_true") {
       err);
 
   CHECK(machine.process_event(ev));
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none));
   REQUIRE(count == 2);
   CHECK(fragments[0].kind ==
         emel::text::tokenizer::preprocessor::fragment_kind::token);
@@ -98,7 +98,7 @@ TEST_CASE("tokenizer_preprocessor_fallback_parse_special_false") {
              emel::text::tokenizer::preprocessor::k_max_fragments>
       fragments = {};
   size_t count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none);
 
   emel::text::tokenizer::preprocessor::fallback::sm machine{};
   emel::text::tokenizer::preprocessor::event::preprocess ev(
@@ -107,7 +107,7 @@ TEST_CASE("tokenizer_preprocessor_fallback_parse_special_false") {
       err);
 
   CHECK(machine.process_event(ev));
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none));
   REQUIRE(count == 2);
   CHECK(fragments[0].kind ==
         emel::text::tokenizer::preprocessor::fragment_kind::token);

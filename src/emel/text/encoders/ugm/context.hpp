@@ -42,6 +42,8 @@ struct encode_runtime {
   mutable int32_t unk_id = emel::text::encoders::detail::k_token_null;
   mutable std::string_view normalized = {};
   mutable size_t traced_count = 0u;
+  mutable bool backtrace_failed = false;
+  mutable bool emit_failed = false;
 };
 
 }  // namespace emel::text::encoders::ugm::runtime

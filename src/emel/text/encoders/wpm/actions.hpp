@@ -40,7 +40,7 @@ struct run_encode {
 struct sync_tables {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
     const bool ready = emel::text::encoders::wpm::detail::ensure_wpm_tables(ctx, *ctx.vocab);
-    const std::array<int32_t, 2> errors{EMEL_ERR_INVALID_ARGUMENT, EMEL_OK};
+    const std::array<int32_t, 2> errors{emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok)};
     ev.ctx.err = errors[static_cast<size_t>(ready)];
   }
 };

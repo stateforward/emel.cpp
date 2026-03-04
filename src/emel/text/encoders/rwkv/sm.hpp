@@ -23,6 +23,7 @@ struct unk_resolution_decision {};
 struct unk_lookup_exec {};
 struct unk_lookup_result_decision {};
 struct encode_exec {};
+struct encode_emit_result_decision {};
 struct encode_result_decision {};
 struct done {};
 struct errored {};
@@ -40,7 +41,8 @@ struct unexpected {};
  * - `table_sync_exec`/`table_sync_result_decision`: explicit RWKV table preparation.
  * - `unk_resolution_decision`/`unk_lookup_exec`/`unk_lookup_result_decision`:
  *   explicit unknown-token ID resolution.
- * - `encode_exec`/`encode_result_decision`: explicit encode execution and status branch.
+ * - `encode_exec`/`encode_emit_result_decision`/`encode_result_decision`:
+ *   explicit encode execution, emit-capacity result, and status branch.
  * - `done`/`errored`: terminal outcomes.
  * - `unexpected`: sequencing contract violation.
  *
@@ -58,6 +60,7 @@ struct unexpected {};
  * - `sync_tables` rebuilds RWKV lookup tables in an explicit phase.
  * - `resolve_vocab_unk`/`lookup_unk_candidate`/`set_unk_*` set runtime unknown-token ID.
  * - `run_encode` performs bounded encode scanning and output emission.
+ * - `mark_encode_push_failed` maps explicit emit-capacity failure to encode error state.
  * - `mark_done`/`ensure_last_error` finalize runtime status.
  */
 struct model {
@@ -165,8 +168,15 @@ struct model {
       //------------------------------------------------------------------------------//
       // Encode Execution
       //------------------------------------------------------------------------------//
-      , sml::state<encode_result_decision> <= sml::state<encode_exec>
+      , sml::state<encode_emit_result_decision> <= sml::state<encode_exec>
           + sml::completion<runtime::encode_runtime> / action::run_encode
+      , sml::state<errored> <= sml::state<encode_emit_result_decision>
+          + sml::completion<runtime::encode_runtime>[guard::encode_push_failed{}]
+          / action::mark_encode_push_failed
+      , sml::state<encode_result_decision> <= sml::state<encode_emit_result_decision>
+          + sml::completion<runtime::encode_runtime>[guard::encode_push_ok{}]
+      , sml::state<errored> <= sml::state<encode_emit_result_decision>
+          + sml::completion<runtime::encode_runtime> / action::ensure_last_error
       , sml::state<done> <= sml::state<encode_result_decision>
           + sml::completion<runtime::encode_runtime>[guard::phase_ok{}] / action::mark_done
       , sml::state<errored> <= sml::state<encode_result_decision>
@@ -198,6 +208,8 @@ struct model {
           + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<runtime::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_emit_result_decision>
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_result_decision>
           + sml::event<runtime::encode_runtime> / action::on_unexpected
 
@@ -249,6 +261,10 @@ struct model {
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_emit_result_decision>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_emit_result_decision>
+          + sml::event<events::encoding_error> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_result_decision>
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_result_decision>
@@ -290,6 +306,8 @@ struct model {
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_emit_result_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_result_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<done>
@@ -320,20 +338,20 @@ struct sm : public emel::sm<model, action::context> {
     runtime_ctx.err = emel::text::encoders::detail::select_final_error(accepted, runtime_ctx.err);
 
     int32_t token_count_sink = 0;
-    int32_t error_sink = EMEL_OK;
+    int32_t error_sink = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
     emel::text::encoders::detail::write_optional(
       ev.token_count_out, token_count_sink, runtime_ctx.token_count);
     emel::text::encoders::detail::write_optional(ev.error_out, error_sink, runtime_ctx.err);
 
     emel::text::encoders::detail::publish_result(ev, runtime_ctx);
     last_error_ = runtime_ctx.err;
-    return runtime_ctx.err == EMEL_OK;
+    return runtime_ctx.err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   }
 
   int32_t last_error() const noexcept { return last_error_; }
 
  private:
-  int32_t last_error_ = EMEL_OK;
+  int32_t last_error_ = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 };
 
 using Rwkv = sm;

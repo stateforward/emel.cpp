@@ -249,7 +249,6 @@ parse_hex(const char *src, const char *end, const int size) noexcept {
   const bool in_range = src_le_end && distance >= static_cast<ptrdiff_t>(size);
   const int parse_len = size * static_cast<int>(in_range);
 
-  const char *pos = src;
   const char *limit = src + parse_len;
   uint32_t value = 0;
   bool valid = in_range;
@@ -259,21 +258,21 @@ parse_hex(const char *src, const char *end, const int size) noexcept {
       11, 12, 13, 14, 15, 10, 11, 12, 13, 14, 15};
   constexpr std::string_view k_hex_digits = "0123456789abcdefABCDEF";
 
-  while (pos < limit && valid) {
+  for (const char *pos = src; pos < limit; ++pos) {
     const size_t digit_index = k_hex_digits.find(*pos);
     const bool is_hex_digit = digit_index != std::string_view::npos;
-    const size_t safe_index = select_size(is_hex_digit, digit_index, 0u);
+    const bool apply_digit = valid && is_hex_digit;
+    const size_t safe_index = select_size(apply_digit, digit_index, 0u);
     const uint32_t shifted = value << 4;
     const uint32_t parsed = shifted + k_hex_values[safe_index];
-    value = select_u32(is_hex_digit, parsed, value);
-    pos += static_cast<size_t>(is_hex_digit);
-    valid = valid && is_hex_digit;
+    value = select_u32(apply_digit, parsed, value);
+    valid = apply_digit;
   }
 
-  const bool success = valid && pos == limit;
+  const bool success = valid;
   const uint32_t out_value = select_u32(success, value, 0u);
   const uintptr_t out_next_addr =
-      select_uptr(success, reinterpret_cast<uintptr_t>(pos), 0u);
+      select_uptr(success, reinterpret_cast<uintptr_t>(limit), 0u);
   return std::make_pair(out_value,
                         reinterpret_cast<const char *>(out_next_addr));
 }

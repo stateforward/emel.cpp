@@ -106,7 +106,11 @@ Status correction: the following files still contain implicit runtime control fl
   `encode_merge_input_capacity_decision` routing before merge execution;
   removed composite `valid_encode_and_vocab_*` and
   `text_non_empty_and_tables_*` guard routers; removed loop-gated symbol-scan
-  and emit error-break control from `spm/detail.hpp`)
+  and emit error-break control from `spm/detail.hpp`; then extended with
+  explicit `encode_emit_input_decision` routing in `spm/sm.hpp` for
+  `symbols_present` vs `symbols_absent` before emit execution and removed
+  loop-condition traversal gates (`left != -1`, `idx != -1`) from
+  `spm/detail.hpp`)
 - [x] `src/emel/text/encoders/fallback/guards.hpp` (rearchitected encode intake
   routing into explicit `encode_validity_decision` and
   `encode_vocab_sync_decision` phases in `text/encoders/fallback/sm.hpp`;

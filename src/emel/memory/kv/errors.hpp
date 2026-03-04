@@ -1,17 +1,16 @@
 #pragma once
 
-#include "emel/emel.h"
 #include "emel/error/error.hpp"
 
 namespace emel::memory::kv {
 
 enum class error : emel::error::type {
-  none = EMEL_OK,
-  invalid_request = EMEL_ERR_INVALID_ARGUMENT,
-  backend_error = EMEL_ERR_BACKEND,
-  internal_error = EMEL_ERR_INTERNAL,
-  out_of_memory = EMEL_ERR_OOM,
-  untracked = EMEL_ERR_INTERNAL,
+  none = 0u,
+  invalid_request = (1u << 0),
+  backend_error = (1u << 1),
+  internal_error = (1u << 2),
+  out_of_memory = (1u << 3),
+  untracked = (1u << 4),
 };
 
 }  // namespace emel::memory::kv

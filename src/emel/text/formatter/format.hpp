@@ -5,9 +5,16 @@
 #include <cstring>
 #include <string_view>
 
-#include "emel/emel.h"
-
 namespace emel::text::formatter {
+
+enum class error : int32_t {
+  none = 0u,
+  invalid_request = (1u << 0),
+};
+
+constexpr int32_t error_code(const error value) noexcept {
+  return static_cast<int32_t>(value);
+}
 
 struct format_request {
   std::string_view input = {};
@@ -24,7 +31,7 @@ inline bool format_raw(void *,
                        const format_request & request,
                        int32_t * error_out) noexcept {
   if (error_out != nullptr) {
-    *error_out = EMEL_OK;
+    *error_out = error_code(error::none);
   }
   if (request.output_length_out != nullptr) {
     *request.output_length_out = 0;
@@ -32,7 +39,7 @@ inline bool format_raw(void *,
   if ((request.output == nullptr && request.output_capacity > 0) ||
       request.input.size() > request.output_capacity) {
     if (error_out != nullptr) {
-      *error_out = EMEL_ERR_INVALID_ARGUMENT;
+      *error_out = error_code(error::invalid_request);
     }
     return false;
   }

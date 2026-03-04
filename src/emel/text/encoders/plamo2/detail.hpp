@@ -444,7 +444,7 @@ inline bool ensure_plamo2_tables_some(emel::text::encoders::plamo2::action::cont
 
 struct decode_result {
   int32_t data_len = 0;
-  int32_t error = EMEL_OK;
+  int32_t error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 };
 
 inline void plamo2_decode_unicode_none(std::vector<uint32_t> &, const std::string_view) {}
@@ -460,7 +460,7 @@ inline decode_result decode_plamo2_input(const event::encode &ev,
   decode_result result{};
   result.error = prior_error;
   std::vector<uint32_t> unicode_data;
-  const bool decode_active = !ev.text.empty() && result.error == EMEL_OK;
+  const bool decode_active = !ev.text.empty() && result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   using decode_unicode_handler_t = void (*)(std::vector<uint32_t> &, std::string_view);
   const decode_unicode_handler_t decode_unicode_handlers[2] = {
       plamo2_decode_unicode_none,
@@ -472,9 +472,9 @@ inline decode_result decode_plamo2_input(const event::encode &ev,
   const size_t bom_offset = static_cast<size_t>(has_bom);
   const size_t decoded_len = unicode_data.size() - bom_offset;
   const bool too_long = decode_active && decoded_len > ctx.cpts.size();
-  result.error = select_i32(result.error == EMEL_OK && too_long, EMEL_ERR_INVALID_ARGUMENT,
+  result.error = select_i32(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok) && too_long, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument),
                             result.error);
-  const bool copy_active = result.error == EMEL_OK;
+  const bool copy_active = result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   const size_t data_len = decoded_len * static_cast<size_t>(copy_active);
   for (size_t i = 0; i < data_len; ++i) {
     ctx.cpts[i] = unicode_data[bom_offset + i];
@@ -547,19 +547,18 @@ inline encode_result emit_plamo2_tokens(const event::encode &ev,
                                         const int32_t prior_error) {
   encode_result result{};
   int32_t count = 0;
-  int32_t pos = 0;
-  bool loop_failed = prior_error != EMEL_OK;
-  int32_t loop_error = EMEL_OK;
+  bool loop_failed = prior_error != emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
+  int32_t loop_error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   using push_handler_t = void (*)(const event::encode &, int32_t, int32_t &, bool &) noexcept;
   const push_handler_t push_handlers[2] = {
       plamo2_push_token_none,
       plamo2_push_token_some,
   };
-  while (pos < data_len_i32) {
+  for (int32_t pos = 0; pos < data_len_i32;) {
     const auto &path = ctx.paths[static_cast<size_t>(pos)];
     const bool step_active = !loop_failed;
     const bool invalid_path = step_active && path.token_length <= 0;
-    loop_error = select_i32(invalid_path, EMEL_ERR_BACKEND, loop_error);
+    loop_error = select_i32(invalid_path, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend), loop_error);
     loop_failed = loop_failed || invalid_path;
 
     const bool direct_token = path.token_id >= 0;
@@ -568,7 +567,7 @@ inline encode_result emit_plamo2_tokens(const event::encode &ev,
                                                                     path.token_id, count,
                                                                     direct_push_ok);
     const bool direct_fail = step_active && !loop_failed && direct_token && !direct_push_ok;
-    loop_error = select_i32(direct_fail, EMEL_ERR_INVALID_ARGUMENT, loop_error);
+    loop_error = select_i32(direct_fail, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), loop_error);
     loop_failed = loop_failed || direct_fail;
 
     const bool emit_bytes = step_active && !loop_failed && !direct_token;
@@ -592,7 +591,7 @@ inline encode_result emit_plamo2_tokens(const event::encode &ev,
       push_handlers[static_cast<size_t>(byte_step_active && byte_valid)](
           ev, byte_token, count, byte_push_ok);
       const bool byte_fail = byte_step_active && (!byte_valid || !byte_push_ok);
-      loop_error = select_i32(byte_fail, EMEL_ERR_INVALID_ARGUMENT, loop_error);
+      loop_error = select_i32(byte_fail, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), loop_error);
       loop_failed = loop_failed || byte_fail;
     }
 
@@ -600,8 +599,8 @@ inline encode_result emit_plamo2_tokens(const event::encode &ev,
     pos += step;
   }
 
-  result.error = select_i32(prior_error == EMEL_OK && loop_failed, loop_error, prior_error);
-  result.token_count = count * static_cast<int32_t>(result.error == EMEL_OK);
+  result.error = select_i32(prior_error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok) && loop_failed, loop_error, prior_error);
+  result.token_count = count * static_cast<int32_t>(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   return result;
 }
 
@@ -617,9 +616,9 @@ inline encode_result encode_plamo2(const event::encode &ev,
       ensure_plamo2_tables_some,
   };
   const bool tables_ready = ensure_tables_handlers[static_cast<size_t>(has_text)](ctx, vocab);
-  const int32_t tables_error = select_i32(has_text && !tables_ready, EMEL_ERR_MODEL_INVALID, EMEL_OK);
+  const int32_t tables_error = select_i32(has_text && !tables_ready, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::model_invalid), emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   const decode_result decoded = decode_plamo2_input(ev, ctx, tables_error);
-  const bool run_dp = decoded.error == EMEL_OK && decoded.data_len > 0;
+  const bool run_dp = decoded.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok) && decoded.data_len > 0;
   const int32_t dp_len = decoded.data_len * static_cast<int32_t>(run_dp);
   prepare_plamo2_dp(ctx, dp_len);
   run_plamo2_dp(ctx, dp_len);

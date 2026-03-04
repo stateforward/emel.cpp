@@ -315,7 +315,7 @@ spm_build_symbols(const std::string_view text,
   const bool patch_head = scratch.symbol_count > 0;
   scratch.prev[0] = select_i32(patch_head, -1, scratch.prev[0]);
 
-  const std::array<int32_t, 2> errors{EMEL_ERR_INVALID_ARGUMENT, EMEL_OK};
+  const std::array<int32_t, 2> errors{emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok)};
   result.error = errors[static_cast<size_t>(ok)];
   return ok;
 }
@@ -483,8 +483,7 @@ spm_byte_to_token(const emel::text::encoders::spm::action::context &ctx,
 
 inline int32_t prepare_spm(const event::encode &ev,
                            emel::text::encoders::spm::action::context &ctx,
-                           const emel::model::data::vocab &vocab,
-                           const bool active) noexcept {
+                           const emel::model::data::vocab &vocab) noexcept {
   size_t out_len = 0;
   const bool add_prefix =
       vocab.add_space_prefix && !vocab.treat_whitespace_as_suffix;
@@ -492,75 +491,67 @@ inline int32_t prepare_spm(const event::encode &ev,
       vocab.add_space_prefix && vocab.treat_whitespace_as_suffix;
   const bool escape_spaces = vocab.escape_whitespaces;
   bool prefix_inserted = false;
-  int32_t err = EMEL_OK;
+  bool overflow = false;
 
   for (const char c : ev.text) {
-    const bool step_active = active && err == EMEL_OK;
-    const bool prefix_now =
-        step_active && add_prefix && !prefix_inserted && c != ' ';
+    const bool prefix_now = add_prefix && !prefix_inserted && c != ' ';
     const bool prefix_ok =
         spm_emit_space_marker(ctx.scratch, out_len, escape_spaces, prefix_now);
-    const bool prefix_fail = prefix_now && !prefix_ok;
-    err = select_i32(prefix_fail, EMEL_ERR_INVALID_ARGUMENT, err);
+    overflow = overflow || (prefix_now && !prefix_ok);
     prefix_inserted = prefix_inserted || prefix_now;
 
     const bool is_space = c == ' ';
-    const bool emit_space = step_active && is_space;
+    const bool emit_space = is_space;
     const bool space_ok =
         spm_emit_space_marker(ctx.scratch, out_len, escape_spaces, emit_space);
-    const bool space_fail = emit_space && !space_ok;
-    err = select_i32(space_fail, EMEL_ERR_INVALID_ARGUMENT, err);
+    overflow = overflow || (emit_space && !space_ok);
 
-    const bool emit_char = step_active && !is_space;
+    const bool emit_char = !is_space;
     const bool char_ok = spm_emit_char(ctx.scratch, out_len, c, emit_char);
-    const bool char_fail = emit_char && !char_ok;
-    err = select_i32(char_fail, EMEL_ERR_INVALID_ARGUMENT, err);
+    overflow = overflow || (emit_char && !char_ok);
   }
 
-  const bool suffix_active = active && err == EMEL_OK;
-  const bool emit_suffix = suffix_active && add_suffix;
+  const bool emit_suffix = add_suffix;
   const bool suffix_ok =
       spm_emit_space_marker(ctx.scratch, out_len, escape_spaces, emit_suffix);
-  const bool suffix_fail = emit_suffix && !suffix_ok;
-  err = select_i32(suffix_fail, EMEL_ERR_INVALID_ARGUMENT, err);
+  overflow = overflow || (emit_suffix && !suffix_ok);
 
+  int32_t err = select_i32(
+    overflow,
+    emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument),
+    emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   encode_result result{};
-  const bool can_build = active && err == EMEL_OK;
-  const size_t escaped_len = out_len * static_cast<size_t>(can_build);
+  const size_t escaped_len = out_len * static_cast<size_t>(!overflow);
   const std::string_view escaped(ctx.scratch.buffer.data(), escaped_len);
   const bool symbols_ok = spm_build_symbols(escaped, ctx.scratch, result);
-  err = select_i32(can_build && !symbols_ok, result.error, err);
+  err = select_i32(!overflow && !symbols_ok, result.error, err);
   return err;
 }
 
-inline int32_t prepare_spm(const event::encode &ev,
-                           emel::text::encoders::spm::action::context &ctx,
-                           const emel::model::data::vocab &vocab) noexcept {
-  return prepare_spm(ev, ctx, vocab, true);
-}
-
 inline int32_t merge_spm(emel::text::encoders::spm::action::context &ctx,
-                         const emel::model::data::vocab &vocab,
-                         const bool active) noexcept {
+                         const emel::model::data::vocab &vocab) noexcept {
   const std::string_view escaped(ctx.scratch.buffer.data(),
                                  ctx.scratch.buffer.size());
-  const bool can_merge = active && ctx.scratch.symbol_count > 1;
+  const int32_t symbol_count_i32 = static_cast<int32_t>(ctx.scratch.symbol_count);
+  const bool can_merge = ctx.scratch.symbol_count > 1;
   const int32_t merge_pass_limit =
       select_i32(can_merge, ctx.scratch.symbol_count - 1, 0);
-  bool merge_active = can_merge;
 
   for (int32_t merge_pass = 0; merge_pass < merge_pass_limit; ++merge_pass) {
     float best_score = -std::numeric_limits<float>::infinity();
     int32_t best_left = -1;
     int32_t best_right = -1;
 
-    for (int32_t left = select_i32(merge_active, 0, -1); left != -1;
-         left = ctx.scratch.next[static_cast<size_t>(left)]) {
-      const int32_t right = ctx.scratch.next[static_cast<size_t>(left)];
-      const bool has_right = right >= 0;
+    for (int32_t walk = 0, left = 0; walk < symbol_count_i32; ++walk) {
+      const bool step_active = left >= 0 && left < symbol_count_i32;
+      const int32_t safe_left = select_i32(step_active, left, 0);
+      const int32_t right_raw = ctx.scratch.next[static_cast<size_t>(safe_left)];
+      const bool has_right =
+          step_active && right_raw >= 0 && right_raw < symbol_count_i32;
+      const int32_t right = select_i32(has_right, right_raw, -1);
       const int32_t safe_right = select_i32(has_right, right, 0);
-      const size_t left_off = ctx.scratch.offsets[static_cast<size_t>(left)];
-      const size_t left_len = ctx.scratch.lengths[static_cast<size_t>(left)];
+      const size_t left_off = ctx.scratch.offsets[static_cast<size_t>(safe_left)];
+      const size_t left_len = ctx.scratch.lengths[static_cast<size_t>(safe_left)];
       const size_t right_off =
           ctx.scratch.offsets[static_cast<size_t>(safe_right)];
       const size_t right_len =
@@ -575,44 +566,46 @@ inline int32_t merge_spm(emel::text::encoders::spm::action::context &ctx,
       const float score = vocab.entries[token_index].score;
       const bool better = has_token && score > best_score;
       const bool tie = has_token && score == best_score;
-      const bool left_pref = best_left < 0 || left < best_left;
+      const bool left_pref = best_left < 0 || safe_left < best_left;
       const bool choose = better || (tie && left_pref);
       best_score = select_f32(choose, score, best_score);
-      best_left = select_i32(choose, left, best_left);
+      best_left = select_i32(choose, safe_left, best_left);
       best_right = select_i32(choose, right, best_right);
+
+      const int32_t next_raw = ctx.scratch.next[static_cast<size_t>(safe_left)];
+      const bool next_valid =
+          step_active && next_raw >= 0 && next_raw < symbol_count_i32;
+      const int32_t next_or_stop = select_i32(next_valid, next_raw, -1);
+      left = select_i32(step_active, next_or_stop, left);
     }
 
-    const bool has_best = merge_active && best_left >= 0 && best_right >= 0;
+    const bool has_best = best_left >= 0 && best_right >= 0;
     spm_merge_symbols_if(ctx.scratch, has_best, best_left, best_right);
-    merge_active = merge_active && has_best;
   }
 
   (void)vocab;
-  return EMEL_OK;
-}
-
-inline int32_t merge_spm(emel::text::encoders::spm::action::context &ctx,
-                         const emel::model::data::vocab &vocab) noexcept {
-  return merge_spm(ctx, vocab, true);
+  return emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 }
 
 inline encode_result emit_spm(const event::encode &ev,
                               emel::text::encoders::spm::action::context &ctx,
-                              const emel::model::data::vocab &vocab,
-                              const bool active) noexcept {
+                              const emel::model::data::vocab &vocab) noexcept {
   (void)vocab;
   const std::string_view escaped(ctx.scratch.buffer.data(),
                                  ctx.scratch.buffer.size());
   encode_result result{};
   int32_t count = 0;
-  int32_t err = EMEL_OK;
-  const bool has_symbol_chain = active && ctx.scratch.symbol_count > 0;
-  int32_t idx = select_i32(has_symbol_chain, 0, -1);
-  for (; idx != -1;) {
-    const bool step_active = err == EMEL_OK;
-    const bool has_symbol = step_active && ctx.scratch.lengths[static_cast<size_t>(idx)] != 0u;
-    const size_t offset = ctx.scratch.offsets[static_cast<size_t>(idx)];
-    const size_t length = ctx.scratch.lengths[static_cast<size_t>(idx)] *
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
+  const int32_t symbol_count_i32 = static_cast<int32_t>(ctx.scratch.symbol_count);
+  const bool has_symbol_chain = ctx.scratch.symbol_count > 0;
+  for (int32_t walk = 0, idx = select_i32(has_symbol_chain, 0, -1);
+       walk < symbol_count_i32; ++walk) {
+    const bool step_active = idx >= 0 && idx < symbol_count_i32;
+    const int32_t safe_idx = select_i32(step_active, idx, 0);
+    const bool has_symbol =
+        step_active && ctx.scratch.lengths[static_cast<size_t>(safe_idx)] != 0u;
+    const size_t offset = ctx.scratch.offsets[static_cast<size_t>(safe_idx)];
+    const size_t length = ctx.scratch.lengths[static_cast<size_t>(safe_idx)] *
                           static_cast<size_t>(has_symbol);
     const std::string_view symbol = escaped.substr(offset, length);
     const int32_t token = spm_lookup_token(ctx, symbol);
@@ -620,62 +613,74 @@ inline encode_result emit_spm(const event::encode &ev,
     const bool emit_direct = has_symbol && token != k_token_null;
     const bool direct_ok = spm_push_token_if(emit_direct, ev, token, count);
     const bool direct_fail = emit_direct && !direct_ok;
-    err = select_i32(step_active && direct_fail, EMEL_ERR_INVALID_ARGUMENT, err);
+    err = select_i32(
+      err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok) &&
+      direct_fail,
+      emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument),
+      err);
 
     const bool emit_bytes = has_symbol && token == k_token_null;
-    const size_t byte_limit =
-        select_size(step_active && emit_bytes, symbol.size(), static_cast<size_t>(0));
+    const size_t byte_limit = select_size(emit_bytes, symbol.size(), static_cast<size_t>(0));
     for (size_t byte_offset = 0; byte_offset < byte_limit; ++byte_offset) {
       const unsigned char c = static_cast<unsigned char>(symbol[byte_offset]);
       const int32_t byte_token = spm_byte_to_token(ctx, c);
       const bool byte_valid = byte_token != k_token_null;
       const bool byte_ok = spm_push_token_if(byte_valid, ev, byte_token, count);
       const bool byte_fail = !byte_valid || !byte_ok;
-      err = select_i32(err == EMEL_OK && byte_fail, EMEL_ERR_BACKEND, err);
+      err = select_i32(
+        err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok) &&
+        byte_fail,
+        emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend),
+        err);
     }
 
-    const int32_t next_idx = ctx.scratch.next[static_cast<size_t>(idx)];
-    idx = next_idx;
+    const int32_t next_raw = ctx.scratch.next[static_cast<size_t>(safe_idx)];
+    const bool next_valid =
+        step_active && next_raw >= 0 && next_raw < symbol_count_i32;
+    const int32_t next_or_stop = select_i32(next_valid, next_raw, -1);
+    idx = select_i32(step_active, next_or_stop, idx);
   }
 
-  result.token_count = count * static_cast<int32_t>(err == EMEL_OK);
+  result.token_count = count * static_cast<int32_t>(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   result.error = err;
   return result;
-}
-
-inline encode_result emit_spm(const event::encode &ev,
-                              emel::text::encoders::spm::action::context &ctx,
-                              const emel::model::data::vocab &vocab) noexcept {
-  return emit_spm(ev, ctx, vocab, true);
 }
 
 inline encode_result encode_spm(const event::encode &ev,
                                 emel::text::encoders::spm::action::context &ctx,
                                 const emel::model::data::vocab &vocab) {
-  const bool non_empty = !ev.text.empty();
-  const bool tables_ready = spm_tables_ready(ctx, vocab);
-  const bool table_missing = non_empty && !tables_ready;
-  const int32_t table_error =
-      select_i32(table_missing, EMEL_ERR_INVALID_ARGUMENT, EMEL_OK);
-  const bool prepare_active = non_empty && table_error == EMEL_OK;
-  const int32_t prepare_error = prepare_spm(ev, ctx, vocab, prepare_active);
-  const bool merge_active = prepare_active && prepare_error == EMEL_OK;
-  const int32_t merge_error = merge_spm(ctx, vocab, merge_active);
-  const bool emit_active = merge_active && merge_error == EMEL_OK;
-  const encode_result emitted = emit_spm(ev, ctx, vocab, emit_active);
-
-  const int32_t step_error =
-      select_i32(table_error == EMEL_OK, prepare_error, table_error);
-  const int32_t merge_step_error =
-      select_i32(step_error == EMEL_OK, merge_error, step_error);
-  const int32_t final_error =
-      select_i32(merge_step_error == EMEL_OK, emitted.error, merge_step_error);
-
   encode_result result{};
-  result.error = select_i32(non_empty, final_error, EMEL_OK);
+  const int32_t ok = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
+  if (ev.text.empty()) {
+    result.error = ok;
+    result.token_count = 0;
+    return result;
+  }
+
+  if (!spm_tables_ready(ctx, vocab)) {
+    result.error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument);
+    result.token_count = 0;
+    return result;
+  }
+
+  const int32_t prepare_error = prepare_spm(ev, ctx, vocab);
+  if (prepare_error != ok) {
+    result.error = prepare_error;
+    result.token_count = 0;
+    return result;
+  }
+
+  const int32_t merge_error = merge_spm(ctx, vocab);
+  if (merge_error != ok) {
+    result.error = merge_error;
+    result.token_count = 0;
+    return result;
+  }
+
+  const encode_result emitted = emit_spm(ev, ctx, vocab);
+  result.error = emitted.error;
   result.token_count = emitted.token_count *
-                       static_cast<int32_t>(result.error == EMEL_OK) *
-                       static_cast<int32_t>(non_empty);
+                       static_cast<int32_t>(emitted.error == ok);
   return result;
 }
 

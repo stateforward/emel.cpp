@@ -59,7 +59,9 @@ struct unexpected {};
  * - `tables_ready`/`tables_missing` route explicit table-policy work.
  * - `vocab_unk_present`/`vocab_unk_missing` route explicit unknown-ID resolution.
  * - `normalized_empty`/`normalized_non_empty` route explicit no-input vs DP execution.
- * - `phase_ok`/`phase_failed` route per-phase error status.
+ * - `phase_ok`/`phase_failed` route normalization/setup/table phase status.
+ * - `backtrace_ok`/`backtrace_failed` route explicit DP backtrace result status.
+ * - `emit_ok`/`emit_failed` route explicit output emission status.
  *
  * action side effects:
  * - `begin_encode`/`begin_encode_sync_vocab` reset runtime outputs and vocabulary bindings.
@@ -67,6 +69,7 @@ struct unexpected {};
  * - `resolve_vocab_unk`/`lookup_unk_id` set the runtime unknown-token ID.
  * - `normalize_input`, `prepare_dp_input`, `run_dp_forward`, `run_dp_backtrace`, and `emit_tokens`
  *   execute kernels per phase.
+ * - `mark_backtrace_failed` and `mark_emit_failed` finalize explicit failure outcomes.
  * - `mark_done`/`ensure_last_error` finalize runtime status.
  */
 struct model {
@@ -190,17 +193,21 @@ struct model {
       , sml::state<dp_backtrace_result_decision> <= sml::state<dp_backtrace_exec>
           + sml::completion<runtime::encode_runtime> / action::run_dp_backtrace
       , sml::state<emit_exec> <= sml::state<dp_backtrace_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::phase_ok{}]
+          + sml::completion<runtime::encode_runtime>[guard::backtrace_ok{}]
       , sml::state<errored> <= sml::state<dp_backtrace_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::phase_failed{}]
-          / action::ensure_last_error
+          + sml::completion<runtime::encode_runtime>[guard::backtrace_failed{}]
+          / action::mark_backtrace_failed
+      , sml::state<errored> <= sml::state<dp_backtrace_result_decision>
+          + sml::completion<runtime::encode_runtime> / action::ensure_last_error
       , sml::state<encode_result_decision> <= sml::state<emit_exec>
           + sml::completion<runtime::encode_runtime> / action::emit_tokens
       , sml::state<done> <= sml::state<encode_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::phase_ok{}] / action::mark_done
+          + sml::completion<runtime::encode_runtime>[guard::emit_ok{}] / action::mark_done
       , sml::state<errored> <= sml::state<encode_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::phase_failed{}]
-          / action::ensure_last_error
+          + sml::completion<runtime::encode_runtime>[guard::emit_failed{}]
+          / action::mark_emit_failed
+      , sml::state<errored> <= sml::state<encode_result_decision>
+          + sml::completion<runtime::encode_runtime> / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
       // Explicit Unexpected-Event Handling
@@ -397,20 +404,20 @@ struct sm : public emel::sm<model, action::context> {
     runtime_ctx.err = emel::text::encoders::detail::select_final_error(accepted, runtime_ctx.err);
 
     int32_t token_count_sink = 0;
-    int32_t error_sink = EMEL_OK;
+    int32_t error_sink = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
     emel::text::encoders::detail::write_optional(
       ev.token_count_out, token_count_sink, runtime_ctx.token_count);
     emel::text::encoders::detail::write_optional(ev.error_out, error_sink, runtime_ctx.err);
 
     emel::text::encoders::detail::publish_result(ev, runtime_ctx);
     last_error_ = runtime_ctx.err;
-    return runtime_ctx.err == EMEL_OK;
+    return runtime_ctx.err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   }
 
   int32_t last_error() const noexcept { return last_error_; }
 
  private:
-  int32_t last_error_ = EMEL_OK;
+  int32_t last_error_ = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 };
 
 using Ugm = sm;

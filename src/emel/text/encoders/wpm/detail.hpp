@@ -367,7 +367,7 @@ inline bool encode_wpm_process_word_some(const event::encode &ev,
   };
   copy_handlers[static_cast<size_t>(has_capacity)](ctx, word);
 
-  result.error = select_i32(!has_capacity, EMEL_ERR_INVALID_ARGUMENT, result.error);
+  result.error = select_i32(!has_capacity, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), result.error);
   bool ok = has_capacity;
   const size_t word_view_len = select_size(has_capacity, k_wpm_prefix_len + word_len, 0u);
   const std::string_view word_view(ctx.scratch.buffer.data(), word_view_len);
@@ -408,7 +408,7 @@ inline bool encode_wpm_process_word_some(const event::encode &ev,
       push_handlers[static_cast<size_t>(scan_step_active && hit)](ev, token, count, pushed);
       const bool found_step = scan_step_active && hit;
       const bool push_fail = found_step && !pushed;
-      result.error = select_i32(push_fail, EMEL_ERR_INVALID_ARGUMENT, result.error);
+      result.error = select_i32(push_fail, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), result.error);
       ok = ok && !push_fail;
       found = found || found_step;
       matched_end = select_i32(found_step, j, matched_end);
@@ -445,7 +445,7 @@ inline bool encode_wpm_process_word_some(const event::encode &ev,
   };
   push_handlers[static_cast<size_t>(have_unk)](ev, unk, count, pushed_unk);
   const bool push_fail_unk = have_unk && !pushed_unk;
-  result.error = select_i32(push_fail_unk, EMEL_ERR_INVALID_ARGUMENT, result.error);
+  result.error = select_i32(push_fail_unk, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), result.error);
   ok = ok && !push_fail_unk;
   return ok;
 }
@@ -455,7 +455,7 @@ inline encode_result encode_wpm_ready_tables(const event::encode &ev,
                                              const emel::model::data::vocab &vocab) {
   encode_result result{};
   result.token_count = 0;
-  result.error = EMEL_OK;
+  result.error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 
   int32_t count = 0;
   const std::vector<std::string> words = wpm_preprocess(ev.text);
@@ -477,7 +477,7 @@ inline encode_result encode_wpm_ready_tables(const event::encode &ev,
     ok = ok && processed_ok;
   }
 
-  const bool success = ok && result.error == EMEL_OK;
+  const bool success = ok && result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   result.token_count = select_i32(success, count, 0);
   return result;
 }
@@ -487,7 +487,7 @@ inline encode_result encode_wpm_missing_tables(const event::encode &,
                                                const emel::model::data::vocab &) {
   encode_result result{};
   result.token_count = 0;
-  result.error = EMEL_ERR_INVALID_ARGUMENT;
+  result.error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument);
   return result;
 }
 
@@ -496,7 +496,7 @@ inline encode_result encode_wpm_empty(const event::encode &,
                                       const emel::model::data::vocab &) {
   encode_result result{};
   result.token_count = 0;
-  result.error = EMEL_OK;
+  result.error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   return result;
 }
 
