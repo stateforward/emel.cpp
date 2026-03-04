@@ -44,6 +44,53 @@ explicitly in the state machine.
 - [x] `src/emel/text/encoders/plamo2/detail.hpp`
 - [x] `src/emel/text/encoders/ugm/detail.hpp`
 
+## Reopened Findings (2026-03-04)
+
+Status correction: the following files still contain implicit runtime control flow inside
+`actions.hpp` / `detail.hpp` and must be explicitly modeled in `sm.hpp` phase/guard transitions.
+
+### Remaining `actions.hpp` hotspots
+
+- [x] `src/emel/token/batcher/actions.hpp` (rearchitected via explicit probe phases in `sm.hpp`)
+- [x] `src/emel/gbnf/rule_parser/actions.hpp` (rearchitected with explicit
+  `rule_reference_decision` and `quantifier_decision` phases in `sm.hpp`)
+- [x] `src/emel/gbnf/rule_parser/lexer/actions.hpp` (rearchitected with explicit
+  newline/rule-reference/unexpected-event branches in `sm.hpp`)
+- [x] `src/emel/text/detokenizer/actions.hpp` (rearchitected with explicit
+  special/byte/text decode phases and branch guards in `sm.hpp`)
+- [x] `src/emel/text/encoders/rwkv/actions.hpp` (rearchitected with explicit
+  `unk_lookup_result_decision` branch in `rwkv/sm.hpp`; unknown-token lookup outcome routed
+  via guards/actions instead of implicit action-finalization)
+- [x] `src/emel/text/jinja/parser/lexer/actions.hpp` (rearchitected lexer token handling with
+  explicit `text_boundary_candidate_decision`, `unary_candidate_decision`,
+  `unary_prefix_context_decision`, `unary_prefix_allowed_decision`,
+  `text_opening_block_decision` and `text_finalize_exec` with explicit opening-block trim,
+  leading-newline trim, and lstrip/rstrip branch guards,
+  unary numeric-suffix decision guards, `comment_candidate_decision`,
+  `comment_unterminated_exec`, `comment_finalize_exec`, `trim_prefix_candidate_decision`,
+  `trim_prefix_eof_exec`, `space_eof_exec`, `mapping_close_curly_exec`,
+  `mapping_candidate_decision` with explicit per-sequence mapping guards/actions (no implicit
+  table lookup branch), `string_unterminated_exec`, and `string_finalize_exec` phases in
+  `text/jinja/parser/lexer/sm.hpp`; removed parser-lexer-local `lookup_mapping` from
+  `text/jinja/parser/lexer/detail.hpp`)
+
+### Remaining `detail.hpp` hotspots
+
+- [x] `src/emel/batch/planner/modes/detail.hpp` (simple + sequential + equal mode paths
+  rearchitected into `modes/*/sm.hpp`; shared helpers only remain in `detail.hpp`)
+- [x] `src/emel/text/encoders/ugm/detail.hpp` (rearchitected with explicit
+  unknown-token, normalization, input-size, DP, and emit phases in `ugm/sm.hpp`)
+- [x] `src/emel/text/encoders/rwkv/detail.hpp` (rearchitected with explicit
+  unknown-token resolution phase in `rwkv/sm.hpp`; `detail::encode_rwkv` removed)
+- [x] `src/emel/text/jinja/lexer/detail.hpp` (rearchitected with explicit scan phases in
+  `text/jinja/parser/lexer/sm.hpp`; removed precomputed scan-plan orchestration)
+- [x] `src/emel/gbnf/rule_parser/detail.hpp` (rearchitected with explicit
+  `rule_reference_parse_*` and `quantifier_parse_*` phases in `rule_parser/sm.hpp`; removed
+  guard-hidden parsing branches for rule references/quantifier bounds)
+- [x] `src/emel/gbnf/rule_parser/lexer/detail.hpp` (rearchitected with explicit
+  `next_decision` and `rule_reference_*_parse_*` phases in `rule_parser/lexer/sm.hpp`; removed
+  guard-composed unknown fallback and action-only scanners from shared `detail.hpp`)
+
 ## High-Priority Findings (Action Files)
 
 1. `src/emel/gbnf/rule_parser/lexer/actions.hpp` (24 sites, lines 40-303)
