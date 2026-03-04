@@ -223,29 +223,31 @@ inline bool insert_token_map(token_map &map,
                              const std::string_view text,
                              const int32_t id) {
   const bool active = !text.empty();
-  bool done = !active;
   bool success = !active;
+  bool loop_active = active;
 
   const uint32_t hash = hash_sv(text);
   const uint32_t mask = k_token_hash_size - 1u;
   uint32_t slot = hash & mask;
 
-  for (uint32_t probes = 0; probes < k_token_hash_size && !done; ++probes) {
+  for (uint32_t probes = 0; probes < k_token_hash_size; ++probes) {
+    const bool step_active = loop_active;
     const uint32_t slot_hash = map.hashes[slot];
     const bool empty_slot = slot_hash == 0u;
     const bool hash_match = slot_hash == hash;
     const int32_t existing = map.values[slot];
     const std::string_view existing_text = token_text(vocab, existing);
-    const bool same_text = hash_match && existing_text == text;
-    const bool claim_slot = empty_slot || same_text;
-    const bool collision = hash_match && !same_text;
+    const bool same_text = step_active && hash_match && existing_text == text;
+    const bool claim_slot = step_active && (empty_slot || same_text);
+    const bool collision = step_active && hash_match && !same_text;
 
     map.hashes[slot] = select_u32(claim_slot, hash, slot_hash);
     map.values[slot] = select_i32(claim_slot, id, existing);
     map.count += static_cast<uint32_t>(claim_slot && empty_slot);
 
     success = success || claim_slot;
-    done = done || claim_slot || collision;
+    const bool step_done = claim_slot || collision;
+    loop_active = loop_active && !step_done;
     slot = (slot + 1u) & mask;
   }
 
