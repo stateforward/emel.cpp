@@ -131,15 +131,16 @@ struct symbol_table {
     const uint32_t mask = slot_count - 1u;
     uint32_t slot = hash & mask;
     bool found = false;
-    bool done = false;
+    uint32_t probe_limit = slot_count;
 
-    for (uint32_t probes = 0; probes < slot_count && !done; ++probes) {
+    for (uint32_t probes = 0; probes < probe_limit; ++probes) {
       const auto &entry = entries[slot];
       const bool occupied = entry.occupied;
       const bool match = occupied && entry.hash == hash && entry.name == name;
       id = select_u32(match, entry.id, id);
       found = found || match;
-      done = !occupied || match;
+      const bool stop_step = !occupied || match;
+      probe_limit = select_u32(stop_step, probes + 1u, probe_limit);
       slot = (slot + 1u) & mask;
     }
 
@@ -151,12 +152,12 @@ struct symbol_table {
     const uint32_t slot_count = static_cast<uint32_t>(entries.size());
     const uint32_t mask = slot_count - 1u;
     uint32_t slot = hash & mask;
-    bool done = false;
+    uint32_t probe_limit = slot_count;
     bool success = false;
     bool inserted_new = false;
     uint32_t inserted_slot = 0;
 
-    for (uint32_t probes = 0; probes < slot_count && !done; ++probes) {
+    for (uint32_t probes = 0; probes < probe_limit; ++probes) {
       auto &entry = entries[slot];
       const bool occupied = entry.occupied;
       const bool empty_slot = !occupied;
@@ -176,7 +177,7 @@ struct symbol_table {
       inserted_slot = select_u32(claim_empty, slot, inserted_slot);
       inserted_new = inserted_new || claim_empty;
       success = success || claim;
-      done = claim;
+      probe_limit = select_u32(claim, probes + 1u, probe_limit);
       slot = (slot + 1u) & mask;
     }
 
