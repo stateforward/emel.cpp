@@ -327,9 +327,10 @@ inline int32_t lookup_token_concat(const action::context &ctx,
   const size_t combined_len = left.size() + right.size();
   uint32_t slot = hash & mask;
   int32_t resolved = k_token_null;
-  bool done = false;
+  bool loop_active = true;
 
-  for (uint32_t probes = 0; probes < k_token_hash_size && !done; ++probes) {
+  for (uint32_t probes = 0; probes < k_token_hash_size; ++probes) {
+    const bool step_active = loop_active;
     const uint32_t entry = ctx.token_to_id.hashes[slot];
     const bool empty_slot = entry == 0u;
     const bool hash_match = entry == hash;
@@ -352,10 +353,12 @@ inline int32_t lookup_token_concat(const action::context &ctx,
 
     const bool left_match = std::memcmp(token_ptr, left_ptr, left_len) == 0;
     const bool right_match = std::memcmp(token_ptr + right_offset, right_ptr, right_len) == 0;
-    const bool exact_match = hash_match && size_match && left_match && right_match;
+    const bool exact_match =
+        step_active && hash_match && size_match && left_match && right_match;
 
     resolved = select_i32(exact_match, id, resolved);
-    done = done || empty_slot || exact_match;
+    const bool step_done = step_active && (empty_slot || exact_match);
+    loop_active = loop_active && !step_done;
     slot = (slot + 1u) & mask;
   }
 
