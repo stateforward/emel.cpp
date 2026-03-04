@@ -370,24 +370,26 @@ inline int32_t lookup_merge_rank(const action::context &ctx,
                                  const std::string_view left,
                                  const std::string_view right) {
   const bool active = !left.empty() && !right.empty();
-  bool done = !active;
+  bool loop_active = active;
   int32_t resolved = k_token_null;
 
   const uint32_t hash = hash_pair(left, right);
   const uint32_t mask = k_merge_hash_size - 1u;
   uint32_t slot = hash & mask;
 
-  for (uint32_t probes = 0; probes < k_merge_hash_size && !done; ++probes) {
+  for (uint32_t probes = 0; probes < k_merge_hash_size; ++probes) {
+    const bool step_active = loop_active;
     const uint32_t entry = ctx.bpe_ranks.hashes[slot];
     const bool empty_slot = entry == 0u;
     const bool hash_match = entry == hash;
     const int32_t rank = ctx.bpe_ranks.values[slot];
     const std::string_view merge = merge_text(vocab, rank);
-    const bool exact_match = hash_match && merge_match(merge, left, right);
-    const bool collision = hash_match && !exact_match;
+    const bool exact_match = step_active && hash_match && merge_match(merge, left, right);
+    const bool collision = step_active && hash_match && !exact_match;
 
     resolved = select_i32(exact_match, rank, resolved);
-    done = done || empty_slot || exact_match || collision;
+    const bool step_done = step_active && (empty_slot || exact_match || collision);
+    loop_active = loop_active && !step_done;
     slot = (slot + 1u) & mask;
   }
 
