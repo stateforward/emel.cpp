@@ -192,10 +192,13 @@ inline bool primary_in_mask_when_both_inputs(const event::batch & req) noexcept 
   const bool check_required = has_masks && has_primary;
   const int32_t mask_words = req.seq_mask_words;
   bool primary_present = true;
-  for (int32_t i = 0; i < req.n_tokens && check_required && primary_present; ++i) {
+  int32_t row_limit = static_cast<int32_t>(check_required) * req.n_tokens;
+  for (int32_t i = 0; i < row_limit; ++i) {
     const int32_t primary = req.seq_primary_ids[i];
     const uint64_t * in_mask = req.seq_masks + static_cast<size_t>(i) * mask_words;
     primary_present = primary_present && mask_has_bit(in_mask, mask_words, primary);
+    const int32_t keep_limit = static_cast<int32_t>(primary_present);
+    row_limit = keep_limit * row_limit + (1 - keep_limit) * (i + 1);
   }
   return !check_required || primary_present;
 }
