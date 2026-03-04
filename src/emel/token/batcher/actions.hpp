@@ -269,7 +269,8 @@ inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
   seq_pos_max.fill(std::numeric_limits<int32_t>::min());
 
   bool ok = true;
-  for (int32_t i = 0; i < req.n_tokens && ok; ++i) {
+  int32_t token_limit = req.n_tokens;
+  for (int32_t i = 0; i < token_limit; ++i) {
     const int32_t pos = positions_out[i];
     const uint64_t * mask = seq_masks_out + static_cast<size_t>(i) * mask_words;
 
@@ -302,6 +303,8 @@ inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
 
            return (!first_seen || has_active_slot) && monotonic && !mask_empty(cur_mask, mask_words);
          });
+    const int32_t keep_limit = static_cast<int32_t>(ok);
+    token_limit = keep_limit * token_limit + (1 - keep_limit) * (i + 1);
   }
 
   for (int32_t i = 0; i < active_seq_count && ok; ++i) {
