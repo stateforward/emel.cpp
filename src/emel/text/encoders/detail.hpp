@@ -564,6 +564,20 @@ inline void ensure_tables_insert_merge_none(action::context &,
                                             const emel::model::data::vocab &) noexcept {
 }
 
+inline bool ensure_tables_insert_token_none(action::context &,
+                                            const emel::model::data::vocab &,
+                                            const std::string_view,
+                                            const int32_t) noexcept {
+  return true;
+}
+
+inline bool ensure_tables_insert_token_some(action::context &ctx,
+                                            const emel::model::data::vocab &vocab,
+                                            const std::string_view text,
+                                            const int32_t id) noexcept {
+  return insert_token_map(ctx.token_to_id, vocab, text, id);
+}
+
 inline void ensure_tables_insert_merge_some(action::context &ctx,
                                             const std::string_view left,
                                             const std::string_view right,
@@ -578,17 +592,28 @@ inline void ensure_tables_build_some(action::context &ctx, bool &ok) noexcept {
   ctx.max_token_len = 0;
 
   const emel::model::data::vocab &vocab = *ctx.vocab;
-  bool build_ok = true;
+  using insert_token_handler_t = bool (*)(action::context &,
+                                          const emel::model::data::vocab &,
+                                          std::string_view,
+                                          int32_t) noexcept;
+  const insert_token_handler_t insert_token_handlers[2] = {
+      ensure_tables_insert_token_none,
+      ensure_tables_insert_token_some,
+  };
 
-  for (uint32_t id = 0; id < vocab.n_tokens && build_ok; ++id) {
+  bool loop_active = true;
+  for (uint32_t id = 0; id < vocab.n_tokens; ++id) {
+    const bool step_active = loop_active;
     const std::string_view text = token_text(vocab, static_cast<int32_t>(id));
-    const bool inserted = insert_token_map(ctx.token_to_id, vocab, text, static_cast<int32_t>(id));
-    build_ok = build_ok && inserted;
+    const bool inserted = insert_token_handlers[static_cast<size_t>(step_active)](
+        ctx, vocab, text, static_cast<int32_t>(id));
 
     const int32_t text_len = static_cast<int32_t>(text.size());
-    const bool longer = text_len > ctx.max_token_len;
+    const bool longer = step_active && text_len > ctx.max_token_len;
     ctx.max_token_len = select_i32(longer, text_len, ctx.max_token_len);
+    loop_active = loop_active && inserted;
   }
+  const bool build_ok = loop_active;
 
   using insert_merge_handler_t = void (*)(action::context &,
                                           std::string_view,
