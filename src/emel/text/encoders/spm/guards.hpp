@@ -41,6 +41,18 @@ struct text_non_empty {
   }
 };
 
+struct merge_symbol_capacity_within_limit {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return ev.request.text.size() <= ctx.scratch.offsets.size();
+  }
+};
+
+struct merge_symbol_capacity_exceeded {
+  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
+    return !merge_symbol_capacity_within_limit{}(ev, ctx);
+  }
+};
+
 struct vocab_changed {
   bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
     return emel::text::encoders::guard::vocab_changed{}(ev, ctx);

@@ -109,10 +109,9 @@ inline unk_lookup_result lookup_unk_candidate(const emel::model::data::vocab & v
 inline void run_encode_tokens(const runtime::encode_runtime & ev, context & ctx) noexcept {
   int32_t count = 0;
   size_t position = 0;
-  bool active = ev.event_.ctx.err == EMEL_OK;
   const std::string_view text = ev.event_.request.text;
 
-  while (active && position < text.size()) {
+  while (position < text.size()) {
     const auto * node = ctx.token_matcher.traverse(text[position]);
     int32_t token_id = ev.unk_id;
     size_t token_end = position + 1u;
@@ -139,7 +138,6 @@ inline void run_encode_tokens(const runtime::encode_runtime & ev, context & ctx)
     const bool push_failed = emit_token && !token_push_ok;
     ev.event_.ctx.err = emel::text::encoders::rwkv::detail::select_i32(
       push_failed, EMEL_ERR_INVALID_ARGUMENT, ev.event_.ctx.err);
-    active = active && !push_failed;
     position = token_end;
   }
 

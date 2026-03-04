@@ -117,6 +117,25 @@ TEST_CASE("encoder_rwkv_push_unk_overflow") {
   CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
 }
 
+TEST_CASE("encoder_rwkv_rejects_short_output_capacity") {
+  vocab_builder builder{};
+  builder.set_model("rwkv");
+  builder.add_byte_token(static_cast<uint8_t>('a'));
+
+  std::array<int32_t, 1> out_tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  emel::text::encoders::rwkv::sm machine{};
+  CHECK_FALSE(machine.process_event(emel::text::encoders::event::encode{
+    .vocab = *builder.vocab,
+    .text = "aa",
+    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(out_tokens.size())),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  }));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+}
+
 TEST_CASE("encoder_rwkv_encode_builds_tables_when_missing") {
   vocab_builder builder{};
   builder.set_model("rwkv");

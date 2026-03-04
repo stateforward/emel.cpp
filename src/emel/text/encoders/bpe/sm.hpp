@@ -19,6 +19,7 @@ struct encode_input_policy_decision {};
 struct encode_table_prepare {};
 struct encode_path_decision {};
 struct encode_direct_word_policy_decision {};
+struct encode_merge_input_capacity_decision {};
 struct encode_exec {};
 struct encode_result_decision {};
 struct done {};
@@ -37,6 +38,7 @@ struct unexpected {};
  * - 'encode_table_prepare': ensure per-vocab tables for deterministic path guards.
  * - 'encode_path_decision': explicit `ignore_merges` policy routing.
  * - 'encode_direct_word_policy_decision': explicit direct-word availability routing.
+ * - 'encode_merge_input_capacity_decision': explicit merge-path symbol-capacity routing.
  * - 'encode_exec'/'encode_result_decision': run selected kernel and branch on phase error.
  * - 'done'/'errored': terminal outcomes.
  * - 'unexpected': sequencing contract violation.
@@ -46,6 +48,7 @@ struct unexpected {};
  * - 'vocab_changed'/'vocab_unchanged' route vocabulary sync work.
  * - 'text_empty'/'text_non_empty' and 'preprocessed'/'not_preprocessed' route precheck decisions.
  * - 'ignore_merges_enabled' and 'direct_word_token_available' route algorithm path selection.
+ * - 'merge_symbol_capacity_within_limit'/'merge_symbol_capacity_exceeded' route merge-path intake.
  * - 'phase_*' guards observe runtime phase errors.
  *
  * action side effects:
@@ -140,8 +143,20 @@ struct model {
       , sml::state<encode_result_decision> <= sml::state<encode_direct_word_policy_decision>
           + sml::completion<event::encode_runtime>[guard::direct_word_token_available{}]
           / action::run_encode_ignore_merges
-      , sml::state<encode_exec> <= sml::state<encode_direct_word_policy_decision>
+      , sml::state<encode_merge_input_capacity_decision> <= sml::state<encode_direct_word_policy_decision>
           + sml::completion<event::encode_runtime>
+
+      //------------------------------------------------------------------------------//
+      // Merge Input Capacity Decision
+      //------------------------------------------------------------------------------//
+      , sml::state<encode_exec> <= sml::state<encode_merge_input_capacity_decision>
+          + sml::completion<event::encode_runtime>[guard::merge_symbol_capacity_within_limit{}]
+      , sml::state<errored> <= sml::state<encode_merge_input_capacity_decision>
+          + sml::completion<event::encode_runtime>[guard::merge_symbol_capacity_exceeded{}]
+          / action::reject_invalid_encode
+      , sml::state<errored> <= sml::state<encode_merge_input_capacity_decision>
+          + sml::completion<event::encode_runtime>
+          / action::reject_invalid_encode
 
       //------------------------------------------------------------------------------//
       // Encode Execution
@@ -171,6 +186,8 @@ struct model {
           + sml::event<event::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_direct_word_policy_decision>
           + sml::event<event::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_merge_input_capacity_decision>
+          + sml::event<event::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<event::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_result_decision>
@@ -208,6 +225,10 @@ struct model {
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_direct_word_policy_decision>
           + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_merge_input_capacity_decision>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_merge_input_capacity_decision>
+          + sml::event<events::encoding_error> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
@@ -244,6 +265,8 @@ struct model {
       , sml::state<unexpected> <= sml::state<encode_path_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_direct_word_policy_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_merge_input_capacity_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_exec>
           + sml::unexpected_event<sml::_> / action::on_unexpected

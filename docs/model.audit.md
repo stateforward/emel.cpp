@@ -63,11 +63,12 @@ Status correction: the following files still contain implicit runtime control fl
 - [x] `src/emel/text/detokenizer/actions.hpp` (rearchitected with explicit
   special/byte/text decode phases and branch guards in `sm.hpp`)
 - [x] `src/emel/text/encoders/rwkv/actions.hpp` (rearchitected with explicit
-  `encode_validity_decision`, `encode_vocab_sync_decision`, `table_policy_decision`, and
+  `encode_validity_decision`, `encode_vocab_sync_decision`,
+  `encode_capacity_decision`, `table_policy_decision`, and
   `unk_lookup_result_decision` phases in `rwkv/sm.hpp`; removed composite
   `valid_encode_and_vocab_*` and `text_non_empty_and_tables_*` guard routers and routed
-  unknown-token lookup outcome via explicit guards/actions instead of implicit
-  action-finalization)
+  unknown-token lookup outcome and output-capacity rejection via explicit
+  guards/actions instead of implicit action-finalization or loop-gated failure control)
 - [x] `src/emel/text/encoders/ugm/guards.hpp` (rearchitected encode intake and
   table-policy routing into explicit `encode_validity_decision`,
   `encode_vocab_sync_decision`, and `table_policy_decision` phases in
@@ -93,13 +94,19 @@ Status correction: the following files still contain implicit runtime control fl
 - [x] `src/emel/text/encoders/wpm/guards.hpp` (rearchitected encode intake and
   table-policy routing into explicit `encode_validity_decision`,
   `encode_vocab_sync_decision`, and `table_policy_decision` phases in
-  `text/encoders/wpm/sm.hpp`; removed composite
-  `valid_encode_and_vocab_*` and `text_non_empty_and_tables_*` guard routers)
+  `text/encoders/wpm/sm.hpp`, then extended with explicit
+  `encode_input_capacity_decision` routing before encode execution;
+  removed composite `valid_encode_and_vocab_*` and
+  `text_non_empty_and_tables_*` guard routers; removed loop-index mutation
+  and loop-gated scan-stop routing from `wpm/detail.hpp`)
 - [x] `src/emel/text/encoders/spm/guards.hpp` (rearchitected encode intake and
   table-policy routing into explicit `encode_validity_decision`,
   `encode_vocab_sync_decision`, and `table_policy_decision` phases in
-  `text/encoders/spm/sm.hpp`; removed composite
-  `valid_encode_and_vocab_*` and `text_non_empty_and_tables_*` guard routers)
+  `text/encoders/spm/sm.hpp`, then extended with explicit
+  `encode_merge_input_capacity_decision` routing before merge execution;
+  removed composite `valid_encode_and_vocab_*` and
+  `text_non_empty_and_tables_*` guard routers; removed loop-gated symbol-scan
+  and emit error-break control from `spm/detail.hpp`)
 - [x] `src/emel/text/encoders/fallback/guards.hpp` (rearchitected encode intake
   routing into explicit `encode_validity_decision` and
   `encode_vocab_sync_decision` phases in `text/encoders/fallback/sm.hpp`;
@@ -108,10 +115,13 @@ Status correction: the following files still contain implicit runtime control fl
   preprocessed-input policy, and ignore-merges/direct-word path routing into
   explicit `encode_validity_decision`, `encode_vocab_sync_decision`,
   `encode_input_policy_decision`, `encode_path_decision`, and
-  `encode_direct_word_policy_decision` phases in `text/encoders/bpe/sm.hpp`;
+  `encode_direct_word_policy_decision` phases in `text/encoders/bpe/sm.hpp`,
+  then extended with explicit `encode_merge_input_capacity_decision` routing
+  before merge-path execution;
   removed composite `valid_encode_and_vocab_*`,
   `text_non_empty_and_{preprocessed,not_preprocessed}`, and
-  `ignore_merges_fast_path`/`merge_path_required` guard routers)
+  `ignore_merges_fast_path`/`merge_path_required` guard routers; removed
+  loop-gated symbol-scan control in `bpe/detail.hpp`)
 - [x] `src/emel/text/encoders/plamo2/guards.hpp` (rearchitected encode intake
   routing into explicit `encode_validity_decision` and
   `encode_vocab_sync_decision` phases in `text/encoders/plamo2/sm.hpp`;
@@ -263,9 +273,22 @@ Despite earlier remediations, explicit `if` statements were found introduced/rem
   `request_capacity_limit_decision`) and explicit parse policy phase
   (`partition_parse_special_decision`) so `parse_special` routing is modeled in
   `sm.hpp` instead of hidden inside shared partition actions/details.
-- [ ] `src/emel/text/tokenizer/preprocessor/{fallback,bpe}/sm.hpp`
-  still require the same explicit request-shape and parse-policy rearchitecture
-  to fully eliminate hidden control routing across the preprocessor family.
+- [x] `src/emel/text/tokenizer/preprocessor/fallback/sm.hpp` + `fallback/actions.hpp` +
+  `fallback/guards.hpp` rearchitected with explicit request-shape phases
+  (`request_buffer_decision`, `request_capacity_nonzero_decision`,
+  `request_capacity_limit_decision`) and explicit parse policy phase
+  (`partition_parse_special_decision`) so `parse_special` routing is modeled in
+  `sm.hpp` instead of hidden inside shared partition actions/details; moved
+  fallback partition actions out of shared `preprocessor/actions.hpp` into
+  `fallback/actions.hpp` so shared files keep only shared helpers.
+- [x] `src/emel/text/tokenizer/preprocessor/bpe/sm.hpp` + `bpe/actions.hpp` +
+  `bpe/guards.hpp` rearchitected with explicit request-shape phases
+  (`request_buffer_decision`, `request_capacity_nonzero_decision`,
+  `request_capacity_limit_decision`) plus explicit specials-shape and parse policy
+  phases (`partitioning_select`, `partition_parse_special_decision`) so both
+  specials-presence and `parse_special` routing are modeled in `sm.hpp`; moved
+  bpe-only partition helpers out of shared `preprocessor/detail.hpp` into
+  `bpe/actions.hpp` per "detail only for shared helpers".
 
 ### 3. Hidden Error-Control Loop Violations
 The following data-plane loops terminate early on error/status checks instead of explicitly modeling the failure path in the state machine (violating the rule: "Loops in actions/detail are data-plane iteration only... not success/error/mode/retry/routing control"):

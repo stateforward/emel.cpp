@@ -372,15 +372,17 @@ inline bool encode_wpm_process_word_some(const event::encode &ev,
   const size_t word_view_len = select_size(has_capacity, k_wpm_prefix_len + word_len, 0u);
   const std::string_view word_view(ctx.scratch.buffer.data(), word_view_len);
   const int32_t n = static_cast<int32_t>(word_view.size());
+  int32_t cursor = 0;
 
-  for (int32_t i = 0; i < n; ++i) {
-    const bool i_active = ok;
+  for (int32_t step = 0; step < n; ++step) {
+    const bool step_active = ok && cursor < n;
+    const int32_t i = select_i32(step_active, cursor, 0);
     bool found = false;
     int32_t matched_end = i;
-    const int32_t end = select_i32(i_active, std::min(n, i + ctx.max_token_len + 1), i);
-    bool j_active = i_active;
+    const int32_t end = select_i32(step_active, std::min(n, i + ctx.max_token_len + 1), i);
+    bool scan_active = step_active;
     for (int32_t j = end; j > i; --j) {
-      const bool step_active = j_active;
+      const bool scan_step_active = scan_active;
       const std::string_view piece = word_view.substr(
         static_cast<size_t>(i),
         static_cast<size_t>(j - i));
@@ -391,7 +393,8 @@ inline bool encode_wpm_process_word_some(const event::encode &ev,
           wpm_lookup_candidate_none,
           wpm_lookup_candidate_some,
       };
-      const int32_t token = lookup_handlers[static_cast<size_t>(step_active)](ctx, vocab, piece);
+      const int32_t token =
+          lookup_handlers[static_cast<size_t>(scan_step_active)](ctx, vocab, piece);
       const bool hit = token != k_token_null;
       bool pushed = true;
       using push_handler_t = void (*)(const event::encode &,
@@ -402,21 +405,21 @@ inline bool encode_wpm_process_word_some(const event::encode &ev,
           wpm_push_candidate_none,
           wpm_push_candidate_some,
       };
-      push_handlers[static_cast<size_t>(step_active && hit)](ev, token, count, pushed);
-      const bool found_step = step_active && hit;
+      push_handlers[static_cast<size_t>(scan_step_active && hit)](ev, token, count, pushed);
+      const bool found_step = scan_step_active && hit;
       const bool push_fail = found_step && !pushed;
       result.error = select_i32(push_fail, EMEL_ERR_INVALID_ARGUMENT, result.error);
       ok = ok && !push_fail;
       found = found || found_step;
       matched_end = select_i32(found_step, j, matched_end);
-      j_active = j_active && !push_fail && !found_step;
+      scan_active = scan_active && !push_fail && !found_step;
     }
 
-    i = select_i32(i_active && found, matched_end - 1, i);
-    const bool rollback = i_active && !found;
+    const bool advance_cursor = step_active && found;
+    cursor = select_i32(advance_cursor, matched_end, cursor);
+    const bool rollback = step_active && !found;
     count = select_i32(rollback, word_token_start, count);
-    i = select_i32(rollback, n, i);
-    i = select_i32(!ok, n, i);
+    cursor = select_i32(rollback, n, cursor);
   }
 
   const bool needs_unk = ok && count == word_token_start;
@@ -488,20 +491,6 @@ inline encode_result encode_wpm_missing_tables(const event::encode &,
   return result;
 }
 
-inline encode_result encode_wpm_non_empty(const event::encode &ev,
-                                          emel::text::encoders::action::context &ctx,
-                                          const emel::model::data::vocab &vocab) {
-  using tables_handler_t = encode_result (*)(const event::encode &,
-                                             emel::text::encoders::action::context &,
-                                             const emel::model::data::vocab &);
-  const tables_handler_t tables_handlers[2] = {
-      encode_wpm_missing_tables,
-      encode_wpm_ready_tables,
-  };
-  const bool tables_ready = ctx.tables_ready && ctx.vocab == &vocab;
-  return tables_handlers[static_cast<size_t>(tables_ready)](ev, ctx, vocab);
-}
-
 inline encode_result encode_wpm_empty(const event::encode &,
                                       emel::text::encoders::action::context &,
                                       const emel::model::data::vocab &) {
@@ -509,19 +498,6 @@ inline encode_result encode_wpm_empty(const event::encode &,
   result.token_count = 0;
   result.error = EMEL_OK;
   return result;
-}
-
-inline encode_result encode_wpm(const event::encode &ev,
-                                emel::text::encoders::action::context &ctx,
-                                const emel::model::data::vocab &vocab) {
-  using empty_handler_t = encode_result (*)(const event::encode &,
-                                            emel::text::encoders::action::context &,
-                                            const emel::model::data::vocab &);
-  const empty_handler_t empty_handlers[2] = {
-      encode_wpm_non_empty,
-      encode_wpm_empty,
-  };
-  return empty_handlers[static_cast<size_t>(ev.text.empty())](ev, ctx, vocab);
 }
 
 }  // namespace emel::text::encoders::wpm::detail

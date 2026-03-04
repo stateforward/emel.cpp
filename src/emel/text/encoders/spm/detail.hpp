@@ -288,7 +288,7 @@ spm_build_symbols(const std::string_view text,
   size_t offset = 0;
   bool ok = true;
 
-  for (; ok && offset < text.size();) {
+  for (; offset < text.size();) {
     const bool has_capacity = scratch.symbol_count < scratch.offsets.size();
     const size_t len_raw = emel::text::encoders::detail::utf8_len(text[offset]);
     const size_t remaining = text.size() - offset;
@@ -307,7 +307,7 @@ spm_build_symbols(const std::string_view text,
         has_next, static_cast<int32_t>(scratch.symbol_count) + 1, -1);
     scratch.next[idx] = select_i32(has_capacity, next_value, scratch.next[idx]);
     scratch.symbol_count += static_cast<uint32_t>(has_capacity);
-    offset += len * static_cast<size_t>(has_capacity);
+    offset += len;
 
     ok = ok && has_capacity;
   }
@@ -606,7 +606,8 @@ inline encode_result emit_spm(const event::encode &ev,
   encode_result result{};
   int32_t count = 0;
   int32_t err = EMEL_OK;
-  int32_t idx = select_i32(active, 0, -1);
+  const bool has_symbol_chain = active && ctx.scratch.symbol_count > 0;
+  int32_t idx = select_i32(has_symbol_chain, 0, -1);
   for (; idx != -1;) {
     const bool step_active = err == EMEL_OK;
     const bool has_symbol = step_active && ctx.scratch.lengths[static_cast<size_t>(idx)] != 0u;
@@ -622,8 +623,8 @@ inline encode_result emit_spm(const event::encode &ev,
     err = select_i32(step_active && direct_fail, EMEL_ERR_INVALID_ARGUMENT, err);
 
     const bool emit_bytes = has_symbol && token == k_token_null;
-    const size_t byte_len = symbol.size() * static_cast<size_t>(emit_bytes);
-    size_t byte_limit = byte_len;
+    const size_t byte_limit =
+        select_size(step_active && emit_bytes, symbol.size(), static_cast<size_t>(0));
     for (size_t byte_offset = 0; byte_offset < byte_limit; ++byte_offset) {
       const unsigned char c = static_cast<unsigned char>(symbol[byte_offset]);
       const int32_t byte_token = spm_byte_to_token(ctx, c);
@@ -631,11 +632,10 @@ inline encode_result emit_spm(const event::encode &ev,
       const bool byte_ok = spm_push_token_if(byte_valid, ev, byte_token, count);
       const bool byte_fail = !byte_valid || !byte_ok;
       err = select_i32(err == EMEL_OK && byte_fail, EMEL_ERR_BACKEND, err);
-      byte_limit = select_size(err == EMEL_OK, byte_limit, byte_offset + 1u);
     }
 
     const int32_t next_idx = ctx.scratch.next[static_cast<size_t>(idx)];
-    idx = select_i32(err == EMEL_OK, next_idx, -1);
+    idx = next_idx;
   }
 
   result.token_count = count * static_cast<int32_t>(err == EMEL_OK);

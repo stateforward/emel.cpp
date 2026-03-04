@@ -412,7 +412,8 @@ TEST_CASE("encoder_encode_impl_variants") {
           emel::text::encoders::wpm::action::context ctx{};
           ctx.vocab = builder.vocab;
           CHECK(emel::text::encoders::wpm::detail::ensure_wpm_tables(ctx, *builder.vocab));
-          result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
+          result = emel::text::encoders::wpm::detail::encode_wpm_ready_tables(
+            ev, ctx, *builder.vocab);
           break;
         }
         case emel::model::data::tokenizer_model::UGM: {
@@ -564,11 +565,13 @@ TEST_CASE("encoder_detail_encode_direct_calls") {
     CHECK(emel::text::encoders::wpm::detail::ensure_wpm_tables(ctx, *builder.vocab));
     emel::text::encoders::event::encode ev_wpm = ev;
     ev_wpm.text = "unaffable";
-    auto result = emel::text::encoders::wpm::detail::encode_wpm(ev_wpm, ctx, *builder.vocab);
+    auto result = emel::text::encoders::wpm::detail::encode_wpm_ready_tables(
+      ev_wpm, ctx, *builder.vocab);
     (void)result;
     emel::text::encoders::event::encode ev_unknown = ev;
     ev_unknown.text = "xyzxyz";
-    auto result_unknown = emel::text::encoders::wpm::detail::encode_wpm(ev_unknown, ctx, *builder.vocab);
+    auto result_unknown = emel::text::encoders::wpm::detail::encode_wpm_ready_tables(
+      ev_unknown, ctx, *builder.vocab);
     (void)result_unknown;
   }
 

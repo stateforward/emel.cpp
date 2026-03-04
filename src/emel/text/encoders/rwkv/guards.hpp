@@ -41,6 +41,20 @@ struct text_non_empty {
   }
 };
 
+struct output_capacity_covers_text {
+  bool operator()(const runtime::encode_runtime & ev,
+                  const action::context &) const noexcept {
+    return ev.event_.request.token_ids.size() >= ev.event_.request.text.size();
+  }
+};
+
+struct output_capacity_short {
+  bool operator()(const runtime::encode_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    return !output_capacity_covers_text{}(ev, ctx);
+  }
+};
+
 struct vocab_changed {
   bool operator()(const runtime::encode_runtime & ev, const action::context & ctx) const noexcept {
     return emel::text::encoders::guard::vocab_changed{}(ev.event_, ctx);

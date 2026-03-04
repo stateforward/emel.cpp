@@ -15,6 +15,7 @@ struct initialized {};
 struct encode_validity_decision {};
 struct encode_vocab_sync_decision {};
 struct encode_precheck_decision {};
+struct encode_capacity_decision {};
 struct table_policy_decision {};
 struct table_sync_exec {};
 struct table_sync_result_decision {};
@@ -34,6 +35,7 @@ struct unexpected {};
  * - `initialized`: idle state awaiting encode intent.
  * - `encode_validity_decision`/`encode_vocab_sync_decision`: explicit intake routing.
  * - `encode_precheck_decision`: explicit request prechecks before phase execution.
+ * - `encode_capacity_decision`: explicit output-capacity routing for non-empty text.
  * - `table_policy_decision`: explicit RWKV table readiness routing for non-empty text.
  * - `table_sync_exec`/`table_sync_result_decision`: explicit RWKV table preparation.
  * - `unk_resolution_decision`/`unk_lookup_exec`/`unk_lookup_result_decision`:
@@ -46,6 +48,7 @@ struct unexpected {};
  * - `valid_encode`/`invalid_encode` validate request payload shape.
  * - `vocab_changed`/`vocab_unchanged` route explicit vocabulary-sync behavior.
  * - `text_empty`/`text_non_empty` route explicit precheck decisions.
+ * - `output_capacity_covers_text`/`output_capacity_short` route output-capacity policy.
  * - `tables_ready`/`tables_missing` route explicit table-policy behavior.
  * - `vocab_unk_present`/`vocab_unk_missing` route unknown-token resolution.
  * - `phase_ok`/`phase_failed` route phase error status.
@@ -105,10 +108,21 @@ struct model {
       //------------------------------------------------------------------------------//
       , sml::state<done> <= sml::state<encode_precheck_decision>
           + sml::completion<runtime::encode_runtime>[guard::text_empty{}] / action::mark_done
-      , sml::state<table_policy_decision> <= sml::state<encode_precheck_decision>
+      , sml::state<encode_capacity_decision> <= sml::state<encode_precheck_decision>
           + sml::completion<runtime::encode_runtime>[guard::text_non_empty{}]
       , sml::state<errored> <= sml::state<encode_precheck_decision>
           + sml::completion<runtime::encode_runtime> / action::ensure_last_error
+
+      //------------------------------------------------------------------------------//
+      // Output Capacity Policy
+      //------------------------------------------------------------------------------//
+      , sml::state<table_policy_decision> <= sml::state<encode_capacity_decision>
+          + sml::completion<runtime::encode_runtime>[guard::output_capacity_covers_text{}]
+      , sml::state<errored> <= sml::state<encode_capacity_decision>
+          + sml::completion<runtime::encode_runtime>[guard::output_capacity_short{}]
+          / action::reject_invalid_encode
+      , sml::state<errored> <= sml::state<encode_capacity_decision>
+          + sml::completion<runtime::encode_runtime> / action::reject_invalid_encode
 
       //------------------------------------------------------------------------------//
       // RWKV Table Policy
@@ -168,6 +182,8 @@ struct model {
           + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
           + sml::event<runtime::encode_runtime> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_capacity_decision>
+          + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<table_policy_decision>
           + sml::event<runtime::encode_runtime> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<table_sync_exec>
@@ -200,6 +216,10 @@ struct model {
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
           + sml::event<events::encoding_done> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::event<events::encoding_error> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_capacity_decision>
+          + sml::event<events::encoding_done> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_capacity_decision>
           + sml::event<events::encoding_error> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<table_policy_decision>
           + sml::event<events::encoding_done> / action::on_unexpected
@@ -253,6 +273,8 @@ struct model {
       , sml::state<unexpected> <= sml::state<encode_vocab_sync_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<encode_precheck_decision>
+          + sml::unexpected_event<sml::_> / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encode_capacity_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected
       , sml::state<unexpected> <= sml::state<table_policy_decision>
           + sml::unexpected_event<sml::_> / action::on_unexpected

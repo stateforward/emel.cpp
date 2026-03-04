@@ -190,6 +190,30 @@ TEST_CASE("encoder_detail_bpe_buffer_overflow") {
   CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
+TEST_CASE("encoder_bpe_merge_path_rejects_symbol_capacity_overflow") {
+  vocab_builder builder{};
+  builder.set_model("gpt2");
+  builder.set_pre("gpt2");
+  builder.add_token("a", 0.1f, 1);
+
+  emel::text::encoders::bpe::sm machine{};
+  std::array<int32_t, 1> tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  std::string text(emel::text::encoders::detail::k_max_encode_symbols + 1, 'a');
+
+  CHECK_FALSE(machine.process_event(emel::text::encoders::event::encode{
+    .vocab = *builder.vocab,
+    .text = text,
+    .preprocessed = true,
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(tokens.size())),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  }));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(token_count == 0);
+}
+
 TEST_CASE("encoder_detail_bpe_byte_push_overflow") {
   vocab_builder builder{};
   builder.set_model("gpt2");
@@ -214,4 +238,3 @@ TEST_CASE("encoder_detail_bpe_byte_push_overflow") {
   const auto result = emel::text::encoders::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
   CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
-

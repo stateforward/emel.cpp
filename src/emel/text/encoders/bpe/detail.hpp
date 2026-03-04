@@ -271,7 +271,7 @@ bpe_build_symbols(const std::string_view text,
   size_t offset = 0;
   bool ok = true;
 
-  for (; ok && offset < text.size();) {
+  for (; offset < text.size();) {
     const bool has_capacity = scratch.symbol_count < scratch.offsets.size();
     const size_t len_raw = emel::text::unicode_len_utf8(text[offset]);
     const size_t remaining = text.size() - offset;
@@ -290,7 +290,7 @@ bpe_build_symbols(const std::string_view text,
         has_next, static_cast<int32_t>(scratch.symbol_count) + 1, -1);
     scratch.next[idx] = select_i32(has_capacity, next_value, scratch.next[idx]);
     scratch.symbol_count += static_cast<int32_t>(has_capacity);
-    offset += len * static_cast<size_t>(has_capacity);
+    offset += len;
 
     ok = ok && has_capacity;
   }
@@ -447,11 +447,11 @@ inline bool encode_bpe_word_merge_path(
     merge_active = merge_active && has_merge;
   }
 
-  const int32_t first_symbol = select_i32(ctx.scratch.symbol_count > 0, 0, -1);
+  const bool has_symbol_chain = ok && ctx.scratch.symbol_count > 0;
+  const int32_t first_symbol = select_i32(has_symbol_chain, 0, -1);
   int32_t idx = first_symbol;
-  bool scan_active = ok;
   for (; idx != -1;) {
-    const bool step_active = scan_active;
+    const bool step_active = ok;
     const bool has_symbol = step_active && ctx.scratch.lengths[static_cast<size_t>(idx)] > 0;
     const size_t sym_off = ctx.scratch.offsets[static_cast<size_t>(idx)];
     const size_t sym_len = ctx.scratch.lengths[static_cast<size_t>(idx)];
@@ -462,7 +462,7 @@ inline bool encode_bpe_word_merge_path(
     const bool direct_pushed = bpe_push_token_if(direct_hit, ev, token, count);
     ok = ok && (!direct_hit || direct_pushed);
 
-    size_t byte_limit = select_size(step_active && !direct_hit, symbol.size(), 0u);
+    const size_t byte_limit = select_size(step_active && !direct_hit, symbol.size(), 0u);
     for (size_t byte_offset = 0; byte_offset < byte_limit;) {
       size_t len = emel::text::unicode_len_utf8(symbol[byte_offset]);
       const size_t remaining = symbol.size() - byte_offset;
@@ -474,13 +474,11 @@ inline bool encode_bpe_word_merge_path(
           bpe_push_token_if(emit_byte, ev, byte_token, count);
       const bool step_ok = !emit_byte || byte_pushed;
       ok = ok && step_ok;
-      byte_limit = select_size(step_ok, byte_limit, byte_offset);
       byte_offset += len;
     }
 
     const int32_t next_idx = ctx.scratch.next[static_cast<size_t>(idx)];
-    scan_active = scan_active && ok;
-    idx = select_i32(scan_active, next_idx, -1);
+    idx = next_idx;
   }
 
   const std::array<int32_t, 2> errors{EMEL_ERR_INVALID_ARGUMENT, EMEL_OK};

@@ -86,41 +86,6 @@ struct build_specials {
   }
 };
 
-struct partition_non_bpe {
-  template <class runtime_event_type>
-  void operator()(const runtime_event_type & runtime_ev,
-                  context & ctx) const noexcept {
-    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
-    size_t fragment_count = 0;
-    const bool ok = pdetail::partition_with_specials(
-        ev.request.text, ctx.special_cache, ev.request.parse_special,
-        ev.request.fragments_out, fragment_count);
-    detail::set_phase_result(runtime_ev, ok, fragment_count, true);
-  }
-};
-
-struct partition_bpe_no_specials {
-  template <class runtime_event_type>
-  void operator()(const runtime_event_type & runtime_ev, context & ctx) const {
-    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
-    size_t fragment_count = 0;
-    const bool ok =
-        pdetail::partition_bpe_no_specials(ev.request, ctx.bpe_scratch, fragment_count);
-    detail::set_phase_result(runtime_ev, ok, fragment_count, true);
-  }
-};
-
-struct partition_bpe_with_specials {
-  template <class runtime_event_type>
-  void operator()(const runtime_event_type & runtime_ev, context & ctx) const {
-    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
-    size_t fragment_count = 0;
-    const bool ok = pdetail::partition_bpe_with_specials(
-        ev.request, ctx.special_cache, ctx.bpe_scratch, fragment_count);
-    detail::set_phase_result(runtime_ev, ok, fragment_count, true);
-  }
-};
-
 struct mark_done {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & runtime_ev,
@@ -168,9 +133,6 @@ struct on_unexpected {
 inline constexpr begin_preprocess begin_preprocess{};
 inline constexpr reject_invalid reject_invalid{};
 inline constexpr build_specials build_specials{};
-inline constexpr partition_non_bpe partition_non_bpe{};
-inline constexpr partition_bpe_no_specials partition_bpe_no_specials{};
-inline constexpr partition_bpe_with_specials partition_bpe_with_specials{};
 inline constexpr mark_done mark_done{};
 inline constexpr ensure_last_error ensure_last_error{};
 inline constexpr on_unexpected on_unexpected{};

@@ -73,7 +73,7 @@ TEST_CASE("encoder_detail_wpm_empty_text") {
     .error_out = &err,
   };
 
-  const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
+  const auto result = emel::text::encoders::wpm::detail::encode_wpm_empty(ev, ctx, *builder.vocab);
   CHECK(result.error == EMEL_OK);
   CHECK(result.token_count == 0);
 }
@@ -96,9 +96,32 @@ TEST_CASE("encoder_wpm_encode_requires_prepared_tables") {
     .error_out = &err,
   };
 
-  const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
+  const auto result = emel::text::encoders::wpm::detail::encode_wpm_missing_tables(
+    ev, ctx, *builder.vocab);
   CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
   CHECK(result.token_count == 0);
+}
+
+TEST_CASE("encoder_wpm_rejects_prefix_capacity_overflow") {
+  vocab_builder builder{};
+  builder.set_model("bert");
+  builder.add_token("<unk>", 0.0f, 1);
+
+  emel::text::encoders::wpm::sm machine{};
+  std::array<int32_t, 4> tokens = {};
+  int32_t token_count = 0;
+  int32_t err = EMEL_OK;
+  std::string text(emel::text::encoders::detail::k_max_encode_bytes, 'a');
+
+  CHECK_FALSE(machine.process_event(emel::text::encoders::event::encode{
+    .vocab = *builder.vocab,
+    .text = text,
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(tokens.size())),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  }));
+  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(token_count == 0);
 }
 
 TEST_CASE("encoder_detail_wpm_preprocess_punctuation_and_control") {
@@ -129,7 +152,8 @@ TEST_CASE("encoder_detail_wpm_skips_unknown_without_unk") {
     .error_out = &err,
   };
 
-  const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
+  const auto result = emel::text::encoders::wpm::detail::encode_wpm_ready_tables(
+    ev, ctx, *builder.vocab);
   CHECK(result.error == EMEL_OK);
   CHECK(result.token_count == 0);
 }
@@ -152,7 +176,8 @@ TEST_CASE("encoder_detail_wpm_prefix_overflow") {
     .error_out = &err,
   };
 
-  const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
+  const auto result = emel::text::encoders::wpm::detail::encode_wpm_ready_tables(
+    ev, ctx, *builder.vocab);
   CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }
 
@@ -173,6 +198,7 @@ TEST_CASE("encoder_detail_wpm_push_overflow") {
     .error_out = &err,
   };
 
-  const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev, ctx, *builder.vocab);
+  const auto result = emel::text::encoders::wpm::detail::encode_wpm_ready_tables(
+    ev, ctx, *builder.vocab);
   CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
 }

@@ -11,8 +11,10 @@
 #include "emel/model/data.hpp"
 #include "emel/text/tokenizer/preprocessor/any.hpp"
 #include "emel/text/tokenizer/preprocessor/actions.hpp"
+#include "emel/text/tokenizer/preprocessor/bpe/actions.hpp"
 #include "emel/text/tokenizer/preprocessor/bpe/sm.hpp"
 #include "emel/text/tokenizer/preprocessor/detail.hpp"
+#include "emel/text/tokenizer/preprocessor/fallback/actions.hpp"
 
 namespace {
 
@@ -191,16 +193,16 @@ TEST_CASE("tokenizer_preprocessor_partition_with_specials_invalid_args") {
              emel::text::tokenizer::preprocessor::k_max_fragments + 1>
       too_many_fragments = {};
 
-  CHECK_FALSE(emel::text::tokenizer::preprocessor::detail::partition_with_specials(
-      std::string_view("hi"), cache, false,
+  CHECK_FALSE(emel::text::tokenizer::preprocessor::detail::partition_with_specials_parse_disabled(
+      std::string_view("hi"), cache,
       std::span<emel::text::tokenizer::preprocessor::fragment>{}, count));
-  CHECK_FALSE(emel::text::tokenizer::preprocessor::detail::partition_with_specials(
-      std::string_view("hi"), cache, false,
+  CHECK_FALSE(emel::text::tokenizer::preprocessor::detail::partition_with_specials_parse_disabled(
+      std::string_view("hi"), cache,
       std::span<emel::text::tokenizer::preprocessor::fragment>(
           one_fragment.data(), static_cast<size_t>(0)),
       count));
-  CHECK_FALSE(emel::text::tokenizer::preprocessor::detail::partition_with_specials(
-      std::string_view("hi"), cache, false,
+  CHECK_FALSE(emel::text::tokenizer::preprocessor::detail::partition_with_specials_parse_enabled(
+      std::string_view("hi"), cache,
       std::span<emel::text::tokenizer::preprocessor::fragment>(too_many_fragments),
       count));
 }
@@ -216,8 +218,8 @@ TEST_CASE("tokenizer_preprocessor_partition_with_specials_empty_token_text") {
       fragments = {};
   size_t count = 0;
 
-  CHECK(emel::text::tokenizer::preprocessor::detail::partition_with_specials(
-      std::string_view("hi"), cache, false,
+  CHECK(emel::text::tokenizer::preprocessor::detail::partition_with_specials_parse_disabled(
+      std::string_view("hi"), cache,
       std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count));
   CHECK(count == 1);
 }
@@ -259,8 +261,8 @@ TEST_CASE("tokenizer_preprocessor_partition_with_specials_empty_cache") {
       fragments = {};
   size_t count = 0;
 
-  CHECK(emel::text::tokenizer::preprocessor::detail::partition_with_specials(
-      std::string_view("hi"), cache, false,
+  CHECK(emel::text::tokenizer::preprocessor::detail::partition_with_specials_parse_disabled(
+      std::string_view("hi"), cache,
       std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count));
   CHECK(count == 1);
   CHECK(fragments[0].kind ==
@@ -279,8 +281,8 @@ TEST_CASE("tokenizer_preprocessor_partition_with_specials_skips_control") {
   size_t count = 0;
   const std::string_view text = "xxAyyBBBzz";
 
-  CHECK(emel::text::tokenizer::preprocessor::detail::partition_with_specials(
-      text, cache, false,
+  CHECK(emel::text::tokenizer::preprocessor::detail::partition_with_specials_parse_disabled(
+      text, cache,
       std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count));
   CHECK(count == 3);
   CHECK(fragments[0].text == std::string_view("xx"));
@@ -301,8 +303,8 @@ TEST_CASE("tokenizer_preprocessor_partition_with_specials_parse_control") {
   size_t count = 0;
   const std::string_view text = "BBB";
 
-  CHECK(emel::text::tokenizer::preprocessor::detail::partition_with_specials(
-      text, cache, true,
+  CHECK(emel::text::tokenizer::preprocessor::detail::partition_with_specials_parse_enabled(
+      text, cache,
       std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count));
   CHECK(count == 1);
   CHECK(fragments[0].kind ==
@@ -328,7 +330,8 @@ TEST_CASE("tokenizer_preprocessor_actions_success") {
   emel::text::tokenizer::preprocessor::action::context ctx = {};
   struct emel::text::tokenizer::preprocessor::action::begin_preprocess begin_preprocess{};
   struct emel::text::tokenizer::preprocessor::action::build_specials build_specials{};
-  struct emel::text::tokenizer::preprocessor::action::partition_non_bpe partition_non_bpe{};
+  struct emel::text::tokenizer::preprocessor::fallback::action::partition_non_bpe_skip_special
+      partition_non_bpe{};
   struct emel::text::tokenizer::preprocessor::action::mark_done mark_done{};
   begin_preprocess(runtime_ev, ctx);
   build_specials(runtime_ev, ctx);
@@ -357,7 +360,7 @@ TEST_CASE("tokenizer_preprocessor_partition_bpe_no_specials") {
       ev, runtime_ctx};
   emel::text::tokenizer::preprocessor::action::context ctx = {};
   struct emel::text::tokenizer::preprocessor::action::begin_preprocess begin_preprocess{};
-  struct emel::text::tokenizer::preprocessor::action::partition_bpe_no_specials
+  struct emel::text::tokenizer::preprocessor::bpe::action::partition_bpe_no_specials
       partition_bpe_no_specials{};
 
   begin_preprocess(runtime_ev, ctx);
@@ -397,7 +400,7 @@ TEST_CASE("tokenizer_preprocessor_partition_bpe_no_specials_large_input") {
       ev, runtime_ctx};
   emel::text::tokenizer::preprocessor::action::context ctx = {};
   struct emel::text::tokenizer::preprocessor::action::begin_preprocess begin_preprocess{};
-  struct emel::text::tokenizer::preprocessor::action::partition_bpe_no_specials
+  struct emel::text::tokenizer::preprocessor::bpe::action::partition_bpe_no_specials
       partition_bpe_no_specials{};
 
   begin_preprocess(runtime_ev, ctx);
@@ -423,7 +426,7 @@ TEST_CASE("tokenizer_preprocessor_partition_bpe_no_specials_invalid") {
   emel::text::tokenizer::preprocessor::event::preprocess_runtime runtime_ev{
       ev, runtime_ctx};
   emel::text::tokenizer::preprocessor::action::context ctx = {};
-  struct emel::text::tokenizer::preprocessor::action::partition_bpe_no_specials
+  struct emel::text::tokenizer::preprocessor::bpe::action::partition_bpe_no_specials
       partition_bpe_no_specials{};
   partition_bpe_no_specials(runtime_ev, ctx);
   CHECK(runtime_ctx.err == emel::text::tokenizer::preprocessor::error::invalid_request);
@@ -448,7 +451,7 @@ TEST_CASE("tokenizer_preprocessor_partition_bpe_with_specials") {
   emel::text::tokenizer::preprocessor::action::context ctx = {};
   struct emel::text::tokenizer::preprocessor::action::begin_preprocess begin_preprocess{};
   struct emel::text::tokenizer::preprocessor::action::build_specials build_specials{};
-  struct emel::text::tokenizer::preprocessor::action::partition_bpe_with_specials
+  struct emel::text::tokenizer::preprocessor::bpe::action::partition_bpe_with_specials_parse_special
       partition_bpe_with_specials{};
 
   begin_preprocess(runtime_ev, ctx);
@@ -478,7 +481,7 @@ TEST_CASE("tokenizer_preprocessor_partition_bpe_with_specials_invalid") {
   emel::text::tokenizer::preprocessor::event::preprocess_runtime runtime_ev{
       ev, runtime_ctx};
   emel::text::tokenizer::preprocessor::action::context ctx = {};
-  struct emel::text::tokenizer::preprocessor::action::partition_bpe_with_specials
+  struct emel::text::tokenizer::preprocessor::bpe::action::partition_bpe_with_specials_parse_special
       partition_bpe_with_specials{};
   partition_bpe_with_specials(runtime_ev, ctx);
   CHECK(runtime_ctx.err == emel::text::tokenizer::preprocessor::error::invalid_request);
@@ -651,7 +654,8 @@ TEST_CASE("tokenizer_preprocessor_partition_invalid_request") {
   emel::text::tokenizer::preprocessor::event::preprocess_ctx runtime_ctx = {};
   emel::text::tokenizer::preprocessor::event::preprocess_runtime runtime_ev{
       ev, runtime_ctx};
-  struct emel::text::tokenizer::preprocessor::action::partition_non_bpe partition_non_bpe{};
+  struct emel::text::tokenizer::preprocessor::fallback::action::partition_non_bpe_skip_special
+      partition_non_bpe{};
   partition_non_bpe(runtime_ev, ctx);
   CHECK(runtime_ctx.err == emel::text::tokenizer::preprocessor::error::invalid_request);
 }
@@ -675,7 +679,8 @@ TEST_CASE("tokenizer_preprocessor_partition_non_bpe_failure") {
   emel::text::tokenizer::preprocessor::event::preprocess_runtime runtime_ev{
       ev, runtime_ctx};
   emel::text::tokenizer::preprocessor::action::context ctx = {};
-  struct emel::text::tokenizer::preprocessor::action::partition_non_bpe partition_non_bpe{};
+  struct emel::text::tokenizer::preprocessor::fallback::action::partition_non_bpe_skip_special
+      partition_non_bpe{};
   partition_non_bpe(runtime_ev, ctx);
   CHECK(runtime_ctx.err == emel::text::tokenizer::preprocessor::error::invalid_request);
 }
@@ -697,7 +702,8 @@ TEST_CASE("tokenizer_preprocessor_partition_bpe_failure") {
   emel::text::tokenizer::preprocessor::event::preprocess_runtime runtime_ev{
       ev, runtime_ctx};
   emel::text::tokenizer::preprocessor::action::context ctx = {};
-  struct emel::text::tokenizer::preprocessor::action::partition_bpe_no_specials partition_bpe_no_specials{};
+  struct emel::text::tokenizer::preprocessor::bpe::action::partition_bpe_no_specials
+      partition_bpe_no_specials{};
   partition_bpe_no_specials(runtime_ev, ctx);
   CHECK(runtime_ctx.err == emel::text::tokenizer::preprocessor::error::invalid_request);
 }
