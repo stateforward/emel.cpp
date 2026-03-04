@@ -569,7 +569,8 @@ inline encode_result encode_plamo2(const event::encode &ev,
     const int32_t s = 1 + static_cast<int32_t>(c >= 0x80) + static_cast<int32_t>(c >= 0x800) +
                       static_cast<int32_t>(c >= 0x10000);
     const int32_t emit_byte_count = s * static_cast<int32_t>(emit_bytes);
-    for (int32_t i = 0; i < emit_byte_count && err == EMEL_OK; ++i) {
+    for (int32_t i = 0; i < emit_byte_count; ++i) {
+      const bool byte_step_active = err == EMEL_OK;
       const uint8_t single_prefix = static_cast<uint8_t>(c);
       const uint8_t lead_prefix = static_cast<uint8_t>((0xF00 >> s) & 0xFF);
       uint8_t prefix = 0x80;
@@ -580,9 +581,10 @@ inline encode_result encode_plamo2(const event::encode &ev,
       const int32_t byte_token = ctx.byte_tokens[static_cast<size_t>(b)];
       const bool byte_valid = byte_token > 0;
       bool byte_push_ok = true;
-      push_handlers[static_cast<size_t>(byte_valid)](ev, byte_token, count, byte_push_ok);
-      const bool byte_fail = !byte_valid || !byte_push_ok;
-      err = select_i32(err == EMEL_OK && byte_fail, EMEL_ERR_INVALID_ARGUMENT, err);
+      push_handlers[static_cast<size_t>(byte_step_active && byte_valid)](
+          ev, byte_token, count, byte_push_ok);
+      const bool byte_fail = byte_step_active && (!byte_valid || !byte_push_ok);
+      err = select_i32(byte_fail, EMEL_ERR_INVALID_ARGUMENT, err);
     }
 
     const int32_t step = select_i32(err == EMEL_OK, path.token_length, 0);
