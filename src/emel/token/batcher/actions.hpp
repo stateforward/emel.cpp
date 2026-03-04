@@ -141,14 +141,19 @@ inline bool for_each_mask_seq_id(const uint64_t * mask,
                                  const int32_t words,
                                  const fn_type & fn) noexcept {
   bool ok = true;
-  for (int32_t w = 0; w < words && ok; ++w) {
+  int32_t word_limit = words;
+  for (int32_t w = 0; w < word_limit; ++w) {
     uint64_t bits = mask[static_cast<size_t>(w)];
-    while (bits != 0U && ok) {
+    while (bits != 0U) {
       const int32_t bit = static_cast<int32_t>(std::countr_zero(bits));
       const int32_t seq_id = w * 64 + bit;
       ok = ok && fn(seq_id);
-      bits &= (bits - 1U);
+      const uint64_t next_bits = bits & (bits - 1U);
+      const uint64_t continue_mask = uint64_t{0} - static_cast<uint64_t>(ok);
+      bits = next_bits & continue_mask;
     }
+    const int32_t keep_limit = static_cast<int32_t>(ok);
+    word_limit = keep_limit * word_limit + (1 - keep_limit) * (w + 1);
   }
   return ok;
 }
