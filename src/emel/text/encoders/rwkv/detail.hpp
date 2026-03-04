@@ -247,7 +247,8 @@ inline bool ensure_rwkv_tables(emel::text::encoders::rwkv::action::context &ctx,
 
     std::string unescaped;
     bool ok = true;
-    for (uint32_t id = 0; id < vocab_value.n_tokens && ok; ++id) {
+    for (uint32_t id = 0; id < vocab_value.n_tokens; ++id) {
+      const bool step_active = ok;
       const std::string_view text = rwkv_token_text(vocab_value, static_cast<int32_t>(id));
       using process_text_handler_t = void (*)(emel::text::encoders::rwkv::action::context &,
                                               std::string_view,
@@ -258,7 +259,7 @@ inline bool ensure_rwkv_tables(emel::text::encoders::rwkv::action::context &ctx,
           process_text_none,
           process_text_some,
       };
-      process_text_handlers[static_cast<size_t>(!text.empty())](
+      process_text_handlers[static_cast<size_t>(step_active && !text.empty())](
           ctx_value, text, static_cast<int32_t>(id), unescaped, ok);
     }
 
