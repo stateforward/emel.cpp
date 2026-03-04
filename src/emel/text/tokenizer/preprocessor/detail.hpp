@@ -320,6 +320,31 @@ partition_bpe_no_specials(const event::preprocess & request,
   }
 
   size_t out_count = 0;
+  auto append_non_empty_words =
+      [&](const emel::text::tokenizer::bpe::detail::split_view & split_view) noexcept {
+        for (size_t idx = 0; idx < split_view.count; ++idx) {
+          const std::string_view word = split_view.words[idx];
+          if (!word.empty()) {
+            if (!push_raw_fragment(request.fragments_out.data(), request.fragments_out.size(),
+                                   out_count, word)) {
+              return false;
+            }
+          }
+        }
+        return true;
+      };
+  if (!append_non_empty_words(view)) {
+    return false;
+  }
+
+  fragment_count_out = out_count;
+  return true;
+}
+
+inline bool append_split_words_to_fragments(
+    const event::preprocess & request,
+    const emel::text::tokenizer::bpe::detail::split_view & view,
+    size_t & out_count) {
   for (size_t idx = 0; idx < view.count; ++idx) {
     const std::string_view word = view.words[idx];
     if (!word.empty()) {
@@ -330,11 +355,50 @@ partition_bpe_no_specials(const event::preprocess & request,
     }
   }
 
-  fragment_count_out = out_count;
   return true;
 }
 
-inline bool partition_bpe_with_specials(
+inline bool append_partition_token_fragment(const event::preprocess & request,
+                                            emel::text::tokenizer::bpe::detail::split_scratch &,
+                                            const fragment & frag,
+                                            size_t & out_count) {
+  return push_token_fragment(request.fragments_out.data(), request.fragments_out.size(),
+                             out_count, frag.token);
+}
+
+inline bool append_partition_raw_fragment(const event::preprocess & request,
+                                          emel::text::tokenizer::bpe::detail::split_scratch & scratch,
+                                          const fragment & frag,
+                                          size_t & out_count) {
+  if (frag.text.empty()) {
+    return true;
+  }
+  emel::text::tokenizer::bpe::detail::split_view view = {};
+  if (!emel::text::tokenizer::bpe::detail::split_and_encode_append(
+          frag.text, request.vocab, scratch, view)) {
+    return false;
+  }
+  return append_split_words_to_fragments(request, view, out_count);
+}
+
+inline bool append_partition_fragment(const event::preprocess & request,
+                                      emel::text::tokenizer::bpe::detail::split_scratch & scratch,
+                                      const fragment & frag,
+                                      size_t & out_count) {
+  using append_fn_type = bool (*)(const event::preprocess &,
+                                  emel::text::tokenizer::bpe::detail::split_scratch &,
+                                  const fragment &,
+                                  size_t &);
+  const std::array<append_fn_type, 2> appenders = {
+      append_partition_raw_fragment,
+      append_partition_token_fragment,
+  };
+  const size_t is_token = static_cast<size_t>(frag.kind == fragment_kind::token);
+  return appenders[is_token](request, scratch, frag, out_count);
+}
+
+inline bool
+partition_bpe_with_specials(
     const event::preprocess & request, const special_token_cache & cache,
     emel::text::tokenizer::bpe::detail::split_scratch & scratch,
     size_t & fragment_count_out) {
@@ -353,29 +417,8 @@ inline bool partition_bpe_with_specials(
   size_t out_count = 0;
   for (size_t idx = 0; idx < partition_count; ++idx) {
     const fragment & frag = partitions[idx];
-    if (frag.kind == fragment_kind::token) {
-      if (!push_token_fragment(request.fragments_out.data(), request.fragments_out.size(),
-                               out_count, frag.token)) {
-        return false;
-      }
-      continue;
-    }
-
-    if (!frag.text.empty()) {
-      emel::text::tokenizer::bpe::detail::split_view view = {};
-      if (!emel::text::tokenizer::bpe::detail::split_and_encode_append(
-              frag.text, request.vocab, scratch, view)) {
-        return false;
-      }
-      for (size_t word_idx = 0; word_idx < view.count; ++word_idx) {
-        const std::string_view word = view.words[word_idx];
-        if (!word.empty()) {
-          if (!push_raw_fragment(request.fragments_out.data(), request.fragments_out.size(),
-                                 out_count, word)) {
-            return false;
-          }
-        }
-      }
+    if (!append_partition_fragment(request, scratch, frag, out_count)) {
+      return false;
     }
   }
 
