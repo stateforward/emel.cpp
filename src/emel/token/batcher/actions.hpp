@@ -307,7 +307,8 @@ inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
     token_limit = keep_limit * token_limit + (1 - keep_limit) * (i + 1);
   }
 
-  for (int32_t i = 0; i < active_seq_count && ok; ++i) {
+  int32_t active_limit = active_seq_count;
+  for (int32_t i = 0; i < active_limit; ++i) {
     const int32_t seq_id = active_seq_ids[i];
     const int32_t min_pos = seq_pos_min[seq_id];
     const int32_t max_pos = seq_pos_max[seq_id];
@@ -316,6 +317,8 @@ inline bool continuity_ok(const event::batch_runtime & ev) noexcept {
                             max_pos != std::numeric_limits<int32_t>::min();
     const int64_t span = static_cast<int64_t>(max_pos) - static_cast<int64_t>(min_pos) + 1;
     ok = ok && (!has_bounds || span <= count);
+    const int32_t keep_limit = static_cast<int32_t>(ok);
+    active_limit = keep_limit * active_limit + (1 - keep_limit) * (i + 1);
   }
 
   return ok;
