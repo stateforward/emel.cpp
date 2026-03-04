@@ -574,27 +574,6 @@ struct apply_render_stop_matching {
   }
 };
 
-struct commit_render_output {
-  template <class runtime_event_type>
-  void operator()(const runtime_event_type & ev,
-                  context & ctx) const noexcept {
-    commit_render_detokenizer_output{}(ev, ctx);
-    update_render_strip_state{}(ev, ctx);
-    apply_render_stop_matching{}(ev, ctx);
-  }
-};
-
-struct commit_and_strip_render_output {
-  template <class runtime_event_type>
-  void operator()(const runtime_event_type & ev,
-                  context & ctx) const noexcept {
-    commit_render_detokenizer_output{}(ev, ctx);
-    strip_render_leading_space{}(ev, ctx);
-    update_render_strip_state{}(ev, ctx);
-    apply_render_stop_matching{}(ev, ctx);
-  }
-};
-
 struct begin_flush {
   void operator()(const event::flush_runtime & ev,
                   context &) const noexcept {
@@ -802,8 +781,6 @@ inline constexpr reject_render reject_render{};
 inline constexpr render_sequence_already_stopped render_sequence_already_stopped{};
 inline constexpr dispatch_render_detokenizer dispatch_render_detokenizer{};
 inline constexpr commit_render_detokenizer_output commit_render_detokenizer_output{};
-inline constexpr commit_render_output commit_render_output{};
-inline constexpr commit_and_strip_render_output commit_and_strip_render_output{};
 inline constexpr strip_render_leading_space strip_render_leading_space{};
 inline constexpr update_render_strip_state update_render_strip_state{};
 inline constexpr apply_render_stop_matching apply_render_stop_matching{};

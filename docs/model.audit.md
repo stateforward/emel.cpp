@@ -370,3 +370,9 @@ User-requested machine action/detail findings and remediation status:
   `emit_result_decision` and `emit_result_{ok,failed}` guards/actions
   (`apply_emit_result_ok` / `apply_emit_result_failed`) instead of implicit
   finalization inside execute/detail code
+- [x] `text/renderer/actions.hpp` + `text/renderer/sm.hpp`
+  reworked render post-dispatch flow into explicit `sm.hpp` phases
+  (`render_commit_output_exec`, `render_strip_decision`, `render_strip_exec`,
+  `render_strip_state_exec`, `render_stop_match_exec`, `render_finalize_decision`)
+  and removed composite render actions that previously bundled commit/strip/stop
+  behavior implicitly inside single action calls
