@@ -817,10 +817,12 @@ inline encode_result encode_ugm(const event::encode &ev,
   }
 
   int32_t count = 0;
-  for (size_t i = 0; i < out_count && err == EMEL_OK; ++i) {
+  size_t emit_limit = select_size(err == EMEL_OK, out_count, static_cast<size_t>(0));
+  for (size_t i = 0; i < emit_limit; ++i) {
     const int32_t token = ctx.token_buffer[out_count - 1u - i];
     const bool pushed = ugm_push_token(ev, token, count);
     err = select_i32(err == EMEL_OK && !pushed, EMEL_ERR_INVALID_ARGUMENT, err);
+    emit_limit = select_size(err == EMEL_OK, emit_limit, i + 1u);
   }
 
   result.token_count = count * static_cast<int32_t>(err == EMEL_OK);
