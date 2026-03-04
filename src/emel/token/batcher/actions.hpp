@@ -162,9 +162,12 @@ inline bool primary_ids_in_range(const int32_t * primary_ids,
                                  const int32_t count,
                                  const int32_t seq_limit) noexcept {
   bool in_range = true;
-  for (int32_t i = 0; i < count && in_range; ++i) {
+  int32_t scan_limit = count;
+  for (int32_t i = 0; i < scan_limit; ++i) {
     const int32_t seq_id = primary_ids[i];
     in_range = in_range && seq_id >= 0 && seq_id < seq_limit;
+    const int32_t keep_limit = static_cast<int32_t>(in_range);
+    scan_limit = keep_limit * scan_limit + (1 - keep_limit) * (i + 1);
   }
   return in_range;
 }
