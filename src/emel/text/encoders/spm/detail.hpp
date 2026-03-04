@@ -544,13 +544,17 @@ inline int32_t merge_spm(emel::text::encoders::spm::action::context &ctx,
                          const bool active) noexcept {
   const std::string_view escaped(ctx.scratch.buffer.data(),
                                  ctx.scratch.buffer.size());
-  for (bool keep_merging = active && ctx.scratch.symbol_count > 1;
-       keep_merging;) {
+  const bool can_merge = active && ctx.scratch.symbol_count > 1;
+  const int32_t merge_pass_limit =
+      select_i32(can_merge, ctx.scratch.symbol_count - 1, 0);
+  bool merge_active = can_merge;
+
+  for (int32_t merge_pass = 0; merge_pass < merge_pass_limit; ++merge_pass) {
     float best_score = -std::numeric_limits<float>::infinity();
     int32_t best_left = -1;
     int32_t best_right = -1;
 
-    for (int32_t left = 0; left != -1;
+    for (int32_t left = select_i32(merge_active, 0, -1); left != -1;
          left = ctx.scratch.next[static_cast<size_t>(left)]) {
       const int32_t right = ctx.scratch.next[static_cast<size_t>(left)];
       const bool has_right = right >= 0;
@@ -578,9 +582,9 @@ inline int32_t merge_spm(emel::text::encoders::spm::action::context &ctx,
       best_right = select_i32(choose, right, best_right);
     }
 
-    const bool has_best = best_left >= 0 && best_right >= 0;
+    const bool has_best = merge_active && best_left >= 0 && best_right >= 0;
     spm_merge_symbols_if(ctx.scratch, has_best, best_left, best_right);
-    keep_merging = has_best;
+    merge_active = merge_active && has_best;
   }
 
   (void)vocab;
