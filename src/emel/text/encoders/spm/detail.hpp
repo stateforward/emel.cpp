@@ -606,9 +606,10 @@ inline encode_result emit_spm(const event::encode &ev,
   encode_result result{};
   int32_t count = 0;
   int32_t err = EMEL_OK;
-  for (int32_t idx = select_i32(active, 0, -1); idx != -1 && err == EMEL_OK;
-       idx = ctx.scratch.next[static_cast<size_t>(idx)]) {
-    const bool has_symbol = ctx.scratch.lengths[static_cast<size_t>(idx)] != 0u;
+  int32_t idx = select_i32(active, 0, -1);
+  for (; idx != -1;) {
+    const bool step_active = err == EMEL_OK;
+    const bool has_symbol = step_active && ctx.scratch.lengths[static_cast<size_t>(idx)] != 0u;
     const size_t offset = ctx.scratch.offsets[static_cast<size_t>(idx)];
     const size_t length = ctx.scratch.lengths[static_cast<size_t>(idx)] *
                           static_cast<size_t>(has_symbol);
@@ -618,20 +619,23 @@ inline encode_result emit_spm(const event::encode &ev,
     const bool emit_direct = has_symbol && token != k_token_null;
     const bool direct_ok = spm_push_token_if(emit_direct, ev, token, count);
     const bool direct_fail = emit_direct && !direct_ok;
-    err = select_i32(err == EMEL_OK && direct_fail, EMEL_ERR_INVALID_ARGUMENT,
-                     err);
+    err = select_i32(step_active && direct_fail, EMEL_ERR_INVALID_ARGUMENT, err);
 
     const bool emit_bytes = has_symbol && token == k_token_null;
     const size_t byte_len = symbol.size() * static_cast<size_t>(emit_bytes);
-    for (size_t byte_offset = 0; byte_offset < byte_len && err == EMEL_OK;
-         ++byte_offset) {
+    size_t byte_limit = byte_len;
+    for (size_t byte_offset = 0; byte_offset < byte_limit; ++byte_offset) {
       const unsigned char c = static_cast<unsigned char>(symbol[byte_offset]);
       const int32_t byte_token = spm_byte_to_token(ctx, c);
       const bool byte_valid = byte_token != k_token_null;
       const bool byte_ok = spm_push_token_if(byte_valid, ev, byte_token, count);
       const bool byte_fail = !byte_valid || !byte_ok;
       err = select_i32(err == EMEL_OK && byte_fail, EMEL_ERR_BACKEND, err);
+      byte_limit = select_size(err == EMEL_OK, byte_limit, byte_offset + 1u);
     }
+
+    const int32_t next_idx = ctx.scratch.next[static_cast<size_t>(idx)];
+    idx = select_i32(err == EMEL_OK, next_idx, -1);
   }
 
   result.token_count = count * static_cast<int32_t>(err == EMEL_OK);
