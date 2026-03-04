@@ -615,6 +615,28 @@ inline bool scan_unary_phase(const ::emel::text::jinja::lexer::cursor &cursor,
   return true;
 }
 
+inline bool scan_mapping_phase(const ::emel::text::jinja::lexer::cursor &cursor,
+                               scan_outcome &out,
+                               const std::string_view source,
+                               const size_t size,
+                               const size_t pos) {
+  for (const auto &entry : k_mapping_table) {
+    const bool skip_close_curly = entry.seq == "}}" && cursor.curly_bracket_depth > 0u;
+    if (!skip_close_curly &&
+        pos + entry.seq.size() <= size &&
+        source.compare(pos, entry.seq.size(), entry.seq) == 0) {
+      out.has_token = true;
+      out.token_value = token{entry.type, std::string(entry.seq), pos};
+      out.next_cursor = emit_cursor(cursor,
+                                    pos + entry.seq.size(),
+                                    out.token_value.type,
+                                    out.token_value.value);
+      return true;
+    }
+  }
+  return false;
+}
+
 inline scan_outcome
 scan_next_token(const ::emel::text::jinja::lexer::cursor &cursor) {
   scan_outcome out{};
@@ -646,19 +668,8 @@ scan_next_token(const ::emel::text::jinja::lexer::cursor &cursor) {
       return out;
     }
 
-    for (const auto &entry : k_mapping_table) {
-      const bool skip_close_curly = entry.seq == "}}" && cursor.curly_bracket_depth > 0u;
-      if (!skip_close_curly &&
-          pos + entry.seq.size() <= size &&
-          source.compare(pos, entry.seq.size(), entry.seq) == 0) {
-        out.has_token = true;
-        out.token_value = token{entry.type, std::string(entry.seq), pos};
-        out.next_cursor = emit_cursor(cursor,
-                                      pos + entry.seq.size(),
-                                      out.token_value.type,
-                                      out.token_value.value);
-        return out;
-      }
+    if (scan_mapping_phase(cursor, out, source, size, pos)) {
+      return out;
     }
 
     if (ch == '\'' || ch == '"') {
