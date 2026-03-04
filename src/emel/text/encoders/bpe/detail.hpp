@@ -448,9 +448,11 @@ inline bool encode_bpe_word_merge_path(
   }
 
   const int32_t first_symbol = select_i32(ctx.scratch.symbol_count > 0, 0, -1);
-  for (int32_t idx = first_symbol; ok && idx != -1;
-       idx = ctx.scratch.next[static_cast<size_t>(idx)]) {
-    const bool has_symbol = ctx.scratch.lengths[static_cast<size_t>(idx)] > 0;
+  int32_t idx = first_symbol;
+  bool scan_active = ok;
+  for (; idx != -1;) {
+    const bool step_active = scan_active;
+    const bool has_symbol = step_active && ctx.scratch.lengths[static_cast<size_t>(idx)] > 0;
     const size_t sym_off = ctx.scratch.offsets[static_cast<size_t>(idx)];
     const size_t sym_len = ctx.scratch.lengths[static_cast<size_t>(idx)];
     const std::string_view symbol(word.data() + sym_off,
@@ -460,8 +462,8 @@ inline bool encode_bpe_word_merge_path(
     const bool direct_pushed = bpe_push_token_if(direct_hit, ev, token, count);
     ok = ok && (!direct_hit || direct_pushed);
 
-    for (size_t byte_offset = 0;
-         ok && !direct_hit && byte_offset < symbol.size();) {
+    size_t byte_limit = select_size(step_active && !direct_hit, symbol.size(), 0u);
+    for (size_t byte_offset = 0; byte_offset < byte_limit;) {
       size_t len = emel::text::unicode_len_utf8(symbol[byte_offset]);
       const size_t remaining = symbol.size() - byte_offset;
       len = select_size(len <= remaining, len, static_cast<size_t>(1));
@@ -470,9 +472,15 @@ inline bool encode_bpe_word_merge_path(
       const bool emit_byte = byte_token != k_token_null;
       const bool byte_pushed =
           bpe_push_token_if(emit_byte, ev, byte_token, count);
-      ok = ok && (!emit_byte || byte_pushed);
+      const bool step_ok = !emit_byte || byte_pushed;
+      ok = ok && step_ok;
+      byte_limit = select_size(step_ok, byte_limit, byte_offset);
       byte_offset += len;
     }
+
+    const int32_t next_idx = ctx.scratch.next[static_cast<size_t>(idx)];
+    scan_active = scan_active && ok;
+    idx = select_i32(scan_active, next_idx, -1);
   }
 
   const std::array<int32_t, 2> errors{EMEL_ERR_INVALID_ARGUMENT, EMEL_OK};
