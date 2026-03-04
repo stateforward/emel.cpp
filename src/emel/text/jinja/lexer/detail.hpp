@@ -346,33 +346,29 @@ inline std::string consume_numeric(const std::string_view source, size_t &pos) {
   return value;
 }
 
-inline scan_outcome
-scan_next_token(const ::emel::text::jinja::lexer::cursor &cursor) {
-  scan_outcome out{};
-  out.next_cursor = cursor;
-
-  const std::string_view source = cursor.source;
-  const size_t size = source.size();
-  size_t pos = cursor.offset;
-
-  while (pos < size) {
-    if (at_text_boundary(cursor.last_token_type)) {
-      const size_t start = pos;
-      size_t end = start;
-      while (pos < size &&
-             !(source[pos] == '{' && next_pos_is(source, pos, {'%', '{', '#'}))) {
-        end = ++pos;
-      }
-
-      const bool has_opening_block =
-          pos < size &&
-          source[pos] == '{' &&
-          next_pos_is(source, pos, {'%', '#', '-'});
-      if (has_opening_block) {
-        size_t current = end;
+inline void trim_text_before_opening_block(const std::string_view source,
+                                           const size_t start,
+                                           size_t &end,
+                                           const size_t pos,
+                                           const size_t size) noexcept {
+  const bool has_opening_block =
+      pos < size &&
+      source[pos] == '{' &&
+      next_pos_is(source, pos, {'%', '#', '-'});
+  using trim_entry_t =
+      void (*)(const std::string_view, const size_t, size_t &, const size_t, const size_t)
+          noexcept;
+  static constexpr std::array<trim_entry_t, 2> trim_entries = {
+      +[](const std::string_view, const size_t, size_t &, const size_t, const size_t) noexcept {},
+      +[](const std::string_view source_value,
+          const size_t start_value,
+          size_t &end_value,
+          const size_t,
+          const size_t) noexcept {
+        size_t current = end_value;
         bool keep_trimming = true;
-        while (current > start && keep_trimming) {
-          const char c = source[current - 1];
+        while (current > start_value && keep_trimming) {
+          const char c = source_value[current - 1];
           const size_t trim_mode =
               static_cast<size_t>(current == 1u) * 2u +
               static_cast<size_t>(c == '\n');
@@ -385,67 +381,181 @@ scan_next_token(const ::emel::text::jinja::lexer::cursor &cursor) {
                   keep_value = false;
                 }
               },
-              +[](size_t &end_value, size_t &current_value, bool &keep_value, const char) noexcept {
-                end_value = current_value;
+              +[](size_t &end_cursor, size_t &current_value, bool &keep_value, const char)
+                  noexcept {
+                end_cursor = current_value;
                 keep_value = false;
               },
-              +[](size_t &end_value, size_t &, bool &keep_value, const char) noexcept {
-                end_value = 0u;
+              +[](size_t &end_cursor, size_t &, bool &keep_value, const char) noexcept {
+                end_cursor = 0u;
                 keep_value = false;
               },
           };
           static constexpr std::array<size_t, 4> trim_mode_dispatch = {0u, 1u, 2u, 0u};
-          trim_handlers[trim_mode_dispatch[trim_mode]](end, current, keep_trimming, c);
+          trim_handlers[trim_mode_dispatch[trim_mode]](end_value, current, keep_trimming, c);
         }
-      }
+      },
+  };
+  trim_entries[static_cast<size_t>(has_opening_block)](source, start, end, pos, size);
+}
 
-      std::string text = std::string(source.substr(start, end - start));
-      const bool trim_leading_newline =
-          cursor.last_block_can_trim_newline && !text.empty() && text.front() == '\n';
-      if (trim_leading_newline) {
-        text.erase(text.begin());
-      }
-      if (cursor.last_block_rstrip) {
-        string_lstrip(text, " \t\r\n");
-      }
+inline bool scan_text_token_at_boundary(const ::emel::text::jinja::lexer::cursor &cursor,
+                                        scan_outcome &out,
+                                        const std::string_view source,
+                                        const size_t size,
+                                        size_t &pos) {
+  const bool at_boundary = at_text_boundary(cursor.last_token_type);
+  using scan_entry_t = bool (*)(const ::emel::text::jinja::lexer::cursor &,
+                                scan_outcome &,
+                                const std::string_view,
+                                const size_t,
+                                size_t &);
+  static constexpr std::array<scan_entry_t, 2> scan_entries = {
+      +[](const ::emel::text::jinja::lexer::cursor &,
+          scan_outcome &,
+          const std::string_view,
+          const size_t,
+          size_t &) -> bool {
+        return false;
+      },
+      +[](const ::emel::text::jinja::lexer::cursor &cursor_value,
+          scan_outcome &out_value,
+          const std::string_view source_value,
+          const size_t size_value,
+          size_t &pos_value) -> bool {
+        const size_t start = pos_value;
+        size_t end = start;
+        while (pos_value < size_value &&
+               !(source_value[pos_value] == '{' &&
+                 next_pos_is(source_value, pos_value, {'%', '{', '#'}))) {
+          end = ++pos_value;
+        }
 
-      const bool is_lstrip_block =
-          pos < size &&
-          source[pos] == '{' &&
-          next_pos_is(source, pos, {'{', '%', '#'}) &&
-          next_pos_is(source, pos, {'-'}, 2u);
-      if (is_lstrip_block) {
-        string_rstrip(text, " \t\r\n");
-      }
+        trim_text_before_opening_block(source_value, start, end, pos_value, size_value);
 
-      if (!text.empty()) {
-        out.has_token = true;
-        out.token_value = token{token_type::text, std::move(text), start};
-        out.next_cursor = emit_cursor(cursor, pos, out.token_value.type, out.token_value.value);
-        return out;
-      }
+        std::string text = std::string(source_value.substr(start, end - start));
+        const bool trim_leading_newline =
+            cursor_value.last_block_can_trim_newline && !text.empty() && text.front() == '\n';
+        if (trim_leading_newline) {
+          text.erase(text.begin());
+        }
+        if (cursor_value.last_block_rstrip) {
+          string_lstrip(text, " \t\r\n");
+        }
+
+        const bool is_lstrip_block =
+            pos_value < size_value &&
+            source_value[pos_value] == '{' &&
+            next_pos_is(source_value, pos_value, {'{', '%', '#'}) &&
+            next_pos_is(source_value, pos_value, {'-'}, 2u);
+        if (is_lstrip_block) {
+          string_rstrip(text, " \t\r\n");
+        }
+
+        if (text.empty()) {
+          return false;
+        }
+        out_value.has_token = true;
+        out_value.token_value = token{token_type::text, std::move(text), start};
+        out_value.next_cursor = emit_cursor(
+            cursor_value, pos_value, out_value.token_value.type, out_value.token_value.value);
+        return true;
+      },
+  };
+  return scan_entries[static_cast<size_t>(at_boundary)](cursor, out, source, size, pos);
+}
+
+inline bool scan_comment_token(const ::emel::text::jinja::lexer::cursor &cursor,
+                               scan_outcome &out,
+                               const std::string_view source,
+                               const size_t size,
+                               size_t &pos) {
+  const bool starts_comment = pos < size && source[pos] == '{' && next_pos_is(source, pos, {'#'});
+  using comment_entry_t = bool (*)(const ::emel::text::jinja::lexer::cursor &,
+                                   scan_outcome &,
+                                   const std::string_view,
+                                   const size_t,
+                                   size_t &);
+  static constexpr std::array<comment_entry_t, 2> comment_entries = {
+      +[](const ::emel::text::jinja::lexer::cursor &,
+          scan_outcome &,
+          const std::string_view,
+          const size_t,
+          size_t &) -> bool {
+        return false;
+      },
+      +[](const ::emel::text::jinja::lexer::cursor &cursor_value,
+          scan_outcome &out_value,
+          const std::string_view source_value,
+          const size_t size_value,
+          size_t &pos_value) -> bool {
+        const size_t start = pos_value;
+        pos_value += 2u;
+        std::string comment;
+        bool done = false;
+        while (pos_value < size_value &&
+               !(source_value[pos_value] == '#' && next_pos_is(source_value, pos_value, {'}'})) &&
+               !done) {
+          const bool hit_unterminated = pos_value + 2u >= size_value;
+          using unterminated_entry_t = void (*)(scan_outcome &, const size_t, bool &) noexcept;
+          static constexpr std::array<unterminated_entry_t, 2> unterminated_entries = {
+              +[](scan_outcome &, const size_t, bool &) noexcept {},
+              +[](scan_outcome &out_entry, const size_t value_pos, bool &done_entry) noexcept {
+                set_error(out_entry, value_pos);
+                done_entry = true;
+              },
+          };
+          unterminated_entries[static_cast<size_t>(hit_unterminated)](out_value, pos_value, done);
+
+          if (!done) {
+            comment.push_back(source_value[pos_value]);
+            ++pos_value;
+          }
+        }
+
+        if (done) {
+          return true;
+        }
+
+        const bool missing_close = pos_value + 1u >= size_value;
+        using close_entry_t = bool (*)(scan_outcome &, const size_t);
+        static constexpr std::array<close_entry_t, 2> close_entries = {
+            +[](scan_outcome &, const size_t) -> bool { return false; },
+            +[](scan_outcome &out_entry, const size_t value_pos) -> bool {
+              set_error(out_entry, value_pos);
+              return true;
+            },
+        };
+        if (close_entries[static_cast<size_t>(missing_close)](out_value, pos_value)) {
+          return true;
+        }
+
+        pos_value += 2u;
+        out_value.has_token = true;
+        out_value.token_value = token{token_type::comment, std::move(comment), start};
+        out_value.next_cursor = emit_cursor(
+            cursor_value, pos_value, out_value.token_value.type, out_value.token_value.value);
+        return true;
+      },
+  };
+  return comment_entries[static_cast<size_t>(starts_comment)](cursor, out, source, size, pos);
+}
+
+inline scan_outcome
+scan_next_token(const ::emel::text::jinja::lexer::cursor &cursor) {
+  scan_outcome out{};
+  out.next_cursor = cursor;
+
+  const std::string_view source = cursor.source;
+  const size_t size = source.size();
+  size_t pos = cursor.offset;
+
+  while (pos < size) {
+    if (scan_text_token_at_boundary(cursor, out, source, size, pos)) {
+      return out;
     }
 
-    if (pos < size && source[pos] == '{' && next_pos_is(source, pos, {'#'})) {
-      const size_t start = pos;
-      pos += 2u;
-      std::string comment;
-      while (pos < size && !(source[pos] == '#' && next_pos_is(source, pos, {'}'}))) {
-        if (pos + 2u >= size) {
-          set_error(out, pos);
-          return out;
-        }
-        comment.push_back(source[pos]);
-        ++pos;
-      }
-      if (pos + 1u >= size) {
-        set_error(out, pos);
-        return out;
-      }
-      pos += 2u;
-      out.has_token = true;
-      out.token_value = token{token_type::comment, std::move(comment), start};
-      out.next_cursor = emit_cursor(cursor, pos, out.token_value.type, out.token_value.value);
+    if (scan_comment_token(cursor, out, source, size, pos)) {
       return out;
     }
 
