@@ -219,11 +219,17 @@ template <class tensor_type>
 inline size_t tensor_offset_bytes(const tensor_type & tensor, const uint64_t idx) noexcept {
   uint64_t remaining = idx;
   size_t offset = 0;
-  for (size_t d = 0; d < 4 && tensor.ne[d] != 0; ++d) {
-    const uint64_t dim = tensor.ne[d];
+  bool dims_active = true;
+  for (size_t d = 0; d < 4; ++d) {
+    const bool dim_non_zero = tensor.ne[d] != 0u;
+    const bool step_active = dims_active && dim_non_zero;
+    const uint64_t dim = select_u64(step_active, tensor.ne[d], 1u);
     const uint64_t coord = remaining % dim;
-    remaining /= dim;
-    offset += static_cast<size_t>(coord * tensor_stride_bytes(tensor, d));
+    const uint64_t stride = tensor_stride_bytes(tensor, d);
+    const uint64_t offset_step = coord * stride;
+    offset += static_cast<size_t>(select_u64(step_active, offset_step, 0u));
+    remaining = select_u64(step_active, remaining / dim, remaining);
+    dims_active = dims_active && dim_non_zero;
   }
   return offset;
 }
