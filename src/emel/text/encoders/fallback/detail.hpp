@@ -193,13 +193,17 @@ inline encode_result encode_fallback_exec(const event::encode &ev,
 
   int32_t count = 0;
   bool failed = false;
-  for (size_t i = 0; i < ev.text.size() && !failed; ++i) {
+  bool loop_active = true;
+  for (size_t i = 0; i < ev.text.size(); ++i) {
+    const bool step_active = loop_active;
     const unsigned char byte = static_cast<unsigned char>(ev.text[i]);
     const char raw = static_cast<char>(byte);
     const int32_t token = fallback_lookup_token(ctx, vocab, std::string_view(&raw, 1));
-    const bool pushed = fallback_push_token(ev, token, count);
-    const bool ok = token != k_token_null && pushed;
-    failed = failed || !ok;
+    const int32_t gated_token = select_i32(step_active, token, k_token_null);
+    const bool pushed = fallback_push_token(ev, gated_token, count);
+    const bool ok = step_active && token != k_token_null && pushed;
+    failed = failed || (step_active && !ok);
+    loop_active = loop_active && ok;
   }
 
   using finalize_handler_t = void (*)(encode_result &, int32_t);
