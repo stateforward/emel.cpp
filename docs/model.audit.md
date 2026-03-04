@@ -292,7 +292,14 @@ Despite earlier remediations, explicit `if` statements were found introduced/rem
   phases (`partitioning_select`, `partition_parse_special_decision`) so both
   specials-presence and `parse_special` routing are modeled in `sm.hpp`; moved
   bpe-only partition helpers out of shared `preprocessor/detail.hpp` into
-  `bpe/actions.hpp` per "detail only for shared helpers".
+  `bpe/actions.hpp` per "detail only for shared helpers"; extended with explicit
+  per-path empty-input decision phases
+  (`partitioning_bpe_no_specials_input_decision`,
+  `partitioning_bpe_with_specials_parse_input_decision`,
+  `partitioning_bpe_with_specials_skip_input_decision`) and
+  `request_text_{empty,nonempty}` guards in `bpe/sm.hpp` so empty-input routing is
+  explicit in the model before partition execute phases; removed runtime `if`
+  branching from `bpe/actions.hpp` helper flow.
 
 ### 3. Hidden Error-Control Loop Violations
 The following data-plane loops terminate early on error/status checks instead of explicitly modeling the failure path in the state machine (violating the rule: "Loops in actions/detail are data-plane iteration only... not success/error/mode/retry/routing control"):

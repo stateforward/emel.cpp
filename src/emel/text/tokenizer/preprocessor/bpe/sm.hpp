@@ -20,6 +20,9 @@ struct preparing {};
 struct build_specials_decision {};
 struct partitioning_select {};
 struct partition_parse_special_decision {};
+struct partitioning_bpe_no_specials_input_decision {};
+struct partitioning_bpe_with_specials_parse_input_decision {};
+struct partitioning_bpe_with_specials_skip_input_decision {};
 struct partitioning_bpe_no_specials {};
 struct partitioning_bpe_with_specials_parse_special {};
 struct partitioning_bpe_with_specials_skip_special {};
@@ -85,7 +88,7 @@ struct model {
       , sml::state<partitioning_select> <= sml::state<build_specials_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::phase_ok{} ]
 
-      , sml::state<partitioning_bpe_no_specials> <= sml::state<partitioning_select>
+      , sml::state<partitioning_bpe_no_specials_input_decision> <= sml::state<partitioning_select>
                    + sml::completion<event::preprocess_runtime>[ guard::no_specials{} ]
       , sml::state<partition_parse_special_decision> <= sml::state<partitioning_select>
                    + sml::completion<event::preprocess_runtime>[ guard::has_specials{} ]
@@ -93,11 +96,38 @@ struct model {
                    + sml::completion<event::preprocess_runtime>
                    / action::ensure_last_error
 
-      , sml::state<partitioning_bpe_with_specials_parse_special> <= sml::state<partition_parse_special_decision>
+      , sml::state<partitioning_bpe_with_specials_parse_input_decision> <= sml::state<partition_parse_special_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::parse_special_enabled{} ]
-      , sml::state<partitioning_bpe_with_specials_skip_special> <= sml::state<partition_parse_special_decision>
+      , sml::state<partitioning_bpe_with_specials_skip_input_decision> <= sml::state<partition_parse_special_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::parse_special_disabled{} ]
       , sml::state<errored> <= sml::state<partition_parse_special_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::ensure_last_error
+
+      , sml::state<partition_decision> <= sml::state<partitioning_bpe_no_specials_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_empty{} ]
+                   / action::set_empty_partition_result
+      , sml::state<partitioning_bpe_no_specials> <= sml::state<partitioning_bpe_no_specials_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_nonempty{} ]
+      , sml::state<errored> <= sml::state<partitioning_bpe_no_specials_input_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::ensure_last_error
+
+      , sml::state<partition_decision> <= sml::state<partitioning_bpe_with_specials_parse_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_empty{} ]
+                   / action::set_empty_partition_result
+      , sml::state<partitioning_bpe_with_specials_parse_special> <= sml::state<partitioning_bpe_with_specials_parse_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_nonempty{} ]
+      , sml::state<errored> <= sml::state<partitioning_bpe_with_specials_parse_input_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::ensure_last_error
+
+      , sml::state<partition_decision> <= sml::state<partitioning_bpe_with_specials_skip_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_empty{} ]
+                   / action::set_empty_partition_result
+      , sml::state<partitioning_bpe_with_specials_skip_special> <= sml::state<partitioning_bpe_with_specials_skip_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_nonempty{} ]
+      , sml::state<errored> <= sml::state<partitioning_bpe_with_specials_skip_input_decision>
                    + sml::completion<event::preprocess_runtime>
                    / action::ensure_last_error
 
@@ -135,6 +165,12 @@ struct model {
       , sml::state<unexpected> <= sml::state<partitioning_select> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<partition_parse_special_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<partitioning_bpe_no_specials_input_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<partitioning_bpe_with_specials_parse_input_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<partitioning_bpe_with_specials_skip_input_decision> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<partitioning_bpe_no_specials> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
