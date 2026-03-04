@@ -646,42 +646,4 @@ inline encode_result emit_spm(const event::encode &ev,
   return result;
 }
 
-inline encode_result encode_spm(const event::encode &ev,
-                                emel::text::encoders::spm::action::context &ctx,
-                                const emel::model::data::vocab &vocab) {
-  encode_result result{};
-  const int32_t ok = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
-  if (ev.text.empty()) {
-    result.error = ok;
-    result.token_count = 0;
-    return result;
-  }
-
-  if (!spm_tables_ready(ctx, vocab)) {
-    result.error = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument);
-    result.token_count = 0;
-    return result;
-  }
-
-  const int32_t prepare_error = prepare_spm(ev, ctx, vocab);
-  if (prepare_error != ok) {
-    result.error = prepare_error;
-    result.token_count = 0;
-    return result;
-  }
-
-  const int32_t merge_error = merge_spm(ctx, vocab);
-  if (merge_error != ok) {
-    result.error = merge_error;
-    result.token_count = 0;
-    return result;
-  }
-
-  const encode_result emitted = emit_spm(ev, ctx, vocab);
-  result.error = emitted.error;
-  result.token_count = emitted.token_count *
-                       static_cast<int32_t>(emitted.error == ok);
-  return result;
-}
-
 } // namespace emel::text::encoders::spm::detail

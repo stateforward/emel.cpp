@@ -110,7 +110,9 @@ Status correction: the following files still contain implicit runtime control fl
   explicit `encode_emit_input_decision` routing in `spm/sm.hpp` for
   `symbols_present` vs `symbols_absent` before emit execution and removed
   loop-condition traversal gates (`left != -1`, `idx != -1`) from
-  `spm/detail.hpp`)
+  `spm/detail.hpp`; removed legacy `encode_spm(...)` orchestration wrapper from
+  `spm/detail.hpp` so encode control flow exists only in explicit `spm/sm.hpp`
+  phases/transitions)
 - [x] `src/emel/text/encoders/fallback/guards.hpp` (rearchitected encode intake
   routing into explicit `encode_validity_decision` and
   `encode_vocab_sync_decision` phases in `text/encoders/fallback/sm.hpp`;
