@@ -238,6 +238,11 @@ Status correction: the following files still contain implicit runtime control fl
   typed `parse_error_*` guard branches in `sm.hpp`; removed generic
   `phase_failed`/`phase_has_token`/`phase_at_eof`/`phase_unhandled` routing and modeled explicit
   error-class, token-available, no-token-eof, and unhandled paths)
+- [x] `src/emel/gbnf/rule_parser/sm.hpp` + `src/emel/gbnf/rule_parser/guards.hpp`
+  (rearchitected literal/character-class consume result routing and final parse dispatch routing
+  to explicit typed `parse_error_*` guard branches in `sm.hpp`; removed generic `phase_ok` /
+  `phase_failed` routing and modeled `none`, typed error classes, untracked, and unknown paths
+  explicitly)
 
 ## High-Priority Findings (Action Files)
 

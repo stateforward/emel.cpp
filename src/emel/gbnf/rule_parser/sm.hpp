@@ -216,21 +216,33 @@ struct model {
                  / action::consume_token_literal
 
       , sml::state<in_rule_expression_after_term> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::phase_ok{} ]
+                 [ guard::parse_error_none{} ]
       , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::phase_failed{} ]
+                 [ guard::parse_error_invalid_request{} ]
       , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
-                 / action::consume_token_invalid
+                 [ guard::parse_error_parse_failed{} ]
+      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
+                 [ guard::parse_error_internal_error{} ]
+      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
+                 [ guard::parse_error_untracked{} ]
+      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
+                 [ guard::parse_error_unknown{} ]
 
       , sml::state<character_class_consume_result_decision> <= sml::state<character_class_consume_exec> + sml::completion<event::parse_rules>
                  / action::consume_token_character_class
 
       , sml::state<in_rule_expression_after_term> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::phase_ok{} ]
+                 [ guard::parse_error_none{} ]
       , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::phase_failed{} ]
+                 [ guard::parse_error_invalid_request{} ]
       , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
-                 / action::consume_token_invalid
+                 [ guard::parse_error_parse_failed{} ]
+      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
+                 [ guard::parse_error_internal_error{} ]
+      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
+                 [ guard::parse_error_untracked{} ]
+      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
+                 [ guard::parse_error_unknown{} ]
 
       , sml::state<rule_reference_decision> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
                  [ guard::term_need_rule_reference_candidate{} ]
@@ -441,11 +453,27 @@ struct model {
                  / action::consume_token_invalid
 
       , sml::state<ready> <= sml::state<parse_decision> + sml::completion<event::parse_rules>
-                 [ guard::phase_ok{} ]
+                 [ guard::parse_error_none{} ]
                  / action::dispatch_done
 
       , sml::state<ready> <= sml::state<parse_decision> + sml::completion<event::parse_rules>
-                 [ guard::phase_failed{} ]
+                 [ guard::parse_error_invalid_request{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<parse_decision> + sml::completion<event::parse_rules>
+                 [ guard::parse_error_parse_failed{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<parse_decision> + sml::completion<event::parse_rules>
+                 [ guard::parse_error_internal_error{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<parse_decision> + sml::completion<event::parse_rules>
+                 [ guard::parse_error_untracked{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<parse_decision> + sml::completion<event::parse_rules>
+                 [ guard::parse_error_unknown{} ]
                  / action::dispatch_error
 
       //------------------------------------------------------------------------------//

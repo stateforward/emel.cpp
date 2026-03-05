@@ -202,15 +202,43 @@ struct invalid_parse_without_grammar {
   }
 };
 
-struct phase_ok {
+struct parse_error_none {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
     return ev.ctx.err == emel::error::cast(error::none);
   }
 };
 
-struct phase_failed {
+struct parse_error_invalid_request {
   bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return ev.ctx.err == emel::error::cast(error::invalid_request);
+  }
+};
+
+struct parse_error_parse_failed {
+  bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::parse_failed);
+  }
+};
+
+struct parse_error_internal_error {
+  bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::internal_error);
+  }
+};
+
+struct parse_error_untracked {
+  bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::untracked);
+  }
+};
+
+struct parse_error_unknown {
+  bool operator()(const event::parse_rules & ev, const action::context &) const noexcept {
+    return ev.ctx.err != emel::error::cast(error::none) &&
+           ev.ctx.err != emel::error::cast(error::invalid_request) &&
+           ev.ctx.err != emel::error::cast(error::parse_failed) &&
+           ev.ctx.err != emel::error::cast(error::internal_error) &&
+           ev.ctx.err != emel::error::cast(error::untracked);
   }
 };
 
@@ -722,13 +750,13 @@ struct eof_cannot_finalize_active_rule {
 
 struct eof_can_finalize_symbols {
   bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return phase_ok{}(ev, ctx) && can_finalize_symbols(ev, ctx);
+    return parse_error_none{}(ev, ctx) && can_finalize_symbols(ev, ctx);
   }
 };
 
 struct eof_cannot_finalize_symbols {
   bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return phase_ok{}(ev, ctx) && !can_finalize_symbols(ev, ctx);
+    return parse_error_none{}(ev, ctx) && !can_finalize_symbols(ev, ctx);
   }
 };
 
