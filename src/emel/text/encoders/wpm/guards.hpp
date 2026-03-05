@@ -25,18 +25,6 @@ struct invalid_encode {
   }
 };
 
-struct phase_ok {
-  bool operator()(const event::encode_runtime & ev) const noexcept {
-    return emel::text::encoders::guard::phase_ok{}(ev);
-  }
-};
-
-struct phase_failed {
-  bool operator()(const event::encode_runtime & ev) const noexcept {
-    return emel::text::encoders::guard::phase_failed{}(ev);
-  }
-};
-
 struct table_sync_ok {
   bool operator()(const event::encode_runtime & ev) const noexcept {
     return phase_error_is(ev, error::code::ok);

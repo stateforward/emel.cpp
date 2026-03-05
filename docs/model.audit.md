@@ -645,3 +645,7 @@ User-requested machine action/detail findings and remediation status:
   (`string_scan_immediate_termination_or_eof` vs
   `string_scan_requires_content`) and removed residual runtime `if` branching
   and `?:` branching from string escaped-content action helpers.
+- [x] `text/encoders/{bpe,spm,rwkv,wpm}/guards.hpp` +
+  `text/encoders/guards.hpp` (removed legacy generic `phase_ok` /
+  `phase_failed` guard shims so encoder family routing remains exclusively on
+  explicit typed error-class guards used by each machine `sm.hpp`)

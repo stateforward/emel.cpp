@@ -24,18 +24,6 @@ struct invalid_encode {
   }
 };
 
-struct phase_ok {
-  bool operator()(const event::encode_runtime & ev) const noexcept {
-    return ev.ctx.err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
-  }
-};
-
-struct phase_failed {
-  bool operator()(const event::encode_runtime & ev) const noexcept {
-    return ev.ctx.err != emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
-  }
-};
-
 struct text_empty {
   bool operator()(const event::encode_runtime & ev) const noexcept {
     return ev.request.text.empty();

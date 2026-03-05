@@ -1157,10 +1157,6 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
 
   CHECK(emel::text::encoders::guard::valid_encode{}(base_runtime_ev, base_ctx));
   CHECK(emel::text::encoders::guard::invalid_encode{}(base_invalid_runtime_ev, base_ctx));
-  base_runtime.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
-  CHECK(emel::text::encoders::guard::phase_ok{}(base_runtime_ev));
-  base_runtime.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
-  CHECK(emel::text::encoders::guard::phase_failed{}(base_runtime_ev));
   CHECK(emel::text::encoders::guard::vocab_unchanged{}(base_runtime_ev, base_ctx));
   base_ctx.vocab = nullptr;
   CHECK(emel::text::encoders::guard::vocab_changed{}(base_runtime_ev, base_ctx));
@@ -1203,9 +1199,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::text::encoders::bpe::guard::valid_encode{}(runtime_ok_ev, ctx));
     CHECK(emel::text::encoders::bpe::guard::invalid_encode{}(runtime_invalid_ev, ctx));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
-    CHECK(emel::text::encoders::bpe::guard::phase_ok{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::bpe::guard::encode_result_ok{}(runtime_ok_ev));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
-    CHECK(emel::text::encoders::bpe::guard::phase_failed{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::bpe::guard::encode_result_backend_error{}(runtime_ok_ev));
   }
 
   {
@@ -1244,9 +1240,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::text::encoders::wpm::guard::valid_encode{}(runtime_ok_ev, ctx));
     CHECK(emel::text::encoders::wpm::guard::invalid_encode{}(runtime_invalid_ev, ctx));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
-    CHECK(emel::text::encoders::wpm::guard::phase_ok{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::wpm::guard::encode_result_ok{}(runtime_ok_ev));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
-    CHECK(emel::text::encoders::wpm::guard::phase_failed{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::wpm::guard::encode_result_backend_error{}(runtime_ok_ev));
   }
 
   {
@@ -1293,9 +1289,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
       emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
     CHECK(emel::text::encoders::spm::guard::emit_result_ok{}(runtime_ok_spm_ev));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
-    CHECK(emel::text::encoders::spm::guard::phase_ok{}(runtime_ok_spm_ev));
+    CHECK(emel::text::encoders::spm::guard::encode_result_ok{}(runtime_ok_spm_ev));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
-    CHECK(emel::text::encoders::spm::guard::phase_failed{}(runtime_ok_spm_ev));
+    CHECK(emel::text::encoders::spm::guard::encode_result_backend_error{}(runtime_ok_spm_ev));
     emel::text::encoders::spm::action::begin_encode(runtime_error_spm_ev, ctx);
   }
 
@@ -1391,9 +1387,9 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::text::encoders::rwkv::guard::valid_encode{}(runtime_ok_rwkv_ev, ctx));
     CHECK(emel::text::encoders::rwkv::guard::invalid_encode{}(runtime_invalid_rwkv_ev, ctx));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
-    CHECK(emel::text::encoders::rwkv::guard::phase_ok{}(runtime_ok_rwkv_ev));
+    CHECK(emel::text::encoders::rwkv::guard::encode_result_ok{}(runtime_ok_rwkv_ev));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
-    CHECK(emel::text::encoders::rwkv::guard::phase_failed{}(runtime_ok_rwkv_ev));
+    CHECK(emel::text::encoders::rwkv::guard::encode_result_backend_error{}(runtime_ok_rwkv_ev));
   }
 
   {

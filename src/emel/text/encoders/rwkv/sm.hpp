@@ -53,7 +53,8 @@ struct unexpected {};
  * - `output_capacity_covers_text`/`output_capacity_short` route output-capacity policy.
  * - `tables_ready`/`tables_missing` route explicit table-policy behavior.
  * - `vocab_unk_present`/`vocab_unk_missing` route unknown-token resolution.
- * - `phase_ok`/`phase_failed` route phase error status.
+ * - `*_ok`/`*_invalid_argument_error`/`*_backend_error`/`*_model_invalid_error`/
+ *   `*_unknown_error` guards route explicit phase error status.
  *
  * action side effects:
  * - `begin_encode`/`begin_encode_sync_vocab` reset runtime outputs and vocabulary bindings.
