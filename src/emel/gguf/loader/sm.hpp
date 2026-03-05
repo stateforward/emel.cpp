@@ -55,13 +55,31 @@ struct model {
           / action::mark_probe_invalid_request
 
       , sml::state<probe_requirements_dispatch> <= sml::state<probe_outcome_dispatch>
-          + sml::completion<event::probe_runtime> [ guard::probe_phase_ok{} ]
+          + sml::completion<event::probe_runtime> [ guard::probe_error_none{} ]
           / action::commit_probe_requirements
       , sml::state<probed> <= sml::state<probe_requirements_dispatch>
           + sml::completion<event::probe_runtime>
           / action::publish_probe_done
       , sml::state<errored> <= sml::state<probe_outcome_dispatch>
-          + sml::completion<event::probe_runtime> [ guard::probe_phase_failed{} ]
+          + sml::completion<event::probe_runtime> [ guard::probe_error_invalid_request{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_model_invalid{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_capacity{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_parse_failed{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_internal_error{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_untracked{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_unknown{} ]
           / action::publish_probe_error
 
       //------------------------------------------------------------------------------//
@@ -98,10 +116,28 @@ struct model {
           / action::mark_bind_capacity
 
       , sml::state<bound> <= sml::state<bind_outcome_dispatch>
-          + sml::completion<event::bind_runtime> [ guard::bind_phase_ok{} ]
+          + sml::completion<event::bind_runtime> [ guard::bind_error_none{} ]
           / action::publish_bind_done
       , sml::state<errored> <= sml::state<bind_outcome_dispatch>
-          + sml::completion<event::bind_runtime> [ guard::bind_phase_failed{} ]
+          + sml::completion<event::bind_runtime> [ guard::bind_error_invalid_request{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_model_invalid{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_capacity{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_parse_failed{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_internal_error{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_untracked{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_unknown{} ]
           / action::publish_bind_error
 
       //------------------------------------------------------------------------------//
@@ -148,10 +184,28 @@ struct model {
           / action::mark_parse_invalid_request
 
       , sml::state<parsed> <= sml::state<parse_outcome_dispatch>
-          + sml::completion<event::parse_runtime> [ guard::parse_phase_ok{} ]
+          + sml::completion<event::parse_runtime> [ guard::parse_error_none{} ]
           / action::publish_parse_done
       , sml::state<errored> <= sml::state<parse_outcome_dispatch>
-          + sml::completion<event::parse_runtime> [ guard::parse_phase_failed{} ]
+          + sml::completion<event::parse_runtime> [ guard::parse_error_invalid_request{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_model_invalid{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_capacity{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_parse_failed{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_internal_error{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_untracked{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_unknown{} ]
           / action::publish_parse_error
 
       //------------------------------------------------------------------------------//

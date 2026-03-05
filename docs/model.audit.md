@@ -198,6 +198,11 @@ Status correction: the following files still contain implicit runtime control fl
   `bind_error_*` / `detokenize_error_*` guard branches in `sm.hpp`; removed
   generic phase routing guards and modeled `none`, typed error classes,
   untracked, and unknown paths explicitly)
+- [x] `src/emel/gguf/loader/sm.hpp` + `src/emel/gguf/loader/guards.hpp`
+  (rearchitected probe/bind/parse outcome dispatch to explicit typed
+  `probe_error_*`, `bind_error_*`, and `parse_error_*` guard branches in
+  `sm.hpp`; removed generic `*_phase_ok` / `*_phase_failed` routing and modeled
+  `none`, typed error classes, untracked, and unknown paths explicitly)
 
 ## High-Priority Findings (Action Files)
 

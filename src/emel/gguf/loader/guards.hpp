@@ -10,6 +10,26 @@ inline bool has_file_image(const std::span<const uint8_t> & file_image) noexcept
   return file_image.data() != nullptr && !file_image.empty();
 }
 
+template <class runtime_event_type>
+inline emel::error::type runtime_error(const runtime_event_type & ev) noexcept {
+  return ev.ctx.err;
+}
+
+inline bool error_is(const emel::error::type runtime_err,
+                     const error expected) noexcept {
+  return runtime_err == emel::error::cast(expected);
+}
+
+inline bool error_is_unknown(const emel::error::type runtime_err) noexcept {
+  return !error_is(runtime_err, error::none) &&
+         !error_is(runtime_err, error::invalid_request) &&
+         !error_is(runtime_err, error::model_invalid) &&
+         !error_is(runtime_err, error::capacity) &&
+         !error_is(runtime_err, error::parse_failed) &&
+         !error_is(runtime_err, error::internal_error) &&
+         !error_is(runtime_err, error::untracked);
+}
+
 struct probe_valid_request {
   bool operator()(const event::probe_runtime & ev, const action::context &) const noexcept {
     return has_file_image(ev.request.file_image);
@@ -94,39 +114,147 @@ struct parse_bound_capacity_insufficient {
   }
 };
 
-struct probe_phase_ok {
+struct probe_error_none {
   bool operator()(const event::probe_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::none);
   }
 };
 
-struct probe_phase_failed {
+struct probe_error_invalid_request {
   bool operator()(const event::probe_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::invalid_request);
   }
 };
 
-struct bind_phase_ok {
+struct probe_error_model_invalid {
+  bool operator()(const event::probe_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::model_invalid);
+  }
+};
+
+struct probe_error_capacity {
+  bool operator()(const event::probe_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::capacity);
+  }
+};
+
+struct probe_error_parse_failed {
+  bool operator()(const event::probe_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::parse_failed);
+  }
+};
+
+struct probe_error_internal_error {
+  bool operator()(const event::probe_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::internal_error);
+  }
+};
+
+struct probe_error_untracked {
+  bool operator()(const event::probe_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::untracked);
+  }
+};
+
+struct probe_error_unknown {
+  bool operator()(const event::probe_runtime & ev, const action::context &) const noexcept {
+    return error_is_unknown(runtime_error(ev));
+  }
+};
+
+struct bind_error_none {
   bool operator()(const event::bind_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::none);
   }
 };
 
-struct bind_phase_failed {
+struct bind_error_invalid_request {
   bool operator()(const event::bind_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::invalid_request);
   }
 };
 
-struct parse_phase_ok {
-  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
+struct bind_error_model_invalid {
+  bool operator()(const event::bind_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::model_invalid);
   }
 };
 
-struct parse_phase_failed {
+struct bind_error_capacity {
+  bool operator()(const event::bind_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::capacity);
+  }
+};
+
+struct bind_error_parse_failed {
+  bool operator()(const event::bind_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::parse_failed);
+  }
+};
+
+struct bind_error_internal_error {
+  bool operator()(const event::bind_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::internal_error);
+  }
+};
+
+struct bind_error_untracked {
+  bool operator()(const event::bind_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::untracked);
+  }
+};
+
+struct bind_error_unknown {
+  bool operator()(const event::bind_runtime & ev, const action::context &) const noexcept {
+    return error_is_unknown(runtime_error(ev));
+  }
+};
+
+struct parse_error_none {
   bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::none);
+  }
+};
+
+struct parse_error_invalid_request {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::invalid_request);
+  }
+};
+
+struct parse_error_model_invalid {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::model_invalid);
+  }
+};
+
+struct parse_error_capacity {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::capacity);
+  }
+};
+
+struct parse_error_parse_failed {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::parse_failed);
+  }
+};
+
+struct parse_error_internal_error {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::internal_error);
+  }
+};
+
+struct parse_error_untracked {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::untracked);
+  }
+};
+
+struct parse_error_unknown {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return error_is_unknown(runtime_error(ev));
   }
 };
 
