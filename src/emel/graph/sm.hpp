@@ -134,11 +134,35 @@ struct model {
       //------------------------------------------------------------------------------//
       // Compute finalization.
       , sml::state<reserved> <= sml::state<compute_decision> + sml::completion<event::compute_graph>
-                 [ guard::compute_phase_ok{} ]
+                 [ guard::compute_error_none{} ]
                  / action::dispatch_compute_done
 
       , sml::state<reserved> <= sml::state<compute_decision> + sml::completion<event::compute_graph>
-                 [ guard::compute_phase_failed{} ]
+                 [ guard::compute_error_invalid_request{} ]
+                 / action::dispatch_compute_error
+
+      , sml::state<reserved> <= sml::state<compute_decision> + sml::completion<event::compute_graph>
+                 [ guard::compute_error_assembler_failed{} ]
+                 / action::dispatch_compute_error
+
+      , sml::state<reserved> <= sml::state<compute_decision> + sml::completion<event::compute_graph>
+                 [ guard::compute_error_processor_failed{} ]
+                 / action::dispatch_compute_error
+
+      , sml::state<reserved> <= sml::state<compute_decision> + sml::completion<event::compute_graph>
+                 [ guard::compute_error_busy{} ]
+                 / action::dispatch_compute_error
+
+      , sml::state<reserved> <= sml::state<compute_decision> + sml::completion<event::compute_graph>
+                 [ guard::compute_error_internal_error{} ]
+                 / action::dispatch_compute_error
+
+      , sml::state<reserved> <= sml::state<compute_decision> + sml::completion<event::compute_graph>
+                 [ guard::compute_error_untracked{} ]
+                 / action::dispatch_compute_error
+
+      , sml::state<reserved> <= sml::state<compute_decision> + sml::completion<event::compute_graph>
+                 [ guard::compute_error_unknown{} ]
                  / action::dispatch_compute_error
 
       //------------------------------------------------------------------------------//
