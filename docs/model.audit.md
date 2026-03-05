@@ -476,7 +476,6 @@ User-requested machine action/detail findings and remediation status:
 - [ ] Remaining machines still route action/detail outcomes through generic
   `phase_ok` / `phase_failed` guards instead of explicit error-class/result
   decision guards in `sm.hpp`, including:
-  `src/emel/text/encoders/rwkv/sm.hpp`,
   `src/emel/text/encoders/fallback/sm.hpp`,
   `src/emel/text/encoders/ugm/sm.hpp`,
   `src/emel/text/encoders/plamo2/sm.hpp`,
@@ -489,3 +488,9 @@ User-requested machine action/detail findings and remediation status:
   `*_backend_error`, `*_model_invalid_error`, `*_unknown_error`) so `spm/sm.hpp`
   no longer relies on generic `phase_ok` / `phase_failed` guards for
   action/detail-driven outcomes.
+- [x] `text/encoders/rwkv/sm.hpp` + `text/encoders/rwkv/guards.hpp`
+  reworked table-sync and final encode-result routing into explicit error-class
+  branches (`*_ok`, `*_invalid_argument_error`, `*_backend_error`,
+  `*_model_invalid_error`, `*_unknown_error`) so `rwkv/sm.hpp` no longer relies
+  on generic `phase_ok` / `phase_failed` guards for action/detail-driven
+  outcomes.
