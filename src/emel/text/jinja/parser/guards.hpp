@@ -1,5 +1,6 @@
 #pragma once
 
+#include "emel/text/jinja/parser/context.hpp"
 #include "emel/text/jinja/parser/errors.hpp"
 #include "emel/text/jinja/parser/events.hpp"
 
@@ -61,7 +62,7 @@ struct invalid_parse_without_callbacks {
   }
 };
 
-struct phase_ok {
+struct parse_error_none {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type &ev,
                   const action::context &) const noexcept {
@@ -70,11 +71,52 @@ struct phase_ok {
   }
 };
 
-struct phase_failed {
+struct parse_error_invalid_request {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type &ev,
-                  const action::context &ctx) const noexcept {
-    return !phase_ok{}(ev, ctx);
+                  const action::context &) const noexcept {
+    const auto &runtime_ev = helper::unwrap_runtime_event(ev);
+    return runtime_ev.ctx.err == error::invalid_request;
+  }
+};
+
+struct parse_error_parse_failed {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &ev,
+                  const action::context &) const noexcept {
+    const auto &runtime_ev = helper::unwrap_runtime_event(ev);
+    return runtime_ev.ctx.err == error::parse_failed;
+  }
+};
+
+struct parse_error_internal_error {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &ev,
+                  const action::context &) const noexcept {
+    const auto &runtime_ev = helper::unwrap_runtime_event(ev);
+    return runtime_ev.ctx.err == error::internal_error;
+  }
+};
+
+struct parse_error_untracked {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &ev,
+                  const action::context &) const noexcept {
+    const auto &runtime_ev = helper::unwrap_runtime_event(ev);
+    return runtime_ev.ctx.err == error::untracked;
+  }
+};
+
+struct parse_error_unknown {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &ev,
+                  const action::context &) const noexcept {
+    const auto &runtime_ev = helper::unwrap_runtime_event(ev);
+    return runtime_ev.ctx.err != error::none &&
+           runtime_ev.ctx.err != error::invalid_request &&
+           runtime_ev.ctx.err != error::parse_failed &&
+           runtime_ev.ctx.err != error::internal_error &&
+           runtime_ev.ctx.err != error::untracked;
   }
 };
 

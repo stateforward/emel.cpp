@@ -228,6 +228,11 @@ Status correction: the following files still contain implicit runtime control fl
   submachine result routing to explicit typed `parse_error_*` guard branches in `sm.hpp`;
   removed generic `phase_ok` / `phase_failed` routing and modeled `none`, typed error
   classes, untracked, and unknown paths explicitly)
+- [x] `src/emel/text/jinja/parser/sm.hpp` +
+  `src/emel/text/jinja/parser/guards.hpp` (rearchitected tokenize/classify/final parse routing
+  to explicit typed `parse_error_*` guard branches in `sm.hpp`; removed generic `phase_ok` /
+  `phase_failed` routing and modeled `none`, typed error classes, untracked, and unknown
+  paths explicitly)
 
 ## High-Priority Findings (Action Files)
 
