@@ -456,3 +456,30 @@ User-requested machine action/detail findings and remediation status:
   branches (`*_ok`, `*_invalid_argument_error`, `*_backend_error`,
   `*_model_invalid_error`, `*_unknown_error`) so `wpm/sm.hpp` does not rely on
   generic `phase_ok` / `phase_failed` guards for action/detail-driven outcomes.
+
+## Reopened Findings (2026-03-05)
+
+- [ ] `src/emel/text/tokenizer/preprocessor/detail.hpp`
+  still contains runtime branching and loop-gated routing in shared helper paths
+  (not explicitly modeled in `sm.hpp`), including at lines:
+  `104`, `108`, `119`, `139`, `147`, `155`, `156`, `178`, `181`, `194`,
+  `197`, `228`, `232`, `234`, `243`, `251`, `255`, `256`, `265`, `267`, `269`,
+  `270`, `276`, `277`, `283`, `289`, `290`, `297`.
+- [ ] `src/emel/text/jinja/parser/lexer/actions.hpp`
+  still contains loop-gated scan/trim behavior inside actions (not explicit
+  per-step model phases), including at lines:
+  `94`, `158`, `173`, `251`, `292`, `452`.
+- [ ] `src/emel/text/renderer/actions.hpp` (line `537`)
+  still contains loop-gated strip traversal/control in action code.
+- [ ] `src/emel/gbnf/rule_parser/actions.hpp` (lines `308`, `330`)
+  still contains loop-driven parse traversal in action code.
+- [ ] Remaining machines still route action/detail outcomes through generic
+  `phase_ok` / `phase_failed` guards instead of explicit error-class/result
+  decision guards in `sm.hpp`, including:
+  `src/emel/text/encoders/spm/sm.hpp`,
+  `src/emel/text/encoders/rwkv/sm.hpp`,
+  `src/emel/text/encoders/fallback/sm.hpp`,
+  `src/emel/text/encoders/ugm/sm.hpp`,
+  `src/emel/text/encoders/plamo2/sm.hpp`,
+  `src/emel/token/batcher/sm.hpp`,
+  and multiple preprocessor machine `sm.hpp` files.
