@@ -1342,9 +1342,19 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::text::encoders::ugm::guard::valid_encode{}(runtime_ok_ugm_ev, ctx));
     CHECK(emel::text::encoders::ugm::guard::invalid_encode{}(runtime_invalid_ugm_ev, ctx));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
-    CHECK(emel::text::encoders::ugm::guard::phase_ok{}(runtime_ok_ugm_ev));
+    CHECK(emel::text::encoders::ugm::guard::table_sync_ok{}(runtime_ok_ugm_ev));
+    CHECK(emel::text::encoders::ugm::guard::normalize_result_ok{}(runtime_ok_ugm_ev));
+    runtime_ok_ugm_ev.normalized = std::string_view{"x"};
+    CHECK(emel::text::encoders::ugm::guard::input_prepare_result_non_empty_ok{}(runtime_ok_ugm_ev));
+    runtime_ok_ugm_ev.normalized = std::string_view{};
+    CHECK(emel::text::encoders::ugm::guard::input_prepare_result_empty_ok{}(runtime_ok_ugm_ev));
+    CHECK(emel::text::encoders::ugm::guard::dp_forward_result_ok{}(runtime_ok_ugm_ev));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
-    CHECK(emel::text::encoders::ugm::guard::phase_failed{}(runtime_ok_ugm_ev));
+    CHECK(emel::text::encoders::ugm::guard::table_sync_backend_error{}(runtime_ok_ugm_ev));
+    CHECK(emel::text::encoders::ugm::guard::normalize_result_backend_error{}(runtime_ok_ugm_ev));
+    CHECK(
+      emel::text::encoders::ugm::guard::input_prepare_result_backend_error{}(runtime_ok_ugm_ev));
+    CHECK(emel::text::encoders::ugm::guard::dp_forward_result_backend_error{}(runtime_ok_ugm_ev));
   }
 
   {
