@@ -80,6 +80,60 @@ struct request_seq_payload_invalid {
   }
 };
 
+struct positions_seeded_probe_ok {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none);
+  }
+};
+
+struct positions_seeded_probe_backend_error {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::backend_error);
+  }
+};
+
+struct positions_seeded_probe_invalid_request {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::invalid_request);
+  }
+};
+
+struct positions_unseeded_probe_ok {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none);
+  }
+};
+
+struct positions_unseeded_probe_invalid_request {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::invalid_request);
+  }
+};
+
+struct single_output_probe_ok {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none);
+  }
+};
+
+struct single_output_probe_invalid_request {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::invalid_request);
+  }
+};
+
+struct continuity_probe_ok {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none);
+  }
+};
+
+struct continuity_probe_invalid_request {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::invalid_request);
+  }
+};
+
 struct seq_mode_masks {
   bool operator()(const event::batch_runtime & ev) const noexcept {
     return emel::token::batcher::detail::has_seq_masks_input(ev.request);

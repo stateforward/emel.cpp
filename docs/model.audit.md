@@ -439,3 +439,10 @@ User-requested machine action/detail findings and remediation status:
   removed composite `probe_request_validity` request classifier from
   `token/batcher/actions.hpp` so request validation control flow is modeled by
   explicit guarded transitions.
+- [x] `token/batcher/sm.hpp` + `token/batcher/guards.hpp`
+  reworked probe outcome routing into explicit `sm.hpp` branches for
+  `positions_seeded_probe`, `positions_unseeded_probe`, `single_output_probe`,
+  and `continuity_probe` using dedicated outcome guards
+  (`*_probe_ok`, `*_probe_invalid_request`, `positions_seeded_probe_backend_error`)
+  plus explicit invalid/backend/internal error transitions instead of generic
+  `phase_ok` / `phase_failed` routing.

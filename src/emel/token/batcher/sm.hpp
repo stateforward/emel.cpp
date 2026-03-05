@@ -134,16 +134,30 @@ struct model {
           / action::mark_internal_error
 
       , sml::state<positions_generate_seeded> <= sml::state<positions_seeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::positions_seeded_probe_ok{} ]
           / action::generate_positions_seeded
       , sml::state<errored> <= sml::state<positions_seeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime>
+          [ guard::positions_seeded_probe_backend_error{} ]
+          / action::mark_backend_error
+      , sml::state<errored> <= sml::state<positions_seeded_probe>
+          + sml::completion<event::batch_runtime>
+          [ guard::positions_seeded_probe_invalid_request{} ]
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<positions_seeded_probe>
+          + sml::completion<event::batch_runtime>
+          / action::mark_internal_error
 
       , sml::state<positions_generate_unseeded> <= sml::state<positions_unseeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::positions_unseeded_probe_ok{} ]
           / action::generate_positions_unseeded
       , sml::state<errored> <= sml::state<positions_unseeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime>
+          [ guard::positions_unseeded_probe_invalid_request{} ]
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<positions_unseeded_probe>
+          + sml::completion<event::batch_runtime>
+          / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<positions_count_publish_decision> <= sml::state<positions_copy_stride_three>
@@ -218,9 +232,14 @@ struct model {
           + sml::completion<event::batch_runtime> [ guard::single_output_check_required{} ]
           / action::probe_single_output_per_seq
       , sml::state<continuity_decision> <= sml::state<single_output_probe>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::single_output_probe_ok{} ]
       , sml::state<errored> <= sml::state<single_output_probe>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime>
+          [ guard::single_output_probe_invalid_request{} ]
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<single_output_probe>
+          + sml::completion<event::batch_runtime>
+          / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<done> <= sml::state<continuity_decision>
@@ -229,9 +248,14 @@ struct model {
           + sml::completion<event::batch_runtime> [ guard::continuity_check_required{} ]
           / action::probe_continuity
       , sml::state<done> <= sml::state<continuity_probe>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::continuity_probe_ok{} ]
       , sml::state<errored> <= sml::state<continuity_probe>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime>
+          [ guard::continuity_probe_invalid_request{} ]
+          / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<continuity_probe>
+          + sml::completion<event::batch_runtime>
+          / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<ready> <= sml::state<done> + sml::completion<event::batch_runtime>
