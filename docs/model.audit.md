@@ -675,3 +675,9 @@ User-requested machine action/detail findings and remediation status:
   `planning_failed` branch now explicitly applies
   `mark_planning_progress_stalled`, making final failure classification
   explicit at the model boundary.
+- [x] `batch/planner/sm.hpp` + `batch/planner/guards.hpp`
+  reworked parent planner mode-result routing so failed child-mode outcomes are
+  classified explicitly at mode completion boundaries via
+  `planning_failed_with_error` and `planning_failed_without_error` guard
+  branches in `sm.hpp`; removed intermediate generic `plan_failed` phase
+  routing and dispatches `_error` outcomes explicitly on each failed-mode path.

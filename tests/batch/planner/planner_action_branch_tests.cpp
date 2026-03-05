@@ -219,3 +219,32 @@ TEST_CASE("batch_planner_guard_planning_failed") {
   CHECK(emel::batch::planner::guard::planning_failed(make_runtime(request, request_ctx),
                                                       planner_ctx));
 }
+
+TEST_CASE("batch_planner_guard_planning_failed_error_classification") {
+  emel::batch::planner::action::context planner_ctx{};
+  emel::batch::planner::event::request_ctx request_ctx{};
+  done_capture done{};
+  error_capture error{};
+
+  emel::batch::planner::event::request request{
+    .n_tokens = 1,
+    .on_done = make_done(&done),
+    .on_error = make_error(&error),
+  };
+
+  request_ctx.step_count = 0;
+  request_ctx.total_outputs = 1;
+  request_ctx.err = emel::error::cast(emel::batch::planner::error::invalid_step_size);
+  CHECK(emel::batch::planner::guard::planning_failed_with_error(make_runtime(request, request_ctx),
+                                                                 planner_ctx));
+  CHECK_FALSE(emel::batch::planner::guard::planning_failed_without_error(
+      make_runtime(request, request_ctx), planner_ctx));
+
+  request_ctx.err = emel::error::cast(emel::batch::planner::error::none);
+  CHECK_FALSE(emel::batch::planner::guard::planning_failed_with_error(make_runtime(request,
+                                                                                     request_ctx),
+                                                                       planner_ctx));
+  CHECK(emel::batch::planner::guard::planning_failed_without_error(make_runtime(request,
+                                                                                 request_ctx),
+                                                                    planner_ctx));
+}

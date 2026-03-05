@@ -18,7 +18,6 @@ struct mode_decision {};
 struct publishing {};
 struct done {};
 struct invalid_request {};
-struct plan_failed {};
 
 struct model {
   auto operator()() const {
@@ -49,22 +48,27 @@ struct model {
       //------------------------------------------------------------------------------//
       , sml::state<publishing> <= sml::state<modes::simple::model>
           + sml::completion<event::request_runtime> [ guard::planning_succeeded ] / action::publish
-      , sml::state<plan_failed> <= sml::state<modes::simple::model>
-          + sml::completion<event::request_runtime> [ guard::planning_failed ]
+      , sml::state<done> <= sml::state<modes::simple::model>
+          + sml::completion<event::request_runtime> [ guard::planning_failed_with_error ]
+          / action::dispatch_plan_failed_with_ctx_error
+      , sml::state<done> <= sml::state<modes::simple::model>
+          + sml::completion<event::request_runtime> [ guard::planning_failed_without_error ]
+          / action::dispatch_plan_failed_internal
       , sml::state<publishing> <= sml::state<modes::equal::model>
           + sml::completion<event::request_runtime> [ guard::planning_succeeded ] / action::publish
-      , sml::state<plan_failed> <= sml::state<modes::equal::model>
-          + sml::completion<event::request_runtime> [ guard::planning_failed ]
+      , sml::state<done> <= sml::state<modes::equal::model>
+          + sml::completion<event::request_runtime> [ guard::planning_failed_with_error ]
+          / action::dispatch_plan_failed_with_ctx_error
+      , sml::state<done> <= sml::state<modes::equal::model>
+          + sml::completion<event::request_runtime> [ guard::planning_failed_without_error ]
+          / action::dispatch_plan_failed_internal
       , sml::state<publishing> <= sml::state<modes::sequential::model>
           + sml::completion<event::request_runtime> [ guard::planning_succeeded ] / action::publish
-      , sml::state<plan_failed> <= sml::state<modes::sequential::model>
-          + sml::completion<event::request_runtime> [ guard::planning_failed ]
-      //------------------------------------------------------------------------------//
-      , sml::state<done> <= sml::state<plan_failed>
-          + sml::completion<event::request_runtime> [ guard::plan_error_present ]
+      , sml::state<done> <= sml::state<modes::sequential::model>
+          + sml::completion<event::request_runtime> [ guard::planning_failed_with_error ]
           / action::dispatch_plan_failed_with_ctx_error
-      , sml::state<done> <= sml::state<plan_failed>
-          + sml::completion<event::request_runtime> [ guard::plan_error_absent ]
+      , sml::state<done> <= sml::state<modes::sequential::model>
+          + sml::completion<event::request_runtime> [ guard::planning_failed_without_error ]
           / action::dispatch_plan_failed_internal
       //------------------------------------------------------------------------------//
       , sml::state<done> <= sml::state<publishing>
@@ -73,8 +77,6 @@ struct model {
       , sml::state<validate_decision> <= sml::state<done> + sml::event<event::request_runtime>
           / action::begin_plan
       , sml::state<validate_decision> <= sml::state<invalid_request>
-          + sml::event<event::request_runtime> / action::begin_plan
-      , sml::state<validate_decision> <= sml::state<plan_failed>
           + sml::event<event::request_runtime> / action::begin_plan
       //------------------------------------------------------------------------------//
       , sml::state<initialized> <= sml::state<initialized> + sml::unexpected_event<sml::_>
@@ -90,8 +92,6 @@ struct model {
       , sml::state<initialized> <= sml::state<done> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<initialized> <= sml::state<invalid_request> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<initialized> <= sml::state<plan_failed> + sml::unexpected_event<sml::_>
           / action::on_unexpected
     );
     // clang-format on
