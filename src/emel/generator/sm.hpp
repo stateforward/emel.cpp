@@ -21,6 +21,7 @@ struct decode_sample_decision {};
 struct decode_render {};
 struct decode_render_decision {};
 struct generate_decision {};
+struct generate_error_channel_decision {};
 struct unexpected_event {};
 
 struct model {
@@ -44,97 +45,118 @@ struct model {
       , sml::state<conditioning_decision> <= sml::state<conditioning> + sml::completion<event::generate_run>
                  / action::request_conditioning
 
-      , sml::state<generate_decision> <= sml::state<conditioning_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_failed{} ]
-
       , sml::state<planning> <= sml::state<conditioning_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_ok{} ]
+                 [ guard::phase_none{} ]
+      , sml::state<generate_decision> <= sml::state<conditioning_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_invalid_request_error{} ]
+      , sml::state<generate_decision> <= sml::state<conditioning_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_backend_error{} ]
+      , sml::state<generate_decision> <= sml::state<conditioning_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_unknown_error{} ]
 
       //------------------------------------------------------------------------------//
       // Planning phase.
       , sml::state<planning_decision> <= sml::state<planning> + sml::completion<event::generate_run>
                  / action::request_planning
 
-      , sml::state<generate_decision> <= sml::state<planning_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_failed{} ]
-
       , sml::state<prefill> <= sml::state<planning_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_ok{} ]
+                 [ guard::phase_none{} ]
+      , sml::state<generate_decision> <= sml::state<planning_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_invalid_request_error{} ]
+      , sml::state<generate_decision> <= sml::state<planning_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_backend_error{} ]
+      , sml::state<generate_decision> <= sml::state<planning_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_unknown_error{} ]
 
       //------------------------------------------------------------------------------//
       // Prefill phase.
       , sml::state<prefill_decision> <= sml::state<prefill> + sml::completion<event::generate_run>
                  / action::request_prefill
 
-      , sml::state<generate_decision> <= sml::state<prefill_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_failed{} ]
-
       , sml::state<decode_compute> <= sml::state<prefill_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_ok{} ]
+                 [ guard::phase_none{} ]
+      , sml::state<generate_decision> <= sml::state<prefill_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_invalid_request_error{} ]
+      , sml::state<generate_decision> <= sml::state<prefill_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_backend_error{} ]
+      , sml::state<generate_decision> <= sml::state<prefill_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_unknown_error{} ]
 
       //------------------------------------------------------------------------------//
       // Decode compute phase.
       , sml::state<decode_compute_decision> <= sml::state<decode_compute> + sml::completion<event::generate_run>
                  / action::request_decode_compute
 
-      , sml::state<generate_decision> <= sml::state<decode_compute_decision> +
-               sml::completion<event::generate_run>
-                 [ guard::phase_failed{} ]
-
       , sml::state<decode_sample> <= sml::state<decode_compute_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_ok{} ]
+                 [ guard::phase_none{} ]
+      , sml::state<generate_decision> <= sml::state<decode_compute_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_invalid_request_error{} ]
+      , sml::state<generate_decision> <= sml::state<decode_compute_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_backend_error{} ]
+      , sml::state<generate_decision> <= sml::state<decode_compute_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_unknown_error{} ]
 
       //------------------------------------------------------------------------------//
       // Decode sample phase.
       , sml::state<decode_sample_decision> <= sml::state<decode_sample> + sml::completion<event::generate_run>
                  / action::request_decode_sample
 
-      , sml::state<generate_decision> <= sml::state<decode_sample_decision> +
-               sml::completion<event::generate_run>
-                 [ guard::phase_failed{} ]
-
       , sml::state<decode_render> <= sml::state<decode_sample_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_ok{} ]
+                 [ guard::phase_none{} ]
+      , sml::state<generate_decision> <= sml::state<decode_sample_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_invalid_request_error{} ]
+      , sml::state<generate_decision> <= sml::state<decode_sample_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_backend_error{} ]
+      , sml::state<generate_decision> <= sml::state<decode_sample_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_unknown_error{} ]
 
       //------------------------------------------------------------------------------//
       // Decode render phase.
       , sml::state<decode_render_decision> <= sml::state<decode_render> + sml::completion<event::generate_run>
                  / action::request_decode_render
 
-      , sml::state<generate_decision> <= sml::state<decode_render_decision> +
-               sml::completion<event::generate_run>
-                 [ guard::phase_failed{} ]
-
       , sml::state<decode_compute> <= sml::state<decode_render_decision> + sml::completion<event::generate_run>
                  [ guard::decode_should_continue{} ]
 
       , sml::state<generate_decision> <= sml::state<decode_render_decision> + sml::completion<event::generate_run>
                  [ guard::decode_complete{} ]
+      , sml::state<generate_decision> <= sml::state<decode_render_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_invalid_request_error{} ]
+      , sml::state<generate_decision> <= sml::state<decode_render_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_backend_error{} ]
+      , sml::state<generate_decision> <= sml::state<decode_render_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_unknown_error{} ]
 
       //------------------------------------------------------------------------------//
       // Finalization and outcome dispatch.
       , sml::state<ready> <= sml::state<generate_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_ok_with_error_out{} ]
+                 [ guard::phase_none_with_error_out{} ]
                  / action::dispatch_done_with_error_out
 
       , sml::state<ready> <= sml::state<generate_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_ok_without_error_out{} ]
+                 [ guard::phase_none_without_error_out{} ]
                  / action::dispatch_done_without_error_out
+      , sml::state<generate_error_channel_decision> <= sml::state<generate_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_invalid_request_error{} ]
+      , sml::state<generate_error_channel_decision> <= sml::state<generate_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_backend_error{} ]
+      , sml::state<generate_error_channel_decision> <= sml::state<generate_decision> + sml::completion<event::generate_run>
+                 [ guard::phase_unknown_error{} ]
 
-      , sml::state<ready> <= sml::state<generate_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_failed_with_dispatch_and_error_out{} ]
+      , sml::state<ready> <= sml::state<generate_error_channel_decision> + sml::completion<event::generate_run>
+                 [ guard::has_error_callback_and_error_out{} ]
                  / action::dispatch_error_with_dispatch_and_error_out
 
-      , sml::state<ready> <= sml::state<generate_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_failed_with_dispatch_only{} ]
+      , sml::state<ready> <= sml::state<generate_error_channel_decision> + sml::completion<event::generate_run>
+                 [ guard::has_error_callback_without_error_out{} ]
                  / action::dispatch_error_with_dispatch_only
 
-      , sml::state<ready> <= sml::state<generate_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_failed_with_error_out_only{} ]
+      , sml::state<ready> <= sml::state<generate_error_channel_decision> + sml::completion<event::generate_run>
+                 [ guard::no_error_callback_with_error_out{} ]
                  / action::dispatch_error_with_error_out_only
 
-      , sml::state<ready> <= sml::state<generate_decision> + sml::completion<event::generate_run>
-                 [ guard::phase_failed_without_error_channels{} ]
+      , sml::state<ready> <= sml::state<generate_error_channel_decision> + sml::completion<event::generate_run>
+                 [ guard::no_error_callback_without_error_out{} ]
                  / action::dispatch_error_without_error_channels
 
       //------------------------------------------------------------------------------//
@@ -173,6 +195,8 @@ struct model {
                  / action::on_unexpected
 
       , sml::state<ready> <= sml::state<generate_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<generate_error_channel_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
       , sml::state<ready> <= sml::state<unexpected_event> + sml::unexpected_event<sml::_>

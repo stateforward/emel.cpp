@@ -466,6 +466,12 @@ User-requested machine action/detail findings and remediation status:
   preprocessor `sm.hpp` guards/states (`no_specials`/`has_specials`,
   `parse_special_enabled`/`parse_special_disabled`, and explicit partition
   result error-class guards).
+- [x] `src/emel/generator/sm.hpp` + `src/emel/generator/guards.hpp`
+  reworked conditioning/planning/prefill/decode phase routing away from generic
+  `phase_ok` / `phase_failed` and into explicit error-class branches
+  (`phase_none`, `phase_invalid_request_error`, `phase_backend_error`,
+  `phase_unknown_error`) plus explicit final error-channel routing via
+  `generate_error_channel_decision`.
 - [x] `src/emel/text/jinja/parser/lexer/actions.hpp` +
   `src/emel/text/jinja/parser/lexer/sm.hpp`
   reworked scanner flow by removing loop-gated scan/trim actions and adding
