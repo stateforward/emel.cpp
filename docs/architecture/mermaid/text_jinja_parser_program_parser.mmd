@@ -12,11 +12,19 @@ stateDiagram-v2
   text_emit --> dispatch_decision : completion_parse_runtime_ [always] / consume_text_
   comment_emit --> dispatch_decision : completion_parse_runtime_ [always] / consume_comment_
   model__ --> statement_parse_result_decision : completion_parse_runtime_ [always] / none
-  statement_parse_result_decision --> dispatch_decision : completion_parse_runtime_ [phase_ok_] / none
-  statement_parse_result_decision --> parse_failed : completion_parse_runtime_ [phase_failed_] / none
+  statement_parse_result_decision --> dispatch_decision : completion_parse_runtime_ [parse_error_none_] / none
+  statement_parse_result_decision --> parse_failed : completion_parse_runtime_ [parse_error_invalid_request_] / none
+  statement_parse_result_decision --> parse_failed : completion_parse_runtime_ [parse_error_parse_failed_] / none
+  statement_parse_result_decision --> parse_failed : completion_parse_runtime_ [parse_error_internal_error_] / none
+  statement_parse_result_decision --> parse_failed : completion_parse_runtime_ [parse_error_untracked_] / none
+  statement_parse_result_decision --> parse_failed : completion_parse_runtime_ [parse_error_unknown_] / none
   model__ --> expression_parse_result_decision : completion_parse_runtime_ [always] / none
-  expression_parse_result_decision --> dispatch_decision : completion_parse_runtime_ [phase_ok_] / none
-  expression_parse_result_decision --> parse_failed : completion_parse_runtime_ [phase_failed_] / none
+  expression_parse_result_decision --> dispatch_decision : completion_parse_runtime_ [parse_error_none_] / none
+  expression_parse_result_decision --> parse_failed : completion_parse_runtime_ [parse_error_invalid_request_] / none
+  expression_parse_result_decision --> parse_failed : completion_parse_runtime_ [parse_error_parse_failed_] / none
+  expression_parse_result_decision --> parse_failed : completion_parse_runtime_ [parse_error_internal_error_] / none
+  expression_parse_result_decision --> parse_failed : completion_parse_runtime_ [parse_error_untracked_] / none
+  expression_parse_result_decision --> parse_failed : completion_parse_runtime_ [parse_error_unknown_] / none
   parsed --> terminate : [always] / none
   parse_failed --> terminate : [always] / none
   deciding --> unexpected_event : _ [always] / on_unexpected_

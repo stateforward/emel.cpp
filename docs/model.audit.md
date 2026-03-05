@@ -223,6 +223,11 @@ Status correction: the following files still contain implicit runtime control fl
   `reserve_error_*` and `assemble_error_*` guard branches in `sm.hpp`; removed
   generic `reserve_phase_*` / `assemble_phase_*` routing and modeled `none`,
   typed error classes, untracked, and unknown paths explicitly)
+- [x] `src/emel/text/jinja/parser/program_parser/sm.hpp` +
+  `src/emel/text/jinja/parser/program_parser/guards.hpp` (rearchitected statement/expression
+  submachine result routing to explicit typed `parse_error_*` guard branches in `sm.hpp`;
+  removed generic `phase_ok` / `phase_failed` routing and modeled `none`, typed error
+  classes, untracked, and unknown paths explicitly)
 
 ## High-Priority Findings (Action Files)
 
