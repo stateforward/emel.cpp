@@ -518,12 +518,16 @@ inline int32_t byte_to_token_raw(const action::context &ctx,
 inline int32_t byte_to_token_piece(const action::context &ctx,
                                    const uint8_t byte) {
   char hex[7] = {};
-  static const char *digits = "0123456789ABCDEF";
+  static constexpr std::array<char, 16> digits = {
+      '0', '1', '2', '3', '4', '5', '6', '7',
+      '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+  const size_t upper_nibble = static_cast<size_t>((byte >> 4u) & 0x0Fu);
+  const size_t lower_nibble = static_cast<size_t>(byte & 0x0Fu);
   hex[0] = '<';
   hex[1] = '0';
   hex[2] = 'x';
-  hex[3] = digits[(byte >> 4u) & 0x0Fu];
-  hex[4] = digits[byte & 0x0Fu];
+  hex[3] = digits[upper_nibble];
+  hex[4] = digits[lower_nibble];
   hex[5] = '>';
   hex[6] = '\0';
 

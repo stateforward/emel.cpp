@@ -51,17 +51,71 @@ struct fragments_capacity_exceeds_limit {
   }
 };
 
-struct phase_ok {
+inline bool phase_error_is(const event::preprocess_runtime & runtime_ev,
+                           const preprocessor::error err) noexcept {
+  const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+  return ev.ctx.phase_error == err;
+}
+
+struct build_specials_ok {
   bool operator()(const event::preprocess_runtime & runtime_ev,
-                  const action::context & ctx) const noexcept {
-    return emel::text::tokenizer::preprocessor::guard::phase_ok{}(runtime_ev, ctx);
+                  const action::context &) const noexcept {
+    return phase_error_is(runtime_ev, preprocessor::error::none);
   }
 };
 
-struct phase_failed {
+struct build_specials_invalid_request_error {
   bool operator()(const event::preprocess_runtime & runtime_ev,
-                  const action::context & ctx) const noexcept {
-    return emel::text::tokenizer::preprocessor::guard::phase_failed{}(runtime_ev, ctx);
+                  const action::context &) const noexcept {
+    return phase_error_is(runtime_ev, preprocessor::error::invalid_request);
+  }
+};
+
+struct build_specials_backend_error {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    return phase_error_is(runtime_ev, preprocessor::error::backend_error);
+  }
+};
+
+struct build_specials_unknown_error {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    return ev.ctx.phase_error != preprocessor::error::none &&
+           ev.ctx.phase_error != preprocessor::error::invalid_request &&
+           ev.ctx.phase_error != preprocessor::error::backend_error;
+  }
+};
+
+struct partition_ok {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    return phase_error_is(runtime_ev, preprocessor::error::none);
+  }
+};
+
+struct partition_invalid_request_error {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    return phase_error_is(runtime_ev, preprocessor::error::invalid_request);
+  }
+};
+
+struct partition_backend_error {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    return phase_error_is(runtime_ev, preprocessor::error::backend_error);
+  }
+};
+
+struct partition_unknown_error {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    return ev.ctx.phase_error != preprocessor::error::none &&
+           ev.ctx.phase_error != preprocessor::error::invalid_request &&
+           ev.ctx.phase_error != preprocessor::error::backend_error;
   }
 };
 
