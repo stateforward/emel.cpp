@@ -1,9 +1,15 @@
 #pragma once
 
 #include "emel/text/encoders/spm/context.hpp"
+#include "emel/text/encoders/spm/errors.hpp"
 #include "emel/text/encoders/guards.hpp"
 
 namespace emel::text::encoders::spm::guard {
+
+inline bool phase_error_is(const runtime::encode_runtime & ev,
+                           const error::code code_value) noexcept {
+  return ev.event_.ctx.err == error::to_emel(code_value);
+}
 
 struct valid_encode {
   bool operator()(const runtime::encode_runtime & ev, const action::context & ctx) const noexcept {
@@ -26,6 +32,138 @@ struct phase_ok {
 struct phase_failed {
   bool operator()(const runtime::encode_runtime & ev) const noexcept {
     return emel::text::encoders::guard::phase_failed{}(ev.event_);
+  }
+};
+
+struct table_sync_ok {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::ok);
+  }
+};
+
+struct table_sync_invalid_argument_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::invalid_argument);
+  }
+};
+
+struct table_sync_backend_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::backend);
+  }
+};
+
+struct table_sync_model_invalid_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::model_invalid);
+  }
+};
+
+struct table_sync_unknown_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return !table_sync_ok{}(ev) &&
+           !table_sync_invalid_argument_error{}(ev) &&
+           !table_sync_backend_error{}(ev) &&
+           !table_sync_model_invalid_error{}(ev);
+  }
+};
+
+struct prepare_result_ok {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::ok);
+  }
+};
+
+struct prepare_result_invalid_argument_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::invalid_argument);
+  }
+};
+
+struct prepare_result_backend_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::backend);
+  }
+};
+
+struct prepare_result_model_invalid_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::model_invalid);
+  }
+};
+
+struct prepare_result_unknown_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return !prepare_result_ok{}(ev) &&
+           !prepare_result_invalid_argument_error{}(ev) &&
+           !prepare_result_backend_error{}(ev) &&
+           !prepare_result_model_invalid_error{}(ev);
+  }
+};
+
+struct merge_result_ok {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::ok);
+  }
+};
+
+struct merge_result_invalid_argument_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::invalid_argument);
+  }
+};
+
+struct merge_result_backend_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::backend);
+  }
+};
+
+struct merge_result_model_invalid_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::model_invalid);
+  }
+};
+
+struct merge_result_unknown_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return !merge_result_ok{}(ev) &&
+           !merge_result_invalid_argument_error{}(ev) &&
+           !merge_result_backend_error{}(ev) &&
+           !merge_result_model_invalid_error{}(ev);
+  }
+};
+
+struct encode_result_ok {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::ok);
+  }
+};
+
+struct encode_result_invalid_argument_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::invalid_argument);
+  }
+};
+
+struct encode_result_backend_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::backend);
+  }
+};
+
+struct encode_result_model_invalid_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::model_invalid);
+  }
+};
+
+struct encode_result_unknown_error {
+  bool operator()(const runtime::encode_runtime & ev) const noexcept {
+    return !encode_result_ok{}(ev) &&
+           !encode_result_invalid_argument_error{}(ev) &&
+           !encode_result_backend_error{}(ev) &&
+           !encode_result_model_invalid_error{}(ev);
   }
 };
 
