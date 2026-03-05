@@ -181,14 +181,6 @@ struct seq_mode_default {
   }
 };
 
-struct seq_mode_invalid {
-  bool operator()(const event::batch_runtime & ev) const noexcept {
-    return !seq_mode_masks{}(ev) &&
-           !seq_mode_primary_ids{}(ev) &&
-           !seq_mode_default{}(ev);
-  }
-};
-
 struct positions_mode_stride_three {
   bool operator()(const event::batch_runtime & ev) const noexcept {
     return emel::token::batcher::detail::positions_stride(ev.request) == 3;
@@ -215,15 +207,6 @@ struct positions_mode_generate_unseeded {
   }
 };
 
-struct positions_mode_invalid {
-  bool operator()(const event::batch_runtime & ev) const noexcept {
-    return !positions_mode_stride_three{}(ev) &&
-           !positions_mode_stride_one{}(ev) &&
-           !positions_mode_generate_seeded{}(ev) &&
-           !positions_mode_generate_unseeded{}(ev);
-  }
-};
-
 struct output_mode_all {
   bool operator()(const event::batch_runtime & ev) const noexcept {
     return ev.request.output_all;
@@ -241,14 +224,6 @@ struct output_mode_last {
   bool operator()(const event::batch_runtime & ev) const noexcept {
     return !ev.request.output_all &&
            !emel::token::batcher::detail::has_output_mask_input(ev.request);
-  }
-};
-
-struct output_mode_invalid {
-  bool operator()(const event::batch_runtime & ev) const noexcept {
-    return !output_mode_all{}(ev) &&
-           !output_mode_copy{}(ev) &&
-           !output_mode_last{}(ev);
   }
 };
 

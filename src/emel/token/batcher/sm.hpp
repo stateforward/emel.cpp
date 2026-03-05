@@ -92,7 +92,7 @@ struct model {
           + sml::completion<event::batch_runtime> [ guard::seq_mode_default{} ]
           / action::normalize_seq_default
       , sml::state<errored> <= sml::state<seq_mode_decision>
-          + sml::completion<event::batch_runtime> [ guard::seq_mode_invalid{} ]
+          + sml::completion<event::batch_runtime>
           / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
@@ -148,7 +148,7 @@ struct model {
           + sml::completion<event::batch_runtime> [ guard::positions_mode_generate_unseeded{} ]
           / action::probe_positions_unseeded
       , sml::state<errored> <= sml::state<positions_mode_decision>
-          + sml::completion<event::batch_runtime> [ guard::positions_mode_invalid{} ]
+          + sml::completion<event::batch_runtime>
           / action::mark_internal_error
 
       , sml::state<positions_generate_seeded> <= sml::state<positions_seeded_probe>
@@ -236,7 +236,7 @@ struct model {
           + sml::completion<event::batch_runtime> [ guard::output_mode_last{} ]
           / action::set_output_mask_last
       , sml::state<errored> <= sml::state<output_mode_decision>
-          + sml::completion<event::batch_runtime> [ guard::output_mode_invalid{} ]
+          + sml::completion<event::batch_runtime>
           / action::mark_internal_error
 
       //------------------------------------------------------------------------------//

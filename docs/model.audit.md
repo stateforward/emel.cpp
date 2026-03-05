@@ -761,3 +761,9 @@ User-requested machine action/detail findings and remediation status:
   (`branch_copy_succeeded`, `branch_copy_failed_with_error`,
   `branch_copy_failed_without_error`) and removed branch-copy failure guard
   fallback composition (`!branch_copy_succeeded && ...`) in `guards.hpp`.
+- [x] `token/batcher/sm.hpp` + `token/batcher/guards.hpp`
+  removed mode-invalid fallback guard composition
+  (`seq_mode_invalid`/`positions_mode_invalid`/`output_mode_invalid`) from
+  `guards.hpp` and reworked mode-decision fallback handling as explicit
+  terminal transitions in `sm.hpp` (`seq_mode_decision`,
+  `positions_mode_decision`, `output_mode_decision` -> `errored`).
