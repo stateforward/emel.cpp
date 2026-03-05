@@ -11,6 +11,11 @@ namespace emel::token::batcher {
 struct ready {};
 struct request_decision {};
 struct request_validation_probe {};
+struct request_outputs_decision {};
+struct request_token_counts_decision {};
+struct request_capacities_decision {};
+struct request_token_ids_decision {};
+struct request_seq_payload_decision {};
 struct seq_mode_decision {};
 struct seq_from_masks {};
 struct seq_from_primary_ids {};
@@ -48,11 +53,33 @@ struct model {
 
       , sml::state<request_validation_probe> <= sml::state<request_decision>
           + sml::completion<event::batch_runtime>
-          / action::probe_request_validity
-      , sml::state<seq_mode_decision> <= sml::state<request_validation_probe>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
-      , sml::state<errored> <= sml::state<request_validation_probe>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+      , sml::state<request_outputs_decision> <= sml::state<request_validation_probe>
+          + sml::completion<event::batch_runtime>
+      , sml::state<request_token_counts_decision> <= sml::state<request_outputs_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_outputs_present{} ]
+      , sml::state<errored> <= sml::state<request_outputs_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_outputs_missing{} ]
+          / action::mark_invalid_request
+      , sml::state<request_capacities_decision> <= sml::state<request_token_counts_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_token_counts_valid{} ]
+      , sml::state<errored> <= sml::state<request_token_counts_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_token_counts_invalid{} ]
+          / action::mark_invalid_request
+      , sml::state<request_token_ids_decision> <= sml::state<request_capacities_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_capacities_valid{} ]
+      , sml::state<errored> <= sml::state<request_capacities_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_capacities_invalid{} ]
+          / action::mark_invalid_request
+      , sml::state<request_seq_payload_decision> <= sml::state<request_token_ids_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_token_ids_in_vocab{} ]
+      , sml::state<errored> <= sml::state<request_token_ids_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_token_ids_out_of_vocab{} ]
+          / action::mark_invalid_request
+      , sml::state<seq_mode_decision> <= sml::state<request_seq_payload_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_seq_payload_valid{} ]
+      , sml::state<errored> <= sml::state<request_seq_payload_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_seq_payload_invalid{} ]
+          / action::mark_invalid_request
 
       //------------------------------------------------------------------------------//
       , sml::state<seq_from_masks> <= sml::state<seq_mode_decision>
@@ -226,6 +253,16 @@ struct model {
       , sml::state<ready> <= sml::state<request_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<request_validation_probe> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_outputs_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_token_counts_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_capacities_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_token_ids_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_seq_payload_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<seq_mode_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected

@@ -252,14 +252,6 @@ inline bool seq_payload_valid(const event::batch & req) noexcept {
   return masks_ok && primary_range_ok && primary_in_mask_ok;
 }
 
-inline bool request_valid(const event::batch & req) noexcept {
-  return required_outputs_present(req) &&
-         token_counts_valid(req) &&
-         capacities_valid(req) &&
-         token_ids_in_vocab(req) &&
-         seq_payload_valid(req);
-}
-
 inline void continuity_track_active_none(std::array<int32_t, action::MAX_SEQ> &,
                                          const int32_t,
                                          const int32_t) noexcept {}
@@ -500,18 +492,6 @@ struct mark_backend_error {
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
     runtime_ev.ctx.err = emel::error::cast(error::backend_error);
     detail::write_error(runtime_ev, runtime_ev.ctx.err);
-  }
-};
-
-struct probe_request_validity {
-  void operator()(const event::batch_runtime & ev, context &) const noexcept {
-    constexpr std::array<emel::error::type, 2> error_lut = {
-        emel::error::cast(error::invalid_request),
-        emel::error::cast(error::none),
-    };
-    const bool valid = detail::request_valid(ev.request);
-    ev.ctx.err = error_lut[static_cast<size_t>(valid)];
-    detail::write_error(ev, ev.ctx.err);
   }
 };
 
@@ -806,7 +786,6 @@ inline constexpr begin_batch begin_batch{};
 inline constexpr mark_invalid_request mark_invalid_request{};
 inline constexpr mark_internal_error mark_internal_error{};
 inline constexpr mark_backend_error mark_backend_error{};
-inline constexpr probe_request_validity probe_request_validity{};
 inline constexpr probe_single_output_per_seq probe_single_output_per_seq{};
 inline constexpr probe_continuity probe_continuity{};
 inline constexpr normalize_seq_from_masks normalize_seq_from_masks{};

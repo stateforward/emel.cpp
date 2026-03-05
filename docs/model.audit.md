@@ -431,3 +431,11 @@ User-requested machine action/detail findings and remediation status:
   `render_strip_state_exec`, `render_stop_match_exec`, `render_finalize_decision`)
   and removed composite render actions that previously bundled commit/strip/stop
   behavior implicitly inside single action calls
+- [x] `token/batcher/actions.hpp` + `token/batcher/sm.hpp` + `token/batcher/guards.hpp`
+  reworked request validation routing into explicit `sm.hpp` phases
+  (`request_outputs_decision`, `request_token_counts_decision`,
+  `request_capacities_decision`, `request_token_ids_decision`,
+  `request_seq_payload_decision`) with explicit invalid-request guards/actions;
+  removed composite `probe_request_validity` request classifier from
+  `token/batcher/actions.hpp` so request validation control flow is modeled by
+  explicit guarded transitions.

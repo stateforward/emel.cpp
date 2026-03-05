@@ -20,6 +20,66 @@ struct phase_failed {
   }
 };
 
+struct request_outputs_present {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return emel::token::batcher::detail::required_outputs_present(ev.request);
+  }
+};
+
+struct request_outputs_missing {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return !request_outputs_present{}(ev);
+  }
+};
+
+struct request_token_counts_valid {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return emel::token::batcher::detail::token_counts_valid(ev.request);
+  }
+};
+
+struct request_token_counts_invalid {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return !request_token_counts_valid{}(ev);
+  }
+};
+
+struct request_capacities_valid {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return emel::token::batcher::detail::capacities_valid(ev.request);
+  }
+};
+
+struct request_capacities_invalid {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return !request_capacities_valid{}(ev);
+  }
+};
+
+struct request_token_ids_in_vocab {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return emel::token::batcher::detail::token_ids_in_vocab(ev.request);
+  }
+};
+
+struct request_token_ids_out_of_vocab {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return !request_token_ids_in_vocab{}(ev);
+  }
+};
+
+struct request_seq_payload_valid {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return emel::token::batcher::detail::seq_payload_valid(ev.request);
+  }
+};
+
+struct request_seq_payload_invalid {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return !request_seq_payload_valid{}(ev);
+  }
+};
+
 struct seq_mode_masks {
   bool operator()(const event::batch_runtime & ev) const noexcept {
     return emel::token::batcher::detail::has_seq_masks_input(ev.request);
