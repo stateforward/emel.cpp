@@ -755,3 +755,9 @@ User-requested machine action/detail findings and remediation status:
   composition (`!guard_a && !...`) with explicit direct
   unclassified-error-code guards and updated `sm.hpp` phase-result routing to
   use the explicit guards.
+- [x] `memory/recurrent/sm.hpp` + `memory/recurrent/guards.hpp`
+  reworked branch-copy result routing in `sm.hpp` from generic
+  `operation_failed_*` guards to explicit branch-copy guards
+  (`branch_copy_succeeded`, `branch_copy_failed_with_error`,
+  `branch_copy_failed_without_error`) and removed branch-copy failure guard
+  fallback composition (`!branch_copy_succeeded && ...`) in `guards.hpp`.

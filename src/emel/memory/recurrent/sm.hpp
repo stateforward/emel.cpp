@@ -179,15 +179,15 @@ struct model {
           / action::exec_branch_sequence_copy_callback
       , sml::state<done> <= sml::state<branch_sequence_copy_result_decision>
           + sml::completion<event::branch_sequence_runtime>
-          [ guard::operation_succeeded{} ]
+          [ guard::branch_copy_succeeded{} ]
           / action::finalize_branch_sequence_success
       , sml::state<branch_sequence_rollback_exec> <= sml::state<branch_sequence_copy_result_decision>
           + sml::completion<event::branch_sequence_runtime>
-          [ guard::operation_failed_with_error{} ]
+          [ guard::branch_copy_failed_with_error{} ]
           / action::mark_error_from_operation
       , sml::state<branch_sequence_rollback_exec> <= sml::state<branch_sequence_copy_result_decision>
           + sml::completion<event::branch_sequence_runtime>
-          [ guard::operation_failed_without_error{} ]
+          [ guard::branch_copy_failed_without_error{} ]
           / action::mark_backend_error
       , sml::state<errored> <= sml::state<branch_sequence_rollback_exec>
           + sml::completion<event::branch_sequence_runtime>

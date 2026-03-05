@@ -190,14 +190,13 @@ struct branch_copy_succeeded {
 
 struct branch_copy_failed_with_error {
   bool operator()(const event::branch_sequence_runtime & ev) const noexcept {
-    return !branch_copy_succeeded{}(ev) &&
-           ev.ctx.copy_error != static_cast<int32_t>(emel::error::cast(error::none));
+    return ev.ctx.copy_error != static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
 
 struct branch_copy_failed_without_error {
   bool operator()(const event::branch_sequence_runtime & ev) const noexcept {
-    return !branch_copy_succeeded{}(ev) &&
+    return !ev.ctx.copy_accepted &&
            ev.ctx.copy_error == static_cast<int32_t>(emel::error::cast(error::none));
   }
 };
