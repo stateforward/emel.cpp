@@ -638,3 +638,10 @@ User-requested machine action/detail findings and remediation status:
   `*_invalid_request_error`, `*_backend_error`, `*_internal_error`,
   `*_unknown_error`) so `token/batcher/sm.hpp` no longer relies on generic
   `phase_ok` / `phase_failed` guards for action/detail-driven outcomes.
+- [x] `text/jinja/parser/lexer/sm.hpp` + `text/jinja/parser/lexer/guards.hpp` +
+  `text/jinja/parser/lexer/actions.hpp`
+  reworked string-content intake into explicit
+  `string_content_policy_decision` routing
+  (`string_scan_immediate_termination_or_eof` vs
+  `string_scan_requires_content`) and removed residual runtime `if` branching
+  from string escaped-content action helpers.

@@ -87,13 +87,42 @@ inline void consume_escape_sequence(event::next_runtime ev, std::string &value) 
 
 inline void consume_escaped_until_recursive(event::next_runtime ev,
                                             const char terminal,
-                                            std::string &value) {
+                                            std::string &value) noexcept;
+
+inline void consume_escaped_until_stop(event::next_runtime,
+                                       const char,
+                                       std::string &) noexcept {}
+
+inline void consume_escaped_until_segment_done_stop(event::next_runtime,
+                                                    const char,
+                                                    std::string &) noexcept {}
+
+inline void consume_escaped_until_segment_done_continue(event::next_runtime ev,
+                                                        const char terminal,
+                                                        std::string &value) noexcept {
+  consume_escape_sequence(ev, value);
+  consume_escaped_until_recursive(ev, terminal, value);
+}
+
+inline void consume_escaped_until_segment_done_decision(event::next_runtime ev,
+                                                        const char terminal,
+                                                        std::string &value) noexcept {
+  const size_t size = ev.ctx.source.size();
+  const bool at_end_or_terminal =
+      ev.ctx.pos >= size || ev.ctx.source[ev.ctx.pos] == terminal;
+  using handler_t = void (*)(event::next_runtime, const char, std::string &) noexcept;
+  constexpr std::array<handler_t, 2> handlers = {
+      consume_escaped_until_segment_done_continue,
+      consume_escaped_until_segment_done_stop,
+  };
+  handlers[static_cast<size_t>(at_end_or_terminal)](ev, terminal, value);
+}
+
+inline void consume_escaped_until_continue(event::next_runtime ev,
+                                           const char terminal,
+                                           std::string &value) noexcept {
   const size_t pos = ev.ctx.pos;
   const size_t size = ev.ctx.source.size();
-  if (pos >= size || ev.ctx.source[pos] == terminal) {
-    return;
-  }
-
   const std::array<char, 2> specials = {terminal, '\\'};
   const std::string_view special_chars(specials.data(), specials.size());
   const size_t next_special = ev.ctx.source.find_first_of(special_chars, pos);
@@ -102,13 +131,22 @@ inline void consume_escaped_until_recursive(event::next_runtime ev,
       segment_end_candidates[static_cast<size_t>(next_special != std::string_view::npos)];
   value.append(ev.ctx.source.substr(pos, segment_end - pos));
   ev.ctx.pos = segment_end;
+  consume_escaped_until_segment_done_decision(ev, terminal, value);
+}
 
-  if (ev.ctx.pos >= size || ev.ctx.source[ev.ctx.pos] == terminal) {
-    return;
-  }
-
-  consume_escape_sequence(ev, value);
-  consume_escaped_until_recursive(ev, terminal, value);
+inline void consume_escaped_until_recursive(event::next_runtime ev,
+                                            const char terminal,
+                                            std::string &value) noexcept {
+  const size_t pos = ev.ctx.pos;
+  const size_t size = ev.ctx.source.size();
+  const bool at_end_or_terminal =
+      pos >= size || ev.ctx.source[pos] == terminal;
+  using handler_t = void (*)(event::next_runtime, const char, std::string &) noexcept;
+  constexpr std::array<handler_t, 2> handlers = {
+      consume_escaped_until_continue,
+      consume_escaped_until_stop,
+  };
+  handlers[static_cast<size_t>(at_end_or_terminal)](ev, terminal, value);
 }
 
 inline std::string consume_escaped_until(event::next_runtime ev, const char terminal) {

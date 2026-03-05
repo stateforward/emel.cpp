@@ -509,6 +509,24 @@ struct starts_word {
   }
 };
 
+struct string_scan_immediate_termination_or_eof {
+  bool operator()(const event::next_runtime &ev,
+                  const action::context &) const noexcept {
+    return ev.ctx.handled &&
+           ev.ctx.scan.err == detail::error_code(error::none) &&
+           (ev.ctx.pos >= ev.ctx.size || ev.ctx.source[ev.ctx.pos] == ev.ctx.string_terminal);
+  }
+};
+
+struct string_scan_requires_content {
+  bool operator()(const event::next_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return !string_scan_immediate_termination_or_eof{}(ev, ctx) &&
+           ev.ctx.handled &&
+           ev.ctx.scan.err == detail::error_code(error::none);
+  }
+};
+
 struct string_terminated {
   bool operator()(const event::next_runtime &ev,
                   const action::context &) const noexcept {

@@ -50,6 +50,7 @@ struct mapping_scan_result_decision {};
 struct string_scan_decision {};
 struct string_scan_exec {};
 struct string_content_scan_exec {};
+struct string_content_policy_decision {};
 struct string_scan_result_decision {};
 struct string_materialize_exec {};
 struct string_status_decision {};
@@ -722,9 +723,21 @@ struct model {
           + sml::completion<event::next_runtime>
           / action::begin_string_scan
 
-      , sml::state<string_scan_result_decision> <= sml::state<string_content_scan_exec>
+      , sml::state<string_content_policy_decision> <= sml::state<string_content_scan_exec>
           + sml::completion<event::next_runtime>
+
+      , sml::state<string_scan_result_decision> <= sml::state<string_content_policy_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::string_scan_immediate_termination_or_eof{} ]
+
+      , sml::state<string_scan_result_decision> <= sml::state<string_content_policy_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::string_scan_requires_content{} ]
           / action::scan_string_content
+
+      , sml::state<invalid_char_exec> <= sml::state<string_content_policy_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::scan_unhandled{} ]
 
       , sml::state<string_materialize_exec> <= sml::state<string_scan_result_decision>
           + sml::completion<event::next_runtime>
