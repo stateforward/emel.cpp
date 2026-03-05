@@ -193,6 +193,11 @@ Status correction: the following files still contain implicit runtime control fl
   `sm.hpp`; removed generic `phase_ok` / `phase_failed` routing from tokenizer
   bind flow and made runtime error classes explicit, including unknown error
   fallback)
+- [x] `src/emel/text/detokenizer/sm.hpp` + `src/emel/text/detokenizer/guards.hpp`
+  (rearchitected bind and detokenize decision routing to explicit typed
+  `bind_error_*` / `detokenize_error_*` guard branches in `sm.hpp`; removed
+  generic phase routing guards and modeled `none`, typed error classes,
+  untracked, and unknown paths explicitly)
 
 ## High-Priority Findings (Action Files)
 

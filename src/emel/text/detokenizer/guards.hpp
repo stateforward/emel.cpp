@@ -9,6 +9,27 @@
 
 namespace emel::text::detokenizer::guard {
 
+inline int32_t runtime_error(const event::bind & ev) noexcept {
+  return ev.error_out;
+}
+
+inline int32_t runtime_error(const event::detokenize & ev) noexcept {
+  return ev.error_out;
+}
+
+inline bool error_is(const int32_t runtime_err, const error expected) noexcept {
+  return runtime_err == error_code(expected);
+}
+
+inline bool error_is_unknown(const int32_t runtime_err) noexcept {
+  return !error_is(runtime_err, error::none) &&
+         !error_is(runtime_err, error::invalid_request) &&
+         !error_is(runtime_err, error::model_invalid) &&
+         !error_is(runtime_err, error::backend_error) &&
+         !error_is(runtime_err, error::internal_error) &&
+         !error_is(runtime_err, error::untracked);
+}
+
 namespace detail {
 
 inline size_t pending_head_sequence_length(const event::detokenize & ev) noexcept {
@@ -118,39 +139,99 @@ struct detokenize_pending_no_capacity_for_byte {
   }
 };
 
-struct bind_phase_ok {
+struct bind_error_none {
   bool operator()(const event::bind & ev) const noexcept {
-    return ev.error_out == error_code(error::none);
+    return error_is(runtime_error(ev), error::none);
   }
 };
 
-struct bind_phase_failed {
+struct bind_error_invalid_request {
   bool operator()(const event::bind & ev) const noexcept {
-    return ev.error_out != error_code(error::none);
+    return error_is(runtime_error(ev), error::invalid_request);
   }
 };
 
-struct detokenize_phase_ok {
-  bool operator()(const event::detokenize & ev) const noexcept {
-    return ev.error_out == error_code(error::none);
+struct bind_error_model_invalid {
+  bool operator()(const event::bind & ev) const noexcept {
+    return error_is(runtime_error(ev), error::model_invalid);
   }
 };
 
-struct detokenize_phase_failed {
+struct bind_error_backend_error {
+  bool operator()(const event::bind & ev) const noexcept {
+    return error_is(runtime_error(ev), error::backend_error);
+  }
+};
+
+struct bind_error_internal_error {
+  bool operator()(const event::bind & ev) const noexcept {
+    return error_is(runtime_error(ev), error::internal_error);
+  }
+};
+
+struct bind_error_untracked {
+  bool operator()(const event::bind & ev) const noexcept {
+    return error_is(runtime_error(ev), error::untracked);
+  }
+};
+
+struct bind_error_unknown {
+  bool operator()(const event::bind & ev) const noexcept {
+    return error_is_unknown(runtime_error(ev));
+  }
+};
+
+struct detokenize_error_none {
   bool operator()(const event::detokenize & ev) const noexcept {
-    return ev.error_out != error_code(error::none);
+    return error_is(runtime_error(ev), error::none);
+  }
+};
+
+struct detokenize_error_invalid_request {
+  bool operator()(const event::detokenize & ev) const noexcept {
+    return error_is(runtime_error(ev), error::invalid_request);
+  }
+};
+
+struct detokenize_error_model_invalid {
+  bool operator()(const event::detokenize & ev) const noexcept {
+    return error_is(runtime_error(ev), error::model_invalid);
+  }
+};
+
+struct detokenize_error_backend_error {
+  bool operator()(const event::detokenize & ev) const noexcept {
+    return error_is(runtime_error(ev), error::backend_error);
+  }
+};
+
+struct detokenize_error_internal_error {
+  bool operator()(const event::detokenize & ev) const noexcept {
+    return error_is(runtime_error(ev), error::internal_error);
+  }
+};
+
+struct detokenize_error_untracked {
+  bool operator()(const event::detokenize & ev) const noexcept {
+    return error_is(runtime_error(ev), error::untracked);
+  }
+};
+
+struct detokenize_error_unknown {
+  bool operator()(const event::detokenize & ev) const noexcept {
+    return error_is_unknown(runtime_error(ev));
   }
 };
 
 struct detokenize_pending_empty {
   bool operator()(const event::detokenize & ev) const noexcept {
-    return detokenize_phase_ok{}(ev) && ev.pending_length_out == 0;
+    return detokenize_error_none{}(ev) && ev.pending_length_out == 0;
   }
 };
 
 struct detokenize_pending_not_empty {
   bool operator()(const event::detokenize & ev) const noexcept {
-    return detokenize_phase_ok{}(ev) && ev.pending_length_out != 0;
+    return detokenize_error_none{}(ev) && ev.pending_length_out != 0;
   }
 };
 

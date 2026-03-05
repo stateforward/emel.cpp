@@ -260,6 +260,10 @@ TEST_CASE("detokenizer_action_and_guard_paths") {
       detokenizer_error_code(emel::text::detokenizer::error::model_invalid);
   const int32_t detok_backend_error =
       detokenizer_error_code(emel::text::detokenizer::error::backend_error);
+  const int32_t detok_internal_error =
+      detokenizer_error_code(emel::text::detokenizer::error::internal_error);
+  const int32_t detok_untracked =
+      detokenizer_error_code(emel::text::detokenizer::error::untracked);
   int32_t err = detok_ok;
 
   emel::text::detokenizer::event::detokenize detok_ev{
@@ -476,12 +480,33 @@ TEST_CASE("detokenizer_action_and_guard_paths") {
 
   err = detok_ok;
   pending_len = 0;
-  CHECK(emel::text::detokenizer::guard::bind_phase_ok{}(bind_ev));
-  CHECK(emel::text::detokenizer::guard::detokenize_phase_ok{}(bad_detok));
+  CHECK(emel::text::detokenizer::guard::bind_error_none{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_none{}(bad_detok));
   CHECK(emel::text::detokenizer::guard::detokenize_pending_empty{}(bad_detok));
   pending_len = 1;
   CHECK(emel::text::detokenizer::guard::detokenize_pending_not_empty{}(bad_detok));
+
+  err = detok_invalid_request;
+  CHECK(emel::text::detokenizer::guard::bind_error_invalid_request{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_invalid_request{}(bad_detok));
+
+  err = detok_model_invalid;
+  CHECK(emel::text::detokenizer::guard::bind_error_model_invalid{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_model_invalid{}(bad_detok));
+
   err = detok_backend_error;
-  CHECK(emel::text::detokenizer::guard::bind_phase_failed{}(bind_ev));
-  CHECK(emel::text::detokenizer::guard::detokenize_phase_failed{}(bad_detok));
+  CHECK(emel::text::detokenizer::guard::bind_error_backend_error{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_backend_error{}(bad_detok));
+
+  err = detok_internal_error;
+  CHECK(emel::text::detokenizer::guard::bind_error_internal_error{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_internal_error{}(bad_detok));
+
+  err = detok_untracked;
+  CHECK(emel::text::detokenizer::guard::bind_error_untracked{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_untracked{}(bad_detok));
+
+  err = 0x7777;
+  CHECK(emel::text::detokenizer::guard::bind_error_unknown{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_unknown{}(bad_detok));
 }
