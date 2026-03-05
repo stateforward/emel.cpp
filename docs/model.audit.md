@@ -203,6 +203,11 @@ Status correction: the following files still contain implicit runtime control fl
   `probe_error_*`, `bind_error_*`, and `parse_error_*` guard branches in
   `sm.hpp`; removed generic `*_phase_ok` / `*_phase_failed` routing and modeled
   `none`, typed error classes, untracked, and unknown paths explicitly)
+- [x] `src/emel/graph/allocator/sm.hpp` + `src/emel/graph/allocator/guards.hpp`
+  (rearchitected allocation finalization routing to explicit typed
+  `allocation_error_*` guard branches in `sm.hpp`; removed generic
+  `phase_ok` / `phase_failed` routing and modeled `none`, typed error classes,
+  untracked, and unknown paths explicitly)
 
 ## High-Priority Findings (Action Files)
 

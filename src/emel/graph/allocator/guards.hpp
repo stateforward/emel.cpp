@@ -6,6 +6,23 @@
 
 namespace emel::graph::allocator::guard {
 
+inline emel::error::type runtime_error(const event::allocate_graph_plan & ev) noexcept {
+  return ev.ctx.err;
+}
+
+inline bool error_is(const emel::error::type runtime_err,
+                     const error expected) noexcept {
+  return runtime_err == emel::error::cast(expected);
+}
+
+inline bool error_is_unknown(const emel::error::type runtime_err) noexcept {
+  return !error_is(runtime_err, error::none) &&
+         !error_is(runtime_err, error::invalid_request) &&
+         !error_is(runtime_err, error::capacity) &&
+         !error_is(runtime_err, error::internal_error) &&
+         !error_is(runtime_err, error::untracked);
+}
+
 struct valid_allocate {
   bool operator()(const event::allocate_graph_plan & ev, const action::context &) const noexcept {
     return ev.request.graph_topology != nullptr &&
@@ -49,15 +66,39 @@ struct invalid_allocate_without_output {
   }
 };
 
-struct phase_ok {
+struct allocation_error_none {
   bool operator()(const event::allocate_graph_plan & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::none);
   }
 };
 
-struct phase_failed {
+struct allocation_error_invalid_request {
   bool operator()(const event::allocate_graph_plan & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::invalid_request);
+  }
+};
+
+struct allocation_error_capacity {
+  bool operator()(const event::allocate_graph_plan & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::capacity);
+  }
+};
+
+struct allocation_error_internal_error {
+  bool operator()(const event::allocate_graph_plan & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::internal_error);
+  }
+};
+
+struct allocation_error_untracked {
+  bool operator()(const event::allocate_graph_plan & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::untracked);
+  }
+};
+
+struct allocation_error_unknown {
+  bool operator()(const event::allocate_graph_plan & ev, const action::context &) const noexcept {
+    return error_is_unknown(runtime_error(ev));
   }
 };
 

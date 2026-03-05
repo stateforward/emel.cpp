@@ -128,11 +128,22 @@ TEST_CASE("graph_allocator_action_and_guard_branches") {
   CHECK(ev.ctx.err == emel::error::cast(emel::graph::allocator::error::invalid_request));
 
   ev.ctx.err = emel::error::cast(emel::graph::allocator::error::none);
-  CHECK(guard::phase_ok{}(ev, machine_ctx));
-  CHECK_FALSE(guard::phase_failed{}(ev, machine_ctx));
+  CHECK(guard::allocation_error_none{}(ev, machine_ctx));
+
+  ev.ctx.err = emel::error::cast(emel::graph::allocator::error::invalid_request);
+  CHECK(guard::allocation_error_invalid_request{}(ev, machine_ctx));
+
+  ev.ctx.err = emel::error::cast(emel::graph::allocator::error::capacity);
+  CHECK(guard::allocation_error_capacity{}(ev, machine_ctx));
+
   ev.ctx.err = emel::error::cast(emel::graph::allocator::error::internal_error);
-  CHECK_FALSE(guard::phase_ok{}(ev, machine_ctx));
-  CHECK(guard::phase_failed{}(ev, machine_ctx));
+  CHECK(guard::allocation_error_internal_error{}(ev, machine_ctx));
+
+  ev.ctx.err = emel::error::cast(emel::graph::allocator::error::untracked);
+  CHECK(guard::allocation_error_untracked{}(ev, machine_ctx));
+
+  ev.ctx.err = static_cast<emel::error::type>(0x7fff);
+  CHECK(guard::allocation_error_unknown{}(ev, machine_ctx));
 
   ev.ctx.err = emel::error::cast(emel::graph::allocator::error::none);
   ev.ctx.liveness_outcome = emel::graph::allocator::liveness_pass::events::phase_outcome::done;
