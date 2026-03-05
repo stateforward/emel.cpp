@@ -476,7 +476,6 @@ User-requested machine action/detail findings and remediation status:
 - [ ] Remaining machines still route action/detail outcomes through generic
   `phase_ok` / `phase_failed` guards instead of explicit error-class/result
   decision guards in `sm.hpp`, including:
-  `src/emel/token/batcher/sm.hpp`,
   and multiple preprocessor machine `sm.hpp` files.
 
 - [x] `text/encoders/spm/sm.hpp` + `text/encoders/spm/guards.hpp`
@@ -509,3 +508,9 @@ User-requested machine action/detail findings and remediation status:
   `*_backend_error`, `*_model_invalid_error`, `*_unknown_error`) so
   `plamo2/sm.hpp` no longer relies on generic `phase_ok` / `phase_failed`
   guards for action/detail-driven outcomes.
+- [x] `token/batcher/sm.hpp` + `token/batcher/guards.hpp`
+  reworked seq-normalization, positions, output-mask, and output-counting
+  phase routing into explicit error-class branches (`*_ok`,
+  `*_invalid_request_error`, `*_backend_error`, `*_internal_error`,
+  `*_unknown_error`) so `token/batcher/sm.hpp` no longer relies on generic
+  `phase_ok` / `phase_failed` guards for action/detail-driven outcomes.

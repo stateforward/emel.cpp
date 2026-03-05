@@ -8,15 +8,41 @@
 
 namespace emel::token::batcher::guard {
 
-struct phase_ok {
+inline bool phase_error_is(const event::batch_runtime & ev,
+                           const emel::error::type code_value) noexcept {
+  return ev.ctx.err == code_value;
+}
+
+struct phase_result_ok {
   bool operator()(const event::batch_runtime & ev) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
+    return phase_error_is(ev, emel::error::cast(error::none));
   }
 };
 
-struct phase_failed {
+struct phase_result_invalid_request_error {
   bool operator()(const event::batch_runtime & ev) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return phase_error_is(ev, emel::error::cast(error::invalid_request));
+  }
+};
+
+struct phase_result_backend_error {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return phase_error_is(ev, emel::error::cast(error::backend_error));
+  }
+};
+
+struct phase_result_internal_error {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return phase_error_is(ev, emel::error::cast(error::internal_error));
+  }
+};
+
+struct phase_result_unknown_error {
+  bool operator()(const event::batch_runtime & ev) const noexcept {
+    return !phase_result_ok{}(ev) &&
+           !phase_result_invalid_request_error{}(ev) &&
+           !phase_result_backend_error{}(ev) &&
+           !phase_result_internal_error{}(ev);
   }
 };
 
