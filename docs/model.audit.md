@@ -497,10 +497,15 @@ User-requested machine action/detail findings and remediation status:
   error-class branches (`*_ok`, `*_invalid_request_error`,
   `*_backend_error`, `*_unknown_error`) so `ugm/sm.hpp` no longer relies on
   generic `phase_ok` / `phase_failed` guards.
+- [x] `src/emel/text/tokenizer/preprocessor/wpm/sm.hpp` +
+  `src/emel/text/tokenizer/preprocessor/wpm/guards.hpp`
+  reworked build-specials and partition result routing into explicit
+  error-class branches (`*_ok`, `*_invalid_request_error`,
+  `*_backend_error`, `*_unknown_error`) so `wpm/sm.hpp` no longer relies on
+  generic `phase_ok` / `phase_failed` guards.
 - [ ] Remaining preprocessor machines still route action/detail outcomes
   through generic `phase_ok` / `phase_failed` guards instead of explicit
   error-class/result decision guards in `sm.hpp`, including:
-  `src/emel/text/tokenizer/preprocessor/wpm/sm.hpp`,
   `src/emel/text/tokenizer/preprocessor/fallback/sm.hpp`,
   `src/emel/text/tokenizer/preprocessor/plamo2/sm.hpp`.
 
