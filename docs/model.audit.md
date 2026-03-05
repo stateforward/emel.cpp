@@ -669,3 +669,9 @@ User-requested machine action/detail findings and remediation status:
   `planning_fast_result_decision` now explicitly apply
   `mark_planning_progress_stalled`, making final failure classification
   explicit at the model boundary.
+- [x] `batch/planner/modes/simple/sm.hpp` +
+  `batch/planner/modes/simple/actions.hpp`
+  reworked simple-mode result-failure routing so the prior generic
+  `planning_failed` branch now explicitly applies
+  `mark_planning_progress_stalled`, making final failure classification
+  explicit at the model boundary.

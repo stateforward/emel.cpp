@@ -47,6 +47,7 @@ struct model {
           + sml::completion<event::request_runtime> [ guard::planning_succeeded ]
       , sml::state<planning_failed> <= sml::state<planning_decision>
           + sml::completion<event::request_runtime> [ guard::planning_failed ]
+          / action::mark_planning_progress_stalled
       //------------------------------------------------------------------------------//
       , sml::X <= sml::state<planning_done>
       , sml::X <= sml::state<planning_failed>
