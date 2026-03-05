@@ -94,18 +94,30 @@ struct model {
       // Bind flow.
       , sml::state<binding_preprocessor_decision> <= sml::state<binding_preprocessor>
                    + sml::completion<event::bind_runtime> / action::bind_preprocessor
-      , sml::state<errored> <= sml::state<binding_preprocessor_decision>
-                   + sml::completion<event::bind_runtime>[ guard::phase_failed{} ]
       , sml::state<binding_encoder> <= sml::state<binding_preprocessor_decision>
-                   + sml::completion<event::bind_runtime>[ guard::phase_ok{} ]
+                   + sml::completion<event::bind_runtime>[ guard::bind_preprocessor_error_none{} ]
+      , sml::state<errored> <= sml::state<binding_preprocessor_decision>
+                   + sml::completion<event::bind_runtime>[ guard::bind_preprocessor_error_invalid_request{} ]
+      , sml::state<errored> <= sml::state<binding_preprocessor_decision>
+                   + sml::completion<event::bind_runtime>[ guard::bind_preprocessor_error_model_invalid{} ]
+      , sml::state<errored> <= sml::state<binding_preprocessor_decision>
+                   + sml::completion<event::bind_runtime>[ guard::bind_preprocessor_error_backend_error{} ]
+      , sml::state<errored> <= sml::state<binding_preprocessor_decision>
+                   + sml::completion<event::bind_runtime>[ guard::bind_preprocessor_error_unknown{} ]
 
       , sml::state<binding_encoder_decision> <= sml::state<binding_encoder>
                    + sml::completion<event::bind_runtime> / action::bind_encoder
-      , sml::state<errored> <= sml::state<binding_encoder_decision>
-                   + sml::completion<event::bind_runtime>[ guard::phase_failed{} ]
       , sml::state<idle> <= sml::state<binding_encoder_decision>
-                   + sml::completion<event::bind_runtime>[ guard::phase_ok{} ]
+                   + sml::completion<event::bind_runtime>[ guard::bind_encoder_error_none{} ]
                    / action::mark_bind_success
+      , sml::state<errored> <= sml::state<binding_encoder_decision>
+                   + sml::completion<event::bind_runtime>[ guard::bind_encoder_error_invalid_request{} ]
+      , sml::state<errored> <= sml::state<binding_encoder_decision>
+                   + sml::completion<event::bind_runtime>[ guard::bind_encoder_error_model_invalid{} ]
+      , sml::state<errored> <= sml::state<binding_encoder_decision>
+                   + sml::completion<event::bind_runtime>[ guard::bind_encoder_error_backend_error{} ]
+      , sml::state<errored> <= sml::state<binding_encoder_decision>
+                   + sml::completion<event::bind_runtime>[ guard::bind_encoder_error_unknown{} ]
 
       //------------------------------------------------------------------------------//
       // Tokenize flow.

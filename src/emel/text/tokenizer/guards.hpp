@@ -10,6 +10,24 @@ namespace emel::text::tokenizer::guard {
 
 inline constexpr int32_t k_none_code = error_code(error::none);
 
+template <class runtime_event_type>
+inline int32_t runtime_error(const runtime_event_type &runtime_ev) noexcept {
+  const auto &ev =
+      emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+  return ev.ctx.err;
+}
+
+inline bool error_is(const int32_t runtime_err, const error expected) noexcept {
+  return runtime_err == error_code(expected);
+}
+
+inline bool error_is_unknown(const int32_t runtime_err) noexcept {
+  return !error_is(runtime_err, error::none) &&
+         !error_is(runtime_err, error::invalid_request) &&
+         !error_is(runtime_err, error::model_invalid) &&
+         !error_is(runtime_err, error::backend_error);
+}
+
 struct can_tokenize {
   bool operator()(const event::tokenize &ev,
                   const action::context &ctx) const noexcept {
@@ -74,19 +92,73 @@ struct can_bind {
   }
 };
 
-struct phase_ok {
+struct bind_preprocessor_error_none {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type &runtime_ev) const noexcept {
-    const auto &ev =
-        emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
-    return ev.ctx.err == k_none_code;
+    return error_is(runtime_error(runtime_ev), error::none);
   }
 };
 
-struct phase_failed {
+struct bind_preprocessor_error_invalid_request {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type &runtime_ev) const noexcept {
-    return !phase_ok{}(runtime_ev);
+    return error_is(runtime_error(runtime_ev), error::invalid_request);
+  }
+};
+
+struct bind_preprocessor_error_model_invalid {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &runtime_ev) const noexcept {
+    return error_is(runtime_error(runtime_ev), error::model_invalid);
+  }
+};
+
+struct bind_preprocessor_error_backend_error {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &runtime_ev) const noexcept {
+    return error_is(runtime_error(runtime_ev), error::backend_error);
+  }
+};
+
+struct bind_preprocessor_error_unknown {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &runtime_ev) const noexcept {
+    return error_is_unknown(runtime_error(runtime_ev));
+  }
+};
+
+struct bind_encoder_error_none {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &runtime_ev) const noexcept {
+    return error_is(runtime_error(runtime_ev), error::none);
+  }
+};
+
+struct bind_encoder_error_invalid_request {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &runtime_ev) const noexcept {
+    return error_is(runtime_error(runtime_ev), error::invalid_request);
+  }
+};
+
+struct bind_encoder_error_model_invalid {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &runtime_ev) const noexcept {
+    return error_is(runtime_error(runtime_ev), error::model_invalid);
+  }
+};
+
+struct bind_encoder_error_backend_error {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &runtime_ev) const noexcept {
+    return error_is(runtime_error(runtime_ev), error::backend_error);
+  }
+};
+
+struct bind_encoder_error_unknown {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &runtime_ev) const noexcept {
+    return error_is_unknown(runtime_error(runtime_ev));
   }
 };
 

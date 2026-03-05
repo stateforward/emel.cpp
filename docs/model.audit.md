@@ -187,6 +187,12 @@ Status correction: the following files still contain implicit runtime control fl
   intake routing into explicit `branch_sequence_request_{shape,capacity}_decision`
   phases in `sm.hpp`; removed guard-internal `analyze_allocate_slots_request`
   and composite `branch_sequence_request_{valid,backend_error,invalid}` routers)
+- [x] `src/emel/text/tokenizer/sm.hpp` + `src/emel/text/tokenizer/guards.hpp`
+  (rearchitected bind-phase callback routing into explicit
+  `bind_preprocessor_error_*` and `bind_encoder_error_*` decision guards in
+  `sm.hpp`; removed generic `phase_ok` / `phase_failed` routing from tokenizer
+  bind flow and made runtime error classes explicit, including unknown error
+  fallback)
 
 ## High-Priority Findings (Action Files)
 

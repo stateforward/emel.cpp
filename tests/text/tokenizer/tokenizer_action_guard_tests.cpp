@@ -50,6 +50,56 @@ TEST_CASE("tokenizer_guard_can_bind_requires_explicit_valid_variants") {
   CHECK_FALSE(emel::text::tokenizer::guard::can_bind{}(bind_ev));
 }
 
+TEST_CASE("tokenizer_guard_bind_phase_error_classification") {
+  auto &vocab = make_vocab_for_specials();
+  emel::text::tokenizer::event::bind bind_ev = {};
+  bind_ev.vocab = &vocab;
+  bind_ev.preprocessor_variant =
+      emel::text::tokenizer::preprocessor::preprocessor_kind::spm;
+  bind_ev.encoder_variant = emel::text::encoders::encoder_kind::spm;
+
+  emel::text::tokenizer::event::bind_ctx bind_ctx = {};
+  emel::text::tokenizer::event::bind_runtime bind_runtime{bind_ev, bind_ctx};
+
+  bind_ctx.err =
+      emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
+  CHECK(emel::text::tokenizer::guard::bind_preprocessor_error_none{}(
+      bind_runtime));
+  CHECK_FALSE(emel::text::tokenizer::guard::bind_preprocessor_error_unknown{}(
+      bind_runtime));
+  CHECK(
+      emel::text::tokenizer::guard::bind_encoder_error_none{}(bind_runtime));
+  CHECK_FALSE(
+      emel::text::tokenizer::guard::bind_encoder_error_unknown{}(bind_runtime));
+
+  bind_ctx.err = emel::text::tokenizer::error_code(
+      emel::text::tokenizer::error::invalid_request);
+  CHECK(emel::text::tokenizer::guard::bind_preprocessor_error_invalid_request{}(
+      bind_runtime));
+  CHECK(emel::text::tokenizer::guard::bind_encoder_error_invalid_request{}(
+      bind_runtime));
+
+  bind_ctx.err = emel::text::tokenizer::error_code(
+      emel::text::tokenizer::error::model_invalid);
+  CHECK(emel::text::tokenizer::guard::bind_preprocessor_error_model_invalid{}(
+      bind_runtime));
+  CHECK(emel::text::tokenizer::guard::bind_encoder_error_model_invalid{}(
+      bind_runtime));
+
+  bind_ctx.err = emel::text::tokenizer::error_code(
+      emel::text::tokenizer::error::backend_error);
+  CHECK(emel::text::tokenizer::guard::bind_preprocessor_error_backend_error{}(
+      bind_runtime));
+  CHECK(emel::text::tokenizer::guard::bind_encoder_error_backend_error{}(
+      bind_runtime));
+
+  bind_ctx.err = 0x7fff;
+  CHECK(emel::text::tokenizer::guard::bind_preprocessor_error_unknown{}(
+      bind_runtime));
+  CHECK(
+      emel::text::tokenizer::guard::bind_encoder_error_unknown{}(bind_runtime));
+}
+
 TEST_CASE("tokenizer_guard_can_tokenize") {
   auto &vocab = make_vocab_for_specials();
   static emel::model::data::vocab other_vocab = {};
