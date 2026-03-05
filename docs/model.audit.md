@@ -663,3 +663,9 @@ User-requested machine action/detail findings and remediation status:
   generic `planning_failed` branch is now explicitly modeled as
   `planning_progress_stalled` via
   `planning_result_decision -> planning_failed / mark_planning_progress_stalled`.
+- [x] `batch/planner/modes/equal/sm.hpp`
+  reworked equal-mode result-failure routing so generic
+  `planning_failed` branches from `planning_general_result_decision` and
+  `planning_fast_result_decision` now explicitly apply
+  `mark_planning_progress_stalled`, making final failure classification
+  explicit at the model boundary.
