@@ -191,6 +191,12 @@ if(EMEL_ENABLE_FUZZ)
       set(CMAKE_AR "/usr/bin/ar" CACHE FILEPATH "" FORCE)
       set(CMAKE_RANLIB "/usr/bin/ranlib" CACHE FILEPATH "" FORCE)
     endif()
+
+    # Current ld64 can mis-handle sanitizer-instrumented libFuzzer objects on macOS
+    # and fail with invalid relocation diagnostics such as "invalid r_symbolnum=1".
+    list(APPEND EMEL_FUZZ_EXTRA_LINK_OPTIONS
+      "-Wl,-ld_classic"
+    )
   endif()
 
   function(emel_configure_fuzzer target_name)
@@ -229,13 +235,6 @@ if(EMEL_ENABLE_FUZZ)
     tests/fuzz/gbnf_parser_fuzz.cpp
   )
   emel_configure_fuzzer(emel_fuzz_gbnf_parser)
-  if(APPLE)
-    # Keep UBSan enabled; force classic ld for this TU due current ld64 relocation bug.
-    target_link_options(emel_fuzz_gbnf_parser
-      PRIVATE
-        -Wl,-ld_classic
-    )
-  endif()
 
   add_executable(emel_fuzz_jinja_parser
     tests/fuzz/jinja_parser_fuzz.cpp
