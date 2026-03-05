@@ -19,6 +19,18 @@ namespace emel::bench::memory_bench {
 
 namespace event = emel::memory::event;
 
+enum class bench_error : int32_t {
+  none = 0,
+  backend = (1 << 0),
+  internal = (1 << 1),
+};
+
+constexpr int32_t error_code(const bench_error code) noexcept {
+  return static_cast<int32_t>(code);
+}
+
+constexpr int32_t k_error_none = error_code(bench_error::none);
+
 constexpr int32_t k_max_sequences = 64;
 constexpr int32_t k_max_blocks = 1024;
 constexpr int32_t k_block_tokens = 16;
@@ -72,13 +84,13 @@ inline bool recurrent_copy_state(const int32_t, const int32_t, void * user_data,
     *calls += 1;
   }
   if (error_out != nullptr) {
-    *error_out = EMEL_OK;
+    *error_out = k_error_none;
   }
   return true;
 }
 
 inline void must_succeed(const bool accepted, const int32_t err, const char * step) {
-  if (accepted && err == EMEL_OK) {
+  if (accepted && err == k_error_none) {
     return;
   }
   std::fprintf(stderr, "error: memory bench setup failed at %s (accepted=%d err=%d)\n",
@@ -177,7 +189,7 @@ template <class machine_type>
 void initialize_machine(machine_type & machine, lifecycle_state & state) {
   state.copy_calls = 0;
 
-  int32_t err = EMEL_OK;
+  int32_t err = k_error_none;
   must_succeed(machine.process_event(event::reserve{
                  .max_sequences = k_max_sequences,
                  .max_blocks = k_max_blocks,
@@ -187,7 +199,7 @@ void initialize_machine(machine_type & machine, lifecycle_state & state) {
                err,
                "reserve");
 
-  err = EMEL_OK;
+  err = k_error_none;
   must_succeed(machine.process_event(event::allocate_sequence{
                  .seq_id = k_parent_seq,
                  .error_out = &err,
@@ -195,7 +207,7 @@ void initialize_machine(machine_type & machine, lifecycle_state & state) {
                err,
                "allocate_sequence(parent)");
 
-  err = EMEL_OK;
+  err = k_error_none;
   must_succeed(machine.process_event(event::allocate_slots{
                  .seq_id = k_parent_seq,
                  .token_count = k_tokens_per_step,
@@ -208,27 +220,27 @@ void initialize_machine(machine_type & machine, lifecycle_state & state) {
 template <class machine_type>
 void run_lifecycle_cycle(machine_type & machine, lifecycle_state & state,
                          event::branch_sequence::copy_state_fn copy_state) {
-  int32_t err = EMEL_OK;
+  int32_t err = k_error_none;
 
   (void)machine.process_event(event::free_sequence{
     .seq_id = k_branch_child_seq,
     .error_out = &err,
   });
 
-  err = EMEL_OK;
+  err = k_error_none;
   (void)machine.process_event(event::allocate_sequence{
     .seq_id = k_work_seq,
     .error_out = &err,
   });
 
-  err = EMEL_OK;
+  err = k_error_none;
   (void)machine.process_event(event::allocate_slots{
     .seq_id = k_work_seq,
     .token_count = k_tokens_per_step,
     .error_out = &err,
   });
 
-  err = EMEL_OK;
+  err = k_error_none;
   (void)machine.process_event(event::branch_sequence{
     .parent_seq_id = k_parent_seq,
     .child_seq_id = k_branch_child_seq,
@@ -237,13 +249,13 @@ void run_lifecycle_cycle(machine_type & machine, lifecycle_state & state,
     .error_out = &err,
   });
 
-  err = EMEL_OK;
+  err = k_error_none;
   (void)machine.process_event(event::free_sequence{
     .seq_id = k_branch_child_seq,
     .error_out = &err,
   });
 
-  err = EMEL_OK;
+  err = k_error_none;
   (void)machine.process_event(event::free_sequence{
     .seq_id = k_work_seq,
     .error_out = &err,

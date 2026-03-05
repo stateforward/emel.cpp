@@ -7,9 +7,9 @@ stateDiagram-v2
   planning_input_decision --> planning_capacity_decision : completion_request_runtime_ [lambda_guards_19_5] / none
   planning_capacity_decision --> planning_failed : completion_request_runtime_ [lambda_guards_31_5] / lambda_actions_43_48
   planning_capacity_decision --> planning_failed : completion_request_runtime_ [lambda_guards_37_5] / lambda_actions_48_50
-  planning_capacity_decision --> planning_decision : completion_request_runtime_ [lambda_guards_43_5] / lambda_actions_53_37
+  planning_capacity_decision --> planning_decision : completion_request_runtime_ [lambda_guards_43_5] / lambda_actions_58_37
   planning_decision --> planning_done : completion_request_runtime_ [lambda_guards_50_44] / none
-  planning_decision --> planning_failed : completion_request_runtime_ [lambda_guards_56_5] / none
+  planning_decision --> planning_failed : completion_request_runtime_ [lambda_guards_56_5] / lambda_actions_53_56
   planning_done --> terminate : [always] / none
   planning_failed --> terminate : [always] / none
   planning_done --> planning_failed : _ [always] / none

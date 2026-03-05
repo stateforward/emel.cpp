@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "emel/batch/planner/context.hpp"
+#include "emel/batch/planner/errors.hpp"
 #include "emel/batch/planner/events.hpp"
 #include "emel/batch/planner/sm.hpp"
 #include "emel/emel.h"
@@ -20,6 +21,18 @@ constexpr int32_t k_plan_token_count = 128;
 constexpr int32_t k_plan_ubatch = 32;
 constexpr int32_t k_plan_seq_count = 4;
 
+enum class bench_error : emel::error::type {
+  none = 0u,
+  backend = (1u << 0),
+};
+
+constexpr int32_t error_code(const bench_error code) noexcept {
+  return static_cast<int32_t>(emel::error::cast(code));
+}
+
+constexpr int32_t k_error_none = error_code(bench_error::none);
+constexpr int32_t k_error_backend = error_code(bench_error::backend);
+
 struct plan_result {
   std::array<int32_t, emel::batch::planner::action::MAX_PLAN_STEPS> ubatch_sizes = {};
   std::array<int32_t, emel::batch::planner::action::MAX_PLAN_STEPS> ubatch_token_indices = {};
@@ -27,7 +40,7 @@ struct plan_result {
   int32_t ubatch_count = 0;
   int32_t token_indices_count = 0;
   int32_t total_outputs = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = k_error_none;
 };
 
 plan_result * g_plan_result = nullptr;
@@ -37,7 +50,7 @@ void planner_done(const emel::batch::planner::events::plan_done & done) noexcept
     return;
   }
   auto & out = *g_plan_result;
-  out.err = EMEL_OK;
+  out.err = k_error_none;
   out.ubatch_count = done.step_count;
   out.token_indices_count = done.step_token_indices_count;
   out.total_outputs = done.total_outputs;
@@ -130,7 +143,7 @@ void reset_split_result(plan_result & out) {
   out.ubatch_count = 0;
   out.token_indices_count = 0;
   out.total_outputs = 0;
-  out.err = EMEL_OK;
+  out.err = k_error_none;
 }
 
 bool collect_emel_plan(emel::batch::planner::event::plan_mode mode,
@@ -172,7 +185,7 @@ bool collect_emel_plan(emel::batch::planner::event::plan_mode mode,
   (void)machine.process_event(request);
   g_plan_result = nullptr;
 
-  return out.err == EMEL_OK;
+  return out.err == k_error_none;
 }
 
 bool collect_llama_plan(emel::batch::planner::event::plan_mode mode,
@@ -203,7 +216,7 @@ bool collect_llama_plan(emel::batch::planner::event::plan_mode mode,
       break;
     }
     if (out.ubatch_count >= emel::batch::planner::action::MAX_PLAN_STEPS) {
-      out.err = EMEL_ERR_BACKEND;
+      out.err = k_error_backend;
       return false;
     }
     out.ubatch_sizes[static_cast<size_t>(out.ubatch_count)] =
@@ -212,7 +225,7 @@ bool collect_llama_plan(emel::batch::planner::event::plan_mode mode,
 
     for (uint32_t i = 0; i < ubatch.n_tokens; ++i) {
       if (out.token_indices_count >= emel::batch::planner::action::MAX_PLAN_STEPS) {
-        out.err = EMEL_ERR_BACKEND;
+        out.err = k_error_backend;
         return false;
       }
       const int32_t seq_id = ubatch.seq_id[i][0];
@@ -231,7 +244,7 @@ bool collect_llama_plan(emel::batch::planner::event::plan_mode mode,
 bool compare_plan_results(const plan_result & lhs,
                            const plan_result & rhs,
                            const char * label) {
-  if (lhs.err != EMEL_OK || rhs.err != EMEL_OK) {
+  if (lhs.err != k_error_none || rhs.err != k_error_none) {
     std::fprintf(stderr, "error: splitter parity failed (%s): err %d vs %d\n",
                  label, lhs.err, rhs.err);
     return false;

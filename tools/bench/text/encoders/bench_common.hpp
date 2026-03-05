@@ -23,6 +23,19 @@ namespace emel::bench::encoder_bench {
 
 constexpr size_t k_token_capacity = 4096;
 
+enum class bench_error : int32_t {
+  none = 0,
+  invalid_argument = (1 << 0),
+  backend = (1 << 1),
+  model_invalid = (1 << 2),
+};
+
+constexpr int32_t error_code(const bench_error code) noexcept {
+  return static_cast<int32_t>(code);
+}
+
+constexpr int32_t k_error_none = error_code(bench_error::none);
+
 inline int32_t add_token(emel::model::data::vocab & vocab,
                          const char * text,
                          const uint32_t len,
@@ -103,9 +116,9 @@ inline bool run_encode(machine_type & machine,
                        int32_t & token_count,
                        int32_t & err) {
   token_count = 0;
-  err = EMEL_OK;
+  err = k_error_none;
   const bool accepted = machine.process_event(request);
-  return accepted && err == EMEL_OK;
+  return accepted && err == k_error_none;
 }
 
 template <class machine_type>
@@ -113,7 +126,7 @@ inline void ensure_encodes(machine_type & machine,
                            emel::text::encoders::event::encode & request,
                            const char * label) {
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = k_error_none;
   if (!run_encode(machine, request, token_count, err)) {
     std::fprintf(stderr,
                  "error: encoder failed to process text (%s, err=%d)\n",
@@ -137,7 +150,7 @@ inline void append_emel_encoder_cases_with_text(std::vector<result> & results,
   machine_type machine{};
   std::array<int32_t, k_token_capacity> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = k_error_none;
 
   emel::text::encoders::event::encode short_request{
     .vocab = *vocab,

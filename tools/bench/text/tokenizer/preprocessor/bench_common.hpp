@@ -25,6 +25,18 @@ using emel::text::tokenizer::preprocessor::fragment_kind;
 
 constexpr size_t k_fragment_capacity = emel::text::tokenizer::preprocessor::k_max_fragments;
 
+enum class bench_error : int32_t {
+  none = 0,
+  invalid_request = (1 << 0),
+  backend_error = (1 << 1),
+};
+
+constexpr int32_t error_code(const bench_error code) noexcept {
+  return static_cast<int32_t>(code);
+}
+
+inline constexpr int32_t k_error_none = error_code(bench_error::none);
+
 struct special_case {
   const char * name = nullptr;
   std::string text;
@@ -95,9 +107,16 @@ inline reference_fragments build_reference_special_fragments(
 
   std::array<fragment, k_fragment_capacity> fragments = {};
   size_t count = 0;
-  if (!emel::text::tokenizer::preprocessor::detail::partition_with_specials(
-          out.text, cache, parse_special,
-          std::span<fragment>(fragments), count)) {
+  using partition_fn = bool (*)(std::string_view,
+                                const emel::text::tokenizer::preprocessor::special_token_cache &,
+                                std::span<fragment>,
+                                size_t &);
+  constexpr std::array<partition_fn, 2> partitioners = {
+      emel::text::tokenizer::preprocessor::detail::partition_with_specials_parse_disabled,
+      emel::text::tokenizer::preprocessor::detail::partition_with_specials_parse_enabled,
+  };
+  if (!partitioners[static_cast<size_t>(parse_special)](
+          out.text, cache, std::span<fragment>(fragments), count)) {
     std::fprintf(stderr, "error: %s reference partition failed\n", label);
     std::abort();
   }
@@ -116,7 +135,7 @@ bool collect_emel_fragments(machine_type & machine,
                             size_t & count,
                             int32_t & err) {
   count = 0;
-  err = EMEL_OK;
+  err = k_error_none;
   emel::text::tokenizer::preprocessor::event::preprocess request(
       vocab, text, parse_special, std::span<fragment>(fragments), count, err);
   return machine.process_event(request);
@@ -130,9 +149,9 @@ void ensure_special_preprocessor_parity(const char * label,
   machine_type machine{};
   std::array<fragment, k_fragment_capacity> fragments = {};
   size_t count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = k_error_none;
   if (!collect_emel_fragments(machine, vocab, text, parse_special, fragments, count, err) ||
-      err != EMEL_OK) {
+      err != k_error_none) {
     std::fprintf(stderr, "error: %s preprocessor failed for parity check: %d\n",
                  label,
                  err);
@@ -181,7 +200,7 @@ void append_emel_special_preprocessor_cases(std::vector<result> & results,
     machine_type machine{};
     std::array<fragment, k_fragment_capacity> fragments = {};
     size_t count = 0;
-    int32_t err = EMEL_OK;
+    int32_t err = k_error_none;
 
     auto fn = [&]() {
       (void)collect_emel_fragments(machine, *vocab, entry.text, entry.parse_special,

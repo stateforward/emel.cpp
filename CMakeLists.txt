@@ -229,6 +229,13 @@ if(EMEL_ENABLE_FUZZ)
     tests/fuzz/gbnf_parser_fuzz.cpp
   )
   emel_configure_fuzzer(emel_fuzz_gbnf_parser)
+  if(APPLE)
+    # Keep UBSan enabled; force classic ld for this TU due current ld64 relocation bug.
+    target_link_options(emel_fuzz_gbnf_parser
+      PRIVATE
+        -Wl,-ld_classic
+    )
+  endif()
 
   add_executable(emel_fuzz_jinja_parser
     tests/fuzz/jinja_parser_fuzz.cpp
