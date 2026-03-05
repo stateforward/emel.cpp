@@ -6,6 +6,7 @@
 #include "emel/text/jinja/parser/detail.hpp"
 #include "emel/text/jinja/parser/errors.hpp"
 #include "emel/text/jinja/parser/lexer/actions.hpp"
+#include "emel/text/jinja/parser/lexer/guards.hpp"
 #include "emel/text/jinja/parser/lexer/sm.hpp"
 
 namespace {
@@ -107,6 +108,64 @@ TEST_CASE("jinja_lexer_tokenizes_expression") {
   CHECK(result.tokens[2].value == "name");
   CHECK(result.tokens[3].type ==
         emel::text::jinja::token_type::close_expression);
+}
+
+TEST_CASE("jinja_parser_lexer_parse_error_guards_classify_runtime_error_explicitly") {
+  std::string source = "{{ value }}";
+  cursor cur{
+      source,
+      0,
+      0,
+      0,
+      emel::text::jinja::token_type::close_statement,
+      false,
+      false,
+  };
+  token_step_result callback_state{};
+  const next request{
+      cur,
+      next::done_callback::from<token_step_result, &token_step_result::on_done>(&callback_state),
+      next::error_callback::from<token_step_result, &token_step_result::on_error>(&callback_state),
+  };
+  emel::text::jinja::parser::lexer::event::next_ctx runtime_ctx{};
+  emel::text::jinja::parser::lexer::event::next_runtime runtime{request, runtime_ctx};
+  emel::text::jinja::parser::lexer::action::context action_ctx{};
+
+  runtime_ctx.handled = true;
+  runtime_ctx.scan.err = k_ok;
+  runtime_ctx.scan.has_token = true;
+  CHECK(emel::text::jinja::parser::lexer::guard::parse_error_none{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::lexer::guard::parse_error_invalid_request{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::lexer::guard::parse_error_parse_failed{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::lexer::guard::parse_error_internal_error{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::lexer::guard::parse_error_untracked{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::lexer::guard::parse_error_unknown{}(runtime, action_ctx));
+  CHECK(emel::text::jinja::parser::lexer::guard::scan_token_available{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::lexer::guard::scan_no_token_eof{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::lexer::guard::scan_unhandled{}(runtime, action_ctx));
+
+  runtime_ctx.scan.has_token = false;
+  CHECK(emel::text::jinja::parser::lexer::guard::scan_no_token_eof{}(runtime, action_ctx));
+
+  runtime_ctx.scan.err = emel::text::jinja::parser::to_error_code(error::invalid_request);
+  CHECK(emel::text::jinja::parser::lexer::guard::parse_error_invalid_request{}(runtime, action_ctx));
+
+  runtime_ctx.scan.err = k_parse_failed;
+  CHECK(emel::text::jinja::parser::lexer::guard::parse_error_parse_failed{}(runtime, action_ctx));
+
+  runtime_ctx.scan.err = emel::text::jinja::parser::to_error_code(error::internal_error);
+  CHECK(emel::text::jinja::parser::lexer::guard::parse_error_internal_error{}(runtime, action_ctx));
+
+  runtime_ctx.scan.err = emel::text::jinja::parser::to_error_code(error::untracked);
+  CHECK(emel::text::jinja::parser::lexer::guard::parse_error_untracked{}(runtime, action_ctx));
+
+  runtime_ctx.scan.err = static_cast<int32_t>(1u << 7);
+  CHECK(emel::text::jinja::parser::lexer::guard::parse_error_unknown{}(runtime, action_ctx));
+
+  runtime_ctx.handled = false;
+  runtime_ctx.scan.err = k_ok;
+  CHECK(emel::text::jinja::parser::lexer::guard::scan_unhandled{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::lexer::guard::parse_error_none{}(runtime, action_ctx));
 }
 
 TEST_CASE("jinja_lexer_handles_empty_input") {

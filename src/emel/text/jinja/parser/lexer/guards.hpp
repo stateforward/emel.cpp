@@ -40,30 +40,76 @@ struct valid_cursor_position {
   }
 };
 
-struct phase_failed {
+inline bool scan_error_is(const event::next_runtime &ev,
+                          const error expected) noexcept {
+  return ev.ctx.handled && ev.ctx.scan.err == detail::error_code(expected);
+}
+
+inline bool scan_error_is_unknown(const event::next_runtime &ev) noexcept {
+  return ev.ctx.handled && ev.ctx.scan.err != detail::error_code(error::none) &&
+         ev.ctx.scan.err != detail::error_code(error::invalid_request) &&
+         ev.ctx.scan.err != detail::error_code(error::parse_failed) &&
+         ev.ctx.scan.err != detail::error_code(error::internal_error) &&
+         ev.ctx.scan.err != detail::error_code(error::untracked);
+}
+
+struct parse_error_none {
   bool operator()(const event::next_runtime &ev,
                   const action::context &) const noexcept {
-    return ev.ctx.handled && ev.ctx.scan.err != detail::error_code(error::none);
+    return scan_error_is(ev, error::none);
   }
 };
 
-struct phase_has_token {
+struct parse_error_invalid_request {
   bool operator()(const event::next_runtime &ev,
                   const action::context &) const noexcept {
-    return ev.ctx.handled && ev.ctx.scan.err == detail::error_code(error::none) &&
-           ev.ctx.scan.has_token;
+    return scan_error_is(ev, error::invalid_request);
   }
 };
 
-struct phase_at_eof {
+struct parse_error_parse_failed {
   bool operator()(const event::next_runtime &ev,
                   const action::context &) const noexcept {
-    return ev.ctx.handled && ev.ctx.scan.err == detail::error_code(error::none) &&
-           !ev.ctx.scan.has_token;
+    return scan_error_is(ev, error::parse_failed);
   }
 };
 
-struct phase_unhandled {
+struct parse_error_internal_error {
+  bool operator()(const event::next_runtime &ev,
+                  const action::context &) const noexcept {
+    return scan_error_is(ev, error::internal_error);
+  }
+};
+
+struct parse_error_untracked {
+  bool operator()(const event::next_runtime &ev,
+                  const action::context &) const noexcept {
+    return scan_error_is(ev, error::untracked);
+  }
+};
+
+struct parse_error_unknown {
+  bool operator()(const event::next_runtime &ev,
+                  const action::context &) const noexcept {
+    return scan_error_is_unknown(ev);
+  }
+};
+
+struct scan_token_available {
+  bool operator()(const event::next_runtime &ev,
+                  const action::context &) const noexcept {
+    return scan_error_is(ev, error::none) && ev.ctx.scan.has_token;
+  }
+};
+
+struct scan_no_token_eof {
+  bool operator()(const event::next_runtime &ev,
+                  const action::context &) const noexcept {
+    return scan_error_is(ev, error::none) && !ev.ctx.scan.has_token;
+  }
+};
+
+struct scan_unhandled {
   bool operator()(const event::next_runtime &ev,
                   const action::context &) const noexcept {
     return !ev.ctx.handled;

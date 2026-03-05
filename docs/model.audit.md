@@ -233,6 +233,11 @@ Status correction: the following files still contain implicit runtime control fl
   to explicit typed `parse_error_*` guard branches in `sm.hpp`; removed generic `phase_ok` /
   `phase_failed` routing and modeled `none`, typed error classes, untracked, and unknown
   paths explicitly)
+- [x] `src/emel/text/jinja/parser/lexer/sm.hpp` +
+  `src/emel/text/jinja/parser/lexer/guards.hpp` (rearchitected scan-result routing to explicit
+  typed `parse_error_*` guard branches in `sm.hpp`; removed generic
+  `phase_failed`/`phase_has_token`/`phase_at_eof`/`phase_unhandled` routing and modeled explicit
+  error-class, token-available, no-token-eof, and unhandled paths)
 
 ## High-Priority Findings (Action Files)
 

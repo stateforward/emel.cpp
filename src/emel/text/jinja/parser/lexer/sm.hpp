@@ -120,12 +120,28 @@ struct model {
 
       , sml::state<scanning> <= sml::state<text_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<text_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<text_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<text_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<text_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       , sml::state<invalid_char_exec> <= sml::state<text_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<text_opening_block_decision> <= sml::state<text_scan_result_decision>
           + sml::completion<event::next_runtime>
@@ -140,7 +156,7 @@ struct model {
 
       , sml::state<invalid_char_exec> <= sml::state<text_opening_block_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<text_trim_opening_block_result_decision> <= sml::state<text_trim_opening_block_exec>
           + sml::completion<event::next_runtime>
@@ -162,7 +178,7 @@ struct model {
 
       , sml::state<invalid_char_exec> <= sml::state<text_trim_opening_block_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<text_finalize_exec> <= sml::state<text_materialize_exec>
           + sml::completion<event::next_runtime>
@@ -179,7 +195,7 @@ struct model {
 
       , sml::state<invalid_char_exec> <= sml::state<text_finalize_exec>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<text_finalize_token_exec> <= sml::state<text_finalize_result_decision>
           + sml::completion<event::next_runtime>
@@ -202,7 +218,7 @@ struct model {
 
       , sml::state<invalid_char_exec> <= sml::state<text_finalize_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<text_emit_result_decision> <= sml::state<text_finalize_token_exec>
           + sml::completion<event::next_runtime>
@@ -219,7 +235,7 @@ struct model {
 
       , sml::state<invalid_char_exec> <= sml::state<text_emit_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       //------------------------------------------------------------------------------//
       // Comment-start decision.
@@ -239,7 +255,23 @@ struct model {
 
       , sml::state<scanning> <= sml::state<comment_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       , sml::state<comment_finalize_exec> <= sml::state<comment_scan_result_decision>
@@ -252,7 +284,7 @@ struct model {
 
       , sml::state<invalid_char_exec> <= sml::state<comment_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<comment_finalize_result_decision> <= sml::state<comment_finalize_exec>
           + sml::completion<event::next_runtime>
@@ -260,22 +292,38 @@ struct model {
 
       , sml::state<scanning> <= sml::state<comment_finalize_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_finalize_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_finalize_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_finalize_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_finalize_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       , sml::state<scanning> <= sml::state<comment_finalize_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_has_token{} ]
+          [ guard::scan_token_available{} ]
           / action::emit_scanned_token
 
       , sml::state<scanning> <= sml::state<comment_finalize_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_at_eof{} ]
+          [ guard::scan_no_token_eof{} ]
           / action::emit_eof
 
       , sml::state<invalid_char_exec> <= sml::state<comment_finalize_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<comment_unterminated_result_decision> <= sml::state<comment_unterminated_exec>
           + sml::completion<event::next_runtime>
@@ -283,22 +331,38 @@ struct model {
 
       , sml::state<scanning> <= sml::state<comment_unterminated_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_unterminated_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_unterminated_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_unterminated_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<comment_unterminated_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       , sml::state<scanning> <= sml::state<comment_unterminated_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_has_token{} ]
+          [ guard::scan_token_available{} ]
           / action::emit_scanned_token
 
       , sml::state<scanning> <= sml::state<comment_unterminated_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_at_eof{} ]
+          [ guard::scan_no_token_eof{} ]
           / action::emit_eof
 
       , sml::state<invalid_char_exec> <= sml::state<comment_unterminated_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       //------------------------------------------------------------------------------//
       // Trim-prefix start decision.
@@ -330,12 +394,12 @@ struct model {
 
       , sml::state<scanning> <= sml::state<trim_prefix_eof_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_at_eof{} ]
+          [ guard::scan_no_token_eof{} ]
           / action::emit_eof
 
       , sml::state<invalid_char_exec> <= sml::state<trim_prefix_eof_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       //------------------------------------------------------------------------------//
       // Space-skip phase.
@@ -357,12 +421,12 @@ struct model {
 
       , sml::state<scanning> <= sml::state<space_eof_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_at_eof{} ]
+          [ guard::scan_no_token_eof{} ]
           / action::emit_eof
 
       , sml::state<invalid_char_exec> <= sml::state<space_eof_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<mapping_candidate_decision> <= sml::state<unary_candidate_decision>
           + sml::completion<event::next_runtime>
@@ -396,7 +460,23 @@ struct model {
 
       , sml::state<scanning> <= sml::state<unary_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<unary_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<unary_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<unary_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<unary_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       , sml::state<scanning> <= sml::state<unary_scan_result_decision>
@@ -411,7 +491,7 @@ struct model {
 
       , sml::state<invalid_char_exec> <= sml::state<unary_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       //------------------------------------------------------------------------------//
       // Mapping-start decision.
@@ -588,22 +668,38 @@ struct model {
 
       , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_has_token{} ]
+          [ guard::scan_token_available{} ]
           / action::emit_scanned_token
 
       , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_at_eof{} ]
+          [ guard::scan_no_token_eof{} ]
           / action::emit_eof
 
       , sml::state<invalid_char_exec> <= sml::state<mapping_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       //------------------------------------------------------------------------------//
       // String / number / identifier decisions.
@@ -639,7 +735,23 @@ struct model {
 
       , sml::state<scanning> <= sml::state<string_status_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_status_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_status_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_status_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_status_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       , sml::state<string_unterminated_exec> <= sml::state<string_status_decision>
@@ -652,7 +764,7 @@ struct model {
 
       , sml::state<invalid_char_exec> <= sml::state<string_status_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<string_unterminated_result_decision> <= sml::state<string_unterminated_exec>
           + sml::completion<event::next_runtime>
@@ -660,22 +772,38 @@ struct model {
 
       , sml::state<scanning> <= sml::state<string_unterminated_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_unterminated_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_unterminated_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_unterminated_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_unterminated_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       , sml::state<scanning> <= sml::state<string_unterminated_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_has_token{} ]
+          [ guard::scan_token_available{} ]
           / action::emit_scanned_token
 
       , sml::state<scanning> <= sml::state<string_unterminated_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_at_eof{} ]
+          [ guard::scan_no_token_eof{} ]
           / action::emit_eof
 
       , sml::state<invalid_char_exec> <= sml::state<string_unterminated_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<string_finalize_result_decision> <= sml::state<string_finalize_exec>
           + sml::completion<event::next_runtime>
@@ -683,22 +811,38 @@ struct model {
 
       , sml::state<scanning> <= sml::state<string_finalize_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_finalize_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_finalize_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_finalize_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<string_finalize_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       , sml::state<scanning> <= sml::state<string_finalize_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_has_token{} ]
+          [ guard::scan_token_available{} ]
           / action::emit_scanned_token
 
       , sml::state<scanning> <= sml::state<string_finalize_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_at_eof{} ]
+          [ guard::scan_no_token_eof{} ]
           / action::emit_eof
 
       , sml::state<invalid_char_exec> <= sml::state<string_finalize_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<numeric_scan_result_decision> <= sml::state<numeric_scan_exec>
           + sml::completion<event::next_runtime>
@@ -706,22 +850,38 @@ struct model {
 
       , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_has_token{} ]
+          [ guard::scan_token_available{} ]
           / action::emit_scanned_token
 
       , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_at_eof{} ]
+          [ guard::scan_no_token_eof{} ]
           / action::emit_eof
 
       , sml::state<invalid_char_exec> <= sml::state<numeric_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<word_scan_result_decision> <= sml::state<word_scan_exec>
           + sml::completion<event::next_runtime>
@@ -729,22 +889,38 @@ struct model {
 
       , sml::state<scanning> <= sml::state<word_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<word_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<word_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<word_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<word_scan_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       , sml::state<scanning> <= sml::state<word_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_has_token{} ]
+          [ guard::scan_token_available{} ]
           / action::emit_scanned_token
 
       , sml::state<scanning> <= sml::state<word_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_at_eof{} ]
+          [ guard::scan_no_token_eof{} ]
           / action::emit_eof
 
       , sml::state<invalid_char_exec> <= sml::state<word_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_unhandled{} ]
+          [ guard::scan_unhandled{} ]
 
       , sml::state<invalid_char_result_decision> <= sml::state<invalid_char_exec>
           + sml::completion<event::next_runtime>
@@ -752,7 +928,23 @@ struct model {
 
       , sml::state<scanning> <= sml::state<invalid_char_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::phase_failed{} ]
+          [ guard::parse_error_invalid_request{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<invalid_char_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_parse_failed{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<invalid_char_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_internal_error{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<invalid_char_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_untracked{} ]
+          / action::emit_scan_error
+      , sml::state<scanning> <= sml::state<invalid_char_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
 
       //------------------------------------------------------------------------------//
