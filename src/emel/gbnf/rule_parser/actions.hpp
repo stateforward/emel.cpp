@@ -45,6 +45,196 @@ inline void consume_char_class_range_some(context & ctx,
   pos = range_char.second;
 }
 
+inline void append_literal_element_none(context &, const uint32_t) noexcept {}
+
+inline void append_literal_element_some(context & ctx,
+                                        const uint32_t value) noexcept {
+  append_unchecked(ctx, {emel::gbnf::element_type::character, value});
+}
+
+inline bool consume_literal_step(context & ctx,
+                                 const char *& pos,
+                                 const char * end) noexcept {
+  const auto parsed = emel::gbnf::rule_parser::detail::parse_char(pos, end);
+  const bool parsed_ok = parsed.second != nullptr;
+  constexpr std::array<void (*)(context &, uint32_t), 2> append_handlers = {
+      append_literal_element_none,
+      append_literal_element_some,
+  };
+  append_handlers[static_cast<size_t>(parsed_ok)](ctx, parsed.first);
+  const uintptr_t next_addr = emel::gbnf::rule_parser::detail::select_uptr(
+      parsed_ok,
+      reinterpret_cast<uintptr_t>(parsed.second),
+      reinterpret_cast<uintptr_t>(pos));
+  pos = reinterpret_cast<const char *>(next_addr);
+  return parsed_ok;
+}
+
+inline void consume_literal_recursive(context & ctx,
+                                      const char *& pos,
+                                      const char * end,
+                                      bool & ok) noexcept;
+
+inline void consume_literal_stop(context &,
+                                 const char *&,
+                                 const char *,
+                                 bool &) noexcept {}
+
+inline void consume_literal_continue(context & ctx,
+                                     const char *& pos,
+                                     const char * end,
+                                     bool & ok) noexcept {
+  ok = consume_literal_step(ctx, pos, end);
+  consume_literal_recursive(ctx, pos, end, ok);
+}
+
+inline void consume_literal_recursive(context & ctx,
+                                      const char *& pos,
+                                      const char * end,
+                                      bool & ok) noexcept {
+  using handler_type = void (*)(context &, const char *&, const char *, bool &) noexcept;
+  constexpr std::array<handler_type, 2> handlers = {
+      consume_literal_stop,
+      consume_literal_continue,
+  };
+  const size_t continue_parse = static_cast<size_t>(ok && pos < end);
+  handlers[continue_parse](ctx, pos, end, ok);
+}
+
+inline void append_char_class_lead_none(context &,
+                                        const emel::gbnf::element_type,
+                                        const uint32_t) noexcept {}
+
+inline void append_char_class_lead_some(context & ctx,
+                                        const emel::gbnf::element_type lead_type,
+                                        const uint32_t value) noexcept {
+  append_unchecked(ctx, {lead_type, value});
+}
+
+inline void append_char_class_range_none(context &, const uint32_t) noexcept {}
+
+inline void append_char_class_range_some(context & ctx,
+                                         const uint32_t value) noexcept {
+  append_unchecked(ctx, {emel::gbnf::element_type::char_rng_upper, value});
+}
+
+inline bool consume_char_class_range_none_checked(context &,
+                                                  const char *&,
+                                                  const char *) noexcept {
+  return true;
+}
+
+inline bool consume_char_class_range_some_checked(context & ctx,
+                                                  const char *& pos,
+                                                  const char * end) noexcept {
+  ++pos;
+  const auto parsed = emel::gbnf::rule_parser::detail::parse_char(pos, end);
+  const bool parsed_ok = parsed.second != nullptr;
+  constexpr std::array<void (*)(context &, uint32_t), 2> append_handlers = {
+      append_char_class_range_none,
+      append_char_class_range_some,
+  };
+  append_handlers[static_cast<size_t>(parsed_ok)](ctx, parsed.first);
+  const uintptr_t next_addr = emel::gbnf::rule_parser::detail::select_uptr(
+      parsed_ok,
+      reinterpret_cast<uintptr_t>(parsed.second),
+      reinterpret_cast<uintptr_t>(pos));
+  pos = reinterpret_cast<const char *>(next_addr);
+  return parsed_ok;
+}
+
+inline emel::gbnf::element_type select_char_class_lead_type(
+    const bool first,
+    const emel::gbnf::element_type start_type) noexcept {
+  constexpr std::array<emel::gbnf::element_type, 2> lead_types = {
+      emel::gbnf::element_type::char_alt,
+      emel::gbnf::element_type::char_alt,
+  };
+  std::array<emel::gbnf::element_type, 2> lead_type_candidates = lead_types;
+  lead_type_candidates[1] = start_type;
+  return lead_type_candidates[static_cast<size_t>(first)];
+}
+
+inline bool consume_character_class_step(
+    context & ctx,
+    const emel::gbnf::element_type start_type,
+    const char *& pos,
+    const char * end,
+    bool & first) noexcept {
+  const auto parsed = emel::gbnf::rule_parser::detail::parse_char(pos, end);
+  const bool parsed_ok = parsed.second != nullptr;
+  const emel::gbnf::element_type lead_type =
+      select_char_class_lead_type(first, start_type);
+  constexpr std::array<void (*)(context &, emel::gbnf::element_type, uint32_t), 2>
+      append_handlers = {
+          append_char_class_lead_none,
+          append_char_class_lead_some,
+      };
+  append_handlers[static_cast<size_t>(parsed_ok)](ctx, lead_type, parsed.first);
+  const uintptr_t next_addr = emel::gbnf::rule_parser::detail::select_uptr(
+      parsed_ok,
+      reinterpret_cast<uintptr_t>(parsed.second),
+      reinterpret_cast<uintptr_t>(pos));
+  pos = reinterpret_cast<const char *>(next_addr);
+  const std::array<bool, 2> first_values = {first, false};
+  first = first_values[static_cast<size_t>(parsed_ok)];
+
+  const bool has_range =
+      parsed_ok && pos + 1u < end && pos[0] == '-' && pos[1] != ']';
+  using range_handler_type = bool (*)(context &, const char *&, const char *) noexcept;
+  constexpr std::array<range_handler_type, 2> range_handlers = {
+      consume_char_class_range_none_checked,
+      consume_char_class_range_some_checked,
+  };
+  const bool range_ok = range_handlers[static_cast<size_t>(has_range)](ctx, pos, end);
+  return parsed_ok && range_ok;
+}
+
+inline void consume_character_class_recursive(
+    context & ctx,
+    const emel::gbnf::element_type start_type,
+    const char *& pos,
+    const char * end,
+    bool & first,
+    bool & ok) noexcept;
+
+inline void consume_character_class_stop(
+    context &,
+    const emel::gbnf::element_type,
+    const char *&,
+    const char *,
+    bool &,
+    bool &) noexcept {}
+
+inline void consume_character_class_continue(
+    context & ctx,
+    const emel::gbnf::element_type start_type,
+    const char *& pos,
+    const char * end,
+    bool & first,
+    bool & ok) noexcept {
+  ok = consume_character_class_step(ctx, start_type, pos, end, first);
+  consume_character_class_recursive(ctx, start_type, pos, end, first, ok);
+}
+
+inline void consume_character_class_recursive(
+    context & ctx,
+    const emel::gbnf::element_type start_type,
+    const char *& pos,
+    const char * end,
+    bool & first,
+    bool & ok) noexcept {
+  using handler_type =
+      void (*)(context &, emel::gbnf::element_type, const char *&, const char *,
+               bool &, bool &) noexcept;
+  constexpr std::array<handler_type, 2> handlers = {
+      consume_character_class_stop,
+      consume_character_class_continue,
+  };
+  const size_t continue_parse = static_cast<size_t>(ok && pos < end);
+  handlers[continue_parse](ctx, start_type, pos, end, first, ok);
+}
+
 inline bool parse_rule_reference_digits_text(const std::string_view text,
                                              uint32_t & token_id) noexcept {
   static constexpr char k_zero = '\0';
@@ -301,53 +491,81 @@ struct consume_token_alternation {
 
 struct consume_token_literal {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
-    ctx.last_sym_start = ctx.current_rule.size;
     const std::string_view text = ev.ctx.token.text;
-    const char * pos = text.data() + 1u;
-    const char * end = text.data() + text.size() - 1u;
-    while (pos < end) {
-      const auto parsed = emel::gbnf::rule_parser::detail::parse_char(pos, end);
-      append_unchecked(ctx, {emel::gbnf::element_type::character, parsed.first});
-      pos = parsed.second;
-    }
+    static constexpr char k_zero = '\0';
+    const bool has_data = text.data() != nullptr;
+    const uintptr_t data_addr = emel::gbnf::rule_parser::detail::select_uptr(
+        has_data,
+        reinterpret_cast<uintptr_t>(text.data()),
+        reinterpret_cast<uintptr_t>(&k_zero));
+    const char * const safe_data = reinterpret_cast<const char *>(data_addr);
+    const bool has_envelope = text.size() >= 2u;
+    const size_t start_offset =
+        emel::gbnf::rule_parser::detail::select_size(has_envelope, 1u, 0u);
+    const size_t end_offset =
+        emel::gbnf::rule_parser::detail::select_size(has_envelope, text.size() - 1u, 0u);
+
+    const uint32_t original_size = ctx.current_rule.size;
+    ctx.last_sym_start = original_size;
+    const char * pos = safe_data + start_offset;
+    const char * end = safe_data + end_offset;
+    bool ok = has_envelope;
+    consume_literal_recursive(ctx, pos, end, ok);
+
+    const std::array<uint32_t, 2> size_candidates = {
+        original_size,
+        ctx.current_rule.size,
+    };
+    ctx.current_rule.size = size_candidates[static_cast<size_t>(ok)];
+    const std::array<emel::error::type, 2> error_candidates = {
+        emel::error::cast(error::parse_failed),
+        emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
   }
 };
 
 struct consume_token_character_class {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
-    ctx.last_sym_start = ctx.current_rule.size;
     const std::string_view text = ev.ctx.token.text;
-    const char * pos = text.data() + 1u;
-    const char * end = text.data() + text.size() - 1u;
-    const size_t leading_not = static_cast<size_t>(pos < end && *pos == '^');
+    static constexpr char k_zero = '\0';
+    const bool has_data = text.data() != nullptr;
+    const uintptr_t data_addr = emel::gbnf::rule_parser::detail::select_uptr(
+        has_data,
+        reinterpret_cast<uintptr_t>(text.data()),
+        reinterpret_cast<uintptr_t>(&k_zero));
+    const char * const safe_data = reinterpret_cast<const char *>(data_addr);
+    const bool has_envelope = text.size() >= 2u;
+    const size_t start_offset =
+        emel::gbnf::rule_parser::detail::select_size(has_envelope, 1u, 0u);
+    const size_t end_offset =
+        emel::gbnf::rule_parser::detail::select_size(has_envelope, text.size() - 1u, 0u);
+
+    const uint32_t original_size = ctx.current_rule.size;
+    ctx.last_sym_start = original_size;
+    const char * pos = safe_data + start_offset;
+    const char * end = safe_data + end_offset;
+    const bool leading_not = pos < end && *pos == '^';
     const emel::gbnf::element_type start_types[2] = {
         emel::gbnf::element_type::character,
         emel::gbnf::element_type::char_not};
-    const emel::gbnf::element_type start_type = start_types[leading_not];
-    pos += leading_not;
-
+    const emel::gbnf::element_type start_type =
+        start_types[static_cast<size_t>(leading_not)];
+    pos += static_cast<size_t>(leading_not);
     bool first = true;
-    while (pos < end) {
-      const auto first_char = emel::gbnf::rule_parser::detail::parse_char(pos, end);
-      constexpr std::array<emel::gbnf::element_type, 2> lead_types = {
-          emel::gbnf::element_type::char_alt,
-          emel::gbnf::element_type::char_alt,
-      };
-      std::array<emel::gbnf::element_type, 2> lead_type_candidates = lead_types;
-      lead_type_candidates[1] = start_type;
-      const auto lead_type = lead_type_candidates[static_cast<size_t>(first)];
-      append_unchecked(ctx, {lead_type, first_char.first});
-      first = false;
-      pos = first_char.second;
+    bool ok = has_envelope;
+    consume_character_class_recursive(ctx, start_type, pos, end, first, ok);
 
-      const size_t has_range = static_cast<size_t>(pos + 1u < end && pos[0] == '-' &&
-                                                   pos[1] != ']');
-      constexpr std::array<void (*)(context &, const char *&, const char *), 2> range_handlers = {
-          consume_char_class_range_none,
-          consume_char_class_range_some,
-      };
-      range_handlers[has_range](ctx, pos, end);
-    }
+    const std::array<uint32_t, 2> size_candidates = {
+        original_size,
+        ctx.current_rule.size,
+    };
+    ctx.current_rule.size = size_candidates[static_cast<size_t>(ok)];
+    const std::array<emel::error::type, 2> error_candidates = {
+        emel::error::cast(error::parse_failed),
+        emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
   }
 };
 

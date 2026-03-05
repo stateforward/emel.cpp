@@ -27,6 +27,10 @@ struct in_rule_expression_need_term_decision {};
 
 struct in_rule_expression_after_term {};
 struct in_rule_expression_after_term_decision {};
+struct literal_consume_exec {};
+struct literal_consume_result_decision {};
+struct character_class_consume_exec {};
+struct character_class_consume_result_decision {};
 struct rule_reference_decision {};
 struct rule_reference_parse_exec {};
 struct rule_reference_shape_decision {};
@@ -198,13 +202,35 @@ struct model {
       , sml::state<parse_decision> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
                  [ guard::term_failed{} ]
 
-      , sml::state<in_rule_expression_after_term> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
+      , sml::state<literal_consume_exec> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
                  [ guard::term_need_literal_valid{} ]
+      , sml::state<character_class_consume_exec> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
+                 [ guard::term_need_character_class_valid{} ]
+
+      , sml::state<literal_consume_exec> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
+                 [ guard::term_after_literal_valid{} ]
+      , sml::state<character_class_consume_exec> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
+                 [ guard::term_after_character_class_valid{} ]
+
+      , sml::state<literal_consume_result_decision> <= sml::state<literal_consume_exec> + sml::completion<event::parse_rules>
                  / action::consume_token_literal
 
-      , sml::state<in_rule_expression_after_term> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
-                 [ guard::term_need_character_class_valid{} ]
+      , sml::state<in_rule_expression_after_term> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
+                 [ guard::phase_ok{} ]
+      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
+                 [ guard::phase_failed{} ]
+      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
+                 / action::consume_token_invalid
+
+      , sml::state<character_class_consume_result_decision> <= sml::state<character_class_consume_exec> + sml::completion<event::parse_rules>
                  / action::consume_token_character_class
+
+      , sml::state<in_rule_expression_after_term> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
+                 [ guard::phase_ok{} ]
+      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
+                 [ guard::phase_failed{} ]
+      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
+                 / action::consume_token_invalid
 
       , sml::state<rule_reference_decision> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
                  [ guard::term_need_rule_reference_candidate{} ]
@@ -223,14 +249,6 @@ struct model {
       , sml::state<parse_decision> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
                  [ guard::term_from_need_term{} ]
                  / action::consume_token_invalid
-
-      , sml::state<in_rule_expression_after_term> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
-                 [ guard::term_after_literal_valid{} ]
-                 / action::consume_token_literal
-
-      , sml::state<in_rule_expression_after_term> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
-                 [ guard::term_after_character_class_valid{} ]
-                 / action::consume_token_character_class
 
       , sml::state<rule_reference_decision> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
                  [ guard::term_after_rule_reference_candidate{} ]
@@ -469,6 +487,18 @@ struct model {
                  / action::on_unexpected
 
       , sml::state<parse_decision> <= sml::state<rule_reference_parse_result_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<parse_decision> <= sml::state<literal_consume_exec> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<parse_decision> <= sml::state<character_class_consume_exec> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
       , sml::state<parse_decision> <= sml::state<quantifier_decision> + sml::unexpected_event<sml::_>

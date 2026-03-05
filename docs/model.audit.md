@@ -478,8 +478,13 @@ User-requested machine action/detail findings and remediation status:
   `render_strip_prefix_decision`, and `render_strip_apply_exec` phases with
   explicit `strip_prefix_nonzero` / `strip_prefix_zero` guards; removed
   loop-gated strip traversal from renderer action code.
-- [ ] `src/emel/gbnf/rule_parser/actions.hpp` (lines `308`, `330`)
-  still contains loop-driven parse traversal in action code.
+- [x] `src/emel/gbnf/rule_parser/actions.hpp` +
+  `src/emel/gbnf/rule_parser/sm.hpp`
+  reworked literal/character-class consume routing into explicit
+  `literal_consume_exec`/`literal_consume_result_decision` and
+  `character_class_consume_exec`/`character_class_consume_result_decision`
+  phases in `sm.hpp`; removed loop-driven literal/char-class traversal from
+  action code.
 - [x] `src/emel/text/tokenizer/preprocessor/bpe/sm.hpp` +
   `src/emel/text/tokenizer/preprocessor/bpe/guards.hpp`
   reworked build-specials and partition result routing into explicit
