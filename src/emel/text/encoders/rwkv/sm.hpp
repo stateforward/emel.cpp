@@ -54,7 +54,7 @@ struct unexpected {};
  * - `tables_ready`/`tables_missing` route explicit table-policy behavior.
  * - `vocab_unk_present`/`vocab_unk_missing` route unknown-token resolution.
  * - `*_ok`/`*_invalid_argument_error`/`*_backend_error`/`*_model_invalid_error`/
- *   `*_unknown_error` guards route explicit phase error status.
+ *   `*_unclassified_error_code` guards route explicit phase error status.
  *
  * action side effects:
  * - `begin_encode`/`begin_encode_sync_vocab` reset runtime outputs and vocabulary bindings.
@@ -155,7 +155,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::table_sync_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<table_sync_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::table_sync_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::table_sync_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
@@ -200,7 +200,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::encode_result_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<encode_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::encode_result_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::encode_result_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
