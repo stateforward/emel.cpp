@@ -713,3 +713,8 @@ User-requested machine action/detail findings and remediation status:
   `phase_result_unknown_error` (`!phase_result_ok && !...`) and modeled the
   unknown-result classification as an explicit direct error-class predicate over
   `ev.ctx.err`.
+- [x] `model/loader/sm.hpp` + `model/loader/guards.hpp`
+  replaced `error_unknown` guard fallback composition (`!error_none && !...`)
+  with explicit `error_unclassified_code` predicate over `ev.ctx.err`, and
+  updated all loader phase-result routes in `sm.hpp` to use the explicit
+  unclassified-code guard.

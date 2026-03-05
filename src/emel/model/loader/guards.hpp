@@ -76,15 +76,16 @@ struct error_untracked {
   }
 };
 
-struct error_unknown {
+struct error_unclassified_code {
   bool operator()(const event::load_runtime & ev) const noexcept {
-    return !error_none{}(ev) &&
-           !error_invalid_request{}(ev) &&
-           !error_parse_failed{}(ev) &&
-           !error_backend_error{}(ev) &&
-           !error_model_invalid{}(ev) &&
-           !error_internal_error{}(ev) &&
-           !error_untracked{}(ev);
+    const emel::error::type err = ev.ctx.err;
+    return err != emel::error::cast(error::none) &&
+           err != emel::error::cast(error::invalid_request) &&
+           err != emel::error::cast(error::parse_failed) &&
+           err != emel::error::cast(error::backend_error) &&
+           err != emel::error::cast(error::model_invalid) &&
+           err != emel::error::cast(error::internal_error) &&
+           err != emel::error::cast(error::untracked);
   }
 };
 

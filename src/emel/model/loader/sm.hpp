@@ -69,7 +69,7 @@ struct model {
       , sml::state<errored> <= sml::state<parse_phase_decision>
           + sml::completion<event::load_runtime> [ guard::error_untracked{} ]
       , sml::state<errored> <= sml::state<parse_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::error_unknown{} ]
+          + sml::completion<event::load_runtime> [ guard::error_unclassified_code{} ]
 
       , sml::state<parse_load_weights_handler_decision> <=
           sml::state<parse_load_weights_policy_decision> + sml::completion<event::load_runtime>
@@ -109,7 +109,7 @@ struct model {
       , sml::state<errored> <= sml::state<load_phase_decision>
           + sml::completion<event::load_runtime> [ guard::error_untracked{} ]
       , sml::state<errored> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::error_unknown{} ]
+          + sml::completion<event::load_runtime> [ guard::error_unclassified_code{} ]
 
       , sml::state<mapping_layers> <= sml::state<load_map_policy_decision>
           + sml::completion<event::load_runtime> [ guard::can_map_layers{} ]
@@ -138,7 +138,7 @@ struct model {
       , sml::state<errored> <= sml::state<map_layers_decision>
           + sml::completion<event::load_runtime> [ guard::error_untracked{} ]
       , sml::state<errored> <= sml::state<map_layers_decision>
-          + sml::completion<event::load_runtime> [ guard::error_unknown{} ]
+          + sml::completion<event::load_runtime> [ guard::error_unclassified_code{} ]
 
       //------------------------------------------------------------------------------//
       , sml::state<structure_policy_decision> <= sml::state<structure_decision>
@@ -172,7 +172,7 @@ struct model {
       , sml::state<errored> <= sml::state<structure_validation_decision>
           + sml::completion<event::load_runtime> [ guard::error_untracked{} ]
       , sml::state<errored> <= sml::state<structure_validation_decision>
-          + sml::completion<event::load_runtime> [ guard::error_unknown{} ]
+          + sml::completion<event::load_runtime> [ guard::error_unclassified_code{} ]
 
       //------------------------------------------------------------------------------//
       , sml::state<architecture_policy_decision> <= sml::state<architecture_decision>
@@ -207,7 +207,7 @@ struct model {
       , sml::state<errored> <= sml::state<architecture_validation_decision>
           + sml::completion<event::load_runtime> [ guard::error_untracked{} ]
       , sml::state<errored> <= sml::state<architecture_validation_decision>
-          + sml::completion<event::load_runtime> [ guard::error_unknown{} ]
+          + sml::completion<event::load_runtime> [ guard::error_unclassified_code{} ]
 
       //------------------------------------------------------------------------------//
       , sml::state<ready> <= sml::state<done> + sml::completion<event::load_runtime>
