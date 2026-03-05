@@ -48,12 +48,13 @@ struct table_prepare_model_invalid_error {
   }
 };
 
-struct table_prepare_unknown_error {
+struct table_prepare_unclassified_error_code {
   bool operator()(const event::encode_runtime & ev) const noexcept {
-    return !table_prepare_ok{}(ev) &&
-           !table_prepare_invalid_argument_error{}(ev) &&
-           !table_prepare_backend_error{}(ev) &&
-           !table_prepare_model_invalid_error{}(ev);
+    const int32_t err = ev.ctx.err;
+    return err != error::to_emel(error::code::ok) &&
+           err != error::to_emel(error::code::invalid_argument) &&
+           err != error::to_emel(error::code::backend) &&
+           err != error::to_emel(error::code::model_invalid);
   }
 };
 
@@ -81,12 +82,13 @@ struct encode_result_model_invalid_error {
   }
 };
 
-struct encode_result_unknown_error {
+struct encode_result_unclassified_error_code {
   bool operator()(const event::encode_runtime & ev) const noexcept {
-    return !encode_result_ok{}(ev) &&
-           !encode_result_invalid_argument_error{}(ev) &&
-           !encode_result_backend_error{}(ev) &&
-           !encode_result_model_invalid_error{}(ev);
+    const int32_t err = ev.ctx.err;
+    return err != error::to_emel(error::code::ok) &&
+           err != error::to_emel(error::code::invalid_argument) &&
+           err != error::to_emel(error::code::backend) &&
+           err != error::to_emel(error::code::model_invalid);
   }
 };
 

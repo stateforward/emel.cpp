@@ -718,3 +718,8 @@ User-requested machine action/detail findings and remediation status:
   with explicit `error_unclassified_code` predicate over `ev.ctx.err`, and
   updated all loader phase-result routes in `sm.hpp` to use the explicit
   unclassified-code guard.
+- [x] `text/encoders/bpe/sm.hpp` + `text/encoders/bpe/guards.hpp`
+  replaced `table_prepare_unknown_error` / `encode_result_unknown_error`
+  fallback composition (`!guard_a && !...`) with explicit direct
+  unclassified-error-code guards and updated `sm.hpp` phase-result routing to
+  use the explicit guards.

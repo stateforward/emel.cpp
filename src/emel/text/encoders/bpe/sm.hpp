@@ -135,7 +135,7 @@ struct model {
           + sml::completion<event::encode_runtime>[guard::table_prepare_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<encode_table_prepare>
-          + sml::completion<event::encode_runtime>[guard::table_prepare_unknown_error{}]
+          + sml::completion<event::encode_runtime>[guard::table_prepare_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
@@ -182,7 +182,7 @@ struct model {
           + sml::completion<event::encode_runtime>[guard::encode_result_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<encode_result_decision>
-          + sml::completion<event::encode_runtime>[guard::encode_result_unknown_error{}]
+          + sml::completion<event::encode_runtime>[guard::encode_result_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
