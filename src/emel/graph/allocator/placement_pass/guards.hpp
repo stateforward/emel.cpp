@@ -7,6 +7,13 @@
 
 namespace emel::graph::allocator::placement_pass::guard {
 
+struct phase_prefailed {
+  bool operator()(const allocator::event::allocate_graph_plan & ev,
+                  const action::context &) const noexcept {
+    return ev.ctx.err != emel::error::cast(allocator::error::none);
+  }
+};
+
 struct phase_done {
   bool operator()(const allocator::event::allocate_graph_plan & ev,
                   const action::context &) const noexcept {
@@ -41,17 +48,6 @@ struct phase_invalid_request {
     return ev.ctx.err == emel::error::cast(allocator::error::none) &&
            ev.ctx.ordering_outcome == ordering_pass::events::phase_outcome::done &&
            (ev.request.plan_out == nullptr || ev.ctx.sorted_tensor_count == 0u);
-  }
-};
-
-struct phase_unclassified_failure {
-  bool operator()(const allocator::event::allocate_graph_plan & ev,
-                  const action::context & ctx) const noexcept {
-    return ev.ctx.err == emel::error::cast(allocator::error::none) &&
-           !phase_done{}(ev, ctx) &&
-           !phase_prereq_failed{}(ev, ctx) &&
-           !phase_capacity_exceeded{}(ev, ctx) &&
-           !phase_invalid_request{}(ev, ctx);
   }
 };
 

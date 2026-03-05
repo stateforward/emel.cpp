@@ -15,6 +15,13 @@ struct mark_done {
   }
 };
 
+struct mark_failed_prefailed {
+  void operator()(const allocator::event::allocate_graph_plan & ev,
+                  context &) const noexcept {
+    ev.ctx.placement_outcome = events::phase_outcome::failed;
+  }
+};
+
 struct mark_failed_prereq {
   void operator()(const allocator::event::allocate_graph_plan & ev,
                   context &) const noexcept {
@@ -58,6 +65,7 @@ struct on_unexpected {
 };
 
 inline constexpr mark_done mark_done{};
+inline constexpr mark_failed_prefailed mark_failed_prefailed{};
 inline constexpr mark_failed_prereq mark_failed_prereq{};
 inline constexpr mark_failed_capacity mark_failed_capacity{};
 inline constexpr mark_failed_invalid_request mark_failed_invalid_request{};
