@@ -649,3 +649,11 @@ User-requested machine action/detail findings and remediation status:
   `text/encoders/guards.hpp` (removed legacy generic `phase_ok` /
   `phase_failed` guard shims so encoder family routing remains exclusively on
   explicit typed error-class guards used by each machine `sm.hpp`)
+- [x] `text/jinja/parser/classifier_parser/sm.hpp` +
+  `text/jinja/parser/classifier_parser/guards.hpp`
+  reworked classification finalization into explicit
+  `classification_result_decision` error-class routing
+  (`parse_error_none`, `parse_error_invalid_request`,
+  `parse_error_parse_failed`, `parse_error_internal_error`,
+  `parse_error_untracked`, `parse_error_unknown`) and removed legacy
+  classifier `phase_ok` / `phase_failed` guard shims.

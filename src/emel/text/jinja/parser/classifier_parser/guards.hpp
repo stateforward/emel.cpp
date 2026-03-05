@@ -116,15 +116,47 @@ struct expr_token_unknown {
   }
 };
 
-struct phase_ok {
+inline bool parse_error_is(const event::parse_runtime & ev, const error code_value) noexcept {
+  return ev.ctx.err == code_value;
+}
+
+struct parse_error_none {
   bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err == error::none;
+    return parse_error_is(ev, error::none);
   }
 };
 
-struct phase_failed {
+struct parse_error_invalid_request {
   bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
-    return ev.ctx.err != error::none;
+    return parse_error_is(ev, error::invalid_request);
+  }
+};
+
+struct parse_error_parse_failed {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return parse_error_is(ev, error::parse_failed);
+  }
+};
+
+struct parse_error_internal_error {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return parse_error_is(ev, error::internal_error);
+  }
+};
+
+struct parse_error_untracked {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return parse_error_is(ev, error::untracked);
+  }
+};
+
+struct parse_error_unknown {
+  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
+    return !parse_error_none{}(ev, action::context{}) &&
+           !parse_error_invalid_request{}(ev, action::context{}) &&
+           !parse_error_parse_failed{}(ev, action::context{}) &&
+           !parse_error_internal_error{}(ev, action::context{}) &&
+           !parse_error_untracked{}(ev, action::context{});
   }
 };
 
