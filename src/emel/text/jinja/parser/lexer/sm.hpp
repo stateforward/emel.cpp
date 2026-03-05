@@ -49,7 +49,9 @@ struct mapping_scan_exec {};
 struct mapping_scan_result_decision {};
 struct string_scan_decision {};
 struct string_scan_exec {};
+struct string_content_scan_exec {};
 struct string_scan_result_decision {};
+struct string_materialize_exec {};
 struct string_status_decision {};
 struct string_finalize_exec {};
 struct string_finalize_result_decision {};
@@ -620,12 +622,20 @@ struct model {
       , sml::state<invalid_char_exec> <= sml::state<string_scan_decision>
           + sml::completion<event::next_runtime>
 
-      , sml::state<string_scan_result_decision> <= sml::state<string_scan_exec>
+      , sml::state<string_content_scan_exec> <= sml::state<string_scan_exec>
           + sml::completion<event::next_runtime>
-          / action::scan_string
+          / action::begin_string_scan
 
-      , sml::state<string_status_decision> <= sml::state<string_scan_result_decision>
+      , sml::state<string_scan_result_decision> <= sml::state<string_content_scan_exec>
           + sml::completion<event::next_runtime>
+          / action::scan_string_content
+
+      , sml::state<string_materialize_exec> <= sml::state<string_scan_result_decision>
+          + sml::completion<event::next_runtime>
+
+      , sml::state<string_status_decision> <= sml::state<string_materialize_exec>
+          + sml::completion<event::next_runtime>
+          / action::materialize_string_token
 
       , sml::state<scanning> <= sml::state<string_status_decision>
           + sml::completion<event::next_runtime>

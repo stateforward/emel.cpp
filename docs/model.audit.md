@@ -465,10 +465,13 @@ User-requested machine action/detail findings and remediation status:
   `104`, `108`, `119`, `139`, `147`, `155`, `156`, `178`, `181`, `194`,
   `197`, `228`, `232`, `234`, `243`, `251`, `255`, `256`, `265`, `267`, `269`,
   `270`, `276`, `277`, `283`, `289`, `290`, `297`.
-- [ ] `src/emel/text/jinja/parser/lexer/actions.hpp`
-  still contains loop-gated scan/trim behavior inside actions (not explicit
-  per-step model phases), including at lines:
-  `94`, `158`, `173`, `251`, `292`, `452`.
+- [x] `src/emel/text/jinja/parser/lexer/actions.hpp` +
+  `src/emel/text/jinja/parser/lexer/sm.hpp`
+  reworked scanner flow by removing loop-gated scan/trim actions and adding
+  explicit string-scan phases (`string_scan_exec`,
+  `string_content_scan_exec`, `string_materialize_exec`) in `sm.hpp`; replaced
+  loop-based text/comment/space/word boundary traversals with explicit
+  boundary-probe actions.
 - [x] `src/emel/text/renderer/actions.hpp` + `src/emel/text/renderer/sm.hpp` +
   `src/emel/text/renderer/guards.hpp`
   reworked render-strip flow into explicit `render_strip_prefix_scan_exec`,

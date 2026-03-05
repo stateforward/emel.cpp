@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <string>
@@ -84,17 +85,35 @@ inline void consume_escape_sequence(event::next_runtime ev, std::string &value) 
   ev.ctx.pos += static_cast<size_t>(decode_ok);
 }
 
+inline void consume_escaped_until_recursive(event::next_runtime ev,
+                                            const char terminal,
+                                            std::string &value) {
+  const size_t pos = ev.ctx.pos;
+  const size_t size = ev.ctx.source.size();
+  if (pos >= size || ev.ctx.source[pos] == terminal) {
+    return;
+  }
+
+  const std::array<char, 2> specials = {terminal, '\\'};
+  const std::string_view special_chars(specials.data(), specials.size());
+  const size_t next_special = ev.ctx.source.find_first_of(special_chars, pos);
+  const size_t segment_end_candidates[2] = {size, next_special};
+  const size_t segment_end =
+      segment_end_candidates[static_cast<size_t>(next_special != std::string_view::npos)];
+  value.append(ev.ctx.source.substr(pos, segment_end - pos));
+  ev.ctx.pos = segment_end;
+
+  if (ev.ctx.pos >= size || ev.ctx.source[ev.ctx.pos] == terminal) {
+    return;
+  }
+
+  consume_escape_sequence(ev, value);
+  consume_escaped_until_recursive(ev, terminal, value);
+}
+
 inline std::string consume_escaped_until(event::next_runtime ev, const char terminal) {
   std::string value;
-  using consume_handler_t = void (*)(event::next_runtime, std::string &) noexcept;
-  const consume_handler_t consume_handlers[2] = {
-      consume_escape_sequence,
-      consume_escape_literal,
-  };
-  while (ev.ctx.pos < ev.ctx.source.size() && ev.ctx.source[ev.ctx.pos] != terminal) {
-    const bool literal = ev.ctx.source[ev.ctx.pos] != '\\';
-    consume_handlers[static_cast<size_t>(literal)](ev, value);
-  }
+  consume_escaped_until_recursive(ev, terminal, value);
   return value;
 }
 
@@ -154,12 +173,17 @@ struct scan_text_boundary {
     size_t &pos = ev.ctx.pos;
 
     const size_t start = pos;
-    size_t end = start;
-    while (pos < size &&
-           !(source[pos] == '{' &&
-             ::emel::text::jinja::lexer::detail::next_pos_is(source, pos, {'%', '{', '#'}))) {
-      end = ++pos;
-    }
+    const size_t open_statement = source.find("{%", start);
+    const size_t open_expression = source.find("{{", start);
+    const size_t open_comment = source.find("{#", start);
+    const size_t end_statement =
+        (open_statement == std::string_view::npos) ? size : open_statement;
+    const size_t end_expression =
+        (open_expression == std::string_view::npos) ? size : open_expression;
+    const size_t end_comment =
+        (open_comment == std::string_view::npos) ? size : open_comment;
+    const size_t end = std::min(end_statement, std::min(end_expression, end_comment));
+    pos = end;
 
     ev.ctx.handled = true;
     ev.ctx.text_start = start;
@@ -169,12 +193,13 @@ struct scan_text_boundary {
 
 struct probe_text_opening_trim {
   void operator()(event::next_runtime ev, context &) const noexcept {
-    size_t probe = ev.ctx.text_end;
-    while (probe > ev.ctx.text_start &&
-           ::emel::text::jinja::lexer::detail::is_space(ev.ctx.source[probe - 1u]) &&
-           ev.ctx.source[probe - 1u] != '\n') {
-      --probe;
-    }
+    constexpr std::string_view trim_chars = " \t\r\f\v";
+    const size_t span_len = ev.ctx.text_end - ev.ctx.text_start;
+    const std::string_view span = ev.ctx.source.substr(ev.ctx.text_start, span_len);
+    const size_t keep_last = span.find_last_not_of(trim_chars);
+    const size_t probe = (keep_last == std::string_view::npos)
+                             ? ev.ctx.text_start
+                             : (ev.ctx.text_start + keep_last + 1u);
     ev.ctx.text_trim_probe = probe;
   }
 };
@@ -246,14 +271,12 @@ struct scan_comment {
     size_t &pos = ev.ctx.pos;
 
     const size_t start = pos;
-    pos += 2u;
-    std::string comment;
-    while (pos < size &&
-           !(source[pos] == '#' &&
-             ::emel::text::jinja::lexer::detail::next_pos_is(source, pos, {'}'}))) {
-      comment.push_back(source[pos]);
-      ++pos;
-    }
+    const size_t content_start = start + 2u;
+    const size_t close_pos = source.find("#}", content_start);
+    const size_t comment_end =
+        (close_pos == std::string_view::npos) ? size : close_pos;
+    std::string comment(source.substr(content_start, comment_end - content_start));
+    pos = comment_end;
 
     ev.ctx.handled = true;
     ev.ctx.scan.token_value = token{token_type::comment, std::move(comment), start};
@@ -289,10 +312,9 @@ struct scan_spaces {
   void operator()(event::next_runtime ev, context &) const noexcept {
     helper::reset_phase(ev);
 
-    while (ev.ctx.pos < ev.ctx.size &&
-           ::emel::text::jinja::lexer::detail::is_space(ev.ctx.source[ev.ctx.pos])) {
-      ++ev.ctx.pos;
-    }
+    const size_t next_non_space = ev.ctx.source.find_first_not_of(" \t\n\r\f\v", ev.ctx.pos);
+    const size_t positions[2] = {ev.ctx.size, next_non_space};
+    ev.ctx.pos = positions[static_cast<size_t>(next_non_space != std::string_view::npos)];
   }
 };
 
@@ -390,19 +412,26 @@ struct scan_mapping_close_curly {
   }
 };
 
-struct scan_string {
+struct begin_string_scan {
   void operator()(event::next_runtime ev, context &) const {
     helper::reset_phase(ev);
-
-    const std::string_view source = ev.ctx.source;
-    size_t &pos = ev.ctx.pos;
-
-    const size_t start = pos;
-    const char terminal = source[pos];
-    ++pos;
-    std::string value = helper::consume_escaped_until(ev, terminal);
     ev.ctx.handled = true;
-    ev.ctx.scan.token_value = token{token_type::string_literal, std::move(value), start};
+    ev.ctx.string_start = ev.ctx.pos;
+    ev.ctx.string_terminal = ev.ctx.source[ev.ctx.pos];
+    ++ev.ctx.pos;
+  }
+};
+
+struct scan_string_content {
+  void operator()(event::next_runtime ev, context &) const {
+    ev.ctx.scan.token_value.value = helper::consume_escaped_until(ev, ev.ctx.string_terminal);
+  }
+};
+
+struct materialize_string_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ev.ctx.scan.token_value.type = token_type::string_literal;
+    ev.ctx.scan.token_value.pos = ev.ctx.string_start;
   }
 };
 
@@ -448,12 +477,14 @@ struct scan_word {
     helper::reset_phase(ev);
 
     const size_t start = ev.ctx.pos;
-    std::string value;
-    while (ev.ctx.pos < ev.ctx.size &&
-           ::emel::text::jinja::lexer::detail::is_word(ev.ctx.source[ev.ctx.pos])) {
-      value.push_back(ev.ctx.source[ev.ctx.pos]);
-      ++ev.ctx.pos;
-    }
+    constexpr std::string_view word_chars =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    const size_t word_end_candidate =
+        ev.ctx.source.find_first_not_of(word_chars, start);
+    const size_t word_end =
+        (word_end_candidate == std::string_view::npos) ? ev.ctx.size : word_end_candidate;
+    std::string value(ev.ctx.source.substr(start, word_end - start));
+    ev.ctx.pos = word_end;
 
     ev.ctx.handled = true;
     ev.ctx.scan.has_token = true;
@@ -601,7 +632,9 @@ inline constexpr scan_fixed_mapping<token_type::multiplicative_binary_operator, 
     scan_mapping_percent{};
 inline constexpr scan_fixed_mapping<token_type::equals, '='> scan_mapping_equals{};
 inline constexpr scan_mapping_close_curly scan_mapping_close_curly{};
-inline constexpr scan_string scan_string{};
+inline constexpr begin_string_scan begin_string_scan{};
+inline constexpr scan_string_content scan_string_content{};
+inline constexpr materialize_string_token materialize_string_token{};
 inline constexpr finalize_string_token finalize_string_token{};
 inline constexpr mark_string_unterminated mark_string_unterminated{};
 inline constexpr scan_numeric scan_numeric{};
