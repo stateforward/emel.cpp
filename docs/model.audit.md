@@ -681,3 +681,10 @@ User-requested machine action/detail findings and remediation status:
   `planning_failed_with_error` and `planning_failed_without_error` guard
   branches in `sm.hpp`; removed intermediate generic `plan_failed` phase
   routing and dispatches `_error` outcomes explicitly on each failed-mode path.
+- [x] `graph/allocator/liveness_pass/sm.hpp` +
+  `graph/allocator/liveness_pass/guards.hpp` +
+  `graph/allocator/liveness_pass/actions.hpp`
+  reworked liveness pass completion routing to explicit prefailed vs
+  done/invalid/capacity branches in `sm.hpp`; removed implicit
+  `phase_unclassified_failure` fallback guard and modeled prefailed propagation
+  explicitly via `phase_prefailed` / `mark_failed_prefailed`.

@@ -193,8 +193,10 @@ TEST_CASE("graph_allocator_pass_action_and_guard_branches") {
   CHECK(emel::graph::allocator::liveness_pass::guard::phase_capacity_exceeded{}(ev, machine_ctx));
   request.tensor_capacity = request.tensor_count;
   request.node_count = 0u;
-  CHECK_FALSE(
-      emel::graph::allocator::liveness_pass::guard::phase_unclassified_failure{}(ev, machine_ctx));
+  ev.ctx.err = emel::error::cast(allocator_error::internal_error);
+  CHECK(emel::graph::allocator::liveness_pass::guard::phase_prefailed{}(ev, machine_ctx));
+  emel::graph::allocator::liveness_pass::action::mark_failed_prefailed(ev, machine_ctx);
+  ev.ctx.err = emel::error::cast(allocator_error::none);
   request.node_count = 4u;
   emel::graph::allocator::liveness_pass::action::mark_failed_invalid_request(ev, machine_ctx);
   emel::graph::allocator::liveness_pass::action::mark_failed_capacity(ev, machine_ctx);
