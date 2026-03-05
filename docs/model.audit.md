@@ -472,6 +472,12 @@ User-requested machine action/detail findings and remediation status:
   (`phase_none`, `phase_invalid_request_error`, `phase_backend_error`,
   `phase_unknown_error`) plus explicit final error-channel routing via
   `generate_error_channel_decision`.
+- [x] `src/emel/model/loader/sm.hpp` + `src/emel/model/loader/guards.hpp`
+  replaced generic phase routing (`phase_ok` / `phase_failed`) with explicit
+  error-class transitions (`error_none`, `error_invalid_request`,
+  `error_parse_failed`, `error_backend_error`, `error_model_invalid`,
+  `error_internal_error`, `error_untracked`, `error_unknown`) across parse/load/
+  map/validation decision phases.
 - [x] `src/emel/text/jinja/parser/lexer/actions.hpp` +
   `src/emel/text/jinja/parser/lexer/sm.hpp`
   reworked scanner flow by removing loop-gated scan/trim actions and adding

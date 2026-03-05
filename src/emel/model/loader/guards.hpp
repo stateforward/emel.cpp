@@ -29,15 +29,62 @@ struct invalid_request {
   }
 };
 
-struct phase_ok {
+inline bool error_is(const event::load_runtime & ev,
+                     const emel::error::type expected) noexcept {
+  return ev.ctx.err == expected;
+}
+
+struct error_none {
   bool operator()(const event::load_runtime & ev) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
+    return error_is(ev, emel::error::cast(error::none));
   }
 };
 
-struct phase_failed {
+struct error_invalid_request {
   bool operator()(const event::load_runtime & ev) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return error_is(ev, emel::error::cast(error::invalid_request));
+  }
+};
+
+struct error_parse_failed {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    return error_is(ev, emel::error::cast(error::parse_failed));
+  }
+};
+
+struct error_backend_error {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    return error_is(ev, emel::error::cast(error::backend_error));
+  }
+};
+
+struct error_model_invalid {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    return error_is(ev, emel::error::cast(error::model_invalid));
+  }
+};
+
+struct error_internal_error {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    return error_is(ev, emel::error::cast(error::internal_error));
+  }
+};
+
+struct error_untracked {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    return error_is(ev, emel::error::cast(error::untracked));
+  }
+};
+
+struct error_unknown {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    return !error_none{}(ev) &&
+           !error_invalid_request{}(ev) &&
+           !error_parse_failed{}(ev) &&
+           !error_backend_error{}(ev) &&
+           !error_model_invalid{}(ev) &&
+           !error_internal_error{}(ev) &&
+           !error_untracked{}(ev);
   }
 };
 

@@ -54,12 +54,22 @@ struct model {
 
       , sml::state<parse_phase_decision> <= sml::state<parse_decision>
           + sml::completion<event::load_runtime>
-      , sml::state<errored> <= sml::state<parse_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_failed{} ]
       , sml::state<parse_load_weights_policy_decision> <= sml::state<parse_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::load_runtime> [ guard::error_none{} ]
       , sml::state<errored> <= sml::state<parse_phase_decision>
-          + sml::completion<event::load_runtime> / action::mark_internal_error
+          + sml::completion<event::load_runtime> [ guard::error_invalid_request{} ]
+      , sml::state<errored> <= sml::state<parse_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_parse_failed{} ]
+      , sml::state<errored> <= sml::state<parse_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_backend_error{} ]
+      , sml::state<errored> <= sml::state<parse_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_model_invalid{} ]
+      , sml::state<errored> <= sml::state<parse_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_internal_error{} ]
+      , sml::state<errored> <= sml::state<parse_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_untracked{} ]
+      , sml::state<errored> <= sml::state<parse_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_unknown{} ]
 
       , sml::state<parse_load_weights_handler_decision> <=
           sml::state<parse_load_weights_policy_decision> + sml::completion<event::load_runtime>
@@ -84,12 +94,22 @@ struct model {
 
       , sml::state<load_phase_decision> <= sml::state<load_decision>
           + sml::completion<event::load_runtime>
-      , sml::state<errored> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_failed{} ]
       , sml::state<load_map_policy_decision> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::load_runtime> [ guard::error_none{} ]
       , sml::state<errored> <= sml::state<load_phase_decision>
-          + sml::completion<event::load_runtime> / action::mark_internal_error
+          + sml::completion<event::load_runtime> [ guard::error_invalid_request{} ]
+      , sml::state<errored> <= sml::state<load_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_parse_failed{} ]
+      , sml::state<errored> <= sml::state<load_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_backend_error{} ]
+      , sml::state<errored> <= sml::state<load_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_model_invalid{} ]
+      , sml::state<errored> <= sml::state<load_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_internal_error{} ]
+      , sml::state<errored> <= sml::state<load_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_untracked{} ]
+      , sml::state<errored> <= sml::state<load_phase_decision>
+          + sml::completion<event::load_runtime> [ guard::error_unknown{} ]
 
       , sml::state<mapping_layers> <= sml::state<load_map_policy_decision>
           + sml::completion<event::load_runtime> [ guard::can_map_layers{} ]
@@ -104,9 +124,21 @@ struct model {
           + sml::completion<event::load_runtime> / action::run_map_layers
 
       , sml::state<structure_decision> <= sml::state<map_layers_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::load_runtime> [ guard::error_none{} ]
       , sml::state<errored> <= sml::state<map_layers_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::load_runtime> [ guard::error_invalid_request{} ]
+      , sml::state<errored> <= sml::state<map_layers_decision>
+          + sml::completion<event::load_runtime> [ guard::error_parse_failed{} ]
+      , sml::state<errored> <= sml::state<map_layers_decision>
+          + sml::completion<event::load_runtime> [ guard::error_backend_error{} ]
+      , sml::state<errored> <= sml::state<map_layers_decision>
+          + sml::completion<event::load_runtime> [ guard::error_model_invalid{} ]
+      , sml::state<errored> <= sml::state<map_layers_decision>
+          + sml::completion<event::load_runtime> [ guard::error_internal_error{} ]
+      , sml::state<errored> <= sml::state<map_layers_decision>
+          + sml::completion<event::load_runtime> [ guard::error_untracked{} ]
+      , sml::state<errored> <= sml::state<map_layers_decision>
+          + sml::completion<event::load_runtime> [ guard::error_unknown{} ]
 
       //------------------------------------------------------------------------------//
       , sml::state<structure_policy_decision> <= sml::state<structure_decision>
@@ -126,9 +158,21 @@ struct model {
           + sml::completion<event::load_runtime> / action::run_validate_structure
 
       , sml::state<architecture_decision> <= sml::state<structure_validation_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::load_runtime> [ guard::error_none{} ]
       , sml::state<errored> <= sml::state<structure_validation_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::load_runtime> [ guard::error_invalid_request{} ]
+      , sml::state<errored> <= sml::state<structure_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_parse_failed{} ]
+      , sml::state<errored> <= sml::state<structure_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_backend_error{} ]
+      , sml::state<errored> <= sml::state<structure_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_model_invalid{} ]
+      , sml::state<errored> <= sml::state<structure_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_internal_error{} ]
+      , sml::state<errored> <= sml::state<structure_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_untracked{} ]
+      , sml::state<errored> <= sml::state<structure_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_unknown{} ]
 
       //------------------------------------------------------------------------------//
       , sml::state<architecture_policy_decision> <= sml::state<architecture_decision>
@@ -149,9 +193,21 @@ struct model {
           + sml::completion<event::load_runtime> / action::run_validate_architecture
 
       , sml::state<done> <= sml::state<architecture_validation_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::load_runtime> [ guard::error_none{} ]
       , sml::state<errored> <= sml::state<architecture_validation_decision>
-          + sml::completion<event::load_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::load_runtime> [ guard::error_invalid_request{} ]
+      , sml::state<errored> <= sml::state<architecture_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_parse_failed{} ]
+      , sml::state<errored> <= sml::state<architecture_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_backend_error{} ]
+      , sml::state<errored> <= sml::state<architecture_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_model_invalid{} ]
+      , sml::state<errored> <= sml::state<architecture_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_internal_error{} ]
+      , sml::state<errored> <= sml::state<architecture_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_untracked{} ]
+      , sml::state<errored> <= sml::state<architecture_validation_decision>
+          + sml::completion<event::load_runtime> [ guard::error_unknown{} ]
 
       //------------------------------------------------------------------------------//
       , sml::state<ready> <= sml::state<done> + sml::completion<event::load_runtime>
