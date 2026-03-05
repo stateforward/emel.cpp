@@ -80,6 +80,11 @@ Status correction: the following files still contain implicit runtime control fl
   error classification into explicit `apply_request_decision`,
   `apply_error_scan_exec`, and `apply_scan_result_decision` phases in
   `model/weight_loader/sm.hpp`; removed guard-internal per-result backend-error scan loop)
+- [x] `src/emel/model/weight_loader/sm.hpp` + `src/emel/model/weight_loader/guards.hpp`
+  (rearchitected callback-phase routing to explicit bind/plan/apply error-class guards
+  in `model/weight_loader/sm.hpp`; removed generic `*_phase_ok` / `*_phase_failed`
+  guard routing and replaced it with explicit `error::none`, typed runtime error classes,
+  untracked, and unknown branches)
 - [x] `src/emel/gguf/loader/guards.hpp` (rearchitected bind/parse request
   classification into explicit `bind_request_shape_decision`,
   `bind_capacity_decision`, `parse_file_image_decision`,

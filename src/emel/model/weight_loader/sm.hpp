@@ -77,9 +77,23 @@ struct model {
       //------------------------------------------------------------------------------//
       // Bind callback dispatch.
       , sml::state<bind_done_decision> <= sml::state<bind_dispatch_decision>
-          + sml::completion<event::bind_runtime> [ guard::bind_phase_ok{} ]
+          + sml::completion<event::bind_runtime> [ guard::bind_error_none{} ]
       , sml::state<bind_error_decision> <= sml::state<bind_dispatch_decision>
-          + sml::completion<event::bind_runtime> [ guard::bind_phase_failed{} ]
+          + sml::completion<event::bind_runtime> [ guard::bind_error_invalid_request{} ]
+      , sml::state<bind_error_decision> <= sml::state<bind_dispatch_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_capacity{} ]
+      , sml::state<bind_error_decision> <= sml::state<bind_dispatch_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_backend_error{} ]
+      , sml::state<bind_error_decision> <= sml::state<bind_dispatch_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_model_invalid{} ]
+      , sml::state<bind_error_decision> <= sml::state<bind_dispatch_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_out_of_memory{} ]
+      , sml::state<bind_error_decision> <= sml::state<bind_dispatch_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_internal_error{} ]
+      , sml::state<bind_error_decision> <= sml::state<bind_dispatch_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_untracked{} ]
+      , sml::state<bind_error_decision> <= sml::state<bind_dispatch_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_unknown{} ]
 
       , sml::state<bind_done_callback> <= sml::state<bind_done_decision>
           + sml::completion<event::bind_runtime> [ guard::bind_done_callback_present{} ]
@@ -129,9 +143,23 @@ struct model {
       //------------------------------------------------------------------------------//
       // Plan callback dispatch.
       , sml::state<plan_done_decision> <= sml::state<plan_dispatch_decision>
-          + sml::completion<event::plan_runtime> [ guard::plan_phase_ok{} ]
+          + sml::completion<event::plan_runtime> [ guard::plan_error_none{} ]
       , sml::state<plan_error_decision> <= sml::state<plan_dispatch_decision>
-          + sml::completion<event::plan_runtime> [ guard::plan_phase_failed{} ]
+          + sml::completion<event::plan_runtime> [ guard::plan_error_invalid_request{} ]
+      , sml::state<plan_error_decision> <= sml::state<plan_dispatch_decision>
+          + sml::completion<event::plan_runtime> [ guard::plan_error_capacity{} ]
+      , sml::state<plan_error_decision> <= sml::state<plan_dispatch_decision>
+          + sml::completion<event::plan_runtime> [ guard::plan_error_backend_error{} ]
+      , sml::state<plan_error_decision> <= sml::state<plan_dispatch_decision>
+          + sml::completion<event::plan_runtime> [ guard::plan_error_model_invalid{} ]
+      , sml::state<plan_error_decision> <= sml::state<plan_dispatch_decision>
+          + sml::completion<event::plan_runtime> [ guard::plan_error_out_of_memory{} ]
+      , sml::state<plan_error_decision> <= sml::state<plan_dispatch_decision>
+          + sml::completion<event::plan_runtime> [ guard::plan_error_internal_error{} ]
+      , sml::state<plan_error_decision> <= sml::state<plan_dispatch_decision>
+          + sml::completion<event::plan_runtime> [ guard::plan_error_untracked{} ]
+      , sml::state<plan_error_decision> <= sml::state<plan_dispatch_decision>
+          + sml::completion<event::plan_runtime> [ guard::plan_error_unknown{} ]
 
       , sml::state<plan_done_callback> <= sml::state<plan_done_decision>
           + sml::completion<event::plan_runtime> [ guard::plan_done_callback_present{} ]
@@ -187,9 +215,23 @@ struct model {
       //------------------------------------------------------------------------------//
       // Apply callback dispatch.
       , sml::state<apply_done_decision> <= sml::state<apply_dispatch_decision>
-          + sml::completion<event::apply_runtime> [ guard::apply_phase_ok{} ]
+          + sml::completion<event::apply_runtime> [ guard::apply_error_none{} ]
       , sml::state<apply_error_decision> <= sml::state<apply_dispatch_decision>
-          + sml::completion<event::apply_runtime> [ guard::apply_phase_failed{} ]
+          + sml::completion<event::apply_runtime> [ guard::apply_error_invalid_request{} ]
+      , sml::state<apply_error_decision> <= sml::state<apply_dispatch_decision>
+          + sml::completion<event::apply_runtime> [ guard::apply_error_capacity{} ]
+      , sml::state<apply_error_decision> <= sml::state<apply_dispatch_decision>
+          + sml::completion<event::apply_runtime> [ guard::apply_error_backend_error{} ]
+      , sml::state<apply_error_decision> <= sml::state<apply_dispatch_decision>
+          + sml::completion<event::apply_runtime> [ guard::apply_error_model_invalid{} ]
+      , sml::state<apply_error_decision> <= sml::state<apply_dispatch_decision>
+          + sml::completion<event::apply_runtime> [ guard::apply_error_out_of_memory{} ]
+      , sml::state<apply_error_decision> <= sml::state<apply_dispatch_decision>
+          + sml::completion<event::apply_runtime> [ guard::apply_error_internal_error{} ]
+      , sml::state<apply_error_decision> <= sml::state<apply_dispatch_decision>
+          + sml::completion<event::apply_runtime> [ guard::apply_error_untracked{} ]
+      , sml::state<apply_error_decision> <= sml::state<apply_dispatch_decision>
+          + sml::completion<event::apply_runtime> [ guard::apply_error_unknown{} ]
 
       , sml::state<apply_done_callback> <= sml::state<apply_done_decision>
           + sml::completion<event::apply_runtime> [ guard::apply_done_callback_present{} ]
