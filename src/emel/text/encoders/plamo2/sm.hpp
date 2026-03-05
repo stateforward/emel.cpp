@@ -52,7 +52,8 @@ struct unexpected {};
  * - `tables_ready`/`tables_missing` route explicit table-policy behavior.
  * - `decode_result_*` route explicit decode outcome and error-class status.
  * - `emit_result_ok`/`emit_result_failed` route explicit emission outcomes.
- * - `table_sync_*` and `encode_result_*` route explicit per-phase error status.
+ * - `table_sync_*`, `decode_result_*`, and `encode_result_*` route explicit
+ *   per-phase error status, including unclassified runtime error-code branches.
  *
  * action side effects:
  * - `begin_encode`/`begin_encode_sync_vocab` reset runtime outputs and vocabulary bindings.
@@ -136,7 +137,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::table_sync_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<table_sync_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::table_sync_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::table_sync_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
@@ -159,7 +160,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::decode_result_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<decode_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::decode_result_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::decode_result_unclassified_error_code{}]
           / action::ensure_last_error
 
       , sml::state<dp_exec> <= sml::state<dp_prepare_exec>
@@ -190,7 +191,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::encode_result_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<encode_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::encode_result_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::encode_result_unclassified_error_code{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<encode_result_decision>
           + sml::completion<runtime::encode_runtime>

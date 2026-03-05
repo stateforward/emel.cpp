@@ -1460,6 +1460,19 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::text::encoders::plamo2::guard::table_sync_backend_error{}(runtime_ok_plamo2_ev));
     CHECK(emel::text::encoders::plamo2::guard::decode_result_backend_error{}(runtime_ok_plamo2_ev));
     CHECK(emel::text::encoders::plamo2::guard::encode_result_backend_error{}(runtime_ok_plamo2_ev));
+    CHECK_FALSE(
+      emel::text::encoders::plamo2::guard::table_sync_unclassified_error_code{}(runtime_ok_plamo2_ev));
+    CHECK_FALSE(emel::text::encoders::plamo2::guard::decode_result_unclassified_error_code{}(
+      runtime_ok_plamo2_ev));
+    CHECK_FALSE(
+      emel::text::encoders::plamo2::guard::encode_result_unclassified_error_code{}(runtime_ok_plamo2_ev));
+    runtime_ok.err = static_cast<int32_t>(0x7FFF);
+    CHECK(emel::text::encoders::plamo2::guard::table_sync_unclassified_error_code{}(
+      runtime_ok_plamo2_ev));
+    CHECK(emel::text::encoders::plamo2::guard::decode_result_unclassified_error_code{}(
+      runtime_ok_plamo2_ev));
+    CHECK(emel::text::encoders::plamo2::guard::encode_result_unclassified_error_code{}(
+      runtime_ok_plamo2_ev));
   }
 
   {

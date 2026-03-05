@@ -47,12 +47,13 @@ struct table_sync_model_invalid_error {
   }
 };
 
-struct table_sync_unknown_error {
+struct table_sync_unclassified_error_code {
   bool operator()(const runtime::encode_runtime & ev) const noexcept {
-    return !table_sync_ok{}(ev) &&
-           !table_sync_invalid_argument_error{}(ev) &&
-           !table_sync_backend_error{}(ev) &&
-           !table_sync_model_invalid_error{}(ev);
+    const auto err = ev.event_.ctx.err;
+    return err != error::to_emel(error::code::ok) &&
+           err != error::to_emel(error::code::invalid_argument) &&
+           err != error::to_emel(error::code::backend) &&
+           err != error::to_emel(error::code::model_invalid);
   }
 };
 
@@ -86,13 +87,13 @@ struct decode_result_model_invalid_error {
   }
 };
 
-struct decode_result_unknown_error {
+struct decode_result_unclassified_error_code {
   bool operator()(const runtime::encode_runtime & ev) const noexcept {
-    return !decode_result_empty_ok{}(ev) &&
-           !decode_result_non_empty_ok{}(ev) &&
-           !decode_result_invalid_argument_error{}(ev) &&
-           !decode_result_backend_error{}(ev) &&
-           !decode_result_model_invalid_error{}(ev);
+    const auto err = ev.event_.ctx.err;
+    return err != error::to_emel(error::code::ok) &&
+           err != error::to_emel(error::code::invalid_argument) &&
+           err != error::to_emel(error::code::backend) &&
+           err != error::to_emel(error::code::model_invalid);
   }
 };
 
@@ -120,12 +121,13 @@ struct encode_result_model_invalid_error {
   }
 };
 
-struct encode_result_unknown_error {
+struct encode_result_unclassified_error_code {
   bool operator()(const runtime::encode_runtime & ev) const noexcept {
-    return !encode_result_ok{}(ev) &&
-           !encode_result_invalid_argument_error{}(ev) &&
-           !encode_result_backend_error{}(ev) &&
-           !encode_result_model_invalid_error{}(ev);
+    const auto err = ev.event_.ctx.err;
+    return err != error::to_emel(error::code::ok) &&
+           err != error::to_emel(error::code::invalid_argument) &&
+           err != error::to_emel(error::code::backend) &&
+           err != error::to_emel(error::code::model_invalid);
   }
 };
 
