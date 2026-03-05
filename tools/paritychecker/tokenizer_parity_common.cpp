@@ -7,11 +7,17 @@
 #include <vector>
 
 #include "emel/emel.h"
+#include "emel/text/tokenizer/errors.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 
 #include "llama-vocab.h"
 
 namespace {
+
+constexpr int32_t k_tokenizer_ok =
+    emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
+constexpr int32_t k_tokenizer_internal_error =
+    emel::text::tokenizer::error_code(emel::text::tokenizer::error::backend_error);
 
 bool run_emel_tokenizer(
     const emel::model::data::vocab & vocab,
@@ -25,7 +31,7 @@ bool run_emel_tokenizer(
     int32_t & err_out) {
   emel::text::tokenizer::sm machine{};
 
-  int32_t bind_err = EMEL_OK;
+  int32_t bind_err = k_tokenizer_ok;
   emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
   bind_ev.preprocessor_variant = preprocessor_variant;
@@ -33,7 +39,7 @@ bool run_emel_tokenizer(
   bind_ev.error_out = &bind_err;
 
   const bool bind_ok = machine.process_event(bind_ev);
-  if (!bind_ok || bind_err != EMEL_OK) {
+  if (!bind_ok || bind_err != k_tokenizer_ok) {
     std::fprintf(stderr,
                  "emel tokenizer bind failed: accepted=%s err=%d\n",
                  bind_ok ? "true" : "false",
@@ -46,7 +52,7 @@ bool run_emel_tokenizer(
   std::vector<int32_t> token_buffer(capacity, 0);
 
   int32_t token_count = 0;
-  int32_t tokenize_err = EMEL_OK;
+  int32_t tokenize_err = k_tokenizer_ok;
   emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = &vocab;
   tok_ev.text = text;
@@ -58,7 +64,7 @@ bool run_emel_tokenizer(
   tok_ev.error_out = &tokenize_err;
 
   const bool tokenize_ok = machine.process_event(tok_ev);
-  if (!tokenize_ok || tokenize_err != EMEL_OK) {
+  if (!tokenize_ok || tokenize_err != k_tokenizer_ok) {
     std::fprintf(stderr,
                  "emel tokenizer tokenize failed: accepted=%s err=%d\n",
                  tokenize_ok ? "true" : "false",
@@ -72,12 +78,12 @@ bool run_emel_tokenizer(
                  "emel tokenizer returned invalid token count: %d (capacity=%zu)\n",
                  token_count,
                  token_buffer.size());
-    err_out = EMEL_ERR_INTERNAL;
+    err_out = k_tokenizer_internal_error;
     return false;
   }
 
   tokens_out.assign(token_buffer.begin(), token_buffer.begin() + token_count);
-  err_out = EMEL_OK;
+  err_out = k_tokenizer_ok;
   return true;
 }
 
@@ -152,7 +158,7 @@ int run_tokenizer_variant_parity(
   }
 
   std::vector<int32_t> emel_tokens;
-  int32_t emel_err = EMEL_OK;
+  int32_t emel_err = k_tokenizer_ok;
   if (!run_emel_tokenizer(emel_vocab,
                           opts.text,
                           opts.add_special,
