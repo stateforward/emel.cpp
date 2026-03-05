@@ -476,7 +476,6 @@ User-requested machine action/detail findings and remediation status:
 - [ ] Remaining machines still route action/detail outcomes through generic
   `phase_ok` / `phase_failed` guards instead of explicit error-class/result
   decision guards in `sm.hpp`, including:
-  `src/emel/text/encoders/plamo2/sm.hpp`,
   `src/emel/token/batcher/sm.hpp`,
   and multiple preprocessor machine `sm.hpp` files.
 
@@ -504,3 +503,9 @@ User-requested machine action/detail findings and remediation status:
   `*_invalid_argument_error`, `*_backend_error`, `*_model_invalid_error`,
   `*_unknown_error`) so `ugm/sm.hpp` no longer relies on generic
   `phase_ok` / `phase_failed` guards for action/detail-driven outcomes.
+- [x] `text/encoders/plamo2/sm.hpp` + `text/encoders/plamo2/guards.hpp`
+  reworked table-sync, decode-result, and final encode-result routing into
+  explicit error-class branches (`*_ok`, `*_invalid_argument_error`,
+  `*_backend_error`, `*_model_invalid_error`, `*_unknown_error`) so
+  `plamo2/sm.hpp` no longer relies on generic `phase_ok` / `phase_failed`
+  guards for action/detail-driven outcomes.

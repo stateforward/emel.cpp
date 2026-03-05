@@ -1423,7 +1423,7 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     emel::text::encoders::plamo2::action::sync_tables(runtime_ok_plamo2_ev, ctx);
     CHECK(emel::text::encoders::plamo2::guard::tables_ready{}(runtime_ok_plamo2_ev, ctx));
     emel::text::encoders::plamo2::action::decode_input(runtime_ok_plamo2_ev, ctx);
-    CHECK(emel::text::encoders::plamo2::guard::decoded_non_empty{}(runtime_ok_plamo2_ev));
+    CHECK(emel::text::encoders::plamo2::guard::decode_result_non_empty_ok{}(runtime_ok_plamo2_ev));
     emel::text::encoders::plamo2::action::prepare_dp(runtime_ok_plamo2_ev, ctx);
     emel::text::encoders::plamo2::action::run_dp(runtime_ok_plamo2_ev, ctx);
     emel::text::encoders::plamo2::action::emit_tokens(runtime_ok_plamo2_ev, ctx);
@@ -1441,9 +1441,12 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::text::encoders::plamo2::guard::valid_encode{}(runtime_ok_plamo2_ev, ctx));
     CHECK(emel::text::encoders::plamo2::guard::invalid_encode{}(runtime_invalid_plamo2_ev, ctx));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
-    CHECK(emel::text::encoders::plamo2::guard::phase_ok{}(runtime_ok_plamo2_ev));
+    CHECK(emel::text::encoders::plamo2::guard::table_sync_ok{}(runtime_ok_plamo2_ev));
+    CHECK(emel::text::encoders::plamo2::guard::encode_result_ok{}(runtime_ok_plamo2_ev));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
-    CHECK(emel::text::encoders::plamo2::guard::phase_failed{}(runtime_ok_plamo2_ev));
+    CHECK(emel::text::encoders::plamo2::guard::table_sync_backend_error{}(runtime_ok_plamo2_ev));
+    CHECK(emel::text::encoders::plamo2::guard::decode_result_backend_error{}(runtime_ok_plamo2_ev));
+    CHECK(emel::text::encoders::plamo2::guard::encode_result_backend_error{}(runtime_ok_plamo2_ev));
   }
 
   {
