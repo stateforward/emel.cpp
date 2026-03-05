@@ -708,3 +708,8 @@ User-requested machine action/detail findings and remediation status:
   reworked reuse-decision completion routing with explicit prefailed branch in
   `sm.hpp` and removed guard-to-guard fallback coupling (`!phase_reuse(...)`)
   from rebuild/invalid guards by using explicit reuse-candidate predicates.
+- [x] `token/batcher/guards.hpp`
+  removed guard-to-guard fallback coupling in
+  `phase_result_unknown_error` (`!phase_result_ok && !...`) and modeled the
+  unknown-result classification as an explicit direct error-class predicate over
+  `ev.ctx.err`.

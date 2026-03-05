@@ -39,10 +39,11 @@ struct phase_result_internal_error {
 
 struct phase_result_unknown_error {
   bool operator()(const event::batch_runtime & ev) const noexcept {
-    return !phase_result_ok{}(ev) &&
-           !phase_result_invalid_request_error{}(ev) &&
-           !phase_result_backend_error{}(ev) &&
-           !phase_result_internal_error{}(ev);
+    const emel::error::type err = ev.ctx.err;
+    return err != emel::error::cast(error::none) &&
+           err != emel::error::cast(error::invalid_request) &&
+           err != emel::error::cast(error::backend_error) &&
+           err != emel::error::cast(error::internal_error);
   }
 };
 
