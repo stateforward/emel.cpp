@@ -18,7 +18,12 @@ struct request_capacity_nonzero_decision {};
 struct request_capacity_limit_decision {};
 struct preparing {};
 struct build_specials_decision {};
+struct partition_specials_decision {};
 struct partition_parse_special_decision {};
+struct partitioning_no_specials_input_decision {};
+struct partitioning_non_bpe_parse_input_decision {};
+struct partitioning_non_bpe_skip_input_decision {};
+struct partitioning_no_specials {};
 struct partitioning_non_bpe_parse_special {};
 struct partitioning_non_bpe_skip_special {};
 struct partition_decision {};
@@ -80,17 +85,55 @@ struct model {
       , sml::state<errored> <= sml::state<build_specials_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::phase_failed{} ]
                    / action::ensure_last_error
-      , sml::state<partition_parse_special_decision> <= sml::state<build_specials_decision>
+      , sml::state<partition_specials_decision> <= sml::state<build_specials_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::phase_ok{} ]
 
-      , sml::state<partitioning_non_bpe_parse_special> <= sml::state<partition_parse_special_decision>
+      , sml::state<partitioning_no_specials_input_decision> <= sml::state<partition_specials_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::no_specials{} ]
+      , sml::state<partition_parse_special_decision> <= sml::state<partition_specials_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::has_specials{} ]
+      , sml::state<errored> <= sml::state<partition_specials_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::ensure_last_error
+
+      , sml::state<partitioning_non_bpe_parse_input_decision> <= sml::state<partition_parse_special_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::parse_special_enabled{} ]
-      , sml::state<partitioning_non_bpe_skip_special> <= sml::state<partition_parse_special_decision>
+      , sml::state<partitioning_non_bpe_skip_input_decision> <= sml::state<partition_parse_special_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::parse_special_disabled{} ]
       , sml::state<errored> <= sml::state<partition_parse_special_decision>
                    + sml::completion<event::preprocess_runtime>
                    / action::ensure_last_error
 
+      , sml::state<partition_decision> <= sml::state<partitioning_no_specials_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_empty{} ]
+                   / action::set_empty_partition_result
+      , sml::state<partitioning_no_specials> <= sml::state<partitioning_no_specials_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_nonempty{} ]
+      , sml::state<errored> <= sml::state<partitioning_no_specials_input_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::ensure_last_error
+
+      , sml::state<partition_decision> <= sml::state<partitioning_non_bpe_parse_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_empty{} ]
+                   / action::set_empty_partition_result
+      , sml::state<partitioning_non_bpe_parse_special> <= sml::state<partitioning_non_bpe_parse_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_nonempty{} ]
+      , sml::state<errored> <= sml::state<partitioning_non_bpe_parse_input_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::ensure_last_error
+
+      , sml::state<partition_decision> <= sml::state<partitioning_non_bpe_skip_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_empty{} ]
+                   / action::set_empty_partition_result
+      , sml::state<partitioning_non_bpe_skip_special> <= sml::state<partitioning_non_bpe_skip_input_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::request_text_nonempty{} ]
+      , sml::state<errored> <= sml::state<partitioning_non_bpe_skip_input_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::ensure_last_error
+
+      , sml::state<partition_decision> <= sml::state<partitioning_no_specials>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::partition_no_specials
       , sml::state<partition_decision> <= sml::state<partitioning_non_bpe_parse_special>
                    + sml::completion<event::preprocess_runtime>
                    / action::partition_non_bpe_parse_special
@@ -119,7 +162,17 @@ struct model {
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<build_specials_decision> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<partition_specials_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
       , sml::state<unexpected> <= sml::state<partition_parse_special_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<partitioning_no_specials_input_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<partitioning_non_bpe_parse_input_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<partitioning_non_bpe_skip_input_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<partitioning_no_specials> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<partitioning_non_bpe_parse_special> + sml::unexpected_event<sml::_>
                    / action::on_unexpected

@@ -15,6 +15,27 @@ using emel::text::tokenizer::preprocessor::action::mark_done;
 using emel::text::tokenizer::preprocessor::action::on_unexpected;
 using emel::text::tokenizer::preprocessor::action::reject_invalid;
 
+struct set_empty_partition_result {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    emel::text::tokenizer::preprocessor::action::detail::set_phase_result(
+      runtime_ev, true, 0, true);
+  }
+};
+
+struct partition_no_specials {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev, context &) const noexcept {
+    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    fragment & first = ev.request.fragments_out[0];
+    first.kind = fragment_kind::raw_text;
+    first.text = ev.request.text;
+    first.token = -1;
+    emel::text::tokenizer::preprocessor::action::detail::set_phase_result(
+      runtime_ev, true, 1, true);
+  }
+};
+
 struct partition_non_bpe_parse_special {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
@@ -39,6 +60,8 @@ struct partition_non_bpe_skip_special {
   }
 };
 
+inline constexpr set_empty_partition_result set_empty_partition_result{};
+inline constexpr partition_no_specials partition_no_specials{};
 inline constexpr partition_non_bpe_parse_special partition_non_bpe_parse_special{};
 inline constexpr partition_non_bpe_skip_special partition_non_bpe_skip_special{};
 
