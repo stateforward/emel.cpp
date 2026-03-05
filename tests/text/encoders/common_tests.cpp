@@ -1471,9 +1471,13 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
       emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
     CHECK(emel::text::encoders::fallback::guard::emit_result_ok{}(runtime_ok_fallback_ev));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
-    CHECK(emel::text::encoders::fallback::guard::phase_ok{}(runtime_ok_fallback_ev));
+    CHECK(emel::text::encoders::fallback::guard::table_prepare_ok{}(runtime_ok_fallback_ev));
+    CHECK(emel::text::encoders::fallback::guard::encode_result_ok{}(runtime_ok_fallback_ev));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
-    CHECK(emel::text::encoders::fallback::guard::phase_failed{}(runtime_ok_fallback_ev));
+    CHECK(
+      emel::text::encoders::fallback::guard::table_prepare_backend_error{}(runtime_ok_fallback_ev));
+    CHECK(
+      emel::text::encoders::fallback::guard::encode_result_backend_error{}(runtime_ok_fallback_ev));
     emel::text::encoders::fallback::action::begin_encode(runtime_error_fallback_ev, ctx);
   }
 }
