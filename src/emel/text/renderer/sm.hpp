@@ -23,7 +23,9 @@ struct render_dispatch_decision {};
 struct render_result_decision {};
 struct render_commit_output_exec {};
 struct render_strip_decision {};
-struct render_strip_exec {};
+struct render_strip_prefix_scan_exec {};
+struct render_strip_prefix_decision {};
+struct render_strip_apply_exec {};
 struct render_strip_state_exec {};
 struct render_stop_match_exec {};
 struct render_finalize_decision {};
@@ -194,16 +196,26 @@ struct model {
       , sml::state<render_strip_decision> <= sml::state<render_commit_output_exec>
             + sml::completion<event::render_runtime>
           / action::commit_render_detokenizer_output
-      , sml::state<render_strip_exec> <= sml::state<render_strip_decision>
+      , sml::state<render_strip_prefix_scan_exec> <= sml::state<render_strip_decision>
             + sml::completion<event::render_runtime> [ guard::strip_needed{} ]
       , sml::state<render_strip_state_exec> <= sml::state<render_strip_decision>
             + sml::completion<event::render_runtime> [ guard::strip_not_needed{} ]
       , sml::state<render_publish_error> <= sml::state<render_strip_decision>
             + sml::completion<event::render_runtime>
           / action::ensure_last_error
-      , sml::state<render_strip_state_exec> <= sml::state<render_strip_exec>
+      , sml::state<render_strip_prefix_decision> <= sml::state<render_strip_prefix_scan_exec>
             + sml::completion<event::render_runtime>
-          / action::strip_render_leading_space
+          / action::compute_render_leading_space_prefix
+      , sml::state<render_strip_apply_exec> <= sml::state<render_strip_prefix_decision>
+            + sml::completion<event::render_runtime> [ guard::strip_prefix_nonzero{} ]
+          / action::apply_render_leading_space_strip
+      , sml::state<render_strip_state_exec> <= sml::state<render_strip_prefix_decision>
+            + sml::completion<event::render_runtime> [ guard::strip_prefix_zero{} ]
+      , sml::state<render_publish_error> <= sml::state<render_strip_prefix_decision>
+            + sml::completion<event::render_runtime>
+          / action::ensure_last_error
+      , sml::state<render_strip_state_exec> <= sml::state<render_strip_apply_exec>
+            + sml::completion<event::render_runtime>
       , sml::state<render_stop_match_exec> <= sml::state<render_strip_state_exec>
             + sml::completion<event::render_runtime>
           / action::update_render_strip_state
@@ -275,7 +287,11 @@ struct model {
             / action::on_unexpected
       , sml::state<unexpected> <= sml::state<render_strip_decision> + sml::unexpected_event<sml::_>
             / action::on_unexpected
-      , sml::state<unexpected> <= sml::state<render_strip_exec> + sml::unexpected_event<sml::_>
+      , sml::state<unexpected> <= sml::state<render_strip_prefix_scan_exec> + sml::unexpected_event<sml::_>
+            / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_strip_prefix_decision> + sml::unexpected_event<sml::_>
+            / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_strip_apply_exec> + sml::unexpected_event<sml::_>
             / action::on_unexpected
       , sml::state<unexpected> <= sml::state<render_strip_state_exec> + sml::unexpected_event<sml::_>
             / action::on_unexpected

@@ -469,8 +469,12 @@ User-requested machine action/detail findings and remediation status:
   still contains loop-gated scan/trim behavior inside actions (not explicit
   per-step model phases), including at lines:
   `94`, `158`, `173`, `251`, `292`, `452`.
-- [ ] `src/emel/text/renderer/actions.hpp` (line `537`)
-  still contains loop-gated strip traversal/control in action code.
+- [x] `src/emel/text/renderer/actions.hpp` + `src/emel/text/renderer/sm.hpp` +
+  `src/emel/text/renderer/guards.hpp`
+  reworked render-strip flow into explicit `render_strip_prefix_scan_exec`,
+  `render_strip_prefix_decision`, and `render_strip_apply_exec` phases with
+  explicit `strip_prefix_nonzero` / `strip_prefix_zero` guards; removed
+  loop-gated strip traversal from renderer action code.
 - [ ] `src/emel/gbnf/rule_parser/actions.hpp` (lines `308`, `330`)
   still contains loop-driven parse traversal in action code.
 - [x] `src/emel/text/tokenizer/preprocessor/bpe/sm.hpp` +

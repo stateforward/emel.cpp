@@ -809,6 +809,24 @@ TEST_CASE("renderer_action_and_guard_paths") {
 
   render_ev.output = output.data();
   render_ev.output_capacity = output.size();
+  output[0] = ' ';
+  output[1] = '\t';
+  output[2] = 'x';
+  render_runtime_ctx.detokenizer_err = k_detok_ok;
+  render_runtime_ctx.detokenizer_output_length = 3;
+  render_runtime_ctx.detokenizer_pending_length = 0;
+  ctx.sequences[0].strip_leading_space = true;
+  emel::text::renderer::action::commit_render_detokenizer_output(render_runtime_ev, ctx);
+  CHECK(emel::text::renderer::guard::strip_needed{}(render_runtime_ev, ctx));
+  emel::text::renderer::action::compute_render_leading_space_prefix(render_runtime_ev, ctx);
+  CHECK(emel::text::renderer::guard::strip_prefix_nonzero{}(render_runtime_ev, ctx));
+  CHECK_FALSE(emel::text::renderer::guard::strip_prefix_zero{}(render_runtime_ev, ctx));
+  emel::text::renderer::action::apply_render_leading_space_strip(render_runtime_ev, ctx);
+  CHECK(render_runtime_ctx.produced_length == 1);
+  CHECK(output[0] == 'x');
+
+  render_ev.output = output.data();
+  render_ev.output_capacity = output.size();
   render_ev.token_id = token_id;
   render_runtime_ctx = {};
   emel::text::renderer::action::begin_render(render_runtime_ev, ctx);

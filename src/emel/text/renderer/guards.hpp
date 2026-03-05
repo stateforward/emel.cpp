@@ -260,6 +260,24 @@ struct strip_not_needed {
   }
 };
 
+struct strip_prefix_nonzero {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type & ev,
+                  const action::context &) const noexcept {
+    const auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    return runtime_ev.ctx.leading_space_prefix_length != 0;
+  }
+};
+
+struct strip_prefix_zero {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type & ev,
+                  const action::context &) const noexcept {
+    const auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    return runtime_ev.ctx.leading_space_prefix_length == 0;
+  }
+};
+
 struct flush_output_fits {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type & ev,
