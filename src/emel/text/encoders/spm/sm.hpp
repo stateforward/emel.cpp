@@ -58,7 +58,8 @@ struct unexpected {};
  * - 'merge_symbol_capacity_within_limit'/'merge_symbol_capacity_exceeded' route merge intake.
  * - 'symbols_present'/'symbols_absent' route emit execution vs explicit empty emit result.
  * - 'emit_result_ok'/'emit_result_failed' route explicit emit outcomes.
- * - 'phase_*' guards observe runtime phase errors.
+ * - per-phase `*_ok`/typed error/unclassified-error-code guards observe
+ *   explicit runtime phase errors.
  *
  * action side effects:
  * - 'begin_encode' resets runtime per-request outputs.
@@ -145,7 +146,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::table_sync_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<table_sync_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::table_sync_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::table_sync_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
@@ -165,7 +166,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::prepare_result_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<encode_prepare_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::prepare_result_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::prepare_result_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
@@ -197,7 +198,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::merge_result_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<encode_merge_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::merge_result_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::merge_result_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
@@ -239,7 +240,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::encode_result_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<encode_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::encode_result_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::encode_result_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//

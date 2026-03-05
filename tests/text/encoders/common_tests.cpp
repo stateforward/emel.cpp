@@ -1302,6 +1302,23 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::text::encoders::spm::guard::encode_result_ok{}(runtime_ok_spm_ev));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
     CHECK(emel::text::encoders::spm::guard::encode_result_backend_error{}(runtime_ok_spm_ev));
+    CHECK_FALSE(emel::text::encoders::spm::guard::table_sync_unclassified_error_code{}(
+      runtime_ok_spm_ev));
+    CHECK_FALSE(emel::text::encoders::spm::guard::prepare_result_unclassified_error_code{}(
+      runtime_ok_spm_ev));
+    CHECK_FALSE(emel::text::encoders::spm::guard::merge_result_unclassified_error_code{}(
+      runtime_ok_spm_ev));
+    CHECK_FALSE(emel::text::encoders::spm::guard::encode_result_unclassified_error_code{}(
+      runtime_ok_spm_ev));
+    runtime_ok.err = static_cast<int32_t>(0x7FFF);
+    CHECK(
+      emel::text::encoders::spm::guard::table_sync_unclassified_error_code{}(runtime_ok_spm_ev));
+    CHECK(
+      emel::text::encoders::spm::guard::prepare_result_unclassified_error_code{}(runtime_ok_spm_ev));
+    CHECK(
+      emel::text::encoders::spm::guard::merge_result_unclassified_error_code{}(runtime_ok_spm_ev));
+    CHECK(
+      emel::text::encoders::spm::guard::encode_result_unclassified_error_code{}(runtime_ok_spm_ev));
     emel::text::encoders::spm::action::begin_encode(runtime_error_spm_ev, ctx);
   }
 

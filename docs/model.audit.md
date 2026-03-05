@@ -749,3 +749,9 @@ User-requested machine action/detail findings and remediation status:
   fallback composition (`!guard_a && !...`) with explicit direct
   unclassified-error-code guards and updated `sm.hpp` phase-result routing to
   use the explicit guards.
+- [x] `text/encoders/spm/sm.hpp` + `text/encoders/spm/guards.hpp`
+  replaced `table_sync_unknown_error` / `prepare_result_unknown_error` /
+  `merge_result_unknown_error` / `encode_result_unknown_error` fallback
+  composition (`!guard_a && !...`) with explicit direct
+  unclassified-error-code guards and updated `sm.hpp` phase-result routing to
+  use the explicit guards.
