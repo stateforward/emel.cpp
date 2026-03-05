@@ -82,11 +82,17 @@ struct model {
                    + sml::completion<event::preprocess_runtime>
                    / action::build_specials
 
-      , sml::state<errored> <= sml::state<build_specials_decision>
-                   + sml::completion<event::preprocess_runtime>[ guard::phase_failed{} ]
-                   / action::ensure_last_error
       , sml::state<partition_specials_decision> <= sml::state<build_specials_decision>
-                   + sml::completion<event::preprocess_runtime>[ guard::phase_ok{} ]
+                   + sml::completion<event::preprocess_runtime>[ guard::build_specials_ok{} ]
+      , sml::state<errored> <= sml::state<build_specials_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::build_specials_invalid_request_error{} ]
+                   / action::ensure_last_error
+      , sml::state<errored> <= sml::state<build_specials_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::build_specials_backend_error{} ]
+                   / action::ensure_last_error
+      , sml::state<errored> <= sml::state<build_specials_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::build_specials_unknown_error{} ]
+                   / action::ensure_last_error
 
       , sml::state<partitioning_no_specials_input_decision> <= sml::state<partition_specials_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::no_specials{} ]
@@ -141,12 +147,18 @@ struct model {
                    + sml::completion<event::preprocess_runtime>
                    / action::partition_non_bpe_skip_special
 
-      , sml::state<errored> <= sml::state<partition_decision>
-                   + sml::completion<event::preprocess_runtime>[ guard::phase_failed{} ]
-                   / action::ensure_last_error
       , sml::state<done> <= sml::state<partition_decision>
-                   + sml::completion<event::preprocess_runtime>[ guard::phase_ok{} ]
+                   + sml::completion<event::preprocess_runtime>[ guard::partition_ok{} ]
                    / action::mark_done
+      , sml::state<errored> <= sml::state<partition_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::partition_invalid_request_error{} ]
+                   / action::ensure_last_error
+      , sml::state<errored> <= sml::state<partition_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::partition_backend_error{} ]
+                   / action::ensure_last_error
+      , sml::state<errored> <= sml::state<partition_decision>
+                   + sml::completion<event::preprocess_runtime>[ guard::partition_unknown_error{} ]
+                   / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
       // Unexpected events.
