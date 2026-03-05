@@ -119,9 +119,18 @@ struct model {
       , sml::state<table_sync_result_decision> <= sml::state<table_sync_exec>
           + sml::completion<event::encode_runtime> / action::sync_tables
       , sml::state<encode_input_capacity_decision> <= sml::state<table_sync_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_ok{}]
+          + sml::completion<event::encode_runtime>[guard::table_sync_ok{}]
       , sml::state<errored> <= sml::state<table_sync_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_failed{}]
+          + sml::completion<event::encode_runtime>[guard::table_sync_invalid_argument_error{}]
+          / action::ensure_last_error
+      , sml::state<errored> <= sml::state<table_sync_result_decision>
+          + sml::completion<event::encode_runtime>[guard::table_sync_backend_error{}]
+          / action::ensure_last_error
+      , sml::state<errored> <= sml::state<table_sync_result_decision>
+          + sml::completion<event::encode_runtime>[guard::table_sync_model_invalid_error{}]
+          / action::ensure_last_error
+      , sml::state<errored> <= sml::state<table_sync_result_decision>
+          + sml::completion<event::encode_runtime>[guard::table_sync_unknown_error{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
@@ -142,9 +151,19 @@ struct model {
       , sml::state<encode_result_decision> <= sml::state<encode_exec>
           + sml::completion<event::encode_runtime> / action::run_encode
       , sml::state<done> <= sml::state<encode_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_ok{}] / action::mark_done
+          + sml::completion<event::encode_runtime>[guard::encode_result_ok{}]
+          / action::mark_done
       , sml::state<errored> <= sml::state<encode_result_decision>
-          + sml::completion<event::encode_runtime>[guard::phase_failed{}]
+          + sml::completion<event::encode_runtime>[guard::encode_result_invalid_argument_error{}]
+          / action::ensure_last_error
+      , sml::state<errored> <= sml::state<encode_result_decision>
+          + sml::completion<event::encode_runtime>[guard::encode_result_backend_error{}]
+          / action::ensure_last_error
+      , sml::state<errored> <= sml::state<encode_result_decision>
+          + sml::completion<event::encode_runtime>[guard::encode_result_model_invalid_error{}]
+          / action::ensure_last_error
+      , sml::state<errored> <= sml::state<encode_result_decision>
+          + sml::completion<event::encode_runtime>[guard::encode_result_unknown_error{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//

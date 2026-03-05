@@ -451,3 +451,8 @@ User-requested machine action/detail findings and remediation status:
   branches (`*_ok`, `*_invalid_argument_error`, `*_backend_error`,
   `*_model_invalid_error`, `*_unknown_error`) so `bpe/sm.hpp` does not rely on
   generic `phase_ok` / `phase_failed` guards for action/detail-driven outcomes.
+- [x] `text/encoders/wpm/sm.hpp` + `text/encoders/wpm/guards.hpp`
+  reworked table-sync and encode-result routing into explicit error-class
+  branches (`*_ok`, `*_invalid_argument_error`, `*_backend_error`,
+  `*_model_invalid_error`, `*_unknown_error`) so `wpm/sm.hpp` does not rely on
+  generic `phase_ok` / `phase_failed` guards for action/detail-driven outcomes.
