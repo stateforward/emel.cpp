@@ -34,113 +34,61 @@ inline void add_rule_unchecked(emel::gbnf::grammar & grammar,
   grammar.rule_count = std::max(grammar.rule_count, rule_id + 1u);
 }
 
-inline void consume_char_class_range_none(context &, const char *&, const char *) noexcept {}
+inline bool can_apply_quantifier_bounds(const event::parse_rules & ev,
+                                        const context & ctx,
+                                        const uint64_t min_times,
+                                        const uint64_t max_times) noexcept {
+  constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
+  constexpr uint64_t k_max_repetition_threshold = 2000;
+  if (ctx.last_sym_start == ctx.current_rule.size) {
+    return false;
+  }
 
-inline void consume_char_class_range_some(context & ctx,
-                                          const char *& pos,
-                                          const char * end) noexcept {
-  ++pos;
-  const auto range_char = emel::gbnf::rule_parser::detail::parse_char(pos, end);
-  append_unchecked(ctx, {emel::gbnf::element_type::char_rng_upper, range_char.first});
-  pos = range_char.second;
-}
+  if (min_times > k_max_repetition_threshold) {
+    return false;
+  }
+  if (max_times != k_no_max && max_times > k_max_repetition_threshold) {
+    return false;
+  }
+  if (max_times != k_no_max && max_times < min_times) {
+    return false;
+  }
 
-inline void append_literal_element_none(context &, const uint32_t) noexcept {}
+  const uint64_t prev_len = static_cast<uint64_t>(ctx.current_rule.size - ctx.last_sym_start);
+  const uint64_t repeated_len =
+      min_times == 0 ? static_cast<uint64_t>(ctx.last_sym_start)
+                     : static_cast<uint64_t>(ctx.last_sym_start) + prev_len * min_times;
 
-inline void append_literal_element_some(context & ctx,
-                                        const uint32_t value) noexcept {
-  append_unchecked(ctx, {emel::gbnf::element_type::character, value});
-}
+  if (repeated_len > emel::gbnf::k_max_gbnf_rule_elements) {
+    return false;
+  }
 
-inline bool consume_literal_step(context & ctx,
-                                 const char *& pos,
-                                 const char * end) noexcept {
-  const auto parsed = emel::gbnf::rule_parser::detail::parse_char(pos, end);
-  const bool parsed_ok = parsed.second != nullptr;
-  constexpr std::array<void (*)(context &, uint32_t), 2> append_handlers = {
-      append_literal_element_none,
-      append_literal_element_some,
-  };
-  append_handlers[static_cast<size_t>(parsed_ok)](ctx, parsed.first);
-  const uintptr_t next_addr = emel::gbnf::rule_parser::detail::select_uptr(
-      parsed_ok,
-      reinterpret_cast<uintptr_t>(parsed.second),
-      reinterpret_cast<uintptr_t>(pos));
-  pos = reinterpret_cast<const char *>(next_addr);
-  return parsed_ok;
-}
+  const bool no_max = max_times == k_no_max;
+  const uint64_t n_opt = no_max ? 1 : (max_times - min_times);
+  if (ctx.next_symbol_id + n_opt > emel::gbnf::k_max_gbnf_rules) {
+    return false;
+  }
 
-inline void consume_literal_recursive(context & ctx,
-                                      const char *& pos,
-                                      const char * end,
-                                      bool & ok) noexcept;
+  const emel::gbnf::grammar & grammar = *ev.request.grammar_out;
+  uint64_t added_grammar_elements = 0;
+  for (uint64_t i = 0; i < n_opt; ++i) {
+    const uint32_t rec_rule_id = ctx.next_symbol_id + static_cast<uint32_t>(i);
+    if (grammar.rule_lengths[rec_rule_id] != 0u) {
+      return false;
+    }
+    const uint64_t rec_rule_len = prev_len + ((i > 0 || no_max) ? 1u : 0u) + 2u;
+    if (rec_rule_len > emel::gbnf::k_max_gbnf_rule_elements) {
+      return false;
+    }
+    added_grammar_elements += rec_rule_len;
+  }
 
-inline void consume_literal_stop(context &,
-                                 const char *&,
-                                 const char *,
-                                 bool &) noexcept {}
+  if (grammar.element_count + added_grammar_elements > emel::gbnf::k_max_gbnf_elements) {
+    return false;
+  }
 
-inline void consume_literal_continue(context & ctx,
-                                     const char *& pos,
-                                     const char * end,
-                                     bool & ok) noexcept {
-  ok = consume_literal_step(ctx, pos, end);
-  consume_literal_recursive(ctx, pos, end, ok);
-}
-
-inline void consume_literal_recursive(context & ctx,
-                                      const char *& pos,
-                                      const char * end,
-                                      bool & ok) noexcept {
-  using handler_type = void (*)(context &, const char *&, const char *, bool &) noexcept;
-  constexpr std::array<handler_type, 2> handlers = {
-      consume_literal_stop,
-      consume_literal_continue,
-  };
-  const size_t continue_parse = static_cast<size_t>(ok && pos < end);
-  handlers[continue_parse](ctx, pos, end, ok);
-}
-
-inline void append_char_class_lead_none(context &,
-                                        const emel::gbnf::element_type,
-                                        const uint32_t) noexcept {}
-
-inline void append_char_class_lead_some(context & ctx,
-                                        const emel::gbnf::element_type lead_type,
-                                        const uint32_t value) noexcept {
-  append_unchecked(ctx, {lead_type, value});
-}
-
-inline void append_char_class_range_none(context &, const uint32_t) noexcept {}
-
-inline void append_char_class_range_some(context & ctx,
-                                         const uint32_t value) noexcept {
-  append_unchecked(ctx, {emel::gbnf::element_type::char_rng_upper, value});
-}
-
-inline bool consume_char_class_range_none_checked(context &,
-                                                  const char *&,
-                                                  const char *) noexcept {
-  return true;
-}
-
-inline bool consume_char_class_range_some_checked(context & ctx,
-                                                  const char *& pos,
-                                                  const char * end) noexcept {
-  ++pos;
-  const auto parsed = emel::gbnf::rule_parser::detail::parse_char(pos, end);
-  const bool parsed_ok = parsed.second != nullptr;
-  constexpr std::array<void (*)(context &, uint32_t), 2> append_handlers = {
-      append_char_class_range_none,
-      append_char_class_range_some,
-  };
-  append_handlers[static_cast<size_t>(parsed_ok)](ctx, parsed.first);
-  const uintptr_t next_addr = emel::gbnf::rule_parser::detail::select_uptr(
-      parsed_ok,
-      reinterpret_cast<uintptr_t>(parsed.second),
-      reinterpret_cast<uintptr_t>(pos));
-  pos = reinterpret_cast<const char *>(next_addr);
-  return parsed_ok;
+  const uint64_t final_rule_len = repeated_len + (n_opt > 0 ? 1u : 0u);
+  return final_rule_len <= emel::gbnf::k_max_gbnf_rule_elements;
 }
 
 inline emel::gbnf::element_type select_char_class_lead_type(
@@ -153,86 +101,6 @@ inline emel::gbnf::element_type select_char_class_lead_type(
   std::array<emel::gbnf::element_type, 2> lead_type_candidates = lead_types;
   lead_type_candidates[1] = start_type;
   return lead_type_candidates[static_cast<size_t>(first)];
-}
-
-inline bool consume_character_class_step(
-    context & ctx,
-    const emel::gbnf::element_type start_type,
-    const char *& pos,
-    const char * end,
-    bool & first) noexcept {
-  const auto parsed = emel::gbnf::rule_parser::detail::parse_char(pos, end);
-  const bool parsed_ok = parsed.second != nullptr;
-  const emel::gbnf::element_type lead_type =
-      select_char_class_lead_type(first, start_type);
-  constexpr std::array<void (*)(context &, emel::gbnf::element_type, uint32_t), 2>
-      append_handlers = {
-          append_char_class_lead_none,
-          append_char_class_lead_some,
-      };
-  append_handlers[static_cast<size_t>(parsed_ok)](ctx, lead_type, parsed.first);
-  const uintptr_t next_addr = emel::gbnf::rule_parser::detail::select_uptr(
-      parsed_ok,
-      reinterpret_cast<uintptr_t>(parsed.second),
-      reinterpret_cast<uintptr_t>(pos));
-  pos = reinterpret_cast<const char *>(next_addr);
-  const std::array<bool, 2> first_values = {first, false};
-  first = first_values[static_cast<size_t>(parsed_ok)];
-
-  const bool has_range =
-      parsed_ok && pos + 1u < end && pos[0] == '-' && pos[1] != ']';
-  using range_handler_type = bool (*)(context &, const char *&, const char *) noexcept;
-  constexpr std::array<range_handler_type, 2> range_handlers = {
-      consume_char_class_range_none_checked,
-      consume_char_class_range_some_checked,
-  };
-  const bool range_ok = range_handlers[static_cast<size_t>(has_range)](ctx, pos, end);
-  return parsed_ok && range_ok;
-}
-
-inline void consume_character_class_recursive(
-    context & ctx,
-    const emel::gbnf::element_type start_type,
-    const char *& pos,
-    const char * end,
-    bool & first,
-    bool & ok) noexcept;
-
-inline void consume_character_class_stop(
-    context &,
-    const emel::gbnf::element_type,
-    const char *&,
-    const char *,
-    bool &,
-    bool &) noexcept {}
-
-inline void consume_character_class_continue(
-    context & ctx,
-    const emel::gbnf::element_type start_type,
-    const char *& pos,
-    const char * end,
-    bool & first,
-    bool & ok) noexcept {
-  ok = consume_character_class_step(ctx, start_type, pos, end, first);
-  consume_character_class_recursive(ctx, start_type, pos, end, first, ok);
-}
-
-inline void consume_character_class_recursive(
-    context & ctx,
-    const emel::gbnf::element_type start_type,
-    const char *& pos,
-    const char * end,
-    bool & first,
-    bool & ok) noexcept {
-  using handler_type =
-      void (*)(context &, emel::gbnf::element_type, const char *&, const char *,
-               bool &, bool &) noexcept;
-  constexpr std::array<handler_type, 2> handlers = {
-      consume_character_class_stop,
-      consume_character_class_continue,
-  };
-  const size_t continue_parse = static_cast<size_t>(ok && pos < end);
-  handlers[continue_parse](ctx, start_type, pos, end, first, ok);
 }
 
 inline bool parse_rule_reference_digits_text(const std::string_view text,
@@ -375,15 +243,13 @@ struct begin_parse {
     ev.ctx.has_token = false;
     ev.ctx.nonterm_mode = nonterm_parser::events::parse_mode::none;
     ev.ctx.nonterm_rule_id = 0;
+    ev.ctx.nonterm_lookup_hash = 0;
+    ev.ctx.nonterm_lookup_rule_id = 0;
+    ev.ctx.nonterm_lookup_found = false;
+    ev.ctx.nonterm_lookup_can_insert = false;
     ev.ctx.expression_kind = expression_parser::events::parse_kind::unknown;
     ev.ctx.term_kind = term_parser::events::term_kind::unknown;
     ev.ctx.current_term_origin = event::parse_rules_ctx::term_origin::none;
-    ev.ctx.parsed_rule_reference_id = 0;
-    ev.ctx.parsed_quantifier_min = 0;
-    ev.ctx.parsed_quantifier_max = 0;
-    ev.ctx.parsed_rule_reference_valid = false;
-    ev.ctx.parsed_rule_reference_negated = false;
-    ev.ctx.parsed_quantifier_valid = false;
 
     ctx.current_rule_id = 0;
     ctx.current_rule.size = 0;
@@ -402,14 +268,12 @@ struct request_next_token {
     ev.ctx.token = {};
     ev.ctx.nonterm_mode = nonterm_parser::events::parse_mode::none;
     ev.ctx.nonterm_rule_id = 0;
+    ev.ctx.nonterm_lookup_hash = 0;
+    ev.ctx.nonterm_lookup_rule_id = 0;
+    ev.ctx.nonterm_lookup_found = false;
+    ev.ctx.nonterm_lookup_can_insert = false;
     ev.ctx.expression_kind = expression_parser::events::parse_kind::unknown;
     ev.ctx.term_kind = term_parser::events::term_kind::unknown;
-    ev.ctx.parsed_rule_reference_id = 0;
-    ev.ctx.parsed_quantifier_min = 0;
-    ev.ctx.parsed_quantifier_max = 0;
-    ev.ctx.parsed_rule_reference_valid = false;
-    ev.ctx.parsed_rule_reference_negated = false;
-    ev.ctx.parsed_quantifier_valid = false;
 
     const callback<bool(const lexer::events::next_done &)> done_cb{&ev.ctx, on_lexer_done};
     const callback<bool(const lexer::events::next_error &)> error_cb{&ev.ctx, on_lexer_error};
@@ -510,7 +374,15 @@ struct consume_token_literal {
     const char * pos = safe_data + start_offset;
     const char * end = safe_data + end_offset;
     bool ok = has_envelope;
-    consume_literal_recursive(ctx, pos, end, ok);
+    while (ok && pos < end) {
+      const auto parsed = emel::gbnf::rule_parser::detail::parse_char(pos, end);
+      ok = parsed.second != nullptr;
+      if (!ok) {
+        break;
+      }
+      append_unchecked(ctx, {emel::gbnf::element_type::character, parsed.first});
+      pos = parsed.second;
+    }
 
     const std::array<uint32_t, 2> size_candidates = {
         original_size,
@@ -554,7 +426,30 @@ struct consume_token_character_class {
     pos += static_cast<size_t>(leading_not);
     bool first = true;
     bool ok = has_envelope;
-    consume_character_class_recursive(ctx, start_type, pos, end, first, ok);
+    while (ok && pos < end) {
+      const auto parsed = emel::gbnf::rule_parser::detail::parse_char(pos, end);
+      ok = parsed.second != nullptr;
+      if (!ok) {
+        break;
+      }
+      append_unchecked(ctx, {select_char_class_lead_type(first, start_type), parsed.first});
+      first = false;
+      pos = parsed.second;
+
+      const bool has_range = pos + 1u < end && pos[0] == '-' && pos[1] != ']';
+      if (!has_range) {
+        continue;
+      }
+
+      ++pos;
+      const auto range_char = emel::gbnf::rule_parser::detail::parse_char(pos, end);
+      ok = range_char.second != nullptr;
+      if (!ok) {
+        break;
+      }
+      append_unchecked(ctx, {emel::gbnf::element_type::char_rng_upper, range_char.first});
+      pos = range_char.second;
+    }
 
     const std::array<uint32_t, 2> size_candidates = {
         original_size,
@@ -569,52 +464,55 @@ struct consume_token_character_class {
   }
 };
 
-struct prepare_rule_reference_parse {
-  void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.ctx.parsed_rule_reference_id = 0;
-    ev.ctx.parsed_rule_reference_valid = false;
-    ev.ctx.parsed_rule_reference_negated = false;
-  }
-};
+inline void append_rule_reference_plain_none(context &, const uint32_t) noexcept {}
 
-struct parse_rule_reference_plain_candidate {
+inline void append_rule_reference_plain_some(context & ctx, const uint32_t token_id) noexcept {
+  ctx.last_sym_start = ctx.current_rule.size;
+  append_unchecked(ctx, {emel::gbnf::element_type::token, token_id});
+}
+
+inline void append_rule_reference_negated_none(context &, const uint32_t) noexcept {}
+
+inline void append_rule_reference_negated_some(context & ctx, const uint32_t token_id) noexcept {
+  ctx.last_sym_start = ctx.current_rule.size;
+  append_unchecked(ctx, {emel::gbnf::element_type::token_not, token_id});
+}
+
+struct consume_token_rule_reference_plain {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     uint32_t token_id = 0;
     const std::string_view text = ev.ctx.token.text;
     const std::string_view digits = text.substr(2u, text.size() - 4u);
     const bool parsed = parse_rule_reference_digits_text(digits, token_id);
-    const bool has_space = ctx.current_rule.size + 1u <= emel::gbnf::k_max_gbnf_rule_elements;
-    ev.ctx.parsed_rule_reference_id = token_id;
-    ev.ctx.parsed_rule_reference_negated = false;
-    ev.ctx.parsed_rule_reference_valid = parsed && has_space;
+    constexpr std::array<void (*)(context &, uint32_t), 2> append_handlers = {
+      append_rule_reference_plain_none,
+      append_rule_reference_plain_some,
+    };
+    append_handlers[static_cast<size_t>(parsed)](ctx, token_id);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(parsed)];
   }
 };
 
-struct parse_rule_reference_negated_candidate {
+struct consume_token_rule_reference_negated {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     uint32_t token_id = 0;
     const std::string_view text = ev.ctx.token.text;
     const std::string_view digits = text.substr(3u, text.size() - 5u);
     const bool parsed = parse_rule_reference_digits_text(digits, token_id);
-    const bool has_space = ctx.current_rule.size + 1u <= emel::gbnf::k_max_gbnf_rule_elements;
-    ev.ctx.parsed_rule_reference_id = token_id;
-    ev.ctx.parsed_rule_reference_negated = true;
-    ev.ctx.parsed_rule_reference_valid = parsed && has_space;
-  }
-};
-
-struct consume_token_rule_reference_plain_parsed {
-  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
-    ctx.last_sym_start = ctx.current_rule.size;
-    append_unchecked(ctx, {emel::gbnf::element_type::token, ev.ctx.parsed_rule_reference_id});
-  }
-};
-
-struct consume_token_rule_reference_negated_parsed {
-  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
-    ctx.last_sym_start = ctx.current_rule.size;
-    append_unchecked(ctx,
-                     {emel::gbnf::element_type::token_not, ev.ctx.parsed_rule_reference_id});
+    constexpr std::array<void (*)(context &, uint32_t), 2> append_handlers = {
+      append_rule_reference_negated_none,
+      append_rule_reference_negated_some,
+    };
+    append_handlers[static_cast<size_t>(parsed)](ctx, token_id);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(parsed)];
   }
 };
 
@@ -667,74 +565,124 @@ struct consume_token_close_group {
   }
 };
 
-struct prepare_quantifier_parse {
-  void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.ctx.parsed_quantifier_min = 0;
-    ev.ctx.parsed_quantifier_max = 0;
-    ev.ctx.parsed_quantifier_valid = false;
-  }
-};
+inline void apply_quantifier_bounds_none(const event::parse_rules &,
+                                         context &,
+                                         const uint64_t,
+                                         const uint64_t) noexcept {}
 
-struct parse_quantifier_star_bounds_candidate {
-  void operator()(const event::parse_rules & ev, context &) const noexcept {
+inline void apply_quantifier_bounds_some(const event::parse_rules & ev,
+                                         context & ctx,
+                                         const uint64_t min_times,
+                                         const uint64_t max_times) noexcept {
+  apply_quantifier_bounds(ev, ctx, min_times, max_times);
+}
+
+struct consume_token_quantifier_star {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
-    ev.ctx.parsed_quantifier_min = 0;
-    ev.ctx.parsed_quantifier_max = k_no_max;
-    ev.ctx.parsed_quantifier_valid = true;
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok = can_apply_quantifier_bounds(ev, ctx, 0u, k_no_max);
+    handlers[static_cast<size_t>(ok)](ev, ctx, 0u, k_no_max);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
   }
 };
 
-struct parse_quantifier_plus_bounds_candidate {
-  void operator()(const event::parse_rules & ev, context &) const noexcept {
+struct consume_token_quantifier_plus {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
-    ev.ctx.parsed_quantifier_min = 1;
-    ev.ctx.parsed_quantifier_max = k_no_max;
-    ev.ctx.parsed_quantifier_valid = true;
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok = can_apply_quantifier_bounds(ev, ctx, 1u, k_no_max);
+    handlers[static_cast<size_t>(ok)](ev, ctx, 1u, k_no_max);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
   }
 };
 
-struct parse_quantifier_question_bounds_candidate {
-  void operator()(const event::parse_rules & ev, context &) const noexcept {
-    ev.ctx.parsed_quantifier_min = 0;
-    ev.ctx.parsed_quantifier_max = 1;
-    ev.ctx.parsed_quantifier_valid = true;
+struct consume_token_quantifier_question {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok = can_apply_quantifier_bounds(ev, ctx, 0u, 1u);
+    handlers[static_cast<size_t>(ok)](ev, ctx, 0u, 1u);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
   }
 };
 
-struct parse_quantifier_braced_exact_bounds_candidate {
-  void operator()(const event::parse_rules & ev, context &) const noexcept {
+struct consume_token_quantifier_braced_exact {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     const std::string_view text = ev.ctx.token.text;
     const std::string_view digits = text.substr(1u, text.size() - 2u);
     uint32_t parsed_min = 0;
     const bool parsed = parse_rule_reference_digits_text(digits, parsed_min);
     const uint64_t min_times = static_cast<uint64_t>(parsed_min);
-    ev.ctx.parsed_quantifier_min = min_times;
-    ev.ctx.parsed_quantifier_max = min_times;
-    ev.ctx.parsed_quantifier_valid = parsed;
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok = parsed && can_apply_quantifier_bounds(ev, ctx, min_times, min_times);
+    handlers[static_cast<size_t>(ok)](ev, ctx, min_times, min_times);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
   }
 };
 
-struct parse_quantifier_braced_open_bounds_candidate {
-  void operator()(const event::parse_rules & ev, context &) const noexcept {
+struct consume_token_quantifier_braced_open {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
     const std::string_view text = ev.ctx.token.text;
     const std::string_view digits = text.substr(1u, text.size() - 3u);
     uint32_t parsed_min = 0;
     const bool parsed = parse_rule_reference_digits_text(digits, parsed_min);
-    ev.ctx.parsed_quantifier_min = static_cast<uint64_t>(parsed_min);
-    ev.ctx.parsed_quantifier_max = k_no_max;
-    ev.ctx.parsed_quantifier_valid = parsed;
+    const uint64_t min_times = static_cast<uint64_t>(parsed_min);
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok = parsed && can_apply_quantifier_bounds(ev, ctx, min_times, k_no_max);
+    handlers[static_cast<size_t>(ok)](ev, ctx, min_times, k_no_max);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
   }
 };
 
-struct parse_quantifier_braced_range_bounds_candidate {
-  void operator()(const event::parse_rules & ev, context &) const noexcept {
+struct consume_token_quantifier_braced_range {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     const std::string_view text = ev.ctx.token.text;
     const std::string_view core = text.substr(1u, text.size() - 2u);
     const size_t comma_pos = core.find(',');
     const size_t has_comma = static_cast<size_t>(comma_pos != std::string_view::npos);
-    const size_t safe_comma_pos = emel::gbnf::rule_parser::detail::select_size(
-        has_comma != 0u, comma_pos, 0u);
+    const size_t safe_comma_pos =
+        emel::gbnf::rule_parser::detail::select_size(has_comma != 0u, comma_pos, 0u);
     const std::string_view min_digits = core.substr(0u, safe_comma_pos);
     const size_t max_offset = safe_comma_pos + has_comma;
     const std::string_view max_digits = core.substr(max_offset, core.size() - max_offset);
@@ -743,15 +691,21 @@ struct parse_quantifier_braced_range_bounds_candidate {
     uint32_t parsed_max = 0;
     const bool min_ok = parse_rule_reference_digits_text(min_digits, parsed_min);
     const bool max_ok = parse_rule_reference_digits_text(max_digits, parsed_max);
-    ev.ctx.parsed_quantifier_min = static_cast<uint64_t>(parsed_min);
-    ev.ctx.parsed_quantifier_max = static_cast<uint64_t>(parsed_max);
-    ev.ctx.parsed_quantifier_valid = min_ok && max_ok;
-  }
-};
-
-struct consume_token_quantifier_parsed {
-  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
-    apply_quantifier_bounds(ev, ctx, ev.ctx.parsed_quantifier_min, ev.ctx.parsed_quantifier_max);
+    const uint64_t min_times = static_cast<uint64_t>(parsed_min);
+    const uint64_t max_times = static_cast<uint64_t>(parsed_max);
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok =
+        min_ok && max_ok && can_apply_quantifier_bounds(ev, ctx, min_times, max_times);
+    handlers[static_cast<size_t>(ok)](ev, ctx, min_times, max_times);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
   }
 };
 
@@ -796,31 +750,18 @@ inline constexpr consume_token_definition_operator consume_token_definition_oper
 inline constexpr consume_token_alternation consume_token_alternation{};
 inline constexpr consume_token_literal consume_token_literal{};
 inline constexpr consume_token_character_class consume_token_character_class{};
-inline constexpr prepare_rule_reference_parse prepare_rule_reference_parse{};
-inline constexpr parse_rule_reference_plain_candidate parse_rule_reference_plain_candidate{};
-inline constexpr parse_rule_reference_negated_candidate parse_rule_reference_negated_candidate{};
-inline constexpr consume_token_rule_reference_plain_parsed
-    consume_token_rule_reference_plain_parsed{};
-inline constexpr consume_token_rule_reference_negated_parsed
-    consume_token_rule_reference_negated_parsed{};
+inline constexpr consume_token_rule_reference_plain consume_token_rule_reference_plain{};
+inline constexpr consume_token_rule_reference_negated consume_token_rule_reference_negated{};
 inline constexpr finalize_active_rule_on_eof finalize_active_rule_on_eof{};
 inline constexpr consume_token_dot consume_token_dot{};
 inline constexpr consume_token_open_group consume_token_open_group{};
 inline constexpr consume_token_close_group consume_token_close_group{};
-inline constexpr prepare_quantifier_parse prepare_quantifier_parse{};
-inline constexpr parse_quantifier_star_bounds_candidate
-    parse_quantifier_star_bounds_candidate{};
-inline constexpr parse_quantifier_plus_bounds_candidate
-    parse_quantifier_plus_bounds_candidate{};
-inline constexpr parse_quantifier_question_bounds_candidate
-    parse_quantifier_question_bounds_candidate{};
-inline constexpr parse_quantifier_braced_exact_bounds_candidate
-    parse_quantifier_braced_exact_bounds_candidate{};
-inline constexpr parse_quantifier_braced_open_bounds_candidate
-    parse_quantifier_braced_open_bounds_candidate{};
-inline constexpr parse_quantifier_braced_range_bounds_candidate
-    parse_quantifier_braced_range_bounds_candidate{};
-inline constexpr consume_token_quantifier_parsed consume_token_quantifier_parsed{};
+inline constexpr consume_token_quantifier_star consume_token_quantifier_star{};
+inline constexpr consume_token_quantifier_plus consume_token_quantifier_plus{};
+inline constexpr consume_token_quantifier_question consume_token_quantifier_question{};
+inline constexpr consume_token_quantifier_braced_exact consume_token_quantifier_braced_exact{};
+inline constexpr consume_token_quantifier_braced_open consume_token_quantifier_braced_open{};
+inline constexpr consume_token_quantifier_braced_range consume_token_quantifier_braced_range{};
 inline constexpr dispatch_done dispatch_done{};
 inline constexpr dispatch_error dispatch_error{};
 inline constexpr on_unexpected on_unexpected{};

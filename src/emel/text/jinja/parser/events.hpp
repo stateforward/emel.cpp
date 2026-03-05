@@ -72,6 +72,7 @@ struct parse_ctx {
       : error_out(error_out_ref), error_pos_out(error_pos_out_ref) {
     lex_result.source = std::string(template_text_ref);
     ::emel::text::jinja::lexer::detail::normalize_source(lex_result.source);
+    lex_result.tokens.reserve(lex_result.source.size() / 3u + 4u);
   }
 
   parser::error err = parser::error::none;

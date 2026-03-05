@@ -1,10 +1,8 @@
 #pragma once
 
 #include <array>
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>
 #include <string>
 #include <string_view>
 
@@ -40,6 +38,14 @@ inline char view_char_at_or(const std::string_view source,
 }
 
 inline void normalize_source(std::string &source) {
+  const bool has_cr = source.find('\r') != std::string::npos;
+  if (!has_cr) {
+    if (!source.empty() && source.back() == '\n') {
+      source.pop_back();
+    }
+    return;
+  }
+
   for (std::string::size_type pos = 0;
        (pos = source.find("\r\n", pos)) != std::string::npos;) {
     source.erase(pos, 1);
@@ -60,15 +66,17 @@ inline void normalize_source(std::string &source) {
 }
 
 inline bool is_word(const char ch) noexcept {
-  return std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_';
+  return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+         (ch >= '0' && ch <= '9') || ch == '_';
 }
 
 inline bool is_integer(const char ch) noexcept {
-  return std::isdigit(static_cast<unsigned char>(ch)) != 0;
+  return ch >= '0' && ch <= '9';
 }
 
 inline bool is_space(const char ch) noexcept {
-  return std::isspace(static_cast<unsigned char>(ch)) != 0;
+  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f' ||
+         ch == '\v';
 }
 
 inline void string_lstrip(std::string &s, const char *chars) {
@@ -83,24 +91,22 @@ inline void string_rstrip(std::string &s, const char *chars) {
   s.erase(keep_count);
 }
 
+template <char... chars>
 inline bool next_pos_is(const std::string_view source,
                         const size_t pos,
-                        const std::initializer_list<char> chars,
                         const size_t n = 1) noexcept {
   const size_t idx = pos + n;
-  const bool in_range = idx < source.size();
-  const char candidate = view_char_at_or(source, idx, '\0');
-  bool matched = false;
-  for (const char c : chars) {
-    matched = matched || candidate == c;
+  if (idx >= source.size()) {
+    return false;
   }
-  return in_range && matched;
+  const char candidate = source[idx];
+  return ((candidate == chars) || ...);
 }
 
 inline bool is_closing_block(const std::string_view source,
                              const size_t pos) noexcept {
   return pos < source.size() && source[pos] == '-' &&
-         next_pos_is(source, pos, {'%', '}'});
+         next_pos_is<'%', '}'>(source, pos);
 }
 
 inline bool unary_prefix_allowed(const token_type last) noexcept {

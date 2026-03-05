@@ -27,22 +27,16 @@ struct in_rule_expression_need_term_decision {};
 
 struct in_rule_expression_after_term {};
 struct in_rule_expression_after_term_decision {};
-struct literal_consume_exec {};
-struct literal_consume_result_decision {};
-struct character_class_consume_exec {};
-struct character_class_consume_result_decision {};
 struct rule_reference_decision {};
-struct rule_reference_parse_exec {};
-struct rule_reference_shape_decision {};
-struct rule_reference_parse_result_decision {};
+struct rule_reference_plain_exec {};
+struct rule_reference_negated_exec {};
 struct quantifier_decision {};
-struct quantifier_parse_exec {};
-struct quantifier_shape_decision {};
-struct quantifier_braced_shape_decision {};
-struct quantifier_braced_exact_parse_exec {};
-struct quantifier_braced_open_parse_exec {};
-struct quantifier_braced_range_parse_exec {};
-struct quantifier_parse_result_decision {};
+struct quantifier_star_exec {};
+struct quantifier_plus_exec {};
+struct quantifier_question_exec {};
+struct quantifier_braced_exact_exec {};
+struct quantifier_braced_open_exec {};
+struct quantifier_braced_range_exec {};
 
 struct eof_symbols_decision {};
 struct parse_decision {};
@@ -202,47 +196,19 @@ struct model {
       , sml::state<parse_decision> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
                  [ guard::term_failed{} ]
 
-      , sml::state<literal_consume_exec> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
+      , sml::state<in_rule_expression_after_term> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
                  [ guard::term_need_literal_valid{} ]
-      , sml::state<character_class_consume_exec> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
-                 [ guard::term_need_character_class_valid{} ]
-
-      , sml::state<literal_consume_exec> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
-                 [ guard::term_after_literal_valid{} ]
-      , sml::state<character_class_consume_exec> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
-                 [ guard::term_after_character_class_valid{} ]
-
-      , sml::state<literal_consume_result_decision> <= sml::state<literal_consume_exec> + sml::completion<event::parse_rules>
                  / action::consume_token_literal
-
-      , sml::state<in_rule_expression_after_term> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_none{} ]
-      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_invalid_request{} ]
-      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_parse_failed{} ]
-      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_internal_error{} ]
-      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_untracked{} ]
-      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_unknown{} ]
-
-      , sml::state<character_class_consume_result_decision> <= sml::state<character_class_consume_exec> + sml::completion<event::parse_rules>
+      , sml::state<in_rule_expression_after_term> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
+                 [ guard::term_need_character_class_valid{} ]
                  / action::consume_token_character_class
 
-      , sml::state<in_rule_expression_after_term> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_none{} ]
-      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_invalid_request{} ]
-      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_parse_failed{} ]
-      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_internal_error{} ]
-      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_untracked{} ]
-      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::completion<event::parse_rules>
-                 [ guard::parse_error_unknown{} ]
+      , sml::state<in_rule_expression_after_term> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
+                 [ guard::term_after_literal_valid{} ]
+                 / action::consume_token_literal
+      , sml::state<in_rule_expression_after_term> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
+                 [ guard::term_after_character_class_valid{} ]
+                 / action::consume_token_character_class
 
       , sml::state<rule_reference_decision> <= sml::state<term_parser::model> + sml::completion<event::parse_rules>
                  [ guard::term_need_rule_reference_candidate{} ]
@@ -297,149 +263,101 @@ struct model {
 
       //------------------------------------------------------------------------------//
       // Rule reference classifier.
-      , sml::state<rule_reference_parse_exec> <= sml::state<rule_reference_decision> +
+      , sml::state<rule_reference_plain_exec> <= sml::state<rule_reference_decision> +
                sml::completion<event::parse_rules>
-                 [ guard::token_rule_reference_candidate{} ]
-                 / action::prepare_rule_reference_parse
-
+                 [ guard::rule_reference_plain_envelope_valid{} ]
+                 / action::consume_token_rule_reference_plain
+      , sml::state<rule_reference_negated_exec> <= sml::state<rule_reference_decision> +
+               sml::completion<event::parse_rules>
+                 [ guard::rule_reference_negated_envelope_valid{} ]
+                 / action::consume_token_rule_reference_negated
       , sml::state<parse_decision> <= sml::state<rule_reference_decision> +
                sml::completion<event::parse_rules>
                  / action::consume_token_invalid
 
-      , sml::state<rule_reference_shape_decision> <=
-               sml::state<rule_reference_parse_exec> + sml::completion<event::parse_rules>
-      , sml::state<rule_reference_parse_result_decision> <=
-               sml::state<rule_reference_shape_decision> + sml::completion<event::parse_rules>
-                 [ guard::rule_reference_plain_envelope_valid{} ]
-                 / action::parse_rule_reference_plain_candidate
-      , sml::state<rule_reference_parse_result_decision> <=
-               sml::state<rule_reference_shape_decision> + sml::completion<event::parse_rules>
-                 [ guard::rule_reference_negated_envelope_valid{} ]
-                 / action::parse_rule_reference_negated_candidate
-      , sml::state<parse_decision> <=
-               sml::state<rule_reference_shape_decision> + sml::completion<event::parse_rules>
-                 [ guard::rule_reference_plain_envelope_invalid{} ]
-                 / action::consume_token_invalid
-      , sml::state<parse_decision> <=
-               sml::state<rule_reference_shape_decision> + sml::completion<event::parse_rules>
-                 [ guard::rule_reference_negated_envelope_invalid{} ]
-                 / action::consume_token_invalid
-      , sml::state<parse_decision> <=
-               sml::state<rule_reference_shape_decision> + sml::completion<event::parse_rules>
-                 / action::consume_token_invalid
-
-      , sml::state<in_rule_expression_after_term> <=
-               sml::state<rule_reference_parse_result_decision> +
+      , sml::state<in_rule_expression_after_term> <= sml::state<rule_reference_plain_exec> +
                sml::completion<event::parse_rules>
-                 [ guard::parsed_rule_reference_plain_valid{} ]
-                 / action::consume_token_rule_reference_plain_parsed
-
-      , sml::state<in_rule_expression_after_term> <=
-               sml::state<rule_reference_parse_result_decision> +
+                 [ guard::parse_error_none{} ]
+      , sml::state<parse_decision> <= sml::state<rule_reference_plain_exec> +
                sml::completion<event::parse_rules>
-                 [ guard::parsed_rule_reference_negated_valid{} ]
-                 / action::consume_token_rule_reference_negated_parsed
-
-      , sml::state<parse_decision> <=
-               sml::state<rule_reference_parse_result_decision> +
-               sml::completion<event::parse_rules>
-                 [ guard::parsed_rule_reference_invalid{} ]
                  / action::consume_token_invalid
 
-      , sml::state<parse_decision> <=
-               sml::state<rule_reference_parse_result_decision> +
+      , sml::state<in_rule_expression_after_term> <= sml::state<rule_reference_negated_exec> +
+               sml::completion<event::parse_rules>
+                 [ guard::parse_error_none{} ]
+      , sml::state<parse_decision> <= sml::state<rule_reference_negated_exec> +
                sml::completion<event::parse_rules>
                  / action::consume_token_invalid
 
       //------------------------------------------------------------------------------//
       // Quantifier classifier.
-      , sml::state<quantifier_parse_exec> <= sml::state<quantifier_decision> +
+      , sml::state<quantifier_star_exec> <= sml::state<quantifier_decision> +
                sml::completion<event::parse_rules>
-                 [ guard::quantifier_candidate{} ]
-                 / action::prepare_quantifier_parse
-
+                 [ guard::quantifier_token_star{} ]
+                 / action::consume_token_quantifier_star
+      , sml::state<quantifier_plus_exec> <= sml::state<quantifier_decision> +
+               sml::completion<event::parse_rules>
+                 [ guard::quantifier_token_plus{} ]
+                 / action::consume_token_quantifier_plus
+      , sml::state<quantifier_question_exec> <= sml::state<quantifier_decision> +
+               sml::completion<event::parse_rules>
+                 [ guard::quantifier_token_question{} ]
+                 / action::consume_token_quantifier_question
+      , sml::state<quantifier_braced_exact_exec> <= sml::state<quantifier_decision> +
+               sml::completion<event::parse_rules>
+                 [ guard::quantifier_braced_exact_shape{} ]
+                 / action::consume_token_quantifier_braced_exact
+      , sml::state<quantifier_braced_open_exec> <= sml::state<quantifier_decision> +
+               sml::completion<event::parse_rules>
+                 [ guard::quantifier_braced_open_shape{} ]
+                 / action::consume_token_quantifier_braced_open
+      , sml::state<quantifier_braced_range_exec> <= sml::state<quantifier_decision> +
+               sml::completion<event::parse_rules>
+                 [ guard::quantifier_braced_range_shape{} ]
+                 / action::consume_token_quantifier_braced_range
       , sml::state<parse_decision> <= sml::state<quantifier_decision> +
                sml::completion<event::parse_rules>
                  / action::consume_token_invalid
 
-      , sml::state<quantifier_shape_decision> <=
-               sml::state<quantifier_parse_exec> + sml::completion<event::parse_rules>
-      , sml::state<quantifier_parse_result_decision> <=
-               sml::state<quantifier_shape_decision> + sml::completion<event::parse_rules>
-                 [ guard::quantifier_token_star{} ]
-                 / action::parse_quantifier_star_bounds_candidate
-      , sml::state<quantifier_parse_result_decision> <=
-               sml::state<quantifier_shape_decision> + sml::completion<event::parse_rules>
-                 [ guard::quantifier_token_plus{} ]
-                 / action::parse_quantifier_plus_bounds_candidate
-      , sml::state<quantifier_parse_result_decision> <=
-               sml::state<quantifier_shape_decision> + sml::completion<event::parse_rules>
-                 [ guard::quantifier_token_question{} ]
-                 / action::parse_quantifier_question_bounds_candidate
-      , sml::state<quantifier_braced_shape_decision> <=
-               sml::state<quantifier_shape_decision> + sml::completion<event::parse_rules>
-                 [ guard::quantifier_token_braced{} ]
-      , sml::state<quantifier_braced_exact_parse_exec> <=
-               sml::state<quantifier_braced_shape_decision> +
+      , sml::state<in_rule_expression_after_term> <= sml::state<quantifier_star_exec> +
                sml::completion<event::parse_rules>
-                 [ guard::quantifier_braced_exact_shape{} ]
-      , sml::state<quantifier_braced_open_parse_exec> <=
-               sml::state<quantifier_braced_shape_decision> +
+                 [ guard::parse_error_none{} ]
+      , sml::state<parse_decision> <= sml::state<quantifier_star_exec> +
                sml::completion<event::parse_rules>
-                 [ guard::quantifier_braced_open_shape{} ]
-      , sml::state<quantifier_braced_range_parse_exec> <=
-               sml::state<quantifier_braced_shape_decision> +
-               sml::completion<event::parse_rules>
-                 [ guard::quantifier_braced_range_shape{} ]
-      , sml::state<quantifier_parse_result_decision> <=
-               sml::state<quantifier_braced_exact_parse_exec> +
-               sml::completion<event::parse_rules>
-                 / action::parse_quantifier_braced_exact_bounds_candidate
-      , sml::state<quantifier_parse_result_decision> <=
-               sml::state<quantifier_braced_open_parse_exec> +
-               sml::completion<event::parse_rules>
-                 / action::parse_quantifier_braced_open_bounds_candidate
-      , sml::state<quantifier_parse_result_decision> <=
-               sml::state<quantifier_braced_range_parse_exec> +
-               sml::completion<event::parse_rules>
-                 / action::parse_quantifier_braced_range_bounds_candidate
-      , sml::state<parse_decision> <=
-               sml::state<quantifier_braced_shape_decision> +
-               sml::completion<event::parse_rules>
-                 [ guard::quantifier_braced_invalid_shape{} ]
-                 / action::consume_token_invalid
-      , sml::state<parse_decision> <=
-               sml::state<quantifier_braced_shape_decision> +
-               sml::completion<event::parse_rules>
-                 / action::consume_token_invalid
-      , sml::state<parse_decision> <=
-               sml::state<quantifier_shape_decision> + sml::completion<event::parse_rules>
-                 [ guard::quantifier_token_unknown{} ]
-                 / action::consume_token_invalid
-      , sml::state<parse_decision> <=
-               sml::state<quantifier_shape_decision> + sml::completion<event::parse_rules>
                  / action::consume_token_invalid
 
-      , sml::state<in_rule_expression_after_term> <=
-               sml::state<quantifier_parse_result_decision> +
+      , sml::state<in_rule_expression_after_term> <= sml::state<quantifier_plus_exec> +
                sml::completion<event::parse_rules>
-                 [ guard::parsed_quantifier_applicable{} ]
-                 / action::consume_token_quantifier_parsed
-
-      , sml::state<parse_decision> <=
-               sml::state<quantifier_parse_result_decision> +
+                 [ guard::parse_error_none{} ]
+      , sml::state<parse_decision> <= sml::state<quantifier_plus_exec> +
                sml::completion<event::parse_rules>
-                 [ guard::parsed_quantifier_invalid{} ]
                  / action::consume_token_invalid
 
-      , sml::state<parse_decision> <=
-               sml::state<quantifier_parse_result_decision> +
+      , sml::state<in_rule_expression_after_term> <= sml::state<quantifier_question_exec> +
                sml::completion<event::parse_rules>
-                 [ guard::parsed_quantifier_not_applicable{} ]
+                 [ guard::parse_error_none{} ]
+      , sml::state<parse_decision> <= sml::state<quantifier_question_exec> +
+               sml::completion<event::parse_rules>
                  / action::consume_token_invalid
 
-      , sml::state<parse_decision> <=
-               sml::state<quantifier_parse_result_decision> +
+      , sml::state<in_rule_expression_after_term> <= sml::state<quantifier_braced_exact_exec> +
+               sml::completion<event::parse_rules>
+                 [ guard::parse_error_none{} ]
+      , sml::state<parse_decision> <= sml::state<quantifier_braced_exact_exec> +
+               sml::completion<event::parse_rules>
+                 / action::consume_token_invalid
+
+      , sml::state<in_rule_expression_after_term> <= sml::state<quantifier_braced_open_exec> +
+               sml::completion<event::parse_rules>
+                 [ guard::parse_error_none{} ]
+      , sml::state<parse_decision> <= sml::state<quantifier_braced_open_exec> +
+               sml::completion<event::parse_rules>
+                 / action::consume_token_invalid
+
+      , sml::state<in_rule_expression_after_term> <= sml::state<quantifier_braced_range_exec> +
+               sml::completion<event::parse_rules>
+                 [ guard::parse_error_none{} ]
+      , sml::state<parse_decision> <= sml::state<quantifier_braced_range_exec> +
                sml::completion<event::parse_rules>
                  / action::consume_token_invalid
 
@@ -508,49 +426,31 @@ struct model {
       , sml::state<parse_decision> <= sml::state<rule_reference_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
-      , sml::state<parse_decision> <= sml::state<rule_reference_parse_exec> + sml::unexpected_event<sml::_>
+      , sml::state<parse_decision> <= sml::state<rule_reference_plain_exec> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
-      , sml::state<parse_decision> <= sml::state<rule_reference_shape_decision> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-
-      , sml::state<parse_decision> <= sml::state<rule_reference_parse_result_decision> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-
-      , sml::state<parse_decision> <= sml::state<literal_consume_exec> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-
-      , sml::state<parse_decision> <= sml::state<literal_consume_result_decision> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-
-      , sml::state<parse_decision> <= sml::state<character_class_consume_exec> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-
-      , sml::state<parse_decision> <= sml::state<character_class_consume_result_decision> + sml::unexpected_event<sml::_>
+      , sml::state<parse_decision> <= sml::state<rule_reference_negated_exec> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
       , sml::state<parse_decision> <= sml::state<quantifier_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
-      , sml::state<parse_decision> <= sml::state<quantifier_parse_exec> + sml::unexpected_event<sml::_>
+      , sml::state<parse_decision> <= sml::state<quantifier_star_exec> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
-      , sml::state<parse_decision> <= sml::state<quantifier_shape_decision> + sml::unexpected_event<sml::_>
+      , sml::state<parse_decision> <= sml::state<quantifier_plus_exec> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
-      , sml::state<parse_decision> <= sml::state<quantifier_braced_shape_decision> + sml::unexpected_event<sml::_>
+      , sml::state<parse_decision> <= sml::state<quantifier_question_exec> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
-      , sml::state<parse_decision> <= sml::state<quantifier_braced_exact_parse_exec> + sml::unexpected_event<sml::_>
+      , sml::state<parse_decision> <= sml::state<quantifier_braced_exact_exec> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
-      , sml::state<parse_decision> <= sml::state<quantifier_braced_open_parse_exec> + sml::unexpected_event<sml::_>
+      , sml::state<parse_decision> <= sml::state<quantifier_braced_open_exec> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
-      , sml::state<parse_decision> <= sml::state<quantifier_braced_range_parse_exec> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-
-      , sml::state<parse_decision> <= sml::state<quantifier_parse_result_decision> + sml::unexpected_event<sml::_>
+      , sml::state<parse_decision> <= sml::state<quantifier_braced_range_exec> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
       , sml::state<parse_decision> <= sml::state<eof_symbols_decision> + sml::unexpected_event<sml::_>

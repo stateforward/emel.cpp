@@ -35,79 +35,81 @@ inline lexer::cursor next_cursor(const lexer::cursor & cursor, const uint32_t ne
   return advanced;
 }
 
-inline void emit_token(const event::next & ev, const event::token & token, const uint32_t end) noexcept {
-  ev.on_done(events::next_done{
+inline void emit_token(const event::scan_next & ev, const event::token & token, const uint32_t end) noexcept {
+  ev.request.on_done(events::next_done{
       .token = token,
       .has_token = true,
-      .next_cursor = next_cursor(ev.cursor, end),
+      .next_cursor = next_cursor(ev.request.cursor, end),
   });
 }
 
-inline void emit_range_token(const event::next & ev,
+inline void emit_range_token(const event::scan_next & ev,
                              const uint32_t start,
                              const uint32_t end,
                              const event::token_kind kind) noexcept {
-  emit_token(ev, make_token(ev.cursor.input, start, end, kind), end);
+  emit_token(ev, make_token(ev.request.cursor.input, start, end, kind), end);
 }
 
 inline uint32_t scan_quoted(const std::string_view input,
                             uint32_t pos,
                             const char terminator) noexcept {
   const uint32_t size = static_cast<uint32_t>(input.size());
-  const uint32_t scan_start = static_cast<uint32_t>(pos + 1u);
-  uint32_t end = scan_start;
-  uint32_t active = static_cast<uint32_t>(scan_start <= size);
-  uint32_t skip_escaped = 0u;
-  for (uint32_t scan = scan_start; scan < size; ++scan) {
+  uint32_t scan = static_cast<uint32_t>(pos + 1u);
+  while (scan < size) {
     const char c = input[scan];
-    const uint32_t consume_char = active & (1u - skip_escaped);
-    const uint32_t escaped =
-        consume_char & static_cast<uint32_t>(c == '\\' && scan + 1u < size);
-    const uint32_t matched =
-        consume_char & static_cast<uint32_t>(c == terminator) & (1u - escaped);
-    end += consume_char;
-    end += escaped;
-    active &= (1u - matched);
-    skip_escaped = escaped;
+    ++scan;
+    if (c == '\\' && scan < size) {
+      ++scan;
+      continue;
+    }
+    if (c == terminator) {
+      break;
+    }
   }
-  return end;
+  return scan;
 }
 
 inline uint32_t scan_braced_quantifier(const std::string_view input, uint32_t pos) noexcept {
   const uint32_t size = static_cast<uint32_t>(input.size());
-  const uint32_t scan_start = static_cast<uint32_t>(pos + 1u);
-  uint32_t end = scan_start;
-  uint32_t active = static_cast<uint32_t>(scan_start <= size);
-  for (uint32_t scan = scan_start; scan < size; ++scan) {
-    const uint32_t consume_char = active;
-    const uint32_t matched = consume_char & static_cast<uint32_t>(input[scan] == '}');
-    end += consume_char;
-    active &= (1u - matched);
+  uint32_t scan = static_cast<uint32_t>(pos + 1u);
+  while (scan < size) {
+    if (input[scan] == '}') {
+      ++scan;
+      break;
+    }
+    ++scan;
   }
-  return end;
+  return scan;
 }
 
 }  // namespace detail
 
+struct prepare_scan {
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    ev.ctx.start = lexer::detail::token_start(ev.request.cursor);
+    ev.ctx.has_input = ev.ctx.start < ev.request.cursor.input.size();
+    ev.ctx.first_char = ev.ctx.has_input ? ev.request.cursor.input[ev.ctx.start] : '\0';
+  }
+};
+
 struct emit_layout_exhausted_unknown {
-  void operator()(const event::next & ev, context &) const noexcept {
-    const uint32_t start = lexer::detail::token_start(ev.cursor);
-    detail::emit_token(ev, event::token{}, start);
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    detail::emit_token(ev, event::token{}, ev.ctx.start);
   }
 };
 
 template <uint32_t width>
 struct emit_newline_token_width {
-  void operator()(const event::next & ev, context &) const noexcept {
-    const uint32_t start = lexer::detail::token_start(ev.cursor);
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    const uint32_t start = ev.ctx.start;
     const uint32_t end = static_cast<uint32_t>(start + width);
     detail::emit_range_token(ev, start, end, event::token_kind::newline);
   }
 };
 
 struct emit_definition_operator {
-  void operator()(const event::next & ev, context &) const noexcept {
-    const uint32_t start = lexer::detail::token_start(ev.cursor);
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    const uint32_t start = ev.ctx.start;
     detail::emit_range_token(ev, start, static_cast<uint32_t>(start + 3u),
                              event::token_kind::definition_operator);
   }
@@ -115,8 +117,8 @@ struct emit_definition_operator {
 
 template <event::token_kind kind>
 struct emit_single_char_token {
-  void operator()(const event::next & ev, context &) const noexcept {
-    const uint32_t start = lexer::detail::token_start(ev.cursor);
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    const uint32_t start = ev.ctx.start;
     detail::emit_range_token(ev, start, static_cast<uint32_t>(start + 1u), kind);
   }
 };
@@ -129,89 +131,84 @@ struct emit_quantifier : emit_single_char_token<event::token_kind::quantifier> {
 struct emit_unknown : emit_single_char_token<event::token_kind::unknown> {};
 
 struct emit_string_literal {
-  void operator()(const event::next & ev, context &) const noexcept {
-    const uint32_t start = lexer::detail::token_start(ev.cursor);
-    const uint32_t end = detail::scan_quoted(ev.cursor.input, start, '"');
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    const uint32_t start = ev.ctx.start;
+    const uint32_t end = detail::scan_quoted(ev.request.cursor.input, start, '"');
     detail::emit_range_token(ev, start, end, event::token_kind::string_literal);
   }
 };
 
 struct emit_character_class {
-  void operator()(const event::next & ev, context &) const noexcept {
-    const uint32_t start = lexer::detail::token_start(ev.cursor);
-    const uint32_t end = detail::scan_quoted(ev.cursor.input, start, ']');
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    const uint32_t start = ev.ctx.start;
+    const uint32_t end = detail::scan_quoted(ev.request.cursor.input, start, ']');
     detail::emit_range_token(ev, start, end, event::token_kind::character_class);
   }
 };
 
 struct emit_braced_quantifier {
-  void operator()(const event::next & ev, context &) const noexcept {
-    const uint32_t start = lexer::detail::token_start(ev.cursor);
-    const uint32_t end = detail::scan_braced_quantifier(ev.cursor.input, start);
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    const uint32_t start = ev.ctx.start;
+    const uint32_t end = detail::scan_braced_quantifier(ev.request.cursor.input, start);
     detail::emit_range_token(ev, start, end, event::token_kind::quantifier);
   }
 };
 
 struct emit_rule_reference_plain {
-  void operator()(const event::next & ev, context &) const noexcept {
-    const uint32_t start = lexer::detail::token_start(ev.cursor);
-    const uint32_t end = lexer::detail::scan_token_ref_plain(ev.cursor.input, start);
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    const uint32_t start = ev.ctx.start;
+    const uint32_t end = lexer::detail::scan_token_ref_plain(ev.request.cursor.input, start);
     detail::emit_range_token(ev, start, end, event::token_kind::rule_reference);
   }
 };
 
 struct emit_rule_reference_negated {
-  void operator()(const event::next & ev, context &) const noexcept {
-    const uint32_t start = lexer::detail::token_start(ev.cursor);
-    const uint32_t end = lexer::detail::scan_token_ref_plain(ev.cursor.input, start + 1u);
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    const uint32_t start = ev.ctx.start;
+    const uint32_t end = lexer::detail::scan_token_ref_plain(ev.request.cursor.input, start + 1u);
     detail::emit_range_token(ev, start, end, event::token_kind::rule_reference);
   }
 };
 
 struct emit_identifier {
-  void operator()(const event::next & ev, context &) const noexcept {
-    const uint32_t size = static_cast<uint32_t>(ev.cursor.input.size());
-    const uint32_t start = lexer::detail::token_start(ev.cursor);
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    const uint32_t start = ev.ctx.start;
+    const uint32_t size = static_cast<uint32_t>(ev.request.cursor.input.size());
     uint32_t end = static_cast<uint32_t>(start + 1u);
-    uint32_t active = static_cast<uint32_t>(end <= size);
-    for (uint32_t scan = end; scan < size; ++scan) {
-      const uint32_t is_word =
-          static_cast<uint32_t>(lexer::detail::is_word_char(ev.cursor.input[scan]));
-      const uint32_t advance = active & is_word;
-      end += advance;
-      active = advance;
+    while (end < size && lexer::detail::is_word_char(ev.request.cursor.input[end])) {
+      ++end;
     }
     detail::emit_range_token(ev, start, end, event::token_kind::identifier);
   }
 };
 
 struct emit_eof {
-  void operator()(const event::next & ev, context &) const noexcept {
-    ev.on_done(events::next_done{
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    ev.request.on_done(events::next_done{
         .token = {},
         .has_token = false,
-        .next_cursor = ev.cursor,
+        .next_cursor = ev.request.cursor,
     });
   }
 };
 
 struct reject_invalid_next {
-  void operator()(const event::next & ev, context &) const noexcept {
-    ev.on_error(events::next_error{error_code(error::invalid_request)});
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    ev.request.on_error(events::next_error{error_code(error::invalid_request)});
   }
 };
 
 struct reject_invalid_cursor {
-  void operator()(const event::next & ev, context &) const noexcept {
-    ev.on_error(events::next_error{error_code(error::invalid_request)});
+  void operator()(const event::scan_next & ev, context &) const noexcept {
+    ev.request.on_error(events::next_error{error_code(error::invalid_request)});
   }
 };
 
 struct dispatch_unexpected_error {
   template <class event_type>
   void operator()(const event_type & ev, context &) const noexcept {
-    if constexpr (requires { ev.on_error; }) {
-      (void)ev.on_error(events::next_error{error_code(error::internal_error)});
+    if constexpr (requires { ev.request.on_error; }) {
+      (void)ev.request.on_error(events::next_error{error_code(error::internal_error)});
     }
   }
 };
@@ -221,6 +218,7 @@ struct ignore_unexpected {
   void operator()(const event_type &, context &) const noexcept {}
 };
 
+inline constexpr prepare_scan prepare_scan{};
 inline constexpr emit_layout_exhausted_unknown emit_layout_exhausted_unknown{};
 inline constexpr emit_newline_token_width<1u> emit_newline_single_token{};
 inline constexpr emit_newline_token_width<2u> emit_newline_crlf_token{};

@@ -55,15 +55,6 @@ inline void run_general_mode_flow(const emel::batch::planner::event::request_run
     action::mark_output_indices_full(runtime, planner_ctx);
     return;
   }
-  if (guard::general_first_group_scan_exceeds_step_size(runtime, planner_ctx)) {
-    action::mark_planning_progress_stalled(runtime, planner_ctx);
-    return;
-  }
-  if (guard::general_progress_not_modelable(runtime, planner_ctx)) {
-    action::mark_planning_progress_stalled(runtime, planner_ctx);
-    return;
-  }
-
   action::create_plan_general(runtime, planner_ctx);
 }
 
@@ -92,15 +83,6 @@ inline void run_fast_path_mode_flow(const emel::batch::planner::event::request_r
     action::mark_output_indices_full(runtime, planner_ctx);
     return;
   }
-  if (guard::fast_path_first_group_scan_exceeds_step_size(runtime, planner_ctx)) {
-    action::mark_planning_progress_stalled(runtime, planner_ctx);
-    return;
-  }
-  if (guard::fast_path_progress_not_modelable(runtime, planner_ctx)) {
-    action::mark_planning_progress_stalled(runtime, planner_ctx);
-    return;
-  }
-
   action::create_plan_primary_fast_path(runtime, planner_ctx);
 }
 

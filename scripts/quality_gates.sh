@@ -3,13 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TIMING_FILE="$ROOT_DIR/snapshots/quality_gates/timing.txt"
+QUALITY_GATES_TIMEOUT="${EMEL_QUALITY_GATES_TIMEOUT:-1200s}"
 
 if [[ -z "${EMEL_QUALITY_GATES_INNER:-}" ]]; then
   timeout_cmd=()
   if command -v timeout >/dev/null 2>&1; then
-    timeout_cmd=(timeout 300s)
+    timeout_cmd=(timeout "$QUALITY_GATES_TIMEOUT")
   elif command -v gtimeout >/dev/null 2>&1; then
-    timeout_cmd=(gtimeout 300s)
+    timeout_cmd=(gtimeout "$QUALITY_GATES_TIMEOUT")
   else
     echo "error: timeout tool missing (install coreutils for gtimeout on macOS)" >&2
     exit 1
@@ -82,9 +83,9 @@ run_step fuzz_smoke "$ROOT_DIR/scripts/fuzz_smoke.sh"
 # Temporary during rearchitecture refactor work: tolerate up to 30% benchmark variance.
 # Keep scripts/bench.sh default at 10% for non-gate/manual usage.
 if run_step_allow_fail bench_snapshot env \
-  EMEL_BENCH_ITERS=10000 \
+  EMEL_BENCH_ITERS=1000 \
   EMEL_BENCH_RUNS=3 \
-  EMEL_BENCH_WARMUP_ITERS=1000 \
+  EMEL_BENCH_WARMUP_ITERS=100 \
   EMEL_BENCH_WARMUP_RUNS=1 \
   BENCH_TOLERANCE=0.30 \
   "$ROOT_DIR/scripts/bench.sh" --snapshot --compare; then

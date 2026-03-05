@@ -4,7 +4,6 @@
 
 #include "emel/sm.hpp"
 #include "emel/text/jinja/parser/actions.hpp"
-#include "emel/text/jinja/parser/classifier_parser/sm.hpp"
 #include "emel/text/jinja/parser/context.hpp"
 #include "emel/text/jinja/parser/events.hpp"
 #include "emel/text/jinja/parser/guards.hpp"
@@ -19,7 +18,6 @@ struct tokenize_begin {};
 struct tokenize_next {};
 struct tokenize_result_decision {};
 struct tokenize_append {};
-struct classify_result_decision {};
 struct parse_result_decision {};
 struct done {};
 struct errored {};
@@ -86,7 +84,7 @@ struct model {
       , sml::state<tokenize_result_decision> <= sml::state<tokenize_next>
           + sml::completion<event::parse_runtime>
 
-      , sml::state<classifier_parser::model> <= sml::state<tokenize_result_decision>
+      , sml::state<program_parser::model> <= sml::state<tokenize_result_decision>
           + sml::completion<event::parse_runtime>[ guard::lexer_at_eof{} ]
 
       , sml::state<tokenize_append> <= sml::state<tokenize_result_decision>
@@ -112,22 +110,6 @@ struct model {
       , sml::state<tokenize_next> <= sml::state<tokenize_append>
           + sml::completion<event::parse_runtime>
           / action::request_next_lex_token
-
-      , sml::state<classify_result_decision> <= sml::state<classifier_parser::model>
-          + sml::completion<event::parse_runtime>
-
-      , sml::state<program_parser::model> <= sml::state<classify_result_decision>
-          + sml::completion<event::parse_runtime>[ guard::parse_error_none{} ]
-      , sml::state<parse_result_decision> <= sml::state<classify_result_decision>
-          + sml::completion<event::parse_runtime>[ guard::parse_error_invalid_request{} ]
-      , sml::state<parse_result_decision> <= sml::state<classify_result_decision>
-          + sml::completion<event::parse_runtime>[ guard::parse_error_parse_failed{} ]
-      , sml::state<parse_result_decision> <= sml::state<classify_result_decision>
-          + sml::completion<event::parse_runtime>[ guard::parse_error_internal_error{} ]
-      , sml::state<parse_result_decision> <= sml::state<classify_result_decision>
-          + sml::completion<event::parse_runtime>[ guard::parse_error_untracked{} ]
-      , sml::state<parse_result_decision> <= sml::state<classify_result_decision>
-          + sml::completion<event::parse_runtime>[ guard::parse_error_unknown{} ]
 
       , sml::state<parse_result_decision> <= sml::state<program_parser::model>
           + sml::completion<event::parse_runtime>
@@ -164,8 +146,6 @@ struct model {
       , sml::state<unexpected> <= sml::state<tokenize_result_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<unexpected> <= sml::state<tokenize_append> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<unexpected> <= sml::state<classify_result_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<unexpected> <= sml::state<parse_result_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected

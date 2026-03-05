@@ -311,81 +311,38 @@ inline std::pair<uint32_t, const char *> decode_utf8(const char *src,
 
 inline std::pair<uint32_t, const char *> parse_char(const char *src,
                                                     const char *end) noexcept {
-  static constexpr char k_zero = '\0';
-  const bool has_src = src < end;
-  const uintptr_t first_addr =
-      select_uptr(has_src, reinterpret_cast<uintptr_t>(src),
-                  reinterpret_cast<uintptr_t>(&k_zero));
-  const char first = *reinterpret_cast<const char *>(first_addr);
-  const bool is_escape = has_src && first == '\\';
+  if (src >= end) {
+    return std::make_pair(0u, nullptr);
+  }
+  if (*src != '\\') {
+    return decode_utf8(src, end);
+  }
+  if (src + 1 >= end) {
+    return std::make_pair(0u, nullptr);
+  }
 
-  const bool src_le_end = src <= end;
-  const ptrdiff_t distance = (end - src) * static_cast<ptrdiff_t>(src_le_end);
-  const bool has_escape_next = is_escape && distance >= 2;
-
-  const uintptr_t escaped_addr =
-      select_uptr(has_escape_next, reinterpret_cast<uintptr_t>(src + 1),
-                  reinterpret_cast<uintptr_t>(&k_zero));
-  const char escaped = *reinterpret_cast<const char *>(escaped_addr);
-
-  const uintptr_t hex_src_addr =
-      select_uptr(has_escape_next, reinterpret_cast<uintptr_t>(src + 2),
-                  reinterpret_cast<uintptr_t>(src));
-  const char *hex_src = reinterpret_cast<const char *>(hex_src_addr);
-
-  const auto hex2 = parse_hex(hex_src, end, 2);
-  const auto hex4 = parse_hex(hex_src, end, 4);
-  const auto hex8 = parse_hex(hex_src, end, 8);
-
-  const size_t is_hex2 = static_cast<size_t>(escaped == 'x');
-  const size_t is_hex4 = static_cast<size_t>(escaped == 'u');
-  const size_t is_hex8 = static_cast<size_t>(escaped == 'U');
-  const size_t is_tab = static_cast<size_t>(escaped == 't');
-  const size_t is_cr = static_cast<size_t>(escaped == 'r');
-  const size_t is_lf = static_cast<size_t>(escaped == 'n');
-  const size_t is_literal = static_cast<size_t>(
-      escaped == '\\' || escaped == '"' || escaped == '[' || escaped == ']');
-
-  const bool hex2_ok = is_hex2 != 0u && hex2.second != nullptr;
-  const bool hex4_ok = is_hex4 != 0u && hex4.second != nullptr;
-  const bool hex8_ok = is_hex8 != 0u && hex8.second != nullptr;
-  const bool direct_kind = (is_tab | is_cr | is_lf | is_literal) != 0u;
-  const bool direct_ok = has_escape_next && direct_kind;
-  const bool escape_ok = hex2_ok || hex4_ok || hex8_ok || direct_ok;
-
-  const uint32_t escape_value =
-      static_cast<uint32_t>(is_hex2) * hex2.first +
-      static_cast<uint32_t>(is_hex4) * hex4.first +
-      static_cast<uint32_t>(is_hex8) * hex8.first +
-      static_cast<uint32_t>(is_tab) * static_cast<uint32_t>('\t') +
-      static_cast<uint32_t>(is_cr) * static_cast<uint32_t>('\r') +
-      static_cast<uint32_t>(is_lf) * static_cast<uint32_t>('\n') +
-      static_cast<uint32_t>(is_literal) *
-          static_cast<uint32_t>(static_cast<unsigned char>(escaped));
-
-  const uintptr_t escape_next_addr =
-      static_cast<uintptr_t>(is_hex2) *
-          reinterpret_cast<uintptr_t>(hex2.second) +
-      static_cast<uintptr_t>(is_hex4) *
-          reinterpret_cast<uintptr_t>(hex4.second) +
-      static_cast<uintptr_t>(is_hex8) *
-          reinterpret_cast<uintptr_t>(hex8.second) +
-      static_cast<uintptr_t>(direct_kind) *
-          select_uptr(has_escape_next, reinterpret_cast<uintptr_t>(src + 2),
-                      0u);
-
-  const auto utf8 = decode_utf8(src, end);
-  const bool utf8_ok = utf8.second != nullptr;
-
-  const uint32_t selected_value =
-      select_u32(is_escape, escape_value, utf8.first);
-  const uintptr_t selected_next = select_uptr(
-      is_escape, escape_next_addr, reinterpret_cast<uintptr_t>(utf8.second));
-  const bool selected_ok = select_bool(is_escape, escape_ok, utf8_ok);
-
-  const uint32_t out_value = select_u32(selected_ok, selected_value, 0u);
-  const uintptr_t out_next = select_uptr(selected_ok, selected_next, 0u);
-  return std::make_pair(out_value, reinterpret_cast<const char *>(out_next));
+  switch (src[1]) {
+  case 'x':
+    return parse_hex(src + 2, end, 2);
+  case 'u':
+    return parse_hex(src + 2, end, 4);
+  case 'U':
+    return parse_hex(src + 2, end, 8);
+  case 't':
+    return std::make_pair(static_cast<uint32_t>('\t'), src + 2);
+  case 'r':
+    return std::make_pair(static_cast<uint32_t>('\r'), src + 2);
+  case 'n':
+    return std::make_pair(static_cast<uint32_t>('\n'), src + 2);
+  case '\\':
+  case '"':
+  case '[':
+  case ']':
+    return std::make_pair(static_cast<uint32_t>(static_cast<unsigned char>(src[1])),
+                          src + 2);
+  default:
+    return std::make_pair(0u, nullptr);
+  }
 }
 
 } // namespace emel::gbnf::rule_parser::detail

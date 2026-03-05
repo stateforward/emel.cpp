@@ -13,7 +13,6 @@ struct scanning {};
 
 struct text_boundary_candidate_decision {};
 struct text_scan_exec {};
-struct text_scan_result_decision {};
 struct text_opening_block_decision {};
 struct text_trim_opening_block_exec {};
 struct text_trim_opening_block_result_decision {};
@@ -29,25 +28,17 @@ struct comment_finalize_exec {};
 struct comment_finalize_result_decision {};
 struct comment_unterminated_exec {};
 struct comment_unterminated_result_decision {};
-struct trim_prefix_candidate_decision {};
 struct trim_prefix_scan_exec {};
-struct trim_prefix_result_decision {};
 struct trim_prefix_eof_exec {};
-struct trim_prefix_eof_result_decision {};
 struct space_scan_exec {};
-struct space_scan_result_decision {};
 struct space_eof_exec {};
-struct space_eof_result_decision {};
 struct unary_candidate_decision {};
 struct unary_prefix_context_decision {};
 struct unary_prefix_allowed_decision {};
 struct unary_scan_exec {};
-struct unary_scan_result_decision {};
 struct mapping_candidate_decision {};
 struct mapping_close_curly_exec {};
 struct mapping_scan_exec {};
-struct mapping_scan_result_decision {};
-struct string_scan_decision {};
 struct string_scan_exec {};
 struct string_content_scan_exec {};
 struct string_content_policy_decision {};
@@ -59,9 +50,7 @@ struct string_finalize_result_decision {};
 struct string_unterminated_exec {};
 struct string_unterminated_result_decision {};
 struct numeric_scan_exec {};
-struct numeric_scan_result_decision {};
 struct word_scan_exec {};
-struct word_scan_result_decision {};
 struct invalid_char_exec {};
 struct invalid_char_result_decision {};
 
@@ -85,7 +74,6 @@ struct model {
 
       , sml::state<text_boundary_candidate_decision> <= sml::state<initialized>
           + sml::event<event::next_runtime>
-          [ guard::valid_cursor_position{} ]
           / action::begin_scan
 
       , sml::state<scanning> <= sml::state<scanning>
@@ -100,7 +88,6 @@ struct model {
 
       , sml::state<text_boundary_candidate_decision> <= sml::state<scanning>
           + sml::event<event::next_runtime>
-          [ guard::valid_cursor_position{} ]
           / action::begin_scan
 
       //------------------------------------------------------------------------------//
@@ -108,43 +95,14 @@ struct model {
       , sml::state<text_scan_exec> <= sml::state<text_boundary_candidate_decision>
           + sml::completion<event::next_runtime>
           [ guard::at_text_boundary{} ]
+          / action::scan_text_boundary
 
       , sml::state<comment_candidate_decision> <= sml::state<text_boundary_candidate_decision>
           + sml::completion<event::next_runtime>
-          [ guard::not_at_text_boundary{} ]
 
       //------------------------------------------------------------------------------//
       // Text boundary phase.
-      , sml::state<text_scan_result_decision> <= sml::state<text_scan_exec>
-          + sml::completion<event::next_runtime>
-          / action::scan_text_boundary
-
-      , sml::state<scanning> <= sml::state<text_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_invalid_request{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<text_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_parse_failed{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<text_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_internal_error{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<text_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_untracked{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<text_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_unknown{} ]
-          / action::emit_scan_error
-
-      , sml::state<invalid_char_exec> <= sml::state<text_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
-
-      , sml::state<text_opening_block_decision> <= sml::state<text_scan_result_decision>
+      , sml::state<text_opening_block_decision> <= sml::state<text_scan_exec>
           + sml::completion<event::next_runtime>
 
       , sml::state<text_trim_opening_block_exec> <= sml::state<text_opening_block_decision>
@@ -153,11 +111,6 @@ struct model {
 
       , sml::state<text_materialize_exec> <= sml::state<text_opening_block_decision>
           + sml::completion<event::next_runtime>
-          [ guard::text_opening_block_not_ahead{} ]
-
-      , sml::state<invalid_char_exec> <= sml::state<text_opening_block_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
 
       , sml::state<text_trim_opening_block_result_decision> <= sml::state<text_trim_opening_block_exec>
           + sml::completion<event::next_runtime>
@@ -175,11 +128,16 @@ struct model {
 
       , sml::state<text_materialize_exec> <= sml::state<text_trim_opening_block_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::text_opening_trim_keep_original{} ]
 
-      , sml::state<invalid_char_exec> <= sml::state<text_trim_opening_block_result_decision>
+      , sml::state<scanning> <= sml::state<text_materialize_exec>
           + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
+          [ guard::text_boundary_empty_at_end{} ]
+          / action::emit_text_boundary_eof
+
+      , sml::state<scanning> <= sml::state<text_materialize_exec>
+          + sml::completion<event::next_runtime>
+          [ guard::text_plain_boundary_ready{} ]
+          / action::emit_plain_text_boundary_token
 
       , sml::state<text_finalize_exec> <= sml::state<text_materialize_exec>
           + sml::completion<event::next_runtime>
@@ -192,11 +150,6 @@ struct model {
 
       , sml::state<text_finalize_result_decision> <= sml::state<text_finalize_exec>
           + sml::completion<event::next_runtime>
-          [ guard::text_skip_trim_leading_newline{} ]
-
-      , sml::state<invalid_char_exec> <= sml::state<text_finalize_exec>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
 
       , sml::state<text_finalize_token_exec> <= sml::state<text_finalize_result_decision>
           + sml::completion<event::next_runtime>
@@ -230,29 +183,34 @@ struct model {
           [ guard::text_token_non_empty{} ]
           / action::emit_scanned_token
 
+      , sml::state<space_eof_exec> <= sml::state<text_emit_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::text_token_empty_at_end{} ]
+          / action::mark_no_token_eof
+
       , sml::state<comment_candidate_decision> <= sml::state<text_emit_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::text_token_empty{} ]
-
-      , sml::state<invalid_char_exec> <= sml::state<text_emit_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
 
       //------------------------------------------------------------------------------//
       // Comment-start decision.
       , sml::state<comment_scan_exec> <= sml::state<comment_candidate_decision>
           + sml::completion<event::next_runtime>
           [ guard::starts_comment{} ]
+          / action::scan_comment
 
-      , sml::state<trim_prefix_candidate_decision> <= sml::state<comment_candidate_decision>
+      , sml::state<trim_prefix_scan_exec> <= sml::state<comment_candidate_decision>
           + sml::completion<event::next_runtime>
-          [ guard::not_starts_comment{} ]
+          [ guard::starts_trim_prefix{} ]
+          / action::scan_trim_prefix
+
+      , sml::state<space_scan_exec> <= sml::state<comment_candidate_decision>
+          + sml::completion<event::next_runtime>
+          / action::scan_spaces
 
       //------------------------------------------------------------------------------//
       // Comment phase.
       , sml::state<comment_scan_result_decision> <= sml::state<comment_scan_exec>
           + sml::completion<event::next_runtime>
-          / action::scan_comment
 
       , sml::state<scanning> <= sml::state<comment_scan_result_decision>
           + sml::completion<event::next_runtime>
@@ -281,11 +239,6 @@ struct model {
 
       , sml::state<comment_unterminated_exec> <= sml::state<comment_scan_result_decision>
           + sml::completion<event::next_runtime>
-          [ guard::comment_unterminated{} ]
-
-      , sml::state<invalid_char_exec> <= sml::state<comment_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
 
       , sml::state<comment_finalize_result_decision> <= sml::state<comment_finalize_exec>
           + sml::completion<event::next_runtime>
@@ -367,75 +320,54 @@ struct model {
 
       //------------------------------------------------------------------------------//
       // Trim-prefix start decision.
-      , sml::state<trim_prefix_scan_exec> <= sml::state<trim_prefix_candidate_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::starts_trim_prefix{} ]
-
-      , sml::state<space_scan_exec> <= sml::state<trim_prefix_candidate_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::not_starts_trim_prefix{} ]
-
-      //------------------------------------------------------------------------------//
       // Trim-prefix phase.
-      , sml::state<trim_prefix_result_decision> <= sml::state<trim_prefix_scan_exec>
-          + sml::completion<event::next_runtime>
-          / action::scan_trim_prefix
-
-      , sml::state<trim_prefix_eof_exec> <= sml::state<trim_prefix_result_decision>
+      , sml::state<trim_prefix_eof_exec> <= sml::state<trim_prefix_scan_exec>
           + sml::completion<event::next_runtime>
           [ guard::cursor_at_end{} ]
-
-      , sml::state<space_scan_exec> <= sml::state<trim_prefix_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::cursor_not_at_end{} ]
-
-      , sml::state<trim_prefix_eof_result_decision> <= sml::state<trim_prefix_eof_exec>
-          + sml::completion<event::next_runtime>
           / action::mark_no_token_eof
 
-      , sml::state<scanning> <= sml::state<trim_prefix_eof_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_no_token_eof{} ]
-          / action::emit_eof
-
-      , sml::state<invalid_char_exec> <= sml::state<trim_prefix_eof_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
-
-      //------------------------------------------------------------------------------//
-      // Space-skip phase.
-      , sml::state<space_scan_result_decision> <= sml::state<space_scan_exec>
+      , sml::state<space_scan_exec> <= sml::state<trim_prefix_scan_exec>
           + sml::completion<event::next_runtime>
           / action::scan_spaces
 
-      , sml::state<space_eof_exec> <= sml::state<space_scan_result_decision>
+      , sml::state<scanning> <= sml::state<trim_prefix_eof_exec>
           + sml::completion<event::next_runtime>
-          [ guard::cursor_at_end{} ]
-
-      , sml::state<unary_candidate_decision> <= sml::state<space_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::cursor_not_at_end{} ]
-
-      , sml::state<space_eof_result_decision> <= sml::state<space_eof_exec>
-          + sml::completion<event::next_runtime>
-          / action::mark_no_token_eof
-
-      , sml::state<scanning> <= sml::state<space_eof_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_no_token_eof{} ]
           / action::emit_eof
 
-      , sml::state<invalid_char_exec> <= sml::state<space_eof_result_decision>
+      //------------------------------------------------------------------------------//
+      // Space-skip phase.
+      , sml::state<space_eof_exec> <= sml::state<space_scan_exec>
           + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
+          [ guard::cursor_at_end{} ]
+          / action::mark_no_token_eof
 
-      , sml::state<mapping_candidate_decision> <= sml::state<unary_candidate_decision>
+      , sml::state<unary_candidate_decision> <= sml::state<space_scan_exec>
           + sml::completion<event::next_runtime>
-          [ guard::unary_not_candidate{} ]
+
+      , sml::state<scanning> <= sml::state<space_eof_exec>
+          + sml::completion<event::next_runtime>
+          / action::emit_eof
 
       , sml::state<unary_prefix_context_decision> <= sml::state<unary_candidate_decision>
           + sml::completion<event::next_runtime>
           [ guard::unary_candidate{} ]
+
+      , sml::state<string_scan_exec> <= sml::state<unary_candidate_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::starts_string{} ]
+
+      , sml::state<numeric_scan_exec> <= sml::state<unary_candidate_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::starts_numeric{} ]
+          / action::scan_numeric
+
+      , sml::state<word_scan_exec> <= sml::state<unary_candidate_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::starts_word{} ]
+          / action::scan_word
+
+      , sml::state<mapping_candidate_decision> <= sml::state<unary_candidate_decision>
+          + sml::completion<event::next_runtime>
 
       , sml::state<invalid_char_exec> <= sml::state<unary_prefix_context_decision>
           + sml::completion<event::next_runtime>
@@ -443,7 +375,6 @@ struct model {
 
       , sml::state<unary_prefix_allowed_decision> <= sml::state<unary_prefix_context_decision>
           + sml::completion<event::next_runtime>
-          [ guard::unary_prefix_context_valid{} ]
 
       , sml::state<mapping_candidate_decision> <= sml::state<unary_prefix_allowed_decision>
           + sml::completion<event::next_runtime>
@@ -451,74 +382,30 @@ struct model {
 
       , sml::state<unary_scan_exec> <= sml::state<unary_prefix_allowed_decision>
           + sml::completion<event::next_runtime>
-          [ guard::unary_prefix_allowed{} ]
+          / action::scan_unary
 
       //------------------------------------------------------------------------------//
       // Unary phase.
-      , sml::state<unary_scan_result_decision> <= sml::state<unary_scan_exec>
-          + sml::completion<event::next_runtime>
-          / action::scan_unary
-
-      , sml::state<scanning> <= sml::state<unary_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_invalid_request{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<unary_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_parse_failed{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<unary_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_internal_error{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<unary_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_untracked{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<unary_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_unknown{} ]
-          / action::emit_scan_error
-
-      , sml::state<scanning> <= sml::state<unary_scan_result_decision>
+      , sml::state<scanning> <= sml::state<unary_scan_exec>
           + sml::completion<event::next_runtime>
           [ guard::unary_numeric_suffix_present{} ]
           / action::emit_unary_numeric_token
 
-      , sml::state<scanning> <= sml::state<unary_scan_result_decision>
+      , sml::state<scanning> <= sml::state<unary_scan_exec>
           + sml::completion<event::next_runtime>
-          [ guard::unary_numeric_suffix_absent{} ]
           / action::emit_unary_operator_token
-
-      , sml::state<invalid_char_exec> <= sml::state<unary_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
 
       //------------------------------------------------------------------------------//
       // Mapping-start decision.
       , sml::state<mapping_close_curly_exec> <= sml::state<mapping_candidate_decision>
           + sml::completion<event::next_runtime>
           [ guard::mapping_close_expression_blocked_by_curly_depth{} ]
+          / action::scan_mapping_close_curly
 
       , sml::state<mapping_scan_exec> <= sml::state<mapping_candidate_decision>
           + sml::completion<event::next_runtime>
           [ guard::mapping_open_statement_trim{} ]
           / action::scan_mapping_open_statement_trim
-
-      , sml::state<mapping_scan_exec> <= sml::state<mapping_candidate_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::mapping_close_statement_trim{} ]
-          / action::scan_mapping_close_statement_trim
-
-      , sml::state<mapping_scan_exec> <= sml::state<mapping_candidate_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::mapping_open_expression_trim{} ]
-          / action::scan_mapping_open_expression_trim
-
-      , sml::state<mapping_scan_exec> <= sml::state<mapping_candidate_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::mapping_close_expression_trim{} ]
-          / action::scan_mapping_close_expression_trim
 
       , sml::state<mapping_scan_exec> <= sml::state<mapping_candidate_decision>
           + sml::completion<event::next_runtime>
@@ -532,6 +419,11 @@ struct model {
 
       , sml::state<mapping_scan_exec> <= sml::state<mapping_candidate_decision>
           + sml::completion<event::next_runtime>
+          [ guard::mapping_open_expression_trim{} ]
+          / action::scan_mapping_open_expression_trim
+
+      , sml::state<mapping_scan_exec> <= sml::state<mapping_candidate_decision>
+          + sml::completion<event::next_runtime>
           [ guard::mapping_open_expression{} ]
           / action::scan_mapping_open_expression
 
@@ -539,6 +431,16 @@ struct model {
           + sml::completion<event::next_runtime>
           [ guard::mapping_close_expression_not_blocked{} ]
           / action::scan_mapping_close_expression
+
+      , sml::state<mapping_scan_exec> <= sml::state<mapping_candidate_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::mapping_close_statement_trim{} ]
+          / action::scan_mapping_close_statement_trim
+
+      , sml::state<mapping_scan_exec> <= sml::state<mapping_candidate_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::mapping_close_expression_trim{} ]
+          / action::scan_mapping_close_expression_trim
 
       , sml::state<mapping_scan_exec> <= sml::state<mapping_candidate_decision>
           + sml::completion<event::next_runtime>
@@ -655,70 +557,22 @@ struct model {
           [ guard::mapping_equals{} ]
           / action::scan_mapping_equals
 
-      , sml::state<string_scan_decision> <= sml::state<mapping_candidate_decision>
+      , sml::state<invalid_char_exec> <= sml::state<mapping_candidate_decision>
           + sml::completion<event::next_runtime>
 
       //------------------------------------------------------------------------------//
       // Mapping phase.
-      , sml::state<mapping_scan_result_decision> <= sml::state<mapping_close_curly_exec>
+      , sml::state<scanning> <= sml::state<mapping_close_curly_exec>
           + sml::completion<event::next_runtime>
-          / action::scan_mapping_close_curly
-
-      , sml::state<mapping_scan_result_decision> <= sml::state<mapping_scan_exec>
-          + sml::completion<event::next_runtime>
-
-      , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_invalid_request{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_parse_failed{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_internal_error{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_untracked{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_unknown{} ]
-          / action::emit_scan_error
-
-      , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_token_available{} ]
           / action::emit_scanned_token
 
-      , sml::state<scanning> <= sml::state<mapping_scan_result_decision>
+      , sml::state<scanning> <= sml::state<mapping_scan_exec>
           + sml::completion<event::next_runtime>
-          [ guard::scan_no_token_eof{} ]
-          / action::emit_eof
-
-      , sml::state<invalid_char_exec> <= sml::state<mapping_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
+          / action::emit_scanned_token
 
       //------------------------------------------------------------------------------//
-      // String / number / identifier decisions.
-      , sml::state<string_scan_exec> <= sml::state<string_scan_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::starts_string{} ]
-
-      , sml::state<numeric_scan_exec> <= sml::state<string_scan_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::starts_numeric{} ]
-
-      , sml::state<word_scan_exec> <= sml::state<string_scan_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::starts_word{} ]
-
-      , sml::state<invalid_char_exec> <= sml::state<string_scan_decision>
-          + sml::completion<event::next_runtime>
-
+      //------------------------------------------------------------------------------//
+      // String phase.
       , sml::state<string_content_scan_exec> <= sml::state<string_scan_exec>
           + sml::completion<event::next_runtime>
           / action::begin_string_scan
@@ -824,6 +678,16 @@ struct model {
 
       , sml::state<scanning> <= sml::state<string_finalize_result_decision>
           + sml::completion<event::next_runtime>
+          [ guard::scan_token_available{} ]
+          / action::emit_scanned_token
+
+      , sml::state<scanning> <= sml::state<string_finalize_result_decision>
+          + sml::completion<event::next_runtime>
+          [ guard::scan_no_token_eof{} ]
+          / action::emit_eof
+
+      , sml::state<scanning> <= sml::state<string_finalize_result_decision>
+          + sml::completion<event::next_runtime>
           [ guard::parse_error_invalid_request{} ]
           / action::emit_scan_error
       , sml::state<scanning> <= sml::state<string_finalize_result_decision>
@@ -842,98 +706,18 @@ struct model {
           + sml::completion<event::next_runtime>
           [ guard::parse_error_unknown{} ]
           / action::emit_scan_error
-
-      , sml::state<scanning> <= sml::state<string_finalize_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_token_available{} ]
-          / action::emit_scanned_token
-
-      , sml::state<scanning> <= sml::state<string_finalize_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_no_token_eof{} ]
-          / action::emit_eof
 
       , sml::state<invalid_char_exec> <= sml::state<string_finalize_result_decision>
           + sml::completion<event::next_runtime>
           [ guard::scan_unhandled{} ]
 
-      , sml::state<numeric_scan_result_decision> <= sml::state<numeric_scan_exec>
+      , sml::state<scanning> <= sml::state<numeric_scan_exec>
           + sml::completion<event::next_runtime>
-          / action::scan_numeric
-
-      , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_invalid_request{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_parse_failed{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_internal_error{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_untracked{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_unknown{} ]
-          / action::emit_scan_error
-
-      , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_token_available{} ]
           / action::emit_scanned_token
 
-      , sml::state<scanning> <= sml::state<numeric_scan_result_decision>
+      , sml::state<scanning> <= sml::state<word_scan_exec>
           + sml::completion<event::next_runtime>
-          [ guard::scan_no_token_eof{} ]
-          / action::emit_eof
-
-      , sml::state<invalid_char_exec> <= sml::state<numeric_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
-
-      , sml::state<word_scan_result_decision> <= sml::state<word_scan_exec>
-          + sml::completion<event::next_runtime>
-          / action::scan_word
-
-      , sml::state<scanning> <= sml::state<word_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_invalid_request{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<word_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_parse_failed{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<word_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_internal_error{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<word_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_untracked{} ]
-          / action::emit_scan_error
-      , sml::state<scanning> <= sml::state<word_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::parse_error_unknown{} ]
-          / action::emit_scan_error
-
-      , sml::state<scanning> <= sml::state<word_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_token_available{} ]
           / action::emit_scanned_token
-
-      , sml::state<scanning> <= sml::state<word_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_no_token_eof{} ]
-          / action::emit_eof
-
-      , sml::state<invalid_char_exec> <= sml::state<word_scan_result_decision>
-          + sml::completion<event::next_runtime>
-          [ guard::scan_unhandled{} ]
 
       , sml::state<invalid_char_result_decision> <= sml::state<invalid_char_exec>
           + sml::completion<event::next_runtime>

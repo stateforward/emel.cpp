@@ -1,6 +1,5 @@
 #pragma once
 
-#include <limits>
 #include <string_view>
 
 #include "emel/gbnf/rule_parser/expression_parser/events.hpp"
@@ -105,63 +104,6 @@ inline bool character_class_element_count(const std::string_view text, uint32_t 
     }
   }
   return !first;
-}
-
-inline bool can_apply_quantifier_bounds(const event::parse_rules & ev,
-                                        const action::context & ctx,
-                                        const uint64_t min_times,
-                                        const uint64_t max_times) noexcept {
-  constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
-  constexpr uint64_t k_max_repetition_threshold = 2000;
-  if (ctx.last_sym_start == ctx.current_rule.size) {
-    return false;
-  }
-
-  if (min_times > k_max_repetition_threshold) {
-    return false;
-  }
-  if (max_times != k_no_max && max_times > k_max_repetition_threshold) {
-    return false;
-  }
-  if (max_times != k_no_max && max_times < min_times) {
-    return false;
-  }
-
-  const uint64_t prev_len = static_cast<uint64_t>(ctx.current_rule.size - ctx.last_sym_start);
-  const uint64_t repeated_len =
-      min_times == 0 ? static_cast<uint64_t>(ctx.last_sym_start)
-                     : static_cast<uint64_t>(ctx.last_sym_start) + prev_len * min_times;
-
-  if (repeated_len > emel::gbnf::k_max_gbnf_rule_elements) {
-    return false;
-  }
-
-  const bool no_max = max_times == k_no_max;
-  const uint64_t n_opt = no_max ? 1 : (max_times - min_times);
-  if (ctx.next_symbol_id + n_opt > emel::gbnf::k_max_gbnf_rules) {
-    return false;
-  }
-
-  const emel::gbnf::grammar & grammar = *ev.request.grammar_out;
-  uint64_t added_grammar_elements = 0;
-  for (uint64_t i = 0; i < n_opt; ++i) {
-    const uint32_t rec_rule_id = ctx.next_symbol_id + static_cast<uint32_t>(i);
-    if (grammar.rule_lengths[rec_rule_id] != 0u) {
-      return false;
-    }
-    const uint64_t rec_rule_len = prev_len + ((i > 0 || no_max) ? 1u : 0u) + 2u;
-    if (rec_rule_len > emel::gbnf::k_max_gbnf_rule_elements) {
-      return false;
-    }
-    added_grammar_elements += rec_rule_len;
-  }
-
-  if (grammar.element_count + added_grammar_elements > emel::gbnf::k_max_gbnf_elements) {
-    return false;
-  }
-
-  const uint64_t final_rule_len = repeated_len + (n_opt > 0 ? 1u : 0u);
-  return final_rule_len <= emel::gbnf::k_max_gbnf_rule_elements;
 }
 
 struct valid_parse {
@@ -442,29 +384,6 @@ struct rule_reference_negated_envelope_invalid {
   }
 };
 
-struct parsed_rule_reference_plain_valid {
-  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return token_rule_reference_candidate{}(ev, ctx) &&
-           ev.ctx.parsed_rule_reference_valid &&
-           !ev.ctx.parsed_rule_reference_negated;
-  }
-};
-
-struct parsed_rule_reference_negated_valid {
-  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return token_rule_reference_candidate{}(ev, ctx) &&
-           ev.ctx.parsed_rule_reference_valid &&
-           ev.ctx.parsed_rule_reference_negated;
-  }
-};
-
-struct parsed_rule_reference_invalid {
-  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return token_rule_reference_candidate{}(ev, ctx) &&
-           !ev.ctx.parsed_rule_reference_valid;
-  }
-};
-
 struct token_newline_with_group_depth_zero_valid {
   bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
     return token_newline{}(ev, ctx) &&
@@ -605,33 +524,6 @@ struct quantifier_token_unknown {
            !quantifier_token_plus{}(ev, ctx) &&
            !quantifier_token_question{}(ev, ctx) &&
            !quantifier_token_braced{}(ev, ctx);
-  }
-};
-
-struct parsed_quantifier_applicable {
-  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return quantifier_candidate{}(ev, ctx) &&
-           ev.ctx.parsed_quantifier_valid &&
-           can_apply_quantifier_bounds(ev, ctx,
-                                       ev.ctx.parsed_quantifier_min,
-                                       ev.ctx.parsed_quantifier_max);
-  }
-};
-
-struct parsed_quantifier_invalid {
-  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return quantifier_candidate{}(ev, ctx) &&
-           !ev.ctx.parsed_quantifier_valid;
-  }
-};
-
-struct parsed_quantifier_not_applicable {
-  bool operator()(const event::parse_rules & ev, const action::context & ctx) const noexcept {
-    return quantifier_candidate{}(ev, ctx) &&
-           ev.ctx.parsed_quantifier_valid &&
-           !can_apply_quantifier_bounds(ev, ctx,
-                                        ev.ctx.parsed_quantifier_min,
-                                        ev.ctx.parsed_quantifier_max);
   }
 };
 

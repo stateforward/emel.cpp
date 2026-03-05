@@ -12,10 +12,8 @@ namespace emel::text::jinja::parser::program_parser {
 struct deciding {};
 struct parse_begin {};
 struct dispatch_decision {};
-
 struct text_emit {};
 struct comment_emit {};
-
 struct statement_parse_result_decision {};
 struct expression_parse_result_decision {};
 
