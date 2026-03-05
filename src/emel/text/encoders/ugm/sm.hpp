@@ -59,7 +59,8 @@ struct unexpected {};
  * - `tables_ready`/`tables_missing` route explicit table-policy work.
  * - `vocab_unk_present`/`vocab_unk_missing` route explicit unknown-ID resolution.
  * - `table_sync_*`, `normalize_result_*`, `input_prepare_result_*`, and
- *   `dp_forward_result_*` route explicit per-phase error-class outcomes.
+ *   `dp_forward_result_*` route explicit per-phase error-class outcomes,
+ *   including unclassified runtime error-code branches.
  * - `backtrace_ok`/`backtrace_failed` route explicit DP backtrace result status.
  * - `emit_ok`/`emit_failed` route explicit output emission status.
  *
@@ -150,7 +151,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::table_sync_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<table_sync_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::table_sync_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::table_sync_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
@@ -181,7 +182,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::normalize_result_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<normalize_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::normalize_result_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::normalize_result_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
@@ -204,7 +205,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::input_prepare_result_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<input_prepare_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::input_prepare_result_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::input_prepare_result_unclassified_error_code{}]
           / action::ensure_last_error
 
       //------------------------------------------------------------------------------//
@@ -224,7 +225,7 @@ struct model {
           + sml::completion<runtime::encode_runtime>[guard::dp_forward_result_model_invalid_error{}]
           / action::ensure_last_error
       , sml::state<errored> <= sml::state<dp_forward_result_decision>
-          + sml::completion<runtime::encode_runtime>[guard::dp_forward_result_unknown_error{}]
+          + sml::completion<runtime::encode_runtime>[guard::dp_forward_result_unclassified_error_code{}]
           / action::ensure_last_error
       , sml::state<dp_backtrace_result_decision> <= sml::state<dp_backtrace_exec>
           + sml::completion<runtime::encode_runtime> / action::run_dp_backtrace

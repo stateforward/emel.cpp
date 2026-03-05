@@ -1361,6 +1361,22 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(
       emel::text::encoders::ugm::guard::input_prepare_result_backend_error{}(runtime_ok_ugm_ev));
     CHECK(emel::text::encoders::ugm::guard::dp_forward_result_backend_error{}(runtime_ok_ugm_ev));
+    CHECK_FALSE(emel::text::encoders::ugm::guard::table_sync_unclassified_error_code{}(
+      runtime_ok_ugm_ev));
+    CHECK_FALSE(emel::text::encoders::ugm::guard::normalize_result_unclassified_error_code{}(
+      runtime_ok_ugm_ev));
+    CHECK_FALSE(emel::text::encoders::ugm::guard::input_prepare_result_unclassified_error_code{}(
+      runtime_ok_ugm_ev));
+    CHECK_FALSE(emel::text::encoders::ugm::guard::dp_forward_result_unclassified_error_code{}(
+      runtime_ok_ugm_ev));
+    runtime_ok.err = static_cast<int32_t>(0x7FFF);
+    CHECK(emel::text::encoders::ugm::guard::table_sync_unclassified_error_code{}(runtime_ok_ugm_ev));
+    CHECK(
+      emel::text::encoders::ugm::guard::normalize_result_unclassified_error_code{}(runtime_ok_ugm_ev));
+    CHECK(emel::text::encoders::ugm::guard::input_prepare_result_unclassified_error_code{}(
+      runtime_ok_ugm_ev));
+    CHECK(
+      emel::text::encoders::ugm::guard::dp_forward_result_unclassified_error_code{}(runtime_ok_ugm_ev));
   }
 
   {
