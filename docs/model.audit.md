@@ -657,3 +657,9 @@ User-requested machine action/detail findings and remediation status:
   `parse_error_parse_failed`, `parse_error_internal_error`,
   `parse_error_untracked`, `parse_error_unknown`) and removed legacy
   classifier `phase_ok` / `phase_failed` guard shims.
+- [x] `batch/planner/modes/sequential/sm.hpp` +
+  `batch/planner/modes/sequential/actions.hpp`
+  reworked sequential result-failure routing so the prior implicit
+  generic `planning_failed` branch is now explicitly modeled as
+  `planning_progress_stalled` via
+  `planning_result_decision -> planning_failed / mark_planning_progress_stalled`.

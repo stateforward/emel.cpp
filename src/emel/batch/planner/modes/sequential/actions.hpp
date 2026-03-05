@@ -128,6 +128,11 @@ inline constexpr auto mark_output_indices_full = [](const event::request_runtime
   detail::fail_plan(ev, error::output_indices_full);
 };
 
+inline constexpr auto mark_planning_progress_stalled = [](const event::request_runtime & ev,
+                                                          context &) noexcept {
+  detail::fail_plan(ev, error::planning_progress_stalled);
+};
+
 inline constexpr auto create_plan = [](const event::request_runtime & ev, context &) noexcept {
   create_plan_impl(ev);
 };
