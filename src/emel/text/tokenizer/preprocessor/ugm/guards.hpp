@@ -65,6 +65,18 @@ struct phase_failed {
   }
 };
 
+struct has_specials {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.special_cache.count != 0;
+  }
+};
+
+struct no_specials {
+  bool operator()(const action::context & ctx) const noexcept {
+    return ctx.special_cache.count == 0;
+  }
+};
+
 struct parse_special_enabled {
   bool operator()(const event::preprocess_runtime & runtime_ev,
                   const action::context &) const noexcept {
@@ -77,6 +89,21 @@ struct parse_special_disabled {
   bool operator()(const event::preprocess_runtime & runtime_ev,
                   const action::context & ctx) const noexcept {
     return !parse_special_enabled{}(runtime_ev, ctx);
+  }
+};
+
+struct request_text_empty {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    return ev.request.text.empty();
+  }
+};
+
+struct request_text_nonempty {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return !request_text_empty{}(runtime_ev, ctx);
   }
 };
 

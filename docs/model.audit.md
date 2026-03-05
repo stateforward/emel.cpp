@@ -280,7 +280,14 @@ Despite earlier remediations, explicit `if` statements were found introduced/rem
   (`request_buffer_decision`, `request_capacity_nonzero_decision`,
   `request_capacity_limit_decision`) and explicit parse policy phase
   (`partition_parse_special_decision`) so `parse_special` routing is modeled in
-  `sm.hpp` instead of hidden inside shared partition actions/details.
+  `sm.hpp` instead of hidden inside shared partition actions/details; extended
+  with explicit specials-presence and per-path input-shape decisions
+  (`partition_specials_decision`, `partitioning_no_specials_input_decision`,
+  `partitioning_non_bpe_parse_input_decision`,
+  `partitioning_non_bpe_skip_input_decision`) and explicit
+  `request_text_{empty,nonempty}` routing plus dedicated no-specials execute
+  phase (`partitioning_no_specials`) so empty-input and no-specials behavior is
+  modeled in `ugm/sm.hpp` instead of hidden inside partition helpers.
 - [x] `src/emel/text/tokenizer/preprocessor/rwkv/sm.hpp` + `rwkv/actions.hpp` +
   `rwkv/guards.hpp` rearchitected with explicit request-shape phases
   (`request_buffer_decision`, `request_capacity_nonzero_decision`,
