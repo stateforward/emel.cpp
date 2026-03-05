@@ -218,6 +218,11 @@ Status correction: the following files still contain implicit runtime control fl
   `compute_error_*` guard branches in `sm.hpp`; removed generic
   `compute_phase_ok` / `compute_phase_failed` routing and modeled `none`,
   typed error classes, untracked, and unknown paths explicitly)
+- [x] `src/emel/graph/assembler/sm.hpp` + `src/emel/graph/assembler/guards.hpp`
+  (rearchitected reserve and assemble finalization routing to explicit typed
+  `reserve_error_*` and `assemble_error_*` guard branches in `sm.hpp`; removed
+  generic `reserve_phase_*` / `assemble_phase_*` routing and modeled `none`,
+  typed error classes, untracked, and unknown paths explicitly)
 
 ## High-Priority Findings (Action Files)
 
