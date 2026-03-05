@@ -133,11 +133,27 @@ struct model {
       //------------------------------------------------------------------------------//
       // Finalization and callback dispatch.
       , sml::state<ready> <= sml::state<execution_decision> + sml::completion<event::execute_step>
-                 [ guard::phase_ok{} ]
+                 [ guard::execution_error_none{} ]
                  / action::dispatch_done
 
       , sml::state<ready> <= sml::state<execution_decision> + sml::completion<event::execute_step>
-                 [ guard::phase_failed{} ]
+                 [ guard::execution_error_invalid_request{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<execution_decision> + sml::completion<event::execute_step>
+                 [ guard::execution_error_kernel_failed{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<execution_decision> + sml::completion<event::execute_step>
+                 [ guard::execution_error_internal_error{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<execution_decision> + sml::completion<event::execute_step>
+                 [ guard::execution_error_untracked{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<execution_decision> + sml::completion<event::execute_step>
+                 [ guard::execution_error_unknown{} ]
                  / action::dispatch_error
 
       //------------------------------------------------------------------------------//

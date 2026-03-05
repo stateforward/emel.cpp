@@ -6,6 +6,23 @@
 
 namespace emel::graph::processor::guard {
 
+inline emel::error::type runtime_error(const event::execute_step & ev) noexcept {
+  return ev.ctx.err;
+}
+
+inline bool error_is(const emel::error::type runtime_err,
+                     const error expected) noexcept {
+  return runtime_err == emel::error::cast(expected);
+}
+
+inline bool error_is_unknown(const emel::error::type runtime_err) noexcept {
+  return !error_is(runtime_err, error::none) &&
+         !error_is(runtime_err, error::invalid_request) &&
+         !error_is(runtime_err, error::kernel_failed) &&
+         !error_is(runtime_err, error::internal_error) &&
+         !error_is(runtime_err, error::untracked);
+}
+
 struct valid_execute {
   bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
     return ev.request.step_plan != nullptr &&
@@ -51,15 +68,39 @@ struct invalid_execute_without_output {
   }
 };
 
-struct phase_ok {
+struct execution_error_none {
   bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::none);
   }
 };
 
-struct phase_failed {
+struct execution_error_invalid_request {
   bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::invalid_request);
+  }
+};
+
+struct execution_error_kernel_failed {
+  bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::kernel_failed);
+  }
+};
+
+struct execution_error_internal_error {
+  bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::internal_error);
+  }
+};
+
+struct execution_error_untracked {
+  bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::untracked);
+  }
+};
+
+struct execution_error_unknown {
+  bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
+    return error_is_unknown(runtime_error(ev));
   }
 };
 
