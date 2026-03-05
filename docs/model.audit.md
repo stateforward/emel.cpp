@@ -473,10 +473,21 @@ User-requested machine action/detail findings and remediation status:
   still contains loop-gated strip traversal/control in action code.
 - [ ] `src/emel/gbnf/rule_parser/actions.hpp` (lines `308`, `330`)
   still contains loop-driven parse traversal in action code.
-- [ ] Remaining machines still route action/detail outcomes through generic
-  `phase_ok` / `phase_failed` guards instead of explicit error-class/result
-  decision guards in `sm.hpp`, including:
-  and multiple preprocessor machine `sm.hpp` files.
+- [x] `src/emel/text/tokenizer/preprocessor/bpe/sm.hpp` +
+  `src/emel/text/tokenizer/preprocessor/bpe/guards.hpp`
+  reworked build-specials and partition result routing into explicit
+  error-class branches (`*_ok`, `*_invalid_request_error`,
+  `*_backend_error`, `*_unknown_error`) so `bpe/sm.hpp` no longer relies on
+  generic `phase_ok` / `phase_failed` guards.
+- [ ] Remaining preprocessor machines still route action/detail outcomes
+  through generic `phase_ok` / `phase_failed` guards instead of explicit
+  error-class/result decision guards in `sm.hpp`, including:
+  `src/emel/text/tokenizer/preprocessor/spm/sm.hpp`,
+  `src/emel/text/tokenizer/preprocessor/rwkv/sm.hpp`,
+  `src/emel/text/tokenizer/preprocessor/ugm/sm.hpp`,
+  `src/emel/text/tokenizer/preprocessor/wpm/sm.hpp`,
+  `src/emel/text/tokenizer/preprocessor/fallback/sm.hpp`,
+  `src/emel/text/tokenizer/preprocessor/plamo2/sm.hpp`.
 
 - [x] `text/encoders/spm/sm.hpp` + `text/encoders/spm/guards.hpp`
   reworked table-sync, prepare, merge, and final encode-result routing into
