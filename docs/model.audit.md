@@ -459,12 +459,13 @@ User-requested machine action/detail findings and remediation status:
 
 ## Reopened Findings (2026-03-05)
 
-- [ ] `src/emel/text/tokenizer/preprocessor/detail.hpp`
-  still contains runtime branching and loop-gated routing in shared helper paths
-  (not explicitly modeled in `sm.hpp`), including at lines:
-  `104`, `108`, `119`, `139`, `147`, `155`, `156`, `178`, `181`, `194`,
-  `197`, `228`, `232`, `234`, `243`, `251`, `255`, `256`, `265`, `267`, `269`,
-  `270`, `276`, `277`, `283`, `289`, `290`, `297`.
+- [x] `src/emel/text/tokenizer/preprocessor/detail.hpp`
+  refactored shared preprocessor helper paths to explicit step-dispatch helpers
+  (no runtime `if`/`for`/`while`/`?:` branch statements in the shared
+  build/partition logic); machine-level branch routing remains explicit in
+  preprocessor `sm.hpp` guards/states (`no_specials`/`has_specials`,
+  `parse_special_enabled`/`parse_special_disabled`, and explicit partition
+  result error-class guards).
 - [x] `src/emel/text/jinja/parser/lexer/actions.hpp` +
   `src/emel/text/jinja/parser/lexer/sm.hpp`
   reworked scanner flow by removing loop-gated scan/trim actions and adding
