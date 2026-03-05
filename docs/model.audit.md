@@ -509,10 +509,12 @@ User-requested machine action/detail findings and remediation status:
   error-class branches (`*_ok`, `*_invalid_request_error`,
   `*_backend_error`, `*_unknown_error`) so `fallback/sm.hpp` no longer relies
   on generic `phase_ok` / `phase_failed` guards.
-- [ ] Remaining preprocessor machines still route action/detail outcomes
-  through generic `phase_ok` / `phase_failed` guards instead of explicit
-  error-class/result decision guards in `sm.hpp`, including:
-  `src/emel/text/tokenizer/preprocessor/plamo2/sm.hpp`.
+- [x] `src/emel/text/tokenizer/preprocessor/plamo2/sm.hpp` +
+  `src/emel/text/tokenizer/preprocessor/plamo2/guards.hpp`
+  reworked build-specials and partition result routing into explicit
+  error-class branches (`*_ok`, `*_invalid_request_error`,
+  `*_backend_error`, `*_unknown_error`) so `plamo2/sm.hpp` no longer relies on
+  generic `phase_ok` / `phase_failed` guards.
 
 - [x] `text/encoders/spm/sm.hpp` + `text/encoders/spm/guards.hpp`
   reworked table-sync, prepare, merge, and final encode-result routing into
