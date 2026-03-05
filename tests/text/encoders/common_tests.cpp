@@ -1248,6 +1248,11 @@ TEST_CASE("encoder_action_guard_wrapper_coverage") {
     CHECK(emel::text::encoders::wpm::guard::encode_result_ok{}(runtime_ok_ev));
     runtime_ok.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
     CHECK(emel::text::encoders::wpm::guard::encode_result_backend_error{}(runtime_ok_ev));
+    CHECK_FALSE(emel::text::encoders::wpm::guard::table_sync_unclassified_error_code{}(runtime_ok_ev));
+    CHECK_FALSE(emel::text::encoders::wpm::guard::encode_result_unclassified_error_code{}(runtime_ok_ev));
+    runtime_ok.err = static_cast<int32_t>(0x7FFF);
+    CHECK(emel::text::encoders::wpm::guard::table_sync_unclassified_error_code{}(runtime_ok_ev));
+    CHECK(emel::text::encoders::wpm::guard::encode_result_unclassified_error_code{}(runtime_ok_ev));
   }
 
   {
