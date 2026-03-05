@@ -50,7 +50,7 @@ struct model {
           / action::set_statement_statement
 
       , sml::state<classification_result_decision> <= sml::state<statement_decision>
-          + sml::completion<event::parse_runtime>[ guard::token_unknown{} ]
+          + sml::completion<event::parse_runtime>
           / action::set_statement_unknown
 
       //------------------------------------------------------------------------------//
@@ -76,7 +76,7 @@ struct model {
           / action::set_expression_compound
 
       , sml::state<classification_result_decision> <= sml::state<expression_decision>
-          + sml::completion<event::parse_runtime>[ guard::expr_token_unknown{} ]
+          + sml::completion<event::parse_runtime>
           / action::set_expression_unknown
 
       //------------------------------------------------------------------------------//
@@ -91,7 +91,7 @@ struct model {
       , sml::state<errored> <= sml::state<classification_result_decision>
           + sml::completion<event::parse_runtime>[ guard::parse_error_untracked{} ]
       , sml::state<errored> <= sml::state<classification_result_decision>
-          + sml::completion<event::parse_runtime>[ guard::parse_error_unknown{} ]
+          + sml::completion<event::parse_runtime>
 
       , sml::X <= sml::state<done>
       , sml::X <= sml::state<errored>

@@ -50,16 +50,6 @@ struct token_open_statement {
   }
 };
 
-struct token_unknown {
-  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
-    return has_token(ev.ctx) &&
-           !token_text{}(ev, action::context{}) &&
-           !token_comment{}(ev, action::context{}) &&
-           !token_open_expression{}(ev, action::context{}) &&
-           !token_open_statement{}(ev, action::context{});
-  }
-};
-
 struct statement_expression {
   bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
     return ev.ctx.statement == event::statement_kind::expression;
@@ -106,16 +96,6 @@ struct expr_token_compound {
   }
 };
 
-struct expr_token_unknown {
-  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
-    return has_token(ev.ctx, 1) &&
-           !expr_token_literal{}(ev, action::context{}) &&
-           !expr_token_identifier{}(ev, action::context{}) &&
-           !expr_token_unary{}(ev, action::context{}) &&
-           !expr_token_compound{}(ev, action::context{});
-  }
-};
-
 inline bool parse_error_is(const event::parse_runtime & ev, const error code_value) noexcept {
   return ev.ctx.err == code_value;
 }
@@ -147,16 +127,6 @@ struct parse_error_internal_error {
 struct parse_error_untracked {
   bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
     return parse_error_is(ev, error::untracked);
-  }
-};
-
-struct parse_error_unknown {
-  bool operator()(const event::parse_runtime & ev, const action::context &) const noexcept {
-    return !parse_error_none{}(ev, action::context{}) &&
-           !parse_error_invalid_request{}(ev, action::context{}) &&
-           !parse_error_parse_failed{}(ev, action::context{}) &&
-           !parse_error_internal_error{}(ev, action::context{}) &&
-           !parse_error_untracked{}(ev, action::context{});
   }
 };
 

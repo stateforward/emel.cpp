@@ -767,3 +767,9 @@ User-requested machine action/detail findings and remediation status:
   `guards.hpp` and reworked mode-decision fallback handling as explicit
   terminal transitions in `sm.hpp` (`seq_mode_decision`,
   `positions_mode_decision`, `output_mode_decision` -> `errored`).
+- [x] `text/jinja/parser/classifier_parser/sm.hpp` +
+  `text/jinja/parser/classifier_parser/guards.hpp`
+  removed classifier fallback guard composition
+  (`token_unknown`/`expr_token_unknown`/`parse_error_unknown`) from
+  `guards.hpp` and reworked statement/expression/result fallback handling as
+  explicit terminal transitions in `sm.hpp`.
