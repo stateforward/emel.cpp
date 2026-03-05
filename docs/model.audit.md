@@ -644,4 +644,4 @@ User-requested machine action/detail findings and remediation status:
   `string_content_policy_decision` routing
   (`string_scan_immediate_termination_or_eof` vs
   `string_scan_requires_content`) and removed residual runtime `if` branching
-  from string escaped-content action helpers.
+  and `?:` branching from string escaped-content action helpers.

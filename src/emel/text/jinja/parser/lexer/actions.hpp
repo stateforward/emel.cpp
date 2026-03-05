@@ -191,6 +191,12 @@ inline void emit_eof(const event::next_runtime &ev) noexcept {
   });
 }
 
+inline size_t select_npos_fallback(const size_t value,
+                                   const size_t fallback) noexcept {
+  const std::array<size_t, 2> candidates = {value, fallback};
+  return candidates[static_cast<size_t>(value == std::string_view::npos)];
+}
+
 } // namespace helper
 
 struct begin_scan {
@@ -214,12 +220,9 @@ struct scan_text_boundary {
     const size_t open_statement = source.find("{%", start);
     const size_t open_expression = source.find("{{", start);
     const size_t open_comment = source.find("{#", start);
-    const size_t end_statement =
-        (open_statement == std::string_view::npos) ? size : open_statement;
-    const size_t end_expression =
-        (open_expression == std::string_view::npos) ? size : open_expression;
-    const size_t end_comment =
-        (open_comment == std::string_view::npos) ? size : open_comment;
+    const size_t end_statement = helper::select_npos_fallback(open_statement, size);
+    const size_t end_expression = helper::select_npos_fallback(open_expression, size);
+    const size_t end_comment = helper::select_npos_fallback(open_comment, size);
     const size_t end = std::min(end_statement, std::min(end_expression, end_comment));
     pos = end;
 
@@ -235,9 +238,11 @@ struct probe_text_opening_trim {
     const size_t span_len = ev.ctx.text_end - ev.ctx.text_start;
     const std::string_view span = ev.ctx.source.substr(ev.ctx.text_start, span_len);
     const size_t keep_last = span.find_last_not_of(trim_chars);
-    const size_t probe = (keep_last == std::string_view::npos)
-                             ? ev.ctx.text_start
-                             : (ev.ctx.text_start + keep_last + 1u);
+    const std::array<size_t, 2> probe_candidates = {
+        ev.ctx.text_start + keep_last + 1u,
+        ev.ctx.text_start,
+    };
+    const size_t probe = probe_candidates[static_cast<size_t>(keep_last == std::string_view::npos)];
     ev.ctx.text_trim_probe = probe;
   }
 };
@@ -311,8 +316,7 @@ struct scan_comment {
     const size_t start = pos;
     const size_t content_start = start + 2u;
     const size_t close_pos = source.find("#}", content_start);
-    const size_t comment_end =
-        (close_pos == std::string_view::npos) ? size : close_pos;
+    const size_t comment_end = helper::select_npos_fallback(close_pos, size);
     std::string comment(source.substr(content_start, comment_end - content_start));
     pos = comment_end;
 
@@ -519,8 +523,7 @@ struct scan_word {
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
     const size_t word_end_candidate =
         ev.ctx.source.find_first_not_of(word_chars, start);
-    const size_t word_end =
-        (word_end_candidate == std::string_view::npos) ? ev.ctx.size : word_end_candidate;
+    const size_t word_end = helper::select_npos_fallback(word_end_candidate, ev.ctx.size);
     std::string value(ev.ctx.source.substr(start, word_end - start));
     ev.ctx.pos = word_end;
 
