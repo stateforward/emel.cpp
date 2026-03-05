@@ -702,3 +702,9 @@ User-requested machine action/detail findings and remediation status:
   done/prereq/capacity/invalid branches in `sm.hpp`; removed implicit
   `phase_unclassified_failure` fallback guard and modeled prefailed propagation
   explicitly via `phase_prefailed` / `mark_failed_prefailed`.
+- [x] `graph/assembler/reuse_decision_pass/sm.hpp` +
+  `graph/assembler/reuse_decision_pass/guards.hpp` +
+  `graph/assembler/reuse_decision_pass/actions.hpp`
+  reworked reuse-decision completion routing with explicit prefailed branch in
+  `sm.hpp` and removed guard-to-guard fallback coupling (`!phase_reuse(...)`)
+  from rebuild/invalid guards by using explicit reuse-candidate predicates.

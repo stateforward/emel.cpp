@@ -7,6 +7,13 @@
 
 namespace emel::graph::assembler::reuse_decision_pass::guard {
 
+struct phase_prefailed {
+  bool operator()(const assembler::event::assemble_graph & ev,
+                  const action::context &) const noexcept {
+    return ev.ctx.err != emel::error::cast(assembler::error::none);
+  }
+};
+
 struct phase_reuse {
   bool operator()(const assembler::event::assemble_graph & ev, const action::context & ctx) const noexcept {
     return ev.ctx.err == emel::error::cast(assembler::error::none) &&
@@ -20,9 +27,13 @@ struct phase_reuse {
 
 struct phase_rebuild {
   bool operator()(const assembler::event::assemble_graph & ev, const action::context & ctx) const noexcept {
+    const bool reuse_candidate = ctx.has_reserved_topology != 0u &&
+                                 ctx.reserved_topology != nullptr &&
+                                 ev.request.node_count_hint == ctx.reserved_node_count &&
+                                 ev.request.tensor_count_hint == ctx.reserved_tensor_count;
     return ev.ctx.err == emel::error::cast(assembler::error::none) &&
            ev.ctx.validate_outcome == assemble_validate_pass::events::phase_outcome::done &&
-           !phase_reuse{}(ev, ctx) &&
+           !reuse_candidate &&
            ev.request.node_count_hint != 0u &&
            ev.request.tensor_count_hint != 0u;
   }
@@ -37,9 +48,13 @@ struct phase_prereq_failed {
 
 struct phase_invalid_request {
   bool operator()(const assembler::event::assemble_graph & ev, const action::context & ctx) const noexcept {
+    const bool reuse_candidate = ctx.has_reserved_topology != 0u &&
+                                 ctx.reserved_topology != nullptr &&
+                                 ev.request.node_count_hint == ctx.reserved_node_count &&
+                                 ev.request.tensor_count_hint == ctx.reserved_tensor_count;
     return ev.ctx.err == emel::error::cast(assembler::error::none) &&
            ev.ctx.validate_outcome == assemble_validate_pass::events::phase_outcome::done &&
-           !phase_reuse{}(ev, ctx) &&
+           !reuse_candidate &&
            (ev.request.node_count_hint == 0u || ev.request.tensor_count_hint == 0u);
   }
 };

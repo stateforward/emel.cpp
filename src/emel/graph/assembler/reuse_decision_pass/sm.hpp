@@ -20,19 +20,28 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
-        sml::state<reuse_selected> <= *sml::state<deciding> + sml::completion<assembler::event::assemble_graph>
+        sml::state<assemble_failed> <= *sml::state<deciding> +
+               sml::completion<assembler::event::assemble_graph>
+                 [ guard::phase_prefailed{} ]
+                 / action::mark_failed_prefailed
+
+      , sml::state<reuse_selected> <= sml::state<deciding> +
+               sml::completion<assembler::event::assemble_graph>
                  [ guard::phase_reuse{} ]
                  / action::mark_reuse
 
-      , sml::state<rebuild_selected> <= sml::state<deciding> + sml::completion<assembler::event::assemble_graph>
+      , sml::state<rebuild_selected> <= sml::state<deciding> +
+               sml::completion<assembler::event::assemble_graph>
                  [ guard::phase_rebuild{} ]
                  / action::mark_rebuild
 
-      , sml::state<assemble_failed> <= sml::state<deciding> + sml::completion<assembler::event::assemble_graph>
+      , sml::state<assemble_failed> <= sml::state<deciding> +
+               sml::completion<assembler::event::assemble_graph>
                  [ guard::phase_prereq_failed{} ]
                  / action::mark_failed_prereq
 
-      , sml::state<assemble_failed> <= sml::state<deciding> + sml::completion<assembler::event::assemble_graph>
+      , sml::state<assemble_failed> <= sml::state<deciding> +
+               sml::completion<assembler::event::assemble_graph>
                  [ guard::phase_invalid_request{} ]
                  / action::mark_failed_invalid_request
 

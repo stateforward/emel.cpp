@@ -385,6 +385,10 @@ TEST_CASE("graph_assembler_pass_action_and_guard_branches") {
 
   assemble_ctx.validate_outcome = emel::graph::assembler::assemble_validate_pass::events::phase_outcome::failed;
   CHECK(emel::graph::assembler::reuse_decision_pass::guard::phase_prereq_failed{}(assemble_ev, machine_ctx));
+  assemble_ctx.err = emel::error::cast(assembler_error::internal_error);
+  CHECK(emel::graph::assembler::reuse_decision_pass::guard::phase_prefailed{}(assemble_ev, machine_ctx));
+  emel::graph::assembler::reuse_decision_pass::action::mark_failed_prefailed(assemble_ev, machine_ctx);
+  assemble_ctx.err = emel::error::cast(assembler_error::none);
   assemble_ctx.validate_outcome = emel::graph::assembler::assemble_validate_pass::events::phase_outcome::done;
   assemble_request.node_count_hint = 0u;
   CHECK(emel::graph::assembler::reuse_decision_pass::guard::phase_invalid_request{}(assemble_ev, machine_ctx));

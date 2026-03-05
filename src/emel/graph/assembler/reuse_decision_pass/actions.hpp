@@ -33,6 +33,12 @@ struct mark_rebuild {
   }
 };
 
+struct mark_failed_prefailed {
+  void operator()(const assembler::event::assemble_graph & ev, context &) const noexcept {
+    ev.ctx.reuse_outcome = events::phase_outcome::failed;
+  }
+};
+
 struct mark_failed_prereq {
   void operator()(const assembler::event::assemble_graph & ev, context &) const noexcept {
     ev.ctx.reuse_outcome = events::phase_outcome::failed;
@@ -60,6 +66,7 @@ struct on_unexpected {
 
 inline constexpr mark_reuse mark_reuse{};
 inline constexpr mark_rebuild mark_rebuild{};
+inline constexpr mark_failed_prefailed mark_failed_prefailed{};
 inline constexpr mark_failed_prereq mark_failed_prereq{};
 inline constexpr mark_failed_invalid_request mark_failed_invalid_request{};
 inline constexpr on_unexpected on_unexpected{};
