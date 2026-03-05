@@ -224,8 +224,10 @@ TEST_CASE("graph_allocator_pass_action_and_guard_branches") {
   CHECK(emel::graph::allocator::ordering_pass::guard::phase_invalid_request{}(ev, machine_ctx));
   request.bytes_per_tensor = 16u;
   ev.ctx.required_intervals = 0u;
-  CHECK_FALSE(
-      emel::graph::allocator::ordering_pass::guard::phase_unclassified_failure{}(ev, machine_ctx));
+  ev.ctx.err = emel::error::cast(allocator_error::internal_error);
+  CHECK(emel::graph::allocator::ordering_pass::guard::phase_prefailed{}(ev, machine_ctx));
+  emel::graph::allocator::ordering_pass::action::mark_failed_prefailed(ev, machine_ctx);
+  ev.ctx.err = emel::error::cast(allocator_error::none);
 
   emel::graph::allocator::ordering_pass::action::mark_failed_prereq(ev, machine_ctx);
   emel::graph::allocator::ordering_pass::action::mark_failed_capacity(ev, machine_ctx);

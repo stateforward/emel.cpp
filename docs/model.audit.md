@@ -688,3 +688,10 @@ User-requested machine action/detail findings and remediation status:
   done/invalid/capacity branches in `sm.hpp`; removed implicit
   `phase_unclassified_failure` fallback guard and modeled prefailed propagation
   explicitly via `phase_prefailed` / `mark_failed_prefailed`.
+- [x] `graph/allocator/ordering_pass/sm.hpp` +
+  `graph/allocator/ordering_pass/guards.hpp` +
+  `graph/allocator/ordering_pass/actions.hpp`
+  reworked ordering pass completion routing to explicit prefailed vs
+  done/prereq/capacity/overflow/invalid branches in `sm.hpp`; removed implicit
+  `phase_unclassified_failure` fallback guard and modeled prefailed propagation
+  explicitly via `phase_prefailed` / `mark_failed_prefailed`.
