@@ -1,52 +1,99 @@
 stateDiagram-v2
   direction TB
-  [*] --> initialized
-  initialized --> mapping_parser : load [can_map_parser_] / begin_load_
-  initialized --> errored : load [cannot_map_parser_] / set_invalid_argument_
-  mapping_parser --> map_parser_decision : [always] / run_map_parser_
-  map_parser_decision --> errored : [phase_failed_] / none
-  map_parser_decision --> parsing : [phase_ok_and_can_parse_] / none
-  map_parser_decision --> errored : [phase_ok_and_cannot_parse_] / set_invalid_argument_
-  parsing --> parse_decision : [always] / run_parse_
-  parse_decision --> errored : [phase_failed_] / none
-  parse_decision --> loading_weights : [phase_ok_and_should_load_weights_and_can_load_] / none
-  parse_decision --> errored : [phase_ok_and_should_load_weights_and_cannot_load_] / set_invalid_argument_
-  parse_decision --> structure_skipped : [phase_ok_and_skip_weights_and_skip_structure_] / none
-  parse_decision --> validating_structure : [phase_ok_and_skip_weights_and_can_validate_structure_] / none
-  parse_decision --> errored : [phase_ok_and_skip_weights_and_cannot_validate_structure_] / set_invalid_argument_
-  loading_weights --> load_decision : [always] / run_load_weights_
-  load_decision --> errored : [phase_failed_] / none
-  load_decision --> mapping_layers : [phase_ok_and_can_map_layers_] / none
-  load_decision --> errored : [phase_ok_and_cannot_map_layers_] / set_invalid_argument_
-  mapping_layers --> map_layers_decision : [always] / run_map_layers_
-  map_layers_decision --> errored : [phase_failed_] / none
-  map_layers_decision --> structure_skipped : [phase_ok_and_skip_structure_] / none
-  map_layers_decision --> validating_structure : [phase_ok_and_can_validate_structure_] / none
-  map_layers_decision --> errored : [phase_ok_and_cannot_validate_structure_] / set_invalid_argument_
-  validating_structure --> structure_decision : [always] / run_validate_structure_
-  structure_skipped --> structure_decision : [always] / skip_validate_structure_
-  structure_decision --> errored : [phase_failed_] / none
-  structure_decision --> validating_architecture : [phase_ok_and_has_arch_validate_and_can_validate_architecture_] / none
-  structure_decision --> errored : [phase_ok_and_has_arch_validate_and_cannot_validate_architecture_] / set_invalid_argument_
-  structure_decision --> done : [phase_ok_and_no_arch_validate_] / none
-  validating_architecture --> architecture_decision : [always] / run_validate_architecture_
-  architecture_decision --> errored : [phase_failed_] / none
-  architecture_decision --> done : [phase_ok_] / none
-  done --> initialized : [always] / publish_done_
-  errored --> initialized : [always] / publish_error_
-  initialized --> errored : _ [always] / on_unexpected_
-  mapping_parser --> errored : _ [always] / on_unexpected_
-  map_parser_decision --> errored : _ [always] / on_unexpected_
-  parsing --> errored : _ [always] / on_unexpected_
-  parse_decision --> errored : _ [always] / on_unexpected_
-  loading_weights --> errored : _ [always] / on_unexpected_
-  load_decision --> errored : _ [always] / on_unexpected_
-  mapping_layers --> errored : _ [always] / on_unexpected_
-  map_layers_decision --> errored : _ [always] / on_unexpected_
-  validating_structure --> errored : _ [always] / on_unexpected_
-  structure_skipped --> errored : _ [always] / on_unexpected_
-  structure_decision --> errored : _ [always] / on_unexpected_
-  validating_architecture --> errored : _ [always] / on_unexpected_
-  architecture_decision --> errored : _ [always] / on_unexpected_
-  done --> errored : _ [always] / on_unexpected_
-  errored --> errored : _ [always] / on_unexpected_
+  [*] --> ready
+  ready --> request_decision : load_runtime [always] / begin_load_
+  request_decision --> parsing : completion_load_runtime_ [valid_request_] / none
+  request_decision --> errored : completion_load_runtime_ [invalid_request_] / mark_invalid_request_
+  parsing --> parse_decision : completion_load_runtime_ [always] / run_parse_
+  parse_decision --> parse_phase_decision : completion_load_runtime_ [always] / none
+  parse_phase_decision --> parse_load_weights_policy_decision : completion_load_runtime_ [error_none_] / none
+  parse_phase_decision --> errored : completion_load_runtime_ [error_invalid_request_] / none
+  parse_phase_decision --> errored : completion_load_runtime_ [error_parse_failed_] / none
+  parse_phase_decision --> errored : completion_load_runtime_ [error_backend_error_] / none
+  parse_phase_decision --> errored : completion_load_runtime_ [error_model_invalid_] / none
+  parse_phase_decision --> errored : completion_load_runtime_ [error_internal_error_] / none
+  parse_phase_decision --> errored : completion_load_runtime_ [error_untracked_] / none
+  parse_phase_decision --> errored : completion_load_runtime_ [error_unclassified_code_] / none
+  parse_load_weights_policy_decision --> parse_load_weights_handler_decision : completion_load_runtime_ [should_load_weights_] / none
+  parse_load_weights_policy_decision --> structure_decision : completion_load_runtime_ [skip_load_weights_] / none
+  parse_load_weights_policy_decision --> errored : completion_load_runtime_ [always] / mark_internal_error_
+  parse_load_weights_handler_decision --> loading_weights : completion_load_runtime_ [can_load_weights_] / none
+  parse_load_weights_handler_decision --> errored : completion_load_runtime_ [cannot_load_weights_] / mark_invalid_request_
+  parse_load_weights_handler_decision --> errored : completion_load_runtime_ [always] / mark_internal_error_
+  loading_weights --> load_decision : completion_load_runtime_ [always] / run_load_weights_
+  load_decision --> load_phase_decision : completion_load_runtime_ [always] / none
+  load_phase_decision --> load_map_policy_decision : completion_load_runtime_ [error_none_] / none
+  load_phase_decision --> errored : completion_load_runtime_ [error_invalid_request_] / none
+  load_phase_decision --> errored : completion_load_runtime_ [error_parse_failed_] / none
+  load_phase_decision --> errored : completion_load_runtime_ [error_backend_error_] / none
+  load_phase_decision --> errored : completion_load_runtime_ [error_model_invalid_] / none
+  load_phase_decision --> errored : completion_load_runtime_ [error_internal_error_] / none
+  load_phase_decision --> errored : completion_load_runtime_ [error_untracked_] / none
+  load_phase_decision --> errored : completion_load_runtime_ [error_unclassified_code_] / none
+  load_map_policy_decision --> mapping_layers : completion_load_runtime_ [can_map_layers_] / none
+  load_map_policy_decision --> errored : completion_load_runtime_ [cannot_map_layers_] / mark_invalid_request_
+  load_map_policy_decision --> errored : completion_load_runtime_ [always] / mark_internal_error_
+  mapping_layers --> map_layers_decision : completion_load_runtime_ [always] / run_map_layers_
+  map_layers_decision --> structure_decision : completion_load_runtime_ [error_none_] / none
+  map_layers_decision --> errored : completion_load_runtime_ [error_invalid_request_] / none
+  map_layers_decision --> errored : completion_load_runtime_ [error_parse_failed_] / none
+  map_layers_decision --> errored : completion_load_runtime_ [error_backend_error_] / none
+  map_layers_decision --> errored : completion_load_runtime_ [error_model_invalid_] / none
+  map_layers_decision --> errored : completion_load_runtime_ [error_internal_error_] / none
+  map_layers_decision --> errored : completion_load_runtime_ [error_untracked_] / none
+  map_layers_decision --> errored : completion_load_runtime_ [error_unclassified_code_] / none
+  structure_decision --> structure_policy_decision : completion_load_runtime_ [always] / none
+  structure_policy_decision --> architecture_decision : completion_load_runtime_ [skip_validate_structure_] / none
+  structure_policy_decision --> validating_structure : completion_load_runtime_ [can_validate_structure_] / none
+  structure_policy_decision --> errored : completion_load_runtime_ [cannot_validate_structure_] / mark_invalid_request_
+  structure_policy_decision --> errored : completion_load_runtime_ [always] / mark_internal_error_
+  validating_structure --> structure_validation_decision : completion_load_runtime_ [always] / run_validate_structure_
+  structure_validation_decision --> architecture_decision : completion_load_runtime_ [error_none_] / none
+  structure_validation_decision --> errored : completion_load_runtime_ [error_invalid_request_] / none
+  structure_validation_decision --> errored : completion_load_runtime_ [error_parse_failed_] / none
+  structure_validation_decision --> errored : completion_load_runtime_ [error_backend_error_] / none
+  structure_validation_decision --> errored : completion_load_runtime_ [error_model_invalid_] / none
+  structure_validation_decision --> errored : completion_load_runtime_ [error_internal_error_] / none
+  structure_validation_decision --> errored : completion_load_runtime_ [error_untracked_] / none
+  structure_validation_decision --> errored : completion_load_runtime_ [error_unclassified_code_] / none
+  architecture_decision --> architecture_policy_decision : completion_load_runtime_ [always] / none
+  architecture_policy_decision --> done : completion_load_runtime_ [skip_validate_architecture_] / none
+  architecture_policy_decision --> validating_architecture : completion_load_runtime_ [can_validate_architecture_] / none
+  architecture_policy_decision --> errored : completion_load_runtime_ [cannot_validate_architecture_] / mark_invalid_request_
+  architecture_policy_decision --> errored : completion_load_runtime_ [always] / mark_internal_error_
+  validating_architecture --> architecture_validation_decision : completion_load_runtime_ [always] / run_validate_architecture_
+  architecture_validation_decision --> done : completion_load_runtime_ [error_none_] / none
+  architecture_validation_decision --> errored : completion_load_runtime_ [error_invalid_request_] / none
+  architecture_validation_decision --> errored : completion_load_runtime_ [error_parse_failed_] / none
+  architecture_validation_decision --> errored : completion_load_runtime_ [error_backend_error_] / none
+  architecture_validation_decision --> errored : completion_load_runtime_ [error_model_invalid_] / none
+  architecture_validation_decision --> errored : completion_load_runtime_ [error_internal_error_] / none
+  architecture_validation_decision --> errored : completion_load_runtime_ [error_untracked_] / none
+  architecture_validation_decision --> errored : completion_load_runtime_ [error_unclassified_code_] / none
+  done --> ready : completion_load_runtime_ [done_callback_present_] / publish_done_
+  done --> ready : completion_load_runtime_ [done_callback_absent_] / publish_done_noop_
+  errored --> ready : completion_load_runtime_ [error_callback_present_] / publish_error_
+  errored --> ready : completion_load_runtime_ [error_callback_absent_] / publish_error_noop_
+  ready --> ready : _ [always] / on_unexpected_
+  request_decision --> ready : _ [always] / on_unexpected_
+  parsing --> ready : _ [always] / on_unexpected_
+  parse_decision --> ready : _ [always] / on_unexpected_
+  parse_phase_decision --> ready : _ [always] / on_unexpected_
+  parse_load_weights_policy_decision --> ready : _ [always] / on_unexpected_
+  parse_load_weights_handler_decision --> ready : _ [always] / on_unexpected_
+  loading_weights --> ready : _ [always] / on_unexpected_
+  load_decision --> ready : _ [always] / on_unexpected_
+  load_phase_decision --> ready : _ [always] / on_unexpected_
+  load_map_policy_decision --> ready : _ [always] / on_unexpected_
+  mapping_layers --> ready : _ [always] / on_unexpected_
+  map_layers_decision --> ready : _ [always] / on_unexpected_
+  structure_decision --> ready : _ [always] / on_unexpected_
+  structure_policy_decision --> ready : _ [always] / on_unexpected_
+  validating_structure --> ready : _ [always] / on_unexpected_
+  structure_validation_decision --> ready : _ [always] / on_unexpected_
+  architecture_decision --> ready : _ [always] / on_unexpected_
+  architecture_policy_decision --> ready : _ [always] / on_unexpected_
+  validating_architecture --> ready : _ [always] / on_unexpected_
+  architecture_validation_decision --> ready : _ [always] / on_unexpected_
+  done --> ready : _ [always] / on_unexpected_
+  errored --> ready : _ [always] / on_unexpected_

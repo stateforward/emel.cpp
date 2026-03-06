@@ -1,29 +1,17 @@
 stateDiagram-v2
   direction TB
   [*] --> ready
-  ready --> apply_begin : apply_runtime [valid_apply_] / begin_apply_
-  ready --> ready : apply_runtime [invalid_apply_] / reject_invalid_apply_
-  apply_begin --> apply_loop_decision : completion [always] / prepare_candidate_parse_
-  apply_loop_decision --> apply_result_decision : completion [phase_failed_apply_] / none
-  apply_loop_decision --> model__ : completion [phase_ok_apply_] / none
-  model__ --> apply_result_decision : completion [candidate_failed_] / none
-  model__ --> model__ : completion [candidate_done_] / prepare_token_parse_
-  model__ --> apply_result_decision : completion [token_failed_] / none
-  model__ --> model__ : completion [token_done_] / prepare_match_parse_
-  model__ --> apply_result_decision : completion [matcher_done_] / none
-  model__ --> apply_result_decision : completion [matcher_failed_] / none
-  apply_result_decision --> ready : completion [phase_ok_apply_] / dispatch_apply_done_
-  apply_result_decision --> ready : completion [phase_failed_apply_] / dispatch_apply_error_
-  ready --> accept_begin : accept_runtime [valid_accept_] / begin_accept_
-  ready --> ready : accept_runtime [invalid_accept_] / reject_invalid_accept_
-  accept_begin --> accept_result_decision : completion [always] / prepare_accept_parse_
-  accept_result_decision --> ready : completion [phase_failed_accept_] / dispatch_accept_error_
-  accept_result_decision --> model__ : completion [phase_ok_accept_] / none
-  model__ --> ready : completion [accept_done_] / dispatch_accept_done_
-  model__ --> ready : completion [accept_failed_] / dispatch_accept_error_
+  ready --> request_decision : sample_runtime [always] / begin_sample_
+  request_decision --> filter_candidates : completion_sample_runtime_ [valid_sample_request_] / none
+  request_decision --> errored : completion_sample_runtime_ [invalid_sample_request_] / mark_invalid_request_
+  filter_candidates --> finalize_decision : completion_sample_runtime_ [always] / filter_candidates_
+  finalize_decision --> done : completion_sample_runtime_ [filtered_candidates_available_] / none
+  finalize_decision --> errored : completion_sample_runtime_ [no_filtered_candidates_] / mark_parse_failed_
+  done --> ready : completion_sample_runtime_ [always] / publish_done_
+  errored --> ready : completion_sample_runtime_ [always] / publish_error_
   ready --> ready : _ [always] / on_unexpected_
-  apply_begin --> apply_result_decision : _ [always] / on_unexpected_
-  apply_loop_decision --> apply_result_decision : _ [always] / on_unexpected_
-  apply_result_decision --> apply_result_decision : _ [always] / on_unexpected_
-  accept_begin --> accept_result_decision : _ [always] / on_unexpected_
-  accept_result_decision --> accept_result_decision : _ [always] / on_unexpected_
+  request_decision --> ready : _ [always] / on_unexpected_
+  filter_candidates --> ready : _ [always] / on_unexpected_
+  finalize_decision --> ready : _ [always] / on_unexpected_
+  done --> ready : _ [always] / on_unexpected_
+  errored --> ready : _ [always] / on_unexpected_

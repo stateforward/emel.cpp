@@ -5,17 +5,21 @@ stateDiagram-v2
   ready --> ready : allocate_graph_plan [invalid_allocate_with_dispatchable_output_] / reject_invalid_allocate_with_dispatch_
   ready --> ready : allocate_graph_plan [invalid_allocate_with_output_only_] / reject_invalid_allocate_with_output_only_
   ready --> ready : allocate_graph_plan [invalid_allocate_without_output_] / reject_invalid_allocate_without_output_
-  model__ --> liveness_decision : completion [always] / none
-  liveness_decision --> model__ : completion [liveness_done_] / none
-  liveness_decision --> allocation_decision : completion [liveness_failed_] / none
-  model__ --> ordering_decision : completion [always] / none
-  ordering_decision --> model__ : completion [ordering_done_] / none
-  ordering_decision --> allocation_decision : completion [ordering_failed_] / none
-  model__ --> placement_decision : completion [always] / none
-  placement_decision --> allocation_decision : completion [placement_done_] / commit_plan_
-  placement_decision --> allocation_decision : completion [placement_failed_] / none
-  allocation_decision --> ready : completion [phase_ok_] / dispatch_done_
-  allocation_decision --> ready : completion [phase_failed_] / dispatch_error_
+  model__ --> liveness_decision : completion_allocate_graph_plan_ [always] / none
+  liveness_decision --> model__ : completion_allocate_graph_plan_ [liveness_done_] / none
+  liveness_decision --> allocation_decision : completion_allocate_graph_plan_ [liveness_failed_] / none
+  model__ --> ordering_decision : completion_allocate_graph_plan_ [always] / none
+  ordering_decision --> model__ : completion_allocate_graph_plan_ [ordering_done_] / none
+  ordering_decision --> allocation_decision : completion_allocate_graph_plan_ [ordering_failed_] / none
+  model__ --> placement_decision : completion_allocate_graph_plan_ [always] / none
+  placement_decision --> allocation_decision : completion_allocate_graph_plan_ [placement_done_] / commit_plan_
+  placement_decision --> allocation_decision : completion_allocate_graph_plan_ [placement_failed_] / none
+  allocation_decision --> ready : completion_allocate_graph_plan_ [allocation_error_none_] / dispatch_done_
+  allocation_decision --> ready : completion_allocate_graph_plan_ [allocation_error_invalid_request_] / dispatch_error_
+  allocation_decision --> ready : completion_allocate_graph_plan_ [allocation_error_capacity_] / dispatch_error_
+  allocation_decision --> ready : completion_allocate_graph_plan_ [allocation_error_internal_error_] / dispatch_error_
+  allocation_decision --> ready : completion_allocate_graph_plan_ [allocation_error_untracked_] / dispatch_error_
+  allocation_decision --> ready : completion_allocate_graph_plan_ [allocation_error_unknown_] / dispatch_error_
   ready --> ready : _ [always] / on_unexpected_
   liveness_decision --> allocation_decision : _ [always] / on_unexpected_
   ordering_decision --> allocation_decision : _ [always] / on_unexpected_

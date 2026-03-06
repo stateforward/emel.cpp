@@ -1,13 +1,34 @@
 stateDiagram-v2
   direction TB
   [*] --> initialized
-  initialized --> initialized : next [invalid_next_] / reject_invalid_next_
-  initialized --> initialized : next [invalid_cursor_position_] / reject_invalid_cursor_
-  initialized --> scanning : next [has_remaining_input_] / emit_next_token_
-  initialized --> scanning : next [at_eof_] / emit_eof_
-  scanning --> scanning : next [invalid_next_] / reject_invalid_next_
-  scanning --> scanning : next [invalid_cursor_position_] / reject_invalid_cursor_
-  scanning --> scanning : next [has_remaining_input_] / emit_next_token_
-  scanning --> scanning : next [at_eof_] / emit_eof_
-  initialized --> initialized : _ [always] / on_unexpected_
-  scanning --> scanning : _ [always] / on_unexpected_
+  initialized --> initialized : scan_next [invalid_next_] / reject_invalid_next_
+  initialized --> initialized : scan_next [invalid_cursor_position_] / reject_invalid_cursor_
+  scanning --> scanning : scan_next [invalid_next_] / reject_invalid_next_
+  scanning --> scanning : scan_next [invalid_cursor_position_] / reject_invalid_cursor_
+  initialized --> scan_ready : scan_next [valid_cursor_position_] / prepare_scan_
+  scanning --> scan_ready : scan_next [valid_cursor_position_] / prepare_scan_
+  scan_ready --> scanning : completion_scan_next_ [at_eof_] / emit_eof_
+  scan_ready --> scanning : completion_scan_next_ [layout_exhausted_] / emit_layout_exhausted_unknown_
+  scan_ready --> scanning : completion_scan_next_ [starts_newline_crlf_] / emit_newline_token_width_2__
+  scan_ready --> scanning : completion_scan_next_ [starts_newline_single_] / emit_newline_token_width_1__
+  scan_ready --> scanning : completion_scan_next_ [starts_definition_operator_] / emit_definition_operator_
+  scan_ready --> scanning : completion_scan_next_ [starts_symbol______] / emit_alternation_
+  scan_ready --> scanning : completion_scan_next_ [starts_symbol______] / emit_dot_
+  scan_ready --> scanning : completion_scan_next_ [starts_symbol______] / emit_open_group_
+  scan_ready --> scanning : completion_scan_next_ [starts_symbol______] / emit_close_group_
+  scan_ready --> scanning : completion_scan_next_ [starts_quantifier_] / emit_quantifier_
+  scan_ready --> scanning : completion_scan_next_ [starts_symbol______] / emit_string_literal_
+  scan_ready --> scanning : completion_scan_next_ [starts_symbol______] / emit_character_class_
+  scan_ready --> scanning : completion_scan_next_ [starts_symbol______] / emit_braced_quantifier_
+  scan_ready --> scanning : completion_scan_next_ [parsed_rule_reference_negated_valid_] / emit_rule_reference_negated_
+  scan_ready --> scanning : completion_scan_next_ [parsed_rule_reference_negated_invalid_] / emit_unknown_
+  scan_ready --> scanning : completion_scan_next_ [parsed_rule_reference_plain_valid_] / emit_rule_reference_plain_
+  scan_ready --> scanning : completion_scan_next_ [parsed_rule_reference_plain_invalid_] / emit_unknown_
+  scan_ready --> scanning : completion_scan_next_ [starts_identifier_] / emit_identifier_
+  scan_ready --> scanning : completion_scan_next_ [always] / emit_unknown_
+  initialized --> initialized : _ [unexpected_has_error_callback_] / dispatch_unexpected_error_
+  scanning --> scanning : _ [unexpected_has_error_callback_] / dispatch_unexpected_error_
+  scan_ready --> scan_ready : _ [unexpected_has_error_callback_] / dispatch_unexpected_error_
+  initialized --> initialized : _ [always] / ignore_unexpected_
+  scanning --> scanning : _ [always] / ignore_unexpected_
+  scan_ready --> scan_ready : _ [always] / ignore_unexpected_

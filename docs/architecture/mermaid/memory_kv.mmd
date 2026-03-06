@@ -1,51 +1,101 @@
 stateDiagram-v2
   direction TB
-  [*] --> uninitialized
-  uninitialized --> initializing : reserve [always] / begin_reserve_
-  ready --> initializing : reserve [always] / begin_reserve_
-  unexpected --> initializing : reserve [always] / begin_reserve_
-  initializing --> ready : [lambda_guards_7_34] / none
-  initializing --> out_of_memory : [lambda_guards_15_45] / none
-  initializing --> errored : [lambda_guards_11_38] / none
-  ready --> allocating_sequence : allocate_sequence [always] / begin_allocate_sequence_
-  allocating_sequence --> ready : [lambda_guards_7_34] / none
-  allocating_sequence --> out_of_memory : [lambda_guards_15_45] / none
-  allocating_sequence --> errored : [lambda_guards_11_38] / none
-  ready --> allocating_slots : allocate_slots [always] / begin_allocate_slots_
-  allocating_slots --> ready : [lambda_guards_7_34] / none
-  allocating_slots --> out_of_memory : [lambda_guards_15_45] / none
-  allocating_slots --> errored : [lambda_guards_11_38] / none
-  ready --> branching_sequence : branch_sequence [always] / begin_branch_sequence_
-  branching_sequence --> ready : [lambda_guards_7_34] / none
-  branching_sequence --> out_of_memory : [lambda_guards_15_45] / none
-  branching_sequence --> errored : [lambda_guards_11_38] / none
-  ready --> freeing_sequence : free_sequence [always] / begin_free_sequence_
-  freeing_sequence --> ready : [lambda_guards_7_34] / none
-  freeing_sequence --> errored : [lambda_guards_11_38] / none
-  ready --> rolling_back_slots : rollback_slots [always] / begin_rollback_slots_
-  rolling_back_slots --> ready : [lambda_guards_7_34] / none
-  rolling_back_slots --> errored : [lambda_guards_11_38] / none
-  out_of_memory --> ready : [always] / clear_out_of_memory_
-  errored --> ready : [always] / ensure_last_error_
-  uninitialized --> uninitialized : capture_view [always] / capture_view_
-  initializing --> initializing : capture_view [always] / capture_view_
-  ready --> ready : capture_view [always] / capture_view_
-  allocating_sequence --> allocating_sequence : capture_view [always] / capture_view_
-  allocating_slots --> allocating_slots : capture_view [always] / capture_view_
-  branching_sequence --> branching_sequence : capture_view [always] / capture_view_
-  freeing_sequence --> freeing_sequence : capture_view [always] / capture_view_
-  rolling_back_slots --> rolling_back_slots : capture_view [always] / capture_view_
-  out_of_memory --> out_of_memory : capture_view [always] / capture_view_
-  errored --> errored : capture_view [always] / capture_view_
-  unexpected --> unexpected : capture_view [always] / capture_view_
-  uninitialized --> unexpected : _ [always] / on_unexpected_
-  initializing --> unexpected : _ [always] / on_unexpected_
-  ready --> unexpected : _ [always] / on_unexpected_
-  allocating_sequence --> unexpected : _ [always] / on_unexpected_
-  allocating_slots --> unexpected : _ [always] / on_unexpected_
-  branching_sequence --> unexpected : _ [always] / on_unexpected_
-  freeing_sequence --> unexpected : _ [always] / on_unexpected_
-  rolling_back_slots --> unexpected : _ [always] / on_unexpected_
-  out_of_memory --> unexpected : _ [always] / on_unexpected_
-  errored --> unexpected : _ [always] / on_unexpected_
-  unexpected --> unexpected : _ [always] / on_unexpected_
+  [*] --> ready
+  ready --> reserve_request_decision : reserve_runtime [always] / begin_reserve_
+  reserve_request_decision --> reserve_exec : completion_reserve_runtime_ [reserve_request_valid_] / none
+  reserve_request_decision --> errored : completion_reserve_runtime_ [reserve_request_invalid_] / mark_invalid_request_
+  reserve_exec --> reserve_result_decision : completion_reserve_runtime_ [always] / exec_reserve_
+  reserve_result_decision --> done : completion_reserve_runtime_ [operation_succeeded_] / none
+  reserve_result_decision --> errored : completion_reserve_runtime_ [operation_failed_with_error_] / mark_error_from_operation_
+  reserve_result_decision --> errored : completion_reserve_runtime_ [operation_failed_without_error_] / mark_backend_error_
+  ready --> allocate_sequence_request_decision : allocate_sequence_runtime [always] / begin_allocate_sequence_
+  allocate_sequence_request_decision --> allocate_sequence_exec : completion_allocate_sequence_runtime_ [allocate_sequence_request_valid_] / none
+  allocate_sequence_request_decision --> errored : completion_allocate_sequence_runtime_ [allocate_sequence_request_invalid_] / mark_invalid_request_
+  allocate_sequence_exec --> allocate_sequence_result_decision : completion_allocate_sequence_runtime_ [always] / exec_allocate_sequence_
+  allocate_sequence_result_decision --> done : completion_allocate_sequence_runtime_ [operation_succeeded_] / none
+  allocate_sequence_result_decision --> errored : completion_allocate_sequence_runtime_ [operation_failed_with_error_] / mark_error_from_operation_
+  allocate_sequence_result_decision --> errored : completion_allocate_sequence_runtime_ [operation_failed_without_error_] / mark_backend_error_
+  ready --> allocate_slots_request_decision : allocate_slots_runtime [always] / begin_allocate_slots_
+  allocate_slots_request_decision --> allocate_slots_request_shape_decision : completion_allocate_slots_runtime_ [always] / none
+  allocate_slots_request_shape_decision --> allocate_slots_request_length_decision : completion_allocate_slots_runtime_ [allocate_slots_request_shape_valid_] / none
+  allocate_slots_request_shape_decision --> errored : completion_allocate_slots_runtime_ [allocate_slots_request_shape_invalid_] / mark_invalid_request_
+  allocate_slots_request_length_decision --> allocate_slots_request_block_layout_decision : completion_allocate_slots_runtime_ [allocate_slots_request_length_valid_] / none
+  allocate_slots_request_length_decision --> errored : completion_allocate_slots_runtime_ [allocate_slots_request_length_invalid_] / mark_invalid_request_
+  allocate_slots_request_block_layout_decision --> allocate_slots_request_capacity_decision : completion_allocate_slots_runtime_ [allocate_slots_request_block_layout_valid_] / none
+  allocate_slots_request_block_layout_decision --> errored : completion_allocate_slots_runtime_ [allocate_slots_request_block_layout_invalid_] / mark_backend_error_
+  allocate_slots_request_capacity_decision --> allocate_slots_exec : completion_allocate_slots_runtime_ [allocate_slots_request_capacity_valid_] / none
+  allocate_slots_request_capacity_decision --> errored : completion_allocate_slots_runtime_ [allocate_slots_request_capacity_invalid_] / mark_out_of_memory_
+  allocate_slots_exec --> allocate_slots_result_decision : completion_allocate_slots_runtime_ [always] / exec_allocate_slots_
+  allocate_slots_result_decision --> done : completion_allocate_slots_runtime_ [operation_succeeded_] / none
+  allocate_slots_result_decision --> errored : completion_allocate_slots_runtime_ [operation_failed_with_error_] / mark_error_from_operation_
+  allocate_slots_result_decision --> errored : completion_allocate_slots_runtime_ [operation_failed_without_error_] / mark_backend_error_
+  ready --> branch_sequence_request_decision : branch_sequence_runtime [always] / begin_branch_sequence_
+  branch_sequence_request_decision --> branch_sequence_exec : completion_branch_sequence_runtime_ [branch_sequence_request_valid_] / none
+  branch_sequence_request_decision --> errored : completion_branch_sequence_runtime_ [branch_sequence_request_invalid_] / mark_invalid_request_
+  branch_sequence_exec --> branch_sequence_result_decision : completion_branch_sequence_runtime_ [always] / exec_branch_sequence_
+  branch_sequence_result_decision --> done : completion_branch_sequence_runtime_ [operation_succeeded_] / none
+  branch_sequence_result_decision --> errored : completion_branch_sequence_runtime_ [operation_failed_with_error_] / mark_error_from_operation_
+  branch_sequence_result_decision --> errored : completion_branch_sequence_runtime_ [operation_failed_without_error_] / mark_backend_error_
+  ready --> free_sequence_request_decision : free_sequence_runtime [always] / begin_free_sequence_
+  free_sequence_request_decision --> free_sequence_exec : completion_free_sequence_runtime_ [free_sequence_request_valid_] / none
+  free_sequence_request_decision --> errored : completion_free_sequence_runtime_ [free_sequence_request_invalid_] / mark_invalid_request_
+  free_sequence_exec --> free_sequence_result_decision : completion_free_sequence_runtime_ [always] / exec_free_sequence_
+  free_sequence_result_decision --> done : completion_free_sequence_runtime_ [operation_succeeded_] / none
+  free_sequence_result_decision --> errored : completion_free_sequence_runtime_ [operation_failed_with_error_] / mark_error_from_operation_
+  free_sequence_result_decision --> errored : completion_free_sequence_runtime_ [operation_failed_without_error_] / mark_backend_error_
+  ready --> rollback_slots_request_decision : rollback_slots_runtime [always] / begin_rollback_slots_
+  rollback_slots_request_decision --> rollback_slots_exec : completion_rollback_slots_runtime_ [rollback_slots_request_valid_] / none
+  rollback_slots_request_decision --> errored : completion_rollback_slots_runtime_ [rollback_slots_request_invalid_] / mark_invalid_request_
+  rollback_slots_exec --> rollback_slots_result_decision : completion_rollback_slots_runtime_ [always] / exec_rollback_slots_
+  rollback_slots_result_decision --> done : completion_rollback_slots_runtime_ [operation_succeeded_] / none
+  rollback_slots_result_decision --> errored : completion_rollback_slots_runtime_ [operation_failed_with_error_] / mark_error_from_operation_
+  rollback_slots_result_decision --> errored : completion_rollback_slots_runtime_ [operation_failed_without_error_] / mark_backend_error_
+  ready --> capture_request_decision : capture_view_runtime [always] / begin_capture_view_
+  capture_request_decision --> capture_exec : completion_capture_view_runtime_ [capture_request_valid_] / none
+  capture_request_decision --> errored : completion_capture_view_runtime_ [capture_request_invalid_] / mark_invalid_request_
+  capture_exec --> capture_result_decision : completion_capture_view_runtime_ [always] / exec_capture_view_
+  capture_result_decision --> done : completion_capture_view_runtime_ [operation_succeeded_] / none
+  capture_result_decision --> errored : completion_capture_view_runtime_ [operation_failed_with_error_] / mark_error_from_operation_
+  capture_result_decision --> errored : completion_capture_view_runtime_ [operation_failed_without_error_] / mark_backend_error_
+  done --> ready : completion_reserve_runtime_ [always] / publish_done_
+  errored --> ready : completion_reserve_runtime_ [always] / publish_error_
+  done --> ready : completion_allocate_sequence_runtime_ [always] / publish_done_
+  errored --> ready : completion_allocate_sequence_runtime_ [always] / publish_error_
+  done --> ready : completion_allocate_slots_runtime_ [always] / publish_done_
+  errored --> ready : completion_allocate_slots_runtime_ [always] / publish_error_
+  done --> ready : completion_branch_sequence_runtime_ [always] / publish_done_
+  errored --> ready : completion_branch_sequence_runtime_ [always] / publish_error_
+  done --> ready : completion_free_sequence_runtime_ [always] / publish_done_
+  errored --> ready : completion_free_sequence_runtime_ [always] / publish_error_
+  done --> ready : completion_rollback_slots_runtime_ [always] / publish_done_
+  errored --> ready : completion_rollback_slots_runtime_ [always] / publish_error_
+  done --> ready : completion_capture_view_runtime_ [always] / publish_done_
+  errored --> ready : completion_capture_view_runtime_ [always] / publish_error_
+  ready --> ready : _ [always] / on_unexpected_
+  reserve_request_decision --> ready : _ [always] / on_unexpected_
+  reserve_exec --> ready : _ [always] / on_unexpected_
+  reserve_result_decision --> ready : _ [always] / on_unexpected_
+  allocate_sequence_request_decision --> ready : _ [always] / on_unexpected_
+  allocate_sequence_exec --> ready : _ [always] / on_unexpected_
+  allocate_sequence_result_decision --> ready : _ [always] / on_unexpected_
+  allocate_slots_request_decision --> ready : _ [always] / on_unexpected_
+  allocate_slots_request_shape_decision --> ready : _ [always] / on_unexpected_
+  allocate_slots_request_length_decision --> ready : _ [always] / on_unexpected_
+  allocate_slots_request_block_layout_decision --> ready : _ [always] / on_unexpected_
+  allocate_slots_request_capacity_decision --> ready : _ [always] / on_unexpected_
+  allocate_slots_exec --> ready : _ [always] / on_unexpected_
+  allocate_slots_result_decision --> ready : _ [always] / on_unexpected_
+  branch_sequence_request_decision --> ready : _ [always] / on_unexpected_
+  branch_sequence_exec --> ready : _ [always] / on_unexpected_
+  branch_sequence_result_decision --> ready : _ [always] / on_unexpected_
+  free_sequence_request_decision --> ready : _ [always] / on_unexpected_
+  free_sequence_exec --> ready : _ [always] / on_unexpected_
+  free_sequence_result_decision --> ready : _ [always] / on_unexpected_
+  rollback_slots_request_decision --> ready : _ [always] / on_unexpected_
+  rollback_slots_exec --> ready : _ [always] / on_unexpected_
+  rollback_slots_result_decision --> ready : _ [always] / on_unexpected_
+  capture_request_decision --> ready : _ [always] / on_unexpected_
+  capture_exec --> ready : _ [always] / on_unexpected_
+  capture_result_decision --> ready : _ [always] / on_unexpected_
+  done --> ready : _ [always] / on_unexpected_
+  errored --> ready : _ [always] / on_unexpected_
