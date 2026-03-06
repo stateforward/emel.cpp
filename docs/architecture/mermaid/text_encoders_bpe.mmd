@@ -1,25 +1,72 @@
 stateDiagram-v2
   direction TB
   [*] --> initialized
-  initialized --> encoding : encode [valid_encode_] / begin_encode_
-  initialized --> errored : encode [invalid_encode_] / reject_invalid_encode_
-  done --> encoding : encode [valid_encode_] / begin_encode_
-  done --> errored : encode [invalid_encode_] / reject_invalid_encode_
-  errored --> encoding : encode [valid_encode_] / begin_encode_
-  errored --> errored : encode [invalid_encode_] / reject_invalid_encode_
-  unexpected --> encoding : encode [valid_encode_] / begin_encode_
-  unexpected --> unexpected : encode [invalid_encode_] / reject_invalid_encode_
-  encoding --> encode_decision : [always] / run_encode_
-  encode_decision --> done : [phase_ok_] / mark_done_
-  encode_decision --> errored : [phase_failed_] / ensure_last_error_
-  encoding --> unexpected : encode [always] / on_unexpected_
-  encode_decision --> unexpected : encode [always] / on_unexpected_
+  initialized --> encode_validity_decision : encode_runtime [always] / none
+  done --> encode_validity_decision : encode_runtime [always] / none
+  errored --> encode_validity_decision : encode_runtime [always] / none
+  unexpected --> encode_validity_decision : encode_runtime [always] / none
+  encode_validity_decision --> encode_vocab_sync_decision : completion_encode_runtime_ [valid_encode_] / none
+  encode_validity_decision --> errored : completion_encode_runtime_ [invalid_encode_] / reject_invalid_encode_
+  encode_validity_decision --> errored : completion_encode_runtime_ [always] / reject_invalid_encode_
+  encode_vocab_sync_decision --> encode_precheck_decision : completion_encode_runtime_ [vocab_changed_] / begin_encode_sync_vocab_
+  encode_vocab_sync_decision --> encode_precheck_decision : completion_encode_runtime_ [vocab_unchanged_] / begin_encode_
+  encode_vocab_sync_decision --> errored : completion_encode_runtime_ [always] / reject_invalid_encode_
+  encode_precheck_decision --> done : completion_encode_runtime_ [text_empty_] / mark_done_
+  encode_precheck_decision --> encode_input_policy_decision : completion_encode_runtime_ [text_non_empty_] / none
+  encode_precheck_decision --> errored : completion_encode_runtime_ [always] / ensure_last_error_
+  encode_input_policy_decision --> encode_table_prepare : completion_encode_runtime_ [preprocessed_] / prepare_tables_
+  encode_input_policy_decision --> errored : completion_encode_runtime_ [not_preprocessed_] / reject_invalid_encode_
+  encode_input_policy_decision --> errored : completion_encode_runtime_ [always] / reject_invalid_encode_
+  encode_table_prepare --> encode_path_decision : completion_encode_runtime_ [table_prepare_ok_] / none
+  encode_table_prepare --> errored : completion_encode_runtime_ [table_prepare_backend_error_] / ensure_last_error_
+  encode_table_prepare --> errored : completion_encode_runtime_ [table_prepare_invalid_argument_error_] / ensure_last_error_
+  encode_table_prepare --> errored : completion_encode_runtime_ [table_prepare_model_invalid_error_] / ensure_last_error_
+  encode_table_prepare --> errored : completion_encode_runtime_ [table_prepare_unclassified_error_code_] / ensure_last_error_
+  encode_path_decision --> encode_direct_word_policy_decision : completion_encode_runtime_ [ignore_merges_enabled_] / none
+  encode_path_decision --> encode_exec : completion_encode_runtime_ [always] / none
+  encode_direct_word_policy_decision --> encode_result_decision : completion_encode_runtime_ [direct_word_token_available_] / run_encode_ignore_merges_
+  encode_direct_word_policy_decision --> encode_merge_input_capacity_decision : completion_encode_runtime_ [always] / none
+  encode_merge_input_capacity_decision --> encode_exec : completion_encode_runtime_ [merge_symbol_capacity_within_limit_] / none
+  encode_merge_input_capacity_decision --> errored : completion_encode_runtime_ [merge_symbol_capacity_exceeded_] / reject_invalid_encode_
+  encode_merge_input_capacity_decision --> errored : completion_encode_runtime_ [always] / reject_invalid_encode_
+  encode_exec --> encode_result_decision : completion_encode_runtime_ [always] / run_encode_merge_path_
+  encode_result_decision --> done : completion_encode_runtime_ [encode_result_ok_] / mark_done_
+  encode_result_decision --> errored : completion_encode_runtime_ [encode_result_invalid_argument_error_] / ensure_last_error_
+  encode_result_decision --> errored : completion_encode_runtime_ [encode_result_backend_error_] / ensure_last_error_
+  encode_result_decision --> errored : completion_encode_runtime_ [encode_result_model_invalid_error_] / ensure_last_error_
+  encode_result_decision --> errored : completion_encode_runtime_ [encode_result_unclassified_error_code_] / ensure_last_error_
+  encode_validity_decision --> unexpected : encode_runtime [always] / on_unexpected_
+  encode_vocab_sync_decision --> unexpected : encode_runtime [always] / on_unexpected_
+  encode_precheck_decision --> unexpected : encode_runtime [always] / on_unexpected_
+  encode_input_policy_decision --> unexpected : encode_runtime [always] / on_unexpected_
+  encode_table_prepare --> unexpected : encode_runtime [always] / on_unexpected_
+  encode_path_decision --> unexpected : encode_runtime [always] / on_unexpected_
+  encode_direct_word_policy_decision --> unexpected : encode_runtime [always] / on_unexpected_
+  encode_merge_input_capacity_decision --> unexpected : encode_runtime [always] / on_unexpected_
+  encode_exec --> unexpected : encode_runtime [always] / on_unexpected_
+  encode_result_decision --> unexpected : encode_runtime [always] / on_unexpected_
   initialized --> unexpected : encoding_done [always] / on_unexpected_
   initialized --> unexpected : encoding_error [always] / on_unexpected_
-  encoding --> unexpected : encoding_done [always] / on_unexpected_
-  encoding --> unexpected : encoding_error [always] / on_unexpected_
-  encode_decision --> unexpected : encoding_done [always] / on_unexpected_
-  encode_decision --> unexpected : encoding_error [always] / on_unexpected_
+  encode_validity_decision --> unexpected : encoding_done [always] / on_unexpected_
+  encode_validity_decision --> unexpected : encoding_error [always] / on_unexpected_
+  encode_vocab_sync_decision --> unexpected : encoding_done [always] / on_unexpected_
+  encode_vocab_sync_decision --> unexpected : encoding_error [always] / on_unexpected_
+  encode_precheck_decision --> unexpected : encoding_done [always] / on_unexpected_
+  encode_precheck_decision --> unexpected : encoding_error [always] / on_unexpected_
+  encode_input_policy_decision --> unexpected : encoding_done [always] / on_unexpected_
+  encode_input_policy_decision --> unexpected : encoding_error [always] / on_unexpected_
+  encode_table_prepare --> unexpected : encoding_done [always] / on_unexpected_
+  encode_table_prepare --> unexpected : encoding_error [always] / on_unexpected_
+  encode_path_decision --> unexpected : encoding_done [always] / on_unexpected_
+  encode_path_decision --> unexpected : encoding_error [always] / on_unexpected_
+  encode_direct_word_policy_decision --> unexpected : encoding_done [always] / on_unexpected_
+  encode_direct_word_policy_decision --> unexpected : encoding_error [always] / on_unexpected_
+  encode_merge_input_capacity_decision --> unexpected : encoding_done [always] / on_unexpected_
+  encode_merge_input_capacity_decision --> unexpected : encoding_error [always] / on_unexpected_
+  encode_exec --> unexpected : encoding_done [always] / on_unexpected_
+  encode_exec --> unexpected : encoding_error [always] / on_unexpected_
+  encode_result_decision --> unexpected : encoding_done [always] / on_unexpected_
+  encode_result_decision --> unexpected : encoding_error [always] / on_unexpected_
   done --> unexpected : encoding_done [always] / on_unexpected_
   done --> unexpected : encoding_error [always] / on_unexpected_
   errored --> unexpected : encoding_done [always] / on_unexpected_
@@ -27,8 +74,16 @@ stateDiagram-v2
   unexpected --> unexpected : encoding_done [always] / on_unexpected_
   unexpected --> unexpected : encoding_error [always] / on_unexpected_
   initialized --> unexpected : _ [always] / on_unexpected_
-  encoding --> unexpected : _ [always] / on_unexpected_
-  encode_decision --> unexpected : _ [always] / on_unexpected_
+  encode_validity_decision --> unexpected : _ [always] / on_unexpected_
+  encode_vocab_sync_decision --> unexpected : _ [always] / on_unexpected_
+  encode_precheck_decision --> unexpected : _ [always] / on_unexpected_
+  encode_input_policy_decision --> unexpected : _ [always] / on_unexpected_
+  encode_table_prepare --> unexpected : _ [always] / on_unexpected_
+  encode_path_decision --> unexpected : _ [always] / on_unexpected_
+  encode_direct_word_policy_decision --> unexpected : _ [always] / on_unexpected_
+  encode_merge_input_capacity_decision --> unexpected : _ [always] / on_unexpected_
+  encode_exec --> unexpected : _ [always] / on_unexpected_
+  encode_result_decision --> unexpected : _ [always] / on_unexpected_
   done --> unexpected : _ [always] / on_unexpected_
   errored --> unexpected : _ [always] / on_unexpected_
   unexpected --> unexpected : _ [always] / on_unexpected_

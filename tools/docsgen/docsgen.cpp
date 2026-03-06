@@ -78,6 +78,40 @@ bool write_file(const fs::path & path, const std::string & content, bool check) 
   return static_cast<bool>(output);
 }
 
+bool prune_stale_generated_files(const fs::path & dir,
+                                 const std::string_view extension,
+                                 const std::unordered_set<std::string> & expected_stems,
+                                 bool check) {
+  if (!fs::exists(dir)) {
+    return true;
+  }
+
+  for (const auto & entry : fs::directory_iterator(dir)) {
+    if (!entry.is_regular_file() || entry.path().extension() != extension) {
+      continue;
+    }
+
+    const std::string stem = entry.path().stem().string();
+    if (expected_stems.contains(stem)) {
+      continue;
+    }
+
+    if (check) {
+      std::fprintf(stderr, "error: stale generated file %s\n", entry.path().string().c_str());
+      return false;
+    }
+
+    std::error_code ec;
+    fs::remove(entry.path(), ec);
+    if (ec) {
+      std::fprintf(stderr, "error: unable to remove %s\n", entry.path().string().c_str());
+      return false;
+    }
+  }
+
+  return true;
+}
+
 std::string md_link(const std::string & label, const std::string & source_path) {
   std::string link = "https://github.com/stateforward/emel.cpp/blob/main/src/";
   link += source_path;
@@ -449,6 +483,19 @@ int main(int argc, char ** argv) {
 
   std::vector<machine_spec> machines;
   register_machines(machines);
+
+  std::unordered_set<std::string> machine_names;
+  machine_names.reserve(machines.size());
+  for (const auto & spec : machines) {
+    machine_names.insert(spec.name);
+  }
+
+  if (!prune_stale_generated_files(paths.architecture_dir, ".md", machine_names, opts.check)) {
+    return 1;
+  }
+  if (!prune_stale_generated_files(paths.mermaid_dir, ".mmd", machine_names, opts.check)) {
+    return 1;
+  }
 
   for (const auto & spec : machines) {
     spec.emit(spec, paths, opts.check);

@@ -49,8 +49,6 @@ design doc: docs/designs/text/formatter.design.md
 
 
 // benchmark: designed
-// docs: disabled
-
 #include "emel/sm.hpp"
 #include "emel/text/formatter/events.hpp"
 

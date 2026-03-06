@@ -1,51 +1,91 @@
 stateDiagram-v2
   direction TB
   [*] --> uninitialized
-  uninitialized --> binding : bind [valid_bind_] / begin_bind_
-  uninitialized --> errored : bind [invalid_bind_] / reject_bind_
-  uninitialized --> errored : render [always] / reject_render_
-  uninitialized --> errored : flush [always] / reject_flush_
-  idle --> binding : bind [valid_bind_] / begin_bind_
-  idle --> errored : bind [invalid_bind_] / reject_bind_
-  idle --> rendering : render [valid_render_] / begin_render_
-  idle --> errored : render [invalid_render_] / reject_render_
-  idle --> flushing : flush [valid_flush_] / begin_flush_
-  idle --> errored : flush [invalid_flush_] / reject_flush_
-  done --> binding : bind [valid_bind_] / begin_bind_
-  done --> errored : bind [invalid_bind_] / reject_bind_
-  done --> rendering : render [valid_render_] / begin_render_
-  done --> errored : render [invalid_render_] / reject_render_
-  done --> flushing : flush [valid_flush_] / begin_flush_
-  done --> errored : flush [invalid_flush_] / reject_flush_
-  errored --> binding : bind [valid_bind_] / begin_bind_
-  errored --> errored : bind [invalid_bind_] / reject_bind_
-  errored --> rendering : render [valid_render_] / begin_render_
-  errored --> errored : render [invalid_render_] / reject_render_
-  errored --> flushing : flush [valid_flush_] / begin_flush_
-  errored --> errored : flush [invalid_flush_] / reject_flush_
-  unexpected --> binding : bind [valid_bind_] / begin_bind_
-  unexpected --> unexpected : bind [invalid_bind_] / reject_bind_
-  unexpected --> rendering : render [valid_render_] / begin_render_
-  unexpected --> unexpected : render [invalid_render_] / reject_render_
-  unexpected --> flushing : flush [valid_flush_] / begin_flush_
-  unexpected --> unexpected : flush [invalid_flush_] / reject_flush_
-  binding --> binding_decision : [always] / bind_detokenizer_
-  binding_decision --> idle : [phase_ok_] / none
-  binding_decision --> errored : [phase_failed_] / ensure_last_error_
-  rendering --> render_decision : [always] / run_render_
-  render_decision --> done : [phase_ok_] / mark_done_
-  render_decision --> errored : [phase_failed_] / ensure_last_error_
-  flushing --> flush_decision : [always] / run_flush_
-  flush_decision --> done : [phase_ok_] / mark_done_
-  flush_decision --> errored : [phase_failed_] / ensure_last_error_
+  uninitialized --> initializing : initialize_runtime [valid_initialize_] / begin_initialize_
+  uninitialized --> initialize_publish_error : initialize_runtime [invalid_initialize_] / reject_initialize_
+  uninitialized --> render_publish_error : render_runtime [always] / reject_render_
+  uninitialized --> flush_publish_error : flush_runtime [always] / reject_flush_
+  initialized --> initializing : initialize_runtime [valid_initialize_] / begin_initialize_
+  initialized --> initialize_publish_error : initialize_runtime [invalid_initialize_] / reject_initialize_
+  initialized --> rendering : render_runtime [valid_render_] / begin_render_
+  initialized --> render_publish_error : render_runtime [invalid_render_] / reject_render_
+  initialized --> flushing : flush_runtime [valid_flush_] / begin_flush_
+  initialized --> flush_publish_error : flush_runtime [invalid_flush_] / reject_flush_
+  done --> initializing : initialize_runtime [valid_initialize_] / begin_initialize_
+  done --> initialize_publish_error : initialize_runtime [invalid_initialize_] / reject_initialize_
+  done --> rendering : render_runtime [valid_render_] / begin_render_
+  done --> render_publish_error : render_runtime [invalid_render_] / reject_render_
+  done --> flushing : flush_runtime [valid_flush_] / begin_flush_
+  done --> flush_publish_error : flush_runtime [invalid_flush_] / reject_flush_
+  errored --> initializing : initialize_runtime [valid_initialize_] / begin_initialize_
+  errored --> initialize_publish_error : initialize_runtime [invalid_initialize_] / reject_initialize_
+  errored --> rendering : render_runtime [valid_render_] / begin_render_
+  errored --> render_publish_error : render_runtime [invalid_render_] / reject_render_
+  errored --> flushing : flush_runtime [valid_flush_] / begin_flush_
+  errored --> flush_publish_error : flush_runtime [invalid_flush_] / reject_flush_
+  unexpected --> initializing : initialize_runtime [valid_initialize_] / begin_initialize_
+  unexpected --> unexpected : initialize_runtime [invalid_initialize_] / reject_initialize_
+  unexpected --> rendering : render_runtime [valid_render_] / begin_render_
+  unexpected --> unexpected : render_runtime [invalid_render_] / reject_render_
+  unexpected --> flushing : flush_runtime [valid_flush_] / begin_flush_
+  unexpected --> unexpected : flush_runtime [invalid_flush_] / reject_flush_
+  initialization_decision --> initialize_publish_success : completion_initialize_runtime_ [initialize_dispatch_ok_] / commit_initialize_success_
+  initialization_decision --> initialize_publish_error : completion_initialize_runtime_ [initialize_dispatch_backend_failure_] / set_backend_error_
+  initialization_decision --> initialize_publish_error : completion_initialize_runtime_ [initialize_dispatch_reported_error_] / set_error_from_detokenizer_
+  initialization_decision --> initialize_publish_error : completion_initialize_runtime_ [always] / set_error_from_detokenizer_
+  initialize_publish_success --> initialized : completion_initialize_runtime_ [always] / publish_initialize_done_
+  initialize_publish_error --> errored : completion_initialize_runtime_ [always] / publish_initialize_error_
+  initializing --> initialization_decision : completion_initialize_runtime_ [always] / dispatch_initialize_detokenizer_
+  rendering --> render_publish_success : completion_render_runtime_ [sequence_stop_matched_] / render_sequence_already_stopped_
+  rendering --> render_dispatch_decision : completion_render_runtime_ [sequence_running_] / dispatch_render_detokenizer_
+  render_dispatch_decision --> render_result_decision : completion_render_runtime_ [render_dispatch_ok_] / none
+  render_result_decision --> render_commit_output_exec : completion_render_runtime_ [always] / none
+  render_commit_output_exec --> render_strip_decision : completion_render_runtime_ [always] / commit_render_detokenizer_output_
+  render_strip_decision --> render_strip_prefix_scan_exec : completion_render_runtime_ [strip_needed_] / none
+  render_strip_decision --> render_strip_state_exec : completion_render_runtime_ [strip_not_needed_] / none
+  render_strip_decision --> render_publish_error : completion_render_runtime_ [always] / ensure_last_error_
+  render_strip_prefix_scan_exec --> render_strip_prefix_decision : completion_render_runtime_ [always] / compute_render_leading_space_prefix_
+  render_strip_prefix_decision --> render_strip_apply_exec : completion_render_runtime_ [strip_prefix_nonzero_] / apply_render_leading_space_strip_
+  render_strip_prefix_decision --> render_strip_state_exec : completion_render_runtime_ [strip_prefix_zero_] / none
+  render_strip_prefix_decision --> render_publish_error : completion_render_runtime_ [always] / ensure_last_error_
+  render_strip_apply_exec --> render_strip_state_exec : completion_render_runtime_ [always] / none
+  render_strip_state_exec --> render_stop_match_exec : completion_render_runtime_ [always] / update_render_strip_state_
+  render_stop_match_exec --> render_finalize_decision : completion_render_runtime_ [always] / apply_render_stop_matching_
+  render_finalize_decision --> render_publish_success : completion_render_runtime_ [request_ok_] / mark_done_
+  render_finalize_decision --> render_publish_error : completion_render_runtime_ [request_failed_] / ensure_last_error_
+  render_finalize_decision --> render_publish_error : completion_render_runtime_ [always] / ensure_last_error_
+  render_dispatch_decision --> render_publish_error : completion_render_runtime_ [render_dispatch_backend_failure_] / set_backend_error_
+  render_dispatch_decision --> render_publish_error : completion_render_runtime_ [render_dispatch_reported_error_] / set_error_from_detokenizer_
+  render_dispatch_decision --> render_publish_error : completion_render_runtime_ [render_dispatch_lengths_invalid_] / set_invalid_request_
+  render_dispatch_decision --> render_publish_error : completion_render_runtime_ [always] / ensure_last_error_
+  render_publish_success --> done : completion_render_runtime_ [always] / publish_render_done_
+  render_publish_error --> errored : completion_render_runtime_ [always] / publish_render_error_
+  flushing --> flush_publish_success : completion_flush_runtime_ [flush_output_fits_] / flush_copy_sequence_buffers_
+  flushing --> flush_publish_error : completion_flush_runtime_ [flush_output_too_large_] / set_invalid_request_
+  flush_publish_success --> done : completion_flush_runtime_ [always] / publish_flush_done_
+  flush_publish_error --> errored : completion_flush_runtime_ [always] / publish_flush_error_
   uninitialized --> unexpected : _ [always] / on_unexpected_
-  binding --> unexpected : _ [always] / on_unexpected_
-  binding_decision --> unexpected : _ [always] / on_unexpected_
-  idle --> unexpected : _ [always] / on_unexpected_
+  initializing --> unexpected : _ [always] / on_unexpected_
+  initialization_decision --> unexpected : _ [always] / on_unexpected_
+  initialize_publish_success --> unexpected : _ [always] / on_unexpected_
+  initialize_publish_error --> unexpected : _ [always] / on_unexpected_
+  initialized --> unexpected : _ [always] / on_unexpected_
   rendering --> unexpected : _ [always] / on_unexpected_
-  render_decision --> unexpected : _ [always] / on_unexpected_
+  render_dispatch_decision --> unexpected : _ [always] / on_unexpected_
+  render_result_decision --> unexpected : _ [always] / on_unexpected_
+  render_commit_output_exec --> unexpected : _ [always] / on_unexpected_
+  render_strip_decision --> unexpected : _ [always] / on_unexpected_
+  render_strip_prefix_scan_exec --> unexpected : _ [always] / on_unexpected_
+  render_strip_prefix_decision --> unexpected : _ [always] / on_unexpected_
+  render_strip_apply_exec --> unexpected : _ [always] / on_unexpected_
+  render_strip_state_exec --> unexpected : _ [always] / on_unexpected_
+  render_stop_match_exec --> unexpected : _ [always] / on_unexpected_
+  render_finalize_decision --> unexpected : _ [always] / on_unexpected_
+  render_publish_success --> unexpected : _ [always] / on_unexpected_
+  render_publish_error --> unexpected : _ [always] / on_unexpected_
   flushing --> unexpected : _ [always] / on_unexpected_
-  flush_decision --> unexpected : _ [always] / on_unexpected_
+  flush_publish_success --> unexpected : _ [always] / on_unexpected_
+  flush_publish_error --> unexpected : _ [always] / on_unexpected_
   done --> unexpected : _ [always] / on_unexpected_
   errored --> unexpected : _ [always] / on_unexpected_
   unexpected --> unexpected : _ [always] / on_unexpected_

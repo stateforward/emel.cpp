@@ -1,8 +1,6 @@
 #pragma once
 
 // benchmark: kernel
-// docs: disabled
-
 #include "emel/emel.h"
 #include "emel/kernel/errors.hpp"
 #include "emel/kernel/vulkan/actions.hpp"

@@ -1,8 +1,6 @@
 #pragma once
 
 // benchmark: kernel
-// docs: disabled
-
 #include "emel/emel.h"
 #include "emel/kernel/aarch64/actions.hpp"
 #include "emel/kernel/aarch64/errors.hpp"

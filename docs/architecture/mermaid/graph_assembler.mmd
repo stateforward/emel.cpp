@@ -9,17 +9,21 @@ stateDiagram-v2
   reserved --> reserved : reserve_graph [invalid_reserve_with_dispatchable_output_] / reject_invalid_reserve_with_dispatch_
   reserved --> reserved : reserve_graph [invalid_reserve_with_output_only_] / reject_invalid_reserve_with_output_only_
   reserved --> reserved : reserve_graph [invalid_reserve_without_output_] / reject_invalid_reserve_without_output_
-  model__ --> reserve_validate_decision : completion [always] / none
-  reserve_validate_decision --> model__ : completion [reserve_validate_done_] / none
-  reserve_validate_decision --> reserve_dispatch_decision : completion [reserve_validate_failed_] / none
-  model__ --> reserve_build_decision : completion [always] / none
-  reserve_build_decision --> model__ : completion [reserve_build_done_] / none
-  reserve_build_decision --> reserve_dispatch_decision : completion [reserve_build_failed_] / none
-  model__ --> reserve_alloc_decision : completion [always] / none
-  reserve_alloc_decision --> reserve_dispatch_decision : completion [reserve_alloc_done_] / commit_reserve_result_
-  reserve_alloc_decision --> reserve_dispatch_decision : completion [reserve_alloc_failed_] / none
-  reserve_dispatch_decision --> reserved : completion [reserve_phase_ok_] / dispatch_reserve_done_
-  reserve_dispatch_decision --> uninitialized : completion [reserve_phase_failed_] / dispatch_reserve_error_
+  model__ --> reserve_validate_decision : completion_reserve_graph_ [always] / none
+  reserve_validate_decision --> model__ : completion_reserve_graph_ [reserve_validate_done_] / none
+  reserve_validate_decision --> reserve_dispatch_decision : completion_reserve_graph_ [reserve_validate_failed_] / none
+  model__ --> reserve_build_decision : completion_reserve_graph_ [always] / none
+  reserve_build_decision --> model__ : completion_reserve_graph_ [reserve_build_done_] / none
+  reserve_build_decision --> reserve_dispatch_decision : completion_reserve_graph_ [reserve_build_failed_] / none
+  model__ --> reserve_alloc_decision : completion_reserve_graph_ [always] / none
+  reserve_alloc_decision --> reserve_dispatch_decision : completion_reserve_graph_ [reserve_alloc_done_] / commit_reserve_result_
+  reserve_alloc_decision --> reserve_dispatch_decision : completion_reserve_graph_ [reserve_alloc_failed_] / none
+  reserve_dispatch_decision --> reserved : completion_reserve_graph_ [reserve_error_none_] / dispatch_reserve_done_
+  reserve_dispatch_decision --> uninitialized : completion_reserve_graph_ [reserve_error_invalid_request_] / dispatch_reserve_error_
+  reserve_dispatch_decision --> uninitialized : completion_reserve_graph_ [reserve_error_capacity_] / dispatch_reserve_error_
+  reserve_dispatch_decision --> uninitialized : completion_reserve_graph_ [reserve_error_internal_error_] / dispatch_reserve_error_
+  reserve_dispatch_decision --> uninitialized : completion_reserve_graph_ [reserve_error_untracked_] / dispatch_reserve_error_
+  reserve_dispatch_decision --> uninitialized : completion_reserve_graph_ [reserve_error_unknown_] / dispatch_reserve_error_
   reserved --> model__ : assemble_graph [valid_assemble_] / begin_assemble_
   reserved --> reserved : assemble_graph [invalid_assemble_with_dispatchable_output_] / reject_invalid_assemble_with_dispatch_
   reserved --> reserved : assemble_graph [invalid_assemble_with_output_only_] / reject_invalid_assemble_with_output_only_
@@ -28,21 +32,25 @@ stateDiagram-v2
   uninitialized --> uninitialized : assemble_graph [invalid_assemble_with_dispatchable_output_] / reject_invalid_assemble_with_dispatch_
   uninitialized --> uninitialized : assemble_graph [invalid_assemble_with_output_only_] / reject_invalid_assemble_with_output_only_
   uninitialized --> uninitialized : assemble_graph [invalid_assemble_without_output_] / reject_invalid_assemble_without_output_
-  model__ --> assemble_validate_decision : completion [always] / none
-  assemble_validate_decision --> model__ : completion [assemble_validate_done_] / none
-  assemble_validate_decision --> assemble_dispatch_decision : completion [assemble_validate_failed_] / none
-  model__ --> reuse_decision : completion [always] / none
-  reuse_decision --> assemble_dispatch_decision : completion [reuse_decision_reused_] / commit_assemble_reuse_result_
-  reuse_decision --> model__ : completion [reuse_decision_rebuild_] / none
-  reuse_decision --> assemble_dispatch_decision : completion [reuse_decision_failed_] / none
-  model__ --> assemble_build_decision : completion [always] / none
-  assemble_build_decision --> model__ : completion [assemble_build_done_] / none
-  assemble_build_decision --> assemble_dispatch_decision : completion [assemble_build_failed_] / none
-  model__ --> assemble_alloc_decision : completion [always] / none
-  assemble_alloc_decision --> assemble_dispatch_decision : completion [assemble_alloc_done_] / commit_assemble_rebuild_result_
-  assemble_alloc_decision --> assemble_dispatch_decision : completion [assemble_alloc_failed_] / none
-  assemble_dispatch_decision --> reserved : completion [assemble_phase_ok_] / dispatch_assemble_done_
-  assemble_dispatch_decision --> reserved : completion [assemble_phase_failed_] / dispatch_assemble_error_
+  model__ --> assemble_validate_decision : completion_assemble_graph_ [always] / none
+  assemble_validate_decision --> model__ : completion_assemble_graph_ [assemble_validate_done_] / none
+  assemble_validate_decision --> assemble_dispatch_decision : completion_assemble_graph_ [assemble_validate_failed_] / none
+  model__ --> reuse_decision : completion_assemble_graph_ [always] / none
+  reuse_decision --> assemble_dispatch_decision : completion_assemble_graph_ [reuse_decision_reused_] / commit_assemble_reuse_result_
+  reuse_decision --> model__ : completion_assemble_graph_ [reuse_decision_rebuild_] / none
+  reuse_decision --> assemble_dispatch_decision : completion_assemble_graph_ [reuse_decision_failed_] / none
+  model__ --> assemble_build_decision : completion_assemble_graph_ [always] / none
+  assemble_build_decision --> model__ : completion_assemble_graph_ [assemble_build_done_] / none
+  assemble_build_decision --> assemble_dispatch_decision : completion_assemble_graph_ [assemble_build_failed_] / none
+  model__ --> assemble_alloc_decision : completion_assemble_graph_ [always] / none
+  assemble_alloc_decision --> assemble_dispatch_decision : completion_assemble_graph_ [assemble_alloc_done_] / commit_assemble_rebuild_result_
+  assemble_alloc_decision --> assemble_dispatch_decision : completion_assemble_graph_ [assemble_alloc_failed_] / none
+  assemble_dispatch_decision --> reserved : completion_assemble_graph_ [assemble_error_none_] / dispatch_assemble_done_
+  assemble_dispatch_decision --> reserved : completion_assemble_graph_ [assemble_error_invalid_request_] / dispatch_assemble_error_
+  assemble_dispatch_decision --> reserved : completion_assemble_graph_ [assemble_error_capacity_] / dispatch_assemble_error_
+  assemble_dispatch_decision --> reserved : completion_assemble_graph_ [assemble_error_internal_error_] / dispatch_assemble_error_
+  assemble_dispatch_decision --> reserved : completion_assemble_graph_ [assemble_error_untracked_] / dispatch_assemble_error_
+  assemble_dispatch_decision --> reserved : completion_assemble_graph_ [assemble_error_unknown_] / dispatch_assemble_error_
   uninitialized --> uninitialized : _ [always] / on_unexpected_
   reserved --> reserved : _ [always] / on_unexpected_
   reserve_validate_decision --> reserve_dispatch_decision : _ [always] / on_unexpected_
