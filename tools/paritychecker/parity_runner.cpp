@@ -14,11 +14,9 @@
 
 #include "emel/gbnf/rule_parser/events.hpp"
 #include "emel/gbnf/rule_parser/sm.hpp"
-#include "emel/kernel/aarch64/context.hpp"
-#include "emel/kernel/aarch64/detail.hpp"
+#include "emel/kernel/aarch64/sm.hpp"
 #include "emel/kernel/events.hpp"
-#include "emel/kernel/x86_64/context.hpp"
-#include "emel/kernel/x86_64/detail.hpp"
+#include "emel/kernel/x86_64/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/text/jinja/formatter/sm.hpp"
 #include "emel/text/jinja/parser/detail.hpp"
@@ -1201,14 +1199,14 @@ bool run_backend_kernel_parity(const char * backend, exec_fn exec) {
 }
 
 int run_kernel_parity(const emel::paritychecker::parity_options &) {
-  const emel::kernel::x86_64::action::context x86_ctx{};
-  const emel::kernel::aarch64::action::context aarch_ctx{};
+  emel::kernel::x86_64::sm x86_machine{};
+  emel::kernel::aarch64::sm aarch_machine{};
 
   auto x86_exec = [&](const auto & ev) {
-    return emel::kernel::x86_64::detail::execute_request(ev, x86_ctx);
+    return x86_machine.process_event(ev);
   };
   auto aarch_exec = [&](const auto & ev) {
-    return emel::kernel::aarch64::detail::execute_request(ev, aarch_ctx);
+    return aarch_machine.process_event(ev);
   };
 
   const bool x86_ok = run_backend_kernel_parity("x86_64", x86_exec);

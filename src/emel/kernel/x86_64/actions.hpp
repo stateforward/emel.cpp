@@ -169,7 +169,7 @@ inline bool can_use_avx2(const request_type & request, const bool avx2_available
   const bool base_supported =
       avx2_available &&
       avx2_intrinsics_compiled &&
-      ::emel::kernel::detail::can_execute_scalar(request) &&
+      ::emel::kernel::detail::can_run_backend_request(request) &&
       ::emel::kernel::detail::dtype_code(request.src0.type) ==
           ::emel::kernel::detail::dtype_f32 &&
       ::emel::kernel::detail::dtype_code(request.dst.type) ==
@@ -696,6 +696,13 @@ inline void mark_error(const dispatch_event_type & ev, context & ctx,
   ev.ctx.err = err;
 }
 
+struct mark_done_op {
+  template <class dispatch_event_type>
+  void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
+    mark_done(ev, ctx);
+  }
+};
+
 struct exec_dispatch {
   void operator()(const ::emel::kernel::x86_64::event::dispatch_request & ev,
                   context & ctx) const noexcept {
@@ -760,6 +767,18 @@ using exec_simd_op_unary_neg_t =
     detail::exec_simd_unary_op<::emel::kernel::event::unary_subop::neg>;
 using exec_simd_op_unary_relu_t =
     detail::exec_simd_unary_op<::emel::kernel::event::unary_subop::relu>;
+using exec_scalar_op_unary_abs_t = ::emel::kernel::detail::exec_scalar_unary_op<
+    ::emel::kernel::x86_64::event::dispatch_op_unary, context, detail::mark_done_op,
+    ::emel::kernel::event::unary_subop::abs>;
+using exec_scalar_op_unary_neg_t = ::emel::kernel::detail::exec_scalar_unary_op<
+    ::emel::kernel::x86_64::event::dispatch_op_unary, context, detail::mark_done_op,
+    ::emel::kernel::event::unary_subop::neg>;
+using exec_scalar_op_unary_relu_t = ::emel::kernel::detail::exec_scalar_unary_op<
+    ::emel::kernel::x86_64::event::dispatch_op_unary, context, detail::mark_done_op,
+    ::emel::kernel::event::unary_subop::relu>;
+using exec_scalar_op_unary_exp_t = ::emel::kernel::detail::exec_scalar_unary_op<
+    ::emel::kernel::x86_64::event::dispatch_op_unary, context, detail::mark_done_op,
+    ::emel::kernel::event::unary_subop::exp>;
 
 #define EMEL_KERNEL_DECLARE_REJECT_TYPE(op_name)                                      \
   using reject_invalid_##op_name##_t =                                                \
@@ -790,6 +809,10 @@ inline constexpr exec_simd_op_mul_mat_t exec_simd_op_mul_mat{};
 inline constexpr exec_simd_op_unary_abs_t exec_simd_op_unary_abs{};
 inline constexpr exec_simd_op_unary_neg_t exec_simd_op_unary_neg{};
 inline constexpr exec_simd_op_unary_relu_t exec_simd_op_unary_relu{};
+inline constexpr exec_scalar_op_unary_abs_t exec_scalar_op_unary_abs{};
+inline constexpr exec_scalar_op_unary_neg_t exec_scalar_op_unary_neg{};
+inline constexpr exec_scalar_op_unary_relu_t exec_scalar_op_unary_relu{};
+inline constexpr exec_scalar_op_unary_exp_t exec_scalar_op_unary_exp{};
 
 #define EMEL_KERNEL_DEFINE_RUN_ACTION(op_name) \
   inline constexpr exec_##op_name##_t exec_##op_name{};

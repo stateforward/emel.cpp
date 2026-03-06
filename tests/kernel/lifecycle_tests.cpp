@@ -483,15 +483,15 @@ TEST_CASE("kernel_backends_cover_all_ggml_ops") {
 #define EMEL_KERNEL_CHECK_ALL_BACKENDS(op_name)                                             \
   {                                                                                           \
     const auto ev = make_smoke_op_event<emel::kernel::event::op_name>();                     \
-    const bool scalar_supported = emel::kernel::detail::can_execute_scalar(ev);              \
-    CHECK(x86_64_machine.process_event(ev) == scalar_supported);                              \
-    CHECK(aarch64_machine.process_event(ev) == scalar_supported);                             \
+    const bool backend_supported = emel::kernel::detail::can_run_backend_request(ev);         \
+    CHECK(x86_64_machine.process_event(ev) == backend_supported);                             \
+    CHECK(aarch64_machine.process_event(ev) == backend_supported);                            \
     CHECK(wasm_machine.process_event(ev));                                                    \
     CHECK(cuda_machine.process_event(ev));                                                    \
     CHECK(metal_machine.process_event(ev));                                                   \
     CHECK(vulkan_machine.process_event(ev));                                                  \
-    CHECK(kernel_machine.process_event(ev) == scalar_supported);                              \
-    CHECK(any_machine.process_event(ev) == scalar_supported);                                 \
+    CHECK(kernel_machine.process_event(ev) == backend_supported);                             \
+    CHECK(any_machine.process_event(ev) == backend_supported);                                \
   }
   EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_CHECK_ALL_BACKENDS)
 #undef EMEL_KERNEL_CHECK_ALL_BACKENDS

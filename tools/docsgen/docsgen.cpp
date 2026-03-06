@@ -86,6 +86,8 @@ bool prune_stale_generated_files(const fs::path & dir,
     return true;
   }
 
+  // Generated architecture outputs are intentionally flat directories; this prune pass is
+  // non-recursive and only removes unexpected files directly under `dir`.
   for (const auto & entry : fs::directory_iterator(dir)) {
     if (!entry.is_regular_file() || entry.path().extension() != extension) {
       continue;
