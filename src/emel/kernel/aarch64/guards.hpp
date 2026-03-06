@@ -55,9 +55,28 @@ struct simd_op_unary_subop {
   }
 };
 
+template <::emel::kernel::event::unary_subop subop>
+struct valid_op_unary_subop {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_unary & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    if (!::emel::kernel::detail::can_run_unary_subop(ev.request)) {
+      return false;
+    }
+    return !simd_op<::emel::kernel::aarch64::event::dispatch_op_unary>{}(ev, ctx) &&
+           unary_subop_is<subop>{}(ev, ctx);
+  }
+};
+
 using simd_op_unary_abs = simd_op_unary_subop<::emel::kernel::event::unary_subop::abs>;
 using simd_op_unary_neg = simd_op_unary_subop<::emel::kernel::event::unary_subop::neg>;
 using simd_op_unary_relu = simd_op_unary_subop<::emel::kernel::event::unary_subop::relu>;
+using valid_op_unary_abs = valid_op_unary_subop<::emel::kernel::event::unary_subop::abs>;
+using valid_op_unary_neg = valid_op_unary_subop<::emel::kernel::event::unary_subop::neg>;
+using valid_op_unary_relu = valid_op_unary_subop<::emel::kernel::event::unary_subop::relu>;
+using valid_op_unary_exp = valid_op_unary_subop<::emel::kernel::event::unary_subop::exp>;
 
 #define EMEL_KERNEL_DECLARE_GUARD_ALIAS(op_name)                                 \
   using simd_##op_name =                                                         \

@@ -363,3 +363,47 @@ TEST_CASE("kernel_aarch64_rejects_unimplemented_ops") {
   aarch64_sm machine{};
   CHECK_FALSE(machine.process_event(sum_ev));
 }
+
+TEST_CASE("kernel_aarch64_unary_subop_scalar_paths") {
+  float src[4] = {-2.0f, -1.0f, 1.0f, 2.0f};
+  float dst[4] = {};
+
+  emel::kernel::event::op_unary unary_ev{
+      .src0 = make_src(src, dtype::f32, 4),
+      .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
+      .subop = emel::kernel::event::unary_subop::abs,
+  };
+
+  aarch64_sm scalar_machine{emel::kernel::aarch64::action::context{false, 0}};
+
+  CHECK(scalar_machine.process_event(unary_ev));
+  CHECK(dst[0] == doctest::Approx(2.0f));
+  CHECK(dst[1] == doctest::Approx(1.0f));
+  CHECK(dst[2] == doctest::Approx(1.0f));
+  CHECK(dst[3] == doctest::Approx(2.0f));
+
+  unary_ev.subop = emel::kernel::event::unary_subop::neg;
+  CHECK(scalar_machine.process_event(unary_ev));
+  CHECK(dst[0] == doctest::Approx(2.0f));
+  CHECK(dst[1] == doctest::Approx(1.0f));
+  CHECK(dst[2] == doctest::Approx(-1.0f));
+  CHECK(dst[3] == doctest::Approx(-2.0f));
+
+  unary_ev.subop = emel::kernel::event::unary_subop::relu;
+  CHECK(scalar_machine.process_event(unary_ev));
+  CHECK(dst[0] == doctest::Approx(0.0f));
+  CHECK(dst[1] == doctest::Approx(0.0f));
+  CHECK(dst[2] == doctest::Approx(1.0f));
+  CHECK(dst[3] == doctest::Approx(2.0f));
+
+  unary_ev.subop = emel::kernel::event::unary_subop::exp;
+  CHECK(scalar_machine.process_event(unary_ev));
+  CHECK(dst[0] == doctest::Approx(std::exp(-2.0f)));
+  CHECK(dst[1] == doctest::Approx(std::exp(-1.0f)));
+  CHECK(dst[2] == doctest::Approx(std::exp(1.0f)));
+  CHECK(dst[3] == doctest::Approx(std::exp(2.0f)));
+
+  unary_ev.subop = emel::kernel::event::unary_subop::tanh;
+  CHECK_FALSE(scalar_machine.process_event(unary_ev));
+}

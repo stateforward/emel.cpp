@@ -407,24 +407,22 @@ inline bool run_unary(const request_type & request, op_type op) noexcept {
   return shape_ok;
 }
 
-template <class request_type, class op_type>
-inline bool run_unary_if_none(const request_type &, op_type) noexcept {
-  return true;
-}
+inline constexpr uint8_t unary_subop_abs = 0u;
+inline constexpr uint8_t unary_subop_neg = 2u;
+inline constexpr uint8_t unary_subop_relu = 6u;
+inline constexpr uint8_t unary_subop_exp = 13u;
 
-template <class request_type, class op_type>
-inline bool run_unary_if_some(const request_type &request, op_type op) noexcept {
-  return run_unary(request, op);
-}
-
-template <class request_type, class op_type>
-inline bool run_unary_if(const request_type &request, op_type op, const bool active) noexcept {
-  using unary_if_handler_t = bool (*)(const request_type &, op_type) noexcept;
-  const unary_if_handler_t unary_if_handlers[2] = {
-      run_unary_if_none<request_type, op_type>,
-      run_unary_if_some<request_type, op_type>,
-  };
-  return unary_if_handlers[static_cast<size_t>(active)](request, op);
+template <uint8_t subop_code, class request_type>
+inline void execute_scalar_unary_subop_unchecked(const request_type & request) noexcept {
+  if constexpr (subop_code == unary_subop_abs) {
+    (void) run_unary(request, [](const float v) { return std::fabs(v); });
+  } else if constexpr (subop_code == unary_subop_neg) {
+    (void) run_unary(request, [](const float v) { return -v; });
+  } else if constexpr (subop_code == unary_subop_relu) {
+    (void) run_unary(request, [](const float v) { return std::max(0.0f, v); });
+  } else if constexpr (subop_code == unary_subop_exp) {
+    (void) run_unary(request, [](const float v) { return std::exp(v); });
+  }
 }
 
 template <class request_type>
@@ -532,23 +530,6 @@ inline bool run_soft_max(const request_type & request) noexcept {
 }
 
 template <class request_type>
-inline bool run_unary_subop(const request_type & request) noexcept {
-  const auto subop = static_cast<uint8_t>(request.subop);
-  const bool is_abs = subop == 0u;
-  const bool is_neg = subop == 2u;
-  const bool is_relu = subop == 6u;
-  const bool is_exp = subop == 13u;
-  const bool supported = is_abs || is_neg || is_relu || is_exp;
-
-  const bool abs_ok = run_unary_if(request, [](const float v) { return std::fabs(v); }, is_abs);
-  const bool neg_ok = run_unary_if(request, [](const float v) { return -v; }, is_neg);
-  const bool relu_ok = run_unary_if(request, [](const float v) { return std::max(0.0f, v); },
-                                    is_relu);
-  const bool exp_ok = run_unary_if(request, [](const float v) { return std::exp(v); }, is_exp);
-  return supported && abs_ok && neg_ok && relu_ok && exp_ok;
-}
-
-template <class request_type>
 inline bool can_run_copy(const request_type & request) noexcept {
   return tensor_element_count(request.dst) == tensor_element_count(request.src0);
 }
@@ -590,7 +571,8 @@ inline bool can_run_soft_max(const request_type & request) noexcept {
 template <class request_type>
 inline bool can_run_unary_subop(const request_type & request) noexcept {
   const auto subop = static_cast<uint8_t>(request.subop);
-  const bool supported_subop = subop == 0 || subop == 2 || subop == 6 || subop == 13;
+  const bool supported_subop = subop == unary_subop_abs || subop == unary_subop_neg ||
+                               subop == unary_subop_relu || subop == unary_subop_exp;
   return supported_subop && can_run_unary(request);
 }
 
@@ -621,7 +603,7 @@ inline bool can_execute_scalar(const request_type & request) noexcept {
   } else if constexpr (std::is_same_v<request_type, event::op_soft_max>) {
     return can_run_soft_max(request);
   } else if constexpr (std::is_same_v<request_type, event::op_unary>) {
-    return can_run_unary_subop(request);
+    return false;
   }
   return false;
 }
@@ -652,20 +634,15 @@ inline void execute_scalar_unchecked(const request_type & request) noexcept {
     (void) run_mul_mat(request);
   } else if constexpr (std::is_same_v<request_type, event::op_soft_max>) {
     (void) run_soft_max(request);
-  } else if constexpr (std::is_same_v<request_type, event::op_unary>) {
-    (void) run_unary_subop(request);
   }
 }
 
 template <class request_type>
 inline bool execute_scalar(const request_type & request) noexcept {
   const bool can_execute = can_execute_scalar(request);
-  using exec_handler_t = void (*)(const request_type &) noexcept;
-  const exec_handler_t exec_handlers[2] = {
-      [](const request_type &) noexcept {},
-      execute_scalar_unchecked<request_type>,
-  };
-  exec_handlers[static_cast<size_t>(can_execute)](request);
+  if (can_execute) {
+    execute_scalar_unchecked(request);
+  }
   return can_execute;
 }
 
