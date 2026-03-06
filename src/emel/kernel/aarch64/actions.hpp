@@ -118,7 +118,7 @@ inline bool can_use_neon(const request_type & request, const bool neon_available
   }
 
   const bool base_supported = neon_available &&
-      ::emel::kernel::detail::can_execute_scalar(request) &&
+      ::emel::kernel::detail::can_run_backend_request(request) &&
       ::emel::kernel::detail::dtype_code(request.src0.type) ==
           ::emel::kernel::detail::dtype_f32 &&
       ::emel::kernel::detail::dtype_code(request.dst.type) ==
@@ -578,6 +578,13 @@ inline void mark_error(const dispatch_event_type & ev, context & ctx,
   ev.ctx.err = err;
 }
 
+struct mark_done_op {
+  template <class dispatch_event_type>
+  void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
+    mark_done(ev, ctx);
+  }
+};
+
 struct exec_dispatch {
   void operator()(const ::emel::kernel::aarch64::event::dispatch_request & ev,
                   context & ctx) const noexcept {
@@ -606,16 +613,6 @@ struct exec_simd_unary_op {
   void operator()(const ::emel::kernel::aarch64::event::dispatch_op_unary & ev,
                   context & ctx) const noexcept {
     ::emel::kernel::aarch64::detail::execute_simd_unary_subop_unchecked<subop>(ev.request);
-    detail::mark_done(ev, ctx);
-  }
-};
-
-template <::emel::kernel::event::unary_subop subop>
-struct exec_scalar_unary_op {
-  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_unary & ev,
-                  context & ctx) const noexcept {
-    ::emel::kernel::detail::execute_scalar_unary_subop_unchecked<static_cast<uint8_t>(subop)>(
-        ev.request);
     detail::mark_done(ev, ctx);
   }
 };
@@ -652,14 +649,18 @@ using exec_simd_op_unary_neg_t =
     detail::exec_simd_unary_op<::emel::kernel::event::unary_subop::neg>;
 using exec_simd_op_unary_relu_t =
     detail::exec_simd_unary_op<::emel::kernel::event::unary_subop::relu>;
-using exec_scalar_op_unary_abs_t =
-    detail::exec_scalar_unary_op<::emel::kernel::event::unary_subop::abs>;
-using exec_scalar_op_unary_neg_t =
-    detail::exec_scalar_unary_op<::emel::kernel::event::unary_subop::neg>;
-using exec_scalar_op_unary_relu_t =
-    detail::exec_scalar_unary_op<::emel::kernel::event::unary_subop::relu>;
-using exec_scalar_op_unary_exp_t =
-    detail::exec_scalar_unary_op<::emel::kernel::event::unary_subop::exp>;
+using exec_scalar_op_unary_abs_t = ::emel::kernel::detail::exec_scalar_unary_op<
+    ::emel::kernel::aarch64::event::dispatch_op_unary, context, detail::mark_done_op,
+    ::emel::kernel::event::unary_subop::abs>;
+using exec_scalar_op_unary_neg_t = ::emel::kernel::detail::exec_scalar_unary_op<
+    ::emel::kernel::aarch64::event::dispatch_op_unary, context, detail::mark_done_op,
+    ::emel::kernel::event::unary_subop::neg>;
+using exec_scalar_op_unary_relu_t = ::emel::kernel::detail::exec_scalar_unary_op<
+    ::emel::kernel::aarch64::event::dispatch_op_unary, context, detail::mark_done_op,
+    ::emel::kernel::event::unary_subop::relu>;
+using exec_scalar_op_unary_exp_t = ::emel::kernel::detail::exec_scalar_unary_op<
+    ::emel::kernel::aarch64::event::dispatch_op_unary, context, detail::mark_done_op,
+    ::emel::kernel::event::unary_subop::exp>;
 
 #define EMEL_KERNEL_DECLARE_REJECT_TYPE(op_name)                                      \
   using reject_invalid_##op_name##_t =                                                \

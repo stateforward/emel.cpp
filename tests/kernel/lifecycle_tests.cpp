@@ -79,14 +79,6 @@ void check_backend_op_paths(machine_type & machine,
   CHECK_FALSE(machine.process_event(op_soft_max_invalid));
 }
 
-template <class event_type>
-bool smoke_event_supported_by_backend(const event_type & ev) {
-  if constexpr (std::is_same_v<event_type, emel::kernel::event::op_unary>) {
-    return emel::kernel::detail::can_run_unary_subop(ev);
-  }
-  return emel::kernel::detail::can_execute_scalar(ev);
-}
-
 }  // namespace
 
 TEST_CASE("kernel_backends_accept_dispatch_event") {
@@ -491,7 +483,7 @@ TEST_CASE("kernel_backends_cover_all_ggml_ops") {
 #define EMEL_KERNEL_CHECK_ALL_BACKENDS(op_name)                                             \
   {                                                                                           \
     const auto ev = make_smoke_op_event<emel::kernel::event::op_name>();                     \
-    const bool backend_supported = smoke_event_supported_by_backend(ev);                      \
+    const bool backend_supported = emel::kernel::detail::can_run_backend_request(ev);         \
     CHECK(x86_64_machine.process_event(ev) == backend_supported);                             \
     CHECK(aarch64_machine.process_event(ev) == backend_supported);                            \
     CHECK(wasm_machine.process_event(ev));                                                    \

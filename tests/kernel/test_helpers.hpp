@@ -86,6 +86,10 @@ inline event_type make_smoke_op_event() {
     ev.dst = make_dst(dst, dtype::f32, 4, 2);
   }
 
+  if constexpr (std::is_same_v<event_type, emel::kernel::event::op_unary>) {
+    ev.subop = emel::kernel::event::unary_subop::abs;
+  }
+
   return ev;
 }
 

@@ -425,6 +425,31 @@ inline void execute_scalar_unary_subop_unchecked(const request_type & request) n
   }
 }
 
+template <class dispatch_event_type, class context_type, class mark_done_type,
+          ::emel::kernel::event::unary_subop subop>
+struct exec_scalar_unary_op {
+  void operator()(const dispatch_event_type & ev, context_type & ctx) const noexcept {
+    execute_scalar_unary_subop_unchecked<static_cast<uint8_t>(subop)>(ev.request);
+    mark_done_type{}(ev, ctx);
+  }
+};
+
+template <class dispatch_event_type, class context_type, class simd_guard_type,
+          class unary_subop_guard_type>
+struct simd_unary_subop_guard {
+  bool operator()(const dispatch_event_type & ev, const context_type & ctx) const noexcept {
+    return simd_guard_type{}(ev, ctx) && unary_subop_guard_type{}(ev, ctx);
+  }
+};
+
+template <class dispatch_event_type, class context_type, class valid_guard_type,
+          class unary_subop_guard_type>
+struct valid_unary_subop_guard {
+  bool operator()(const dispatch_event_type & ev, const context_type & ctx) const noexcept {
+    return valid_guard_type{}(ev, ctx) && unary_subop_guard_type{}(ev, ctx);
+  }
+};
+
 template <class request_type>
 inline bool run_mul_mat(const request_type & request) noexcept {
   const uint64_t k = request.src0.ne[0];
@@ -606,6 +631,14 @@ inline bool can_execute_scalar(const request_type & request) noexcept {
     return false;
   }
   return false;
+}
+
+template <class request_type>
+inline bool can_run_backend_request(const request_type & request) noexcept {
+  if constexpr (std::is_same_v<request_type, event::op_unary>) {
+    return can_run_unary_subop(request);
+  }
+  return can_execute_scalar(request);
 }
 
 template <class request_type>

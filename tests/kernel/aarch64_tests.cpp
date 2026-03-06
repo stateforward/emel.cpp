@@ -206,6 +206,20 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
   add_ev.src1 = make_src(rhs, dtype::f32, 4);
   add_ev.src0.type = dtype::q4_0;
   CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(add_ev, true));
+
+  emel::kernel::event::op_unary unary_ev{
+      .src0 = make_src(lhs, dtype::f32, 4),
+      .dst = make_dst(dst, dtype::f32, 4),
+      .nth = 1,
+      .subop = emel::kernel::event::unary_subop::relu,
+  };
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(emel::kernel::aarch64::detail::can_use_neon(unary_ev, true));
+#else
+  CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(unary_ev, true));
+#endif
+  unary_ev.subop = emel::kernel::event::unary_subop::exp;
+  CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(unary_ev, true));
 }
 
 TEST_CASE("kernel_aarch64_detail_helper_edge_paths") {
