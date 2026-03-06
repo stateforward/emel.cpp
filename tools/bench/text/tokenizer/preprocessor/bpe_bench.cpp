@@ -14,6 +14,7 @@ namespace {
 using tokenizer_pre = emel::model::data::tokenizer_pre;
 using emel::bench::tokenizer_preprocessor::fragment;
 using emel::bench::tokenizer_preprocessor::fragment_kind;
+using emel::bench::tokenizer_preprocessor::k_error_none;
 using emel::bench::tokenizer_preprocessor::k_fragment_capacity;
 using emel::bench::tokenizer_preprocessor::reference_fragments;
 
@@ -76,10 +77,10 @@ void ensure_preprocessor_bpe_parity(const emel::model::data::vocab & vocab,
   emel::text::tokenizer::preprocessor::bpe::sm machine{};
   std::array<fragment, k_fragment_capacity> fragments = {};
   size_t count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = k_error_none;
   if (!emel::bench::tokenizer_preprocessor::collect_emel_fragments(
           machine, vocab, text, false, fragments, count, err) ||
-      err != EMEL_OK) {
+      err != k_error_none) {
     std::fprintf(stderr, "error: preprocessor failed for parity check: %d\n", err);
     std::abort();
   }
@@ -123,7 +124,7 @@ void append_emel_tokenizer_preprocessor_bpe_cases(std::vector<result> & results,
     emel::text::tokenizer::preprocessor::bpe::sm machine{};
     std::array<fragment, k_fragment_capacity> fragments = {};
     size_t count = 0;
-    int32_t err = EMEL_OK;
+    int32_t err = k_error_none;
 
     auto fn = [&]() {
       (void)emel::bench::tokenizer_preprocessor::collect_emel_fragments(

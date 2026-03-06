@@ -5,6 +5,7 @@
 #include "emel/error/error.hpp"
 #include "emel/graph/errors.hpp"
 #include "emel/graph/events.hpp"
+#include "emel/graph/guards.hpp"
 #include "emel/graph/sm.hpp"
 
 namespace {
@@ -225,4 +226,41 @@ TEST_CASE("graph_machine_dispatches_invalid_compute_error") {
   CHECK(compute_output.reused_topology == 0u);
   CHECK(compute_output.outputs_produced == 0);
   CHECK(compute_output.graph_reused == 0u);
+}
+
+TEST_CASE("graph_compute_error_guard_classification") {
+  emel::graph::action::context ctx{};
+  emel::graph::event::compute_output output{};
+  compute_callbacks callbacks{};
+  emel::graph::event::compute request{
+    .output_out = &output,
+    .dispatch_done = {&callbacks, compute_callbacks::on_done},
+    .dispatch_error = {&callbacks, compute_callbacks::on_error},
+  };
+  emel::graph::event::compute_ctx phase_ctx{};
+  emel::graph::event::compute_graph ev{request, phase_ctx};
+
+  phase_ctx.err = emel::error::cast(emel::graph::error::none);
+  CHECK(emel::graph::guard::compute_error_none{}(ev, ctx));
+
+  phase_ctx.err = emel::error::cast(emel::graph::error::invalid_request);
+  CHECK(emel::graph::guard::compute_error_invalid_request{}(ev, ctx));
+
+  phase_ctx.err = emel::error::cast(emel::graph::error::assembler_failed);
+  CHECK(emel::graph::guard::compute_error_assembler_failed{}(ev, ctx));
+
+  phase_ctx.err = emel::error::cast(emel::graph::error::processor_failed);
+  CHECK(emel::graph::guard::compute_error_processor_failed{}(ev, ctx));
+
+  phase_ctx.err = emel::error::cast(emel::graph::error::busy);
+  CHECK(emel::graph::guard::compute_error_busy{}(ev, ctx));
+
+  phase_ctx.err = emel::error::cast(emel::graph::error::internal_error);
+  CHECK(emel::graph::guard::compute_error_internal_error{}(ev, ctx));
+
+  phase_ctx.err = emel::error::cast(emel::graph::error::untracked);
+  CHECK(emel::graph::guard::compute_error_untracked{}(ev, ctx));
+
+  phase_ctx.err = static_cast<emel::error::type>(0x7fff);
+  CHECK(emel::graph::guard::compute_error_unknown{}(ev, ctx));
 }

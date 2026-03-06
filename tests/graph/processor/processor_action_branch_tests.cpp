@@ -298,11 +298,22 @@ TEST_CASE("graph_processor_action_and_guard_branches") {
   CHECK(ev.ctx.err == emel::error::cast(processor_error::invalid_request));
 
   ev.ctx.err = emel::error::cast(processor_error::none);
-  CHECK(guard::phase_ok{}(ev, machine_ctx));
-  CHECK_FALSE(guard::phase_failed{}(ev, machine_ctx));
+  CHECK(guard::execution_error_none{}(ev, machine_ctx));
+
+  ev.ctx.err = emel::error::cast(processor_error::invalid_request);
+  CHECK(guard::execution_error_invalid_request{}(ev, machine_ctx));
+
   ev.ctx.err = emel::error::cast(processor_error::kernel_failed);
-  CHECK_FALSE(guard::phase_ok{}(ev, machine_ctx));
-  CHECK(guard::phase_failed{}(ev, machine_ctx));
+  CHECK(guard::execution_error_kernel_failed{}(ev, machine_ctx));
+
+  ev.ctx.err = emel::error::cast(processor_error::internal_error);
+  CHECK(guard::execution_error_internal_error{}(ev, machine_ctx));
+
+  ev.ctx.err = emel::error::cast(processor_error::untracked);
+  CHECK(guard::execution_error_untracked{}(ev, machine_ctx));
+
+  ev.ctx.err = static_cast<emel::error::type>(0x7fff);
+  CHECK(guard::execution_error_unknown{}(ev, machine_ctx));
 
   ev.ctx.err = emel::error::cast(processor_error::none);
   ev.ctx.validate_outcome = emel::graph::processor::validate_step::events::phase_outcome::done;

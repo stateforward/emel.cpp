@@ -12,10 +12,8 @@ namespace emel::text::jinja::parser::program_parser {
 struct deciding {};
 struct parse_begin {};
 struct dispatch_decision {};
-
 struct text_emit {};
 struct comment_emit {};
-
 struct statement_parse_result_decision {};
 struct expression_parse_result_decision {};
 
@@ -76,19 +74,35 @@ struct model {
           + sml::completion<event::parse_runtime>
 
       , sml::state<dispatch_decision> <= sml::state<statement_parse_result_decision>
-          + sml::completion<event::parse_runtime>[ guard::phase_ok{} ]
+          + sml::completion<event::parse_runtime>[ guard::parse_error_none{} ]
 
       , sml::state<parse_failed> <= sml::state<statement_parse_result_decision>
-          + sml::completion<event::parse_runtime>[ guard::phase_failed{} ]
+          + sml::completion<event::parse_runtime>[ guard::parse_error_invalid_request{} ]
+      , sml::state<parse_failed> <= sml::state<statement_parse_result_decision>
+          + sml::completion<event::parse_runtime>[ guard::parse_error_parse_failed{} ]
+      , sml::state<parse_failed> <= sml::state<statement_parse_result_decision>
+          + sml::completion<event::parse_runtime>[ guard::parse_error_internal_error{} ]
+      , sml::state<parse_failed> <= sml::state<statement_parse_result_decision>
+          + sml::completion<event::parse_runtime>[ guard::parse_error_untracked{} ]
+      , sml::state<parse_failed> <= sml::state<statement_parse_result_decision>
+          + sml::completion<event::parse_runtime>[ guard::parse_error_unknown{} ]
 
       , sml::state<expression_parse_result_decision> <= sml::state<expression_parser::model>
           + sml::completion<event::parse_runtime>
 
       , sml::state<dispatch_decision> <= sml::state<expression_parse_result_decision>
-          + sml::completion<event::parse_runtime>[ guard::phase_ok{} ]
+          + sml::completion<event::parse_runtime>[ guard::parse_error_none{} ]
 
       , sml::state<parse_failed> <= sml::state<expression_parse_result_decision>
-          + sml::completion<event::parse_runtime>[ guard::phase_failed{} ]
+          + sml::completion<event::parse_runtime>[ guard::parse_error_invalid_request{} ]
+      , sml::state<parse_failed> <= sml::state<expression_parse_result_decision>
+          + sml::completion<event::parse_runtime>[ guard::parse_error_parse_failed{} ]
+      , sml::state<parse_failed> <= sml::state<expression_parse_result_decision>
+          + sml::completion<event::parse_runtime>[ guard::parse_error_internal_error{} ]
+      , sml::state<parse_failed> <= sml::state<expression_parse_result_decision>
+          + sml::completion<event::parse_runtime>[ guard::parse_error_untracked{} ]
+      , sml::state<parse_failed> <= sml::state<expression_parse_result_decision>
+          + sml::completion<event::parse_runtime>[ guard::parse_error_unknown{} ]
 
       //------------------------------------------------------------------------------//
       , sml::X <= sml::state<parsed>

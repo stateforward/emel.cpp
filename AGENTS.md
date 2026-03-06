@@ -28,6 +28,16 @@ NEVER put runtime branching statements (`if`, `else if`, `switch`, `?:`) in
 actions or in functions called from actions.
 ALWAYS model all runtime control flow as explicit guards or explicit choice
 states/transitions.
+NEVER emulate runtime branching with loop constructs in actions, detail helpers,
+state machine member methods, or functions called from them.
+NEVER use single-pass loop patterns such as
+`for (bool cond = ...; cond; cond = false)` to choose control paths.
+NEVER use branch-case loop patterns such as
+`for (size_t emel_case_* = emel_branch_*; ...)` to choose control paths.
+NEVER use runtime-indexed handler/candidate arrays (including function-pointer
+tables) as a substitute for explicit guards/states/transitions.
+ALWAYS use loops in actions/detail only for data-plane iteration with monotonic
+progress and bounded work.
 ONLY compile-time conditionals (`if constexpr`, `#if`) are allowed inside
 actions, state machine member methods, or functions called from actions.
 NEVER perform I/O waits, mutex waits, or sleeps inside guards/actions.

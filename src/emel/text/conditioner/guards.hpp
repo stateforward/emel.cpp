@@ -15,10 +15,11 @@ inline constexpr int32_t k_model_invalid_code =
 inline constexpr int32_t k_capacity_code =
     detail::to_local_error_code(error::capacity);
 inline constexpr int32_t k_external_model_invalid_code =
-    5; // legacy EMEL_ERR_MODEL_INVALID
-inline constexpr int32_t k_external_backend_code = 6; // legacy EMEL_ERR_BACKEND
+    emel::text::tokenizer::error_code(emel::text::tokenizer::error::model_invalid);
+inline constexpr int32_t k_external_backend_code =
+    emel::text::tokenizer::error_code(emel::text::tokenizer::error::backend_error);
 inline constexpr int32_t k_external_capacity_code =
-    8; // legacy EMEL_ERR_CAPACITY
+    detail::to_local_error_code(error::capacity);
 
 struct valid_bind {
   template <class runtime_event_type>

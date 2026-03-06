@@ -690,6 +690,41 @@ TEST_CASE("token_batcher_dispatches_callbacks_synchronously") {
   CHECK(capture.last_err == emel::error::cast(batch_error::invalid_request));
 }
 
+TEST_CASE("token_batcher_unknown_phase_guard_matches_only_unclassified_errors") {
+  std::array<int32_t, 1> tokens = {{1}};
+  std::array<int32_t, 1> seq_primary_out = {};
+  std::array<uint64_t, emel::batch::planner::action::SEQ_WORDS> seq_masks_out = {};
+  std::array<int32_t, 1> positions_out = {};
+  std::array<int8_t, 1> output_mask_out = {};
+  emel::error::type err = emel::error::cast(batch_error::none);
+  auto request = make_request(
+      tokens[0],
+      static_cast<int32_t>(tokens.size()),
+      seq_primary_out[0],
+      static_cast<int32_t>(seq_primary_out.size()),
+      seq_masks_out[0],
+      static_cast<int32_t>(seq_masks_out.size()),
+      positions_out[0],
+      static_cast<int32_t>(positions_out.size()),
+      output_mask_out[0],
+      static_cast<int32_t>(output_mask_out.size()),
+      err);
+  emel::token::batcher::event::batch_ctx runtime_ctx{};
+  emel::token::batcher::event::batch_runtime runtime_ev{request, runtime_ctx};
+  const auto unknown_guard = emel::token::batcher::guard::phase_result_unknown_error{};
+
+  runtime_ctx.err = emel::error::cast(batch_error::none);
+  CHECK_FALSE(unknown_guard(runtime_ev));
+  runtime_ctx.err = emel::error::cast(batch_error::invalid_request);
+  CHECK_FALSE(unknown_guard(runtime_ev));
+  runtime_ctx.err = emel::error::cast(batch_error::backend_error);
+  CHECK_FALSE(unknown_guard(runtime_ev));
+  runtime_ctx.err = emel::error::cast(batch_error::internal_error);
+  CHECK_FALSE(unknown_guard(runtime_ev));
+  runtime_ctx.err = emel::error::cast(batch_error::untracked);
+  CHECK(unknown_guard(runtime_ev));
+}
+
 TEST_CASE("token_batcher_routes_unexpected_event") {
   emel::token::batcher::sm machine{};
   CHECK(machine.process_event(unknown_event{}));

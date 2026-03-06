@@ -36,6 +36,10 @@ struct model {
           + sml::completion<event::parse_runtime>[ guard::expr_first_is_close{} ]
           / action::fail_expression_close_token
 
+      , sml::state<parsed> <= sml::state<expression_first_decision>
+          + sml::completion<event::parse_runtime>[ guard::expr_first_identifier_followed_by_close{} ]
+          / action::consume_expression_identifier_and_close
+
       , sml::state<expression_scan> <= sml::state<expression_first_decision>
           + sml::completion<event::parse_runtime>[ guard::expr_first_is_identifier{} ]
           / action::consume_expression_identifier

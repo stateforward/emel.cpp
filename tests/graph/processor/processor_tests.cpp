@@ -13,7 +13,7 @@ using execute_t = emel::graph::processor::event::execute;
 
 bool validate_ok(const execute_t &, int32_t * err_out) {
   if (err_out != nullptr) {
-    *err_out = EMEL_OK;
+    *err_out = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
   }
   return true;
 }
@@ -23,35 +23,35 @@ bool prepare_graph_reuse(const execute_t &, bool * reused_out, int32_t * err_out
     *reused_out = true;
   }
   if (err_out != nullptr) {
-    *err_out = EMEL_OK;
+    *err_out = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
   }
   return true;
 }
 
 bool alloc_graph_ok(const execute_t &, int32_t * err_out) {
   if (err_out != nullptr) {
-    *err_out = EMEL_OK;
+    *err_out = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
   }
   return true;
 }
 
 bool bind_inputs_ok(const execute_t &, int32_t * err_out) {
   if (err_out != nullptr) {
-    *err_out = EMEL_OK;
+    *err_out = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
   }
   return true;
 }
 
 bool run_backend_ok(const execute_t &, int32_t * err_out) {
   if (err_out != nullptr) {
-    *err_out = EMEL_OK;
+    *err_out = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
   }
   return true;
 }
 
 bool run_backend_fail(const execute_t &, int32_t * err_out) {
   if (err_out != nullptr) {
-    *err_out = EMEL_ERR_BACKEND;
+    *err_out = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::kernel_failed));
   }
   return false;
 }
@@ -61,7 +61,7 @@ bool extract_outputs_one(const execute_t &, int32_t * outputs_out, int32_t * err
     *outputs_out = 1;
   }
   if (err_out != nullptr) {
-    *err_out = EMEL_OK;
+    *err_out = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
   }
   return true;
 }
@@ -81,7 +81,7 @@ bool prepare_graph_checks_memory_payload(const execute_t & ev, bool * reused_out
                           ev.memory_view->lookup_kv_block(7, 0) == 42 &&
                           ev.memory_view->lookup_recurrent_slot(7) == 3;
   if (err_out != nullptr) {
-    *err_out = g_saw_unified_payload ? EMEL_OK : EMEL_ERR_BACKEND;
+    *err_out = g_saw_unified_payload ? static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none)) : static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::kernel_failed));
   }
   return g_saw_unified_payload;
 }
@@ -96,7 +96,7 @@ TEST_CASE("graph_processor_starts_initialized") {
 TEST_CASE("graph_processor_execute_success_path") {
   emel::graph::processor::sm machine{};
   int32_t outputs_produced = 0;
-  int32_t error = EMEL_OK;
+  int32_t error = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
 
   CHECK(machine.process_event(emel::graph::processor::event::execute{
     .step_index = 0,
@@ -111,14 +111,14 @@ TEST_CASE("graph_processor_execute_success_path") {
     .outputs_produced_out = &outputs_produced,
     .error_out = &error,
   }));
-  CHECK(error == EMEL_OK);
+  CHECK(error == static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none)));
   CHECK(outputs_produced == 1);
   CHECK(machine.outputs_produced() == 1);
 }
 
 TEST_CASE("graph_processor_rejects_invalid_payload") {
   emel::graph::processor::sm machine{};
-  int32_t error = EMEL_OK;
+  int32_t error = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
 
   CHECK_FALSE(machine.process_event(emel::graph::processor::event::execute{
     .step_index = -1,
@@ -130,13 +130,13 @@ TEST_CASE("graph_processor_rejects_invalid_payload") {
     .extract_outputs = extract_outputs_one,
     .error_out = &error,
   }));
-  CHECK(error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(error == static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::invalid_request)));
 }
 
 TEST_CASE("graph_processor_propagates_unified_memory_payload") {
   emel::graph::processor::sm machine{};
   int32_t outputs_produced = 0;
-  int32_t error = EMEL_OK;
+  int32_t error = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
   int32_t memory_tag = 123;
   g_expected_memory_sm = &memory_tag;
   g_saw_unified_payload = false;
@@ -164,13 +164,13 @@ TEST_CASE("graph_processor_propagates_unified_memory_payload") {
     .outputs_produced_out = &outputs_produced,
     .error_out = &error,
   }));
-  CHECK(error == EMEL_OK);
+  CHECK(error == static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none)));
   CHECK(g_saw_unified_payload);
 }
 
 TEST_CASE("graph_processor_propagates_backend_failure") {
   emel::graph::processor::sm machine{};
-  int32_t error = EMEL_OK;
+  int32_t error = static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::none));
 
   CHECK_FALSE(machine.process_event(emel::graph::processor::event::execute{
     .step_index = 0,
@@ -184,5 +184,5 @@ TEST_CASE("graph_processor_propagates_backend_failure") {
     .extract_outputs = extract_outputs_one,
     .error_out = &error,
   }));
-  CHECK(error == EMEL_ERR_BACKEND);
+  CHECK(error == static_cast<int32_t>(emel::error::cast(emel::graph::processor::error::kernel_failed)));
 }

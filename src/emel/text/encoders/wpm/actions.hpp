@@ -19,7 +19,6 @@ struct begin_encode_sync_vocab {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
     emel::text::encoders::action::begin_encode(ev, ctx);
     emel::text::encoders::action::sync_vocab(ev, ctx);
-
   }
 };
 
@@ -31,7 +30,8 @@ struct reject_invalid_encode {
 
 struct run_encode {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
-    const auto result = emel::text::encoders::wpm::detail::encode_wpm(ev.request, ctx, *ctx.vocab);
+    const auto result = emel::text::encoders::wpm::detail::encode_wpm_ready_tables(
+      ev.request, ctx, *ctx.vocab);
     ev.ctx.token_count = result.token_count;
     ev.ctx.err = result.error;
   }
@@ -40,7 +40,7 @@ struct run_encode {
 struct sync_tables {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
     const bool ready = emel::text::encoders::wpm::detail::ensure_wpm_tables(ctx, *ctx.vocab);
-    const std::array<int32_t, 2> errors{EMEL_ERR_INVALID_ARGUMENT, EMEL_OK};
+    const std::array<int32_t, 2> errors{emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok)};
     ev.ctx.err = errors[static_cast<size_t>(ready)];
   }
 };

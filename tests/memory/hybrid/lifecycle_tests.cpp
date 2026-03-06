@@ -13,13 +13,13 @@ using namespace emel::memory::hybrid;
 
 struct copy_probe {
   bool succeed = true;
-  int32_t callback_error = EMEL_OK;
+  int32_t callback_error = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
 };
 
 bool copy_state_cb(const int32_t, const int32_t, void * user_data, int32_t * error_out) {
   const auto * probe = static_cast<const copy_probe *>(user_data);
   if (error_out != nullptr) {
-    *error_out = probe != nullptr ? probe->callback_error : EMEL_ERR_BACKEND;
+    *error_out = probe != nullptr ? probe->callback_error : static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::backend_error));
   }
   return probe != nullptr && probe->succeed;
 }
@@ -28,7 +28,7 @@ bool copy_state_cb(const int32_t, const int32_t, void * user_data, int32_t * err
 
 TEST_CASE("memory_hybrid_lifecycle_allocate_rolls_back_on_recurrent_failure") {
   hybrid_sm machine{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
 
   REQUIRE(machine.process_event(event::reserve{
     .max_sequences = 4,
@@ -49,13 +49,13 @@ TEST_CASE("memory_hybrid_lifecycle_allocate_rolls_back_on_recurrent_failure") {
     .seq_id = 2,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_BACKEND);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::backend_error)));
   CHECK_FALSE(machine.view().is_sequence_active(2));
 }
 
 TEST_CASE("memory_hybrid_lifecycle_branch_rolls_back_kv_when_recurrent_fails") {
   hybrid_sm machine{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
 
   REQUIRE(machine.process_event(event::reserve{
     .max_sequences = 8,
@@ -79,14 +79,14 @@ TEST_CASE("memory_hybrid_lifecycle_branch_rolls_back_kv_when_recurrent_fails") {
     .copy_state = nullptr,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::invalid_request)));
   CHECK_FALSE(machine.view().is_sequence_active(1));
   CHECK(machine.view().lookup_kv_block(1, 0) == -1);
 }
 
 TEST_CASE("memory_hybrid_lifecycle_free_consistent_across_kv_and_recurrent") {
   hybrid_sm machine{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
   copy_probe probe{};
 
   REQUIRE(machine.process_event(event::reserve{
@@ -131,7 +131,7 @@ TEST_CASE("memory_hybrid_lifecycle_free_consistent_across_kv_and_recurrent") {
 
 TEST_CASE("memory_hybrid_lifecycle_validation_and_unexpected_event_paths") {
   hybrid_sm machine{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
 
   CHECK_FALSE(machine.process_event(event::reserve{
     .max_sequences = 999999,
@@ -139,7 +139,7 @@ TEST_CASE("memory_hybrid_lifecycle_validation_and_unexpected_event_paths") {
     .block_tokens = 2,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::invalid_request)));
 
   REQUIRE(machine.process_event(event::reserve{
     .max_sequences = 4,
@@ -159,30 +159,30 @@ TEST_CASE("memory_hybrid_lifecycle_validation_and_unexpected_event_paths") {
     .copy_state_user_data = nullptr,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::invalid_request)));
 
   CHECK_FALSE(machine.process_event(event::rollback_slots{
     .seq_id = -1,
     .token_count = 1,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::invalid_request)));
 
   CHECK(machine.process_event(emel::memory::events::rollback_slots_done{}));
 
-  err = EMEL_OK;
+  err = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
   CHECK(machine.process_event(event::reserve{
     .max_sequences = 4,
     .max_blocks = 2,
     .block_tokens = 2,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_OK);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none)));
 }
 
 TEST_CASE("memory_hybrid_view_snapshot_tracks_combined_state") {
   hybrid_sm machine{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::none));
 
   REQUIRE(machine.process_event(event::reserve{
     .max_sequences = 4,

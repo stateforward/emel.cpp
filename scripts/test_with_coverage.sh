@@ -3,6 +3,7 @@ set -euo pipefail
 
 LINE_COVERAGE_MIN="${LINE_COVERAGE_MIN:-90}"
 BRANCH_COVERAGE_MIN="${BRANCH_COVERAGE_MIN:-50}"
+GCOVR_IGNORE_PARSE_ERRORS="${GCOVR_IGNORE_PARSE_ERRORS:-suspicious_hits.warn_once_per_file}"
 
 # Resolve Homebrew LLVM when binaries exist but are not in PATH.
 if ! command -v llvm-cov >/dev/null 2>&1 || ! command -v llvm-profdata >/dev/null 2>&1; then
@@ -57,6 +58,7 @@ gcovr \
   --filter src \
   --exclude tests \
   --exclude 'src/emel/.*/sm.hpp' \
+  --gcov-ignore-parse-errors "$GCOVR_IGNORE_PARSE_ERRORS" \
   --exclude-throw-branches \
   --exclude-unreachable-branches \
   --txt-summary \

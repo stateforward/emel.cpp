@@ -5,12 +5,10 @@
 
 #include "emel/text/encoders/rwkv/context.hpp"
 #include "emel/text/encoders/detail.hpp"
-#include "emel/text/encoders/events.hpp"
 #include "emel/model/data.hpp"
 
 namespace emel::text::encoders::rwkv::detail {
 
-using emel::text::encoders::detail::encode_result;
 using emel::text::encoders::detail::k_token_null;
 
 inline int32_t select_i32(const bool choose_true,
@@ -34,23 +32,6 @@ inline uint8_t select_u8(const bool choose_true,
   return static_cast<uint8_t>((false_value & static_cast<uint8_t>(~mask)) | (true_value & mask));
 }
 
-inline size_t select_size(const bool choose_true,
-                          const size_t true_value,
-                          const size_t false_value) noexcept {
-  const size_t mask = static_cast<size_t>(0) - static_cast<size_t>(choose_true);
-  return (false_value & ~mask) | (true_value & mask);
-}
-
-template <class pointer_type>
-inline pointer_type *select_ptr(const bool choose_true,
-                                pointer_type *true_value,
-                                pointer_type *false_value) noexcept {
-  const uintptr_t mask = static_cast<uintptr_t>(0) - static_cast<uintptr_t>(choose_true);
-  const uintptr_t t = reinterpret_cast<uintptr_t>(true_value);
-  const uintptr_t f = reinterpret_cast<uintptr_t>(false_value);
-  return reinterpret_cast<pointer_type *>((f & ~mask) | (t & mask));
-}
-
 inline std::string_view rwkv_token_text(const emel::model::data::vocab &vocab,
                                         const int32_t id) noexcept {
   const bool valid_id = id >= 0 && static_cast<uint32_t>(id) < vocab.n_tokens;
@@ -63,25 +44,85 @@ inline std::string_view rwkv_token_text(const emel::model::data::vocab &vocab,
     vocab.token_storage.data() + static_cast<size_t>(offset), static_cast<size_t>(length));
 }
 
-inline bool rwkv_push_token(const event::encode &ev, const int32_t token, int32_t &count) noexcept {
-  int32_t sink = 0;
-  const bool has_buffer = !ev.token_ids.empty();
-  int32_t *base_ptrs[2] = {&sink, ev.token_ids.data()};
-  int32_t *base = base_ptrs[static_cast<size_t>(has_buffer)];
-  const bool non_negative_count = count >= 0;
-  const int32_t safe_count = select_i32(non_negative_count, count, 0);
-  const size_t count_index = static_cast<size_t>(safe_count);
-  const bool has_space = has_buffer && non_negative_count && count_index < ev.token_ids.size();
-  const bool write = token >= 0 && has_space;
-  const size_t target_index = count_index * static_cast<size_t>(write);
-  int32_t *target = base + target_index;
-  *target = select_i32(write, token, *target);
-  count += static_cast<int32_t>(write);
-  return write;
-}
-
 inline bool unescape_rwkv_token(const std::string_view escaped,
                                 std::string &out) {
+  using process_hex_handler_t =
+      void (*)(std::string &, uint8_t &, uint8_t &, bool &, char) noexcept;
+  auto process_hex_none = +[](std::string &, uint8_t &, uint8_t &, bool &, char) noexcept {};
+  auto process_hex_some = +[](std::string &out_value,
+                              uint8_t &hex_remaining_value,
+                              uint8_t &hex_acc_value,
+                              bool &consumed_value,
+                              char c) noexcept {
+    const uint8_t byte = static_cast<uint8_t>(c);
+    const bool alpha = byte >= static_cast<uint8_t>('a');
+    const uint8_t alpha_value = static_cast<uint8_t>(byte - static_cast<uint8_t>('a') + 10u);
+    const uint8_t digit_value = static_cast<uint8_t>(byte - static_cast<uint8_t>('0'));
+    const uint8_t nibble = select_u8(alpha, alpha_value, digit_value);
+    hex_acc_value = static_cast<uint8_t>((hex_acc_value << 4u) + nibble);
+    hex_remaining_value = static_cast<uint8_t>(hex_remaining_value - 1u);
+    using emit_hex_handler_t = void (*)(std::string &, uint8_t &, uint8_t &) noexcept;
+    auto emit_hex_none = +[](std::string &, uint8_t &, uint8_t &) noexcept {};
+    auto emit_hex_some = +[](std::string &out_emit,
+                             uint8_t &hex_acc_emit,
+                             uint8_t &) noexcept {
+      out_emit.push_back(static_cast<char>(hex_acc_emit));
+      hex_acc_emit = 0;
+    };
+    const emit_hex_handler_t emit_hex_handlers[2] = {
+        emit_hex_none,
+        emit_hex_some,
+    };
+    emit_hex_handlers[static_cast<size_t>(hex_remaining_value == 0)](
+        out_value, hex_acc_value, hex_remaining_value);
+    consumed_value = true;
+  };
+
+  using process_escape_handler_t =
+      void (*)(std::string &, bool &, uint8_t &, bool &, char) noexcept;
+  auto process_escape_none =
+      +[](std::string &, bool &, uint8_t &, bool &, char) noexcept {};
+  auto process_escape_some = +[](std::string &out_value,
+                                 bool &escaping_value,
+                                 uint8_t &hex_remaining_value,
+                                 bool &consumed_value,
+                                 char c) noexcept {
+    const bool esc_t = c == 't';
+    const bool esc_n = c == 'n';
+    const bool esc_r = c == 'r';
+    const bool esc_x = c == 'x';
+    char mapped = c;
+    mapped = static_cast<char>(
+        select_i32(esc_r, static_cast<int32_t>('\r'), static_cast<int32_t>(mapped)));
+    mapped = static_cast<char>(
+        select_i32(esc_n, static_cast<int32_t>('\n'), static_cast<int32_t>(mapped)));
+    mapped = static_cast<char>(
+        select_i32(esc_t, static_cast<int32_t>('\t'), static_cast<int32_t>(mapped)));
+    using emit_char_handler_t = void (*)(std::string &, char) noexcept;
+    auto emit_char_none = +[](std::string &, char) noexcept {};
+    auto emit_char_some = +[](std::string &out_emit, char mapped_emit) noexcept {
+      out_emit.push_back(mapped_emit);
+    };
+    const emit_char_handler_t emit_char_handlers[2] = {emit_char_none, emit_char_some};
+    emit_char_handlers[static_cast<size_t>(!esc_x)](out_value, mapped);
+    hex_remaining_value = select_u8(esc_x, static_cast<uint8_t>(2), hex_remaining_value);
+    escaping_value = false;
+    consumed_value = true;
+  };
+
+  using begin_escape_handler_t = void (*)(bool &, bool &) noexcept;
+  auto begin_escape_none = +[](bool &, bool &) noexcept {};
+  auto begin_escape_some = +[](bool &escaping_value, bool &consumed_value) noexcept {
+    escaping_value = true;
+    consumed_value = true;
+  };
+
+  using emit_plain_handler_t = void (*)(std::string &, char) noexcept;
+  auto emit_plain_none = +[](std::string &, char) noexcept {};
+  auto emit_plain_some = +[](std::string &out_value, char c) noexcept {
+    out_value.push_back(c);
+  };
+
   out.clear();
   out.reserve(escaped.size());
   bool escaping = false;
@@ -90,50 +131,31 @@ inline bool unescape_rwkv_token(const std::string_view escaped,
 
   for (const char c : escaped) {
     bool consumed = false;
+    const process_hex_handler_t process_hex_handlers[2] = {
+        process_hex_none,
+        process_hex_some,
+    };
+    process_hex_handlers[static_cast<size_t>(hex_remaining != 0)](
+        out, hex_remaining, hex_acc, consumed, c);
 
-    for (bool in_hex = hex_remaining != 0; in_hex; in_hex = false) {
-      const uint8_t byte = static_cast<uint8_t>(c);
-      const bool alpha = byte >= static_cast<uint8_t>('a');
-      const uint8_t alpha_value = static_cast<uint8_t>(byte - static_cast<uint8_t>('a') + 10u);
-      const uint8_t digit_value = static_cast<uint8_t>(byte - static_cast<uint8_t>('0'));
-      const uint8_t nibble = select_u8(alpha, alpha_value, digit_value);
-      hex_acc = static_cast<uint8_t>((hex_acc << 4u) + nibble);
-      hex_remaining = static_cast<uint8_t>(hex_remaining - 1u);
-      for (bool emit_hex = hex_remaining == 0; emit_hex; emit_hex = false) {
-        out.push_back(static_cast<char>(hex_acc));
-        hex_acc = 0;
-      }
-      consumed = true;
-    }
+    const process_escape_handler_t process_escape_handlers[2] = {
+        process_escape_none,
+        process_escape_some,
+    };
+    process_escape_handlers[static_cast<size_t>((!consumed) && escaping)](
+        out, escaping, hex_remaining, consumed, c);
 
-    for (bool escaped_mode = !consumed && escaping; escaped_mode; escaped_mode = false) {
-      const bool esc_t = c == 't';
-      const bool esc_n = c == 'n';
-      const bool esc_r = c == 'r';
-      const bool esc_x = c == 'x';
-      char mapped = c;
-      mapped = static_cast<char>(
-        select_i32(esc_r, static_cast<int32_t>('\r'), static_cast<int32_t>(mapped)));
-      mapped = static_cast<char>(
-        select_i32(esc_n, static_cast<int32_t>('\n'), static_cast<int32_t>(mapped)));
-      mapped = static_cast<char>(
-        select_i32(esc_t, static_cast<int32_t>('\t'), static_cast<int32_t>(mapped)));
-      for (bool emit_char = !esc_x; emit_char; emit_char = false) {
-        out.push_back(mapped);
-      }
-      hex_remaining = select_u8(esc_x, static_cast<uint8_t>(2), hex_remaining);
-      escaping = false;
-      consumed = true;
-    }
+    const begin_escape_handler_t begin_escape_handlers[2] = {
+        begin_escape_none,
+        begin_escape_some,
+    };
+    begin_escape_handlers[static_cast<size_t>((!consumed) && (c == '\\'))](escaping, consumed);
 
-    for (bool begin_escape = !consumed && c == '\\'; begin_escape; begin_escape = false) {
-      escaping = true;
-      consumed = true;
-    }
-
-    for (bool emit_plain = !consumed; emit_plain; emit_plain = false) {
-      out.push_back(c);
-    }
+    const emit_plain_handler_t emit_plain_handlers[2] = {
+        emit_plain_none,
+        emit_plain_some,
+    };
+    emit_plain_handlers[static_cast<size_t>(!consumed)](out, c);
   }
   return hex_remaining == 0;
 }
@@ -145,99 +167,62 @@ inline bool rwkv_tables_ready(const emel::text::encoders::rwkv::action::context 
 
 inline bool ensure_rwkv_tables(emel::text::encoders::rwkv::action::context &ctx,
                                const emel::model::data::vocab &vocab) {
-  for (bool already_ready = rwkv_tables_ready(ctx, vocab);
-       already_ready;
-       already_ready = false) {
-    return true;
-  }
+  auto process_text_none = +[](emel::text::encoders::rwkv::action::context &,
+                               const std::string_view,
+                               int32_t,
+                               std::string &,
+                               bool &) {};
+  auto process_text_some = +[](emel::text::encoders::rwkv::action::context &ctx_process,
+                               const std::string_view text_process,
+                               int32_t id_process,
+                               std::string &unescaped_process,
+                               bool &ok_process) {
+    const bool unescaped_ok = unescape_rwkv_token(text_process, unescaped_process);
+    ok_process = ok_process && unescaped_ok;
+    using insert_token_handler_t =
+      void (*)(emel::text::encoders::rwkv::action::context &, const std::string &, int32_t);
+    auto insert_token_none = +[](emel::text::encoders::rwkv::action::context &,
+                                 const std::string &,
+                                 int32_t) {};
+    auto insert_token_some = +[](emel::text::encoders::rwkv::action::context &ctx_insert,
+                                 const std::string &unescaped_insert,
+                                 int32_t id_insert) {
+      ctx_insert.token_matcher.insert(
+        unescaped_insert.data(), unescaped_insert.size(), id_insert);
+    };
+    const insert_token_handler_t insert_token_handlers[2] = {
+      insert_token_none,
+      insert_token_some,
+    };
+    const bool insert_token = unescaped_ok && !unescaped_process.empty();
+    insert_token_handlers[static_cast<size_t>(insert_token)](
+      ctx_process, unescaped_process, id_process);
+  };
+
   ctx.rwkv_vocab = &vocab;
   ctx.rwkv_tables_ready = false;
   ctx.token_matcher = emel::text::encoders::detail::naive_trie{};
 
   std::string unescaped;
+  bool ok = true;
   for (uint32_t id = 0; id < vocab.n_tokens; ++id) {
+    const bool step_active = ok;
     const std::string_view text = rwkv_token_text(vocab, static_cast<int32_t>(id));
-    for (bool has_text = !text.empty(); has_text; has_text = false) {
-      const bool unescaped_ok = unescape_rwkv_token(text, unescaped);
-      for (bool unescape_fail = !unescaped_ok; unescape_fail; unescape_fail = false) {
-        return false;
-      }
-      for (bool insert_token = !unescaped.empty(); insert_token; insert_token = false) {
-        ctx.token_matcher.insert(unescaped.data(), unescaped.size(), static_cast<int32_t>(id));
-      }
-    }
-  }
-  ctx.rwkv_tables_ready = true;
-  return true;
-}
-
-inline int32_t rwkv_lookup_unescaped_token(const emel::model::data::vocab &vocab,
-                                           const std::string_view target) {
-  int32_t resolved = k_token_null;
-  std::string unescaped;
-  bool done = false;
-  for (uint32_t id = 0; id < vocab.n_tokens && !done; ++id) {
-    const std::string_view text = rwkv_token_text(vocab, static_cast<int32_t>(id));
-    for (bool has_text = !text.empty(); has_text; has_text = false) {
-      const bool ok = unescape_rwkv_token(text, unescaped);
-      const bool match = ok && unescaped == target;
-      resolved = select_i32(match, static_cast<int32_t>(id), resolved);
-      done = done || match;
-    }
-  }
-  return resolved;
-}
-
-inline int32_t rwkv_resolve_unk_id(const emel::model::data::vocab &vocab) {
-  int32_t unk_id = vocab.unk_id;
-  for (bool lookup = unk_id == k_token_null; lookup; lookup = false) {
-    unk_id = rwkv_lookup_unescaped_token(vocab, "<unk>");
-  }
-  return unk_id;
-}
-
-inline encode_result encode_rwkv(const event::encode &ev,
-                                 emel::text::encoders::rwkv::action::context &ctx,
-                                 const emel::model::data::vocab &vocab) {
-  encode_result result{};
-  result.token_count = 0;
-  const bool has_text = !ev.text.empty();
-  const bool tables_ready = rwkv_tables_ready(ctx, vocab);
-  result.error = select_i32(has_text && !tables_ready, EMEL_ERR_INVALID_ARGUMENT, EMEL_OK);
-
-  int32_t count = 0;
-  const int32_t unk_id = rwkv_resolve_unk_id(vocab);
-  size_t position = 0;
-  bool active = has_text && tables_ready;
-
-  while (active && position < ev.text.size()) {
-    const auto *node = ctx.token_matcher.traverse(ev.text[position]);
-    int32_t token_id = unk_id;
-    size_t token_end = position + 1;
-    size_t offset = position + 1;
-    const auto *walk = node;
-
-    while (walk != nullptr) {
-      token_id = select_i32(walk->has_value, walk->value, token_id);
-      token_end = select_size(walk->has_value, offset, token_end);
-      const bool can_advance = offset < ev.text.size();
-      const size_t safe_index = select_size(can_advance, offset, position);
-      const char next_char = ev.text[safe_index];
-      const auto *next_walk = walk->traverse(next_char);
-      walk = select_ptr(can_advance, next_walk, static_cast<decltype(next_walk)>(nullptr));
-      offset += static_cast<size_t>(can_advance);
-    }
-
-    const bool emit_token = token_id != k_token_null;
-    const bool token_push_ok = rwkv_push_token(ev, token_id, count);
-    const bool push_failed = emit_token && !token_push_ok;
-    result.error = select_i32(push_failed, EMEL_ERR_INVALID_ARGUMENT, result.error);
-    active = active && !push_failed;
-    position = token_end;
+    using process_text_handler_t = void (*)(emel::text::encoders::rwkv::action::context &,
+                                            std::string_view,
+                                            int32_t,
+                                            std::string &,
+                                            bool &);
+    const process_text_handler_t process_text_handlers[2] = {
+      process_text_none,
+      process_text_some,
+    };
+    process_text_handlers[static_cast<size_t>(step_active && !text.empty())](
+      ctx, text, static_cast<int32_t>(id), unescaped, ok);
   }
 
-  result.token_count = select_i32(result.error == EMEL_OK, count, 0);
-  return result;
+  ctx.rwkv_tables_ready = ok;
+  return ok;
 }
 
 }  // namespace emel::text::encoders::rwkv::detail

@@ -9,12 +9,10 @@
 
 #include "emel/text/encoders/ugm/context.hpp"
 #include "emel/text/encoders/detail.hpp"
-#include "emel/text/encoders/events.hpp"
 #include "emel/model/data.hpp"
 
 namespace emel::text::encoders::ugm::detail {
 
-using emel::text::encoders::detail::encode_result;
 using emel::text::encoders::detail::k_token_null;
 
 inline int32_t select_i32(const bool choose_true,
@@ -45,6 +43,20 @@ inline float select_f32(const bool choose_true,
   return values[static_cast<size_t>(choose_true)];
 }
 
+inline double select_f64(const bool choose_true,
+                         const double true_value,
+                         const double false_value) noexcept {
+  const std::array<double, 2> values{false_value, true_value};
+  return values[static_cast<size_t>(choose_true)];
+}
+
+inline bool select_bool(const bool choose_true,
+                        const bool true_value,
+                        const bool false_value) noexcept {
+  const std::array<bool, 2> values{false_value, true_value};
+  return values[static_cast<size_t>(choose_true)];
+}
+
 inline size_t ugm_utf8_len(const char byte) noexcept {
   constexpr std::array<size_t, 16> lookup{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
   const uint8_t highbits = static_cast<uint8_t>(byte) >> 4u;
@@ -53,30 +65,26 @@ inline size_t ugm_utf8_len(const char byte) noexcept {
 
 inline std::string_view ugm_token_text(const emel::model::data::vocab &vocab,
                                        const int32_t id) noexcept {
-  std::string_view text{};
   const bool valid_id = id >= 0 && static_cast<uint32_t>(id) < vocab.n_tokens;
-  for (bool read_entry = valid_id; read_entry; read_entry = false) {
-    const auto &entry = vocab.entries[static_cast<uint32_t>(id)];
-    const bool has_text = entry.text_length > 0;
-    for (bool assign = has_text; assign; assign = false) {
-      text = std::string_view(vocab.token_storage.data() + entry.text_offset, entry.text_length);
-    }
-  }
-  return text;
+  const uint32_t safe_id = select_u32(valid_id, static_cast<uint32_t>(id), 0u);
+  const auto &entry = vocab.entries[safe_id];
+  const bool has_text = valid_id && entry.text_length > 0u;
+  const uint32_t offset = select_u32(has_text, entry.text_offset, 0u);
+  const uint32_t length = select_u32(has_text, entry.text_length, 0u);
+  return std::string_view(vocab.token_storage.data() + static_cast<size_t>(offset),
+                          static_cast<size_t>(length));
 }
 
-inline bool ugm_push_token(const event::encode &ev, const int32_t token, int32_t &count) noexcept {
-  const bool token_ok = token >= 0;
-  const bool count_ok = count >= 0;
-  const size_t slot = select_size(count_ok, static_cast<size_t>(count), static_cast<size_t>(0));
-  const bool output_ok = !ev.token_ids.empty();
-  const bool room_ok = slot < ev.token_ids.size();
-  const bool can_write = token_ok && count_ok && output_ok && room_ok;
-  for (bool write = can_write; write; write = false) {
-    ev.token_ids[slot] = token;
-    count += 1;
-  }
-  return can_write;
+inline void ugm_trie_insert_none(emel::text::encoders::detail::naive_trie::node &,
+                                 emel::text::encoders::detail::naive_trie &,
+                                 const uint8_t) noexcept {}
+
+inline void ugm_trie_insert_some(emel::text::encoders::detail::naive_trie::node &node,
+                                 emel::text::encoders::detail::naive_trie &trie,
+                                 const uint8_t byte) noexcept {
+  node.next[byte] = static_cast<int32_t>(trie.nodes.size());
+  trie.nodes.emplace_back();
+  trie.nodes.back().nodes_ref = &trie.nodes;
 }
 
 inline void ugm_trie_insert(emel::text::encoders::detail::naive_trie &trie,
@@ -88,11 +96,14 @@ inline void ugm_trie_insert(emel::text::encoders::detail::naive_trie &trie,
     auto &node = trie.nodes[idx];
     const uint8_t byte = static_cast<uint8_t>(text[i]);
     const bool missing = node.next[byte] < 0;
-    for (bool grow = missing; grow; grow = false) {
-      node.next[byte] = static_cast<int32_t>(trie.nodes.size());
-      trie.nodes.emplace_back();
-      trie.nodes.back().nodes_ref = &trie.nodes;
-    }
+    using trie_insert_handler_t = void (*)(emel::text::encoders::detail::naive_trie::node &,
+                                           emel::text::encoders::detail::naive_trie &,
+                                           uint8_t) noexcept;
+    const trie_insert_handler_t trie_insert_handlers[2] = {
+        ugm_trie_insert_none,
+        ugm_trie_insert_some,
+    };
+    trie_insert_handlers[static_cast<size_t>(missing)](node, trie, byte);
     idx = static_cast<size_t>(node.next[byte]);
   }
   trie.nodes[idx].has_value = true;
@@ -128,15 +139,37 @@ inline const emel::text::encoders::detail::naive_trie::node *ugm_trie_step(
   return options[static_cast<size_t>(valid)];
 }
 
-inline int32_t ugm_lookup_token_exact(const emel::model::data::vocab &vocab,
-                                      const std::string_view target) noexcept {
-  int32_t resolved = k_token_null;
-  for (uint32_t id = 0; id < vocab.n_tokens; ++id) {
-    const std::string_view token = ugm_token_text(vocab, static_cast<int32_t>(id));
-    const bool exact = token == target;
-    resolved = select_i32(exact, static_cast<int32_t>(id), resolved);
-  }
-  return resolved;
+struct xcda_blob_info {
+  const uint8_t *data = nullptr;
+  uint32_t blob_size = 0u;
+  bool bounded = false;
+};
+
+inline void ugm_load_xcda_blob_none(const emel::text::encoders::ugm::action::context &,
+                                    xcda_blob_info &) noexcept {}
+
+inline void ugm_load_xcda_blob_some(const emel::text::encoders::ugm::action::context &ctx,
+                                    xcda_blob_info &blob) noexcept {
+  blob.data = ctx.vocab->precompiled_charsmap.data();
+  blob.blob_size = *reinterpret_cast<const uint32_t *>(blob.data);
+  blob.bounded = blob.blob_size + static_cast<uint32_t>(sizeof(blob.blob_size)) <=
+                 static_cast<uint32_t>(ctx.vocab->precompiled_charsmap_size);
+}
+
+inline bool ugm_init_xcda_blob_none(emel::text::encoders::ugm::action::context &,
+                                    const xcda_blob_info &) noexcept {
+  return false;
+}
+
+inline bool ugm_init_xcda_blob_some(emel::text::encoders::ugm::action::context &ctx,
+                                    const xcda_blob_info &blob) noexcept {
+  ctx.xcda_table = reinterpret_cast<const uint32_t *>(blob.data + sizeof(blob.blob_size));
+  ctx.xcda_table_size = blob.blob_size / sizeof(uint32_t);
+  ctx.prefix_replacements =
+      reinterpret_cast<const char *>(blob.data + sizeof(blob.blob_size) + blob.blob_size);
+  ctx.prefix_replacements_size =
+      ctx.vocab->precompiled_charsmap_size - sizeof(blob.blob_size) - blob.blob_size;
+  return true;
 }
 
 inline bool init_xcda_tables(emel::text::encoders::ugm::action::context &ctx) noexcept {
@@ -147,24 +180,22 @@ inline bool init_xcda_tables(emel::text::encoders::ugm::action::context &ctx) no
 
   const bool has_vocab = ctx.vocab != nullptr;
   const bool has_blob = has_vocab && ctx.vocab->precompiled_charsmap_size > 0u;
-  for (bool missing_blob = !has_blob; missing_blob; missing_blob = false) {
-    return false;
-  }
+  xcda_blob_info blob{};
+  using load_handler_t = void (*)(const emel::text::encoders::ugm::action::context &,
+                                  xcda_blob_info &) noexcept;
+  const load_handler_t load_handlers[2] = {
+      ugm_load_xcda_blob_none,
+      ugm_load_xcda_blob_some,
+  };
+  load_handlers[static_cast<size_t>(has_blob)](ctx, blob);
 
-  const uint8_t *data = ctx.vocab->precompiled_charsmap.data();
-  const uint32_t blob_size = *reinterpret_cast<const uint32_t *>(data);
-  const bool bounded = blob_size + static_cast<uint32_t>(sizeof(blob_size)) <=
-                       static_cast<uint32_t>(ctx.vocab->precompiled_charsmap_size);
-  for (bool invalid_blob = !bounded; invalid_blob; invalid_blob = false) {
-    return false;
-  }
-
-  ctx.xcda_table = reinterpret_cast<const uint32_t *>(data + sizeof(blob_size));
-  ctx.xcda_table_size = blob_size / sizeof(uint32_t);
-  ctx.prefix_replacements = reinterpret_cast<const char *>(data + sizeof(blob_size) + blob_size);
-  ctx.prefix_replacements_size =
-    ctx.vocab->precompiled_charsmap_size - sizeof(blob_size) - blob_size;
-  return true;
+  using init_handler_t =
+      bool (*)(emel::text::encoders::ugm::action::context &, const xcda_blob_info &) noexcept;
+  const init_handler_t init_handlers[2] = {
+      ugm_init_xcda_blob_none,
+      ugm_init_xcda_blob_some,
+  };
+  return init_handlers[static_cast<size_t>(blob.bounded)](ctx, blob);
 }
 
 inline bool ugm_tables_ready(const emel::text::encoders::ugm::action::context &ctx,
@@ -172,12 +203,18 @@ inline bool ugm_tables_ready(const emel::text::encoders::ugm::action::context &c
   return ctx.ugm_tables_ready && ctx.ugm_vocab == &vocab;
 }
 
-inline bool ensure_ugm_tables(emel::text::encoders::ugm::action::context &ctx,
-                              const emel::model::data::vocab &vocab) noexcept {
-  for (bool already_ready = ugm_tables_ready(ctx, vocab); already_ready; already_ready = false) {
-    return true;
-  }
+inline void ugm_insert_token_none(emel::text::encoders::detail::naive_trie &,
+                                  const std::string_view,
+                                  const int32_t) noexcept {}
 
+inline void ugm_insert_token_some(emel::text::encoders::detail::naive_trie &trie,
+                                  const std::string_view text,
+                                  const int32_t id) noexcept {
+  ugm_trie_insert(trie, text.data(), text.size(), id);
+}
+
+inline bool rebuild_ugm_tables(emel::text::encoders::ugm::action::context &ctx,
+                               const emel::model::data::vocab &vocab) noexcept {
   ctx.ugm_vocab = &vocab;
   ctx.ugm_tables_ready = false;
   ctx.token_matcher = emel::text::encoders::detail::naive_trie{};
@@ -196,17 +233,21 @@ inline bool ensure_ugm_tables(emel::text::encoders::ugm::action::context &ctx,
     const bool insert_general = has_text && (is_normal || is_user_defined || is_unused);
     const bool insert_user_defined = has_text && is_user_defined;
     const bool update_min = has_text && is_normal;
+    const float min_candidate = std::min(ctx.min_score, entry.score);
+    const float max_candidate = std::max(ctx.max_score, entry.score);
+    ctx.min_score = select_f32(update_min, min_candidate, ctx.min_score);
+    ctx.max_score = select_f32(update_min, max_candidate, ctx.max_score);
 
-    for (bool update = update_min; update; update = false) {
-      ctx.min_score = std::min(ctx.min_score, entry.score);
-      ctx.max_score = std::max(ctx.max_score, entry.score);
-    }
-    for (bool insert = insert_general; insert; insert = false) {
-      ugm_trie_insert(ctx.token_matcher, text.data(), text.size(), static_cast<int32_t>(id));
-    }
-    for (bool insert = insert_user_defined; insert; insert = false) {
-      ugm_trie_insert(ctx.user_defined_token_matcher, text.data(), text.size(), static_cast<int32_t>(id));
-    }
+    using insert_handler_t =
+        void (*)(emel::text::encoders::detail::naive_trie &, std::string_view, int32_t) noexcept;
+    const insert_handler_t insert_handlers[2] = {
+        ugm_insert_token_none,
+        ugm_insert_token_some,
+    };
+    insert_handlers[static_cast<size_t>(insert_general)](
+        ctx.token_matcher, text, static_cast<int32_t>(id));
+    insert_handlers[static_cast<size_t>(insert_user_defined)](
+        ctx.user_defined_token_matcher, text, static_cast<int32_t>(id));
   }
 
   const bool has_normal_scores = ctx.min_score != std::numeric_limits<float>::max();
@@ -215,6 +256,23 @@ inline bool ensure_ugm_tables(emel::text::encoders::ugm::action::context &ctx,
   init_xcda_tables(ctx);
   ctx.ugm_tables_ready = true;
   return true;
+}
+
+inline bool keep_ugm_tables(emel::text::encoders::ugm::action::context &,
+                            const emel::model::data::vocab &) noexcept {
+  return true;
+}
+
+inline bool ensure_ugm_tables(emel::text::encoders::ugm::action::context &ctx,
+                              const emel::model::data::vocab &vocab) noexcept {
+  const bool already_ready = ugm_tables_ready(ctx, vocab);
+  using ensure_handler_t = bool (*)(emel::text::encoders::ugm::action::context &,
+                                    const emel::model::data::vocab &) noexcept;
+  const ensure_handler_t ensure_handlers[2] = {
+      rebuild_ugm_tables,
+      keep_ugm_tables,
+  };
+  return ensure_handlers[static_cast<size_t>(already_ready)](ctx, vocab);
 }
 
 struct xcda_view {
@@ -260,89 +318,292 @@ struct normalization_result {
   size_t consumed_input = 0;
 };
 
-inline size_t trie_longest_prefix(const emel::text::encoders::detail::naive_trie &trie,
-                                  const char *text,
-                                  const size_t len) noexcept {
+inline size_t trie_longest_prefix_none(const emel::text::encoders::detail::naive_trie &,
+                                       const char *,
+                                       const size_t) noexcept {
+  return 0u;
+}
+
+inline size_t trie_longest_prefix_some(const emel::text::encoders::detail::naive_trie &trie,
+                                       const char *text,
+                                       const size_t len) noexcept {
+  using node = emel::text::encoders::detail::naive_trie::node;
+  using step_handler_t = const node *(*)(const node *, char) noexcept;
+  const auto step_inactive = +[](const node *, const char) noexcept -> const node * {
+    return nullptr;
+  };
+  const auto step_active = +[](const node *current, const char c) noexcept -> const node * {
+    return ugm_trie_step(*current, c);
+  };
+  const step_handler_t step_handlers[2] = {
+      step_inactive,
+      step_active,
+  };
+
   size_t matched = 0;
-  for (bool has_input = len > 0u; has_input; has_input = false) {
-    const auto *node = ugm_trie_root(trie, text[0]);
-    bool walking = node != nullptr;
-    size_t offset = 1;
-    matched = select_size(walking && node->has_value, static_cast<size_t>(1), matched);
-    while (walking && offset < len) {
-      node = ugm_trie_step(*node, text[offset]);
-      offset += 1u;
-      walking = node != nullptr;
-      matched = select_size(walking && node->has_value, offset, matched);
-    }
+  const node *current = ugm_trie_root(trie, text[0]);
+  matched = select_size(current != nullptr && current->has_value, static_cast<size_t>(1), matched);
+  for (size_t offset = 1; offset < len; ++offset) {
+    const bool step_active = current != nullptr;
+    current = step_handlers[static_cast<size_t>(step_active)](current, text[offset]);
+    matched = select_size(current != nullptr && current->has_value, offset + 1u, matched);
   }
   return matched;
 }
 
-inline normalization_result normalize_prefix(const emel::model::data::vocab &vocab,
-                                             emel::text::encoders::ugm::action::context &ctx,
-                                             const std::string_view input,
-                                             const size_t input_offset) noexcept {
-  (void)vocab;
-  for (bool at_end = input_offset >= input.size(); at_end; at_end = false) {
-    return {input.data() + input_offset, 0, 0};
-  }
+inline size_t trie_longest_prefix(const emel::text::encoders::detail::naive_trie &trie,
+                                  const char *text,
+                                  const size_t len) noexcept {
+  using prefix_handler_t = size_t (*)(const emel::text::encoders::detail::naive_trie &,
+                                      const char *,
+                                      size_t) noexcept;
+  const prefix_handler_t prefix_handlers[2] = {
+      trie_longest_prefix_none,
+      trie_longest_prefix_some,
+  };
+  return prefix_handlers[static_cast<size_t>(len > 0u)](trie, text, len);
+}
 
-  const size_t remaining = input.size() - input_offset;
-  const size_t user_len = trie_longest_prefix(
-    ctx.user_defined_token_matcher, input.data() + input_offset, remaining);
-  for (bool user_hit = user_len > 0u; user_hit; user_hit = false) {
-    return {input.data() + input_offset, user_len, user_len};
-  }
+inline normalization_result normalize_prefix_at_end(const std::string_view input,
+                                                    const size_t input_offset) noexcept {
+  return {input.data() + input_offset, 0, 0};
+}
 
+inline normalization_result normalize_prefix_user_miss(const std::string_view,
+                                                       const size_t,
+                                                       const size_t) noexcept {
+  return {};
+}
+
+inline normalization_result normalize_prefix_user_hit(const std::string_view input,
+                                                      const size_t input_offset,
+                                                      const size_t user_len) noexcept {
+  return {input.data() + input_offset, user_len, user_len};
+}
+
+inline void normalize_prefix_scan_xcda_none(const emel::text::encoders::ugm::action::context &,
+                                            const std::string_view,
+                                            const size_t,
+                                            size_t &,
+                                            size_t &) noexcept {}
+
+inline void normalize_prefix_scan_xcda_some(const emel::text::encoders::ugm::action::context &ctx,
+                                            const std::string_view input,
+                                            const size_t input_offset,
+                                            size_t &longest_prefix_length,
+                                            size_t &longest_prefix_offset) noexcept {
+  xcda_view view = {ctx.xcda_table, ctx.xcda_table_size};
+  bool active = view.valid_index(0);
+  uint32_t node_index = select_u32(active, view.get_base(0), 0u);
+
+  for (size_t prefix_offset = input_offset; prefix_offset < input.size(); ++prefix_offset) {
+    const bool active_step = active;
+    const uint32_t c = static_cast<unsigned char>(input[prefix_offset]);
+    const bool non_zero = c != 0u;
+    const uint32_t candidate = node_index ^ c;
+    const bool valid = active_step && non_zero && view.valid_index(candidate)
+                       && view.get_lcheck(candidate) == c;
+    const bool leaf = valid && view.get_leaf(candidate);
+    const uint32_t branch = candidate ^ view.get_base(candidate);
+    const size_t candidate_length = prefix_offset - input_offset + 1u;
+    const size_t candidate_offset = static_cast<size_t>(view.get_value(branch));
+    longest_prefix_length = select_size(leaf, candidate_length, longest_prefix_length);
+    longest_prefix_offset = select_size(leaf, candidate_offset, longest_prefix_offset);
+    node_index = select_u32(valid, branch, node_index);
+    active = valid;
+  }
+}
+
+inline normalization_result normalize_prefix_prefix_invalid(
+    const emel::text::encoders::ugm::action::context &, const size_t, const size_t) noexcept {
+  return {nullptr, 0, 0};
+}
+
+inline normalization_result normalize_prefix_prefix_valid(
+    const emel::text::encoders::ugm::action::context &ctx,
+    const size_t longest_prefix_length,
+    const size_t longest_prefix_offset) noexcept {
+  const char *replacement = ctx.prefix_replacements + longest_prefix_offset;
+  const size_t replacement_len = std::strlen(replacement);
+  return {replacement, replacement_len, longest_prefix_length};
+}
+
+inline normalization_result normalize_prefix_invalid_utf8(const std::string_view,
+                                                          const size_t,
+                                                          const size_t) noexcept {
+  static constexpr std::array<char, 3> replacement = {'\xEF', '\xBF', '\xBD'};
+  return {replacement.data(), replacement.size(), 1};
+}
+
+inline normalization_result normalize_prefix_valid_utf8(const std::string_view input,
+                                                        const size_t input_offset,
+                                                        const size_t consumed) noexcept {
+  return {input.data() + input_offset, consumed, consumed};
+}
+
+inline normalization_result normalize_prefix_core(emel::text::encoders::ugm::action::context &ctx,
+                                                  const std::string_view input,
+                                                  const size_t input_offset,
+                                                  const size_t remaining) noexcept {
+  size_t matched = 0;
+  (void)matched;
   size_t longest_prefix_length = 0;
   size_t longest_prefix_offset = 0;
 
-  for (bool has_xcda = ctx.xcda_table != nullptr && ctx.xcda_table_size > 0u;
-       has_xcda;
-       has_xcda = false) {
-    xcda_view view = {ctx.xcda_table, ctx.xcda_table_size};
-    bool active = view.valid_index(0);
-    uint32_t node_index = select_u32(active, view.get_base(0), 0u);
+  const bool has_xcda = ctx.xcda_table != nullptr && ctx.xcda_table_size > 0u;
+  using scan_xcda_handler_t = void (*)(const emel::text::encoders::ugm::action::context &,
+                                       std::string_view,
+                                       size_t,
+                                       size_t &,
+                                       size_t &) noexcept;
+  const scan_xcda_handler_t scan_xcda_handlers[2] = {
+      normalize_prefix_scan_xcda_none,
+      normalize_prefix_scan_xcda_some,
+  };
+  scan_xcda_handlers[static_cast<size_t>(has_xcda)](
+      ctx, input, input_offset, longest_prefix_length, longest_prefix_offset);
 
-    for (size_t prefix_offset = input_offset; active && prefix_offset < input.size(); ++prefix_offset) {
-      const uint32_t c = static_cast<unsigned char>(input[prefix_offset]);
-      const bool non_zero = c != 0u;
-      const uint32_t candidate = node_index ^ c;
-      const bool valid = active && non_zero && view.valid_index(candidate)
-                         && view.get_lcheck(candidate) == c;
-      const bool leaf = valid && view.get_leaf(candidate);
-      const uint32_t branch = candidate ^ view.get_base(candidate);
-      const size_t candidate_length = prefix_offset - input_offset + 1u;
-      const size_t candidate_offset = static_cast<size_t>(view.get_value(branch));
-      longest_prefix_length = select_size(leaf, candidate_length, longest_prefix_length);
-      longest_prefix_offset = select_size(leaf, candidate_offset, longest_prefix_offset);
-      node_index = select_u32(valid, branch, node_index);
-      active = valid;
-    }
-  }
+  const bool has_prefix = longest_prefix_length > 0u;
+  const bool offset_ok = longest_prefix_offset < ctx.prefix_replacements_size;
+  using prefix_handler_t = normalization_result (*)(
+      const emel::text::encoders::ugm::action::context &, size_t, size_t) noexcept;
+  const prefix_handler_t prefix_handlers[2] = {
+      normalize_prefix_prefix_invalid,
+      normalize_prefix_prefix_valid,
+  };
+  const normalization_result prefix_result = prefix_handlers[static_cast<size_t>(offset_ok)](
+      ctx, longest_prefix_length, longest_prefix_offset);
 
-  for (bool has_prefix = longest_prefix_length > 0u; has_prefix; has_prefix = false) {
-    const bool offset_ok = longest_prefix_offset < ctx.prefix_replacements_size;
-    for (bool invalid_offset = !offset_ok; invalid_offset; invalid_offset = false) {
-      return {nullptr, 0, 0};
-    }
-    const char *replacement = ctx.prefix_replacements + longest_prefix_offset;
-    const size_t replacement_len = std::strlen(replacement);
-    return {replacement, replacement_len, longest_prefix_length};
-  }
-
-  static constexpr std::array<char, 3> replacement = {'\xEF', '\xBF', '\xBD'};
   const uint8_t first = static_cast<uint8_t>(input[input_offset]);
   const bool continuation = (first & 0xC0u) == 0x80u;
   const size_t len_raw = ugm_utf8_len(static_cast<char>(first));
   const bool bounded = len_raw <= remaining;
   const bool invalid = continuation || !bounded;
   const size_t consumed = select_size(bounded, len_raw, static_cast<size_t>(1));
-  for (bool invalid_utf8 = invalid; invalid_utf8; invalid_utf8 = false) {
-    return {replacement.data(), replacement.size(), 1};
-  }
-  return {input.data() + input_offset, consumed, consumed};
+  using utf8_handler_t = normalization_result (*)(std::string_view, size_t, size_t) noexcept;
+  const utf8_handler_t utf8_handlers[2] = {
+      normalize_prefix_valid_utf8,
+      normalize_prefix_invalid_utf8,
+  };
+  const normalization_result utf8_result =
+      utf8_handlers[static_cast<size_t>(invalid)](input, input_offset, consumed);
+
+  const std::array<normalization_result, 2> result_table{utf8_result, prefix_result};
+  return result_table[static_cast<size_t>(has_prefix)];
+}
+
+inline normalization_result normalize_prefix_not_end(const emel::model::data::vocab &vocab,
+                                                     emel::text::encoders::ugm::action::context &ctx,
+                                                     const std::string_view input,
+                                                     const size_t input_offset) noexcept {
+  (void)vocab;
+  const size_t remaining = input.size() - input_offset;
+  const size_t user_len = trie_longest_prefix(
+      ctx.user_defined_token_matcher, input.data() + input_offset, remaining);
+  const bool user_hit = user_len > 0u;
+  using user_handler_t = normalization_result (*)(std::string_view, size_t, size_t) noexcept;
+  const user_handler_t user_handlers[2] = {
+      normalize_prefix_user_miss,
+      normalize_prefix_user_hit,
+  };
+  const normalization_result user_result =
+      user_handlers[static_cast<size_t>(user_hit)](input, input_offset, user_len);
+  const normalization_result core_result =
+      normalize_prefix_core(ctx, input, input_offset, remaining);
+  const std::array<normalization_result, 2> result_table{core_result, user_result};
+  return result_table[static_cast<size_t>(user_hit)];
+}
+
+inline normalization_result normalize_prefix(const emel::model::data::vocab &vocab,
+                                             emel::text::encoders::ugm::action::context &ctx,
+                                             const std::string_view input,
+                                             const size_t input_offset) noexcept {
+  const bool at_end = input_offset >= input.size();
+  using prefix_handler_t = normalization_result (*)(
+      const emel::model::data::vocab &, emel::text::encoders::ugm::action::context &,
+      std::string_view, size_t) noexcept;
+  const prefix_handler_t prefix_handlers[2] = {
+      normalize_prefix_not_end,
+      [](const emel::model::data::vocab &,
+         emel::text::encoders::ugm::action::context &,
+         const std::string_view in,
+         const size_t off) noexcept {
+        return normalize_prefix_at_end(in, off);
+      },
+  };
+  return prefix_handlers[static_cast<size_t>(at_end)](vocab, ctx, input, input_offset);
+}
+
+struct normalize_emit_state {
+  size_t out_len = 0u;
+  bool is_space_prepended = false;
+  bool processing_non_ws = false;
+  bool ok = true;
+};
+
+inline void ugm_append_bytes_none(emel::text::encoders::ugm::action::context &,
+                                  normalize_emit_state &,
+                                  const char *,
+                                  const size_t) noexcept {}
+
+inline void ugm_append_bytes_some(emel::text::encoders::ugm::action::context &ctx,
+                                  normalize_emit_state &state,
+                                  const char *src,
+                                  const size_t len) noexcept {
+  std::memcpy(ctx.scratch.buffer.data() + state.out_len, src, len);
+  state.out_len += len;
+}
+
+inline bool ugm_append_bytes_if(const bool emit,
+                                emel::text::encoders::ugm::action::context &ctx,
+                                normalize_emit_state &state,
+                                const char *src,
+                                const size_t len) noexcept {
+  const bool has_capacity = state.out_len + len <= ctx.scratch.buffer.size();
+  const bool write = emit && has_capacity;
+  using append_handler_t = void (*)(emel::text::encoders::ugm::action::context &,
+                                    normalize_emit_state &, const char *, size_t) noexcept;
+  const append_handler_t append_handlers[2] = {
+      ugm_append_bytes_none,
+      ugm_append_bytes_some,
+  };
+  append_handlers[static_cast<size_t>(write)](ctx, state, src, len);
+  return !emit || has_capacity;
+}
+
+inline void process_normalized_space(emel::text::encoders::ugm::action::context &ctx,
+                                     normalize_emit_state &state,
+                                     const char,
+                                     const char *space,
+                                     const size_t space_len,
+                                     const bool,
+                                     const bool shall_merge_spaces) noexcept {
+  state.processing_non_ws = false;
+  const bool emit_space = state.ok && !shall_merge_spaces;
+  const bool space_ok = ugm_append_bytes_if(emit_space, ctx, state, space, space_len);
+  state.ok = state.ok && space_ok;
+}
+
+inline void process_normalized_non_space(emel::text::encoders::ugm::action::context &ctx,
+                                         normalize_emit_state &state,
+                                         const char c,
+                                         const char *space,
+                                         const size_t space_len,
+                                         const bool shall_prepend_space,
+                                         const bool shall_merge_spaces) noexcept {
+  const bool begin_non_ws = !state.processing_non_ws;
+  state.processing_non_ws = true;
+  const bool emit_prefix = begin_non_ws &&
+                           ((shall_prepend_space && !state.is_space_prepended) ||
+                            shall_merge_spaces);
+  const bool prefix_ok = ugm_append_bytes_if(state.ok && emit_prefix, ctx, state, space, space_len);
+  const bool prefix_written = state.ok && emit_prefix && prefix_ok;
+  state.ok = state.ok && prefix_ok;
+  state.is_space_prepended = state.is_space_prepended || prefix_written;
+
+  const bool emit_char = state.ok;
+  const bool char_ok = ugm_append_bytes_if(emit_char, ctx, state, &c, 1u);
+  state.ok = state.ok && char_ok;
 }
 
 inline bool normalize_ugm_into(const emel::model::data::vocab &vocab,
@@ -359,212 +620,42 @@ inline bool normalize_ugm_into(const emel::model::data::vocab &vocab,
   const bool shall_append_space = vocab.treat_whitespace_as_suffix && vocab.add_space_prefix;
   const bool shall_merge_spaces = vocab.remove_extra_whitespaces;
 
-  size_t out_len = 0;
-  bool is_space_prepended = false;
-  bool processing_non_ws = false;
+  normalize_emit_state state{};
 
   size_t input_offset = 0;
   while (input_offset < input.size()) {
     normalization_result norm = normalize_prefix(vocab, ctx, input, input_offset);
     const bool invalid_norm = norm.normalized == nullptr && norm.consumed_input == 0u;
-    for (bool fail_norm = invalid_norm; fail_norm; fail_norm = false) {
-      return false;
-    }
+    state.ok = state.ok && !invalid_norm;
+    const size_t consumed_input = select_size(norm.consumed_input > 0u,
+                                              norm.consumed_input,
+                                              static_cast<size_t>(1));
 
-    for (size_t i = 0; i < norm.normalized_len; ++i) {
+    const size_t normalized_len = norm.normalized_len * static_cast<size_t>(state.ok);
+    for (size_t i = 0; i < normalized_len; ++i) {
       const char c = norm.normalized[i];
       const bool non_space = c != ' ';
-
-      for (bool emit_non_space = non_space; emit_non_space; emit_non_space = false) {
-        for (bool begin_non_ws = !processing_non_ws; begin_non_ws; begin_non_ws = false) {
-          processing_non_ws = true;
-          const bool emit_prefix = (shall_prepend_space && !is_space_prepended) || shall_merge_spaces;
-          for (bool write_prefix = emit_prefix; write_prefix; write_prefix = false) {
-            const bool has_capacity = out_len + space_len <= ctx.scratch.buffer.size();
-            for (bool overflow = !has_capacity; overflow; overflow = false) {
-              return false;
-            }
-            std::memcpy(ctx.scratch.buffer.data() + out_len, space, space_len);
-            out_len += space_len;
-            is_space_prepended = true;
-          }
-        }
-
-        const bool has_capacity = out_len + 1u <= ctx.scratch.buffer.size();
-        for (bool overflow = !has_capacity; overflow; overflow = false) {
-          return false;
-        }
-        ctx.scratch.buffer[out_len] = c;
-        out_len += 1u;
-      }
-
-      for (bool emit_space = !non_space; emit_space; emit_space = false) {
-        processing_non_ws = false;
-        for (bool keep_spaces = !shall_merge_spaces; keep_spaces; keep_spaces = false) {
-          const bool has_capacity = out_len + space_len <= ctx.scratch.buffer.size();
-          for (bool overflow = !has_capacity; overflow; overflow = false) {
-            return false;
-          }
-          std::memcpy(ctx.scratch.buffer.data() + out_len, space, space_len);
-          out_len += space_len;
-        }
-      }
-    }
-
-    input_offset += norm.consumed_input;
-  }
-
-  for (bool append_space = shall_append_space; append_space; append_space = false) {
-    const bool has_capacity = out_len + space_len <= ctx.scratch.buffer.size();
-    for (bool overflow = !has_capacity; overflow; overflow = false) {
-      return false;
-    }
-    std::memcpy(ctx.scratch.buffer.data() + out_len, space, space_len);
-    out_len += space_len;
-  }
-
-  out_view = std::string_view(ctx.scratch.buffer.data(), out_len);
-  return true;
-}
-
-inline encode_result encode_ugm(const event::encode &ev,
-                                emel::text::encoders::ugm::action::context &ctx,
-                                const emel::model::data::vocab &vocab) {
-  encode_result result{};
-  result.token_count = 0;
-
-  for (bool empty_text = ev.text.empty(); empty_text; empty_text = false) {
-    result.error = EMEL_OK;
-    return result;
-  }
-
-  const bool tables_ready = ugm_tables_ready(ctx, vocab);
-  for (bool missing_tables = !tables_ready; missing_tables; missing_tables = false) {
-    result.error = EMEL_ERR_INVALID_ARGUMENT;
-    return result;
-  }
-
-  int32_t unk_id = vocab.unk_id;
-  for (bool resolve_unk = unk_id == k_token_null; resolve_unk; resolve_unk = false) {
-    unk_id = ugm_lookup_token_exact(vocab, "<unk>");
-  }
-
-  std::string_view normalized{};
-  const bool normalized_ok = normalize_ugm_into(vocab, ctx, ev.text, normalized);
-  for (bool normalize_fail = !normalized_ok; normalize_fail; normalize_fail = false) {
-    result.error = EMEL_ERR_INVALID_ARGUMENT;
-    return result;
-  }
-
-  const size_t input_len = normalized.size();
-  for (bool no_input = input_len == 0u; no_input; no_input = false) {
-    result.error = EMEL_OK;
-    return result;
-  }
-  for (bool overflow = input_len >= ctx.best.size(); overflow; overflow = false) {
-    result.error = EMEL_ERR_INVALID_ARGUMENT;
-    return result;
-  }
-
-  for (size_t i = 0; i <= input_len; ++i) {
-    ctx.best[i] = {unk_id, 0u, -std::numeric_limits<double>::max()};
-  }
-  ctx.best[0] = {unk_id, 0u, 0.0};
-
-  size_t input_offset = 0;
-  while (input_offset < input_len) {
-    const size_t n_utf8_code_units = std::min(
-      static_cast<size_t>(ugm_utf8_len(normalized[input_offset])),
-      input_len - input_offset);
-    bool single_codepoint_token_found = false;
-    const auto current_best = ctx.best[input_offset];
-    size_t prefix_offset = input_offset;
-    const auto *node = ugm_trie_root(ctx.token_matcher, normalized[prefix_offset]);
-    prefix_offset += 1u;
-    bool walking = node != nullptr && prefix_offset <= input_len;
-
-    while (walking) {
-      for (bool has_value = node->has_value; has_value; has_value = false) {
-        const bool single_codepoint = prefix_offset - input_offset == n_utf8_code_units;
-        single_codepoint_token_found = single_codepoint_token_found || single_codepoint;
-        const int32_t token_id = node->value;
-        const auto &token_data = vocab.entries[static_cast<uint32_t>(token_id)];
-        const bool is_user_defined = token_data.type == 4;
-        const std::array<double, 2> score_table{
-          static_cast<double>(token_data.score),
-          0.0,
-        };
-        const double token_score = score_table[static_cast<size_t>(is_user_defined)];
-        const double challenger_score = current_best.score_sum + token_score;
-        auto &current_champ = ctx.best[prefix_offset];
-        for (bool better = challenger_score > current_champ.score_sum; better; better = false) {
-          current_champ = {token_id, static_cast<uint32_t>(input_offset), challenger_score};
-        }
-      }
-
-      const bool can_advance = prefix_offset < input_len;
-      const size_t safe_offset = select_size(can_advance, prefix_offset, input_offset);
-      const auto *next_node = ugm_trie_step(*node, normalized[safe_offset]);
-      const std::array<const emel::text::encoders::detail::naive_trie::node *, 2> options{
-        node,
-        next_node,
+      using process_char_handler_t = void (*)(emel::text::encoders::ugm::action::context &,
+                                              normalize_emit_state &, char, const char *, size_t,
+                                              bool, bool) noexcept;
+      const process_char_handler_t process_char_handlers[2] = {
+          process_normalized_space,
+          process_normalized_non_space,
       };
-      node = options[static_cast<size_t>(can_advance)];
-      prefix_offset += static_cast<size_t>(can_advance);
-      walking = can_advance && node != nullptr && prefix_offset <= input_len;
+      process_char_handlers[static_cast<size_t>(non_space)](
+          ctx, state, c, space, space_len, shall_prepend_space, shall_merge_spaces);
     }
 
-    const bool use_unk = !single_codepoint_token_found && unk_id != k_token_null;
-    for (bool update_unk = use_unk; update_unk; update_unk = false) {
-      const double challenger_score = current_best.score_sum + static_cast<double>(ctx.unknown_token_score);
-      const size_t next_offset = input_offset + n_utf8_code_units;
-      auto &current_champ = ctx.best[next_offset];
-      for (bool better = challenger_score > current_champ.score_sum; better; better = false) {
-        current_champ = {unk_id, static_cast<uint32_t>(input_offset), challenger_score};
-      }
-    }
-
-    input_offset += n_utf8_code_units;
+    input_offset += consumed_input;
   }
 
-  size_t out_count = 0;
-  bool is_prev_unknown = false;
-  emel::text::encoders::ugm::action::best_tokenization tokenization = ctx.best[input_len];
-  bool tracing = true;
-  while (tracing) {
-    const bool is_unknown = tokenization.token_id == unk_id;
-    const bool emit_token = !(is_prev_unknown && is_unknown);
-    for (bool emit = emit_token; emit; emit = false) {
-      const bool has_room = out_count < ctx.token_buffer.size();
-      for (bool no_room = !has_room; no_room; no_room = false) {
-        result.error = EMEL_ERR_INVALID_ARGUMENT;
-        return result;
-      }
-      ctx.token_buffer[out_count] = tokenization.token_id;
-      out_count += 1u;
-    }
+  const bool append_space = state.ok && shall_append_space;
+  const bool append_ok = ugm_append_bytes_if(append_space, ctx, state, space, space_len);
+  state.ok = state.ok && append_ok;
 
-    const bool at_root = tokenization.input_offset == 0u;
-    for (bool advance = !at_root; advance; advance = false) {
-      is_prev_unknown = is_unknown;
-      tokenization = ctx.best[tokenization.input_offset];
-    }
-    tracing = !at_root;
-  }
-
-  int32_t count = 0;
-  for (size_t i = 0; i < out_count; ++i) {
-    const int32_t token = ctx.token_buffer[out_count - 1u - i];
-    const bool pushed = ugm_push_token(ev, token, count);
-    for (bool push_fail = !pushed; push_fail; push_fail = false) {
-      result.error = EMEL_ERR_INVALID_ARGUMENT;
-      return result;
-    }
-  }
-
-  result.token_count = count;
-  result.error = EMEL_OK;
-  return result;
+  out_view = std::string_view(
+      ctx.scratch.buffer.data(), state.out_len * static_cast<size_t>(state.ok));
+  return state.ok;
 }
 
 }  // namespace emel::text::encoders::ugm::detail

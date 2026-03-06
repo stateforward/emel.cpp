@@ -219,12 +219,23 @@ TEST_CASE("graph_assembler_action_and_guard_branches") {
   CHECK(guard::reserve_validate_done{}(reserve_ev, machine_ctx));
   CHECK(guard::reserve_build_done{}(reserve_ev, machine_ctx));
   CHECK(guard::reserve_alloc_done{}(reserve_ev, machine_ctx));
-  CHECK(guard::reserve_phase_ok{}(reserve_ev, machine_ctx));
+  CHECK(guard::reserve_error_none{}(reserve_ev, machine_ctx));
+
+  reserve_ctx.err = emel::error::cast(assembler_error::invalid_request);
+  CHECK(guard::reserve_error_invalid_request{}(reserve_ev, machine_ctx));
+  reserve_ctx.err = emel::error::cast(assembler_error::capacity);
+  CHECK(guard::reserve_error_capacity{}(reserve_ev, machine_ctx));
+  reserve_ctx.err = emel::error::cast(assembler_error::internal_error);
+  CHECK(guard::reserve_error_internal_error{}(reserve_ev, machine_ctx));
+  reserve_ctx.err = emel::error::cast(assembler_error::untracked);
+  CHECK(guard::reserve_error_untracked{}(reserve_ev, machine_ctx));
+  reserve_ctx.err = static_cast<emel::error::type>(0x7fff);
+  CHECK(guard::reserve_error_unknown{}(reserve_ev, machine_ctx));
+
   reserve_ctx.err = emel::error::cast(assembler_error::capacity);
   CHECK(guard::reserve_validate_failed{}(reserve_ev, machine_ctx));
   CHECK(guard::reserve_build_failed{}(reserve_ev, machine_ctx));
   CHECK(guard::reserve_alloc_failed{}(reserve_ev, machine_ctx));
-  CHECK(guard::reserve_phase_failed{}(reserve_ev, machine_ctx));
 
   assemble_ctx.err = emel::error::cast(assembler_error::none);
   assemble_ctx.validate_outcome = emel::graph::assembler::assemble_validate_pass::events::phase_outcome::done;
@@ -237,13 +248,24 @@ TEST_CASE("graph_assembler_action_and_guard_branches") {
   CHECK(guard::reuse_decision_rebuild{}(assemble_ev, machine_ctx));
   CHECK(guard::assemble_build_done{}(assemble_ev, machine_ctx));
   CHECK(guard::assemble_alloc_done{}(assemble_ev, machine_ctx));
-  CHECK(guard::assemble_phase_ok{}(assemble_ev, machine_ctx));
+  CHECK(guard::assemble_error_none{}(assemble_ev, machine_ctx));
+
+  assemble_ctx.err = emel::error::cast(assembler_error::invalid_request);
+  CHECK(guard::assemble_error_invalid_request{}(assemble_ev, machine_ctx));
+  assemble_ctx.err = emel::error::cast(assembler_error::capacity);
+  CHECK(guard::assemble_error_capacity{}(assemble_ev, machine_ctx));
+  assemble_ctx.err = emel::error::cast(assembler_error::internal_error);
+  CHECK(guard::assemble_error_internal_error{}(assemble_ev, machine_ctx));
+  assemble_ctx.err = emel::error::cast(assembler_error::untracked);
+  CHECK(guard::assemble_error_untracked{}(assemble_ev, machine_ctx));
+  assemble_ctx.err = static_cast<emel::error::type>(0x7fff);
+  CHECK(guard::assemble_error_unknown{}(assemble_ev, machine_ctx));
+
   assemble_ctx.err = emel::error::cast(assembler_error::internal_error);
   CHECK(guard::assemble_validate_failed{}(assemble_ev, machine_ctx));
   CHECK(guard::reuse_decision_failed{}(assemble_ev, machine_ctx));
   CHECK(guard::assemble_build_failed{}(assemble_ev, machine_ctx));
   CHECK(guard::assemble_alloc_failed{}(assemble_ev, machine_ctx));
-  CHECK(guard::assemble_phase_failed{}(assemble_ev, machine_ctx));
 
   action::on_unexpected(reserve_ev, machine_ctx);
   action::on_unexpected(assemble_ev, machine_ctx);
@@ -363,6 +385,10 @@ TEST_CASE("graph_assembler_pass_action_and_guard_branches") {
 
   assemble_ctx.validate_outcome = emel::graph::assembler::assemble_validate_pass::events::phase_outcome::failed;
   CHECK(emel::graph::assembler::reuse_decision_pass::guard::phase_prereq_failed{}(assemble_ev, machine_ctx));
+  assemble_ctx.err = emel::error::cast(assembler_error::internal_error);
+  CHECK(emel::graph::assembler::reuse_decision_pass::guard::phase_prefailed{}(assemble_ev, machine_ctx));
+  emel::graph::assembler::reuse_decision_pass::action::mark_failed_prefailed(assemble_ev, machine_ctx);
+  assemble_ctx.err = emel::error::cast(assembler_error::none);
   assemble_ctx.validate_outcome = emel::graph::assembler::assemble_validate_pass::events::phase_outcome::done;
   assemble_request.node_count_hint = 0u;
   CHECK(emel::graph::assembler::reuse_decision_pass::guard::phase_invalid_request{}(assemble_ev, machine_ctx));

@@ -3,6 +3,7 @@
 
 #include "emel/batch/planner/actions.hpp"
 #include "emel/batch/planner/modes/sequential/actions.hpp"
+#include "emel/batch/planner/modes/sequential/guards.hpp"
 
 namespace {
 
@@ -57,8 +58,12 @@ TEST_CASE("batch_planner_modes_sequential_create_plan_with_masks") {
   };
   request_ctx.effective_step_size = 3;
 
+  auto runtime = make_runtime(request, request_ctx);
+  emel::batch::planner::modes::sequential::action::prepare_steps(runtime, planner_ctx);
+  REQUIRE(emel::batch::planner::modes::sequential::guard::sequential_plan_capacity_ok(runtime,
+                                                                                       planner_ctx));
   emel::batch::planner::modes::sequential::action::create_plan(
-      make_runtime(request, request_ctx), planner_ctx);
+      runtime, planner_ctx);
   CHECK(request_ctx.step_count == 2);
   CHECK(request_ctx.step_sizes[0] == 3);
   CHECK(request_ctx.step_sizes[1] == 1);
@@ -81,9 +86,36 @@ TEST_CASE("batch_planner_modes_sequential_create_plan_without_masks_failure") {
   };
   request_ctx.effective_step_size = 0;
 
-  emel::batch::planner::modes::sequential::action::create_plan(
-      make_runtime(request, request_ctx), planner_ctx);
+  auto runtime = make_runtime(request, request_ctx);
+  emel::batch::planner::modes::sequential::action::prepare_steps(runtime, planner_ctx);
+  REQUIRE(emel::batch::planner::modes::sequential::guard::has_invalid_step_size(runtime,
+                                                                                 planner_ctx));
+  emel::batch::planner::modes::sequential::action::mark_invalid_step_size(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 0);
   CHECK(request_ctx.total_outputs == 0);
   CHECK(request_ctx.err == emel::error::cast(emel::batch::planner::error::invalid_step_size));
+}
+
+TEST_CASE("batch_planner_modes_sequential_marks_progress_stalled") {
+  emel::batch::planner::action::context planner_ctx{};
+  emel::batch::planner::event::request_ctx request_ctx{};
+  std::array<int32_t, 1> tokens = {{42}};
+  done_capture done{};
+  error_capture error{};
+
+  emel::batch::planner::event::request request{
+    .token_ids = tokens.data(),
+    .n_tokens = static_cast<int32_t>(tokens.size()),
+    .mode = emel::batch::planner::event::plan_mode::seq,
+    .seq_masks = nullptr,
+    .on_done = make_done(&done),
+    .on_error = make_error(&error),
+  };
+
+  auto runtime = make_runtime(request, request_ctx);
+  emel::batch::planner::modes::sequential::action::prepare_steps(runtime, planner_ctx);
+  emel::batch::planner::modes::sequential::action::mark_planning_progress_stalled(runtime,
+                                                                                   planner_ctx);
+  CHECK(request_ctx.err ==
+        emel::error::cast(emel::batch::planner::error::planning_progress_stalled));
 }

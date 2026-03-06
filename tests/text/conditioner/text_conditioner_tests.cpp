@@ -17,7 +17,8 @@ conditioner_code(const emel::text::conditioner::error err) noexcept {
   return static_cast<int32_t>(err);
 }
 
-constexpr int32_t k_external_model_invalid_code = 5;
+constexpr int32_t k_external_model_invalid_code =
+    emel::text::tokenizer::error_code(emel::text::tokenizer::error::model_invalid);
 
 int32_t add_token(emel::model::data::vocab &vocab, const char *text,
                   const int32_t type = 0) {

@@ -9,6 +9,7 @@
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
 #include "emel/text/tokenizer/preprocessor/types.hpp"
+#include "emel/text/tokenizer/preprocessor/wpm/guards.hpp"
 #include "emel/text/tokenizer/preprocessor/wpm/sm.hpp"
 
 namespace {
@@ -43,7 +44,7 @@ TEST_CASE("tokenizer_preprocessor_wpm_valid_request") {
              emel::text::tokenizer::preprocessor::k_max_fragments>
       fragments = {};
   size_t count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none);
 
   emel::text::tokenizer::preprocessor::wpm::sm machine{};
   emel::text::tokenizer::preprocessor::event::preprocess ev(
@@ -52,7 +53,7 @@ TEST_CASE("tokenizer_preprocessor_wpm_valid_request") {
       err);
 
   CHECK(machine.process_event(ev));
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none));
   CHECK(count == 1);
   CHECK(fragments[0].kind ==
         emel::text::tokenizer::preprocessor::fragment_kind::raw_text);
@@ -66,7 +67,7 @@ TEST_CASE("tokenizer_preprocessor_wpm_parse_special_true") {
              emel::text::tokenizer::preprocessor::k_max_fragments>
       fragments = {};
   size_t count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none);
 
   emel::text::tokenizer::preprocessor::wpm::sm machine{};
   emel::text::tokenizer::preprocessor::event::preprocess ev(
@@ -75,7 +76,7 @@ TEST_CASE("tokenizer_preprocessor_wpm_parse_special_true") {
       err);
 
   CHECK(machine.process_event(ev));
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none));
   REQUIRE(count == 2);
   CHECK(fragments[0].kind ==
         emel::text::tokenizer::preprocessor::fragment_kind::token);
@@ -92,7 +93,7 @@ TEST_CASE("tokenizer_preprocessor_wpm_parse_special_false") {
              emel::text::tokenizer::preprocessor::k_max_fragments>
       fragments = {};
   size_t count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none);
 
   emel::text::tokenizer::preprocessor::wpm::sm machine{};
   emel::text::tokenizer::preprocessor::event::preprocess ev(
@@ -101,7 +102,7 @@ TEST_CASE("tokenizer_preprocessor_wpm_parse_special_false") {
       err);
 
   CHECK(machine.process_event(ev));
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::tokenizer::preprocessor::error_code(emel::text::tokenizer::preprocessor::error::none));
   REQUIRE(count == 2);
   CHECK(fragments[0].kind ==
         emel::text::tokenizer::preprocessor::fragment_kind::token);
@@ -109,4 +110,49 @@ TEST_CASE("tokenizer_preprocessor_wpm_parse_special_false") {
   CHECK(fragments[1].kind ==
         emel::text::tokenizer::preprocessor::fragment_kind::raw_text);
   CHECK(fragments[1].text == std::string_view("BBB"));
+}
+
+TEST_CASE("tokenizer_preprocessor_wpm_phase_result_guards") {
+  using emel::text::tokenizer::preprocessor::error;
+  using emel::text::tokenizer::preprocessor::event::preprocess;
+  using emel::text::tokenizer::preprocessor::event::preprocess_ctx;
+  using emel::text::tokenizer::preprocessor::event::preprocess_runtime;
+
+  static emel::model::data::vocab vocab = {};
+  std::memset(&vocab, 0, sizeof(vocab));
+  vocab.tokenizer_model_id = emel::model::data::tokenizer_model::WPM;
+
+  std::array<emel::text::tokenizer::preprocessor::fragment, 1> fragments = {};
+  size_t count = 0;
+  int32_t err = 0;
+  preprocess request(vocab, std::string_view("x"), false,
+                     std::span<emel::text::tokenizer::preprocessor::fragment>(fragments),
+                     count, err);
+  preprocess_ctx ctx{};
+  preprocess_runtime runtime_ev{request, ctx};
+  emel::text::tokenizer::preprocessor::action::context sm_ctx{};
+
+  ctx.phase_error = error::none;
+  CHECK(emel::text::tokenizer::preprocessor::wpm::guard::build_specials_ok{}(
+      runtime_ev, sm_ctx));
+  CHECK(emel::text::tokenizer::preprocessor::wpm::guard::partition_ok{}(
+      runtime_ev, sm_ctx));
+
+  ctx.phase_error = error::invalid_request;
+  CHECK(emel::text::tokenizer::preprocessor::wpm::guard::build_specials_invalid_request_error{}(
+      runtime_ev, sm_ctx));
+  CHECK(emel::text::tokenizer::preprocessor::wpm::guard::partition_invalid_request_error{}(
+      runtime_ev, sm_ctx));
+
+  ctx.phase_error = error::backend_error;
+  CHECK(emel::text::tokenizer::preprocessor::wpm::guard::build_specials_backend_error{}(
+      runtime_ev, sm_ctx));
+  CHECK(emel::text::tokenizer::preprocessor::wpm::guard::partition_backend_error{}(
+      runtime_ev, sm_ctx));
+
+  ctx.phase_error = static_cast<error>(0xFF);
+  CHECK(emel::text::tokenizer::preprocessor::wpm::guard::build_specials_unknown_error{}(
+      runtime_ev, sm_ctx));
+  CHECK(emel::text::tokenizer::preprocessor::wpm::guard::partition_unknown_error{}(
+      runtime_ev, sm_ctx));
 }

@@ -44,7 +44,7 @@ design doc: docs/designs/text/encoders/encoder.design.md
  - bounded work per encode request.
  
  ## error mapping
- - invalid requests or capacity errors -> `EMEL_ERR_INVALID_ARGUMENT`.
+ - invalid requests or capacity errors -> `emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument)`.
  - kernel/data errors propagate via `error_out`.
  
  ## status

@@ -49,6 +49,14 @@ struct expr_first_is_identifier {
   }
 };
 
+struct expr_first_identifier_followed_by_close {
+  bool operator()(const event::parse_runtime &ev,
+                  const action::context &ctx) const noexcept {
+    return expr_first_is_identifier{}(ev, ctx) &&
+           token_is(ev.ctx, emel::text::jinja::token_type::close_expression, 1);
+  }
+};
+
 struct expr_first_is_literal {
   bool operator()(const event::parse_runtime &ev,
                   const action::context &) const noexcept {

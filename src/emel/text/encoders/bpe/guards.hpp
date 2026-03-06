@@ -1,10 +1,16 @@
 #pragma once
 
 #include "emel/text/encoders/bpe/detail.hpp"
+#include "emel/text/encoders/bpe/errors.hpp"
 #include "emel/text/encoders/bpe/context.hpp"
 #include "emel/text/encoders/guards.hpp"
 
 namespace emel::text::encoders::bpe::guard {
+
+inline bool phase_error_is(const event::encode_runtime & ev,
+                           const error::code code_value) noexcept {
+  return ev.ctx.err == error::to_emel(code_value);
+}
 
 struct valid_encode {
   bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
@@ -18,15 +24,71 @@ struct invalid_encode {
   }
 };
 
-struct phase_ok {
+struct table_prepare_ok {
   bool operator()(const event::encode_runtime & ev) const noexcept {
-    return emel::text::encoders::guard::phase_ok{}(ev);
+    return phase_error_is(ev, error::code::ok);
   }
 };
 
-struct phase_failed {
+struct table_prepare_invalid_argument_error {
   bool operator()(const event::encode_runtime & ev) const noexcept {
-    return emel::text::encoders::guard::phase_failed{}(ev);
+    return phase_error_is(ev, error::code::invalid_argument);
+  }
+};
+
+struct table_prepare_backend_error {
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::backend);
+  }
+};
+
+struct table_prepare_model_invalid_error {
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::model_invalid);
+  }
+};
+
+struct table_prepare_unclassified_error_code {
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    const int32_t err = ev.ctx.err;
+    return err != error::to_emel(error::code::ok) &&
+           err != error::to_emel(error::code::invalid_argument) &&
+           err != error::to_emel(error::code::backend) &&
+           err != error::to_emel(error::code::model_invalid);
+  }
+};
+
+struct encode_result_ok {
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::ok);
+  }
+};
+
+struct encode_result_invalid_argument_error {
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::invalid_argument);
+  }
+};
+
+struct encode_result_backend_error {
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::backend);
+  }
+};
+
+struct encode_result_model_invalid_error {
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    return phase_error_is(ev, error::code::model_invalid);
+  }
+};
+
+struct encode_result_unclassified_error_code {
+  bool operator()(const event::encode_runtime & ev) const noexcept {
+    const int32_t err = ev.ctx.err;
+    return err != error::to_emel(error::code::ok) &&
+           err != error::to_emel(error::code::invalid_argument) &&
+           err != error::to_emel(error::code::backend) &&
+           err != error::to_emel(error::code::model_invalid);
   }
 };
 
@@ -54,18 +116,6 @@ struct not_preprocessed {
   }
 };
 
-struct text_non_empty_and_preprocessed {
-  bool operator()(const event::encode_runtime & ev) const noexcept {
-    return text_non_empty{}(ev) && preprocessed{}(ev);
-  }
-};
-
-struct text_non_empty_and_not_preprocessed {
-  bool operator()(const event::encode_runtime & ev) const noexcept {
-    return text_non_empty{}(ev) && not_preprocessed{}(ev);
-  }
-};
-
 struct ignore_merges_enabled {
   bool operator()(const event::encode_runtime &, const action::context & ctx) const noexcept {
     return ctx.vocab != nullptr && ctx.vocab->ignore_merges;
@@ -79,15 +129,15 @@ struct direct_word_token_available {
   }
 };
 
-struct ignore_merges_fast_path {
+struct merge_symbol_capacity_within_limit {
   bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return ignore_merges_enabled{}(ev, ctx) && direct_word_token_available{}(ev, ctx);
+    return ev.request.text.size() <= ctx.scratch.offsets.size();
   }
 };
 
-struct merge_path_required {
+struct merge_symbol_capacity_exceeded {
   bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return !ignore_merges_fast_path{}(ev, ctx);
+    return !merge_symbol_capacity_within_limit{}(ev, ctx);
   }
 };
 
@@ -100,18 +150,6 @@ struct vocab_changed {
 struct vocab_unchanged {
   bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
     return emel::text::encoders::guard::vocab_unchanged{}(ev, ctx);
-  }
-};
-
-struct valid_encode_and_vocab_changed {
-  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return emel::text::encoders::guard::valid_encode_and_vocab_changed{}(ev, ctx);
-  }
-};
-
-struct valid_encode_and_vocab_unchanged {
-  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return emel::text::encoders::guard::valid_encode_and_vocab_unchanged{}(ev, ctx);
   }
 };
 

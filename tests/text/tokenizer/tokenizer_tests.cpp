@@ -52,7 +52,7 @@ TEST_CASE("tokenizer_bind_and_tokenize_bpe") {
   auto & vocab = make_bpe_vocab();;
   emel::text::tokenizer::sm machine{};
 
-  int32_t bind_err = EMEL_OK;
+  int32_t bind_err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
   emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
   bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
@@ -60,11 +60,11 @@ TEST_CASE("tokenizer_bind_and_tokenize_bpe") {
   bind_ev.error_out = &bind_err;
 
   CHECK(machine.process_event(bind_ev));
-  CHECK(bind_err == EMEL_OK);
+  CHECK(bind_err == emel::text::tokenizer::error_code(emel::text::tokenizer::error::none));
 
   std::array<int32_t, 8> tokens = {};
   int32_t count = 0;
-  int32_t tok_err = EMEL_OK;
+  int32_t tok_err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
   emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = &vocab;
   tok_ev.text = std::string_view("hello world");
@@ -76,7 +76,7 @@ TEST_CASE("tokenizer_bind_and_tokenize_bpe") {
   tok_ev.error_out = &tok_err;
 
   CHECK(machine.process_event(tok_ev));
-  CHECK(tok_err == EMEL_OK);
+  CHECK(tok_err == emel::text::tokenizer::error_code(emel::text::tokenizer::error::none));
   CHECK(count == 4);
   CHECK(tokens[0] == vocab.bos_id);
   CHECK(tokens[1] == 0);
@@ -90,7 +90,7 @@ TEST_CASE("tokenizer_tokenize_requires_bind") {
 
   std::array<int32_t, 4> tokens = {};
   int32_t count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
   emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = &vocab;
   tok_ev.text = std::string_view("hello");
@@ -102,7 +102,7 @@ TEST_CASE("tokenizer_tokenize_requires_bind") {
   tok_ev.error_out = &err;
 
   CHECK_FALSE(machine.process_event(tok_ev));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == emel::text::tokenizer::error_code(emel::text::tokenizer::error::invalid_request));
   CHECK(count == 0);
 }
 
@@ -112,18 +112,18 @@ TEST_CASE("tokenizer_tokenize_rejects_mismatched_vocab") {
   std::memset(&other_vocab, 0, sizeof(other_vocab));
   emel::text::tokenizer::sm machine{};
 
-  int32_t bind_err = EMEL_OK;
+  int32_t bind_err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
   emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
   bind_ev.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
   bind_ev.encoder_variant = emel::text::encoders::encoder_kind::bpe;
   bind_ev.error_out = &bind_err;
   CHECK(machine.process_event(bind_ev));
-  CHECK(bind_err == EMEL_OK);
+  CHECK(bind_err == emel::text::tokenizer::error_code(emel::text::tokenizer::error::none));
 
   std::array<int32_t, 4> tokens = {};
   int32_t count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
   emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = &other_vocab;
   tok_ev.text = std::string_view("hello");
@@ -135,6 +135,6 @@ TEST_CASE("tokenizer_tokenize_rejects_mismatched_vocab") {
   tok_ev.error_out = &err;
 
   CHECK_FALSE(machine.process_event(tok_ev));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == emel::text::tokenizer::error_code(emel::text::tokenizer::error::invalid_request));
   CHECK(count == 0);
 }

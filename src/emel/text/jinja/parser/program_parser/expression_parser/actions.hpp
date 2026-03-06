@@ -49,6 +49,17 @@ struct consume_expression_identifier {
   }
 };
 
+struct consume_expression_identifier_and_close {
+  void operator()(const event::parse_runtime &ev, context &) const {
+    ev.ctx.expression = event::expression_kind::identifier;
+    ev.ctx.expression_value_index = ev.ctx.token_index;
+    const auto &tok = current_token(ev);
+    ev.request.program.body.push_back(
+        make_node<emel::text::jinja::identifier>(tok.pos, tok.value));
+    ev.ctx.token_index += 2u;
+  }
+};
+
 struct consume_expression_literal {
   void operator()(const event::parse_runtime &ev, context &) const noexcept {
     ev.ctx.expression = event::expression_kind::literal;
@@ -128,6 +139,7 @@ struct on_unexpected {
 
 inline constexpr begin_expression_parse begin_expression_parse{};
 inline constexpr consume_expression_identifier consume_expression_identifier{};
+inline constexpr consume_expression_identifier_and_close consume_expression_identifier_and_close{};
 inline constexpr consume_expression_literal consume_expression_literal{};
 inline constexpr consume_expression_unary consume_expression_unary{};
 inline constexpr consume_expression_compound consume_expression_compound{};

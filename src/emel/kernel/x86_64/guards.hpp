@@ -38,6 +38,27 @@ struct invalid_op {
   }
 };
 
+template <::emel::kernel::event::unary_subop subop>
+struct unary_subop_is {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_unary & ev,
+                  const action::context &) const noexcept {
+    return ev.request.subop == subop;
+  }
+};
+
+template <::emel::kernel::event::unary_subop subop>
+struct simd_op_unary_subop {
+  bool operator()(const ::emel::kernel::x86_64::event::dispatch_op_unary & ev,
+                  const action::context & ctx) const noexcept {
+    return simd_op<::emel::kernel::x86_64::event::dispatch_op_unary>{}(ev, ctx) &&
+           unary_subop_is<subop>{}(ev, ctx);
+  }
+};
+
+using simd_op_unary_abs = simd_op_unary_subop<::emel::kernel::event::unary_subop::abs>;
+using simd_op_unary_neg = simd_op_unary_subop<::emel::kernel::event::unary_subop::neg>;
+using simd_op_unary_relu = simd_op_unary_subop<::emel::kernel::event::unary_subop::relu>;
+
 #define EMEL_KERNEL_DECLARE_GUARD_ALIAS(op_name)                                 \
   using simd_##op_name =                                                         \
       simd_op<::emel::kernel::x86_64::event::dispatch_##op_name>;                \

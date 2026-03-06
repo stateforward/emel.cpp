@@ -911,8 +911,18 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_unary>
-                 [ guard::simd_op_unary{} ]
-                 / action::exec_simd_op_unary
+                 [ guard::simd_op_unary_abs{} ]
+                 / action::exec_simd_op_unary_abs
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_unary>
+                 [ guard::simd_op_unary_neg{} ]
+                 / action::exec_simd_op_unary_neg
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_unary>
+                 [ guard::simd_op_unary_relu{} ]
+                 / action::exec_simd_op_unary_relu
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_unary>

@@ -260,6 +260,10 @@ TEST_CASE("detokenizer_action_and_guard_paths") {
       detokenizer_error_code(emel::text::detokenizer::error::model_invalid);
   const int32_t detok_backend_error =
       detokenizer_error_code(emel::text::detokenizer::error::backend_error);
+  const int32_t detok_internal_error =
+      detokenizer_error_code(emel::text::detokenizer::error::internal_error);
+  const int32_t detok_untracked =
+      detokenizer_error_code(emel::text::detokenizer::error::untracked);
   int32_t err = detok_ok;
 
   emel::text::detokenizer::event::detokenize detok_ev{
@@ -285,17 +289,24 @@ TEST_CASE("detokenizer_action_and_guard_paths") {
 
   pending[0] = 0xFFu;
   pending_len = 1;
-  CHECK_FALSE(emel::text::detokenizer::action::flush_pending_complete_sequences(
-      detok_ev, pending_len, out_len));
-  CHECK(err == detok_invalid_request);
+  CHECK(emel::text::detokenizer::guard::detokenize_pending_head_invalid{}(detok_ev));
 
   err = detok_ok;
   out_len = 0;
   pending[0] = 0xE2u;
   pending_len = 1;
-  CHECK(emel::text::detokenizer::action::flush_pending_complete_sequences(
-      detok_ev, pending_len, out_len));
-  CHECK(pending_len == 1);
+  CHECK(emel::text::detokenizer::guard::detokenize_pending_head_incomplete{}(detok_ev));
+
+  err = detok_ok;
+  out_len = 0;
+  pending[0] = 0x41u;
+  pending_len = 1;
+  CHECK(emel::text::detokenizer::guard::detokenize_pending_head_complete{}(detok_ev));
+  emel::text::detokenizer::action::write_pending_head_sequence(detok_ev);
+  CHECK(err == detok_ok);
+  CHECK(out_len == 1);
+  CHECK(output[0] == 'A');
+  CHECK(pending_len == 0);
 
   err = detok_ok;
   out_len = 0;
@@ -303,9 +314,7 @@ TEST_CASE("detokenizer_action_and_guard_paths") {
   pending[1] = 0x80u;
   pending[2] = 0x20u;
   pending_len = 3;
-  CHECK_FALSE(emel::text::detokenizer::action::flush_pending_complete_sequences(
-      detok_ev, pending_len, out_len));
-  CHECK(err == detok_invalid_request);
+  CHECK(emel::text::detokenizer::guard::detokenize_pending_head_invalid{}(detok_ev));
 
   emel::text::detokenizer::event::bind bind_ev{vocab, err};
   err = detok_ok;
@@ -334,18 +343,29 @@ TEST_CASE("detokenizer_action_and_guard_paths") {
   CHECK(pending_len == 0);
   CHECK(err == detok_ok);
 
-  ctx = context{};
-  emel::text::detokenizer::action::decode_token(detok_ev, ctx);
+  emel::text::detokenizer::sm unbound_detokenizer{};
+  detok_ev.token_id = plain_id;
+  detok_ev.emit_special = true;
+  detok_ev.pending_length = 0;
+  out_len = 99;
+  pending_len = 99;
+  err = detok_ok;
+  CHECK_FALSE(unbound_detokenizer.process_event(detok_ev));
   CHECK(err == detok_invalid_request);
 
-  ctx.vocab = &vocab;
-  ctx.is_bound = true;
+  emel::text::detokenizer::sm detokenizer{};
+  int32_t bind_sm_err = detok_ok;
+  emel::text::detokenizer::event::bind bind_sm_ev{vocab, bind_sm_err};
+  CHECK(detokenizer.process_event(bind_sm_ev));
+  CHECK(bind_sm_err == detok_ok);
 
   detok_ev.token_id = 999;
   detok_ev.emit_special = true;
   detok_ev.pending_length = 0;
+  out_len = 99;
+  pending_len = 99;
   err = detok_ok;
-  emel::text::detokenizer::action::decode_token(detok_ev, ctx);
+  CHECK_FALSE(detokenizer.process_event(detok_ev));
   CHECK(err == detok_model_invalid);
 
   detok_ev.token_id = special_id;
@@ -354,7 +374,7 @@ TEST_CASE("detokenizer_action_and_guard_paths") {
   out_len = 99;
   pending_len = 99;
   err = detok_ok;
-  emel::text::detokenizer::action::decode_token(detok_ev, ctx);
+  CHECK(detokenizer.process_event(detok_ev));
   CHECK(err == detok_ok);
   CHECK(out_len == 0);
   CHECK(pending_len == 0);
@@ -362,28 +382,34 @@ TEST_CASE("detokenizer_action_and_guard_paths") {
   detok_ev.token_id = byte_id;
   detok_ev.emit_special = true;
   detok_ev.pending_length = detok_ev.pending_capacity;
+  out_len = 0;
+  pending_len = detok_ev.pending_capacity;
   err = detok_ok;
-  emel::text::detokenizer::action::decode_token(detok_ev, ctx);
+  CHECK_FALSE(detokenizer.process_event(detok_ev));
   CHECK(err == detok_invalid_request);
 
   detok_ev.token_id = plain_id;
   detok_ev.pending_length = 1;
   pending[0] = 0xE2u;
+  out_len = 0;
+  pending_len = 1;
   err = detok_ok;
-  emel::text::detokenizer::action::decode_token(detok_ev, ctx);
+  CHECK_FALSE(detokenizer.process_event(detok_ev));
   CHECK(err == detok_invalid_request);
 
   detok_ev.pending_length = 0;
   detok_ev.output_capacity = 0;
+  out_len = 0;
+  pending_len = 0;
   err = detok_ok;
-  emel::text::detokenizer::action::decode_token(detok_ev, ctx);
+  CHECK_FALSE(detokenizer.process_event(detok_ev));
   CHECK(err == detok_invalid_request);
 
   detok_ev.output_capacity = output.size();
   out_len = 0;
   pending_len = 0;
   err = detok_ok;
-  emel::text::detokenizer::action::decode_token(detok_ev, ctx);
+  CHECK(detokenizer.process_event(detok_ev));
   CHECK(err == detok_ok);
   CHECK(out_len == 1);
   CHECK(pending_len == 0);
@@ -431,11 +457,56 @@ TEST_CASE("detokenizer_action_and_guard_paths") {
   ctx.is_bound = true;
   bad_detok.pending_bytes = pending.data();
   CHECK(emel::text::detokenizer::guard::valid_detokenize{}(bad_detok, ctx));
+  CHECK(emel::text::detokenizer::guard::detokenize_token_in_vocab{}(bad_detok, ctx));
+  CHECK_FALSE(emel::text::detokenizer::guard::detokenize_token_out_of_vocab{}(bad_detok, ctx));
+
+  bad_detok.token_id = special_id;
+  bad_detok.emit_special = false;
+  CHECK(emel::text::detokenizer::guard::detokenize_skip_special_piece{}(bad_detok, ctx));
+  CHECK_FALSE(emel::text::detokenizer::guard::detokenize_byte_piece{}(bad_detok, ctx));
+  CHECK_FALSE(emel::text::detokenizer::guard::detokenize_text_piece{}(bad_detok, ctx));
+
+  bad_detok.token_id = byte_id;
+  bad_detok.emit_special = true;
+  pending_len = 0;
+  CHECK(emel::text::detokenizer::guard::detokenize_byte_piece{}(bad_detok, ctx));
+  CHECK(emel::text::detokenizer::guard::detokenize_pending_has_capacity_for_byte{}(bad_detok, ctx));
+  pending_len = bad_detok.pending_capacity;
+  CHECK(emel::text::detokenizer::guard::detokenize_pending_no_capacity_for_byte{}(bad_detok, ctx));
+
+  bad_detok.token_id = plain_id;
+  pending_len = 0;
+  CHECK(emel::text::detokenizer::guard::detokenize_text_piece{}(bad_detok, ctx));
 
   err = detok_ok;
-  CHECK(emel::text::detokenizer::guard::bind_phase_ok{}(bind_ev));
-  CHECK(emel::text::detokenizer::guard::detokenize_phase_ok{}(bad_detok));
+  pending_len = 0;
+  CHECK(emel::text::detokenizer::guard::bind_error_none{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_none{}(bad_detok));
+  CHECK(emel::text::detokenizer::guard::detokenize_pending_empty{}(bad_detok));
+  pending_len = 1;
+  CHECK(emel::text::detokenizer::guard::detokenize_pending_not_empty{}(bad_detok));
+
+  err = detok_invalid_request;
+  CHECK(emel::text::detokenizer::guard::bind_error_invalid_request{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_invalid_request{}(bad_detok));
+
+  err = detok_model_invalid;
+  CHECK(emel::text::detokenizer::guard::bind_error_model_invalid{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_model_invalid{}(bad_detok));
+
   err = detok_backend_error;
-  CHECK(emel::text::detokenizer::guard::bind_phase_failed{}(bind_ev));
-  CHECK(emel::text::detokenizer::guard::detokenize_phase_failed{}(bad_detok));
+  CHECK(emel::text::detokenizer::guard::bind_error_backend_error{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_backend_error{}(bad_detok));
+
+  err = detok_internal_error;
+  CHECK(emel::text::detokenizer::guard::bind_error_internal_error{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_internal_error{}(bad_detok));
+
+  err = detok_untracked;
+  CHECK(emel::text::detokenizer::guard::bind_error_untracked{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_untracked{}(bad_detok));
+
+  err = 0x7777;
+  CHECK(emel::text::detokenizer::guard::bind_error_unknown{}(bind_ev));
+  CHECK(emel::text::detokenizer::guard::detokenize_error_unknown{}(bad_detok));
 }

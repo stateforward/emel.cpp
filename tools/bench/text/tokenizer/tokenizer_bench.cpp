@@ -11,11 +11,14 @@
 
 #include "emel/emel.h"
 #include "emel/model/data.hpp"
+#include "emel/text/tokenizer/errors.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 
 namespace {
 
 constexpr size_t k_token_capacity = 4096;
+constexpr int32_t k_error_none =
+    emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
 
 int32_t add_token(emel::model::data::vocab & vocab,
                   const char * text,
@@ -174,13 +177,13 @@ emel::text::tokenizer::preprocessor::preprocessor_kind preprocessor_kind_for_mod
 
 bool bind_tokenizer(emel::text::tokenizer::sm & machine,
                     const emel::model::data::vocab & vocab) {
-  int32_t err = EMEL_OK;
+  int32_t err = k_error_none;
   emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
   bind_ev.preprocessor_variant = preprocessor_kind_for_model(vocab.tokenizer_model_id);
   bind_ev.encoder_variant = encoder_kind_for_model(vocab.tokenizer_model_id);
   bind_ev.error_out = &err;
-  if (!machine.process_event(bind_ev) || err != EMEL_OK) {
+  if (!machine.process_event(bind_ev) || err != k_error_none) {
     return false;
   }
   return true;
@@ -192,7 +195,7 @@ bool tokenize_once(emel::text::tokenizer::sm & machine,
                    std::array<int32_t, k_token_capacity> & tokens,
                    int32_t & token_count,
                    int32_t & err) {
-  err = EMEL_OK;
+  err = k_error_none;
   emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = &vocab;
   tok_ev.text = text;
@@ -203,7 +206,7 @@ bool tokenize_once(emel::text::tokenizer::sm & machine,
   tok_ev.token_count_out = &token_count;
   tok_ev.error_out = &err;
   const bool accepted = machine.process_event(tok_ev);
-  return accepted && err == EMEL_OK;
+  return accepted && err == k_error_none;
 }
 
 void ensure_tokenizes(emel::text::tokenizer::sm & machine,
@@ -212,7 +215,7 @@ void ensure_tokenizes(emel::text::tokenizer::sm & machine,
                       const char * label) {
   std::array<int32_t, k_token_capacity> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = k_error_none;
   if (!tokenize_once(machine, vocab, text, tokens, token_count, err)) {
     std::fprintf(stderr,
                  "error: tokenizer failed to process text (%s, err=%d)\n",
@@ -257,7 +260,7 @@ void append_emel_tokenizer_cases(std::vector<result> & results, const config & c
 
     std::array<int32_t, k_token_capacity> tokens = {};
     int32_t token_count = 0;
-    int32_t err = EMEL_OK;
+    int32_t err = k_error_none;
     emel::text::tokenizer::event::tokenize short_ev = {};
     short_ev.vocab = vocab.get();
     short_ev.text = short_text;

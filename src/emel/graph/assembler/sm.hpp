@@ -106,12 +106,32 @@ struct model {
                  [ guard::reserve_alloc_failed{} ]
 
       , sml::state<reserved> <= sml::state<reserve_dispatch_decision> + sml::completion<event::reserve_graph>
-                 [ guard::reserve_phase_ok{} ]
+                 [ guard::reserve_error_none{} ]
                  / action::dispatch_reserve_done
 
       , sml::state<uninitialized> <= sml::state<reserve_dispatch_decision> +
                sml::completion<event::reserve_graph>
-                 [ guard::reserve_phase_failed{} ]
+                 [ guard::reserve_error_invalid_request{} ]
+                 / action::dispatch_reserve_error
+
+      , sml::state<uninitialized> <= sml::state<reserve_dispatch_decision> +
+               sml::completion<event::reserve_graph>
+                 [ guard::reserve_error_capacity{} ]
+                 / action::dispatch_reserve_error
+
+      , sml::state<uninitialized> <= sml::state<reserve_dispatch_decision> +
+               sml::completion<event::reserve_graph>
+                 [ guard::reserve_error_internal_error{} ]
+                 / action::dispatch_reserve_error
+
+      , sml::state<uninitialized> <= sml::state<reserve_dispatch_decision> +
+               sml::completion<event::reserve_graph>
+                 [ guard::reserve_error_untracked{} ]
+                 / action::dispatch_reserve_error
+
+      , sml::state<uninitialized> <= sml::state<reserve_dispatch_decision> +
+               sml::completion<event::reserve_graph>
+                 [ guard::reserve_error_unknown{} ]
                  / action::dispatch_reserve_error
 
       //------------------------------------------------------------------------------//
@@ -202,12 +222,32 @@ struct model {
 
       , sml::state<reserved> <= sml::state<assemble_dispatch_decision> +
                sml::completion<event::assemble_graph>
-                 [ guard::assemble_phase_ok{} ]
+                 [ guard::assemble_error_none{} ]
                  / action::dispatch_assemble_done
 
       , sml::state<reserved> <= sml::state<assemble_dispatch_decision> +
                sml::completion<event::assemble_graph>
-                 [ guard::assemble_phase_failed{} ]
+                 [ guard::assemble_error_invalid_request{} ]
+                 / action::dispatch_assemble_error
+
+      , sml::state<reserved> <= sml::state<assemble_dispatch_decision> +
+               sml::completion<event::assemble_graph>
+                 [ guard::assemble_error_capacity{} ]
+                 / action::dispatch_assemble_error
+
+      , sml::state<reserved> <= sml::state<assemble_dispatch_decision> +
+               sml::completion<event::assemble_graph>
+                 [ guard::assemble_error_internal_error{} ]
+                 / action::dispatch_assemble_error
+
+      , sml::state<reserved> <= sml::state<assemble_dispatch_decision> +
+               sml::completion<event::assemble_graph>
+                 [ guard::assemble_error_untracked{} ]
+                 / action::dispatch_assemble_error
+
+      , sml::state<reserved> <= sml::state<assemble_dispatch_decision> +
+               sml::completion<event::assemble_graph>
+                 [ guard::assemble_error_unknown{} ]
                  / action::dispatch_assemble_error
 
       //------------------------------------------------------------------------------//

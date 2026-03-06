@@ -13,7 +13,7 @@ TEST_CASE("encoder_spm_merges_bigram") {
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -23,7 +23,7 @@ TEST_CASE("encoder_spm_merges_bigram") {
     .error_out = &err,
   }));
 
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(token_count == 1);
   CHECK(tokens[0] == hi_id);
 }
@@ -42,7 +42,7 @@ TEST_CASE("encoder_detail_spm_merge_capacity_error") {
 
   std::array<int32_t, 1> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "hi",
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(0)),
@@ -51,7 +51,7 @@ TEST_CASE("encoder_detail_spm_merge_capacity_error") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 }
 
 TEST_CASE("encoder_detail_spm_add_space_prefix") {
@@ -72,7 +72,7 @@ TEST_CASE("encoder_detail_spm_add_space_prefix") {
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "hi",
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
@@ -81,7 +81,7 @@ TEST_CASE("encoder_detail_spm_add_space_prefix") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(result.token_count >= 1);
 }
 
@@ -101,7 +101,7 @@ TEST_CASE("encoder_detail_spm_prefix_after_leading_spaces") {
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "  hi",
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
@@ -110,7 +110,7 @@ TEST_CASE("encoder_detail_spm_prefix_after_leading_spaces") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(result.token_count >= 1);
 }
 
@@ -129,7 +129,7 @@ TEST_CASE("encoder_detail_spm_unescaped_spaces") {
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "h i",
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
@@ -138,7 +138,7 @@ TEST_CASE("encoder_detail_spm_unescaped_spaces") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(result.token_count >= 1);
 }
 
@@ -158,7 +158,7 @@ TEST_CASE("encoder_detail_spm_suffix_escape_spaces") {
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "hi",
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
@@ -167,7 +167,7 @@ TEST_CASE("encoder_detail_spm_suffix_escape_spaces") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(result.token_count >= 1);
 }
 
@@ -187,7 +187,7 @@ TEST_CASE("encoder_detail_spm_suffix_unescaped_space") {
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "hi",
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
@@ -196,7 +196,7 @@ TEST_CASE("encoder_detail_spm_suffix_unescaped_space") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(result.token_count >= 1);
 }
 
@@ -211,7 +211,7 @@ TEST_CASE("encoder_detail_spm_prefix_overflow") {
   std::string text(max_bytes, 'a');
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = text,
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
@@ -219,7 +219,7 @@ TEST_CASE("encoder_detail_spm_prefix_overflow") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 }
 
 TEST_CASE("encoder_detail_spm_space_overflow") {
@@ -233,7 +233,7 @@ TEST_CASE("encoder_detail_spm_space_overflow") {
   text.back() = ' ';
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = text,
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
@@ -241,7 +241,7 @@ TEST_CASE("encoder_detail_spm_space_overflow") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 }
 
 TEST_CASE("encoder_detail_spm_missing_byte_token") {
@@ -253,7 +253,7 @@ TEST_CASE("encoder_detail_spm_missing_byte_token") {
   CHECK(emel::text::encoders::spm::detail::ensure_spm_tables(ctx));
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "b",
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
@@ -261,7 +261,7 @@ TEST_CASE("encoder_detail_spm_missing_byte_token") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_BACKEND);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend));
 }
 
 TEST_CASE("encoder_detail_spm_empty_text") {
@@ -271,7 +271,7 @@ TEST_CASE("encoder_detail_spm_empty_text") {
   ctx.vocab = builder.vocab;
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "",
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
@@ -280,7 +280,7 @@ TEST_CASE("encoder_detail_spm_empty_text") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(result.token_count == 0);
 }
 
@@ -295,7 +295,7 @@ TEST_CASE("encoder_spm_encode_requires_prepared_tables") {
 
   std::array<int32_t, 2> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "a",
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(out_tokens.size())),
@@ -304,8 +304,30 @@ TEST_CASE("encoder_spm_encode_requires_prepared_tables") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
   CHECK(result.token_count == 0);
+}
+
+TEST_CASE("encoder_spm_merge_path_rejects_symbol_capacity_overflow") {
+  vocab_builder builder{};
+  builder.set_model("llama");
+  builder.add_token("a", 0.1f, 1);
+
+  emel::text::encoders::spm::sm machine{};
+  std::array<int32_t, 1> tokens = {};
+  int32_t token_count = 0;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
+  std::string text(emel::text::encoders::detail::k_max_encode_symbols + 1, 'a');
+
+  CHECK_FALSE(machine.process_event(emel::text::encoders::event::encode{
+    .vocab = *builder.vocab,
+    .text = text,
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(tokens.size())),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  }));
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
+  CHECK(token_count == 0);
 }
 
 TEST_CASE("encoder_detail_spm_symbol_overflow") {
@@ -318,7 +340,7 @@ TEST_CASE("encoder_detail_spm_symbol_overflow") {
   std::string text(max_symbols + 1, 'a');
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = text,
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
@@ -327,5 +349,5 @@ TEST_CASE("encoder_detail_spm_symbol_overflow") {
   };
 
   const auto result = emel::text::encoders::spm::detail::encode_spm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 }

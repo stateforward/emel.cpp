@@ -13,57 +13,12 @@ namespace emel::memory::kv::guard {
 namespace detail {
 
 inline int32_t blocks_for_length(const int32_t block_tokens, const int32_t token_count) noexcept {
-  if (token_count <= 0 || block_tokens <= 0) {
-    return 0;
-  }
-  return (token_count + block_tokens - 1) / block_tokens;
-}
-
-struct allocate_slots_analysis {
-  bool request_shape_valid = false;
-  bool length_valid = false;
-  bool block_layout_valid = false;
-  bool capacity_valid = false;
-};
-
-inline allocate_slots_analysis analyze_allocate_slots_request(const action::context & ctx,
-                                                             const event::allocate_slots & request) noexcept {
-  allocate_slots_analysis analysis{};
-  analysis.request_shape_valid = kv::detail::valid_sequence_id(ctx.max_sequences, request.seq_id) &&
-                                 request.token_count > 0 && ctx.block_tokens > 0;
-  if (!analysis.request_shape_valid) {
-    return analysis;
-  }
-
-  const size_t seq_index = static_cast<size_t>(request.seq_id);
-  if (!ctx.sequence_active[seq_index]) {
-    analysis.request_shape_valid = false;
-    return analysis;
-  }
-
-  const int32_t old_length = ctx.sequence_length[seq_index];
-  const int64_t new_length_wide = static_cast<int64_t>(old_length) + request.token_count;
-  analysis.length_valid =
-      new_length_wide > 0 && new_length_wide <= std::numeric_limits<int32_t>::max();
-  if (!analysis.length_valid) {
-    return analysis;
-  }
-
-  const int32_t new_length = static_cast<int32_t>(new_length_wide);
-  const int32_t existing_block_count = ctx.sequence_block_count[seq_index];
-  const int32_t old_blocks = blocks_for_length(ctx.block_tokens, old_length);
-  const int32_t new_blocks = blocks_for_length(ctx.block_tokens, new_length);
-  analysis.block_layout_valid = existing_block_count >= old_blocks && new_blocks >= old_blocks;
-  if (!analysis.block_layout_valid) {
-    return analysis;
-  }
-
-  const int32_t blocks_needed = new_blocks - old_blocks;
-  const bool within_sequence_capacity =
-      existing_block_count + blocks_needed <= kv::detail::max_blocks_per_sequence;
-  const bool enough_free_blocks = ctx.free_count >= blocks_needed;
-  analysis.capacity_valid = within_sequence_capacity && enough_free_blocks;
-  return analysis;
+  const int32_t positive_tokens = static_cast<int32_t>(token_count > 0);
+  const int32_t positive_block_tokens = static_cast<int32_t>(block_tokens > 0);
+  const int32_t safe_block_tokens = block_tokens + static_cast<int32_t>(block_tokens <= 0);
+  const int32_t effective_tokens = positive_tokens * positive_block_tokens * token_count;
+  const int32_t rounded = (effective_tokens + safe_block_tokens - 1) / safe_block_tokens;
+  return rounded * positive_block_tokens;
 }
 
 }  // namespace detail
@@ -103,42 +58,87 @@ struct allocate_sequence_request_invalid {
   }
 };
 
-struct allocate_slots_request_valid {
+struct allocate_slots_request_shape_valid {
   bool operator()(const event::allocate_slots_runtime & ev,
                   const action::context & ctx) const noexcept {
-    const detail::allocate_slots_analysis analysis =
-        detail::analyze_allocate_slots_request(ctx, ev.request);
-    return analysis.request_shape_valid && analysis.length_valid && analysis.block_layout_valid &&
-           analysis.capacity_valid;
+    return kv::detail::valid_sequence_id(ctx.max_sequences, ev.request.seq_id) &&
+           ev.request.token_count > 0 && ctx.block_tokens > 0 &&
+           ctx.sequence_active[static_cast<size_t>(ev.request.seq_id)];
   }
 };
 
-struct allocate_slots_request_invalid {
+struct allocate_slots_request_shape_invalid {
   bool operator()(const event::allocate_slots_runtime & ev,
                   const action::context & ctx) const noexcept {
-    const detail::allocate_slots_analysis analysis =
-        detail::analyze_allocate_slots_request(ctx, ev.request);
-    return !analysis.request_shape_valid || !analysis.length_valid;
+    return !allocate_slots_request_shape_valid{}(ev, ctx);
   }
 };
 
-struct allocate_slots_request_backend_error {
+struct allocate_slots_request_length_valid {
   bool operator()(const event::allocate_slots_runtime & ev,
                   const action::context & ctx) const noexcept {
-    const detail::allocate_slots_analysis analysis =
-        detail::analyze_allocate_slots_request(ctx, ev.request);
-    return analysis.request_shape_valid && analysis.length_valid &&
-           !analysis.block_layout_valid;
+    const bool shape_valid = allocate_slots_request_shape_valid{}(ev, ctx);
+    const int32_t safe_seq_id = static_cast<int32_t>(shape_valid) * ev.request.seq_id;
+    const size_t seq_index = static_cast<size_t>(safe_seq_id);
+    const int64_t new_length_wide =
+        static_cast<int64_t>(ctx.sequence_length[seq_index]) + ev.request.token_count;
+    return shape_valid && new_length_wide > 0 &&
+           new_length_wide <= std::numeric_limits<int32_t>::max();
   }
 };
 
-struct allocate_slots_request_out_of_memory {
+struct allocate_slots_request_length_invalid {
   bool operator()(const event::allocate_slots_runtime & ev,
                   const action::context & ctx) const noexcept {
-    const detail::allocate_slots_analysis analysis =
-        detail::analyze_allocate_slots_request(ctx, ev.request);
-    return analysis.request_shape_valid && analysis.length_valid &&
-           analysis.block_layout_valid && !analysis.capacity_valid;
+    return !allocate_slots_request_length_valid{}(ev, ctx);
+  }
+};
+
+struct allocate_slots_request_block_layout_valid {
+  bool operator()(const event::allocate_slots_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    const bool length_valid = allocate_slots_request_length_valid{}(ev, ctx);
+    const int32_t safe_seq_id = static_cast<int32_t>(length_valid) * ev.request.seq_id;
+    const size_t seq_index = static_cast<size_t>(safe_seq_id);
+    const int32_t old_length = ctx.sequence_length[seq_index];
+    const int32_t new_length = old_length + ev.request.token_count;
+    const int32_t existing_block_count = ctx.sequence_block_count[seq_index];
+    const int32_t old_blocks = detail::blocks_for_length(ctx.block_tokens, old_length);
+    const int32_t new_blocks = detail::blocks_for_length(ctx.block_tokens, new_length);
+    return length_valid && existing_block_count >= old_blocks && new_blocks >= old_blocks;
+  }
+};
+
+struct allocate_slots_request_block_layout_invalid {
+  bool operator()(const event::allocate_slots_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    return !allocate_slots_request_block_layout_valid{}(ev, ctx);
+  }
+};
+
+struct allocate_slots_request_capacity_valid {
+  bool operator()(const event::allocate_slots_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    const bool block_layout_valid = allocate_slots_request_block_layout_valid{}(ev, ctx);
+    const int32_t safe_seq_id = static_cast<int32_t>(block_layout_valid) * ev.request.seq_id;
+    const size_t seq_index = static_cast<size_t>(safe_seq_id);
+    const int32_t old_length = ctx.sequence_length[seq_index];
+    const int32_t new_length = old_length + ev.request.token_count;
+    const int32_t existing_block_count = ctx.sequence_block_count[seq_index];
+    const int32_t old_blocks = detail::blocks_for_length(ctx.block_tokens, old_length);
+    const int32_t new_blocks = detail::blocks_for_length(ctx.block_tokens, new_length);
+    const int32_t blocks_needed = new_blocks - old_blocks;
+    const bool within_sequence_capacity =
+        existing_block_count + blocks_needed <= kv::detail::max_blocks_per_sequence;
+    const bool enough_free_blocks = ctx.free_count >= blocks_needed;
+    return block_layout_valid && within_sequence_capacity && enough_free_blocks;
+  }
+};
+
+struct allocate_slots_request_capacity_invalid {
+  bool operator()(const event::allocate_slots_runtime & ev,
+                  const action::context & ctx) const noexcept {
+    return !allocate_slots_request_capacity_valid{}(ev, ctx);
   }
 };
 

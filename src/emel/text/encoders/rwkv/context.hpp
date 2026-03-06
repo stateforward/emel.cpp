@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cstdint>
+
 #include "emel/text/encoders/context.hpp"
+#include "emel/text/encoders/events.hpp"
 #include "emel/text/encoders/types.hpp"
 
 namespace emel::text::encoders::rwkv::action {
@@ -12,3 +15,14 @@ struct context : emel::text::encoders::action::context {
 };
 
 }  // namespace emel::text::encoders::rwkv::action
+
+namespace emel::text::encoders::rwkv::runtime {
+
+struct encode_runtime {
+  const emel::text::encoders::event::encode_runtime & event_;
+  mutable int32_t unk_id = emel::text::encoders::detail::k_token_null;
+  mutable bool unk_lookup_found = false;
+  mutable bool encode_push_failed = false;
+};
+
+}  // namespace emel::text::encoders::rwkv::runtime

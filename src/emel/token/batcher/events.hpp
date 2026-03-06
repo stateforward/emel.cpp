@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
+#include "emel/batch/planner/context.hpp"
 #include "emel/callback.hpp"
 #include "emel/error/error.hpp"
 #include "emel/token/batcher/errors.hpp"
@@ -78,10 +80,13 @@ struct batch {
 };
 
 struct batch_ctx {
+  static constexpr int32_t max_seq = emel::batch::planner::action::MAX_SEQ;
+
   emel::error::type err = emel::error::cast(error::none);
   int32_t outputs_total = 0;
   int32_t normalized_seq_mask_words = 1;
   int32_t normalized_positions_count = 0;
+  std::array<int32_t, static_cast<size_t>(max_seq)> seeded_next_pos = {};
 };
 
 struct batch_runtime {

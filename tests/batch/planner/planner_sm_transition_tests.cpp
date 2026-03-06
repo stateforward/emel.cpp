@@ -11,13 +11,13 @@
 namespace {
 
 struct plan_capture {
-  int32_t err = EMEL_OK;
+  int32_t err = emel::error::cast(emel::batch::planner::error::none);
   bool done_called = false;
   bool error_called = false;
 
   void on_done(const emel::batch::planner::events::plan_done &) noexcept {
     done_called = true;
-    err = EMEL_OK;
+    err = emel::error::cast(emel::batch::planner::error::none);
   }
 
   void on_error(const emel::batch::planner::events::plan_error & ev) noexcept {

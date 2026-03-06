@@ -1,39 +1,608 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <string>
+#include <string_view>
+
 #include "emel/text/jinja/parser/lexer/context.hpp"
 #include "emel/text/jinja/parser/lexer/detail.hpp"
 
 namespace emel::text::jinja::parser::lexer::action {
 
+namespace helper {
+
+inline bool decode_escape_char(const char ch, char &out) noexcept {
+  const size_t is_n = static_cast<size_t>(ch == 'n');
+  const size_t is_t = static_cast<size_t>(ch == 't');
+  const size_t is_r = static_cast<size_t>(ch == 'r');
+  const size_t is_b = static_cast<size_t>(ch == 'b');
+  const size_t is_f = static_cast<size_t>(ch == 'f');
+  const size_t is_v = static_cast<size_t>(ch == 'v');
+  const size_t is_backslash = static_cast<size_t>(ch == '\\');
+  const size_t is_single_quote = static_cast<size_t>(ch == '\'');
+  const size_t is_double_quote = static_cast<size_t>(ch == '"');
+  const size_t code = is_n * 1u + is_t * 2u + is_r * 3u + is_b * 4u + is_f * 5u +
+                      is_v * 6u + is_backslash * 7u + is_single_quote * 8u +
+                      is_double_quote * 9u;
+  constexpr std::array<char, 10> decoded = {
+      '\0',
+      '\n',
+      '\t',
+      '\r',
+      '\b',
+      '\f',
+      '\v',
+      '\\',
+      '\'',
+      '"',
+  };
+  out = decoded[code];
+  return code != 0u;
+}
+
+inline void append_char_none(std::string &, const char) noexcept {}
+
+inline void append_char_some(std::string &value, const char ch) noexcept {
+  value.push_back(ch);
+}
+
+inline void set_escape_error_none(event::next_runtime, const size_t) noexcept {}
+
+inline void set_escape_error_some(event::next_runtime ev, const size_t pos) noexcept {
+  ::emel::text::jinja::lexer::detail::set_error(ev.ctx.scan, pos);
+}
+
+inline void consume_escape_literal(event::next_runtime ev, std::string &value) noexcept {
+  value.push_back(ev.ctx.source[ev.ctx.pos]);
+  ++ev.ctx.pos;
+}
+
+inline void consume_escape_sequence(event::next_runtime ev, std::string &value) noexcept {
+  ++ev.ctx.pos;
+  const bool in_range = ev.ctx.pos < ev.ctx.source.size();
+  const char escaped = ::emel::text::jinja::lexer::detail::view_char_at_or(ev.ctx.source,
+                                                                            ev.ctx.pos,
+                                                                            '\0');
+  char decoded = '\0';
+  const bool decode_ok = in_range && decode_escape_char(escaped, decoded);
+  const bool set_error = !decode_ok && ev.ctx.scan.err == detail::error_code(error::none);
+
+  using error_handler_t = void (*)(event::next_runtime, size_t) noexcept;
+  const error_handler_t error_handlers[2] = {
+      set_escape_error_none,
+      set_escape_error_some,
+  };
+  error_handlers[static_cast<size_t>(set_error)](ev, ev.ctx.pos);
+
+  using append_handler_t = void (*)(std::string &, char) noexcept;
+  const append_handler_t append_handlers[2] = {
+      append_char_none,
+      append_char_some,
+  };
+  append_handlers[static_cast<size_t>(decode_ok)](value, decoded);
+  ev.ctx.pos += static_cast<size_t>(decode_ok);
+}
+
+inline void consume_escaped_until_recursive(event::next_runtime ev,
+                                            const char terminal,
+                                            std::string &value) noexcept;
+
+inline void consume_escaped_until_stop(event::next_runtime,
+                                       const char,
+                                       std::string &) noexcept {}
+
+inline void consume_escaped_until_segment_done_stop(event::next_runtime,
+                                                    const char,
+                                                    std::string &) noexcept {}
+
+inline void consume_escaped_until_segment_done_continue(event::next_runtime ev,
+                                                        const char terminal,
+                                                        std::string &value) noexcept {
+  consume_escape_sequence(ev, value);
+  consume_escaped_until_recursive(ev, terminal, value);
+}
+
+inline void consume_escaped_until_segment_done_decision(event::next_runtime ev,
+                                                        const char terminal,
+                                                        std::string &value) noexcept {
+  const size_t size = ev.ctx.source.size();
+  const bool at_end_or_terminal =
+      ev.ctx.pos >= size || ev.ctx.source[ev.ctx.pos] == terminal;
+  using handler_t = void (*)(event::next_runtime, const char, std::string &) noexcept;
+  constexpr std::array<handler_t, 2> handlers = {
+      consume_escaped_until_segment_done_continue,
+      consume_escaped_until_segment_done_stop,
+  };
+  handlers[static_cast<size_t>(at_end_or_terminal)](ev, terminal, value);
+}
+
+inline void consume_escaped_until_continue(event::next_runtime ev,
+                                           const char terminal,
+                                           std::string &value) noexcept {
+  const size_t pos = ev.ctx.pos;
+  const size_t size = ev.ctx.source.size();
+  const std::array<char, 2> specials = {terminal, '\\'};
+  const std::string_view special_chars(specials.data(), specials.size());
+  const size_t next_special = ev.ctx.source.find_first_of(special_chars, pos);
+  const size_t segment_end_candidates[2] = {size, next_special};
+  const size_t segment_end =
+      segment_end_candidates[static_cast<size_t>(next_special != std::string_view::npos)];
+  value.append(ev.ctx.source.substr(pos, segment_end - pos));
+  ev.ctx.pos = segment_end;
+  consume_escaped_until_segment_done_decision(ev, terminal, value);
+}
+
+inline void consume_escaped_until_recursive(event::next_runtime ev,
+                                            const char terminal,
+                                            std::string &value) noexcept {
+  const size_t pos = ev.ctx.pos;
+  const size_t size = ev.ctx.source.size();
+  const bool at_end_or_terminal =
+      pos >= size || ev.ctx.source[pos] == terminal;
+  using handler_t = void (*)(event::next_runtime, const char, std::string &) noexcept;
+  constexpr std::array<handler_t, 2> handlers = {
+      consume_escaped_until_continue,
+      consume_escaped_until_stop,
+  };
+  handlers[static_cast<size_t>(at_end_or_terminal)](ev, terminal, value);
+}
+
+inline std::string consume_escaped_until(event::next_runtime ev, const char terminal) {
+  std::string value;
+  consume_escaped_until_recursive(ev, terminal, value);
+  return value;
+}
+
+inline void reset_phase(event::next_runtime &ev) noexcept {
+  ev.ctx.handled = false;
+  ev.ctx.scan.has_token = false;
+  ev.ctx.scan.err = detail::error_code(error::none);
+  ev.ctx.scan.error_pos = 0u;
+}
+
+inline void emit_scanned_token(const event::next_runtime &ev) noexcept {
+  ev.request.dispatch_done(::emel::text::jinja::lexer::events::next_done{
+      ev.request,
+      ev.ctx.scan.token_value,
+      true,
+      ev.ctx.scan.next_cursor,
+  });
+}
+
+inline void emit_scan_error(const event::next_runtime &ev) noexcept {
+  ev.request.dispatch_error(::emel::text::jinja::lexer::events::next_error{
+      ev.request,
+      ev.ctx.scan.err,
+      ev.ctx.scan.error_pos,
+  });
+}
+
+inline void emit_eof(const event::next_runtime &ev) noexcept {
+  ev.request.dispatch_done(::emel::text::jinja::lexer::events::next_done{
+      ev.request,
+      {},
+      false,
+      ev.ctx.scan.next_cursor,
+  });
+}
+
+inline size_t select_npos_fallback(const size_t value,
+                                   const size_t fallback) noexcept {
+  const std::array<size_t, 2> candidates = {value, fallback};
+  return candidates[static_cast<size_t>(value == std::string_view::npos)];
+}
+
+} // namespace helper
+
+struct begin_scan {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    ev.ctx.source = ev.request.cursor.source;
+    ev.ctx.size = ev.request.cursor.source.size();
+    ev.ctx.pos = ev.request.cursor.offset;
+    helper::reset_phase(ev);
+  }
+};
+
+struct scan_text_boundary {
+  void operator()(event::next_runtime ev, context &) const {
+    helper::reset_phase(ev);
+
+    const std::string_view source = ev.ctx.source;
+    const size_t size = ev.ctx.size;
+    size_t &pos = ev.ctx.pos;
+
+    const size_t start = pos;
+    size_t end = size;
+    for (size_t scan = start; scan + 1u < size; ++scan) {
+      if (source[scan] != '{') {
+        continue;
+      }
+      const char next = source[scan + 1u];
+      if (next == '%' || next == '{' || next == '#') {
+        end = scan;
+        break;
+      }
+    }
+    pos = end;
+
+    ev.ctx.handled = true;
+    ev.ctx.text_start = start;
+    ev.ctx.text_end = end;
+  }
+};
+
+struct probe_text_opening_trim {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    constexpr std::string_view trim_chars = " \t\r\f\v";
+    const size_t span_len = ev.ctx.text_end - ev.ctx.text_start;
+    const std::string_view span = ev.ctx.source.substr(ev.ctx.text_start, span_len);
+    const size_t keep_last = span.find_last_not_of(trim_chars);
+    const std::array<size_t, 2> probe_candidates = {
+        ev.ctx.text_start + keep_last + 1u,
+        ev.ctx.text_start,
+    };
+    const size_t probe = probe_candidates[static_cast<size_t>(keep_last == std::string_view::npos)];
+    ev.ctx.text_trim_probe = probe;
+  }
+};
+
+struct apply_text_opening_trim_to_newline {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    ev.ctx.text_end = ev.ctx.text_trim_probe;
+  }
+};
+
+struct apply_text_opening_trim_to_zero {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    ev.ctx.text_end = 0u;
+  }
+};
+
+struct materialize_text_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ev.ctx.scan.token_value.type = token_type::text;
+    ev.ctx.scan.token_value.value.assign(ev.ctx.source.data() + ev.ctx.text_start,
+                                         ev.ctx.text_end - ev.ctx.text_start);
+    ev.ctx.scan.token_value.pos = ev.ctx.text_start;
+  }
+};
+
+struct trim_text_leading_newline {
+  void operator()(event::next_runtime ev, context &) const {
+    ev.ctx.scan.token_value.value.erase(ev.ctx.scan.token_value.value.begin());
+  }
+};
+
+struct lstrip_text_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ::emel::text::jinja::lexer::detail::string_lstrip(ev.ctx.scan.token_value.value, " \t\r\n");
+  }
+};
+
+struct rstrip_text_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ::emel::text::jinja::lexer::detail::string_rstrip(ev.ctx.scan.token_value.value, " \t\r\n");
+  }
+};
+
+struct lstrip_and_rstrip_text_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ::emel::text::jinja::lexer::detail::string_lstrip(ev.ctx.scan.token_value.value, " \t\r\n");
+    ::emel::text::jinja::lexer::detail::string_rstrip(ev.ctx.scan.token_value.value, " \t\r\n");
+  }
+};
+
+struct finalize_text_boundary_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ev.ctx.scan.has_token = !ev.ctx.scan.token_value.value.empty();
+    ev.ctx.scan.next_cursor = ::emel::text::jinja::lexer::detail::emit_cursor(
+        ev.request.cursor,
+        ev.ctx.pos,
+        ev.ctx.scan.token_value.type,
+        ev.ctx.scan.token_value.value);
+  }
+};
+
+struct emit_plain_text_boundary_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ev.ctx.scan.token_value.type = token_type::text;
+    ev.ctx.scan.token_value.value.assign(ev.ctx.source.data() + ev.ctx.text_start,
+                                         ev.ctx.text_end - ev.ctx.text_start);
+    ev.ctx.scan.token_value.pos = ev.ctx.text_start;
+    ev.ctx.scan.has_token = true;
+    ev.ctx.scan.next_cursor = ::emel::text::jinja::lexer::detail::emit_cursor(
+        ev.request.cursor,
+        ev.ctx.pos,
+        ev.ctx.scan.token_value.type,
+        ev.ctx.scan.token_value.value);
+    helper::emit_scanned_token(ev);
+  }
+};
+
+struct emit_text_boundary_eof {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    ev.ctx.handled = true;
+    ::emel::text::jinja::lexer::detail::emit_no_token_cursor(
+        ev.ctx.scan,
+        ev.request.cursor,
+        ev.ctx.pos);
+    helper::emit_eof(ev);
+  }
+};
+
+struct scan_comment {
+  void operator()(event::next_runtime ev, context &) const {
+    helper::reset_phase(ev);
+
+    const std::string_view source = ev.ctx.source;
+    const size_t size = ev.ctx.size;
+    size_t &pos = ev.ctx.pos;
+
+    const size_t start = pos;
+    const size_t content_start = start + 2u;
+    const size_t close_pos = source.find("#}", content_start);
+    const size_t comment_end = helper::select_npos_fallback(close_pos, size);
+    pos = comment_end;
+
+    ev.ctx.handled = true;
+    ev.ctx.scan.token_value.type = token_type::comment;
+    ev.ctx.scan.token_value.value.assign(source.data() + content_start,
+                                         comment_end - content_start);
+    ev.ctx.scan.token_value.pos = start;
+  }
+};
+
+struct finalize_comment_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ev.ctx.pos += 2u;
+    ev.ctx.scan.has_token = true;
+    ev.ctx.scan.next_cursor = ::emel::text::jinja::lexer::detail::emit_cursor(
+        ev.request.cursor,
+        ev.ctx.pos,
+        ev.ctx.scan.token_value.type,
+        ev.ctx.scan.token_value.value);
+  }
+};
+
+struct mark_comment_unterminated {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    ::emel::text::jinja::lexer::detail::set_error(ev.ctx.scan, ev.ctx.pos);
+  }
+};
+
+struct scan_trim_prefix {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    helper::reset_phase(ev);
+    ++ev.ctx.pos;
+  }
+};
+
+struct scan_spaces {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    helper::reset_phase(ev);
+    while (ev.ctx.pos < ev.ctx.size &&
+           ::emel::text::jinja::lexer::detail::is_space(ev.ctx.source[ev.ctx.pos])) {
+      ++ev.ctx.pos;
+    }
+  }
+};
+
+struct mark_no_token_eof {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    ev.ctx.handled = true;
+    ::emel::text::jinja::lexer::detail::emit_no_token_cursor(
+        ev.ctx.scan,
+        ev.request.cursor,
+        ev.ctx.pos);
+  }
+};
+
+struct scan_unary {
+  void operator()(event::next_runtime ev, context &) const {
+    helper::reset_phase(ev);
+
+    const std::string_view source = ev.ctx.source;
+    size_t &pos = ev.ctx.pos;
+    const char ch = source[pos];
+    const size_t start = pos;
+    ++pos;
+    std::string num = ::emel::text::jinja::lexer::detail::consume_numeric(source, pos);
+    ev.ctx.handled = true;
+    ev.ctx.scan.token_value.type = token_type::unary_operator;
+    ev.ctx.scan.token_value.value.clear();
+    ev.ctx.scan.token_value.value.reserve(num.size() + 1u);
+    ev.ctx.scan.token_value.value.push_back(ch);
+    ev.ctx.scan.token_value.value += num;
+    ev.ctx.scan.token_value.pos = start;
+  }
+};
+
+struct emit_unary_numeric_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ev.ctx.scan.has_token = true;
+    ev.ctx.scan.token_value.type = token_type::numeric_literal;
+    ev.ctx.scan.next_cursor = ::emel::text::jinja::lexer::detail::emit_cursor(
+        ev.request.cursor,
+        ev.ctx.pos,
+        ev.ctx.scan.token_value.type,
+        ev.ctx.scan.token_value.value);
+    helper::emit_scanned_token(ev);
+  }
+};
+
+struct emit_unary_operator_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ev.ctx.scan.has_token = true;
+    ev.ctx.scan.token_value.type = token_type::unary_operator;
+    ev.ctx.scan.next_cursor = ::emel::text::jinja::lexer::detail::emit_cursor(
+        ev.request.cursor,
+        ev.ctx.pos,
+        ev.ctx.scan.token_value.type,
+        ev.ctx.scan.token_value.value);
+    helper::emit_scanned_token(ev);
+  }
+};
+
+template <token_type mapped_token, char... seq_chars>
+struct scan_fixed_mapping {
+  void operator()(event::next_runtime ev, context &) const {
+    helper::reset_phase(ev);
+
+    constexpr char token_text[] = {seq_chars...};
+    constexpr size_t token_size = sizeof...(seq_chars);
+    const size_t pos = ev.ctx.pos;
+
+    ev.ctx.handled = true;
+    ev.ctx.scan.has_token = true;
+    ev.ctx.scan.token_value.type = mapped_token;
+    ev.ctx.scan.token_value.value.assign(token_text, token_size);
+    ev.ctx.scan.token_value.pos = pos;
+    ev.ctx.scan.next_cursor = ::emel::text::jinja::lexer::detail::emit_cursor(
+        ev.request.cursor,
+        pos + token_size,
+        ev.ctx.scan.token_value.type,
+        ev.ctx.scan.token_value.value);
+    ev.ctx.pos = pos + token_size;
+  }
+};
+
+struct scan_mapping_close_curly {
+  void operator()(event::next_runtime ev, context &) const {
+    helper::reset_phase(ev);
+
+    const size_t pos = ev.ctx.pos;
+    ev.ctx.handled = true;
+    ev.ctx.scan.has_token = true;
+    ev.ctx.scan.token_value = token{token_type::close_curly_bracket, "}", pos};
+    ev.ctx.scan.next_cursor = ::emel::text::jinja::lexer::detail::emit_cursor(
+        ev.request.cursor,
+        pos + 1u,
+        ev.ctx.scan.token_value.type,
+        ev.ctx.scan.token_value.value);
+    ev.ctx.pos = pos + 1u;
+  }
+};
+
+struct begin_string_scan {
+  void operator()(event::next_runtime ev, context &) const {
+    helper::reset_phase(ev);
+    ev.ctx.handled = true;
+    ev.ctx.string_start = ev.ctx.pos;
+    ev.ctx.string_terminal = ev.ctx.source[ev.ctx.pos];
+    ++ev.ctx.pos;
+  }
+};
+
+struct scan_string_content {
+  void operator()(event::next_runtime ev, context &) const {
+    ev.ctx.scan.token_value.value = helper::consume_escaped_until(ev, ev.ctx.string_terminal);
+  }
+};
+
+struct materialize_string_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ev.ctx.scan.token_value.type = token_type::string_literal;
+    ev.ctx.scan.token_value.pos = ev.ctx.string_start;
+  }
+};
+
+struct finalize_string_token {
+  void operator()(event::next_runtime ev, context &) const {
+    ++ev.ctx.pos;
+    ev.ctx.scan.has_token = true;
+    ev.ctx.scan.next_cursor = ::emel::text::jinja::lexer::detail::emit_cursor(
+        ev.request.cursor,
+        ev.ctx.pos,
+        ev.ctx.scan.token_value.type,
+        ev.ctx.scan.token_value.value);
+  }
+};
+
+struct mark_string_unterminated {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    ::emel::text::jinja::lexer::detail::set_error(ev.ctx.scan, ev.ctx.pos);
+  }
+};
+
+struct scan_numeric {
+  void operator()(event::next_runtime ev, context &) const {
+    helper::reset_phase(ev);
+
+    const size_t start = ev.ctx.pos;
+    ev.ctx.scan.token_value.value =
+        ::emel::text::jinja::lexer::detail::consume_numeric(ev.ctx.source, ev.ctx.pos);
+
+    ev.ctx.handled = true;
+    ev.ctx.scan.has_token = true;
+    ev.ctx.scan.token_value.type = token_type::numeric_literal;
+    ev.ctx.scan.token_value.pos = start;
+    ev.ctx.scan.next_cursor = ::emel::text::jinja::lexer::detail::emit_cursor(
+        ev.request.cursor,
+        ev.ctx.pos,
+        ev.ctx.scan.token_value.type,
+        ev.ctx.scan.token_value.value);
+  }
+};
+
+struct scan_word {
+  void operator()(event::next_runtime ev, context &) const {
+    helper::reset_phase(ev);
+
+    const size_t start = ev.ctx.pos;
+    const char *const data = ev.ctx.source.data();
+    const char *cursor = data + start;
+    const char *const end = data + ev.ctx.size;
+    while (cursor != end) {
+      const unsigned char ch = static_cast<unsigned char>(*cursor);
+      const bool is_lower = ch >= 'a' && ch <= 'z';
+      const bool is_upper = ch >= 'A' && ch <= 'Z';
+      const bool is_digit = ch >= '0' && ch <= '9';
+      if (!(is_lower || is_upper || is_digit || ch == '_')) {
+        break;
+      }
+      ++cursor;
+    }
+    const size_t word_end = static_cast<size_t>(cursor - data);
+    ev.ctx.pos = word_end;
+
+    ev.ctx.handled = true;
+    ev.ctx.scan.has_token = true;
+    ev.ctx.scan.token_value.type = token_type::identifier;
+    ev.ctx.scan.token_value.value.assign(data + start, word_end - start);
+    ev.ctx.scan.token_value.pos = start;
+    ev.ctx.scan.next_cursor = ::emel::text::jinja::lexer::detail::emit_cursor(
+        ev.request.cursor,
+        ev.ctx.pos,
+        ev.ctx.scan.token_value.type,
+        ev.ctx.scan.token_value.value);
+  }
+};
+
+struct mark_invalid_character {
+  void operator()(event::next_runtime ev, context &) const noexcept {
+    helper::reset_phase(ev);
+    ev.ctx.handled = true;
+    ::emel::text::jinja::lexer::detail::set_error(ev.ctx.scan, ev.ctx.pos);
+  }
+};
+
 struct emit_scanned_token {
   void operator()(const event::next_runtime &ev, context &) const noexcept {
-    ev.request.dispatch_done(::emel::text::jinja::lexer::events::next_done{
-        ev.request,
-        ev.scan.token_value,
-        true,
-        ev.scan.next_cursor,
-    });
+    helper::emit_scanned_token(ev);
   }
 };
 
 struct emit_scan_error {
   void operator()(const event::next_runtime &ev, context &) const noexcept {
-    ev.request.dispatch_error(::emel::text::jinja::lexer::events::next_error{
-        ev.request,
-        ev.scan.err,
-        ev.scan.error_pos,
-    });
+    helper::emit_scan_error(ev);
   }
 };
 
 struct emit_eof {
   void operator()(const event::next_runtime &ev, context &) const noexcept {
-    ev.request.dispatch_done(::emel::text::jinja::lexer::events::next_done{
-        ev.request,
-        {},
-        false,
-        ev.request.cursor,
-    });
+    helper::emit_eof(ev);
   }
 };
 
@@ -70,6 +639,92 @@ struct on_unexpected {
   void operator()(const event_type &, context &) const noexcept {}
 };
 
+inline constexpr begin_scan begin_scan{};
+inline constexpr scan_text_boundary scan_text_boundary{};
+inline constexpr probe_text_opening_trim probe_text_opening_trim{};
+inline constexpr apply_text_opening_trim_to_newline apply_text_opening_trim_to_newline{};
+inline constexpr apply_text_opening_trim_to_zero apply_text_opening_trim_to_zero{};
+inline constexpr materialize_text_token materialize_text_token{};
+inline constexpr trim_text_leading_newline trim_text_leading_newline{};
+inline constexpr lstrip_text_token lstrip_text_token{};
+inline constexpr rstrip_text_token rstrip_text_token{};
+inline constexpr lstrip_and_rstrip_text_token lstrip_and_rstrip_text_token{};
+inline constexpr finalize_text_boundary_token finalize_text_boundary_token{};
+inline constexpr emit_plain_text_boundary_token emit_plain_text_boundary_token{};
+inline constexpr emit_text_boundary_eof emit_text_boundary_eof{};
+inline constexpr scan_comment scan_comment{};
+inline constexpr finalize_comment_token finalize_comment_token{};
+inline constexpr mark_comment_unterminated mark_comment_unterminated{};
+inline constexpr scan_trim_prefix scan_trim_prefix{};
+inline constexpr scan_spaces scan_spaces{};
+inline constexpr mark_no_token_eof mark_no_token_eof{};
+inline constexpr scan_unary scan_unary{};
+inline constexpr emit_unary_numeric_token emit_unary_numeric_token{};
+inline constexpr emit_unary_operator_token emit_unary_operator_token{};
+inline constexpr scan_fixed_mapping<token_type::open_statement, '{', '%', '-'>
+    scan_mapping_open_statement_trim{};
+inline constexpr scan_fixed_mapping<token_type::close_statement, '-', '%', '}'>
+    scan_mapping_close_statement_trim{};
+inline constexpr scan_fixed_mapping<token_type::open_expression, '{', '{', '-'>
+    scan_mapping_open_expression_trim{};
+inline constexpr scan_fixed_mapping<token_type::close_expression, '-', '}', '}'>
+    scan_mapping_close_expression_trim{};
+inline constexpr scan_fixed_mapping<token_type::open_statement, '{', '%'>
+    scan_mapping_open_statement{};
+inline constexpr scan_fixed_mapping<token_type::close_statement, '%', '}'>
+    scan_mapping_close_statement{};
+inline constexpr scan_fixed_mapping<token_type::open_expression, '{', '{'>
+    scan_mapping_open_expression{};
+inline constexpr scan_fixed_mapping<token_type::close_expression, '}', '}'>
+    scan_mapping_close_expression{};
+inline constexpr scan_fixed_mapping<token_type::open_paren, '('> scan_mapping_open_paren{};
+inline constexpr scan_fixed_mapping<token_type::close_paren, ')'> scan_mapping_close_paren{};
+inline constexpr scan_fixed_mapping<token_type::open_curly_bracket, '{'>
+    scan_mapping_open_curly_bracket{};
+inline constexpr scan_fixed_mapping<token_type::close_curly_bracket, '}'>
+    scan_mapping_close_curly_bracket{};
+inline constexpr scan_fixed_mapping<token_type::open_square_bracket, '['>
+    scan_mapping_open_square_bracket{};
+inline constexpr scan_fixed_mapping<token_type::close_square_bracket, ']'>
+    scan_mapping_close_square_bracket{};
+inline constexpr scan_fixed_mapping<token_type::comma, ','> scan_mapping_comma{};
+inline constexpr scan_fixed_mapping<token_type::dot, '.'> scan_mapping_dot{};
+inline constexpr scan_fixed_mapping<token_type::colon, ':'> scan_mapping_colon{};
+inline constexpr scan_fixed_mapping<token_type::pipe, '|'> scan_mapping_pipe{};
+inline constexpr scan_fixed_mapping<token_type::comparison_binary_operator, '<', '='>
+    scan_mapping_less_equal{};
+inline constexpr scan_fixed_mapping<token_type::comparison_binary_operator, '>', '='>
+    scan_mapping_greater_equal{};
+inline constexpr scan_fixed_mapping<token_type::comparison_binary_operator, '=', '='>
+    scan_mapping_equal_equal{};
+inline constexpr scan_fixed_mapping<token_type::comparison_binary_operator, '!', '='>
+    scan_mapping_bang_equal{};
+inline constexpr scan_fixed_mapping<token_type::comparison_binary_operator, '<'>
+    scan_mapping_less{};
+inline constexpr scan_fixed_mapping<token_type::comparison_binary_operator, '>'>
+    scan_mapping_greater{};
+inline constexpr scan_fixed_mapping<token_type::additive_binary_operator, '+'>
+    scan_mapping_plus{};
+inline constexpr scan_fixed_mapping<token_type::additive_binary_operator, '-'>
+    scan_mapping_minus{};
+inline constexpr scan_fixed_mapping<token_type::additive_binary_operator, '~'>
+    scan_mapping_tilde{};
+inline constexpr scan_fixed_mapping<token_type::multiplicative_binary_operator, '*'>
+    scan_mapping_star{};
+inline constexpr scan_fixed_mapping<token_type::multiplicative_binary_operator, '/'>
+    scan_mapping_slash{};
+inline constexpr scan_fixed_mapping<token_type::multiplicative_binary_operator, '%'>
+    scan_mapping_percent{};
+inline constexpr scan_fixed_mapping<token_type::equals, '='> scan_mapping_equals{};
+inline constexpr scan_mapping_close_curly scan_mapping_close_curly{};
+inline constexpr begin_string_scan begin_string_scan{};
+inline constexpr scan_string_content scan_string_content{};
+inline constexpr materialize_string_token materialize_string_token{};
+inline constexpr finalize_string_token finalize_string_token{};
+inline constexpr mark_string_unterminated mark_string_unterminated{};
+inline constexpr scan_numeric scan_numeric{};
+inline constexpr scan_word scan_word{};
+inline constexpr mark_invalid_character mark_invalid_character{};
 inline constexpr emit_scanned_token emit_scanned_token{};
 inline constexpr emit_scan_error emit_scan_error{};
 inline constexpr emit_eof emit_eof{};

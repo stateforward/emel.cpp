@@ -87,6 +87,7 @@ struct plan_runtime {
 
 struct apply_ctx {
   emel::error::type err = emel::error::cast(error::none);
+  bool has_effect_errors = false;
 };
 
 struct apply_runtime {

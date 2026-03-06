@@ -7,7 +7,7 @@
 #include "emel/text/formatter/format.hpp"
 
 TEST_CASE("formatter_format_raw_handles_invalid_and_empty_inputs") {
-  int32_t err = EMEL_OK;
+  int32_t err = 0;
   size_t out_len = 7;
 
   emel::text::formatter::format_request bad_req = {};
@@ -16,10 +16,10 @@ TEST_CASE("formatter_format_raw_handles_invalid_and_empty_inputs") {
   bad_req.output_capacity = 1;
   bad_req.output_length_out = &out_len;
   CHECK_FALSE(emel::text::formatter::format_raw(nullptr, bad_req, &err));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == (1 << 0));
   CHECK(out_len == 0);
 
-  err = EMEL_OK;
+  err = 0;
   out_len = 9;
   emel::text::formatter::format_request empty_req = {};
   empty_req.input = "";
@@ -27,6 +27,6 @@ TEST_CASE("formatter_format_raw_handles_invalid_and_empty_inputs") {
   empty_req.output_capacity = 0;
   empty_req.output_length_out = &out_len;
   CHECK(emel::text::formatter::format_raw(nullptr, empty_req, &err));
-  CHECK(err == EMEL_OK);
+  CHECK(err == 0);
   CHECK(out_len == 0);
 }

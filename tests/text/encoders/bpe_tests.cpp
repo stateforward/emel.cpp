@@ -11,7 +11,7 @@ TEST_CASE("encoder_bpe_ignore_merges_prefers_full_token") {
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -22,7 +22,7 @@ TEST_CASE("encoder_bpe_ignore_merges_prefers_full_token") {
     .error_out = &err,
   }));
 
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(token_count == 1);
   CHECK(tokens[0] == full_id);
 }
@@ -40,7 +40,7 @@ TEST_CASE("encoder_bpe_merges_ranked_pair") {
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -51,7 +51,7 @@ TEST_CASE("encoder_bpe_merges_ranked_pair") {
     .error_out = &err,
   }));
 
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(token_count == 1);
   CHECK(tokens[0] == he_id);
 }
@@ -66,7 +66,7 @@ TEST_CASE("encoder_bpe_byte_fallback") {
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -77,7 +77,7 @@ TEST_CASE("encoder_bpe_byte_fallback") {
     .error_out = &err,
   }));
 
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(token_count == 1);
   CHECK(tokens[0] == byte_id);
 }
@@ -100,7 +100,7 @@ TEST_CASE("encoder_bpe_byte_fallback_multibyte_symbols") {
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -111,7 +111,7 @@ TEST_CASE("encoder_bpe_byte_fallback_multibyte_symbols") {
     .error_out = &err,
   }));
 
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(token_count == 2);
   CHECK(tokens[0] == byte0_id);
   CHECK(tokens[1] == byte1_id);
@@ -132,7 +132,7 @@ TEST_CASE("encoder_detail_bpe_merge_and_errors") {
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "he",
     .preprocessed = true,
@@ -142,7 +142,7 @@ TEST_CASE("encoder_detail_bpe_merge_and_errors") {
   };
 
   const auto merged = emel::text::encoders::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
-  CHECK(merged.error == EMEL_OK);
+  CHECK(merged.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(merged.token_count >= 1);
   CHECK(tokens[0] == he_id);
 
@@ -161,7 +161,7 @@ TEST_CASE("encoder_detail_bpe_merge_and_errors") {
 
   const auto result_fail = emel::text::encoders::bpe::detail::encode_bpe(
     ev_fail, ctx_fail, *builder.vocab);
-  CHECK(result_fail.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result_fail.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 }
 
 TEST_CASE("encoder_detail_bpe_buffer_overflow") {
@@ -177,7 +177,7 @@ TEST_CASE("encoder_detail_bpe_buffer_overflow") {
   std::string text(70000, 'a');
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = text,
     .preprocessed = true,
@@ -187,7 +187,31 @@ TEST_CASE("encoder_detail_bpe_buffer_overflow") {
   };
 
   const auto result = emel::text::encoders::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
+}
+
+TEST_CASE("encoder_bpe_merge_path_rejects_symbol_capacity_overflow") {
+  vocab_builder builder{};
+  builder.set_model("gpt2");
+  builder.set_pre("gpt2");
+  builder.add_token("a", 0.1f, 1);
+
+  emel::text::encoders::bpe::sm machine{};
+  std::array<int32_t, 1> tokens = {};
+  int32_t token_count = 0;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
+  std::string text(emel::text::encoders::detail::k_max_encode_symbols + 1, 'a');
+
+  CHECK_FALSE(machine.process_event(emel::text::encoders::event::encode{
+    .vocab = *builder.vocab,
+    .text = text,
+    .preprocessed = true,
+    .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(tokens.size())),
+    .token_count_out = &token_count,
+    .error_out = &err,
+  }));
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
+  CHECK(token_count == 0);
 }
 
 TEST_CASE("encoder_detail_bpe_byte_push_overflow") {
@@ -202,7 +226,7 @@ TEST_CASE("encoder_detail_bpe_byte_push_overflow") {
   ctx.vocab = builder.vocab;
   std::array<int32_t, 1> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "ab",
     .preprocessed = true,
@@ -212,6 +236,5 @@ TEST_CASE("encoder_detail_bpe_byte_push_overflow") {
   };
 
   const auto result = emel::text::encoders::bpe::detail::encode_bpe(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 }
-

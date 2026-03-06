@@ -9,7 +9,6 @@
 #include <string_view>
 
 #include "emel/model/data.hpp"
-#include "emel/text/tokenizer/bpe/split.hpp"
 #include "emel/text/tokenizer/preprocessor/events.hpp"
 #include "emel/text/tokenizer/preprocessor/types.hpp"
 
@@ -23,6 +22,20 @@ unwrap_runtime_event(const runtime_event_type & ev) noexcept {
   } else {
     return (ev);
   }
+}
+
+inline size_t select_size(const bool choose_true,
+                          const size_t true_value,
+                          const size_t false_value) noexcept {
+  const std::array<size_t, 2> values = {false_value, true_value};
+  return values[static_cast<size_t>(choose_true)];
+}
+
+inline uintptr_t select_uptr(const bool choose_true,
+                             const uintptr_t true_value,
+                             const uintptr_t false_value) noexcept {
+  const std::array<uintptr_t, 2> values = {false_value, true_value};
+  return values[static_cast<size_t>(choose_true)];
 }
 
 template <class value_type>
@@ -102,45 +115,33 @@ inline bool token_type_skip_when_no_parse(const int32_t type) noexcept {
 
 inline std::string_view token_text(const emel::model::data::vocab & vocab,
                                    const uint32_t id) {
-    {
-    const size_t emel_branch_1 = static_cast<size_t>(id >= vocab.n_tokens);
-    for (size_t emel_case_1 = emel_branch_1; emel_case_1 == 1u; emel_case_1 = 2u) {
-            return {};
-    }
-    for (size_t emel_case_1 = emel_branch_1; emel_case_1 == 0u; emel_case_1 = 2u) {
-
-    }
-  }
-  const auto & entry = vocab.entries[id];
-    {
-    const size_t emel_branch_2 = static_cast<size_t>(entry.text_length == 0);
-    for (size_t emel_case_2 = emel_branch_2; emel_case_2 == 1u; emel_case_2 = 2u) {
-            return {};
-    }
-    for (size_t emel_case_2 = emel_branch_2; emel_case_2 == 0u; emel_case_2 = 2u) {
-
-    }
-  }
-  return std::string_view(vocab.token_storage.data() + entry.text_offset,
-                          entry.text_length);
+  static constexpr char k_zero = '\0';
+  const bool id_valid = id < vocab.n_tokens;
+  const uint32_t safe_id = static_cast<uint32_t>(select_size(id_valid, id, 0u));
+  const auto & entry = vocab.entries[safe_id];
+  const bool has_text = id_valid && entry.text_length != 0;
+  const uintptr_t data_addr = select_uptr(
+      has_text,
+      reinterpret_cast<uintptr_t>(vocab.token_storage.data() + entry.text_offset),
+      reinterpret_cast<uintptr_t>(&k_zero));
+  const std::array<std::string_view, 2> texts = {
+      std::string_view{},
+      std::string_view(reinterpret_cast<const char *>(data_addr), entry.text_length),
+  };
+  return texts[static_cast<size_t>(has_text)];
 }
 
 inline bool flag_set(
     const emel::model::data::vocab & vocab,
     const std::array<uint8_t, emel::model::data::vocab::k_attr_flag_bytes> & flags,
     const uint32_t id) noexcept {
-    {
-    const size_t emel_branch_3 = static_cast<size_t>(id >= vocab.n_tokens);
-    for (size_t emel_case_3 = emel_branch_3; emel_case_3 == 1u; emel_case_3 = 2u) {
-            return false;
-    }
-    for (size_t emel_case_3 = emel_branch_3; emel_case_3 == 0u; emel_case_3 = 2u) {
-
-    }
-  }
-  const uint32_t byte = id >> 3;
-  const uint8_t mask = static_cast<uint8_t>(1u << (id & 7u));
-  return (flags[byte] & mask) != 0;
+  const bool id_valid = id < vocab.n_tokens;
+  const uint32_t safe_id = static_cast<uint32_t>(select_size(id_valid, id, 0u));
+  const uint32_t byte = safe_id >> 3;
+  const uint8_t mask = static_cast<uint8_t>(1u << (safe_id & 7u));
+  const bool bit_set = (flags[byte] & mask) != 0;
+  const std::array<bool, 2> values = {false, bit_set};
+  return values[static_cast<size_t>(id_valid)];
 }
 
 inline bool has_lstrip(const emel::model::data::vocab & vocab,
@@ -155,62 +156,113 @@ inline bool has_rstrip(const emel::model::data::vocab & vocab,
 
 inline bool is_special_type(const emel::model::data::vocab & vocab,
                             const uint32_t id) noexcept {
-    {
-    const size_t emel_branch_4 = static_cast<size_t>(id >= vocab.n_tokens);
-    for (size_t emel_case_4 = emel_branch_4; emel_case_4 == 1u; emel_case_4 = 2u) {
-            return false;
-    }
-    for (size_t emel_case_4 = emel_branch_4; emel_case_4 == 0u; emel_case_4 = 2u) {
-
-    }
-  }
-  return token_type_is_special(vocab.entries[id].type);
+  const bool id_valid = id < vocab.n_tokens;
+  const uint32_t safe_id = static_cast<uint32_t>(select_size(id_valid, id, 0u));
+  const bool is_special = token_type_is_special(vocab.entries[safe_id].type);
+  const std::array<bool, 2> values = {false, is_special};
+  return values[static_cast<size_t>(id_valid)];
 }
 
-inline bool build_special_tokens(special_token_cache & cache,
-                                 const emel::model::data::vocab & vocab) {
-    {
-    const size_t emel_branch_5 = static_cast<size_t>(cache.vocab == &vocab);
-    for (size_t emel_case_5 = emel_branch_5; emel_case_5 == 1u; emel_case_5 = 2u) {
-            return true;
-    }
-    for (size_t emel_case_5 = emel_branch_5; emel_case_5 == 0u; emel_case_5 = 2u) {
+inline bool keep_special_token(special_token_cache &,
+                               const emel::model::data::vocab &,
+                               const uint32_t,
+                               const std::string_view) noexcept {
+  return true;
+}
 
-    }
-  }
-  cache.vocab = &vocab;
-  cache.count = 0;
-  for (uint32_t i = 0; i < vocab.n_tokens; ++i) {
-    const bool include_token = is_special_type(vocab, i);
-    const std::string_view text = token_text(vocab, i);
-    const size_t emel_branch_include =
-        static_cast<size_t>(include_token && !text.empty());
-    for (size_t emel_case_include = emel_branch_include; emel_case_include == 1u;
-         emel_case_include = 2u) {
-      {
-        const size_t emel_branch_full = static_cast<size_t>(cache.count >= cache.tokens.size());
-        for (size_t emel_case_full = emel_branch_full; emel_case_full == 1u;
-             emel_case_full = 2u) {
-          return false;
-        }
-        for (size_t emel_case_full = emel_branch_full; emel_case_full == 0u;
-             emel_case_full = 2u) {
+inline bool overflow_special_token(special_token_cache &,
+                                   const emel::model::data::vocab &,
+                                   const uint32_t,
+                                   const std::string_view) noexcept {
+  return false;
+}
 
-        }
-      }
-      special_token & entry = cache.tokens[cache.count];
-      entry.text = text;
-      entry.token = static_cast<int32_t>(i);
-      entry.type = vocab.entries[i].type;
-      entry.lstrip = has_lstrip(vocab, i);
-      entry.rstrip = has_rstrip(vocab, i);
-      cache.count += 1;
-    }
-    for (size_t emel_case_include = emel_branch_include; emel_case_include == 0u;
-         emel_case_include = 2u) {
+inline bool write_special_token(special_token_cache & cache,
+                                const emel::model::data::vocab & vocab,
+                                const uint32_t id,
+                                const std::string_view text) noexcept {
+  special_token & entry = cache.tokens[cache.count];
+  entry.text = text;
+  entry.token = static_cast<int32_t>(id);
+  entry.type = vocab.entries[id].type;
+  entry.lstrip = has_lstrip(vocab, id);
+  entry.rstrip = has_rstrip(vocab, id);
+  cache.count += 1;
+  return true;
+}
 
-    }
-  }
+inline bool add_special_token_entry(special_token_cache & cache,
+                                    const emel::model::data::vocab & vocab,
+                                    const uint32_t id,
+                                    const std::string_view text) noexcept {
+  const bool has_capacity = cache.count < cache.tokens.size();
+  using add_fn = bool (*)(special_token_cache &, const emel::model::data::vocab &,
+                          uint32_t, std::string_view) noexcept;
+  constexpr std::array<add_fn, 2> adders = {
+      overflow_special_token,
+      write_special_token,
+  };
+  return adders[static_cast<size_t>(has_capacity)](cache, vocab, id, text);
+}
+
+inline bool scan_special_token_entry(special_token_cache & cache,
+                                     const emel::model::data::vocab & vocab,
+                                     const uint32_t id) noexcept {
+  const bool include_token = is_special_type(vocab, id);
+  const std::string_view text = token_text(vocab, id);
+  const bool include = include_token && !text.empty();
+  using scan_fn = bool (*)(special_token_cache &, const emel::model::data::vocab &,
+                           uint32_t, std::string_view) noexcept;
+  constexpr std::array<scan_fn, 2> scanners = {
+      keep_special_token,
+      add_special_token_entry,
+  };
+  return scanners[static_cast<size_t>(include)](cache, vocab, id, text);
+}
+
+inline bool scan_special_token_range(special_token_cache & cache,
+                                     const emel::model::data::vocab & vocab,
+                                     const uint32_t begin,
+                                     const uint32_t end) noexcept;
+
+inline bool scan_special_token_range_done(special_token_cache &,
+                                          const emel::model::data::vocab &,
+                                          const uint32_t,
+                                          const uint32_t) noexcept {
+  return true;
+}
+
+inline bool scan_special_token_range_active(special_token_cache & cache,
+                                            const emel::model::data::vocab & vocab,
+                                            const uint32_t begin,
+                                            const uint32_t end) noexcept {
+  const uint32_t span = end - begin;
+  const uint32_t mid = begin + (span >> 1u);
+  const bool left_ok = scan_special_token_range(cache, vocab, begin, mid);
+  const bool center_ok = scan_special_token_entry(cache, vocab, mid);
+  const bool right_ok = scan_special_token_range(cache, vocab, mid + 1u, end);
+  return left_ok && center_ok && right_ok;
+}
+
+inline bool scan_special_token_range(special_token_cache & cache,
+                                     const emel::model::data::vocab & vocab,
+                                     const uint32_t begin,
+                                     const uint32_t end) noexcept {
+  using scan_fn = bool (*)(special_token_cache &, const emel::model::data::vocab &,
+                           uint32_t, uint32_t) noexcept;
+  constexpr std::array<scan_fn, 2> scanners = {
+      scan_special_token_range_done,
+      scan_special_token_range_active,
+  };
+  const bool has_range = begin < end;
+  return scanners[static_cast<size_t>(has_range)](cache, vocab, begin, end);
+}
+
+inline bool finish_build_special_tokens_error(special_token_cache &) noexcept {
+  return false;
+}
+
+inline bool finish_build_special_tokens_ok(special_token_cache & cache) {
   std::sort(cache.tokens.begin(),
             cache.tokens.begin() + static_cast<std::ptrdiff_t>(cache.count),
             [](const special_token & a, const special_token & b) {
@@ -219,436 +271,598 @@ inline bool build_special_tokens(special_token_cache & cache,
   return true;
 }
 
-inline bool push_raw_fragment(fragment * out, const size_t capacity,
-                              size_t & count, const std::string_view text) {
-    {
-    const size_t emel_branch_6 = static_cast<size_t>(text.empty());
-    for (size_t emel_case_6 = emel_branch_6; emel_case_6 == 1u; emel_case_6 = 2u) {
-            return true;
-    }
-    for (size_t emel_case_6 = emel_branch_6; emel_case_6 == 0u; emel_case_6 = 2u) {
+inline bool build_special_tokens_cached(special_token_cache &,
+                                        const emel::model::data::vocab &) noexcept {
+  return true;
+}
 
-    }
-  }
-    {
-    const size_t emel_branch_7 = static_cast<size_t>(count >= capacity);
-    for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 1u; emel_case_7 = 2u) {
-            return false;
-    }
-    for (size_t emel_case_7 = emel_branch_7; emel_case_7 == 0u; emel_case_7 = 2u) {
+inline bool build_special_tokens_rebuild(special_token_cache & cache,
+                                         const emel::model::data::vocab & vocab) {
+  cache.vocab = &vocab;
+  cache.count = 0;
+  const bool scanned = scan_special_token_range(cache, vocab, 0u, vocab.n_tokens);
+  using finish_fn = bool (*)(special_token_cache &);
+  const std::array<finish_fn, 2> finishers = {
+      finish_build_special_tokens_error,
+      finish_build_special_tokens_ok,
+  };
+  return finishers[static_cast<size_t>(scanned)](cache);
+}
 
-    }
-  }
+inline bool build_special_tokens(special_token_cache & cache,
+                                 const emel::model::data::vocab & vocab) {
+  const bool cache_matches = cache.vocab == &vocab;
+  using build_fn = bool (*)(special_token_cache &, const emel::model::data::vocab &);
+  const std::array<build_fn, 2> builders = {
+      build_special_tokens_rebuild,
+      build_special_tokens_cached,
+  };
+  return builders[static_cast<size_t>(cache_matches)](cache, vocab);
+}
+
+inline void write_raw_fragment_noop(fragment *,
+                                    size_t &,
+                                    const std::string_view) noexcept {}
+
+inline void write_raw_fragment_active(fragment * out,
+                                      size_t & count,
+                                      const std::string_view text) noexcept {
   fragment & entry = out[count];
   entry.kind = fragment_kind::raw_text;
   entry.text = text;
   entry.token = -1;
   count += 1;
-  return true;
 }
 
-inline bool push_token_fragment(fragment * out, const size_t capacity,
-                                size_t & count, const int32_t token) {
-    {
-    const size_t emel_branch_8 = static_cast<size_t>(token < 0);
-    for (size_t emel_case_8 = emel_branch_8; emel_case_8 == 1u; emel_case_8 = 2u) {
-            return false;
-    }
-    for (size_t emel_case_8 = emel_branch_8; emel_case_8 == 0u; emel_case_8 = 2u) {
+inline bool push_raw_fragment(fragment * out, const size_t capacity,
+                              size_t & count, const std::string_view text) {
+  const bool has_text = !text.empty();
+  const bool has_capacity = count < capacity;
+  const size_t state = (static_cast<size_t>(has_text) << 1u) |
+                       static_cast<size_t>(has_capacity);
+  using write_fn = void (*)(fragment *, size_t &, std::string_view) noexcept;
+  constexpr std::array<write_fn, 4> writers = {
+      write_raw_fragment_noop,
+      write_raw_fragment_noop,
+      write_raw_fragment_noop,
+      write_raw_fragment_active,
+  };
+  constexpr std::array<bool, 4> results = {
+      true,
+      true,
+      false,
+      true,
+  };
+  writers[state](out, count, text);
+  return results[state];
+}
 
-    }
-  }
-    {
-    const size_t emel_branch_9 = static_cast<size_t>(count >= capacity);
-    for (size_t emel_case_9 = emel_branch_9; emel_case_9 == 1u; emel_case_9 = 2u) {
-            return false;
-    }
-    for (size_t emel_case_9 = emel_branch_9; emel_case_9 == 0u; emel_case_9 = 2u) {
+inline void write_token_fragment_noop(fragment *,
+                                      size_t &,
+                                      const int32_t) noexcept {}
 
-    }
-  }
+inline void write_token_fragment_active(fragment * out,
+                                        size_t & count,
+                                        const int32_t token) noexcept {
   fragment & entry = out[count];
   entry.kind = fragment_kind::token;
   entry.text = {};
   entry.token = token;
   count += 1;
-  return true;
 }
 
-inline bool partition_with_specials(const std::string_view text,
-                                    const special_token_cache & cache,
-                                    const bool parse_special,
-                                    const std::span<fragment> fragments_out,
-                                    size_t & fragment_count_out) {
+inline bool push_token_fragment(fragment * out, const size_t capacity,
+                                size_t & count, const int32_t token) {
+  const bool token_valid = token >= 0;
+  const bool has_capacity = count < capacity;
+  const size_t state = (static_cast<size_t>(token_valid) << 1u) |
+                       static_cast<size_t>(has_capacity);
+  using write_fn = void (*)(fragment *, size_t &, int32_t) noexcept;
+  constexpr std::array<write_fn, 4> writers = {
+      write_token_fragment_noop,
+      write_token_fragment_noop,
+      write_token_fragment_noop,
+      write_token_fragment_active,
+  };
+  constexpr std::array<bool, 4> results = {
+      false,
+      false,
+      false,
+      true,
+  };
+  writers[state](out, count, token);
+  return results[state];
+}
+
+inline bool special_token_allowed_parse_enabled(const special_token & token) noexcept {
+  return !token.text.empty();
+}
+
+inline bool special_token_allowed_parse_disabled(const special_token & token) noexcept {
+  return !token.text.empty() && !token_type_skip_when_no_parse(token.type);
+}
+
+using special_token_allowed_fn = bool (*)(const special_token &) noexcept;
+
+inline void trim_left_noop(const std::string_view,
+                           const size_t,
+                           size_t &) noexcept {}
+
+inline void trim_left_active(const std::string_view raw,
+                             const size_t base_offset,
+                             size_t & left_len) noexcept;
+
+inline void trim_left_step_stop(const std::string_view,
+                                const size_t,
+                                size_t &) noexcept {}
+
+inline void trim_left_step_continue(const std::string_view raw,
+                                    const size_t base_offset,
+                                    size_t & left_len) noexcept {
+  left_len -= 1;
+  trim_left_active(raw, base_offset, left_len);
+}
+
+inline void trim_left_active(const std::string_view raw,
+                             const size_t base_offset,
+                             size_t & left_len) noexcept {
+  const bool can_trim =
+      left_len > 0 &&
+      std::isspace(static_cast<unsigned char>(raw[base_offset + left_len - 1u])) != 0;
+  using step_fn = void (*)(std::string_view, size_t, size_t &) noexcept;
+  constexpr std::array<step_fn, 2> steppers = {
+      trim_left_step_stop,
+      trim_left_step_continue,
+  };
+  steppers[static_cast<size_t>(can_trim)](raw, base_offset, left_len);
+}
+
+inline void trim_right_noop(const std::string_view,
+                            size_t &) noexcept {}
+
+inline void trim_right_active(const std::string_view raw,
+                              size_t & right_offset) noexcept;
+
+inline void trim_right_step_stop(const std::string_view,
+                                 size_t &) noexcept {}
+
+inline void trim_right_step_continue(const std::string_view raw,
+                                     size_t & right_offset) noexcept {
+  right_offset += 1u;
+  trim_right_active(raw, right_offset);
+}
+
+inline void trim_right_active(const std::string_view raw,
+                              size_t & right_offset) noexcept {
+  const bool can_trim =
+      right_offset < raw.size() &&
+      std::isspace(static_cast<unsigned char>(raw[right_offset])) != 0;
+  using step_fn = void (*)(std::string_view, size_t &) noexcept;
+  constexpr std::array<step_fn, 2> steppers = {
+      trim_right_step_stop,
+      trim_right_step_continue,
+  };
+  steppers[static_cast<size_t>(can_trim)](raw, right_offset);
+}
+
+inline void partition_raw_scan_recursive(const std::string_view raw,
+                                         const special_token & token,
+                                         fragment * out,
+                                         const size_t capacity,
+                                         size_t & next_count,
+                                         size_t & base_offset,
+                                         bool & ok) noexcept;
+
+inline void partition_raw_scan_stop(const std::string_view,
+                                    const special_token &,
+                                    fragment *,
+                                    const size_t,
+                                    size_t &,
+                                    size_t &,
+                                    bool &) noexcept {}
+
+inline void partition_raw_scan_no_match(const std::string_view raw,
+                                        const special_token &,
+                                        fragment * out,
+                                        const size_t capacity,
+                                        size_t & next_count,
+                                        size_t & base_offset,
+                                        bool & ok,
+                                        const size_t) {
+  const bool push_ok = push_raw_fragment(out, capacity, next_count, raw.substr(base_offset));
+  ok = ok && push_ok;
+  base_offset = raw.size();
+}
+
+inline void partition_raw_scan_match(const std::string_view raw,
+                                     const special_token & token,
+                                     fragment * out,
+                                     const size_t capacity,
+                                     size_t & next_count,
+                                     size_t & base_offset,
+                                     bool & ok,
+                                     const size_t match) {
+  size_t left_len = match - base_offset;
+  using trim_left_fn = void (*)(std::string_view, size_t, size_t &) noexcept;
+  constexpr std::array<trim_left_fn, 2> trim_left_handlers = {
+      trim_left_noop,
+      trim_left_active,
+  };
+  trim_left_handlers[static_cast<size_t>(token.lstrip)](raw, base_offset, left_len);
+
+  const bool left_ok =
+      push_raw_fragment(out, capacity, next_count, raw.substr(base_offset, left_len));
+  const bool token_ok = push_token_fragment(out, capacity, next_count, token.token);
+  ok = ok && left_ok && token_ok;
+
+  size_t right_offset = match + token.text.size();
+  using trim_right_fn = void (*)(std::string_view, size_t &) noexcept;
+  constexpr std::array<trim_right_fn, 2> trim_right_handlers = {
+      trim_right_noop,
+      trim_right_active,
+  };
+  trim_right_handlers[static_cast<size_t>(token.rstrip)](raw, right_offset);
+  base_offset = right_offset;
+}
+
+inline void partition_raw_scan_continue(const std::string_view raw,
+                                        const special_token & token,
+                                        fragment * out,
+                                        const size_t capacity,
+                                        size_t & next_count,
+                                        size_t & base_offset,
+                                        bool & ok) {
+  const size_t match = raw.find(token.text, base_offset);
+  const bool has_match = match != std::string_view::npos;
+  using match_fn = void (*)(std::string_view, const special_token &, fragment *,
+                            size_t, size_t &, size_t &, bool &, size_t);
+  constexpr std::array<match_fn, 2> match_handlers = {
+      partition_raw_scan_no_match,
+      partition_raw_scan_match,
+  };
+  match_handlers[static_cast<size_t>(has_match)](raw, token, out, capacity, next_count,
+                                                 base_offset, ok, match);
+  partition_raw_scan_recursive(raw, token, out, capacity, next_count, base_offset,
+                               ok);
+}
+
+inline void partition_raw_scan_recursive(const std::string_view raw,
+                                         const special_token & token,
+                                         fragment * out,
+                                         const size_t capacity,
+                                         size_t & next_count,
+                                         size_t & base_offset,
+                                         bool & ok) noexcept {
+  const bool continue_scan = ok && base_offset < raw.size();
+  using scan_fn = void (*)(std::string_view, const special_token &, fragment *,
+                           size_t, size_t &, size_t &, bool &);
+  constexpr std::array<scan_fn, 2> scanners = {
+      partition_raw_scan_stop,
+      partition_raw_scan_continue,
+  };
+  scanners[static_cast<size_t>(continue_scan)](raw, token, out, capacity, next_count,
+                                               base_offset, ok);
+}
+
+inline void partition_fragment_token(const fragment & frag,
+                                     const special_token &,
+                                     fragment * out,
+                                     const size_t capacity,
+                                     size_t & next_count,
+                                     bool & ok) {
+  const bool push_ok = push_token_fragment(out, capacity, next_count, frag.token);
+  ok = ok && push_ok;
+}
+
+inline void partition_fragment_raw(const fragment & frag,
+                                   const special_token & token,
+                                   fragment * out,
+                                   const size_t capacity,
+                                   size_t & next_count,
+                                   bool & ok) {
+  size_t base_offset = 0;
+  partition_raw_scan_recursive(frag.text, token, out, capacity, next_count,
+                               base_offset, ok);
+}
+
+inline void partition_fragments_recursive(
+    const std::array<fragment, k_max_fragments> & current_fragments,
+    const size_t current_count,
+    const special_token & token,
+    fragment * out,
+    const size_t capacity,
+    size_t & next_count,
+    const size_t frag_idx,
+    bool & ok) noexcept;
+
+inline void partition_fragments_stop(
+    const std::array<fragment, k_max_fragments> &,
+    const size_t,
+    const special_token &,
+    fragment *,
+    const size_t,
+    size_t &,
+    const size_t,
+    bool &) noexcept {}
+
+inline void partition_fragments_continue(
+    const std::array<fragment, k_max_fragments> & current_fragments,
+    const size_t current_count,
+    const special_token & token,
+    fragment * out,
+    const size_t capacity,
+    size_t & next_count,
+    const size_t frag_idx,
+    bool & ok) {
+  const fragment & frag = current_fragments[frag_idx];
+  using partition_fn = void (*)(const fragment &, const special_token &, fragment *,
+                                size_t, size_t &, bool &);
+  constexpr std::array<partition_fn, 2> partitioners = {
+      partition_fragment_raw,
+      partition_fragment_token,
+  };
+  const size_t token_fragment =
+      static_cast<size_t>(frag.kind == fragment_kind::token);
+  partitioners[token_fragment](frag, token, out, capacity, next_count, ok);
+  partition_fragments_recursive(current_fragments, current_count, token, out, capacity,
+                                next_count, frag_idx + 1u, ok);
+}
+
+inline void partition_fragments_recursive(
+    const std::array<fragment, k_max_fragments> & current_fragments,
+    const size_t current_count,
+    const special_token & token,
+    fragment * out,
+    const size_t capacity,
+    size_t & next_count,
+    const size_t frag_idx,
+    bool & ok) noexcept {
+  const bool continue_partition = ok && frag_idx < current_count;
+  using partition_fn = void (*)(const std::array<fragment, k_max_fragments> &,
+                                size_t, const special_token &, fragment *, size_t,
+                                size_t &, size_t, bool &);
+  constexpr std::array<partition_fn, 2> partitioners = {
+      partition_fragments_stop,
+      partition_fragments_continue,
+  };
+  partitioners[static_cast<size_t>(continue_partition)](
+      current_fragments, current_count, token, out, capacity, next_count, frag_idx,
+      ok);
+}
+
+inline void apply_token_skip(
+    std::array<fragment, k_max_fragments> &,
+    size_t &,
+    std::array<fragment, k_max_fragments> &,
+    const size_t,
+    const special_token &,
+    bool &) noexcept {}
+
+inline void apply_token_partition(
+    std::array<fragment, k_max_fragments> & current_fragments,
+    size_t & current_count,
+    std::array<fragment, k_max_fragments> & next_fragments,
+    const size_t capacity,
+    const special_token & token,
+    bool & ok) {
+  size_t next_count = 0;
+  partition_fragments_recursive(current_fragments, current_count, token,
+                                next_fragments.data(), capacity, next_count, 0u, ok);
+  current_fragments = next_fragments;
+  current_count = next_count;
+}
+
+inline void partition_tokens_recursive(
+    const special_token_cache & cache,
+    const special_token_allowed_fn token_allowed,
+    std::array<fragment, k_max_fragments> & current_fragments,
+    size_t & current_count,
+    std::array<fragment, k_max_fragments> & next_fragments,
+    const size_t capacity,
+    const size_t token_idx,
+    bool & ok) noexcept;
+
+inline void partition_tokens_stop(
+    const special_token_cache &,
+    const special_token_allowed_fn,
+    std::array<fragment, k_max_fragments> &,
+    size_t &,
+    std::array<fragment, k_max_fragments> &,
+    const size_t,
+    const size_t,
+    bool &) noexcept {}
+
+inline void partition_tokens_continue(
+    const special_token_cache & cache,
+    const special_token_allowed_fn token_allowed,
+    std::array<fragment, k_max_fragments> & current_fragments,
+    size_t & current_count,
+    std::array<fragment, k_max_fragments> & next_fragments,
+    const size_t capacity,
+    const size_t token_idx,
+    bool & ok) {
+  const special_token & token = cache.tokens[token_idx];
+  const bool process_token = token_allowed(token);
+  using token_fn = void (*)(std::array<fragment, k_max_fragments> &, size_t &,
+                            std::array<fragment, k_max_fragments> &, size_t,
+                            const special_token &, bool &);
+  constexpr std::array<token_fn, 2> token_handlers = {
+      apply_token_skip,
+      apply_token_partition,
+  };
+  token_handlers[static_cast<size_t>(process_token)](
+      current_fragments, current_count, next_fragments, capacity, token, ok);
+  partition_tokens_recursive(cache, token_allowed, current_fragments, current_count,
+                             next_fragments, capacity, token_idx + 1u, ok);
+}
+
+inline void partition_tokens_recursive(
+    const special_token_cache & cache,
+    const special_token_allowed_fn token_allowed,
+    std::array<fragment, k_max_fragments> & current_fragments,
+    size_t & current_count,
+    std::array<fragment, k_max_fragments> & next_fragments,
+    const size_t capacity,
+    const size_t token_idx,
+    bool & ok) noexcept {
+  const bool continue_partition = ok && token_idx < cache.count;
+  using token_fn = void (*)(const special_token_cache &, special_token_allowed_fn,
+                            std::array<fragment, k_max_fragments> &, size_t &,
+                            std::array<fragment, k_max_fragments> &, size_t, size_t,
+                            bool &);
+  constexpr std::array<token_fn, 2> token_handlers = {
+      partition_tokens_stop,
+      partition_tokens_continue,
+  };
+  token_handlers[static_cast<size_t>(continue_partition)](
+      cache, token_allowed, current_fragments, current_count, next_fragments,
+      capacity, token_idx, ok);
+}
+
+inline void copy_fragments_recursive(
+    fragment * out,
+    const std::array<fragment, k_max_fragments> & current_fragments,
+    const size_t current_count,
+    const size_t idx) noexcept;
+
+inline void copy_fragments_stop(fragment *,
+                                const std::array<fragment, k_max_fragments> &,
+                                const size_t,
+                                const size_t) noexcept {}
+
+inline void copy_fragments_continue(
+    fragment * out,
+    const std::array<fragment, k_max_fragments> & current_fragments,
+    const size_t current_count,
+    const size_t idx) noexcept {
+  out[idx] = current_fragments[idx];
+  copy_fragments_recursive(out, current_fragments, current_count, idx + 1u);
+}
+
+inline void copy_fragments_recursive(
+    fragment * out,
+    const std::array<fragment, k_max_fragments> & current_fragments,
+    const size_t current_count,
+    const size_t idx) noexcept {
+  const bool continue_copy = idx < current_count;
+  using copy_fn = void (*)(fragment *, const std::array<fragment, k_max_fragments> &,
+                           size_t, size_t) noexcept;
+  constexpr std::array<copy_fn, 2> copiers = {
+      copy_fragments_stop,
+      copy_fragments_continue,
+  };
+  copiers[static_cast<size_t>(continue_copy)](out, current_fragments, current_count,
+                                              idx);
+}
+
+inline bool partition_invalid_output(const std::string_view,
+                                     const special_token_cache &,
+                                     const std::span<fragment>,
+                                     size_t & fragment_count_out,
+                                     const special_token_allowed_fn) noexcept {
   fragment_count_out = 0;
-  const size_t fragment_capacity = fragments_out.size();
-  const bool invalid_output =
-      fragments_out.data() == nullptr || fragment_capacity == 0 ||
-      fragment_capacity > k_max_fragments;
-    {
-    const size_t emel_branch_10 = static_cast<size_t>(invalid_output);
-    for (size_t emel_case_10 = emel_branch_10; emel_case_10 == 1u; emel_case_10 = 2u) {
-            return false;
-    }
-    for (size_t emel_case_10 = emel_branch_10; emel_case_10 == 0u; emel_case_10 = 2u) {
+  return false;
+}
 
-    }
-  }
+inline bool partition_empty_cache(const std::string_view text,
+                                  const special_token_cache &,
+                                  const std::span<fragment> fragments_out,
+                                  size_t & fragment_count_out,
+                                  const special_token_allowed_fn) {
+  size_t count = 0;
+  const bool ok =
+      push_raw_fragment(fragments_out.data(), fragments_out.size(), count, text);
+  fragment_count_out = count;
+  return ok;
+}
 
-    {
-    const size_t emel_branch_11 = static_cast<size_t>(cache.count == 0);
-    for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 1u; emel_case_11 = 2u) {
-       {
-            size_t count = 0;
-            {
-              const size_t emel_branch_push = static_cast<size_t>(
-                  !push_raw_fragment(fragments_out.data(), fragment_capacity, count, text));
-              for (size_t emel_case_push = emel_branch_push; emel_case_push == 1u;
-                   emel_case_push = 2u) {
-                return false;
-              }
-              for (size_t emel_case_push = emel_branch_push; emel_case_push == 0u;
-                   emel_case_push = 2u) {
-
-              }
-            }
-            fragment_count_out = count;
-            return true;
-          }
-    }
-    for (size_t emel_case_11 = emel_branch_11; emel_case_11 == 0u; emel_case_11 = 2u) {
-
-    }
-  }
-
+inline bool partition_with_cache(const std::string_view text,
+                                 const special_token_cache & cache,
+                                 const std::span<fragment> fragments_out,
+                                 size_t & fragment_count_out,
+                                 const special_token_allowed_fn token_allowed) {
   std::array<fragment, k_max_fragments> current_fragments = {};
   size_t current_count = 0;
-    {
-    const size_t emel_branch_12 = static_cast<size_t>(
-      !push_raw_fragment(current_fragments.data(), fragment_capacity, current_count, text));
-    for (size_t emel_case_12 = emel_branch_12; emel_case_12 == 1u; emel_case_12 = 2u) {
-            return false;
-    }
-    for (size_t emel_case_12 = emel_branch_12; emel_case_12 == 0u; emel_case_12 = 2u) {
-
-    }
-  }
+  bool ok = push_raw_fragment(current_fragments.data(), fragments_out.size(),
+                              current_count, text);
 
   std::array<fragment, k_max_fragments> next_fragments = {};
-  for (size_t token_idx = 0; token_idx < cache.count; ++token_idx) {
-    const special_token & token = cache.tokens[token_idx];
-    const bool skip_without_parse = !parse_special && token_type_skip_when_no_parse(token.type);
-    const size_t emel_branch_process_token =
-        static_cast<size_t>(!token.text.empty() && !skip_without_parse);
-    for (size_t emel_case_process_token = emel_branch_process_token;
-         emel_case_process_token == 1u;
-         emel_case_process_token = 2u) {
-      size_t next_count = 0;
-      for (size_t frag_idx = 0; frag_idx < current_count; ++frag_idx) {
-        const fragment & frag = current_fragments[frag_idx];
-        const bool is_raw = frag.kind == fragment_kind::raw_text;
-        {
-          const size_t emel_branch_copy_token = static_cast<size_t>(!is_raw);
-          for (size_t emel_case_copy_token = emel_branch_copy_token;
-               emel_case_copy_token == 1u;
-               emel_case_copy_token = 2u) {
-            {
-              const size_t emel_branch_push_token = static_cast<size_t>(
-                  !push_token_fragment(next_fragments.data(), fragment_capacity, next_count,
-                                       frag.token));
-              for (size_t emel_case_push_token = emel_branch_push_token;
-                   emel_case_push_token == 1u;
-                   emel_case_push_token = 2u) {
-                return false;
-              }
-              for (size_t emel_case_push_token = emel_branch_push_token;
-                   emel_case_push_token == 0u;
-                   emel_case_push_token = 2u) {
+  partition_tokens_recursive(cache, token_allowed, current_fragments, current_count,
+                             next_fragments, fragments_out.size(), 0u, ok);
 
-              }
-            }
-          }
-          for (size_t emel_case_copy_token = emel_branch_copy_token;
-               emel_case_copy_token == 0u;
-               emel_case_copy_token = 2u) {
-            const std::string_view raw = frag.text;
-            size_t base_offset = 0;
-            while (base_offset < raw.size()) {
-              const size_t match = raw.find(token.text, base_offset);
-              const size_t emel_branch_has_match =
-                  static_cast<size_t>(match != std::string_view::npos);
-              for (size_t emel_case_has_match = emel_branch_has_match;
-                   emel_case_has_match == 1u;
-                   emel_case_has_match = 2u) {
-                size_t left_len = match - base_offset;
-                {
-                  const size_t emel_branch_13 = static_cast<size_t>(token.lstrip);
-                  for (size_t emel_case_13 = emel_branch_13; emel_case_13 == 1u;
-                       emel_case_13 = 2u) {
-                    while (left_len > 0 &&
-                           std::isspace(static_cast<unsigned char>(
-                               raw[base_offset + left_len - 1])) != 0) {
-                      left_len -= 1;
-                    }
-                  }
-                  for (size_t emel_case_13 = emel_branch_13; emel_case_13 == 0u;
-                       emel_case_13 = 2u) {
+  using copy_fn = void (*)(fragment *,
+                           const std::array<fragment, k_max_fragments> &,
+                           size_t,
+                           size_t) noexcept;
+  constexpr std::array<copy_fn, 2> copiers = {
+      copy_fragments_stop,
+      copy_fragments_recursive,
+  };
+  copiers[static_cast<size_t>(ok)](fragments_out.data(), current_fragments,
+                                   current_count, 0u);
 
-                  }
-                }
-                {
-                  const size_t emel_branch_14 = static_cast<size_t>(left_len > 0);
-                  for (size_t emel_case_14 = emel_branch_14; emel_case_14 == 1u;
-                       emel_case_14 = 2u) {
-                    {
-                      const size_t emel_branch_push_left = static_cast<size_t>(
-                          !push_raw_fragment(next_fragments.data(), fragment_capacity, next_count,
-                                             raw.substr(base_offset, left_len)));
-                      for (size_t emel_case_push_left = emel_branch_push_left;
-                           emel_case_push_left == 1u;
-                           emel_case_push_left = 2u) {
-                        return false;
-                      }
-                      for (size_t emel_case_push_left = emel_branch_push_left;
-                           emel_case_push_left == 0u;
-                           emel_case_push_left = 2u) {
-
-                      }
-                    }
-                  }
-                  for (size_t emel_case_14 = emel_branch_14; emel_case_14 == 0u;
-                       emel_case_14 = 2u) {
-
-                  }
-                }
-
-                {
-                  const size_t emel_branch_15 = static_cast<size_t>(
-                      !push_token_fragment(next_fragments.data(), fragment_capacity, next_count,
-                                           token.token));
-                  for (size_t emel_case_15 = emel_branch_15; emel_case_15 == 1u;
-                       emel_case_15 = 2u) {
-                    return false;
-                  }
-                  for (size_t emel_case_15 = emel_branch_15; emel_case_15 == 0u;
-                       emel_case_15 = 2u) {
-
-                  }
-                }
-
-                size_t right_offset = match + token.text.size();
-                {
-                  const size_t emel_branch_16 = static_cast<size_t>(token.rstrip);
-                  for (size_t emel_case_16 = emel_branch_16; emel_case_16 == 1u;
-                       emel_case_16 = 2u) {
-                    while (right_offset < raw.size() &&
-                           std::isspace(static_cast<unsigned char>(raw[right_offset])) != 0) {
-                      right_offset += 1;
-                    }
-                  }
-                  for (size_t emel_case_16 = emel_branch_16; emel_case_16 == 0u;
-                       emel_case_16 = 2u) {
-
-                  }
-                }
-                base_offset = right_offset;
-              }
-              for (size_t emel_case_has_match = emel_branch_has_match;
-                   emel_case_has_match == 0u;
-                   emel_case_has_match = 2u) {
-                {
-                  const size_t emel_branch_push_tail = static_cast<size_t>(
-                      !push_raw_fragment(next_fragments.data(), fragment_capacity, next_count,
-                                         raw.substr(base_offset)));
-                  for (size_t emel_case_push_tail = emel_branch_push_tail;
-                       emel_case_push_tail == 1u;
-                       emel_case_push_tail = 2u) {
-                    return false;
-                  }
-                  for (size_t emel_case_push_tail = emel_branch_push_tail;
-                       emel_case_push_tail == 0u;
-                       emel_case_push_tail = 2u) {
-
-                  }
-                }
-                base_offset = raw.size();
-              }
-            }
-          }
-        }
-      }
-
-      current_fragments = next_fragments;
-      current_count = next_count;
-    }
-    for (size_t emel_case_process_token = emel_branch_process_token;
-         emel_case_process_token == 0u;
-         emel_case_process_token = 2u) {
-
-    }
-  }
-
-  for (size_t i = 0; i < current_count; ++i) {
-    fragments_out[i] = current_fragments[i];
-  }
-  fragment_count_out = current_count;
-  return true;
+  const std::array<size_t, 2> counts = {
+      0,
+      current_count,
+  };
+  fragment_count_out = counts[static_cast<size_t>(ok)];
+  return ok;
 }
 
-inline bool
-partition_bpe_no_specials(const event::preprocess & request,
-                          emel::text::tokenizer::bpe::detail::split_scratch & scratch,
-                          size_t & fragment_count_out) {
-  fragment_count_out = 0;
-  scratch.reset();
-
-  emel::text::tokenizer::bpe::detail::split_view view = {};
-    {
-    const size_t emel_branch_17 = static_cast<size_t>(
-      !emel::text::tokenizer::bpe::detail::split_and_encode_append(
-          request.text, request.vocab, scratch, view));
-    for (size_t emel_case_17 = emel_branch_17; emel_case_17 == 1u; emel_case_17 = 2u) {
-            return false;
-    }
-    for (size_t emel_case_17 = emel_branch_17; emel_case_17 == 0u; emel_case_17 = 2u) {
-
-    }
-  }
-
-  size_t out_count = 0;
-  for (size_t idx = 0; idx < view.count; ++idx) {
-    const std::string_view word = view.words[idx];
-    {
-      const size_t emel_branch_emit_word = static_cast<size_t>(!word.empty());
-      for (size_t emel_case_emit_word = emel_branch_emit_word; emel_case_emit_word == 1u;
-           emel_case_emit_word = 2u) {
-            {
-          const size_t emel_branch_18 = static_cast<size_t>(
-            !push_raw_fragment(request.fragments_out.data(), request.fragments_out.size(), out_count,
-                               word));
-          for (size_t emel_case_18 = emel_branch_18; emel_case_18 == 1u; emel_case_18 = 2u) {
-                    return false;
-          }
-          for (size_t emel_case_18 = emel_branch_18; emel_case_18 == 0u; emel_case_18 = 2u) {
-
-          }
-        }
-      }
-      for (size_t emel_case_emit_word = emel_branch_emit_word; emel_case_emit_word == 0u;
-           emel_case_emit_word = 2u) {
-
-      }
-    }
-  }
-
-  fragment_count_out = out_count;
-  return true;
+inline bool partition_valid_output(const std::string_view text,
+                                   const special_token_cache & cache,
+                                   const std::span<fragment> fragments_out,
+                                   size_t & fragment_count_out,
+                                   const special_token_allowed_fn token_allowed) {
+  using partition_fn = bool (*)(std::string_view, const special_token_cache &,
+                                std::span<fragment>, size_t &,
+                                special_token_allowed_fn);
+  const std::array<partition_fn, 2> partitions = {
+      partition_empty_cache,
+      partition_with_cache,
+  };
+  const bool has_specials = cache.count != 0;
+  return partitions[static_cast<size_t>(has_specials)](text, cache, fragments_out,
+                                                       fragment_count_out,
+                                                       token_allowed);
 }
 
-inline bool partition_bpe_with_specials(
-    const event::preprocess & request, const special_token_cache & cache,
-    emel::text::tokenizer::bpe::detail::split_scratch & scratch,
-    size_t & fragment_count_out) {
+inline bool partition_with_specials_filtered(const std::string_view text,
+                                             const special_token_cache & cache,
+                                             const std::span<fragment> fragments_out,
+                                             size_t & fragment_count_out,
+                                             const special_token_allowed_fn token_allowed) {
   fragment_count_out = 0;
+  const size_t fragment_capacity = fragments_out.size();
+  const bool output_valid =
+      fragments_out.data() != nullptr && fragment_capacity != 0 &&
+      fragment_capacity <= k_max_fragments;
+  using partition_fn = bool (*)(std::string_view, const special_token_cache &,
+                                std::span<fragment>, size_t &,
+                                special_token_allowed_fn);
+  const std::array<partition_fn, 2> partitions = {
+      partition_invalid_output,
+      partition_valid_output,
+  };
+  return partitions[static_cast<size_t>(output_valid)](text, cache, fragments_out,
+                                                        fragment_count_out,
+                                                        token_allowed);
+}
 
-  std::array<fragment, k_max_fragments> partitions = {};
-  size_t partition_count = 0;
-    {
-    const size_t emel_branch_19 = static_cast<size_t>(
-      !partition_with_specials(
-          request.text, cache, request.parse_special,
-          std::span<fragment>(partitions.data(), request.fragments_out.size()),
-          partition_count));
-    for (size_t emel_case_19 = emel_branch_19; emel_case_19 == 1u; emel_case_19 = 2u) {
-            return false;
-    }
-    for (size_t emel_case_19 = emel_branch_19; emel_case_19 == 0u; emel_case_19 = 2u) {
+inline bool partition_with_specials_parse_enabled(const std::string_view text,
+                                                  const special_token_cache & cache,
+                                                  const std::span<fragment> fragments_out,
+                                                  size_t & fragment_count_out) {
+  return partition_with_specials_filtered(text, cache, fragments_out, fragment_count_out,
+                                          special_token_allowed_parse_enabled);
+}
 
-    }
-  }
-
-  scratch.reset();
-  size_t out_count = 0;
-  for (size_t idx = 0; idx < partition_count; ++idx) {
-    const fragment & frag = partitions[idx];
-    {
-      const size_t emel_branch_token = static_cast<size_t>(frag.kind == fragment_kind::token);
-      for (size_t emel_case_token = emel_branch_token; emel_case_token == 1u;
-           emel_case_token = 2u) {
-        {
-          const size_t emel_branch_push = static_cast<size_t>(
-              !push_token_fragment(request.fragments_out.data(), request.fragments_out.size(),
-                                   out_count, frag.token));
-          for (size_t emel_case_push = emel_branch_push; emel_case_push == 1u;
-               emel_case_push = 2u) {
-            return false;
-          }
-          for (size_t emel_case_push = emel_branch_push; emel_case_push == 0u;
-               emel_case_push = 2u) {
-
-          }
-        }
-      }
-      for (size_t emel_case_token = emel_branch_token; emel_case_token == 0u;
-           emel_case_token = 2u) {
-        {
-          const size_t emel_branch_text = static_cast<size_t>(!frag.text.empty());
-          for (size_t emel_case_text = emel_branch_text; emel_case_text == 1u;
-               emel_case_text = 2u) {
-            emel::text::tokenizer::bpe::detail::split_view view = {};
-                {
-              const size_t emel_branch_20 = static_cast<size_t>(
-                !emel::text::tokenizer::bpe::detail::split_and_encode_append(
-                    frag.text, request.vocab, scratch, view));
-              for (size_t emel_case_20 = emel_branch_20; emel_case_20 == 1u;
-                   emel_case_20 = 2u) {
-                        return false;
-              }
-              for (size_t emel_case_20 = emel_branch_20; emel_case_20 == 0u;
-                   emel_case_20 = 2u) {
-
-              }
-            }
-            for (size_t word_idx = 0; word_idx < view.count; ++word_idx) {
-              const std::string_view word = view.words[word_idx];
-              {
-                const size_t emel_branch_emit_word = static_cast<size_t>(!word.empty());
-                for (size_t emel_case_emit_word = emel_branch_emit_word;
-                     emel_case_emit_word == 1u;
-                     emel_case_emit_word = 2u) {
-                        {
-                    const size_t emel_branch_21 = static_cast<size_t>(
-                      !push_raw_fragment(request.fragments_out.data(), request.fragments_out.size(),
-                                         out_count, word));
-                    for (size_t emel_case_21 = emel_branch_21; emel_case_21 == 1u;
-                         emel_case_21 = 2u) {
-                                return false;
-                    }
-                    for (size_t emel_case_21 = emel_branch_21; emel_case_21 == 0u;
-                         emel_case_21 = 2u) {
-
-                    }
-                  }
-                }
-                for (size_t emel_case_emit_word = emel_branch_emit_word;
-                     emel_case_emit_word == 0u;
-                     emel_case_emit_word = 2u) {
-
-                }
-              }
-            }
-          }
-          for (size_t emel_case_text = emel_branch_text; emel_case_text == 0u;
-               emel_case_text = 2u) {
-
-          }
-        }
-      }
-    }
-  }
-
-  fragment_count_out = out_count;
-  return true;
+inline bool partition_with_specials_parse_disabled(const std::string_view text,
+                                                   const special_token_cache & cache,
+                                                   const std::span<fragment> fragments_out,
+                                                   size_t & fragment_count_out) {
+  return partition_with_specials_filtered(text, cache, fragments_out, fragment_count_out,
+                                          special_token_allowed_parse_disabled);
 }
 
 }  // namespace emel::text::tokenizer::preprocessor::detail

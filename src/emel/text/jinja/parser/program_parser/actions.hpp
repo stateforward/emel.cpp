@@ -35,6 +35,7 @@ struct start_program_parse {
     ev.ctx.statement_start = 0;
     ev.ctx.expression_start = 0;
     ev.ctx.expression_value_index = 0;
+    ev.request.program.body.reserve(ev.ctx.lex_result.tokens.size());
   }
 };
 

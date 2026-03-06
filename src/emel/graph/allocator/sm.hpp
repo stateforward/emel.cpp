@@ -84,11 +84,27 @@ struct model {
       //------------------------------------------------------------------------------//
       // Finalization and callback dispatch.
       , sml::state<ready> <= sml::state<allocation_decision> + sml::completion<event::allocate_graph_plan>
-                 [ guard::phase_ok{} ]
+                 [ guard::allocation_error_none{} ]
                  / action::dispatch_done
 
       , sml::state<ready> <= sml::state<allocation_decision> + sml::completion<event::allocate_graph_plan>
-                 [ guard::phase_failed{} ]
+                 [ guard::allocation_error_invalid_request{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<allocation_decision> + sml::completion<event::allocate_graph_plan>
+                 [ guard::allocation_error_capacity{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<allocation_decision> + sml::completion<event::allocate_graph_plan>
+                 [ guard::allocation_error_internal_error{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<allocation_decision> + sml::completion<event::allocate_graph_plan>
+                 [ guard::allocation_error_untracked{} ]
+                 / action::dispatch_error
+
+      , sml::state<ready> <= sml::state<allocation_decision> + sml::completion<event::allocate_graph_plan>
+                 [ guard::allocation_error_unknown{} ]
                  / action::dispatch_error
 
       //------------------------------------------------------------------------------//

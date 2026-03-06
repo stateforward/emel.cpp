@@ -19,28 +19,38 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
-        sml::state<allocated> <= *sml::state<deciding> + sml::completion<allocator::event::allocate_graph_plan>
+        sml::state<allocate_failed> <= *sml::state<deciding> +
+               sml::completion<allocator::event::allocate_graph_plan>
+                 [ guard::phase_prefailed{} ]
+                 / action::mark_failed_prefailed
+
+      , sml::state<allocated> <= sml::state<deciding> +
+               sml::completion<allocator::event::allocate_graph_plan>
                  [ guard::phase_done{} ]
                  / action::mark_done
 
-      , sml::state<allocate_failed> <= sml::state<deciding> + sml::completion<allocator::event::allocate_graph_plan>
+      , sml::state<allocate_failed> <= sml::state<deciding> +
+               sml::completion<allocator::event::allocate_graph_plan>
                  [ guard::phase_prereq_failed{} ]
                  / action::mark_failed_prereq
 
-      , sml::state<allocate_failed> <= sml::state<deciding> + sml::completion<allocator::event::allocate_graph_plan>
+      , sml::state<allocate_failed> <= sml::state<deciding> +
+               sml::completion<allocator::event::allocate_graph_plan>
                  [ guard::phase_capacity_exceeded{} ]
                  / action::mark_failed_capacity
 
-      , sml::state<allocate_failed> <= sml::state<deciding> + sml::completion<allocator::event::allocate_graph_plan>
+      , sml::state<allocate_failed> <= sml::state<deciding> +
+               sml::completion<allocator::event::allocate_graph_plan>
                  [ guard::phase_overflow{} ]
                  / action::mark_failed_overflow
 
-      , sml::state<allocate_failed> <= sml::state<deciding> + sml::completion<allocator::event::allocate_graph_plan>
+      , sml::state<allocate_failed> <= sml::state<deciding> +
+               sml::completion<allocator::event::allocate_graph_plan>
                  [ guard::phase_invalid_request{} ]
                  / action::mark_failed_invalid_request
 
-      , sml::state<allocate_failed> <= sml::state<deciding> + sml::completion<allocator::event::allocate_graph_plan>
-                 [ guard::phase_unclassified_failure{} ]
+      , sml::state<allocate_failed> <= sml::state<deciding> +
+               sml::completion<allocator::event::allocate_graph_plan>
                  / action::mark_failed_internal
 
       //------------------------------------------------------------------------------//

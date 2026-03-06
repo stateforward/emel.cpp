@@ -4,8 +4,8 @@
 #include <span>
 #include <string_view>
 
-#include "emel/emel.h"
 #include "emel/model/data.hpp"
+#include "emel/text/encoders/errors.hpp"
 
 namespace emel::text::encoders::events {
 
@@ -35,7 +35,7 @@ struct encode {
 
 struct encode_ctx {
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 };
 
 struct encode_runtime {
@@ -54,7 +54,7 @@ struct encoding_done {
 
 struct encoding_error {
   const event::encode & request;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 };
 
 }  // namespace emel::text::encoders::events

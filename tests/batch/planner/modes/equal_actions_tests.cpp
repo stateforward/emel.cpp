@@ -38,6 +38,54 @@ inline emel::batch::planner::event::request_runtime make_runtime(
   };
 }
 
+inline void run_general_mode_flow(const emel::batch::planner::event::request_runtime & runtime,
+                                  emel::batch::planner::action::context & planner_ctx) {
+  using namespace emel::batch::planner::modes::equal;
+  action::prepare_steps(runtime, planner_ctx);
+
+  if (guard::has_invalid_step_size(runtime, planner_ctx)) {
+    action::mark_invalid_step_size(runtime, planner_ctx);
+    return;
+  }
+  if (guard::lacks_step_capacity(runtime, planner_ctx)) {
+    action::mark_output_steps_full(runtime, planner_ctx);
+    return;
+  }
+  if (guard::lacks_index_capacity(runtime, planner_ctx)) {
+    action::mark_output_indices_full(runtime, planner_ctx);
+    return;
+  }
+  action::create_plan_general(runtime, planner_ctx);
+}
+
+inline void run_fast_path_mode_flow(const emel::batch::planner::event::request_runtime & runtime,
+                                    emel::batch::planner::action::context & planner_ctx) {
+  using namespace emel::batch::planner::modes::equal;
+  action::prepare_steps(runtime, planner_ctx);
+
+  if (guard::has_invalid_step_size(runtime, planner_ctx)) {
+    action::mark_invalid_step_size(runtime, planner_ctx);
+    return;
+  }
+  if (guard::fast_path_missing_primary_ids(runtime, planner_ctx)) {
+    action::mark_invalid_sequence_id(runtime, planner_ctx);
+    return;
+  }
+  if (guard::fast_path_primary_ids_invalid(runtime, planner_ctx)) {
+    action::mark_invalid_sequence_id(runtime, planner_ctx);
+    return;
+  }
+  if (guard::lacks_step_capacity(runtime, planner_ctx)) {
+    action::mark_output_steps_full(runtime, planner_ctx);
+    return;
+  }
+  if (guard::lacks_index_capacity(runtime, planner_ctx)) {
+    action::mark_output_indices_full(runtime, planner_ctx);
+    return;
+  }
+  action::create_plan_primary_fast_path(runtime, planner_ctx);
+}
+
 }  // namespace
 
 TEST_CASE("batch_planner_modes_equal_create_plan_without_masks") {
@@ -58,7 +106,8 @@ TEST_CASE("batch_planner_modes_equal_create_plan_without_masks") {
   };
   request_ctx.effective_step_size = 2;
 
-  emel::batch::planner::modes::equal::action::create_plan_general(make_runtime(request, request_ctx), planner_ctx);
+  auto runtime = make_runtime(request, request_ctx);
+  run_general_mode_flow(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 3);
   CHECK(request_ctx.step_sizes[0] == 2);
   CHECK(request_ctx.step_sizes[1] == 2);
@@ -88,7 +137,8 @@ TEST_CASE("batch_planner_modes_equal_create_plan_skips_nonconsecutive_primary") 
   };
   request_ctx.effective_step_size = 2;
 
-  emel::batch::planner::modes::equal::action::create_plan_general(make_runtime(request, request_ctx), planner_ctx);
+  auto runtime = make_runtime(request, request_ctx);
+  run_general_mode_flow(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 2);
   CHECK(request_ctx.step_sizes[0] == 2);
   CHECK(request_ctx.step_sizes[1] == 1);
@@ -110,9 +160,11 @@ TEST_CASE("batch_planner_modes_equal_create_plan_rejects_zero_batch") {
   };
   request_ctx.effective_step_size = 0;
 
-  emel::batch::planner::modes::equal::action::create_plan_general(make_runtime(request, request_ctx), planner_ctx);
+  auto runtime = make_runtime(request, request_ctx);
+  run_general_mode_flow(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 0);
   CHECK(request_ctx.total_outputs == 0);
+  CHECK(request_ctx.err == emel::error::cast(emel::batch::planner::error::invalid_step_size));
 }
 
 TEST_CASE("batch_planner_modes_equal_create_plan_fails_when_groups_exceed_capacity") {
@@ -135,9 +187,12 @@ TEST_CASE("batch_planner_modes_equal_create_plan_fails_when_groups_exceed_capaci
   };
   request_ctx.effective_step_size = 1;
 
-  emel::batch::planner::modes::equal::action::create_plan_general(make_runtime(request, request_ctx), planner_ctx);
+  auto runtime = make_runtime(request, request_ctx);
+  run_general_mode_flow(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 0);
   CHECK(request_ctx.total_outputs == 0);
+  CHECK(request_ctx.err ==
+        emel::error::cast(emel::batch::planner::error::planning_progress_stalled));
 }
 
 TEST_CASE("batch_planner_modes_equal_fast_path_success") {
@@ -160,10 +215,10 @@ TEST_CASE("batch_planner_modes_equal_fast_path_success") {
     .on_done = make_done(&done),
     .on_error = make_error(&error),
   };
-
-  emel::batch::planner::modes::equal::action::prepare_steps(make_runtime(request, request_ctx), planner_ctx);
   request_ctx.effective_step_size = 4;
-  emel::batch::planner::modes::equal::action::create_plan_primary_fast_path(make_runtime(request, request_ctx), planner_ctx);
+
+  auto runtime = make_runtime(request, request_ctx);
+  run_fast_path_mode_flow(runtime, planner_ctx);
 
   CHECK(request_ctx.step_count == 2);
   CHECK(request_ctx.step_sizes[0] == 3);
@@ -194,9 +249,11 @@ TEST_CASE("batch_planner_modes_equal_fast_path_rejects_missing_primary_ids") {
   };
   request_ctx.effective_step_size = 2;
 
-  emel::batch::planner::modes::equal::action::create_plan_primary_fast_path(make_runtime(request, request_ctx), planner_ctx);
+  auto runtime = make_runtime(request, request_ctx);
+  run_fast_path_mode_flow(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 0);
   CHECK(request_ctx.total_outputs == 0);
+  CHECK(request_ctx.err == emel::error::cast(emel::batch::planner::error::invalid_sequence_id));
 }
 
 TEST_CASE("batch_planner_modes_equal_fast_path_rejects_invalid_sequence_id") {
@@ -221,9 +278,11 @@ TEST_CASE("batch_planner_modes_equal_fast_path_rejects_invalid_sequence_id") {
   };
   request_ctx.effective_step_size = 2;
 
-  emel::batch::planner::modes::equal::action::create_plan_primary_fast_path(make_runtime(request, request_ctx), planner_ctx);
+  auto runtime = make_runtime(request, request_ctx);
+  run_fast_path_mode_flow(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 0);
   CHECK(request_ctx.total_outputs == 0);
+  CHECK(request_ctx.err == emel::error::cast(emel::batch::planner::error::invalid_sequence_id));
 }
 
 TEST_CASE("batch_planner_modes_equal_fast_path_stalls_when_step_too_small") {
@@ -248,9 +307,12 @@ TEST_CASE("batch_planner_modes_equal_fast_path_stalls_when_step_too_small") {
   };
   request_ctx.effective_step_size = 1;
 
-  emel::batch::planner::modes::equal::action::create_plan_primary_fast_path(make_runtime(request, request_ctx), planner_ctx);
+  auto runtime = make_runtime(request, request_ctx);
+  run_fast_path_mode_flow(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 0);
   CHECK(request_ctx.total_outputs == 0);
+  CHECK(request_ctx.err ==
+        emel::error::cast(emel::batch::planner::error::planning_progress_stalled));
 }
 
 TEST_CASE("batch_planner_modes_equal_fast_path_fails_when_steps_storage_full") {
@@ -276,9 +338,12 @@ TEST_CASE("batch_planner_modes_equal_fast_path_fails_when_steps_storage_full") {
   request_ctx.effective_step_size = 1;
   request_ctx.step_count = emel::batch::planner::action::MAX_PLAN_STEPS;
 
-  emel::batch::planner::modes::equal::action::create_plan_primary_fast_path(make_runtime(request, request_ctx), planner_ctx);
+  auto runtime = make_runtime(request, request_ctx);
+  CHECK(emel::batch::planner::modes::equal::guard::lacks_step_capacity(runtime, planner_ctx));
+  emel::batch::planner::modes::equal::action::mark_output_steps_full(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 0);
   CHECK(request_ctx.total_outputs == 0);
+  CHECK(request_ctx.err == emel::error::cast(emel::batch::planner::error::output_steps_full));
 }
 
 TEST_CASE("batch_planner_modes_equal_fast_path_fails_when_indices_storage_full") {
@@ -304,10 +369,13 @@ TEST_CASE("batch_planner_modes_equal_fast_path_fails_when_indices_storage_full")
   request_ctx.effective_step_size = 1;
   request_ctx.token_indices_count = emel::batch::planner::action::MAX_PLAN_STEPS;
 
-  emel::batch::planner::modes::equal::action::create_plan_primary_fast_path(make_runtime(request, request_ctx), planner_ctx);
+  auto runtime = make_runtime(request, request_ctx);
+  CHECK(emel::batch::planner::modes::equal::guard::lacks_index_capacity(runtime, planner_ctx));
+  emel::batch::planner::modes::equal::action::mark_output_indices_full(runtime, planner_ctx);
   CHECK(request_ctx.step_count == 0);
   CHECK(request_ctx.total_outputs == 0);
   CHECK(request_ctx.token_indices_count == 0);
+  CHECK(request_ctx.err == emel::error::cast(emel::batch::planner::error::output_indices_full));
 }
 
 TEST_CASE("batch_planner_modes_equal_guards_cover_fast_path_and_decision") {
@@ -331,6 +399,7 @@ TEST_CASE("batch_planner_modes_equal_guards_cover_fast_path_and_decision") {
   };
 
   CHECK(emel::batch::planner::modes::equal::guard::mode_is_primary_fast_path(make_runtime(request, request_ctx), planner_ctx));
+  CHECK(emel::batch::planner::modes::equal::guard::mode_is_general_path(make_runtime(request, request_ctx), planner_ctx) == false);
 
   request_ctx.step_count = 1;
   request_ctx.total_outputs = 1;
@@ -341,6 +410,7 @@ TEST_CASE("batch_planner_modes_equal_guards_cover_fast_path_and_decision") {
   request.seq_masks = masks.data();
   request.seq_masks_count = static_cast<int32_t>(masks.size());
   CHECK_FALSE(emel::batch::planner::modes::equal::guard::mode_is_primary_fast_path(make_runtime(request, request_ctx), planner_ctx));
+  CHECK(emel::batch::planner::modes::equal::guard::mode_is_general_path(make_runtime(request, request_ctx), planner_ctx));
 
   request_ctx.token_indices_count = 0;
   CHECK(emel::batch::planner::modes::equal::guard::planning_failed(make_runtime(request, request_ctx), planner_ctx));

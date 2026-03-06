@@ -1,14 +1,24 @@
 stateDiagram-v2
   direction TB
   [*] --> deciding
-  deciding --> parsed : completion_parse_rules_ [definition_existing_valid_] / consume_definition_existing_
-  deciding --> parsed : completion_parse_rules_ [definition_new_valid_] / consume_definition_new_
-  deciding --> parsed : completion_parse_rules_ [reference_existing_valid_] / consume_reference_existing_
-  deciding --> parsed : completion_parse_rules_ [reference_new_valid_] / consume_reference_new_
-  deciding --> parse_failed : completion_parse_rules_ [parse_failed_] / dispatch_parse_failed_
+  deciding --> definition_lookup_exec : completion_parse_rules_ [token_identifier_definition_] / none
+  deciding --> reference_lookup_exec : completion_parse_rules_ [token_identifier_reference_] / none
+  deciding --> parse_failed : completion_parse_rules_ [always] / dispatch_parse_failed_
+  definition_lookup_exec --> definition_lookup_decision : completion_parse_rules_ [always] / lookup_definition_candidate_
+  reference_lookup_exec --> reference_lookup_decision : completion_parse_rules_ [always] / lookup_reference_candidate_
+  definition_lookup_decision --> parsed : completion_parse_rules_ [definition_existing_valid_] / consume_definition_existing_
+  definition_lookup_decision --> parsed : completion_parse_rules_ [definition_new_valid_] / consume_definition_new_
+  definition_lookup_decision --> parse_failed : completion_parse_rules_ [definition_failed_] / dispatch_parse_failed_
+  reference_lookup_decision --> parsed : completion_parse_rules_ [reference_existing_valid_] / consume_reference_existing_
+  reference_lookup_decision --> parsed : completion_parse_rules_ [reference_new_valid_] / consume_reference_new_
+  reference_lookup_decision --> parse_failed : completion_parse_rules_ [reference_failed_] / dispatch_parse_failed_
   parsed --> terminate : [always] / none
   parse_failed --> terminate : [always] / none
   deciding --> unexpected_event : _ [always] / on_unexpected_
+  definition_lookup_exec --> unexpected_event : _ [always] / on_unexpected_
+  definition_lookup_decision --> unexpected_event : _ [always] / on_unexpected_
+  reference_lookup_exec --> unexpected_event : _ [always] / on_unexpected_
+  reference_lookup_decision --> unexpected_event : _ [always] / on_unexpected_
   parsed --> unexpected_event : _ [always] / on_unexpected_
   parse_failed --> unexpected_event : _ [always] / on_unexpected_
   unexpected_event --> unexpected_event : _ [always] / on_unexpected_

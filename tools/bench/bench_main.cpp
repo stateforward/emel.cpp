@@ -70,6 +70,19 @@ std::size_t read_env_size(const char * name, std::size_t fallback) {
   return static_cast<std::size_t>(parsed);
 }
 
+std::int32_t read_env_i32(const char * name, const std::int32_t fallback) {
+  const char * value = std::getenv(name);
+  if (value == nullptr || value[0] == '\0') {
+    return fallback;
+  }
+  char * end = nullptr;
+  const long parsed = std::strtol(value, &end, 10);
+  if (end == value) {
+    return fallback;
+  }
+  return static_cast<std::int32_t>(parsed);
+}
+
 constexpr bench::test_case make_test_case(const bench::append_case_fn emel_fn,
                                           const bench::append_case_fn reference_fn,
                                           const bool tokenizer_case = false) {
@@ -147,8 +160,16 @@ std::vector<bench::result> run_benchmarks(const bench::config & cfg,
                                           const bool include_tokenizer) {
   std::vector<bench::result> results;
   results.reserve(k_case_count + 1);
+  const std::int32_t selected_case_index = read_env_i32("EMEL_BENCH_CASE_INDEX", -1);
 
+  std::size_t case_index = 0;
   for (const bench::test_case & tc : cases) {
+    const bool selected_case = selected_case_index < 0 ||
+        static_cast<std::int32_t>(case_index) == selected_case_index;
+    case_index += 1;
+    if (!selected_case) {
+      continue;
+    }
     if (tc.tokenizer_case && !include_tokenizer) {
       continue;
     }
@@ -159,6 +180,11 @@ std::vector<bench::result> run_benchmarks(const bench::config & cfg,
   }
 
   if (include_tokenizer) {
+    const bool selected_tokenizer = selected_case_index < 0 ||
+      selected_case_index == static_cast<std::int32_t>(k_case_count);
+    if (!selected_tokenizer) {
+      return results;
+    }
     const bench::test_case tokenizer_case = make_test_case(
       bench::append_emel_tokenizer_cases,
       bench::append_reference_tokenizer_cases,

@@ -14,21 +14,22 @@ namespace detail {
 template <class runtime_event_type>
 constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noexcept {
   if constexpr (requires { ev.event_; }) {
-    return ev.event_;
+    return (ev.event_);
+  } else {
+    return (ev);
   }
-  return (ev);
 }
 
 inline void signal_unexpected_request(const event::encode & request) noexcept {
   int32_t token_count_sink = 0;
-  int32_t error_sink = EMEL_OK;
+  int32_t error_sink = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::detail::write_optional(request.token_count_out, token_count_sink, 0);
   emel::text::encoders::detail::write_optional(
-    request.error_out, error_sink, EMEL_ERR_INVALID_ARGUMENT);
+    request.error_out, error_sink, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 
   event::encode_ctx runtime_ctx{};
   runtime_ctx.token_count = 0;
-  runtime_ctx.err = EMEL_ERR_INVALID_ARGUMENT;
+  runtime_ctx.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument);
   emel::text::encoders::detail::publish_result(request, runtime_ctx);
 }
 
@@ -37,7 +38,7 @@ inline void signal_unexpected_request(const event::encode & request) noexcept {
 struct begin_encode {
   void operator()(const event::encode_runtime & ev, context &) const noexcept {
     ev.ctx.token_count = 0;
-    ev.ctx.err = EMEL_OK;
+    ev.ctx.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   }
 };
 
@@ -52,7 +53,7 @@ struct sync_vocab {
 struct reject_invalid_encode {
   void operator()(const event::encode_runtime & ev, context &) const noexcept {
     ev.ctx.token_count = 0;
-    ev.ctx.err = EMEL_ERR_INVALID_ARGUMENT;
+    ev.ctx.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument);
   }
 };
 
@@ -63,14 +64,14 @@ struct run_encode {
 
 struct mark_done {
   void operator()(const event::encode_runtime & ev, context &) const noexcept {
-    ev.ctx.err = EMEL_OK;
+    ev.ctx.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   }
 };
 
 struct ensure_last_error {
   void operator()(const event::encode_runtime & ev, context &) const noexcept {
-    const std::array<int32_t, 2> errors{EMEL_ERR_BACKEND, ev.ctx.err};
-    ev.ctx.err = errors[static_cast<size_t>(ev.ctx.err != EMEL_OK)];
+    const std::array<int32_t, 2> errors{emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend), ev.ctx.err};
+    ev.ctx.err = errors[static_cast<size_t>(ev.ctx.err != emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok))];
   }
 };
 
@@ -80,7 +81,7 @@ struct on_unexpected {
     const auto & runtime_ev = detail::unwrap_runtime_event(ev);
     if constexpr (requires { runtime_ev.ctx.err; runtime_ev.ctx.token_count; }) {
       runtime_ev.ctx.token_count = 0;
-      runtime_ev.ctx.err = EMEL_ERR_INVALID_ARGUMENT;
+      runtime_ev.ctx.err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument);
     } else if constexpr (requires { runtime_ev.request; }) {
       detail::signal_unexpected_request(runtime_ev.request);
     }

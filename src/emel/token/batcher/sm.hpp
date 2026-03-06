@@ -10,6 +10,12 @@ namespace emel::token::batcher {
 
 struct ready {};
 struct request_decision {};
+struct request_validation_probe {};
+struct request_outputs_decision {};
+struct request_token_counts_decision {};
+struct request_capacities_decision {};
+struct request_token_ids_decision {};
+struct request_seq_payload_decision {};
 struct seq_mode_decision {};
 struct seq_from_masks {};
 struct seq_from_primary_ids {};
@@ -30,7 +36,9 @@ struct output_mask_last {};
 struct output_counting {};
 struct outputs_total_publish_decision {};
 struct single_output_decision {};
+struct single_output_probe {};
 struct continuity_decision {};
+struct continuity_probe {};
 struct done {};
 struct errored {};
 
@@ -43,10 +51,34 @@ struct model {
         sml::state<request_decision> <= *sml::state<ready> + sml::event<event::batch_runtime>
           / action::begin_batch
 
-      , sml::state<seq_mode_decision> <= sml::state<request_decision>
-          + sml::completion<event::batch_runtime> [ guard::valid_request{} ]
-      , sml::state<errored> <= sml::state<request_decision>
-          + sml::completion<event::batch_runtime> [ guard::invalid_request{} ]
+      , sml::state<request_validation_probe> <= sml::state<request_decision>
+          + sml::completion<event::batch_runtime>
+      , sml::state<request_outputs_decision> <= sml::state<request_validation_probe>
+          + sml::completion<event::batch_runtime>
+      , sml::state<request_token_counts_decision> <= sml::state<request_outputs_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_outputs_present{} ]
+      , sml::state<errored> <= sml::state<request_outputs_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_outputs_missing{} ]
+          / action::mark_invalid_request
+      , sml::state<request_capacities_decision> <= sml::state<request_token_counts_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_token_counts_valid{} ]
+      , sml::state<errored> <= sml::state<request_token_counts_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_token_counts_invalid{} ]
+          / action::mark_invalid_request
+      , sml::state<request_token_ids_decision> <= sml::state<request_capacities_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_capacities_valid{} ]
+      , sml::state<errored> <= sml::state<request_capacities_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_capacities_invalid{} ]
+          / action::mark_invalid_request
+      , sml::state<request_seq_payload_decision> <= sml::state<request_token_ids_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_token_ids_in_vocab{} ]
+      , sml::state<errored> <= sml::state<request_token_ids_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_token_ids_out_of_vocab{} ]
+          / action::mark_invalid_request
+      , sml::state<seq_mode_decision> <= sml::state<request_seq_payload_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_seq_payload_valid{} ]
+      , sml::state<errored> <= sml::state<request_seq_payload_decision>
+          + sml::completion<event::batch_runtime> [ guard::request_seq_payload_invalid{} ]
           / action::mark_invalid_request
 
       //------------------------------------------------------------------------------//
@@ -60,22 +92,40 @@ struct model {
           + sml::completion<event::batch_runtime> [ guard::seq_mode_default{} ]
           / action::normalize_seq_default
       , sml::state<errored> <= sml::state<seq_mode_decision>
-          + sml::completion<event::batch_runtime> [ guard::seq_mode_invalid{} ]
+          + sml::completion<event::batch_runtime>
           / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<seq_mask_words_publish_decision> <= sml::state<seq_from_masks>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_ok{} ]
       , sml::state<errored> <= sml::state<seq_from_masks>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_invalid_request_error{} ]
+      , sml::state<errored> <= sml::state<seq_from_masks>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_backend_error{} ]
+      , sml::state<errored> <= sml::state<seq_from_masks>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_internal_error{} ]
+      , sml::state<errored> <= sml::state<seq_from_masks>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_unknown_error{} ]
       , sml::state<seq_mask_words_publish_decision> <= sml::state<seq_from_primary_ids>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_ok{} ]
       , sml::state<errored> <= sml::state<seq_from_primary_ids>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_invalid_request_error{} ]
+      , sml::state<errored> <= sml::state<seq_from_primary_ids>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_backend_error{} ]
+      , sml::state<errored> <= sml::state<seq_from_primary_ids>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_internal_error{} ]
+      , sml::state<errored> <= sml::state<seq_from_primary_ids>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_unknown_error{} ]
       , sml::state<seq_mask_words_publish_decision> <= sml::state<seq_default>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_ok{} ]
       , sml::state<errored> <= sml::state<seq_default>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_invalid_request_error{} ]
+      , sml::state<errored> <= sml::state<seq_default>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_backend_error{} ]
+      , sml::state<errored> <= sml::state<seq_default>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_internal_error{} ]
+      , sml::state<errored> <= sml::state<seq_default>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_unknown_error{} ]
 
       //------------------------------------------------------------------------------//
       , sml::state<positions_mode_decision> <= sml::state<seq_mask_words_publish_decision>
@@ -98,43 +148,76 @@ struct model {
           + sml::completion<event::batch_runtime> [ guard::positions_mode_generate_unseeded{} ]
           / action::probe_positions_unseeded
       , sml::state<errored> <= sml::state<positions_mode_decision>
-          + sml::completion<event::batch_runtime> [ guard::positions_mode_invalid{} ]
+          + sml::completion<event::batch_runtime>
           / action::mark_internal_error
 
       , sml::state<positions_generate_seeded> <= sml::state<positions_seeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::seeded_probe_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::positions_seeded_probe_ok{} ]
           / action::generate_positions_seeded
       , sml::state<errored> <= sml::state<positions_seeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::seeded_probe_backend_error{} ]
+          + sml::completion<event::batch_runtime>
+          [ guard::positions_seeded_probe_backend_error{} ]
           / action::mark_backend_error
       , sml::state<errored> <= sml::state<positions_seeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::seeded_probe_invalid{} ]
+          + sml::completion<event::batch_runtime>
+          [ guard::positions_seeded_probe_invalid_request{} ]
           / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<positions_seeded_probe>
+          + sml::completion<event::batch_runtime>
+          / action::mark_internal_error
 
       , sml::state<positions_generate_unseeded> <= sml::state<positions_unseeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::unseeded_probe_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::positions_unseeded_probe_ok{} ]
           / action::generate_positions_unseeded
       , sml::state<errored> <= sml::state<positions_unseeded_probe>
-          + sml::completion<event::batch_runtime> [ guard::unseeded_probe_invalid{} ]
+          + sml::completion<event::batch_runtime>
+          [ guard::positions_unseeded_probe_invalid_request{} ]
           / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<positions_unseeded_probe>
+          + sml::completion<event::batch_runtime>
+          / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<positions_count_publish_decision> <= sml::state<positions_copy_stride_three>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_ok{} ]
       , sml::state<errored> <= sml::state<positions_copy_stride_three>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_invalid_request_error{} ]
+      , sml::state<errored> <= sml::state<positions_copy_stride_three>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_backend_error{} ]
+      , sml::state<errored> <= sml::state<positions_copy_stride_three>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_internal_error{} ]
+      , sml::state<errored> <= sml::state<positions_copy_stride_three>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_unknown_error{} ]
       , sml::state<positions_count_publish_decision> <= sml::state<positions_copy_stride_one>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_ok{} ]
       , sml::state<errored> <= sml::state<positions_copy_stride_one>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_invalid_request_error{} ]
+      , sml::state<errored> <= sml::state<positions_copy_stride_one>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_backend_error{} ]
+      , sml::state<errored> <= sml::state<positions_copy_stride_one>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_internal_error{} ]
+      , sml::state<errored> <= sml::state<positions_copy_stride_one>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_unknown_error{} ]
       , sml::state<positions_count_publish_decision> <= sml::state<positions_generate_seeded>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_ok{} ]
       , sml::state<errored> <= sml::state<positions_generate_seeded>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_invalid_request_error{} ]
+      , sml::state<errored> <= sml::state<positions_generate_seeded>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_backend_error{} ]
+      , sml::state<errored> <= sml::state<positions_generate_seeded>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_internal_error{} ]
+      , sml::state<errored> <= sml::state<positions_generate_seeded>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_unknown_error{} ]
       , sml::state<positions_count_publish_decision> <= sml::state<positions_generate_unseeded>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_ok{} ]
       , sml::state<errored> <= sml::state<positions_generate_unseeded>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_invalid_request_error{} ]
+      , sml::state<errored> <= sml::state<positions_generate_unseeded>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_backend_error{} ]
+      , sml::state<errored> <= sml::state<positions_generate_unseeded>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_internal_error{} ]
+      , sml::state<errored> <= sml::state<positions_generate_unseeded>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_unknown_error{} ]
 
       , sml::state<output_mode_decision> <= sml::state<positions_count_publish_decision>
           + sml::completion<event::batch_runtime> [ guard::positions_count_out_present{} ]
@@ -153,30 +236,54 @@ struct model {
           + sml::completion<event::batch_runtime> [ guard::output_mode_last{} ]
           / action::set_output_mask_last
       , sml::state<errored> <= sml::state<output_mode_decision>
-          + sml::completion<event::batch_runtime> [ guard::output_mode_invalid{} ]
+          + sml::completion<event::batch_runtime>
           / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<output_counting> <= sml::state<output_mask_all>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_ok{} ]
           / action::count_outputs_total
       , sml::state<errored> <= sml::state<output_mask_all>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_invalid_request_error{} ]
+      , sml::state<errored> <= sml::state<output_mask_all>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_backend_error{} ]
+      , sml::state<errored> <= sml::state<output_mask_all>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_internal_error{} ]
+      , sml::state<errored> <= sml::state<output_mask_all>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_unknown_error{} ]
       , sml::state<output_counting> <= sml::state<output_mask_copy>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_ok{} ]
           / action::count_outputs_total
       , sml::state<errored> <= sml::state<output_mask_copy>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_invalid_request_error{} ]
+      , sml::state<errored> <= sml::state<output_mask_copy>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_backend_error{} ]
+      , sml::state<errored> <= sml::state<output_mask_copy>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_internal_error{} ]
+      , sml::state<errored> <= sml::state<output_mask_copy>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_unknown_error{} ]
       , sml::state<output_counting> <= sml::state<output_mask_last>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_ok{} ]
           / action::count_outputs_total
       , sml::state<errored> <= sml::state<output_mask_last>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_invalid_request_error{} ]
+      , sml::state<errored> <= sml::state<output_mask_last>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_backend_error{} ]
+      , sml::state<errored> <= sml::state<output_mask_last>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_internal_error{} ]
+      , sml::state<errored> <= sml::state<output_mask_last>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_unknown_error{} ]
 
       , sml::state<outputs_total_publish_decision> <= sml::state<output_counting>
-          + sml::completion<event::batch_runtime> [ guard::phase_ok{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_ok{} ]
       , sml::state<errored> <= sml::state<output_counting>
-          + sml::completion<event::batch_runtime> [ guard::phase_failed{} ]
+          + sml::completion<event::batch_runtime> [ guard::phase_result_invalid_request_error{} ]
+      , sml::state<errored> <= sml::state<output_counting>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_backend_error{} ]
+      , sml::state<errored> <= sml::state<output_counting>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_internal_error{} ]
+      , sml::state<errored> <= sml::state<output_counting>
+          + sml::completion<event::batch_runtime> [ guard::phase_result_unknown_error{} ]
 
       , sml::state<single_output_decision> <= sml::state<outputs_total_publish_decision>
           + sml::completion<event::batch_runtime> [ guard::outputs_total_out_present{} ]
@@ -187,20 +294,34 @@ struct model {
       //------------------------------------------------------------------------------//
       , sml::state<continuity_decision> <= sml::state<single_output_decision>
           + sml::completion<event::batch_runtime> [ guard::single_output_check_skipped{} ]
-      , sml::state<continuity_decision> <= sml::state<single_output_decision>
-          + sml::completion<event::batch_runtime> [ guard::single_output_check_passed{} ]
-      , sml::state<errored> <= sml::state<single_output_decision>
-          + sml::completion<event::batch_runtime> [ guard::single_output_check_failed{} ]
+      , sml::state<single_output_probe> <= sml::state<single_output_decision>
+          + sml::completion<event::batch_runtime> [ guard::single_output_check_required{} ]
+          / action::probe_single_output_per_seq
+      , sml::state<continuity_decision> <= sml::state<single_output_probe>
+          + sml::completion<event::batch_runtime> [ guard::single_output_probe_ok{} ]
+      , sml::state<errored> <= sml::state<single_output_probe>
+          + sml::completion<event::batch_runtime>
+          [ guard::single_output_probe_invalid_request{} ]
           / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<single_output_probe>
+          + sml::completion<event::batch_runtime>
+          / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<done> <= sml::state<continuity_decision>
           + sml::completion<event::batch_runtime> [ guard::continuity_check_skipped{} ]
-      , sml::state<done> <= sml::state<continuity_decision>
-          + sml::completion<event::batch_runtime> [ guard::continuity_check_passed{} ]
-      , sml::state<errored> <= sml::state<continuity_decision>
-          + sml::completion<event::batch_runtime> [ guard::continuity_check_failed{} ]
+      , sml::state<continuity_probe> <= sml::state<continuity_decision>
+          + sml::completion<event::batch_runtime> [ guard::continuity_check_required{} ]
+          / action::probe_continuity
+      , sml::state<done> <= sml::state<continuity_probe>
+          + sml::completion<event::batch_runtime> [ guard::continuity_probe_ok{} ]
+      , sml::state<errored> <= sml::state<continuity_probe>
+          + sml::completion<event::batch_runtime>
+          [ guard::continuity_probe_invalid_request{} ]
           / action::mark_invalid_request
+      , sml::state<errored> <= sml::state<continuity_probe>
+          + sml::completion<event::batch_runtime>
+          / action::mark_internal_error
 
       //------------------------------------------------------------------------------//
       , sml::state<ready> <= sml::state<done> + sml::completion<event::batch_runtime>
@@ -220,6 +341,18 @@ struct model {
       , sml::state<ready> <= sml::state<ready> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<request_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_validation_probe> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_outputs_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_token_counts_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_capacities_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_token_ids_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<request_seq_payload_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<seq_mode_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
@@ -261,7 +394,11 @@ struct model {
           / action::on_unexpected
       , sml::state<ready> <= sml::state<single_output_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
+      , sml::state<ready> <= sml::state<single_output_probe> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
       , sml::state<ready> <= sml::state<continuity_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<ready> <= sml::state<continuity_probe> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<ready> <= sml::state<done> + sml::unexpected_event<sml::_>
           / action::on_unexpected

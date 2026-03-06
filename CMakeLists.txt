@@ -191,6 +191,12 @@ if(EMEL_ENABLE_FUZZ)
       set(CMAKE_AR "/usr/bin/ar" CACHE FILEPATH "" FORCE)
       set(CMAKE_RANLIB "/usr/bin/ranlib" CACHE FILEPATH "" FORCE)
     endif()
+
+    # Current ld64 can mis-handle sanitizer-instrumented libFuzzer objects on macOS
+    # and fail with invalid relocation diagnostics such as "invalid r_symbolnum=1".
+    list(APPEND EMEL_FUZZ_EXTRA_LINK_OPTIONS
+      "-Wl,-ld_classic"
+    )
   endif()
 
   function(emel_configure_fuzzer target_name)

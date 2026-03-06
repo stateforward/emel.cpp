@@ -154,3 +154,29 @@ TEST_CASE("model loader propagates parse failure") {
   CHECK(owner.error);
   CHECK(owner.err == emel::error::cast(emel::model::loader::error::parse_failed));
 }
+
+TEST_CASE("model loader unclassified error guard matches only unclassified codes") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+  emel::model::loader::event::load request{*model, parse_model};
+  emel::model::loader::event::load_ctx load_ctx{};
+  emel::model::loader::event::load_runtime runtime{request, load_ctx};
+  const auto guard = emel::model::loader::guard::error_unclassified_code{};
+
+  load_ctx.err = emel::error::cast(emel::model::loader::error::none);
+  CHECK_FALSE(guard(runtime));
+  load_ctx.err = emel::error::cast(emel::model::loader::error::invalid_request);
+  CHECK_FALSE(guard(runtime));
+  load_ctx.err = emel::error::cast(emel::model::loader::error::parse_failed);
+  CHECK_FALSE(guard(runtime));
+  load_ctx.err = emel::error::cast(emel::model::loader::error::backend_error);
+  CHECK_FALSE(guard(runtime));
+  load_ctx.err = emel::error::cast(emel::model::loader::error::model_invalid);
+  CHECK_FALSE(guard(runtime));
+  load_ctx.err = emel::error::cast(emel::model::loader::error::internal_error);
+  CHECK_FALSE(guard(runtime));
+  load_ctx.err = emel::error::cast(emel::model::loader::error::untracked);
+  CHECK_FALSE(guard(runtime));
+  load_ctx.err = static_cast<emel::error::type>(0xFFFFu);
+  CHECK(guard(runtime));
+}

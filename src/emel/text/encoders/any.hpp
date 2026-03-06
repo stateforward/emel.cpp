@@ -44,7 +44,7 @@ class any {
   bool process_event(const event::encode & ev) { return core_.process_event(ev); }
 
   int32_t last_error() const noexcept {
-    int32_t err = EMEL_ERR_BACKEND;
+    int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend);
     core_.visit([&](const auto & sm) { err = sm.last_error(); });
     return err;
   }

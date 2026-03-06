@@ -84,4 +84,14 @@ inline constexpr auto plan_error_absent = [](const event::request_runtime & ev,
   return ev.ctx.err == emel::error::cast(error::none);
 };
 
+inline constexpr auto planning_failed_with_error = [](const event::request_runtime & ev,
+                                                      const action::context & ctx) noexcept {
+  return planning_failed(ev, ctx) && plan_error_present(ev, ctx);
+};
+
+inline constexpr auto planning_failed_without_error = [](const event::request_runtime & ev,
+                                                         const action::context & ctx) noexcept {
+  return planning_failed(ev, ctx) && plan_error_absent(ev, ctx);
+};
+
 }  // namespace emel::batch::planner::guard

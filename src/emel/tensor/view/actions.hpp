@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include "emel/tensor/events.hpp"
@@ -27,7 +28,17 @@ struct exec_capture_tensor_view {
       .state_out = ev.request.state_out,
       .error_out = &tensor_error,
     });
-    ev.ctx.err = static_cast<emel::error::type>(tensor_error);
+    const std::array<emel::error::type, 3> mapped_errors = {
+      static_cast<emel::error::type>(tensor_error),
+      emel::error::cast(error::invalid_request),
+      emel::error::cast(error::internal_error),
+    };
+    const size_t from_invalid_request = static_cast<size_t>(
+        tensor_error == static_cast<int32_t>(emel::error::cast(tensor::error::invalid_request)));
+    const size_t from_internal_error = static_cast<size_t>(
+        tensor_error == static_cast<int32_t>(emel::error::cast(tensor::error::internal_error)));
+    const size_t mapped_index = from_invalid_request + (from_internal_error * 2u);
+    ev.ctx.err = mapped_errors[mapped_index];
   }
 };
 

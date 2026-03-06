@@ -46,6 +46,10 @@ struct parse_rules_ctx {
       emel::gbnf::rule_parser::term_parser::events::term_kind::unknown;
   term_origin current_term_origin = term_origin::none;
   uint32_t nonterm_rule_id = 0;
+  uint32_t nonterm_lookup_hash = 0;
+  uint32_t nonterm_lookup_rule_id = 0;
+  bool nonterm_lookup_found = false;
+  bool nonterm_lookup_can_insert = false;
   bool has_token = false;
   emel::error::type err = emel::error::cast(error::none);
 };

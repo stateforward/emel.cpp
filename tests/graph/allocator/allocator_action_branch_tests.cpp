@@ -128,11 +128,22 @@ TEST_CASE("graph_allocator_action_and_guard_branches") {
   CHECK(ev.ctx.err == emel::error::cast(emel::graph::allocator::error::invalid_request));
 
   ev.ctx.err = emel::error::cast(emel::graph::allocator::error::none);
-  CHECK(guard::phase_ok{}(ev, machine_ctx));
-  CHECK_FALSE(guard::phase_failed{}(ev, machine_ctx));
+  CHECK(guard::allocation_error_none{}(ev, machine_ctx));
+
+  ev.ctx.err = emel::error::cast(emel::graph::allocator::error::invalid_request);
+  CHECK(guard::allocation_error_invalid_request{}(ev, machine_ctx));
+
+  ev.ctx.err = emel::error::cast(emel::graph::allocator::error::capacity);
+  CHECK(guard::allocation_error_capacity{}(ev, machine_ctx));
+
   ev.ctx.err = emel::error::cast(emel::graph::allocator::error::internal_error);
-  CHECK_FALSE(guard::phase_ok{}(ev, machine_ctx));
-  CHECK(guard::phase_failed{}(ev, machine_ctx));
+  CHECK(guard::allocation_error_internal_error{}(ev, machine_ctx));
+
+  ev.ctx.err = emel::error::cast(emel::graph::allocator::error::untracked);
+  CHECK(guard::allocation_error_untracked{}(ev, machine_ctx));
+
+  ev.ctx.err = static_cast<emel::error::type>(0x7fff);
+  CHECK(guard::allocation_error_unknown{}(ev, machine_ctx));
 
   ev.ctx.err = emel::error::cast(emel::graph::allocator::error::none);
   ev.ctx.liveness_outcome = emel::graph::allocator::liveness_pass::events::phase_outcome::done;
@@ -182,8 +193,10 @@ TEST_CASE("graph_allocator_pass_action_and_guard_branches") {
   CHECK(emel::graph::allocator::liveness_pass::guard::phase_capacity_exceeded{}(ev, machine_ctx));
   request.tensor_capacity = request.tensor_count;
   request.node_count = 0u;
-  CHECK_FALSE(
-      emel::graph::allocator::liveness_pass::guard::phase_unclassified_failure{}(ev, machine_ctx));
+  ev.ctx.err = emel::error::cast(allocator_error::internal_error);
+  CHECK(emel::graph::allocator::liveness_pass::guard::phase_prefailed{}(ev, machine_ctx));
+  emel::graph::allocator::liveness_pass::action::mark_failed_prefailed(ev, machine_ctx);
+  ev.ctx.err = emel::error::cast(allocator_error::none);
   request.node_count = 4u;
   emel::graph::allocator::liveness_pass::action::mark_failed_invalid_request(ev, machine_ctx);
   emel::graph::allocator::liveness_pass::action::mark_failed_capacity(ev, machine_ctx);
@@ -211,8 +224,10 @@ TEST_CASE("graph_allocator_pass_action_and_guard_branches") {
   CHECK(emel::graph::allocator::ordering_pass::guard::phase_invalid_request{}(ev, machine_ctx));
   request.bytes_per_tensor = 16u;
   ev.ctx.required_intervals = 0u;
-  CHECK_FALSE(
-      emel::graph::allocator::ordering_pass::guard::phase_unclassified_failure{}(ev, machine_ctx));
+  ev.ctx.err = emel::error::cast(allocator_error::internal_error);
+  CHECK(emel::graph::allocator::ordering_pass::guard::phase_prefailed{}(ev, machine_ctx));
+  emel::graph::allocator::ordering_pass::action::mark_failed_prefailed(ev, machine_ctx);
+  ev.ctx.err = emel::error::cast(allocator_error::none);
 
   emel::graph::allocator::ordering_pass::action::mark_failed_prereq(ev, machine_ctx);
   emel::graph::allocator::ordering_pass::action::mark_failed_capacity(ev, machine_ctx);
@@ -242,8 +257,10 @@ TEST_CASE("graph_allocator_pass_action_and_guard_branches") {
   CHECK(emel::graph::allocator::placement_pass::guard::phase_invalid_request{}(ev, machine_ctx));
   request.plan_out = &plan;
   ev.ctx.sorted_tensor_count = 0u;
-  CHECK_FALSE(
-      emel::graph::allocator::placement_pass::guard::phase_unclassified_failure{}(ev, machine_ctx));
+  ev.ctx.err = emel::error::cast(allocator_error::internal_error);
+  CHECK(emel::graph::allocator::placement_pass::guard::phase_prefailed{}(ev, machine_ctx));
+  emel::graph::allocator::placement_pass::action::mark_failed_prefailed(ev, machine_ctx);
+  ev.ctx.err = emel::error::cast(allocator_error::none);
 
   emel::graph::allocator::placement_pass::action::mark_failed_prereq(ev, machine_ctx);
   emel::graph::allocator::placement_pass::action::mark_failed_capacity(ev, machine_ctx);

@@ -89,6 +89,14 @@ struct binding_error_decision {};
 struct binding_error_callback {};
 struct idle {};
 struct decoding {};
+struct decode_token_validation {};
+struct decode_piece_decision {};
+struct decode_byte_capacity_decision {};
+struct decode_byte_pending_decision {};
+struct decode_byte_pending_write {};
+struct decode_text_pending_decision {};
+struct decode_text_pending_write {};
+struct decode_text_write {};
 struct decode_decision {};
 struct detokenize_done_decision {};
 struct detokenize_done_callback {};
@@ -106,18 +114,18 @@ struct unexpected {};
  * - `binding`/`binding_decision`: validate and apply vocab binding.
  * - `binding_*_callback`: synchronous callback delivery before terminal state.
  * - `idle`: ready for detokenize requests.
- * - `decoding`/`decode_decision`: translate token id into output bytes.
+ * - `decoding`/`decode_*`: explicit detokenize phases and branch decisions.
  * - `detokenize_*_callback`: synchronous callback delivery before terminal state.
  * - `done`/`errored`: terminal outcomes for the latest request.
  * - `unexpected`: sequencing contract violation.
  *
  * guard semantics:
  * - `valid_*` guards validate request payload pointers and bound state.
- * - `phase_*` guards branch on per-request error outputs.
+ * - explicit `*_error_*` guards branch on per-request typed error outputs.
  *
  * action side effects:
  * - `begin_detokenize` initializes request output fields.
- * - `decode_token` emits bytes and updates pending utf-8 fragments.
+ * - `append_byte_piece`/`write_pending_head_sequence`/`write_text_piece` execute decode kernels.
  * - `mark_done` finalizes success terminal status.
  */
 struct model {
@@ -201,6 +209,38 @@ struct model {
                    / action::reject_bind
       , sml::state<detokenize_error_decision> <= sml::state<decoding> + sml::unexpected_event<event::detokenize>
                    / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<decode_token_validation> + sml::unexpected_event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<decode_token_validation> + sml::unexpected_event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<decode_piece_decision> + sml::unexpected_event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<decode_piece_decision> + sml::unexpected_event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<decode_byte_capacity_decision> + sml::unexpected_event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<decode_byte_capacity_decision> + sml::unexpected_event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<decode_byte_pending_decision> + sml::unexpected_event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<decode_byte_pending_decision> + sml::unexpected_event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<decode_byte_pending_write> + sml::unexpected_event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<decode_byte_pending_write> + sml::unexpected_event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<decode_text_pending_decision> + sml::unexpected_event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<decode_text_pending_decision> + sml::unexpected_event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<decode_text_pending_write> + sml::unexpected_event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<decode_text_pending_write> + sml::unexpected_event<event::detokenize>
+                   / action::reject_detokenize
+      , sml::state<binding_error_decision> <= sml::state<decode_text_write> + sml::unexpected_event<event::bind>
+                   / action::reject_bind
+      , sml::state<detokenize_error_decision> <= sml::state<decode_text_write> + sml::unexpected_event<event::detokenize>
+                   / action::reject_detokenize
       , sml::state<binding_error_decision> <= sml::state<decode_decision> + sml::unexpected_event<event::bind>
                    / action::reject_bind
       , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::unexpected_event<event::detokenize>
@@ -227,32 +267,111 @@ struct model {
       , sml::state<binding_decision> <= sml::state<binding> + sml::completion<event::bind>
                    / action::commit_bind
       , sml::state<binding_done_decision> <= sml::state<binding_decision> + sml::completion<event::bind>
-                   [ guard::bind_phase_ok{} ]
+                   [ guard::bind_error_none{} ]
+      , sml::state<binding_error_decision> <= sml::state<binding_decision> + sml::completion<event::bind>
+                   [ guard::bind_error_invalid_request{} ]
+      , sml::state<binding_error_decision> <= sml::state<binding_decision> + sml::completion<event::bind>
+                   [ guard::bind_error_model_invalid{} ]
+      , sml::state<binding_error_decision> <= sml::state<binding_decision> + sml::completion<event::bind>
+                   [ guard::bind_error_backend_error{} ]
+      , sml::state<binding_error_decision> <= sml::state<binding_decision> + sml::completion<event::bind>
+                   [ guard::bind_error_internal_error{} ]
+      , sml::state<binding_error_decision> <= sml::state<binding_decision> + sml::completion<event::bind>
+                   [ guard::bind_error_untracked{} ]
+      , sml::state<binding_error_decision> <= sml::state<binding_decision> + sml::completion<event::bind>
+                   [ guard::bind_error_unknown{} ]
       , sml::state<binding_done_callback> <= sml::state<binding_done_decision> + sml::completion<event::bind>
                    [ guard::has_bind_done_callback{} ] / action::notify_bind_done
       , sml::state<idle> <= sml::state<binding_done_decision> + sml::completion<event::bind>
                    [ guard::no_bind_done_callback{} ]
       , sml::state<idle> <= sml::state<binding_done_callback> + sml::completion<event::bind>
-      , sml::state<binding_error_decision> <= sml::state<binding_decision> + sml::completion<event::bind>
-                   [ guard::bind_phase_failed{} ]
       , sml::state<binding_error_callback> <= sml::state<binding_error_decision> + sml::completion<event::bind>
                    [ guard::has_bind_error_callback{} ] / action::notify_bind_error
       , sml::state<errored> <= sml::state<binding_error_decision> + sml::completion<event::bind>
                    [ guard::no_bind_error_callback{} ]
       , sml::state<errored> <= sml::state<binding_error_callback> + sml::completion<event::bind>
 
-      , sml::state<decode_decision> <= sml::state<decoding> + sml::completion<event::detokenize>
-                   / action::decode_token
+      , sml::state<decode_token_validation> <= sml::state<decoding> + sml::completion<event::detokenize>
+      , sml::state<decode_piece_decision> <= sml::state<decode_token_validation> + sml::completion<event::detokenize>
+                   [ guard::detokenize_token_in_vocab{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_token_validation> + sml::completion<event::detokenize>
+                   [ guard::detokenize_token_out_of_vocab{} ] / action::mark_model_invalid
+      , sml::state<detokenize_done_decision> <= sml::state<decode_piece_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_skip_special_piece{} ] / action::mark_done
+      , sml::state<decode_byte_capacity_decision> <= sml::state<decode_piece_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_byte_piece{} ]
+      , sml::state<decode_text_pending_decision> <= sml::state<decode_piece_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_text_piece{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_piece_decision> + sml::completion<event::detokenize>
+                   / action::mark_internal_error
+      , sml::state<decode_byte_pending_decision> <= sml::state<decode_byte_capacity_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_pending_has_capacity_for_byte{} ] / action::append_byte_piece
+      , sml::state<detokenize_error_decision> <= sml::state<decode_byte_capacity_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_pending_no_capacity_for_byte{} ] / action::mark_invalid_pending_full
+      , sml::state<detokenize_error_decision> <= sml::state<decode_byte_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_invalid_request{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_byte_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_model_invalid{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_byte_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_backend_error{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_byte_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_internal_error{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_byte_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_untracked{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_byte_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_unknown{} ]
+      , sml::state<decode_byte_pending_write> <= sml::state<decode_byte_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_pending_head_complete{} ] / action::write_pending_head_sequence
+      , sml::state<decode_decision> <= sml::state<decode_byte_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_pending_empty{} ]
+      , sml::state<decode_decision> <= sml::state<decode_byte_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_pending_head_incomplete{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_byte_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_pending_head_invalid{} ] / action::mark_invalid_pending_sequence
+      , sml::state<decode_byte_pending_decision> <= sml::state<decode_byte_pending_write> + sml::completion<event::detokenize>
+
+      , sml::state<detokenize_error_decision> <= sml::state<decode_text_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_invalid_request{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_text_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_model_invalid{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_text_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_backend_error{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_text_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_internal_error{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_text_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_untracked{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_text_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_unknown{} ]
+      , sml::state<decode_text_pending_write> <= sml::state<decode_text_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_pending_head_complete{} ] / action::write_pending_head_sequence
+      , sml::state<decode_text_write> <= sml::state<decode_text_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_pending_empty{} ] / action::write_text_piece
+      , sml::state<detokenize_error_decision> <= sml::state<decode_text_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_pending_head_incomplete{} ] / action::mark_invalid_pending_not_empty
+      , sml::state<detokenize_error_decision> <= sml::state<decode_text_pending_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_pending_head_invalid{} ] / action::mark_invalid_pending_sequence
+      , sml::state<decode_text_pending_decision> <= sml::state<decode_text_pending_write> + sml::completion<event::detokenize>
+      , sml::state<decode_decision> <= sml::state<decode_text_write> + sml::completion<event::detokenize>
       , sml::state<detokenize_done_decision> <= sml::state<decode_decision> + sml::completion<event::detokenize>
-                   [ guard::detokenize_phase_ok{} ] / action::mark_done
+                   [ guard::detokenize_error_none{} ] / action::mark_done
+      , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_invalid_request{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_model_invalid{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_backend_error{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_internal_error{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_untracked{} ]
+      , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::completion<event::detokenize>
+                   [ guard::detokenize_error_unknown{} ]
       , sml::state<detokenize_done_callback> <= sml::state<detokenize_done_decision> + sml::completion<event::detokenize>
                    [ guard::has_detokenize_done_callback{} ]
       , sml::state<done> <= sml::state<detokenize_done_decision> + sml::completion<event::detokenize>
                    [ guard::no_detokenize_done_callback{} ]
       , sml::state<done> <= sml::state<detokenize_done_callback> + sml::completion<event::detokenize>
                    / action::notify_detokenize_done
-      , sml::state<detokenize_error_decision> <= sml::state<decode_decision> + sml::completion<event::detokenize>
-                   [ guard::detokenize_phase_failed{} ]
       , sml::state<detokenize_error_callback> <= sml::state<detokenize_error_decision> + sml::completion<event::detokenize>
                    [ guard::has_detokenize_error_callback{} ] / action::notify_detokenize_error
       , sml::state<errored> <= sml::state<detokenize_error_decision> + sml::completion<event::detokenize>
@@ -278,6 +397,22 @@ struct model {
       , sml::state<unexpected> <= sml::state<idle> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<decoding> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<decode_token_validation> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<decode_piece_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<decode_byte_capacity_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<decode_byte_pending_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<decode_byte_pending_write> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<decode_text_pending_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<decode_text_pending_write> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<decode_text_write> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<decode_decision> + sml::unexpected_event<sml::_>
                    / action::on_unexpected

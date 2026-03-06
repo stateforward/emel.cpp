@@ -16,7 +16,7 @@ struct copy_probe {
   int32_t src_slot = -1;
   int32_t dst_slot = -1;
   bool succeed = true;
-  int32_t callback_error = EMEL_OK;
+  int32_t callback_error = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::none));
 };
 
 bool copy_state_cb(const int32_t src_slot, const int32_t dst_slot, void * user_data,
@@ -28,7 +28,7 @@ bool copy_state_cb(const int32_t src_slot, const int32_t dst_slot, void * user_d
     probe->dst_slot = dst_slot;
   }
   if (error_out != nullptr) {
-    *error_out = probe != nullptr ? probe->callback_error : EMEL_ERR_BACKEND;
+    *error_out = probe != nullptr ? probe->callback_error : static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::backend_error));
   }
   return probe != nullptr && probe->succeed;
 }
@@ -37,7 +37,7 @@ bool copy_state_cb(const int32_t src_slot, const int32_t dst_slot, void * user_d
 
 TEST_CASE("memory_recurrent_lifecycle_slot_oom_reuse_and_rollback") {
   recurrent_sm machine{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::none));
 
   REQUIRE(machine.process_event(event::reserve{
     .max_sequences = 4,
@@ -57,7 +57,7 @@ TEST_CASE("memory_recurrent_lifecycle_slot_oom_reuse_and_rollback") {
     .seq_id = 2,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_BACKEND);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::backend_error)));
 
   REQUIRE(machine.process_event(event::free_sequence{
     .seq_id = 0,
@@ -92,7 +92,7 @@ TEST_CASE("memory_recurrent_lifecycle_slot_oom_reuse_and_rollback") {
 
 TEST_CASE("memory_recurrent_lifecycle_branch_invokes_copy_callback_once") {
   recurrent_sm machine{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::none));
   copy_probe probe{};
 
   REQUIRE(machine.process_event(event::reserve{
@@ -120,10 +120,10 @@ TEST_CASE("memory_recurrent_lifecycle_branch_invokes_copy_callback_once") {
 
 TEST_CASE("memory_recurrent_lifecycle_branch_callback_failure_rolls_back") {
   recurrent_sm machine{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::none));
   copy_probe probe{};
   probe.succeed = false;
-  probe.callback_error = EMEL_ERR_BACKEND;
+  probe.callback_error = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::backend_error));
 
   REQUIRE(machine.process_event(event::reserve{
     .max_sequences = 8,
@@ -142,7 +142,7 @@ TEST_CASE("memory_recurrent_lifecycle_branch_callback_failure_rolls_back") {
     .copy_state_user_data = &probe,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_BACKEND);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::backend_error)));
   CHECK_FALSE(machine.view().is_sequence_active(1));
   CHECK(machine.view().lookup_recurrent_slot(1) == -1);
 
@@ -153,9 +153,67 @@ TEST_CASE("memory_recurrent_lifecycle_branch_callback_failure_rolls_back") {
   CHECK(machine.view().lookup_recurrent_slot(1) == 1);
 }
 
+TEST_CASE("memory_recurrent_lifecycle_branch_callback_error_overrides_accept_flag") {
+  recurrent_sm machine{};
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::none));
+  copy_probe probe{};
+  probe.succeed = true;
+  probe.callback_error = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::backend_error));
+
+  REQUIRE(machine.process_event(event::reserve{
+    .max_sequences = 8,
+    .max_blocks = 8,
+    .error_out = &err,
+  }));
+  REQUIRE(machine.process_event(event::allocate_sequence{
+    .seq_id = 0,
+    .error_out = &err,
+  }));
+
+  CHECK_FALSE(machine.process_event(event::branch_sequence{
+    .parent_seq_id = 0,
+    .child_seq_id = 1,
+    .copy_state = &copy_state_cb,
+    .copy_state_user_data = &probe,
+    .error_out = &err,
+  }));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::backend_error)));
+  CHECK_FALSE(machine.view().is_sequence_active(1));
+  CHECK(machine.view().lookup_recurrent_slot(1) == -1);
+}
+
+TEST_CASE("memory_recurrent_lifecycle_branch_callback_reject_without_error_maps_backend") {
+  recurrent_sm machine{};
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::none));
+  copy_probe probe{};
+  probe.succeed = false;
+  probe.callback_error = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::none));
+
+  REQUIRE(machine.process_event(event::reserve{
+    .max_sequences = 8,
+    .max_blocks = 8,
+    .error_out = &err,
+  }));
+  REQUIRE(machine.process_event(event::allocate_sequence{
+    .seq_id = 0,
+    .error_out = &err,
+  }));
+
+  CHECK_FALSE(machine.process_event(event::branch_sequence{
+    .parent_seq_id = 0,
+    .child_seq_id = 1,
+    .copy_state = &copy_state_cb,
+    .copy_state_user_data = &probe,
+    .error_out = &err,
+  }));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::backend_error)));
+  CHECK_FALSE(machine.view().is_sequence_active(1));
+  CHECK(machine.view().lookup_recurrent_slot(1) == -1);
+}
+
 TEST_CASE("memory_recurrent_lifecycle_validation_and_unexpected_event_paths") {
   recurrent_sm machine{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::none));
 
   REQUIRE(machine.process_event(event::reserve{
     .max_sequences = 4,
@@ -172,7 +230,7 @@ TEST_CASE("memory_recurrent_lifecycle_validation_and_unexpected_event_paths") {
     .token_count = 0,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::invalid_request)));
 
   CHECK_FALSE(machine.process_event(event::branch_sequence{
     .parent_seq_id = 0,
@@ -180,35 +238,35 @@ TEST_CASE("memory_recurrent_lifecycle_validation_and_unexpected_event_paths") {
     .copy_state = nullptr,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::invalid_request)));
 
   CHECK_FALSE(machine.process_event(event::free_sequence{
     .seq_id = -1,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::invalid_request)));
 
   CHECK_FALSE(machine.process_event(event::rollback_slots{
     .seq_id = 1,
     .token_count = 1,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::invalid_request)));
 
   CHECK(machine.process_event(emel::memory::events::branch_sequence_done{}));
 
-  err = EMEL_OK;
+  err = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::none));
   CHECK(machine.process_event(event::reserve{
     .max_sequences = 4,
     .max_blocks = 2,
     .error_out = &err,
   }));
-  CHECK(err == EMEL_OK);
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::none)));
 }
 
 TEST_CASE("memory_recurrent_view_snapshot_tracks_state") {
   recurrent_sm machine{};
-  int32_t err = EMEL_OK;
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::memory::recurrent::error::none));
 
   REQUIRE(machine.process_event(event::reserve{
     .max_sequences = 8,

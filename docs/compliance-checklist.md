@@ -38,7 +38,12 @@ This checklist is architecture-only and merge-blocking for machine design/orches
 - [ ] Runtime branching statements (`if`, `else if`, `switch`, `?:`) are not implemented inside actions/member methods.
 - [ ] Runtime branching statements (`if`, `else if`, `switch`, `?:`) are not implemented in functions called from actions/member methods.
 - [ ] Runtime control flow is modeled only as explicit guarded transitions or explicit choice states.
+- [ ] Runtime branch emulation via single-pass conditional loops is absent in `actions.hpp`/`detail.hpp` (`for (bool cond = ...; cond; cond = false)`).
+- [ ] Runtime branch emulation via branch-case loops is absent in `actions.hpp`/`detail.hpp` (`for (size_t emel_case_* = emel_branch_*; ...)`).
+- [ ] Runtime-indexed handler/candidate dispatch selection is not used in actions/detail as a control-flow substitute (allowed only for data lookup).
+- [ ] Loops in actions/detail are data-plane iteration only (monotonic progress, bounded work), not success/error/mode/retry/routing control.
 - [ ] Only compile-time conditionals (`if constexpr`, `#if`) appear in actions/member methods/action callees.
+- [ ] Anti-shortcut lint gate (or no-new-violations ratchet) passes and is attached to the PR.
 - [ ] State-machine member functions do not read/write context directly.
 
 ## 3) Event, Error, and Context Architecture

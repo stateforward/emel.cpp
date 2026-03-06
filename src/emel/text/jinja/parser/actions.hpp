@@ -1,12 +1,12 @@
 #pragma once
 
 #include <cstddef>
+#include <utility>
 
 #include "emel/callback.hpp"
 #include "emel/text/jinja/parser/context.hpp"
 #include "emel/text/jinja/parser/errors.hpp"
 #include "emel/text/jinja/parser/events.hpp"
-#include "emel/text/jinja/parser/lexer/detail.hpp"
 
 namespace emel::text::jinja::parser::action {
 
@@ -31,7 +31,6 @@ inline void reset_result(const event::parse &request,
   ctx.lex_result.tokens.clear();
   ctx.lex_result.error = parser::to_error_code(error::none);
   ctx.lex_result.error_pos = 0;
-  ctx.lex_plan_index = 0;
 
   request.program.body.clear();
   request.program.last_error = parser::to_error_code(error::none);
@@ -90,8 +89,8 @@ inline bool on_lexer_done(
   ctx->error_pos = 0;
   ctx->lex_result.error = parser::to_error_code(error::none);
   ctx->lex_result.error_pos = 0;
-  ctx->lex_token = ev.token;
   ctx->lex_has_token = ev.has_token;
+  ctx->lex_token = ev.token;
   ctx->lex_cursor = ev.next_cursor;
   return true;
 }
@@ -150,7 +149,6 @@ struct begin_tokenization {
     runtime_ev.ctx.lex_result.tokens.clear();
     runtime_ev.ctx.lex_result.error = parser::to_error_code(error::none);
     runtime_ev.ctx.lex_result.error_pos = 0;
-    runtime_ev.ctx.lex_plan_index = 0;
     runtime_ev.ctx.lex_cursor = ::emel::text::jinja::lexer::cursor{
         runtime_ev.ctx.lex_result.source,
         0,
@@ -169,8 +167,6 @@ struct request_next_lex_token {
   template <class runtime_event_type>
   void operator()(const runtime_event_type &ev, context &ctx) const noexcept {
     const auto &runtime_ev = runtime_detail::unwrap_runtime_event(ev);
-    const auto &scan = runtime_ev.ctx.lex_plan[runtime_ev.ctx.lex_plan_index];
-    runtime_ev.ctx.lex_plan_index += 1;
 
     runtime_ev.ctx.err = error::internal_error;
     runtime_ev.ctx.error_pos = 0;
@@ -191,12 +187,7 @@ struct request_next_lex_token {
         done_cb,
         error_cb,
     };
-    const ::emel::text::jinja::parser::lexer::event::next_runtime
-        runtime_next_ev{
-            next_ev,
-            scan,
-        };
-    (void)ctx.lexer.process_event(runtime_next_ev);
+    (void)ctx.lexer.process_event(next_ev);
   }
 };
 
@@ -204,7 +195,7 @@ struct append_lex_token {
   template <class runtime_event_type>
   void operator()(const runtime_event_type &ev, context &) const noexcept {
     const auto &runtime_ev = runtime_detail::unwrap_runtime_event(ev);
-    runtime_ev.ctx.lex_result.tokens.push_back(runtime_ev.ctx.lex_token);
+    runtime_ev.ctx.lex_result.tokens.push_back(std::move(runtime_ev.ctx.lex_token));
   }
 };
 

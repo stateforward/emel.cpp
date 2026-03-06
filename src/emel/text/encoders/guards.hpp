@@ -24,18 +24,6 @@ struct invalid_encode {
   }
 };
 
-struct phase_ok {
-  bool operator()(const event::encode_runtime & ev) const noexcept {
-    return ev.ctx.err == EMEL_OK;
-  }
-};
-
-struct phase_failed {
-  bool operator()(const event::encode_runtime & ev) const noexcept {
-    return ev.ctx.err != EMEL_OK;
-  }
-};
-
 struct text_empty {
   bool operator()(const event::encode_runtime & ev) const noexcept {
     return ev.request.text.empty();
@@ -69,18 +57,6 @@ struct vocab_changed {
 struct vocab_unchanged {
   bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
     return !vocab_changed{}(ev, ctx);
-  }
-};
-
-struct valid_encode_and_vocab_changed {
-  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return valid_encode{}(ev, ctx) && vocab_changed{}(ev, ctx);
-  }
-};
-
-struct valid_encode_and_vocab_unchanged {
-  bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    return valid_encode{}(ev, ctx) && vocab_unchanged{}(ev, ctx);
   }
 };
 

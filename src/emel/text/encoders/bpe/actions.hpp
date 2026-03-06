@@ -31,7 +31,7 @@ struct reject_invalid_encode {
 struct prepare_tables {
   void operator()(const event::encode_runtime & ev, context & ctx) const noexcept {
     const bool ready = emel::text::encoders::bpe::detail::ensure_bpe_tables(ctx);
-    const std::array<int32_t, 2> errors{EMEL_ERR_BACKEND, EMEL_OK};
+    const std::array<int32_t, 2> errors{emel::text::encoders::error::to_emel(emel::text::encoders::error::code::backend), emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok)};
     ev.ctx.err = errors[static_cast<size_t>(ready)];
   }
 };

@@ -46,71 +46,77 @@ struct no_error_callback {
   }
 };
 
-struct phase_ok {
+struct phase_none {
   bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
     return ev.ctx.err == emel::error::cast(error::none);
   }
 };
 
-struct phase_failed {
+struct phase_invalid_request_error {
   bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return ev.ctx.err == emel::error::cast(error::invalid_request);
+  }
+};
+
+struct phase_backend_error {
+  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::backend);
+  }
+};
+
+struct phase_unknown_error {
+  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
+    return ev.ctx.err != emel::error::cast(error::none) &&
+           ev.ctx.err != emel::error::cast(error::invalid_request) &&
+           ev.ctx.err != emel::error::cast(error::backend);
   }
 };
 
 struct decode_should_continue {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return phase_ok{}(ev, ctx) && ev.ctx.tokens_generated < ev.ctx.target_tokens;
+    return phase_none{}(ev, ctx) && ev.ctx.tokens_generated < ev.ctx.target_tokens;
   }
 };
 
 struct decode_complete {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return phase_ok{}(ev, ctx) && ev.ctx.tokens_generated >= ev.ctx.target_tokens;
+    return phase_none{}(ev, ctx) && ev.ctx.tokens_generated >= ev.ctx.target_tokens;
   }
 };
 
-struct phase_ok_with_error_out {
+struct phase_none_with_error_out {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return phase_ok{}(ev, ctx) && has_error_out{}(ev, ctx);
+    return phase_none{}(ev, ctx) && has_error_out{}(ev, ctx);
   }
 };
 
-struct phase_ok_without_error_out {
+struct phase_none_without_error_out {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return phase_ok{}(ev, ctx) && no_error_out{}(ev, ctx);
+    return phase_none{}(ev, ctx) && no_error_out{}(ev, ctx);
   }
 };
 
-struct phase_failed_with_dispatch_and_error_out {
+struct has_error_callback_and_error_out {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return phase_failed{}(ev, ctx) &&
-           has_error_callback{}(ev, ctx) &&
-           has_error_out{}(ev, ctx);
+    return has_error_callback{}(ev, ctx) && has_error_out{}(ev, ctx);
   }
 };
 
-struct phase_failed_with_dispatch_only {
+struct has_error_callback_without_error_out {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return phase_failed{}(ev, ctx) &&
-           has_error_callback{}(ev, ctx) &&
-           no_error_out{}(ev, ctx);
+    return has_error_callback{}(ev, ctx) && no_error_out{}(ev, ctx);
   }
 };
 
-struct phase_failed_with_error_out_only {
+struct no_error_callback_with_error_out {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return phase_failed{}(ev, ctx) &&
-           no_error_callback{}(ev, ctx) &&
-           has_error_out{}(ev, ctx);
+    return no_error_callback{}(ev, ctx) && has_error_out{}(ev, ctx);
   }
 };
 
-struct phase_failed_without_error_channels {
+struct no_error_callback_without_error_out {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return phase_failed{}(ev, ctx) &&
-           no_error_callback{}(ev, ctx) &&
-           no_error_out{}(ev, ctx);
+    return no_error_callback{}(ev, ctx) && no_error_out{}(ev, ctx);
   }
 };
 

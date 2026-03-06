@@ -84,14 +84,14 @@ struct next {
   using error_callback = ::emel::callback<bool(
       const ::emel::text::jinja::lexer::events::next_error &)>;
 
-  next(const lexer::cursor &cursor_ref, const done_callback &dispatch_done_ref,
-       const error_callback &dispatch_error_ref) noexcept
+  next(const lexer::cursor &cursor_ref, done_callback dispatch_done_ref,
+       error_callback dispatch_error_ref) noexcept
       : cursor(cursor_ref), dispatch_done(dispatch_done_ref),
         dispatch_error(dispatch_error_ref) {}
 
   const lexer::cursor &cursor;
-  const done_callback &dispatch_done;
-  const error_callback &dispatch_error;
+  const done_callback dispatch_done;
+  const error_callback dispatch_error;
 };
 
 } // namespace lexer::event

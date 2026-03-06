@@ -7,6 +7,7 @@
 #include "emel/gbnf/rule_parser/detail.hpp"
 #include "emel/gbnf/rule_parser/errors.hpp"
 #include "emel/gbnf/rule_parser/events.hpp"
+#include "emel/gbnf/rule_parser/guards.hpp"
 #include "emel/gbnf/rule_parser/sm.hpp"
 
 namespace {
@@ -282,4 +283,42 @@ TEST_CASE("gbnf_grammar_rule_view_bounds") {
   grammar.rule_lengths[0] = 2;
   grammar.element_count = 1;
   CHECK(grammar.rule(0).length == 0);
+}
+
+TEST_CASE("gbnf_parser_error_guards_classify_explicit_errors") {
+  emel::gbnf::grammar grammar{};
+  grammar.rule_count = 1;
+  emel::gbnf::rule_parser::event::parse request{};
+  request.grammar_out = &grammar;
+  emel::gbnf::rule_parser::event::parse_rules_ctx parse_ctx{};
+  emel::gbnf::rule_parser::event::parse_rules ev{request, parse_ctx};
+  emel::gbnf::rule_parser::action::context ctx{};
+
+  parse_ctx.err = emel::error::cast(emel::gbnf::rule_parser::error::none);
+  CHECK(emel::gbnf::rule_parser::guard::parse_error_none{}(ev, ctx));
+
+  parse_ctx.err = emel::error::cast(emel::gbnf::rule_parser::error::invalid_request);
+  CHECK(emel::gbnf::rule_parser::guard::parse_error_invalid_request{}(ev, ctx));
+
+  parse_ctx.err = emel::error::cast(emel::gbnf::rule_parser::error::parse_failed);
+  CHECK(emel::gbnf::rule_parser::guard::parse_error_parse_failed{}(ev, ctx));
+
+  parse_ctx.err = emel::error::cast(emel::gbnf::rule_parser::error::internal_error);
+  CHECK(emel::gbnf::rule_parser::guard::parse_error_internal_error{}(ev, ctx));
+
+  parse_ctx.err = emel::error::cast(emel::gbnf::rule_parser::error::untracked);
+  CHECK(emel::gbnf::rule_parser::guard::parse_error_untracked{}(ev, ctx));
+
+  parse_ctx.err = static_cast<emel::error::type>(0x40000000u);
+  CHECK(emel::gbnf::rule_parser::guard::parse_error_unknown{}(ev, ctx));
+
+  parse_ctx.err = emel::error::cast(emel::gbnf::rule_parser::error::none);
+  ctx.next_symbol_id = 1u;
+  ctx.rule_defined[0] = true;
+  CHECK(emel::gbnf::rule_parser::guard::eof_can_finalize_symbols{}(ev, ctx));
+  CHECK_FALSE(emel::gbnf::rule_parser::guard::eof_cannot_finalize_symbols{}(ev, ctx));
+
+  grammar.rule_count = 0u;
+  CHECK_FALSE(emel::gbnf::rule_parser::guard::eof_can_finalize_symbols{}(ev, ctx));
+  CHECK(emel::gbnf::rule_parser::guard::eof_cannot_finalize_symbols{}(ev, ctx));
 }

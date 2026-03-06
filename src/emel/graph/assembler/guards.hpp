@@ -6,6 +6,24 @@
 
 namespace emel::graph::assembler::guard {
 
+template <class runtime_event_type>
+inline emel::error::type runtime_error(const runtime_event_type & ev) noexcept {
+  return ev.ctx.err;
+}
+
+inline bool error_is(const emel::error::type runtime_err,
+                     const error expected) noexcept {
+  return runtime_err == emel::error::cast(expected);
+}
+
+inline bool error_is_unknown(const emel::error::type runtime_err) noexcept {
+  return !error_is(runtime_err, error::none) &&
+         !error_is(runtime_err, error::invalid_request) &&
+         !error_is(runtime_err, error::capacity) &&
+         !error_is(runtime_err, error::internal_error) &&
+         !error_is(runtime_err, error::untracked);
+}
+
 struct valid_reserve {
   bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
     return ev.request.model_topology != nullptr &&
@@ -128,15 +146,39 @@ struct reserve_alloc_failed {
   }
 };
 
-struct reserve_phase_ok {
+struct reserve_error_none {
   bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::none);
   }
 };
 
-struct reserve_phase_failed {
+struct reserve_error_invalid_request {
   bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::invalid_request);
+  }
+};
+
+struct reserve_error_capacity {
+  bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::capacity);
+  }
+};
+
+struct reserve_error_internal_error {
+  bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::internal_error);
+  }
+};
+
+struct reserve_error_untracked {
+  bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::untracked);
+  }
+};
+
+struct reserve_error_unknown {
+  bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
+    return error_is_unknown(runtime_error(ev));
   }
 };
 
@@ -203,15 +245,39 @@ struct assemble_alloc_failed {
   }
 };
 
-struct assemble_phase_ok {
+struct assemble_error_none {
   bool operator()(const event::assemble_graph & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::none);
   }
 };
 
-struct assemble_phase_failed {
+struct assemble_error_invalid_request {
   bool operator()(const event::assemble_graph & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::invalid_request);
+  }
+};
+
+struct assemble_error_capacity {
+  bool operator()(const event::assemble_graph & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::capacity);
+  }
+};
+
+struct assemble_error_internal_error {
+  bool operator()(const event::assemble_graph & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::internal_error);
+  }
+};
+
+struct assemble_error_untracked {
+  bool operator()(const event::assemble_graph & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::untracked);
+  }
+};
+
+struct assemble_error_unknown {
+  bool operator()(const event::assemble_graph & ev, const action::context &) const noexcept {
+    return error_is_unknown(runtime_error(ev));
   }
 };
 

@@ -154,7 +154,7 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
                         int32_t & token_count,
                         int32_t & err) {
   token_count = 0;
-  err = EMEL_OK;
+  err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
 
   emel::text::tokenizer::preprocessor::any preprocessor;
   preprocessor.set_kind(preprocessor_kind_for_model(vocab.tokenizer_model_id));
@@ -168,17 +168,17 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
       std::span<emel::text::tokenizer::preprocessor::fragment>(fragments),
       fragment_count, err);
   pre_ev.preprocessed_out = &preprocessed;
-  if (!preprocessor.process_event(pre_ev) || err != EMEL_OK) {
+  if (!preprocessor.process_event(pre_ev) || err != emel::text::tokenizer::error_code(emel::text::tokenizer::error::none)) {
     return false;
   }
 
   auto push_token = [&](const int32_t token) -> bool {
     if (token < 0 || token_ids == nullptr) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
+      err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::invalid_request);
       return false;
     }
     if (token_count >= token_capacity) {
-      err = EMEL_ERR_INVALID_ARGUMENT;
+      err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::invalid_request);
       return false;
     }
     token_ids[token_count++] = token;
@@ -217,7 +217,7 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
         .token_count_out = &fragment_tokens,
         .error_out = &err,
     };
-    if (!encoder.process_event(enc_ev) || err != EMEL_OK) {
+    if (!encoder.process_event(enc_ev) || err != emel::text::tokenizer::error_code(emel::text::tokenizer::error::none)) {
       return false;
     }
     token_count += fragment_tokens;
@@ -237,7 +237,7 @@ bool reference_tokenize(const emel::model::data::vocab & vocab,
     }
   }
 
-  return err == EMEL_OK;
+  return err == emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
 }
 
 void run_parity_case(const emel::model::data::vocab & vocab,
@@ -245,18 +245,18 @@ void run_parity_case(const emel::model::data::vocab & vocab,
                      const bool add_special,
                      const bool parse_special) {
   emel::text::tokenizer::sm machine{};
-  int32_t bind_err = EMEL_OK;
+  int32_t bind_err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
   emel::text::tokenizer::event::bind bind_ev = {};
   bind_ev.vocab = &vocab;
   bind_ev.preprocessor_variant = preprocessor_kind_for_model(vocab.tokenizer_model_id);
   bind_ev.encoder_variant = encoder_kind_for_model(vocab.tokenizer_model_id);
   bind_ev.error_out = &bind_err;
   REQUIRE(machine.process_event(bind_ev));
-  REQUIRE(bind_err == EMEL_OK);
+  REQUIRE(bind_err == emel::text::tokenizer::error_code(emel::text::tokenizer::error::none));
 
   std::array<int32_t, 32> tokens = {};
   int32_t count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
   emel::text::tokenizer::event::tokenize tok_ev = {};
   tok_ev.vocab = &vocab;
   tok_ev.text = text;
@@ -267,16 +267,16 @@ void run_parity_case(const emel::model::data::vocab & vocab,
   tok_ev.token_count_out = &count;
   tok_ev.error_out = &err;
   REQUIRE(machine.process_event(tok_ev));
-  REQUIRE(err == EMEL_OK);
+  REQUIRE(err == emel::text::tokenizer::error_code(emel::text::tokenizer::error::none));
 
   std::array<int32_t, 32> reference_tokens = {};
   int32_t reference_count = 0;
-  int32_t reference_err = EMEL_OK;
+  int32_t reference_err = emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
   REQUIRE(reference_tokenize(vocab, text, add_special, parse_special,
                              reference_tokens.data(),
                              static_cast<int32_t>(reference_tokens.size()),
                              reference_count, reference_err));
-  REQUIRE(reference_err == EMEL_OK);
+  REQUIRE(reference_err == emel::text::tokenizer::error_code(emel::text::tokenizer::error::none));
   REQUIRE(reference_count == count);
   for (int32_t idx = 0; idx < count; ++idx) {
     CHECK(reference_tokens[static_cast<size_t>(idx)] ==

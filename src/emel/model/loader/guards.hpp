@@ -29,15 +29,63 @@ struct invalid_request {
   }
 };
 
-struct phase_ok {
+inline bool error_is(const event::load_runtime & ev,
+                     const emel::error::type expected) noexcept {
+  return ev.ctx.err == expected;
+}
+
+struct error_none {
   bool operator()(const event::load_runtime & ev) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
+    return error_is(ev, emel::error::cast(error::none));
   }
 };
 
-struct phase_failed {
+struct error_invalid_request {
   bool operator()(const event::load_runtime & ev) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return error_is(ev, emel::error::cast(error::invalid_request));
+  }
+};
+
+struct error_parse_failed {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    return error_is(ev, emel::error::cast(error::parse_failed));
+  }
+};
+
+struct error_backend_error {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    return error_is(ev, emel::error::cast(error::backend_error));
+  }
+};
+
+struct error_model_invalid {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    return error_is(ev, emel::error::cast(error::model_invalid));
+  }
+};
+
+struct error_internal_error {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    return error_is(ev, emel::error::cast(error::internal_error));
+  }
+};
+
+struct error_untracked {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    return error_is(ev, emel::error::cast(error::untracked));
+  }
+};
+
+struct error_unclassified_code {
+  bool operator()(const event::load_runtime & ev) const noexcept {
+    const emel::error::type err = ev.ctx.err;
+    return err != emel::error::cast(error::none) &&
+           err != emel::error::cast(error::invalid_request) &&
+           err != emel::error::cast(error::parse_failed) &&
+           err != emel::error::cast(error::backend_error) &&
+           err != emel::error::cast(error::model_invalid) &&
+           err != emel::error::cast(error::internal_error) &&
+           err != emel::error::cast(error::untracked);
   }
 };
 
@@ -136,72 +184,6 @@ struct error_callback_present {
 struct error_callback_absent {
   bool operator()(const event::load_runtime & ev) const noexcept {
     return !error_callback_present{}(ev);
-  }
-};
-
-struct phase_ok_and_should_load_weights_and_can_load_weights {
-  bool operator()(const event::load_runtime & ev) const noexcept {
-    return phase_ok{}(ev) && should_load_weights{}(ev) && can_load_weights{}(ev);
-  }
-};
-
-struct phase_ok_and_should_load_weights_and_cannot_load_weights {
-  bool operator()(const event::load_runtime & ev) const noexcept {
-    return phase_ok{}(ev) && should_load_weights{}(ev) && cannot_load_weights{}(ev);
-  }
-};
-
-struct phase_ok_and_skip_load_weights {
-  bool operator()(const event::load_runtime & ev) const noexcept {
-    return phase_ok{}(ev) && skip_load_weights{}(ev);
-  }
-};
-
-struct phase_ok_and_can_map_layers {
-  bool operator()(const event::load_runtime & ev) const noexcept {
-    return phase_ok{}(ev) && can_map_layers{}(ev);
-  }
-};
-
-struct phase_ok_and_cannot_map_layers {
-  bool operator()(const event::load_runtime & ev) const noexcept {
-    return phase_ok{}(ev) && cannot_map_layers{}(ev);
-  }
-};
-
-struct phase_ok_and_skip_validate_structure {
-  bool operator()(const event::load_runtime & ev) const noexcept {
-    return phase_ok{}(ev) && skip_validate_structure{}(ev);
-  }
-};
-
-struct phase_ok_and_can_validate_structure {
-  bool operator()(const event::load_runtime & ev) const noexcept {
-    return phase_ok{}(ev) && can_validate_structure{}(ev);
-  }
-};
-
-struct phase_ok_and_cannot_validate_structure {
-  bool operator()(const event::load_runtime & ev) const noexcept {
-    return phase_ok{}(ev) && cannot_validate_structure{}(ev);
-  }
-};
-
-struct phase_ok_and_skip_validate_architecture {
-  bool operator()(const event::load_runtime & ev) const noexcept {
-    return phase_ok{}(ev) && skip_validate_architecture{}(ev);
-  }
-};
-
-struct phase_ok_and_can_validate_architecture {
-  bool operator()(const event::load_runtime & ev) const noexcept {
-    return phase_ok{}(ev) && can_validate_architecture{}(ev);
-  }
-};
-
-struct phase_ok_and_cannot_validate_architecture {
-  bool operator()(const event::load_runtime & ev) const noexcept {
-    return phase_ok{}(ev) && cannot_validate_architecture{}(ev);
   }
 };
 

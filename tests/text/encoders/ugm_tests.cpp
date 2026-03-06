@@ -13,7 +13,7 @@ TEST_CASE("encoder_ugm_applies_precompiled_charsmap") {
 
   std::array<int32_t, 8> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -23,7 +23,7 @@ TEST_CASE("encoder_ugm_applies_precompiled_charsmap") {
     .error_out = &err,
   }));
 
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(token_count == 1);
   CHECK(tokens[0] == token_id);
 }
@@ -129,15 +129,17 @@ TEST_CASE("encoder_detail_ugm_normalize_overflow") {
 
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
-  emel::text::encoders::event::encode ev{
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
+  emel::text::encoders::ugm::sm machine{};
+  CHECK_FALSE(machine.process_event(emel::text::encoders::event::encode{
+    .vocab = *builder.vocab,
     .text = text,
-    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
+    .token_ids = std::span<int32_t>(
+      out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
-  };
-  const auto result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
+  }));
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 }
 
 TEST_CASE("encoder_detail_ugm_normalize_empty") {
@@ -153,41 +155,40 @@ TEST_CASE("encoder_detail_ugm_normalize_empty") {
   CHECK(emel::text::encoders::ugm::detail::ensure_ugm_tables(ctx, *builder.vocab));
   std::array<int32_t, 4> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
-  emel::text::encoders::event::encode ev{
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
+  emel::text::encoders::ugm::sm machine{};
+  CHECK(machine.process_event(emel::text::encoders::event::encode{
+    .vocab = *builder.vocab,
     .text = "   ",
-    .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
+    .token_ids = std::span<int32_t>(
+      out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
     .error_out = &err,
-  };
-  const auto result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
-  CHECK(result.token_count == 0);
+  }));
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
+  CHECK(token_count == 0);
 }
 
-TEST_CASE("encoder_ugm_encode_requires_prepared_tables") {
+TEST_CASE("encoder_ugm_encode_builds_tables_when_missing") {
   vocab_builder builder{};
   builder.set_model("t5");
-  builder.add_token("a", 0.0f, 1);
-
-  emel::text::encoders::ugm::action::context ctx{};
-  ctx.vocab = builder.vocab;
-  ctx.ugm_tables_ready = false;
-  ctx.ugm_vocab = nullptr;
+  const int32_t token_id = builder.add_token("a", 0.0f, 1);
+  builder.vocab->unk_id = token_id;
 
   std::array<int32_t, 2> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
-  emel::text::encoders::event::encode ev{
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
+  emel::text::encoders::ugm::sm machine{};
+  CHECK(machine.process_event(emel::text::encoders::event::encode{
+    .vocab = *builder.vocab,
     .text = "a",
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(out_tokens.size())),
     .token_count_out = &token_count,
     .error_out = &err,
-  };
-
-  const auto result = emel::text::encoders::ugm::detail::encode_ugm(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_ERR_INVALID_ARGUMENT);
-  CHECK(result.token_count == 0);
+  }));
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
+  CHECK(token_count == 1);
+  CHECK(out_tokens[0] == token_id);
 }
 
 TEST_CASE("encoder_detail_ugm_append_space_and_overflow") {

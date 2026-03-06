@@ -34,6 +34,157 @@ inline void add_rule_unchecked(emel::gbnf::grammar & grammar,
   grammar.rule_count = std::max(grammar.rule_count, rule_id + 1u);
 }
 
+inline bool can_apply_quantifier_bounds(const event::parse_rules & ev,
+                                        const context & ctx,
+                                        const uint64_t min_times,
+                                        const uint64_t max_times) noexcept {
+  constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
+  constexpr uint64_t k_max_repetition_threshold = 2000;
+  if (ctx.last_sym_start == ctx.current_rule.size) {
+    return false;
+  }
+
+  if (min_times > k_max_repetition_threshold) {
+    return false;
+  }
+  if (max_times != k_no_max && max_times > k_max_repetition_threshold) {
+    return false;
+  }
+  if (max_times != k_no_max && max_times < min_times) {
+    return false;
+  }
+
+  const uint64_t prev_len = static_cast<uint64_t>(ctx.current_rule.size - ctx.last_sym_start);
+  const uint64_t repeated_len =
+      min_times == 0 ? static_cast<uint64_t>(ctx.last_sym_start)
+                     : static_cast<uint64_t>(ctx.last_sym_start) + prev_len * min_times;
+
+  if (repeated_len > emel::gbnf::k_max_gbnf_rule_elements) {
+    return false;
+  }
+
+  const bool no_max = max_times == k_no_max;
+  const uint64_t n_opt = no_max ? 1 : (max_times - min_times);
+  if (ctx.next_symbol_id + n_opt > emel::gbnf::k_max_gbnf_rules) {
+    return false;
+  }
+
+  const emel::gbnf::grammar & grammar = *ev.request.grammar_out;
+  uint64_t added_grammar_elements = 0;
+  for (uint64_t i = 0; i < n_opt; ++i) {
+    const uint32_t rec_rule_id = ctx.next_symbol_id + static_cast<uint32_t>(i);
+    if (grammar.rule_lengths[rec_rule_id] != 0u) {
+      return false;
+    }
+    const uint64_t rec_rule_len = prev_len + ((i > 0 || no_max) ? 1u : 0u) + 2u;
+    if (rec_rule_len > emel::gbnf::k_max_gbnf_rule_elements) {
+      return false;
+    }
+    added_grammar_elements += rec_rule_len;
+  }
+
+  if (grammar.element_count + added_grammar_elements > emel::gbnf::k_max_gbnf_elements) {
+    return false;
+  }
+
+  const uint64_t final_rule_len = repeated_len + (n_opt > 0 ? 1u : 0u);
+  return final_rule_len <= emel::gbnf::k_max_gbnf_rule_elements;
+}
+
+inline emel::gbnf::element_type select_char_class_lead_type(
+    const bool first,
+    const emel::gbnf::element_type start_type) noexcept {
+  constexpr std::array<emel::gbnf::element_type, 2> lead_types = {
+      emel::gbnf::element_type::char_alt,
+      emel::gbnf::element_type::char_alt,
+  };
+  std::array<emel::gbnf::element_type, 2> lead_type_candidates = lead_types;
+  lead_type_candidates[1] = start_type;
+  return lead_type_candidates[static_cast<size_t>(first)];
+}
+
+inline bool parse_rule_reference_digits_text(const std::string_view text,
+                                             uint32_t & token_id) noexcept {
+  static constexpr char k_zero = '\0';
+  const bool has_data = text.data() != nullptr;
+  const uintptr_t data_addr = emel::gbnf::rule_parser::detail::select_uptr(
+      has_data, reinterpret_cast<uintptr_t>(text.data()),
+      reinterpret_cast<uintptr_t>(&k_zero));
+  const char * safe_data = reinterpret_cast<const char *>(data_addr);
+
+  uint64_t value = 0;
+  const char * cursor = safe_data;
+  const char * end = safe_data + text.size();
+  const char * next = cursor;
+  const bool parsed_uint =
+      emel::gbnf::rule_parser::detail::parse_uint64(cursor, end, value, &next);
+  const std::size_t pos = static_cast<std::size_t>(next - safe_data);
+  const bool value_in_range = value <= std::numeric_limits<uint32_t>::max();
+  const bool consumed_all = text.size() == pos;
+  const bool valid = parsed_uint && value_in_range && consumed_all;
+  token_id = emel::gbnf::rule_parser::detail::select_u32(
+      valid, static_cast<uint32_t>(value), token_id);
+  return valid;
+}
+
+inline void append_optional_rule_ref_none(context &, const uint32_t) noexcept {}
+
+inline void append_optional_rule_ref_some(context & ctx, const uint32_t rule_id) noexcept {
+  append_unchecked(ctx, {emel::gbnf::element_type::rule_ref, rule_id});
+}
+
+inline void apply_quantifier_bounds(const event::parse_rules & ev,
+                                    context & ctx,
+                                    const uint64_t min_times,
+                                    const uint64_t max_times) noexcept {
+  constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
+
+  const uint32_t prev_len = ctx.current_rule.size - ctx.last_sym_start;
+  emel::gbnf::element * const prev_elements = ctx.prev_scratch.get();
+  std::memcpy(prev_elements,
+              ctx.current_rule.elements.data() + ctx.last_sym_start,
+              sizeof(emel::gbnf::element) * prev_len);
+
+  for (uint64_t i = 1; i < min_times; ++i) {
+    std::memcpy(ctx.current_rule.elements.data() + ctx.current_rule.size,
+                prev_elements,
+                sizeof(emel::gbnf::element) * prev_len);
+    ctx.current_rule.size += prev_len;
+  }
+  const std::array<uint32_t, 2> rule_sizes = {ctx.current_rule.size, ctx.last_sym_start};
+  ctx.current_rule.size = rule_sizes[static_cast<size_t>(min_times == 0)];
+
+  const bool no_max = max_times == k_no_max;
+  const std::array<uint64_t, 2> n_opt_candidates = {max_times - min_times, 1u};
+  const uint64_t n_opt = n_opt_candidates[static_cast<size_t>(no_max)];
+  uint32_t last_rec_rule_id = 0;
+  emel::gbnf::element * const rec_elements = ctx.rec_scratch.get();
+
+  for (uint64_t i = 0; i < n_opt; ++i) {
+    uint32_t rec_len = 0;
+    std::memcpy(rec_elements, prev_elements, sizeof(emel::gbnf::element) * prev_len);
+    rec_len += prev_len;
+
+    const uint32_t rec_rule_id = ctx.next_symbol_id++;
+    ctx.rule_defined[rec_rule_id] = true;
+    const size_t append_ref = static_cast<size_t>(i > 0 || no_max);
+    const std::array<uint32_t, 2> ref_id_candidates = {last_rec_rule_id, rec_rule_id};
+    const uint32_t ref_id = ref_id_candidates[static_cast<size_t>(no_max)];
+    rec_elements[rec_len] = {emel::gbnf::element_type::rule_ref, ref_id};
+    rec_len += static_cast<uint32_t>(append_ref);
+    rec_elements[rec_len++] = {emel::gbnf::element_type::alt, 0};
+    rec_elements[rec_len++] = {emel::gbnf::element_type::end, 0};
+    add_rule_unchecked(*ev.request.grammar_out, rec_rule_id, rec_elements, rec_len);
+    last_rec_rule_id = rec_rule_id;
+  }
+
+  constexpr std::array<void (*)(context &, uint32_t), 2> optional_rule_ref_handlers = {
+      append_optional_rule_ref_none,
+      append_optional_rule_ref_some,
+  };
+  optional_rule_ref_handlers[static_cast<size_t>(n_opt > 0)](ctx, last_rec_rule_id);
+}
+
 inline bool on_lexer_done(void * owner, const lexer::events::next_done & ev) noexcept {
   auto * ctx = static_cast<event::parse_rules_ctx *>(owner);
   ctx->err = emel::error::cast(error::none);
@@ -92,6 +243,10 @@ struct begin_parse {
     ev.ctx.has_token = false;
     ev.ctx.nonterm_mode = nonterm_parser::events::parse_mode::none;
     ev.ctx.nonterm_rule_id = 0;
+    ev.ctx.nonterm_lookup_hash = 0;
+    ev.ctx.nonterm_lookup_rule_id = 0;
+    ev.ctx.nonterm_lookup_found = false;
+    ev.ctx.nonterm_lookup_can_insert = false;
     ev.ctx.expression_kind = expression_parser::events::parse_kind::unknown;
     ev.ctx.term_kind = term_parser::events::term_kind::unknown;
     ev.ctx.current_term_origin = event::parse_rules_ctx::term_origin::none;
@@ -113,6 +268,10 @@ struct request_next_token {
     ev.ctx.token = {};
     ev.ctx.nonterm_mode = nonterm_parser::events::parse_mode::none;
     ev.ctx.nonterm_rule_id = 0;
+    ev.ctx.nonterm_lookup_hash = 0;
+    ev.ctx.nonterm_lookup_rule_id = 0;
+    ev.ctx.nonterm_lookup_found = false;
+    ev.ctx.nonterm_lookup_can_insert = false;
     ev.ctx.expression_kind = expression_parser::events::parse_kind::unknown;
     ev.ctx.term_kind = term_parser::events::term_kind::unknown;
 
@@ -196,89 +355,164 @@ struct consume_token_alternation {
 
 struct consume_token_literal {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
-    ctx.last_sym_start = ctx.current_rule.size;
     const std::string_view text = ev.ctx.token.text;
-    const char * pos = text.data() + 1u;
-    const char * end = text.data() + text.size() - 1u;
-    while (pos < end) {
+    static constexpr char k_zero = '\0';
+    const bool has_data = text.data() != nullptr;
+    const uintptr_t data_addr = emel::gbnf::rule_parser::detail::select_uptr(
+        has_data,
+        reinterpret_cast<uintptr_t>(text.data()),
+        reinterpret_cast<uintptr_t>(&k_zero));
+    const char * const safe_data = reinterpret_cast<const char *>(data_addr);
+    const bool has_envelope = text.size() >= 2u;
+    const size_t start_offset =
+        emel::gbnf::rule_parser::detail::select_size(has_envelope, 1u, 0u);
+    const size_t end_offset =
+        emel::gbnf::rule_parser::detail::select_size(has_envelope, text.size() - 1u, 0u);
+
+    const uint32_t original_size = ctx.current_rule.size;
+    ctx.last_sym_start = original_size;
+    const char * pos = safe_data + start_offset;
+    const char * end = safe_data + end_offset;
+    bool ok = has_envelope;
+    while (ok && pos < end) {
       const auto parsed = emel::gbnf::rule_parser::detail::parse_char(pos, end);
+      ok = parsed.second != nullptr;
+      if (!ok) {
+        break;
+      }
       append_unchecked(ctx, {emel::gbnf::element_type::character, parsed.first});
       pos = parsed.second;
     }
+
+    const std::array<uint32_t, 2> size_candidates = {
+        original_size,
+        ctx.current_rule.size,
+    };
+    ctx.current_rule.size = size_candidates[static_cast<size_t>(ok)];
+    const std::array<emel::error::type, 2> error_candidates = {
+        emel::error::cast(error::parse_failed),
+        emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
   }
 };
 
 struct consume_token_character_class {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
-    ctx.last_sym_start = ctx.current_rule.size;
     const std::string_view text = ev.ctx.token.text;
-    const char * pos = text.data() + 1u;
-    const char * end = text.data() + text.size() - 1u;
-    const size_t leading_not = static_cast<size_t>(pos < end && *pos == '^');
+    static constexpr char k_zero = '\0';
+    const bool has_data = text.data() != nullptr;
+    const uintptr_t data_addr = emel::gbnf::rule_parser::detail::select_uptr(
+        has_data,
+        reinterpret_cast<uintptr_t>(text.data()),
+        reinterpret_cast<uintptr_t>(&k_zero));
+    const char * const safe_data = reinterpret_cast<const char *>(data_addr);
+    const bool has_envelope = text.size() >= 2u;
+    const size_t start_offset =
+        emel::gbnf::rule_parser::detail::select_size(has_envelope, 1u, 0u);
+    const size_t end_offset =
+        emel::gbnf::rule_parser::detail::select_size(has_envelope, text.size() - 1u, 0u);
+
+    const uint32_t original_size = ctx.current_rule.size;
+    ctx.last_sym_start = original_size;
+    const char * pos = safe_data + start_offset;
+    const char * end = safe_data + end_offset;
+    const bool leading_not = pos < end && *pos == '^';
     const emel::gbnf::element_type start_types[2] = {
         emel::gbnf::element_type::character,
         emel::gbnf::element_type::char_not};
-    const emel::gbnf::element_type start_type = start_types[leading_not];
-    pos += leading_not;
-
+    const emel::gbnf::element_type start_type =
+        start_types[static_cast<size_t>(leading_not)];
+    pos += static_cast<size_t>(leading_not);
     bool first = true;
-    while (pos < end) {
-      const auto first_char = emel::gbnf::rule_parser::detail::parse_char(pos, end);
-      constexpr std::array<emel::gbnf::element_type, 2> lead_types = {
-          emel::gbnf::element_type::char_alt,
-          emel::gbnf::element_type::char_alt,
-      };
-      std::array<emel::gbnf::element_type, 2> lead_type_candidates = lead_types;
-      lead_type_candidates[1] = start_type;
-      const auto lead_type = lead_type_candidates[static_cast<size_t>(first)];
-      append_unchecked(ctx, {lead_type, first_char.first});
-      first = false;
-      pos = first_char.second;
-
-      const size_t has_range = static_cast<size_t>(pos + 1u < end && pos[0] == '-' &&
-                                                   pos[1] != ']');
-      {
-        const size_t emel_branch_has_range = has_range;
-        for (size_t emel_case_has_range = emel_branch_has_range; emel_case_has_range == 1u;
-             emel_case_has_range = 2u) {
-          ++pos;
-          const auto range_char = emel::gbnf::rule_parser::detail::parse_char(pos, end);
-          append_unchecked(ctx, {emel::gbnf::element_type::char_rng_upper, range_char.first});
-          pos = range_char.second;
-        }
-        for (size_t emel_case_has_range = emel_branch_has_range; emel_case_has_range == 0u;
-             emel_case_has_range = 2u) {
-
-        }
+    bool ok = has_envelope;
+    while (ok && pos < end) {
+      const auto parsed = emel::gbnf::rule_parser::detail::parse_char(pos, end);
+      ok = parsed.second != nullptr;
+      if (!ok) {
+        break;
       }
+      append_unchecked(ctx, {select_char_class_lead_type(first, start_type), parsed.first});
+      first = false;
+      pos = parsed.second;
+
+      const bool has_range = pos + 1u < end && pos[0] == '-' && pos[1] != ']';
+      if (!has_range) {
+        continue;
+      }
+
+      ++pos;
+      const auto range_char = emel::gbnf::rule_parser::detail::parse_char(pos, end);
+      ok = range_char.second != nullptr;
+      if (!ok) {
+        break;
+      }
+      append_unchecked(ctx, {emel::gbnf::element_type::char_rng_upper, range_char.first});
+      pos = range_char.second;
     }
+
+    const std::array<uint32_t, 2> size_candidates = {
+        original_size,
+        ctx.current_rule.size,
+    };
+    ctx.current_rule.size = size_candidates[static_cast<size_t>(ok)];
+    const std::array<emel::error::type, 2> error_candidates = {
+        emel::error::cast(error::parse_failed),
+        emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
   }
 };
 
-struct consume_token_rule_reference {
+inline void append_rule_reference_plain_none(context &, const uint32_t) noexcept {}
+
+inline void append_rule_reference_plain_some(context & ctx, const uint32_t token_id) noexcept {
+  ctx.last_sym_start = ctx.current_rule.size;
+  append_unchecked(ctx, {emel::gbnf::element_type::token, token_id});
+}
+
+inline void append_rule_reference_negated_none(context &, const uint32_t) noexcept {}
+
+inline void append_rule_reference_negated_some(context & ctx, const uint32_t token_id) noexcept {
+  ctx.last_sym_start = ctx.current_rule.size;
+  append_unchecked(ctx, {emel::gbnf::element_type::token_not, token_id});
+}
+
+struct consume_token_rule_reference_plain {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
-    bool token_not = false;
     uint32_t token_id = 0;
     const std::string_view text = ev.ctx.token.text;
-    const size_t has_negation = static_cast<size_t>(text[0] == '!');
-    token_not = has_negation != 0;
-    std::size_t pos = has_negation;
-    pos += 2u;
-
-    uint64_t value = 0;
-    const char * cursor = text.data() + pos;
-    const char * end = text.data() + text.size();
-    const char * next = nullptr;
-    (void)emel::gbnf::rule_parser::detail::parse_uint64(cursor, end, value, &next);
-    token_id = static_cast<uint32_t>(value);
-
-    constexpr std::array<emel::gbnf::element_type, 2> type_candidates = {
-        emel::gbnf::element_type::token,
-        emel::gbnf::element_type::token_not,
+    const std::string_view digits = text.substr(2u, text.size() - 4u);
+    const bool parsed = parse_rule_reference_digits_text(digits, token_id);
+    constexpr std::array<void (*)(context &, uint32_t), 2> append_handlers = {
+      append_rule_reference_plain_none,
+      append_rule_reference_plain_some,
     };
-    const auto type = type_candidates[static_cast<size_t>(token_not)];
-    ctx.last_sym_start = ctx.current_rule.size;
-    append_unchecked(ctx, {type, token_id});
+    append_handlers[static_cast<size_t>(parsed)](ctx, token_id);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(parsed)];
+  }
+};
+
+struct consume_token_rule_reference_negated {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
+    uint32_t token_id = 0;
+    const std::string_view text = ev.ctx.token.text;
+    const std::string_view digits = text.substr(3u, text.size() - 5u);
+    const bool parsed = parse_rule_reference_digits_text(digits, token_id);
+    constexpr std::array<void (*)(context &, uint32_t), 2> append_handlers = {
+      append_rule_reference_negated_none,
+      append_rule_reference_negated_some,
+    };
+    append_handlers[static_cast<size_t>(parsed)](ctx, token_id);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(parsed)];
   }
 };
 
@@ -331,129 +565,147 @@ struct consume_token_close_group {
   }
 };
 
-struct consume_token_quantifier {
+inline void apply_quantifier_bounds_none(const event::parse_rules &,
+                                         context &,
+                                         const uint64_t,
+                                         const uint64_t) noexcept {}
+
+inline void apply_quantifier_bounds_some(const event::parse_rules & ev,
+                                         context & ctx,
+                                         const uint64_t min_times,
+                                         const uint64_t max_times) noexcept {
+  apply_quantifier_bounds(ev, ctx, min_times, max_times);
+}
+
+struct consume_token_quantifier_star {
   void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok = can_apply_quantifier_bounds(ev, ctx, 0u, k_no_max);
+    handlers[static_cast<size_t>(ok)](ev, ctx, 0u, k_no_max);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
+  }
+};
 
-    uint64_t min_times = 0;
-    uint64_t max_times = 0;
+struct consume_token_quantifier_plus {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
+    constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok = can_apply_quantifier_bounds(ev, ctx, 1u, k_no_max);
+    handlers[static_cast<size_t>(ok)](ev, ctx, 1u, k_no_max);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
+  }
+};
+
+struct consume_token_quantifier_question {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok = can_apply_quantifier_bounds(ev, ctx, 0u, 1u);
+    handlers[static_cast<size_t>(ok)](ev, ctx, 0u, 1u);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
+  }
+};
+
+struct consume_token_quantifier_braced_exact {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
     const std::string_view text = ev.ctx.token.text;
-    const size_t is_star = static_cast<size_t>(text == "*");
-    const size_t is_plus = static_cast<size_t>(text == "+");
-    const size_t is_question =
-        static_cast<size_t>(text.size() == 1u && static_cast<unsigned char>(text[0]) == 63u);
-    const size_t has_symbol_quantifier =
-        static_cast<size_t>((is_star | is_plus | is_question) != 0u);
-    const size_t quantifier_kind =
-        is_plus * 1u + is_question * 2u + (1u - has_symbol_quantifier) * 3u;
+    const std::string_view digits = text.substr(1u, text.size() - 2u);
+    uint32_t parsed_min = 0;
+    const bool parsed = parse_rule_reference_digits_text(digits, parsed_min);
+    const uint64_t min_times = static_cast<uint64_t>(parsed_min);
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok = parsed && can_apply_quantifier_bounds(ev, ctx, min_times, min_times);
+    handlers[static_cast<size_t>(ok)](ev, ctx, min_times, min_times);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
+  }
+};
 
-    constexpr std::array<uint64_t, 4> min_defaults = {0, 1, 0, 0};
-    constexpr std::array<uint64_t, 4> max_defaults = {k_no_max, k_no_max, 1, 0};
-    min_times = min_defaults[quantifier_kind];
-    max_times = max_defaults[quantifier_kind];
-    const size_t has_braced_range = static_cast<size_t>(quantifier_kind == 3u);
-    {
-      const size_t emel_branch_braced_range = has_braced_range;
-      for (size_t emel_case_braced_range = emel_branch_braced_range;
-           emel_case_braced_range == 1u;
-           emel_case_braced_range = 2u) {
-        const char * cursor = text.data() + 1u;
-        const char * end = text.data() + text.size() - 1u;
-        const char * next = nullptr;
-        (void)emel::gbnf::rule_parser::detail::parse_uint64(cursor, end, min_times, &next);
-        const size_t at_end = static_cast<size_t>(next == end);
-        const size_t at_open_end = static_cast<size_t>(next != end && next + 1u == end);
-        const size_t range_mode = at_end + (at_open_end * 2u);
-        const size_t has_exact_max = static_cast<size_t>(range_mode == 1u);
-        const size_t has_open_max = static_cast<size_t>(range_mode == 2u);
-        const size_t has_explicit_max = static_cast<size_t>(range_mode == 0u);
-        const size_t max_mode = has_exact_max * 1u + has_open_max * 2u;
-        const std::array<uint64_t, 3> max_candidates = {max_times, min_times, k_no_max};
-        max_times = max_candidates[max_mode];
-        {
-          const size_t emel_branch_explicit_max = has_explicit_max;
-          for (size_t emel_case_explicit_max = emel_branch_explicit_max;
-               emel_case_explicit_max == 1u;
-               emel_case_explicit_max = 2u) {
-            ++next;
-            (void)emel::gbnf::rule_parser::detail::parse_uint64(next, end, max_times, &next);
-          }
-          for (size_t emel_case_explicit_max = emel_branch_explicit_max;
-               emel_case_explicit_max == 0u;
-               emel_case_explicit_max = 2u) {
+struct consume_token_quantifier_braced_open {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
+    constexpr uint64_t k_no_max = std::numeric_limits<uint64_t>::max();
+    const std::string_view text = ev.ctx.token.text;
+    const std::string_view digits = text.substr(1u, text.size() - 3u);
+    uint32_t parsed_min = 0;
+    const bool parsed = parse_rule_reference_digits_text(digits, parsed_min);
+    const uint64_t min_times = static_cast<uint64_t>(parsed_min);
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok = parsed && can_apply_quantifier_bounds(ev, ctx, min_times, k_no_max);
+    handlers[static_cast<size_t>(ok)](ev, ctx, min_times, k_no_max);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
+  }
+};
 
-          }
-        }
-      }
-      for (size_t emel_case_braced_range = emel_branch_braced_range;
-           emel_case_braced_range == 0u;
-           emel_case_braced_range = 2u) {
+struct consume_token_quantifier_braced_range {
+  void operator()(const event::parse_rules & ev, context & ctx) const noexcept {
+    const std::string_view text = ev.ctx.token.text;
+    const std::string_view core = text.substr(1u, text.size() - 2u);
+    const size_t comma_pos = core.find(',');
+    const size_t has_comma = static_cast<size_t>(comma_pos != std::string_view::npos);
+    const size_t safe_comma_pos =
+        emel::gbnf::rule_parser::detail::select_size(has_comma != 0u, comma_pos, 0u);
+    const std::string_view min_digits = core.substr(0u, safe_comma_pos);
+    const size_t max_offset = safe_comma_pos + has_comma;
+    const std::string_view max_digits = core.substr(max_offset, core.size() - max_offset);
 
-      }
-    }
-
-    const uint32_t prev_len = ctx.current_rule.size - ctx.last_sym_start;
-    emel::gbnf::element * const prev_elements = ctx.prev_scratch.get();
-    std::memcpy(prev_elements,
-                ctx.current_rule.elements.data() + ctx.last_sym_start,
-                sizeof(emel::gbnf::element) * prev_len);
-
-    for (uint64_t i = 1; i < min_times; ++i) {
-      std::memcpy(ctx.current_rule.elements.data() + ctx.current_rule.size,
-                  prev_elements,
-                  sizeof(emel::gbnf::element) * prev_len);
-      ctx.current_rule.size += prev_len;
-    }
-    const std::array<uint32_t, 2> rule_sizes = {ctx.current_rule.size, ctx.last_sym_start};
-    ctx.current_rule.size = rule_sizes[static_cast<size_t>(min_times == 0)];
-
-    const bool no_max = max_times == k_no_max;
-    uint64_t n_opt = max_times - min_times;
-    {
-      const size_t emel_branch_no_max = static_cast<size_t>(no_max);
-      for (size_t emel_case_no_max = emel_branch_no_max; emel_case_no_max == 1u;
-           emel_case_no_max = 2u) {
-        n_opt = 1u;
-      }
-      for (size_t emel_case_no_max = emel_branch_no_max; emel_case_no_max == 0u;
-           emel_case_no_max = 2u) {
-
-      }
-    }
-    uint32_t last_rec_rule_id = 0;
-    emel::gbnf::element * const rec_elements = ctx.rec_scratch.get();
-
-    for (uint64_t i = 0; i < n_opt; ++i) {
-      uint32_t rec_len = 0;
-      std::memcpy(rec_elements, prev_elements, sizeof(emel::gbnf::element) * prev_len);
-      rec_len += prev_len;
-
-      const uint32_t rec_rule_id = ctx.next_symbol_id++;
-      ctx.rule_defined[rec_rule_id] = true;
-      const size_t append_ref = static_cast<size_t>(i > 0 || no_max);
-      const std::array<uint32_t, 2> ref_id_candidates = {last_rec_rule_id, rec_rule_id};
-      const uint32_t ref_id = ref_id_candidates[static_cast<size_t>(no_max)];
-      rec_elements[rec_len] = {emel::gbnf::element_type::rule_ref, ref_id};
-      rec_len += static_cast<uint32_t>(append_ref);
-      rec_elements[rec_len++] = {emel::gbnf::element_type::alt, 0};
-      rec_elements[rec_len++] = {emel::gbnf::element_type::end, 0};
-      add_rule_unchecked(*ev.request.grammar_out, rec_rule_id, rec_elements, rec_len);
-      last_rec_rule_id = rec_rule_id;
-    }
-
-    {
-      const size_t emel_branch_has_optional = static_cast<size_t>(n_opt > 0);
-      for (size_t emel_case_has_optional = emel_branch_has_optional;
-           emel_case_has_optional == 1u;
-           emel_case_has_optional = 2u) {
-        append_unchecked(ctx, {emel::gbnf::element_type::rule_ref, last_rec_rule_id});
-      }
-      for (size_t emel_case_has_optional = emel_branch_has_optional;
-           emel_case_has_optional == 0u;
-           emel_case_has_optional = 2u) {
-
-      }
-    }
+    uint32_t parsed_min = 0;
+    uint32_t parsed_max = 0;
+    const bool min_ok = parse_rule_reference_digits_text(min_digits, parsed_min);
+    const bool max_ok = parse_rule_reference_digits_text(max_digits, parsed_max);
+    const uint64_t min_times = static_cast<uint64_t>(parsed_min);
+    const uint64_t max_times = static_cast<uint64_t>(parsed_max);
+    constexpr std::array<void (*)(const event::parse_rules &, context &, uint64_t, uint64_t), 2>
+        handlers = {
+          apply_quantifier_bounds_none,
+          apply_quantifier_bounds_some,
+        };
+    const bool ok =
+        min_ok && max_ok && can_apply_quantifier_bounds(ev, ctx, min_times, max_times);
+    handlers[static_cast<size_t>(ok)](ev, ctx, min_times, max_times);
+    const std::array<emel::error::type, 2> error_candidates = {
+      emel::error::cast(error::parse_failed),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.err = error_candidates[static_cast<size_t>(ok)];
   }
 };
 
@@ -498,12 +750,18 @@ inline constexpr consume_token_definition_operator consume_token_definition_oper
 inline constexpr consume_token_alternation consume_token_alternation{};
 inline constexpr consume_token_literal consume_token_literal{};
 inline constexpr consume_token_character_class consume_token_character_class{};
-inline constexpr consume_token_rule_reference consume_token_rule_reference{};
+inline constexpr consume_token_rule_reference_plain consume_token_rule_reference_plain{};
+inline constexpr consume_token_rule_reference_negated consume_token_rule_reference_negated{};
 inline constexpr finalize_active_rule_on_eof finalize_active_rule_on_eof{};
 inline constexpr consume_token_dot consume_token_dot{};
 inline constexpr consume_token_open_group consume_token_open_group{};
 inline constexpr consume_token_close_group consume_token_close_group{};
-inline constexpr consume_token_quantifier consume_token_quantifier{};
+inline constexpr consume_token_quantifier_star consume_token_quantifier_star{};
+inline constexpr consume_token_quantifier_plus consume_token_quantifier_plus{};
+inline constexpr consume_token_quantifier_question consume_token_quantifier_question{};
+inline constexpr consume_token_quantifier_braced_exact consume_token_quantifier_braced_exact{};
+inline constexpr consume_token_quantifier_braced_open consume_token_quantifier_braced_open{};
+inline constexpr consume_token_quantifier_braced_range consume_token_quantifier_braced_range{};
 inline constexpr dispatch_done dispatch_done{};
 inline constexpr dispatch_error dispatch_error{};
 inline constexpr on_unexpected on_unexpected{};

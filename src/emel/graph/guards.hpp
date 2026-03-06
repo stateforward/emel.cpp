@@ -6,6 +6,25 @@
 
 namespace emel::graph::guard {
 
+inline emel::error::type runtime_error(const event::compute_graph & ev) noexcept {
+  return ev.ctx.err;
+}
+
+inline bool error_is(const emel::error::type runtime_err,
+                     const error expected) noexcept {
+  return runtime_err == emel::error::cast(expected);
+}
+
+inline bool error_is_unknown(const emel::error::type runtime_err) noexcept {
+  return !error_is(runtime_err, error::none) &&
+         !error_is(runtime_err, error::invalid_request) &&
+         !error_is(runtime_err, error::assembler_failed) &&
+         !error_is(runtime_err, error::processor_failed) &&
+         !error_is(runtime_err, error::busy) &&
+         !error_is(runtime_err, error::internal_error) &&
+         !error_is(runtime_err, error::untracked);
+}
+
 struct valid_reserve {
   bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
     return ev.request.model_topology != nullptr &&
@@ -140,15 +159,51 @@ struct execute_failed {
   }
 };
 
-struct compute_phase_ok {
+struct compute_error_none {
   bool operator()(const event::compute_graph & ev, const action::context &) const noexcept {
-    return ev.ctx.err == emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::none);
   }
 };
 
-struct compute_phase_failed {
+struct compute_error_invalid_request {
   bool operator()(const event::compute_graph & ev, const action::context &) const noexcept {
-    return ev.ctx.err != emel::error::cast(error::none);
+    return error_is(runtime_error(ev), error::invalid_request);
+  }
+};
+
+struct compute_error_assembler_failed {
+  bool operator()(const event::compute_graph & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::assembler_failed);
+  }
+};
+
+struct compute_error_processor_failed {
+  bool operator()(const event::compute_graph & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::processor_failed);
+  }
+};
+
+struct compute_error_busy {
+  bool operator()(const event::compute_graph & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::busy);
+  }
+};
+
+struct compute_error_internal_error {
+  bool operator()(const event::compute_graph & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::internal_error);
+  }
+};
+
+struct compute_error_untracked {
+  bool operator()(const event::compute_graph & ev, const action::context &) const noexcept {
+    return error_is(runtime_error(ev), error::untracked);
+  }
+};
+
+struct compute_error_unknown {
+  bool operator()(const event::compute_graph & ev, const action::context &) const noexcept {
+    return error_is_unknown(runtime_error(ev));
   }
 };
 

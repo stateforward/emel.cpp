@@ -6,6 +6,8 @@
 #include "emel/text/jinja/parser/detail.hpp"
 #include "emel/text/jinja/parser/errors.hpp"
 #include "emel/text/jinja/parser/events.hpp"
+#include "emel/text/jinja/parser/guards.hpp"
+#include "emel/text/jinja/parser/program_parser/guards.hpp"
 #include "emel/text/jinja/parser/sm.hpp"
 
 namespace {
@@ -52,6 +54,93 @@ TEST_CASE("jinja_parser_starts_initialized") {
   emel::text::jinja::parser::action::context ctx{};
   emel::text::jinja::parser::sm machine{ctx};
   CHECK(machine.is(boost::sml::state<emel::text::jinja::parser::initialized>));
+}
+
+TEST_CASE("jinja_program_parser_parse_error_guards_classify_runtime_error_explicitly") {
+  emel::text::jinja::program program{};
+  int32_t err = 0;
+  size_t error_pos = 0;
+  parse request{
+      "",
+      program,
+      k_ignore_done_callback,
+      k_ignore_error_callback,
+      err,
+      error_pos,
+  };
+  emel::text::jinja::event::parse_ctx runtime_ctx{"", err, error_pos};
+  emel::text::jinja::event::parse_runtime runtime{request, runtime_ctx};
+  emel::text::jinja::parser::action::context action_ctx{};
+
+  runtime_ctx.err = emel::text::jinja::parser::error::none;
+  CHECK(emel::text::jinja::parser::program_parser::guard::parse_error_none{}(runtime, action_ctx));
+  CHECK_FALSE(
+      emel::text::jinja::parser::program_parser::guard::parse_error_invalid_request{}(runtime, action_ctx));
+  CHECK_FALSE(
+      emel::text::jinja::parser::program_parser::guard::parse_error_parse_failed{}(runtime, action_ctx));
+  CHECK_FALSE(
+      emel::text::jinja::parser::program_parser::guard::parse_error_internal_error{}(runtime, action_ctx));
+  CHECK_FALSE(
+      emel::text::jinja::parser::program_parser::guard::parse_error_untracked{}(runtime, action_ctx));
+  CHECK_FALSE(
+      emel::text::jinja::parser::program_parser::guard::parse_error_unknown{}(runtime, action_ctx));
+
+  runtime_ctx.err = emel::text::jinja::parser::error::invalid_request;
+  CHECK(
+      emel::text::jinja::parser::program_parser::guard::parse_error_invalid_request{}(runtime, action_ctx));
+
+  runtime_ctx.err = emel::text::jinja::parser::error::parse_failed;
+  CHECK(emel::text::jinja::parser::program_parser::guard::parse_error_parse_failed{}(runtime, action_ctx));
+
+  runtime_ctx.err = emel::text::jinja::parser::error::internal_error;
+  CHECK(
+      emel::text::jinja::parser::program_parser::guard::parse_error_internal_error{}(runtime, action_ctx));
+
+  runtime_ctx.err = emel::text::jinja::parser::error::untracked;
+  CHECK(emel::text::jinja::parser::program_parser::guard::parse_error_untracked{}(runtime, action_ctx));
+
+  runtime_ctx.err = static_cast<emel::text::jinja::parser::error>(1u << 7);
+  CHECK(emel::text::jinja::parser::program_parser::guard::parse_error_unknown{}(runtime, action_ctx));
+}
+
+TEST_CASE("jinja_parser_parse_error_guards_classify_runtime_error_explicitly") {
+  emel::text::jinja::program program{};
+  int32_t err = 0;
+  size_t error_pos = 0;
+  parse request{
+      "",
+      program,
+      k_ignore_done_callback,
+      k_ignore_error_callback,
+      err,
+      error_pos,
+  };
+  emel::text::jinja::event::parse_ctx runtime_ctx{"", err, error_pos};
+  emel::text::jinja::event::parse_runtime runtime{request, runtime_ctx};
+  emel::text::jinja::parser::action::context action_ctx{};
+
+  runtime_ctx.err = emel::text::jinja::parser::error::none;
+  CHECK(emel::text::jinja::parser::guard::parse_error_none{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::guard::parse_error_invalid_request{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::guard::parse_error_parse_failed{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::guard::parse_error_internal_error{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::guard::parse_error_untracked{}(runtime, action_ctx));
+  CHECK_FALSE(emel::text::jinja::parser::guard::parse_error_unknown{}(runtime, action_ctx));
+
+  runtime_ctx.err = emel::text::jinja::parser::error::invalid_request;
+  CHECK(emel::text::jinja::parser::guard::parse_error_invalid_request{}(runtime, action_ctx));
+
+  runtime_ctx.err = emel::text::jinja::parser::error::parse_failed;
+  CHECK(emel::text::jinja::parser::guard::parse_error_parse_failed{}(runtime, action_ctx));
+
+  runtime_ctx.err = emel::text::jinja::parser::error::internal_error;
+  CHECK(emel::text::jinja::parser::guard::parse_error_internal_error{}(runtime, action_ctx));
+
+  runtime_ctx.err = emel::text::jinja::parser::error::untracked;
+  CHECK(emel::text::jinja::parser::guard::parse_error_untracked{}(runtime, action_ctx));
+
+  runtime_ctx.err = static_cast<emel::text::jinja::parser::error>(1u << 6);
+  CHECK(emel::text::jinja::parser::guard::parse_error_unknown{}(runtime, action_ctx));
 }
 
 TEST_CASE("jinja_parser_valid_parse_reaches_done") {

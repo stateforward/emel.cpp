@@ -17,9 +17,15 @@ struct errored {};
 
 struct probe_request_decision {};
 struct probe_outcome_dispatch {};
+struct probe_requirements_dispatch {};
 struct bind_request_decision {};
+struct bind_request_shape_decision {};
+struct bind_capacity_decision {};
 struct bind_outcome_dispatch {};
 struct parse_request_decision {};
+struct parse_file_image_decision {};
+struct parse_bound_storage_decision {};
+struct parse_capacity_decision {};
 struct parse_outcome_dispatch {};
 
 struct model {
@@ -48,11 +54,32 @@ struct model {
           + sml::completion<event::probe_runtime> [ guard::probe_invalid_request{} ]
           / action::mark_probe_invalid_request
 
-      , sml::state<probed> <= sml::state<probe_outcome_dispatch>
-          + sml::completion<event::probe_runtime> [ guard::probe_phase_ok{} ]
+      , sml::state<probe_requirements_dispatch> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_none{} ]
+          / action::commit_probe_requirements
+      , sml::state<probed> <= sml::state<probe_requirements_dispatch>
+          + sml::completion<event::probe_runtime>
           / action::publish_probe_done
       , sml::state<errored> <= sml::state<probe_outcome_dispatch>
-          + sml::completion<event::probe_runtime> [ guard::probe_phase_failed{} ]
+          + sml::completion<event::probe_runtime> [ guard::probe_error_invalid_request{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_model_invalid{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_capacity{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_parse_failed{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_internal_error{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_untracked{} ]
+          / action::publish_probe_error
+      , sml::state<errored> <= sml::state<probe_outcome_dispatch>
+          + sml::completion<event::probe_runtime> [ guard::probe_error_unknown{} ]
           / action::publish_probe_error
 
       //------------------------------------------------------------------------------//
@@ -68,21 +95,49 @@ struct model {
       , sml::state<bind_outcome_dispatch> <= sml::state<errored>
           + sml::event<event::bind_runtime> / action::mark_bind_invalid_request
 
-      , sml::state<bind_outcome_dispatch> <= sml::state<bind_request_decision>
-          + sml::completion<event::bind_runtime> [ guard::bind_valid_request_and_capacity{} ]
-          / action::exec_bind
-      , sml::state<bind_outcome_dispatch> <= sml::state<bind_request_decision>
+      , sml::state<bind_request_shape_decision> <= sml::state<bind_request_decision>
+          + sml::completion<event::bind_runtime>
+      , sml::state<bind_capacity_decision> <= sml::state<bind_request_shape_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_valid_request{} ]
+      , sml::state<bind_outcome_dispatch> <= sml::state<bind_request_shape_decision>
           + sml::completion<event::bind_runtime> [ guard::bind_invalid_request{} ]
           / action::mark_bind_invalid_request
-      , sml::state<bind_outcome_dispatch> <= sml::state<bind_request_decision>
-          + sml::completion<event::bind_runtime> [ guard::bind_invalid_capacity{} ]
+      , sml::state<bind_outcome_dispatch> <= sml::state<bind_request_shape_decision>
+          + sml::completion<event::bind_runtime>
+          / action::mark_bind_invalid_request
+      , sml::state<bind_outcome_dispatch> <= sml::state<bind_capacity_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_capacity_sufficient{} ]
+          / action::exec_bind
+      , sml::state<bind_outcome_dispatch> <= sml::state<bind_capacity_decision>
+          + sml::completion<event::bind_runtime> [ guard::bind_capacity_insufficient{} ]
+          / action::mark_bind_capacity
+      , sml::state<bind_outcome_dispatch> <= sml::state<bind_capacity_decision>
+          + sml::completion<event::bind_runtime>
           / action::mark_bind_capacity
 
       , sml::state<bound> <= sml::state<bind_outcome_dispatch>
-          + sml::completion<event::bind_runtime> [ guard::bind_phase_ok{} ]
+          + sml::completion<event::bind_runtime> [ guard::bind_error_none{} ]
           / action::publish_bind_done
       , sml::state<errored> <= sml::state<bind_outcome_dispatch>
-          + sml::completion<event::bind_runtime> [ guard::bind_phase_failed{} ]
+          + sml::completion<event::bind_runtime> [ guard::bind_error_invalid_request{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_model_invalid{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_capacity{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_parse_failed{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_internal_error{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_untracked{} ]
+          / action::publish_bind_error
+      , sml::state<errored> <= sml::state<bind_outcome_dispatch>
+          + sml::completion<event::bind_runtime> [ guard::bind_error_unknown{} ]
           / action::publish_bind_error
 
       //------------------------------------------------------------------------------//
@@ -98,18 +153,59 @@ struct model {
       , sml::state<parse_outcome_dispatch> <= sml::state<errored>
           + sml::event<event::parse_runtime> / action::mark_parse_invalid_request
 
-      , sml::state<parse_outcome_dispatch> <= sml::state<parse_request_decision>
-          + sml::completion<event::parse_runtime> [ guard::parse_valid_request{} ]
+      , sml::state<parse_file_image_decision> <= sml::state<parse_request_decision>
+          + sml::completion<event::parse_runtime>
+      , sml::state<parse_bound_storage_decision> <= sml::state<parse_file_image_decision>
+          + sml::completion<event::parse_runtime> [ guard::parse_has_file_image{} ]
+      , sml::state<parse_outcome_dispatch> <= sml::state<parse_file_image_decision>
+          + sml::completion<event::parse_runtime> [ guard::parse_missing_file_image{} ]
+          / action::mark_parse_invalid_request
+      , sml::state<parse_outcome_dispatch> <= sml::state<parse_file_image_decision>
+          + sml::completion<event::parse_runtime>
+          / action::mark_parse_invalid_request
+
+      , sml::state<parse_capacity_decision> <= sml::state<parse_bound_storage_decision>
+          + sml::completion<event::parse_runtime> [ guard::parse_has_bound_storage{} ]
+      , sml::state<parse_outcome_dispatch> <= sml::state<parse_bound_storage_decision>
+          + sml::completion<event::parse_runtime> [ guard::parse_missing_bound_storage{} ]
+          / action::mark_parse_invalid_request
+      , sml::state<parse_outcome_dispatch> <= sml::state<parse_bound_storage_decision>
+          + sml::completion<event::parse_runtime>
+          / action::mark_parse_invalid_request
+
+      , sml::state<parse_outcome_dispatch> <= sml::state<parse_capacity_decision>
+          + sml::completion<event::parse_runtime> [ guard::parse_bound_capacity_sufficient{} ]
           / action::exec_parse
-      , sml::state<parse_outcome_dispatch> <= sml::state<parse_request_decision>
-          + sml::completion<event::parse_runtime> [ guard::parse_invalid_request{} ]
+      , sml::state<parse_outcome_dispatch> <= sml::state<parse_capacity_decision>
+          + sml::completion<event::parse_runtime> [ guard::parse_bound_capacity_insufficient{} ]
+          / action::mark_parse_invalid_request
+      , sml::state<parse_outcome_dispatch> <= sml::state<parse_capacity_decision>
+          + sml::completion<event::parse_runtime>
           / action::mark_parse_invalid_request
 
       , sml::state<parsed> <= sml::state<parse_outcome_dispatch>
-          + sml::completion<event::parse_runtime> [ guard::parse_phase_ok{} ]
+          + sml::completion<event::parse_runtime> [ guard::parse_error_none{} ]
           / action::publish_parse_done
       , sml::state<errored> <= sml::state<parse_outcome_dispatch>
-          + sml::completion<event::parse_runtime> [ guard::parse_phase_failed{} ]
+          + sml::completion<event::parse_runtime> [ guard::parse_error_invalid_request{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_model_invalid{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_capacity{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_parse_failed{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_internal_error{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_untracked{} ]
+          / action::publish_parse_error
+      , sml::state<errored> <= sml::state<parse_outcome_dispatch>
+          + sml::completion<event::parse_runtime> [ guard::parse_error_unknown{} ]
           / action::publish_parse_error
 
       //------------------------------------------------------------------------------//
@@ -128,11 +224,23 @@ struct model {
           / action::on_unexpected
       , sml::state<errored> <= sml::state<probe_outcome_dispatch> + sml::unexpected_event<sml::_>
           / action::on_unexpected
+      , sml::state<errored> <= sml::state<probe_requirements_dispatch> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
       , sml::state<errored> <= sml::state<bind_request_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<errored> <= sml::state<bind_request_shape_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<errored> <= sml::state<bind_capacity_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<errored> <= sml::state<bind_outcome_dispatch> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<errored> <= sml::state<parse_request_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<errored> <= sml::state<parse_file_image_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<errored> <= sml::state<parse_bound_storage_decision> + sml::unexpected_event<sml::_>
+          / action::on_unexpected
+      , sml::state<errored> <= sml::state<parse_capacity_decision> + sml::unexpected_event<sml::_>
           / action::on_unexpected
       , sml::state<errored> <= sml::state<parse_outcome_dispatch> + sml::unexpected_event<sml::_>
           / action::on_unexpected
@@ -153,11 +261,6 @@ struct sm : public emel::sm<model, action::context> {
     event::probe_ctx ctx{};
     event::probe_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
-    const bool phase_ok = accepted && ctx.err == emel::error::cast(error::none);
-    while (phase_ok) {
-      ev.requirements_out = ctx.requirements_out;
-      break;
-    }
     return accepted && ctx.err == emel::error::cast(error::none);
   }
 

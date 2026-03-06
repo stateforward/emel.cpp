@@ -91,6 +91,7 @@ struct render_ctx {
   size_t detokenizer_output_length = 0;
   size_t detokenizer_pending_length = 0;
   size_t produced_length = 0;
+  size_t leading_space_prefix_length = 0;
 };
 
 struct flush_ctx {

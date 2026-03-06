@@ -21,6 +21,14 @@ struct initialized {};
 struct rendering {};
 struct render_dispatch_decision {};
 struct render_result_decision {};
+struct render_commit_output_exec {};
+struct render_strip_decision {};
+struct render_strip_prefix_scan_exec {};
+struct render_strip_prefix_decision {};
+struct render_strip_apply_exec {};
+struct render_strip_state_exec {};
+struct render_stop_match_exec {};
+struct render_finalize_decision {};
 struct render_publish_success {};
 struct render_publish_error {};
 struct flushing {};
@@ -38,7 +46,7 @@ state purpose
 - initializing/initialization_decision: initialization request acceptance and detokenizer attach outcome.
 - initialize_publish_*: explicit success/error publication for initialization.
 - initialized: ready for render and flush requests.
-- rendering/render_*: render request setup, detokenizer dispatch, strip/stop phases.
+- rendering/render_*: render request setup, detokenizer dispatch, explicit commit/strip/stop/finalize phases.
 - render_publish_*: explicit success/error publication for render.
 - flushing: emits buffered bytes (utf-8 pending + stop holdback).
 - flush_publish_*: explicit success/error publication for flush.
@@ -183,6 +191,46 @@ struct model {
           / action::dispatch_render_detokenizer
       , sml::state<render_result_decision> <= sml::state<render_dispatch_decision>
             + sml::completion<event::render_runtime> [ guard::render_dispatch_ok{} ]
+      , sml::state<render_commit_output_exec> <= sml::state<render_result_decision>
+            + sml::completion<event::render_runtime>
+      , sml::state<render_strip_decision> <= sml::state<render_commit_output_exec>
+            + sml::completion<event::render_runtime>
+          / action::commit_render_detokenizer_output
+      , sml::state<render_strip_prefix_scan_exec> <= sml::state<render_strip_decision>
+            + sml::completion<event::render_runtime> [ guard::strip_needed{} ]
+      , sml::state<render_strip_state_exec> <= sml::state<render_strip_decision>
+            + sml::completion<event::render_runtime> [ guard::strip_not_needed{} ]
+      , sml::state<render_publish_error> <= sml::state<render_strip_decision>
+            + sml::completion<event::render_runtime>
+          / action::ensure_last_error
+      , sml::state<render_strip_prefix_decision> <= sml::state<render_strip_prefix_scan_exec>
+            + sml::completion<event::render_runtime>
+          / action::compute_render_leading_space_prefix
+      , sml::state<render_strip_apply_exec> <= sml::state<render_strip_prefix_decision>
+            + sml::completion<event::render_runtime> [ guard::strip_prefix_nonzero{} ]
+          / action::apply_render_leading_space_strip
+      , sml::state<render_strip_state_exec> <= sml::state<render_strip_prefix_decision>
+            + sml::completion<event::render_runtime> [ guard::strip_prefix_zero{} ]
+      , sml::state<render_publish_error> <= sml::state<render_strip_prefix_decision>
+            + sml::completion<event::render_runtime>
+          / action::ensure_last_error
+      , sml::state<render_strip_state_exec> <= sml::state<render_strip_apply_exec>
+            + sml::completion<event::render_runtime>
+      , sml::state<render_stop_match_exec> <= sml::state<render_strip_state_exec>
+            + sml::completion<event::render_runtime>
+          / action::update_render_strip_state
+      , sml::state<render_finalize_decision> <= sml::state<render_stop_match_exec>
+            + sml::completion<event::render_runtime>
+          / action::apply_render_stop_matching
+      , sml::state<render_publish_success> <= sml::state<render_finalize_decision>
+            + sml::completion<event::render_runtime> [ guard::request_ok{} ]
+          / action::mark_done
+      , sml::state<render_publish_error> <= sml::state<render_finalize_decision>
+            + sml::completion<event::render_runtime> [ guard::request_failed{} ]
+          / action::ensure_last_error
+      , sml::state<render_publish_error> <= sml::state<render_finalize_decision>
+            + sml::completion<event::render_runtime>
+          / action::ensure_last_error
       , sml::state<render_publish_error> <= sml::state<render_dispatch_decision>
             + sml::completion<event::render_runtime> [ guard::render_dispatch_backend_failure{} ]
           / action::set_backend_error
@@ -194,18 +242,6 @@ struct model {
           / action::set_invalid_request
       , sml::state<render_publish_error> <= sml::state<render_dispatch_decision>
             + sml::completion<event::render_runtime>
-          / action::ensure_last_error
-      , sml::state<render_publish_success> <= sml::state<render_result_decision>
-            + sml::completion<event::render_runtime> [ guard::strip_needed{} ]
-          / action::commit_and_strip_render_output
-      , sml::state<render_publish_success> <= sml::state<render_result_decision>
-            + sml::completion<event::render_runtime> [ guard::strip_not_needed{} ]
-          / action::commit_render_output
-      , sml::state<render_publish_success> <= sml::state<render_result_decision>
-            + sml::completion<event::render_runtime> [ guard::request_ok{} ]
-          / action::mark_done
-      , sml::state<render_publish_error> <= sml::state<render_result_decision>
-            + sml::completion<event::render_runtime> [ guard::request_failed{} ]
           / action::ensure_last_error
       , sml::state<done> <= sml::state<render_publish_success>
             + sml::completion<event::render_runtime>
@@ -246,6 +282,22 @@ struct model {
       , sml::state<unexpected> <= sml::state<render_dispatch_decision> + sml::unexpected_event<sml::_>
             / action::on_unexpected
       , sml::state<unexpected> <= sml::state<render_result_decision> + sml::unexpected_event<sml::_>
+            / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_commit_output_exec> + sml::unexpected_event<sml::_>
+            / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_strip_decision> + sml::unexpected_event<sml::_>
+            / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_strip_prefix_scan_exec> + sml::unexpected_event<sml::_>
+            / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_strip_prefix_decision> + sml::unexpected_event<sml::_>
+            / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_strip_apply_exec> + sml::unexpected_event<sml::_>
+            / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_strip_state_exec> + sml::unexpected_event<sml::_>
+            / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_stop_match_exec> + sml::unexpected_event<sml::_>
+            / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<render_finalize_decision> + sml::unexpected_event<sml::_>
             / action::on_unexpected
       , sml::state<unexpected> <= sml::state<render_publish_success> + sml::unexpected_event<sml::_>
             / action::on_unexpected

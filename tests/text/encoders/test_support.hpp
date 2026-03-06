@@ -32,6 +32,51 @@
 #include "emel/model/data.hpp"
 #include "emel/text/unicode.hpp"
 
+namespace emel::text::encoders::spm::detail {
+
+inline encode_result encode_spm(const event::encode & ev,
+                                const emel::text::encoders::spm::action::context & ctx,
+                                const emel::model::data::vocab & vocab) {
+  encode_result result{};
+  const int32_t ok = emel::text::encoders::error::to_emel(
+    emel::text::encoders::error::code::ok);
+  const bool tables_ready = ctx.tables_ready && ctx.vocab == &vocab;
+
+  if (ev.text.empty()) {
+    result.error = ok;
+    result.token_count = 0;
+    return result;
+  }
+
+  if (!tables_ready) {
+    result.error = emel::text::encoders::error::to_emel(
+      emel::text::encoders::error::code::invalid_argument);
+    result.token_count = 0;
+    return result;
+  }
+
+  emel::text::encoders::spm::sm machine{};
+  int32_t token_count = 0;
+  int32_t err = ok;
+  const event::encode machine_ev{
+    .vocab = vocab,
+    .text = ev.text,
+    .preprocessed = ev.preprocessed,
+    .token_ids = ev.token_ids,
+    .token_count_out = &token_count,
+    .error_out = &err,
+    .owner_sm = ev.owner_sm,
+    .dispatch_done = ev.dispatch_done,
+    .dispatch_error = ev.dispatch_error,
+  };
+  (void)machine.process_event(machine_ev);
+  result.error = err;
+  result.token_count = token_count;
+  return result;
+}
+
+}  // namespace emel::text::encoders::spm::detail
+
 namespace {
 
 emel::model::data::vocab & vocab_storage() {

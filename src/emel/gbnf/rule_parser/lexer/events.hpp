@@ -52,6 +52,17 @@ struct next {
   const callback<bool(const ::emel::gbnf::rule_parser::lexer::events::next_error &)> & on_error;
 };
 
+struct scan_ctx {
+  uint32_t start = 0;
+  char first_char = '\0';
+  bool has_input = false;
+};
+
+struct scan_next {
+  const next & request;
+  scan_ctx & ctx;
+};
+
 }  // namespace emel::gbnf::rule_parser::lexer::event
 
 namespace emel::gbnf::rule_parser::lexer::events {

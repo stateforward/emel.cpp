@@ -108,6 +108,9 @@ inline void reset_outcome(runtime_ctx_type & runtime_ctx) noexcept {
   if constexpr (requires { runtime_ctx.produced_length; }) {
     runtime_ctx.produced_length = 0;
   }
+  if constexpr (requires { runtime_ctx.leading_space_prefix_length; }) {
+    runtime_ctx.leading_space_prefix_length = 0;
+  }
 }
 
 inline void reset_sequence_state(sequence_state & state,
@@ -524,25 +527,38 @@ struct commit_render_detokenizer_output {
     sequence_state & sequence = ctx.sequences[runtime_ev.ctx.sequence_index];
     sequence.pending_length = runtime_ev.ctx.detokenizer_pending_length;
     runtime_ev.ctx.produced_length = runtime_ev.ctx.detokenizer_output_length;
+    runtime_ev.ctx.leading_space_prefix_length = 0;
   }
 };
 
-struct strip_render_leading_space {
+struct compute_render_leading_space_prefix {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & ev,
                   context &) const noexcept {
     auto & runtime_ev = detail::unwrap_runtime_event(ev);
-    size_t strip_count = 0;
-    const size_t produced = runtime_ev.ctx.produced_length;
-    while (strip_count < produced &&
-           is_leading_space(runtime_ev.request.output[strip_count])) {
-      strip_count += 1;
-    }
+    const char * const begin = runtime_ev.request.output;
+    const char * const end = begin + runtime_ev.ctx.produced_length;
+    const char * const first_non_space =
+        std::find_if_not(begin, end, [](const char value) noexcept {
+          return is_leading_space(value);
+        });
+    runtime_ev.ctx.leading_space_prefix_length =
+        static_cast<size_t>(first_non_space - begin);
+  }
+};
 
+struct apply_render_leading_space_strip {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & ev,
+                  context &) const noexcept {
+    auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    const size_t strip_count = runtime_ev.ctx.leading_space_prefix_length;
+    const size_t produced = runtime_ev.ctx.produced_length;
     std::memmove(runtime_ev.request.output,
                  runtime_ev.request.output + strip_count,
                  produced - strip_count);
     runtime_ev.ctx.produced_length = produced - strip_count;
+    runtime_ev.ctx.leading_space_prefix_length = 0;
   }
 };
 
@@ -571,27 +587,6 @@ struct apply_render_stop_matching {
                              runtime_ev.ctx.output_length,
                              runtime_ev.ctx.status,
                              runtime_ev.ctx);
-  }
-};
-
-struct commit_render_output {
-  template <class runtime_event_type>
-  void operator()(const runtime_event_type & ev,
-                  context & ctx) const noexcept {
-    commit_render_detokenizer_output{}(ev, ctx);
-    update_render_strip_state{}(ev, ctx);
-    apply_render_stop_matching{}(ev, ctx);
-  }
-};
-
-struct commit_and_strip_render_output {
-  template <class runtime_event_type>
-  void operator()(const runtime_event_type & ev,
-                  context & ctx) const noexcept {
-    commit_render_detokenizer_output{}(ev, ctx);
-    strip_render_leading_space{}(ev, ctx);
-    update_render_strip_state{}(ev, ctx);
-    apply_render_stop_matching{}(ev, ctx);
   }
 };
 
@@ -802,9 +797,8 @@ inline constexpr reject_render reject_render{};
 inline constexpr render_sequence_already_stopped render_sequence_already_stopped{};
 inline constexpr dispatch_render_detokenizer dispatch_render_detokenizer{};
 inline constexpr commit_render_detokenizer_output commit_render_detokenizer_output{};
-inline constexpr commit_render_output commit_render_output{};
-inline constexpr commit_and_strip_render_output commit_and_strip_render_output{};
-inline constexpr strip_render_leading_space strip_render_leading_space{};
+inline constexpr compute_render_leading_space_prefix compute_render_leading_space_prefix{};
+inline constexpr apply_render_leading_space_strip apply_render_leading_space_strip{};
 inline constexpr update_render_strip_state update_render_strip_state{};
 inline constexpr apply_render_stop_matching apply_render_stop_matching{};
 inline constexpr begin_flush begin_flush{};

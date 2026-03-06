@@ -11,7 +11,7 @@ TEST_CASE("encoder_plamo2_byte_tokens") {
 
   std::array<int32_t, 4> tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
 
   CHECK(machine.process_event(emel::text::encoders::event::encode{
     .vocab = *builder.vocab,
@@ -21,7 +21,7 @@ TEST_CASE("encoder_plamo2_byte_tokens") {
     .error_out = &err,
   }));
 
-  CHECK(err == EMEL_OK);
+  CHECK(err == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(token_count == 1);
   CHECK(tokens[0] == byte_id);
 }
@@ -38,7 +38,7 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
   CHECK(emel::text::encoders::plamo2::detail::ensure_plamo2_tables(ctx, *builder.vocab));
   std::array<int32_t, 8> out_tokens = {};
   int32_t token_count = 0;
-  int32_t err = EMEL_OK;
+  int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
     .text = "\xEF\xBB\xBF" "a",
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
@@ -46,14 +46,14 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
     .error_out = &err,
   };
   const auto result = emel::text::encoders::plamo2::detail::encode_plamo2(ev, ctx, *builder.vocab);
-  CHECK(result.error == EMEL_OK);
+  CHECK(result.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(result.token_count > 0);
 
   emel::text::encoders::event::encode ev_bom_only = ev;
   ev_bom_only.text = "\xEF\xBB\xBF";
   const auto bom_only =
       emel::text::encoders::plamo2::detail::encode_plamo2(ev_bom_only, ctx, *builder.vocab);
-  CHECK(bom_only.error == EMEL_OK);
+  CHECK(bom_only.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok));
   CHECK(bom_only.token_count == 0);
 
   emel::text::encoders::event::encode ev_long = ev;
@@ -62,7 +62,7 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
   ev_long.text = long_text;
   const auto too_long =
       emel::text::encoders::plamo2::detail::encode_plamo2(ev_long, ctx, *builder.vocab);
-  CHECK(too_long.error == EMEL_ERR_INVALID_ARGUMENT);
+  CHECK(too_long.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument));
 
   vocab_builder incomplete_builder{};
   incomplete_builder.set_model("plamo2");
@@ -75,6 +75,6 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
   const auto invalid =
       emel::text::encoders::plamo2::detail::encode_plamo2(ev_incomplete, ctx_incomplete,
                                                    *incomplete_builder.vocab);
-  CHECK(invalid.error == EMEL_ERR_MODEL_INVALID);
+  CHECK(invalid.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::model_invalid));
 }
 
