@@ -35,6 +35,28 @@ namespace {
 
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_internal = 3;
+constexpr const char * k_generation_fixture_name = "Llama-68M-Chat-v1-Q2_K.gguf";
+
+bool file_exists(const std::string & path) {
+  std::FILE * file = std::fopen(path.c_str(), "rb");
+  if (file == nullptr) {
+    return false;
+  }
+  std::fclose(file);
+  return true;
+}
+
+std::string_view path_basename(const std::string & path) {
+  const size_t pos = path.find_last_of("/\\");
+  if (pos == std::string::npos) {
+    return path;
+  }
+  return std::string_view(path.data() + pos + 1u, path.size() - pos - 1u);
+}
+
+bool is_expected_generation_fixture(const std::string & model_path) {
+  return path_basename(model_path) == k_generation_fixture_name;
+}
 
 struct parser_done_capture {
   bool called = false;
