@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <string_view>
 
@@ -10,14 +11,39 @@ using emel::paritychecker::parity_options;
 
 void print_usage(const char * exe) {
   std::fprintf(stderr,
-               "usage: %s [--gbnf | --kernel | --jinja] [--model <path>] "
+               "usage: %s [--gbnf | --kernel | --jinja | --generation] [--model <path>] "
                "(--text <text> | --text-file <path>) "
-               "[--add-special] [--parse-special] [--dump]\n"
+               "[--max-tokens <count>] [--add-special] [--parse-special] [--dump]\n"
                "  default mode compares tokenizer parity and requires --model\n"
                "  --gbnf mode compares GBNF parser parity and ignores --model\n"
                "  --kernel mode compares kernel parity and ignores --model\n"
-               "  --jinja mode compares jinja parser/formatter parity and ignores --model\n",
+               "  --jinja mode compares jinja parser/formatter parity and ignores --model\n"
+               "  --generation mode reserves the generation CLI contract and requires --model and prompt text\n",
                exe);
+}
+
+bool parse_positive_i32(std::string_view text, int32_t & out) {
+  if (text.empty()) {
+    return false;
+  }
+  char buffer[32];
+  if (text.size() >= sizeof(buffer)) {
+    return false;
+  }
+  for (size_t i = 0; i < text.size(); ++i) {
+    buffer[i] = text[i];
+  }
+  buffer[text.size()] = '\0';
+  char * end = nullptr;
+  const long parsed = std::strtol(buffer, &end, 10);
+  if (end == buffer || *end != '\0') {
+    return false;
+  }
+  if (parsed <= 0 || parsed > 0x7fffffffL) {
+    return false;
+  }
+  out = static_cast<int32_t>(parsed);
+  return true;
 }
 
 bool load_text_file(const char * path, std::string & out) {
@@ -53,6 +79,10 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
     }
     if (arg == "--jinja") {
       out.mode = emel::paritychecker::parity_mode::jinja;
+      continue;
+    }
+    if (arg == "--generation") {
+      out.mode = emel::paritychecker::parity_mode::generation;
       continue;
     }
     if (arg == "--model") {
@@ -92,6 +122,15 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
       out.dump = true;
       continue;
     }
+    if (arg == "--max-tokens") {
+      if (i + 1 >= argc) {
+        return false;
+      }
+      if (!parse_positive_i32(argv[++i], out.max_tokens)) {
+        return false;
+      }
+      continue;
+    }
     if (arg == "--help" || arg == "-h") {
       return false;
     }
@@ -104,11 +143,19 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
       out.model_path.empty()) {
     return false;
   }
+  if (out.mode == emel::paritychecker::parity_mode::generation &&
+      (out.model_path.empty() || !have_text)) {
+    return false;
+  }
   if (out.mode == emel::paritychecker::parity_mode::gbnf_parser &&
       (out.add_special || out.parse_special)) {
     return false;
   }
   if (out.mode == emel::paritychecker::parity_mode::jinja &&
+      (out.add_special || out.parse_special)) {
+    return false;
+  }
+  if (out.mode == emel::paritychecker::parity_mode::generation &&
       (out.add_special || out.parse_special)) {
     return false;
   }
