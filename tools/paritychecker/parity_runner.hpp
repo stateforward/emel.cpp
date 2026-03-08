@@ -10,12 +10,14 @@ enum class parity_mode : uint8_t {
   gbnf_parser = 1,
   kernel = 2,
   jinja = 3,
+  generation = 4,
 };
 
 struct parity_options {
   parity_mode mode = parity_mode::tokenizer;
   std::string model_path;
   std::string text;
+  int32_t max_tokens = 32;
   bool add_special = false;
   bool parse_special = false;
   bool dump = false;
