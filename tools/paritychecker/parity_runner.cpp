@@ -1400,12 +1400,39 @@ int run_jinja_parity(const emel::paritychecker::parity_options & opts) {
   return 0;
 }
 
+int run_generation_harness_contract(const emel::paritychecker::parity_options & opts) {
+  if (!file_exists(opts.model_path)) {
+    std::fprintf(stderr, "generation fixture missing: %s\n", opts.model_path.c_str());
+    return 1;
+  }
+  if (!is_expected_generation_fixture(opts.model_path)) {
+    std::fprintf(stderr,
+                 "generation requires pinned fixture %s, got %.*s\n",
+                 k_generation_fixture_name,
+                 static_cast<int>(path_basename(opts.model_path).size()),
+                 path_basename(opts.model_path).data());
+    return 1;
+  }
+
+  const size_t prompt_bytes = opts.text.size();
+  std::fprintf(stdout,
+               "generation harness ok (fixture=%s prompt_bytes=%zu max_tokens=%d)\n",
+               k_generation_fixture_name,
+               prompt_bytes,
+               opts.max_tokens);
+  std::fprintf(stdout,
+               "generation dispatch reserved for later phases; no reference or EMEL decode ran\n");
+  return 0;
+}
+
 }  // namespace
 
 namespace emel::paritychecker {
 
 int run_parity(const parity_options & opts) {
   switch (opts.mode) {
+    case parity_mode::generation:
+      return run_generation_harness_contract(opts);
     case parity_mode::gbnf_parser:
       return run_gbnf_parser_parity(opts);
     case parity_mode::kernel:
