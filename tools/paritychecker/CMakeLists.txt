@@ -142,6 +142,11 @@ target_include_directories(paritychecker
     ${reference_impl_SOURCE_DIR}/include
 )
 
+target_compile_definitions(paritychecker
+  PRIVATE
+    PARITYCHECKER_REPO_ROOT=\"${EMEL_ROOT}\"
+)
+
 set(DOCTEST_INCLUDE_DIR ${EMEL_ROOT}/third_party/doctest)
 if(NOT EXISTS ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h)
   message(FATAL_ERROR "Missing doctest header at ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h")

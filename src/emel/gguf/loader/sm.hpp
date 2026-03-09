@@ -178,10 +178,10 @@ struct model {
           / action::exec_parse
       , sml::state<parse_outcome_dispatch> <= sml::state<parse_capacity_decision>
           + sml::completion<event::parse_runtime> [ guard::parse_bound_capacity_insufficient{} ]
-          / action::mark_parse_invalid_request
+          / action::mark_parse_capacity
       , sml::state<parse_outcome_dispatch> <= sml::state<parse_capacity_decision>
           + sml::completion<event::parse_runtime>
-          / action::mark_parse_invalid_request
+          / action::mark_parse_capacity
 
       , sml::state<parsed> <= sml::state<parse_outcome_dispatch>
           + sml::completion<event::parse_runtime> [ guard::parse_error_none{} ]

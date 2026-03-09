@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -245,6 +246,87 @@ bool run_jinja_paritychecker_process(const std::filesystem::path & template_path
 #endif
 }
 
+struct process_capture {
+  int exit_code = -1;
+  std::string stdout_text;
+  std::string stderr_text;
+};
+
+std::filesystem::path make_temp_capture_path(const char * stem) {
+  static uint32_t counter = 0;
+  ++counter;
+  return std::filesystem::temp_directory_path() /
+         (std::string(stem) + "-" + std::to_string(counter) + ".txt");
+}
+
+std::filesystem::path make_temp_fixture_path(const char * stem, const std::string & filename) {
+  static uint32_t counter = 0;
+  ++counter;
+  const std::filesystem::path dir = std::filesystem::temp_directory_path() /
+                                    (std::string(stem) + "-" + std::to_string(counter));
+  std::filesystem::create_directories(dir);
+  return dir / filename;
+}
+
+std::string read_text_file(const std::filesystem::path & path) {
+  std::ifstream input(path, std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+}
+
+process_capture run_generation_paritychecker_capture_with_args(
+    const std::vector<std::string> & args) {
+  const std::filesystem::path stdout_path = make_temp_capture_path("paritychecker-stdout");
+  const std::filesystem::path stderr_path = make_temp_capture_path("paritychecker-stderr");
+  std::string command;
+#if defined(_WIN32)
+  command = ".\\paritychecker";
+  for (const auto & arg : args) {
+    command += " ";
+    command += quote_arg_windows(arg);
+  }
+  command += " > ";
+  command += quote_arg_windows(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_windows(stderr_path.string());
+#else
+  command = "ulimit -s 8192; ./paritychecker";
+  for (const auto & arg : args) {
+    command += " ";
+    command += quote_arg_posix(arg);
+  }
+  command += " > ";
+  command += quote_arg_posix(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_posix(stderr_path.string());
+#endif
+
+  const int status = std::system(command.c_str());
+  process_capture capture{};
+#if defined(_WIN32)
+  capture.exit_code = status;
+#else
+  capture.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
+  capture.stdout_text = read_text_file(stdout_path);
+  capture.stderr_text = read_text_file(stderr_path);
+  std::filesystem::remove(stdout_path);
+  std::filesystem::remove(stderr_path);
+  return capture;
+}
+
+process_capture run_generation_paritychecker_capture(const std::filesystem::path & model_path,
+                                                     const std::string & text) {
+  return run_generation_paritychecker_capture_with_args({
+    "--generation",
+    "--model",
+    model_path.string(),
+    "--text",
+    text,
+    "--max-tokens",
+    "1",
+  });
+}
+
 }  // namespace
 
 TEST_CASE("paritychecker matches llama tokens across tiny models") {
@@ -291,6 +373,70 @@ TEST_CASE("paritychecker matches llama gbnf parser outputs") {
 
 TEST_CASE("paritychecker matches llama kernel outputs") {
   CHECK(run_kernel_paritychecker_process());
+}
+
+TEST_CASE("paritychecker generation compares one bounded request against the reference path") {
+  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+  REQUIRE(file_exists(model_path));
+
+  const process_capture capture = run_generation_paritychecker_capture(model_path, "hello");
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+  CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
+  CHECK(capture.stdout_text.find("generation initialize ok") == std::string::npos);
+  CHECK(capture.stdout_text.find("emel generator path ready") == std::string::npos);
+}
+
+TEST_CASE("paritychecker help describes the canonical generation fixture contract") {
+  const process_capture capture = run_generation_paritychecker_capture_with_args({"--help"});
+
+  CHECK(capture.exit_code == 2);
+  CHECK(capture.stdout_text.empty());
+  CHECK(capture.stderr_text.find("--generation mode requires --model tests/models/"
+                                 "Llama-68M-Chat-v1-Q2_K.gguf") != std::string::npos);
+  CHECK(capture.stderr_text.find("reserves the generation CLI contract") == std::string::npos);
+}
+
+TEST_CASE("paritychecker generation reports a deterministic missing-model failure") {
+  const auto missing_model_path = models_dir() / "does-not-exist.gguf";
+  REQUIRE(!file_exists(missing_model_path));
+
+  const process_capture capture = run_generation_paritychecker_capture_with_args({
+    "--generation",
+    "--model",
+    missing_model_path.string(),
+    "--text",
+    "hello",
+    "--max-tokens",
+    "1",
+  });
+
+  CHECK(capture.exit_code == 1);
+  CHECK(capture.stdout_text.find("generation parity ok") == std::string::npos);
+  CHECK(capture.stderr_text.find("generation load failed: missing model file") !=
+        std::string::npos);
+}
+
+TEST_CASE("paritychecker generation rejects a same-basename fixture outside tests/models") {
+  const auto canonical_model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+  REQUIRE(file_exists(canonical_model_path));
+
+  const std::filesystem::path impostor_model_path =
+      make_temp_fixture_path("paritychecker-fixture", canonical_model_path.filename().string());
+  std::filesystem::copy_file(canonical_model_path,
+                             impostor_model_path,
+                             std::filesystem::copy_options::overwrite_existing);
+
+  const process_capture capture = run_generation_paritychecker_capture(impostor_model_path, "hello");
+
+  CHECK(capture.exit_code == 1);
+  CHECK(capture.stdout_text.find("generation parity ok") == std::string::npos);
+  CHECK(capture.stderr_text.find("generation requires canonical fixture") != std::string::npos);
+
+  std::filesystem::remove(impostor_model_path);
+  std::filesystem::remove(impostor_model_path.parent_path());
 }
 
 TEST_CASE("paritychecker matches llama jinja parser and formatter outputs") {

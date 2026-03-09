@@ -55,6 +55,17 @@ emel::error::type load_weights_ok(void *,
   return emel::error::cast(emel::model::loader::error::none);
 }
 
+emel::error::type load_weights_backend_error(void *,
+                                             const emel::model::loader::event::load &,
+                                             uint64_t & bytes_total,
+                                             uint64_t & bytes_done,
+                                             bool & used_mmap) noexcept {
+  bytes_total = 0;
+  bytes_done = 0;
+  used_mmap = false;
+  return emel::error::cast(emel::model::loader::error::backend_error);
+}
+
 emel::error::type map_layers_ok(void *, const emel::model::loader::event::load & req) noexcept {
   req.model_data.n_layers = 2;
   return emel::error::cast(emel::model::loader::error::none);
@@ -153,6 +164,73 @@ TEST_CASE("model loader propagates parse failure") {
   CHECK_FALSE(owner.done);
   CHECK(owner.error);
   CHECK(owner.err == emel::error::cast(emel::model::loader::error::parse_failed));
+}
+
+TEST_CASE("model loader rejects full load without load_weights callback") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::model::loader::error::invalid_request));
+}
+
+TEST_CASE("model loader rejects full load without map_layers callback") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  request.load_weights = {nullptr, load_weights_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::model::loader::error::invalid_request));
+}
+
+TEST_CASE("model loader propagates load_weights backend error") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::loader::sm machine{};
+  owner_state owner{};
+  emel::model::loader::event::parse_model_fn parse_model{nullptr, parse_ok};
+
+  uint8_t file_bytes[8] = {};
+  emel::model::loader::event::load request{*model, parse_model};
+  request.file_image = file_bytes;
+  request.file_size = sizeof(file_bytes);
+  request.load_weights = {nullptr, load_weights_backend_error};
+  request.map_layers = {nullptr, map_layers_ok};
+  request.validate_structure = {nullptr, validate_structure_ok};
+  request.validate_architecture_impl = {nullptr, validate_architecture_ok};
+  request.on_done = {&owner, on_done};
+  request.on_error = {&owner, on_error};
+
+  CHECK_FALSE(machine.process_event(request));
+  CHECK_FALSE(owner.done);
+  CHECK(owner.error);
+  CHECK(owner.err == emel::error::cast(emel::model::loader::error::backend_error));
 }
 
 TEST_CASE("model loader unclassified error guard matches only unclassified codes") {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -37,8 +38,6 @@ inline constexpr uint32_t gguf_type_int64 = 11u;
 inline constexpr uint32_t gguf_type_float64 = 12u;
 inline constexpr uint32_t gguf_type_count = 13u;
 
-inline constexpr uint32_t ggml_type_count = 40u;
-
 }  // namespace constants
 
 struct ggml_type_layout {
@@ -48,14 +47,14 @@ struct ggml_type_layout {
 
 inline constexpr ggml_type_layout ggml_layout(const uint32_t type) noexcept {
   switch (type) {
-    case 0u: return {1u, 4u};    // F32
-    case 1u: return {1u, 2u};    // F16
-    case 2u: return {32u, 18u};  // Q4_0
-    case 3u: return {32u, 20u};  // Q4_1
-    case 6u: return {32u, 22u};  // Q5_0
-    case 7u: return {32u, 24u};  // Q5_1
-    case 8u: return {32u, 34u};  // Q8_0
-    case 9u: return {32u, 36u};  // Q8_1
+    case 0u: return {1u, 4u};       // F32
+    case 1u: return {1u, 2u};       // F16
+    case 2u: return {32u, 18u};     // Q4_0
+    case 3u: return {32u, 20u};     // Q4_1
+    case 6u: return {32u, 22u};     // Q5_0
+    case 7u: return {32u, 24u};     // Q5_1
+    case 8u: return {32u, 34u};     // Q8_0
+    case 9u: return {32u, 36u};     // Q8_1
     case 10u: return {256u, 84u};   // Q2_K
     case 11u: return {256u, 110u};  // Q3_K
     case 12u: return {256u, 144u};  // Q4_K
@@ -70,13 +69,13 @@ inline constexpr ggml_type_layout ggml_layout(const uint32_t type) noexcept {
     case 21u: return {256u, 110u};  // IQ3_S
     case 22u: return {256u, 82u};   // IQ2_S
     case 23u: return {256u, 136u};  // IQ4_XS
-    case 24u: return {1u, 1u};   // I8
-    case 25u: return {1u, 2u};   // I16
-    case 26u: return {1u, 4u};   // I32
-    case 27u: return {1u, 8u};   // I64
-    case 28u: return {1u, 8u};   // F64
+    case 24u: return {1u, 1u};      // I8
+    case 25u: return {1u, 2u};      // I16
+    case 26u: return {1u, 4u};      // I32
+    case 27u: return {1u, 8u};      // I64
+    case 28u: return {1u, 8u};      // F64
     case 29u: return {256u, 56u};   // IQ1_M
-    case 30u: return {1u, 2u};   // BF16
+    case 30u: return {1u, 2u};      // BF16
     case 34u: return {256u, 54u};   // TQ1_0
     case 35u: return {256u, 66u};   // TQ2_0
     case 39u: return {32u, 17u};    // MXFP4
@@ -146,10 +145,11 @@ struct bounded_reader {
   std::span<const uint8_t> bytes = {};
   uint64_t offset = 0u;
 
-  bounded_reader(std::span<const uint8_t> bytes_in) noexcept : bytes(bytes_in) {}
+  explicit bounded_reader(std::span<const uint8_t> bytes_in) noexcept : bytes(bytes_in) {}
 
   bool can_read(const uint64_t count) const noexcept {
-    return count <= bytes.size() && offset <= bytes.size() - count;
+    const uint64_t size = static_cast<uint64_t>(bytes.size());
+    return count <= size && offset <= size - count;
   }
 
   template <class value_type>
@@ -162,7 +162,9 @@ struct bounded_reader {
 
     unsigned_type value = 0u;
     for (size_t i = 0; i < sizeof(value_type); ++i) {
-      value |= static_cast<unsigned_type>(bytes[static_cast<size_t>(offset) + i]) << (i * 8u);
+      const unsigned_type byte =
+          static_cast<unsigned_type>(bytes[static_cast<size_t>(offset) + i]);
+      value |= byte << (i * 8u);
     }
 
     out = static_cast<value_type>(value);
@@ -170,23 +172,17 @@ struct bounded_reader {
     return true;
   }
 
-  bool read_string(std::string_view & out, uint64_t & serialized_size) noexcept {
+  bool read_string(std::string_view & out) noexcept {
     uint64_t length = 0u;
 
-    if (!read_scalar(length)) {
+    if (!read_scalar(length) || !can_read(length)) {
       return false;
     }
 
-    if (!can_read(length)) {
-      return false;
-    }
-
-    if (!add_u64(sizeof(uint64_t), length, serialized_size)) {
-      return false;
-    }
-
-    out = std::string_view{reinterpret_cast<const char *>(bytes.data() + offset),
-                           static_cast<size_t>(length)};
+    out = std::string_view{
+      reinterpret_cast<const char *>(bytes.data() + static_cast<size_t>(offset)),
+      static_cast<size_t>(length),
+    };
     offset += length;
     return true;
   }
@@ -225,22 +221,49 @@ inline bool valid_ggml_type(const uint32_t type) noexcept {
   return layout.block_size != 0u && layout.type_size != 0u;
 }
 
+inline uint64_t required_kv_arena_bytes(const requirements & requirements_in) noexcept;
+
+inline bool read_header(bounded_reader & reader,
+                        uint64_t & tensor_count_out,
+                        uint64_t & kv_count_out) noexcept {
+  if (!reader.can_read(constants::magic.size())) {
+    return false;
+  }
+
+  const std::string_view magic{
+    reinterpret_cast<const char *>(reader.bytes.data() + static_cast<size_t>(reader.offset)),
+    constants::magic.size(),
+  };
+  reader.offset += constants::magic.size();
+
+  uint32_t version = 0u;
+  if (magic != constants::magic ||
+      !reader.read_scalar(version) ||
+      !reader.read_scalar(tensor_count_out) ||
+      !reader.read_scalar(kv_count_out)) {
+    return false;
+  }
+
+  return version == constants::version;
+}
+
 inline emel::error::type scan_value_payload(bounded_reader & reader,
                                             const uint32_t type,
                                             const std::string_view key,
                                             uint32_t & alignment_out,
                                             uint64_t & serialized_size_out) noexcept {
+  const uint64_t value_start = reader.offset;
+
   if (!valid_gguf_type(type)) {
     return cast_loader_error(error::model_invalid);
   }
 
   if (type == constants::gguf_type_string) {
     std::string_view value = {};
-
-    if (!reader.read_string(value, serialized_size_out)) {
+    if (!reader.read_string(value)) {
       return cast_loader_error(error::parse_failed);
     }
-
+    serialized_size_out = reader.offset - value_start;
     return cast_loader_error(error::none);
   }
 
@@ -256,44 +279,30 @@ inline emel::error::type scan_value_payload(bounded_reader & reader,
       return cast_loader_error(error::model_invalid);
     }
 
-    uint64_t serialized_size = sizeof(uint32_t) + sizeof(uint64_t);
-
     if (array_type == constants::gguf_type_string) {
       for (uint64_t i = 0u; i < count; ++i) {
         std::string_view value = {};
-        uint64_t string_size = 0u;
-
-        if (!reader.read_string(value, string_size)) {
+        if (!reader.read_string(value)) {
           return cast_loader_error(error::parse_failed);
         }
-
-        if (!add_u64(serialized_size, string_size, serialized_size)) {
-          return cast_loader_error(error::capacity);
-        }
+      }
+    } else {
+      const uint8_t element_size = gguf_scalar_size(array_type);
+      if (element_size == 0u) {
+        return cast_loader_error(error::model_invalid);
       }
 
-      serialized_size_out = serialized_size;
-      return cast_loader_error(error::none);
+      uint64_t payload_size = 0u;
+      if (!multiply_u64(count, element_size, payload_size)) {
+        return cast_loader_error(error::capacity);
+      }
+
+      if (!reader.skip(payload_size)) {
+        return cast_loader_error(error::parse_failed);
+      }
     }
 
-    const uint8_t element_size = gguf_scalar_size(array_type);
-    if (element_size == 0u) {
-      return cast_loader_error(error::model_invalid);
-    }
-
-    uint64_t payload_size = 0u;
-    if (!multiply_u64(count, element_size, payload_size)) {
-      return cast_loader_error(error::capacity);
-    }
-
-    if (!reader.skip(payload_size)) {
-      return cast_loader_error(error::parse_failed);
-    }
-
-    if (!add_u64(serialized_size, payload_size, serialized_size_out)) {
-      return cast_loader_error(error::capacity);
-    }
-
+    serialized_size_out = reader.offset - value_start;
     return cast_loader_error(error::none);
   }
 
@@ -301,8 +310,6 @@ inline emel::error::type scan_value_payload(bounded_reader & reader,
   if (scalar_size == 0u) {
     return cast_loader_error(error::model_invalid);
   }
-
-  serialized_size_out = scalar_size;
 
   if (key == constants::general_alignment) {
     if (type != constants::gguf_type_uint32) {
@@ -316,15 +323,54 @@ inline emel::error::type scan_value_payload(bounded_reader & reader,
     if (alignment_out == 0u || !std::has_single_bit(alignment_out)) {
       return cast_loader_error(error::model_invalid);
     }
-
-    return cast_loader_error(error::none);
-  }
-
-  if (!reader.skip(scalar_size)) {
+  } else if (!reader.skip(scalar_size)) {
     return cast_loader_error(error::parse_failed);
   }
 
+  serialized_size_out = reader.offset - value_start;
   return cast_loader_error(error::none);
+}
+
+inline emel::error::type compute_tensor_data_size(const std::array<uint64_t, 4> & dims,
+                                                  const uint32_t n_dims,
+                                                  const uint32_t type,
+                                                  uint64_t & data_size_out) noexcept {
+  if (!valid_ggml_type(type)) {
+    return cast_loader_error(error::model_invalid);
+  }
+
+  const ggml_type_layout layout = ggml_layout(type);
+  const uint64_t first_dim = n_dims == 0u ? 1u : dims[0];
+  if ((first_dim % layout.block_size) != 0u) {
+    return cast_loader_error(error::model_invalid);
+  }
+
+  uint64_t element_count = 1u;
+  for (uint32_t dim_index = 0u; dim_index < n_dims; ++dim_index) {
+    if (!multiply_u64(element_count, dims[dim_index], element_count)) {
+      return cast_loader_error(error::capacity);
+    }
+  }
+
+  if (!multiply_u64(element_count / layout.block_size, layout.type_size, data_size_out)) {
+    return cast_loader_error(error::capacity);
+  }
+
+  return cast_loader_error(error::none);
+}
+
+inline bool copy_bytes(std::span<uint8_t> dst,
+                       const std::span<const uint8_t> src,
+                       const uint64_t offset) noexcept {
+  if (offset > dst.size() || src.size() > dst.size() - static_cast<size_t>(offset)) {
+    return false;
+  }
+
+  for (size_t i = 0; i < src.size(); ++i) {
+    dst[static_cast<size_t>(offset) + i] = src[i];
+  }
+
+  return true;
 }
 
 inline emel::error::type probe_requirements(const std::span<const uint8_t> & file_image,
@@ -332,33 +378,15 @@ inline emel::error::type probe_requirements(const std::span<const uint8_t> & fil
   requirements_out = {};
 
   bounded_reader reader{file_image};
-  uint32_t version = 0u;
   uint64_t tensor_count = 0u;
   uint64_t kv_count = 0u;
   uint32_t alignment = constants::default_alignment;
   uint64_t expected_tensor_offset = 0u;
 
-  if (!reader.can_read(constants::magic.size())) {
-    return cast_loader_error(error::parse_failed);
-  }
-
-  const std::string_view magic{
-    reinterpret_cast<const char *>(file_image.data() + reader.offset),
-    constants::magic.size(),
-  };
-  reader.offset += constants::magic.size();
-
-  if (magic != constants::magic) {
-    return cast_loader_error(error::model_invalid);
-  }
-
-  if (!reader.read_scalar(version) || !reader.read_scalar(tensor_count) ||
-      !reader.read_scalar(kv_count)) {
-    return cast_loader_error(error::parse_failed);
-  }
-
-  if (version != constants::version) {
-    return cast_loader_error(error::model_invalid);
+  if (!read_header(reader, tensor_count, kv_count)) {
+    return file_image.size() < constants::magic.size()
+             ? cast_loader_error(error::parse_failed)
+             : cast_loader_error(error::model_invalid);
   }
 
   if (tensor_count > std::numeric_limits<uint32_t>::max() ||
@@ -371,27 +399,25 @@ inline emel::error::type probe_requirements(const std::span<const uint8_t> & fil
 
   for (uint64_t i = 0u; i < kv_count; ++i) {
     std::string_view key = {};
-    uint64_t serialized_key_size = 0u;
     uint32_t type = 0u;
-    uint64_t serialized_value_size = 0u;
+    uint64_t value_size = 0u;
     uint32_t maybe_alignment = alignment;
 
-    if (!reader.read_string(key, serialized_key_size) || !reader.read_scalar(type)) {
+    if (!reader.read_string(key) || !reader.read_scalar(type)) {
       return cast_loader_error(error::parse_failed);
     }
-    (void)serialized_key_size;
 
     if (key.size() > std::numeric_limits<uint32_t>::max()) {
       return cast_loader_error(error::capacity);
     }
 
     const emel::error::type value_err =
-        scan_value_payload(reader, type, key, maybe_alignment, serialized_value_size);
+        scan_value_payload(reader, type, key, maybe_alignment, value_size);
     if (value_err != cast_loader_error(error::none)) {
       return value_err;
     }
 
-    if (serialized_value_size > std::numeric_limits<uint32_t>::max()) {
+    if (value_size > std::numeric_limits<uint32_t>::max()) {
       return cast_loader_error(error::capacity);
     }
 
@@ -399,8 +425,8 @@ inline emel::error::type probe_requirements(const std::span<const uint8_t> & fil
       requirements_out.max_key_bytes = static_cast<uint32_t>(key.size());
     }
 
-    if (requirements_out.max_value_bytes < serialized_value_size) {
-      requirements_out.max_value_bytes = static_cast<uint32_t>(serialized_value_size);
+    if (requirements_out.max_value_bytes < value_size) {
+      requirements_out.max_value_bytes = static_cast<uint32_t>(value_size);
     }
 
     alignment = maybe_alignment;
@@ -408,18 +434,19 @@ inline emel::error::type probe_requirements(const std::span<const uint8_t> & fil
 
   for (uint64_t i = 0u; i < tensor_count; ++i) {
     std::string_view name = {};
-    uint64_t serialized_name_size = 0u;
     uint32_t n_dims = 0u;
-    uint64_t dims[constants::max_tensor_dims] = {1u, 1u, 1u, 1u};
+    std::array<uint64_t, 4> dims = {1u, 1u, 1u, 1u};
     uint32_t type = 0u;
-    uint64_t file_offset = 0u;
-    uint64_t element_count = 1u;
+    uint64_t tensor_data_offset = 0u;
+    uint64_t tensor_data_size = 0u;
 
-    if (!reader.read_string(name, serialized_name_size) || !reader.read_scalar(n_dims)) {
+    if (!reader.read_string(name) || !reader.read_scalar(n_dims)) {
       return cast_loader_error(error::parse_failed);
     }
-    (void)name;
-    (void)serialized_name_size;
+
+    if (name.size() > std::numeric_limits<uint32_t>::max()) {
+      return cast_loader_error(error::capacity);
+    }
 
     if (n_dims > constants::max_tensor_dims) {
       return cast_loader_error(error::model_invalid);
@@ -431,41 +458,23 @@ inline emel::error::type probe_requirements(const std::span<const uint8_t> & fil
       }
     }
 
-    if (!reader.read_scalar(type) || !reader.read_scalar(file_offset)) {
+    if (!reader.read_scalar(type) || !reader.read_scalar(tensor_data_offset)) {
       return cast_loader_error(error::parse_failed);
     }
 
-    if (!valid_ggml_type(type)) {
-      return cast_loader_error(error::model_invalid);
+    const emel::error::type size_err =
+        compute_tensor_data_size(dims, n_dims, type, tensor_data_size);
+    if (size_err != cast_loader_error(error::none)) {
+      return size_err;
     }
 
-    const ggml_type_layout layout = ggml_layout(type);
-
-    if ((dims[0] % layout.block_size) != 0u) {
-      return cast_loader_error(error::model_invalid);
-    }
-
-    for (uint32_t dim_index = 0u; dim_index < n_dims; ++dim_index) {
-      if (!multiply_u64(element_count, dims[dim_index], element_count)) {
-        return cast_loader_error(error::capacity);
-      }
-    }
-
-    uint64_t block_count = 0u;
-    if (!multiply_u64(element_count / layout.block_size, layout.type_size, block_count)) {
-      return cast_loader_error(error::capacity);
-    }
-
-    if (file_offset != expected_tensor_offset) {
+    if (tensor_data_offset != expected_tensor_offset) {
       return cast_loader_error(error::parse_failed);
     }
 
     uint64_t padded_size = 0u;
-    if (!pad_to_alignment(block_count, alignment, padded_size)) {
-      return cast_loader_error(error::capacity);
-    }
-
-    if (!add_u64(expected_tensor_offset, padded_size, expected_tensor_offset)) {
+    if (!pad_to_alignment(tensor_data_size, alignment, padded_size) ||
+        !add_u64(expected_tensor_offset, padded_size, expected_tensor_offset)) {
       return cast_loader_error(error::capacity);
     }
   }
@@ -486,8 +495,194 @@ inline emel::error::type probe_requirements(const std::span<const uint8_t> & fil
   return cast_loader_error(error::none);
 }
 
-inline emel::error::type parse_bound_storage(const std::span<const uint8_t> &) noexcept {
-  return emel::error::cast(error::none);
+inline emel::error::type parse_bound_storage(
+    const std::span<const uint8_t> & file_image,
+    const std::span<uint8_t> kv_arena,
+    const std::span<kv_entry> kv_entries,
+    const std::span<emel::model::data::tensor_record> tensors,
+    const requirements & requirements_in) noexcept {
+  if (kv_entries.size() < requirements_in.kv_count ||
+      tensors.size() < requirements_in.tensor_count ||
+      kv_arena.size() < required_kv_arena_bytes(requirements_in)) {
+    return cast_loader_error(error::capacity);
+  }
+
+  bounded_reader reader{file_image};
+  uint64_t tensor_count = 0u;
+  uint64_t kv_count = 0u;
+  uint32_t alignment = constants::default_alignment;
+  uint64_t arena_cursor = 0u;
+  uint64_t expected_tensor_offset = 0u;
+
+  if (!read_header(reader, tensor_count, kv_count)) {
+    return file_image.size() < constants::magic.size()
+             ? cast_loader_error(error::parse_failed)
+             : cast_loader_error(error::model_invalid);
+  }
+
+  if (tensor_count != requirements_in.tensor_count || kv_count != requirements_in.kv_count) {
+    return cast_loader_error(error::invalid_request);
+  }
+
+  for (uint64_t i = 0u; i < kv_count; ++i) {
+    std::string_view key = {};
+    uint32_t type = 0u;
+    uint32_t maybe_alignment = alignment;
+    uint64_t value_start = 0u;
+    uint64_t value_size = 0u;
+
+    if (!reader.read_string(key) || !reader.read_scalar(type)) {
+      return cast_loader_error(error::parse_failed);
+    }
+
+    value_start = reader.offset;
+    const emel::error::type value_err =
+        scan_value_payload(reader, type, key, maybe_alignment, value_size);
+    if (value_err != cast_loader_error(error::none)) {
+      return value_err;
+    }
+
+    if (key.size() > requirements_in.max_key_bytes || value_size > requirements_in.max_value_bytes) {
+      return cast_loader_error(error::capacity);
+    }
+
+    const uint64_t entry_offset = arena_cursor;
+    if (!add_u64(arena_cursor, key.size(), arena_cursor) ||
+        !add_u64(arena_cursor, value_size, arena_cursor)) {
+      return cast_loader_error(error::capacity);
+    }
+
+    if (arena_cursor > kv_arena.size()) {
+      return cast_loader_error(error::capacity);
+    }
+
+    const std::span<const uint8_t> key_bytes{
+      reinterpret_cast<const uint8_t *>(key.data()),
+      key.size(),
+    };
+    const std::span<const uint8_t> value_bytes{
+      file_image.data() + static_cast<size_t>(value_start),
+      static_cast<size_t>(value_size),
+    };
+
+    if (!copy_bytes(kv_arena, key_bytes, entry_offset) ||
+        !copy_bytes(kv_arena, value_bytes, entry_offset + key.size())) {
+      return cast_loader_error(error::capacity);
+    }
+
+    kv_entries[static_cast<size_t>(i)] = kv_entry{
+      .key_offset = static_cast<uint32_t>(entry_offset),
+      .key_length = static_cast<uint32_t>(key.size()),
+      .value_offset = static_cast<uint32_t>(entry_offset + key.size()),
+      .value_length = static_cast<uint32_t>(value_size),
+      .value_type = type,
+    };
+    alignment = maybe_alignment;
+  }
+
+  for (uint64_t i = 0u; i < tensor_count; ++i) {
+    std::string_view name = {};
+    uint32_t n_dims = 0u;
+    std::array<uint64_t, 4> dims = {1u, 1u, 1u, 1u};
+    uint32_t type = 0u;
+    uint64_t tensor_data_offset = 0u;
+    uint64_t tensor_data_size = 0u;
+
+    if (!reader.read_string(name) || !reader.read_scalar(n_dims)) {
+      return cast_loader_error(error::parse_failed);
+    }
+
+    if (name.size() > std::numeric_limits<uint32_t>::max()) {
+      return cast_loader_error(error::capacity);
+    }
+
+    if (n_dims > constants::max_tensor_dims) {
+      return cast_loader_error(error::model_invalid);
+    }
+
+    for (uint32_t dim_index = 0u; dim_index < n_dims; ++dim_index) {
+      if (!reader.read_scalar(dims[dim_index])) {
+        return cast_loader_error(error::parse_failed);
+      }
+    }
+
+    if (!reader.read_scalar(type) || !reader.read_scalar(tensor_data_offset)) {
+      return cast_loader_error(error::parse_failed);
+    }
+
+    const emel::error::type size_err =
+        compute_tensor_data_size(dims, n_dims, type, tensor_data_size);
+    if (size_err != cast_loader_error(error::none)) {
+      return size_err;
+    }
+
+    if (tensor_data_offset != expected_tensor_offset) {
+      return cast_loader_error(error::parse_failed);
+    }
+
+    uint64_t padded_size = 0u;
+    if (!pad_to_alignment(tensor_data_size, alignment, padded_size) ||
+        !add_u64(expected_tensor_offset, padded_size, expected_tensor_offset)) {
+      return cast_loader_error(error::capacity);
+    }
+
+    const uint64_t name_offset =
+        static_cast<uint64_t>(reinterpret_cast<const uint8_t *>(name.data()) - file_image.data());
+    if (name_offset > std::numeric_limits<uint32_t>::max()) {
+      return cast_loader_error(error::capacity);
+    }
+
+    auto & tensor = tensors[static_cast<size_t>(i)];
+    tensor = {};
+    tensor.name_offset = static_cast<uint32_t>(name_offset);
+    tensor.name_length = static_cast<uint32_t>(name.size());
+    tensor.type = static_cast<int32_t>(type);
+    tensor.n_dims = static_cast<int32_t>(n_dims);
+    for (uint32_t dim_index = 0u; dim_index < constants::max_tensor_dims; ++dim_index) {
+      tensor.dims[dim_index] = static_cast<int64_t>(dims[dim_index]);
+    }
+    tensor.data_offset = tensor_data_offset;
+    tensor.data_size = tensor_data_size;
+    tensor.file_index = 0u;
+  }
+
+  if (!reader.align_to(alignment)) {
+    return cast_loader_error(error::parse_failed);
+  }
+
+  const uint64_t data_section_offset = reader.offset;
+  if (data_section_offset > file_image.size()) {
+    return cast_loader_error(error::parse_failed);
+  }
+
+  uint64_t required_file_size = 0u;
+  if (!add_u64(data_section_offset, expected_tensor_offset, required_file_size)) {
+    return cast_loader_error(error::capacity);
+  }
+
+  if (required_file_size > file_image.size()) {
+    return cast_loader_error(error::parse_failed);
+  }
+
+  for (size_t i = 0; i < requirements_in.tensor_count; ++i) {
+    auto & tensor = tensors[i];
+    uint64_t absolute_offset = 0u;
+    uint64_t tensor_end = 0u;
+
+    if (!add_u64(data_section_offset, tensor.data_offset, absolute_offset) ||
+        !add_u64(absolute_offset, tensor.data_size, tensor_end)) {
+      return cast_loader_error(error::capacity);
+    }
+
+    if (tensor_end > file_image.size()) {
+      return cast_loader_error(error::parse_failed);
+    }
+
+    tensor.file_offset = absolute_offset;
+    tensor.data = file_image.data() + static_cast<size_t>(absolute_offset);
+  }
+
+  return cast_loader_error(error::none);
 }
 
 inline uint64_t required_kv_arena_bytes(const requirements & requirements_in) noexcept {
