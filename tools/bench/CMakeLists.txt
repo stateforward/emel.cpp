@@ -109,6 +109,8 @@ find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
 
 set(BENCH_RUNNER_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/batch/planner_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../generation_backend.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/generation_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/rule_parser_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/kernel/aarch64_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/kernel/x86_64_bench.cpp
@@ -157,6 +159,11 @@ target_link_libraries(bench_runner
     emel
     ggml
     llama
+)
+
+target_compile_definitions(bench_runner
+  PRIVATE
+    EMEL_BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
 )
 
 target_include_directories(bench_runner

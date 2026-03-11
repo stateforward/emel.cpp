@@ -3,9 +3,10 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. Shipped v1.0 proves one narrow
-brownfield outcome: an end-to-end Llama-68M generation parity path inside `tools/paritychecker`
-that follows `docs/rules/sml.rules.md`.
+modeled as explicit actors instead of ad hoc control flow. Shipped v1.1 now proves two narrow
+brownfield outcomes: a parity-checked Llama-68M generation slice in `tools/paritychecker` and a
+truthful canonical Llama-68M generation benchmark in `tools/bench`, both aligned with
+`docs/rules/sml.rules.md`.
 
 ## Core Value
 
@@ -27,14 +28,22 @@ before widening API surface or model scope.
 - ✓ Generation mode now has subprocess success and failure coverage through the standard parity gate
   chain — v1.0
 - ✓ The milestone audit passed with 14/14 requirements satisfied for the Llama-68M slice — v1.0
+- ✓ One truthful `tools/bench` generation benchmark exists for the canonical Llama-68M workload
+  — v1.1
+- ✓ EMEL and `llama.cpp` timings for that workload are published through the existing compare flow
+  — v1.1
+- ✓ The canonical generation benchmark is maintained through the existing snapshot and docsgen
+  surfaces — v1.1
+- ✓ The v1.1 milestone audit passed with 10/10 requirements satisfied — v1.1
 
 ### Active
 
-- [ ] Expand generation parity across more GGUF fixtures under `tests/models/`
-- [ ] Reduce the paritychecker pre-initialize backfill from `llama.cpp` so more runtime ownership
-  stays inside EMEL
-- [ ] Decide whether the proven generation slice should graduate into a public C API or standalone
-  example outside `tools/paritychecker/`
+- [ ] Stabilize benchmark-policy behavior if low-iteration snapshot smoke checks should become hard
+  gates rather than noisy advisory signals.
+- [ ] Reduce the remaining tool-local reference-model metadata backfill before initialize so the
+  shipped generation slice depends less on `llama.cpp` for setup.
+- [ ] Expand benchmark scope only under an explicit next milestone, such as additional prompt
+  shapes, token budgets, or model fixtures.
 
 ### Out of Scope
 
@@ -44,19 +53,25 @@ before widening API surface or model scope.
 
 ## Current State
 
-Shipped version: `v1.0`
+Shipped version: `v1.1`
 
-- 7 phases and 15 plans delivered the first canonical Llama-68M parity slice.
+- 7 phases and 15 plans delivered the first canonical Llama-68M parity slice in v1.0.
+- 4 additional phases and 10 plans delivered the truthful benchmark slice in v1.1.
 - The audited E2E flow is `paritychecker --generation --model tests/models/Llama-68M-Chat-v1-Q2_K.gguf --text hello --max-tokens 1`.
-- Current non-blocking debt is narrow: the paritychecker handoff still backfills some runtime state
-  from `llama.cpp`, and `scripts/quality_gates.sh` still tolerates benchmark snapshot drift.
+- The audited benchmark flow is `scripts/bench.sh --compare` with the canonical row
+  `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1`.
+- Current non-blocking debt is narrow: the low-iteration snapshot smoke check is noisy, benchmark
+  drift is still non-blocking in `scripts/quality_gates.sh`, and the shipped tool-local generation
+  slice still derives some tokenizer/vocab metadata from the explicit `llama.cpp` reference model
+  before initialize.
 
 ## Next Milestone Goals
 
-- Expand coverage beyond one fixture without weakening deterministic gate behavior.
-- Continue moving generation ownership inward toward EMEL rather than paritychecker-local bridging.
-- Reassess whether a public generation surface belongs in the next milestone or should stay
-  paritychecker-only longer.
+- Decide whether benchmark-policy hardening should become a first-class milestone goal.
+- Expand the benchmark matrix only intentionally: additional prompt shapes, token budgets, or
+  fixtures.
+- Continue shrinking the remaining tool-local reference-model setup dependency in the shipped
+  generation slice.
 
 ## Context
 
@@ -91,6 +106,9 @@ explicit error publication, bounded actions, and deliberate machine-structure ch
 | Close `HARN-02` with canonical-path fixture enforcement | The audit exposed that basename-only validation overstated the shipped contract | ✓ Good |
 | Keep the normal paritychecker and quality-gate scripts as the verification surface | Reusing existing gates kept the slice honest and minimized repo churn | ✓ Good |
 | Leave benchmark snapshot drift policy unchanged during v1.0 | The milestone prioritized generation correctness over repo-wide gate-policy changes | ⚠ Revisit |
+| Reuse the v1.0 generation slice in `tools/bench` first | This kept the benchmark milestone narrow and anchored to proven behavior | ✓ Good |
+| Insert Phase 07.1 before publishing benchmark numbers | Truthful EMEL benchmark evidence required replacing the circular reference-backed decode seam | ✓ Good |
+| Keep benchmark maintenance on the existing compare/snapshot/docs surfaces | This preserved one operator workflow instead of creating benchmark-only tooling | ✓ Good |
 
 ---
-*Last updated: 2026-03-08 after v1.0 milestone*
+*Last updated: 2026-03-11 after v1.1 milestone*

@@ -327,6 +327,24 @@ process_capture run_generation_paritychecker_capture(const std::filesystem::path
   });
 }
 
+int parse_named_metric(const std::string & text, const std::string & key) {
+  const std::string needle = key + "=";
+  const size_t key_pos = text.find(needle);
+  if (key_pos == std::string::npos) {
+    return -1;
+  }
+
+  size_t value_pos = key_pos + needle.size();
+  size_t value_end = value_pos;
+  while (value_end < text.size() && text[value_end] >= '0' && text[value_end] <= '9') {
+    ++value_end;
+  }
+  if (value_pos == value_end) {
+    return -1;
+  }
+  return std::atoi(text.substr(value_pos, value_end - value_pos).c_str());
+}
+
 }  // namespace
 
 TEST_CASE("paritychecker matches llama tokens across tiny models") {
@@ -387,6 +405,30 @@ TEST_CASE("paritychecker generation compares one bounded request against the ref
   CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
   CHECK(capture.stdout_text.find("generation initialize ok") == std::string::npos);
   CHECK(capture.stdout_text.find("emel generator path ready") == std::string::npos);
+}
+
+TEST_CASE("paritychecker generation dump proves the EMEL path avoids the reference decode seam") {
+  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+  REQUIRE(file_exists(model_path));
+
+  const process_capture capture = run_generation_paritychecker_capture_with_args({
+    "--generation",
+    "--model",
+    model_path.string(),
+    "--text",
+    "hello",
+    "--max-tokens",
+    "1",
+    "--dump",
+  });
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
+  CHECK(parse_named_metric(capture.stdout_text, "emel_decode_calls") == 0);
+  CHECK(parse_named_metric(capture.stdout_text, "emel_logits_calls") == 0);
+  CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") > 0);
+  CHECK(parse_named_metric(capture.stdout_text, "reference_logits_calls") > 0);
 }
 
 TEST_CASE("paritychecker help describes the canonical generation fixture contract") {

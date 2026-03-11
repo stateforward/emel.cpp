@@ -1,8 +1,14 @@
 #include "doctest/doctest.h"
 
+#include <algorithm>
+#include <array>
+#include <cstring>
 #include <memory>
+#include <string>
+#include <string_view>
 
 #include "emel/error/error.hpp"
+#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/sm.hpp"
 
@@ -78,6 +84,65 @@ emel::error::type validate_structure_ok(void *, const emel::model::loader::event
 emel::error::type validate_architecture_ok(void *,
                                            const emel::model::loader::event::load &) noexcept {
   return emel::error::cast(emel::model::loader::error::none);
+}
+
+void copy_name(std::array<char, emel::model::data::k_max_architecture_name> & dest,
+               const std::string_view value) {
+  dest.fill('\0');
+  const size_t count = std::min(dest.size() - 1u, value.size());
+  for (size_t i = 0; i < count; ++i) {
+    dest[i] = value[i];
+  }
+}
+
+void append_tensor_name(emel::model::data & model, emel::model::data::tensor_record & tensor,
+                        const std::string_view name) {
+  tensor.name_offset = model.name_bytes_used;
+  tensor.name_length = static_cast<uint32_t>(name.size());
+  for (size_t i = 0; i < name.size(); ++i) {
+    model.name_storage[model.name_bytes_used + static_cast<uint32_t>(i)] = name[i];
+  }
+  model.name_bytes_used += static_cast<uint32_t>(name.size());
+  tensor.n_dims = 2;
+  tensor.dims[0] = 8;
+  tensor.dims[1] = 8;
+  tensor.data = &tensor;
+  tensor.data_size = 64u;
+}
+
+void build_canonical_model(emel::model::data & model, const int32_t block_count) {
+  std::memset(&model, 0, sizeof(model));
+  copy_name(model.architecture_name, "llama");
+  model.n_layers = block_count;
+  model.params.n_embd = 64;
+  model.params.n_ctx = 128;
+  model.weights_data = model.tensors.data();
+  model.weights_size = 4096u;
+
+  uint32_t tensor_index = 0u;
+  const auto add = [&](const std::string_view name) {
+    append_tensor_name(model, model.tensors[tensor_index], name);
+    ++tensor_index;
+  };
+  const auto add_block = [&](const int32_t block, const std::string_view suffix) {
+    add(std::string{"blk."} + std::to_string(block) + "." + std::string{suffix});
+  };
+
+  add("token_embd.weight");
+  add("output_norm.weight");
+  add("output.weight");
+  for (int32_t block = 0; block < block_count; ++block) {
+    add_block(block, "attn_norm.weight");
+    add_block(block, "attn_q.weight");
+    add_block(block, "attn_k.weight");
+    add_block(block, "attn_v.weight");
+    add_block(block, "attn_output.weight");
+    add_block(block, "ffn_norm.weight");
+    add_block(block, "ffn_gate.weight");
+    add_block(block, "ffn_down.weight");
+    add_block(block, "ffn_up.weight");
+  }
+  model.n_tensors = tensor_index;
 }
 
 }  // namespace
@@ -257,4 +322,39 @@ TEST_CASE("model loader unclassified error guard matches only unclassified codes
   CHECK_FALSE(guard(runtime));
   load_ctx.err = static_cast<emel::error::type>(0xFFFFu);
   CHECK(guard(runtime));
+}
+
+TEST_CASE("model_llama_detail_builds_execution_view_for_canonical_tensor_set") {
+  auto model = std::make_unique<emel::model::data>();
+  build_canonical_model(*model, 2);
+
+  emel::model::llama::detail::execution_view view = {};
+  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+
+  CHECK(err == emel::error::cast(emel::model::loader::error::none));
+  CHECK(view.model == model.get());
+  CHECK(view.block_count == 2);
+  CHECK(view.token_embedding.name == "token_embd.weight");
+  CHECK(view.output_norm.name == "output_norm.weight");
+  CHECK(view.output.name == "output.weight");
+
+  emel::model::llama::detail::block_view block = {};
+  CHECK(emel::model::llama::detail::lookup_block_view(view, 1, block) ==
+        emel::error::cast(emel::model::loader::error::none));
+  CHECK(block.index == 1);
+  CHECK(block.attention_norm.name == "blk.1.attn_norm.weight");
+  CHECK(block.feed_forward_up.name == "blk.1.ffn_up.weight");
+}
+
+TEST_CASE("model_llama_detail_rejects_missing_required_tensor") {
+  auto model = std::make_unique<emel::model::data>();
+  build_canonical_model(*model, 1);
+  model->tensors[3].data = nullptr;
+  model->tensors[3].data_size = 0u;
+
+  emel::model::llama::detail::execution_view view = {};
+  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+
+  CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(view.model == nullptr);
 }

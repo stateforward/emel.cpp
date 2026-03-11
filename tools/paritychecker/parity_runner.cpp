@@ -1,5 +1,6 @@
 #include "parity_runner.hpp"
 #include "tokenizer_parity.hpp"
+#include "../generation_backend.hpp"
 
 #include <algorithm>
 #include <array>
@@ -783,11 +784,15 @@ struct generation_result {
 };
 
 struct initialize_backend {
+  emel::tools::generation_backend::native_backend native = {};
   llama_model_ptr model = {nullptr, llama_model_free};
-  llama_context_ptr decode_ctx = {nullptr, llama_free};
   const llama_vocab * vocab = nullptr;
   int32_t vocab_size = 0;
   int32_t fallback_token_id = 0;
+  int32_t emel_reference_decode_calls = 0;
+  int32_t emel_reference_logits_calls = 0;
+  int32_t direct_reference_decode_calls = 0;
+  int32_t direct_reference_logits_calls = 0;
 };
 
 emel::error::type sampler_select_argmax(int32_t & candidate_ids,
@@ -820,9 +825,10 @@ struct generation_load_state {
   std::array<emel::logits::sampler::fn, 1> samplers = {
       emel::logits::sampler::fn::from<sampler_select_argmax>(),
   };
-  int model_topology = 1;
-  int prefill_plan = 2;
-  int decode_plan = 3;
+  emel::model::llama::detail::execution_view execution = {};
+  emel::model::llama::detail::topology model_topology = {};
+  emel::model::llama::detail::step_plan prefill_plan = {};
+  emel::model::llama::detail::step_plan decode_plan = {};
   std::vector<uint8_t> kv_arena = {};
   std::vector<emel::gguf::loader::kv_entry> kv_entries = {};
   std::vector<emel::model::weight_loader::effect_request> effect_requests = {};
@@ -1125,99 +1131,11 @@ bool tokenizer_tokenize_dispatch(
   return static_cast<emel::text::tokenizer::sm *>(tokenizer_sm)->process_event(ev);
 }
 
-bool backend_validate(const emel::graph::processor::event::execute & request, int32_t * err_out) {
-  auto * io = static_cast<emel::generator::compute_io *>(request.compute_ctx);
-  auto * backend = static_cast<initialize_backend *>(io != nullptr ? io->backend_ctx : nullptr);
-  if (err_out != nullptr) {
-    *err_out = 0;
-  }
-  return request.compute_ctx != nullptr && backend != nullptr && backend->decode_ctx != nullptr &&
-         backend->vocab != nullptr && backend->vocab_size > 0;
-}
-
-bool backend_prepare_graph(const emel::graph::processor::event::execute &,
-                           bool * reused_out,
-                           int32_t * err_out) {
-  if (reused_out != nullptr) {
-    *reused_out = false;
-  }
-  if (err_out != nullptr) {
-    *err_out = 0;
-  }
-  return true;
-}
-
-bool backend_alloc_graph(const emel::graph::processor::event::execute &, int32_t * err_out) {
-  if (err_out != nullptr) {
-    *err_out = 0;
-  }
-  return true;
-}
-
-bool backend_bind_inputs(const emel::graph::processor::event::execute &, int32_t * err_out) {
-  if (err_out != nullptr) {
-    *err_out = 0;
-  }
-  return true;
-}
-
-bool backend_run_kernel(const emel::graph::processor::event::execute &, int32_t * err_out) {
-  if (err_out != nullptr) {
-    *err_out = 0;
-  }
-  return true;
-}
-
-bool backend_extract_outputs(const emel::graph::processor::event::execute & request,
-                             int32_t * outputs_out,
-                             int32_t * err_out) {
-  auto * io = static_cast<emel::generator::compute_io *>(request.compute_ctx);
-  auto * backend = static_cast<initialize_backend *>(io != nullptr ? io->backend_ctx : nullptr);
-  if (err_out != nullptr) {
-    *err_out = 0;
-  }
-  if (io == nullptr || backend == nullptr || io->logits == nullptr || io->logits_capacity <= 0) {
-    if (err_out != nullptr) {
-      *err_out = 1;
-    }
-    return false;
-  }
-  if (backend->decode_ctx == nullptr || backend->vocab == nullptr || io->token_ids == nullptr ||
-      io->token_count <= 0 || backend->vocab_size <= 0 ||
-      backend->vocab_size > io->logits_capacity) {
-    if (err_out != nullptr) {
-      *err_out = 1;
-    }
-    return false;
-  }
-
-  llama_batch batch = llama_batch_get_one(const_cast<llama_token *>(io->token_ids), io->token_count);
-  const int32_t decode_status = llama_decode(backend->decode_ctx.get(), batch);
-  if (decode_status != 0) {
-    if (err_out != nullptr) {
-      *err_out = decode_status;
-    }
-    return false;
-  }
-
-  float * logits = llama_get_logits_ith(backend->decode_ctx.get(), -1);
-  if (logits == nullptr) {
-    if (err_out != nullptr) {
-      *err_out = 1;
-    }
-    return false;
-  }
-
-  for (int32_t idx = 0; idx < backend->vocab_size; ++idx) {
-    io->logits[idx] = logits[idx];
-  }
-  for (int32_t idx = backend->vocab_size; idx < io->logits_capacity; ++idx) {
-    io->logits[idx] = -1.0f;
-  }
-  if (outputs_out != nullptr) {
-    *outputs_out = 1;
-  }
-  return true;
+void reset_reference_decode_seam(initialize_backend & backend) {
+  backend.emel_reference_decode_calls = 0;
+  backend.emel_reference_logits_calls = 0;
+  backend.direct_reference_decode_calls = 0;
+  backend.direct_reference_logits_calls = 0;
 }
 
 emel::text::tokenizer::preprocessor::preprocessor_kind generation_preprocessor_variant(
@@ -1357,24 +1275,6 @@ bool load_generation_vocab_from_llama(const std::string & model_path,
   state.backend.vocab = vocab_ptr;
   state.backend.vocab_size = llama_vocab_n_tokens(vocab_ptr);
 
-  llama_context_params context_params = llama_context_default_params();
-  context_params.n_ctx = 0;
-  context_params.n_batch = 512;
-  context_params.n_ubatch = 512;
-  context_params.n_seq_max = 1;
-  context_params.n_threads = 1;
-  context_params.n_threads_batch = 1;
-  context_params.embeddings = false;
-  state.backend.decode_ctx = llama_context_ptr{
-      llama_init_from_model(model.get(), context_params),
-      llama_free,
-  };
-  if (state.backend.decode_ctx == nullptr) {
-    state.backend.vocab = nullptr;
-    state.backend.vocab_size = 0;
-    return false;
-  }
-
   state.backend.model = std::move(model);
   return true;
 }
@@ -1391,6 +1291,16 @@ emel::error::type run_emel_initialize_generator(
   const int32_t decode_capacity = std::max<int32_t>(4, opts.max_tokens);
   const int32_t block_capacity = std::max<int32_t>(8, prompt_capacity + decode_capacity);
 
+  const emel::error::type backend_err =
+      emel::tools::generation_backend::prepare(state.backend.native, *state.model_data);
+  if (backend_err != emel::error::cast(emel::model::loader::error::none)) {
+    return emel::error::cast(emel::generator::error::backend);
+  }
+  state.execution = state.backend.native.execution;
+  state.model_topology = state.backend.native.topology;
+  state.prefill_plan = state.backend.native.prefill_plan;
+  state.decode_plan = state.backend.native.decode_plan;
+
   state.generator = std::make_unique<emel::generator::sm>(
       *state.model_data,
       state.conditioner,
@@ -1406,23 +1316,23 @@ emel::error::type run_emel_initialize_generator(
     &state.tokenizer,
     tokenizer_bind_dispatch,
     tokenizer_tokenize_dispatch,
-    &state.backend,
-    backend_validate,
-    backend_prepare_graph,
-    backend_alloc_graph,
-    backend_bind_inputs,
-    backend_run_kernel,
-    backend_extract_outputs,
+    &state.backend.native,
+    emel::tools::generation_backend::validate,
+    emel::tools::generation_backend::prepare_graph,
+    emel::tools::generation_backend::alloc_graph,
+    emel::tools::generation_backend::bind_inputs,
+    emel::tools::generation_backend::run_kernel,
+    emel::tools::generation_backend::extract_outputs,
     std::span<emel::logits::sampler::fn>{state.samplers},
   };
   request.preprocessor_variant = generation_preprocessor_variant(*state.model_data);
   request.encoder_variant = generation_encoder_variant(*state.model_data);
   request.add_special = false;
   request.parse_special = false;
-  request.max_node_count = 8;
-  request.max_tensor_count = 8;
-  request.bytes_per_tensor = 4;
-  request.workspace_capacity_bytes = 4096;
+  request.max_node_count = state.model_topology.node_count;
+  request.max_tensor_count = state.model_topology.tensor_count;
+  request.bytes_per_tensor = state.model_topology.bytes_per_tensor;
+  request.workspace_capacity_bytes = state.model_topology.workspace_capacity_bytes;
   request.max_prompt_tokens = prompt_capacity;
   request.max_generated_tokens = decode_capacity;
   request.max_blocks = block_capacity;
@@ -1528,6 +1438,18 @@ bool tokenize_reference_prompt(const initialize_backend & backend,
   return true;
 }
 
+int32_t run_direct_reference_decode(initialize_backend & backend,
+                                    llama_context * ctx,
+                                    const llama_batch batch) {
+  backend.direct_reference_decode_calls += 1;
+  return llama_decode(ctx, batch);
+}
+
+float * read_direct_reference_logits(initialize_backend & backend, llama_context * ctx) {
+  backend.direct_reference_logits_calls += 1;
+  return llama_get_logits_ith(ctx, -1);
+}
+
 bool append_reference_piece(const initialize_backend & backend,
                             const llama_token token,
                             generation_result & result_out) {
@@ -1590,12 +1512,12 @@ emel::error::type run_reference_generate(initialize_backend & backend,
 
   llama_batch prompt_batch =
       llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()));
-  if (llama_decode(ctx.get(), prompt_batch) != 0) {
+  if (run_direct_reference_decode(backend, ctx.get(), prompt_batch) != 0) {
     return emel::error::cast(emel::generator::error::backend);
   }
 
   for (int32_t step = 0; step < opts.max_tokens; ++step) {
-    float * logits = llama_get_logits_ith(ctx.get(), -1);
+    float * logits = read_direct_reference_logits(backend, ctx.get());
     if (logits == nullptr) {
       return emel::error::cast(emel::generator::error::backend);
     }
@@ -1611,7 +1533,7 @@ emel::error::type run_reference_generate(initialize_backend & backend,
 
     llama_token next_token = selected;
     llama_batch decode_batch = llama_batch_get_one(&next_token, 1);
-    if (llama_decode(ctx.get(), decode_batch) != 0) {
+    if (run_direct_reference_decode(backend, ctx.get(), decode_batch) != 0) {
       return emel::error::cast(emel::generator::error::backend);
     }
   }
@@ -1645,6 +1567,16 @@ void dump_generation_result(const char * label, const generation_result & result
                result.output_length,
                static_cast<int>(result.output_length),
                result.output.data());
+}
+
+void dump_reference_decode_seam(const initialize_backend & backend) {
+  std::fprintf(stdout,
+               "reference_decode_seams: emel_decode_calls=%d emel_logits_calls=%d "
+               "reference_decode_calls=%d reference_logits_calls=%d\n",
+               backend.emel_reference_decode_calls,
+               backend.emel_reference_logits_calls,
+               backend.direct_reference_decode_calls,
+               backend.direct_reference_logits_calls);
 }
 
 std::string_view kv_key_view(const generation_load_state & state,
@@ -2070,8 +2002,9 @@ emel::error::type run_emel_map_layers(void *, const emel::model::loader::event::
   int32_t max_block_index = -1;
   for (uint32_t i = 0u; i < req.model_data.n_tensors; ++i) {
     int32_t block_index = -1;
-    if (try_parse_block_index(tensor_name_view(req.model_data, req.model_data.tensors[i]),
-                              block_index) &&
+    if (emel::model::try_parse_block_index(
+            emel::model::tensor_name_view(req.model_data, req.model_data.tensors[i]),
+            block_index) &&
         block_index > max_block_index) {
       max_block_index = block_index;
     }
@@ -2105,7 +2038,7 @@ emel::error::type run_emel_validate_structure(void *,
 emel::error::type run_emel_validate_architecture(
     void *,
     const emel::model::loader::event::load & req) {
-  return architecture_name_view(req.model_data) == "llama"
+  return emel::model::architecture_name_view(req.model_data) == "llama"
              ? emel::error::cast(emel::model::loader::error::none)
              : emel::error::cast(emel::model::loader::error::model_invalid);
 }
@@ -2898,6 +2831,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     return 1;
   }
 
+  reset_reference_decode_seam(state.backend);
   generation_result emel_result{};
   const emel::error::type generation_err =
       run_emel_generate(state, opts, std::span<char>{emel_result.output}, emel_result.output_length);
@@ -2936,6 +2870,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  reference_result.output_length,
                  mismatch_offset);
     if (opts.dump) {
+      dump_reference_decode_seam(state.backend);
       dump_generation_result("emel", emel_result);
       dump_generation_result("reference", reference_result);
     }
@@ -2953,6 +2888,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                static_cast<int>(emel_result.output_length),
                emel_result.output.data());
   if (opts.dump) {
+    dump_reference_decode_seam(state.backend);
     dump_generation_result("emel", emel_result);
     dump_generation_result("reference", reference_result);
   }

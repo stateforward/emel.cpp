@@ -383,7 +383,7 @@ TEST_CASE("generator_initialize_can_rebind_ready_session_without_re_reserving_gr
   CHECK(second_error == emel::error::cast(emel::generator::error::none));
 }
 
-TEST_CASE("generator_generate_runs_real_inference_and_writes_output") {
+TEST_CASE("generator_generate_runs_fake_backend_contract_for_orchestration_only") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};
   emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
