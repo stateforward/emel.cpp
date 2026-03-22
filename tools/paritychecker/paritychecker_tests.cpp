@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <cstdio>
 #include <filesystem>
@@ -315,7 +316,8 @@ process_capture run_generation_paritychecker_capture_with_args(
 }
 
 process_capture run_generation_paritychecker_capture(const std::filesystem::path & model_path,
-                                                     const std::string & text) {
+                                                     const std::string & text,
+                                                     const int32_t max_tokens = 1) {
   return run_generation_paritychecker_capture_with_args({
     "--generation",
     "--model",
@@ -323,7 +325,7 @@ process_capture run_generation_paritychecker_capture(const std::filesystem::path
     "--text",
     text,
     "--max-tokens",
-    "1",
+    std::to_string(max_tokens),
   });
 }
 
@@ -453,15 +455,37 @@ TEST_CASE("paritychecker generation compares one bounded request against the ref
   const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
   REQUIRE(file_exists(model_path));
 
-  const process_capture capture = run_generation_paritychecker_capture(model_path, "hello");
+  const process_capture capture = run_generation_paritychecker_capture(model_path, "hello", 1);
 
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
   CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
   CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
   CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") > 0);
+  CHECK(capture.stdout_text.find("reference_impl: source=") != std::string::npos);
+  CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
+  CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
+  CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
   CHECK(capture.stdout_text.find("generation initialize ok") == std::string::npos);
   CHECK(capture.stdout_text.find("emel generator path ready") == std::string::npos);
+}
+
+TEST_CASE("paritychecker generation keeps parity on a bounded longer decode") {
+  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+  REQUIRE(file_exists(model_path));
+
+  const process_capture capture = run_generation_paritychecker_capture(model_path, "hello", 8);
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+  CHECK(capture.stdout_text.find("max_tokens=8") != std::string::npos);
+  CHECK(parse_named_metric(capture.stdout_text, "generated_tokens") > 1);
+  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") > 0);
+  CHECK(capture.stdout_text.find("reference_impl: source=") != std::string::npos);
+  CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
+  CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
+  CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
 }
 
 TEST_CASE("paritychecker generation dump proves the EMEL path avoids the reference decode seam") {

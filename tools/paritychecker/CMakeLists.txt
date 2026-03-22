@@ -9,33 +9,28 @@ if(NOT EMEL_ROOT)
 endif()
 
 set(REF_IMPL_REPOSITORY "https://github.com/ggml-org/llama.cpp.git" CACHE STRING "")
-set(REF_IMPL_REF "" CACHE STRING "")
-if(REF_IMPL_REF STREQUAL "")
-  set(REF_IMPL_REF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/reference_ref.txt")
-  if(EXISTS "${REF_IMPL_REF_FILE}")
-    file(READ "${REF_IMPL_REF_FILE}" REF_IMPL_REF_CONTENT)
-    string(STRIP "${REF_IMPL_REF_CONTENT}" REF_IMPL_REF_CONTENT)
-    set(REF_IMPL_REF "${REF_IMPL_REF_CONTENT}" CACHE STRING "" FORCE)
-  else()
-    set(REF_IMPL_REF "master" CACHE STRING "" FORCE)
-  endif()
-endif()
+set(REF_IMPL_REF "master" CACHE STRING "" FORCE)
 
 include(FetchContent)
-set(REF_IMPL_LOCAL_PATH "${EMEL_ROOT}/tmp/llama.cpp" CACHE PATH "")
-if(EXISTS "${REF_IMPL_LOCAL_PATH}/ggml/CMakeLists.txt" AND
-   EXISTS "${REF_IMPL_LOCAL_PATH}/src/CMakeLists.txt")
-  set(reference_impl_SOURCE_DIR "${REF_IMPL_LOCAL_PATH}")
-else()
-  FetchContent_Declare(
-    reference_impl
-    GIT_REPOSITORY ${REF_IMPL_REPOSITORY}
-    GIT_TAG ${REF_IMPL_REF}
-  )
-  FetchContent_GetProperties(reference_impl)
-  if(NOT reference_impl_POPULATED)
-    FetchContent_Populate(reference_impl)
-  endif()
+set(PARITYCHECKER_REFERENCE_SOURCE "cmake_fetch")
+set(PARITYCHECKER_REFERENCE_REF_VALUE "${REF_IMPL_REF}")
+FetchContent_Declare(
+  reference_impl
+  GIT_REPOSITORY ${REF_IMPL_REPOSITORY}
+  GIT_TAG ${REF_IMPL_REF}
+)
+FetchContent_GetProperties(reference_impl)
+if(NOT reference_impl_POPULATED)
+  FetchContent_Populate(reference_impl)
+endif()
+execute_process(
+  COMMAND git -C "${reference_impl_SOURCE_DIR}" rev-parse HEAD
+  OUTPUT_VARIABLE PARITYCHECKER_REFERENCE_REF_VALUE
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+)
+if(PARITYCHECKER_REFERENCE_REF_VALUE STREQUAL "")
+  set(PARITYCHECKER_REFERENCE_REF_VALUE "${REF_IMPL_REF}")
 endif()
 
 set(LLAMA_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
@@ -145,6 +140,8 @@ target_include_directories(paritychecker
 target_compile_definitions(paritychecker
   PRIVATE
     PARITYCHECKER_REPO_ROOT=\"${EMEL_ROOT}\"
+    PARITYCHECKER_REFERENCE_SOURCE=\"${PARITYCHECKER_REFERENCE_SOURCE}\"
+    PARITYCHECKER_REFERENCE_REF=\"${PARITYCHECKER_REFERENCE_REF_VALUE}\"
 )
 
 set(DOCTEST_INCLUDE_DIR ${EMEL_ROOT}/third_party/doctest)
@@ -193,6 +190,8 @@ target_include_directories(paritychecker_tests
 target_compile_definitions(paritychecker_tests
   PRIVATE
     PARITYCHECKER_REPO_ROOT=\"${EMEL_ROOT}\"
+    PARITYCHECKER_REFERENCE_SOURCE=\"${PARITYCHECKER_REFERENCE_SOURCE}\"
+    PARITYCHECKER_REFERENCE_REF=\"${PARITYCHECKER_REFERENCE_REF_VALUE}\"
 )
 
 enable_testing()

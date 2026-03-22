@@ -74,6 +74,18 @@ constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_internal = 3;
 constexpr const char * k_generation_fixture_name = "Llama-68M-Chat-v1-Q2_K.gguf";
 constexpr size_t k_generation_output_capacity = 256u;
+constexpr std::string_view k_reference_impl_source =
+#ifdef PARITYCHECKER_REFERENCE_SOURCE
+    PARITYCHECKER_REFERENCE_SOURCE;
+#else
+    "unknown";
+#endif
+constexpr std::string_view k_reference_impl_ref =
+#ifdef PARITYCHECKER_REFERENCE_REF
+    PARITYCHECKER_REFERENCE_REF;
+#else
+    "unknown";
+#endif
 
 using llama_model_ptr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
 using llama_context_ptr = std::unique_ptr<llama_context, decltype(&llama_free)>;
@@ -2298,6 +2310,12 @@ const char * kernel_kind_name(const emel::kernel::kernel_kind kind) {
 
 void dump_reference_decode_seam(const generation_load_state & state) {
   std::fprintf(stdout,
+               "reference_impl: source=%.*s ref=%.*s\n",
+               static_cast<int>(k_reference_impl_source.size()),
+               k_reference_impl_source.data(),
+               static_cast<int>(k_reference_impl_ref.size()),
+               k_reference_impl_ref.data());
+  std::fprintf(stdout,
                "reference_decode_seams: emel_decode_calls=%d emel_logits_calls=%d "
                "reference_decode_calls=%d reference_logits_calls=%d\n",
                state.backend.emel_reference_decode_calls,
@@ -2311,6 +2329,22 @@ void dump_reference_decode_seam(const generation_load_state & state) {
   std::fprintf(stdout,
                "flash_dispatch: calls=%" PRIu64 "\n",
                state.generator->generation_flash_attention_dispatch_calls());
+}
+
+void dump_generation_failure_surface(generation_load_state & state,
+                                     const generation_result * emel_result,
+                                     const generation_result * reference_result,
+                                     const emel::paritychecker::parity_options & opts) {
+  dump_reference_decode_seam(state);
+  if (emel_result != nullptr) {
+    dump_generation_result("emel", *emel_result);
+  }
+  if (reference_result != nullptr) {
+    dump_generation_result("reference", *reference_result);
+  }
+  if (opts.dump && reference_result != nullptr) {
+    dump_generation_tensor_compare(state, opts);
+  }
 }
 
 std::string_view kv_key_view(const generation_load_state & state,
@@ -3661,6 +3695,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  generator_error_name(generation_err),
                  state.generation.tokens_generated,
                  state.generation.output_length);
+    dump_generation_failure_surface(state, nullptr, nullptr, opts);
     return 1;
   }
   emel_result.tokens_generated = state.generation.tokens_generated;
@@ -3672,9 +3707,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  "generation flash proof failed (fixture=%s flash_dispatch_calls=%" PRIu64 ")\n",
                  k_generation_fixture_name,
                  flash_dispatch_calls);
-    if (opts.dump) {
-      dump_reference_decode_seam(state);
-    }
+    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
 
@@ -3686,6 +3719,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  "generation reference failed (fixture=%s err=%s)\n",
                  k_generation_fixture_name,
                  generator_error_name(reference_err));
+    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
 
@@ -3700,12 +3734,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  emel_result.output_length,
                  reference_result.output_length,
                  mismatch_offset);
-    if (opts.dump) {
-      dump_reference_decode_seam(state);
-      dump_generation_result("emel", emel_result);
-      dump_generation_result("reference", reference_result);
-      dump_generation_tensor_compare(state, opts);
-    }
+    dump_generation_failure_surface(state, &emel_result, &reference_result, opts);
     return 1;
   }
 
@@ -3720,8 +3749,8 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                flash_dispatch_calls,
                static_cast<int>(emel_result.output_length),
                emel_result.output.data());
+  dump_reference_decode_seam(state);
   if (opts.dump) {
-    dump_reference_decode_seam(state);
     dump_generation_result("emel", emel_result);
     dump_generation_result("reference", reference_result);
     dump_generation_tensor_compare(state, opts);
