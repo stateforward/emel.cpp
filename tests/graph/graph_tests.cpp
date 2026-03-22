@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 #include <string_view>
 
@@ -17,6 +20,55 @@
 #include "emel/model/loader/errors.hpp"
 #include "emel/tensor/errors.hpp"
 #include "emel/tensor/events.hpp"
+
+namespace {
+
+std::atomic<bool> g_track_allocations = false;
+std::atomic<size_t> g_allocation_count = 0u;
+
+}  // namespace
+
+void * operator new(const std::size_t size) {
+  if (g_track_allocations.load(std::memory_order_relaxed)) {
+    g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
+  }
+  if (void * ptr = std::malloc(size)) {
+    return ptr;
+  }
+  throw std::bad_alloc{};
+}
+
+void * operator new[](const std::size_t size) {
+  if (g_track_allocations.load(std::memory_order_relaxed)) {
+    g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
+  }
+  if (void * ptr = std::malloc(size)) {
+    return ptr;
+  }
+  throw std::bad_alloc{};
+}
+
+void * operator new(const std::size_t size, const std::nothrow_t &) noexcept {
+  if (g_track_allocations.load(std::memory_order_relaxed)) {
+    g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
+  }
+  return std::malloc(size);
+}
+
+void * operator new[](const std::size_t size, const std::nothrow_t &) noexcept {
+  if (g_track_allocations.load(std::memory_order_relaxed)) {
+    g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
+  }
+  return std::malloc(size);
+}
+
+void operator delete(void * ptr) noexcept {
+  std::free(ptr);
+}
+
+void operator delete[](void * ptr) noexcept {
+  std::free(ptr);
+}
 
 namespace {
 
@@ -192,6 +244,21 @@ struct lifecycle_fixture {
     .tensor_count = static_cast<int32_t>(tensors.size()),
     .phase = &no_release_phase,
   };
+};
+
+struct allocation_scope {
+  allocation_scope() noexcept {
+    g_allocation_count.store(0u, std::memory_order_relaxed);
+    g_track_allocations.store(true, std::memory_order_relaxed);
+  }
+
+  ~allocation_scope() {
+    g_track_allocations.store(false, std::memory_order_relaxed);
+  }
+
+  size_t allocations() const noexcept {
+    return g_allocation_count.load(std::memory_order_relaxed);
+  }
 };
 
 void copy_architecture(std::array<char, emel::model::data::k_max_architecture_name> & dest,
@@ -496,6 +563,52 @@ TEST_CASE("graph_machine_reuses_publish_targets_after_release") {
     REQUIRE(compute_cb.done_called);
   }
   CHECK(g_kernel_calls == 2);
+}
+
+TEST_CASE("graph_machine_compute_lifecycle_dispatch_is_alloc_free") {
+  emel::graph::sm machine{};
+  lifecycle_fixture lifecycle{};
+
+  emel::graph::event::reserve_output reserve_output{};
+  reserve_callbacks reserve_cb{};
+  REQUIRE(machine.process_event(emel::graph::event::reserve{
+    .model_topology = reinterpret_cast<const void *>(0xA5),
+    .output_out = &reserve_output,
+    .lifecycle = &lifecycle.reserve,
+    .max_node_count = 4u,
+    .max_tensor_count = 5u,
+    .bytes_per_tensor = 8u,
+    .workspace_capacity_bytes = 64u,
+    .dispatch_done = {&reserve_cb, reserve_callbacks::on_done},
+    .dispatch_error = {&reserve_cb, reserve_callbacks::on_error},
+  }));
+
+  emel::graph::event::compute_output compute_output{};
+  compute_callbacks compute_cb{};
+  allocation_scope allocations{};
+  REQUIRE(machine.process_event(emel::graph::event::compute{
+    .step_plan = reinterpret_cast<const void *>(0xE1),
+    .output_out = &compute_output,
+    .lifecycle = &lifecycle.compute,
+    .node_count_hint = reserve_output.node_count,
+    .tensor_count_hint = reserve_output.tensor_count,
+    .bytes_per_tensor = 8u,
+    .workspace_capacity_bytes = 64u,
+    .step_index = 0,
+    .step_size = 1,
+    .kv_tokens = 1,
+    .expected_outputs = 1,
+    .validate = validate_ok,
+    .prepare_graph = prepare_graph_reuse,
+    .alloc_graph = alloc_graph_ok,
+    .bind_inputs = bind_inputs_ok,
+    .run_kernel = run_kernel_ok,
+    .extract_outputs = extract_outputs_ok,
+    .dispatch_done = {&compute_cb, compute_callbacks::on_done},
+    .dispatch_error = {&compute_cb, compute_callbacks::on_error},
+  }));
+  const size_t allocation_count = allocations.allocations();
+  CHECK(allocation_count == 0u);
 }
 
 TEST_CASE("graph_machine_dispatches_invalid_compute_error") {
