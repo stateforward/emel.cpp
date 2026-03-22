@@ -763,6 +763,14 @@ struct sm : public emel::sm<model, action::context> {
     return this->context_.compute.backend.flash_attention_dispatch_calls;
   }
 
+  uint64_t generation_optimized_flash_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_flash_dispatch_count();
+  }
+
+  uint64_t generation_shared_flash_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.shared_flash_dispatch_count();
+  }
+
   const emel::graph::event::reserve_output & graph_reservation() const noexcept {
     return this->context_.state.graph_reservation;
   }

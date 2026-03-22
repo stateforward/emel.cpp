@@ -531,17 +531,24 @@ TEST_CASE("kernel_aarch64_unary_subop_scalar_paths") {
 }
 
 TEST_CASE("kernel_aarch64_flash_attn_ext_reuses_persistent_workspace") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
   flash_attn_ext_fixture fixture{};
   const auto request = make_flash_attn_ext_event(fixture);
 
   emel::kernel::aarch64::action::context ctx{};
   emel::kernel::aarch64::event::dispatch_ctx dispatch_ctx0{};
   const emel::kernel::aarch64::event::dispatch_op_flash_attn_ext dispatch0{request, dispatch_ctx0};
+  const float * scratch = ctx.flash_attn_workspace.score_buffer.data();
 
   emel::kernel::aarch64::action::exec_op_flash_attn_ext(dispatch0, ctx);
   CHECK(dispatch_ctx0.outcome == emel::kernel::aarch64::events::phase_outcome::done);
+  CHECK(ctx.optimized_flash_dispatch_count == 1u);
+  CHECK(ctx.shared_flash_dispatch_count == 0u);
   CHECK(ctx.flash_attn_workspace.prepared_tokens == 2u);
   CHECK(ctx.flash_attn_workspace.reuse_count == 0u);
+  CHECK(ctx.flash_attn_workspace.score_buffer.data() == scratch);
 
   fixture.dst[0] = 0.0f;
   fixture.dst[1] = 0.0f;
@@ -553,6 +560,33 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_reuses_persistent_workspace") {
 
   emel::kernel::aarch64::action::exec_op_flash_attn_ext(dispatch1, ctx);
   CHECK(dispatch_ctx1.outcome == emel::kernel::aarch64::events::phase_outcome::done);
+  CHECK(ctx.optimized_flash_dispatch_count == 2u);
+  CHECK(ctx.shared_flash_dispatch_count == 0u);
   CHECK(ctx.flash_attn_workspace.prepared_tokens == 2u);
   CHECK(ctx.flash_attn_workspace.reuse_count == 1u);
+  CHECK(ctx.flash_attn_workspace.score_buffer.data() == scratch);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_flash_attn_ext_uses_optimized_backend_path") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  flash_attn_ext_fixture fixture{};
+  const auto request = make_flash_attn_ext_event(fixture);
+
+  emel::kernel::aarch64::action::context ctx{};
+  emel::kernel::aarch64::event::dispatch_ctx dispatch_ctx{};
+  const emel::kernel::aarch64::event::dispatch_op_flash_attn_ext dispatch{request, dispatch_ctx};
+
+  emel::kernel::aarch64::action::exec_op_flash_attn_ext(dispatch, ctx);
+
+  CHECK(dispatch_ctx.outcome == emel::kernel::aarch64::events::phase_outcome::done);
+  CHECK(ctx.optimized_flash_dispatch_count == 1u);
+  CHECK(ctx.shared_flash_dispatch_count == 0u);
+  CHECK(fixture.dst[0] == doctest::Approx(1.4621172f).epsilon(1e-5f));
+  CHECK(fixture.dst[1] == doctest::Approx(1.0757657f).epsilon(1e-5f));
+  CHECK(fixture.dst[2] == doctest::Approx(0.0f));
+  CHECK(fixture.dst[3] == doctest::Approx(0.0f));
+#endif
 }

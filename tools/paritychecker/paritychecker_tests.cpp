@@ -392,6 +392,28 @@ int parse_flash_dispatch_calls(const std::string & text) {
   return std::atoi(text.substr(value_pos, value_end - value_pos).c_str());
 }
 
+int parse_flash_dispatch_metric(const std::string & text, const std::string & key) {
+  const size_t line_pos = text.find("flash_dispatch:");
+  if (line_pos == std::string::npos) {
+    return -1;
+  }
+
+  const size_t metric_pos = text.find(key + "=", line_pos);
+  if (metric_pos == std::string::npos) {
+    return -1;
+  }
+
+  const size_t value_pos = metric_pos + key.size() + 1u;
+  size_t value_end = value_pos;
+  while (value_end < text.size() && text[value_end] >= '0' && text[value_end] <= '9') {
+    ++value_end;
+  }
+  if (value_pos == value_end) {
+    return -1;
+  }
+  return std::atoi(text.substr(value_pos, value_end - value_pos).c_str());
+}
+
 std::string_view expected_generation_kernel_kind() {
 #if defined(__aarch64__) || defined(_M_ARM64)
   return "aarch64";
@@ -467,6 +489,21 @@ TEST_CASE("paritychecker generation compares one bounded request against the ref
   CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
   CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
   CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
+  CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") >= 0);
+  CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") >= 0);
+  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") >= 0);
+  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") >= 0);
+  if (expected_generation_kernel_kind() == "aarch64") {
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") > 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") > 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+  } else {
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+  }
   CHECK(capture.stdout_text.find("generation initialize ok") == std::string::npos);
   CHECK(capture.stdout_text.find("emel generator path ready") == std::string::npos);
 }
@@ -483,10 +520,23 @@ TEST_CASE("paritychecker generation keeps parity on a bounded longer decode") {
   CHECK(capture.stdout_text.find("max_tokens=8") != std::string::npos);
   CHECK(parse_named_metric(capture.stdout_text, "generated_tokens") > 1);
   CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") > 0);
+  CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") >= 0);
+  CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") >= 0);
   CHECK(capture.stdout_text.find("reference_impl: source=") != std::string::npos);
   CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
   CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
   CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
+  if (expected_generation_kernel_kind() == "aarch64") {
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") > 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") > 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+  } else {
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+  }
 }
 
 TEST_CASE("paritychecker generation dump proves the EMEL path avoids the reference decode seam") {
@@ -518,6 +568,15 @@ TEST_CASE("paritychecker generation dump proves the EMEL path avoids the referen
         std::string::npos);
   CHECK(parse_kernel_dispatch_calls(capture.stdout_text) > 0);
   CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
+  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") >= 0);
+  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") >= 0);
+  if (expected_generation_kernel_kind() == "aarch64") {
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") > 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+  } else {
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+  }
 }
 
 TEST_CASE("paritychecker help describes the canonical generation fixture contract") {

@@ -2309,6 +2309,11 @@ const char * kernel_kind_name(const emel::kernel::kernel_kind kind) {
 }
 
 void dump_reference_decode_seam(const generation_load_state & state) {
+  const emel::kernel::kernel_kind kernel_kind = state.generator->generation_kernel_kind();
+  const uint64_t optimized_flash_dispatch_calls =
+      state.generator->generation_optimized_flash_dispatch_calls();
+  const uint64_t shared_flash_dispatch_calls =
+      state.generator->generation_shared_flash_dispatch_calls();
   std::fprintf(stdout,
                "reference_impl: source=%.*s ref=%.*s\n",
                static_cast<int>(k_reference_impl_source.size()),
@@ -2324,11 +2329,13 @@ void dump_reference_decode_seam(const generation_load_state & state) {
                state.backend.direct_reference_logits_calls);
   std::fprintf(stdout,
                "kernel_dispatch: kind=%s calls=%" PRIu64 "\n",
-               kernel_kind_name(state.generator->generation_kernel_kind()),
+               kernel_kind_name(kernel_kind),
                state.generator->generation_kernel_dispatch_calls());
   std::fprintf(stdout,
-               "flash_dispatch: calls=%" PRIu64 "\n",
-               state.generator->generation_flash_attention_dispatch_calls());
+               "flash_dispatch: calls=%" PRIu64 " optimized=%" PRIu64 " shared=%" PRIu64 "\n",
+               state.generator->generation_flash_attention_dispatch_calls(),
+               optimized_flash_dispatch_calls,
+               shared_flash_dispatch_calls);
 }
 
 void dump_generation_failure_surface(generation_load_state & state,
@@ -3700,13 +3707,33 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   }
   emel_result.tokens_generated = state.generation.tokens_generated;
   emel_result.output_length = state.generation.output_length;
+  const emel::kernel::kernel_kind generation_kernel_kind =
+      state.generator->generation_kernel_kind();
   const uint64_t flash_dispatch_calls =
       state.generator->generation_flash_attention_dispatch_calls();
+  const uint64_t optimized_flash_dispatch_calls =
+      state.generator->generation_optimized_flash_dispatch_calls();
+  const uint64_t shared_flash_dispatch_calls =
+      state.generator->generation_shared_flash_dispatch_calls();
   if (flash_dispatch_calls == 0u) {
     std::fprintf(stderr,
                  "generation flash proof failed (fixture=%s flash_dispatch_calls=%" PRIu64 ")\n",
                  k_generation_fixture_name,
                  flash_dispatch_calls);
+    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
+    return 1;
+  }
+  if (generation_kernel_kind == emel::kernel::kernel_kind::aarch64 &&
+      (optimized_flash_dispatch_calls == 0u || shared_flash_dispatch_calls != 0u)) {
+    std::fprintf(stderr,
+                 "generation flash proof failed (fixture=%s kernel_kind=%s "
+                 "flash_dispatch_calls=%" PRIu64 " optimized_flash_dispatch_calls=%" PRIu64
+                 " shared_flash_dispatch_calls=%" PRIu64 ")\n",
+                 k_generation_fixture_name,
+                 kernel_kind_name(generation_kernel_kind),
+                 flash_dispatch_calls,
+                 optimized_flash_dispatch_calls,
+                 shared_flash_dispatch_calls);
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
@@ -3740,13 +3767,17 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
 
   std::fprintf(stdout,
                "generation parity ok (fixture=%s prompt_bytes=%zu max_tokens=%d generated_tokens=%d "
-               "output_bytes=%zu flash_dispatch_calls=%" PRIu64 " text=%.*s)\n",
+               "output_bytes=%zu flash_dispatch_calls=%" PRIu64
+               " optimized_flash_dispatch_calls=%" PRIu64
+               " shared_flash_dispatch_calls=%" PRIu64 " text=%.*s)\n",
                k_generation_fixture_name,
                opts.text.size(),
                opts.max_tokens,
                emel_result.tokens_generated,
                emel_result.output_length,
                flash_dispatch_calls,
+               optimized_flash_dispatch_calls,
+               shared_flash_dispatch_calls,
                static_cast<int>(emel_result.output_length),
                emel_result.output.data());
   dump_reference_decode_seam(state);

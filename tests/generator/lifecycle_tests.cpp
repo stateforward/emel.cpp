@@ -448,6 +448,13 @@ TEST_CASE("generator_generate_runs_native_generator_contract") {
   CHECK(std::string_view(output.data(), output_length) == "world");
   CHECK(fixture->generator->generation_kernel_dispatch_calls() > 0u);
   CHECK(fixture->generator->generation_flash_attention_dispatch_calls() > 0u);
+  if (fixture->generator->generation_kernel_kind() == emel::kernel::kernel_kind::aarch64) {
+    CHECK(fixture->generator->generation_optimized_flash_dispatch_calls() > 0u);
+    CHECK(fixture->generator->generation_shared_flash_dispatch_calls() == 0u);
+  } else {
+    CHECK(fixture->generator->generation_optimized_flash_dispatch_calls() == 0u);
+    CHECK(fixture->generator->generation_shared_flash_dispatch_calls() == 0u);
+  }
 }
 
 TEST_CASE("generator_generate_pins_the_phase_4_request_contract") {
@@ -528,6 +535,8 @@ TEST_CASE("generator_generate_rejects_noncanonical_flash_request_without_claimin
   CHECK(generate_tracker.generate_error_called);
   CHECK(generate_error != emel::error::cast(emel::generator::error::none));
   CHECK(fixture->generator->generation_flash_attention_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_optimized_flash_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_shared_flash_dispatch_calls() == 0u);
 }
 
 TEST_CASE("generator_generate_multiple_tokens_and_resets_sequence_on_reuse") {

@@ -604,6 +604,8 @@ struct generation_seam_audit {
 struct generation_flash_evidence_state {
   bool ready = false;
   std::uint64_t flash_dispatch_calls = 0u;
+  std::uint64_t optimized_flash_dispatch_calls = 0u;
+  std::uint64_t shared_flash_dispatch_calls = 0u;
   generation_seam_audit seam = {};
 };
 
@@ -1713,6 +1715,14 @@ std::uint64_t generation_flash_evidence_dispatch_calls() noexcept {
   return g_generation_flash_evidence.flash_dispatch_calls;
 }
 
+std::uint64_t generation_flash_evidence_optimized_dispatch_calls() noexcept {
+  return g_generation_flash_evidence.optimized_flash_dispatch_calls;
+}
+
+std::uint64_t generation_flash_evidence_shared_dispatch_calls() noexcept {
+  return g_generation_flash_evidence.shared_flash_dispatch_calls;
+}
+
 std::int32_t generation_flash_evidence_emel_decode_calls() noexcept {
   return g_generation_flash_evidence.seam.emel_reference_decode_calls;
 }
@@ -1742,6 +1752,8 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
     volatile std::size_t sink = 0u;
     generation_seam_audit seam = {};
     std::uint64_t flash_dispatch_calls = 0u;
+    std::uint64_t optimized_flash_dispatch_calls = 0u;
+    std::uint64_t shared_flash_dispatch_calls = 0u;
     auto session = std::make_unique<emel_session>();
     prepare_emel_session(fixture, *session);
     if (!initialize_emel_session(*session, generation_case)) {
@@ -1752,6 +1764,10 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
       reset_generation_seam(session->seam);
       const std::uint64_t flash_dispatch_calls_before =
           session->generator->generation_flash_attention_dispatch_calls();
+      const std::uint64_t optimized_flash_dispatch_calls_before =
+          session->generator->generation_optimized_flash_dispatch_calls();
+      const std::uint64_t shared_flash_dispatch_calls_before =
+          session->generator->generation_shared_flash_dispatch_calls();
 
       generation_result generated{};
       if (!run_emel_generate(*session, generation_case, generated)) {
@@ -1759,8 +1775,16 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
       }
       const std::uint64_t flash_dispatch_calls_after =
           session->generator->generation_flash_attention_dispatch_calls();
+      const std::uint64_t optimized_flash_dispatch_calls_after =
+          session->generator->generation_optimized_flash_dispatch_calls();
+      const std::uint64_t shared_flash_dispatch_calls_after =
+          session->generator->generation_shared_flash_dispatch_calls();
       seam = session->seam;
       flash_dispatch_calls = flash_dispatch_calls_after - flash_dispatch_calls_before;
+      optimized_flash_dispatch_calls =
+          optimized_flash_dispatch_calls_after - optimized_flash_dispatch_calls_before;
+      shared_flash_dispatch_calls =
+          shared_flash_dispatch_calls_after - shared_flash_dispatch_calls_before;
       sink ^= generated.output_length;
     };
 
@@ -1768,6 +1792,9 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
     if (generation_case.name == k_generation_case_name) {
       g_generation_flash_evidence.ready = true;
       g_generation_flash_evidence.flash_dispatch_calls = flash_dispatch_calls;
+      g_generation_flash_evidence.optimized_flash_dispatch_calls =
+          optimized_flash_dispatch_calls;
+      g_generation_flash_evidence.shared_flash_dispatch_calls = shared_flash_dispatch_calls;
       g_generation_flash_evidence.seam = seam;
     }
     if (generation_seam_audit_enabled()) {

@@ -1065,6 +1065,14 @@ struct sm : public emel::sm<model, action::context> {
     return process_dispatch_event(dispatch);
   }
 
+  uint64_t optimized_flash_dispatch_count() const noexcept {
+    return this->context_.optimized_flash_dispatch_count;
+  }
+
+  uint64_t shared_flash_dispatch_count() const noexcept {
+    return this->context_.shared_flash_dispatch_count;
+  }
+
  private:
   template <class dispatch_event_type>
   bool process_dispatch_event(const dispatch_event_type & ev) {

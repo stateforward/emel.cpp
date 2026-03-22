@@ -485,11 +485,20 @@ TEST_CASE("kernel_flash_attn_ext_requires_canonical_execution_path") {
   const auto canonical = make_flash_attn_ext_event(fixture);
 
   x86_64_sm x86_64_machine{};
+  aarch64_sm aarch64_machine{};
   CHECK(x86_64_machine.process_event(canonical));
   CHECK(fixture.dst[0] == doctest::Approx(1.4621172f).epsilon(1e-5f));
   CHECK(fixture.dst[1] == doctest::Approx(1.0757657f).epsilon(1e-5f));
   CHECK(fixture.dst[2] == doctest::Approx(0.0f));
   CHECK(fixture.dst[3] == doctest::Approx(0.0f));
+
+  flash_attn_ext_fixture aarch64_fixture{};
+  const auto aarch64_canonical = make_flash_attn_ext_event(aarch64_fixture);
+  CHECK(aarch64_machine.process_event(aarch64_canonical));
+  CHECK(aarch64_fixture.dst[0] == doctest::Approx(1.4621172f).epsilon(1e-5f));
+  CHECK(aarch64_fixture.dst[1] == doctest::Approx(1.0757657f).epsilon(1e-5f));
+  CHECK(aarch64_fixture.dst[2] == doctest::Approx(0.0f));
+  CHECK(aarch64_fixture.dst[3] == doctest::Approx(0.0f));
 
   flash_attn_ext_fixture invalid_fixture{};
   auto invalid = make_flash_attn_ext_event(invalid_fixture);
@@ -497,6 +506,7 @@ TEST_CASE("kernel_flash_attn_ext_requires_canonical_execution_path") {
   invalid.src1.nb[1] = invalid.src1.nb[0] * invalid.src1.ne[0];
 
   CHECK_FALSE(x86_64_machine.process_event(invalid));
+  CHECK_FALSE(aarch64_machine.process_event(invalid));
 }
 
 TEST_CASE("kernel_x86_64_flash_attn_ext_reuses_persistent_workspace") {

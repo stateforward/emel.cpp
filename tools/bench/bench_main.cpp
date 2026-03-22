@@ -16,6 +16,8 @@ namespace emel::bench {
 
 bool generation_flash_evidence_ready() noexcept;
 std::uint64_t generation_flash_evidence_dispatch_calls() noexcept;
+std::uint64_t generation_flash_evidence_optimized_dispatch_calls() noexcept;
+std::uint64_t generation_flash_evidence_shared_dispatch_calls() noexcept;
 std::int32_t generation_flash_evidence_emel_decode_calls() noexcept;
 std::int32_t generation_flash_evidence_emel_logits_calls() noexcept;
 std::int32_t generation_flash_evidence_reference_decode_calls() noexcept;
@@ -303,6 +305,10 @@ void print_compare(const std::vector<bench::result> & emel_results,
   }
 
   const auto flash_dispatch_calls = bench::generation_flash_evidence_dispatch_calls();
+  const auto optimized_flash_dispatch_calls =
+      bench::generation_flash_evidence_optimized_dispatch_calls();
+  const auto shared_flash_dispatch_calls =
+      bench::generation_flash_evidence_shared_dispatch_calls();
   const auto emel_decode_calls = bench::generation_flash_evidence_emel_decode_calls();
   const auto emel_logits_calls = bench::generation_flash_evidence_emel_logits_calls();
   const auto reference_decode_calls = bench::generation_flash_evidence_reference_decode_calls();
@@ -311,13 +317,35 @@ void print_compare(const std::vector<bench::result> & emel_results,
       reference_decode_calls != 0 || reference_logits_calls != 0) {
     std::fprintf(stderr,
                  "error: invalid generation flash evidence flash_dispatch_calls=%" PRIu64
+                 " optimized_flash_dispatch_calls=%" PRIu64
+                 " shared_flash_dispatch_calls=%" PRIu64
                  " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
                  "reference_logits_calls=%d\n",
                  flash_dispatch_calls,
+                 optimized_flash_dispatch_calls,
+                 shared_flash_dispatch_calls,
                  emel_decode_calls,
                  emel_logits_calls,
                  reference_decode_calls,
                  reference_logits_calls);
+    std::exit(1);
+  }
+  if (k_host_is_aarch64 &&
+      (optimized_flash_dispatch_calls == 0 || shared_flash_dispatch_calls != 0)) {
+    std::fprintf(stderr,
+                 "error: invalid ARM optimized flash evidence optimized_flash_dispatch_calls=%" PRIu64
+                 " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                 optimized_flash_dispatch_calls,
+                 shared_flash_dispatch_calls);
+    std::exit(1);
+  }
+  if (!k_host_is_aarch64 &&
+      (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
+    std::fprintf(stderr,
+                 "error: invalid non-ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                 " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                 optimized_flash_dispatch_calls,
+                 shared_flash_dispatch_calls);
     std::exit(1);
   }
 
@@ -327,11 +355,15 @@ void print_compare(const std::vector<bench::result> & emel_results,
               static_cast<int>(k_bench_reference_ref.size()),
               k_bench_reference_ref.data());
   std::printf("# generation_flash_evidence: case=%.*s flash_dispatch_calls=%" PRIu64
+              " optimized_flash_dispatch_calls=%" PRIu64
+              " shared_flash_dispatch_calls=%" PRIu64
               " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
               "reference_logits_calls=%d\n",
               static_cast<int>(bench::k_generation_case_name.size()),
               bench::k_generation_case_name.data(),
               flash_dispatch_calls,
+              optimized_flash_dispatch_calls,
+              shared_flash_dispatch_calls,
               emel_decode_calls,
               emel_logits_calls,
               reference_decode_calls,

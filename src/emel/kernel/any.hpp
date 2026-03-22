@@ -49,6 +49,30 @@ class any {
     return core_.process_event(ev);
   }
 
+  uint64_t optimized_flash_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_flash_dispatch_count(); }) {
+        count = sm.optimized_flash_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t shared_flash_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.shared_flash_dispatch_count(); }) {
+        count = sm.shared_flash_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
  private:
   using sm_list = boost::sml::aux::type_list<x86_64::sm, aarch64::sm, wasm::sm, cuda::sm,
                                              metal::sm, vulkan::sm>;

@@ -23,6 +23,8 @@ struct context {
   ::emel::kernel::detail::flash_attn_workspace flash_attn_workspace = {};
   // TODO(emel): remove once dispatch observability no longer relies on this counter.
   uint64_t dispatch_generation = 0;
+  uint64_t optimized_flash_dispatch_count = 0;
+  uint64_t shared_flash_dispatch_count = 0;
 };
 
 }  // namespace emel::kernel::aarch64::action

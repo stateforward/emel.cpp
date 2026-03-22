@@ -148,6 +148,162 @@ inline bool can_use_neon(const request_type & request, const bool neon_available
 #endif
 }
 
+template <class request_type>
+inline bool can_use_neon_flash_attn_ext(const request_type & request,
+                                        const bool neon_available) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void) request;
+  (void) neon_available;
+  return false;
+#else
+  return neon_available && ::emel::kernel::detail::can_run_flash_attn_ext(request);
+#endif
+}
+
+template <class tensor_type>
+inline const float * tensor_row_ptr(const tensor_type & tensor,
+                                    const uint64_t row1,
+                                    const uint64_t row2) noexcept {
+  const auto * base = static_cast<const char *>(tensor.data);
+  return reinterpret_cast<const float *>(base + row1 * tensor.nb[1] + row2 * tensor.nb[2]);
+}
+
+template <class tensor_type>
+inline float * tensor_row_ptr_mut(const tensor_type & tensor,
+                                  const uint64_t row1,
+                                  const uint64_t row2) noexcept {
+  auto * base = static_cast<char *>(tensor.data);
+  return reinterpret_cast<float *>(base + row1 * tensor.nb[1] + row2 * tensor.nb[2]);
+}
+
+inline float dot_product_f32_neon(const float * lhs, const float * rhs, const uint64_t count) noexcept {
+#if !defined(__aarch64__) && !defined(__ARM_NEON)
+  (void) lhs;
+  (void) rhs;
+  (void) count;
+  return 0.0f;
+#else
+  float32x4_t acc = vdupq_n_f32(0.0f);
+  uint64_t idx = 0;
+  for (; idx + 4 <= count; idx += 4) {
+    const float32x4_t lhs_v = vld1q_f32(lhs + idx);
+    const float32x4_t rhs_v = vld1q_f32(rhs + idx);
+#if defined(__aarch64__)
+    acc = vfmaq_f32(acc, lhs_v, rhs_v);
+#else
+    acc = vmlaq_f32(acc, lhs_v, rhs_v);
+#endif
+  }
+
+  float sum = vaddvq_f32(acc);
+  for (; idx < count; ++idx) {
+    sum += lhs[idx] * rhs[idx];
+  }
+  return sum;
+#endif
+}
+
+inline void scale_f32_neon(float * data, const float scale, const uint64_t count) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  const float32x4_t scale_v = vdupq_n_f32(scale);
+  uint64_t idx = 0;
+  for (; idx + 4 <= count; idx += 4) {
+    const float32x4_t data_v = vld1q_f32(data + idx);
+    vst1q_f32(data + idx, vmulq_f32(data_v, scale_v));
+  }
+  for (; idx < count; ++idx) {
+    data[idx] *= scale;
+  }
+#else
+  (void) data;
+  (void) scale;
+  (void) count;
+#endif
+}
+
+inline void axpy_f32_neon(float * dst, const float * src,
+                          const float alpha, const uint64_t count) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  const float32x4_t alpha_v = vdupq_n_f32(alpha);
+  uint64_t idx = 0;
+  for (; idx + 4 <= count; idx += 4) {
+    const float32x4_t dst_v = vld1q_f32(dst + idx);
+    const float32x4_t src_v = vld1q_f32(src + idx);
+#if defined(__aarch64__)
+    vst1q_f32(dst + idx, vfmaq_f32(dst_v, src_v, alpha_v));
+#else
+    vst1q_f32(dst + idx, vmlaq_f32(dst_v, src_v, alpha_v));
+#endif
+  }
+  for (; idx < count; ++idx) {
+    dst[idx] += src[idx] * alpha;
+  }
+#else
+  (void) dst;
+  (void) src;
+  (void) alpha;
+  (void) count;
+#endif
+}
+
+template <class request_type>
+inline bool run_flash_attn_ext_neon(const request_type & request,
+                                    const bool neon_available,
+                                    ::emel::kernel::detail::flash_attn_workspace & workspace) noexcept {
+  if (!can_use_neon_flash_attn_ext(request, neon_available)) {
+    return false;
+  }
+
+  const uint64_t kv_tokens = request.src1.ne[1];
+  if (kv_tokens > workspace.score_buffer.size()) {
+    return false;
+  }
+
+  if (workspace.prepared_tokens == kv_tokens) {
+    ++workspace.reuse_count;
+  } else {
+    workspace.prepared_tokens = kv_tokens;
+  }
+
+  const uint64_t head_dim = request.src0.ne[0];
+  const uint64_t head_count = request.src0.ne[2];
+  const uint64_t kv_head_count = request.src1.ne[2];
+  const uint64_t n_rep = head_count / kv_head_count;
+  const float scale = ::emel::kernel::detail::flash_attn_scale(request);
+
+  for (uint64_t head = 0; head < head_count; ++head) {
+    const uint64_t kv_head = head / n_rep;
+    const float * q = tensor_row_ptr(request.src0, 0u, head);
+    float * dst = tensor_row_ptr_mut(request.dst, 0u, head);
+    std::fill_n(dst, head_dim, 0.0f);
+
+    float max_score = -INFINITY;
+    float denom = 0.0f;
+
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const float * k = tensor_row_ptr(request.src1, token, kv_head);
+      const float * v = tensor_row_ptr(request.src2, token, kv_head);
+      const float score = dot_product_f32_neon(q, k, head_dim) * scale;
+
+      if (score > max_score) {
+        const float rescale = std::exp(max_score - score);
+        scale_f32_neon(dst, rescale, head_dim);
+        axpy_f32_neon(dst, v, 1.0f, head_dim);
+        denom = denom * rescale + 1.0f;
+        max_score = score;
+      } else {
+        const float weight = std::exp(score - max_score);
+        axpy_f32_neon(dst, v, weight, head_dim);
+        denom += weight;
+      }
+    }
+
+    scale_f32_neon(dst, 1.0f / denom, head_dim);
+  }
+
+  return true;
+}
+
 inline bool execute_neon_dup(const event::op_dup & request) noexcept {
 #if defined(__aarch64__) || defined(__ARM_NEON)
   const uint64_t count = ::emel::kernel::detail::tensor_element_count(request.dst);
@@ -936,8 +1092,14 @@ struct exec_scalar_op {
   void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
     using request_type = std::remove_cvref_t<decltype(ev.request)>;
     if constexpr (std::is_same_v<request_type, ::emel::kernel::event::op_flash_attn_ext>) {
-      if (::emel::kernel::detail::run_flash_attn_ext_with_workspace(ev.request,
-                                                                    ctx.flash_attn_workspace)) {
+      if (::emel::kernel::aarch64::detail::run_flash_attn_ext_neon(ev.request,
+                                                                   ctx.neon_available,
+                                                                   ctx.flash_attn_workspace)) {
+        ++ctx.optimized_flash_dispatch_count;
+        detail::mark_done(ev, ctx);
+      } else if (::emel::kernel::detail::run_flash_attn_ext_with_workspace(
+                     ev.request, ctx.flash_attn_workspace)) {
+        ++ctx.shared_flash_dispatch_count;
         detail::mark_done(ev, ctx);
       } else {
         detail::mark_error(
