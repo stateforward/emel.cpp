@@ -79,6 +79,43 @@ the canonical workload is fixed to the checked-in llama-68m fixture, prompt `hel
 `max_tokens=1`. fixture loading and one-time setup stay outside the timed loop; this case measures
 preloaded request latency.
 
+## phase 13 flash-evidence publication workflow
+
+phase 13 keeps flash-evidence publication on the existing benchmark surfaces only:
+`scripts/bench.sh --compare`, `scripts/bench.sh --compare-update`, `snapshots/bench`,
+`tools/docsgen`, and `docs/benchmarks.md`.
+
+the BENCH-03 approval gate is the canonical short case:
+
+`generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1`
+
+before any checked-in snapshot refresh, compare the preserved non-flash artifact
+`snapshots/bench/generation_pre_flash_baseline.txt` against the current compare snapshot with:
+
+```bash
+python3 tools/bench/compare_flash_baseline.py \
+  --baseline snapshots/bench/generation_pre_flash_baseline.txt \
+  --current snapshots/bench/benchmarks_compare.txt \
+  --case generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1
+```
+
+the preserved baseline artifact is a key-value file with these required fields:
+
+- `source_commit`
+- `baseline_ref`
+- `case`
+- `baseline_emel_ns`
+- `baseline_reference_ns`
+- `baseline_ratio`
+
+the comparator exits non-zero unless the current EMEL short-case latency is lower than the
+preserved pre-flash baseline. phase 13 remains anchored to the short case until a trustworthy
+maintained long-case baseline artifact exists.
+
+stop and obtain explicit user approval before running `scripts/bench.sh --compare-update` or
+checking in any new snapshot artifact under `snapshots/bench/`. do not treat local benchmark runs
+as permission to refresh checked-in snapshot or generated benchmark evidence files.
+
 ## reading the generation compare row
 
 compare mode prints one row per matched case:

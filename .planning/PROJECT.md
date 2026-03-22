@@ -3,26 +3,23 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. Shipped v1.1 now proves two narrow
-brownfield outcomes: a parity-checked Llama-68M generation slice in `tools/paritychecker` and a
-truthful canonical Llama-68M generation benchmark in `tools/bench`, both aligned with
-`docs/rules/sml.rules.md`.
+modeled as explicit actors instead of ad hoc control flow. Shipped v1.2 now proves three narrow
+brownfield outcomes on the canonical Llama-68M slice: a parity-checked generation path in
+`tools/paritychecker`, a truthful maintained benchmark workflow in `tools/bench`, and an
+EMEL-owned flash-attention runtime path carried through those existing repo surfaces, all aligned
+with `docs/rules/sml.rules.md`.
 
 ## Core Value
 
 Prove real end-to-end behavior with explicit SML orchestration and parity-oriented verification
 before widening API surface or model scope.
 
-## Current Milestone: v1.2 flash attention
+## Current Milestone
 
-**Goal:** Add an EMEL-owned flash-attention path for the canonical Llama-68M generation slice, then
-verify it through paritychecker and bench under the normal repo surfaces.
+No active milestone.
 
-**Target features:**
-- A real flash-attention execution path in the shipped `src/emel/generator` generation flow for the
-  canonical Llama-68M case
-- Parity-oriented verification for the flash-attention path through `tools/paritychecker`
-- Benchmark visibility for the flash-attention path through the existing `tools/bench` compare flow
+**Next action:** Start the next milestone with `$gsd-new-milestone` after deciding whether the next
+scope expansion is broader flash coverage, backend specialization, or benchmark-policy hardening.
 
 ## Requirements
 
@@ -54,11 +51,19 @@ verify it through paritychecker and bench under the normal repo surfaces.
 - ✓ The shipped graph and generator runtime now use `emel::tensor::sm` as the only tensor
   lifecycle authority, with formal reserve/fill/release cutover and alloc-free dispatch proof
   — v1.2 Phase 12.1
+- ✓ The maintained benchmark workflow now proves canonical flash execution, preserves a pre-flash
+  baseline artifact, and publishes generated benchmark evidence showing measurable improvement
+  on the maintained short compare case — v1.2 Phase 13
 
 ### Active
 
-- [ ] `tools/bench` can compare the canonical EMEL flash-attention path against `llama.cpp`
-  through the existing compare workflow.
+- [ ] Broaden flash attention beyond the canonical Llama-68M shape and workload contract.
+- [ ] Add backend-specific optimized flash-attention implementations where benchmark evidence
+  justifies them.
+- [ ] Roll flash attention out to additional model fixtures after the canonical path remains
+  stable.
+- [ ] Decide whether benchmark-policy hardening should become a real milestone requirement instead
+  of warning-only repo policy.
 
 ### Out of Scope
 
@@ -70,28 +75,31 @@ verify it through paritychecker and bench under the normal repo surfaces.
 
 ## Current State
 
-Shipped version: `v1.1`
+Shipped version: `v1.2`
 
 - 7 phases and 15 plans delivered the first canonical Llama-68M parity slice in v1.0.
 - 4 additional phases and 10 plans delivered the truthful benchmark slice in v1.1.
-- Phases 10, 11, 12, and 12.1 of v1.2 are now complete: flash attention is live in the shipped
-  canonical generator path, paritychecker proves that path, and the graph/generator runtime has
-  been hard-cut over to `emel::tensor::sm` lifecycle ownership.
-- The current validated E2E flow remains `paritychecker --generation --model tests/models/Llama-68M-Chat-v1-Q2_K.gguf --text hello --max-tokens 1`.
-- The next active phase is Phase 13, which publishes benchmark evidence for the flash-attention
-  path through the existing compare workflow and maintained artifacts.
-- Current non-blocking debt is narrow: the low-iteration snapshot smoke check is noisy, benchmark
-  drift is still non-blocking in `scripts/quality_gates.sh`, and benchmark baselines have not yet
-  been refreshed for the new canonical flash-attention compare row.
+- 5 additional phases and 13 plans delivered v1.2: flash attention is live in the shipped
+  canonical generator path, paritychecker proves it against fetched upstream `llama.cpp`,
+  graph/generator runtime ownership is hard-cut through `emel::tensor::sm`, and the maintained
+  benchmark workflow now publishes flash evidence plus a preserved pre-flash baseline.
+- The validated E2E flows now include
+  `paritychecker --generation --model tests/models/Llama-68M-Chat-v1-Q2_K.gguf --text hello --max-tokens 1`
+  and the maintained `scripts/bench.sh --compare` publication path that feeds
+  `snapshots/bench/benchmarks_compare.txt` and `docs/benchmarks.md`.
+- No active milestone is currently defined; the next milestone should state explicitly whether it
+  is broadening model scope, backend scope, or benchmark policy.
+- Current non-blocking debt remains narrow: the low-iteration benchmark smoke is noisy on this
+  machine, benchmark drift is still warning-only in `scripts/quality_gates.sh`, and broader flash
+  claims are intentionally out of scope until a future milestone defines them.
 
 ## Next Milestone Goals
 
-- Publish truthful flash-attention benchmark evidence through the existing compare, snapshot, and
-  docsgen surfaces.
-- Keep benchmark claims tied to the canonical Llama-68M workload and the shipped flash-attention
-  runtime path.
-- Preserve the current narrow milestone boundary instead of widening into broader runtime or API
-  work before benchmark evidence ships.
+- Choose the next deliberate widening step: broader flash operand/model coverage, backend-specific
+  optimization, or benchmark-policy hardening.
+- Keep acceptance boundaries explicit before broadening product surfaces beyond paritychecker and
+  bench.
+- Preserve the canonical Llama-68M slice as the truth anchor while any broader rollout is proven.
 
 ## Context
 
@@ -129,8 +137,9 @@ explicit error publication, bounded actions, and deliberate machine-structure ch
 | Reuse the v1.0 generation slice in `tools/bench` first | This kept the benchmark milestone narrow and anchored to proven behavior | ✓ Good |
 | Insert Phase 07.1 before publishing benchmark numbers | Truthful EMEL benchmark evidence required replacing the circular reference-backed decode seam | ✓ Good |
 | Keep benchmark maintenance on the existing compare/snapshot/docs surfaces | This preserved one operator workflow instead of creating benchmark-only tooling | ✓ Good |
-| Start v1.2 with flash attention in paritychecker plus bench | This keeps the next milestone narrow, measurable, and aligned with the shipped generation surfaces | — Pending |
+| Start v1.2 with flash attention in paritychecker plus bench | This kept the milestone narrow, measurable, and aligned with the shipped generation surfaces | ✓ Good |
 | Insert Phase 12.1 to hard-cut tensor lifecycle through `emel::tensor::sm` | Flash runtime work had left an ad hoc lifecycle bypass in graph/generator, which violated the architecture contract and needed removal before benchmarking | ✓ Good |
+| Preserve pre-flash benchmark evidence as a standalone artifact | Benchmark claims needed a durable non-flash baseline separate from the current flash compare snapshot | ✓ Good |
 
 ---
-*Last updated: 2026-03-22 after completing Phase 12.1*
+*Last updated: 2026-03-22 after shipping v1.2*

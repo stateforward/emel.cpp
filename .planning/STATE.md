@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Flash Attention
-status: unknown
-stopped_at: Completed 12.1-03-PLAN.md
-last_updated: "2026-03-22T05:45:20.994Z"
+status: complete
+stopped_at: Archived v1.2 milestone and cleaned archived phase directories
+last_updated: "2026-03-22T11:12:14Z"
 progress:
   total_phases: 5
-  completed_phases: 4
-  total_plans: 9
-  completed_plans: 9
+  completed_phases: 5
+  total_plans: 13
+  completed_plans: 13
 ---
 
 # Project State
@@ -20,20 +20,22 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Phase 13 — benchmark-evidence
+**Current focus:** No active milestone
 
 ## Current Position
 
-Phase: 13
-Plan: Not started
+Milestone: v1.2 archived
+Phase: None
+Plan: None
 
 ## Performance Metrics
 
-**Previous milestone velocity:**
+**Last shipped milestone:**
 
-- Total plans completed: 10
-- Active phases completed: 4
-- Current milestone progress: Phases 10 through 12.1 are complete; Phase 13 planning is next
+- Milestone: v1.2 Flash Attention
+- Phases complete: 5/5
+- Plans complete: 13/13
+- Audit status: passed
 
 ## Accumulated Context
 
@@ -43,11 +45,11 @@ Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
 - v1.2 scope stays inside paritychecker plus bench; no broader runtime or API expansion.
-- Flash attention lands as a data-plane replacement inside the existing generator -> graph ->
-  processor -> kernel chain; Boost.SML orchestration stays unchanged.
-
-- Phase order is correctness-first: kernel bring-up, runtime adoption, parity closure, then
-  benchmark evidence.
+- Flash attention ships as a data-plane replacement inside the existing generator -> graph ->
+  processor -> kernel chain; Boost.SML orchestration stayed unchanged.
+- Phase 12.1 hard-cut tensor lifecycle through `emel::tensor::sm` before benchmark publication.
+- Phase 13 preserved pre-flash benchmark evidence separately and published docs-generated flash
+  comparison output.
 
 ### Roadmap Evolution
 
@@ -60,7 +62,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+- Start the next milestone with `$gsd-new-milestone`.
 
 ### Blockers/Concerns
 
@@ -72,7 +74,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T05:45:06.778Z
-Stopped at: Completed 12.1-03-PLAN.md
-/gsd:plan-phase 13
+Last session: 2026-03-22T11:12:14Z
+Stopped at: v1.2 milestone archived and phase directories moved under `.planning/milestones/`
 Resume file: None

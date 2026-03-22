@@ -12,6 +12,17 @@
 #include "bench_cases.hpp"
 #include "bench_common.hpp"
 
+namespace emel::bench {
+
+bool generation_flash_evidence_ready() noexcept;
+std::uint64_t generation_flash_evidence_dispatch_calls() noexcept;
+std::int32_t generation_flash_evidence_emel_decode_calls() noexcept;
+std::int32_t generation_flash_evidence_emel_logits_calls() noexcept;
+std::int32_t generation_flash_evidence_reference_decode_calls() noexcept;
+std::int32_t generation_flash_evidence_reference_logits_calls() noexcept;
+
+}  // namespace emel::bench
+
 namespace {
 namespace bench = emel::bench;
 
@@ -33,6 +44,20 @@ constexpr bool k_host_is_aarch64 =
   true;
 #else
   false;
+#endif
+
+constexpr std::string_view k_bench_reference_source =
+#ifdef BENCH_REFERENCE_SOURCE
+  BENCH_REFERENCE_SOURCE;
+#else
+  "unknown";
+#endif
+
+constexpr std::string_view k_bench_reference_ref =
+#ifdef BENCH_REFERENCE_REF
+  BENCH_REFERENCE_REF;
+#else
+  "unknown";
 #endif
 
 bool case_supported_on_host(const bench::test_case & tc) {
@@ -271,6 +296,46 @@ void print_compare(const std::vector<bench::result> & emel_results,
                  ref_sorted.size());
     std::exit(1);
   }
+
+  if (!bench::generation_flash_evidence_ready()) {
+    std::fprintf(stderr, "error: missing generation flash evidence\n");
+    std::exit(1);
+  }
+
+  const auto flash_dispatch_calls = bench::generation_flash_evidence_dispatch_calls();
+  const auto emel_decode_calls = bench::generation_flash_evidence_emel_decode_calls();
+  const auto emel_logits_calls = bench::generation_flash_evidence_emel_logits_calls();
+  const auto reference_decode_calls = bench::generation_flash_evidence_reference_decode_calls();
+  const auto reference_logits_calls = bench::generation_flash_evidence_reference_logits_calls();
+  if (flash_dispatch_calls == 0 || emel_decode_calls != 0 || emel_logits_calls != 0 ||
+      reference_decode_calls != 0 || reference_logits_calls != 0) {
+    std::fprintf(stderr,
+                 "error: invalid generation flash evidence flash_dispatch_calls=%" PRIu64
+                 " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
+                 "reference_logits_calls=%d\n",
+                 flash_dispatch_calls,
+                 emel_decode_calls,
+                 emel_logits_calls,
+                 reference_decode_calls,
+                 reference_logits_calls);
+    std::exit(1);
+  }
+
+  std::printf("# reference_impl: source=%.*s ref=%.*s\n",
+              static_cast<int>(k_bench_reference_source.size()),
+              k_bench_reference_source.data(),
+              static_cast<int>(k_bench_reference_ref.size()),
+              k_bench_reference_ref.data());
+  std::printf("# generation_flash_evidence: case=%.*s flash_dispatch_calls=%" PRIu64
+              " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
+              "reference_logits_calls=%d\n",
+              static_cast<int>(bench::k_generation_case_name.size()),
+              bench::k_generation_case_name.data(),
+              flash_dispatch_calls,
+              emel_decode_calls,
+              emel_logits_calls,
+              reference_decode_calls,
+              reference_logits_calls);
 
   const std::size_t count = std::min(emel_sorted.size(), ref_sorted.size());
   for (std::size_t i = 0; i < count; ++i) {

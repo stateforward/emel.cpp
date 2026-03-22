@@ -601,6 +601,12 @@ struct generation_seam_audit {
   int32_t direct_reference_logits_calls = 0;
 };
 
+struct generation_flash_evidence_state {
+  bool ready = false;
+  std::uint64_t flash_dispatch_calls = 0u;
+  generation_seam_audit seam = {};
+};
+
 struct emel_session {
   emel::model::data model_data = {};
   emel::text::tokenizer::sm tokenizer = {};
@@ -611,6 +617,8 @@ struct emel_session {
   initialize_capture initialize = {};
   generation_capture generation = {};
 };
+
+generation_flash_evidence_state g_generation_flash_evidence = {};
 
 uint32_t read_u32_le(const std::span<const uint8_t> bytes) {
   uint32_t value = 0u;
@@ -809,6 +817,10 @@ bool tokenizer_tokenize_dispatch(void * tokenizer_sm,
 
 void reset_generation_seam(generation_seam_audit & seam) {
   seam = {};
+}
+
+void reset_generation_flash_evidence() {
+  g_generation_flash_evidence = {};
 }
 
 bool generation_seam_audit_enabled() {
@@ -1693,6 +1705,30 @@ const emel_fixture & canonical_generation_fixture() {
 
 namespace emel::bench {
 
+bool generation_flash_evidence_ready() noexcept {
+  return g_generation_flash_evidence.ready;
+}
+
+std::uint64_t generation_flash_evidence_dispatch_calls() noexcept {
+  return g_generation_flash_evidence.flash_dispatch_calls;
+}
+
+std::int32_t generation_flash_evidence_emel_decode_calls() noexcept {
+  return g_generation_flash_evidence.seam.emel_reference_decode_calls;
+}
+
+std::int32_t generation_flash_evidence_emel_logits_calls() noexcept {
+  return g_generation_flash_evidence.seam.emel_reference_logits_calls;
+}
+
+std::int32_t generation_flash_evidence_reference_decode_calls() noexcept {
+  return g_generation_flash_evidence.seam.direct_reference_decode_calls;
+}
+
+std::int32_t generation_flash_evidence_reference_logits_calls() noexcept {
+  return g_generation_flash_evidence.seam.direct_reference_logits_calls;
+}
+
 void append_emel_generation_cases(std::vector<result> & results, const config & cfg) {
   const emel_fixture & fixture = canonical_generation_fixture();
   const config case_cfg = generation_case_config(cfg);
@@ -1701,9 +1737,11 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
       k_long_generation_case,
   };
 
+  reset_generation_flash_evidence();
   for (const generation_case_spec & generation_case : cases) {
     volatile std::size_t sink = 0u;
     generation_seam_audit seam = {};
+    std::uint64_t flash_dispatch_calls = 0u;
     auto session = std::make_unique<emel_session>();
     prepare_emel_session(fixture, *session);
     if (!initialize_emel_session(*session, generation_case)) {
@@ -1712,16 +1750,26 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
 
     auto fn = [&]() {
       reset_generation_seam(session->seam);
+      const std::uint64_t flash_dispatch_calls_before =
+          session->generator->generation_flash_attention_dispatch_calls();
 
       generation_result generated{};
       if (!run_emel_generate(*session, generation_case, generated)) {
         fail_bench_setup("run_emel_generate", generation_case.name.data());
       }
+      const std::uint64_t flash_dispatch_calls_after =
+          session->generator->generation_flash_attention_dispatch_calls();
       seam = session->seam;
+      flash_dispatch_calls = flash_dispatch_calls_after - flash_dispatch_calls_before;
       sink ^= generated.output_length;
     };
 
     results.push_back(measure_case(generation_case.name.data(), case_cfg, fn));
+    if (generation_case.name == k_generation_case_name) {
+      g_generation_flash_evidence.ready = true;
+      g_generation_flash_evidence.flash_dispatch_calls = flash_dispatch_calls;
+      g_generation_flash_evidence.seam = seam;
+    }
     if (generation_seam_audit_enabled()) {
       print_generation_seam_audit("emel", seam);
       verify_emel_generation_seam(seam);
