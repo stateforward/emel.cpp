@@ -108,6 +108,46 @@ TEST_CASE("tensor_view_capture_tensor_view_propagates_tensor_error") {
   CHECK(state.lifecycle_state == emel::tensor::event::lifecycle::internal_error);
 }
 
+TEST_CASE("tensor_view_capture_tensor_view_observes_publish_then_release") {
+  tensor_sm tensors{};
+  tensor_view_sm view{};
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::view::error::none));
+
+  REQUIRE(tensors.process_event(emel::tensor::event::reserve_tensor{
+    .tensor_id = 44,
+    .buffer = fake_buffer(0x7200u),
+    .buffer_bytes = 128u,
+    .consumer_refs = 1,
+    .is_leaf = false,
+    .error_out = &err,
+  }));
+  REQUIRE(tensors.process_event(emel::tensor::event::publish_filled_tensor{
+    .tensor_id = 44,
+    .error_out = &err,
+  }));
+
+  emel::tensor::event::tensor_state state{};
+  REQUIRE(view.process_event(emel::tensor::view::event::capture_tensor_view{
+    .tensor_machine = &tensors,
+    .tensor_id = 44,
+    .state_out = &state,
+    .error_out = &err,
+  }));
+  CHECK(state.lifecycle_state == emel::tensor::event::lifecycle::filled);
+
+  REQUIRE(tensors.process_event(emel::tensor::event::release_tensor_ref{
+    .tensor_id = 44,
+    .error_out = &err,
+  }));
+  REQUIRE(view.process_event(emel::tensor::view::event::capture_tensor_view{
+    .tensor_machine = &tensors,
+    .tensor_id = 44,
+    .state_out = &state,
+    .error_out = &err,
+  }));
+  CHECK(state.lifecycle_state == emel::tensor::event::lifecycle::empty);
+}
+
 TEST_CASE("tensor_view_unexpected_event_keeps_machine_dispatchable") {
   tensor_sm tensors{};
   tensor_view_sm view{};

@@ -22,20 +22,25 @@ if(REF_IMPL_REF STREQUAL "")
 endif()
 
 include(FetchContent)
-set(REF_IMPL_LOCAL_PATH "${EMEL_ROOT}/tmp/llama.cpp" CACHE PATH "")
-if(EXISTS "${REF_IMPL_LOCAL_PATH}/ggml/CMakeLists.txt" AND
-   EXISTS "${REF_IMPL_LOCAL_PATH}/src/CMakeLists.txt")
-  set(reference_impl_SOURCE_DIR "${REF_IMPL_LOCAL_PATH}")
-else()
-  FetchContent_Declare(
-    reference_impl
-    GIT_REPOSITORY ${REF_IMPL_REPOSITORY}
-    GIT_TAG ${REF_IMPL_REF}
-  )
-  FetchContent_GetProperties(reference_impl)
-  if(NOT reference_impl_POPULATED)
-    FetchContent_Populate(reference_impl)
-  endif()
+set(PARITYCHECKER_REFERENCE_SOURCE "cmake_fetch")
+set(PARITYCHECKER_REFERENCE_REF_VALUE "${REF_IMPL_REF}")
+FetchContent_Declare(
+  reference_impl
+  GIT_REPOSITORY ${REF_IMPL_REPOSITORY}
+  GIT_TAG ${REF_IMPL_REF}
+)
+FetchContent_GetProperties(reference_impl)
+if(NOT reference_impl_POPULATED)
+  FetchContent_Populate(reference_impl)
+endif()
+execute_process(
+  COMMAND git -C "${reference_impl_SOURCE_DIR}" rev-parse HEAD
+  OUTPUT_VARIABLE PARITYCHECKER_REFERENCE_REF_VALUE
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+)
+if(PARITYCHECKER_REFERENCE_REF_VALUE STREQUAL "")
+  set(PARITYCHECKER_REFERENCE_REF_VALUE "${REF_IMPL_REF}")
 endif()
 
 set(LLAMA_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
@@ -142,6 +147,13 @@ target_include_directories(paritychecker
     ${reference_impl_SOURCE_DIR}/include
 )
 
+target_compile_definitions(paritychecker
+  PRIVATE
+    PARITYCHECKER_REPO_ROOT=\"${EMEL_ROOT}\"
+    PARITYCHECKER_REFERENCE_SOURCE=\"${PARITYCHECKER_REFERENCE_SOURCE}\"
+    PARITYCHECKER_REFERENCE_REF=\"${PARITYCHECKER_REFERENCE_REF_VALUE}\"
+)
+
 set(DOCTEST_INCLUDE_DIR ${EMEL_ROOT}/third_party/doctest)
 if(NOT EXISTS ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h)
   message(FATAL_ERROR "Missing doctest header at ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h")
@@ -188,6 +200,8 @@ target_include_directories(paritychecker_tests
 target_compile_definitions(paritychecker_tests
   PRIVATE
     PARITYCHECKER_REPO_ROOT=\"${EMEL_ROOT}\"
+    PARITYCHECKER_REFERENCE_SOURCE=\"${PARITYCHECKER_REFERENCE_SOURCE}\"
+    PARITYCHECKER_REFERENCE_REF=\"${PARITYCHECKER_REFERENCE_REF_VALUE}\"
 )
 
 enable_testing()

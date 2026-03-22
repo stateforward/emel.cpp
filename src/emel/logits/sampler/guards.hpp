@@ -5,6 +5,18 @@
 
 namespace emel::logits::sampler::guard {
 
+struct valid_config {
+  bool operator()(const event::configure_runtime & ev) const noexcept {
+    return ev.request.sampler_count > 0;
+  }
+};
+
+struct invalid_config {
+  bool operator()(const event::configure_runtime & ev) const noexcept {
+    return !valid_config{}(ev);
+  }
+};
+
 struct request_has_valid_sizes {
   bool operator()(const event::sample_logits_runtime & ev) const noexcept {
     return ev.request.vocab_size > 0 &&

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstring>
 #include <cstdint>
 #include <type_traits>
 
@@ -34,6 +35,24 @@ inline tensor_view make_src(const void * data, const dtype type, const uint64_t 
   return out;
 }
 
+inline tensor_view make_quantized_src(const void * data,
+                                      const dtype type,
+                                      const uint64_t ne0,
+                                      const uint64_t ne1 = 1) {
+  tensor_view out{};
+  const size_t row_bytes =
+      emel::kernel::detail::quantized_row_storage_bytes(
+          emel::kernel::detail::dtype_code(type), ne0);
+  out.data = data;
+  out.type = type;
+  out.ne = {ne0, ne1, 1, 1};
+  out.nb[0] = 1;
+  out.nb[1] = row_bytes;
+  out.nb[2] = row_bytes * ne1;
+  out.nb[3] = out.nb[2];
+  return out;
+}
+
 inline tensor_view_mut make_dst(void * data, const dtype type, const uint64_t ne0,
                                 const uint64_t ne1 = 1, const uint64_t ne2 = 1,
                                 const uint64_t ne3 = 1) {
@@ -43,6 +62,28 @@ inline tensor_view_mut make_dst(void * data, const dtype type, const uint64_t ne
   out.ne = {ne0, ne1, ne2, ne3};
   fill_default_nb(out);
   return out;
+}
+
+struct flash_attn_ext_fixture {
+  float q[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+  float k[8] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
+  float v[8] = {2.0f, 0.0f, 0.0f, 0.0f, 0.0f, 4.0f, 0.0f, 0.0f};
+  float dst[4] = {};
+};
+
+inline emel::kernel::event::op_flash_attn_ext make_flash_attn_ext_event(
+    flash_attn_ext_fixture & fixture) {
+  emel::kernel::event::op_flash_attn_ext ev{};
+  ev.src0 = make_src(fixture.q, dtype::f32, 4, 1, 1, 1);
+  ev.src1 = make_src(fixture.k, dtype::f32, 4, 2, 1, 1);
+  ev.src2 = make_src(fixture.v, dtype::f32, 4, 2, 1, 1);
+  ev.dst = make_dst(fixture.dst, dtype::f32, 4, 1, 1, 1);
+  ev.nth = 1;
+
+  const float scale = 1.0f;
+  std::memcpy(ev.op_params.data(), &scale, sizeof(scale));
+  ev.op_params_size = sizeof(scale);
+  return ev;
 }
 
 template <class event_type>

@@ -14,6 +14,7 @@ inline void reset_reserve_output(event::reserve_output & output) noexcept {
   output.tensor_count = 0;
   output.required_buffer_bytes = 0;
   output.version = 0;
+  output.lifecycle = nullptr;
 }
 
 inline void reset_assemble_output(event::assemble_output & output) noexcept {
@@ -23,6 +24,7 @@ inline void reset_assemble_output(event::assemble_output & output) noexcept {
   output.required_buffer_bytes = 0;
   output.version = 0;
   output.reused_topology = 0;
+  output.lifecycle = nullptr;
 }
 
 struct reject_invalid_reserve_with_dispatch {
@@ -108,6 +110,7 @@ struct commit_reserve_result {
     ctx.reserved_tensor_count = ev.ctx.assembled_tensor_count;
     ctx.reserved_required_buffer_bytes = ev.ctx.alloc_plan.required_buffer_bytes;
     ++ctx.topology_version;
+    ctx.reserved_lifecycle = ev.request.lifecycle;
     ctx.has_reserved_topology = 1u;
 
     ev.request.output_out->graph_topology = ctx.reserved_topology;
@@ -115,6 +118,7 @@ struct commit_reserve_result {
     ev.request.output_out->tensor_count = ctx.reserved_tensor_count;
     ev.request.output_out->required_buffer_bytes = ctx.reserved_required_buffer_bytes;
     ev.request.output_out->version = ctx.topology_version;
+    ev.request.output_out->lifecycle = ctx.reserved_lifecycle;
   }
 };
 
@@ -126,6 +130,7 @@ struct commit_assemble_reuse_result {
     ev.request.output_out->required_buffer_bytes = ctx.reserved_required_buffer_bytes;
     ev.request.output_out->version = ctx.topology_version;
     ev.request.output_out->reused_topology = 1u;
+    ev.request.output_out->lifecycle = ctx.reserved_lifecycle;
   }
 };
 
@@ -136,6 +141,7 @@ struct commit_assemble_rebuild_result {
     ctx.reserved_tensor_count = ev.ctx.assembled_tensor_count;
     ctx.reserved_required_buffer_bytes = ev.ctx.alloc_plan.required_buffer_bytes;
     ++ctx.topology_version;
+    ctx.reserved_lifecycle = ev.request.lifecycle;
     ctx.has_reserved_topology = 1u;
 
     ev.request.output_out->graph_topology = ctx.reserved_topology;
@@ -144,6 +150,7 @@ struct commit_assemble_rebuild_result {
     ev.request.output_out->required_buffer_bytes = ctx.reserved_required_buffer_bytes;
     ev.request.output_out->version = ctx.topology_version;
     ev.request.output_out->reused_topology = 0u;
+    ev.request.output_out->lifecycle = ctx.reserved_lifecycle;
   }
 };
 

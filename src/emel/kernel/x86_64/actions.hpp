@@ -713,8 +713,19 @@ struct exec_dispatch {
 template <class dispatch_event_type>
 struct exec_scalar_op {
   void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
-    ::emel::kernel::detail::execute_scalar_unchecked(ev.request);
-    detail::mark_done(ev, ctx);
+    using request_type = std::remove_cvref_t<decltype(ev.request)>;
+    if constexpr (std::is_same_v<request_type, ::emel::kernel::event::op_flash_attn_ext>) {
+      if (::emel::kernel::detail::run_flash_attn_ext_with_workspace(ev.request,
+                                                                    ctx.flash_attn_workspace)) {
+        detail::mark_done(ev, ctx);
+      } else {
+        detail::mark_error(
+            ev, ctx, static_cast<int32_t>(emel::error::cast(error::invalid_request)));
+      }
+    } else {
+      ::emel::kernel::detail::execute_scalar_unchecked(ev.request);
+      detail::mark_done(ev, ctx);
+    }
   }
 };
 

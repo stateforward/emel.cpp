@@ -2,9 +2,15 @@
 
 #include "bench_common.hpp"
 
+#include <string_view>
 #include <vector>
 
 namespace emel::bench {
+
+inline constexpr std::string_view k_generation_case_name =
+  "generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1";
+inline constexpr std::string_view k_generation_long_case_name =
+  "generation/preloaded_request/llama_68m_prompt_hello_max_tokens_8";
 
 using append_case_fn = void (*)(std::vector<result> & results, const config & cfg);
 
@@ -38,6 +44,8 @@ void append_emel_jinja_formatter_cases(std::vector<result> & results, const conf
 void append_reference_jinja_formatter_cases(std::vector<result> & results, const config & cfg);
 void append_emel_gbnf_rule_parser_cases(std::vector<result> & results, const config & cfg);
 void append_reference_gbnf_rule_parser_cases(std::vector<result> & results, const config & cfg);
+void append_emel_generation_cases(std::vector<result> & results, const config & cfg);
+void append_reference_generation_cases(std::vector<result> & results, const config & cfg);
 void append_emel_logits_validator_cases(std::vector<result> & results, const config & cfg);
 void append_reference_logits_validator_cases(std::vector<result> & results, const config & cfg);
 void append_emel_logits_sampler_cases(std::vector<result> & results, const config & cfg);
