@@ -1,5 +1,6 @@
 #include <boost/sml.hpp>
 
+#include <charconv>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -554,6 +555,25 @@ const benchmark_row * find_benchmark_row(const benchmark_snapshot & snapshot,
   return nullptr;
 }
 
+std::optional<double> parse_double_field(const std::string & raw_value,
+                                         const char * field_name,
+                                         const fs::path & source_path) {
+  double value = 0.0;
+  const char * const begin = raw_value.data();
+  const char * const end = begin + raw_value.size();
+  const auto result = std::from_chars(begin, end, value);
+  const bool parsed_ok = result.ec == std::errc{} && result.ptr == end;
+  if (!parsed_ok) {
+    std::fprintf(stderr,
+                 "error: invalid %s=%s in %s\n",
+                 field_name,
+                 raw_value.c_str(),
+                 source_path.string().c_str());
+    return std::nullopt;
+  }
+  return value;
+}
+
 std::optional<std::string> build_flash_publication_section(const doc_paths & paths,
                                                            const benchmark_snapshot & snapshot) {
   const auto baseline = parse_key_value_file(paths.generation_pre_flash_baseline);
@@ -586,10 +606,22 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
     return std::nullopt;
   }
 
-  const double baseline_emel = std::stod(baseline->at("baseline_emel_ns"));
-  const double current_emel = std::stod(current->emel_ns);
-  const double speedup = baseline_emel / current_emel;
-  const double latency_drop_pct = ((baseline_emel - current_emel) / baseline_emel) * 100.0;
+  const auto baseline_emel =
+      parse_double_field(baseline->at("baseline_emel_ns"),
+                         "baseline_emel_ns",
+                         paths.generation_pre_flash_baseline);
+  if (!baseline_emel.has_value()) {
+    return std::nullopt;
+  }
+
+  const auto current_emel =
+      parse_double_field(current->emel_ns, "current_emel_ns", paths.benchmarks_snapshot);
+  if (!current_emel.has_value()) {
+    return std::nullopt;
+  }
+
+  const double speedup = *baseline_emel / *current_emel;
+  const double latency_drop_pct = ((*baseline_emel - *current_emel) / *baseline_emel) * 100.0;
 
   char speedup_buf[32];
   char latency_buf[32];

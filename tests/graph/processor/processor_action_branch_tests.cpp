@@ -18,6 +18,7 @@
 #include "emel/graph/processor/kernel_step/guards.hpp"
 #include "emel/graph/processor/prepare_step/actions.hpp"
 #include "emel/graph/processor/prepare_step/guards.hpp"
+#include "emel/graph/processor/sm.hpp"
 #include "emel/graph/processor/validate_step/actions.hpp"
 #include "emel/graph/processor/validate_step/guards.hpp"
 #include "emel/tensor/errors.hpp"
@@ -441,6 +442,32 @@ TEST_CASE("graph_processor_action_and_guard_branches") {
   ev.ctx.err = emel::error::cast(processor_error::none);
   action::on_unexpected(ev, machine_ctx);
   CHECK(ev.ctx.err == emel::error::cast(processor_error::internal_error));
+}
+
+TEST_CASE("graph_processor_releases_publish_targets_after_extract_failure") {
+  namespace event = emel::graph::processor::event;
+
+  lifecycle_fixture lifecycle{};
+  emel::graph::processor::sm machine{};
+
+  dispatch_state first_dispatch{};
+  event::execution_output first_output{};
+  auto first_request = make_valid_execute(&first_output, &first_dispatch, lifecycle);
+  first_request.extract_outputs = extract_fail_with_error;
+
+  CHECK_FALSE(machine.process_event(first_request));
+  CHECK(first_dispatch.error_called);
+  CHECK(first_dispatch.error_code ==
+        static_cast<int32_t>(emel::error::cast(processor_error::kernel_failed)));
+
+  dispatch_state second_dispatch{};
+  event::execution_output second_output{};
+  const auto second_request = make_valid_execute(&second_output, &second_dispatch, lifecycle);
+
+  CHECK(machine.process_event(second_request));
+  CHECK(second_dispatch.done_called);
+  CHECK_FALSE(second_dispatch.error_called);
+  CHECK(second_output.outputs_produced == 2);
 }
 
 TEST_CASE("graph_processor_step_action_and_guard_branches") {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -14,6 +15,7 @@
 #include "emel/model/data.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
+#include "emel/text/renderer/context.hpp"
 #include "emel/text/renderer/sm.hpp"
 #include "emel/text/tokenizer/events.hpp"
 
@@ -70,6 +72,16 @@ struct session_state {
   emel::memory::view::snapshot memory_snapshot = {};
 };
 
+struct renderer_session {
+  bool strip_leading_space = false;
+  size_t stop_sequence_used = 0;
+  std::array<std::array<char, emel::text::renderer::action::k_max_stop_length>,
+             emel::text::renderer::action::k_max_stop_sequences>
+      stop_sequence_bytes = {};
+  std::array<size_t, emel::text::renderer::action::k_max_stop_sequences>
+      stop_sequence_lengths = {};
+};
+
 struct context {
   const emel::model::data * model = nullptr;
   emel::text::conditioner::sm * conditioner = nullptr;
@@ -88,6 +100,7 @@ struct context {
   session_limits limits = {};
   session_buffers buffers = {};
   session_state state = {};
+  renderer_session renderer_session = {};
 };
 
 }  // namespace emel::generator::action
