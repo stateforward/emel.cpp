@@ -70,9 +70,29 @@ struct native_backend {
   std::vector<float> value_cache = {};
   int32_t kv_cache_tokens = 0;
 
+  std::vector<emel::graph::processor::event::lifecycle_tensor_binding> lifecycle_tensors = {};
+  std::vector<int32_t> prefill_required_ids = {};
+  std::vector<int32_t> prefill_publish_ids = {};
+  std::vector<int32_t> prefill_release_ids = {};
+  std::vector<int32_t> decode_required_ids = {};
+  std::vector<int32_t> decode_publish_ids = {};
+  std::vector<int32_t> decode_release_ids = {};
+  emel::graph::processor::event::lifecycle_phase prefill_lifecycle_phase = {};
+  emel::graph::processor::event::lifecycle_phase decode_lifecycle_phase = {};
+  emel::graph::processor::event::lifecycle_manifest reserve_lifecycle = {};
+  emel::graph::processor::event::lifecycle_manifest prefill_lifecycle = {};
+  emel::graph::processor::event::lifecycle_manifest decode_lifecycle = {};
+  int32_t input_tokens_tensor_id = -1;
+  int32_t positions_tensor_id = -1;
+  int32_t logits_tensor_id = -1;
+  int32_t key_cache_tensor_id = -1;
+  int32_t value_cache_tensor_id = -1;
+
   std::vector<int32_t> bound_tokens = {};
   std::vector<int32_t> bound_positions = {};
   std::vector<float> bound_logits = {};
+  int32_t bound_token_count = 0;
+  int32_t bound_position_count = 0;
 
   std::vector<float> hidden = {};
   std::vector<float> norm = {};
@@ -295,6 +315,218 @@ inline emel::kernel::event::tensor_view make_src_view(const tensor_matrix & matr
   return tensor;
 }
 
+inline uint64_t matrix_buffer_bytes(const tensor_matrix & matrix) noexcept {
+  return static_cast<uint64_t>(row_storage_bytes(*matrix.tensor, matrix.cols)) *
+         static_cast<uint64_t>(matrix.rows);
+}
+
+inline int32_t append_lifecycle_tensor(
+    native_backend & backend,
+    void * buffer,
+    const uint64_t buffer_bytes,
+    const int32_t consumer_refs,
+    const bool is_leaf) {
+  const int32_t tensor_id = static_cast<int32_t>(backend.lifecycle_tensors.size());
+  backend.lifecycle_tensors.push_back(emel::graph::processor::event::lifecycle_tensor_binding{
+    .tensor_id = tensor_id,
+    .buffer = buffer,
+    .buffer_bytes = buffer_bytes,
+    .consumer_refs = consumer_refs,
+    .is_leaf = is_leaf,
+  });
+  return tensor_id;
+}
+
+inline void append_leaf_lifecycle_tensor(native_backend & backend,
+                                         void * buffer,
+                                         const uint64_t buffer_bytes) {
+  const int32_t tensor_id = append_lifecycle_tensor(backend, buffer, buffer_bytes, 0, true);
+  backend.prefill_required_ids.push_back(tensor_id);
+  backend.decode_required_ids.push_back(tensor_id);
+}
+
+inline void rebuild_lifecycle_views(native_backend & backend) noexcept {
+  const auto * tensors = backend.lifecycle_tensors.data();
+  backend.prefill_lifecycle_phase = emel::graph::processor::event::lifecycle_phase{
+    .required_filled_ids = backend.prefill_required_ids.data(),
+    .required_filled_count = static_cast<int32_t>(backend.prefill_required_ids.size()),
+    .publish_ids = backend.prefill_publish_ids.data(),
+    .publish_count = static_cast<int32_t>(backend.prefill_publish_ids.size()),
+    .release_ids = backend.prefill_release_ids.data(),
+    .release_count = static_cast<int32_t>(backend.prefill_release_ids.size()),
+  };
+  backend.decode_lifecycle_phase = emel::graph::processor::event::lifecycle_phase{
+    .required_filled_ids = backend.decode_required_ids.data(),
+    .required_filled_count = static_cast<int32_t>(backend.decode_required_ids.size()),
+    .publish_ids = backend.decode_publish_ids.data(),
+    .publish_count = static_cast<int32_t>(backend.decode_publish_ids.size()),
+    .release_ids = backend.decode_release_ids.data(),
+    .release_count = static_cast<int32_t>(backend.decode_release_ids.size()),
+  };
+  backend.reserve_lifecycle = emel::graph::processor::event::lifecycle_manifest{
+    .tensors = tensors,
+    .tensor_count = static_cast<int32_t>(backend.lifecycle_tensors.size()),
+    .phase = nullptr,
+  };
+  backend.prefill_lifecycle = emel::graph::processor::event::lifecycle_manifest{
+    .tensors = tensors,
+    .tensor_count = static_cast<int32_t>(backend.lifecycle_tensors.size()),
+    .phase = &backend.prefill_lifecycle_phase,
+  };
+  backend.decode_lifecycle = emel::graph::processor::event::lifecycle_manifest{
+    .tensors = tensors,
+    .tensor_count = static_cast<int32_t>(backend.lifecycle_tensors.size()),
+    .phase = &backend.decode_lifecycle_phase,
+  };
+}
+
+inline void build_lifecycle(native_backend & backend) {
+  backend.lifecycle_tensors.clear();
+  backend.prefill_required_ids.clear();
+  backend.prefill_publish_ids.clear();
+  backend.prefill_release_ids.clear();
+  backend.decode_required_ids.clear();
+  backend.decode_publish_ids.clear();
+  backend.decode_release_ids.clear();
+
+  append_leaf_lifecycle_tensor(
+      backend,
+      const_cast<void *>(backend.token_embedding.tensor->data),
+      matrix_buffer_bytes(backend.token_embedding));
+  append_leaf_lifecycle_tensor(
+      backend,
+      backend.output_norm.data(),
+      static_cast<uint64_t>(backend.output_norm.size()) * sizeof(float));
+  append_leaf_lifecycle_tensor(
+      backend,
+      const_cast<void *>(backend.output.tensor->data),
+      matrix_buffer_bytes(backend.output));
+
+  for (auto & block : backend.blocks) {
+    append_leaf_lifecycle_tensor(
+        backend,
+        block.attention_norm.data(),
+        static_cast<uint64_t>(block.attention_norm.size()) * sizeof(float));
+    append_leaf_lifecycle_tensor(
+        backend,
+        const_cast<void *>(block.attention_q.tensor->data),
+        matrix_buffer_bytes(block.attention_q));
+    append_leaf_lifecycle_tensor(
+        backend,
+        const_cast<void *>(block.attention_k.tensor->data),
+        matrix_buffer_bytes(block.attention_k));
+    append_leaf_lifecycle_tensor(
+        backend,
+        const_cast<void *>(block.attention_v.tensor->data),
+        matrix_buffer_bytes(block.attention_v));
+    append_leaf_lifecycle_tensor(
+        backend,
+        const_cast<void *>(block.attention_output.tensor->data),
+        matrix_buffer_bytes(block.attention_output));
+    append_leaf_lifecycle_tensor(
+        backend,
+        block.feed_forward_norm.data(),
+        static_cast<uint64_t>(block.feed_forward_norm.size()) * sizeof(float));
+    append_leaf_lifecycle_tensor(
+        backend,
+        const_cast<void *>(block.feed_forward_gate.tensor->data),
+        matrix_buffer_bytes(block.feed_forward_gate));
+    append_leaf_lifecycle_tensor(
+        backend,
+        const_cast<void *>(block.feed_forward_down.tensor->data),
+        matrix_buffer_bytes(block.feed_forward_down));
+    append_leaf_lifecycle_tensor(
+        backend,
+        const_cast<void *>(block.feed_forward_up.tensor->data),
+        matrix_buffer_bytes(block.feed_forward_up));
+  }
+
+  backend.input_tokens_tensor_id = append_lifecycle_tensor(backend, nullptr, 0u, 1, false);
+  backend.positions_tensor_id = append_lifecycle_tensor(backend, nullptr, 0u, 1, false);
+  backend.logits_tensor_id = append_lifecycle_tensor(backend, nullptr, 0u, 1, false);
+  backend.key_cache_tensor_id = append_lifecycle_tensor(
+      backend,
+      backend.key_cache.data(),
+      static_cast<uint64_t>(backend.key_cache.size()) * sizeof(float),
+      1,
+      false);
+  backend.value_cache_tensor_id = append_lifecycle_tensor(
+      backend,
+      backend.value_cache.data(),
+      static_cast<uint64_t>(backend.value_cache.size()) * sizeof(float),
+      1,
+      false);
+
+  backend.prefill_required_ids.push_back(backend.input_tokens_tensor_id);
+  backend.prefill_required_ids.push_back(backend.positions_tensor_id);
+  backend.prefill_publish_ids.push_back(backend.logits_tensor_id);
+  backend.prefill_publish_ids.push_back(backend.key_cache_tensor_id);
+  backend.prefill_publish_ids.push_back(backend.value_cache_tensor_id);
+  backend.prefill_release_ids.push_back(backend.input_tokens_tensor_id);
+  backend.prefill_release_ids.push_back(backend.positions_tensor_id);
+  backend.prefill_release_ids.push_back(backend.logits_tensor_id);
+
+  backend.decode_required_ids = backend.prefill_required_ids;
+  backend.decode_required_ids.push_back(backend.key_cache_tensor_id);
+  backend.decode_required_ids.push_back(backend.value_cache_tensor_id);
+  backend.decode_publish_ids = backend.prefill_publish_ids;
+  backend.decode_release_ids = backend.prefill_release_ids;
+
+  rebuild_lifecycle_views(backend);
+}
+
+inline void bind_runtime_lifecycle(native_backend & backend,
+                                   int32_t * input_tokens,
+                                   const int32_t input_token_capacity,
+                                   int32_t * positions,
+                                   const int32_t position_capacity,
+                                   float * logits,
+                                   const int32_t logits_capacity) noexcept {
+  backend.lifecycle_tensors[static_cast<size_t>(backend.input_tokens_tensor_id)].buffer =
+      input_tokens;
+  backend.lifecycle_tensors[static_cast<size_t>(backend.input_tokens_tensor_id)].buffer_bytes =
+      static_cast<uint64_t>(input_token_capacity) * sizeof(int32_t);
+  backend.lifecycle_tensors[static_cast<size_t>(backend.positions_tensor_id)].buffer = positions;
+  backend.lifecycle_tensors[static_cast<size_t>(backend.positions_tensor_id)].buffer_bytes =
+      static_cast<uint64_t>(position_capacity) * sizeof(int32_t);
+  backend.lifecycle_tensors[static_cast<size_t>(backend.logits_tensor_id)].buffer = logits;
+  backend.lifecycle_tensors[static_cast<size_t>(backend.logits_tensor_id)].buffer_bytes =
+      static_cast<uint64_t>(logits_capacity) * sizeof(float);
+}
+
+inline const emel::graph::processor::event::lifecycle_manifest * reserve_lifecycle(
+    native_backend & backend,
+    int32_t * input_tokens,
+    const int32_t input_token_capacity,
+    int32_t * positions,
+    const int32_t position_capacity,
+    float * logits,
+    const int32_t logits_capacity) noexcept {
+  bind_runtime_lifecycle(
+      backend, input_tokens, input_token_capacity, positions, position_capacity, logits,
+      logits_capacity);
+  return &backend.reserve_lifecycle;
+}
+
+inline const emel::graph::processor::event::lifecycle_manifest * phase_lifecycle(
+    native_backend & backend,
+    int32_t * input_tokens,
+    const int32_t input_token_capacity,
+    int32_t * positions,
+    const int32_t position_capacity,
+    float * logits,
+    const int32_t logits_capacity,
+    const step_kind kind) noexcept {
+  bind_runtime_lifecycle(
+      backend, input_tokens, input_token_capacity, positions, position_capacity, logits,
+      logits_capacity);
+  const std::array<const emel::graph::processor::event::lifecycle_manifest *, 2> manifests{
+    &backend.prefill_lifecycle,
+    &backend.decode_lifecycle,
+  };
+  return manifests[static_cast<size_t>(kind)];
+}
+
 inline bool matmul_vector(native_backend & backend,
                           const tensor_matrix & matrix,
                           std::span<const float> input,
@@ -425,16 +657,20 @@ inline bool store_bound_request(native_backend & backend,
   if (io == nullptr ||
       io->token_ids == nullptr ||
       io->token_count <= 0 ||
+      static_cast<size_t>(io->token_count) > backend.bound_tokens.size() ||
       request.positions == nullptr ||
-      request.positions_count != io->token_count) {
+      request.positions_count != io->token_count ||
+      static_cast<size_t>(request.positions_count) > backend.bound_positions.size()) {
     if (err_out != nullptr) {
       *err_out = k_error_invalid;
     }
     return false;
   }
 
-  backend.bound_tokens.assign(io->token_ids, io->token_ids + io->token_count);
-  backend.bound_positions.assign(request.positions, request.positions + request.positions_count);
+  std::copy_n(io->token_ids, io->token_count, backend.bound_tokens.begin());
+  std::copy_n(request.positions, request.positions_count, backend.bound_positions.begin());
+  backend.bound_token_count = io->token_count;
+  backend.bound_position_count = request.positions_count;
   backend.bound_ready = true;
   return true;
 }
@@ -605,7 +841,8 @@ inline bool compute_logits(native_backend & backend) noexcept {
 inline bool run_prefill(native_backend & backend) noexcept {
   backend.kv_cache_tokens = 0;
 
-  for (size_t token_index = 0; token_index < backend.bound_tokens.size(); ++token_index) {
+  const size_t token_count = static_cast<size_t>(backend.bound_token_count);
+  for (size_t token_index = 0; token_index < token_count; ++token_index) {
     const int32_t token_id = backend.bound_tokens[token_index];
     const int32_t position = backend.bound_positions[token_index];
     if (token_id < 0 ||
@@ -632,8 +869,8 @@ inline bool run_prefill(native_backend & backend) noexcept {
 
 inline bool run_decode(native_backend & backend,
                        const emel::graph::processor::event::execute & request) noexcept {
-  if (backend.bound_tokens.size() != 1u ||
-      backend.bound_positions.size() != 1u ||
+  if (backend.bound_token_count != 1 ||
+      backend.bound_position_count != 1 ||
       request.kv_tokens < 0 ||
       backend.kv_cache_tokens != request.kv_tokens) {
     return false;
@@ -766,6 +1003,8 @@ inline emel::error::type prepare(native_backend & backend,
                              static_cast<size_t>(backend.n_ctx) *
                              static_cast<size_t>(kv_dim));
   backend.bound_logits.resize(static_cast<size_t>(backend.n_vocab));
+  backend.bound_tokens.resize(static_cast<size_t>(backend.n_ctx));
+  backend.bound_positions.resize(static_cast<size_t>(backend.n_ctx));
   backend.hidden.resize(static_cast<size_t>(backend.n_embd));
   backend.norm.resize(static_cast<size_t>(backend.n_embd));
   backend.q.resize(static_cast<size_t>(backend.n_embd));
@@ -778,6 +1017,7 @@ inline emel::error::type prepare(native_backend & backend,
   backend.gate.resize(static_cast<size_t>(backend.blocks[0].feed_forward_gate.rows));
   backend.up.resize(static_cast<size_t>(backend.blocks[0].feed_forward_up.rows));
   backend.ffn_hidden.resize(static_cast<size_t>(backend.blocks[0].feed_forward_gate.rows));
+  build_lifecycle(backend);
 
   return emel::error::cast(emel::model::loader::error::none);
 }

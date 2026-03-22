@@ -16,6 +16,8 @@
 #include "emel/generator/sm.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/model/data.hpp"
+#include "emel/tensor/errors.hpp"
+#include "emel/tensor/events.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 
@@ -310,6 +312,30 @@ struct generator_fixture {
 TEST_CASE("generator_starts_uninitialized") {
   auto fixture = std::make_unique<generator_fixture>();
   CHECK(fixture->generator->is(boost::sml::state<emel::generator::uninitialized>));
+}
+
+TEST_CASE("generator_initialize_reserves_lifecycle_managed_graph_tensors") {
+  auto fixture = std::make_unique<generator_fixture>();
+  callback_tracker tracker{};
+  emel::error::type error = emel::error::cast(emel::generator::error::none);
+  auto initialize = fixture->make_initialize(tracker, &error);
+
+  REQUIRE(fixture->generator->process_event(initialize));
+  REQUIRE(tracker.initialize_done_called);
+  REQUIRE_FALSE(tracker.initialize_error_called);
+
+  const auto & reservation = fixture->generator->graph_reservation();
+  REQUIRE(reservation.lifecycle != nullptr);
+  REQUIRE(reservation.lifecycle->tensor_count > 1);
+
+  emel::tensor::event::tensor_state tensor_state{};
+  emel::error::type tensor_err = emel::error::cast(emel::tensor::error::none);
+  REQUIRE(fixture->generator->try_capture_graph_tensor(0, tensor_state, tensor_err));
+  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::leaf_filled);
+
+  const int32_t runtime_tensor_id = reservation.lifecycle->tensor_count - 1;
+  REQUIRE(fixture->generator->try_capture_graph_tensor(runtime_tensor_id, tensor_state, tensor_err));
+  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::empty);
 }
 
 TEST_CASE("generator_rejects_generate_before_initialize") {

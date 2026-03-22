@@ -138,6 +138,14 @@ struct request_memory_reserve {
 struct request_graph_reserve {
   void operator()(const event::initialize_run & ev, context & ctx) const noexcept {
     ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::graph::error::none));
+    const auto * lifecycle = emel::generator::detail::reserve_lifecycle(
+        ctx.compute.backend,
+        ctx.buffers.prompt_tokens.data(),
+        ctx.limits.prompt_capacity,
+        ctx.buffers.positions.data(),
+        ctx.limits.prompt_capacity,
+        ctx.buffers.logits.get(),
+        ctx.buffers.vocab_size);
     const auto on_done =
         emel::callback<bool(const emel::graph::events::reserve_done &)>::from<capture_graph_reserve_done>();
     const auto on_error =
@@ -147,6 +155,7 @@ struct request_graph_reserve {
     emel::graph::event::reserve reserve_ev{
       .model_topology = &ctx.compute.model_topology,
       .output_out = &ctx.state.graph_reservation,
+      .lifecycle = lifecycle,
       .max_node_count = ctx.compute.model_topology.node_count,
       .max_tensor_count = ctx.compute.model_topology.tensor_count,
       .bytes_per_tensor = ctx.compute.model_topology.bytes_per_tensor,
@@ -326,6 +335,15 @@ struct request_prefill_compute {
     for (int32_t idx = 0; idx < ev.ctx.prompt_token_count; ++idx) {
       ctx.buffers.positions[static_cast<size_t>(idx)] = idx;
     }
+    const auto * lifecycle = emel::generator::detail::phase_lifecycle(
+        ctx.compute.backend,
+        ctx.buffers.prompt_tokens.data(),
+        ctx.limits.prompt_capacity,
+        ctx.buffers.positions.data(),
+        ctx.limits.prompt_capacity,
+        ctx.buffers.logits.get(),
+        ctx.buffers.vocab_size,
+        ctx.compute.prefill_plan.kind);
     ev.ctx.graph_output = {};
     ev.ctx.io.backend_ctx = &ctx.compute.backend;
     ev.ctx.io.token_ids = ctx.buffers.prompt_tokens.data();
@@ -341,6 +359,7 @@ struct request_prefill_compute {
     emel::graph::event::compute compute_ev{
       .step_plan = &ctx.compute.prefill_plan,
       .output_out = &ev.ctx.graph_output,
+      .lifecycle = lifecycle,
       .node_count_hint = ctx.state.graph_reservation.node_count,
       .tensor_count_hint = ctx.state.graph_reservation.tensor_count,
       .bytes_per_tensor = ctx.compute.model_topology.bytes_per_tensor,
@@ -389,10 +408,20 @@ struct request_decode_slots {
 struct request_decode_compute {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
     ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::graph::error::none));
+    ctx.buffers.prompt_tokens[0] = ev.ctx.selected_token;
     ctx.buffers.positions[0] = ev.ctx.kv_tokens;
+    const auto * lifecycle = emel::generator::detail::phase_lifecycle(
+        ctx.compute.backend,
+        ctx.buffers.prompt_tokens.data(),
+        ctx.limits.prompt_capacity,
+        ctx.buffers.positions.data(),
+        ctx.limits.prompt_capacity,
+        ctx.buffers.logits.get(),
+        ctx.buffers.vocab_size,
+        ctx.compute.decode_plan.kind);
     ev.ctx.graph_output = {};
     ev.ctx.io.backend_ctx = &ctx.compute.backend;
-    ev.ctx.io.token_ids = &ev.ctx.selected_token;
+    ev.ctx.io.token_ids = ctx.buffers.prompt_tokens.data();
     ev.ctx.io.token_count = 1;
     ev.ctx.io.logits = ctx.buffers.logits.get();
     ev.ctx.io.logits_capacity = ctx.buffers.vocab_size;
@@ -405,6 +434,7 @@ struct request_decode_compute {
     emel::graph::event::compute compute_ev{
       .step_plan = &ctx.compute.decode_plan,
       .output_out = &ev.ctx.graph_output,
+      .lifecycle = lifecycle,
       .node_count_hint = ctx.state.graph_reservation.node_count,
       .tensor_count_hint = ctx.state.graph_reservation.tensor_count,
       .bytes_per_tensor = ctx.compute.model_topology.bytes_per_tensor,

@@ -8,6 +8,7 @@
 #include "emel/generator/guards.hpp"
 #include "emel/model/data.hpp"
 #include "emel/sm.hpp"
+#include "emel/tensor/events.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
 
@@ -760,6 +761,16 @@ struct sm : public emel::sm<model, action::context> {
 
   uint64_t generation_flash_attention_dispatch_calls() const noexcept {
     return this->context_.compute.backend.flash_attention_dispatch_calls;
+  }
+
+  const emel::graph::event::reserve_output & graph_reservation() const noexcept {
+    return this->context_.state.graph_reservation;
+  }
+
+  bool try_capture_graph_tensor(const int32_t tensor_id,
+                                emel::tensor::event::tensor_state & state_out,
+                                emel::error::type & err_out) noexcept {
+    return this->context_.graph.try_capture_tensor(tensor_id, state_out, err_out);
   }
 };
 
