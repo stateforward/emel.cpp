@@ -11,6 +11,7 @@ namespace emel::graph::processor::action {
 inline void reset_output(event::execution_output & output) noexcept {
   output.outputs_produced = 0;
   output.graph_reused = 0;
+  output.lifecycle = nullptr;
 }
 
 struct reject_invalid_execute_with_dispatch {
@@ -59,6 +60,7 @@ struct commit_output {
   void operator()(const event::execute_step & ev, const context &) const noexcept {
     ev.request.output_out->outputs_produced = ev.ctx.outputs_produced;
     ev.request.output_out->graph_reused = ev.ctx.graph_reused;
+    ev.request.output_out->lifecycle = ev.request.lifecycle;
   }
 };
 

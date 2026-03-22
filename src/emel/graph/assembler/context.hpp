@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "emel/graph/allocator/sm.hpp"
+#include "emel/graph/processor/events.hpp"
 
 namespace emel::graph::assembler::action {
 
@@ -13,6 +14,7 @@ struct context {
   uint32_t reserved_tensor_count = 0;
   uint64_t reserved_required_buffer_bytes = 0;
   uint32_t topology_version = 0;
+  const processor::event::lifecycle_manifest * reserved_lifecycle = nullptr;
   uint8_t has_reserved_topology = 0;
 };
 

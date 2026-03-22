@@ -29,6 +29,9 @@ struct valid_reserve {
   bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
     return ev.request.model_topology != nullptr &&
            ev.request.output_out != nullptr &&
+           ev.request.lifecycle != nullptr &&
+           ev.request.lifecycle->tensors != nullptr &&
+           ev.request.lifecycle->tensor_count > 0 &&
            ev.request.max_node_count != 0u &&
            ev.request.max_tensor_count != 0u &&
            ev.request.bytes_per_tensor != 0u &&
@@ -70,6 +73,9 @@ struct valid_compute {
   bool operator()(const event::compute_graph & ev, const action::context &) const noexcept {
     return ev.request.step_plan != nullptr &&
            ev.request.output_out != nullptr &&
+           ev.request.lifecycle != nullptr &&
+           ev.request.lifecycle->tensors != nullptr &&
+           ev.request.lifecycle->tensor_count > 0 &&
            ev.request.bytes_per_tensor != 0u &&
            ev.request.workspace_capacity_bytes != 0u &&
            ev.request.step_index >= 0 &&
@@ -121,6 +127,20 @@ struct reserve_done {
   bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
     return ev.ctx.err == emel::error::cast(error::none) &&
            ev.ctx.reserve_outcome == event::phase_outcome::done;
+  }
+};
+
+struct tensor_reserve_done {
+  bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.tensor_reserve_outcome == event::phase_outcome::done;
+  }
+};
+
+struct tensor_reserve_failed {
+  bool operator()(const event::reserve_graph & ev, const action::context &) const noexcept {
+    return ev.ctx.err != emel::error::cast(error::none) ||
+           ev.ctx.tensor_reserve_outcome == event::phase_outcome::failed;
   }
 };
 

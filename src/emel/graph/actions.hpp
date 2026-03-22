@@ -1,10 +1,13 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include "emel/graph/context.hpp"
 #include "emel/graph/errors.hpp"
 #include "emel/graph/events.hpp"
+#include "emel/tensor/errors.hpp"
+#include "emel/tensor/events.hpp"
 
 namespace emel::graph::action {
 
@@ -77,6 +80,7 @@ inline void reset_reserve_output(event::reserve_output & output) noexcept {
   output.tensor_count = 0;
   output.required_buffer_bytes = 0;
   output.version = 0;
+  output.lifecycle = nullptr;
 }
 
 inline void reset_compute_output(event::compute_output & output) noexcept {
@@ -88,6 +92,7 @@ inline void reset_compute_output(event::compute_output & output) noexcept {
   output.reused_topology = 0;
   output.outputs_produced = 0;
   output.graph_reused = 0;
+  output.lifecycle = nullptr;
 }
 
 struct reject_invalid_reserve_with_dispatch {
@@ -142,6 +147,7 @@ struct begin_reserve {
   void operator()(const event::reserve_graph & ev, context & ctx) const noexcept {
     ev.ctx.err = emel::error::cast(error::none);
     ev.ctx.reserve_outcome = event::phase_outcome::unknown;
+    ev.ctx.tensor_reserve_outcome = event::phase_outcome::unknown;
     ev.ctx.reserve_output = {};
     ++ctx.dispatch_generation;
     reset_reserve_output(*ev.request.output_out);
@@ -168,6 +174,7 @@ struct request_reserve {
     const assembler::event::reserve request{
       .model_topology = ev.request.model_topology,
       .output_out = &ev.ctx.reserve_output,
+      .lifecycle = ev.request.lifecycle,
       .max_node_count = ev.request.max_node_count,
       .max_tensor_count = ev.request.max_tensor_count,
       .bytes_per_tensor = ev.request.bytes_per_tensor,
@@ -188,6 +195,7 @@ struct request_assemble {
     const assembler::event::assemble request{
       .step_plan = ev.request.step_plan,
       .output_out = &ev.ctx.assemble_output,
+      .lifecycle = ev.request.lifecycle,
       .node_count_hint = ev.request.node_count_hint,
       .tensor_count_hint = ev.request.tensor_count_hint,
       .bytes_per_tensor = ev.request.bytes_per_tensor,
@@ -208,6 +216,7 @@ struct request_execute {
     const processor::event::execute request{
       .step_plan = ev.request.step_plan,
       .output_out = &ev.ctx.execute_output,
+      .lifecycle = ev.request.lifecycle,
       .step_index = ev.request.step_index,
       .step_size = ev.request.step_size,
       .kv_tokens = ev.request.kv_tokens,
@@ -236,6 +245,45 @@ struct request_execute {
   }
 };
 
+namespace detail {
+
+inline bool reserve_lifecycle_manifest(const processor::event::lifecycle_manifest & lifecycle,
+                                       tensor::sm & tensor_actor) noexcept {
+  int32_t tensor_err = static_cast<int32_t>(emel::error::cast(tensor::error::none));
+  bool all_ok = true;
+  for (int32_t idx = 0; idx < lifecycle.tensor_count; ++idx) {
+    const auto & binding = lifecycle.tensors[idx];
+    const tensor::event::reserve_tensor reserve_ev{
+      .tensor_id = binding.tensor_id,
+      .buffer = binding.buffer,
+      .buffer_bytes = binding.buffer_bytes,
+      .consumer_refs = binding.consumer_refs,
+      .is_leaf = binding.is_leaf,
+      .error_out = &tensor_err,
+    };
+    all_ok = tensor_actor.process_event(reserve_ev) && all_ok;
+  }
+  return all_ok;
+}
+
+}  // namespace detail
+
+struct request_tensor_reserve {
+  void operator()(const event::reserve_graph & ev, context & ctx) const noexcept {
+    const bool all_ok = detail::reserve_lifecycle_manifest(*ev.request.lifecycle, ctx.tensor_actor);
+    const std::array<event::phase_outcome, 2> outcomes{
+      event::phase_outcome::failed,
+      event::phase_outcome::done,
+    };
+    const std::array<emel::error::type, 2> errors{
+      emel::error::cast(error::internal_error),
+      emel::error::cast(error::none),
+    };
+    ev.ctx.tensor_reserve_outcome = outcomes[static_cast<size_t>(all_ok)];
+    ev.ctx.err = errors[static_cast<size_t>(all_ok)];
+  }
+};
+
 struct dispatch_reserve_done {
   void operator()(const event::reserve_graph & ev, const context &) const noexcept {
     ev.request.output_out->graph_topology = ev.ctx.reserve_output.graph_topology;
@@ -243,6 +291,7 @@ struct dispatch_reserve_done {
     ev.request.output_out->tensor_count = ev.ctx.reserve_output.tensor_count;
     ev.request.output_out->required_buffer_bytes = ev.ctx.reserve_output.required_buffer_bytes;
     ev.request.output_out->version = ev.ctx.reserve_output.version;
+    ev.request.output_out->lifecycle = ev.ctx.reserve_output.lifecycle;
 
     ev.request.dispatch_done(events::reserve_done{*ev.request.output_out});
   }
@@ -267,6 +316,7 @@ struct dispatch_compute_done {
     ev.request.output_out->reused_topology = ev.ctx.assemble_output.reused_topology;
     ev.request.output_out->outputs_produced = ev.ctx.execute_output.outputs_produced;
     ev.request.output_out->graph_reused = ev.ctx.execute_output.graph_reused;
+    ev.request.output_out->lifecycle = ev.request.lifecycle;
 
     ev.request.dispatch_done(events::compute_done{*ev.request.output_out});
   }
@@ -299,6 +349,7 @@ inline constexpr reject_invalid_compute_without_output reject_invalid_compute_wi
 inline constexpr begin_reserve begin_reserve{};
 inline constexpr begin_compute begin_compute{};
 inline constexpr request_reserve request_reserve{};
+inline constexpr request_tensor_reserve request_tensor_reserve{};
 inline constexpr request_assemble request_assemble{};
 inline constexpr request_execute request_execute{};
 inline constexpr dispatch_reserve_done dispatch_reserve_done{};

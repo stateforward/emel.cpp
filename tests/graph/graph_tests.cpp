@@ -15,6 +15,8 @@
 #include "emel/graph/sm.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
+#include "emel/tensor/errors.hpp"
+#include "emel/tensor/events.hpp"
 
 namespace {
 
@@ -114,6 +116,47 @@ struct compute_callbacks {
   }
 };
 
+struct lifecycle_fixture {
+  int32_t input_tokens[2] = {1, 2};
+  std::array<emel::graph::processor::event::lifecycle_tensor_binding, 2> tensors{{
+      {
+          .tensor_id = 0,
+          .buffer = reinterpret_cast<void *>(0xCAFE),
+          .buffer_bytes = 64u,
+          .consumer_refs = 0,
+          .is_leaf = true,
+      },
+      {
+          .tensor_id = 1,
+          .buffer = input_tokens,
+          .buffer_bytes = sizeof(input_tokens),
+          .consumer_refs = 1,
+          .is_leaf = false,
+      },
+  }};
+  std::array<int32_t, 2> required_ids = {0, 1};
+  std::array<int32_t, 1> publish_ids = {1};
+  std::array<int32_t, 1> release_ids = {1};
+  emel::graph::processor::event::lifecycle_phase phase{
+    .required_filled_ids = required_ids.data(),
+    .required_filled_count = static_cast<int32_t>(required_ids.size()),
+    .publish_ids = publish_ids.data(),
+    .publish_count = static_cast<int32_t>(publish_ids.size()),
+    .release_ids = release_ids.data(),
+    .release_count = static_cast<int32_t>(release_ids.size()),
+  };
+  emel::graph::processor::event::lifecycle_manifest reserve{
+    .tensors = tensors.data(),
+    .tensor_count = static_cast<int32_t>(tensors.size()),
+    .phase = nullptr,
+  };
+  emel::graph::processor::event::lifecycle_manifest compute{
+    .tensors = tensors.data(),
+    .tensor_count = static_cast<int32_t>(tensors.size()),
+    .phase = &phase,
+  };
+};
+
 void copy_architecture(std::array<char, emel::model::data::k_max_architecture_name> & dest,
                        const std::string_view value) {
   dest.fill('\0');
@@ -178,12 +221,14 @@ void build_canonical_model(emel::model::data & model, const int32_t block_count)
 
 TEST_CASE("graph_machine_reserve_then_compute_success_path") {
   emel::graph::sm machine{};
+  lifecycle_fixture lifecycle{};
 
   emel::graph::event::reserve_output reserve_output{};
   reserve_callbacks reserve_cb{};
   const emel::graph::event::reserve reserve_request{
     .model_topology = reinterpret_cast<const void *>(0xA5),
     .output_out = &reserve_output,
+    .lifecycle = &lifecycle.reserve,
     .max_node_count = 4u,
     .max_tensor_count = 5u,
     .bytes_per_tensor = 8u,
@@ -194,12 +239,21 @@ TEST_CASE("graph_machine_reserve_then_compute_success_path") {
   REQUIRE(machine.process_event(reserve_request));
   REQUIRE(reserve_cb.done_called);
   REQUIRE_FALSE(reserve_cb.error_called);
+  CHECK(reserve_output.lifecycle == &lifecycle.reserve);
+
+  emel::tensor::event::tensor_state tensor_state{};
+  emel::error::type tensor_err = emel::error::cast(emel::tensor::error::none);
+  REQUIRE(machine.try_capture_tensor(0, tensor_state, tensor_err));
+  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::leaf_filled);
+  REQUIRE(machine.try_capture_tensor(1, tensor_state, tensor_err));
+  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::empty);
 
   emel::graph::event::compute_output compute_output{};
   compute_callbacks compute_cb{};
   const emel::graph::event::compute compute_request{
     .step_plan = reinterpret_cast<const void *>(0xB6),
     .output_out = &compute_output,
+    .lifecycle = &lifecycle.compute,
     .node_count_hint = reserve_output.node_count,
     .tensor_count_hint = reserve_output.tensor_count,
     .bytes_per_tensor = 8u,
@@ -229,16 +283,19 @@ TEST_CASE("graph_machine_reserve_then_compute_success_path") {
   CHECK(compute_output.reused_topology == 1u);
   CHECK(compute_output.outputs_produced == 1);
   CHECK(compute_output.graph_reused == 1u);
+  CHECK(compute_output.lifecycle == &lifecycle.compute);
 }
 
 TEST_CASE("graph_machine_dispatches_invalid_compute_error") {
   emel::graph::sm machine{};
+  lifecycle_fixture lifecycle{};
 
   emel::graph::event::reserve_output reserve_output{};
   reserve_callbacks reserve_cb{};
   const emel::graph::event::reserve reserve_request{
     .model_topology = reinterpret_cast<const void *>(0xA5),
     .output_out = &reserve_output,
+    .lifecycle = &lifecycle.reserve,
     .max_node_count = 4u,
     .max_tensor_count = 5u,
     .bytes_per_tensor = 8u,
@@ -263,6 +320,7 @@ TEST_CASE("graph_machine_dispatches_invalid_compute_error") {
   const emel::graph::event::compute compute_request{
     .step_plan = nullptr,
     .output_out = &compute_output,
+    .lifecycle = &lifecycle.compute,
     .node_count_hint = reserve_output.node_count,
     .tensor_count_hint = reserve_output.tensor_count,
     .bytes_per_tensor = 8u,
@@ -336,6 +394,7 @@ TEST_CASE("graph_compute_error_guard_classification") {
 TEST_CASE("graph_machine_accepts_canonical_descriptor_handles") {
   auto model = std::make_unique<emel::model::data>();
   build_canonical_model(*model, 2);
+  lifecycle_fixture lifecycle{};
 
   emel::model::llama::detail::execution_view execution = {};
   REQUIRE(emel::model::llama::detail::build_execution_view(*model, execution) ==
@@ -355,6 +414,7 @@ TEST_CASE("graph_machine_accepts_canonical_descriptor_handles") {
   const emel::graph::event::reserve reserve_request{
     .model_topology = &topology,
     .output_out = &reserve_output,
+    .lifecycle = &lifecycle.reserve,
     .max_node_count = topology.node_count,
     .max_tensor_count = topology.tensor_count,
     .bytes_per_tensor = topology.bytes_per_tensor,
@@ -370,6 +430,7 @@ TEST_CASE("graph_machine_accepts_canonical_descriptor_handles") {
   const emel::graph::event::compute compute_request{
     .step_plan = &prefill,
     .output_out = &compute_output,
+    .lifecycle = &lifecycle.compute,
     .node_count_hint = prefill.node_count,
     .tensor_count_hint = prefill.tensor_count,
     .bytes_per_tensor = topology.bytes_per_tensor,
