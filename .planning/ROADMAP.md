@@ -111,5 +111,5 @@ Phases execute in numeric order: 10 → 11 → 12 → 12.1 → 13
 | 10. Flash Kernel Bring-Up | 1/2 | Complete    | 2026-03-22 |
 | 11. Generator Flash Adoption | 2/2 | Complete    | 2026-03-22 |
 | 12. Parity And Verification Closure | 0/2 | Complete    | 2026-03-22 |
-| 12.1. Enforce SML Tensor Lifecycle Orchestration | 1/3 | In Progress|  |
+| 12.1. Enforce SML Tensor Lifecycle Orchestration | 3/3 | Complete    | 2026-03-22 |
 | 13. Benchmark Evidence | 0/TBD | Not started | - |
