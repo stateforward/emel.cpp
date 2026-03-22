@@ -60,6 +60,16 @@ bool run_kernel_ok(const execute_t &, int32_t * err_out) {
   return true;
 }
 
+int32_t g_kernel_calls = 0;
+
+bool run_kernel_counting(const execute_t &, int32_t * err_out) {
+  ++g_kernel_calls;
+  if (err_out != nullptr) {
+    *err_out = 0;
+  }
+  return true;
+}
+
 bool extract_outputs_ok(const execute_t &, int32_t * outputs_out, int32_t * err_out) {
   if (outputs_out != nullptr) {
     *outputs_out = 1;
@@ -134,7 +144,8 @@ struct lifecycle_fixture {
           .is_leaf = false,
       },
   }};
-  std::array<int32_t, 2> required_ids = {0, 1};
+  std::array<int32_t, 1> required_ids = {0};
+  std::array<int32_t, 2> blocked_required_ids = {0, 1};
   std::array<int32_t, 1> publish_ids = {1};
   std::array<int32_t, 1> release_ids = {1};
   emel::graph::processor::event::lifecycle_phase phase{
@@ -145,6 +156,22 @@ struct lifecycle_fixture {
     .release_ids = release_ids.data(),
     .release_count = static_cast<int32_t>(release_ids.size()),
   };
+  emel::graph::processor::event::lifecycle_phase blocked_phase{
+    .required_filled_ids = blocked_required_ids.data(),
+    .required_filled_count = static_cast<int32_t>(blocked_required_ids.size()),
+    .publish_ids = publish_ids.data(),
+    .publish_count = static_cast<int32_t>(publish_ids.size()),
+    .release_ids = release_ids.data(),
+    .release_count = static_cast<int32_t>(release_ids.size()),
+  };
+  emel::graph::processor::event::lifecycle_phase no_release_phase{
+    .required_filled_ids = required_ids.data(),
+    .required_filled_count = static_cast<int32_t>(required_ids.size()),
+    .publish_ids = publish_ids.data(),
+    .publish_count = static_cast<int32_t>(publish_ids.size()),
+    .release_ids = nullptr,
+    .release_count = 0,
+  };
   emel::graph::processor::event::lifecycle_manifest reserve{
     .tensors = tensors.data(),
     .tensor_count = static_cast<int32_t>(tensors.size()),
@@ -154,6 +181,16 @@ struct lifecycle_fixture {
     .tensors = tensors.data(),
     .tensor_count = static_cast<int32_t>(tensors.size()),
     .phase = &phase,
+  };
+  emel::graph::processor::event::lifecycle_manifest blocked_compute{
+    .tensors = tensors.data(),
+    .tensor_count = static_cast<int32_t>(tensors.size()),
+    .phase = &blocked_phase,
+  };
+  emel::graph::processor::event::lifecycle_manifest no_release_compute{
+    .tensors = tensors.data(),
+    .tensor_count = static_cast<int32_t>(tensors.size()),
+    .phase = &no_release_phase,
   };
 };
 
@@ -284,6 +321,181 @@ TEST_CASE("graph_machine_reserve_then_compute_success_path") {
   CHECK(compute_output.outputs_produced == 1);
   CHECK(compute_output.graph_reused == 1u);
   CHECK(compute_output.lifecycle == &lifecycle.compute);
+  REQUIRE(machine.try_capture_tensor(1, tensor_state, tensor_err));
+  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::empty);
+}
+
+TEST_CASE("graph_machine_blocks_kernel_until_required_tensors_are_filled") {
+  emel::graph::sm machine{};
+  lifecycle_fixture lifecycle{};
+
+  emel::graph::event::reserve_output reserve_output{};
+  reserve_callbacks reserve_cb{};
+  REQUIRE(machine.process_event(emel::graph::event::reserve{
+    .model_topology = reinterpret_cast<const void *>(0xA5),
+    .output_out = &reserve_output,
+    .lifecycle = &lifecycle.reserve,
+    .max_node_count = 4u,
+    .max_tensor_count = 5u,
+    .bytes_per_tensor = 8u,
+    .workspace_capacity_bytes = 64u,
+    .dispatch_done = {&reserve_cb, reserve_callbacks::on_done},
+    .dispatch_error = {&reserve_cb, reserve_callbacks::on_error},
+  }));
+
+  g_kernel_calls = 0;
+  emel::graph::event::compute_output compute_output{};
+  compute_callbacks compute_cb{};
+  CHECK_FALSE(machine.process_event(emel::graph::event::compute{
+    .step_plan = reinterpret_cast<const void *>(0xB7),
+    .output_out = &compute_output,
+    .lifecycle = &lifecycle.blocked_compute,
+    .node_count_hint = reserve_output.node_count,
+    .tensor_count_hint = reserve_output.tensor_count,
+    .bytes_per_tensor = 8u,
+    .workspace_capacity_bytes = 64u,
+    .step_index = 0,
+    .step_size = 1,
+    .kv_tokens = 1,
+    .expected_outputs = 1,
+    .validate = validate_ok,
+    .prepare_graph = prepare_graph_reuse,
+    .alloc_graph = alloc_graph_ok,
+    .bind_inputs = bind_inputs_ok,
+    .run_kernel = run_kernel_counting,
+    .extract_outputs = extract_outputs_ok,
+    .dispatch_done = {&compute_cb, compute_callbacks::on_done},
+    .dispatch_error = {&compute_cb, compute_callbacks::on_error},
+  }));
+  CHECK_FALSE(compute_cb.done_called);
+  CHECK(compute_cb.error_called);
+  CHECK(g_kernel_calls == 0);
+}
+
+TEST_CASE("graph_machine_blocks_reuse_until_release_is_recorded") {
+  emel::graph::sm machine{};
+  lifecycle_fixture lifecycle{};
+
+  emel::graph::event::reserve_output reserve_output{};
+  reserve_callbacks reserve_cb{};
+  REQUIRE(machine.process_event(emel::graph::event::reserve{
+    .model_topology = reinterpret_cast<const void *>(0xA5),
+    .output_out = &reserve_output,
+    .lifecycle = &lifecycle.reserve,
+    .max_node_count = 4u,
+    .max_tensor_count = 5u,
+    .bytes_per_tensor = 8u,
+    .workspace_capacity_bytes = 64u,
+    .dispatch_done = {&reserve_cb, reserve_callbacks::on_done},
+    .dispatch_error = {&reserve_cb, reserve_callbacks::on_error},
+  }));
+
+  g_kernel_calls = 0;
+  emel::graph::event::compute_output first_output{};
+  compute_callbacks first_cb{};
+  REQUIRE(machine.process_event(emel::graph::event::compute{
+    .step_plan = reinterpret_cast<const void *>(0xC1),
+    .output_out = &first_output,
+    .lifecycle = &lifecycle.no_release_compute,
+    .node_count_hint = reserve_output.node_count,
+    .tensor_count_hint = reserve_output.tensor_count,
+    .bytes_per_tensor = 8u,
+    .workspace_capacity_bytes = 64u,
+    .step_index = 0,
+    .step_size = 1,
+    .kv_tokens = 1,
+    .expected_outputs = 1,
+    .validate = validate_ok,
+    .prepare_graph = prepare_graph_reuse,
+    .alloc_graph = alloc_graph_ok,
+    .bind_inputs = bind_inputs_ok,
+    .run_kernel = run_kernel_counting,
+    .extract_outputs = extract_outputs_ok,
+    .dispatch_done = {&first_cb, compute_callbacks::on_done},
+    .dispatch_error = {&first_cb, compute_callbacks::on_error},
+  }));
+  REQUIRE(first_cb.done_called);
+  CHECK(g_kernel_calls == 1);
+
+  emel::tensor::event::tensor_state tensor_state{};
+  emel::error::type tensor_err = emel::error::cast(emel::tensor::error::none);
+  REQUIRE(machine.try_capture_tensor(1, tensor_state, tensor_err));
+  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::filled);
+
+  emel::graph::event::compute_output second_output{};
+  compute_callbacks second_cb{};
+  CHECK_FALSE(machine.process_event(emel::graph::event::compute{
+    .step_plan = reinterpret_cast<const void *>(0xC2),
+    .output_out = &second_output,
+    .lifecycle = &lifecycle.no_release_compute,
+    .node_count_hint = reserve_output.node_count,
+    .tensor_count_hint = reserve_output.tensor_count,
+    .bytes_per_tensor = 8u,
+    .workspace_capacity_bytes = 64u,
+    .step_index = 0,
+    .step_size = 1,
+    .kv_tokens = 1,
+    .expected_outputs = 1,
+    .validate = validate_ok,
+    .prepare_graph = prepare_graph_reuse,
+    .alloc_graph = alloc_graph_ok,
+    .bind_inputs = bind_inputs_ok,
+    .run_kernel = run_kernel_counting,
+    .extract_outputs = extract_outputs_ok,
+    .dispatch_done = {&second_cb, compute_callbacks::on_done},
+    .dispatch_error = {&second_cb, compute_callbacks::on_error},
+  }));
+  CHECK_FALSE(second_cb.done_called);
+  CHECK(second_cb.error_called);
+  CHECK(g_kernel_calls == 1);
+}
+
+TEST_CASE("graph_machine_reuses_publish_targets_after_release") {
+  emel::graph::sm machine{};
+  lifecycle_fixture lifecycle{};
+
+  emel::graph::event::reserve_output reserve_output{};
+  reserve_callbacks reserve_cb{};
+  REQUIRE(machine.process_event(emel::graph::event::reserve{
+    .model_topology = reinterpret_cast<const void *>(0xA5),
+    .output_out = &reserve_output,
+    .lifecycle = &lifecycle.reserve,
+    .max_node_count = 4u,
+    .max_tensor_count = 5u,
+    .bytes_per_tensor = 8u,
+    .workspace_capacity_bytes = 64u,
+    .dispatch_done = {&reserve_cb, reserve_callbacks::on_done},
+    .dispatch_error = {&reserve_cb, reserve_callbacks::on_error},
+  }));
+
+  g_kernel_calls = 0;
+  for (int32_t step = 0; step < 2; ++step) {
+    emel::graph::event::compute_output compute_output{};
+    compute_callbacks compute_cb{};
+    REQUIRE(machine.process_event(emel::graph::event::compute{
+      .step_plan = reinterpret_cast<const void *>(0xD0 + step),
+      .output_out = &compute_output,
+      .lifecycle = &lifecycle.compute,
+      .node_count_hint = reserve_output.node_count,
+      .tensor_count_hint = reserve_output.tensor_count,
+      .bytes_per_tensor = 8u,
+      .workspace_capacity_bytes = 64u,
+      .step_index = 0,
+      .step_size = 1,
+      .kv_tokens = 1,
+      .expected_outputs = 1,
+      .validate = validate_ok,
+      .prepare_graph = prepare_graph_reuse,
+      .alloc_graph = alloc_graph_ok,
+      .bind_inputs = bind_inputs_ok,
+      .run_kernel = run_kernel_counting,
+      .extract_outputs = extract_outputs_ok,
+      .dispatch_done = {&compute_cb, compute_callbacks::on_done},
+      .dispatch_error = {&compute_cb, compute_callbacks::on_error},
+    }));
+    REQUIRE(compute_cb.done_called);
+  }
+  CHECK(g_kernel_calls == 2);
 }
 
 TEST_CASE("graph_machine_dispatches_invalid_compute_error") {

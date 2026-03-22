@@ -217,6 +217,7 @@ struct request_execute {
       .step_plan = ev.request.step_plan,
       .output_out = &ev.ctx.execute_output,
       .lifecycle = ev.request.lifecycle,
+      .tensor_machine = &ctx.tensor_actor,
       .step_index = ev.request.step_index,
       .step_size = ev.request.step_size,
       .kv_tokens = ev.request.kv_tokens,
