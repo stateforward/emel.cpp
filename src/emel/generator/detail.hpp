@@ -441,8 +441,8 @@ inline void build_lifecycle(native_backend & backend) {
         matrix_buffer_bytes(block.feed_forward_up));
   }
 
-  backend.input_tokens_tensor_id = append_lifecycle_tensor(backend, nullptr, 0u, 1, false);
-  backend.positions_tensor_id = append_lifecycle_tensor(backend, nullptr, 0u, 1, false);
+  backend.input_tokens_tensor_id = append_lifecycle_tensor(backend, nullptr, 0u, 0, true);
+  backend.positions_tensor_id = append_lifecycle_tensor(backend, nullptr, 0u, 0, true);
   backend.logits_tensor_id = append_lifecycle_tensor(backend, nullptr, 0u, 1, false);
   backend.key_cache_tensor_id = append_lifecycle_tensor(
       backend,
@@ -462,14 +462,12 @@ inline void build_lifecycle(native_backend & backend) {
   backend.prefill_publish_ids.push_back(backend.logits_tensor_id);
   backend.prefill_publish_ids.push_back(backend.key_cache_tensor_id);
   backend.prefill_publish_ids.push_back(backend.value_cache_tensor_id);
-  backend.prefill_release_ids.push_back(backend.input_tokens_tensor_id);
-  backend.prefill_release_ids.push_back(backend.positions_tensor_id);
   backend.prefill_release_ids.push_back(backend.logits_tensor_id);
 
   backend.decode_required_ids = backend.prefill_required_ids;
   backend.decode_required_ids.push_back(backend.key_cache_tensor_id);
   backend.decode_required_ids.push_back(backend.value_cache_tensor_id);
-  backend.decode_publish_ids = backend.prefill_publish_ids;
+  backend.decode_publish_ids.push_back(backend.logits_tensor_id);
   backend.decode_release_ids = backend.prefill_release_ids;
 
   rebuild_lifecycle_views(backend);

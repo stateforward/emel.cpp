@@ -53,6 +53,18 @@ inline bool capture_graph_compute_error(event::generate_ctx & ctx,
   return true;
 }
 
+inline void reset_generation_tensor_epochs(context & ctx) noexcept {
+  emel::error::type ignored = 0;
+  const std::array<int32_t, 3> tensor_ids{
+    ctx.compute.backend.key_cache_tensor_id,
+    ctx.compute.backend.value_cache_tensor_id,
+    ctx.compute.backend.logits_tensor_id,
+  };
+  for (const int32_t tensor_id : tensor_ids) {
+    (void)ctx.graph.reset_tensor_epoch(tensor_id, ignored);
+  }
+}
+
 struct begin_initialize {
   void operator()(const event::initialize_run & ev, context & ctx) const noexcept {
     ev.ctx.err = emel::error::cast(error::none);
@@ -533,6 +545,7 @@ struct mark_backend_error {
 
 struct mark_sequence_clear {
   void operator()(const event::generate_run &, context & ctx) const noexcept {
+    reset_generation_tensor_epochs(ctx);
     ctx.state.sequence_live = false;
   }
 };
