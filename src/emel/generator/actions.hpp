@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <cstring>
+
 #include "emel/batch/planner/events.hpp"
 #include "emel/generator/context.hpp"
 #include "emel/generator/errors.hpp"
@@ -60,9 +63,60 @@ inline void reset_generation_tensor_epochs(context & ctx) noexcept {
     ctx.compute.backend.value_cache_tensor_id,
     ctx.compute.backend.logits_tensor_id,
   };
-  for (const int32_t tensor_id : tensor_ids) {
-    (void)ctx.graph.reset_tensor_epoch(tensor_id, ignored);
+  const std::array<int32_t, 2> reset_totals{
+      0,
+      static_cast<int32_t>(tensor_ids.size()),
+  };
+  const size_t has_graph_reservation =
+      static_cast<size_t>(ctx.state.graph_reservation.lifecycle != nullptr);
+  for (int32_t idx = 0; idx < reset_totals[has_graph_reservation]; ++idx) {
+    (void)ctx.graph.reset_tensor_epoch(tensor_ids[static_cast<size_t>(idx)], ignored);
   }
+}
+
+inline void capture_renderer_session(const event::initialize & request,
+                                     context & ctx) noexcept {
+  ctx.renderer_session.strip_leading_space = request.strip_leading_space;
+  ctx.renderer_session.stop_sequence_used = std::min(
+      request.stop_sequences.size(),
+      ctx.renderer_session.stop_sequence_lengths.size());
+  ctx.renderer_session.stop_sequence_lengths.fill(0u);
+
+  for (auto & stop_bytes : ctx.renderer_session.stop_sequence_bytes) {
+    stop_bytes.fill('\0');
+  }
+
+  for (size_t idx = 0; idx < ctx.renderer_session.stop_sequence_used; ++idx) {
+    const std::string_view stop = request.stop_sequences[idx];
+    const size_t bounded_size = std::min(stop.size(),
+                                         ctx.renderer_session.stop_sequence_bytes[idx].size());
+    std::memcpy(ctx.renderer_session.stop_sequence_bytes[idx].data(),
+                stop.data(),
+                bounded_size);
+    ctx.renderer_session.stop_sequence_lengths[idx] = bounded_size;
+  }
+}
+
+inline bool dispatch_renderer_initialize(context & ctx,
+                                         int32_t & phase_code_out) noexcept {
+  std::array<std::string_view,
+             emel::text::renderer::action::k_max_stop_sequences>
+      stop_sequences = {};
+  for (size_t idx = 0; idx < ctx.renderer_session.stop_sequence_used; ++idx) {
+    stop_sequences[idx] = std::string_view{
+        ctx.renderer_session.stop_sequence_bytes[idx].data(),
+        ctx.renderer_session.stop_sequence_lengths[idx]};
+  }
+
+  emel::text::renderer::event::initialize initialize_ev{ctx.model->vocab_data};
+  initialize_ev.strip_leading_space = ctx.renderer_session.strip_leading_space;
+  const size_t has_stop_sequences =
+      static_cast<size_t>(ctx.renderer_session.stop_sequence_used != 0u);
+  const std::string_view * stop_sequence_ptrs[2] = {nullptr, stop_sequences.data()};
+  initialize_ev.stop_sequences = stop_sequence_ptrs[has_stop_sequences];
+  initialize_ev.stop_sequence_count = ctx.renderer_session.stop_sequence_used;
+  initialize_ev.error_out = &phase_code_out;
+  return ctx.renderer.process_event(initialize_ev);
 }
 
 struct begin_initialize {
@@ -88,9 +142,10 @@ struct begin_initialize {
     ctx.buffers.seq_masks[0] = 1u;
     ctx.buffers.seq_primary_ids[0] = k_sequence_id;
 
+    capture_renderer_session(ev.request, ctx);
+    reset_generation_tensor_epochs(ctx);
     ctx.state.sequence_live = false;
     ctx.state.memory_snapshot = {};
-
   }
 };
 
@@ -124,12 +179,7 @@ struct request_conditioner_bind {
 struct request_renderer_initialize {
   void operator()(const event::initialize_run & ev, context & ctx) const noexcept {
     ev.ctx.phase_code = 0;
-    emel::text::renderer::event::initialize initialize_ev{ctx.model->vocab_data};
-    initialize_ev.strip_leading_space = ev.request.strip_leading_space;
-    initialize_ev.stop_sequences = ev.request.stop_sequences.data();
-    initialize_ev.stop_sequence_count = ev.request.stop_sequences.size();
-    initialize_ev.error_out = &ev.ctx.phase_code;
-    ev.ctx.phase_accepted = ctx.renderer.process_event(initialize_ev);
+    ev.ctx.phase_accepted = dispatch_renderer_initialize(ctx, ev.ctx.phase_code);
   }
 };
 
@@ -545,8 +595,11 @@ struct mark_backend_error {
 
 struct mark_sequence_clear {
   void operator()(const event::generate_run &, context & ctx) const noexcept {
+    int32_t ignored_renderer_error = 0;
+    (void)dispatch_renderer_initialize(ctx, ignored_renderer_error);
     reset_generation_tensor_epochs(ctx);
     ctx.state.sequence_live = false;
+    ctx.state.memory_snapshot = {};
   }
 };
 

@@ -565,6 +565,85 @@ TEST_CASE("generator_generate_multiple_tokens_and_resets_sequence_on_reuse") {
   CHECK(std::string_view(second_output.data(), second_output_length) == "world");
 }
 
+TEST_CASE("generator_resets_renderer_stop_state_when_reusing_a_sequence") {
+  auto fixture = std::make_unique<generator_fixture>();
+  callback_tracker initialize_tracker{};
+  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
+  const std::array<std::string_view, 1> stops = {"worldworld"};
+  initialize_request.stop_sequences = stops;
+  REQUIRE(fixture->generator->process_event(initialize_request));
+
+  callback_tracker first_tracker{};
+  std::array<char, 32> first_output = {};
+  size_t first_output_length = 0;
+  emel::error::type first_error = emel::error::cast(emel::generator::error::backend);
+  auto first_request =
+      fixture->make_generate(first_tracker, first_output.data(), first_output.size(),
+                             first_output_length, &first_error);
+  first_request.max_tokens = 2;
+
+  REQUIRE(fixture->generator->process_event(first_request));
+  CHECK(first_error == emel::error::cast(emel::generator::error::none));
+  CHECK(first_tracker.tokens_generated == 2);
+  CHECK(first_output_length == 0);
+
+  callback_tracker second_tracker{};
+  std::array<char, 32> second_output = {};
+  size_t second_output_length = 0;
+  emel::error::type second_error = emel::error::cast(emel::generator::error::backend);
+  auto second_request =
+      fixture->make_generate(second_tracker, second_output.data(), second_output.size(),
+                             second_output_length, &second_error);
+  second_request.max_tokens = 2;
+
+  CHECK(fixture->generator->process_event(second_request));
+  CHECK(second_error == emel::error::cast(emel::generator::error::none));
+  CHECK(second_tracker.tokens_generated == 2);
+  CHECK(second_output_length == 0);
+}
+
+TEST_CASE("generator_reinitialize_clears_lifecycle_publish_state_before_next_generate") {
+  auto fixture = std::make_unique<generator_fixture>();
+  callback_tracker first_initialize_tracker{};
+  emel::error::type first_initialize_error =
+      emel::error::cast(emel::generator::error::backend);
+  const auto first_initialize =
+      fixture->make_initialize(first_initialize_tracker, &first_initialize_error);
+  REQUIRE(fixture->generator->process_event(first_initialize));
+
+  callback_tracker first_generate_tracker{};
+  std::array<char, 32> first_output = {};
+  size_t first_output_length = 0;
+  emel::error::type first_generate_error = emel::error::cast(emel::generator::error::backend);
+  const auto first_generate =
+      fixture->make_generate(first_generate_tracker, first_output.data(), first_output.size(),
+                             first_output_length, &first_generate_error);
+  REQUIRE(fixture->generator->process_event(first_generate));
+  REQUIRE(first_generate_error == emel::error::cast(emel::generator::error::none));
+
+  callback_tracker second_initialize_tracker{};
+  emel::error::type second_initialize_error =
+      emel::error::cast(emel::generator::error::backend);
+  const auto second_initialize =
+      fixture->make_initialize(second_initialize_tracker, &second_initialize_error);
+  REQUIRE(fixture->generator->process_event(second_initialize));
+  REQUIRE(second_initialize_error == emel::error::cast(emel::generator::error::none));
+
+  callback_tracker second_generate_tracker{};
+  std::array<char, 32> second_output = {};
+  size_t second_output_length = 0;
+  emel::error::type second_generate_error = emel::error::cast(emel::generator::error::backend);
+  const auto second_generate =
+      fixture->make_generate(second_generate_tracker, second_output.data(), second_output.size(),
+                             second_output_length, &second_generate_error);
+
+  CHECK(fixture->generator->process_event(second_generate));
+  CHECK(second_generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(second_generate_tracker.tokens_generated == 1);
+  CHECK(std::string_view(second_output.data(), second_output_length) == "world");
+}
+
 TEST_CASE("generator_docs_table_uses_typed_completion_event_names") {
   using machine_t = boost::sml::sm<emel::generator::model>;
   using transitions = typename machine_t::transitions;

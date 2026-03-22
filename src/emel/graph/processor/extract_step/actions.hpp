@@ -2,6 +2,7 @@
 
 #include "emel/graph/processor/errors.hpp"
 #include "emel/graph/processor/events.hpp"
+#include "emel/graph/processor/detail.hpp"
 #include "emel/graph/processor/extract_step/context.hpp"
 #include "emel/graph/processor/extract_step/events.hpp"
 
@@ -29,6 +30,7 @@ struct mark_done {
 struct mark_failed_existing_error {
   void operator()(const processor::event::execute_step & ev, context &) const noexcept {
     ev.ctx.extract_outcome = events::phase_outcome::failed;
+    (void)::emel::graph::processor::detail::release_phase_tensors(ev.request);
   }
 };
 
@@ -36,6 +38,7 @@ struct mark_failed_callback_error {
   void operator()(const processor::event::execute_step & ev, context &) const noexcept {
     ev.ctx.extract_outcome = events::phase_outcome::failed;
     ev.ctx.err = static_cast<emel::error::type>(ev.ctx.phase_callback_err);
+    (void)::emel::graph::processor::detail::release_phase_tensors(ev.request);
   }
 };
 
@@ -43,6 +46,7 @@ struct mark_failed_callback_without_error {
   void operator()(const processor::event::execute_step & ev, context &) const noexcept {
     ev.ctx.extract_outcome = events::phase_outcome::failed;
     ev.ctx.err = emel::error::cast(processor::error::kernel_failed);
+    (void)::emel::graph::processor::detail::release_phase_tensors(ev.request);
   }
 };
 
@@ -50,6 +54,7 @@ struct mark_failed_invalid_request {
   void operator()(const processor::event::execute_step & ev, context &) const noexcept {
     ev.ctx.extract_outcome = events::phase_outcome::failed;
     ev.ctx.err = emel::error::cast(processor::error::invalid_request);
+    (void)::emel::graph::processor::detail::release_phase_tensors(ev.request);
   }
 };
 
