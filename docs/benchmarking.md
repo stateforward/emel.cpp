@@ -45,6 +45,66 @@ run it via `scripts/bench.sh --compare`.
 when updating the comparison snapshot used by documentation, run:
 `scripts/bench.sh --compare-update`.
 
+## canonical generation compare workflow
+
+the canonical generation benchmark runs through the same compare surface. do not use a separate
+generation-only script path.
+
+run the normal compare workflow:
+
+```bash
+EMEL_BENCH_ITERS=1 \
+EMEL_BENCH_RUNS=1 \
+EMEL_BENCH_WARMUP_ITERS=0 \
+EMEL_BENCH_WARMUP_RUNS=0 \
+scripts/bench.sh --compare
+```
+
+the stable generation case name is:
+
+`generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1`
+
+to isolate that row from the normal compare output:
+
+```bash
+EMEL_BENCH_ITERS=1 \
+EMEL_BENCH_RUNS=1 \
+EMEL_BENCH_WARMUP_ITERS=0 \
+EMEL_BENCH_WARMUP_RUNS=0 \
+scripts/bench.sh --compare | \
+rg '^generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 .* ratio='
+```
+
+the canonical workload is fixed to the checked-in llama-68m fixture, prompt `hello`, and
+`max_tokens=1`. fixture loading and one-time setup stay outside the timed loop; this case measures
+preloaded request latency.
+
+## reading the generation compare row
+
+compare mode prints one row per matched case:
+
+```text
+generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 emel.cpp 21368041.000 ns/op, llama.cpp 6660042.000 ns/op, ratio=3.208x
+```
+
+- `emel.cpp` is the measured EMEL-side time for the canonical generation case.
+- `llama.cpp` is the direct reference time for the same named case.
+- `ratio` is `emel.cpp / llama.cpp`.
+- `ratio > 1.0x` means EMEL is slower for that workload; `ratio < 1.0x` means EMEL is faster.
+
+## generation-specific local overrides
+
+the canonical generation case has its own bounded local validation knobs:
+
+- `EMEL_BENCH_GENERATION_ITERS` overrides per-run iterations for the generation case only.
+- `EMEL_BENCH_GENERATION_RUNS` overrides run count for the generation case only.
+- `EMEL_BENCH_GENERATION_WARMUP_ITERS` overrides warmup iterations for the generation case only.
+- `EMEL_BENCH_GENERATION_WARMUP_RUNS` overrides warmup run count for the generation case only.
+
+for narrow local debugging, you can also isolate a single case with `EMEL_BENCH_CASE_INDEX`. if
+you need seam-audit output for the generation case, set `EMEL_BENCH_AUDIT_GENERATION_SEAMS=1`;
+that audit output stays on stderr and does not change the normal compare row on stdout.
+
 ## gate behavior
 
 the benchmark gate script enforces the following:
@@ -60,8 +120,13 @@ the benchmark gate script enforces the following:
 
 1. add a new machine `sm.hpp` with a benchmark marker.
 2. if the machine is complete, set `// benchmark: ready` and add a benchmark case.
-3. run `scripts/bench.sh --snapshot` locally to verify, or
+3. run `scripts/bench.sh --compare` when you need the live EMEL-vs-reference compare surface,
+   including the canonical generation row.
+4. run `scripts/bench.sh --snapshot` locally to verify, or
    `scripts/bench.sh --snapshot --update` to update the baseline.
+5. run `scripts/bench.sh --compare-update` only when intentionally refreshing the compare
+   snapshot used by generated benchmark docs. benchmark snapshot updates require explicit user
+   approval.
 
 ## rationale
 

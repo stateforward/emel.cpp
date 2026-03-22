@@ -118,8 +118,8 @@ configure_bench_build() {
     cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
   fi
 
-  cmake "${cmake_args[@]}"
-  cmake --build "$build_dir" --parallel --target bench_runner
+  cmake "${cmake_args[@]}" >&2
+  cmake --build "$build_dir" --parallel --target bench_runner >&2
 }
 
 if $COMBINED; then
@@ -518,8 +518,8 @@ if $COMPARE; then
     cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
   fi
 
-  cmake "${cmake_args[@]}"
-  cmake --build "$compare_build_dir" --parallel --target bench_runner
+  cmake "${cmake_args[@]}" >&2
+  cmake --build "$compare_build_dir" --parallel --target bench_runner >&2
   if $COMPARE_UPDATE; then
     compare_baseline="$ROOT_DIR/snapshots/bench/benchmarks_compare.txt"
     {

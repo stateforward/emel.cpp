@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <string_view>
 #include <string>
 #include <vector>
 
@@ -94,7 +95,7 @@ constexpr bench::test_case make_test_case(const bench::append_case_fn emel_fn,
 }
 
 const auto & default_test_cases() {
-  static const std::array<bench::test_case, 25> cases = {{
+  static const std::array<bench::test_case, 26> cases = {{
     make_test_case(bench::append_emel_batch_planner_cases,
                    bench::append_reference_batch_planner_cases),
     make_test_case(bench::append_emel_memory_kv_cases, bench::append_reference_memory_kv_cases),
@@ -108,6 +109,7 @@ const auto & default_test_cases() {
                    bench::append_reference_jinja_formatter_cases),
     make_test_case(bench::append_emel_gbnf_rule_parser_cases,
                    bench::append_reference_gbnf_rule_parser_cases),
+    make_test_case(bench::append_emel_generation_cases, bench::append_reference_generation_cases),
     make_test_case(bench::append_emel_logits_validator_cases,
                    bench::append_reference_logits_validator_cases),
     make_test_case(bench::append_emel_logits_sampler_cases,
@@ -223,6 +225,53 @@ void print_compare(const std::vector<bench::result> & emel_results,
     return a.name < b.name;
   });
 
+  const auto duplicate_emel = std::adjacent_find(
+    emel_sorted.begin(), emel_sorted.end(), [](const bench::result & a, const bench::result & b) {
+      return a.name == b.name;
+    });
+  if (duplicate_emel != emel_sorted.end()) {
+    std::fprintf(stderr, "error: duplicate emel case %s\n", duplicate_emel->name.c_str());
+    std::exit(1);
+  }
+
+  const auto duplicate_ref = std::adjacent_find(
+    ref_sorted.begin(), ref_sorted.end(), [](const bench::result & a, const bench::result & b) {
+      return a.name == b.name;
+    });
+  if (duplicate_ref != ref_sorted.end()) {
+    std::fprintf(stderr, "error: duplicate reference case %s\n", duplicate_ref->name.c_str());
+    std::exit(1);
+  }
+
+  const auto generation_emel = std::find_if(
+    emel_sorted.begin(), emel_sorted.end(), [](const bench::result & entry) {
+      return entry.name == bench::k_generation_case_name;
+    });
+  if (generation_emel == emel_sorted.end()) {
+    std::fprintf(stderr, "error: missing emel generation case %.*s\n",
+                 static_cast<int>(bench::k_generation_case_name.size()),
+                 bench::k_generation_case_name.data());
+    std::exit(1);
+  }
+
+  const auto generation_ref = std::find_if(
+    ref_sorted.begin(), ref_sorted.end(), [](const bench::result & entry) {
+      return entry.name == bench::k_generation_case_name;
+    });
+  if (generation_ref == ref_sorted.end()) {
+    std::fprintf(stderr, "error: missing reference generation case %.*s\n",
+                 static_cast<int>(bench::k_generation_case_name.size()),
+                 bench::k_generation_case_name.data());
+    std::exit(1);
+  }
+
+  if (emel_sorted.size() != ref_sorted.size()) {
+    std::fprintf(stderr, "error: case count mismatch emel=%zu reference=%zu\n",
+                 emel_sorted.size(),
+                 ref_sorted.size());
+    std::exit(1);
+  }
+
   const std::size_t count = std::min(emel_sorted.size(), ref_sorted.size());
   for (std::size_t i = 0; i < count; ++i) {
     const auto & emel_entry = emel_sorted[i];
@@ -238,11 +287,6 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 emel_entry.ns_per_op,
                 ref_entry.ns_per_op,
                 ratio);
-  }
-
-  if (emel_sorted.size() != ref_sorted.size()) {
-    std::fprintf(stderr, "error: case count mismatch\n");
-    std::exit(1);
   }
 }
 

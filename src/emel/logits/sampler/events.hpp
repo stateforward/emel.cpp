@@ -17,6 +17,19 @@ using fn = emel::callback<emel::error::type(int32_t & candidate_ids,
 
 namespace emel::logits::sampler::event {
 
+struct configure {
+  fn & sampler_fns;
+  int32_t sampler_count = 0;
+  emel::error::type & error_out;
+
+  configure(fn & sampler_fns_ref,
+            int32_t sampler_count_value,
+            emel::error::type & error_out_ref) noexcept
+    : sampler_fns(sampler_fns_ref),
+      sampler_count(sampler_count_value),
+      error_out(error_out_ref) {}
+};
+
 struct sample_logits {
   const float & logits;
   int32_t vocab_size = 0;
@@ -55,6 +68,10 @@ struct sample_preselected {
       error_out(error_out_ref) {}
 };
 
+struct configure_ctx {
+  emel::error::type err = emel::error::cast(error::none);
+};
+
 struct sample_logits_ctx {
   emel::error::type err = emel::error::cast(error::none);
   int32_t candidate_count = 0;
@@ -64,6 +81,11 @@ struct sample_logits_ctx {
 
 struct sample_preselected_ctx {
   emel::error::type err = emel::error::cast(error::none);
+};
+
+struct configure_runtime {
+  const configure & request;
+  configure_ctx & ctx;
 };
 
 struct sample_logits_runtime {
@@ -79,6 +101,12 @@ struct sample_preselected_runtime {
 }  // namespace emel::logits::sampler::event
 
 namespace emel::logits::sampler::events {
+
+struct configure_done {};
+
+struct configure_error {
+  emel::error::type err = emel::error::cast(error::none);
+};
 
 struct sample_done {
   int32_t token_id = -1;

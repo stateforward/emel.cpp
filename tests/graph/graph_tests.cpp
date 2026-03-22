@@ -1,12 +1,20 @@
 #include <doctest/doctest.h>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <string_view>
 
 #include "emel/error/error.hpp"
 #include "emel/graph/errors.hpp"
 #include "emel/graph/events.hpp"
 #include "emel/graph/guards.hpp"
 #include "emel/graph/sm.hpp"
+#include "emel/model/llama/detail.hpp"
+#include "emel/model/loader/errors.hpp"
 
 namespace {
 
@@ -105,6 +113,66 @@ struct compute_callbacks {
     return true;
   }
 };
+
+void copy_architecture(std::array<char, emel::model::data::k_max_architecture_name> & dest,
+                       const std::string_view value) {
+  dest.fill('\0');
+  const size_t count = std::min(dest.size() - 1u, value.size());
+  for (size_t i = 0; i < count; ++i) {
+    dest[i] = value[i];
+  }
+}
+
+void append_tensor_name(emel::model::data & model,
+                        emel::model::data::tensor_record & tensor,
+                        const std::string_view name) {
+  tensor.name_offset = model.name_bytes_used;
+  tensor.name_length = static_cast<uint32_t>(name.size());
+  for (size_t i = 0; i < name.size(); ++i) {
+    model.name_storage[model.name_bytes_used + static_cast<uint32_t>(i)] = name[i];
+  }
+  model.name_bytes_used += static_cast<uint32_t>(name.size());
+  tensor.n_dims = 2;
+  tensor.dims[0] = 8;
+  tensor.dims[1] = 8;
+  tensor.data = &tensor;
+  tensor.data_size = 64u;
+}
+
+void build_canonical_model(emel::model::data & model, const int32_t block_count) {
+  std::memset(&model, 0, sizeof(model));
+  copy_architecture(model.architecture_name, "llama");
+  model.n_layers = block_count;
+  model.params.n_embd = 64;
+  model.params.n_ctx = 128;
+  model.weights_data = model.tensors.data();
+  model.weights_size = 4096u;
+
+  uint32_t tensor_index = 0u;
+  const auto add = [&](const std::string_view name) {
+    append_tensor_name(model, model.tensors[tensor_index], name);
+    ++tensor_index;
+  };
+  const auto add_block = [&](const int32_t block, const std::string_view suffix) {
+    add(std::string{"blk."} + std::to_string(block) + "." + std::string{suffix});
+  };
+
+  add("token_embd.weight");
+  add("output_norm.weight");
+  add("output.weight");
+  for (int32_t block = 0; block < block_count; ++block) {
+    add_block(block, "attn_norm.weight");
+    add_block(block, "attn_q.weight");
+    add_block(block, "attn_k.weight");
+    add_block(block, "attn_v.weight");
+    add_block(block, "attn_output.weight");
+    add_block(block, "ffn_norm.weight");
+    add_block(block, "ffn_gate.weight");
+    add_block(block, "ffn_down.weight");
+    add_block(block, "ffn_up.weight");
+  }
+  model.n_tensors = tensor_index;
+}
 
 }  // namespace
 
@@ -263,4 +331,68 @@ TEST_CASE("graph_compute_error_guard_classification") {
 
   phase_ctx.err = static_cast<emel::error::type>(0x7fff);
   CHECK(emel::graph::guard::compute_error_unknown{}(ev, ctx));
+}
+
+TEST_CASE("graph_machine_accepts_canonical_descriptor_handles") {
+  auto model = std::make_unique<emel::model::data>();
+  build_canonical_model(*model, 2);
+
+  emel::model::llama::detail::execution_view execution = {};
+  REQUIRE(emel::model::llama::detail::build_execution_view(*model, execution) ==
+          emel::error::cast(emel::model::loader::error::none));
+  emel::model::llama::detail::topology topology = {};
+  REQUIRE(emel::model::llama::detail::build_topology(execution, topology) ==
+          emel::error::cast(emel::model::loader::error::none));
+  emel::model::llama::detail::step_plan prefill = {};
+  emel::model::llama::detail::step_plan decode = {};
+  REQUIRE(emel::model::llama::detail::build_step_plans(topology, prefill, decode) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  emel::graph::sm machine{};
+
+  emel::graph::event::reserve_output reserve_output{};
+  reserve_callbacks reserve_cb{};
+  const emel::graph::event::reserve reserve_request{
+    .model_topology = &topology,
+    .output_out = &reserve_output,
+    .max_node_count = topology.node_count,
+    .max_tensor_count = topology.tensor_count,
+    .bytes_per_tensor = topology.bytes_per_tensor,
+    .workspace_capacity_bytes = topology.workspace_capacity_bytes,
+    .dispatch_done = {&reserve_cb, reserve_callbacks::on_done},
+    .dispatch_error = {&reserve_cb, reserve_callbacks::on_error},
+  };
+  REQUIRE(machine.process_event(reserve_request));
+  REQUIRE(reserve_cb.done_called);
+
+  emel::graph::event::compute_output compute_output{};
+  compute_callbacks compute_cb{};
+  const emel::graph::event::compute compute_request{
+    .step_plan = &prefill,
+    .output_out = &compute_output,
+    .node_count_hint = prefill.node_count,
+    .tensor_count_hint = prefill.tensor_count,
+    .bytes_per_tensor = topology.bytes_per_tensor,
+    .workspace_capacity_bytes = topology.workspace_capacity_bytes,
+    .step_index = 0,
+    .step_size = 1,
+    .kv_tokens = 1,
+    .expected_outputs = prefill.expected_outputs,
+    .validate = validate_ok,
+    .prepare_graph = prepare_graph_reuse,
+    .alloc_graph = alloc_graph_ok,
+    .bind_inputs = bind_inputs_ok,
+    .run_kernel = run_kernel_ok,
+    .extract_outputs = extract_outputs_ok,
+    .dispatch_done = {&compute_cb, compute_callbacks::on_done},
+    .dispatch_error = {&compute_cb, compute_callbacks::on_error},
+  };
+
+  CHECK(machine.process_event(compute_request));
+  CHECK(compute_cb.done_called);
+  CHECK_FALSE(compute_cb.error_called);
+  CHECK(compute_output.graph_topology == &topology);
+  CHECK(compute_output.node_count == topology.node_count);
+  CHECK(compute_output.tensor_count == topology.tensor_count);
+  CHECK(compute_output.outputs_produced == 1);
 }

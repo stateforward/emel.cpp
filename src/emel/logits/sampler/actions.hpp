@@ -18,6 +18,15 @@ constexpr decltype(auto) unwrap_runtime_event(const runtime_event_type & ev) noe
 
 }  // namespace detail
 
+struct configure_table {
+  void operator()(const event::configure_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.err = emel::error::cast(error::none);
+    ev.request.error_out = emel::error::cast(error::none);
+    ctx.sampler_fns = &ev.request.sampler_fns;
+    ctx.sampler_count = ev.request.sampler_count;
+  }
+};
+
 struct begin_sample {
   void operator()(const event::sample_logits_runtime & ev, context &) const noexcept {
     ev.ctx.err = emel::error::cast(error::none);
@@ -105,6 +114,7 @@ struct on_unexpected {
   }
 };
 
+inline constexpr configure_table configure_table{};
 inline constexpr begin_sample begin_sample{};
 inline constexpr mark_invalid_request mark_invalid_request{};
 inline constexpr prepare_candidates prepare_candidates{};

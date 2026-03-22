@@ -26,7 +26,15 @@ void append_emel_logits_sampler_cases(std::vector<result> & results, const confi
     };
     constexpr int32_t sampler_count = static_cast<int32_t>(std::size(sampler_chain));
 
-    emel::logits::sampler::sm sampler_machine{sampler_chain, sampler_count};
+    emel::error::type sampler_config_error =
+        emel::error::cast(emel::logits::sampler::error::none);
+    emel::logits::sampler::sm sampler_machine{};
+    emel::logits::sampler::event::configure sampler_config{
+      sampler_chain[0],
+      sampler_count,
+      sampler_config_error,
+    };
+    (void)sampler_machine.process_event(sampler_config);
     const std::string sampler_sml_case = make_case_name("sampler", "sml", vocab_size);
     auto sampler_sml_fn = [&]() {
       (void)sampler_machine.process_event(sample_event);

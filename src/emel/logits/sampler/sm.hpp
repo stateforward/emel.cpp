@@ -26,7 +26,14 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
-        sml::state<request_logits_decision> <= *sml::state<ready> + sml::event<event::sample_logits_runtime>
+        sml::state<done> <= *sml::state<ready> + sml::event<event::configure_runtime>
+          [ guard::valid_config{} ]
+          / action::configure_table
+      , sml::state<errored> <= *sml::state<ready> + sml::event<event::configure_runtime>
+          [ guard::invalid_config{} ]
+          / action::mark_invalid_request
+
+      , sml::state<request_logits_decision> <= *sml::state<ready> + sml::event<event::sample_logits_runtime>
       , sml::state<request_preselected_decision> <= *sml::state<ready>
           + sml::event<event::sample_preselected_runtime>
 
@@ -82,6 +89,10 @@ struct model {
           / action::mark_invalid_request
 
       //------------------------------------------------------------------------------//
+      , sml::state<ready> <= sml::state<done> + sml::completion<event::configure_runtime>
+          / action::publish_done
+      , sml::state<ready> <= sml::state<errored> + sml::completion<event::configure_runtime>
+          / action::publish_error
       , sml::state<ready> <= sml::state<done> + sml::completion<event::sample_logits_runtime>
           / action::publish_done
       , sml::state<ready> <= sml::state<errored> + sml::completion<event::sample_logits_runtime>
@@ -127,14 +138,11 @@ struct sm : public emel::sm<model, action::context> {
 
   sm() : base_type() {}
 
-  explicit sm(const action::context & sampler_context) : base_type() {
-    this->context_ = sampler_context;
-  }
-
-  sm(fn * sampler_fns, int32_t sampler_count)
-      : base_type() {
-    this->context_.sampler_fns = sampler_fns;
-    this->context_.sampler_count = sampler_count;
+  bool process_event(const event::configure & ev) {
+    event::configure_ctx ctx{};
+    event::configure_runtime runtime{ev, ctx};
+    const bool accepted = base_type::process_event(runtime);
+    return accepted && ctx.err == emel::error::cast(error::none);
   }
 
   bool process_event(const event::sample_logits & ev) {

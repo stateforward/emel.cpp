@@ -49,6 +49,12 @@ struct mark_bind_capacity {
   }
 };
 
+struct mark_parse_capacity {
+  void operator()(const event::parse_runtime & ev, context &) const noexcept {
+    ev.ctx.err = emel::error::cast(error::capacity);
+  }
+};
+
 struct exec_probe {
   void operator()(const event::probe_runtime & ev, context & ctx) const noexcept {
     ev.ctx.err = loader::detail::probe_requirements(ev.request.file_image, ev.ctx.requirements_out);
@@ -75,8 +81,13 @@ struct exec_bind {
 };
 
 struct exec_parse {
-  void operator()(const event::parse_runtime & ev, context &) const noexcept {
-    ev.ctx.err = loader::detail::parse_bound_storage(ev.request.file_image);
+  void operator()(const event::parse_runtime & ev, context & ctx) const noexcept {
+    ev.ctx.err = loader::detail::parse_bound_storage(
+        ev.request.file_image,
+        ctx.kv_arena,
+        ctx.kv_entries,
+        ctx.tensors,
+        ctx.probed);
   }
 };
 
@@ -150,6 +161,7 @@ inline constexpr mark_probe_invalid_request mark_probe_invalid_request{};
 inline constexpr mark_bind_invalid_request mark_bind_invalid_request{};
 inline constexpr mark_parse_invalid_request mark_parse_invalid_request{};
 inline constexpr mark_bind_capacity mark_bind_capacity{};
+inline constexpr mark_parse_capacity mark_parse_capacity{};
 inline constexpr exec_probe exec_probe{};
 inline constexpr commit_probe_requirements commit_probe_requirements{};
 inline constexpr exec_bind exec_bind{};

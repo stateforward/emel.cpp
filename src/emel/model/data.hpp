@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string_view>
 
 namespace emel::model {
 
@@ -492,5 +493,10 @@ struct data {
   vocab vocab_data = {};
   metadata meta = {};
 };
+
+std::string_view tensor_name_view(const data & model_data,
+                                  const data::tensor_record & tensor) noexcept;
+bool try_parse_block_index(std::string_view name, int32_t & block_index_out) noexcept;
+std::string_view architecture_name_view(const data & model_data) noexcept;
 
 }  // namespace emel::model
