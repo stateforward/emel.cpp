@@ -21,7 +21,7 @@ without changing the Boost.SML orchestration or widening the runtime/API boundar
       operator and persistent hot-path workspace in `src/emel/kernel`.
 - [x] **Phase 11: Generator Flash Adoption** - Route supported canonical generation requests (completed 2026-03-22)
       through flash attention inside the existing generator to kernel chain.
-- [ ] **Phase 12: Parity And Verification Closure** - Prove the shipped flash path ran and stayed
+- [x] **Phase 12: Parity And Verification Closure** - Prove the shipped flash path ran and stayed (completed 2026-03-22)
       parity-stable on the canonical Llama-68M workload.
 - [ ] **Phase 13: Benchmark Evidence** - Publish canonical flash-attention benchmark evidence
       through the maintained compare and artifact workflow.
@@ -67,10 +67,30 @@ the accepted parity surfaces.
      deterministic negative selection or fallback behavior.
 **Plans**: TBD
 
+### Phase 12.1: Enforce SML Tensor Lifecycle Orchestration (INSERTED)
+
+**Goal**: The shipped graph and generator inference pipeline use `emel::tensor::sm` as the only
+tensor lifecycle authority, with explicit SML-gated reserve/fill/release semantics and no legacy
+ad hoc lifecycle bypass left reachable.
+**Requirements**: CUTOVER-01, CUTOVER-02, CUTOVER-03, CUTOVER-04, CUTOVER-05
+**Depends on:** Phase 12
+**Success Criteria** (what must be TRUE):
+  1. Graph-owned runtime context carries the existing `emel::tensor::sm` as the only tensor
+     lifecycle authority for the shipped inference path.
+  2. Active tensors are reserved through the tensor actor at the earliest truthful point where
+     runtime buffers are known, and reservation state matches tensor kind.
+  3. Processor orchestration mathematically blocks kernel dispatch until required tensors are
+     verified filled, then publishes outputs and records release before reuse.
+  4. Generator/runtime callers are hard-cut over to the lifecycle-managed graph path with no dual
+     path fallback or legacy bypass left reachable.
+  5. The cutover preserves the no-allocation dispatch contract and is proven by targeted tests plus
+     the normal repo quality gates.
+**Plans**: 3 plans
+
 ### Phase 13: Benchmark Evidence
 **Goal**: The existing benchmark workflow publishes truthful flash-attention performance evidence
 for the canonical Llama-68M generation slice.
-**Depends on**: Phase 12
+**Depends on**: Phase 12.1
 **Requirements**: BENCH-01, BENCH-02, BENCH-03
 **Success Criteria** (what must be TRUE):
   1. `tools/bench` can run the canonical EMEL flash-attention path through the existing compare
@@ -84,11 +104,12 @@ for the canonical Llama-68M generation slice.
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 10 → 11 → 12 → 13
+Phases execute in numeric order: 10 → 11 → 12 → 12.1 → 13
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 10. Flash Kernel Bring-Up | 1/2 | Complete    | 2026-03-22 |
 | 11. Generator Flash Adoption | 2/2 | Complete    | 2026-03-22 |
-| 12. Parity And Verification Closure | 0/TBD | Not started | - |
+| 12. Parity And Verification Closure | 0/2 | Complete    | 2026-03-22 |
+| 12.1. Enforce SML Tensor Lifecycle Orchestration | 1/3 | In Progress|  |
 | 13. Benchmark Evidence | 0/TBD | Not started | - |

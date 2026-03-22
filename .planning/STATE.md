@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Flash Attention
 status: unknown
-stopped_at: Roadmap creation complete for milestone v1.2; next recommended action is
-last_updated: "2026-03-22T02:09:32.232Z"
+stopped_at: Completed 12.1-02-PLAN.md
+last_updated: "2026-03-22T05:25:57.807Z"
 progress:
-  total_phases: 4
-  completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 5
+  completed_phases: 3
+  total_plans: 9
+  completed_plans: 7
 ---
 
 # Project State
@@ -20,12 +20,12 @@ See: .planning/PROJECT.md (updated 2026-03-11)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Phase 11 — Generator Flash Adoption
+**Current focus:** Phase 12.1 — enforce-sml-tensor-lifecycle-orchestration
 
 ## Current Position
 
-Phase: 12
-Plan: Not started
+Phase: 12.1 (enforce-sml-tensor-lifecycle-orchestration) — EXECUTING
+Plan: 2 of 3
 
 ## Performance Metrics
 
@@ -49,6 +49,15 @@ Recent decisions affecting current work:
 - Phase order is correctness-first: kernel bring-up, runtime adoption, parity closure, then
   benchmark evidence.
 
+### Roadmap Evolution
+
+- Phase 12.1 inserted after Phase 12: Enforce SML Tensor Lifecycle Orchestration (URGENT)
+  Graph and generator work must stop bypassing `emel::tensor::sm`/`sml::utility::sm_pool`.
+  The inserted phase is intended to wire formal tensor lifecycle dispatch into graph reservation,
+  kernel publish, and liveness release so kernels only run on filled tensors and tensor memory is
+  not reused before the tensor pool records release, while preserving zero-allocation hot-path
+  behavior.
+
 ### Pending Todos
 
 None yet.
@@ -63,7 +72,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-12T06:04:29Z
-Stopped at: Roadmap creation complete for milestone v1.2; next recommended action is
+Last session: 2026-03-22T05:25:57.804Z
+Stopped at: Completed 12.1-02-PLAN.md
 /gsd:plan-phase 10
 Resume file: None
