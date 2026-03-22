@@ -9,6 +9,8 @@ namespace emel::bench {
 
 inline constexpr std::string_view k_generation_case_name =
   "generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1";
+inline constexpr std::string_view k_generation_long_case_name =
+  "generation/preloaded_request/llama_68m_prompt_hello_max_tokens_8";
 
 using append_case_fn = void (*)(std::vector<result> & results, const config & cfg);
 

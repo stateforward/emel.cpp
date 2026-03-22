@@ -345,6 +345,62 @@ int parse_named_metric(const std::string & text, const std::string & key) {
   return std::atoi(text.substr(value_pos, value_end - value_pos).c_str());
 }
 
+int parse_kernel_dispatch_calls(const std::string & text) {
+  const size_t line_pos = text.find("kernel_dispatch:");
+  if (line_pos == std::string::npos) {
+    return -1;
+  }
+
+  const size_t calls_pos = text.find("calls=", line_pos);
+  if (calls_pos == std::string::npos) {
+    return -1;
+  }
+
+  const size_t value_pos = calls_pos + std::string("calls=").size();
+  size_t value_end = value_pos;
+  while (value_end < text.size() && text[value_end] >= '0' && text[value_end] <= '9') {
+    ++value_end;
+  }
+  if (value_pos == value_end) {
+    return -1;
+  }
+  return std::atoi(text.substr(value_pos, value_end - value_pos).c_str());
+}
+
+int parse_flash_dispatch_calls(const std::string & text) {
+  const size_t line_pos = text.find("flash_dispatch:");
+  if (line_pos == std::string::npos) {
+    return -1;
+  }
+
+  const size_t calls_pos = text.find("calls=", line_pos);
+  if (calls_pos == std::string::npos) {
+    return -1;
+  }
+
+  const size_t value_pos = calls_pos + std::string("calls=").size();
+  size_t value_end = value_pos;
+  while (value_end < text.size() && text[value_end] >= '0' && text[value_end] <= '9') {
+    ++value_end;
+  }
+  if (value_pos == value_end) {
+    return -1;
+  }
+  return std::atoi(text.substr(value_pos, value_end - value_pos).c_str());
+}
+
+std::string_view expected_generation_kernel_kind() {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  return "aarch64";
+#elif defined(__x86_64__) || defined(_M_X64)
+  return "x86_64";
+#elif defined(__wasm__)
+  return "wasm";
+#else
+  return "x86_64";
+#endif
+}
+
 }  // namespace
 
 TEST_CASE("paritychecker matches llama tokens across tiny models") {
@@ -403,6 +459,7 @@ TEST_CASE("paritychecker generation compares one bounded request against the ref
   CHECK(capture.stderr_text.empty());
   CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
   CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
+  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") > 0);
   CHECK(capture.stdout_text.find("generation initialize ok") == std::string::npos);
   CHECK(capture.stdout_text.find("emel generator path ready") == std::string::npos);
 }
@@ -429,6 +486,13 @@ TEST_CASE("paritychecker generation dump proves the EMEL path avoids the referen
   CHECK(parse_named_metric(capture.stdout_text, "emel_logits_calls") == 0);
   CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") > 0);
   CHECK(parse_named_metric(capture.stdout_text, "reference_logits_calls") > 0);
+  CHECK(capture.stdout_text.find("kernel_dispatch: kind=") != std::string::npos);
+  CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
+  CHECK(capture.stdout_text.find(std::string("kernel_dispatch: kind=") +
+                                 std::string(expected_generation_kernel_kind())) !=
+        std::string::npos);
+  CHECK(parse_kernel_dispatch_calls(capture.stdout_text) > 0);
+  CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
 }
 
 TEST_CASE("paritychecker help describes the canonical generation fixture contract") {

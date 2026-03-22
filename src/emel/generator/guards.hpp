@@ -191,16 +191,8 @@ struct valid_initialize {
     return ctx.model != nullptr &&
            ctx.conditioner != nullptr &&
            ctx.format_prompt != nullptr &&
-           ev.request.model_topology != nullptr &&
-           ev.request.prefill_plan != nullptr &&
-           ev.request.decode_plan != nullptr &&
            ev.request.tokenizer_sm != nullptr &&
-           ev.request.backend_ctx != nullptr &&
            !ev.request.sampler_fns.empty() &&
-           ev.request.max_node_count > 0u &&
-           ev.request.max_tensor_count > 0u &&
-           ev.request.bytes_per_tensor > 0u &&
-           ev.request.workspace_capacity_bytes > 0u &&
            ev.request.max_prompt_tokens > 0 &&
            ev.request.max_prompt_tokens <= action::MAX_GENERATION_STEPS &&
            ev.request.max_generated_tokens > 0 &&

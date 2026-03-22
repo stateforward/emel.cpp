@@ -106,7 +106,6 @@ set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${EMEL_ROOT} emel)
 
 add_executable(paritychecker
-  ${CMAKE_CURRENT_SOURCE_DIR}/../generation_backend.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/parity_main.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/parity_runner.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_parity_common.cpp
@@ -154,7 +153,6 @@ if(NOT EXISTS ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h)
 endif()
 
 add_executable(paritychecker_tests
-  ${CMAKE_CURRENT_SOURCE_DIR}/../generation_backend.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/paritychecker_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/parity_runner.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer_parity_common.cpp

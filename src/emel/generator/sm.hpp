@@ -34,6 +34,16 @@ inline void reserve_session_buffers(action::context & ctx,
   ctx.buffers.vocab_size = vocab_size;
 }
 
+inline void dispatch_initialize_backend_error(const event::initialize & ev) noexcept {
+  const auto err = emel::error::cast(error::backend);
+  if (ev.error_out != nullptr) {
+    *ev.error_out = err;
+  }
+  if (ev.on_error) {
+    ev.on_error(events::initialize_error{&ev, err});
+  }
+}
+
 }  // namespace detail
 
 struct uninitialized {};
@@ -712,9 +722,21 @@ struct sm : public emel::sm<model, action::context> {
     this->context_.format_prompt = format_prompt;
     // Session scratch is sized once from the injected loaded model so initialize stays allocation-free.
     detail::reserve_session_buffers(this->context_, model_ref);
+    this->context_.compute.backend_ready =
+        detail::prepare(this->context_.compute.backend, model_ref) ==
+        emel::error::cast(emel::model::loader::error::none);
+    if (this->context_.compute.backend_ready) {
+      this->context_.compute.model_topology = this->context_.compute.backend.topology;
+      this->context_.compute.prefill_plan = this->context_.compute.backend.prefill_plan;
+      this->context_.compute.decode_plan = this->context_.compute.backend.decode_plan;
+    }
   }
 
   bool process_event(const event::initialize & ev) {
+    if (!this->context_.compute.backend_ready) {
+      detail::dispatch_initialize_backend_error(ev);
+      return false;
+    }
     event::initialize_ctx ctx{};
     event::initialize_run runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
@@ -726,6 +748,18 @@ struct sm : public emel::sm<model, action::context> {
     event::generate_run runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.err == emel::error::cast(error::none);
+  }
+
+  emel::kernel::kernel_kind generation_kernel_kind() const noexcept {
+    return this->context_.compute.backend.kernel_kind;
+  }
+
+  uint64_t generation_kernel_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel_dispatch_calls;
+  }
+
+  uint64_t generation_flash_attention_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.flash_attention_dispatch_calls;
   }
 };
 

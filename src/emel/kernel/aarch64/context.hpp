@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "emel/kernel/detail.hpp"
+
 namespace emel::kernel::aarch64::action {
 
 namespace detail {
@@ -18,6 +20,7 @@ inline bool detect_neon() noexcept {
 
 struct context {
   const bool neon_available = detail::detect_neon();
+  ::emel::kernel::detail::flash_attn_workspace flash_attn_workspace = {};
   // TODO(emel): remove once dispatch observability no longer relies on this counter.
   uint64_t dispatch_generation = 0;
 };

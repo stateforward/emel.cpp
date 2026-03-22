@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "emel/batch/planner/sm.hpp"
+#include "emel/generator/detail.hpp"
 #include "emel/graph/events.hpp"
 #include "emel/graph/sm.hpp"
 #include "emel/logits/sampler/sm.hpp"
@@ -37,20 +38,11 @@ struct tokenizer_binding {
 };
 
 struct graph_binding {
-  const void * model_topology = nullptr;
-  const void * prefill_plan = nullptr;
-  const void * decode_plan = nullptr;
-  void * backend_ctx = nullptr;
-  emel::graph::event::validate_fn validate = nullptr;
-  emel::graph::event::prepare_graph_fn prepare_graph = nullptr;
-  emel::graph::event::alloc_graph_fn alloc_graph = nullptr;
-  emel::graph::event::bind_inputs_fn bind_inputs = nullptr;
-  emel::graph::event::run_kernel_fn run_kernel = nullptr;
-  emel::graph::event::extract_outputs_fn extract_outputs = nullptr;
-  uint32_t max_nodes = 0;
-  uint32_t max_tensors = 0;
-  uint64_t bytes_per_tensor = 0;
-  uint64_t workspace_bytes = 0;
+  emel::generator::detail::native_backend backend = {};
+  emel::model::llama::detail::topology model_topology = {};
+  emel::model::llama::detail::step_plan prefill_plan = {};
+  emel::model::llama::detail::step_plan decode_plan = {};
+  bool backend_ready = false;
 };
 
 struct session_limits {

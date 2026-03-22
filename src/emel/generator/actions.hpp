@@ -68,21 +68,6 @@ struct begin_initialize {
     ctx.conditioning.add_special = ev.request.add_special;
     ctx.conditioning.parse_special = ev.request.parse_special;
 
-    ctx.compute.model_topology = ev.request.model_topology;
-    ctx.compute.prefill_plan = ev.request.prefill_plan;
-    ctx.compute.decode_plan = ev.request.decode_plan;
-    ctx.compute.backend_ctx = ev.request.backend_ctx;
-    ctx.compute.validate = ev.request.validate;
-    ctx.compute.prepare_graph = ev.request.prepare_graph;
-    ctx.compute.alloc_graph = ev.request.alloc_graph;
-    ctx.compute.bind_inputs = ev.request.bind_inputs;
-    ctx.compute.run_kernel = ev.request.run_kernel;
-    ctx.compute.extract_outputs = ev.request.extract_outputs;
-    ctx.compute.max_nodes = ev.request.max_node_count;
-    ctx.compute.max_tensors = ev.request.max_tensor_count;
-    ctx.compute.bytes_per_tensor = ev.request.bytes_per_tensor;
-    ctx.compute.workspace_bytes = ev.request.workspace_capacity_bytes;
-
     ctx.limits.prompt_capacity = ev.request.max_prompt_tokens;
     ctx.limits.decode_capacity = ev.request.max_generated_tokens;
     ctx.limits.block_capacity = ev.request.max_blocks;
@@ -160,12 +145,12 @@ struct request_graph_reserve {
             event::initialize_ctx,
             capture_graph_reserve_error>(&ev.ctx);
     emel::graph::event::reserve reserve_ev{
-      .model_topology = ctx.compute.model_topology,
+      .model_topology = &ctx.compute.model_topology,
       .output_out = &ctx.state.graph_reservation,
-      .max_node_count = ctx.compute.max_nodes,
-      .max_tensor_count = ctx.compute.max_tensors,
-      .bytes_per_tensor = ctx.compute.bytes_per_tensor,
-      .workspace_capacity_bytes = ctx.compute.workspace_bytes,
+      .max_node_count = ctx.compute.model_topology.node_count,
+      .max_tensor_count = ctx.compute.model_topology.tensor_count,
+      .bytes_per_tensor = ctx.compute.model_topology.bytes_per_tensor,
+      .workspace_capacity_bytes = ctx.compute.model_topology.workspace_capacity_bytes,
       .dispatch_done = on_done,
       .dispatch_error = on_error,
     };
@@ -342,7 +327,7 @@ struct request_prefill_compute {
       ctx.buffers.positions[static_cast<size_t>(idx)] = idx;
     }
     ev.ctx.graph_output = {};
-    ev.ctx.io.backend_ctx = ctx.compute.backend_ctx;
+    ev.ctx.io.backend_ctx = &ctx.compute.backend;
     ev.ctx.io.token_ids = ctx.buffers.prompt_tokens.data();
     ev.ctx.io.token_count = ev.ctx.prompt_token_count;
     ev.ctx.io.logits = ctx.buffers.logits.get();
@@ -354,12 +339,12 @@ struct request_prefill_compute {
             event::generate_ctx,
             capture_graph_compute_error>(&ev.ctx);
     emel::graph::event::compute compute_ev{
-      .step_plan = ctx.compute.prefill_plan,
+      .step_plan = &ctx.compute.prefill_plan,
       .output_out = &ev.ctx.graph_output,
       .node_count_hint = ctx.state.graph_reservation.node_count,
       .tensor_count_hint = ctx.state.graph_reservation.tensor_count,
-      .bytes_per_tensor = ctx.compute.bytes_per_tensor,
-      .workspace_capacity_bytes = ctx.compute.workspace_bytes,
+      .bytes_per_tensor = ctx.compute.model_topology.bytes_per_tensor,
+      .workspace_capacity_bytes = ctx.compute.model_topology.workspace_capacity_bytes,
       .step_index = 0,
       .step_size = ev.ctx.prefill_step_size,
       .kv_tokens = 0,
@@ -374,12 +359,12 @@ struct request_prefill_compute {
       .seq_masks_count = 1,
       .seq_primary_ids = ctx.buffers.seq_primary_ids.data(),
       .seq_primary_ids_count = 1,
-      .validate = ctx.compute.validate,
-      .prepare_graph = ctx.compute.prepare_graph,
-      .alloc_graph = ctx.compute.alloc_graph,
-      .bind_inputs = ctx.compute.bind_inputs,
-      .run_kernel = ctx.compute.run_kernel,
-      .extract_outputs = ctx.compute.extract_outputs,
+      .validate = emel::generator::detail::validate,
+      .prepare_graph = emel::generator::detail::prepare_graph,
+      .alloc_graph = emel::generator::detail::alloc_graph,
+      .bind_inputs = emel::generator::detail::bind_inputs,
+      .run_kernel = emel::generator::detail::run_kernel,
+      .extract_outputs = emel::generator::detail::extract_outputs,
       .dispatch_done = on_done,
       .dispatch_error = on_error,
     };
@@ -406,7 +391,7 @@ struct request_decode_compute {
     ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::graph::error::none));
     ctx.buffers.positions[0] = ev.ctx.kv_tokens;
     ev.ctx.graph_output = {};
-    ev.ctx.io.backend_ctx = ctx.compute.backend_ctx;
+    ev.ctx.io.backend_ctx = &ctx.compute.backend;
     ev.ctx.io.token_ids = &ev.ctx.selected_token;
     ev.ctx.io.token_count = 1;
     ev.ctx.io.logits = ctx.buffers.logits.get();
@@ -418,12 +403,12 @@ struct request_decode_compute {
             event::generate_ctx,
             capture_graph_compute_error>(&ev.ctx);
     emel::graph::event::compute compute_ev{
-      .step_plan = ctx.compute.decode_plan,
+      .step_plan = &ctx.compute.decode_plan,
       .output_out = &ev.ctx.graph_output,
       .node_count_hint = ctx.state.graph_reservation.node_count,
       .tensor_count_hint = ctx.state.graph_reservation.tensor_count,
-      .bytes_per_tensor = ctx.compute.bytes_per_tensor,
-      .workspace_capacity_bytes = ctx.compute.workspace_bytes,
+      .bytes_per_tensor = ctx.compute.model_topology.bytes_per_tensor,
+      .workspace_capacity_bytes = ctx.compute.model_topology.workspace_capacity_bytes,
       .step_index = 0,
       .step_size = 1,
       .kv_tokens = ev.ctx.kv_tokens,
@@ -438,12 +423,12 @@ struct request_decode_compute {
       .seq_masks_count = 1,
       .seq_primary_ids = ctx.buffers.seq_primary_ids.data(),
       .seq_primary_ids_count = 1,
-      .validate = ctx.compute.validate,
-      .prepare_graph = ctx.compute.prepare_graph,
-      .alloc_graph = ctx.compute.alloc_graph,
-      .bind_inputs = ctx.compute.bind_inputs,
-      .run_kernel = ctx.compute.run_kernel,
-      .extract_outputs = ctx.compute.extract_outputs,
+      .validate = emel::generator::detail::validate,
+      .prepare_graph = emel::generator::detail::prepare_graph,
+      .alloc_graph = emel::generator::detail::alloc_graph,
+      .bind_inputs = emel::generator::detail::bind_inputs,
+      .run_kernel = emel::generator::detail::run_kernel,
+      .extract_outputs = emel::generator::detail::extract_outputs,
       .dispatch_done = on_done,
       .dispatch_error = on_error,
     };

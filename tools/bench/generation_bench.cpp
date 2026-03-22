@@ -1,5 +1,4 @@
 #include "bench_cases.hpp"
-#include "../generation_backend.hpp"
 
 #include <algorithm>
 #include <array>
@@ -42,9 +41,25 @@
 namespace {
 
 constexpr char k_generation_fixture_rel[] = "tests/models/Llama-68M-Chat-v1-Q2_K.gguf";
-constexpr std::string_view k_generation_prompt = "hello";
-constexpr int32_t k_generation_max_tokens = 1;
 constexpr size_t k_generation_output_capacity = 256u;
+
+struct generation_case_spec {
+  std::string_view name = {};
+  std::string_view prompt = {};
+  int32_t max_tokens = 0;
+};
+
+constexpr generation_case_spec k_short_generation_case = {
+    .name = emel::bench::k_generation_case_name,
+    .prompt = "hello",
+    .max_tokens = 1,
+};
+
+constexpr generation_case_spec k_long_generation_case = {
+    .name = emel::bench::k_generation_long_case_name,
+    .prompt = "hello",
+    .max_tokens = 8,
+};
 
 using llama_model_ptr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
 using llama_context_ptr = std::unique_ptr<llama_context, decltype(&llama_free)>;
@@ -579,10 +594,6 @@ struct emel_fixture {
   int32_t fallback_token_id = 0;
 };
 
-struct initialize_backend {
-  emel::tools::generation_backend::native_backend native = {};
-};
-
 struct generation_seam_audit {
   int32_t emel_reference_decode_calls = 0;
   int32_t emel_reference_logits_calls = 0;
@@ -595,12 +606,7 @@ struct emel_session {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
   std::unique_ptr<emel::generator::sm> generator = {};
-  initialize_backend backend = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {};
-  emel::model::llama::detail::execution_view execution = {};
-  emel::model::llama::detail::topology model_topology = {};
-  emel::model::llama::detail::step_plan prefill_plan = {};
-  emel::model::llama::detail::step_plan decode_plan = {};
   generation_seam_audit seam = {};
   initialize_capture initialize = {};
   generation_capture generation = {};
@@ -1356,12 +1362,15 @@ bool prepare_emel_fixture(emel_fixture & fixture, const std::string & model_path
 
 llama_model_ptr load_reference_model(const std::string & model_path) {
   llama_model_params params = llama_model_default_params();
+  // Force the reference path onto CPU so the compare stays aligned with EMEL's CPU-only backend.
+  params.n_gpu_layers = 0;
   params.check_tensors = false;
   return llama_model_ptr{llama_model_load_from_file(model_path.c_str(), params), llama_model_free};
 }
 
 llama_context_ptr make_reference_context(llama_model * model) {
   llama_context_params params = llama_context_default_params();
+  params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
   params.n_ctx = 0;
   params.n_batch = 512;
   params.n_ubatch = 512;
@@ -1383,52 +1392,28 @@ void prepare_emel_session(const emel_fixture & fixture, emel_session & session) 
       emel::text::formatter::format_raw);
 }
 
-bool initialize_emel_session(emel_session & session) {
+bool initialize_emel_session(emel_session & session, const generation_case_spec & spec) {
   if (session.generator == nullptr) {
     return false;
   }
 
-  const emel::error::type backend_err =
-      emel::tools::generation_backend::prepare(session.backend.native, session.model_data);
-  if (backend_err != emel::error::cast(emel::model::loader::error::none)) {
-    return false;
-  }
-  session.execution = session.backend.native.execution;
-  session.model_topology = session.backend.native.topology;
-  session.prefill_plan = session.backend.native.prefill_plan;
-  session.decode_plan = session.backend.native.decode_plan;
-
   const int32_t prompt_capacity =
-      std::max<int32_t>(32, static_cast<int32_t>(k_generation_prompt.size()) + 8);
-  const int32_t decode_capacity = std::max<int32_t>(4, k_generation_max_tokens);
+      std::max<int32_t>(32, static_cast<int32_t>(spec.prompt.size()) + 8);
+  const int32_t decode_capacity = std::max<int32_t>(4, spec.max_tokens);
   const int32_t block_capacity = std::max<int32_t>(8, prompt_capacity + decode_capacity);
 
   reset_initialize_capture(session);
   emel::error::type error_out = emel::error::cast(emel::generator::error::none);
   emel::generator::event::initialize request{
-      &session.model_topology,
-      &session.prefill_plan,
-      &session.decode_plan,
       &session.tokenizer,
       tokenizer_bind_dispatch,
       tokenizer_tokenize_dispatch,
-      &session.backend.native,
-      emel::tools::generation_backend::validate,
-      emel::tools::generation_backend::prepare_graph,
-      emel::tools::generation_backend::alloc_graph,
-      emel::tools::generation_backend::bind_inputs,
-      emel::tools::generation_backend::run_kernel,
-      emel::tools::generation_backend::extract_outputs,
       std::span<emel::logits::sampler::fn>{session.samplers},
   };
   request.preprocessor_variant = generation_preprocessor_variant(session.model_data);
   request.encoder_variant = generation_encoder_variant(session.model_data);
   request.add_special = false;
   request.parse_special = false;
-  request.max_node_count = session.model_topology.node_count;
-  request.max_tensor_count = session.model_topology.tensor_count;
-  request.bytes_per_tensor = session.model_topology.bytes_per_tensor;
-  request.workspace_capacity_bytes = session.model_topology.workspace_capacity_bytes;
   request.max_prompt_tokens = prompt_capacity;
   request.max_generated_tokens = decode_capacity;
   request.max_blocks = block_capacity;
@@ -1443,7 +1428,9 @@ bool initialize_emel_session(emel_session & session) {
          error_out == emel::error::cast(emel::generator::error::none);
 }
 
-bool run_emel_generate(emel_session & session, generation_result & result_out) {
+bool run_emel_generate(emel_session & session,
+                       const generation_case_spec & spec,
+                       generation_result & result_out) {
   if (session.generator == nullptr) {
     return false;
   }
@@ -1452,8 +1439,8 @@ bool run_emel_generate(emel_session & session, generation_result & result_out) {
   reset_generation_capture(session);
   emel::error::type error_out = emel::error::cast(emel::generator::error::none);
   emel::generator::event::generate request{
-      k_generation_prompt,
-      k_generation_max_tokens,
+      spec.prompt,
+      spec.max_tokens,
       std::span<char>{result_out.output},
       result_out.output_length,
   };
@@ -1484,17 +1471,19 @@ llama_token select_argmax_token_from_logits(const float * logits, const int32_t 
   return static_cast<llama_token>(best_index);
 }
 
-bool tokenize_reference_prompt(const emel_fixture & fixture, std::vector<llama_token> & tokens_out) {
+bool tokenize_reference_prompt(const emel_fixture & fixture,
+                               const generation_case_spec & spec,
+                               std::vector<llama_token> & tokens_out) {
   if (fixture.reference_vocab == nullptr) {
     return false;
   }
 
   int32_t token_capacity =
-      std::max<int32_t>(8, static_cast<int32_t>(k_generation_prompt.size()) + 8);
+      std::max<int32_t>(8, static_cast<int32_t>(spec.prompt.size()) + 8);
   tokens_out.resize(static_cast<size_t>(token_capacity));
   int32_t token_count = llama_tokenize(fixture.reference_vocab,
-                                       k_generation_prompt.data(),
-                                       static_cast<int32_t>(k_generation_prompt.size()),
+                                       spec.prompt.data(),
+                                       static_cast<int32_t>(spec.prompt.size()),
                                        tokens_out.data(),
                                        token_capacity,
                                        false,
@@ -1503,8 +1492,8 @@ bool tokenize_reference_prompt(const emel_fixture & fixture, std::vector<llama_t
     token_capacity = -token_count;
     tokens_out.resize(static_cast<size_t>(token_capacity));
     token_count = llama_tokenize(fixture.reference_vocab,
-                                 k_generation_prompt.data(),
-                                 static_cast<int32_t>(k_generation_prompt.size()),
+                                 spec.prompt.data(),
+                                 static_cast<int32_t>(spec.prompt.size()),
                                  tokens_out.data(),
                                  token_capacity,
                                  false,
@@ -1548,6 +1537,7 @@ bool append_reference_piece(const emel_fixture & fixture,
 }
 
 bool run_reference_generate(const emel_fixture & fixture,
+                            const generation_case_spec & spec,
                             generation_seam_audit & seam,
                             generation_result & result_out) {
   if (fixture.reference_model == nullptr || fixture.reference_vocab == nullptr ||
@@ -1561,7 +1551,7 @@ bool run_reference_generate(const emel_fixture & fixture,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(fixture, prompt_tokens)) {
+  if (!tokenize_reference_prompt(fixture, spec, prompt_tokens)) {
     return false;
   }
 
@@ -1572,7 +1562,7 @@ bool run_reference_generate(const emel_fixture & fixture,
     return false;
   }
 
-  for (int32_t step = 0; step < k_generation_max_tokens; ++step) {
+  for (int32_t step = 0; step < spec.max_tokens; ++step) {
     float * logits = read_direct_reference_logits(seam, ctx.get());
     if (logits == nullptr) {
       return false;
@@ -1590,6 +1580,69 @@ bool run_reference_generate(const emel_fixture & fixture,
     llama_token next_token = selected;
     llama_batch decode_batch = llama_batch_get_one(&next_token, 1);
     if (run_direct_reference_decode(seam, ctx.get(), decode_batch) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool reset_reference_context(llama_context * ctx) {
+  if (ctx == nullptr) {
+    return false;
+  }
+
+  const llama_memory_t memory = llama_get_memory(ctx);
+  if (memory == nullptr) {
+    return false;
+  }
+
+  llama_memory_clear(memory, false);
+  return true;
+}
+
+bool run_reference_generate_preloaded(const emel_fixture & fixture,
+                                      const generation_case_spec & spec,
+                                      llama_context * ctx,
+                                      const std::vector<llama_token> & prompt_tokens,
+                                      generation_seam_audit & seam,
+                                      generation_result & result_out) {
+  if (fixture.reference_vocab == nullptr ||
+      fixture.reference_vocab_size <= 0 ||
+      ctx == nullptr ||
+      prompt_tokens.empty()) {
+    return false;
+  }
+
+  if (!reset_reference_context(ctx)) {
+    return false;
+  }
+
+  result_out = {};
+  llama_batch prompt_batch =
+      llama_batch_get_one(const_cast<llama_token *>(prompt_tokens.data()),
+                          static_cast<int32_t>(prompt_tokens.size()));
+  if (run_direct_reference_decode(seam, ctx, prompt_batch) != 0) {
+    return false;
+  }
+
+  for (int32_t step = 0; step < spec.max_tokens; ++step) {
+    float * logits = read_direct_reference_logits(seam, ctx);
+    if (logits == nullptr) {
+      return false;
+    }
+
+    const llama_token selected = select_argmax_token_from_logits(logits, fixture.reference_vocab_size);
+    result_out.tokens_generated += 1;
+    if (!append_reference_piece(fixture, selected, result_out)) {
+      return false;
+    }
+    if (llama_vocab_is_eog(fixture.reference_vocab, selected)) {
+      break;
+    }
+
+    llama_token next_token = selected;
+    llama_batch decode_batch = llama_batch_get_one(&next_token, 1);
+    if (run_direct_reference_decode(seam, ctx, decode_batch) != 0) {
       return false;
     }
   }
@@ -1643,54 +1696,77 @@ namespace emel::bench {
 void append_emel_generation_cases(std::vector<result> & results, const config & cfg) {
   const emel_fixture & fixture = canonical_generation_fixture();
   const config case_cfg = generation_case_config(cfg);
-  volatile std::size_t sink = 0u;
-  generation_seam_audit seam = {};
-
-  auto fn = [&]() {
-    auto session = std::make_unique<emel_session>();
-    prepare_emel_session(fixture, *session);
-    if (!initialize_emel_session(*session)) {
-      fail_bench_setup("initialize_emel_session", "preloaded request");
-    }
-    reset_generation_seam(session->seam);
-
-    generation_result generated{};
-    if (!run_emel_generate(*session, generated)) {
-      fail_bench_setup("run_emel_generate", "preloaded request");
-    }
-    seam = session->seam;
-    sink ^= generated.output_length;
+  constexpr std::array<generation_case_spec, 2> cases = {
+      k_short_generation_case,
+      k_long_generation_case,
   };
 
-  results.push_back(measure_case(k_generation_case_name.data(), case_cfg, fn));
-  if (generation_seam_audit_enabled()) {
-    print_generation_seam_audit("emel", seam);
-    verify_emel_generation_seam(seam);
+  for (const generation_case_spec & generation_case : cases) {
+    volatile std::size_t sink = 0u;
+    generation_seam_audit seam = {};
+    auto session = std::make_unique<emel_session>();
+    prepare_emel_session(fixture, *session);
+    if (!initialize_emel_session(*session, generation_case)) {
+      fail_bench_setup("initialize_emel_session", generation_case.name.data());
+    }
+
+    auto fn = [&]() {
+      reset_generation_seam(session->seam);
+
+      generation_result generated{};
+      if (!run_emel_generate(*session, generation_case, generated)) {
+        fail_bench_setup("run_emel_generate", generation_case.name.data());
+      }
+      seam = session->seam;
+      sink ^= generated.output_length;
+    };
+
+    results.push_back(measure_case(generation_case.name.data(), case_cfg, fn));
+    if (generation_seam_audit_enabled()) {
+      print_generation_seam_audit("emel", seam);
+      verify_emel_generation_seam(seam);
+    }
+    static_cast<void>(sink);
   }
-  static_cast<void>(sink);
 }
 
 void append_reference_generation_cases(std::vector<result> & results, const config & cfg) {
   const emel_fixture & fixture = canonical_generation_fixture();
   const config case_cfg = generation_case_config(cfg);
-  volatile std::size_t sink = 0u;
-  generation_seam_audit seam = {};
-
-  auto fn = [&]() {
-    reset_generation_seam(seam);
-    generation_result generated{};
-    if (!run_reference_generate(fixture, seam, generated)) {
-      fail_bench_setup("run_reference_generate", "preloaded request");
-    }
-    sink ^= generated.output_length;
+  constexpr std::array<generation_case_spec, 2> cases = {
+      k_short_generation_case,
+      k_long_generation_case,
   };
 
-  results.push_back(measure_case(k_generation_case_name.data(), case_cfg, fn));
-  if (generation_seam_audit_enabled()) {
-    print_generation_seam_audit("reference", seam);
-    verify_reference_generation_seam(seam);
+  for (const generation_case_spec & generation_case : cases) {
+    volatile std::size_t sink = 0u;
+    generation_seam_audit seam = {};
+    llama_context_ptr ctx = make_reference_context(fixture.reference_model.get());
+    if (ctx == nullptr) {
+      fail_bench_setup("make_reference_context", generation_case.name.data());
+    }
+    std::vector<llama_token> prompt_tokens;
+    if (!tokenize_reference_prompt(fixture, generation_case, prompt_tokens)) {
+      fail_bench_setup("tokenize_reference_prompt", generation_case.name.data());
+    }
+
+    auto fn = [&]() {
+      reset_generation_seam(seam);
+      generation_result generated{};
+      if (!run_reference_generate_preloaded(
+              fixture, generation_case, ctx.get(), prompt_tokens, seam, generated)) {
+        fail_bench_setup("run_reference_generate_preloaded", generation_case.name.data());
+      }
+      sink ^= generated.output_length;
+    };
+
+    results.push_back(measure_case(generation_case.name.data(), case_cfg, fn));
+    if (generation_seam_audit_enabled()) {
+      print_generation_seam_audit("reference", seam);
+      verify_reference_generation_seam(seam);
+    }
+    static_cast<void>(sink);
   }
-  static_cast<void>(sink);
 }
 
 }  // namespace emel::bench

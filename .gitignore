@@ -11,3 +11,4 @@ tmp/llama.cpp/
 .gemini/
 gha-creds-*.json
 >>>>>>> Stashed changes
+.planning/

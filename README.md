@@ -86,7 +86,6 @@ environments, while Zig remains the default for day-to-day builds.
 ## Documentation
 
 - [Architecture](docs/architecture/) (generated state-machine docs + Mermaid diagrams)
-- [Benchmark Workflow](docs/benchmarking.md) (live compare/snapshot runbook)
 - [Benchmarks](docs/benchmarks.md) (generated benchmark snapshot table)
 - [SML Conventions](docs/third_party/sml.md) (Boost.SML conventions and usage)
 - [Parity Audit](docs/gaps.md) (parity audit status)

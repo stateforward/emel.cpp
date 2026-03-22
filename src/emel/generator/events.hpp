@@ -31,22 +31,6 @@ using tokenizer_bind_dispatch_fn =
     bool(void * tokenizer_sm, const emel::text::tokenizer::event::bind &);
 using tokenizer_tokenize_dispatch_fn =
     bool(void * tokenizer_sm, const emel::text::tokenizer::event::tokenize &);
-using validate_dispatch_fn =
-    bool(const emel::graph::processor::event::execute & request, int32_t * err_out);
-using prepare_graph_dispatch_fn =
-    bool(const emel::graph::processor::event::execute & request,
-         bool * reused_out,
-         int32_t * err_out);
-using alloc_graph_dispatch_fn =
-    bool(const emel::graph::processor::event::execute & request, int32_t * err_out);
-using bind_inputs_dispatch_fn =
-    bool(const emel::graph::processor::event::execute & request, int32_t * err_out);
-using run_kernel_dispatch_fn =
-    bool(const emel::graph::processor::event::execute & request, int32_t * err_out);
-using extract_outputs_dispatch_fn =
-    bool(const emel::graph::processor::event::execute & request,
-         int32_t * outputs_out,
-         int32_t * err_out);
 
 struct compute_io {
   void * backend_ctx = nullptr;
@@ -61,38 +45,15 @@ struct compute_io {
 namespace emel::generator::event {
 
 struct initialize {
-  initialize(const void * model_topology_ref,
-             const void * prefill_plan_ref,
-             const void * decode_plan_ref,
-             void * tokenizer_sm_ref,
+  initialize(void * tokenizer_sm_ref,
              emel::generator::tokenizer_bind_dispatch_fn & dispatch_tokenizer_bind_ref,
              emel::generator::tokenizer_tokenize_dispatch_fn & dispatch_tokenizer_tokenize_ref,
-             void * backend_ctx_ref,
-             emel::generator::validate_dispatch_fn & validate_ref,
-             emel::generator::prepare_graph_dispatch_fn & prepare_graph_ref,
-             emel::generator::alloc_graph_dispatch_fn & alloc_graph_ref,
-             emel::generator::bind_inputs_dispatch_fn & bind_inputs_ref,
-             emel::generator::run_kernel_dispatch_fn & run_kernel_ref,
-             emel::generator::extract_outputs_dispatch_fn & extract_outputs_ref,
              std::span<emel::logits::sampler::fn> sampler_fns_ref) noexcept
-    : model_topology(model_topology_ref),
-      prefill_plan(prefill_plan_ref),
-      decode_plan(decode_plan_ref),
-      tokenizer_sm(tokenizer_sm_ref),
+    : tokenizer_sm(tokenizer_sm_ref),
       dispatch_tokenizer_bind(dispatch_tokenizer_bind_ref),
       dispatch_tokenizer_tokenize(dispatch_tokenizer_tokenize_ref),
-      backend_ctx(backend_ctx_ref),
-      validate(validate_ref),
-      prepare_graph(prepare_graph_ref),
-      alloc_graph(alloc_graph_ref),
-      bind_inputs(bind_inputs_ref),
-      run_kernel(run_kernel_ref),
-      extract_outputs(extract_outputs_ref),
       sampler_fns(sampler_fns_ref) {}
 
-  const void * model_topology = nullptr;
-  const void * prefill_plan = nullptr;
-  const void * decode_plan = nullptr;
   void * tokenizer_sm = nullptr;
   emel::generator::tokenizer_bind_dispatch_fn & dispatch_tokenizer_bind;
   emel::generator::tokenizer_tokenize_dispatch_fn & dispatch_tokenizer_tokenize;
@@ -102,18 +63,7 @@ struct initialize {
       emel::text::encoders::encoder_kind::fallback;
   bool add_special = true;
   bool parse_special = false;
-  void * backend_ctx = nullptr;
-  emel::generator::validate_dispatch_fn & validate;
-  emel::generator::prepare_graph_dispatch_fn & prepare_graph;
-  emel::generator::alloc_graph_dispatch_fn & alloc_graph;
-  emel::generator::bind_inputs_dispatch_fn & bind_inputs;
-  emel::generator::run_kernel_dispatch_fn & run_kernel;
-  emel::generator::extract_outputs_dispatch_fn & extract_outputs;
   std::span<emel::logits::sampler::fn> sampler_fns = {};
-  uint32_t max_node_count = 0;
-  uint32_t max_tensor_count = 0;
-  uint64_t bytes_per_tensor = 0;
-  uint64_t workspace_capacity_bytes = 0;
   int32_t max_prompt_tokens = 0;
   int32_t max_generated_tokens = 0;
   int32_t max_blocks = 0;
