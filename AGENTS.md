@@ -243,3 +243,30 @@ NEVER use `llama_` or `ggml_` prefixes in identifiers, symbols, files, or APIs
 outside `tools/bench` or `tools/paritychecker`.
 ALWAYS use `emel_` or `EMEL_` prefixes for project-owned identifiers, symbols,
 files, and APIs.
+ALWAYS prefer porting the exact reference arithmetic and kernel operand path
+into EMEL-owned `src/` code when the user asks for parity, benchmarking, or
+performance comparison against llama.cpp or ggml.
+ALWAYS treat reference-kernel parity work as incomplete until the corresponding
+EMEL-owned kernel consumes the same effective operand format as the reference
+path.
+NEVER replace a missing native packed or quantized kernel in a hot inference
+path with a dequantize-to-f32 fallback unless the user explicitly approves that
+fallback as an interim milestone.
+If an interim fallback is explicitly approved, ALWAYS label it `interim` in
+code comments, tests, milestone docs, and user updates, and ALWAYS state which
+exact reference operand or kernel path is still missing.
+NEVER present parity or benchmark results as kernel parity when EMEL and the
+reference implementation are not executing materially equivalent operand
+pipelines.
+ALWAYS ask the user before landing an implementation that changes the
+performance contract of a milestone by substituting a simpler fallback kernel,
+helper backend, or tool-local scaffold for the intended `src/` runtime path.
+For quantized inference work, "done" means:
+1. EMEL-owned code in `src/`
+2. no tool-only compute fallback
+3. no whole-tensor dequantize-to-f32 substitution in the hot path
+4. benchmark claims based on the same effective operand class as the reference
+   path
+When an implementation is architecturally narrower than the user's stated
+goal, ALWAYS stop and get explicit approval before proceeding, even if the
+narrower implementation is faster to complete.

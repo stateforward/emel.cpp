@@ -32,9 +32,29 @@ struct doc_paths {
   fs::path mermaid_dir;
   fs::path benchmarks_md;
   fs::path benchmarks_snapshot;
+  fs::path generation_pre_flash_baseline;
   fs::path benchmarks_template;
   fs::path readme_template;
   fs::path readme_path;
+};
+
+struct benchmark_row {
+  std::string name;
+  std::string emel_ns;
+  std::string llama_ns;
+  std::string ratio;
+};
+
+struct benchmark_snapshot {
+  std::vector<benchmark_row> rows;
+  std::string reference_source;
+  std::string reference_ref;
+  std::string flash_case;
+  std::string flash_dispatch_calls;
+  std::string emel_decode_calls;
+  std::string emel_logits_calls;
+  std::string reference_decode_calls;
+  std::string reference_logits_calls;
 };
 
 struct machine_spec {
@@ -421,7 +441,30 @@ std::optional<std::string> render_template(const fs::path & template_path,
   return rendered;
 }
 
-std::optional<std::string> build_benchmarks_table(const doc_paths & paths) {
+std::optional<std::unordered_map<std::string, std::string>>
+parse_key_value_file(const fs::path & path) {
+  const std::string content = read_file(path);
+  if (content.empty()) {
+    std::fprintf(stderr, "error: unable to read %s\n", path.string().c_str());
+    return std::nullopt;
+  }
+
+  std::unordered_map<std::string, std::string> fields;
+  std::istringstream input(content);
+  for (std::string line; std::getline(input, line);) {
+    if (line.empty() || line[0] == '#') {
+      continue;
+    }
+    const std::size_t separator = line.find('=');
+    if (separator == std::string::npos || separator == 0u) {
+      continue;
+    }
+    fields.emplace(line.substr(0u, separator), line.substr(separator + 1u));
+  }
+  return fields;
+}
+
+std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & paths) {
   const std::string snapshot = read_file(paths.benchmarks_snapshot);
   if (snapshot.empty()) {
     std::fprintf(stderr, "error: unable to read %s\n",
@@ -429,41 +472,198 @@ std::optional<std::string> build_benchmarks_table(const doc_paths & paths) {
     return std::nullopt;
   }
 
-  std::vector<std::string> rows;
-  std::regex line_re(
+  benchmark_snapshot parsed;
+  const std::regex line_re(
       R"(^([^ ]+) emel\.cpp ([0-9.]+) ns/op, llama\.cpp ([0-9.]+) ns/op, ratio=([0-9.]+)x$)");
+  const std::regex reference_re(R"(^# reference_impl: source=([^ ]+) ref=([0-9a-f]+)$)");
+  const std::regex flash_re(
+      R"(^# generation_flash_evidence: case=([^ ]+) flash_dispatch_calls=([0-9]+) emel_decode_calls=([0-9]+) emel_logits_calls=([0-9]+) reference_decode_calls=([0-9]+) reference_logits_calls=([0-9]+)$)");
 
   std::istringstream input(snapshot);
   for (std::string line; std::getline(input, line);) {
+    std::smatch match;
+    if (std::regex_match(line, match, reference_re)) {
+      parsed.reference_source = match[1].str();
+      parsed.reference_ref = match[2].str();
+      continue;
+    }
+    if (std::regex_match(line, match, flash_re)) {
+      parsed.flash_case = match[1].str();
+      parsed.flash_dispatch_calls = match[2].str();
+      parsed.emel_decode_calls = match[3].str();
+      parsed.emel_logits_calls = match[4].str();
+      parsed.reference_decode_calls = match[5].str();
+      parsed.reference_logits_calls = match[6].str();
+      continue;
+    }
     if (line.empty() || line[0] == '#') {
       continue;
     }
-    std::smatch match;
     if (!std::regex_match(line, match, line_re)) {
       continue;
     }
-    const std::string name = match[1].str();
-    const std::string emel_ns = match[2].str();
-    const std::string llama_ns = match[3].str();
-    const std::string ratio = match[4].str();
-    std::string row = "| `" + name + "` | ";
-    row += emel_ns;
-    row += " | ";
-    row += llama_ns;
-    row += " | ";
-    row += ratio;
-    row += "x |";
-    rows.push_back(std::move(row));
+    parsed.rows.push_back(benchmark_row{
+        .name = match[1].str(),
+        .emel_ns = match[2].str(),
+        .llama_ns = match[3].str(),
+        .ratio = match[4].str(),
+    });
   }
 
+  if (parsed.reference_source.empty() || parsed.reference_ref.empty()) {
+    std::fprintf(stderr,
+                 "error: missing # reference_impl metadata in %s\n",
+                 paths.benchmarks_snapshot.string().c_str());
+    return std::nullopt;
+  }
+  if (parsed.flash_case.empty()) {
+    std::fprintf(stderr,
+                 "error: missing # generation_flash_evidence metadata in %s\n",
+                 paths.benchmarks_snapshot.string().c_str());
+    return std::nullopt;
+  }
+
+  return parsed;
+}
+
+std::optional<std::string> build_benchmarks_table(const benchmark_snapshot & snapshot) {
   std::string table;
   table += "| Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |\n";
   table += "| --- | ---: | ---: | ---: |\n";
-  for (const auto & row : rows) {
-    table += row;
-    table += "\n";
+  for (const auto & row : snapshot.rows) {
+    table += "| `";
+    table += row.name;
+    table += "` | ";
+    table += row.emel_ns;
+    table += " | ";
+    table += row.llama_ns;
+    table += " | ";
+    table += row.ratio;
+    table += "x |\n";
   }
   return table;
+}
+
+const benchmark_row * find_benchmark_row(const benchmark_snapshot & snapshot,
+                                         const std::string & name) {
+  for (const auto & row : snapshot.rows) {
+    if (row.name == name) {
+      return &row;
+    }
+  }
+  return nullptr;
+}
+
+std::optional<std::string> build_flash_publication_section(const doc_paths & paths,
+                                                           const benchmark_snapshot & snapshot) {
+  const auto baseline = parse_key_value_file(paths.generation_pre_flash_baseline);
+  if (!baseline.has_value()) {
+    return std::nullopt;
+  }
+
+  for (const char * field : {"source_commit",
+                             "baseline_ref",
+                             "case",
+                             "baseline_emel_ns",
+                             "baseline_reference_ns",
+                             "baseline_ratio"}) {
+    if (!baseline->contains(field)) {
+      std::fprintf(stderr,
+                   "error: missing %s in %s\n",
+                   field,
+                   paths.generation_pre_flash_baseline.string().c_str());
+      return std::nullopt;
+    }
+  }
+
+  const std::string & baseline_case = baseline->at("case");
+  const benchmark_row * current = find_benchmark_row(snapshot, baseline_case);
+  if (current == nullptr) {
+    std::fprintf(stderr,
+                 "error: missing benchmark row for %s in %s\n",
+                 baseline_case.c_str(),
+                 paths.benchmarks_snapshot.string().c_str());
+    return std::nullopt;
+  }
+
+  const double baseline_emel = std::stod(baseline->at("baseline_emel_ns"));
+  const double current_emel = std::stod(current->emel_ns);
+  const double speedup = baseline_emel / current_emel;
+  const double latency_drop_pct = ((baseline_emel - current_emel) / baseline_emel) * 100.0;
+
+  char speedup_buf[32];
+  char latency_buf[32];
+  std::snprintf(speedup_buf, sizeof(speedup_buf), "%.3fx", speedup);
+  std::snprintf(latency_buf, sizeof(latency_buf), "%.1f", latency_drop_pct);
+
+  std::string section;
+  section += "## Current Flash Evidence\n\n";
+  section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
+  section += "- Preserved baseline artifact: `snapshots/bench/generation_pre_flash_baseline.txt`\n";
+  section += "- `reference_impl: source=";
+  section += snapshot.reference_source;
+  section += " ref=";
+  section += snapshot.reference_ref;
+  section += "`\n";
+  section += "- `generation_flash_evidence: case=";
+  section += snapshot.flash_case;
+  section += " flash_dispatch_calls=";
+  section += snapshot.flash_dispatch_calls;
+  section += " emel_decode_calls=";
+  section += snapshot.emel_decode_calls;
+  section += " emel_logits_calls=";
+  section += snapshot.emel_logits_calls;
+  section += " reference_decode_calls=";
+  section += snapshot.reference_decode_calls;
+  section += " reference_logits_calls=";
+  section += snapshot.reference_logits_calls;
+  section += "`\n";
+  section += "- Current compare row: `";
+  section += current->name;
+  section += " emel.cpp ";
+  section += current->emel_ns;
+  section += " ns/op, llama.cpp ";
+  section += current->llama_ns;
+  section += " ns/op, ratio=";
+  section += current->ratio;
+  section += "x`\n\n";
+
+  section += "## Pre-Flash Baseline Comparison\n\n";
+  section += "- `source_commit=";
+  section += baseline->at("source_commit");
+  section += "`\n";
+  section += "- `baseline_ref=";
+  section += baseline->at("baseline_ref");
+  section += "`\n";
+  section += "- `case=";
+  section += baseline_case;
+  section += "`\n";
+  section += "- `baseline_emel_ns=";
+  section += baseline->at("baseline_emel_ns");
+  section += "`\n";
+  section += "- `baseline_reference_ns=";
+  section += baseline->at("baseline_reference_ns");
+  section += "`\n";
+  section += "- `baseline_ratio=";
+  section += baseline->at("baseline_ratio");
+  section += "`\n";
+  section += "- `current_emel_ns=";
+  section += current->emel_ns;
+  section += "`\n";
+  section += "- `current_reference_ns=";
+  section += current->llama_ns;
+  section += "`\n";
+  section += "- `current_ratio=";
+  section += current->ratio;
+  section += "x`\n";
+  section += "- `speedup=";
+  section += speedup_buf;
+  section += "`\n";
+  section += "- `latency_drop_pct=";
+  section += latency_buf;
+  section += "`\n";
+
+  return section;
 }
 
 int main(int argc, char ** argv) {
@@ -479,6 +679,8 @@ int main(int argc, char ** argv) {
   paths.mermaid_dir = paths.architecture_dir / "mermaid";
   paths.benchmarks_md = paths.docs_dir / "benchmarks.md";
   paths.benchmarks_snapshot = paths.root / "snapshots/bench/benchmarks_compare.txt";
+  paths.generation_pre_flash_baseline =
+      paths.root / "snapshots/bench/generation_pre_flash_baseline.txt";
   paths.benchmarks_template = paths.docs_dir / "templates/benchmarks.md.j2";
   paths.readme_template = paths.docs_dir / "templates/README.md.j2";
   paths.readme_path = paths.root / "README.md";
@@ -504,14 +706,24 @@ int main(int argc, char ** argv) {
   }
 
   const std::string docs_toc = build_docs_toc(machines);
-  const auto benchmarks_table = build_benchmarks_table(paths);
+  const auto benchmarks_snapshot = parse_benchmarks_snapshot(paths);
+  if (!benchmarks_snapshot.has_value()) {
+    return 1;
+  }
+  const auto benchmarks_table = build_benchmarks_table(*benchmarks_snapshot);
   if (!benchmarks_table.has_value()) {
+    return 1;
+  }
+  const auto flash_publication_section =
+      build_flash_publication_section(paths, *benchmarks_snapshot);
+  if (!flash_publication_section.has_value()) {
     return 1;
   }
 
   const auto benchmarks_doc = render_template(
       paths.benchmarks_template,
-      {template_var{"benchmarks_table", *benchmarks_table}});
+      {template_var{"flash_publication_section", *flash_publication_section},
+       template_var{"benchmarks_table", *benchmarks_table}});
   if (!benchmarks_doc.has_value()) {
     return 1;
   }

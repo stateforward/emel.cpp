@@ -22,20 +22,25 @@ if(REF_IMPL_REF STREQUAL "")
 endif()
 
 include(FetchContent)
-set(REF_IMPL_LOCAL_PATH "${EMEL_ROOT}/tmp/llama.cpp" CACHE PATH "")
-if(EXISTS "${REF_IMPL_LOCAL_PATH}/ggml/CMakeLists.txt" AND
-   EXISTS "${REF_IMPL_LOCAL_PATH}/src/CMakeLists.txt")
-  set(reference_impl_SOURCE_DIR "${REF_IMPL_LOCAL_PATH}")
-else()
-  FetchContent_Declare(
-    reference_impl
-    GIT_REPOSITORY ${REF_IMPL_REPOSITORY}
-    GIT_TAG ${REF_IMPL_REF}
-  )
-  FetchContent_GetProperties(reference_impl)
-  if(NOT reference_impl_POPULATED)
-    FetchContent_Populate(reference_impl)
-  endif()
+set(BENCH_REFERENCE_SOURCE "cmake_fetch")
+set(BENCH_REFERENCE_REF_VALUE "${REF_IMPL_REF}")
+FetchContent_Declare(
+  reference_impl
+  GIT_REPOSITORY ${REF_IMPL_REPOSITORY}
+  GIT_TAG ${REF_IMPL_REF}
+)
+FetchContent_GetProperties(reference_impl)
+if(NOT reference_impl_POPULATED)
+  FetchContent_Populate(reference_impl)
+endif()
+execute_process(
+  COMMAND git -C "${reference_impl_SOURCE_DIR}" rev-parse HEAD
+  OUTPUT_VARIABLE BENCH_REFERENCE_REF_VALUE
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+)
+if(BENCH_REFERENCE_REF_VALUE STREQUAL "")
+  set(BENCH_REFERENCE_REF_VALUE "${REF_IMPL_REF}")
 endif()
 
 set(LLAMA_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
@@ -109,6 +114,7 @@ find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
 
 set(BENCH_RUNNER_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/batch/planner_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/generation_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/rule_parser_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/kernel/aarch64_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/kernel/x86_64_bench.cpp
@@ -157,6 +163,13 @@ target_link_libraries(bench_runner
     emel
     ggml
     llama
+)
+
+target_compile_definitions(bench_runner
+  PRIVATE
+    EMEL_BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
+    BENCH_REFERENCE_SOURCE=\"${BENCH_REFERENCE_SOURCE}\"
+    BENCH_REFERENCE_REF=\"${BENCH_REFERENCE_REF_VALUE}\"
 )
 
 target_include_directories(bench_runner

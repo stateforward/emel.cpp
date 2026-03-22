@@ -14,6 +14,7 @@ struct reserved {};
 
 struct reserving {};
 struct reserve_decision {};
+struct reserve_tensor_decision {};
 
 struct assembling {};
 struct assemble_decision {};
@@ -67,12 +68,20 @@ struct model {
       , sml::state<reserve_decision> <= sml::state<reserving> + sml::completion<event::reserve_graph>
                  / action::request_reserve
 
-      , sml::state<reserved> <= sml::state<reserve_decision> + sml::completion<event::reserve_graph>
+      , sml::state<reserve_tensor_decision> <= sml::state<reserve_decision> + sml::completion<event::reserve_graph>
                  [ guard::reserve_done{} ]
+                 / action::request_tensor_reserve
+
+      , sml::state<reserved> <= sml::state<reserve_tensor_decision> + sml::completion<event::reserve_graph>
+                 [ guard::tensor_reserve_done{} ]
                  / action::dispatch_reserve_done
 
       , sml::state<uninitialized> <= sml::state<reserve_decision> + sml::completion<event::reserve_graph>
                  [ guard::reserve_failed{} ]
+                 / action::dispatch_reserve_error
+
+      , sml::state<uninitialized> <= sml::state<reserve_tensor_decision> + sml::completion<event::reserve_graph>
+                 [ guard::tensor_reserve_failed{} ]
                  / action::dispatch_reserve_error
 
       //------------------------------------------------------------------------------//
@@ -176,6 +185,8 @@ struct model {
                  / action::on_unexpected
       , sml::state<uninitialized> <= sml::state<reserve_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
+      , sml::state<uninitialized> <= sml::state<reserve_tensor_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
 
       , sml::state<reserved> <= sml::state<assembling> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
@@ -208,6 +219,22 @@ struct sm : public emel::sm<model, action::context> {
     event::compute_graph evt{ev, ctx};
     const bool accepted = base_type::process_event(evt);
     return accepted && ctx.err == emel::error::cast(error::none);
+  }
+
+  bool try_capture_tensor(const int32_t tensor_id,
+                          tensor::event::tensor_state & state_out,
+                          emel::error::type & err_out) noexcept {
+    return this->context_.tensor_actor.try_capture(tensor_id, state_out, err_out);
+  }
+
+  bool reset_tensor_epoch(const int32_t tensor_id, emel::error::type & err_out) noexcept {
+    int32_t err = static_cast<int32_t>(emel::error::cast(tensor::error::none));
+    const bool ok = this->context_.tensor_actor.process_event(tensor::event::reset_tensor_epoch{
+      .tensor_id = tensor_id,
+      .error_out = &err,
+    });
+    err_out = static_cast<emel::error::type>(err);
+    return ok;
   }
 };
 

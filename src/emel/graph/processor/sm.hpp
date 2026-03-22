@@ -19,8 +19,11 @@ struct validate_decision {};
 struct prepare_decision {};
 struct alloc_decision {};
 struct bind_decision {};
+struct lifecycle_gate_decision {};
 struct kernel_decision {};
+struct publish_decision {};
 struct extract_decision {};
+struct release_decision {};
 struct execution_decision {};
 
 struct model {
@@ -95,40 +98,73 @@ struct model {
       , sml::state<bind_decision> <= sml::state<bind_step::model> +
                sml::completion<event::execute_step>
 
-      , sml::state<kernel_step::model> <= sml::state<bind_decision> +
+      , sml::state<lifecycle_gate_decision> <= sml::state<bind_decision> +
                sml::completion<event::execute_step>
                  [ guard::bind_done{} ]
+                 / action::request_lifecycle_gate
 
       , sml::state<execution_decision> <= sml::state<bind_decision> +
                sml::completion<event::execute_step>
                  [ guard::bind_failed{} ]
 
       //------------------------------------------------------------------------------//
+      // Lifecycle gate phase.
+      , sml::state<kernel_step::model> <= sml::state<lifecycle_gate_decision> +
+               sml::completion<event::execute_step>
+                 [ guard::lifecycle_gate_done{} ]
+
+      , sml::state<execution_decision> <= sml::state<lifecycle_gate_decision> +
+               sml::completion<event::execute_step>
+                 [ guard::lifecycle_gate_failed{} ]
+
+      //------------------------------------------------------------------------------//
       // Kernel phase.
       , sml::state<kernel_decision> <= sml::state<kernel_step::model> +
                sml::completion<event::execute_step>
 
-      , sml::state<extract_step::model> <= sml::state<kernel_decision> +
+      , sml::state<publish_decision> <= sml::state<kernel_decision> +
                sml::completion<event::execute_step>
                  [ guard::kernel_done{} ]
+                 / action::request_lifecycle_publish
 
       , sml::state<execution_decision> <= sml::state<kernel_decision> +
                sml::completion<event::execute_step>
                  [ guard::kernel_failed{} ]
 
       //------------------------------------------------------------------------------//
+      // Publish phase.
+      , sml::state<extract_step::model> <= sml::state<publish_decision> +
+               sml::completion<event::execute_step>
+                 [ guard::publish_done{} ]
+
+      , sml::state<execution_decision> <= sml::state<publish_decision> +
+               sml::completion<event::execute_step>
+                 [ guard::publish_failed{} ]
+
+      //------------------------------------------------------------------------------//
       // Extract phase.
       , sml::state<extract_decision> <= sml::state<extract_step::model> +
                sml::completion<event::execute_step>
 
-      , sml::state<execution_decision> <= sml::state<extract_decision> +
+      , sml::state<release_decision> <= sml::state<extract_decision> +
                sml::completion<event::execute_step>
                  [ guard::extract_done{} ]
-                 / action::commit_output
+                 / action::request_lifecycle_release
 
       , sml::state<execution_decision> <= sml::state<extract_decision> +
                sml::completion<event::execute_step>
                  [ guard::extract_failed{} ]
+
+      //------------------------------------------------------------------------------//
+      // Release phase.
+      , sml::state<execution_decision> <= sml::state<release_decision> +
+               sml::completion<event::execute_step>
+                 [ guard::release_done{} ]
+                 / action::commit_output
+
+      , sml::state<execution_decision> <= sml::state<release_decision> +
+               sml::completion<event::execute_step>
+                 [ guard::release_failed{} ]
 
       //------------------------------------------------------------------------------//
       // Finalization and callback dispatch.
@@ -173,10 +209,21 @@ struct model {
       , sml::state<execution_decision> <= sml::state<bind_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
+      , sml::state<execution_decision> <= sml::state<lifecycle_gate_decision> +
+               sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
       , sml::state<execution_decision> <= sml::state<kernel_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
+      , sml::state<execution_decision> <= sml::state<publish_decision> +
+               sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
       , sml::state<execution_decision> <= sml::state<extract_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+
+      , sml::state<execution_decision> <= sml::state<release_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
       , sml::state<ready> <= sml::state<execution_decision> + sml::unexpected_event<sml::_>

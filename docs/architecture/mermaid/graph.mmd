@@ -10,8 +10,10 @@ stateDiagram-v2
   reserved --> reserved : reserve_graph [invalid_reserve_with_output_only_] / reject_invalid_reserve_with_output_only_
   reserved --> reserved : reserve_graph [invalid_reserve_without_output_] / reject_invalid_reserve_without_output_
   reserving --> reserve_decision : completion_reserve_graph_ [always] / request_reserve_
-  reserve_decision --> reserved : completion_reserve_graph_ [reserve_done_] / dispatch_reserve_done_
+  reserve_decision --> reserve_tensor_decision : completion_reserve_graph_ [reserve_done_] / request_tensor_reserve_
+  reserve_tensor_decision --> reserved : completion_reserve_graph_ [tensor_reserve_done_] / dispatch_reserve_done_
   reserve_decision --> uninitialized : completion_reserve_graph_ [reserve_failed_] / dispatch_reserve_error_
+  reserve_tensor_decision --> uninitialized : completion_reserve_graph_ [tensor_reserve_failed_] / dispatch_reserve_error_
   reserved --> assembling : compute_graph [valid_compute_] / begin_compute_
   reserved --> reserved : compute_graph [invalid_compute_with_dispatchable_output_] / reject_invalid_compute_with_dispatch_
   reserved --> reserved : compute_graph [invalid_compute_with_output_only_] / reject_invalid_compute_with_output_only_
@@ -38,6 +40,7 @@ stateDiagram-v2
   reserved --> reserved : _ [always] / on_unexpected_
   reserving --> uninitialized : _ [always] / on_unexpected_
   reserve_decision --> uninitialized : _ [always] / on_unexpected_
+  reserve_tensor_decision --> uninitialized : _ [always] / on_unexpected_
   assembling --> reserved : _ [always] / on_unexpected_
   assemble_decision --> reserved : _ [always] / on_unexpected_
   executing --> reserved : _ [always] / on_unexpected_

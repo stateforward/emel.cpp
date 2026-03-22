@@ -1,0 +1,6 @@
+source_commit=2acd4fe
+baseline_ref=ecbcb7ea9d3303097519723b264a8b5f1e977028
+case=generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1
+baseline_emel_ns=6000000
+baseline_reference_ns=6660042
+baseline_ratio=0.901x

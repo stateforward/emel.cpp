@@ -42,7 +42,10 @@ using cuda_dispatch_event = emel::kernel::cuda::event::dispatch_request;
 using metal_dispatch_event = emel::kernel::metal::event::dispatch_request;
 using vulkan_dispatch_event = emel::kernel::vulkan::event::dispatch_request;
 using emel::kernel::test::dtype;
+using emel::kernel::test::flash_attn_ext_fixture;
 using emel::kernel::test::make_dst;
+using emel::kernel::test::make_flash_attn_ext_event;
+using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_smoke_op_event;
 using emel::kernel::test::make_src;
 
@@ -80,6 +83,68 @@ void check_backend_op_paths(machine_type & machine,
 }
 
 }  // namespace
+
+TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q2_k;
+  using emel::kernel::detail::quant::block_q3_k;
+  using emel::kernel::detail::quant::block_q6_k;
+
+  const std::array<float, QK_K> input = [] {
+    std::array<float, QK_K> values = {};
+    values.fill(1.0f);
+    return values;
+  }();
+  float q2_out[1] = {};
+  float q3_out[1] = {};
+  float q6_out[1] = {};
+
+  block_q2_k q2 = {};
+  q2.d = 0x3c00u;
+  q2.dmin = 0x3c00u;
+  std::fill(q2.scales.begin(), q2.scales.end(), static_cast<uint8_t>(0x11u));
+  std::fill(q2.qs.begin(), q2.qs.end(), static_cast<uint8_t>(0x00u));
+
+  block_q3_k q3 = {};
+  q3.d = 0x3c00u;
+  std::fill(q3.scales.begin(), q3.scales.end(), static_cast<uint8_t>(0x00u));
+  std::fill(q3.hmask.begin(), q3.hmask.end(), static_cast<uint8_t>(0x00u));
+  std::fill(q3.qs.begin(), q3.qs.end(), static_cast<uint8_t>(0x00u));
+
+  block_q6_k q6 = {};
+  q6.d = 0x3c00u;
+  std::fill(q6.scales.begin(), q6.scales.end(), static_cast<int8_t>(1));
+  std::fill(q6.ql.begin(), q6.ql.end(), static_cast<uint8_t>(0x00u));
+  std::fill(q6.qh.begin(), q6.qh.end(), static_cast<uint8_t>(0x00u));
+
+  kernel_sm machine{};
+
+  const emel::kernel::event::op_mul_mat q2_ev{
+      .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat q3_ev{
+      .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat q6_ev{
+      .src0 = make_quantized_src(&q6, dtype::q6_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q6_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+
+  CHECK(machine.process_event(q2_ev));
+  CHECK(machine.process_event(q3_ev));
+  CHECK(machine.process_event(q6_ev));
+  CHECK(q2_out[0] == doctest::Approx(-256.0f));
+  CHECK(q3_out[0] == doctest::Approx(32768.0f));
+  CHECK(q6_out[0] == doctest::Approx(-8192.0f));
+}
 
 TEST_CASE("kernel_backends_accept_dispatch_event") {
   const emel::kernel::event::dispatch event{};
@@ -413,6 +478,52 @@ TEST_CASE("kernel_backends_reject_quantized_dispatch_dtypes") {
   CHECK_FALSE(cuda_machine.process_event(quantized));
   CHECK_FALSE(metal_machine.process_event(quantized));
   CHECK_FALSE(vulkan_machine.process_event(quantized));
+}
+
+TEST_CASE("kernel_flash_attn_ext_requires_canonical_execution_path") {
+  flash_attn_ext_fixture fixture{};
+  const auto canonical = make_flash_attn_ext_event(fixture);
+
+  x86_64_sm x86_64_machine{};
+  CHECK(x86_64_machine.process_event(canonical));
+  CHECK(fixture.dst[0] == doctest::Approx(1.4621172f).epsilon(1e-5f));
+  CHECK(fixture.dst[1] == doctest::Approx(1.0757657f).epsilon(1e-5f));
+  CHECK(fixture.dst[2] == doctest::Approx(0.0f));
+  CHECK(fixture.dst[3] == doctest::Approx(0.0f));
+
+  flash_attn_ext_fixture invalid_fixture{};
+  auto invalid = make_flash_attn_ext_event(invalid_fixture);
+  invalid.src1.ne[0] = 3;
+  invalid.src1.nb[1] = invalid.src1.nb[0] * invalid.src1.ne[0];
+
+  CHECK_FALSE(x86_64_machine.process_event(invalid));
+}
+
+TEST_CASE("kernel_x86_64_flash_attn_ext_reuses_persistent_workspace") {
+  flash_attn_ext_fixture fixture{};
+  const auto request = make_flash_attn_ext_event(fixture);
+
+  emel::kernel::x86_64::action::context ctx{};
+  emel::kernel::x86_64::event::dispatch_ctx dispatch_ctx0{};
+  const emel::kernel::x86_64::event::dispatch_op_flash_attn_ext dispatch0{request, dispatch_ctx0};
+
+  emel::kernel::x86_64::action::exec_op_flash_attn_ext(dispatch0, ctx);
+  CHECK(dispatch_ctx0.outcome == emel::kernel::x86_64::events::phase_outcome::done);
+  CHECK(ctx.flash_attn_workspace.prepared_tokens == 2u);
+  CHECK(ctx.flash_attn_workspace.reuse_count == 0u);
+
+  fixture.dst[0] = 0.0f;
+  fixture.dst[1] = 0.0f;
+  fixture.dst[2] = 0.0f;
+  fixture.dst[3] = 0.0f;
+
+  emel::kernel::x86_64::event::dispatch_ctx dispatch_ctx1{};
+  const emel::kernel::x86_64::event::dispatch_op_flash_attn_ext dispatch1{request, dispatch_ctx1};
+
+  emel::kernel::x86_64::action::exec_op_flash_attn_ext(dispatch1, ctx);
+  CHECK(dispatch_ctx1.outcome == emel::kernel::x86_64::events::phase_outcome::done);
+  CHECK(ctx.flash_attn_workspace.prepared_tokens == 2u);
+  CHECK(ctx.flash_attn_workspace.reuse_count == 1u);
 }
 
 TEST_CASE("kernel_backend_unexpected_actions_mark_backend_error") {

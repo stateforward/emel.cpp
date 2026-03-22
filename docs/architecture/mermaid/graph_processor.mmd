@@ -16,14 +16,20 @@ stateDiagram-v2
   alloc_decision --> model__ : completion_execute_step_ [alloc_done_] / none
   alloc_decision --> execution_decision : completion_execute_step_ [alloc_failed_] / none
   model__ --> bind_decision : completion_execute_step_ [always] / none
-  bind_decision --> model__ : completion_execute_step_ [bind_done_] / none
+  bind_decision --> lifecycle_gate_decision : completion_execute_step_ [bind_done_] / request_lifecycle_gate_
   bind_decision --> execution_decision : completion_execute_step_ [bind_failed_] / none
+  lifecycle_gate_decision --> model__ : completion_execute_step_ [lifecycle_gate_done_] / none
+  lifecycle_gate_decision --> execution_decision : completion_execute_step_ [lifecycle_gate_failed_] / none
   model__ --> kernel_decision : completion_execute_step_ [always] / none
-  kernel_decision --> model__ : completion_execute_step_ [kernel_done_] / none
+  kernel_decision --> publish_decision : completion_execute_step_ [kernel_done_] / request_lifecycle_publish_
   kernel_decision --> execution_decision : completion_execute_step_ [kernel_failed_] / none
+  publish_decision --> model__ : completion_execute_step_ [publish_done_] / none
+  publish_decision --> execution_decision : completion_execute_step_ [publish_failed_] / none
   model__ --> extract_decision : completion_execute_step_ [always] / none
-  extract_decision --> execution_decision : completion_execute_step_ [extract_done_] / commit_output_
+  extract_decision --> release_decision : completion_execute_step_ [extract_done_] / request_lifecycle_release_
   extract_decision --> execution_decision : completion_execute_step_ [extract_failed_] / none
+  release_decision --> execution_decision : completion_execute_step_ [release_done_] / commit_output_
+  release_decision --> execution_decision : completion_execute_step_ [release_failed_] / none
   execution_decision --> ready : completion_execute_step_ [execution_error_none_] / dispatch_done_
   execution_decision --> ready : completion_execute_step_ [execution_error_invalid_request_] / dispatch_error_
   execution_decision --> ready : completion_execute_step_ [execution_error_kernel_failed_] / dispatch_error_
@@ -35,6 +41,9 @@ stateDiagram-v2
   prepare_decision --> execution_decision : _ [always] / on_unexpected_
   alloc_decision --> execution_decision : _ [always] / on_unexpected_
   bind_decision --> execution_decision : _ [always] / on_unexpected_
+  lifecycle_gate_decision --> execution_decision : _ [always] / on_unexpected_
   kernel_decision --> execution_decision : _ [always] / on_unexpected_
+  publish_decision --> execution_decision : _ [always] / on_unexpected_
   extract_decision --> execution_decision : _ [always] / on_unexpected_
+  release_decision --> execution_decision : _ [always] / on_unexpected_
   execution_decision --> ready : _ [always] / on_unexpected_

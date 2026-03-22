@@ -7,13 +7,17 @@
 #include "test_helpers.hpp"
 #include "emel/kernel/aarch64/actions.hpp"
 #include "emel/kernel/aarch64/detail.hpp"
+#include "emel/kernel/aarch64/events.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
 
 namespace {
 
 using aarch64_sm = emel::kernel::aarch64::sm;
 using emel::kernel::test::dtype;
+using emel::kernel::test::flash_attn_ext_fixture;
 using emel::kernel::test::make_dst;
+using emel::kernel::test::make_flash_attn_ext_event;
+using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_src;
 
 }  // namespace
@@ -37,7 +41,7 @@ TEST_CASE("kernel_aarch64_numeric_paths") {
       .nth = 1,
   };
 
-  aarch64_sm machine{emel::kernel::aarch64::action::context{false, 0}};
+  aarch64_sm machine{emel::kernel::aarch64::action::context{false, {}, 0}};
 
   CHECK(machine.process_event(add_ev));
   CHECK(machine.process_event(mul_ev));
@@ -76,7 +80,7 @@ TEST_CASE("kernel_aarch64_scalar_path_honors_strides") {
       .nth = 1,
   };
 
-  aarch64_sm machine{emel::kernel::aarch64::action::context{false, 0}};
+  aarch64_sm machine{emel::kernel::aarch64::action::context{false, {}, 0}};
   CHECK(machine.process_event(add_ev));
 
   CHECK(dst_storage[0] == doctest::Approx(11.0f));
@@ -117,7 +121,7 @@ TEST_CASE("kernel_aarch64_forced_neon_context_path") {
       .nth = 1,
   };
 
-  aarch64_sm machine{emel::kernel::aarch64::action::context{true, 0}};
+  aarch64_sm machine{emel::kernel::aarch64::action::context{true, {}, 0}};
   CHECK(machine.process_event(add_ev));
   CHECK(out[0] == doctest::Approx(3.0f));
   CHECK(out[1] == doctest::Approx(7.0f));
@@ -170,6 +174,89 @@ TEST_CASE("kernel_aarch64_mul_mat_simd_matches_scalar_tiled_edges") {
 #endif
 }
 
+TEST_CASE("kernel_aarch64_quantized_mul_mat_simd_matches_scalar") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q2_k;
+  using emel::kernel::detail::quant::block_q3_k;
+  using emel::kernel::detail::quant::block_q6_k;
+
+  const std::array<float, QK_K> src1 = [] {
+    std::array<float, QK_K> values = {};
+    for (size_t i = 0; i < values.size(); ++i) {
+      const int32_t centered = static_cast<int32_t>(i % 17u) - 8;
+      values[i] = static_cast<float>(centered) * 0.125f;
+    }
+    return values;
+  }();
+
+  block_q2_k q2 = {};
+  q2.d = 0x3c00u;
+  q2.dmin = 0x3c00u;
+  for (size_t i = 0; i < q2.scales.size(); ++i) {
+    q2.scales[i] = static_cast<uint8_t>(((i % 11u) << 4u) | ((i * 3u) % 13u));
+  }
+  for (size_t i = 0; i < q2.qs.size(); ++i) {
+    q2.qs[i] = static_cast<uint8_t>((i * 29u) ^ (i >> 1u));
+  }
+
+  block_q3_k q3 = {};
+  q3.d = 0x3c00u;
+  for (size_t i = 0; i < q3.scales.size(); ++i) {
+    q3.scales[i] = static_cast<uint8_t>((i * 17u) ^ 0x5au);
+  }
+  for (size_t i = 0; i < q3.hmask.size(); ++i) {
+    q3.hmask[i] = static_cast<uint8_t>((i * 9u) ^ 0xa5u);
+  }
+  for (size_t i = 0; i < q3.qs.size(); ++i) {
+    q3.qs[i] = static_cast<uint8_t>((i * 13u) ^ 0x33u);
+  }
+
+  block_q6_k q6 = {};
+  q6.d = 0x3c00u;
+  for (size_t i = 0; i < q6.scales.size(); ++i) {
+    q6.scales[i] = static_cast<int8_t>((static_cast<int>(i % 7u) - 3) * 9);
+  }
+  for (size_t i = 0; i < q6.ql.size(); ++i) {
+    q6.ql[i] = static_cast<uint8_t>((i * 7u) ^ 0x96u);
+  }
+  for (size_t i = 0; i < q6.qh.size(); ++i) {
+    q6.qh[i] = static_cast<uint8_t>((i * 5u) ^ 0x69u);
+  }
+
+  std::array<float, 1> dst_simd = {};
+  std::array<float, 1> dst_scalar = {};
+
+  auto run_case = [&](const auto & block, const dtype type) {
+    dst_simd.fill(0.0f);
+    dst_scalar.fill(0.0f);
+    const emel::kernel::event::op_mul_mat simd_ev{
+        .src0 = make_quantized_src(&block, type, QK_K, 1),
+        .src1 = make_src(src1.data(), dtype::f32, 1, QK_K),
+        .dst = make_dst(dst_simd.data(), dtype::f32, 1, 1),
+        .nth = 1,
+    };
+    const emel::kernel::event::op_mul_mat scalar_ev{
+        .src0 = make_quantized_src(&block, type, QK_K, 1),
+        .src1 = make_src(src1.data(), dtype::f32, 1, QK_K),
+        .dst = make_dst(dst_scalar.data(), dtype::f32, 1, 1),
+        .nth = 1,
+    };
+
+    CHECK(emel::kernel::aarch64::detail::can_use_neon(simd_ev, true));
+    CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat(simd_ev));
+    CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+    CHECK(dst_simd[0] == doctest::Approx(dst_scalar[0]).epsilon(1e-5f));
+  };
+
+  run_case(q2, dtype::q2_k);
+  run_case(q3, dtype::q3_k);
+  run_case(q6, dtype::q6_k);
+#endif
+}
+
 TEST_CASE("kernel_aarch64_detail_branch_paths") {
   float lhs[4] = {1.0f, 2.0f, 3.0f, 4.0f};
   float rhs[4] = {4.0f, 3.0f, 2.0f, 1.0f};
@@ -189,7 +276,7 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
   CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(add_ev, true));
 #endif
   CHECK(emel::kernel::aarch64::detail::execute_request(
-      add_ev, emel::kernel::aarch64::action::context{true, 0}));
+      add_ev, emel::kernel::aarch64::action::context{true, {}, 0}));
 
   add_ev.dst.nb[0] = add_ev.dst.nb[0] * 2;
   CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(add_ev, true));
@@ -206,6 +293,27 @@ TEST_CASE("kernel_aarch64_detail_branch_paths") {
   add_ev.src1 = make_src(rhs, dtype::f32, 4);
   add_ev.src0.type = dtype::q4_0;
   CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(add_ev, true));
+
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q2_k;
+  block_q2_k q2 = {};
+  q2.d = 0x3c00u;
+  q2.dmin = 0x3c00u;
+  std::fill(q2.scales.begin(), q2.scales.end(), static_cast<uint8_t>(0x11u));
+  std::fill(q2.qs.begin(), q2.qs.end(), static_cast<uint8_t>(0x00u));
+  float quant_dst[1] = {};
+  const float quant_rhs[QK_K] = {0.0f};
+  const emel::kernel::event::op_mul_mat quant_mul_mat_ev{
+      .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
+      .src1 = make_src(quant_rhs, dtype::f32, 1, QK_K),
+      .dst = make_dst(quant_dst, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(emel::kernel::aarch64::detail::can_use_neon(quant_mul_mat_ev, true));
+#else
+  CHECK_FALSE(emel::kernel::aarch64::detail::can_use_neon(quant_mul_mat_ev, true));
+#endif
 
   emel::kernel::event::op_unary unary_ev{
       .src0 = make_src(lhs, dtype::f32, 4),
@@ -389,7 +497,7 @@ TEST_CASE("kernel_aarch64_unary_subop_scalar_paths") {
       .subop = emel::kernel::event::unary_subop::abs,
   };
 
-  aarch64_sm scalar_machine{emel::kernel::aarch64::action::context{false, 0}};
+  aarch64_sm scalar_machine{emel::kernel::aarch64::action::context{false, {}, 0}};
 
   CHECK(scalar_machine.process_event(unary_ev));
   CHECK(dst[0] == doctest::Approx(2.0f));
@@ -420,4 +528,31 @@ TEST_CASE("kernel_aarch64_unary_subop_scalar_paths") {
 
   unary_ev.subop = emel::kernel::event::unary_subop::tanh;
   CHECK_FALSE(scalar_machine.process_event(unary_ev));
+}
+
+TEST_CASE("kernel_aarch64_flash_attn_ext_reuses_persistent_workspace") {
+  flash_attn_ext_fixture fixture{};
+  const auto request = make_flash_attn_ext_event(fixture);
+
+  emel::kernel::aarch64::action::context ctx{};
+  emel::kernel::aarch64::event::dispatch_ctx dispatch_ctx0{};
+  const emel::kernel::aarch64::event::dispatch_op_flash_attn_ext dispatch0{request, dispatch_ctx0};
+
+  emel::kernel::aarch64::action::exec_op_flash_attn_ext(dispatch0, ctx);
+  CHECK(dispatch_ctx0.outcome == emel::kernel::aarch64::events::phase_outcome::done);
+  CHECK(ctx.flash_attn_workspace.prepared_tokens == 2u);
+  CHECK(ctx.flash_attn_workspace.reuse_count == 0u);
+
+  fixture.dst[0] = 0.0f;
+  fixture.dst[1] = 0.0f;
+  fixture.dst[2] = 0.0f;
+  fixture.dst[3] = 0.0f;
+
+  emel::kernel::aarch64::event::dispatch_ctx dispatch_ctx1{};
+  const emel::kernel::aarch64::event::dispatch_op_flash_attn_ext dispatch1{request, dispatch_ctx1};
+
+  emel::kernel::aarch64::action::exec_op_flash_attn_ext(dispatch1, ctx);
+  CHECK(dispatch_ctx1.outcome == emel::kernel::aarch64::events::phase_outcome::done);
+  CHECK(ctx.flash_attn_workspace.prepared_tokens == 2u);
+  CHECK(ctx.flash_attn_workspace.reuse_count == 1u);
 }

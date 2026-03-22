@@ -33,6 +33,7 @@ struct reserve_output {
   uint32_t tensor_count = 0;
   uint64_t required_buffer_bytes = 0;
   uint32_t version = 0;
+  const processor::event::lifecycle_manifest * lifecycle = nullptr;
 };
 
 struct compute_output {
@@ -44,11 +45,13 @@ struct compute_output {
   uint8_t reused_topology = 0;
   int32_t outputs_produced = 0;
   uint8_t graph_reused = 0;
+  const processor::event::lifecycle_manifest * lifecycle = nullptr;
 };
 
 struct reserve {
   const void * model_topology = nullptr;
   reserve_output * output_out = nullptr;
+  const processor::event::lifecycle_manifest * lifecycle = nullptr;
   uint32_t max_node_count = 0;
   uint32_t max_tensor_count = 0;
   uint64_t bytes_per_tensor = 0;
@@ -60,6 +63,7 @@ struct reserve {
 struct compute {
   const void * step_plan = nullptr;
   compute_output * output_out = nullptr;
+  const processor::event::lifecycle_manifest * lifecycle = nullptr;
   uint32_t node_count_hint = 0;
   uint32_t tensor_count_hint = 0;
   uint64_t bytes_per_tensor = 0;
@@ -97,6 +101,7 @@ enum class phase_outcome : uint8_t {
 
 struct reserve_ctx {
   phase_outcome reserve_outcome = phase_outcome::unknown;
+  phase_outcome tensor_reserve_outcome = phase_outcome::unknown;
   assembler::event::reserve_output reserve_output = {};
   emel::error::type err = emel::error::cast(error::none);
 };

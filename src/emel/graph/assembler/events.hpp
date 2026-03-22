@@ -5,6 +5,7 @@
 #include "emel/callback.hpp"
 #include "emel/error/error.hpp"
 #include "emel/graph/allocator/events.hpp"
+#include "emel/graph/processor/events.hpp"
 #include "emel/graph/assembler/assemble_alloc_pass/events.hpp"
 #include "emel/graph/assembler/assemble_build_pass/events.hpp"
 #include "emel/graph/assembler/assemble_validate_pass/events.hpp"
@@ -31,6 +32,7 @@ struct reserve_output {
   uint32_t tensor_count = 0;
   uint64_t required_buffer_bytes = 0;
   uint32_t version = 0;
+  const processor::event::lifecycle_manifest * lifecycle = nullptr;
 };
 
 struct assemble_output {
@@ -40,11 +42,13 @@ struct assemble_output {
   uint64_t required_buffer_bytes = 0;
   uint32_t version = 0;
   uint8_t reused_topology = 0;
+  const processor::event::lifecycle_manifest * lifecycle = nullptr;
 };
 
 struct reserve {
   const void * model_topology = nullptr;
   reserve_output * output_out = nullptr;
+  const processor::event::lifecycle_manifest * lifecycle = nullptr;
   uint32_t max_node_count = 0;
   uint32_t max_tensor_count = 0;
   uint64_t bytes_per_tensor = 0;
@@ -56,6 +60,7 @@ struct reserve {
 struct assemble {
   const void * step_plan = nullptr;
   assemble_output * output_out = nullptr;
+  const processor::event::lifecycle_manifest * lifecycle = nullptr;
   uint32_t node_count_hint = 0;
   uint32_t tensor_count_hint = 0;
   uint64_t bytes_per_tensor = 0;

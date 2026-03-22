@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "emel/kernel/detail.hpp"
+
 namespace emel::kernel::x86_64::action {
 
 namespace detail {
@@ -23,6 +25,7 @@ inline bool detect_avx2() noexcept {
 
 struct context {
   const bool avx2_available = detail::detect_avx2();
+  ::emel::kernel::detail::flash_attn_workspace flash_attn_workspace = {};
   // TODO(emel): remove once dispatch observability no longer relies on this counter.
   uint64_t dispatch_generation = 0;
 };

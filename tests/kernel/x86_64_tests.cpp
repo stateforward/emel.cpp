@@ -37,7 +37,7 @@ TEST_CASE("kernel_x86_64_numeric_paths") {
       .nth = 1,
   };
 
-  x86_64_sm machine{emel::kernel::x86_64::action::context{false, 0}};
+  x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
 
   CHECK(machine.process_event(add_ev));
   CHECK(machine.process_event(mul_ev));
@@ -76,7 +76,7 @@ TEST_CASE("kernel_x86_64_scalar_path_honors_strides") {
       .nth = 1,
   };
 
-  x86_64_sm machine{emel::kernel::x86_64::action::context{false, 0}};
+  x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
   CHECK(machine.process_event(add_ev));
 
   CHECK(dst_storage[0] == doctest::Approx(11.0f));
@@ -122,7 +122,7 @@ TEST_CASE("kernel_x86_64_forced_avx2_context_path") {
       .nth = 1,
   };
 
-  x86_64_sm machine{emel::kernel::x86_64::action::context{true, 0}};
+  x86_64_sm machine{emel::kernel::x86_64::action::context{true, {}, 0}};
   CHECK(machine.process_event(add_ev));
   CHECK(out[0] == doctest::Approx(3.0f));
   CHECK(out[1] == doctest::Approx(7.0f));
@@ -165,7 +165,7 @@ TEST_CASE("kernel_x86_64_unary_subop_supported_and_unsupported_paths") {
   unary_ev.subop = emel::kernel::event::unary_subop::tanh;
   CHECK_FALSE(machine.process_event(unary_ev));
 
-  x86_64_sm scalar_machine{emel::kernel::x86_64::action::context{false, 0}};
+  x86_64_sm scalar_machine{emel::kernel::x86_64::action::context{false, {}, 0}};
 
   unary_ev.subop = emel::kernel::event::unary_subop::abs;
   CHECK(scalar_machine.process_event(unary_ev));
@@ -278,7 +278,7 @@ TEST_CASE("kernel_x86_64_detail_branch_paths") {
   CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, false));
   CHECK(emel::kernel::x86_64::detail::can_use_avx2(add_ev, host_avx2) == host_avx2);
   CHECK(emel::kernel::x86_64::detail::execute_request(
-      add_ev, emel::kernel::x86_64::action::context{host_avx2, 0}));
+      add_ev, emel::kernel::x86_64::action::context{host_avx2, {}, 0}));
 
   add_ev.dst.nb[0] = add_ev.dst.nb[0] * 2;
   CHECK_FALSE(emel::kernel::x86_64::detail::can_use_avx2(add_ev, host_avx2));
@@ -452,7 +452,7 @@ TEST_CASE("kernel_x86_64_simd_action_exec_marks_done") {
   };
 
   emel::kernel::x86_64::event::dispatch_ctx dispatch_ctx{};
-  emel::kernel::x86_64::action::context ctx{false, 0};
+  emel::kernel::x86_64::action::context ctx{false, {}, 0};
   const emel::kernel::x86_64::event::dispatch_op_add dispatch_ev{add_ev, dispatch_ctx};
 
   emel::kernel::x86_64::action::exec_simd_op_add(dispatch_ev, ctx);

@@ -3,10 +3,15 @@
 #include <cstdint>
 #include <span>
 
+#include "emel/gguf/loader/detail.hpp"
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/model/data.hpp"
 
 namespace {
+
+constexpr size_t k_max_fuzz_kv_arena_bytes = 16 * 1024;
+constexpr size_t k_max_fuzz_kv_entries = 256;
+constexpr size_t k_max_fuzz_tensors = 256;
 
 void on_probe_done(const emel::gguf::loader::events::probe_done &) {}
 void on_probe_error(const emel::gguf::loader::events::probe_error &) {}
@@ -43,26 +48,34 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     probe_done_cb,
     probe_error_cb,
   };
-  (void)machine.process_event(probe);
+  const bool probe_ok = machine.process_event(probe);
+  const uint64_t required_kv_arena_bytes =
+      emel::gguf::loader::detail::required_kv_arena_bytes(req);
 
-  std::array<uint8_t, 8> kv_arena = {};
-  std::array<emel::gguf::loader::kv_entry, 1> kv_entries = {};
-  std::array<emel::model::data::tensor_record, 1> tensors = {};
-  const emel::gguf::loader::event::bind_storage bind{
-    std::span<uint8_t>{kv_arena},
-    std::span<emel::gguf::loader::kv_entry>{kv_entries},
-    std::span<emel::model::data::tensor_record>{tensors},
-    bind_done_cb,
-    bind_error_cb,
-  };
-  (void)machine.process_event(bind);
+  std::array<uint8_t, k_max_fuzz_kv_arena_bytes> kv_arena = {};
+  std::array<emel::gguf::loader::kv_entry, k_max_fuzz_kv_entries> kv_entries = {};
+  std::array<emel::model::data::tensor_record, k_max_fuzz_tensors> tensors = {};
 
-  const emel::gguf::loader::event::parse parse{
-    std::span<const uint8_t>{data, size},
-    parse_done_cb,
-    parse_error_cb,
-  };
-  (void)machine.process_event(parse);
+  if (probe_ok &&
+      required_kv_arena_bytes <= kv_arena.size() &&
+      req.kv_count <= kv_entries.size() &&
+      req.tensor_count <= tensors.size()) {
+    const emel::gguf::loader::event::bind_storage bind{
+      std::span<uint8_t>{kv_arena.data(), static_cast<size_t>(required_kv_arena_bytes)},
+      std::span<emel::gguf::loader::kv_entry>{kv_entries.data(), req.kv_count},
+      std::span<emel::model::data::tensor_record>{tensors.data(), req.tensor_count},
+      bind_done_cb,
+      bind_error_cb,
+    };
+    (void)machine.process_event(bind);
+
+    const emel::gguf::loader::event::parse parse{
+      std::span<const uint8_t>{data, size},
+      parse_done_cb,
+      parse_error_cb,
+    };
+    (void)machine.process_event(parse);
+  }
 
   return 0;
 }

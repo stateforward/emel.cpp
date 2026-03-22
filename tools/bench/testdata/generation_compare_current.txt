@@ -1,0 +1,1 @@
+generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 emel.cpp 6992875.000 ns/op, llama.cpp 4810834.000 ns/op, ratio=1.454x

@@ -6,6 +6,14 @@
 
 namespace emel::graph::processor::guard {
 
+namespace detail {
+
+inline bool valid_phase_ids(const int32_t count, const int32_t * ids) noexcept {
+  return count >= 0 && (count == 0 || ids != nullptr);
+}
+
+}  // namespace detail
+
 inline emel::error::type runtime_error(const event::execute_step & ev) noexcept {
   return ev.ctx.err;
 }
@@ -27,6 +35,11 @@ struct valid_execute {
   bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
     return ev.request.step_plan != nullptr &&
            ev.request.output_out != nullptr &&
+           ev.request.lifecycle != nullptr &&
+           ev.request.lifecycle->tensors != nullptr &&
+           ev.request.lifecycle->tensor_count > 0 &&
+           ev.request.lifecycle->phase != nullptr &&
+           ev.request.tensor_machine != nullptr &&
            ev.request.step_index >= 0 &&
            ev.request.step_size > 0 &&
            ev.request.kv_tokens >= 0 &&
@@ -35,6 +48,15 @@ struct valid_execute {
            ev.request.seq_mask_words > 0 &&
            ev.request.seq_masks_count >= 0 &&
            ev.request.seq_primary_ids_count >= 0 &&
+           detail::valid_phase_ids(
+               ev.request.lifecycle->phase->required_filled_count,
+               ev.request.lifecycle->phase->required_filled_ids) &&
+           detail::valid_phase_ids(
+               ev.request.lifecycle->phase->publish_count,
+               ev.request.lifecycle->phase->publish_ids) &&
+           detail::valid_phase_ids(
+               ev.request.lifecycle->phase->release_count,
+               ev.request.lifecycle->phase->release_ids) &&
            static_cast<bool>(ev.request.dispatch_done) &&
            static_cast<bool>(ev.request.dispatch_error);
   }
@@ -183,6 +205,34 @@ struct kernel_failed {
   }
 };
 
+struct lifecycle_gate_done {
+  bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.gate_outcome == event::lifecycle_outcome::done;
+  }
+};
+
+struct lifecycle_gate_failed {
+  bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
+    return ev.ctx.err != emel::error::cast(error::none) ||
+           ev.ctx.gate_outcome == event::lifecycle_outcome::failed;
+  }
+};
+
+struct publish_done {
+  bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.publish_outcome == event::lifecycle_outcome::done;
+  }
+};
+
+struct publish_failed {
+  bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
+    return ev.ctx.err != emel::error::cast(error::none) ||
+           ev.ctx.publish_outcome == event::lifecycle_outcome::failed;
+  }
+};
+
 struct extract_done {
   bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
     return ev.ctx.err == emel::error::cast(error::none) &&
@@ -194,6 +244,20 @@ struct extract_failed {
   bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
     return ev.ctx.err != emel::error::cast(error::none) ||
            ev.ctx.extract_outcome == extract_step::events::phase_outcome::failed;
+  }
+};
+
+struct release_done {
+  bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
+    return ev.ctx.err == emel::error::cast(error::none) &&
+           ev.ctx.release_outcome == event::lifecycle_outcome::done;
+  }
+};
+
+struct release_failed {
+  bool operator()(const event::execute_step & ev, const action::context &) const noexcept {
+    return ev.ctx.err != emel::error::cast(error::none) ||
+           ev.ctx.release_outcome == event::lifecycle_outcome::failed;
   }
 };
 

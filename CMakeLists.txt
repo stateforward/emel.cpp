@@ -63,6 +63,8 @@ if(EMEL_ENABLE_TESTS)
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp
     tests/generator/lifecycle_tests.cpp
+    tests/generator/action_guard_tests.cpp
+    tests/generator/detail_tests.cpp
     tests/logits/validator/validator_tests.cpp
     tests/logits/sampler/pipeline_tests.cpp
     tests/sm/callback_tests.cpp

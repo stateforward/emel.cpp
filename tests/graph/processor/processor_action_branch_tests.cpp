@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include <array>
 #include <cstdint>
 
 #include "emel/error/error.hpp"
@@ -19,11 +20,72 @@
 #include "emel/graph/processor/prepare_step/guards.hpp"
 #include "emel/graph/processor/validate_step/actions.hpp"
 #include "emel/graph/processor/validate_step/guards.hpp"
+#include "emel/tensor/errors.hpp"
+#include "emel/tensor/events.hpp"
+#include "emel/tensor/sm.hpp"
 
 namespace {
 
 using execute_t = emel::graph::processor::event::execute;
 using processor_error = emel::graph::processor::error;
+
+struct lifecycle_fixture {
+  int32_t leaf_tensor = 11;
+  int32_t compute_tensor = 29;
+  emel::tensor::sm tensor_machine{};
+  std::array<emel::graph::processor::event::lifecycle_tensor_binding, 2> tensors{{
+      {
+          .tensor_id = 0,
+          .buffer = &leaf_tensor,
+          .buffer_bytes = sizeof(leaf_tensor),
+          .consumer_refs = 0,
+          .is_leaf = true,
+      },
+      {
+          .tensor_id = 1,
+          .buffer = &compute_tensor,
+          .buffer_bytes = sizeof(compute_tensor),
+          .consumer_refs = 1,
+          .is_leaf = false,
+      },
+  }};
+  std::array<int32_t, 1> required_ids = {0};
+  std::array<int32_t, 1> publish_ids = {1};
+  std::array<int32_t, 1> release_ids = {1};
+  emel::graph::processor::event::lifecycle_phase phase{
+    .required_filled_ids = required_ids.data(),
+    .required_filled_count = static_cast<int32_t>(required_ids.size()),
+    .publish_ids = publish_ids.data(),
+    .publish_count = static_cast<int32_t>(publish_ids.size()),
+    .release_ids = release_ids.data(),
+    .release_count = static_cast<int32_t>(release_ids.size()),
+  };
+  emel::graph::processor::event::lifecycle_manifest manifest{
+    .tensors = tensors.data(),
+    .tensor_count = static_cast<int32_t>(tensors.size()),
+    .phase = &phase,
+  };
+
+  lifecycle_fixture() {
+    int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::error::none));
+    REQUIRE(tensor_machine.process_event(emel::tensor::event::reserve_tensor{
+      .tensor_id = tensors[0].tensor_id,
+      .buffer = tensors[0].buffer,
+      .buffer_bytes = tensors[0].buffer_bytes,
+      .consumer_refs = tensors[0].consumer_refs,
+      .is_leaf = tensors[0].is_leaf,
+      .error_out = &err,
+    }));
+    REQUIRE(tensor_machine.process_event(emel::tensor::event::reserve_tensor{
+      .tensor_id = tensors[1].tensor_id,
+      .buffer = tensors[1].buffer,
+      .buffer_bytes = tensors[1].buffer_bytes,
+      .consumer_refs = tensors[1].consumer_refs,
+      .is_leaf = tensors[1].is_leaf,
+      .error_out = &err,
+    }));
+  }
+};
 
 struct dispatch_state {
   bool done_called = false;
@@ -205,10 +267,12 @@ bool extract_fail_without_error(const execute_t &, int32_t * outputs_out, int32_
 }
 
 execute_t make_valid_execute(emel::graph::processor::event::execution_output * output,
-                             dispatch_state * state) {
+                             dispatch_state * state, lifecycle_fixture & lifecycle) {
   return execute_t{
     .step_plan = reinterpret_cast<const void *>(0xCC11),
     .output_out = output,
+    .lifecycle = &lifecycle.manifest,
+    .tensor_machine = &lifecycle.tensor_machine,
     .step_index = 0,
     .step_size = 1,
     .kv_tokens = 1,
@@ -236,9 +300,10 @@ TEST_CASE("graph_processor_action_and_guard_branches") {
   namespace guard = emel::graph::processor::guard;
 
   action::context machine_ctx{};
+  lifecycle_fixture lifecycle{};
   dispatch_state state{};
   event::execution_output output{};
-  event::execute request = make_valid_execute(&output, &state);
+  event::execute request = make_valid_execute(&output, &state, lifecycle);
   event::execute_ctx phase_ctx{};
   event::execute_step ev{request, phase_ctx};
 
@@ -253,12 +318,15 @@ TEST_CASE("graph_processor_action_and_guard_branches") {
   request.output_out = nullptr;
   CHECK(guard::invalid_execute_without_output{}(ev, machine_ctx));
 
-  request = make_valid_execute(&output, &state);
+  request = make_valid_execute(&output, &state, lifecycle);
   action::begin_execute(ev, machine_ctx);
   CHECK(machine_ctx.dispatch_generation == 1u);
   CHECK(ev.ctx.err == emel::error::cast(processor_error::none));
   CHECK(ev.ctx.outputs_produced == 0);
   CHECK(ev.ctx.graph_reused == 0u);
+  CHECK(ev.ctx.gate_outcome == emel::graph::processor::event::lifecycle_outcome::unknown);
+  CHECK(ev.ctx.publish_outcome == emel::graph::processor::event::lifecycle_outcome::unknown);
+  CHECK(ev.ctx.release_outcome == emel::graph::processor::event::lifecycle_outcome::unknown);
 
   ev.ctx.outputs_produced = 9;
   ev.ctx.graph_reused = 1u;
@@ -344,6 +412,27 @@ TEST_CASE("graph_processor_action_and_guard_branches") {
   ev.ctx.kernel_outcome = emel::graph::processor::kernel_step::events::phase_outcome::failed;
   CHECK(guard::kernel_failed{}(ev, machine_ctx));
 
+  ev.ctx.err = emel::error::cast(processor_error::none);
+  action::request_lifecycle_gate(ev, machine_ctx);
+  CHECK(ev.ctx.gate_outcome == emel::graph::processor::event::lifecycle_outcome::done);
+  CHECK(guard::lifecycle_gate_done{}(ev, machine_ctx));
+
+  action::request_lifecycle_publish(ev, machine_ctx);
+  CHECK(ev.ctx.publish_outcome == emel::graph::processor::event::lifecycle_outcome::done);
+  CHECK(guard::publish_done{}(ev, machine_ctx));
+
+  action::request_lifecycle_gate(ev, machine_ctx);
+  CHECK(ev.ctx.gate_outcome == emel::graph::processor::event::lifecycle_outcome::failed);
+  CHECK(guard::lifecycle_gate_failed{}(ev, machine_ctx));
+
+  action::request_lifecycle_release(ev, machine_ctx);
+  CHECK(ev.ctx.release_outcome == emel::graph::processor::event::lifecycle_outcome::done);
+  CHECK(guard::release_done{}(ev, machine_ctx));
+
+  ev.ctx.err = emel::error::cast(processor_error::none);
+  action::request_lifecycle_gate(ev, machine_ctx);
+  CHECK(ev.ctx.gate_outcome == emel::graph::processor::event::lifecycle_outcome::done);
+
   ev.ctx.extract_outcome = emel::graph::processor::extract_step::events::phase_outcome::done;
   CHECK(guard::extract_done{}(ev, machine_ctx));
   ev.ctx.extract_outcome = emel::graph::processor::extract_step::events::phase_outcome::failed;
@@ -357,9 +446,10 @@ TEST_CASE("graph_processor_action_and_guard_branches") {
 TEST_CASE("graph_processor_step_action_and_guard_branches") {
   namespace event = emel::graph::processor::event;
 
+  lifecycle_fixture lifecycle{};
   event::execution_output output{};
   dispatch_state dispatch{};
-  event::execute request = make_valid_execute(&output, &dispatch);
+  event::execute request = make_valid_execute(&output, &dispatch, lifecycle);
   event::execute_ctx ctx{};
   event::execute_step ev{request, ctx};
 
@@ -403,7 +493,7 @@ TEST_CASE("graph_processor_step_action_and_guard_branches") {
   emel::graph::processor::validate_step::action::on_unexpected(ev, validate_ctx);
 
   // prepare_step
-  request = make_valid_execute(&output, &dispatch);
+  request = make_valid_execute(&output, &dispatch, lifecycle);
   ev.ctx.err = emel::error::cast(processor_error::none);
   CHECK(emel::graph::processor::prepare_step::guard::phase_request_callback{}(ev, prepare_ctx));
   emel::graph::processor::prepare_step::action::run_callback(ev, prepare_ctx);
@@ -435,7 +525,7 @@ TEST_CASE("graph_processor_step_action_and_guard_branches") {
   emel::graph::processor::prepare_step::action::on_unexpected(ev, prepare_ctx);
 
   // alloc_step
-  request = make_valid_execute(&output, &dispatch);
+  request = make_valid_execute(&output, &dispatch, lifecycle);
   ev.ctx.err = emel::error::cast(processor_error::none);
   CHECK(emel::graph::processor::alloc_step::guard::phase_request_callback{}(ev, alloc_ctx));
   emel::graph::processor::alloc_step::action::run_callback(ev, alloc_ctx);
@@ -465,7 +555,7 @@ TEST_CASE("graph_processor_step_action_and_guard_branches") {
   emel::graph::processor::alloc_step::action::on_unexpected(ev, alloc_ctx);
 
   // bind_step
-  request = make_valid_execute(&output, &dispatch);
+  request = make_valid_execute(&output, &dispatch, lifecycle);
   ev.ctx.err = emel::error::cast(processor_error::none);
   CHECK(emel::graph::processor::bind_step::guard::phase_request_callback{}(ev, bind_ctx));
   emel::graph::processor::bind_step::action::run_callback(ev, bind_ctx);
@@ -495,7 +585,7 @@ TEST_CASE("graph_processor_step_action_and_guard_branches") {
   emel::graph::processor::bind_step::action::on_unexpected(ev, bind_ctx);
 
   // kernel_step
-  request = make_valid_execute(&output, &dispatch);
+  request = make_valid_execute(&output, &dispatch, lifecycle);
   ev.ctx.err = emel::error::cast(processor_error::none);
   CHECK(emel::graph::processor::kernel_step::guard::phase_request_callback{}(ev, kernel_ctx));
   emel::graph::processor::kernel_step::action::run_callback(ev, kernel_ctx);
@@ -525,7 +615,7 @@ TEST_CASE("graph_processor_step_action_and_guard_branches") {
   emel::graph::processor::kernel_step::action::on_unexpected(ev, kernel_ctx);
 
   // extract_step
-  request = make_valid_execute(&output, &dispatch);
+  request = make_valid_execute(&output, &dispatch, lifecycle);
   ev.ctx.err = emel::error::cast(processor_error::none);
   CHECK(emel::graph::processor::extract_step::guard::phase_request_callback{}(ev, extract_ctx));
   emel::graph::processor::extract_step::action::run_callback(ev, extract_ctx);

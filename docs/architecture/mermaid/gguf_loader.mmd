@@ -50,8 +50,8 @@ stateDiagram-v2
   parse_bound_storage_decision --> parse_outcome_dispatch : completion_parse_runtime_ [parse_missing_bound_storage_] / mark_parse_invalid_request_
   parse_bound_storage_decision --> parse_outcome_dispatch : completion_parse_runtime_ [always] / mark_parse_invalid_request_
   parse_capacity_decision --> parse_outcome_dispatch : completion_parse_runtime_ [parse_bound_capacity_sufficient_] / exec_parse_
-  parse_capacity_decision --> parse_outcome_dispatch : completion_parse_runtime_ [parse_bound_capacity_insufficient_] / mark_parse_invalid_request_
-  parse_capacity_decision --> parse_outcome_dispatch : completion_parse_runtime_ [always] / mark_parse_invalid_request_
+  parse_capacity_decision --> parse_outcome_dispatch : completion_parse_runtime_ [parse_bound_capacity_insufficient_] / mark_parse_capacity_
+  parse_capacity_decision --> parse_outcome_dispatch : completion_parse_runtime_ [always] / mark_parse_capacity_
   parse_outcome_dispatch --> parsed : completion_parse_runtime_ [parse_error_none_] / publish_parse_done_
   parse_outcome_dispatch --> errored : completion_parse_runtime_ [parse_error_invalid_request_] / publish_parse_error_
   parse_outcome_dispatch --> errored : completion_parse_runtime_ [parse_error_model_invalid_] / publish_parse_error_
