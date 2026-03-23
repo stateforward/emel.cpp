@@ -2480,6 +2480,19 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
     dump_ctx_variant("kqv_out_from_reference_values", ctx_reference_values);
   }
 
+  if (position_limit == 1 && backend.n_head == backend.n_head_kv &&
+      backend.attn_ctx.size() == backend.v.size()) {
+    float internal_v_max_abs = 0.0f;
+    for (size_t idx = 0; idx < backend.attn_ctx.size(); ++idx) {
+      internal_v_max_abs =
+          std::max(internal_v_max_abs, std::fabs(backend.attn_ctx[idx] - backend.v[idx]));
+    }
+    std::fprintf(stdout,
+                 "%s.kqv_out_from_internal_v: max_abs=%g\n",
+                 layer_prefix.c_str(),
+                 internal_v_max_abs);
+  }
+
   return true;
 }
 
