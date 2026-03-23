@@ -25,7 +25,7 @@ using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_src;
 
-std::vector<float> flash_attn_reference_f16_weight_contraction(
+std::vector<float> flash_attn_reference_ggml_f16_scores(
     std::span<const float> q,
     std::span<const float> k,
     std::span<const float> v,
@@ -35,12 +35,12 @@ std::vector<float> flash_attn_reference_f16_weight_contraction(
   std::vector<float> scores(static_cast<size_t>(kv_tokens), 0.0f);
   float max_score = -INFINITY;
   for (uint64_t token = 0; token < kv_tokens; ++token) {
-    float score = 0.0f;
     const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
-    for (uint64_t dim = 0; dim < head_dim; ++dim) {
-      score += q[static_cast<size_t>(dim)] * k[offset + static_cast<size_t>(dim)];
-    }
-    score *= scale;
+    const float score = emel::kernel::detail::dot_product_ggml_f16_scores(
+        q.data(),
+        k.data() + static_cast<std::ptrdiff_t>(offset),
+        head_dim) *
+        scale;
     scores[static_cast<size_t>(token)] = score;
     max_score = std::max(max_score, score);
   }
@@ -54,11 +54,9 @@ std::vector<float> flash_attn_reference_f16_weight_contraction(
   std::vector<float> out(static_cast<size_t>(head_dim), 0.0f);
   for (uint64_t token = 0; token < kv_tokens; ++token) {
     const float normalized = scores[static_cast<size_t>(token)] / denom;
-    const float rounded_weight = emel::kernel::detail::quant::fp16_to_fp32(
-        emel::kernel::detail::quant::fp32_to_fp16(normalized));
     const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
     for (uint64_t dim = 0; dim < head_dim; ++dim) {
-      out[static_cast<size_t>(dim)] += rounded_weight * v[offset + static_cast<size_t>(dim)];
+      out[static_cast<size_t>(dim)] += normalized * v[offset + static_cast<size_t>(dim)];
     }
   }
 
@@ -1123,7 +1121,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_shared_workspace_on_long_kv_spa
 #endif
 }
 
-TEST_CASE("kernel_aarch64_flash_attn_ext_matches_f16_weight_contraction_reference") {
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_ggml_f16_scores_reference") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;
 #else
@@ -1176,8 +1174,8 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_f16_weight_contraction_referenc
   REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(
       shared_request, shared_workspace));
 
-  const std::vector<float> expected = flash_attn_reference_f16_weight_contraction(
-      q, k, v, head_dim, kv_tokens, scale);
+  const std::vector<float> expected =
+      flash_attn_reference_ggml_f16_scores(q, k, v, head_dim, kv_tokens, scale);
   for (uint64_t dim = 0; dim < head_dim; ++dim) {
     CHECK(neon_dst[static_cast<size_t>(dim)] ==
           doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));

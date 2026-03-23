@@ -39,6 +39,7 @@
 #include "emel/model/weight_loader/events.hpp"
 #include "emel/model/weight_loader/sm.hpp"
 #include "emel/text/conditioner/sm.hpp"
+#include "emel/text/detokenizer/actions.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/jinja/formatter/sm.hpp"
 #include "emel/text/jinja/parser/detail.hpp"
@@ -1569,13 +1570,27 @@ bool append_reference_piece(const initialize_backend & backend,
     return false;
   }
 
-  const size_t piece_len = std::strlen(piece);
+  const std::string_view piece_view = piece;
+  const llama_token_attr attr = llama_vocab_get_attr(backend.vocab, token);
+  const bool is_byte_token = (attr & LLAMA_TOKEN_ATTR_BYTE) != 0;
+  if (is_byte_token) {
+    uint8_t byte_value = 0;
+    const bool parsed =
+        emel::text::detokenizer::action::detail::parse_plamo2_byte_token(piece_view, byte_value);
+    if (!parsed || result_out.output_length + 1u > result_out.output.size()) {
+      return false;
+    }
+    result_out.output[result_out.output_length] = static_cast<char>(byte_value);
+    result_out.output_length += 1u;
+    return true;
+  }
+
+  const size_t piece_len = piece_view.size();
   if (result_out.output_length + piece_len > result_out.output.size()) {
     return false;
   }
-
   if (piece_len > 0u) {
-    std::memcpy(result_out.output.data() + result_out.output_length, piece, piece_len);
+    std::memcpy(result_out.output.data() + result_out.output_length, piece_view.data(), piece_len);
   }
   result_out.output_length += piece_len;
   return true;
