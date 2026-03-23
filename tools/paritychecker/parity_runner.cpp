@@ -1771,6 +1771,10 @@ bool run_prefill_with_scalar_attention(emel::generator::detail::native_backend &
   return emel::generator::detail::compute_logits(backend);
 }
 
+bool run_reference_prefix_decode(llama_context * ctx,
+                                 std::span<const llama_token> prompt_tokens,
+                                 std::span<const int32_t> generated_tokens);
+
 void dump_scalar_attention_debug(const generation_load_state & state,
                                  const emel::paritychecker::parity_options & opts,
                                  const generation_result & emel_result,
@@ -1842,12 +1846,6 @@ void dump_scalar_attention_debug(const generation_load_state & state,
                shared_backend.bound_logits[static_cast<size_t>(emel_token)],
                shared_backend.bound_logits[static_cast<size_t>(reference_token)]);
 
-  std::vector<llama_token> reference_prefix_tokens;
-  reference_prefix_tokens.reserve(prefix_tokens.size());
-  for (const int32_t token : prefix_tokens) {
-    reference_prefix_tokens.push_back(static_cast<llama_token>(token));
-  }
-
   llama_context_ptr reference_ctx =
       make_reference_context(const_cast<initialize_backend &>(state.backend));
   if (reference_ctx == nullptr) {
@@ -1855,9 +1853,11 @@ void dump_scalar_attention_debug(const generation_load_state & state,
     return;
   }
 
-  llama_batch prefix_batch = llama_batch_get_one(
-      reference_prefix_tokens.data(), static_cast<int32_t>(reference_prefix_tokens.size()));
-  if (llama_decode(reference_ctx.get(), prefix_batch) != 0) {
+  const std::span<const int32_t> generated_prefix{
+      prefix_tokens.data() + prompt_tokens.size(),
+      prefix_tokens.size() - prompt_tokens.size(),
+  };
+  if (!run_reference_prefix_decode(reference_ctx.get(), prompt_tokens, generated_prefix)) {
     std::fprintf(stdout, "generation_debug.reference: unable to decode mismatch prefix\n");
     return;
   }
@@ -2246,6 +2246,59 @@ bool capture_reference_graph_for_tokens(const generation_load_state & state,
       llama_batch_get_one(const_cast<llama_token *>(tokens.data()),
                           static_cast<int32_t>(tokens.size()));
   return llama_decode(ctx.get(), prompt_batch) == 0;
+}
+
+bool run_reference_prefix_decode(llama_context * ctx,
+                                 std::span<const llama_token> prompt_tokens,
+                                 std::span<const int32_t> generated_tokens) {
+  if (ctx == nullptr || prompt_tokens.empty()) {
+    return false;
+  }
+
+  llama_batch prompt_batch =
+      llama_batch_get_one(const_cast<llama_token *>(prompt_tokens.data()),
+                          static_cast<int32_t>(prompt_tokens.size()));
+  if (llama_decode(ctx, prompt_batch) != 0) {
+    return false;
+  }
+
+  for (const int32_t token_id : generated_tokens) {
+    llama_token token = static_cast<llama_token>(token_id);
+    llama_batch decode_batch = llama_batch_get_one(&token, 1);
+    if (llama_decode(ctx, decode_batch) != 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool capture_reference_graph_for_generation_prefix(const generation_load_state & state,
+                                                   std::span<const llama_token> prompt_tokens,
+                                                   std::span<const int32_t> generated_tokens,
+                                                   reference_graph_capture & graph_capture) {
+  llama_context_params context_params = llama_context_default_params();
+  context_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+  context_params.n_ctx = 0;
+  context_params.n_batch = 512;
+  context_params.n_ubatch = 512;
+  context_params.n_seq_max = 1;
+  context_params.n_threads = 1;
+  context_params.n_threads_batch = 1;
+  context_params.embeddings = true;
+  context_params.cb_eval = capture_reference_eval_tensor;
+  context_params.cb_eval_user_data = &graph_capture;
+  llama_context_ptr ctx = llama_context_ptr{
+      state.backend.model != nullptr
+          ? llama_init_from_model(state.backend.model.get(), context_params)
+          : nullptr,
+      llama_free,
+  };
+  if (ctx == nullptr) {
+    return false;
+  }
+
+  return run_reference_prefix_decode(ctx.get(), prompt_tokens, generated_tokens);
 }
 
 bool capture_reference_graph(const generation_load_state & state,
@@ -2943,14 +2996,13 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
     return;
   }
 
-  std::vector<llama_token> prefix_tokens_llama;
-  prefix_tokens_llama.reserve(prefix_tokens.size());
-  for (const int32_t token : prefix_tokens) {
-    prefix_tokens_llama.push_back(static_cast<llama_token>(token));
-  }
-
   reference_graph_capture graph_capture = {};
-  if (!capture_reference_graph_for_tokens(state, prefix_tokens_llama, graph_capture)) {
+  const std::span<const int32_t> generated_prefix{
+      prefix_tokens.data() + prompt_tokens.size(),
+      prefix_tokens.size() - prompt_tokens.size(),
+  };
+  if (!capture_reference_graph_for_generation_prefix(
+          state, prompt_tokens, generated_prefix, graph_capture)) {
     std::fprintf(stdout, "generation_debug.state: reference graph capture failed\n");
     return;
   }
@@ -3310,14 +3362,13 @@ void dump_generation_residual_l2_debug(const generation_load_state & state,
     return;
   }
 
-  std::vector<llama_token> prefix_tokens_llama;
-  prefix_tokens_llama.reserve(prefix_tokens.size());
-  for (const int32_t token : prefix_tokens) {
-    prefix_tokens_llama.push_back(static_cast<llama_token>(token));
-  }
-
   reference_graph_capture graph_capture = {};
-  if (!capture_reference_graph_for_tokens(state, prefix_tokens_llama, graph_capture)) {
+  const std::span<const int32_t> generated_prefix{
+      prefix_tokens.data() + prompt_tokens.size(),
+      prefix_tokens.size() - prompt_tokens.size(),
+  };
+  if (!capture_reference_graph_for_generation_prefix(
+          state, prompt_tokens, generated_prefix, graph_capture)) {
     std::fprintf(stdout, "generation_debug.residual_l2: reference graph capture failed\n");
     return;
   }
