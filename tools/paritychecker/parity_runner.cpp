@@ -1727,6 +1727,7 @@ struct exact_matmul_mode {
   bool ffn = false;
   bool output = false;
   uint8_t only_dtype = 0u;
+  uint32_t dtype_mask = 0xffffffffu;
   bool use_reference_q8 = false;
   bool use_scalar_quantized = false;
 };
@@ -1832,20 +1833,23 @@ bool matmul_vector_mode(emel::generator::detail::native_backend & backend,
                         std::span<float> output,
                         const bool exact,
                         const uint8_t only_dtype = 0u,
+                        const uint32_t dtype_mask = 0xffffffffu,
                         const bool use_reference_q8 = false,
                         const bool use_scalar_quantized = false) {
-  const bool dtype_match =
-      only_dtype == 0u ||
-      (matrix.tensor != nullptr && static_cast<uint8_t>(matrix.tensor->type) == only_dtype);
+  const uint8_t dtype_code =
+      matrix.tensor != nullptr ? static_cast<uint8_t>(matrix.tensor->type) : 0xffu;
+  const bool dtype_match = only_dtype != 0u
+      ? (dtype_code == only_dtype)
+      : (dtype_code < 32u && ((dtype_mask >> dtype_code) & 1u) != 0u);
   const bool exact_enabled = exact && dtype_match;
-  if (exact_enabled) {
-    return matmul_vector_dequantized(matrix, input, output);
-  }
   if (use_reference_q8 && dtype_match) {
     return matmul_vector_reference_q8(matrix, input, output);
   }
   if (use_scalar_quantized && dtype_match) {
     return matmul_vector_scalar_quantized(matrix, input, output);
+  }
+  if (exact_enabled) {
+    return matmul_vector_dequantized(matrix, input, output);
   }
   return emel::generator::detail::matmul_vector(backend, matrix, input, output);
 }
@@ -1860,6 +1864,7 @@ bool compute_logits_with_matmul_mode(emel::generator::detail::native_backend & b
                             backend.bound_logits,
                             mode.output,
                             mode.only_dtype,
+                            mode.dtype_mask,
                             mode.use_reference_q8,
                             mode.use_scalar_quantized);
 }
@@ -1878,6 +1883,7 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
           backend.q,
           mode.attention,
           mode.only_dtype,
+          mode.dtype_mask,
           mode.use_reference_q8,
           mode.use_scalar_quantized) ||
       !matmul_vector_mode(
@@ -1887,6 +1893,7 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
           backend.k,
           mode.attention,
           mode.only_dtype,
+          mode.dtype_mask,
           mode.use_reference_q8,
           mode.use_scalar_quantized) ||
       !matmul_vector_mode(
@@ -1896,6 +1903,7 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
           backend.v,
           mode.attention,
           mode.only_dtype,
+          mode.dtype_mask,
           mode.use_reference_q8,
           mode.use_scalar_quantized)) {
     return false;
@@ -1932,6 +1940,7 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
           backend.projected,
           mode.attention,
           mode.only_dtype,
+          mode.dtype_mask,
           mode.use_reference_q8,
           mode.use_scalar_quantized)) {
     return false;
@@ -1950,6 +1959,7 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
           backend.gate,
           mode.ffn,
           mode.only_dtype,
+          mode.dtype_mask,
           mode.use_reference_q8,
           mode.use_scalar_quantized) ||
       !matmul_vector_mode(
@@ -1959,6 +1969,7 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
           backend.up,
           mode.ffn,
           mode.only_dtype,
+          mode.dtype_mask,
           mode.use_reference_q8,
           mode.use_scalar_quantized)) {
     return false;
@@ -1975,6 +1986,7 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
           backend.projected,
           mode.ffn,
           mode.only_dtype,
+          mode.dtype_mask,
           mode.use_reference_q8,
           mode.use_scalar_quantized)) {
     return false;
@@ -2193,6 +2205,161 @@ bool compute_attention_with_ggml_f16_value_contraction(
   return true;
 }
 
+bool compute_attention_without_weight_rounding(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position_limit,
+    std::span<const float> q_vector) {
+  const int32_t head_count = backend.n_head;
+  const int32_t kv_head_count = backend.n_head_kv;
+  const int32_t head_dim = backend.head_dim;
+  const int32_t kv_head_dim = backend.head_dim_kv;
+  const int32_t kv_dim = kv_head_count * kv_head_dim;
+  const float inv_scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+
+  std::fill(backend.attn_ctx.begin(), backend.attn_ctx.end(), 0.0f);
+
+  for (int32_t head = 0; head < head_count; ++head) {
+    const int32_t kv_head = head / backend.n_rep;
+    const size_t q_offset = static_cast<size_t>(head) * static_cast<size_t>(head_dim);
+    const size_t kv_offset = static_cast<size_t>(kv_head) * static_cast<size_t>(kv_head_dim);
+
+    float max_score = -std::numeric_limits<float>::infinity();
+    for (int32_t position = 0; position < position_limit; ++position) {
+      const size_t cache_offset =
+          emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim) +
+          kv_offset;
+      float score = 0.0f;
+      for (int32_t dim = 0; dim < head_dim; ++dim) {
+        score += q_vector[q_offset + static_cast<size_t>(dim)] *
+                 backend.key_cache[cache_offset + static_cast<size_t>(dim)];
+      }
+      score *= inv_scale;
+      backend.attn_scores[static_cast<size_t>(position)] = score;
+      max_score = std::max(max_score, score);
+    }
+
+    float score_sum = 0.0f;
+    for (int32_t position = 0; position < position_limit; ++position) {
+      const float prob = std::exp(backend.attn_scores[static_cast<size_t>(position)] - max_score);
+      backend.attn_probs[static_cast<size_t>(position)] = prob;
+      score_sum += prob;
+    }
+
+    for (int32_t position = 0; position < position_limit; ++position) {
+      const float weight = backend.attn_probs[static_cast<size_t>(position)] / score_sum;
+      const size_t cache_offset =
+          emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim) +
+          kv_offset;
+      for (int32_t dim = 0; dim < head_dim; ++dim) {
+        backend.attn_ctx[q_offset + static_cast<size_t>(dim)] +=
+            weight * backend.value_cache[cache_offset + static_cast<size_t>(dim)];
+      }
+    }
+  }
+
+  return true;
+}
+
+inline void scale_fp16_buffer(std::span<ggml_fp16_t> values, const float scale) {
+  for (ggml_fp16_t & value : values) {
+    value = ggml_fp32_to_fp16(ggml_fp16_to_fp32(value) * scale);
+  }
+}
+
+inline void mad_fp16_buffer(std::span<ggml_fp16_t> accum,
+                            std::span<const ggml_fp16_t> values,
+                            const float scale) {
+  if (accum.size() != values.size()) {
+    return;
+  }
+  for (size_t idx = 0; idx < accum.size(); ++idx) {
+    const float sum =
+        ggml_fp16_to_fp32(accum[idx]) + ggml_fp16_to_fp32(values[idx]) * scale;
+    accum[idx] = ggml_fp32_to_fp16(sum);
+  }
+}
+
+bool compute_attention_with_ggml_online_f16(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position_limit,
+    std::span<const float> q_vector) {
+  const int32_t head_count = backend.n_head;
+  const int32_t kv_head_count = backend.n_head_kv;
+  const int32_t head_dim = backend.head_dim;
+  const int32_t kv_head_dim = backend.head_dim_kv;
+  const int32_t kv_dim = kv_head_count * kv_head_dim;
+  const float inv_scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+
+  std::fill(backend.attn_ctx.begin(), backend.attn_ctx.end(), 0.0f);
+
+  std::vector<ggml_fp16_t> q_f16(static_cast<size_t>(head_dim));
+  std::vector<ggml_fp16_t> k_f16(static_cast<size_t>(head_dim));
+  std::vector<ggml_fp16_t> v_f16(static_cast<size_t>(head_dim));
+  std::vector<ggml_fp16_t> acc_f16(static_cast<size_t>(head_dim));
+
+  for (int32_t head = 0; head < head_count; ++head) {
+    const int32_t kv_head = head / backend.n_rep;
+    const size_t q_offset = static_cast<size_t>(head) * static_cast<size_t>(head_dim);
+    const size_t kv_offset = static_cast<size_t>(kv_head) * static_cast<size_t>(kv_head_dim);
+
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
+      q_f16[static_cast<size_t>(dim)] =
+          ggml_fp32_to_fp16(q_vector[q_offset + static_cast<size_t>(dim)]);
+    }
+    std::fill(acc_f16.begin(), acc_f16.end(), ggml_fp32_to_fp16(0.0f));
+
+    float score_sum = 0.0f;
+    float max_score = -std::numeric_limits<float>::infinity();
+    for (int32_t position = 0; position < position_limit; ++position) {
+      const size_t cache_offset =
+          emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim) +
+          kv_offset;
+      for (int32_t dim = 0; dim < head_dim; ++dim) {
+        k_f16[static_cast<size_t>(dim)] = ggml_fp32_to_fp16(
+            backend.key_cache[cache_offset + static_cast<size_t>(dim)]);
+        v_f16[static_cast<size_t>(dim)] = ggml_fp32_to_fp16(
+            backend.value_cache[cache_offset + static_cast<size_t>(dim)]);
+      }
+
+      float score = 0.0f;
+      ggml_vec_dot_f16(head_dim,
+                       &score,
+                       0u,
+                       k_f16.data(),
+                       0u,
+                       q_f16.data(),
+                       0u,
+                       1);
+      score *= inv_scale;
+
+      const float prior_max = max_score;
+      float scale_acc = 1.0f;
+      float weight = 1.0f;
+      if (score > max_score) {
+        max_score = score;
+        scale_acc = std::exp(prior_max - max_score);
+        scale_fp16_buffer(acc_f16, scale_acc);
+      } else {
+        weight = std::exp(score - max_score);
+      }
+
+      mad_fp16_buffer(acc_f16, v_f16, weight);
+      score_sum = score_sum * scale_acc + weight;
+    }
+
+    const float inv_score_sum = score_sum == 0.0f ? 0.0f : 1.0f / score_sum;
+    scale_fp16_buffer(acc_f16, inv_score_sum);
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
+      backend.attn_ctx[q_offset + static_cast<size_t>(dim)] =
+          ggml_fp16_to_fp32(acc_f16[static_cast<size_t>(dim)]);
+    }
+  }
+
+  return true;
+}
+
 bool run_layer_with_scalar_attention_ggml_f16_value_contraction(
     emel::generator::detail::native_backend & backend,
     const int32_t layer_index,
@@ -2262,6 +2429,144 @@ bool run_layer_with_scalar_attention_ggml_f16_value_contraction(
   return true;
 }
 
+bool run_layer_with_scalar_attention_no_weight_rounding(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position) {
+  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    return false;
+  }
+
+  emel::generator::detail::apply_rope(
+      backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+  emel::generator::detail::apply_rope(backend.k,
+                                      backend.n_head_kv,
+                                      backend.head_dim_kv,
+                                      backend.n_rot,
+                                      position,
+                                      backend.rope_freq_base);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
+
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t cache_offset =
+      emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
+
+  if (!compute_attention_without_weight_rounding(
+          backend, layer_index, position + 1, backend.q_attn) ||
+      !emel::generator::detail::matmul_vector(
+          backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+    backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+  }
+
+  if (!emel::generator::detail::matmul_vector(
+          backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  return true;
+}
+
+bool run_layer_with_scalar_attention_ggml_online_f16(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position) {
+  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    return false;
+  }
+
+  emel::generator::detail::apply_rope(
+      backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+  emel::generator::detail::apply_rope(backend.k,
+                                      backend.n_head_kv,
+                                      backend.head_dim_kv,
+                                      backend.n_rot,
+                                      position,
+                                      backend.rope_freq_base);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
+
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t cache_offset =
+      emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
+
+  if (!compute_attention_with_ggml_online_f16(
+          backend, layer_index, position + 1, backend.q_attn) ||
+      !emel::generator::detail::matmul_vector(
+          backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+    backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+  }
+
+  if (!emel::generator::detail::matmul_vector(
+          backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  return true;
+}
+
 bool run_prefill_with_scalar_attention_ggml_f16_value_contraction(
     emel::generator::detail::native_backend & backend,
     std::span<const int32_t> prefix_tokens) {
@@ -2286,6 +2591,378 @@ bool run_prefill_with_scalar_attention_ggml_f16_value_contraction(
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
       if (!run_layer_with_scalar_attention_ggml_f16_value_contraction(backend, layer, position)) {
+        return false;
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+  }
+
+  return emel::generator::detail::compute_logits(backend);
+}
+
+bool run_prefill_with_scalar_attention_no_weight_rounding(
+    emel::generator::detail::native_backend & backend,
+    std::span<const int32_t> prefix_tokens) {
+  if (prefix_tokens.empty()) {
+    return false;
+  }
+
+  backend.kv_cache_tokens = 0;
+  for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+    const int32_t token_id = prefix_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (token_id < 0 ||
+        token_id >= backend.token_embedding.rows ||
+        position < 0 ||
+        position >= backend.n_ctx) {
+      return false;
+    }
+
+    if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
+      return false;
+    }
+
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_layer_with_scalar_attention_no_weight_rounding(backend, layer, position)) {
+        return false;
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+  }
+
+  return emel::generator::detail::compute_logits(backend);
+}
+
+bool run_prefill_with_scalar_attention_ggml_online_f16(
+    emel::generator::detail::native_backend & backend,
+    std::span<const int32_t> prefix_tokens) {
+  if (prefix_tokens.empty()) {
+    return false;
+  }
+
+  backend.kv_cache_tokens = 0;
+  for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+    const int32_t token_id = prefix_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (token_id < 0 ||
+        token_id >= backend.token_embedding.rows ||
+        position < 0 ||
+        position >= backend.n_ctx) {
+      return false;
+    }
+
+    if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
+      return false;
+    }
+
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_layer_with_scalar_attention_ggml_online_f16(backend, layer, position)) {
+        return false;
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+  }
+
+  return emel::generator::detail::compute_logits(backend);
+}
+
+bool run_layer_with_scalar_attention_full_q_no_weight_rounding(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position) {
+  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    return false;
+  }
+
+  emel::generator::detail::apply_rope(
+      backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+  emel::generator::detail::apply_rope(backend.k,
+                                      backend.n_head_kv,
+                                      backend.head_dim_kv,
+                                      backend.n_rot,
+                                      position,
+                                      backend.rope_freq_base);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
+
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t cache_offset =
+      emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
+
+  if (!compute_attention_without_weight_rounding(
+          backend, layer_index, position + 1, backend.q) ||
+      !emel::generator::detail::matmul_vector(
+          backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+    backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+  }
+
+  if (!emel::generator::detail::matmul_vector(
+          backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  return true;
+}
+
+bool run_layer_with_scalar_attention_full_q(emel::generator::detail::native_backend & backend,
+                                            const int32_t layer_index,
+                                            const int32_t position) {
+  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    return false;
+  }
+
+  emel::generator::detail::apply_rope(
+      backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+  emel::generator::detail::apply_rope(backend.k,
+                                      backend.n_head_kv,
+                                      backend.head_dim_kv,
+                                      backend.n_rot,
+                                      position,
+                                      backend.rope_freq_base);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
+
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t cache_offset =
+      emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
+
+  if (!emel::generator::detail::compute_attention(
+          backend, layer_index, position + 1, backend.q) ||
+      !emel::generator::detail::matmul_vector(
+          backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+    backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+  }
+
+  if (!emel::generator::detail::matmul_vector(
+          backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  return true;
+}
+
+bool run_prefill_with_scalar_attention_full_q(emel::generator::detail::native_backend & backend,
+                                              std::span<const int32_t> prefix_tokens) {
+  if (prefix_tokens.empty()) {
+    return false;
+  }
+
+  backend.kv_cache_tokens = 0;
+  for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+    const int32_t token_id = prefix_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (token_id < 0 ||
+        token_id >= backend.token_embedding.rows ||
+        position < 0 ||
+        position >= backend.n_ctx) {
+      return false;
+    }
+
+    if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
+      return false;
+    }
+
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_layer_with_scalar_attention_full_q(backend, layer, position)) {
+        return false;
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+  }
+
+  return emel::generator::detail::compute_logits(backend);
+}
+
+bool run_prefill_with_scalar_attention_full_q_no_weight_rounding(
+    emel::generator::detail::native_backend & backend,
+    std::span<const int32_t> prefix_tokens) {
+  if (prefix_tokens.empty()) {
+    return false;
+  }
+
+  backend.kv_cache_tokens = 0;
+  for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+    const int32_t token_id = prefix_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (token_id < 0 ||
+        token_id >= backend.token_embedding.rows ||
+        position < 0 ||
+        position >= backend.n_ctx) {
+      return false;
+    }
+
+    if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
+      return false;
+    }
+
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_layer_with_scalar_attention_full_q_no_weight_rounding(
+              backend, layer, position)) {
+        return false;
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+  }
+
+  return emel::generator::detail::compute_logits(backend);
+}
+
+bool run_layer_with_scalar_attention_full_q_ggml_f16_value_contraction(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position) {
+  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    return false;
+  }
+
+  emel::generator::detail::apply_rope(
+      backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+  emel::generator::detail::apply_rope(backend.k,
+                                      backend.n_head_kv,
+                                      backend.head_dim_kv,
+                                      backend.n_rot,
+                                      position,
+                                      backend.rope_freq_base);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
+
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t cache_offset =
+      emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
+
+  if (!compute_attention_with_ggml_f16_value_contraction(
+          backend, layer_index, position + 1, backend.q) ||
+      !emel::generator::detail::matmul_vector(
+          backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+    backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+  }
+
+  if (!emel::generator::detail::matmul_vector(
+          backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  return true;
+}
+
+bool run_prefill_with_scalar_attention_full_q_ggml_f16_value_contraction(
+    emel::generator::detail::native_backend & backend,
+    std::span<const int32_t> prefix_tokens) {
+  if (prefix_tokens.empty()) {
+    return false;
+  }
+
+  backend.kv_cache_tokens = 0;
+  for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+    const int32_t token_id = prefix_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (token_id < 0 ||
+        token_id >= backend.token_embedding.rows ||
+        position < 0 ||
+        position >= backend.n_ctx) {
+      return false;
+    }
+
+    if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
+      return false;
+    }
+
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_layer_with_scalar_attention_full_q_ggml_f16_value_contraction(
+              backend, layer, position)) {
         return false;
       }
     }
@@ -2330,7 +3007,12 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   emel::generator::detail::native_backend dispatch_backend = {};
   emel::generator::detail::native_backend scalar_backend = {};
   emel::generator::detail::native_backend shared_backend = {};
+  emel::generator::detail::native_backend f32_attention_backend = {};
   emel::generator::detail::native_backend ggml_f16_attention_backend = {};
+  emel::generator::detail::native_backend ggml_online_f16_attention_backend = {};
+  emel::generator::detail::native_backend full_q_attention_backend = {};
+  emel::generator::detail::native_backend full_q_f32_attention_backend = {};
+  emel::generator::detail::native_backend full_q_ggml_f16_attention_backend = {};
   emel::generator::detail::native_backend exact_backend = {};
   emel::generator::detail::native_backend attention_exact_backend = {};
   emel::generator::detail::native_backend ffn_exact_backend = {};
@@ -2340,6 +3022,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   emel::generator::detail::native_backend q6_exact_backend = {};
   emel::generator::detail::native_backend q2_scalar_quant_backend = {};
   emel::generator::detail::native_backend q3_scalar_quant_backend = {};
+  emel::generator::detail::native_backend q23_scalar_quant_backend = {};
   emel::generator::detail::native_backend q6_scalar_quant_backend = {};
   emel::generator::detail::native_backend q2_reference_backend = {};
   emel::generator::detail::native_backend q3_reference_backend = {};
@@ -2387,6 +3070,15 @@ void dump_scalar_attention_debug(const generation_load_state & state,
       .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q6_k),
       .use_scalar_quantized = true,
   };
+  const exact_matmul_mode scalar_quant_q23{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .dtype_mask =
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q2_k)) |
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q3_k)),
+      .use_scalar_quantized = true,
+  };
   const exact_matmul_mode reference_q2_only{
       .attention = true,
       .ffn = true,
@@ -2414,7 +3106,17 @@ void dump_scalar_attention_debug(const generation_load_state & state,
           emel::error::cast(emel::model::loader::error::none) ||
       emel::generator::detail::prepare(shared_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(f32_attention_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
       emel::generator::detail::prepare(ggml_f16_attention_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(ggml_online_f16_attention_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(full_q_attention_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(full_q_f32_attention_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(full_q_ggml_f16_attention_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
       emel::generator::detail::prepare(exact_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
@@ -2434,6 +3136,8 @@ void dump_scalar_attention_debug(const generation_load_state & state,
           emel::error::cast(emel::model::loader::error::none) ||
       emel::generator::detail::prepare(q3_scalar_quant_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q23_scalar_quant_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
       emel::generator::detail::prepare(q6_scalar_quant_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
       emel::generator::detail::prepare(q2_reference_backend, *state.model_data) !=
@@ -2444,8 +3148,17 @@ void dump_scalar_attention_debug(const generation_load_state & state,
           emel::error::cast(emel::model::loader::error::none) ||
       !run_prefill_from_token_prefix(dispatch_backend, prefix_tokens) ||
       !run_prefill_with_scalar_attention(scalar_backend, prefix_tokens) ||
+      !run_prefill_with_scalar_attention_no_weight_rounding(
+          f32_attention_backend, prefix_tokens) ||
       !run_prefill_with_scalar_attention_ggml_f16_value_contraction(
           ggml_f16_attention_backend, prefix_tokens) ||
+      !run_prefill_with_scalar_attention_ggml_online_f16(
+          ggml_online_f16_attention_backend, prefix_tokens) ||
+      !run_prefill_with_scalar_attention_full_q(full_q_attention_backend, prefix_tokens) ||
+      !run_prefill_with_scalar_attention_full_q_no_weight_rounding(
+          full_q_f32_attention_backend, prefix_tokens) ||
+      !run_prefill_with_scalar_attention_full_q_ggml_f16_value_contraction(
+          full_q_ggml_f16_attention_backend, prefix_tokens) ||
       !run_prefill_with_scalar_attention_matmul_mode(exact_backend, prefix_tokens, exact_all) ||
       !run_prefill_with_scalar_attention_matmul_mode(
           attention_exact_backend, prefix_tokens, exact_attention_only) ||
@@ -2463,6 +3176,8 @@ void dump_scalar_attention_debug(const generation_load_state & state,
           q2_scalar_quant_backend, prefix_tokens, scalar_quant_q2_only) ||
       !run_prefill_with_scalar_attention_matmul_mode(
           q3_scalar_quant_backend, prefix_tokens, scalar_quant_q3_only) ||
+      !run_prefill_with_scalar_attention_matmul_mode(
+          q23_scalar_quant_backend, prefix_tokens, scalar_quant_q23) ||
       !run_prefill_with_scalar_attention_matmul_mode(
           q6_scalar_quant_backend, prefix_tokens, scalar_quant_q6_only) ||
       !run_prefill_with_scalar_attention_matmul_mode(
@@ -2508,8 +3223,21 @@ void dump_scalar_attention_debug(const generation_load_state & state,
       select_argmax_from_logits(scalar_backend.bound_logits.data(), scalar_backend.n_vocab);
   const argmax_summary shared_summary =
       select_argmax_from_logits(shared_backend.bound_logits.data(), shared_backend.n_vocab);
+  const argmax_summary f32_attention_summary = select_argmax_from_logits(
+      f32_attention_backend.bound_logits.data(), f32_attention_backend.n_vocab);
   const argmax_summary ggml_f16_attention_summary = select_argmax_from_logits(
       ggml_f16_attention_backend.bound_logits.data(), ggml_f16_attention_backend.n_vocab);
+  const argmax_summary ggml_online_f16_attention_summary = select_argmax_from_logits(
+      ggml_online_f16_attention_backend.bound_logits.data(),
+      ggml_online_f16_attention_backend.n_vocab);
+  const argmax_summary full_q_attention_summary = select_argmax_from_logits(
+      full_q_attention_backend.bound_logits.data(), full_q_attention_backend.n_vocab);
+  const argmax_summary full_q_f32_attention_summary = select_argmax_from_logits(
+      full_q_f32_attention_backend.bound_logits.data(),
+      full_q_f32_attention_backend.n_vocab);
+  const argmax_summary full_q_ggml_f16_attention_summary = select_argmax_from_logits(
+      full_q_ggml_f16_attention_backend.bound_logits.data(),
+      full_q_ggml_f16_attention_backend.n_vocab);
   const argmax_summary exact_summary =
       select_argmax_from_logits(exact_backend.bound_logits.data(), exact_backend.n_vocab);
   const argmax_summary attention_exact_summary = select_argmax_from_logits(
@@ -2528,6 +3256,8 @@ void dump_scalar_attention_debug(const generation_load_state & state,
       q2_scalar_quant_backend.bound_logits.data(), q2_scalar_quant_backend.n_vocab);
   const argmax_summary q3_scalar_quant_summary = select_argmax_from_logits(
       q3_scalar_quant_backend.bound_logits.data(), q3_scalar_quant_backend.n_vocab);
+  const argmax_summary q23_scalar_quant_summary = select_argmax_from_logits(
+      q23_scalar_quant_backend.bound_logits.data(), q23_scalar_quant_backend.n_vocab);
   const argmax_summary q6_scalar_quant_summary = select_argmax_from_logits(
       q6_scalar_quant_backend.bound_logits.data(), q6_scalar_quant_backend.n_vocab);
   const argmax_summary q2_reference_summary = select_argmax_from_logits(
@@ -2582,16 +3312,21 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   dump_flash_kernel_compare("shared_state", shared_backend);
   std::fprintf(stdout,
                "generation_debug.flash: prefix_tokens=%zu dispatch_argmax=%d scalar_argmax=%d "
-               "shared_argmax=%d ggml_f16_attn_argmax=%d exact_argmax=%d attention_exact_argmax=%d "
+               "shared_argmax=%d f32_attn_argmax=%d ggml_f16_attn_argmax=%d ggml_online_f16_attn_argmax=%d full_q_attn_argmax=%d full_q_f32_attn_argmax=%d full_q_ggml_f16_attn_argmax=%d exact_argmax=%d attention_exact_argmax=%d "
                "ffn_exact_argmax=%d output_exact_argmax=%d q2_exact_argmax=%d "
                "q3_exact_argmax=%d q6_exact_argmax=%d q2_scalar_argmax=%d q3_scalar_argmax=%d "
-               "q6_scalar_argmax=%d q2_reference_argmax=%d q3_reference_argmax=%d "
+               "q23_scalar_argmax=%d q6_scalar_argmax=%d q2_reference_argmax=%d q3_reference_argmax=%d "
                "q6_reference_argmax=%d reference_token=%d\n",
                prefix_tokens.size(),
                dispatch_summary.selected_token,
                scalar_summary.selected_token,
                shared_summary.selected_token,
+               f32_attention_summary.selected_token,
                ggml_f16_attention_summary.selected_token,
+               ggml_online_f16_attention_summary.selected_token,
+               full_q_attention_summary.selected_token,
+               full_q_f32_attention_summary.selected_token,
+               full_q_ggml_f16_attention_summary.selected_token,
                exact_summary.selected_token,
                attention_exact_summary.selected_token,
                ffn_exact_summary.selected_token,
@@ -2601,6 +3336,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
                q6_exact_summary.selected_token,
                q2_scalar_quant_summary.selected_token,
                q3_scalar_quant_summary.selected_token,
+               q23_scalar_quant_summary.selected_token,
                q6_scalar_quant_summary.selected_token,
                q2_reference_summary.selected_token,
                q3_reference_summary.selected_token,
@@ -3748,7 +4484,7 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
 
     const std::span<const float> reference_probs =
         softmax_capture != nullptr
-            ? reference_softmax_query_head_slice(*softmax_capture, head, position_limit - 1)
+            ? reference_softmax_query_head_slice(*softmax_capture, head, 0)
             : std::span<const float>{};
 
     for (int32_t position = 0; position < position_limit; ++position) {
@@ -3904,7 +4640,7 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
       int32_t tail_pos = position_limit;
       for (int32_t head = 0; head < head_count; ++head) {
         const std::span<const float> reference_probs =
-            reference_softmax_query_head_slice(*softmax_capture, head, position_limit - 1);
+            reference_softmax_query_head_slice(*softmax_capture, head, 0);
         for (int32_t pos = position_limit; pos < static_cast<int32_t>(reference_probs.size()); ++pos) {
           const float value = std::fabs(reference_probs[static_cast<size_t>(pos)]);
           if (value > tail_max) {
@@ -4007,6 +4743,25 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
     dump_ctx_variant("kqv_out_from_reference_values", ctx_reference_values);
     if (!raw_reference_ctx.empty()) {
       dump_ctx_variant("kqv_raw", raw_reference_ctx);
+      if (!reference_ctx.empty() && raw_reference_ctx.size() == reference_ctx.size()) {
+        float raw_to_out_max_abs = 0.0f;
+        int32_t raw_to_out_idx = 0;
+        for (int32_t idx = 0; idx < static_cast<int32_t>(reference_ctx.size()); ++idx) {
+          const float diff = std::fabs(raw_reference_ctx[static_cast<size_t>(idx)] -
+                                       reference_ctx[static_cast<size_t>(idx)]);
+          if (diff > raw_to_out_max_abs) {
+            raw_to_out_max_abs = diff;
+            raw_to_out_idx = idx;
+          }
+        }
+        std::fprintf(stdout,
+                     "%s.kqv_raw_to_kqv_out_reference: max_abs=%g idx=%d raw=%g out=%g\n",
+                     layer_prefix.c_str(),
+                     raw_to_out_max_abs,
+                     raw_to_out_idx,
+                     raw_reference_ctx[static_cast<size_t>(raw_to_out_idx)],
+                     reference_ctx[static_cast<size_t>(raw_to_out_idx)]);
+      }
     }
   }
 
@@ -5018,6 +5773,1050 @@ void dump_generation_prefix_timeline_debug(const generation_load_state & state,
   }
 }
 
+void dump_generation_q23_timeline_debug(const generation_load_state & state,
+                                        const emel::paritychecker::parity_options & opts,
+                                        const generation_result & emel_result,
+                                        const generation_result & reference_result) {
+  const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
+  if (state.model_data == nullptr || token_mismatch_index <= 0) {
+    return;
+  }
+
+  std::vector<llama_token> prompt_tokens;
+  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+    std::fprintf(stdout, "generation_debug.q23_timeline: tokenize failed\n");
+    return;
+  }
+
+  std::vector<int32_t> prefix_tokens;
+  prefix_tokens.reserve(prompt_tokens.size() + static_cast<size_t>(token_mismatch_index));
+  for (const llama_token token : prompt_tokens) {
+    prefix_tokens.push_back(static_cast<int32_t>(token));
+  }
+  for (int32_t idx = 0; idx < token_mismatch_index; ++idx) {
+    prefix_tokens.push_back(reference_result.trace.token_ids[static_cast<size_t>(idx)]);
+  }
+
+  emel::generator::detail::native_backend actor_backend = {};
+  emel::generator::detail::native_backend q23_backend = {};
+  if (emel::generator::detail::prepare(actor_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q23_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none)) {
+    std::fprintf(stdout, "generation_debug.q23_timeline: backend prepare failed\n");
+    return;
+  }
+
+  const exact_matmul_mode scalar_quant_q23{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .dtype_mask =
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q2_k)) |
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q3_k)),
+      .use_scalar_quantized = true,
+  };
+  const size_t prompt_count = prompt_tokens.size();
+
+  for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+    const int32_t token_id = prefix_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (!emel::generator::detail::copy_tensor_row(
+            *actor_backend.token_embedding.tensor, token_id, actor_backend.hidden) ||
+        !emel::generator::detail::copy_tensor_row(
+            *q23_backend.token_embedding.tensor, token_id, q23_backend.hidden)) {
+      std::fprintf(stdout, "generation_debug.q23_timeline: token embedding replay failed\n");
+      return;
+    }
+
+    const bool is_prompt_token = token_index < prompt_count;
+    const int32_t generated_index = static_cast<int32_t>(token_index - prompt_count);
+    const std::string token_prefix = is_prompt_token
+                                         ? "generation_debug.q23_timeline.prompt" +
+                                               std::to_string(token_index)
+                                         : "generation_debug.q23_timeline.gen" +
+                                               std::to_string(generated_index);
+
+    for (int32_t layer = 0; layer < actor_backend.n_layer; ++layer) {
+      if (!run_layer_with_scalar_attention(actor_backend, layer, position) ||
+          !run_layer_with_matmul_mode_scalar_attention(
+              q23_backend, layer, position, scalar_quant_q23)) {
+        std::fprintf(stdout, "generation_debug.q23_timeline: layer replay failed\n");
+        return;
+      }
+
+      std::fprintf(stdout,
+                   "%s.layer%d_l_out: max_abs=%g\n",
+                   token_prefix.c_str(),
+                   layer,
+                   max_abs_diff(actor_backend.hidden, q23_backend.hidden));
+    }
+
+    actor_backend.kv_cache_tokens = position + 1;
+    q23_backend.kv_cache_tokens = position + 1;
+  }
+}
+
+void dump_generation_reference_q_timeline_debug(const generation_load_state & state,
+                                                const emel::paritychecker::parity_options & opts,
+                                                const generation_result & emel_result,
+                                                const generation_result & reference_result) {
+  const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
+  if (state.model_data == nullptr || token_mismatch_index <= 0) {
+    return;
+  }
+
+  std::vector<llama_token> prompt_tokens;
+  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+    std::fprintf(stdout, "generation_debug.qref_timeline: tokenize failed\n");
+    return;
+  }
+
+  std::vector<int32_t> prefix_tokens;
+  prefix_tokens.reserve(prompt_tokens.size() + static_cast<size_t>(token_mismatch_index));
+  for (const llama_token token : prompt_tokens) {
+    prefix_tokens.push_back(static_cast<int32_t>(token));
+  }
+  for (int32_t idx = 0; idx < token_mismatch_index; ++idx) {
+    prefix_tokens.push_back(reference_result.trace.token_ids[static_cast<size_t>(idx)]);
+  }
+
+  emel::generator::detail::native_backend actor_backend = {};
+  emel::generator::detail::native_backend q2_reference_backend = {};
+  emel::generator::detail::native_backend q3_reference_backend = {};
+  if (emel::generator::detail::prepare(actor_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q2_reference_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q3_reference_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none)) {
+    std::fprintf(stdout, "generation_debug.qref_timeline: backend prepare failed\n");
+    return;
+  }
+
+  const exact_matmul_mode reference_q2_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q2_k),
+      .use_reference_q8 = true,
+  };
+  const exact_matmul_mode reference_q3_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q3_k),
+      .use_reference_q8 = true,
+  };
+  const size_t prompt_count = prompt_tokens.size();
+
+  for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+    const int32_t token_id = prefix_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (!emel::generator::detail::copy_tensor_row(
+            *actor_backend.token_embedding.tensor, token_id, actor_backend.hidden) ||
+        !emel::generator::detail::copy_tensor_row(
+            *q2_reference_backend.token_embedding.tensor, token_id, q2_reference_backend.hidden) ||
+        !emel::generator::detail::copy_tensor_row(
+            *q3_reference_backend.token_embedding.tensor, token_id, q3_reference_backend.hidden)) {
+      std::fprintf(stdout, "generation_debug.qref_timeline: token embedding replay failed\n");
+      return;
+    }
+
+    const bool is_prompt_token = token_index < prompt_count;
+    const int32_t generated_index = static_cast<int32_t>(token_index - prompt_count);
+    const std::string token_prefix = is_prompt_token
+                                         ? "generation_debug.qref_timeline.prompt" +
+                                               std::to_string(token_index)
+                                         : "generation_debug.qref_timeline.gen" +
+                                               std::to_string(generated_index);
+
+    for (int32_t layer = 0; layer < actor_backend.n_layer; ++layer) {
+      if (!run_layer_with_scalar_attention(actor_backend, layer, position) ||
+          !run_layer_with_matmul_mode_scalar_attention(
+              q2_reference_backend, layer, position, reference_q2_only) ||
+          !run_layer_with_matmul_mode_scalar_attention(
+              q3_reference_backend, layer, position, reference_q3_only)) {
+        std::fprintf(stdout, "generation_debug.qref_timeline: layer replay failed\n");
+        return;
+      }
+
+      std::fprintf(stdout,
+                   "%s.layer%d_q2_reference_l_out: max_abs=%g\n",
+                   token_prefix.c_str(),
+                   layer,
+                   max_abs_diff(actor_backend.hidden, q2_reference_backend.hidden));
+      std::fprintf(stdout,
+                   "%s.layer%d_q3_reference_l_out: max_abs=%g\n",
+                   token_prefix.c_str(),
+                   layer,
+                   max_abs_diff(actor_backend.hidden, q3_reference_backend.hidden));
+    }
+
+    actor_backend.kv_cache_tokens = position + 1;
+    q2_reference_backend.kv_cache_tokens = position + 1;
+    q3_reference_backend.kv_cache_tokens = position + 1;
+  }
+}
+
+void dump_generation_q23_stage_debug(const generation_load_state & state,
+                                     const emel::paritychecker::parity_options & opts,
+                                     const generation_result & emel_result,
+                                     const generation_result & reference_result) {
+  const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
+  if (state.model_data == nullptr || token_mismatch_index <= 0) {
+    return;
+  }
+
+  std::vector<llama_token> prompt_tokens;
+  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+    std::fprintf(stdout, "generation_debug.q23_stage: tokenize failed\n");
+    return;
+  }
+
+  emel::generator::detail::native_backend actor_backend = {};
+  emel::generator::detail::native_backend q23_backend = {};
+  if (emel::generator::detail::prepare(actor_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q23_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none)) {
+    std::fprintf(stdout, "generation_debug.q23_stage: backend prepare failed\n");
+    return;
+  }
+
+  const exact_matmul_mode scalar_quant_q23{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .dtype_mask =
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q2_k)) |
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q3_k)),
+      .use_scalar_quantized = true,
+  };
+  const int32_t token_id = static_cast<int32_t>(prompt_tokens.front());
+  const int32_t position = 0;
+  const int32_t layer_index = 0;
+
+  if (!emel::generator::detail::copy_tensor_row(
+          *actor_backend.token_embedding.tensor, token_id, actor_backend.hidden) ||
+      !emel::generator::detail::copy_tensor_row(
+          *q23_backend.token_embedding.tensor, token_id, q23_backend.hidden)) {
+    std::fprintf(stdout, "generation_debug.q23_stage: token embedding replay failed\n");
+    return;
+  }
+
+  auto dump_stage = [&](const char * label,
+                        std::span<const float> actor_values,
+                        std::span<const float> q23_values) {
+    std::fprintf(stdout,
+                 "generation_debug.q23_stage.%s: max_abs=%g\n",
+                 label,
+                 max_abs_diff(actor_values, q23_values));
+  };
+
+  auto & actor_block = actor_backend.blocks[static_cast<size_t>(layer_index)];
+  auto & q23_block = q23_backend.blocks[static_cast<size_t>(layer_index)];
+  if (!emel::generator::detail::rms_norm(
+          actor_backend.hidden,
+          actor_block.attention_norm,
+          actor_backend.rms_epsilon,
+          actor_backend.norm) ||
+      !emel::generator::detail::rms_norm(
+          q23_backend.hidden,
+          q23_block.attention_norm,
+          q23_backend.rms_epsilon,
+          q23_backend.norm)) {
+    std::fprintf(stdout, "generation_debug.q23_stage: attn rms_norm failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.attn_norm", actor_backend.norm, q23_backend.norm);
+
+  if (!emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.attention_q, actor_backend.norm, actor_backend.q) ||
+      !matmul_vector_mode(q23_backend,
+                          q23_block.attention_q,
+                          q23_backend.norm,
+                          q23_backend.q,
+                          scalar_quant_q23.attention,
+                          scalar_quant_q23.only_dtype,
+                          scalar_quant_q23.dtype_mask,
+                          scalar_quant_q23.use_reference_q8,
+                          scalar_quant_q23.use_scalar_quantized) ||
+      !emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.attention_k, actor_backend.norm, actor_backend.k) ||
+      !matmul_vector_mode(q23_backend,
+                          q23_block.attention_k,
+                          q23_backend.norm,
+                          q23_backend.k,
+                          scalar_quant_q23.attention,
+                          scalar_quant_q23.only_dtype,
+                          scalar_quant_q23.dtype_mask,
+                          scalar_quant_q23.use_reference_q8,
+                          scalar_quant_q23.use_scalar_quantized) ||
+      !emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.attention_v, actor_backend.norm, actor_backend.v) ||
+      !matmul_vector_mode(q23_backend,
+                          q23_block.attention_v,
+                          q23_backend.norm,
+                          q23_backend.v,
+                          scalar_quant_q23.attention,
+                          scalar_quant_q23.only_dtype,
+                          scalar_quant_q23.dtype_mask,
+                          scalar_quant_q23.use_reference_q8,
+                          scalar_quant_q23.use_scalar_quantized)) {
+    std::fprintf(stdout, "generation_debug.q23_stage: qkv matmul failed\n");
+    return;
+  }
+  dump_q8_quantize_compare("generation_debug.q23_stage.prompt0.layer0.attn_norm_q8",
+                           actor_backend.norm);
+  dump_stage("prompt0.layer0.q_pre_rope", actor_backend.q, q23_backend.q);
+  dump_stage("prompt0.layer0.k_pre_rope", actor_backend.k, q23_backend.k);
+  dump_stage("prompt0.layer0.v_pre_cache", actor_backend.v, q23_backend.v);
+  std::vector<float> reference_q(actor_backend.q.size());
+  std::vector<float> reference_k(actor_backend.k.size());
+  std::vector<float> reference_v(actor_backend.v.size());
+  if (matmul_vector_reference_q8(actor_block.attention_q, actor_backend.norm, reference_q) &&
+      matmul_vector_reference_q8(actor_block.attention_k, actor_backend.norm, reference_k) &&
+      matmul_vector_reference_q8(actor_block.attention_v, actor_backend.norm, reference_v)) {
+    dump_stage("prompt0.layer0.q_pre_rope_actor_vs_reference_q8",
+               actor_backend.q,
+               reference_q);
+    dump_stage("prompt0.layer0.q_pre_rope_q23_vs_reference_q8",
+               q23_backend.q,
+               reference_q);
+    dump_stage("prompt0.layer0.k_pre_rope_actor_vs_reference_q8",
+               actor_backend.k,
+               reference_k);
+    dump_stage("prompt0.layer0.k_pre_rope_q23_vs_reference_q8",
+               q23_backend.k,
+               reference_k);
+    dump_stage("prompt0.layer0.v_pre_cache_actor_vs_reference_q8",
+               actor_backend.v,
+               reference_v);
+    dump_stage("prompt0.layer0.v_pre_cache_q23_vs_reference_q8",
+               q23_backend.v,
+               reference_v);
+  }
+
+  emel::generator::detail::apply_rope(
+      actor_backend.q,
+      actor_backend.n_head,
+      actor_backend.head_dim,
+      actor_backend.n_rot,
+      position,
+      actor_backend.rope_freq_base);
+  emel::generator::detail::apply_rope(
+      actor_backend.k,
+      actor_backend.n_head_kv,
+      actor_backend.head_dim_kv,
+      actor_backend.n_rot,
+      position,
+      actor_backend.rope_freq_base);
+  emel::generator::detail::apply_rope(
+      q23_backend.q,
+      q23_backend.n_head,
+      q23_backend.head_dim,
+      q23_backend.n_rot,
+      position,
+      q23_backend.rope_freq_base);
+  emel::generator::detail::apply_rope(
+      q23_backend.k,
+      q23_backend.n_head_kv,
+      q23_backend.head_dim_kv,
+      q23_backend.n_rot,
+      position,
+      q23_backend.rope_freq_base);
+  dump_stage("prompt0.layer0.q", actor_backend.q, q23_backend.q);
+  dump_stage("prompt0.layer0.k", actor_backend.k, q23_backend.k);
+
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(actor_backend.q.data(), static_cast<size_t>(actor_backend.n_embd)),
+      actor_backend.q_attn.data());
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(q23_backend.q.data(), static_cast<size_t>(q23_backend.n_embd)),
+      q23_backend.q_attn.data());
+  dump_stage("prompt0.layer0.q_attn", actor_backend.q_attn, q23_backend.q_attn);
+
+  const int32_t kv_dim = actor_backend.n_head_kv * actor_backend.head_dim_kv;
+  const size_t actor_cache_offset =
+      emel::generator::detail::layer_cache_offset(actor_backend, layer_index, position, kv_dim);
+  const size_t q23_cache_offset =
+      emel::generator::detail::layer_cache_offset(q23_backend, layer_index, position, kv_dim);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(actor_backend.k.data(), static_cast<size_t>(kv_dim)),
+      actor_backend.key_cache.data() + actor_cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(actor_backend.v.data(), static_cast<size_t>(kv_dim)),
+      actor_backend.value_cache.data() + actor_cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(q23_backend.k.data(), static_cast<size_t>(kv_dim)),
+      q23_backend.key_cache.data() + q23_cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(q23_backend.v.data(), static_cast<size_t>(kv_dim)),
+      q23_backend.value_cache.data() + q23_cache_offset);
+  dump_stage("prompt0.layer0.key_cache",
+             std::span<const float>(actor_backend.key_cache.data() + actor_cache_offset,
+                                    static_cast<size_t>(kv_dim)),
+             std::span<const float>(q23_backend.key_cache.data() + q23_cache_offset,
+                                    static_cast<size_t>(kv_dim)));
+  dump_stage("prompt0.layer0.value_cache",
+             std::span<const float>(actor_backend.value_cache.data() + actor_cache_offset,
+                                    static_cast<size_t>(kv_dim)),
+             std::span<const float>(q23_backend.value_cache.data() + q23_cache_offset,
+                                    static_cast<size_t>(kv_dim)));
+
+  if (!emel::generator::detail::compute_attention(
+          actor_backend, layer_index, position + 1, actor_backend.q_attn) ||
+      !emel::generator::detail::compute_attention(
+          q23_backend, layer_index, position + 1, q23_backend.q_attn)) {
+    std::fprintf(stdout, "generation_debug.q23_stage: attention failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.kqv_out", actor_backend.attn_ctx, q23_backend.attn_ctx);
+
+  if (!emel::generator::detail::matmul_vector(
+          actor_backend,
+          actor_block.attention_output,
+          actor_backend.attn_ctx,
+          actor_backend.projected) ||
+      !matmul_vector_mode(q23_backend,
+                          q23_block.attention_output,
+                          q23_backend.attn_ctx,
+                          q23_backend.projected,
+                          scalar_quant_q23.attention,
+                          scalar_quant_q23.only_dtype,
+                          scalar_quant_q23.dtype_mask,
+                          scalar_quant_q23.use_reference_q8,
+                          scalar_quant_q23.use_scalar_quantized)) {
+    std::fprintf(stdout, "generation_debug.q23_stage: attention output matmul failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.attn_out", actor_backend.projected, q23_backend.projected);
+
+  for (int32_t idx = 0; idx < actor_backend.n_embd; ++idx) {
+    actor_backend.hidden[static_cast<size_t>(idx)] += actor_backend.projected[static_cast<size_t>(idx)];
+    q23_backend.hidden[static_cast<size_t>(idx)] += q23_backend.projected[static_cast<size_t>(idx)];
+  }
+  dump_stage("prompt0.layer0.attn_residual", actor_backend.hidden, q23_backend.hidden);
+
+  if (!emel::generator::detail::rms_norm(
+          actor_backend.hidden,
+          actor_block.feed_forward_norm,
+          actor_backend.rms_epsilon,
+          actor_backend.norm) ||
+      !emel::generator::detail::rms_norm(
+          q23_backend.hidden,
+          q23_block.feed_forward_norm,
+          q23_backend.rms_epsilon,
+          q23_backend.norm)) {
+    std::fprintf(stdout, "generation_debug.q23_stage: ffn rms_norm failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.ffn_norm", actor_backend.norm, q23_backend.norm);
+
+  if (!emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.feed_forward_gate, actor_backend.norm, actor_backend.gate) ||
+      !matmul_vector_mode(q23_backend,
+                          q23_block.feed_forward_gate,
+                          q23_backend.norm,
+                          q23_backend.gate,
+                          scalar_quant_q23.ffn,
+                          scalar_quant_q23.only_dtype,
+                          scalar_quant_q23.dtype_mask,
+                          scalar_quant_q23.use_reference_q8,
+                          scalar_quant_q23.use_scalar_quantized) ||
+      !emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.feed_forward_up, actor_backend.norm, actor_backend.up) ||
+      !matmul_vector_mode(q23_backend,
+                          q23_block.feed_forward_up,
+                          q23_backend.norm,
+                          q23_backend.up,
+                          scalar_quant_q23.ffn,
+                          scalar_quant_q23.only_dtype,
+                          scalar_quant_q23.dtype_mask,
+                          scalar_quant_q23.use_reference_q8,
+                          scalar_quant_q23.use_scalar_quantized)) {
+    std::fprintf(stdout, "generation_debug.q23_stage: ffn gate/up matmul failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.ffn_gate", actor_backend.gate, q23_backend.gate);
+  dump_stage("prompt0.layer0.ffn_up", actor_backend.up, q23_backend.up);
+
+  for (size_t idx = 0; idx < actor_backend.gate.size(); ++idx) {
+    actor_backend.ffn_hidden[idx] =
+        emel::generator::detail::silu(actor_backend.gate[idx]) * actor_backend.up[idx];
+    q23_backend.ffn_hidden[idx] =
+        emel::generator::detail::silu(q23_backend.gate[idx]) * q23_backend.up[idx];
+  }
+  dump_stage("prompt0.layer0.ffn_swiglu", actor_backend.ffn_hidden, q23_backend.ffn_hidden);
+
+  if (!emel::generator::detail::matmul_vector(
+          actor_backend,
+          actor_block.feed_forward_down,
+          actor_backend.ffn_hidden,
+          actor_backend.projected) ||
+      !matmul_vector_mode(q23_backend,
+                          q23_block.feed_forward_down,
+                          q23_backend.ffn_hidden,
+                          q23_backend.projected,
+                          scalar_quant_q23.ffn,
+                          scalar_quant_q23.only_dtype,
+                          scalar_quant_q23.dtype_mask,
+                          scalar_quant_q23.use_reference_q8,
+                          scalar_quant_q23.use_scalar_quantized)) {
+    std::fprintf(stdout, "generation_debug.q23_stage: ffn down matmul failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.ffn_out", actor_backend.projected, q23_backend.projected);
+
+  for (int32_t idx = 0; idx < actor_backend.n_embd; ++idx) {
+    actor_backend.hidden[static_cast<size_t>(idx)] += actor_backend.projected[static_cast<size_t>(idx)];
+    q23_backend.hidden[static_cast<size_t>(idx)] += q23_backend.projected[static_cast<size_t>(idx)];
+  }
+  dump_stage("prompt0.layer0.l_out", actor_backend.hidden, q23_backend.hidden);
+}
+
+void dump_generation_reference_q_stage_debug(const generation_load_state & state,
+                                             const emel::paritychecker::parity_options & opts,
+                                             const generation_result & emel_result,
+                                             const generation_result & reference_result) {
+  const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
+  if (state.model_data == nullptr || token_mismatch_index <= 0) {
+    return;
+  }
+
+  std::vector<llama_token> prompt_tokens;
+  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+    std::fprintf(stdout, "generation_debug.qref_stage: tokenize failed\n");
+    return;
+  }
+
+  emel::generator::detail::native_backend actor_backend = {};
+  emel::generator::detail::native_backend q2_reference_backend = {};
+  emel::generator::detail::native_backend q3_reference_backend = {};
+  if (emel::generator::detail::prepare(actor_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q2_reference_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q3_reference_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none)) {
+    std::fprintf(stdout, "generation_debug.qref_stage: backend prepare failed\n");
+    return;
+  }
+
+  const exact_matmul_mode reference_q2_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q2_k),
+      .use_reference_q8 = true,
+  };
+  const exact_matmul_mode reference_q3_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q3_k),
+      .use_reference_q8 = true,
+  };
+  const int32_t token_id = static_cast<int32_t>(prompt_tokens.front());
+  const int32_t position = 0;
+  const int32_t layer_index = 0;
+
+  if (!emel::generator::detail::copy_tensor_row(
+          *actor_backend.token_embedding.tensor, token_id, actor_backend.hidden) ||
+      !emel::generator::detail::copy_tensor_row(
+          *q2_reference_backend.token_embedding.tensor, token_id, q2_reference_backend.hidden) ||
+      !emel::generator::detail::copy_tensor_row(
+          *q3_reference_backend.token_embedding.tensor, token_id, q3_reference_backend.hidden)) {
+    std::fprintf(stdout, "generation_debug.qref_stage: token embedding replay failed\n");
+    return;
+  }
+
+  auto dump_stage = [&](const char * label,
+                        std::span<const float> actor_values,
+                        std::span<const float> q2_values,
+                        std::span<const float> q3_values) {
+    std::fprintf(stdout,
+                 "generation_debug.qref_stage.%s.q2_reference: max_abs=%g\n",
+                 label,
+                 max_abs_diff(actor_values, q2_values));
+    std::fprintf(stdout,
+                 "generation_debug.qref_stage.%s.q3_reference: max_abs=%g\n",
+                 label,
+                 max_abs_diff(actor_values, q3_values));
+  };
+
+  auto & actor_block = actor_backend.blocks[static_cast<size_t>(layer_index)];
+  auto & q2_block = q2_reference_backend.blocks[static_cast<size_t>(layer_index)];
+  auto & q3_block = q3_reference_backend.blocks[static_cast<size_t>(layer_index)];
+  if (!emel::generator::detail::rms_norm(
+          actor_backend.hidden,
+          actor_block.attention_norm,
+          actor_backend.rms_epsilon,
+          actor_backend.norm) ||
+      !emel::generator::detail::rms_norm(
+          q2_reference_backend.hidden,
+          q2_block.attention_norm,
+          q2_reference_backend.rms_epsilon,
+          q2_reference_backend.norm) ||
+      !emel::generator::detail::rms_norm(
+          q3_reference_backend.hidden,
+          q3_block.attention_norm,
+          q3_reference_backend.rms_epsilon,
+          q3_reference_backend.norm)) {
+    std::fprintf(stdout, "generation_debug.qref_stage: attn rms_norm failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.attn_norm",
+             actor_backend.norm,
+             q2_reference_backend.norm,
+             q3_reference_backend.norm);
+
+  const auto run_mode_matmul = [&](emel::generator::detail::native_backend & backend,
+                                   const emel::generator::detail::tensor_matrix & matrix,
+                                   std::span<const float> input,
+                                   std::span<float> output,
+                                   const exact_matmul_mode mode,
+                                   const bool attention_mode) {
+    return matmul_vector_mode(backend,
+                              matrix,
+                              input,
+                              output,
+                              attention_mode ? mode.attention : mode.ffn,
+                              mode.only_dtype,
+                              mode.dtype_mask,
+                              mode.use_reference_q8,
+                              mode.use_scalar_quantized);
+  };
+
+  if (!emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.attention_q, actor_backend.norm, actor_backend.q) ||
+      !run_mode_matmul(q2_reference_backend,
+                       q2_block.attention_q,
+                       q2_reference_backend.norm,
+                       q2_reference_backend.q,
+                       reference_q2_only,
+                       true) ||
+      !run_mode_matmul(q3_reference_backend,
+                       q3_block.attention_q,
+                       q3_reference_backend.norm,
+                       q3_reference_backend.q,
+                       reference_q3_only,
+                       true) ||
+      !emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.attention_k, actor_backend.norm, actor_backend.k) ||
+      !run_mode_matmul(q2_reference_backend,
+                       q2_block.attention_k,
+                       q2_reference_backend.norm,
+                       q2_reference_backend.k,
+                       reference_q2_only,
+                       true) ||
+      !run_mode_matmul(q3_reference_backend,
+                       q3_block.attention_k,
+                       q3_reference_backend.norm,
+                       q3_reference_backend.k,
+                       reference_q3_only,
+                       true) ||
+      !emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.attention_v, actor_backend.norm, actor_backend.v) ||
+      !run_mode_matmul(q2_reference_backend,
+                       q2_block.attention_v,
+                       q2_reference_backend.norm,
+                       q2_reference_backend.v,
+                       reference_q2_only,
+                       true) ||
+      !run_mode_matmul(q3_reference_backend,
+                       q3_block.attention_v,
+                       q3_reference_backend.norm,
+                       q3_reference_backend.v,
+                       reference_q3_only,
+                       true)) {
+    std::fprintf(stdout, "generation_debug.qref_stage: qkv matmul failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.q_pre_rope",
+             actor_backend.q,
+             q2_reference_backend.q,
+             q3_reference_backend.q);
+  dump_stage("prompt0.layer0.k_pre_rope",
+             actor_backend.k,
+             q2_reference_backend.k,
+             q3_reference_backend.k);
+  dump_stage("prompt0.layer0.v_pre_cache",
+             actor_backend.v,
+             q2_reference_backend.v,
+             q3_reference_backend.v);
+
+  auto apply_rope_and_cache = [&](emel::generator::detail::native_backend & backend) {
+    emel::generator::detail::apply_rope(
+        backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+    emel::generator::detail::apply_rope(backend.k,
+                                        backend.n_head_kv,
+                                        backend.head_dim_kv,
+                                        backend.n_rot,
+                                        position,
+                                        backend.rope_freq_base);
+    emel::generator::detail::store_fp16_rounded_cache(
+        std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+        backend.q_attn.data());
+    const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+    const size_t cache_offset =
+        emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
+    emel::generator::detail::store_fp16_rounded_cache(
+        std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+        backend.key_cache.data() + cache_offset);
+    emel::generator::detail::store_fp16_rounded_cache(
+        std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+        backend.value_cache.data() + cache_offset);
+  };
+  apply_rope_and_cache(actor_backend);
+  apply_rope_and_cache(q2_reference_backend);
+  apply_rope_and_cache(q3_reference_backend);
+  dump_stage("prompt0.layer0.q", actor_backend.q, q2_reference_backend.q, q3_reference_backend.q);
+  dump_stage("prompt0.layer0.k", actor_backend.k, q2_reference_backend.k, q3_reference_backend.k);
+  dump_stage("prompt0.layer0.q_attn",
+             actor_backend.q_attn,
+             q2_reference_backend.q_attn,
+             q3_reference_backend.q_attn);
+  dump_stage("prompt0.layer0.key_cache",
+             actor_backend.key_cache,
+             q2_reference_backend.key_cache,
+             q3_reference_backend.key_cache);
+  dump_stage("prompt0.layer0.value_cache",
+             actor_backend.value_cache,
+             q2_reference_backend.value_cache,
+             q3_reference_backend.value_cache);
+
+  if (!emel::generator::detail::compute_attention(
+          actor_backend, layer_index, position + 1, actor_backend.q_attn) ||
+      !emel::generator::detail::compute_attention(
+          q2_reference_backend, layer_index, position + 1, q2_reference_backend.q_attn) ||
+      !emel::generator::detail::compute_attention(
+          q3_reference_backend, layer_index, position + 1, q3_reference_backend.q_attn)) {
+    std::fprintf(stdout, "generation_debug.qref_stage: attention failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.kqv_out",
+             actor_backend.attn_ctx,
+             q2_reference_backend.attn_ctx,
+             q3_reference_backend.attn_ctx);
+
+  if (!emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.attention_output, actor_backend.attn_ctx, actor_backend.projected) ||
+      !run_mode_matmul(q2_reference_backend,
+                       q2_block.attention_output,
+                       q2_reference_backend.attn_ctx,
+                       q2_reference_backend.projected,
+                       reference_q2_only,
+                       true) ||
+      !run_mode_matmul(q3_reference_backend,
+                       q3_block.attention_output,
+                       q3_reference_backend.attn_ctx,
+                       q3_reference_backend.projected,
+                       reference_q3_only,
+                       true)) {
+    std::fprintf(stdout, "generation_debug.qref_stage: attention output matmul failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.attn_out",
+             actor_backend.projected,
+             q2_reference_backend.projected,
+             q3_reference_backend.projected);
+
+  for (int32_t idx = 0; idx < actor_backend.n_embd; ++idx) {
+    actor_backend.hidden[static_cast<size_t>(idx)] += actor_backend.projected[static_cast<size_t>(idx)];
+    q2_reference_backend.hidden[static_cast<size_t>(idx)] +=
+        q2_reference_backend.projected[static_cast<size_t>(idx)];
+    q3_reference_backend.hidden[static_cast<size_t>(idx)] +=
+        q3_reference_backend.projected[static_cast<size_t>(idx)];
+  }
+  dump_stage("prompt0.layer0.attn_residual",
+             actor_backend.hidden,
+             q2_reference_backend.hidden,
+             q3_reference_backend.hidden);
+
+  if (!emel::generator::detail::rms_norm(
+          actor_backend.hidden,
+          actor_block.feed_forward_norm,
+          actor_backend.rms_epsilon,
+          actor_backend.norm) ||
+      !emel::generator::detail::rms_norm(
+          q2_reference_backend.hidden,
+          q2_block.feed_forward_norm,
+          q2_reference_backend.rms_epsilon,
+          q2_reference_backend.norm) ||
+      !emel::generator::detail::rms_norm(
+          q3_reference_backend.hidden,
+          q3_block.feed_forward_norm,
+          q3_reference_backend.rms_epsilon,
+          q3_reference_backend.norm)) {
+    std::fprintf(stdout, "generation_debug.qref_stage: ffn rms_norm failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.ffn_norm",
+             actor_backend.norm,
+             q2_reference_backend.norm,
+             q3_reference_backend.norm);
+
+  if (!emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.feed_forward_gate, actor_backend.norm, actor_backend.gate) ||
+      !run_mode_matmul(q2_reference_backend,
+                       q2_block.feed_forward_gate,
+                       q2_reference_backend.norm,
+                       q2_reference_backend.gate,
+                       reference_q2_only,
+                       false) ||
+      !run_mode_matmul(q3_reference_backend,
+                       q3_block.feed_forward_gate,
+                       q3_reference_backend.norm,
+                       q3_reference_backend.gate,
+                       reference_q3_only,
+                       false) ||
+      !emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.feed_forward_up, actor_backend.norm, actor_backend.up) ||
+      !run_mode_matmul(q2_reference_backend,
+                       q2_block.feed_forward_up,
+                       q2_reference_backend.norm,
+                       q2_reference_backend.up,
+                       reference_q2_only,
+                       false) ||
+      !run_mode_matmul(q3_reference_backend,
+                       q3_block.feed_forward_up,
+                       q3_reference_backend.norm,
+                       q3_reference_backend.up,
+                       reference_q3_only,
+                       false)) {
+    std::fprintf(stdout, "generation_debug.qref_stage: ffn gate/up matmul failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.ffn_gate",
+             actor_backend.gate,
+             q2_reference_backend.gate,
+             q3_reference_backend.gate);
+  dump_stage("prompt0.layer0.ffn_up",
+             actor_backend.up,
+             q2_reference_backend.up,
+             q3_reference_backend.up);
+
+  for (size_t idx = 0; idx < actor_backend.gate.size(); ++idx) {
+    actor_backend.ffn_hidden[idx] =
+        emel::generator::detail::silu(actor_backend.gate[idx]) * actor_backend.up[idx];
+    q2_reference_backend.ffn_hidden[idx] =
+        emel::generator::detail::silu(q2_reference_backend.gate[idx]) *
+        q2_reference_backend.up[idx];
+    q3_reference_backend.ffn_hidden[idx] =
+        emel::generator::detail::silu(q3_reference_backend.gate[idx]) *
+        q3_reference_backend.up[idx];
+  }
+  dump_stage("prompt0.layer0.ffn_swiglu",
+             actor_backend.ffn_hidden,
+             q2_reference_backend.ffn_hidden,
+             q3_reference_backend.ffn_hidden);
+
+  if (!emel::generator::detail::matmul_vector(
+          actor_backend, actor_block.feed_forward_down, actor_backend.ffn_hidden, actor_backend.projected) ||
+      !run_mode_matmul(q2_reference_backend,
+                       q2_block.feed_forward_down,
+                       q2_reference_backend.ffn_hidden,
+                       q2_reference_backend.projected,
+                       reference_q2_only,
+                       false) ||
+      !run_mode_matmul(q3_reference_backend,
+                       q3_block.feed_forward_down,
+                       q3_reference_backend.ffn_hidden,
+                       q3_reference_backend.projected,
+                       reference_q3_only,
+                       false)) {
+    std::fprintf(stdout, "generation_debug.qref_stage: ffn down matmul failed\n");
+    return;
+  }
+  dump_stage("prompt0.layer0.ffn_out",
+             actor_backend.projected,
+             q2_reference_backend.projected,
+             q3_reference_backend.projected);
+
+  for (int32_t idx = 0; idx < actor_backend.n_embd; ++idx) {
+    actor_backend.hidden[static_cast<size_t>(idx)] += actor_backend.projected[static_cast<size_t>(idx)];
+    q2_reference_backend.hidden[static_cast<size_t>(idx)] +=
+        q2_reference_backend.projected[static_cast<size_t>(idx)];
+    q3_reference_backend.hidden[static_cast<size_t>(idx)] +=
+        q3_reference_backend.projected[static_cast<size_t>(idx)];
+  }
+  dump_stage("prompt0.layer0.l_out",
+             actor_backend.hidden,
+             q2_reference_backend.hidden,
+             q3_reference_backend.hidden);
+}
+
+void dump_generation_gen0_attention_debug(const generation_load_state & state,
+                                          const emel::paritychecker::parity_options & opts,
+                                          const generation_result & emel_result,
+                                          const generation_result & reference_result) {
+  const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
+  if (state.model_data == nullptr || token_mismatch_index <= 0 ||
+      reference_result.trace.token_count <= 0) {
+    return;
+  }
+
+  std::vector<llama_token> prompt_tokens;
+  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+    std::fprintf(stdout, "generation_debug.gen0: tokenize failed\n");
+    return;
+  }
+
+  std::vector<int32_t> prefix_tokens;
+  prefix_tokens.reserve(prompt_tokens.size() + 1u);
+  for (const llama_token token : prompt_tokens) {
+    prefix_tokens.push_back(static_cast<int32_t>(token));
+  }
+  prefix_tokens.push_back(reference_result.trace.token_ids[0]);
+
+  const std::span<const int32_t> generated_prefix{
+      prefix_tokens.data() + prompt_tokens.size(),
+      prefix_tokens.size() - prompt_tokens.size(),
+  };
+  reference_graph_capture graph_capture = {};
+  if (!capture_reference_graph_for_generation_prefix(
+          state, prompt_tokens, generated_prefix, graph_capture)) {
+    std::fprintf(stdout, "generation_debug.gen0: reference graph capture failed\n");
+    return;
+  }
+
+  llama_context_ptr reference_ctx =
+      make_reference_context(const_cast<initialize_backend &>(state.backend));
+  if (reference_ctx == nullptr ||
+      !run_reference_prefix_decode(reference_ctx.get(), prompt_tokens, generated_prefix)) {
+    std::fprintf(stdout, "generation_debug.gen0: reference decode replay failed\n");
+    return;
+  }
+
+  std::vector<float> reference_value_cache_rows;
+  if (!capture_reference_value_cache_rows(reference_ctx.get(), 0, reference_value_cache_rows)) {
+    reference_value_cache_rows.clear();
+  }
+
+  emel::generator::detail::native_backend backend = {};
+  if (emel::generator::detail::prepare(backend, *state.model_data) !=
+      emel::error::cast(emel::model::loader::error::none)) {
+    std::fprintf(stdout, "generation_debug.gen0: backend prepare failed\n");
+    return;
+  }
+
+  const std::span<const int32_t> prior_tokens{prefix_tokens.data(), prefix_tokens.size() - 1u};
+  if (!run_prefill_from_token_prefix(backend, prior_tokens)) {
+    std::fprintf(stdout, "generation_debug.gen0: prior prefix replay failed\n");
+    return;
+  }
+
+  const int32_t token_id = prefix_tokens.back();
+  const int32_t position = static_cast<int32_t>(prefix_tokens.size() - 1u);
+  if (!emel::generator::detail::copy_tensor_row(
+          *backend.token_embedding.tensor, token_id, backend.hidden)) {
+    std::fprintf(stdout, "generation_debug.gen0: token embedding replay failed\n");
+    return;
+  }
+
+  auto & block = backend.blocks[0];
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    std::fprintf(stdout, "generation_debug.gen0: qkv matmul failed\n");
+    return;
+  }
+
+  emel::generator::detail::apply_rope(
+      backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+  emel::generator::detail::apply_rope(backend.k,
+                                      backend.n_head_kv,
+                                      backend.head_dim_kv,
+                                      backend.n_rot,
+                                      position,
+                                      backend.rope_freq_base);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t cache_offset =
+      emel::generator::detail::layer_cache_offset(backend, 0, position, kv_dim);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
+
+  (void) compute_attention_with_softmax_debug(
+      backend,
+      graph_capture,
+      0,
+      position + 1,
+      "generation_debug.gen0.layer0",
+      reference_value_cache_rows);
+
+  auto dump_gen0_state = [&](const char * suffix,
+                             std::span<const float> emel_values,
+                             const char * tensor_name) {
+    const std::span<const float> reference_values = reference_last_token_row(
+        find_reference_tensor(graph_capture, tensor_name), emel_values.size());
+    std::fprintf(stdout,
+                 "generation_debug.gen0.layer0.%s: max_abs=%g\n",
+                 suffix,
+                 max_abs_diff(emel_values, reference_values));
+  };
+
+  dump_matrix_compare(
+      "generation_debug.gen0.layer0.attn_out_matmul", backend, block.attention_output, backend.attn_ctx);
+  if (!emel::generator::detail::matmul_vector(
+          backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+    std::fprintf(stdout, "generation_debug.gen0: attention output matmul failed\n");
+    return;
+  }
+  dump_gen0_state("attn_out", backend.projected, "attn_out-0");
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+  dump_gen0_state("ffn_inp", backend.hidden, "ffn_inp-0");
+
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm)) {
+    std::fprintf(stdout, "generation_debug.gen0: ffn rms_norm failed\n");
+    return;
+  }
+  dump_gen0_state("ffn_norm", backend.norm, "ffn_norm-0");
+  dump_matrix_compare(
+      "generation_debug.gen0.layer0.ffn_gate_matmul", backend, block.feed_forward_gate, backend.norm);
+  dump_matrix_compare(
+      "generation_debug.gen0.layer0.ffn_up_matmul", backend, block.feed_forward_up, backend.norm);
+  if (!emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+    std::fprintf(stdout, "generation_debug.gen0: ffn gate/up matmul failed\n");
+    return;
+  }
+  dump_gen0_state("ffn_gate", backend.gate, "ffn_gate-0");
+  dump_gen0_state("ffn_up", backend.up, "ffn_up-0");
+
+  for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+    backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+  }
+  dump_gen0_state("ffn_swiglu", backend.ffn_hidden, "ffn_swiglu-0");
+  dump_matrix_compare(
+      "generation_debug.gen0.layer0.ffn_down_matmul", backend, block.feed_forward_down, backend.ffn_hidden);
+  if (!emel::generator::detail::matmul_vector(
+          backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+    std::fprintf(stdout, "generation_debug.gen0: ffn down matmul failed\n");
+    return;
+  }
+  dump_gen0_state("ffn_out", backend.projected, "ffn_out-0");
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+  dump_gen0_state("l_out", backend.hidden, "l_out-0");
+}
+
 void dump_generation_residual_l2_debug(const generation_load_state & state,
                                        const emel::paritychecker::parity_options & opts,
                                        const generation_result & emel_result,
@@ -5273,6 +7072,11 @@ void dump_generation_failure_surface(generation_load_state & state,
     dump_scalar_attention_debug(state, opts, *emel_result, *reference_result);
     dump_generation_residual_l2_debug(state, opts, *emel_result, *reference_result);
     dump_generation_prefix_timeline_debug(state, opts, *emel_result, *reference_result);
+    dump_generation_reference_q_timeline_debug(state, opts, *emel_result, *reference_result);
+    dump_generation_q23_timeline_debug(state, opts, *emel_result, *reference_result);
+    dump_generation_q23_stage_debug(state, opts, *emel_result, *reference_result);
+    dump_generation_reference_q_stage_debug(state, opts, *emel_result, *reference_result);
+    dump_generation_gen0_attention_debug(state, opts, *emel_result, *reference_result);
     dump_generation_prefix_state_debug(state, opts, *emel_result, *reference_result);
   }
   if (opts.dump && reference_result != nullptr) {
