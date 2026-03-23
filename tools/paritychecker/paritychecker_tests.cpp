@@ -518,12 +518,11 @@ TEST_CASE("paritychecker matches llama kernel outputs") {
   CHECK(run_kernel_paritychecker_process());
 }
 
-TEST_CASE("paritychecker generation keeps parity across the active decode lengths") {
+TEST_CASE("paritychecker generation keeps parity across the maintained decode lengths") {
   const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
   REQUIRE(file_exists(model_path));
 
-  // Longer decode parity remains explicitly deferred by user priority for now.
-  constexpr std::array<int32_t, 2> generation_lengths{1, 10};
+  constexpr std::array<int32_t, 3> generation_lengths{1, 10, 100};
   for (const int32_t max_tokens : generation_lengths) {
     INFO("max_tokens=" << max_tokens);
     const process_capture capture = run_generation_paritychecker_capture(model_path, "hello", max_tokens);

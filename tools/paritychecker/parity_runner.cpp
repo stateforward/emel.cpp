@@ -74,6 +74,7 @@ constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_internal = 3;
 constexpr const char * k_generation_fixture_name = "Llama-68M-Chat-v1-Q2_K.gguf";
 constexpr size_t k_generation_output_capacity = 65536u;
+constexpr size_t k_generation_token_trace_capacity = 4096u;
 constexpr std::string_view k_reference_impl_source =
 #ifdef PARITYCHECKER_REFERENCE_SOURCE
     PARITYCHECKER_REFERENCE_SOURCE;
@@ -805,10 +806,17 @@ struct generation_capture {
   size_t output_length = 0u;
 };
 
+struct generation_trace {
+  std::array<int32_t, k_generation_token_trace_capacity> token_ids = {};
+  std::array<float, k_generation_token_trace_capacity> top_score_gaps = {};
+  int32_t token_count = 0;
+};
+
 struct generation_result {
   std::array<char, k_generation_output_capacity> output = {};
   int32_t tokens_generated = 0;
   size_t output_length = 0u;
+  generation_trace trace = {};
 };
 
 struct initialize_backend {
@@ -822,22 +830,62 @@ struct initialize_backend {
   int32_t direct_reference_logits_calls = 0;
 };
 
-emel::error::type sampler_select_argmax(int32_t & candidate_ids,
-                                        float & candidate_scores,
-                                        int32_t & candidate_count,
-                                        int32_t & selected_token_out) {
+struct argmax_summary {
+  int32_t selected_token = -1;
+  float best_score = -std::numeric_limits<float>::infinity();
+  float second_best_score = -std::numeric_limits<float>::infinity();
+};
+
+argmax_summary summarize_argmax_scores(const int32_t & candidate_ids,
+                                       const float & candidate_scores,
+                                       const int32_t & candidate_count) {
+  argmax_summary summary{};
+  if (candidate_count <= 0) {
+    return summary;
+  }
+
   int32_t best_index = 0;
   float best_score = (&candidate_scores)[0];
+  float second_best_score = -std::numeric_limits<float>::infinity();
   for (int32_t idx = 1; idx < candidate_count; ++idx) {
-    if ((&candidate_scores)[idx] > best_score) {
-      best_score = (&candidate_scores)[idx];
+    const float score = (&candidate_scores)[idx];
+    if (score > best_score) {
+      second_best_score = best_score;
+      best_score = score;
       best_index = idx;
+    } else if (score > second_best_score) {
+      second_best_score = score;
     }
   }
 
-  selected_token_out = (&candidate_ids)[best_index];
-  return emel::error::cast(emel::logits::sampler::error::none);
+  summary.selected_token = (&candidate_ids)[best_index];
+  summary.best_score = best_score;
+  summary.second_best_score = second_best_score;
+  return summary;
 }
+
+void append_trace_token(generation_trace & trace,
+                        const int32_t token_id,
+                        const float best_score,
+                        const float second_best_score) {
+  if (trace.token_count < 0 ||
+      static_cast<size_t>(trace.token_count) >= trace.token_ids.size()) {
+    return;
+  }
+
+  const size_t index = static_cast<size_t>(trace.token_count);
+  trace.token_ids[index] = token_id;
+  trace.top_score_gaps[index] = best_score - second_best_score;
+  trace.token_count += 1;
+}
+
+struct generation_load_state;
+
+emel::error::type sampler_select_argmax(generation_load_state & state,
+                                        int32_t & candidate_ids,
+                                        float & candidate_scores,
+                                        int32_t & candidate_count,
+                                        int32_t & selected_token_out);
 
 struct generation_load_state {
   std::unique_ptr<emel::model::data> model_data = std::make_unique<emel::model::data>();
@@ -849,9 +897,8 @@ struct generation_load_state {
   emel::text::conditioner::sm conditioner = {};
   std::unique_ptr<emel::generator::sm> generator = {};
   initialize_backend backend = {};
-  std::array<emel::logits::sampler::fn, 1> samplers = {
-      emel::logits::sampler::fn::from<sampler_select_argmax>(),
-  };
+  generation_trace * emel_trace = nullptr;
+  std::array<emel::logits::sampler::fn, 1> samplers = {};
   std::vector<uint8_t> kv_arena = {};
   std::vector<emel::gguf::loader::kv_entry> kv_entries = {};
   std::vector<emel::model::weight_loader::effect_request> effect_requests = {};
@@ -861,7 +908,26 @@ struct generation_load_state {
   load_capture load = {};
   initialize_capture initialize = {};
   generation_capture generation = {};
+
+  generation_load_state()
+      : samplers{emel::logits::sampler::fn::from<generation_load_state, sampler_select_argmax>(
+            this)} {}
 };
+
+emel::error::type sampler_select_argmax(generation_load_state & state,
+                                        int32_t & candidate_ids,
+                                        float & candidate_scores,
+                                        int32_t & candidate_count,
+                                        int32_t & selected_token_out) {
+  const argmax_summary summary =
+      summarize_argmax_scores(candidate_ids, candidate_scores, candidate_count);
+  selected_token_out = summary.selected_token;
+  if (state.emel_trace != nullptr) {
+    append_trace_token(
+        *state.emel_trace, summary.selected_token, summary.best_score, summary.second_best_score);
+  }
+  return emel::error::cast(emel::logits::sampler::error::none);
+}
 
 uint32_t read_u32_le(const std::span<const uint8_t> bytes) {
   uint32_t value = 0u;
@@ -1358,12 +1424,15 @@ emel::error::type run_emel_initialize_generator(
 emel::error::type run_emel_generate(generation_load_state & state,
                                     const emel::paritychecker::parity_options & opts,
                                     std::span<char> output,
-                                    size_t & output_length_out) {
+                                    size_t & output_length_out,
+                                    generation_trace & trace_out) {
   if (state.generator == nullptr) {
     return emel::error::cast(emel::generator::error::invalid_request);
   }
 
   reset_generation_capture(state);
+  trace_out = {};
+  state.emel_trace = &trace_out;
   emel::error::type error_out = emel::error::cast(emel::generator::error::none);
   emel::generator::event::generate request{
     opts.text,
@@ -1376,6 +1445,7 @@ emel::error::type run_emel_generate(generation_load_state & state,
   request.on_error = {&state, on_generation_error};
 
   const bool accepted = state.generator->process_event(request);
+  state.emel_trace = nullptr;
   if (accepted && state.generation.done && !state.generation.error) {
     return emel::error::cast(emel::generator::error::none);
   }
@@ -1388,16 +1458,30 @@ emel::error::type run_emel_generate(generation_load_state & state,
   return emel::error::cast(emel::generator::error::invalid_request);
 }
 
-llama_token select_argmax_token_from_logits(const float * logits, const int32_t vocab_size) {
+argmax_summary select_argmax_from_logits(const float * logits, const int32_t vocab_size) {
+  argmax_summary summary{};
+  if (logits == nullptr || vocab_size <= 0) {
+    return summary;
+  }
+
   int32_t best_index = 0;
   float best_score = logits[0];
+  float second_best_score = -std::numeric_limits<float>::infinity();
   for (int32_t idx = 1; idx < vocab_size; ++idx) {
-    if (logits[idx] > best_score) {
-      best_score = logits[idx];
+    const float score = logits[idx];
+    if (score > best_score) {
+      second_best_score = best_score;
+      best_score = score;
       best_index = idx;
+    } else if (score > second_best_score) {
+      second_best_score = score;
     }
   }
-  return static_cast<llama_token>(best_index);
+
+  summary.selected_token = best_index;
+  summary.best_score = best_score;
+  summary.second_best_score = second_best_score;
+  return summary;
 }
 
 bool tokenize_reference_prompt(const initialize_backend & backend,
@@ -1523,7 +1607,10 @@ emel::error::type run_reference_generate(initialize_backend & backend,
       return emel::error::cast(emel::generator::error::backend);
     }
 
-    const llama_token selected = select_argmax_token_from_logits(logits, backend.vocab_size);
+    const argmax_summary summary = select_argmax_from_logits(logits, backend.vocab_size);
+    const llama_token selected = static_cast<llama_token>(summary.selected_token);
+    append_trace_token(
+        result_out.trace, summary.selected_token, summary.best_score, summary.second_best_score);
     result_out.tokens_generated += 1;
     if (!append_reference_piece(backend, selected, result_out)) {
       return emel::error::cast(emel::generator::error::backend);
@@ -1540,6 +1627,17 @@ emel::error::type run_reference_generate(initialize_backend & backend,
   }
 
   return emel::error::cast(emel::generator::error::none);
+}
+
+int32_t first_token_mismatch_index(const generation_result & lhs, const generation_result & rhs) {
+  const int32_t shared = std::min(lhs.trace.token_count, rhs.trace.token_count);
+  for (int32_t idx = 0; idx < shared; ++idx) {
+    if (lhs.trace.token_ids[static_cast<size_t>(idx)] !=
+        rhs.trace.token_ids[static_cast<size_t>(idx)]) {
+      return idx;
+    }
+  }
+  return shared;
 }
 
 size_t first_mismatch_offset(const generation_result & lhs, const generation_result & rhs) {
@@ -1560,6 +1658,257 @@ bool generation_results_match(const generation_result & emel_result,
              std::string_view{reference_result.output.data(), reference_result.output_length};
 }
 
+bool run_prefill_from_token_prefix(emel::generator::detail::native_backend & backend,
+                                   std::span<const int32_t> prefix_tokens) {
+  if (prefix_tokens.empty() ||
+      prefix_tokens.size() > backend.bound_tokens.size() ||
+      prefix_tokens.size() > backend.bound_positions.size()) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < prefix_tokens.size(); ++idx) {
+    backend.bound_tokens[idx] = prefix_tokens[idx];
+    backend.bound_positions[idx] = static_cast<int32_t>(idx);
+  }
+  backend.bound_token_count = static_cast<int32_t>(prefix_tokens.size());
+  backend.bound_position_count = static_cast<int32_t>(prefix_tokens.size());
+  backend.bound_ready = true;
+  return emel::generator::detail::run_prefill(backend);
+}
+
+bool run_layer_with_scalar_attention(emel::generator::detail::native_backend & backend,
+                                     const int32_t layer_index,
+                                     const int32_t position) {
+  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    return false;
+  }
+
+  emel::generator::detail::apply_rope(
+      backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+  emel::generator::detail::apply_rope(backend.k,
+                                      backend.n_head_kv,
+                                      backend.head_dim_kv,
+                                      backend.n_rot,
+                                      position,
+                                      backend.rope_freq_base);
+
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t cache_offset =
+      emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
+  std::copy(backend.k.begin(),
+            backend.k.begin() + kv_dim,
+            backend.key_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
+  std::copy(backend.v.begin(),
+            backend.v.begin() + kv_dim,
+            backend.value_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
+
+  if (!emel::generator::detail::compute_attention(backend, layer_index, position + 1, backend.q) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+    backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+  }
+
+  if (!emel::generator::detail::matmul_vector(
+          backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  return true;
+}
+
+bool run_prefill_with_scalar_attention(emel::generator::detail::native_backend & backend,
+                                       std::span<const int32_t> prefix_tokens) {
+  if (prefix_tokens.empty()) {
+    return false;
+  }
+
+  backend.kv_cache_tokens = 0;
+  for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+    const int32_t token_id = prefix_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (token_id < 0 ||
+        token_id >= backend.token_embedding.rows ||
+        position < 0 ||
+        position >= backend.n_ctx) {
+      return false;
+    }
+
+    if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
+      return false;
+    }
+
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_layer_with_scalar_attention(backend, layer, position)) {
+        return false;
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+  }
+
+  return emel::generator::detail::compute_logits(backend);
+}
+
+void dump_scalar_attention_debug(const generation_load_state & state,
+                                 const emel::paritychecker::parity_options & opts,
+                                 const generation_result & emel_result,
+                                 const generation_result & reference_result) {
+  const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
+  if (state.model_data == nullptr || token_mismatch_index <= 0) {
+    return;
+  }
+
+  std::vector<llama_token> prompt_tokens;
+  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+    return;
+  }
+
+  std::vector<int32_t> prefix_tokens;
+  prefix_tokens.reserve(prompt_tokens.size() + static_cast<size_t>(token_mismatch_index));
+  for (const llama_token token : prompt_tokens) {
+    prefix_tokens.push_back(static_cast<int32_t>(token));
+  }
+  for (int32_t idx = 0; idx < token_mismatch_index; ++idx) {
+    prefix_tokens.push_back(reference_result.trace.token_ids[static_cast<size_t>(idx)]);
+  }
+
+  emel::generator::detail::native_backend dispatch_backend = {};
+  emel::generator::detail::native_backend scalar_backend = {};
+  emel::generator::detail::native_backend shared_backend = {};
+  if (emel::generator::detail::prepare(dispatch_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(scalar_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(shared_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      !run_prefill_from_token_prefix(dispatch_backend, prefix_tokens) ||
+      !run_prefill_with_scalar_attention(scalar_backend, prefix_tokens)) {
+    std::fprintf(stdout, "generation_debug.flash: unable to replay mismatch prefix\n");
+    return;
+  }
+  shared_backend.kernel_kind = emel::kernel::kernel_kind::x86_64;
+  shared_backend.kernel.set_kind(shared_backend.kernel_kind);
+  if (!run_prefill_from_token_prefix(shared_backend, prefix_tokens)) {
+    std::fprintf(stdout, "generation_debug.flash: unable to replay shared backend prefix\n");
+    return;
+  }
+
+  const int32_t emel_token = emel_result.trace.token_ids[static_cast<size_t>(token_mismatch_index)];
+  const int32_t reference_token =
+      reference_result.trace.token_ids[static_cast<size_t>(token_mismatch_index)];
+  const argmax_summary dispatch_summary =
+      select_argmax_from_logits(dispatch_backend.bound_logits.data(), dispatch_backend.n_vocab);
+  const argmax_summary scalar_summary =
+      select_argmax_from_logits(scalar_backend.bound_logits.data(), scalar_backend.n_vocab);
+  const argmax_summary shared_summary =
+      select_argmax_from_logits(shared_backend.bound_logits.data(), shared_backend.n_vocab);
+  std::fprintf(stdout,
+               "generation_debug.flash: prefix_tokens=%zu dispatch_argmax=%d scalar_argmax=%d "
+               "shared_argmax=%d reference_token=%d\n",
+               prefix_tokens.size(),
+               dispatch_summary.selected_token,
+               scalar_summary.selected_token,
+               shared_summary.selected_token,
+               reference_token);
+  std::fprintf(stdout,
+               "generation_debug.flash.scores: dispatch_emel=%g dispatch_reference=%g "
+               "scalar_emel=%g scalar_reference=%g shared_emel=%g shared_reference=%g\n",
+               dispatch_backend.bound_logits[static_cast<size_t>(emel_token)],
+               dispatch_backend.bound_logits[static_cast<size_t>(reference_token)],
+               scalar_backend.bound_logits[static_cast<size_t>(emel_token)],
+               scalar_backend.bound_logits[static_cast<size_t>(reference_token)],
+               shared_backend.bound_logits[static_cast<size_t>(emel_token)],
+               shared_backend.bound_logits[static_cast<size_t>(reference_token)]);
+
+  std::vector<llama_token> reference_prefix_tokens;
+  reference_prefix_tokens.reserve(prefix_tokens.size());
+  for (const int32_t token : prefix_tokens) {
+    reference_prefix_tokens.push_back(static_cast<llama_token>(token));
+  }
+
+  llama_context_ptr reference_ctx =
+      make_reference_context(const_cast<initialize_backend &>(state.backend));
+  if (reference_ctx == nullptr) {
+    std::fprintf(stdout, "generation_debug.reference: unable to create reference context\n");
+    return;
+  }
+
+  llama_batch prefix_batch = llama_batch_get_one(
+      reference_prefix_tokens.data(), static_cast<int32_t>(reference_prefix_tokens.size()));
+  if (llama_decode(reference_ctx.get(), prefix_batch) != 0) {
+    std::fprintf(stdout, "generation_debug.reference: unable to decode mismatch prefix\n");
+    return;
+  }
+
+  const float * reference_logits = llama_get_logits_ith(reference_ctx.get(), -1);
+  if (reference_logits == nullptr) {
+    std::fprintf(stdout, "generation_debug.reference: missing logits at mismatch prefix\n");
+    return;
+  }
+
+  const argmax_summary reference_summary =
+      select_argmax_from_logits(reference_logits, dispatch_backend.n_vocab);
+  float max_abs = 0.0f;
+  int32_t max_idx = 0;
+  for (int32_t idx = 0; idx < dispatch_backend.n_vocab; ++idx) {
+    const float diff =
+        std::fabs(dispatch_backend.bound_logits[static_cast<size_t>(idx)] - reference_logits[idx]);
+    if (diff > max_abs) {
+      max_abs = diff;
+      max_idx = idx;
+    }
+  }
+  std::fprintf(stdout,
+               "generation_debug.reference: argmax=%d max_abs=%g idx=%d dispatch=%g "
+               "reference=%g\n",
+               reference_summary.selected_token,
+               max_abs,
+               max_idx,
+               dispatch_backend.bound_logits[static_cast<size_t>(max_idx)],
+               reference_logits[max_idx]);
+  std::fprintf(stdout,
+               "generation_debug.reference.scores: dispatch_emel=%g dispatch_reference=%g "
+               "reference_emel=%g reference_reference=%g\n",
+               dispatch_backend.bound_logits[static_cast<size_t>(emel_token)],
+               dispatch_backend.bound_logits[static_cast<size_t>(reference_token)],
+               reference_logits[emel_token],
+               reference_logits[reference_token]);
+}
+
+std::string_view token_piece_view(const initialize_backend & backend, const int32_t token_id) {
+  if (backend.vocab == nullptr || token_id < 0) {
+    return {};
+  }
+
+  const char * piece = llama_vocab_get_text(backend.vocab, token_id);
+  if (piece == nullptr) {
+    return {};
+  }
+  return piece;
+}
+
 void dump_generation_result(const char * label, const generation_result & result) {
   std::fprintf(stdout,
                "%s: generated_tokens=%d output_bytes=%zu text=%.*s\n",
@@ -1568,6 +1917,26 @@ void dump_generation_result(const char * label, const generation_result & result
                result.output_length,
                static_cast<int>(result.output_length),
                result.output.data());
+}
+
+void dump_generation_trace_window(const char * label,
+                                  const initialize_backend & backend,
+                                  const generation_result & result,
+                                  const int32_t center_index) {
+  const int32_t start = std::max(0, center_index - 2);
+  const int32_t stop = std::min(result.trace.token_count, center_index + 3);
+  for (int32_t idx = start; idx < stop; ++idx) {
+    const int32_t token_id = result.trace.token_ids[static_cast<size_t>(idx)];
+    const std::string_view piece = token_piece_view(backend, token_id);
+    std::fprintf(stdout,
+                 "%s.trace[%d]: token=%d gap=%g piece=%.*s\n",
+                 label,
+                 idx,
+                 token_id,
+                 result.trace.top_score_gaps[static_cast<size_t>(idx)],
+                 static_cast<int>(piece.size()),
+                 piece.data() != nullptr ? piece.data() : "");
+  }
 }
 
 bool quantize_input_blocks(std::span<const float> input,
@@ -1747,8 +2116,10 @@ struct reference_tensor_capture {
 };
 
 struct reference_graph_capture {
-  std::array<reference_tensor_capture, 19> entries = {{
+  std::array<reference_tensor_capture, 23> entries = {{
       {"attn_norm-0", {}},
+      {"Qcur-0", {}},
+      {"Kcur-0", {}},
       {"Vcur-0", {}},
       {"kqv_out-0", {}},
       {"attn_out-0", {}},
@@ -1758,6 +2129,8 @@ struct reference_graph_capture {
       {"ffn_swiglu-0", {}},
       {"l_out-0", {}},
       {"attn_norm-1", {}},
+      {"Qcur-1", {}},
+      {"Kcur-1", {}},
       {"Vcur-1", {}},
       {"kqv_out-1", {}},
       {"attn_out-1", {}},
@@ -1805,9 +2178,12 @@ std::span<const float> find_reference_tensor(const reference_graph_capture & cap
   return {};
 }
 
-bool capture_reference_graph(const generation_load_state & state,
-                             const emel::paritychecker::parity_options & opts,
-                             reference_graph_capture & graph_capture) {
+std::span<const float> reference_last_token_row(std::span<const float> reference_values,
+                                                size_t row_width);
+
+bool capture_reference_graph_for_tokens(const generation_load_state & state,
+                                        std::span<const llama_token> tokens,
+                                        reference_graph_capture & graph_capture) {
   llama_context_params context_params = llama_context_default_params();
   context_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
   context_params.n_ctx = 0;
@@ -1829,19 +2205,35 @@ bool capture_reference_graph(const generation_load_state & state,
     return false;
   }
 
-  std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (tokens.empty()) {
     return false;
   }
 
   llama_batch prompt_batch =
-      llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()));
+      llama_batch_get_one(const_cast<llama_token *>(tokens.data()),
+                          static_cast<int32_t>(tokens.size()));
   return llama_decode(ctx.get(), prompt_batch) == 0;
+}
+
+bool capture_reference_graph(const generation_load_state & state,
+                             const emel::paritychecker::parity_options & opts,
+                             reference_graph_capture & graph_capture) {
+  std::vector<llama_token> prompt_tokens;
+  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+    return false;
+  }
+  return capture_reference_graph_for_tokens(state, prompt_tokens, graph_capture);
 }
 
 void dump_state_compare(const char * label,
                         std::span<const float> emel_values,
                         std::span<const float> reference_values) {
+  const std::span<const float> aligned_reference =
+      reference_last_token_row(reference_values, emel_values.size());
+  if (aligned_reference.size() == emel_values.size()) {
+    reference_values = aligned_reference;
+  }
+
   if (reference_values.empty() || emel_values.size() != reference_values.size()) {
     std::fprintf(stdout,
                  "%s: unavailable emel=%zu reference=%zu\n",
@@ -2290,6 +2682,374 @@ void dump_generation_tensor_compare(generation_load_state & state,
   dump_logits_compare(state, backend.norm, backend.bound_logits, opts);
 }
 
+void dump_generation_prefix_state_debug(const generation_load_state & state,
+                                        const emel::paritychecker::parity_options & opts,
+                                        const generation_result & emel_result,
+                                        const generation_result & reference_result) {
+  const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
+  if (state.model_data == nullptr || token_mismatch_index <= 0) {
+    return;
+  }
+
+  std::vector<llama_token> prompt_tokens;
+  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+    std::fprintf(stdout, "generation_debug.state: tokenize failed\n");
+    return;
+  }
+
+  std::vector<int32_t> prefix_tokens;
+  prefix_tokens.reserve(prompt_tokens.size() + static_cast<size_t>(token_mismatch_index));
+  for (const llama_token token : prompt_tokens) {
+    prefix_tokens.push_back(static_cast<int32_t>(token));
+  }
+  for (int32_t idx = 0; idx < token_mismatch_index; ++idx) {
+    prefix_tokens.push_back(reference_result.trace.token_ids[static_cast<size_t>(idx)]);
+  }
+  if (prefix_tokens.empty()) {
+    std::fprintf(stdout, "generation_debug.state: empty prefix\n");
+    return;
+  }
+
+  std::vector<llama_token> prefix_tokens_llama;
+  prefix_tokens_llama.reserve(prefix_tokens.size());
+  for (const int32_t token : prefix_tokens) {
+    prefix_tokens_llama.push_back(static_cast<llama_token>(token));
+  }
+
+  reference_graph_capture graph_capture = {};
+  if (!capture_reference_graph_for_tokens(state, prefix_tokens_llama, graph_capture)) {
+    std::fprintf(stdout, "generation_debug.state: reference graph capture failed\n");
+    return;
+  }
+
+  emel::generator::detail::native_backend backend = {};
+  if (emel::generator::detail::prepare(backend, *state.model_data) !=
+      emel::error::cast(emel::model::loader::error::none)) {
+    std::fprintf(stdout, "generation_debug.state: backend prepare failed\n");
+    return;
+  }
+
+  if (prefix_tokens.size() > 1u) {
+    const std::span<const int32_t> prior_tokens{prefix_tokens.data(), prefix_tokens.size() - 1u};
+    if (!run_prefill_from_token_prefix(backend, prior_tokens)) {
+      std::fprintf(stdout, "generation_debug.state: prior prefix replay failed\n");
+      return;
+    }
+  } else {
+    backend.kv_cache_tokens = 0;
+  }
+
+  const int32_t token_id = prefix_tokens.back();
+  const int32_t position = static_cast<int32_t>(prefix_tokens.size() - 1u);
+  if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
+    std::fprintf(stdout, "generation_debug.state: token embedding replay failed\n");
+    return;
+  }
+
+  auto compare_layer = [&](const int32_t layer) -> bool {
+    auto & block = backend.blocks[static_cast<size_t>(layer)];
+    const std::string layer_prefix = "generation_debug.state.layer" + std::to_string(layer);
+    const std::string layer_suffix = std::to_string(layer);
+
+    if (!emel::generator::detail::rms_norm(
+            backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm)) {
+      std::fprintf(stdout, "%s.attn_norm: rms_norm failed\n", layer_prefix.c_str());
+      return false;
+    }
+    dump_state_compare((layer_prefix + ".attn_norm").c_str(),
+                       backend.norm,
+                       find_reference_tensor(graph_capture, ("attn_norm-" + layer_suffix).c_str()));
+
+    if (!emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+        !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+        !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+      std::fprintf(stdout, "%s.qkv: matmul failed\n", layer_prefix.c_str());
+      return false;
+    }
+    dump_state_compare((layer_prefix + ".v").c_str(),
+                       backend.v,
+                       find_reference_tensor(graph_capture, ("Vcur-" + layer_suffix).c_str()));
+
+    emel::generator::detail::apply_rope(
+        backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+    emel::generator::detail::apply_rope(backend.k,
+                                        backend.n_head_kv,
+                                        backend.head_dim_kv,
+                                        backend.n_rot,
+                                        position,
+                                        backend.rope_freq_base);
+    dump_state_compare((layer_prefix + ".q").c_str(),
+                       backend.q,
+                       find_reference_tensor(graph_capture, ("Qcur-" + layer_suffix).c_str()));
+    dump_state_compare((layer_prefix + ".k").c_str(),
+                       backend.k,
+                       find_reference_tensor(graph_capture, ("Kcur-" + layer_suffix).c_str()));
+
+    const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+    const size_t cache_offset =
+        emel::generator::detail::layer_cache_offset(backend, layer, position, kv_dim);
+    std::copy(backend.k.begin(),
+              backend.k.begin() + kv_dim,
+              backend.key_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
+    std::copy(backend.v.begin(),
+              backend.v.begin() + kv_dim,
+              backend.value_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
+
+    if (!emel::generator::detail::compute_attention(backend, layer, position + 1, backend.q)) {
+      std::fprintf(stdout, "%s.attention: compute failed\n", layer_prefix.c_str());
+      return false;
+    }
+    dump_state_compare((layer_prefix + ".kqv_out").c_str(),
+                       backend.attn_ctx,
+                       find_reference_tensor(graph_capture, ("kqv_out-" + layer_suffix).c_str()));
+
+    if (!emel::generator::detail::matmul_vector(
+            backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+      std::fprintf(stdout, "%s.attn_out: matmul failed\n", layer_prefix.c_str());
+      return false;
+    }
+    dump_state_compare((layer_prefix + ".attn_out").c_str(),
+                       backend.projected,
+                       find_reference_tensor(graph_capture, ("attn_out-" + layer_suffix).c_str()));
+
+    for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+      backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+    }
+
+    if (!emel::generator::detail::rms_norm(
+            backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm)) {
+      std::fprintf(stdout, "%s.ffn_norm: rms_norm failed\n", layer_prefix.c_str());
+      return false;
+    }
+    dump_state_compare((layer_prefix + ".ffn_norm").c_str(),
+                       backend.norm,
+                       find_reference_tensor(graph_capture, ("ffn_norm-" + layer_suffix).c_str()));
+
+    if (!emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+        !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+      std::fprintf(stdout, "%s.ffn_gate_up: matmul failed\n", layer_prefix.c_str());
+      return false;
+    }
+    dump_state_compare((layer_prefix + ".ffn_gate").c_str(),
+                       backend.gate,
+                       find_reference_tensor(graph_capture, ("ffn_gate-" + layer_suffix).c_str()));
+    dump_state_compare((layer_prefix + ".ffn_up").c_str(),
+                       backend.up,
+                       find_reference_tensor(graph_capture, ("ffn_up-" + layer_suffix).c_str()));
+
+    for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+      backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+    }
+    dump_state_compare((layer_prefix + ".ffn_swiglu").c_str(),
+                       backend.ffn_hidden,
+                       find_reference_tensor(graph_capture, ("ffn_swiglu-" + layer_suffix).c_str()));
+
+    if (!emel::generator::detail::matmul_vector(
+            backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+      std::fprintf(stdout, "%s.ffn_down: matmul failed\n", layer_prefix.c_str());
+      return false;
+    }
+
+    for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+      backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+    }
+    dump_state_compare((layer_prefix + ".l_out").c_str(),
+                       backend.hidden,
+                       find_reference_tensor(graph_capture, ("l_out-" + layer_suffix).c_str()));
+    return true;
+  };
+
+  for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+    if (!compare_layer(layer)) {
+      return;
+    }
+  }
+
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, backend.output_norm, backend.rms_epsilon, backend.norm)) {
+    std::fprintf(stdout, "generation_debug.state.result_norm: rms_norm failed\n");
+    return;
+  }
+  dump_state_compare(
+      "generation_debug.state.result_norm",
+      backend.norm,
+      find_reference_tensor(graph_capture, "result_norm"));
+}
+
+double l2_norm_diff(std::span<const float> emel_values, std::span<const float> reference_values) {
+  if (emel_values.size() != reference_values.size()) {
+    return -1.0;
+  }
+
+  double square_sum = 0.0;
+  for (size_t idx = 0; idx < emel_values.size(); ++idx) {
+    const double diff = static_cast<double>(emel_values[idx]) -
+                        static_cast<double>(reference_values[idx]);
+    square_sum += diff * diff;
+  }
+  return std::sqrt(square_sum);
+}
+
+std::span<const float> reference_last_token_row(std::span<const float> reference_values,
+                                                const size_t row_width) {
+  if (row_width == 0 || reference_values.empty()) {
+    return {};
+  }
+  if (reference_values.size() == row_width) {
+    return reference_values;
+  }
+  if (reference_values.size() % row_width != 0) {
+    return {};
+  }
+
+  const size_t row_count = reference_values.size() / row_width;
+  const size_t row_offset = (row_count - 1u) * row_width;
+  return reference_values.subspan(row_offset, row_width);
+}
+
+void dump_generation_residual_l2_debug(const generation_load_state & state,
+                                       const emel::paritychecker::parity_options & opts,
+                                       const generation_result & emel_result,
+                                       const generation_result & reference_result) {
+  const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
+  const int32_t prefix_generated_tokens = std::min<int32_t>(12, token_mismatch_index);
+  if (state.model_data == nullptr || prefix_generated_tokens <= 0) {
+    return;
+  }
+
+  std::vector<llama_token> prompt_tokens;
+  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+    std::fprintf(stdout, "generation_debug.residual_l2: tokenize failed\n");
+    return;
+  }
+
+  std::vector<int32_t> prefix_tokens;
+  prefix_tokens.reserve(prompt_tokens.size() + static_cast<size_t>(prefix_generated_tokens));
+  for (const llama_token token : prompt_tokens) {
+    prefix_tokens.push_back(static_cast<int32_t>(token));
+  }
+  for (int32_t idx = 0; idx < prefix_generated_tokens; ++idx) {
+    prefix_tokens.push_back(reference_result.trace.token_ids[static_cast<size_t>(idx)]);
+  }
+  if (prefix_tokens.empty()) {
+    std::fprintf(stdout, "generation_debug.residual_l2: empty prefix\n");
+    return;
+  }
+
+  std::vector<llama_token> prefix_tokens_llama;
+  prefix_tokens_llama.reserve(prefix_tokens.size());
+  for (const int32_t token : prefix_tokens) {
+    prefix_tokens_llama.push_back(static_cast<llama_token>(token));
+  }
+
+  reference_graph_capture graph_capture = {};
+  if (!capture_reference_graph_for_tokens(state, prefix_tokens_llama, graph_capture)) {
+    std::fprintf(stdout, "generation_debug.residual_l2: reference graph capture failed\n");
+    return;
+  }
+
+  emel::generator::detail::native_backend backend = {};
+  if (emel::generator::detail::prepare(backend, *state.model_data) !=
+      emel::error::cast(emel::model::loader::error::none)) {
+    std::fprintf(stdout, "generation_debug.residual_l2: backend prepare failed\n");
+    return;
+  }
+
+  if (prefix_tokens.size() > 1u) {
+    const std::span<const int32_t> prior_tokens{prefix_tokens.data(), prefix_tokens.size() - 1u};
+    if (!run_prefill_from_token_prefix(backend, prior_tokens)) {
+      std::fprintf(stdout, "generation_debug.residual_l2: prior prefix replay failed\n");
+      return;
+    }
+  } else {
+    backend.kv_cache_tokens = 0;
+  }
+
+  const int32_t token_id = prefix_tokens.back();
+  const int32_t position = static_cast<int32_t>(prefix_tokens.size() - 1u);
+  if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
+    std::fprintf(stdout, "generation_debug.residual_l2: token embedding replay failed\n");
+    return;
+  }
+
+  std::fprintf(stdout,
+               "generation_debug.residual_l2: generated_prefix=%d total_prefix_tokens=%zu\n",
+               prefix_generated_tokens,
+               prefix_tokens.size());
+
+  for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+    auto & block = backend.blocks[static_cast<size_t>(layer)];
+    if (!emel::generator::detail::rms_norm(
+            backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
+        !emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+        !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+        !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+      std::fprintf(stdout, "generation_debug.residual_l2.layer%d: qkv prep failed\n", layer);
+      return;
+    }
+
+    emel::generator::detail::apply_rope(
+        backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+    emel::generator::detail::apply_rope(backend.k,
+                                        backend.n_head_kv,
+                                        backend.head_dim_kv,
+                                        backend.n_rot,
+                                        position,
+                                        backend.rope_freq_base);
+
+    const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+    const size_t cache_offset =
+        emel::generator::detail::layer_cache_offset(backend, layer, position, kv_dim);
+    std::copy(backend.k.begin(),
+              backend.k.begin() + kv_dim,
+              backend.key_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
+    std::copy(backend.v.begin(),
+              backend.v.begin() + kv_dim,
+              backend.value_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
+
+    if (!emel::generator::detail::compute_attention(backend, layer, position + 1, backend.q) ||
+        !emel::generator::detail::matmul_vector(
+            backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+      std::fprintf(stdout, "generation_debug.residual_l2.layer%d: attention failed\n", layer);
+      return;
+    }
+
+    for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+      backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+    }
+
+    if (!emel::generator::detail::rms_norm(
+            backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
+        !emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+        !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+      std::fprintf(stdout, "generation_debug.residual_l2.layer%d: ffn gate/up failed\n", layer);
+      return;
+    }
+
+    for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+      backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+    }
+    if (!emel::generator::detail::matmul_vector(
+            backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+      std::fprintf(stdout, "generation_debug.residual_l2.layer%d: ffn down failed\n", layer);
+      return;
+    }
+
+    for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+      backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+    }
+
+    const std::string key = "l_out-" + std::to_string(layer);
+    const std::span<const float> reference_hidden =
+        reference_last_token_row(find_reference_tensor(graph_capture, key.c_str()), backend.hidden.size());
+    const double l2 = l2_norm_diff(backend.hidden, reference_hidden);
+    std::fprintf(stdout,
+                 "generation_debug.residual_l2.layer%d: l2=%g\n",
+                 layer,
+                 l2);
+  }
+}
+
 const char * kernel_kind_name(const emel::kernel::kernel_kind kind) {
   switch (kind) {
     case emel::kernel::kernel_kind::x86_64:
@@ -2373,6 +3133,32 @@ void dump_generation_failure_surface(generation_load_state & state,
   }
   if (reference_result != nullptr) {
     dump_generation_result("reference", *reference_result);
+  }
+  if (emel_result != nullptr && reference_result != nullptr) {
+    const int32_t token_mismatch_index = first_token_mismatch_index(*emel_result, *reference_result);
+    const bool have_emel_token =
+        token_mismatch_index >= 0 && token_mismatch_index < emel_result->trace.token_count;
+    const bool have_reference_token =
+        token_mismatch_index >= 0 && token_mismatch_index < reference_result->trace.token_count;
+    std::fprintf(stdout,
+                 "generation_trace: emel_tokens=%d reference_tokens=%d first_token_mismatch=%d\n",
+                 emel_result->trace.token_count,
+                 reference_result->trace.token_count,
+                 token_mismatch_index);
+    if (have_emel_token && have_reference_token) {
+      std::fprintf(stdout,
+                   "generation_trace.mismatch: emel_token=%d emel_gap=%g reference_token=%d "
+                   "reference_gap=%g\n",
+                   emel_result->trace.token_ids[static_cast<size_t>(token_mismatch_index)],
+                   emel_result->trace.top_score_gaps[static_cast<size_t>(token_mismatch_index)],
+                   reference_result->trace.token_ids[static_cast<size_t>(token_mismatch_index)],
+                   reference_result->trace.top_score_gaps[static_cast<size_t>(token_mismatch_index)]);
+      dump_generation_trace_window("emel", state.backend, *emel_result, token_mismatch_index);
+      dump_generation_trace_window("reference", state.backend, *reference_result, token_mismatch_index);
+    }
+    dump_scalar_attention_debug(state, opts, *emel_result, *reference_result);
+    dump_generation_residual_l2_debug(state, opts, *emel_result, *reference_result);
+    dump_generation_prefix_state_debug(state, opts, *emel_result, *reference_result);
   }
   if (opts.dump && reference_result != nullptr) {
     dump_generation_tensor_compare(state, opts);
@@ -3719,7 +4505,11 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   reset_reference_decode_seam(state.backend);
   generation_result emel_result{};
   const emel::error::type generation_err =
-      run_emel_generate(state, opts, std::span<char>{emel_result.output}, emel_result.output_length);
+      run_emel_generate(state,
+                        opts,
+                        std::span<char>{emel_result.output},
+                        emel_result.output_length,
+                        emel_result.trace);
   if (generation_err != emel::error::cast(emel::generator::error::none)) {
     std::fprintf(stderr,
                  "generation error (fixture=%s err=%s generated_tokens=%d output_bytes=%zu)\n",
