@@ -176,31 +176,6 @@ inline float * tensor_row_ptr_mut(const tensor_type & tensor,
   return reinterpret_cast<float *>(base + row1 * tensor.nb[1] + row2 * tensor.nb[2]);
 }
 
-inline float dot_product_f32_neon(const float * lhs, const float * rhs, const uint64_t count) noexcept {
-#if !defined(__aarch64__) && !defined(__ARM_NEON)
-  (void) lhs;
-  (void) rhs;
-  (void) count;
-  return 0.0f;
-#else
-  float sum = 0.0f;
-  uint64_t idx = 0;
-  for (; idx + 4 <= count; idx += 4) {
-    const float32x4_t lhs_v = vld1q_f32(lhs + idx);
-    const float32x4_t rhs_v = vld1q_f32(rhs + idx);
-    const float32x4_t prod_v = vmulq_f32(lhs_v, rhs_v);
-    sum += vgetq_lane_f32(prod_v, 0);
-    sum += vgetq_lane_f32(prod_v, 1);
-    sum += vgetq_lane_f32(prod_v, 2);
-    sum += vgetq_lane_f32(prod_v, 3);
-  }
-  for (; idx < count; ++idx) {
-    sum += lhs[idx] * rhs[idx];
-  }
-  return sum;
-#endif
-}
-
 inline void scale_f32_neon(float * data, const float scale, const uint64_t count) noexcept {
 #if defined(__aarch64__) || defined(__ARM_NEON)
   const float32x4_t scale_v = vdupq_n_f32(scale);
@@ -274,7 +249,8 @@ inline bool run_flash_attn_ext_neon(const request_type & request,
     float max_score = -INFINITY;
     for (uint64_t token = 0; token < kv_tokens; ++token) {
       const float * k = tensor_row_ptr(request.src1, token, kv_head);
-      const float score = dot_product_f32_neon(q, k, head_dim) * scale;
+      const float score =
+          ::emel::kernel::detail::dot_product_ggml_f16_scores(q, k, head_dim) * scale;
       workspace.score_buffer[static_cast<size_t>(token)] = score;
       max_score = std::max(max_score, score);
     }

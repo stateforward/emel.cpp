@@ -702,12 +702,11 @@ inline bool compute_attention(native_backend & backend,
     for (int32_t position = 0; position < position_limit; ++position) {
       const size_t cache_offset =
           layer_cache_offset(backend, layer_index, position, kv_dim) + kv_offset;
-      float score = 0.0f;
-      for (int32_t dim = 0; dim < head_dim; ++dim) {
-        score += q_vector[q_offset + static_cast<size_t>(dim)] *
-                 backend.key_cache[cache_offset + static_cast<size_t>(dim)];
-      }
-      score *= inv_scale;
+      const float score = emel::kernel::detail::dot_product_ggml_f16_scores(
+          q_vector.data() + static_cast<std::ptrdiff_t>(q_offset),
+          backend.key_cache.data() + static_cast<std::ptrdiff_t>(cache_offset),
+          static_cast<uint64_t>(head_dim)) *
+          inv_scale;
       backend.attn_scores[static_cast<size_t>(position)] = score;
       max_score = std::max(max_score, score);
     }

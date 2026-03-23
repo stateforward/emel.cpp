@@ -8,6 +8,10 @@
 #include <cstring>
 #include <type_traits>
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 // Keep this list aligned with `tmp/llama.cpp/ggml/include/ggml.h` (`enum ggml_op`),
 // excluding sentinel entries (`NONE`, `COUNT`).
 #define EMEL_KERNEL_OP_EVENT_LIST(X) \
@@ -661,6 +665,60 @@ inline void write_f32_at(const tensor_type & tensor, const uint64_t i0, const ui
   char * base = static_cast<char *>(tensor.data);
   const size_t offset = tensor_offset_bytes(tensor, i0, i1, i2, i3);
   std::memcpy(base + offset, &value, sizeof(value));
+}
+
+template <class tensor_type>
+inline const float * tensor_row_ptr(const tensor_type & tensor,
+                                    const uint64_t row1,
+                                    const uint64_t row2) noexcept {
+  const auto * base = static_cast<const char *>(tensor.data);
+  return reinterpret_cast<const float *>(base + row1 * tensor.nb[1] + row2 * tensor.nb[2]);
+}
+
+inline float dot_product_ggml_f16_scores(const float * lhs,
+                                         const float * rhs,
+                                         const uint64_t count) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+  auto load_f16x8 = [](const float * src) noexcept {
+    const float16x4_t low = vcvt_f16_f32(vld1q_f32(src));
+    const float16x4_t high = vcvt_f16_f32(vld1q_f32(src + 4u));
+    return vcombine_f16(low, high);
+  };
+
+  float16x8_t sum0 = vdupq_n_f16(0.0f);
+  float16x8_t sum1 = vdupq_n_f16(0.0f);
+  float16x8_t sum2 = vdupq_n_f16(0.0f);
+  float16x8_t sum3 = vdupq_n_f16(0.0f);
+  uint64_t idx = 0u;
+  for (; idx + 32u <= count; idx += 32u) {
+    sum0 = vfmaq_f16(sum0, load_f16x8(lhs + idx), load_f16x8(rhs + idx));
+    sum1 = vfmaq_f16(sum1, load_f16x8(lhs + idx + 8u), load_f16x8(rhs + idx + 8u));
+    sum2 = vfmaq_f16(sum2, load_f16x8(lhs + idx + 16u), load_f16x8(rhs + idx + 16u));
+    sum3 = vfmaq_f16(sum3, load_f16x8(lhs + idx + 24u), load_f16x8(rhs + idx + 24u));
+  }
+
+  sum0 = vaddq_f16(sum0, sum2);
+  sum1 = vaddq_f16(sum1, sum3);
+  sum0 = vaddq_f16(sum0, sum1);
+
+  const float32x4_t low = vcvt_f32_f16(vget_low_f16(sum0));
+  const float32x4_t high = vcvt_f32_f16(vget_high_f16(sum0));
+  float sum = vaddvq_f32(vaddq_f32(low, high));
+  for (; idx < count; ++idx) {
+    sum += quant::fp16_to_fp32(quant::fp32_to_fp16(lhs[idx])) *
+           quant::fp16_to_fp32(quant::fp32_to_fp16(rhs[idx]));
+  }
+  return sum;
+#endif
+#endif
+
+  float scalar_sum = 0.0f;
+  for (uint64_t idx = 0u; idx < count; ++idx) {
+    scalar_sum += quant::fp16_to_fp32(quant::fp32_to_fp16(lhs[idx])) *
+                  quant::fp16_to_fp32(quant::fp32_to_fp16(rhs[idx]));
+  }
+  return scalar_sum;
 }
 
 template <class request_type>
@@ -1455,15 +1513,12 @@ inline bool run_flash_attn_ext(const request_type & request) noexcept {
 
   for (uint64_t head = 0; head < head_count; ++head) {
     const uint64_t kv_head = head / n_rep;
+    const float * q = tensor_row_ptr(request.src0, 0u, head);
     float max_score = -INFINITY;
 
     for (uint64_t token = 0; token < kv_tokens; ++token) {
-      float score = 0.0f;
-      for (uint64_t dim = 0; dim < head_dim; ++dim) {
-        score += read_f32_at(request.src0, dim, 0, head) *
-                 read_f32_at(request.src1, dim, token, kv_head);
-      }
-      score *= scale;
+      const float * k = tensor_row_ptr(request.src1, token, kv_head);
+      const float score = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
       max_score = std::max(max_score, score);
     }
 
@@ -1473,21 +1528,15 @@ inline bool run_flash_attn_ext(const request_type & request) noexcept {
     }
 
     for (uint64_t token = 0; token < kv_tokens; ++token) {
-      float score = 0.0f;
-      for (uint64_t dim = 0; dim < head_dim; ++dim) {
-        score += read_f32_at(request.src0, dim, 0, head) *
-                 read_f32_at(request.src1, dim, token, kv_head);
-      }
-      denom += std::exp(score * scale - max_score);
+      const float * k = tensor_row_ptr(request.src1, token, kv_head);
+      const float score = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
+      denom += std::exp(score - max_score);
     }
 
     for (uint64_t token = 0; token < kv_tokens; ++token) {
-      float score = 0.0f;
-      for (uint64_t dim = 0; dim < head_dim; ++dim) {
-        score += read_f32_at(request.src0, dim, 0, head) *
-                 read_f32_at(request.src1, dim, token, kv_head);
-      }
-      const float weight = std::exp(score * scale - max_score) / denom;
+      const float * k = tensor_row_ptr(request.src1, token, kv_head);
+      const float score = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
+      const float weight = std::exp(score - max_score) / denom;
       for (uint64_t dim = 0; dim < head_dim; ++dim) {
         const float value = read_f32_at(request.dst, dim, 0, head) +
             weight * read_f32_at(request.src2, dim, token, kv_head);
@@ -1525,15 +1574,12 @@ inline bool run_flash_attn_ext_with_workspace(const request_type & request,
 
   for (uint64_t head = 0; head < head_count; ++head) {
     const uint64_t kv_head = head / n_rep;
+    const float * q = tensor_row_ptr(request.src0, 0u, head);
     float max_score = -INFINITY;
 
     for (uint64_t token = 0; token < kv_tokens; ++token) {
-      float score = 0.0f;
-      for (uint64_t dim = 0; dim < head_dim; ++dim) {
-        score += read_f32_at(request.src0, dim, 0, head) *
-                 read_f32_at(request.src1, dim, token, kv_head);
-      }
-      score *= scale;
+      const float * k = tensor_row_ptr(request.src1, token, kv_head);
+      const float score = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
       workspace.score_buffer[static_cast<size_t>(token)] = score;
       max_score = std::max(max_score, score);
     }
