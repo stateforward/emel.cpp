@@ -54,6 +54,7 @@
 #include "llama.h"
 #include "llama-context.h"
 #include "llama-kv-cache.h"
+#include "llama-model.h"
 #include "llama-grammar.h"
 #include "llama-vocab.h"
 
@@ -1955,6 +1956,11 @@ bool run_reference_prefix_decode(llama_context * ctx,
                                  std::span<const llama_token> prompt_tokens,
                                  std::span<const int32_t> generated_tokens);
 
+void dump_candidate_logits_compare(const char * label,
+                                   const emel::generator::detail::native_backend & backend,
+                                   const int32_t token_a,
+                                   const int32_t token_b);
+
 void dump_scalar_attention_debug(const generation_load_state & state,
                                  const emel::paritychecker::parity_options & opts,
                                  const generation_result & emel_result,
@@ -2025,6 +2031,24 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   const int32_t emel_token = emel_result.trace.token_ids[static_cast<size_t>(token_mismatch_index)];
   const int32_t reference_token =
       reference_result.trace.token_ids[static_cast<size_t>(token_mismatch_index)];
+  if (state.backend.model != nullptr && state.backend.model->layers.size() >= 2) {
+    for (int32_t layer = 0; layer < 2; ++layer) {
+      const auto & ref_layer = state.backend.model->layers[static_cast<size_t>(layer)];
+      std::fprintf(stdout,
+                   "generation_debug.reference.layer%d.transforms: bo=%d wo_s=%d "
+                   "ffn_gate_b=%d ffn_up_b=%d ffn_down_b=%d "
+                   "ffn_gate_s=%d ffn_up_s=%d ffn_down_s=%d\n",
+                   layer,
+                   ref_layer.bo != nullptr ? 1 : 0,
+                   ref_layer.wo_s != nullptr ? 1 : 0,
+                   ref_layer.ffn_gate_b != nullptr ? 1 : 0,
+                   ref_layer.ffn_up_b != nullptr ? 1 : 0,
+                   ref_layer.ffn_down_b != nullptr ? 1 : 0,
+                   ref_layer.ffn_gate_s != nullptr ? 1 : 0,
+                   ref_layer.ffn_up_s != nullptr ? 1 : 0,
+                   ref_layer.ffn_down_s != nullptr ? 1 : 0);
+    }
+  }
   const argmax_summary dispatch_summary =
       select_argmax_from_logits(dispatch_backend.bound_logits.data(), dispatch_backend.n_vocab);
   const argmax_summary scalar_summary =
@@ -2116,6 +2140,10 @@ void dump_scalar_attention_debug(const generation_load_state & state,
                ffn_exact_backend.bound_logits[static_cast<size_t>(reference_token)],
                output_exact_backend.bound_logits[static_cast<size_t>(emel_token)],
                output_exact_backend.bound_logits[static_cast<size_t>(reference_token)]);
+  dump_candidate_logits_compare(
+      "generation_debug.flash.dispatch_output", dispatch_backend, emel_token, reference_token);
+  dump_candidate_logits_compare(
+      "generation_debug.flash.output_exact", output_exact_backend, emel_token, reference_token);
 
   llama_context_ptr reference_ctx =
       make_reference_context(const_cast<initialize_backend &>(state.backend));
@@ -2299,6 +2327,82 @@ float ggml_row_dot_reference_q8(const emel::generator::detail::tensor_matrix & m
     default:
       return std::numeric_limits<float>::quiet_NaN();
   }
+}
+
+float dequantized_row_dot(const emel::generator::detail::tensor_matrix & matrix,
+                          const uint32_t row,
+                          std::span<const float> input) {
+  if (matrix.tensor == nullptr ||
+      row >= static_cast<uint32_t>(matrix.rows) ||
+      static_cast<size_t>(matrix.cols) != input.size()) {
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+
+  std::vector<float> weights(static_cast<size_t>(matrix.cols));
+  if (!emel::generator::detail::copy_tensor_row(*matrix.tensor, static_cast<int32_t>(row), weights)) {
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+
+  double sum = 0.0;
+  for (int32_t idx = 0; idx < matrix.cols; ++idx) {
+    sum += static_cast<double>(weights[static_cast<size_t>(idx)]) *
+           static_cast<double>(input[static_cast<size_t>(idx)]);
+  }
+  return static_cast<float>(sum);
+}
+
+void dump_candidate_logits_compare(const char * label,
+                                   const emel::generator::detail::native_backend & backend,
+                                   const int32_t token_a,
+                                   const int32_t token_b) {
+  if (backend.output.tensor == nullptr ||
+      backend.output.rows <= 0 ||
+      backend.output.cols <= 0 ||
+      static_cast<size_t>(backend.output.cols) != backend.norm.size() ||
+      token_a < 0 ||
+      token_b < 0 ||
+      token_a >= backend.output.rows ||
+      token_b >= backend.output.rows) {
+    std::fprintf(stdout, "%s: unavailable\n", label);
+    return;
+  }
+
+  std::array<kernel_quant::block_q8_k, kernel_quant::MAX_Q8_K_BLOCKS> emel_q8 = {};
+  std::array<reference_block_q8_k, kernel_quant::MAX_Q8_K_BLOCKS> reference_q8 = {};
+  uint64_t emel_q8_blocks = 0;
+  uint64_t reference_q8_blocks = 0;
+  if (!quantize_input_blocks(backend.norm, emel_q8, emel_q8_blocks) ||
+      !quantize_input_blocks_reference(backend.norm, reference_q8, reference_q8_blocks) ||
+      emel_q8_blocks != reference_q8_blocks) {
+    std::fprintf(stdout, "%s: q8 quantize failed\n", label);
+    return;
+  }
+
+  const auto dump_token = [&](const char * token_label, const int32_t token_id) {
+    const float emel_logit = backend.bound_logits[static_cast<size_t>(token_id)];
+    const float ggml_emel_q8 = ggml_row_dot(
+        backend.output, static_cast<uint32_t>(token_id), emel_q8.data(), emel_q8_blocks);
+    const float ggml_reference_q8 = ggml_row_dot_reference_q8(
+        backend.output, static_cast<uint32_t>(token_id), reference_q8.data(), reference_q8_blocks);
+    const float exact = dequantized_row_dot(
+        backend.output, static_cast<uint32_t>(token_id), backend.norm);
+    std::fprintf(stdout,
+                 "%s.%s: token=%d dtype=%u emel=%g ggml_emel_q8=%g ggml_reference_q8=%g "
+                 "exact=%g emel_delta=%g exact_delta=%g\n",
+                 label,
+                 token_label,
+                 token_id,
+                 static_cast<unsigned>(backend.output.tensor->type),
+                 emel_logit,
+                 ggml_emel_q8,
+                 ggml_reference_q8,
+                 exact,
+                 emel_logit - ggml_emel_q8,
+                 ggml_emel_q8 - exact);
+  };
+
+  dump_token("candidate_a", token_a);
+  dump_token("candidate_b", token_b);
 }
 
 void dump_q8_quantize_compare(const char * label, std::span<const float> input) {
@@ -2560,30 +2664,36 @@ struct reference_tensor_capture {
 };
 
 struct reference_graph_capture {
-  std::array<reference_tensor_capture, 25> entries = {{
+  std::array<reference_tensor_capture, 31> entries = {{
       {"attn_norm-0", {}},
       {"Qcur-0", {}},
       {"Kcur-0", {}},
       {"Vcur-0", {}},
       {"kq_soft_max-0", {}},
+      {"kqv-0", {}},
       {"kqv_out-0", {}},
       {"attn_out-0", {}},
+      {"ffn_inp-0", {}},
       {"ffn_norm-0", {}},
       {"ffn_gate-0", {}},
       {"ffn_up-0", {}},
       {"ffn_swiglu-0", {}},
+      {"ffn_out-0", {}},
       {"l_out-0", {}},
       {"attn_norm-1", {}},
       {"Qcur-1", {}},
       {"Kcur-1", {}},
       {"Vcur-1", {}},
       {"kq_soft_max-1", {}},
+      {"kqv-1", {}},
       {"kqv_out-1", {}},
       {"attn_out-1", {}},
+      {"ffn_inp-1", {}},
       {"ffn_norm-1", {}},
       {"ffn_gate-1", {}},
       {"ffn_up-1", {}},
       {"ffn_swiglu-1", {}},
+      {"ffn_out-1", {}},
       {"l_out-1", {}},
       {"result_norm", {}},
   }};
@@ -3003,6 +3113,38 @@ std::span<const float> reference_token_head_slice(const reference_tensor_capture
 std::span<const float> reference_token_tensor_slice(const reference_tensor_capture & capture,
                                                     const int32_t token_index);
 
+std::vector<float> reference_attention_context_slice(const reference_tensor_capture & capture,
+                                                     const int32_t query_index,
+                                                     const int32_t head_count,
+                                                     const int32_t head_dim) {
+  const int64_t ne0 = std::max<int64_t>(capture.shape[0], 1);
+  const int64_t ne1 = std::max<int64_t>(capture.shape[1], 1);
+  const int64_t ne2 = std::max<int64_t>(capture.shape[2], 1);
+  if (query_index < 0 ||
+      head_count < 0 ||
+      head_dim < 0 ||
+      ne0 != head_dim ||
+      ne1 <= query_index ||
+      ne2 != head_count) {
+    return {};
+  }
+
+  std::vector<float> out(static_cast<size_t>(head_count) * static_cast<size_t>(head_dim), 0.0f);
+  for (int32_t head = 0; head < head_count; ++head) {
+    const size_t capture_offset =
+        ((static_cast<size_t>(head) * static_cast<size_t>(ne1)) + static_cast<size_t>(query_index)) *
+        static_cast<size_t>(ne0);
+    const size_t out_offset = static_cast<size_t>(head) * static_cast<size_t>(head_dim);
+    if (capture_offset + static_cast<size_t>(head_dim) > capture.values.size()) {
+      return {};
+    }
+    std::copy_n(capture.values.data() + static_cast<std::ptrdiff_t>(capture_offset),
+                static_cast<size_t>(head_dim),
+                out.data() + static_cast<std::ptrdiff_t>(out_offset));
+  }
+  return out;
+}
+
 bool compute_attention_with_softmax_debug(emel::generator::detail::native_backend & backend,
                                           const reference_graph_capture & graph_capture,
                                           const int32_t layer_index,
@@ -3024,6 +3166,9 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
   const std::string value_key = "Vcur-" + std::to_string(layer_index);
   const reference_tensor_capture * value_capture =
       find_reference_capture(graph_capture, value_key.c_str());
+  const std::string raw_ctx_key = "kqv-" + std::to_string(layer_index);
+  const reference_tensor_capture * raw_ctx_capture =
+      find_reference_capture(graph_capture, raw_ctx_key.c_str());
   const std::string ctx_key = "kqv_out-" + std::to_string(layer_index);
   const reference_tensor_capture * ctx_capture =
       find_reference_capture(graph_capture, ctx_key.c_str());
@@ -3034,6 +3179,11 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
   std::vector<float> ctx_reference_values(backend.attn_ctx.size(), 0.0f);
   std::vector<float> ctx_emel_ggml_f16_dot(backend.attn_ctx.size(), 0.0f);
   std::vector<float> ctx_reference_all_ggml_f16_dot(backend.attn_ctx.size(), 0.0f);
+  const std::vector<float> raw_reference_ctx =
+      raw_ctx_capture != nullptr
+          ? reference_attention_context_slice(
+                *raw_ctx_capture, 0, head_count, head_dim)
+          : std::vector<float>{};
 
   float max_abs = 0.0f;
   int32_t max_head = 0;
@@ -3296,6 +3446,51 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
                  ctx_capture->shape[2],
                  ctx_capture->shape[3]);
   }
+  if (raw_ctx_capture != nullptr) {
+    std::fprintf(stdout,
+                 "%s.kqv_raw_shape: ne=[%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "]\n",
+                 layer_prefix.c_str(),
+                 raw_ctx_capture->shape[0],
+                 raw_ctx_capture->shape[1],
+                 raw_ctx_capture->shape[2],
+                 raw_ctx_capture->shape[3]);
+  }
+  const std::string attn_out_key = "attn_out-" + std::to_string(layer_index);
+  const reference_tensor_capture * attn_out_capture =
+      find_reference_capture(graph_capture, attn_out_key.c_str());
+  if (attn_out_capture != nullptr) {
+    std::fprintf(stdout,
+                 "%s.attn_out_shape: ne=[%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "]\n",
+                 layer_prefix.c_str(),
+                 attn_out_capture->shape[0],
+                 attn_out_capture->shape[1],
+                 attn_out_capture->shape[2],
+                 attn_out_capture->shape[3]);
+  }
+  const std::string ffn_inp_key = "ffn_inp-" + std::to_string(layer_index);
+  const reference_tensor_capture * ffn_inp_capture =
+      find_reference_capture(graph_capture, ffn_inp_key.c_str());
+  if (ffn_inp_capture != nullptr) {
+    std::fprintf(stdout,
+                 "%s.ffn_inp_shape: ne=[%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "]\n",
+                 layer_prefix.c_str(),
+                 ffn_inp_capture->shape[0],
+                 ffn_inp_capture->shape[1],
+                 ffn_inp_capture->shape[2],
+                 ffn_inp_capture->shape[3]);
+  }
+  const std::string ffn_out_key = "ffn_out-" + std::to_string(layer_index);
+  const reference_tensor_capture * ffn_out_capture =
+      find_reference_capture(graph_capture, ffn_out_key.c_str());
+  if (ffn_out_capture != nullptr) {
+    std::fprintf(stdout,
+                 "%s.ffn_out_shape: ne=[%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "]\n",
+                 layer_prefix.c_str(),
+                 ffn_out_capture->shape[0],
+                 ffn_out_capture->shape[1],
+                 ffn_out_capture->shape[2],
+                 ffn_out_capture->shape[3]);
+  }
 
   if (!reference_ctx.empty()) {
     auto dump_ctx_variant = [&](const char * suffix, std::span<const float> values) {
@@ -3324,6 +3519,9 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
     dump_ctx_variant("kqv_out_from_reference_all_ggml_f16_dot", ctx_reference_all_ggml_f16_dot);
     dump_ctx_variant("kqv_out_from_reference_probs", ctx_reference_probs);
     dump_ctx_variant("kqv_out_from_reference_values", ctx_reference_values);
+    if (!raw_reference_ctx.empty()) {
+      dump_ctx_variant("kqv_raw", raw_reference_ctx);
+    }
   }
 
   if (position_limit == 1 && backend.n_head == backend.n_head_kv &&
@@ -3945,6 +4143,9 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
     for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
       backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
     }
+    dump_state_compare((layer_prefix + ".ffn_inp").c_str(),
+                       backend.hidden,
+                       find_reference_tensor(graph_capture, ("ffn_inp-" + layer_suffix).c_str()));
 
     if (!emel::generator::detail::rms_norm(
             backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm)) {
@@ -4005,6 +4206,9 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
       std::fprintf(stdout, "%s.ffn_down: matmul failed\n", layer_prefix.c_str());
       return false;
     }
+    dump_state_compare((layer_prefix + ".ffn_out").c_str(),
+                       backend.projected,
+                       find_reference_tensor(graph_capture, ("ffn_out-" + layer_suffix).c_str()));
 
     for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
       backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
