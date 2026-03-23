@@ -60,6 +60,15 @@
 #undef QK_K
 
 extern "C" {
+void ggml_vec_dot_f16(
+    int n,
+    float * s,
+    size_t bs,
+    ggml_fp16_t * x,
+    size_t bx,
+    ggml_fp16_t * y,
+    size_t by,
+    int nrc);
 void ggml_vec_dot_q2_K_q8_K(
     int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
 void ggml_vec_dot_q3_K_q8_K(
@@ -1761,6 +1770,9 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
                                       backend.n_rot,
                                       position,
                                       backend.rope_freq_base);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
 
   const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
   const size_t cache_offset =
@@ -1772,7 +1784,8 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
       std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
       backend.value_cache.data() + cache_offset);
 
-  if (!emel::generator::detail::compute_attention(backend, layer_index, position + 1, backend.q) ||
+  if (!emel::generator::detail::compute_attention(
+          backend, layer_index, position + 1, backend.q_attn) ||
       !matmul_vector_mode(
           backend, block.attention_output, backend.attn_ctx, backend.projected, mode.attention)) {
     return false;
@@ -1859,6 +1872,9 @@ bool run_layer_with_scalar_attention(emel::generator::detail::native_backend & b
                                       backend.n_rot,
                                       position,
                                       backend.rope_freq_base);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
 
   const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
   const size_t cache_offset =
@@ -1870,7 +1886,8 @@ bool run_layer_with_scalar_attention(emel::generator::detail::native_backend & b
       std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
       backend.value_cache.data() + cache_offset);
 
-  if (!emel::generator::detail::compute_attention(backend, layer_index, position + 1, backend.q) ||
+  if (!emel::generator::detail::compute_attention(
+          backend, layer_index, position + 1, backend.q_attn) ||
       !emel::generator::detail::matmul_vector(backend, block.attention_output, backend.attn_ctx, backend.projected)) {
     return false;
   }
@@ -3008,11 +3025,15 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
   const reference_tensor_capture * value_capture =
       find_reference_capture(graph_capture, value_key.c_str());
   const std::string ctx_key = "kqv_out-" + std::to_string(layer_index);
+  const reference_tensor_capture * ctx_capture =
+      find_reference_capture(graph_capture, ctx_key.c_str());
   const std::span<const float> reference_ctx = reference_last_token_row(
       find_reference_tensor(graph_capture, ctx_key.c_str()), backend.attn_ctx.size());
 
   std::vector<float> ctx_reference_probs(backend.attn_ctx.size(), 0.0f);
   std::vector<float> ctx_reference_values(backend.attn_ctx.size(), 0.0f);
+  std::vector<float> ctx_emel_ggml_f16_dot(backend.attn_ctx.size(), 0.0f);
+  std::vector<float> ctx_reference_all_ggml_f16_dot(backend.attn_ctx.size(), 0.0f);
 
   float max_abs = 0.0f;
   int32_t max_head = 0;
@@ -3064,6 +3085,8 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
     const int32_t kv_head = head / backend.n_rep;
     const size_t q_offset = static_cast<size_t>(head) * static_cast<size_t>(head_dim);
     const size_t kv_offset = static_cast<size_t>(kv_head) * static_cast<size_t>(kv_head_dim);
+    std::vector<ggml_fp16_t> emel_weight_f16(static_cast<size_t>(position_limit));
+    std::vector<ggml_fp16_t> reference_weight_f16(static_cast<size_t>(position_limit));
 
     float max_score = -std::numeric_limits<float>::infinity();
     for (int32_t position = 0; position < position_limit; ++position) {
@@ -3072,7 +3095,7 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
           kv_offset;
       float score = 0.0f;
       for (int32_t dim = 0; dim < head_dim; ++dim) {
-        score += backend.q[q_offset + static_cast<size_t>(dim)] *
+        score += backend.q_attn[q_offset + static_cast<size_t>(dim)] *
                  backend.key_cache[cache_offset + static_cast<size_t>(dim)];
       }
       score *= inv_scale;
@@ -3099,6 +3122,9 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
           static_cast<size_t>(position) < reference_probs.size()
               ? reference_probs[static_cast<size_t>(position)]
               : weight;
+      emel_weight_f16[static_cast<size_t>(position)] = kernel_quant::fp32_to_fp16(weight);
+      reference_weight_f16[static_cast<size_t>(position)] =
+          kernel_quant::fp32_to_fp16(reference_weight);
 
       if (static_cast<size_t>(position) < reference_probs.size()) {
         const float diff = std::fabs(weight - reference_probs[static_cast<size_t>(position)]);
@@ -3145,6 +3171,55 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
         }
       }
     }
+
+    std::vector<ggml_fp16_t> emel_value_f16(static_cast<size_t>(position_limit));
+    std::vector<ggml_fp16_t> reference_value_f16(static_cast<size_t>(position_limit));
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
+      bool have_reference_value_dim = true;
+      for (int32_t position = 0; position < position_limit; ++position) {
+        const size_t cache_offset =
+            emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim) +
+            kv_offset;
+        emel_value_f16[static_cast<size_t>(position)] = kernel_quant::fp32_to_fp16(
+            backend.value_cache[cache_offset + static_cast<size_t>(dim)]);
+        const std::span<const float> reference_value =
+            have_reference_value_cache
+                ? reference_value_cache_rows.subspan(
+                      static_cast<size_t>(position) * static_cast<size_t>(kv_dim) + kv_offset,
+                      static_cast<size_t>(head_dim))
+                : value_capture != nullptr
+                      ? reference_token_head_slice(*value_capture, position, kv_head)
+                      : std::span<const float>{};
+        if (static_cast<size_t>(dim) < reference_value.size()) {
+          reference_value_f16[static_cast<size_t>(position)] =
+              kernel_quant::fp32_to_fp16(reference_value[static_cast<size_t>(dim)]);
+        } else {
+          have_reference_value_dim = false;
+        }
+      }
+      float dot = 0.0f;
+      ggml_vec_dot_f16(position_limit,
+                       &dot,
+                       0u,
+                       emel_value_f16.data(),
+                       0u,
+                       emel_weight_f16.data(),
+                       0u,
+                       1);
+      ctx_emel_ggml_f16_dot[q_offset + static_cast<size_t>(dim)] = dot;
+      if (have_reference_value_dim) {
+        float reference_dot = 0.0f;
+        ggml_vec_dot_f16(position_limit,
+                         &reference_dot,
+                         0u,
+                         reference_value_f16.data(),
+                         0u,
+                         reference_weight_f16.data(),
+                         0u,
+                         1);
+        ctx_reference_all_ggml_f16_dot[q_offset + static_cast<size_t>(dim)] = reference_dot;
+      }
+    }
   }
 
   if (!have_reference_value_cache && value_capture == nullptr) {
@@ -3180,6 +3255,46 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
                  max_pos,
                  emel_at_max,
                  reference_at_max);
+    std::fprintf(stdout,
+                 "%s.kq_soft_max_shape: ne=[%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "]\n",
+                 layer_prefix.c_str(),
+                 softmax_capture->shape[0],
+                 softmax_capture->shape[1],
+                 softmax_capture->shape[2],
+                 softmax_capture->shape[3]);
+    if (softmax_capture->shape[0] > position_limit) {
+      float tail_max = 0.0f;
+      int32_t tail_head = 0;
+      int32_t tail_pos = position_limit;
+      for (int32_t head = 0; head < head_count; ++head) {
+        const std::span<const float> reference_probs =
+            reference_softmax_query_head_slice(*softmax_capture, head, position_limit - 1);
+        for (int32_t pos = position_limit; pos < static_cast<int32_t>(reference_probs.size()); ++pos) {
+          const float value = std::fabs(reference_probs[static_cast<size_t>(pos)]);
+          if (value > tail_max) {
+            tail_max = value;
+            tail_head = head;
+            tail_pos = pos;
+          }
+        }
+      }
+      std::fprintf(stdout,
+                   "%s.kq_soft_max_tail: max_abs=%g head=%d pos=%d\n",
+                   layer_prefix.c_str(),
+                   tail_max,
+                   tail_head,
+                   tail_pos);
+    }
+  }
+
+  if (ctx_capture != nullptr) {
+    std::fprintf(stdout,
+                 "%s.kqv_out_shape: ne=[%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "]\n",
+                 layer_prefix.c_str(),
+                 ctx_capture->shape[0],
+                 ctx_capture->shape[1],
+                 ctx_capture->shape[2],
+                 ctx_capture->shape[3]);
   }
 
   if (!reference_ctx.empty()) {
@@ -3205,6 +3320,8 @@ bool compute_attention_with_softmax_debug(emel::generator::detail::native_backen
     };
 
     dump_ctx_variant("kqv_out_from_emel", backend.attn_ctx);
+    dump_ctx_variant("kqv_out_from_emel_ggml_f16_dot", ctx_emel_ggml_f16_dot);
+    dump_ctx_variant("kqv_out_from_reference_all_ggml_f16_dot", ctx_reference_all_ggml_f16_dot);
     dump_ctx_variant("kqv_out_from_reference_probs", ctx_reference_probs);
     dump_ctx_variant("kqv_out_from_reference_values", ctx_reference_values);
   }
@@ -3491,13 +3608,18 @@ void dump_generation_tensor_compare(generation_load_state & state,
         backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
     emel::generator::detail::apply_rope(
         backend.k, backend.n_head_kv, backend.head_dim_kv, backend.n_rot, position, backend.rope_freq_base);
+    emel::generator::detail::store_fp16_rounded_cache(
+        std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+        backend.q_attn.data());
 
     const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
     const size_t cache_offset = emel::generator::detail::layer_cache_offset(backend, layer, position, kv_dim);
-    std::copy(
-        backend.k.begin(), backend.k.begin() + kv_dim, backend.key_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
-    std::copy(
-        backend.v.begin(), backend.v.begin() + kv_dim, backend.value_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
+    emel::generator::detail::store_fp16_rounded_cache(
+        std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+        backend.key_cache.data() + cache_offset);
+    emel::generator::detail::store_fp16_rounded_cache(
+        std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+        backend.value_cache.data() + cache_offset);
 
     if (!compute_attention_with_softmax_debug(backend, graph_capture, layer, position + 1, prefix)) {
       std::fprintf(stdout, "%s: attention failed\n", prefix.c_str());
@@ -3770,6 +3892,9 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
                                         backend.n_rot,
                                         position,
                                         backend.rope_freq_base);
+    emel::generator::detail::store_fp16_rounded_cache(
+        std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+        backend.q_attn.data());
     dump_state_compare((layer_prefix + ".q").c_str(),
                        backend.q,
                        find_reference_tensor(graph_capture, ("Qcur-" + layer_suffix).c_str()));
@@ -4291,6 +4416,9 @@ void dump_generation_residual_l2_debug(const generation_load_state & state,
                                         backend.n_rot,
                                         position,
                                         backend.rope_freq_base);
+    emel::generator::detail::store_fp16_rounded_cache(
+        std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+        backend.q_attn.data());
 
     const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
     const size_t cache_offset =
@@ -4302,7 +4430,8 @@ void dump_generation_residual_l2_debug(const generation_load_state & state,
         std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
         backend.value_cache.data() + cache_offset);
 
-    if (!emel::generator::detail::compute_attention(backend, layer, position + 1, backend.q) ||
+    if (!emel::generator::detail::compute_attention(
+            backend, layer, position + 1, backend.q_attn) ||
         !emel::generator::detail::matmul_vector(
             backend, block.attention_output, backend.attn_ctx, backend.projected)) {
       std::fprintf(stdout, "generation_debug.residual_l2.layer%d: attention failed\n", layer);

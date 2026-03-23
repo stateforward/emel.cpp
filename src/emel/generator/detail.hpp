@@ -97,6 +97,7 @@ struct native_backend {
   std::vector<float> hidden = {};
   std::vector<float> norm = {};
   std::vector<float> q = {};
+  std::vector<float> q_attn = {};
   std::vector<float> k = {};
   std::vector<float> v = {};
   std::vector<float> attn_scores = {};
@@ -747,7 +748,7 @@ inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
       backend, layer_index, 0, static_cast<int32_t>(kv_dim));
   const float scale = 1.0f / std::sqrt(static_cast<float>(backend.head_dim));
 
-  request.src0 = make_src_view_3d(backend.q.data(), head_dim, 1u, head_count);
+  request.src0 = make_src_view_3d(backend.q_attn.data(), head_dim, 1u, head_count);
   request.src1 = make_src_view_strided_3d(backend.key_cache.data() + layer_offset,
                                           kv_head_dim,
                                           kv_tokens,
@@ -797,6 +798,9 @@ inline bool run_layer(native_backend & backend,
              backend.n_rot,
              position,
              backend.rope_freq_base);
+  store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
 
   const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
   const size_t cache_offset = layer_cache_offset(backend, layer_index, position, kv_dim);
@@ -1012,6 +1016,7 @@ inline emel::error::type prepare(native_backend & backend,
   backend.hidden.resize(static_cast<size_t>(backend.n_embd));
   backend.norm.resize(static_cast<size_t>(backend.n_embd));
   backend.q.resize(static_cast<size_t>(backend.n_embd));
+  backend.q_attn.resize(static_cast<size_t>(backend.n_embd));
   backend.k.resize(static_cast<size_t>(kv_dim));
   backend.v.resize(static_cast<size_t>(kv_dim));
   backend.attn_scores.resize(static_cast<size_t>(backend.n_ctx));
