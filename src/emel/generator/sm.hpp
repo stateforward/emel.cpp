@@ -771,6 +771,30 @@ struct sm : public emel::sm<model, action::context> {
     return this->context_.compute.backend.kernel.shared_flash_dispatch_count();
   }
 
+  uint64_t generation_optimized_q2_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q2_dispatch_count();
+  }
+
+  uint64_t generation_shared_q2_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.shared_q2_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q3_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q3_dispatch_count();
+  }
+
+  uint64_t generation_shared_q3_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.shared_q3_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q6_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q6_dispatch_count();
+  }
+
+  uint64_t generation_shared_q6_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.shared_q6_dispatch_count();
+  }
+
   const emel::graph::event::reserve_output & graph_reservation() const noexcept {
     return this->context_.state.graph_reservation;
   }

@@ -457,6 +457,31 @@ TEST_CASE("generator_generate_runs_native_generator_contract") {
   }
 }
 
+TEST_CASE("generator_generate_f32_fixture_does_not_claim_quantized_optimized_dispatch") {
+  auto fixture = std::make_unique<generator_fixture>();
+  callback_tracker initialize_tracker{};
+  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
+  REQUIRE(fixture->generator->process_event(initialize_request));
+
+  callback_tracker generate_tracker{};
+  std::array<char, 32> output = {};
+  size_t output_length = 0;
+  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  const auto generate_request =
+      fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
+                             &generate_error);
+
+  REQUIRE(fixture->generator->process_event(generate_request));
+  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(fixture->generator->generation_optimized_q2_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_shared_q2_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_optimized_q3_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_shared_q3_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_optimized_q6_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_shared_q6_dispatch_calls() == 0u);
+}
+
 TEST_CASE("generator_generate_pins_the_phase_4_request_contract") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};

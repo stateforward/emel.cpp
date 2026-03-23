@@ -41,7 +41,7 @@
 namespace {
 
 constexpr char k_generation_fixture_rel[] = "tests/models/Llama-68M-Chat-v1-Q2_K.gguf";
-constexpr size_t k_generation_output_capacity = 256u;
+constexpr size_t k_generation_output_capacity = 65536u;
 
 struct generation_case_spec {
   std::string_view name = {};
@@ -55,10 +55,22 @@ constexpr generation_case_spec k_short_generation_case = {
     .max_tokens = 1,
 };
 
-constexpr generation_case_spec k_long_generation_case = {
-    .name = emel::bench::k_generation_long_case_name,
+constexpr generation_case_spec k_generation_10_case = {
+    .name = emel::bench::k_generation_10_case_name,
     .prompt = "hello",
-    .max_tokens = 8,
+    .max_tokens = 10,
+};
+
+constexpr generation_case_spec k_generation_100_case = {
+    .name = emel::bench::k_generation_100_case_name,
+    .prompt = "hello",
+    .max_tokens = 100,
+};
+
+constexpr generation_case_spec k_generation_1000_case = {
+    .name = emel::bench::k_generation_1000_case_name,
+    .prompt = "hello",
+    .max_tokens = 1000,
 };
 
 using llama_model_ptr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
@@ -606,6 +618,12 @@ struct generation_flash_evidence_state {
   std::uint64_t flash_dispatch_calls = 0u;
   std::uint64_t optimized_flash_dispatch_calls = 0u;
   std::uint64_t shared_flash_dispatch_calls = 0u;
+  std::uint64_t optimized_q2_dispatch_calls = 0u;
+  std::uint64_t shared_q2_dispatch_calls = 0u;
+  std::uint64_t optimized_q3_dispatch_calls = 0u;
+  std::uint64_t shared_q3_dispatch_calls = 0u;
+  std::uint64_t optimized_q6_dispatch_calls = 0u;
+  std::uint64_t shared_q6_dispatch_calls = 0u;
   generation_seam_audit seam = {};
 };
 
@@ -1723,6 +1741,30 @@ std::uint64_t generation_flash_evidence_shared_dispatch_calls() noexcept {
   return g_generation_flash_evidence.shared_flash_dispatch_calls;
 }
 
+std::uint64_t generation_quantized_evidence_optimized_q2_dispatch_calls() noexcept {
+  return g_generation_flash_evidence.optimized_q2_dispatch_calls;
+}
+
+std::uint64_t generation_quantized_evidence_shared_q2_dispatch_calls() noexcept {
+  return g_generation_flash_evidence.shared_q2_dispatch_calls;
+}
+
+std::uint64_t generation_quantized_evidence_optimized_q3_dispatch_calls() noexcept {
+  return g_generation_flash_evidence.optimized_q3_dispatch_calls;
+}
+
+std::uint64_t generation_quantized_evidence_shared_q3_dispatch_calls() noexcept {
+  return g_generation_flash_evidence.shared_q3_dispatch_calls;
+}
+
+std::uint64_t generation_quantized_evidence_optimized_q6_dispatch_calls() noexcept {
+  return g_generation_flash_evidence.optimized_q6_dispatch_calls;
+}
+
+std::uint64_t generation_quantized_evidence_shared_q6_dispatch_calls() noexcept {
+  return g_generation_flash_evidence.shared_q6_dispatch_calls;
+}
+
 std::int32_t generation_flash_evidence_emel_decode_calls() noexcept {
   return g_generation_flash_evidence.seam.emel_reference_decode_calls;
 }
@@ -1742,9 +1784,11 @@ std::int32_t generation_flash_evidence_reference_logits_calls() noexcept {
 void append_emel_generation_cases(std::vector<result> & results, const config & cfg) {
   const emel_fixture & fixture = canonical_generation_fixture();
   const config case_cfg = generation_case_config(cfg);
-  constexpr std::array<generation_case_spec, 2> cases = {
+  constexpr std::array<generation_case_spec, 4> cases = {
       k_short_generation_case,
-      k_long_generation_case,
+      k_generation_10_case,
+      k_generation_100_case,
+      k_generation_1000_case,
   };
 
   reset_generation_flash_evidence();
@@ -1754,6 +1798,12 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
     std::uint64_t flash_dispatch_calls = 0u;
     std::uint64_t optimized_flash_dispatch_calls = 0u;
     std::uint64_t shared_flash_dispatch_calls = 0u;
+    std::uint64_t optimized_q2_dispatch_calls = 0u;
+    std::uint64_t shared_q2_dispatch_calls = 0u;
+    std::uint64_t optimized_q3_dispatch_calls = 0u;
+    std::uint64_t shared_q3_dispatch_calls = 0u;
+    std::uint64_t optimized_q6_dispatch_calls = 0u;
+    std::uint64_t shared_q6_dispatch_calls = 0u;
     auto session = std::make_unique<emel_session>();
     prepare_emel_session(fixture, *session);
     if (!initialize_emel_session(*session, generation_case)) {
@@ -1768,6 +1818,18 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
           session->generator->generation_optimized_flash_dispatch_calls();
       const std::uint64_t shared_flash_dispatch_calls_before =
           session->generator->generation_shared_flash_dispatch_calls();
+      const std::uint64_t optimized_q2_dispatch_calls_before =
+          session->generator->generation_optimized_q2_dispatch_calls();
+      const std::uint64_t shared_q2_dispatch_calls_before =
+          session->generator->generation_shared_q2_dispatch_calls();
+      const std::uint64_t optimized_q3_dispatch_calls_before =
+          session->generator->generation_optimized_q3_dispatch_calls();
+      const std::uint64_t shared_q3_dispatch_calls_before =
+          session->generator->generation_shared_q3_dispatch_calls();
+      const std::uint64_t optimized_q6_dispatch_calls_before =
+          session->generator->generation_optimized_q6_dispatch_calls();
+      const std::uint64_t shared_q6_dispatch_calls_before =
+          session->generator->generation_shared_q6_dispatch_calls();
 
       generation_result generated{};
       if (!run_emel_generate(*session, generation_case, generated)) {
@@ -1779,12 +1841,33 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
           session->generator->generation_optimized_flash_dispatch_calls();
       const std::uint64_t shared_flash_dispatch_calls_after =
           session->generator->generation_shared_flash_dispatch_calls();
+      const std::uint64_t optimized_q2_dispatch_calls_after =
+          session->generator->generation_optimized_q2_dispatch_calls();
+      const std::uint64_t shared_q2_dispatch_calls_after =
+          session->generator->generation_shared_q2_dispatch_calls();
+      const std::uint64_t optimized_q3_dispatch_calls_after =
+          session->generator->generation_optimized_q3_dispatch_calls();
+      const std::uint64_t shared_q3_dispatch_calls_after =
+          session->generator->generation_shared_q3_dispatch_calls();
+      const std::uint64_t optimized_q6_dispatch_calls_after =
+          session->generator->generation_optimized_q6_dispatch_calls();
+      const std::uint64_t shared_q6_dispatch_calls_after =
+          session->generator->generation_shared_q6_dispatch_calls();
       seam = session->seam;
       flash_dispatch_calls = flash_dispatch_calls_after - flash_dispatch_calls_before;
       optimized_flash_dispatch_calls =
           optimized_flash_dispatch_calls_after - optimized_flash_dispatch_calls_before;
       shared_flash_dispatch_calls =
           shared_flash_dispatch_calls_after - shared_flash_dispatch_calls_before;
+      optimized_q2_dispatch_calls =
+          optimized_q2_dispatch_calls_after - optimized_q2_dispatch_calls_before;
+      shared_q2_dispatch_calls = shared_q2_dispatch_calls_after - shared_q2_dispatch_calls_before;
+      optimized_q3_dispatch_calls =
+          optimized_q3_dispatch_calls_after - optimized_q3_dispatch_calls_before;
+      shared_q3_dispatch_calls = shared_q3_dispatch_calls_after - shared_q3_dispatch_calls_before;
+      optimized_q6_dispatch_calls =
+          optimized_q6_dispatch_calls_after - optimized_q6_dispatch_calls_before;
+      shared_q6_dispatch_calls = shared_q6_dispatch_calls_after - shared_q6_dispatch_calls_before;
       sink ^= generated.output_length;
     };
 
@@ -1795,6 +1878,12 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
       g_generation_flash_evidence.optimized_flash_dispatch_calls =
           optimized_flash_dispatch_calls;
       g_generation_flash_evidence.shared_flash_dispatch_calls = shared_flash_dispatch_calls;
+      g_generation_flash_evidence.optimized_q2_dispatch_calls = optimized_q2_dispatch_calls;
+      g_generation_flash_evidence.shared_q2_dispatch_calls = shared_q2_dispatch_calls;
+      g_generation_flash_evidence.optimized_q3_dispatch_calls = optimized_q3_dispatch_calls;
+      g_generation_flash_evidence.shared_q3_dispatch_calls = shared_q3_dispatch_calls;
+      g_generation_flash_evidence.optimized_q6_dispatch_calls = optimized_q6_dispatch_calls;
+      g_generation_flash_evidence.shared_q6_dispatch_calls = shared_q6_dispatch_calls;
       g_generation_flash_evidence.seam = seam;
     }
     if (generation_seam_audit_enabled()) {
@@ -1808,9 +1897,11 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
 void append_reference_generation_cases(std::vector<result> & results, const config & cfg) {
   const emel_fixture & fixture = canonical_generation_fixture();
   const config case_cfg = generation_case_config(cfg);
-  constexpr std::array<generation_case_spec, 2> cases = {
+  constexpr std::array<generation_case_spec, 4> cases = {
       k_short_generation_case,
-      k_long_generation_case,
+      k_generation_10_case,
+      k_generation_100_case,
+      k_generation_1000_case,
   };
 
   for (const generation_case_spec & generation_case : cases) {

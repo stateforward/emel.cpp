@@ -578,6 +578,16 @@ inline float dot_q2_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block
 #endif
 }
 
+inline float dot_q2_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q2_k * lhs,
+                                    const ::emel::kernel::detail::quant::block_q8_k * rhs,
+                                    const uint64_t block_count) noexcept {
+  float sum = 0.0f;
+  for (uint64_t block = 0; block < block_count; ++block) {
+    sum += dot_q2_k_q8_k_block_neon(lhs[block], rhs[block]);
+  }
+  return sum;
+}
+
 inline float dot_q3_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block_q3_k & lhs,
                                       const ::emel::kernel::detail::quant::block_q8_k & rhs)
     noexcept {
@@ -674,6 +684,16 @@ inline float dot_q3_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block
 #endif
 }
 
+inline float dot_q3_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q3_k * lhs,
+                                    const ::emel::kernel::detail::quant::block_q8_k * rhs,
+                                    const uint64_t block_count) noexcept {
+  float sum = 0.0f;
+  for (uint64_t block = 0; block < block_count; ++block) {
+    sum += dot_q3_k_q8_k_block_neon(lhs[block], rhs[block]);
+  }
+  return sum;
+}
+
 inline float dot_q6_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block_q6_k & lhs,
                                       const ::emel::kernel::detail::quant::block_q8_k & rhs)
     noexcept {
@@ -762,6 +782,16 @@ inline float dot_q6_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block
 #endif
 }
 
+inline float dot_q6_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q6_k * lhs,
+                                    const ::emel::kernel::detail::quant::block_q8_k * rhs,
+                                    const uint64_t block_count) noexcept {
+  float sum = 0.0f;
+  for (uint64_t block = 0; block < block_count; ++block) {
+    sum += dot_q6_k_q8_k_block_neon(lhs[block], rhs[block]);
+  }
+  return sum;
+}
+
 inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {
 #if defined(__aarch64__) || defined(__ARM_NEON)
   const uint64_t k = request.src0.ne[0];
@@ -799,17 +829,17 @@ inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {
       for (uint64_t i = 0; i < m; ++i) {
         const uint8_t * row_ptr = a + i * row_bytes;
         if (src0_type == ::emel::kernel::detail::dtype_q2_k) {
-          c[i * n + j] = ::emel::kernel::detail::dot_q2_k_q8_k_row_scalar(
+          c[i * n + j] = dot_q2_k_q8_k_row_neon(
               reinterpret_cast<const ::emel::kernel::detail::quant::block_q2_k *>(row_ptr),
               q8_blocks.data(),
               block_count);
         } else if (src0_type == ::emel::kernel::detail::dtype_q3_k) {
-          c[i * n + j] = ::emel::kernel::detail::dot_q3_k_q8_k_row_scalar(
+          c[i * n + j] = dot_q3_k_q8_k_row_neon(
               reinterpret_cast<const ::emel::kernel::detail::quant::block_q3_k *>(row_ptr),
               q8_blocks.data(),
               block_count);
         } else {
-          c[i * n + j] = ::emel::kernel::detail::dot_q6_k_q8_k_row_scalar(
+          c[i * n + j] = dot_q6_k_q8_k_row_neon(
               reinterpret_cast<const ::emel::kernel::detail::quant::block_q6_k *>(row_ptr),
               q8_blocks.data(),
               block_count);
@@ -1106,6 +1136,15 @@ struct exec_scalar_op {
             ev, ctx, static_cast<int32_t>(emel::error::cast(error::invalid_request)));
       }
     } else {
+      if constexpr (std::is_same_v<request_type, ::emel::kernel::event::op_mul_mat>) {
+        const uint8_t src0_type = ::emel::kernel::detail::dtype_code(ev.request.src0.type);
+        ctx.shared_q2_dispatch_count +=
+            static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q2_k);
+        ctx.shared_q3_dispatch_count +=
+            static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q3_k);
+        ctx.shared_q6_dispatch_count +=
+            static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q6_k);
+      }
       ::emel::kernel::detail::execute_scalar_unchecked(ev.request);
       detail::mark_done(ev, ctx);
     }
@@ -1115,6 +1154,16 @@ struct exec_scalar_op {
 template <class dispatch_event_type>
 struct exec_simd_op {
   void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
+    using request_type = std::remove_cvref_t<decltype(ev.request)>;
+    if constexpr (std::is_same_v<request_type, ::emel::kernel::event::op_mul_mat>) {
+      const uint8_t src0_type = ::emel::kernel::detail::dtype_code(ev.request.src0.type);
+      ctx.optimized_q2_dispatch_count +=
+          static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q2_k);
+      ctx.optimized_q3_dispatch_count +=
+          static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q3_k);
+      ctx.optimized_q6_dispatch_count +=
+          static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q6_k);
+    }
     ::emel::kernel::aarch64::detail::execute_simd_unchecked(ev.request);
     detail::mark_done(ev, ctx);
   }

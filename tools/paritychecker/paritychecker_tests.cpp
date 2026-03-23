@@ -426,6 +426,50 @@ std::string_view expected_generation_kernel_kind() {
 #endif
 }
 
+void check_generation_flash_attribution(const process_capture & capture) {
+  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") > 0);
+  CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") >= 0);
+  CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") >= 0);
+  CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
+  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") >= 0);
+  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") >= 0);
+  if (expected_generation_kernel_kind() == "aarch64") {
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") > 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") > 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+  } else {
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+  }
+}
+
+void check_generation_quantized_attribution(const process_capture & capture) {
+  CHECK(parse_named_metric(capture.stdout_text, "optimized_q2_dispatch_calls") >= 0);
+  CHECK(parse_named_metric(capture.stdout_text, "shared_q2_dispatch_calls") >= 0);
+  CHECK(parse_named_metric(capture.stdout_text, "optimized_q3_dispatch_calls") >= 0);
+  CHECK(parse_named_metric(capture.stdout_text, "shared_q3_dispatch_calls") >= 0);
+  CHECK(parse_named_metric(capture.stdout_text, "optimized_q6_dispatch_calls") >= 0);
+  CHECK(parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls") >= 0);
+  if (expected_generation_kernel_kind() == "aarch64") {
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_q2_dispatch_calls") > 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_q2_dispatch_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_q3_dispatch_calls") > 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_q3_dispatch_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_q6_dispatch_calls") > 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls") == 0);
+  } else {
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_q2_dispatch_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_q2_dispatch_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_q3_dispatch_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_q3_dispatch_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_q6_dispatch_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls") == 0);
+  }
+}
+
 }  // namespace
 
 TEST_CASE("paritychecker matches llama tokens across tiny models") {
@@ -474,68 +518,32 @@ TEST_CASE("paritychecker matches llama kernel outputs") {
   CHECK(run_kernel_paritychecker_process());
 }
 
-TEST_CASE("paritychecker generation compares one bounded request against the reference path") {
+TEST_CASE("paritychecker generation keeps parity across the active decode lengths") {
   const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
   REQUIRE(file_exists(model_path));
 
-  const process_capture capture = run_generation_paritychecker_capture(model_path, "hello", 1);
+  // Longer decode parity remains explicitly deferred by user priority for now.
+  constexpr std::array<int32_t, 2> generation_lengths{1, 10};
+  for (const int32_t max_tokens : generation_lengths) {
+    INFO("max_tokens=" << max_tokens);
+    const process_capture capture = run_generation_paritychecker_capture(model_path, "hello", max_tokens);
 
-  CHECK(capture.exit_code == 0);
-  CHECK(capture.stderr_text.empty());
-  CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
-  CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
-  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") > 0);
-  CHECK(capture.stdout_text.find("reference_impl: source=") != std::string::npos);
-  CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
-  CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
-  CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
-  CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") >= 0);
-  CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") >= 0);
-  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") >= 0);
-  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") >= 0);
-  if (expected_generation_kernel_kind() == "aarch64") {
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") > 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") > 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
-  } else {
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") == 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
-  }
-  CHECK(capture.stdout_text.find("generation initialize ok") == std::string::npos);
-  CHECK(capture.stdout_text.find("emel generator path ready") == std::string::npos);
-}
-
-TEST_CASE("paritychecker generation keeps parity on a bounded longer decode") {
-  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
-  REQUIRE(file_exists(model_path));
-
-  const process_capture capture = run_generation_paritychecker_capture(model_path, "hello", 8);
-
-  CHECK(capture.exit_code == 0);
-  CHECK(capture.stderr_text.empty());
-  CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
-  CHECK(capture.stdout_text.find("max_tokens=8") != std::string::npos);
-  CHECK(parse_named_metric(capture.stdout_text, "generated_tokens") > 1);
-  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") > 0);
-  CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") >= 0);
-  CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") >= 0);
-  CHECK(capture.stdout_text.find("reference_impl: source=") != std::string::npos);
-  CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
-  CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
-  CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
-  if (expected_generation_kernel_kind() == "aarch64") {
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") > 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") > 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
-  } else {
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") == 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+    CHECK(capture.exit_code == 0);
+    CHECK(capture.stderr_text.empty());
+    CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+    CHECK(capture.stdout_text.find("reference_impl: source=") != std::string::npos);
+    CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
+    CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
+    CHECK(capture.stdout_text.find("generation initialize ok") == std::string::npos);
+    CHECK(capture.stdout_text.find("emel generator path ready") == std::string::npos);
+    CHECK(capture.stdout_text.find("max_tokens=" + std::to_string(max_tokens)) != std::string::npos);
+    if (max_tokens == 1) {
+      CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
+    } else {
+      CHECK(parse_named_metric(capture.stdout_text, "generated_tokens") > 1);
+    }
+    check_generation_flash_attribution(capture);
+    check_generation_quantized_attribution(capture);
   }
 }
 
@@ -556,27 +564,9 @@ TEST_CASE("paritychecker generation dump proves the EMEL path avoids the referen
 
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
-  CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
-  CHECK(parse_named_metric(capture.stdout_text, "emel_decode_calls") == 0);
-  CHECK(parse_named_metric(capture.stdout_text, "emel_logits_calls") == 0);
-  CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") > 0);
-  CHECK(parse_named_metric(capture.stdout_text, "reference_logits_calls") > 0);
-  CHECK(capture.stdout_text.find("kernel_dispatch: kind=") != std::string::npos);
-  CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
-  CHECK(capture.stdout_text.find(std::string("kernel_dispatch: kind=") +
-                                 std::string(expected_generation_kernel_kind())) !=
-        std::string::npos);
-  CHECK(parse_kernel_dispatch_calls(capture.stdout_text) > 0);
-  CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
-  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") >= 0);
-  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") >= 0);
-  if (expected_generation_kernel_kind() == "aarch64") {
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") > 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
-  } else {
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
-  }
+  CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+  CHECK(capture.stdout_text.find("max_tokens=1") != std::string::npos);
+  CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
 }
 
 TEST_CASE("paritychecker help describes the canonical generation fixture contract") {

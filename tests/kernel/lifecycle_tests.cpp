@@ -146,6 +146,114 @@ TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
   CHECK(q6_out[0] == doctest::Approx(-8192.0f));
 }
 
+TEST_CASE("kernel_aarch64_backend_reports_q2_vectorized_or_shared_dispatch") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q2_k;
+
+  const std::array<float, QK_K> input = [] {
+    std::array<float, QK_K> values = {};
+    values.fill(1.0f);
+    return values;
+  }();
+
+  float q2_out[1] = {};
+  block_q2_k q2 = {};
+  q2.d = 0x3c00u;
+  q2.dmin = 0x3c00u;
+  std::fill(q2.scales.begin(), q2.scales.end(), static_cast<uint8_t>(0x11u));
+  std::fill(q2.qs.begin(), q2.qs.end(), static_cast<uint8_t>(0x00u));
+
+  const emel::kernel::event::op_mul_mat q2_ev{
+      .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+
+  aarch64_sm machine{};
+  CHECK(machine.process_event(q2_ev));
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(machine.optimized_q2_dispatch_count() == 1u);
+  CHECK(machine.shared_q2_dispatch_count() == 0u);
+#else
+  CHECK(machine.optimized_q2_dispatch_count() == 0u);
+  CHECK(machine.shared_q2_dispatch_count() == 1u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_backend_reports_q3_vectorized_or_shared_dispatch") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q3_k;
+
+  const std::array<float, QK_K> input = [] {
+    std::array<float, QK_K> values = {};
+    values.fill(1.0f);
+    return values;
+  }();
+
+  float q3_out[1] = {};
+  block_q3_k q3 = {};
+  q3.d = 0x3c00u;
+  std::fill(q3.scales.begin(), q3.scales.end(), static_cast<uint8_t>(0x00u));
+  std::fill(q3.hmask.begin(), q3.hmask.end(), static_cast<uint8_t>(0x00u));
+  std::fill(q3.qs.begin(), q3.qs.end(), static_cast<uint8_t>(0x00u));
+
+  const emel::kernel::event::op_mul_mat q3_ev{
+      .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+
+  aarch64_sm machine{};
+  CHECK(machine.process_event(q3_ev));
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(machine.optimized_q3_dispatch_count() == 1u);
+  CHECK(machine.shared_q3_dispatch_count() == 0u);
+#else
+  CHECK(machine.optimized_q3_dispatch_count() == 0u);
+  CHECK(machine.shared_q3_dispatch_count() == 1u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_backend_reports_q6_vectorized_or_shared_dispatch") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q6_k;
+
+  const std::array<float, QK_K> input = [] {
+    std::array<float, QK_K> values = {};
+    values.fill(1.0f);
+    return values;
+  }();
+
+  float q6_out[1] = {};
+  block_q6_k q6 = {};
+  q6.d = 0x3c00u;
+  std::fill(q6.scales.begin(), q6.scales.end(), static_cast<int8_t>(3));
+  std::fill(q6.ql.begin(), q6.ql.end(), static_cast<uint8_t>(0x66u));
+  std::fill(q6.qh.begin(), q6.qh.end(), static_cast<uint8_t>(0x77u));
+
+  const emel::kernel::event::op_mul_mat q6_ev{
+      .src0 = make_quantized_src(&q6, dtype::q6_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q6_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+
+  aarch64_sm machine{};
+  CHECK(machine.process_event(q6_ev));
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(machine.optimized_q6_dispatch_count() == 1u);
+  CHECK(machine.shared_q6_dispatch_count() == 0u);
+#else
+  CHECK(machine.optimized_q6_dispatch_count() == 0u);
+  CHECK(machine.shared_q6_dispatch_count() == 1u);
+#endif
+}
+
 TEST_CASE("kernel_backends_accept_dispatch_event") {
   const emel::kernel::event::dispatch event{};
 

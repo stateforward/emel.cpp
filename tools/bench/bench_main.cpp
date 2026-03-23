@@ -18,6 +18,12 @@ bool generation_flash_evidence_ready() noexcept;
 std::uint64_t generation_flash_evidence_dispatch_calls() noexcept;
 std::uint64_t generation_flash_evidence_optimized_dispatch_calls() noexcept;
 std::uint64_t generation_flash_evidence_shared_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_optimized_q2_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_shared_q2_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_optimized_q3_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_shared_q3_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_optimized_q6_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_shared_q6_dispatch_calls() noexcept;
 std::int32_t generation_flash_evidence_emel_decode_calls() noexcept;
 std::int32_t generation_flash_evidence_emel_logits_calls() noexcept;
 std::int32_t generation_flash_evidence_reference_decode_calls() noexcept;
@@ -309,6 +315,18 @@ void print_compare(const std::vector<bench::result> & emel_results,
       bench::generation_flash_evidence_optimized_dispatch_calls();
   const auto shared_flash_dispatch_calls =
       bench::generation_flash_evidence_shared_dispatch_calls();
+  const auto optimized_q2_dispatch_calls =
+      bench::generation_quantized_evidence_optimized_q2_dispatch_calls();
+  const auto shared_q2_dispatch_calls =
+      bench::generation_quantized_evidence_shared_q2_dispatch_calls();
+  const auto optimized_q3_dispatch_calls =
+      bench::generation_quantized_evidence_optimized_q3_dispatch_calls();
+  const auto shared_q3_dispatch_calls =
+      bench::generation_quantized_evidence_shared_q3_dispatch_calls();
+  const auto optimized_q6_dispatch_calls =
+      bench::generation_quantized_evidence_optimized_q6_dispatch_calls();
+  const auto shared_q6_dispatch_calls =
+      bench::generation_quantized_evidence_shared_q6_dispatch_calls();
   const auto emel_decode_calls = bench::generation_flash_evidence_emel_decode_calls();
   const auto emel_logits_calls = bench::generation_flash_evidence_emel_logits_calls();
   const auto reference_decode_calls = bench::generation_flash_evidence_reference_decode_calls();
@@ -348,6 +366,25 @@ void print_compare(const std::vector<bench::result> & emel_results,
                  shared_flash_dispatch_calls);
     std::exit(1);
   }
+  if (k_host_is_aarch64 &&
+      (optimized_q2_dispatch_calls == 0 || shared_q2_dispatch_calls != 0 ||
+       optimized_q3_dispatch_calls == 0 || shared_q3_dispatch_calls != 0 ||
+       optimized_q6_dispatch_calls == 0 || shared_q6_dispatch_calls != 0)) {
+    std::fprintf(stderr,
+                 "error: invalid ARM quantized evidence optimized_q2_dispatch_calls=%" PRIu64
+                 " shared_q2_dispatch_calls=%" PRIu64
+                 " optimized_q3_dispatch_calls=%" PRIu64
+                 " shared_q3_dispatch_calls=%" PRIu64
+                 " optimized_q6_dispatch_calls=%" PRIu64
+                 " shared_q6_dispatch_calls=%" PRIu64 "\n",
+                 optimized_q2_dispatch_calls,
+                 shared_q2_dispatch_calls,
+                 optimized_q3_dispatch_calls,
+                 shared_q3_dispatch_calls,
+                 optimized_q6_dispatch_calls,
+                 shared_q6_dispatch_calls);
+    std::exit(1);
+  }
 
   std::printf("# reference_impl: source=%.*s ref=%.*s\n",
               static_cast<int>(k_bench_reference_source.size()),
@@ -368,6 +405,20 @@ void print_compare(const std::vector<bench::result> & emel_results,
               emel_logits_calls,
               reference_decode_calls,
               reference_logits_calls);
+  std::printf("# generation_quantized_evidence: case=%.*s optimized_q2_dispatch_calls=%" PRIu64
+              " shared_q2_dispatch_calls=%" PRIu64
+              " optimized_q3_dispatch_calls=%" PRIu64
+              " shared_q3_dispatch_calls=%" PRIu64
+              " optimized_q6_dispatch_calls=%" PRIu64
+              " shared_q6_dispatch_calls=%" PRIu64 "\n",
+              static_cast<int>(bench::k_generation_case_name.size()),
+              bench::k_generation_case_name.data(),
+              optimized_q2_dispatch_calls,
+              shared_q2_dispatch_calls,
+              optimized_q3_dispatch_calls,
+              shared_q3_dispatch_calls,
+              optimized_q6_dispatch_calls,
+              shared_q6_dispatch_calls);
 
   const std::size_t count = std::min(emel_sorted.size(), ref_sorted.size());
   for (std::size_t i = 0; i < count; ++i) {

@@ -3,7 +3,9 @@
 #include <array>
 #include <cstdint>
 #include <cmath>
+#include <vector>
 
+#include "../allocation_tracker.hpp"
 #include "test_helpers.hpp"
 #include "emel/kernel/aarch64/actions.hpp"
 #include "emel/kernel/aarch64/detail.hpp"
@@ -13,6 +15,7 @@
 namespace {
 
 using aarch64_sm = emel::kernel::aarch64::sm;
+using allocation_scope = emel::test::allocation::allocation_scope;
 using emel::kernel::test::dtype;
 using emel::kernel::test::flash_attn_ext_fixture;
 using emel::kernel::test::make_dst;
@@ -254,6 +257,416 @@ TEST_CASE("kernel_aarch64_quantized_mul_mat_simd_matches_scalar") {
   run_case(q2, dtype::q2_k);
   run_case(q3, dtype::q3_k);
   run_case(q6, dtype::q6_k);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q2_row_neon_matches_scalar") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q2_k;
+  using emel::kernel::detail::quant::block_q8_k;
+
+  block_q2_k q2 = {};
+  q2.d = 0x3c00u;
+  q2.dmin = 0x3c00u;
+  for (size_t i = 0; i < q2.scales.size(); ++i) {
+    q2.scales[i] = static_cast<uint8_t>(((i % 9u) << 4u) | ((i * 5u) % 13u));
+  }
+  for (size_t i = 0; i < q2.qs.size(); ++i) {
+    q2.qs[i] = static_cast<uint8_t>((i * 23u) ^ (i >> 2u));
+  }
+
+  std::array<float, QK_K> src1 = {};
+  for (size_t i = 0; i < src1.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>(i % 19u) - 9;
+    src1[i] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  std::array<block_q8_k, 1> q8_blocks = {};
+  emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      src1.data(), 1, &q8_blocks[0], emel::kernel::detail::quant::QK_K);
+
+  const float scalar =
+      emel::kernel::detail::dot_q2_k_q8_k_row_scalar(&q2, q8_blocks.data(), q8_blocks.size());
+  const float neon =
+      emel::kernel::aarch64::detail::dot_q2_k_q8_k_row_neon(&q2, q8_blocks.data(),
+                                                             q8_blocks.size());
+
+  CHECK(neon == doctest::Approx(scalar).epsilon(1e-5f));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q3_row_neon_matches_scalar") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q3_k;
+  using emel::kernel::detail::quant::block_q8_k;
+
+  block_q3_k q3 = {};
+  q3.d = 0x3c00u;
+  for (size_t i = 0; i < q3.scales.size(); ++i) {
+    q3.scales[i] = static_cast<uint8_t>((i * 17u) ^ 0x5au);
+  }
+  for (size_t i = 0; i < q3.hmask.size(); ++i) {
+    q3.hmask[i] = static_cast<uint8_t>((i * 9u) ^ 0xa5u);
+  }
+  for (size_t i = 0; i < q3.qs.size(); ++i) {
+    q3.qs[i] = static_cast<uint8_t>((i * 13u) ^ 0x33u);
+  }
+
+  std::array<float, QK_K> src1 = {};
+  for (size_t i = 0; i < src1.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>(i % 23u) - 11;
+    src1[i] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  std::array<block_q8_k, 1> q8_blocks = {};
+  emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      src1.data(), 1, &q8_blocks[0], emel::kernel::detail::quant::QK_K);
+
+  const float scalar =
+      emel::kernel::detail::dot_q3_k_q8_k_row_scalar(&q3, q8_blocks.data(), q8_blocks.size());
+  const float neon =
+      emel::kernel::aarch64::detail::dot_q3_k_q8_k_row_neon(&q3, q8_blocks.data(),
+                                                             q8_blocks.size());
+
+  CHECK(neon == doctest::Approx(scalar).epsilon(1e-5f));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q6_row_neon_matches_scalar") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q6_k;
+  using emel::kernel::detail::quant::block_q8_k;
+
+  block_q6_k q6 = {};
+  q6.d = 0x3c00u;
+  for (size_t i = 0; i < q6.scales.size(); ++i) {
+    q6.scales[i] = static_cast<int8_t>(static_cast<int32_t>(i % 15u) - 7);
+  }
+  for (size_t i = 0; i < q6.ql.size(); ++i) {
+    q6.ql[i] = static_cast<uint8_t>((i * 19u) ^ 0x6cu);
+  }
+  for (size_t i = 0; i < q6.qh.size(); ++i) {
+    q6.qh[i] = static_cast<uint8_t>((i * 7u) ^ 0x95u);
+  }
+
+  std::array<float, QK_K> src1 = {};
+  for (size_t i = 0; i < src1.size(); ++i) {
+    const int32_t centered = static_cast<int32_t>(i % 29u) - 14;
+    src1[i] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  std::array<block_q8_k, 1> q8_blocks = {};
+  emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      src1.data(), 1, &q8_blocks[0], emel::kernel::detail::quant::QK_K);
+
+  const float scalar =
+      emel::kernel::detail::dot_q6_k_q8_k_row_scalar(&q6, q8_blocks.data(), q8_blocks.size());
+  const float neon =
+      emel::kernel::aarch64::detail::dot_q6_k_q8_k_row_neon(&q6, q8_blocks.data(),
+                                                             q8_blocks.size());
+
+  CHECK(neon == doctest::Approx(scalar).epsilon(1e-5f));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_sm_reports_q2_vectorized_dispatch_at_kernel_seam") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q2_k;
+  using emel::kernel::detail::quant::block_q3_k;
+
+  const std::array<float, QK_K> input = [] {
+    std::array<float, QK_K> values = {};
+    for (size_t i = 0; i < values.size(); ++i) {
+      const int32_t centered = static_cast<int32_t>(i % 13u) - 6;
+      values[i] = static_cast<float>(centered) * 0.125f;
+    }
+    return values;
+  }();
+
+  block_q2_k q2 = {};
+  q2.d = 0x3c00u;
+  q2.dmin = 0x3c00u;
+  for (size_t i = 0; i < q2.scales.size(); ++i) {
+    q2.scales[i] = static_cast<uint8_t>(((i % 7u) << 4u) | ((i * 3u) % 11u));
+  }
+  for (size_t i = 0; i < q2.qs.size(); ++i) {
+    q2.qs[i] = static_cast<uint8_t>((i * 17u) ^ (i >> 1u));
+  }
+
+  block_q3_k q3 = {};
+  q3.d = 0x3c00u;
+  for (size_t i = 0; i < q3.scales.size(); ++i) {
+    q3.scales[i] = static_cast<uint8_t>((i * 11u) ^ 0x4du);
+  }
+  for (size_t i = 0; i < q3.hmask.size(); ++i) {
+    q3.hmask[i] = static_cast<uint8_t>((i * 5u) ^ 0xb2u);
+  }
+  for (size_t i = 0; i < q3.qs.size(); ++i) {
+    q3.qs[i] = static_cast<uint8_t>((i * 7u) ^ 0x39u);
+  }
+
+  float q2_out[1] = {};
+  float q3_out[1] = {};
+  const emel::kernel::event::op_mul_mat q2_ev{
+      .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat q3_ev{
+      .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+
+  aarch64_sm machine{};
+  CHECK(machine.process_event(q2_ev));
+  CHECK(machine.process_event(q3_ev));
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(machine.optimized_q2_dispatch_count() == 1u);
+  CHECK(machine.shared_q2_dispatch_count() == 0u);
+#else
+  CHECK(machine.optimized_q2_dispatch_count() == 0u);
+  CHECK(machine.shared_q2_dispatch_count() == 1u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_sm_reports_q3_vectorized_dispatch_at_kernel_seam") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q2_k;
+  using emel::kernel::detail::quant::block_q3_k;
+
+  const std::array<float, QK_K> input = [] {
+    std::array<float, QK_K> values = {};
+    for (size_t i = 0; i < values.size(); ++i) {
+      const int32_t centered = static_cast<int32_t>(i % 17u) - 8;
+      values[i] = static_cast<float>(centered) * 0.125f;
+    }
+    return values;
+  }();
+
+  block_q2_k q2 = {};
+  q2.d = 0x3c00u;
+  q2.dmin = 0x3c00u;
+  for (size_t i = 0; i < q2.scales.size(); ++i) {
+    q2.scales[i] = static_cast<uint8_t>(((i % 7u) << 4u) | ((i * 3u) % 11u));
+  }
+  for (size_t i = 0; i < q2.qs.size(); ++i) {
+    q2.qs[i] = static_cast<uint8_t>((i * 17u) ^ (i >> 1u));
+  }
+
+  block_q3_k q3 = {};
+  q3.d = 0x3c00u;
+  for (size_t i = 0; i < q3.scales.size(); ++i) {
+    q3.scales[i] = static_cast<uint8_t>((i * 11u) ^ 0x4du);
+  }
+  for (size_t i = 0; i < q3.hmask.size(); ++i) {
+    q3.hmask[i] = static_cast<uint8_t>((i * 5u) ^ 0xb2u);
+  }
+  for (size_t i = 0; i < q3.qs.size(); ++i) {
+    q3.qs[i] = static_cast<uint8_t>((i * 7u) ^ 0x39u);
+  }
+
+  float q2_out[1] = {};
+  float q3_out[1] = {};
+  const emel::kernel::event::op_mul_mat q2_ev{
+      .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat q3_ev{
+      .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+
+  aarch64_sm machine{};
+  CHECK(machine.process_event(q2_ev));
+  CHECK(machine.process_event(q3_ev));
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(machine.optimized_q3_dispatch_count() == 1u);
+  CHECK(machine.shared_q3_dispatch_count() == 0u);
+#else
+  CHECK(machine.optimized_q3_dispatch_count() == 0u);
+  CHECK(machine.shared_q3_dispatch_count() == 1u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_sm_reports_q6_vectorized_dispatch_at_kernel_seam") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q2_k;
+  using emel::kernel::detail::quant::block_q3_k;
+  using emel::kernel::detail::quant::block_q6_k;
+
+  const std::array<float, QK_K> input = [] {
+    std::array<float, QK_K> values = {};
+    for (size_t i = 0; i < values.size(); ++i) {
+      const int32_t centered = static_cast<int32_t>(i % 19u) - 9;
+      values[i] = static_cast<float>(centered) * 0.125f;
+    }
+    return values;
+  }();
+
+  block_q2_k q2 = {};
+  q2.d = 0x3c00u;
+  q2.dmin = 0x3c00u;
+  for (size_t i = 0; i < q2.scales.size(); ++i) {
+    q2.scales[i] = static_cast<uint8_t>(((i % 7u) << 4u) | ((i * 3u) % 11u));
+  }
+  for (size_t i = 0; i < q2.qs.size(); ++i) {
+    q2.qs[i] = static_cast<uint8_t>((i * 17u) ^ (i >> 1u));
+  }
+
+  block_q3_k q3 = {};
+  q3.d = 0x3c00u;
+  for (size_t i = 0; i < q3.scales.size(); ++i) {
+    q3.scales[i] = static_cast<uint8_t>((i * 11u) ^ 0x4du);
+  }
+  for (size_t i = 0; i < q3.hmask.size(); ++i) {
+    q3.hmask[i] = static_cast<uint8_t>((i * 5u) ^ 0xb2u);
+  }
+  for (size_t i = 0; i < q3.qs.size(); ++i) {
+    q3.qs[i] = static_cast<uint8_t>((i * 7u) ^ 0x39u);
+  }
+
+  block_q6_k q6 = {};
+  q6.d = 0x3c00u;
+  for (size_t i = 0; i < q6.scales.size(); ++i) {
+    q6.scales[i] = static_cast<int8_t>(static_cast<int32_t>(i % 15u) - 7);
+  }
+  for (size_t i = 0; i < q6.ql.size(); ++i) {
+    q6.ql[i] = static_cast<uint8_t>((i * 19u) ^ 0x6cu);
+  }
+  for (size_t i = 0; i < q6.qh.size(); ++i) {
+    q6.qh[i] = static_cast<uint8_t>((i * 7u) ^ 0x95u);
+  }
+
+  float q2_out[1] = {};
+  float q3_out[1] = {};
+  float q6_out[1] = {};
+  const emel::kernel::event::op_mul_mat q2_ev{
+      .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat q3_ev{
+      .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat q6_ev{
+      .src0 = make_quantized_src(&q6, dtype::q6_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q6_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+
+  aarch64_sm machine{};
+  CHECK(machine.process_event(q2_ev));
+  CHECK(machine.process_event(q3_ev));
+  CHECK(machine.process_event(q6_ev));
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(machine.optimized_q6_dispatch_count() == 1u);
+  CHECK(machine.shared_q6_dispatch_count() == 0u);
+#else
+  CHECK(machine.optimized_q6_dispatch_count() == 0u);
+  CHECK(machine.shared_q6_dispatch_count() == 1u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_supported_quantized_dispatch_is_alloc_free") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q2_k;
+  using emel::kernel::detail::quant::block_q3_k;
+  using emel::kernel::detail::quant::block_q6_k;
+
+  const std::array<float, QK_K> input = [] {
+    std::array<float, QK_K> values = {};
+    for (size_t i = 0; i < values.size(); ++i) {
+      const int32_t centered = static_cast<int32_t>(i % 21u) - 10;
+      values[i] = static_cast<float>(centered) * 0.125f;
+    }
+    return values;
+  }();
+
+  block_q2_k q2 = {};
+  q2.d = 0x3c00u;
+  q2.dmin = 0x3c00u;
+  std::fill(q2.scales.begin(), q2.scales.end(), static_cast<uint8_t>(0x11u));
+  std::fill(q2.qs.begin(), q2.qs.end(), static_cast<uint8_t>(0x22u));
+
+  block_q3_k q3 = {};
+  q3.d = 0x3c00u;
+  std::fill(q3.scales.begin(), q3.scales.end(), static_cast<uint8_t>(0x33u));
+  std::fill(q3.hmask.begin(), q3.hmask.end(), static_cast<uint8_t>(0x44u));
+  std::fill(q3.qs.begin(), q3.qs.end(), static_cast<uint8_t>(0x55u));
+
+  block_q6_k q6 = {};
+  q6.d = 0x3c00u;
+  std::fill(q6.scales.begin(), q6.scales.end(), static_cast<int8_t>(3));
+  std::fill(q6.ql.begin(), q6.ql.end(), static_cast<uint8_t>(0x66u));
+  std::fill(q6.qh.begin(), q6.qh.end(), static_cast<uint8_t>(0x77u));
+
+  float q2_out[1] = {};
+  float q3_out[1] = {};
+  float q6_out[1] = {};
+  const emel::kernel::event::op_mul_mat q2_ev{
+      .src0 = make_quantized_src(&q2, dtype::q2_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q2_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat q3_ev{
+      .src0 = make_quantized_src(&q3, dtype::q3_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q3_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat q6_ev{
+      .src0 = make_quantized_src(&q6, dtype::q6_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q6_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
+
+  aarch64_sm machine{};
+  allocation_scope allocations{};
+  CHECK(machine.process_event(q2_ev));
+  CHECK(machine.process_event(q3_ev));
+  CHECK(machine.process_event(q6_ev));
+  CHECK(allocations.allocations() == 0u);
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(machine.optimized_q2_dispatch_count() == 1u);
+  CHECK(machine.shared_q2_dispatch_count() == 0u);
+  CHECK(machine.optimized_q3_dispatch_count() == 1u);
+  CHECK(machine.shared_q3_dispatch_count() == 0u);
+  CHECK(machine.optimized_q6_dispatch_count() == 1u);
+  CHECK(machine.shared_q6_dispatch_count() == 0u);
+#else
+  CHECK(machine.optimized_q2_dispatch_count() == 0u);
+  CHECK(machine.shared_q2_dispatch_count() == 1u);
+  CHECK(machine.optimized_q3_dispatch_count() == 0u);
+  CHECK(machine.shared_q3_dispatch_count() == 1u);
+  CHECK(machine.optimized_q6_dispatch_count() == 0u);
+  CHECK(machine.shared_q6_dispatch_count() == 1u);
 #endif
 }
 
@@ -588,5 +1001,69 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_uses_optimized_backend_path") {
   CHECK(fixture.dst[1] == doctest::Approx(1.0757657f).epsilon(1e-5f));
   CHECK(fixture.dst[2] == doctest::Approx(0.0f));
   CHECK(fixture.dst[3] == doctest::Approx(0.0f));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_shared_workspace_on_long_kv_spans") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t head_dim = 64u;
+  constexpr uint64_t head_count = 12u;
+  constexpr uint64_t kv_head_count = 12u;
+  constexpr uint64_t kv_tokens = 128u;
+  const uint64_t kv_dim = head_dim * kv_head_count;
+
+  std::vector<float> q(head_dim * head_count);
+  std::vector<float> k(kv_dim * kv_tokens);
+  std::vector<float> v(kv_dim * kv_tokens);
+  std::vector<float> dst_neon(head_dim * head_count, -1.0f);
+  std::vector<float> dst_shared(head_dim * head_count, -1.0f);
+
+  for (uint64_t head = 0; head < head_count; ++head) {
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      const double angle = static_cast<double>((head + 1u) * (dim + 3u));
+      q[head * head_dim + dim] = static_cast<float>(std::sin(angle * 0.03125));
+    }
+  }
+
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    for (uint64_t head = 0; head < kv_head_count; ++head) {
+      for (uint64_t dim = 0; dim < head_dim; ++dim) {
+        const uint64_t offset = token * kv_dim + head * head_dim + dim;
+        const double base = static_cast<double>((token + 1u) * (head + 3u) * (dim + 5u));
+        k[offset] = static_cast<float>(std::cos(base * 0.0078125));
+        v[offset] = static_cast<float>(std::sin(base * 0.01171875));
+      }
+    }
+  }
+
+  emel::kernel::event::op_flash_attn_ext request{};
+  request.src0 = make_src(q.data(), dtype::f32, head_dim, 1u, head_count);
+  request.src1 = make_src(k.data(), dtype::f32, head_dim, kv_tokens, kv_head_count);
+  request.src2 = make_src(v.data(), dtype::f32, head_dim, kv_tokens, kv_head_count);
+  request.dst = make_dst(dst_neon.data(), dtype::f32, head_dim, 1u, head_count);
+  request.src1.nb[1] = sizeof(float) * kv_dim;
+  request.src1.nb[2] = sizeof(float) * head_dim;
+  request.src2.nb[1] = sizeof(float) * kv_dim;
+  request.src2.nb[2] = sizeof(float) * head_dim;
+  request.nth = 1;
+
+  const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+  std::memcpy(request.op_params.data(), &scale, sizeof(scale));
+  request.op_params_size = sizeof(scale);
+
+  emel::kernel::detail::flash_attn_workspace neon_workspace{};
+  emel::kernel::detail::flash_attn_workspace shared_workspace{};
+
+  REQUIRE(emel::kernel::aarch64::detail::run_flash_attn_ext_neon(
+      request, true, neon_workspace));
+
+  request.dst = make_dst(dst_shared.data(), dtype::f32, head_dim, 1u, head_count);
+  REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(request, shared_workspace));
+
+  for (size_t idx = 0; idx < dst_neon.size(); ++idx) {
+    CHECK(dst_neon[idx] == doctest::Approx(dst_shared[idx]).epsilon(1e-5f));
+  }
 #endif
 }

@@ -1,15 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.3
-milestone_name: ARM Flash Optimizations
-status: ready_for_next_milestone
-stopped_at: v1.3 shipped; next step is to define the next milestone
-last_updated: "2026-03-22T22:06:43Z"
+milestone: v1.4
+milestone_name: Full Vectorized Quantized Kernels
+status: planning
+stopped_at: "roadmap created for milestone v1.4; next step is `/gsd:plan-phase 17`"
+last_updated: "2026-03-23T03:28:26.575Z"
+last_activity: 2026-03-23
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
+  total_phases: 5
+  completed_phases: 5
+  total_plans: 11
+  completed_plans: 11
+  percent: 0
 ---
 
 # Project State
@@ -20,14 +22,25 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Planning the next milestone
+**Current focus:** Phase 17 Vectorized q2_K Kernel
 
 ## Current Position
 
-Milestone: None (v1.3 shipped)
-Plan: n/a
+Phase: 21 of 21 (benchmark attribution and impact)
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-03-23
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
+
+**Current milestone:**
+
+- Milestone: v1.4 Full Vectorized Quantized Kernels
+- Phases complete: 0/5
+- Plans complete: 0/11
+- Status: roadmap created; Phase 17 ready for planning
 
 **Last shipped milestone:**
 
@@ -45,16 +58,27 @@ Recent decisions affecting current work:
 
 - v1.3 proved the canonical ARM flash optimization on the existing runtime, parity, and benchmark
   surfaces without changing state-machine structure.
-- The next milestone should reuse the same canonical Llama-68M truth anchor and decide between
-  ARM generator math, broader flash coverage, and benchmark-policy hardening.
+
+- v1.4 stays fixed on the canonical Llama-68M ARM slice and splits the remaining quantized kernel
+  cutover into Phases 17-21.
+
+- Architecture, parity, and regression proof are grouped into Phase 20 so the kernel phases remain
+  data-plane-only.
+
 - Benchmark publication remains approval-sensitive and compare snapshot refresh still republishes
   the full maintained suite.
 
 ### Pending Todos
 
-- Define the next milestone and its fresh requirement set.
+- Plan Phase 17 and start the maintained `q2_K x q8_K` vectorized kernel cutover.
 
 ### Blockers/Concerns
+
+- The maintained ARM path still routes the hottest quantized row-dot work through scalar helpers
+  inside `execute_neon_mul_mat`.
+
+- Generation parity now surfaces decode drift at `100` and `1000` tokens, so longer-length proof
+  needs attention while the kernel path changes.
 
 - Benchmark drift remains warning-only repo policy.
 - Broader flash and model claims remain intentionally unproven beyond the canonical ARM slice.
@@ -63,6 +87,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-22T22:06:43Z
-Stopped at: v1.3 shipped; next step is `$gsd-new-milestone`
+Last session: 2026-03-23T01:30:44Z
+Stopped at: roadmap created for milestone v1.4; next step is `/gsd:plan-phase 17`
 Resume file: None

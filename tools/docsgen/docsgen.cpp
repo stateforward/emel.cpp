@@ -58,6 +58,13 @@ struct benchmark_snapshot {
   std::string emel_logits_calls;
   std::string reference_decode_calls;
   std::string reference_logits_calls;
+  std::string quantized_case;
+  std::string optimized_q2_dispatch_calls;
+  std::string shared_q2_dispatch_calls;
+  std::string optimized_q3_dispatch_calls;
+  std::string shared_q3_dispatch_calls;
+  std::string optimized_q6_dispatch_calls;
+  std::string shared_q6_dispatch_calls;
 };
 
 struct machine_spec {
@@ -547,6 +554,32 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       parsed.reference_logits_calls = metadata->at("reference_logits_calls");
       continue;
     }
+    if (const auto metadata =
+            parse_inline_key_value_fields(line, "# generation_quantized_evidence: ");
+        metadata.has_value()) {
+      for (const char * field : {"case",
+                                 "optimized_q2_dispatch_calls",
+                                 "shared_q2_dispatch_calls",
+                                 "optimized_q3_dispatch_calls",
+                                 "shared_q3_dispatch_calls",
+                                 "optimized_q6_dispatch_calls",
+                                 "shared_q6_dispatch_calls"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # generation_quantized_evidence metadata in %s\n",
+                       paths.benchmarks_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.quantized_case = metadata->at("case");
+      parsed.optimized_q2_dispatch_calls = metadata->at("optimized_q2_dispatch_calls");
+      parsed.shared_q2_dispatch_calls = metadata->at("shared_q2_dispatch_calls");
+      parsed.optimized_q3_dispatch_calls = metadata->at("optimized_q3_dispatch_calls");
+      parsed.shared_q3_dispatch_calls = metadata->at("shared_q3_dispatch_calls");
+      parsed.optimized_q6_dispatch_calls = metadata->at("optimized_q6_dispatch_calls");
+      parsed.shared_q6_dispatch_calls = metadata->at("shared_q6_dispatch_calls");
+      continue;
+    }
     if (line.empty() || line[0] == '#') {
       continue;
     }
@@ -570,6 +603,12 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
   if (parsed.flash_case.empty()) {
     std::fprintf(stderr,
                  "error: missing # generation_flash_evidence metadata in %s\n",
+                 paths.benchmarks_snapshot.string().c_str());
+    return std::nullopt;
+  }
+  if (parsed.quantized_case.empty()) {
+    std::fprintf(stderr,
+                 "error: missing # generation_quantized_evidence metadata in %s\n",
                  paths.benchmarks_snapshot.string().c_str());
     return std::nullopt;
   }
@@ -716,6 +755,23 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += " ns/op, ratio=";
   section += current->ratio;
   section += "x`\n\n";
+  section += "## Current Quantized Evidence\n\n";
+  section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
+  section += "- `generation_quantized_evidence: case=";
+  section += snapshot.quantized_case;
+  section += " optimized_q2_dispatch_calls=";
+  section += snapshot.optimized_q2_dispatch_calls;
+  section += " shared_q2_dispatch_calls=";
+  section += snapshot.shared_q2_dispatch_calls;
+  section += " optimized_q3_dispatch_calls=";
+  section += snapshot.optimized_q3_dispatch_calls;
+  section += " shared_q3_dispatch_calls=";
+  section += snapshot.shared_q3_dispatch_calls;
+  section += " optimized_q6_dispatch_calls=";
+  section += snapshot.optimized_q6_dispatch_calls;
+  section += " shared_q6_dispatch_calls=";
+  section += snapshot.shared_q6_dispatch_calls;
+  section += "`\n\n";
 
   section += "## Preserved ARM Flash Baseline Comparison\n\n";
   section += "- `source_commit=";

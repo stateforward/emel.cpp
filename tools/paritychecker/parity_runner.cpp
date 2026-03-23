@@ -73,7 +73,7 @@ namespace {
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_internal = 3;
 constexpr const char * k_generation_fixture_name = "Llama-68M-Chat-v1-Q2_K.gguf";
-constexpr size_t k_generation_output_capacity = 256u;
+constexpr size_t k_generation_output_capacity = 65536u;
 constexpr std::string_view k_reference_impl_source =
 #ifdef PARITYCHECKER_REFERENCE_SOURCE
     PARITYCHECKER_REFERENCE_SOURCE;
@@ -2314,6 +2314,18 @@ void dump_reference_decode_seam(const generation_load_state & state) {
       state.generator->generation_optimized_flash_dispatch_calls();
   const uint64_t shared_flash_dispatch_calls =
       state.generator->generation_shared_flash_dispatch_calls();
+  const uint64_t optimized_q2_dispatch_calls =
+      state.generator->generation_optimized_q2_dispatch_calls();
+  const uint64_t shared_q2_dispatch_calls =
+      state.generator->generation_shared_q2_dispatch_calls();
+  const uint64_t optimized_q3_dispatch_calls =
+      state.generator->generation_optimized_q3_dispatch_calls();
+  const uint64_t shared_q3_dispatch_calls =
+      state.generator->generation_shared_q3_dispatch_calls();
+  const uint64_t optimized_q6_dispatch_calls =
+      state.generator->generation_optimized_q6_dispatch_calls();
+  const uint64_t shared_q6_dispatch_calls =
+      state.generator->generation_shared_q6_dispatch_calls();
   std::fprintf(stdout,
                "reference_impl: source=%.*s ref=%.*s\n",
                static_cast<int>(k_reference_impl_source.size()),
@@ -2336,6 +2348,19 @@ void dump_reference_decode_seam(const generation_load_state & state) {
                state.generator->generation_flash_attention_dispatch_calls(),
                optimized_flash_dispatch_calls,
                shared_flash_dispatch_calls);
+  std::fprintf(stdout,
+               "quantized_dispatch: optimized_q2_dispatch_calls=%" PRIu64
+               " shared_q2_dispatch_calls=%" PRIu64
+               " optimized_q3_dispatch_calls=%" PRIu64
+               " shared_q3_dispatch_calls=%" PRIu64
+               " optimized_q6_dispatch_calls=%" PRIu64
+               " shared_q6_dispatch_calls=%" PRIu64 "\n",
+               optimized_q2_dispatch_calls,
+               shared_q2_dispatch_calls,
+               optimized_q3_dispatch_calls,
+               shared_q3_dispatch_calls,
+               optimized_q6_dispatch_calls,
+               shared_q6_dispatch_calls);
 }
 
 void dump_generation_failure_surface(generation_load_state & state,
@@ -3715,6 +3740,18 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
       state.generator->generation_optimized_flash_dispatch_calls();
   const uint64_t shared_flash_dispatch_calls =
       state.generator->generation_shared_flash_dispatch_calls();
+  const uint64_t optimized_q2_dispatch_calls =
+      state.generator->generation_optimized_q2_dispatch_calls();
+  const uint64_t shared_q2_dispatch_calls =
+      state.generator->generation_shared_q2_dispatch_calls();
+  const uint64_t optimized_q3_dispatch_calls =
+      state.generator->generation_optimized_q3_dispatch_calls();
+  const uint64_t shared_q3_dispatch_calls =
+      state.generator->generation_shared_q3_dispatch_calls();
+  const uint64_t optimized_q6_dispatch_calls =
+      state.generator->generation_optimized_q6_dispatch_calls();
+  const uint64_t shared_q6_dispatch_calls =
+      state.generator->generation_shared_q6_dispatch_calls();
   if (flash_dispatch_calls == 0u) {
     std::fprintf(stderr,
                  "generation flash proof failed (fixture=%s flash_dispatch_calls=%" PRIu64 ")\n",
@@ -3734,6 +3771,29 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  flash_dispatch_calls,
                  optimized_flash_dispatch_calls,
                  shared_flash_dispatch_calls);
+    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
+    return 1;
+  }
+  if (generation_kernel_kind == emel::kernel::kernel_kind::aarch64 &&
+      (optimized_q2_dispatch_calls == 0u || shared_q2_dispatch_calls != 0u ||
+       optimized_q3_dispatch_calls == 0u || shared_q3_dispatch_calls != 0u ||
+       optimized_q6_dispatch_calls == 0u || shared_q6_dispatch_calls != 0u)) {
+    std::fprintf(stderr,
+                 "generation quantized proof failed (fixture=%s kernel_kind=%s "
+                 "optimized_q2_dispatch_calls=%" PRIu64
+                 " shared_q2_dispatch_calls=%" PRIu64
+                 " optimized_q3_dispatch_calls=%" PRIu64
+                 " shared_q3_dispatch_calls=%" PRIu64
+                 " optimized_q6_dispatch_calls=%" PRIu64
+                 " shared_q6_dispatch_calls=%" PRIu64 ")\n",
+                 k_generation_fixture_name,
+                 kernel_kind_name(generation_kernel_kind),
+                 optimized_q2_dispatch_calls,
+                 shared_q2_dispatch_calls,
+                 optimized_q3_dispatch_calls,
+                 shared_q3_dispatch_calls,
+                 optimized_q6_dispatch_calls,
+                 shared_q6_dispatch_calls);
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
