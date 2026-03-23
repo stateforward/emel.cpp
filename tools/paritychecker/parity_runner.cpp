@@ -2757,7 +2757,7 @@ void dump_generation_tensor_compare(generation_load_state & state,
     std::copy(
         backend.v.begin(), backend.v.begin() + kv_dim, backend.value_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
 
-    if (!emel::generator::detail::compute_attention(backend, layer, position + 1, backend.q)) {
+    if (!compute_attention_with_softmax_debug(backend, graph_capture, layer, position + 1, prefix)) {
       std::fprintf(stdout, "%s: attention failed\n", prefix.c_str());
       return false;
     }
@@ -3111,6 +3111,50 @@ double l2_norm_diff(std::span<const float> emel_values, std::span<const float> r
   return std::sqrt(square_sum);
 }
 
+float max_abs_diff(std::span<const float> emel_values, std::span<const float> reference_values) {
+  if (emel_values.size() != reference_values.size()) {
+    return -1.0f;
+  }
+
+  float max_abs = 0.0f;
+  for (size_t idx = 0; idx < emel_values.size(); ++idx) {
+    max_abs = std::max(max_abs, std::fabs(emel_values[idx] - reference_values[idx]));
+  }
+  return max_abs;
+}
+
+std::span<const float> reference_token_row(std::span<const float> reference_values,
+                                           const size_t row_width,
+                                           const size_t row_index) {
+  if (row_width == 0 || reference_values.empty() || reference_values.size() % row_width != 0) {
+    return {};
+  }
+
+  const size_t row_count = reference_values.size() / row_width;
+  if (row_index >= row_count) {
+    return {};
+  }
+
+  return reference_values.subspan(row_index * row_width, row_width);
+}
+
+std::span<const float> reference_token_tensor_slice(const reference_tensor_capture & capture,
+                                                    const int32_t token_index) {
+  const int64_t ne0 = std::max<int64_t>(capture.shape[0], 1);
+  const int64_t ne1 = std::max<int64_t>(capture.shape[1], 1);
+  const int64_t ne2 = std::max<int64_t>(capture.shape[2], 1);
+  if (token_index < 0 || token_index >= ne2) {
+    return {};
+  }
+
+  const size_t row_width = static_cast<size_t>(ne0 * ne1);
+  const size_t offset = static_cast<size_t>(token_index) * row_width;
+  if (offset + row_width > capture.values.size()) {
+    return {};
+  }
+  return std::span<const float>(capture.values).subspan(offset, row_width);
+}
+
 std::span<const float> reference_last_token_row(std::span<const float> reference_values,
                                                 const size_t row_width) {
   if (row_width == 0 || reference_values.empty()) {
@@ -3126,6 +3170,102 @@ std::span<const float> reference_last_token_row(std::span<const float> reference
   const size_t row_count = reference_values.size() / row_width;
   const size_t row_offset = (row_count - 1u) * row_width;
   return reference_values.subspan(row_offset, row_width);
+}
+
+void dump_generation_prefix_timeline_debug(const generation_load_state & state,
+                                           const emel::paritychecker::parity_options & opts,
+                                           const generation_result & emel_result,
+                                           const generation_result & reference_result) {
+  const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
+  const int32_t prefix_generated_tokens = std::min<int32_t>(12, token_mismatch_index);
+  if (state.model_data == nullptr || prefix_generated_tokens <= 0) {
+    return;
+  }
+
+  std::vector<llama_token> prompt_tokens;
+  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+    std::fprintf(stdout, "generation_debug.timeline: tokenize failed\n");
+    return;
+  }
+
+  std::vector<int32_t> prefix_tokens;
+  prefix_tokens.reserve(prompt_tokens.size() + static_cast<size_t>(prefix_generated_tokens));
+  for (const llama_token token : prompt_tokens) {
+    prefix_tokens.push_back(static_cast<int32_t>(token));
+  }
+  for (int32_t idx = 0; idx < prefix_generated_tokens; ++idx) {
+    prefix_tokens.push_back(reference_result.trace.token_ids[static_cast<size_t>(idx)]);
+  }
+
+  std::vector<llama_token> prefix_tokens_llama;
+  prefix_tokens_llama.reserve(prefix_tokens.size());
+  for (const int32_t token : prefix_tokens) {
+    prefix_tokens_llama.push_back(static_cast<llama_token>(token));
+  }
+
+  reference_graph_capture graph_capture = {};
+  if (!capture_reference_graph_for_tokens(state, prefix_tokens_llama, graph_capture)) {
+    std::fprintf(stdout, "generation_debug.timeline: reference graph capture failed\n");
+    return;
+  }
+
+  emel::generator::detail::native_backend backend = {};
+  if (emel::generator::detail::prepare(backend, *state.model_data) !=
+      emel::error::cast(emel::model::loader::error::none)) {
+    std::fprintf(stdout, "generation_debug.timeline: backend prepare failed\n");
+    return;
+  }
+
+  const reference_tensor_capture * layer1_v_capture = find_reference_capture(graph_capture, "Vcur-1");
+  const size_t prompt_count = prompt_tokens.size();
+
+  for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+    const int32_t token_id = prefix_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
+      std::fprintf(stdout, "generation_debug.timeline: token embedding replay failed\n");
+      return;
+    }
+
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_layer_with_scalar_attention(backend, layer, position)) {
+        std::fprintf(stdout, "generation_debug.timeline: layer replay failed\n");
+        return;
+      }
+
+      const bool is_prompt_token = token_index < prompt_count;
+      const int32_t generated_index = static_cast<int32_t>(token_index - prompt_count);
+      const std::string token_prefix = is_prompt_token
+                                           ? "generation_debug.timeline.prompt" +
+                                                 std::to_string(token_index)
+                                           : "generation_debug.timeline.gen" +
+                                                 std::to_string(generated_index);
+      if (layer == 0) {
+        const std::span<const float> reference_l_out = reference_token_row(
+            find_reference_tensor(graph_capture, "l_out-0"), backend.hidden.size(), token_index);
+        std::fprintf(stdout,
+                     "%s.layer0_l_out: max_abs=%g\n",
+                     token_prefix.c_str(),
+                     max_abs_diff(backend.hidden, reference_l_out));
+      } else if (layer == 1) {
+        if (layer1_v_capture != nullptr) {
+          const std::span<const float> reference_v =
+              reference_token_tensor_slice(*layer1_v_capture, position);
+          std::fprintf(stdout,
+                       "%s.layer1_v: max_abs=%g\n",
+                       token_prefix.c_str(),
+                       max_abs_diff(backend.v, reference_v));
+        }
+        const std::span<const float> reference_l_out = reference_token_row(
+            find_reference_tensor(graph_capture, "l_out-1"), backend.hidden.size(), token_index);
+        std::fprintf(stdout,
+                     "%s.layer1_l_out: max_abs=%g\n",
+                     token_prefix.c_str(),
+                     max_abs_diff(backend.hidden, reference_l_out));
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+  }
 }
 
 void dump_generation_residual_l2_debug(const generation_load_state & state,
@@ -3379,6 +3519,7 @@ void dump_generation_failure_surface(generation_load_state & state,
     }
     dump_scalar_attention_debug(state, opts, *emel_result, *reference_result);
     dump_generation_residual_l2_debug(state, opts, *emel_result, *reference_result);
+    dump_generation_prefix_timeline_debug(state, opts, *emel_result, *reference_result);
     dump_generation_prefix_state_debug(state, opts, *emel_result, *reference_result);
   }
   if (opts.dump && reference_result != nullptr) {
