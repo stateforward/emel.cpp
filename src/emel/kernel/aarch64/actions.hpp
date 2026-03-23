@@ -275,30 +275,30 @@ inline bool run_flash_attn_ext_neon(const request_type & request,
     const uint64_t kv_head = head / n_rep;
     const float * q = tensor_row_ptr(request.src0, 0u, head);
     float * dst = tensor_row_ptr_mut(request.dst, 0u, head);
-    std::fill_n(dst, head_dim, 0.0f);
 
     float max_score = -INFINITY;
-    float denom = 0.0f;
-
     for (uint64_t token = 0; token < kv_tokens; ++token) {
       const float * k = tensor_row_ptr(request.src1, token, kv_head);
-      const float * v = tensor_row_ptr(request.src2, token, kv_head);
       const float score = dot_product_f32_neon(q, k, head_dim) * scale;
-
-      if (score > max_score) {
-        const float rescale = std::exp(max_score - score);
-        scale_f32_neon(dst, rescale, head_dim);
-        axpy_f32_neon(dst, v, 1.0f, head_dim);
-        denom = denom * rescale + 1.0f;
-        max_score = score;
-      } else {
-        const float weight = std::exp(score - max_score);
-        axpy_f32_neon(dst, v, weight, head_dim);
-        denom += weight;
-      }
+      workspace.score_buffer[static_cast<size_t>(token)] = score;
+      max_score = std::max(max_score, score);
     }
 
-    scale_f32_neon(dst, 1.0f / denom, head_dim);
+    float denom = 0.0f;
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const float weight =
+          std::exp(workspace.score_buffer[static_cast<size_t>(token)] - max_score);
+      workspace.score_buffer[static_cast<size_t>(token)] = weight;
+      denom += weight;
+    }
+
+    std::fill_n(dst, head_dim, 0.0f);
+    const float inv_denom = 1.0f / denom;
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const float * v = tensor_row_ptr(request.src2, token, kv_head);
+      const float weight = workspace.score_buffer[static_cast<size_t>(token)] * inv_denom;
+      axpy_f32_neon(dst, v, weight, head_dim);
+    }
   }
 
   return true;

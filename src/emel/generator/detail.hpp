@@ -613,6 +613,12 @@ inline size_t layer_cache_offset(const native_backend & backend,
          static_cast<size_t>(kv_dim);
 }
 
+inline void store_fp16_rounded_cache(std::span<const float> src, float * dst) noexcept {
+  for (size_t idx = 0; idx < src.size(); ++idx) {
+    dst[idx] = quant::fp16_to_fp32(quant::fp32_to_fp16(src[idx]));
+  }
+}
+
 inline bool check_backend(const native_backend * backend, int32_t * err_out) noexcept {
   if (err_out != nullptr) {
     *err_out = k_error_ok;
@@ -794,12 +800,12 @@ inline bool run_layer(native_backend & backend,
 
   const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
   const size_t cache_offset = layer_cache_offset(backend, layer_index, position, kv_dim);
-  std::copy(backend.k.begin(),
-            backend.k.begin() + kv_dim,
-            backend.key_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
-  std::copy(backend.v.begin(),
-            backend.v.begin() + kv_dim,
-            backend.value_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
+  store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
 
   if (!dispatch_flash_attention(backend, layer_index, position) ||
       !matmul_vector(backend, block.attention_output, backend.attn_ctx, backend.projected)) {

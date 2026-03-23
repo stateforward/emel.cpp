@@ -1756,12 +1756,12 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
   const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
   const size_t cache_offset =
       emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
-  std::copy(backend.k.begin(),
-            backend.k.begin() + kv_dim,
-            backend.key_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
-  std::copy(backend.v.begin(),
-            backend.v.begin() + kv_dim,
-            backend.value_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
 
   if (!emel::generator::detail::compute_attention(backend, layer_index, position + 1, backend.q) ||
       !matmul_vector_mode(
@@ -1854,12 +1854,12 @@ bool run_layer_with_scalar_attention(emel::generator::detail::native_backend & b
   const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
   const size_t cache_offset =
       emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
-  std::copy(backend.k.begin(),
-            backend.k.begin() + kv_dim,
-            backend.key_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
-  std::copy(backend.v.begin(),
-            backend.v.begin() + kv_dim,
-            backend.value_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
 
   if (!emel::generator::detail::compute_attention(backend, layer_index, position + 1, backend.q) ||
       !emel::generator::detail::matmul_vector(backend, block.attention_output, backend.attn_ctx, backend.projected)) {

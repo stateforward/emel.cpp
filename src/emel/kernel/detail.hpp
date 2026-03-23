@@ -213,6 +213,56 @@ inline float fp16_to_fp32(const uint16_t bits16) noexcept {
   return out;
 }
 
+inline uint16_t fp32_to_fp16(const float value) noexcept {
+  uint32_t bits32 = 0u;
+  std::memcpy(&bits32, &value, sizeof(bits32));
+
+  const uint32_t sign = (bits32 >> 16u) & 0x8000u;
+  const uint32_t exp = (bits32 >> 23u) & 0xffu;
+  const uint32_t mant = bits32 & 0x007fffffu;
+
+  if (exp == 0xffu) {
+    const uint16_t nan_mant = static_cast<uint16_t>((mant >> 13u) | (mant != 0u));
+    return static_cast<uint16_t>(sign | 0x7c00u | nan_mant);
+  }
+
+  const int32_t exp_unbiased = static_cast<int32_t>(exp) - 127;
+  const int32_t exp16 = exp_unbiased + 15;
+
+  if (exp16 >= 0x1f) {
+    return static_cast<uint16_t>(sign | 0x7c00u);
+  }
+
+  if (exp16 <= 0) {
+    if (exp16 < -10) {
+      return static_cast<uint16_t>(sign);
+    }
+    uint32_t mantissa = mant | 0x00800000u;
+    const uint32_t shift = static_cast<uint32_t>(14 - exp16);
+    uint32_t rounded = mantissa >> shift;
+    const uint32_t round_bit = (mantissa >> (shift - 1u)) & 1u;
+    const uint32_t sticky = mantissa & ((1u << (shift - 1u)) - 1u);
+    rounded += round_bit & ((rounded & 1u) | static_cast<uint32_t>(sticky != 0u));
+    return static_cast<uint16_t>(sign | rounded);
+  }
+
+  uint32_t mant16 = mant >> 13u;
+  const uint32_t round_bit = (mant >> 12u) & 1u;
+  const uint32_t sticky = mant & 0x0fffu;
+  mant16 += round_bit & ((mant16 & 1u) | static_cast<uint32_t>(sticky != 0u));
+
+  uint32_t exp16_rounded = static_cast<uint32_t>(exp16);
+  if (mant16 == 0x0400u) {
+    mant16 = 0u;
+    ++exp16_rounded;
+    if (exp16_rounded >= 0x1fu) {
+      return static_cast<uint16_t>(sign | 0x7c00u);
+    }
+  }
+
+  return static_cast<uint16_t>(sign | (exp16_rounded << 10u) | (mant16 & 0x03ffu));
+}
+
 inline void dequantize_row_q2_k(const block_q2_k * x, float * y, const int64_t k) noexcept {
   const int64_t nb = k / static_cast<int64_t>(QK_K);
 
