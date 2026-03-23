@@ -1341,6 +1341,10 @@ inline float flash_attn_scale(const request_type & request) noexcept {
   return head_dim > 0.0f ? (1.0f / std::sqrt(head_dim)) : 1.0f;
 }
 
+inline float round_fp16_weight(const float value) noexcept {
+  return quant::fp16_to_fp32(quant::fp32_to_fp16(value));
+}
+
 template <class request_type>
 inline bool has_required_src2(const request_type & request) noexcept {
   return request.src2.data != nullptr &&
@@ -1483,7 +1487,7 @@ inline bool run_flash_attn_ext(const request_type & request) noexcept {
         score += read_f32_at(request.src0, dim, 0, head) *
                  read_f32_at(request.src1, dim, token, kv_head);
       }
-      const float weight = std::exp(score * scale - max_score) / denom;
+      const float weight = round_fp16_weight(std::exp(score * scale - max_score) / denom);
       for (uint64_t dim = 0; dim < head_dim; ++dim) {
         const float value = read_f32_at(request.dst, dim, 0, head) +
             weight * read_f32_at(request.src2, dim, token, kv_head);
@@ -1547,7 +1551,8 @@ inline bool run_flash_attn_ext_with_workspace(const request_type & request,
     }
 
     for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float weight = workspace.score_buffer[static_cast<size_t>(token)] / denom;
+      const float weight = round_fp16_weight(
+          workspace.score_buffer[static_cast<size_t>(token)] / denom);
       for (uint64_t dim = 0; dim < head_dim; ++dim) {
         const float value = read_f32_at(request.dst, dim, 0, head) +
             weight * read_f32_at(request.src2, dim, token, kv_head);

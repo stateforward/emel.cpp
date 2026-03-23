@@ -720,7 +720,8 @@ inline bool compute_attention(native_backend & backend,
     }
 
     for (int32_t position = 0; position < position_limit; ++position) {
-      const float weight = backend.attn_probs[static_cast<size_t>(position)] / score_sum;
+      const float weight = quant::fp16_to_fp32(
+          quant::fp32_to_fp16(backend.attn_probs[static_cast<size_t>(position)] / score_sum));
       const size_t cache_offset =
           layer_cache_offset(backend, layer_index, position, kv_dim) + kv_offset;
       for (int32_t dim = 0; dim < head_dim; ++dim) {

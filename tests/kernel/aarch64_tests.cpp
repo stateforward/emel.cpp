@@ -1,8 +1,10 @@
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cmath>
+#include <span>
 #include <vector>
 
 #include "../allocation_tracker.hpp"
@@ -22,6 +24,46 @@ using emel::kernel::test::make_dst;
 using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_src;
+
+std::vector<float> flash_attn_reference_f16_weight_contraction(
+    std::span<const float> q,
+    std::span<const float> k,
+    std::span<const float> v,
+    const uint64_t head_dim,
+    const uint64_t kv_tokens,
+    const float scale) {
+  std::vector<float> scores(static_cast<size_t>(kv_tokens), 0.0f);
+  float max_score = -INFINITY;
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    float score = 0.0f;
+    const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      score += q[static_cast<size_t>(dim)] * k[offset + static_cast<size_t>(dim)];
+    }
+    score *= scale;
+    scores[static_cast<size_t>(token)] = score;
+    max_score = std::max(max_score, score);
+  }
+
+  float denom = 0.0f;
+  for (float & score : scores) {
+    score = std::exp(score - max_score);
+    denom += score;
+  }
+
+  std::vector<float> out(static_cast<size_t>(head_dim), 0.0f);
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    const float normalized = scores[static_cast<size_t>(token)] / denom;
+    const float rounded_weight = emel::kernel::detail::quant::fp16_to_fp32(
+        emel::kernel::detail::quant::fp32_to_fp16(normalized));
+    const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      out[static_cast<size_t>(dim)] += rounded_weight * v[offset + static_cast<size_t>(dim)];
+    }
+  }
+
+  return out;
+}
 
 }  // namespace
 
@@ -1077,6 +1119,70 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_shared_workspace_on_long_kv_spa
 
   for (size_t idx = 0; idx < dst_neon.size(); ++idx) {
     CHECK(dst_neon[idx] == doctest::Approx(dst_shared[idx]).epsilon(1e-7f));
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_f16_weight_contraction_reference") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t head_dim = 32u;
+  constexpr uint64_t kv_tokens = 19u;
+  constexpr float scale = 0.125f;
+
+  std::array<float, head_dim> q = {};
+  std::array<float, head_dim * kv_tokens> k = {};
+  std::array<float, head_dim * kv_tokens> v = {};
+  std::array<float, head_dim> neon_dst = {};
+  std::array<float, head_dim> shared_dst = {};
+
+  for (uint64_t dim = 0; dim < head_dim; ++dim) {
+    const int32_t centered = static_cast<int32_t>((dim * 7u) % 23u) - 11;
+    q[static_cast<size_t>(dim)] = static_cast<float>(centered) * 0.09375f;
+  }
+
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim) +
+                            static_cast<size_t>(dim);
+      const int32_t key_centered =
+          static_cast<int32_t>(((token + 3u) * (dim + 5u)) % 29u) - 14;
+      const int32_t value_centered =
+          static_cast<int32_t>(((token + 11u) * (dim + 7u)) % 31u) - 15;
+      k[offset] = static_cast<float>(key_centered) * 0.0625f;
+      const float raw_value = static_cast<float>(value_centered) * 0.28125f;
+      v[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+          emel::kernel::detail::quant::fp32_to_fp16(raw_value));
+    }
+  }
+
+  emel::kernel::event::op_flash_attn_ext request{};
+  request.src0 = make_src(q.data(), dtype::f32, head_dim, 1, 1, 1);
+  request.src1 = make_src(k.data(), dtype::f32, head_dim, kv_tokens, 1, 1);
+  request.src2 = make_src(v.data(), dtype::f32, head_dim, kv_tokens, 1, 1);
+  request.dst = make_dst(neon_dst.data(), dtype::f32, head_dim, 1, 1, 1);
+  request.nth = 1;
+  std::memcpy(request.op_params.data(), &scale, sizeof(scale));
+  request.op_params_size = sizeof(scale);
+
+  auto shared_request = request;
+  shared_request.dst = make_dst(shared_dst.data(), dtype::f32, head_dim, 1, 1, 1);
+
+  emel::kernel::detail::flash_attn_workspace neon_workspace{};
+  emel::kernel::detail::flash_attn_workspace shared_workspace{};
+  REQUIRE(emel::kernel::aarch64::detail::run_flash_attn_ext_neon(
+      request, true, neon_workspace));
+  REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(
+      shared_request, shared_workspace));
+
+  const std::vector<float> expected = flash_attn_reference_f16_weight_contraction(
+      q, k, v, head_dim, kv_tokens, scale);
+  for (uint64_t dim = 0; dim < head_dim; ++dim) {
+    CHECK(neon_dst[static_cast<size_t>(dim)] ==
+          doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
+    CHECK(shared_dst[static_cast<size_t>(dim)] ==
+          doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
   }
 #endif
 }

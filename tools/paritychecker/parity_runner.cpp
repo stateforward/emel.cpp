@@ -1726,15 +1726,126 @@ struct exact_matmul_mode {
   bool attention = false;
   bool ffn = false;
   bool output = false;
+  uint8_t only_dtype = 0u;
+  bool use_reference_q8 = false;
+  bool use_scalar_quantized = false;
 };
+
+bool quantize_input_blocks_reference(std::span<const float> input,
+                                     std::array<reference_block_q8_k,
+                                                kernel_quant::MAX_Q8_K_BLOCKS> & blocks,
+                                     uint64_t & block_count_out);
+
+bool quantize_input_blocks(std::span<const float> input,
+                           std::array<kernel_quant::block_q8_k,
+                                      kernel_quant::MAX_Q8_K_BLOCKS> & blocks,
+                           uint64_t & block_count_out);
+
+float ggml_row_dot_reference_q8(const emel::generator::detail::tensor_matrix & matrix,
+                                uint32_t row,
+                                const reference_block_q8_k * q8_blocks,
+                                uint64_t block_count);
+
+bool matmul_vector_reference_q8(const emel::generator::detail::tensor_matrix & matrix,
+                                std::span<const float> input,
+                                std::span<float> output) {
+  if (matrix.tensor == nullptr ||
+      matrix.rows <= 0 ||
+      matrix.cols <= 0 ||
+      static_cast<size_t>(matrix.cols) != input.size() ||
+      static_cast<size_t>(matrix.rows) != output.size()) {
+    return false;
+  }
+
+  std::array<reference_block_q8_k, kernel_quant::MAX_Q8_K_BLOCKS> q8_blocks = {};
+  uint64_t block_count = 0;
+  if (!quantize_input_blocks_reference(input, q8_blocks, block_count)) {
+    return false;
+  }
+
+  for (uint32_t row = 0; row < static_cast<uint32_t>(matrix.rows); ++row) {
+    output[static_cast<size_t>(row)] =
+        ggml_row_dot_reference_q8(matrix, row, q8_blocks.data(), block_count);
+  }
+  return true;
+}
+
+bool matmul_vector_scalar_quantized(const emel::generator::detail::tensor_matrix & matrix,
+                                    std::span<const float> input,
+                                    std::span<float> output) {
+  if (matrix.tensor == nullptr ||
+      matrix.rows <= 0 ||
+      matrix.cols <= 0 ||
+      static_cast<size_t>(matrix.cols) != input.size() ||
+      static_cast<size_t>(matrix.rows) != output.size()) {
+    return false;
+  }
+
+  const auto dtype = static_cast<emel::kernel::event::dtype>(matrix.tensor->type);
+  if (dtype != emel::kernel::event::dtype::q2_k &&
+      dtype != emel::kernel::event::dtype::q3_k &&
+      dtype != emel::kernel::event::dtype::q6_k) {
+    return false;
+  }
+
+  std::array<kernel_quant::block_q8_k, kernel_quant::MAX_Q8_K_BLOCKS> q8_blocks = {};
+  uint64_t block_count = 0;
+  if (!quantize_input_blocks(input, q8_blocks, block_count)) {
+    return false;
+  }
+
+  const auto * matrix_data = static_cast<const uint8_t *>(matrix.tensor->data);
+  const size_t row_bytes =
+      emel::generator::detail::row_storage_bytes(*matrix.tensor, matrix.cols);
+  for (uint32_t row = 0; row < static_cast<uint32_t>(matrix.rows); ++row) {
+    const uint8_t * row_ptr = matrix_data + static_cast<size_t>(row) * row_bytes;
+    switch (dtype) {
+      case emel::kernel::event::dtype::q2_k:
+        output[static_cast<size_t>(row)] = emel::kernel::detail::dot_q2_k_q8_k_row_scalar(
+            reinterpret_cast<const kernel_quant::block_q2_k *>(row_ptr),
+            q8_blocks.data(),
+            block_count);
+        break;
+      case emel::kernel::event::dtype::q3_k:
+        output[static_cast<size_t>(row)] = emel::kernel::detail::dot_q3_k_q8_k_row_scalar(
+            reinterpret_cast<const kernel_quant::block_q3_k *>(row_ptr),
+            q8_blocks.data(),
+            block_count);
+        break;
+      case emel::kernel::event::dtype::q6_k:
+        output[static_cast<size_t>(row)] = emel::kernel::detail::dot_q6_k_q8_k_row_scalar(
+            reinterpret_cast<const kernel_quant::block_q6_k *>(row_ptr),
+            q8_blocks.data(),
+            block_count);
+        break;
+      default:
+        return false;
+    }
+  }
+
+  return true;
+}
 
 bool matmul_vector_mode(emel::generator::detail::native_backend & backend,
                         const emel::generator::detail::tensor_matrix & matrix,
                         std::span<const float> input,
                         std::span<float> output,
-                        const bool exact) {
-  if (exact) {
+                        const bool exact,
+                        const uint8_t only_dtype = 0u,
+                        const bool use_reference_q8 = false,
+                        const bool use_scalar_quantized = false) {
+  const bool dtype_match =
+      only_dtype == 0u ||
+      (matrix.tensor != nullptr && static_cast<uint8_t>(matrix.tensor->type) == only_dtype);
+  const bool exact_enabled = exact && dtype_match;
+  if (exact_enabled) {
     return matmul_vector_dequantized(matrix, input, output);
+  }
+  if (use_reference_q8 && dtype_match) {
+    return matmul_vector_reference_q8(matrix, input, output);
+  }
+  if (use_scalar_quantized && dtype_match) {
+    return matmul_vector_scalar_quantized(matrix, input, output);
   }
   return emel::generator::detail::matmul_vector(backend, matrix, input, output);
 }
@@ -1747,7 +1858,10 @@ bool compute_logits_with_matmul_mode(emel::generator::detail::native_backend & b
                             backend.output,
                             backend.norm,
                             backend.bound_logits,
-                            mode.output);
+                            mode.output,
+                            mode.only_dtype,
+                            mode.use_reference_q8,
+                            mode.use_scalar_quantized);
 }
 
 bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native_backend & backend,
@@ -1757,9 +1871,33 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
   if (!emel::generator::detail::rms_norm(
           backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
-      !matmul_vector_mode(backend, block.attention_q, backend.norm, backend.q, mode.attention) ||
-      !matmul_vector_mode(backend, block.attention_k, backend.norm, backend.k, mode.attention) ||
-      !matmul_vector_mode(backend, block.attention_v, backend.norm, backend.v, mode.attention)) {
+      !matmul_vector_mode(
+          backend,
+          block.attention_q,
+          backend.norm,
+          backend.q,
+          mode.attention,
+          mode.only_dtype,
+          mode.use_reference_q8,
+          mode.use_scalar_quantized) ||
+      !matmul_vector_mode(
+          backend,
+          block.attention_k,
+          backend.norm,
+          backend.k,
+          mode.attention,
+          mode.only_dtype,
+          mode.use_reference_q8,
+          mode.use_scalar_quantized) ||
+      !matmul_vector_mode(
+          backend,
+          block.attention_v,
+          backend.norm,
+          backend.v,
+          mode.attention,
+          mode.only_dtype,
+          mode.use_reference_q8,
+          mode.use_scalar_quantized)) {
     return false;
   }
 
@@ -1788,7 +1926,14 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
   if (!emel::generator::detail::compute_attention(
           backend, layer_index, position + 1, backend.q_attn) ||
       !matmul_vector_mode(
-          backend, block.attention_output, backend.attn_ctx, backend.projected, mode.attention)) {
+          backend,
+          block.attention_output,
+          backend.attn_ctx,
+          backend.projected,
+          mode.attention,
+          mode.only_dtype,
+          mode.use_reference_q8,
+          mode.use_scalar_quantized)) {
     return false;
   }
 
@@ -1798,8 +1943,24 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
 
   if (!emel::generator::detail::rms_norm(
           backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
-      !matmul_vector_mode(backend, block.feed_forward_gate, backend.norm, backend.gate, mode.ffn) ||
-      !matmul_vector_mode(backend, block.feed_forward_up, backend.norm, backend.up, mode.ffn)) {
+      !matmul_vector_mode(
+          backend,
+          block.feed_forward_gate,
+          backend.norm,
+          backend.gate,
+          mode.ffn,
+          mode.only_dtype,
+          mode.use_reference_q8,
+          mode.use_scalar_quantized) ||
+      !matmul_vector_mode(
+          backend,
+          block.feed_forward_up,
+          backend.norm,
+          backend.up,
+          mode.ffn,
+          mode.only_dtype,
+          mode.use_reference_q8,
+          mode.use_scalar_quantized)) {
     return false;
   }
 
@@ -1808,7 +1969,14 @@ bool run_layer_with_matmul_mode_scalar_attention(emel::generator::detail::native
   }
 
   if (!matmul_vector_mode(
-          backend, block.feed_forward_down, backend.ffn_hidden, backend.projected, mode.ffn)) {
+          backend,
+          block.feed_forward_down,
+          backend.ffn_hidden,
+          backend.projected,
+          mode.ffn,
+          mode.only_dtype,
+          mode.use_reference_q8,
+          mode.use_scalar_quantized)) {
     return false;
   }
 
@@ -1952,6 +2120,181 @@ bool run_prefill_with_scalar_attention(emel::generator::detail::native_backend &
   return emel::generator::detail::compute_logits(backend);
 }
 
+bool compute_attention_with_ggml_f16_value_contraction(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position_limit,
+    std::span<const float> q_vector) {
+  const int32_t head_count = backend.n_head;
+  const int32_t kv_head_count = backend.n_head_kv;
+  const int32_t head_dim = backend.head_dim;
+  const int32_t kv_head_dim = backend.head_dim_kv;
+  const int32_t kv_dim = kv_head_count * kv_head_dim;
+  const float inv_scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+
+  std::fill(backend.attn_ctx.begin(), backend.attn_ctx.end(), 0.0f);
+
+  std::vector<ggml_fp16_t> weight_f16(static_cast<size_t>(position_limit));
+  std::vector<ggml_fp16_t> value_f16(static_cast<size_t>(position_limit));
+  for (int32_t head = 0; head < head_count; ++head) {
+    const int32_t kv_head = head / backend.n_rep;
+    const size_t q_offset = static_cast<size_t>(head) * static_cast<size_t>(head_dim);
+    const size_t kv_offset = static_cast<size_t>(kv_head) * static_cast<size_t>(kv_head_dim);
+
+    float max_score = -std::numeric_limits<float>::infinity();
+    for (int32_t position = 0; position < position_limit; ++position) {
+      const size_t cache_offset =
+          emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim) +
+          kv_offset;
+      float score = 0.0f;
+      for (int32_t dim = 0; dim < head_dim; ++dim) {
+        score += q_vector[q_offset + static_cast<size_t>(dim)] *
+                 backend.key_cache[cache_offset + static_cast<size_t>(dim)];
+      }
+      score *= inv_scale;
+      backend.attn_scores[static_cast<size_t>(position)] = score;
+      max_score = std::max(max_score, score);
+    }
+
+    float score_sum = 0.0f;
+    for (int32_t position = 0; position < position_limit; ++position) {
+      const float prob = std::exp(backend.attn_scores[static_cast<size_t>(position)] - max_score);
+      backend.attn_probs[static_cast<size_t>(position)] = prob;
+      score_sum += prob;
+    }
+
+    for (int32_t position = 0; position < position_limit; ++position) {
+      const float weight = backend.attn_probs[static_cast<size_t>(position)] / score_sum;
+      weight_f16[static_cast<size_t>(position)] = kernel_quant::fp32_to_fp16(weight);
+    }
+
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
+      for (int32_t position = 0; position < position_limit; ++position) {
+        const size_t cache_offset =
+            emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim) +
+            kv_offset;
+        value_f16[static_cast<size_t>(position)] = kernel_quant::fp32_to_fp16(
+            backend.value_cache[cache_offset + static_cast<size_t>(dim)]);
+      }
+
+      float dot = 0.0f;
+      ggml_vec_dot_f16(position_limit,
+                       &dot,
+                       0u,
+                       value_f16.data(),
+                       0u,
+                       weight_f16.data(),
+                       0u,
+                       1);
+      backend.attn_ctx[q_offset + static_cast<size_t>(dim)] = dot;
+    }
+  }
+
+  return true;
+}
+
+bool run_layer_with_scalar_attention_ggml_f16_value_contraction(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position) {
+  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    return false;
+  }
+
+  emel::generator::detail::apply_rope(
+      backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+  emel::generator::detail::apply_rope(backend.k,
+                                      backend.n_head_kv,
+                                      backend.head_dim_kv,
+                                      backend.n_rot,
+                                      position,
+                                      backend.rope_freq_base);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
+
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t cache_offset =
+      emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
+
+  if (!compute_attention_with_ggml_f16_value_contraction(
+          backend, layer_index, position + 1, backend.q_attn) ||
+      !emel::generator::detail::matmul_vector(
+          backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+    backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+  }
+
+  if (!emel::generator::detail::matmul_vector(
+          backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  return true;
+}
+
+bool run_prefill_with_scalar_attention_ggml_f16_value_contraction(
+    emel::generator::detail::native_backend & backend,
+    std::span<const int32_t> prefix_tokens) {
+  if (prefix_tokens.empty()) {
+    return false;
+  }
+
+  backend.kv_cache_tokens = 0;
+  for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+    const int32_t token_id = prefix_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (token_id < 0 ||
+        token_id >= backend.token_embedding.rows ||
+        position < 0 ||
+        position >= backend.n_ctx) {
+      return false;
+    }
+
+    if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
+      return false;
+    }
+
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_layer_with_scalar_attention_ggml_f16_value_contraction(backend, layer, position)) {
+        return false;
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+  }
+
+  return emel::generator::detail::compute_logits(backend);
+}
+
 bool run_reference_prefix_decode(llama_context * ctx,
                                  std::span<const llama_token> prompt_tokens,
                                  std::span<const int32_t> generated_tokens);
@@ -1987,19 +2330,91 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   emel::generator::detail::native_backend dispatch_backend = {};
   emel::generator::detail::native_backend scalar_backend = {};
   emel::generator::detail::native_backend shared_backend = {};
+  emel::generator::detail::native_backend ggml_f16_attention_backend = {};
   emel::generator::detail::native_backend exact_backend = {};
   emel::generator::detail::native_backend attention_exact_backend = {};
   emel::generator::detail::native_backend ffn_exact_backend = {};
   emel::generator::detail::native_backend output_exact_backend = {};
+  emel::generator::detail::native_backend q2_exact_backend = {};
+  emel::generator::detail::native_backend q3_exact_backend = {};
+  emel::generator::detail::native_backend q6_exact_backend = {};
+  emel::generator::detail::native_backend q2_scalar_quant_backend = {};
+  emel::generator::detail::native_backend q3_scalar_quant_backend = {};
+  emel::generator::detail::native_backend q6_scalar_quant_backend = {};
+  emel::generator::detail::native_backend q2_reference_backend = {};
+  emel::generator::detail::native_backend q3_reference_backend = {};
+  emel::generator::detail::native_backend q6_reference_backend = {};
   const exact_matmul_mode exact_all{.attention = true, .ffn = true, .output = true};
   const exact_matmul_mode exact_attention_only{.attention = true, .ffn = false, .output = false};
   const exact_matmul_mode exact_ffn_only{.attention = false, .ffn = true, .output = false};
   const exact_matmul_mode exact_output_only{.attention = false, .ffn = false, .output = true};
+  const exact_matmul_mode exact_q2_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q2_k),
+  };
+  const exact_matmul_mode exact_q3_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q3_k),
+  };
+  const exact_matmul_mode exact_q6_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q6_k),
+  };
+  const exact_matmul_mode scalar_quant_q2_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q2_k),
+      .use_scalar_quantized = true,
+  };
+  const exact_matmul_mode scalar_quant_q3_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q3_k),
+      .use_scalar_quantized = true,
+  };
+  const exact_matmul_mode scalar_quant_q6_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q6_k),
+      .use_scalar_quantized = true,
+  };
+  const exact_matmul_mode reference_q2_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q2_k),
+      .use_reference_q8 = true,
+  };
+  const exact_matmul_mode reference_q3_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q3_k),
+      .use_reference_q8 = true,
+  };
+  const exact_matmul_mode reference_q6_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q6_k),
+      .use_reference_q8 = true,
+  };
   if (emel::generator::detail::prepare(dispatch_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
       emel::generator::detail::prepare(scalar_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
       emel::generator::detail::prepare(shared_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(ggml_f16_attention_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
       emel::generator::detail::prepare(exact_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
@@ -2009,15 +2424,53 @@ void dump_scalar_attention_debug(const generation_load_state & state,
           emel::error::cast(emel::model::loader::error::none) ||
       emel::generator::detail::prepare(output_exact_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q2_exact_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q3_exact_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q6_exact_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q2_scalar_quant_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q3_scalar_quant_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q6_scalar_quant_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q2_reference_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q3_reference_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q6_reference_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
       !run_prefill_from_token_prefix(dispatch_backend, prefix_tokens) ||
       !run_prefill_with_scalar_attention(scalar_backend, prefix_tokens) ||
+      !run_prefill_with_scalar_attention_ggml_f16_value_contraction(
+          ggml_f16_attention_backend, prefix_tokens) ||
       !run_prefill_with_scalar_attention_matmul_mode(exact_backend, prefix_tokens, exact_all) ||
       !run_prefill_with_scalar_attention_matmul_mode(
           attention_exact_backend, prefix_tokens, exact_attention_only) ||
       !run_prefill_with_scalar_attention_matmul_mode(
           ffn_exact_backend, prefix_tokens, exact_ffn_only) ||
       !run_prefill_with_scalar_attention_matmul_mode(
-          output_exact_backend, prefix_tokens, exact_output_only)) {
+          output_exact_backend, prefix_tokens, exact_output_only) ||
+      !run_prefill_with_scalar_attention_matmul_mode(
+          q2_exact_backend, prefix_tokens, exact_q2_only) ||
+      !run_prefill_with_scalar_attention_matmul_mode(
+          q3_exact_backend, prefix_tokens, exact_q3_only) ||
+      !run_prefill_with_scalar_attention_matmul_mode(
+          q6_exact_backend, prefix_tokens, exact_q6_only) ||
+      !run_prefill_with_scalar_attention_matmul_mode(
+          q2_scalar_quant_backend, prefix_tokens, scalar_quant_q2_only) ||
+      !run_prefill_with_scalar_attention_matmul_mode(
+          q3_scalar_quant_backend, prefix_tokens, scalar_quant_q3_only) ||
+      !run_prefill_with_scalar_attention_matmul_mode(
+          q6_scalar_quant_backend, prefix_tokens, scalar_quant_q6_only) ||
+      !run_prefill_with_scalar_attention_matmul_mode(
+          q2_reference_backend, prefix_tokens, reference_q2_only) ||
+      !run_prefill_with_scalar_attention_matmul_mode(
+          q3_reference_backend, prefix_tokens, reference_q3_only) ||
+      !run_prefill_with_scalar_attention_matmul_mode(
+          q6_reference_backend, prefix_tokens, reference_q6_only)) {
     std::fprintf(stdout, "generation_debug.flash: unable to replay mismatch prefix\n");
     return;
   }
@@ -2055,6 +2508,8 @@ void dump_scalar_attention_debug(const generation_load_state & state,
       select_argmax_from_logits(scalar_backend.bound_logits.data(), scalar_backend.n_vocab);
   const argmax_summary shared_summary =
       select_argmax_from_logits(shared_backend.bound_logits.data(), shared_backend.n_vocab);
+  const argmax_summary ggml_f16_attention_summary = select_argmax_from_logits(
+      ggml_f16_attention_backend.bound_logits.data(), ggml_f16_attention_backend.n_vocab);
   const argmax_summary exact_summary =
       select_argmax_from_logits(exact_backend.bound_logits.data(), exact_backend.n_vocab);
   const argmax_summary attention_exact_summary = select_argmax_from_logits(
@@ -2063,6 +2518,24 @@ void dump_scalar_attention_debug(const generation_load_state & state,
       select_argmax_from_logits(ffn_exact_backend.bound_logits.data(), ffn_exact_backend.n_vocab);
   const argmax_summary output_exact_summary = select_argmax_from_logits(
       output_exact_backend.bound_logits.data(), output_exact_backend.n_vocab);
+  const argmax_summary q2_exact_summary =
+      select_argmax_from_logits(q2_exact_backend.bound_logits.data(), q2_exact_backend.n_vocab);
+  const argmax_summary q3_exact_summary =
+      select_argmax_from_logits(q3_exact_backend.bound_logits.data(), q3_exact_backend.n_vocab);
+  const argmax_summary q6_exact_summary =
+      select_argmax_from_logits(q6_exact_backend.bound_logits.data(), q6_exact_backend.n_vocab);
+  const argmax_summary q2_scalar_quant_summary = select_argmax_from_logits(
+      q2_scalar_quant_backend.bound_logits.data(), q2_scalar_quant_backend.n_vocab);
+  const argmax_summary q3_scalar_quant_summary = select_argmax_from_logits(
+      q3_scalar_quant_backend.bound_logits.data(), q3_scalar_quant_backend.n_vocab);
+  const argmax_summary q6_scalar_quant_summary = select_argmax_from_logits(
+      q6_scalar_quant_backend.bound_logits.data(), q6_scalar_quant_backend.n_vocab);
+  const argmax_summary q2_reference_summary = select_argmax_from_logits(
+      q2_reference_backend.bound_logits.data(), q2_reference_backend.n_vocab);
+  const argmax_summary q3_reference_summary = select_argmax_from_logits(
+      q3_reference_backend.bound_logits.data(), q3_reference_backend.n_vocab);
+  const argmax_summary q6_reference_summary = select_argmax_from_logits(
+      q6_reference_backend.bound_logits.data(), q6_reference_backend.n_vocab);
   const auto dump_flash_kernel_compare =
       [&](const char * label, emel::generator::detail::native_backend & backend) {
         const int32_t last_layer = backend.n_layer - 1;
@@ -2109,16 +2582,29 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   dump_flash_kernel_compare("shared_state", shared_backend);
   std::fprintf(stdout,
                "generation_debug.flash: prefix_tokens=%zu dispatch_argmax=%d scalar_argmax=%d "
-               "shared_argmax=%d exact_argmax=%d attention_exact_argmax=%d "
-               "ffn_exact_argmax=%d output_exact_argmax=%d reference_token=%d\n",
+               "shared_argmax=%d ggml_f16_attn_argmax=%d exact_argmax=%d attention_exact_argmax=%d "
+               "ffn_exact_argmax=%d output_exact_argmax=%d q2_exact_argmax=%d "
+               "q3_exact_argmax=%d q6_exact_argmax=%d q2_scalar_argmax=%d q3_scalar_argmax=%d "
+               "q6_scalar_argmax=%d q2_reference_argmax=%d q3_reference_argmax=%d "
+               "q6_reference_argmax=%d reference_token=%d\n",
                prefix_tokens.size(),
                dispatch_summary.selected_token,
                scalar_summary.selected_token,
                shared_summary.selected_token,
+               ggml_f16_attention_summary.selected_token,
                exact_summary.selected_token,
                attention_exact_summary.selected_token,
                ffn_exact_summary.selected_token,
                output_exact_summary.selected_token,
+               q2_exact_summary.selected_token,
+               q3_exact_summary.selected_token,
+               q6_exact_summary.selected_token,
+               q2_scalar_quant_summary.selected_token,
+               q3_scalar_quant_summary.selected_token,
+               q6_scalar_quant_summary.selected_token,
+               q2_reference_summary.selected_token,
+               q3_reference_summary.selected_token,
+               q6_reference_summary.selected_token,
                reference_token);
   std::fprintf(stdout,
                "generation_debug.flash.scores: dispatch_emel=%g dispatch_reference=%g "
