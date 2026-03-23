@@ -2113,14 +2113,16 @@ void dump_vector_compare(const char * label,
 struct reference_tensor_capture {
   const char * name = nullptr;
   std::vector<float> values = {};
+  std::array<int64_t, 4> shape = {1, 1, 1, 1};
 };
 
 struct reference_graph_capture {
-  std::array<reference_tensor_capture, 23> entries = {{
+  std::array<reference_tensor_capture, 25> entries = {{
       {"attn_norm-0", {}},
       {"Qcur-0", {}},
       {"Kcur-0", {}},
       {"Vcur-0", {}},
+      {"kq_soft_max-0", {}},
       {"kqv_out-0", {}},
       {"attn_out-0", {}},
       {"ffn_norm-0", {}},
@@ -2132,6 +2134,7 @@ struct reference_graph_capture {
       {"Qcur-1", {}},
       {"Kcur-1", {}},
       {"Vcur-1", {}},
+      {"kq_soft_max-1", {}},
       {"kqv_out-1", {}},
       {"attn_out-1", {}},
       {"ffn_norm-1", {}},
@@ -2156,12 +2159,32 @@ bool capture_reference_eval_tensor(ggml_tensor * tensor, const bool ask, void * 
     if (ask) {
       return true;
     }
-    const int64_t count = tensor->ne[0] * std::max<int64_t>(tensor->ne[1], 1);
-    if (count <= 0 || tensor->data == nullptr) {
+    const int64_t ne0 = std::max<int64_t>(tensor->ne[0], 1);
+    const int64_t ne1 = std::max<int64_t>(tensor->ne[1], 1);
+    const int64_t ne2 = std::max<int64_t>(tensor->ne[2], 1);
+    const int64_t ne3 = std::max<int64_t>(tensor->ne[3], 1);
+    const int64_t count = ne0 * ne1 * ne2 * ne3;
+    if (count <= 0 || tensor->data == nullptr || tensor->type != GGML_TYPE_F32) {
       return false;
     }
+    entry.shape = {ne0, ne1, ne2, ne3};
     entry.values.resize(static_cast<size_t>(count));
-    std::memcpy(entry.values.data(), tensor->data, static_cast<size_t>(count) * sizeof(float));
+    const auto * base = static_cast<const uint8_t *>(tensor->data);
+    size_t out_index = 0;
+    for (int64_t i3 = 0; i3 < ne3; ++i3) {
+      for (int64_t i2 = 0; i2 < ne2; ++i2) {
+        for (int64_t i1 = 0; i1 < ne1; ++i1) {
+          for (int64_t i0 = 0; i0 < ne0; ++i0) {
+            const size_t offset = static_cast<size_t>(i0) * static_cast<size_t>(tensor->nb[0]) +
+                                  static_cast<size_t>(i1) * static_cast<size_t>(tensor->nb[1]) +
+                                  static_cast<size_t>(i2) * static_cast<size_t>(tensor->nb[2]) +
+                                  static_cast<size_t>(i3) * static_cast<size_t>(tensor->nb[3]);
+            std::memcpy(&entry.values[out_index], base + offset, sizeof(float));
+            ++out_index;
+          }
+        }
+      }
+    }
     return true;
   }
 
@@ -2176,6 +2199,16 @@ std::span<const float> find_reference_tensor(const reference_graph_capture & cap
     }
   }
   return {};
+}
+
+const reference_tensor_capture * find_reference_capture(const reference_graph_capture & capture,
+                                                        const char * name) {
+  for (const auto & entry : capture.entries) {
+    if (std::strcmp(entry.name, name) == 0) {
+      return &entry;
+    }
+  }
+  return nullptr;
 }
 
 std::span<const float> reference_last_token_row(std::span<const float> reference_values,
@@ -2261,6 +2294,193 @@ void dump_state_compare(const char * label,
                max_idx,
                emel_values[static_cast<size_t>(max_idx)],
                reference_values[static_cast<size_t>(max_idx)]);
+}
+
+std::span<const float> reference_softmax_query_head_slice(const reference_tensor_capture & capture,
+                                                          const int32_t head,
+                                                          const int32_t query_index) {
+  const int64_t ne0 = std::max<int64_t>(capture.shape[0], 1);
+  const int64_t ne1 = std::max<int64_t>(capture.shape[1], 1);
+  const int64_t ne2 = std::max<int64_t>(capture.shape[2], 1);
+  const int64_t ne3 = std::max<int64_t>(capture.shape[3], 1);
+  if (head < 0 || query_index < 0 || ne3 < 1 || head >= ne2 || query_index >= ne1) {
+    return {};
+  }
+
+  const size_t offset =
+      ((static_cast<size_t>(head) * static_cast<size_t>(ne1)) + static_cast<size_t>(query_index)) *
+      static_cast<size_t>(ne0);
+  if (offset + static_cast<size_t>(ne0) > capture.values.size()) {
+    return {};
+  }
+  return std::span<const float>(capture.values).subspan(offset, static_cast<size_t>(ne0));
+}
+
+std::span<const float> reference_token_head_slice(const reference_tensor_capture & capture,
+                                                  const int32_t token_index,
+                                                  const int32_t head_index) {
+  const int64_t ne0 = std::max<int64_t>(capture.shape[0], 1);
+  const int64_t ne1 = std::max<int64_t>(capture.shape[1], 1);
+  const int64_t ne2 = std::max<int64_t>(capture.shape[2], 1);
+  if (token_index < 0 || head_index < 0 || token_index >= ne2 || head_index >= ne1) {
+    return {};
+  }
+
+  const size_t offset =
+      ((static_cast<size_t>(token_index) * static_cast<size_t>(ne1)) +
+       static_cast<size_t>(head_index)) *
+      static_cast<size_t>(ne0);
+  if (offset + static_cast<size_t>(ne0) > capture.values.size()) {
+    return {};
+  }
+  return std::span<const float>(capture.values).subspan(offset, static_cast<size_t>(ne0));
+}
+
+bool compute_attention_with_softmax_debug(emel::generator::detail::native_backend & backend,
+                                          const reference_graph_capture & graph_capture,
+                                          const int32_t layer_index,
+                                          const int32_t position_limit,
+                                          const std::string & layer_prefix) {
+  const int32_t head_count = backend.n_head;
+  const int32_t kv_head_count = backend.n_head_kv;
+  const int32_t head_dim = backend.head_dim;
+  const int32_t kv_head_dim = backend.head_dim_kv;
+  const int32_t kv_dim = kv_head_count * kv_head_dim;
+  const float inv_scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+
+  std::fill(backend.attn_ctx.begin(), backend.attn_ctx.end(), 0.0f);
+
+  const std::string softmax_key = "kq_soft_max-" + std::to_string(layer_index);
+  const reference_tensor_capture * softmax_capture =
+      find_reference_capture(graph_capture, softmax_key.c_str());
+  const std::string value_key = "Vcur-" + std::to_string(layer_index);
+  const reference_tensor_capture * value_capture =
+      find_reference_capture(graph_capture, value_key.c_str());
+  const std::string ctx_key = "kqv_out-" + std::to_string(layer_index);
+  const std::span<const float> reference_ctx = reference_last_token_row(
+      find_reference_tensor(graph_capture, ctx_key.c_str()), backend.attn_ctx.size());
+
+  std::vector<float> ctx_reference_probs(backend.attn_ctx.size(), 0.0f);
+  std::vector<float> ctx_reference_values(backend.attn_ctx.size(), 0.0f);
+
+  float max_abs = 0.0f;
+  int32_t max_head = 0;
+  int32_t max_pos = 0;
+  float emel_at_max = 0.0f;
+  float reference_at_max = 0.0f;
+
+  for (int32_t head = 0; head < head_count; ++head) {
+    const int32_t kv_head = head / backend.n_rep;
+    const size_t q_offset = static_cast<size_t>(head) * static_cast<size_t>(head_dim);
+    const size_t kv_offset = static_cast<size_t>(kv_head) * static_cast<size_t>(kv_head_dim);
+
+    float max_score = -std::numeric_limits<float>::infinity();
+    for (int32_t position = 0; position < position_limit; ++position) {
+      const size_t cache_offset =
+          emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim) +
+          kv_offset;
+      float score = 0.0f;
+      for (int32_t dim = 0; dim < head_dim; ++dim) {
+        score += backend.q[q_offset + static_cast<size_t>(dim)] *
+                 backend.key_cache[cache_offset + static_cast<size_t>(dim)];
+      }
+      score *= inv_scale;
+      backend.attn_scores[static_cast<size_t>(position)] = score;
+      max_score = std::max(max_score, score);
+    }
+
+    float score_sum = 0.0f;
+    for (int32_t position = 0; position < position_limit; ++position) {
+      const float prob = std::exp(backend.attn_scores[static_cast<size_t>(position)] - max_score);
+      backend.attn_probs[static_cast<size_t>(position)] = prob;
+      score_sum += prob;
+    }
+
+    const std::span<const float> reference_probs =
+        softmax_capture != nullptr
+            ? reference_softmax_query_head_slice(*softmax_capture, head, position_limit - 1)
+            : std::span<const float>{};
+
+    for (int32_t position = 0; position < position_limit; ++position) {
+      const float weight = backend.attn_probs[static_cast<size_t>(position)] / score_sum;
+      backend.attn_probs[static_cast<size_t>(position)] = weight;
+      const float reference_weight =
+          static_cast<size_t>(position) < reference_probs.size()
+              ? reference_probs[static_cast<size_t>(position)]
+              : weight;
+
+      if (static_cast<size_t>(position) < reference_probs.size()) {
+        const float diff = std::fabs(weight - reference_probs[static_cast<size_t>(position)]);
+        if (diff > max_abs) {
+          max_abs = diff;
+          max_head = head;
+          max_pos = position;
+          emel_at_max = weight;
+          reference_at_max = reference_probs[static_cast<size_t>(position)];
+        }
+      }
+
+      const size_t cache_offset =
+          emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim) +
+          kv_offset;
+      const std::span<const float> reference_value =
+          value_capture != nullptr
+              ? reference_token_head_slice(*value_capture, position, kv_head)
+              : std::span<const float>{};
+      for (int32_t dim = 0; dim < head_dim; ++dim) {
+        backend.attn_ctx[q_offset + static_cast<size_t>(dim)] +=
+            weight * backend.value_cache[cache_offset + static_cast<size_t>(dim)];
+        ctx_reference_probs[q_offset + static_cast<size_t>(dim)] +=
+            reference_weight * backend.value_cache[cache_offset + static_cast<size_t>(dim)];
+        if (static_cast<size_t>(dim) < reference_value.size()) {
+          ctx_reference_values[q_offset + static_cast<size_t>(dim)] +=
+              weight * reference_value[static_cast<size_t>(dim)];
+        }
+      }
+    }
+  }
+
+  if (softmax_capture == nullptr) {
+    std::fprintf(stdout, "%s.kq_soft_max: unavailable\n", layer_prefix.c_str());
+  } else {
+    std::fprintf(stdout,
+                 "%s.kq_soft_max: max_abs=%g head=%d pos=%d emel=%g reference=%g\n",
+                 layer_prefix.c_str(),
+                 max_abs,
+                 max_head,
+                 max_pos,
+                 emel_at_max,
+                 reference_at_max);
+  }
+
+  if (!reference_ctx.empty()) {
+    auto dump_ctx_variant = [&](const char * suffix, std::span<const float> values) {
+      float ctx_max_abs = 0.0f;
+      int32_t ctx_max_idx = 0;
+      for (int32_t idx = 0; idx < static_cast<int32_t>(values.size()); ++idx) {
+        const float diff = std::fabs(values[static_cast<size_t>(idx)] -
+                                     reference_ctx[static_cast<size_t>(idx)]);
+        if (diff > ctx_max_abs) {
+          ctx_max_abs = diff;
+          ctx_max_idx = idx;
+        }
+      }
+      std::fprintf(stdout,
+                   "%s.%s: max_abs=%g idx=%d emel=%g reference=%g\n",
+                   layer_prefix.c_str(),
+                   suffix,
+                   ctx_max_abs,
+                   ctx_max_idx,
+                   values[static_cast<size_t>(ctx_max_idx)],
+                   reference_ctx[static_cast<size_t>(ctx_max_idx)]);
+    };
+
+    dump_ctx_variant("kqv_out_from_emel", backend.attn_ctx);
+    dump_ctx_variant("kqv_out_from_reference_probs", ctx_reference_probs);
+    dump_ctx_variant("kqv_out_from_reference_values", ctx_reference_values);
+  }
+
+  return true;
 }
 
 void dump_logits_compare(const generation_load_state & state,
@@ -2795,7 +3015,8 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
               backend.v.begin() + kv_dim,
               backend.value_cache.begin() + static_cast<std::ptrdiff_t>(cache_offset));
 
-    if (!emel::generator::detail::compute_attention(backend, layer, position + 1, backend.q)) {
+    if (!compute_attention_with_softmax_debug(
+            backend, graph_capture, layer, position + 1, layer_prefix)) {
       std::fprintf(stdout, "%s.attention: compute failed\n", layer_prefix.c_str());
       return false;
     }
