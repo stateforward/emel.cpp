@@ -268,33 +268,40 @@ TEST_CASE("kernel_aarch64_q2_row_neon_matches_scalar") {
   using emel::kernel::detail::quant::block_q2_k;
   using emel::kernel::detail::quant::block_q8_k;
 
-  block_q2_k q2 = {};
-  q2.d = 0x3c00u;
-  q2.dmin = 0x3c00u;
-  for (size_t i = 0; i < q2.scales.size(); ++i) {
-    q2.scales[i] = static_cast<uint8_t>(((i % 9u) << 4u) | ((i * 5u) % 13u));
-  }
-  for (size_t i = 0; i < q2.qs.size(); ++i) {
-    q2.qs[i] = static_cast<uint8_t>((i * 23u) ^ (i >> 2u));
+  constexpr size_t block_count = 4u;
+  std::array<block_q2_k, block_count> q2_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    auto & q2 = q2_blocks[block];
+    q2.d = static_cast<uint16_t>(0x3c00u + block);
+    q2.dmin = static_cast<uint16_t>(0x3c00u + (block % 2u));
+    for (size_t i = 0; i < q2.scales.size(); ++i) {
+      q2.scales[i] = static_cast<uint8_t>(((i + block) % 9u) << 4u |
+                                          (((i * 5u) + block * 3u) % 13u));
+    }
+    for (size_t i = 0; i < q2.qs.size(); ++i) {
+      q2.qs[i] = static_cast<uint8_t>((i * (23u + block)) ^ ((i + block) >> 2u));
+    }
   }
 
-  std::array<float, QK_K> src1 = {};
+  std::array<float, QK_K * block_count> src1 = {};
   for (size_t i = 0; i < src1.size(); ++i) {
-    const int32_t centered = static_cast<int32_t>(i % 19u) - 9;
-    src1[i] = static_cast<float>(centered) * 0.0625f;
+    const int32_t centered = static_cast<int32_t>((i * 7u) % 29u) - 14;
+    src1[i] = static_cast<float>(centered) * 0.03125f;
   }
 
-  std::array<block_q8_k, 1> q8_blocks = {};
+  std::array<block_q8_k, block_count> q8_blocks = {};
   emel::kernel::detail::quant::quantize_row_q8_k_strided(
-      src1.data(), 1, &q8_blocks[0], emel::kernel::detail::quant::QK_K);
+      src1.data(), static_cast<int32_t>(block_count), q8_blocks.data(),
+      emel::kernel::detail::quant::QK_K);
 
   const float scalar =
-      emel::kernel::detail::dot_q2_k_q8_k_row_scalar(&q2, q8_blocks.data(), q8_blocks.size());
+      emel::kernel::detail::dot_q2_k_q8_k_row_scalar(q2_blocks.data(), q8_blocks.data(),
+                                                     q8_blocks.size());
   const float neon =
-      emel::kernel::aarch64::detail::dot_q2_k_q8_k_row_neon(&q2, q8_blocks.data(),
+      emel::kernel::aarch64::detail::dot_q2_k_q8_k_row_neon(q2_blocks.data(), q8_blocks.data(),
                                                              q8_blocks.size());
 
-  CHECK(neon == doctest::Approx(scalar).epsilon(1e-5f));
+  CHECK(neon == doctest::Approx(scalar).epsilon(1e-7f));
 #endif
 }
 
@@ -306,35 +313,41 @@ TEST_CASE("kernel_aarch64_q3_row_neon_matches_scalar") {
   using emel::kernel::detail::quant::block_q3_k;
   using emel::kernel::detail::quant::block_q8_k;
 
-  block_q3_k q3 = {};
-  q3.d = 0x3c00u;
-  for (size_t i = 0; i < q3.scales.size(); ++i) {
-    q3.scales[i] = static_cast<uint8_t>((i * 17u) ^ 0x5au);
-  }
-  for (size_t i = 0; i < q3.hmask.size(); ++i) {
-    q3.hmask[i] = static_cast<uint8_t>((i * 9u) ^ 0xa5u);
-  }
-  for (size_t i = 0; i < q3.qs.size(); ++i) {
-    q3.qs[i] = static_cast<uint8_t>((i * 13u) ^ 0x33u);
+  constexpr size_t block_count = 4u;
+  std::array<block_q3_k, block_count> q3_blocks = {};
+  for (size_t block = 0; block < block_count; ++block) {
+    auto & q3 = q3_blocks[block];
+    q3.d = static_cast<uint16_t>(0x3c00u + block);
+    for (size_t i = 0; i < q3.scales.size(); ++i) {
+      q3.scales[i] = static_cast<uint8_t>((i * (17u + block)) ^ (0x5au + block));
+    }
+    for (size_t i = 0; i < q3.hmask.size(); ++i) {
+      q3.hmask[i] = static_cast<uint8_t>((i * (9u + block)) ^ (0xa5u - block));
+    }
+    for (size_t i = 0; i < q3.qs.size(); ++i) {
+      q3.qs[i] = static_cast<uint8_t>((i * (13u + block)) ^ (0x33u + block * 7u));
+    }
   }
 
-  std::array<float, QK_K> src1 = {};
+  std::array<float, QK_K * block_count> src1 = {};
   for (size_t i = 0; i < src1.size(); ++i) {
-    const int32_t centered = static_cast<int32_t>(i % 23u) - 11;
-    src1[i] = static_cast<float>(centered) * 0.0625f;
+    const int32_t centered = static_cast<int32_t>((i * 11u) % 37u) - 18;
+    src1[i] = static_cast<float>(centered) * 0.03125f;
   }
 
-  std::array<block_q8_k, 1> q8_blocks = {};
+  std::array<block_q8_k, block_count> q8_blocks = {};
   emel::kernel::detail::quant::quantize_row_q8_k_strided(
-      src1.data(), 1, &q8_blocks[0], emel::kernel::detail::quant::QK_K);
+      src1.data(), static_cast<int32_t>(block_count), q8_blocks.data(),
+      emel::kernel::detail::quant::QK_K);
 
   const float scalar =
-      emel::kernel::detail::dot_q3_k_q8_k_row_scalar(&q3, q8_blocks.data(), q8_blocks.size());
+      emel::kernel::detail::dot_q3_k_q8_k_row_scalar(q3_blocks.data(), q8_blocks.data(),
+                                                     q8_blocks.size());
   const float neon =
-      emel::kernel::aarch64::detail::dot_q3_k_q8_k_row_neon(&q3, q8_blocks.data(),
+      emel::kernel::aarch64::detail::dot_q3_k_q8_k_row_neon(q3_blocks.data(), q8_blocks.data(),
                                                              q8_blocks.size());
 
-  CHECK(neon == doctest::Approx(scalar).epsilon(1e-5f));
+  CHECK(neon == doctest::Approx(scalar).epsilon(1e-7f));
 #endif
 }
 
@@ -1063,7 +1076,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_shared_workspace_on_long_kv_spa
   REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(request, shared_workspace));
 
   for (size_t idx = 0; idx < dst_neon.size(); ++idx) {
-    CHECK(dst_neon[idx] == doctest::Approx(dst_shared[idx]).epsilon(1e-5f));
+    CHECK(dst_neon[idx] == doctest::Approx(dst_shared[idx]).epsilon(1e-7f));
   }
 #endif
 }

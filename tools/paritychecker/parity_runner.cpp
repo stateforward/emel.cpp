@@ -26,6 +26,7 @@
 #include "emel/generator/detail.hpp"
 #include "emel/generator/events.hpp"
 #include "emel/generator/sm.hpp"
+#include "emel/kernel/aarch64/actions.hpp"
 #include "emel/kernel/aarch64/sm.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
@@ -2013,6 +2014,50 @@ void dump_scalar_attention_debug(const generation_load_state & state,
       select_argmax_from_logits(ffn_exact_backend.bound_logits.data(), ffn_exact_backend.n_vocab);
   const argmax_summary output_exact_summary = select_argmax_from_logits(
       output_exact_backend.bound_logits.data(), output_exact_backend.n_vocab);
+  const auto dump_flash_kernel_compare =
+      [&](const char * label, emel::generator::detail::native_backend & backend) {
+        const int32_t last_layer = backend.n_layer - 1;
+        const int32_t last_position = static_cast<int32_t>(prefix_tokens.size()) - 1;
+        auto neon_request =
+            emel::generator::detail::make_flash_attn_request(backend, last_layer, last_position);
+        std::vector<float> neon_dst(backend.attn_ctx.size(), -1.0f);
+        std::vector<float> shared_dst(backend.attn_ctx.size(), -1.0f);
+        neon_request.dst = emel::generator::detail::make_dst_view_3d(
+            neon_dst.data(), neon_request.dst.ne[0], neon_request.dst.ne[1], neon_request.dst.ne[2]);
+        auto shared_request = neon_request;
+        shared_request.dst = emel::generator::detail::make_dst_view_3d(
+            shared_dst.data(),
+            shared_request.dst.ne[0],
+            shared_request.dst.ne[1],
+            shared_request.dst.ne[2]);
+        emel::kernel::detail::flash_attn_workspace neon_workspace{};
+        emel::kernel::detail::flash_attn_workspace shared_workspace{};
+        if (!emel::kernel::aarch64::detail::run_flash_attn_ext_neon(
+                neon_request, true, neon_workspace) ||
+            !emel::kernel::detail::run_flash_attn_ext_with_workspace(
+                shared_request, shared_workspace)) {
+          std::fprintf(stdout, "generation_debug.flash.kernel.%s: unable to compare\n", label);
+          return;
+        }
+        float max_abs = 0.0f;
+        size_t max_idx = 0u;
+        for (size_t idx = 0; idx < neon_dst.size(); ++idx) {
+          const float diff = std::fabs(neon_dst[idx] - shared_dst[idx]);
+          if (diff > max_abs) {
+            max_abs = diff;
+            max_idx = idx;
+          }
+        }
+        std::fprintf(stdout,
+                     "generation_debug.flash.kernel.%s: max_abs=%g idx=%zu neon=%g shared=%g\n",
+                     label,
+                     max_abs,
+                     max_idx,
+                     neon_dst[max_idx],
+                     shared_dst[max_idx]);
+      };
+  dump_flash_kernel_compare("dispatch_state", dispatch_backend);
+  dump_flash_kernel_compare("shared_state", shared_backend);
   std::fprintf(stdout,
                "generation_debug.flash: prefix_tokens=%zu dispatch_argmax=%d scalar_argmax=%d "
                "shared_argmax=%d exact_argmax=%d attention_exact_argmax=%d "

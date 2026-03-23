@@ -183,19 +183,17 @@ inline float dot_product_f32_neon(const float * lhs, const float * rhs, const ui
   (void) count;
   return 0.0f;
 #else
-  float32x4_t acc = vdupq_n_f32(0.0f);
+  float sum = 0.0f;
   uint64_t idx = 0;
   for (; idx + 4 <= count; idx += 4) {
     const float32x4_t lhs_v = vld1q_f32(lhs + idx);
     const float32x4_t rhs_v = vld1q_f32(rhs + idx);
-#if defined(__aarch64__)
-    acc = vfmaq_f32(acc, lhs_v, rhs_v);
-#else
-    acc = vmlaq_f32(acc, lhs_v, rhs_v);
-#endif
+    const float32x4_t prod_v = vmulq_f32(lhs_v, rhs_v);
+    sum += vgetq_lane_f32(prod_v, 0);
+    sum += vgetq_lane_f32(prod_v, 1);
+    sum += vgetq_lane_f32(prod_v, 2);
+    sum += vgetq_lane_f32(prod_v, 3);
   }
-
-  float sum = vaddvq_f32(acc);
   for (; idx < count; ++idx) {
     sum += lhs[idx] * rhs[idx];
   }
@@ -229,11 +227,8 @@ inline void axpy_f32_neon(float * dst, const float * src,
   for (; idx + 4 <= count; idx += 4) {
     const float32x4_t dst_v = vld1q_f32(dst + idx);
     const float32x4_t src_v = vld1q_f32(src + idx);
-#if defined(__aarch64__)
-    vst1q_f32(dst + idx, vfmaq_f32(dst_v, src_v, alpha_v));
-#else
-    vst1q_f32(dst + idx, vmlaq_f32(dst_v, src_v, alpha_v));
-#endif
+    const float32x4_t prod_v = vmulq_f32(src_v, alpha_v);
+    vst1q_f32(dst + idx, vaddq_f32(dst_v, prod_v));
   }
   for (; idx < count; ++idx) {
     dst[idx] += src[idx] * alpha;
