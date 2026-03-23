@@ -291,8 +291,7 @@ inline bool run_flash_attn_ext_neon(const request_type & request,
     const float inv_denom = 1.0f / denom;
     for (uint64_t token = 0; token < kv_tokens; ++token) {
       const float * v = tensor_row_ptr(request.src2, token, kv_head);
-      const float weight = ::emel::kernel::detail::round_fp16_weight(
-          workspace.score_buffer[static_cast<size_t>(token)] * inv_denom);
+      const float weight = workspace.score_buffer[static_cast<size_t>(token)] * inv_denom;
       axpy_f32_neon(dst, v, weight, head_dim);
     }
   }
