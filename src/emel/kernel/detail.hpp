@@ -186,81 +186,58 @@ static_assert(sizeof(block_q3_k) == sizeof(uint16_t) + (QK_K / 4) + (QK_K / 8) +
 static_assert(sizeof(block_q6_k) == sizeof(uint16_t) + (QK_K / 16) + (3 * QK_K / 4));
 static_assert(sizeof(block_q8_k) == sizeof(float) + QK_K + (QK_K / 16) * sizeof(int16_t));
 
-inline float fp16_to_fp32(const uint16_t bits16) noexcept {
-  const uint32_t sign = static_cast<uint32_t>(bits16 & 0x8000u) << 16u;
-  const uint32_t exp = static_cast<uint32_t>(bits16 & 0x7c00u) >> 10u;
-  const uint32_t mant = static_cast<uint32_t>(bits16 & 0x03ffu);
-
-  uint32_t bits32 = sign;
-  if (exp == 0x1fu) {
-    bits32 |= 0x7f800000u | (mant << 13u);
-  } else if (exp != 0u) {
-    const uint32_t exp32 = exp + (127u - 15u);
-    bits32 |= (exp32 << 23u) | (mant << 13u);
-  } else if (mant != 0u) {
-    uint32_t mantissa = mant;
-    uint32_t exp32 = 127u - 14u;
-    while ((mantissa & 0x0400u) == 0u) {
-      mantissa <<= 1u;
-      --exp32;
-    }
-    mantissa &= 0x03ffu;
-    bits32 |= (exp32 << 23u) | (mantissa << 13u);
-  }
-
+inline float fp32_from_bits(const uint32_t bits) noexcept {
   float out = 0.0f;
-  std::memcpy(&out, &bits32, sizeof(out));
+  std::memcpy(&out, &bits, sizeof(out));
   return out;
 }
 
+inline uint32_t fp32_to_bits(const float value) noexcept {
+  uint32_t bits = 0u;
+  std::memcpy(&bits, &value, sizeof(bits));
+  return bits;
+}
+
+inline float fp16_to_fp32(const uint16_t bits16) noexcept {
+  const uint32_t word = static_cast<uint32_t>(bits16) << 16u;
+  const uint32_t sign = word & 0x80000000u;
+  const uint32_t doubled = word + word;
+
+  const uint32_t exp_offset = 0xE0u << 23u;
+  const float exp_scale = 0x1.0p-112f;
+  const float normalized = fp32_from_bits((doubled >> 4u) + exp_offset) * exp_scale;
+
+  const uint32_t magic_mask = 126u << 23u;
+  const float magic_bias = 0.5f;
+  const float denormalized = fp32_from_bits((doubled >> 17u) | magic_mask) - magic_bias;
+
+  const uint32_t denormalized_cutoff = 1u << 27u;
+  const uint32_t result =
+      sign | (doubled < denormalized_cutoff ? fp32_to_bits(denormalized)
+                                            : fp32_to_bits(normalized));
+  return fp32_from_bits(result);
+}
+
 inline uint16_t fp32_to_fp16(const float value) noexcept {
-  uint32_t bits32 = 0u;
-  std::memcpy(&bits32, &value, sizeof(bits32));
+  const float scale_to_inf = 0x1.0p+112f;
+  const float scale_to_zero = 0x1.0p-110f;
+  float base = (std::fabs(value) * scale_to_inf) * scale_to_zero;
 
-  const uint32_t sign = (bits32 >> 16u) & 0x8000u;
-  const uint32_t exp = (bits32 >> 23u) & 0xffu;
-  const uint32_t mant = bits32 & 0x007fffffu;
-
-  if (exp == 0xffu) {
-    const uint16_t nan_mant = static_cast<uint16_t>((mant >> 13u) | (mant != 0u));
-    return static_cast<uint16_t>(sign | 0x7c00u | nan_mant);
+  const uint32_t word = fp32_to_bits(value);
+  const uint32_t doubled = word + word;
+  const uint32_t sign = word & 0x80000000u;
+  uint32_t bias = doubled & 0xFF000000u;
+  if (bias < 0x71000000u) {
+    bias = 0x71000000u;
   }
 
-  const int32_t exp_unbiased = static_cast<int32_t>(exp) - 127;
-  const int32_t exp16 = exp_unbiased + 15;
-
-  if (exp16 >= 0x1f) {
-    return static_cast<uint16_t>(sign | 0x7c00u);
-  }
-
-  if (exp16 <= 0) {
-    if (exp16 < -10) {
-      return static_cast<uint16_t>(sign);
-    }
-    uint32_t mantissa = mant | 0x00800000u;
-    const uint32_t shift = static_cast<uint32_t>(14 - exp16);
-    uint32_t rounded = mantissa >> shift;
-    const uint32_t round_bit = (mantissa >> (shift - 1u)) & 1u;
-    const uint32_t sticky = mantissa & ((1u << (shift - 1u)) - 1u);
-    rounded += round_bit & ((rounded & 1u) | static_cast<uint32_t>(sticky != 0u));
-    return static_cast<uint16_t>(sign | rounded);
-  }
-
-  uint32_t mant16 = mant >> 13u;
-  const uint32_t round_bit = (mant >> 12u) & 1u;
-  const uint32_t sticky = mant & 0x0fffu;
-  mant16 += round_bit & ((mant16 & 1u) | static_cast<uint32_t>(sticky != 0u));
-
-  uint32_t exp16_rounded = static_cast<uint32_t>(exp16);
-  if (mant16 == 0x0400u) {
-    mant16 = 0u;
-    ++exp16_rounded;
-    if (exp16_rounded >= 0x1fu) {
-      return static_cast<uint16_t>(sign | 0x7c00u);
-    }
-  }
-
-  return static_cast<uint16_t>(sign | (exp16_rounded << 10u) | (mant16 & 0x03ffu));
+  base = fp32_from_bits((bias >> 1u) + 0x07800000u) + base;
+  const uint32_t bits = fp32_to_bits(base);
+  const uint32_t exp_bits = (bits >> 13u) & 0x00007C00u;
+  const uint32_t mantissa_bits = bits & 0x00000FFFu;
+  const uint32_t nonsign = exp_bits + mantissa_bits;
+  return static_cast<uint16_t>(
+      (sign >> 16u) | (doubled > 0xFF000000u ? 0x7E00u : nonsign));
 }
 
 inline void dequantize_row_q2_k(const block_q2_k * x, float * y, const int64_t k) noexcept {
