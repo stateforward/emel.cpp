@@ -522,7 +522,7 @@ TEST_CASE("paritychecker generation keeps parity across the maintained decode le
   const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
   REQUIRE(file_exists(model_path));
 
-  constexpr std::array<int32_t, 3> generation_lengths{1, 10, 100};
+  constexpr std::array<int32_t, 4> generation_lengths{1, 10, 100, 1000};
   for (const int32_t max_tokens : generation_lengths) {
     INFO("max_tokens=" << max_tokens);
     const process_capture capture = run_generation_paritychecker_capture(model_path, "hello", max_tokens);

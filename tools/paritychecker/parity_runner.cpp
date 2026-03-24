@@ -6133,6 +6133,83 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
     return;
   }
 
+  constexpr float target_q2_threshold = 1.0e-4f;
+  int32_t target_generated_index = token_mismatch_index - 1;
+  const auto local_max_abs_diff = [](std::span<const float> lhs, std::span<const float> rhs) {
+    if (lhs.size() != rhs.size()) {
+      return std::numeric_limits<float>::infinity();
+    }
+
+    float max_abs = 0.0f;
+    for (size_t idx = 0; idx < lhs.size(); ++idx) {
+      max_abs = std::max(max_abs, std::fabs(lhs[idx] - rhs[idx]));
+    }
+    return max_abs;
+  };
+  const exact_matmul_mode reference_q2_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q2_k),
+      .use_reference_q8 = true,
+  };
+  if (target_generated_index > 0) {
+    emel::generator::detail::native_backend scan_actor_backend = {};
+    emel::generator::detail::native_backend scan_q2_reference_backend = {};
+    if (emel::generator::detail::prepare(scan_actor_backend, *state.model_data) ==
+            emel::error::cast(emel::model::loader::error::none) &&
+        emel::generator::detail::prepare(scan_q2_reference_backend, *state.model_data) ==
+            emel::error::cast(emel::model::loader::error::none)) {
+      const size_t prompt_count = prompt_tokens.size();
+      for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+        const int32_t scan_token_id = prefix_tokens[token_index];
+        const int32_t scan_position = static_cast<int32_t>(token_index);
+        if (!emel::generator::detail::copy_tensor_row(
+                *scan_actor_backend.token_embedding.tensor, scan_token_id, scan_actor_backend.hidden) ||
+            !emel::generator::detail::copy_tensor_row(*scan_q2_reference_backend.token_embedding.tensor,
+                                                      scan_token_id,
+                                                      scan_q2_reference_backend.hidden)) {
+          break;
+        }
+
+        const bool is_prompt_token = token_index < prompt_count;
+        const int32_t generated_index = static_cast<int32_t>(token_index - prompt_count);
+        bool found_target = false;
+        for (int32_t layer = 0; layer < scan_actor_backend.n_layer; ++layer) {
+          if (!run_layer_with_scalar_attention(scan_actor_backend, layer, scan_position) ||
+              !run_layer_with_matmul_mode_scalar_attention(
+                  scan_q2_reference_backend, layer, scan_position, reference_q2_only)) {
+            found_target = false;
+            break;
+          }
+
+          if (!is_prompt_token && layer == 1 &&
+              local_max_abs_diff(scan_actor_backend.hidden, scan_q2_reference_backend.hidden) >
+                  target_q2_threshold) {
+            target_generated_index = generated_index;
+            found_target = true;
+            break;
+          }
+        }
+
+        scan_actor_backend.kv_cache_tokens = scan_position + 1;
+        scan_q2_reference_backend.kv_cache_tokens = scan_position + 1;
+        if (found_target) {
+          break;
+        }
+      }
+    }
+  }
+
+  const int32_t target_prefix_token_count =
+      static_cast<int32_t>(prompt_tokens.size()) + target_generated_index + 1;
+  if (target_prefix_token_count <= 0 ||
+      target_prefix_token_count > static_cast<int32_t>(prefix_tokens.size())) {
+    std::fprintf(stdout, "generation_debug.state: invalid target prefix\n");
+    return;
+  }
+  prefix_tokens.resize(static_cast<size_t>(target_prefix_token_count));
+
   reference_graph_capture graph_capture = {};
   const std::span<const int32_t> generated_prefix{
       prefix_tokens.data() + prompt_tokens.size(),
@@ -6143,6 +6220,37 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
     std::fprintf(stdout, "generation_debug.state: reference graph capture failed\n");
     return;
   }
+
+  const std::span<const float> reference_layer1_l_out =
+      find_reference_tensor(graph_capture, "l_out-1");
+  const auto dump_attention_mode = [&](const char * label, const auto & run_prefill) {
+    if (reference_layer1_l_out.empty()) {
+      std::fprintf(stdout, "generation_debug.mode_summary.%s: reference unavailable\n", label);
+      return;
+    }
+
+    emel::generator::detail::native_backend mode_backend = {};
+    if (emel::generator::detail::prepare(mode_backend, *state.model_data) !=
+            emel::error::cast(emel::model::loader::error::none) ||
+        !run_prefill(mode_backend, prefix_tokens)) {
+      std::fprintf(stdout, "generation_debug.mode_summary.%s: replay failed\n", label);
+      return;
+    }
+
+    std::fprintf(stdout,
+                 "generation_debug.mode_summary.%s.layer1_l_out: max_abs=%g\n",
+                 label,
+                 local_max_abs_diff(mode_backend.hidden, reference_layer1_l_out));
+  };
+
+  dump_attention_mode("scalar", run_prefill_with_scalar_attention);
+  dump_attention_mode("no_weight_rounding", run_prefill_with_scalar_attention_no_weight_rounding);
+  dump_attention_mode("rounded_weight_scalar", run_prefill_with_scalar_attention_rounded_weight_scalar);
+  dump_attention_mode("ggml_f16_value_contraction",
+                      run_prefill_with_scalar_attention_ggml_f16_value_contraction);
+  dump_attention_mode("ggml_online_f16", run_prefill_with_scalar_attention_ggml_online_f16);
+  dump_attention_mode("ggml_nonflash_f16", run_prefill_with_scalar_attention_ggml_nonflash_f16);
+  dump_attention_mode("ggml_f16_scores", run_prefill_with_scalar_attention_ggml_f16_scores);
 
   llama_context_ptr reference_ctx =
       make_reference_context(const_cast<initialize_backend &>(state.backend));
@@ -6457,7 +6565,9 @@ void dump_generation_prefix_timeline_debug(const generation_load_state & state,
                                            const generation_result & emel_result,
                                            const generation_result & reference_result) {
   const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
-  const int32_t prefix_generated_tokens = std::min<int32_t>(12, token_mismatch_index);
+  const int32_t timeline_window = 12;
+  const int32_t timeline_start_generated = std::max<int32_t>(0, token_mismatch_index - timeline_window);
+  const int32_t prefix_generated_tokens = token_mismatch_index;
   if (state.model_data == nullptr || prefix_generated_tokens <= 0) {
     return;
   }
@@ -6537,6 +6647,9 @@ void dump_generation_prefix_timeline_debug(const generation_load_state & state,
 
       const bool is_prompt_token = token_index < prompt_count;
       const int32_t generated_index = static_cast<int32_t>(token_index - prompt_count);
+      if (!is_prompt_token && generated_index < timeline_start_generated) {
+        continue;
+      }
       const std::string token_prefix = is_prompt_token
                                            ? "generation_debug.timeline.prompt" +
                                                  std::to_string(token_index)
@@ -6678,6 +6791,8 @@ void dump_generation_q23_timeline_debug(const generation_load_state & state,
                                         const generation_result & emel_result,
                                         const generation_result & reference_result) {
   const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
+  const int32_t timeline_window = 12;
+  const int32_t timeline_start_generated = std::max<int32_t>(0, token_mismatch_index - timeline_window);
   if (state.model_data == nullptr || token_mismatch_index <= 0) {
     return;
   }
@@ -6731,6 +6846,7 @@ void dump_generation_q23_timeline_debug(const generation_load_state & state,
 
     const bool is_prompt_token = token_index < prompt_count;
     const int32_t generated_index = static_cast<int32_t>(token_index - prompt_count);
+    const bool emit_token_debug = is_prompt_token || generated_index >= timeline_start_generated;
     const std::string token_prefix = is_prompt_token
                                          ? "generation_debug.q23_timeline.prompt" +
                                                std::to_string(token_index)
@@ -6745,6 +6861,9 @@ void dump_generation_q23_timeline_debug(const generation_load_state & state,
         return;
       }
 
+      if (!emit_token_debug) {
+        continue;
+      }
       std::fprintf(stdout,
                    "%s.layer%d_l_out: max_abs=%g\n",
                    token_prefix.c_str(),
@@ -6762,6 +6881,8 @@ void dump_generation_reference_q_timeline_debug(const generation_load_state & st
                                                 const generation_result & emel_result,
                                                 const generation_result & reference_result) {
   const int32_t token_mismatch_index = first_token_mismatch_index(emel_result, reference_result);
+  const int32_t timeline_window = 12;
+  const int32_t timeline_start_generated = std::max<int32_t>(0, token_mismatch_index - timeline_window);
   if (state.model_data == nullptr || token_mismatch_index <= 0) {
     return;
   }
@@ -6809,6 +6930,19 @@ void dump_generation_reference_q_timeline_debug(const generation_load_state & st
       .use_reference_q8 = true,
   };
   const size_t prompt_count = prompt_tokens.size();
+  constexpr std::array<float, 3> qref_thresholds{1.0e-5f, 1.0e-4f, 1.0e-3f};
+  std::array<float, 2> q2_max_abs{0.0f, 0.0f};
+  std::array<float, 2> q3_max_abs{0.0f, 0.0f};
+  std::array<int32_t, 2> q2_max_generated{-1, -1};
+  std::array<int32_t, 2> q3_max_generated{-1, -1};
+  std::array<std::array<int32_t, qref_thresholds.size()>, 2> q2_first_generated{};
+  std::array<std::array<int32_t, qref_thresholds.size()>, 2> q3_first_generated{};
+  for (auto & per_layer : q2_first_generated) {
+    per_layer.fill(-1);
+  }
+  for (auto & per_layer : q3_first_generated) {
+    per_layer.fill(-1);
+  }
 
   for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
     const int32_t token_id = prefix_tokens[token_index];
@@ -6825,6 +6959,7 @@ void dump_generation_reference_q_timeline_debug(const generation_load_state & st
 
     const bool is_prompt_token = token_index < prompt_count;
     const int32_t generated_index = static_cast<int32_t>(token_index - prompt_count);
+    const bool emit_token_debug = is_prompt_token || generated_index >= timeline_start_generated;
     const std::string token_prefix = is_prompt_token
                                          ? "generation_debug.qref_timeline.prompt" +
                                                std::to_string(token_index)
@@ -6841,21 +6976,66 @@ void dump_generation_reference_q_timeline_debug(const generation_load_state & st
         return;
       }
 
+      const float q2_diff = max_abs_diff(actor_backend.hidden, q2_reference_backend.hidden);
+      const float q3_diff = max_abs_diff(actor_backend.hidden, q3_reference_backend.hidden);
+      if (!is_prompt_token && layer < static_cast<int32_t>(q2_max_abs.size())) {
+        if (q2_diff > q2_max_abs[static_cast<size_t>(layer)]) {
+          q2_max_abs[static_cast<size_t>(layer)] = q2_diff;
+          q2_max_generated[static_cast<size_t>(layer)] = generated_index;
+        }
+        if (q3_diff > q3_max_abs[static_cast<size_t>(layer)]) {
+          q3_max_abs[static_cast<size_t>(layer)] = q3_diff;
+          q3_max_generated[static_cast<size_t>(layer)] = generated_index;
+        }
+        for (size_t threshold_index = 0; threshold_index < qref_thresholds.size(); ++threshold_index) {
+          if (q2_first_generated[static_cast<size_t>(layer)][threshold_index] < 0 &&
+              q2_diff > qref_thresholds[threshold_index]) {
+            q2_first_generated[static_cast<size_t>(layer)][threshold_index] = generated_index;
+          }
+          if (q3_first_generated[static_cast<size_t>(layer)][threshold_index] < 0 &&
+              q3_diff > qref_thresholds[threshold_index]) {
+            q3_first_generated[static_cast<size_t>(layer)][threshold_index] = generated_index;
+          }
+        }
+      }
+
+      if (!emit_token_debug) {
+        continue;
+      }
       std::fprintf(stdout,
                    "%s.layer%d_q2_reference_l_out: max_abs=%g\n",
                    token_prefix.c_str(),
                    layer,
-                   max_abs_diff(actor_backend.hidden, q2_reference_backend.hidden));
+                   q2_diff);
       std::fprintf(stdout,
                    "%s.layer%d_q3_reference_l_out: max_abs=%g\n",
                    token_prefix.c_str(),
                    layer,
-                   max_abs_diff(actor_backend.hidden, q3_reference_backend.hidden));
+                   q3_diff);
     }
 
     actor_backend.kv_cache_tokens = position + 1;
     q2_reference_backend.kv_cache_tokens = position + 1;
     q3_reference_backend.kv_cache_tokens = position + 1;
+  }
+
+  for (size_t layer = 0; layer < q2_max_abs.size(); ++layer) {
+    std::fprintf(stdout,
+                 "generation_debug.qref_summary.layer%zu.q2_max=%g gen=%d q3_max=%g gen=%d\n",
+                 layer,
+                 q2_max_abs[layer],
+                 q2_max_generated[layer],
+                 q3_max_abs[layer],
+                 q3_max_generated[layer]);
+    for (size_t threshold_index = 0; threshold_index < qref_thresholds.size(); ++threshold_index) {
+      std::fprintf(stdout,
+                   "generation_debug.qref_summary.layer%zu.threshold=%g q2_first_gen=%d "
+                   "q3_first_gen=%d\n",
+                   layer,
+                   qref_thresholds[threshold_index],
+                   q2_first_generated[layer][threshold_index],
+                   q3_first_generated[layer][threshold_index]);
+    }
   }
 }
 
@@ -7191,6 +7371,19 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     return;
   }
 
+  std::vector<int32_t> prefix_tokens;
+  prefix_tokens.reserve(prompt_tokens.size() + static_cast<size_t>(token_mismatch_index));
+  for (const llama_token token : prompt_tokens) {
+    prefix_tokens.push_back(static_cast<int32_t>(token));
+  }
+  for (int32_t idx = 0; idx < token_mismatch_index; ++idx) {
+    prefix_tokens.push_back(reference_result.trace.token_ids[static_cast<size_t>(idx)]);
+  }
+  if (prefix_tokens.empty()) {
+    std::fprintf(stdout, "generation_debug.qref_stage: empty prefix\n");
+    return;
+  }
+
   emel::generator::detail::native_backend actor_backend = {};
   emel::generator::detail::native_backend q2_reference_backend = {};
   emel::generator::detail::native_backend q3_reference_backend = {};
@@ -7218,9 +7411,100 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
       .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q3_k),
       .use_reference_q8 = true,
   };
-  const int32_t token_id = static_cast<int32_t>(prompt_tokens.front());
-  const int32_t position = 0;
-  const int32_t layer_index = 0;
+
+  constexpr float target_q2_threshold = 1.0e-4f;
+  int32_t target_generated_index = token_mismatch_index - 1;
+  if (target_generated_index > 0) {
+    emel::generator::detail::native_backend scan_actor_backend = {};
+    emel::generator::detail::native_backend scan_q2_reference_backend = {};
+    emel::generator::detail::native_backend scan_q3_reference_backend = {};
+    if (emel::generator::detail::prepare(scan_actor_backend, *state.model_data) ==
+            emel::error::cast(emel::model::loader::error::none) &&
+        emel::generator::detail::prepare(scan_q2_reference_backend, *state.model_data) ==
+            emel::error::cast(emel::model::loader::error::none) &&
+        emel::generator::detail::prepare(scan_q3_reference_backend, *state.model_data) ==
+            emel::error::cast(emel::model::loader::error::none)) {
+      const size_t prompt_count = prompt_tokens.size();
+      for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+        const int32_t scan_token_id = prefix_tokens[token_index];
+        const int32_t scan_position = static_cast<int32_t>(token_index);
+        if (!emel::generator::detail::copy_tensor_row(
+                *scan_actor_backend.token_embedding.tensor, scan_token_id, scan_actor_backend.hidden) ||
+            !emel::generator::detail::copy_tensor_row(*scan_q2_reference_backend.token_embedding.tensor,
+                                                      scan_token_id,
+                                                      scan_q2_reference_backend.hidden) ||
+            !emel::generator::detail::copy_tensor_row(*scan_q3_reference_backend.token_embedding.tensor,
+                                                      scan_token_id,
+                                                      scan_q3_reference_backend.hidden)) {
+          break;
+        }
+
+        const bool is_prompt_token = token_index < prompt_count;
+        const int32_t generated_index = static_cast<int32_t>(token_index - prompt_count);
+        bool found_target = false;
+        for (int32_t layer = 0; layer < scan_actor_backend.n_layer; ++layer) {
+          if (!run_layer_with_scalar_attention(scan_actor_backend, layer, scan_position) ||
+              !run_layer_with_matmul_mode_scalar_attention(
+                  scan_q2_reference_backend, layer, scan_position, reference_q2_only) ||
+              !run_layer_with_matmul_mode_scalar_attention(
+                  scan_q3_reference_backend, layer, scan_position, reference_q3_only)) {
+            found_target = false;
+            break;
+          }
+
+          if (!is_prompt_token && layer == 1 &&
+              max_abs_diff(scan_actor_backend.hidden, scan_q2_reference_backend.hidden) >
+                  target_q2_threshold) {
+            target_generated_index = generated_index;
+            found_target = true;
+            break;
+          }
+        }
+
+        scan_actor_backend.kv_cache_tokens = scan_position + 1;
+        scan_q2_reference_backend.kv_cache_tokens = scan_position + 1;
+        scan_q3_reference_backend.kv_cache_tokens = scan_position + 1;
+        if (found_target) {
+          break;
+        }
+      }
+    }
+  }
+
+  const int32_t target_prefix_token_count =
+      static_cast<int32_t>(prompt_tokens.size()) + target_generated_index + 1;
+  if (target_prefix_token_count <= 0 ||
+      target_prefix_token_count > static_cast<int32_t>(prefix_tokens.size())) {
+    std::fprintf(stdout, "generation_debug.qref_stage: invalid target prefix\n");
+    return;
+  }
+
+  if (target_prefix_token_count > 1) {
+    const std::span<const int32_t> prior_tokens{
+        prefix_tokens.data(), static_cast<size_t>(target_prefix_token_count - 1)};
+    if (!run_prefill_with_scalar_attention(actor_backend, prior_tokens) ||
+        !run_prefill_with_scalar_attention_matmul_mode(
+            q2_reference_backend, prior_tokens, reference_q2_only) ||
+        !run_prefill_with_scalar_attention_matmul_mode(
+            q3_reference_backend, prior_tokens, reference_q3_only)) {
+      std::fprintf(stdout, "generation_debug.qref_stage: prior prefix replay failed\n");
+      return;
+    }
+  } else {
+    actor_backend.kv_cache_tokens = 0;
+    q2_reference_backend.kv_cache_tokens = 0;
+    q3_reference_backend.kv_cache_tokens = 0;
+  }
+
+  const int32_t token_id =
+      prefix_tokens[static_cast<size_t>(target_prefix_token_count - 1)];
+  const int32_t position = target_prefix_token_count - 1;
+  const int32_t generated_index = target_generated_index;
+  const int32_t layer_index = 1;
+  if (actor_backend.n_layer <= layer_index) {
+    std::fprintf(stdout, "generation_debug.qref_stage: layer%d unavailable\n", layer_index);
+    return;
+  }
 
   if (!emel::generator::detail::copy_tensor_row(
           *actor_backend.token_embedding.tensor, token_id, actor_backend.hidden) ||
@@ -7246,6 +7530,22 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
                  max_abs_diff(actor_values, q3_values));
   };
 
+  if (!run_layer_with_scalar_attention(actor_backend, 0, position) ||
+      !run_layer_with_matmul_mode_scalar_attention(
+          q2_reference_backend, 0, position, reference_q2_only) ||
+      !run_layer_with_matmul_mode_scalar_attention(
+          q3_reference_backend, 0, position, reference_q3_only)) {
+    std::fprintf(stdout, "generation_debug.qref_stage: layer0 replay failed\n");
+    return;
+  }
+
+  const std::string stage_prefix =
+      "gen" + std::to_string(generated_index) + ".layer" + std::to_string(layer_index);
+  dump_stage((stage_prefix + ".input_hidden").c_str(),
+             actor_backend.hidden,
+             q2_reference_backend.hidden,
+             q3_reference_backend.hidden);
+
   auto & actor_block = actor_backend.blocks[static_cast<size_t>(layer_index)];
   auto & q2_block = q2_reference_backend.blocks[static_cast<size_t>(layer_index)];
   auto & q3_block = q3_reference_backend.blocks[static_cast<size_t>(layer_index)];
@@ -7267,10 +7567,29 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     std::fprintf(stdout, "generation_debug.qref_stage: attn rms_norm failed\n");
     return;
   }
-  dump_stage("prompt0.layer0.attn_norm",
+  dump_stage((stage_prefix + ".attn_norm").c_str(),
              actor_backend.norm,
              q2_reference_backend.norm,
              q3_reference_backend.norm);
+  dump_q8_quantize_compare((stage_prefix + ".attn_norm_q8").c_str(), actor_backend.norm);
+  dump_matrix_compare(
+      (stage_prefix + ".attn_q_matmul").c_str(), actor_backend, actor_block.attention_q, actor_backend.norm);
+  dump_matrix_compare_reference_q8((stage_prefix + ".attn_q_matmul_refq8").c_str(),
+                                   actor_backend,
+                                   actor_block.attention_q,
+                                   actor_backend.norm);
+  dump_matrix_compare(
+      (stage_prefix + ".attn_k_matmul").c_str(), actor_backend, actor_block.attention_k, actor_backend.norm);
+  dump_matrix_compare_reference_q8((stage_prefix + ".attn_k_matmul_refq8").c_str(),
+                                   actor_backend,
+                                   actor_block.attention_k,
+                                   actor_backend.norm);
+  dump_matrix_compare(
+      (stage_prefix + ".attn_v_matmul").c_str(), actor_backend, actor_block.attention_v, actor_backend.norm);
+  dump_matrix_compare_reference_q8((stage_prefix + ".attn_v_matmul_refq8").c_str(),
+                                   actor_backend,
+                                   actor_block.attention_v,
+                                   actor_backend.norm);
 
   const auto run_mode_matmul = [&](emel::generator::detail::native_backend & backend,
                                    const emel::generator::detail::tensor_matrix & matrix,
@@ -7334,15 +7653,15 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     std::fprintf(stdout, "generation_debug.qref_stage: qkv matmul failed\n");
     return;
   }
-  dump_stage("prompt0.layer0.q_pre_rope",
+  dump_stage((stage_prefix + ".q_pre_rope").c_str(),
              actor_backend.q,
              q2_reference_backend.q,
              q3_reference_backend.q);
-  dump_stage("prompt0.layer0.k_pre_rope",
+  dump_stage((stage_prefix + ".k_pre_rope").c_str(),
              actor_backend.k,
              q2_reference_backend.k,
              q3_reference_backend.k);
-  dump_stage("prompt0.layer0.v_pre_cache",
+  dump_stage((stage_prefix + ".v_pre_cache").c_str(),
              actor_backend.v,
              q2_reference_backend.v,
              q3_reference_backend.v);
@@ -7372,17 +7691,23 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   apply_rope_and_cache(actor_backend);
   apply_rope_and_cache(q2_reference_backend);
   apply_rope_and_cache(q3_reference_backend);
-  dump_stage("prompt0.layer0.q", actor_backend.q, q2_reference_backend.q, q3_reference_backend.q);
-  dump_stage("prompt0.layer0.k", actor_backend.k, q2_reference_backend.k, q3_reference_backend.k);
-  dump_stage("prompt0.layer0.q_attn",
+  dump_stage((stage_prefix + ".q").c_str(),
+             actor_backend.q,
+             q2_reference_backend.q,
+             q3_reference_backend.q);
+  dump_stage((stage_prefix + ".k").c_str(),
+             actor_backend.k,
+             q2_reference_backend.k,
+             q3_reference_backend.k);
+  dump_stage((stage_prefix + ".q_attn").c_str(),
              actor_backend.q_attn,
              q2_reference_backend.q_attn,
              q3_reference_backend.q_attn);
-  dump_stage("prompt0.layer0.key_cache",
+  dump_stage((stage_prefix + ".key_cache").c_str(),
              actor_backend.key_cache,
              q2_reference_backend.key_cache,
              q3_reference_backend.key_cache);
-  dump_stage("prompt0.layer0.value_cache",
+  dump_stage((stage_prefix + ".value_cache").c_str(),
              actor_backend.value_cache,
              q2_reference_backend.value_cache,
              q3_reference_backend.value_cache);
@@ -7396,10 +7721,19 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     std::fprintf(stdout, "generation_debug.qref_stage: attention failed\n");
     return;
   }
-  dump_stage("prompt0.layer0.kqv_out",
+  dump_stage((stage_prefix + ".kqv_out").c_str(),
              actor_backend.attn_ctx,
              q2_reference_backend.attn_ctx,
              q3_reference_backend.attn_ctx);
+  dump_q8_quantize_compare((stage_prefix + ".attn_ctx_q8").c_str(), actor_backend.attn_ctx);
+  dump_matrix_compare((stage_prefix + ".attn_out_matmul").c_str(),
+                      actor_backend,
+                      actor_block.attention_output,
+                      actor_backend.attn_ctx);
+  dump_matrix_compare_reference_q8((stage_prefix + ".attn_out_matmul_refq8").c_str(),
+                                   actor_backend,
+                                   actor_block.attention_output,
+                                   actor_backend.attn_ctx);
 
   if (!emel::generator::detail::matmul_vector(
           actor_backend, actor_block.attention_output, actor_backend.attn_ctx, actor_backend.projected) ||
@@ -7418,7 +7752,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     std::fprintf(stdout, "generation_debug.qref_stage: attention output matmul failed\n");
     return;
   }
-  dump_stage("prompt0.layer0.attn_out",
+  dump_stage((stage_prefix + ".attn_out").c_str(),
              actor_backend.projected,
              q2_reference_backend.projected,
              q3_reference_backend.projected);
@@ -7430,7 +7764,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     q3_reference_backend.hidden[static_cast<size_t>(idx)] +=
         q3_reference_backend.projected[static_cast<size_t>(idx)];
   }
-  dump_stage("prompt0.layer0.attn_residual",
+  dump_stage((stage_prefix + ".attn_residual").c_str(),
              actor_backend.hidden,
              q2_reference_backend.hidden,
              q3_reference_backend.hidden);
@@ -7453,10 +7787,27 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     std::fprintf(stdout, "generation_debug.qref_stage: ffn rms_norm failed\n");
     return;
   }
-  dump_stage("prompt0.layer0.ffn_norm",
+  dump_stage((stage_prefix + ".ffn_norm").c_str(),
              actor_backend.norm,
              q2_reference_backend.norm,
              q3_reference_backend.norm);
+  dump_q8_quantize_compare((stage_prefix + ".ffn_norm_q8").c_str(), actor_backend.norm);
+  dump_matrix_compare((stage_prefix + ".ffn_gate_matmul").c_str(),
+                      actor_backend,
+                      actor_block.feed_forward_gate,
+                      actor_backend.norm);
+  dump_matrix_compare_reference_q8((stage_prefix + ".ffn_gate_matmul_refq8").c_str(),
+                                   actor_backend,
+                                   actor_block.feed_forward_gate,
+                                   actor_backend.norm);
+  dump_matrix_compare((stage_prefix + ".ffn_up_matmul").c_str(),
+                      actor_backend,
+                      actor_block.feed_forward_up,
+                      actor_backend.norm);
+  dump_matrix_compare_reference_q8((stage_prefix + ".ffn_up_matmul_refq8").c_str(),
+                                   actor_backend,
+                                   actor_block.feed_forward_up,
+                                   actor_backend.norm);
 
   if (!emel::generator::detail::matmul_vector(
           actor_backend, actor_block.feed_forward_gate, actor_backend.norm, actor_backend.gate) ||
@@ -7489,11 +7840,11 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     std::fprintf(stdout, "generation_debug.qref_stage: ffn gate/up matmul failed\n");
     return;
   }
-  dump_stage("prompt0.layer0.ffn_gate",
+  dump_stage((stage_prefix + ".ffn_gate").c_str(),
              actor_backend.gate,
              q2_reference_backend.gate,
              q3_reference_backend.gate);
-  dump_stage("prompt0.layer0.ffn_up",
+  dump_stage((stage_prefix + ".ffn_up").c_str(),
              actor_backend.up,
              q2_reference_backend.up,
              q3_reference_backend.up);
@@ -7508,10 +7859,19 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
         emel::generator::detail::silu(q3_reference_backend.gate[idx]) *
         q3_reference_backend.up[idx];
   }
-  dump_stage("prompt0.layer0.ffn_swiglu",
+  dump_stage((stage_prefix + ".ffn_swiglu").c_str(),
              actor_backend.ffn_hidden,
              q2_reference_backend.ffn_hidden,
              q3_reference_backend.ffn_hidden);
+  dump_q8_quantize_compare((stage_prefix + ".ffn_hidden_q8").c_str(), actor_backend.ffn_hidden);
+  dump_matrix_compare((stage_prefix + ".ffn_down_matmul").c_str(),
+                      actor_backend,
+                      actor_block.feed_forward_down,
+                      actor_backend.ffn_hidden);
+  dump_matrix_compare_reference_q8((stage_prefix + ".ffn_down_matmul_refq8").c_str(),
+                                   actor_backend,
+                                   actor_block.feed_forward_down,
+                                   actor_backend.ffn_hidden);
 
   if (!emel::generator::detail::matmul_vector(
           actor_backend, actor_block.feed_forward_down, actor_backend.ffn_hidden, actor_backend.projected) ||
@@ -7530,7 +7890,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     std::fprintf(stdout, "generation_debug.qref_stage: ffn down matmul failed\n");
     return;
   }
-  dump_stage("prompt0.layer0.ffn_out",
+  dump_stage((stage_prefix + ".ffn_out").c_str(),
              actor_backend.projected,
              q2_reference_backend.projected,
              q3_reference_backend.projected);
@@ -7542,7 +7902,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     q3_reference_backend.hidden[static_cast<size_t>(idx)] +=
         q3_reference_backend.projected[static_cast<size_t>(idx)];
   }
-  dump_stage("prompt0.layer0.l_out",
+  dump_stage((stage_prefix + ".l_out").c_str(),
              actor_backend.hidden,
              q2_reference_backend.hidden,
              q3_reference_backend.hidden);
