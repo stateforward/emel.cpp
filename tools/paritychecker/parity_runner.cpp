@@ -2126,6 +2126,70 @@ bool run_prefill_with_scalar_attention_matmul_mode(
   return compute_logits_with_matmul_mode(backend, mode);
 }
 
+bool run_layer_with_exact_all_scalar_attention(emel::generator::detail::native_backend & backend,
+                                               const int32_t layer_index,
+                                               const int32_t position) {
+  const exact_matmul_mode mode{.attention = true, .ffn = true, .output = true};
+  return run_layer_with_matmul_mode_scalar_attention(backend, layer_index, position, mode);
+}
+
+bool run_layer_with_exact_attention_scalar_attention(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position) {
+  const exact_matmul_mode mode{.attention = true, .ffn = false, .output = false};
+  return run_layer_with_matmul_mode_scalar_attention(backend, layer_index, position, mode);
+}
+
+bool run_layer_with_exact_ffn_scalar_attention(emel::generator::detail::native_backend & backend,
+                                               const int32_t layer_index,
+                                               const int32_t position) {
+  const exact_matmul_mode mode{.attention = false, .ffn = true, .output = false};
+  return run_layer_with_matmul_mode_scalar_attention(backend, layer_index, position, mode);
+}
+
+bool run_layer_with_exact_output_scalar_attention(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position) {
+  const exact_matmul_mode mode{.attention = false, .ffn = false, .output = true};
+  return run_layer_with_matmul_mode_scalar_attention(backend, layer_index, position, mode);
+}
+
+bool run_layer_with_reference_q236_scalar_attention(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position) {
+  const exact_matmul_mode mode{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .dtype_mask =
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q2_k)) |
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q3_k)) |
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q6_k)),
+      .use_reference_q8 = true,
+  };
+  return run_layer_with_matmul_mode_scalar_attention(backend, layer_index, position, mode);
+}
+
+bool run_layer_with_scalar_q236_scalar_attention(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position) {
+  const exact_matmul_mode mode{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .dtype_mask =
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q2_k)) |
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q3_k)) |
+          (1u << static_cast<uint8_t>(emel::kernel::event::dtype::q6_k)),
+      .use_scalar_quantized = true,
+  };
+  return run_layer_with_matmul_mode_scalar_attention(backend, layer_index, position, mode);
+}
+
 bool run_layer_with_scalar_attention(emel::generator::detail::native_backend & backend,
                                      const int32_t layer_index,
                                      const int32_t position) {
@@ -4122,106 +4186,56 @@ void dump_scalar_attention_debug(const generation_load_state & state,
                ffn_exact_backend.bound_logits[static_cast<size_t>(reference_token)],
                output_exact_backend.bound_logits[static_cast<size_t>(emel_token)],
                output_exact_backend.bound_logits[static_cast<size_t>(reference_token)]);
-  generation_result rounded_weight_full_result = {};
-  const emel::error::type rounded_weight_full_err = run_custom_native_generate(
-      state.backend,
-      *state.model_data,
-      opts,
-      run_layer_with_scalar_attention_rounded_weight_scalar,
-      rounded_weight_full_result);
-  if (rounded_weight_full_err == emel::error::cast(emel::generator::error::none)) {
-    const int32_t rounded_weight_token_mismatch =
-        first_token_mismatch_index(rounded_weight_full_result, reference_result);
-    const size_t rounded_weight_byte_mismatch =
-        first_mismatch_offset(rounded_weight_full_result, reference_result);
+  const auto dump_alt_generation = [&](const char * label, const native_layer_runner run_layer_fn) {
+    generation_result alt_result = {};
+    const emel::error::type alt_err = run_custom_native_generate(
+        state.backend, *state.model_data, opts, run_layer_fn, alt_result);
+    if (alt_err == emel::error::cast(emel::generator::error::none)) {
+      std::fprintf(stdout,
+                   "generation_debug.alt.%s: match=%d token_mismatch=%d "
+                   "byte_mismatch=%zu tokens=%d output_length=%zu\n",
+                   label,
+                   generation_results_match(alt_result, reference_result) ? 1 : 0,
+                   first_token_mismatch_index(alt_result, reference_result),
+                   first_mismatch_offset(alt_result, reference_result),
+                   alt_result.tokens_generated,
+                   alt_result.output_length);
+      return;
+    }
+
     std::fprintf(stdout,
-                 "generation_debug.alt.rounded_weight_full: match=%d token_mismatch=%d "
-                 "byte_mismatch=%zu tokens=%d output_length=%zu\n",
-                 generation_results_match(rounded_weight_full_result, reference_result) ? 1 : 0,
-                 rounded_weight_token_mismatch,
-                 rounded_weight_byte_mismatch,
-                 rounded_weight_full_result.tokens_generated,
-                 rounded_weight_full_result.output_length);
-  } else {
-    std::fprintf(stdout,
-                 "generation_debug.alt.rounded_weight_full: error=%d\n",
-                 static_cast<int>(rounded_weight_full_err));
-  }
-  generation_result ggml_f16_full_result = {};
-  const emel::error::type ggml_f16_full_err = run_custom_native_generate(
-      state.backend,
-      *state.model_data,
-      opts,
-      run_layer_with_scalar_attention_ggml_f16_value_contraction,
-      ggml_f16_full_result);
-  if (ggml_f16_full_err == emel::error::cast(emel::generator::error::none)) {
-    const int32_t ggml_f16_token_mismatch =
-        first_token_mismatch_index(ggml_f16_full_result, reference_result);
-    const size_t ggml_f16_byte_mismatch =
-        first_mismatch_offset(ggml_f16_full_result, reference_result);
-    std::fprintf(stdout,
-                 "generation_debug.alt.ggml_f16_full: match=%d token_mismatch=%d "
-                 "byte_mismatch=%zu tokens=%d output_length=%zu\n",
-                 generation_results_match(ggml_f16_full_result, reference_result) ? 1 : 0,
-                 ggml_f16_token_mismatch,
-                 ggml_f16_byte_mismatch,
-                 ggml_f16_full_result.tokens_generated,
-                 ggml_f16_full_result.output_length);
-  } else {
-    std::fprintf(stdout,
-                 "generation_debug.alt.ggml_f16_full: error=%d\n",
-                 static_cast<int>(ggml_f16_full_err));
-  }
-  generation_result ggml_nonflash_f16_full_result = {};
-  const emel::error::type ggml_nonflash_f16_full_err = run_custom_native_generate(
-      state.backend,
-      *state.model_data,
-      opts,
-      run_layer_with_scalar_attention_ggml_nonflash_f16,
-      ggml_nonflash_f16_full_result);
-  if (ggml_nonflash_f16_full_err == emel::error::cast(emel::generator::error::none)) {
-    const int32_t ggml_nonflash_f16_token_mismatch =
-        first_token_mismatch_index(ggml_nonflash_f16_full_result, reference_result);
-    const size_t ggml_nonflash_f16_byte_mismatch =
-        first_mismatch_offset(ggml_nonflash_f16_full_result, reference_result);
-    std::fprintf(stdout,
-                 "generation_debug.alt.ggml_nonflash_f16_full: match=%d token_mismatch=%d "
-                 "byte_mismatch=%zu tokens=%d output_length=%zu\n",
-                 generation_results_match(ggml_nonflash_f16_full_result, reference_result) ? 1 : 0,
-                 ggml_nonflash_f16_token_mismatch,
-                 ggml_nonflash_f16_byte_mismatch,
-                 ggml_nonflash_f16_full_result.tokens_generated,
-                 ggml_nonflash_f16_full_result.output_length);
-  } else {
-    std::fprintf(stdout,
-                 "generation_debug.alt.ggml_nonflash_f16_full: error=%d\n",
-                 static_cast<int>(ggml_nonflash_f16_full_err));
-  }
-  generation_result ggml_f16_scores_full_result = {};
-  const emel::error::type ggml_f16_scores_full_err = run_custom_native_generate(
-      state.backend,
-      *state.model_data,
-      opts,
-      run_layer_with_scalar_attention_ggml_f16_scores,
-      ggml_f16_scores_full_result);
-  if (ggml_f16_scores_full_err == emel::error::cast(emel::generator::error::none)) {
-    const int32_t ggml_f16_scores_token_mismatch =
-        first_token_mismatch_index(ggml_f16_scores_full_result, reference_result);
-    const size_t ggml_f16_scores_byte_mismatch =
-        first_mismatch_offset(ggml_f16_scores_full_result, reference_result);
-    std::fprintf(stdout,
-                 "generation_debug.alt.ggml_f16_scores_full: match=%d token_mismatch=%d "
-                 "byte_mismatch=%zu tokens=%d output_length=%zu\n",
-                 generation_results_match(ggml_f16_scores_full_result, reference_result) ? 1 : 0,
-                 ggml_f16_scores_token_mismatch,
-                 ggml_f16_scores_byte_mismatch,
-                 ggml_f16_scores_full_result.tokens_generated,
-                 ggml_f16_scores_full_result.output_length);
-  } else {
-    std::fprintf(stdout,
-                 "generation_debug.alt.ggml_f16_scores_full: error=%d\n",
-                 static_cast<int>(ggml_f16_scores_full_err));
-  }
+                 "generation_debug.alt.%s: error=%d\n",
+                 label,
+                 static_cast<int>(alt_err));
+  };
+  dump_alt_generation("no_weight_rounding_full",
+                      run_layer_with_scalar_attention_no_weight_rounding);
+  dump_alt_generation("rounded_weight_full",
+                      run_layer_with_scalar_attention_rounded_weight_scalar);
+  dump_alt_generation("ggml_f16_full",
+                      run_layer_with_scalar_attention_ggml_f16_value_contraction);
+  dump_alt_generation("ggml_online_f16_full",
+                      run_layer_with_scalar_attention_ggml_online_f16);
+  dump_alt_generation("ggml_nonflash_f16_full",
+                      run_layer_with_scalar_attention_ggml_nonflash_f16);
+  dump_alt_generation("ggml_f16_scores_full",
+                      run_layer_with_scalar_attention_ggml_f16_scores);
+  dump_alt_generation("full_q_full", run_layer_with_scalar_attention_full_q);
+  dump_alt_generation("full_q_no_weight_rounding_full",
+                      run_layer_with_scalar_attention_full_q_no_weight_rounding);
+  dump_alt_generation("full_q_rounded_weight_full",
+                      run_layer_with_scalar_attention_full_q_rounded_weight);
+  dump_alt_generation("full_q_ggml_f16_full",
+                      run_layer_with_scalar_attention_full_q_ggml_f16_value_contraction);
+  dump_alt_generation("exact_all_full", run_layer_with_exact_all_scalar_attention);
+  dump_alt_generation("exact_attention_full",
+                      run_layer_with_exact_attention_scalar_attention);
+  dump_alt_generation("exact_ffn_full", run_layer_with_exact_ffn_scalar_attention);
+  dump_alt_generation("exact_output_full", run_layer_with_exact_output_scalar_attention);
+  dump_alt_generation("reference_q236_full",
+                      run_layer_with_reference_q236_scalar_attention);
+  dump_alt_generation("scalar_q236_full",
+                      run_layer_with_scalar_q236_scalar_attention);
   dump_candidate_logits_compare(
       "generation_debug.flash.dispatch_output", dispatch_backend, emel_token, reference_token);
   dump_candidate_logits_compare(
@@ -6251,6 +6265,13 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   dump_attention_mode("ggml_online_f16", run_prefill_with_scalar_attention_ggml_online_f16);
   dump_attention_mode("ggml_nonflash_f16", run_prefill_with_scalar_attention_ggml_nonflash_f16);
   dump_attention_mode("ggml_f16_scores", run_prefill_with_scalar_attention_ggml_f16_scores);
+  dump_attention_mode("full_q", run_prefill_with_scalar_attention_full_q);
+  dump_attention_mode("full_q_no_weight_rounding",
+                      run_prefill_with_scalar_attention_full_q_no_weight_rounding);
+  dump_attention_mode("full_q_rounded_weight",
+                      run_prefill_with_scalar_attention_full_q_rounded_weight);
+  dump_attention_mode("full_q_ggml_f16_value_contraction",
+                      run_prefill_with_scalar_attention_full_q_ggml_f16_value_contraction);
 
   llama_context_ptr reference_ctx =
       make_reference_context(const_cast<initialize_backend &>(state.backend));
@@ -6358,6 +6379,44 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
     emel::generator::detail::store_fp16_rounded_cache(
         std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
         backend.value_cache.data() + cache_offset);
+
+    {
+      auto flash_request = emel::generator::detail::make_flash_attn_request(backend, layer, position);
+      std::vector<float> shared_flash_ctx(backend.attn_ctx.size(), 0.0f);
+      flash_request.dst = emel::generator::detail::make_dst_view_3d(
+          shared_flash_ctx.data(),
+          flash_request.dst.ne[0],
+          flash_request.dst.ne[1],
+          flash_request.dst.ne[2]);
+      emel::kernel::detail::flash_attn_workspace shared_flash_workspace = {};
+      if (emel::kernel::detail::run_flash_attn_ext_with_workspace(
+              flash_request, shared_flash_workspace)) {
+        dump_state_compare((layer_prefix + ".kqv_out_shared_flash").c_str(),
+                           shared_flash_ctx,
+                           find_reference_tensor(graph_capture, ("kqv_out-" + layer_suffix).c_str()));
+      } else {
+        std::fprintf(stdout, "%s.kqv_out_shared_flash: compute failed\n", layer_prefix.c_str());
+      }
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+      std::vector<float> neon_flash_ctx(backend.attn_ctx.size(), 0.0f);
+      auto neon_flash_request = flash_request;
+      neon_flash_request.dst = emel::generator::detail::make_dst_view_3d(
+          neon_flash_ctx.data(),
+          neon_flash_request.dst.ne[0],
+          neon_flash_request.dst.ne[1],
+          neon_flash_request.dst.ne[2]);
+      emel::kernel::detail::flash_attn_workspace neon_flash_workspace = {};
+      if (emel::kernel::aarch64::detail::run_flash_attn_ext_neon(
+              neon_flash_request, true, neon_flash_workspace)) {
+        dump_state_compare((layer_prefix + ".kqv_out_neon_flash").c_str(),
+                           neon_flash_ctx,
+                           find_reference_tensor(graph_capture, ("kqv_out-" + layer_suffix).c_str()));
+      } else {
+        std::fprintf(stdout, "%s.kqv_out_neon_flash: compute failed\n", layer_prefix.c_str());
+      }
+#endif
+    }
 
     if (!compute_attention_with_softmax_debug(
             backend,
@@ -8007,14 +8066,6 @@ void dump_generation_gen0_attention_debug(const generation_load_state & state,
       std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
       backend.value_cache.data() + cache_offset);
 
-  (void) compute_attention_with_softmax_debug(
-      backend,
-      graph_capture,
-      0,
-      position + 1,
-      "generation_debug.gen0.layer0",
-      reference_value_cache_rows);
-
   auto dump_gen0_state = [&](const char * suffix,
                              std::span<const float> emel_values,
                              const char * tensor_name) {
@@ -8025,6 +8076,48 @@ void dump_generation_gen0_attention_debug(const generation_load_state & state,
                  suffix,
                  max_abs_diff(emel_values, reference_values));
   };
+
+  {
+    auto flash_request = emel::generator::detail::make_flash_attn_request(backend, 0, position);
+    std::vector<float> shared_flash_ctx(backend.attn_ctx.size(), 0.0f);
+    flash_request.dst = emel::generator::detail::make_dst_view_3d(
+        shared_flash_ctx.data(),
+        flash_request.dst.ne[0],
+        flash_request.dst.ne[1],
+        flash_request.dst.ne[2]);
+    emel::kernel::detail::flash_attn_workspace shared_flash_workspace = {};
+    if (emel::kernel::detail::run_flash_attn_ext_with_workspace(
+            flash_request, shared_flash_workspace)) {
+      dump_gen0_state("kqv_out_shared_flash", shared_flash_ctx, "kqv_out-0");
+    } else {
+      std::fprintf(stdout, "generation_debug.gen0.layer0.kqv_out_shared_flash: compute failed\n");
+    }
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+    std::vector<float> neon_flash_ctx(backend.attn_ctx.size(), 0.0f);
+    auto neon_flash_request = flash_request;
+    neon_flash_request.dst = emel::generator::detail::make_dst_view_3d(
+        neon_flash_ctx.data(),
+        neon_flash_request.dst.ne[0],
+        neon_flash_request.dst.ne[1],
+        neon_flash_request.dst.ne[2]);
+    emel::kernel::detail::flash_attn_workspace neon_flash_workspace = {};
+    if (emel::kernel::aarch64::detail::run_flash_attn_ext_neon(
+            neon_flash_request, true, neon_flash_workspace)) {
+      dump_gen0_state("kqv_out_neon_flash", neon_flash_ctx, "kqv_out-0");
+    } else {
+      std::fprintf(stdout, "generation_debug.gen0.layer0.kqv_out_neon_flash: compute failed\n");
+    }
+#endif
+  }
+
+  (void) compute_attention_with_softmax_debug(
+      backend,
+      graph_capture,
+      0,
+      position + 1,
+      "generation_debug.gen0.layer0",
+      reference_value_cache_rows);
 
   dump_matrix_compare(
       "generation_debug.gen0.layer0.attn_out_matmul", backend, block.attention_output, backend.attn_ctx);
