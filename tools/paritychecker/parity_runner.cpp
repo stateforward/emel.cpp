@@ -2742,9 +2742,14 @@ bool compute_attention_with_ggml_flash_ext_helper(
   return true;
 }
 
+inline float round_scalar_to_fp16(const float value) {
+  return ggml_fp16_to_fp32(ggml_fp32_to_fp16(value));
+}
+
 inline void scale_fp16_buffer(std::span<ggml_fp16_t> values, const float scale) {
+  const float rounded_scale = round_scalar_to_fp16(scale);
   for (ggml_fp16_t & value : values) {
-    value = ggml_fp32_to_fp16(ggml_fp16_to_fp32(value) * scale);
+    value = ggml_fp32_to_fp16(ggml_fp16_to_fp32(value) * rounded_scale);
   }
 }
 
@@ -2754,9 +2759,10 @@ inline void mad_fp16_buffer(std::span<ggml_fp16_t> accum,
   if (accum.size() != values.size()) {
     return;
   }
+  const float rounded_scale = round_scalar_to_fp16(scale);
   for (size_t idx = 0; idx < accum.size(); ++idx) {
     const float sum =
-        ggml_fp16_to_fp32(accum[idx]) + ggml_fp16_to_fp32(values[idx]) * scale;
+        ggml_fp16_to_fp32(accum[idx]) + ggml_fp16_to_fp32(values[idx]) * rounded_scale;
     accum[idx] = ggml_fp32_to_fp16(sum);
   }
 }
@@ -2831,10 +2837,9 @@ bool compute_attention_with_ggml_online_f16(
     }
 
     const float inv_score_sum = score_sum == 0.0f ? 0.0f : 1.0f / score_sum;
-    scale_fp16_buffer(acc_f16, inv_score_sum);
     for (int32_t dim = 0; dim < head_dim; ++dim) {
       backend.attn_ctx[q_offset + static_cast<size_t>(dim)] =
-          ggml_fp16_to_fp32(acc_f16[static_cast<size_t>(dim)]);
+          ggml_fp16_to_fp32(acc_f16[static_cast<size_t>(dim)]) * inv_score_sum;
     }
   }
 
