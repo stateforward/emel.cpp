@@ -9404,14 +9404,51 @@ bool run_ggml_flash_attn_ext_case(std::span<const float> q_data,
   }
 
   ggml_case_context c{};
-  ggml_tensor * q = ggml_new_tensor_3d(c.ctx, GGML_TYPE_F32, head_dim, 1, head_count);
-  ggml_tensor * k = ggml_new_tensor_3d(c.ctx, GGML_TYPE_F16, head_dim, kv_tokens, kv_head_count);
-  ggml_tensor * v = ggml_new_tensor_3d(c.ctx, GGML_TYPE_F16, head_dim, kv_tokens, kv_head_count);
+  ggml_tensor * q_backing = ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32, static_cast<int64_t>(q_size));
+  ggml_tensor * q = q_backing == nullptr
+      ? nullptr
+      : ggml_view_3d(c.ctx,
+                     q_backing,
+                     head_dim,
+                     1,
+                     head_count,
+                     sizeof(float) * static_cast<size_t>(head_dim),
+                     sizeof(float) * static_cast<size_t>(head_dim),
+                     0);
+
+  ggml_tensor * k_backing =
+      ggml_new_tensor_1d(c.ctx, GGML_TYPE_F16, static_cast<int64_t>(kv_size));
+  ggml_tensor * k = k_backing == nullptr
+      ? nullptr
+      : ggml_view_3d(c.ctx,
+                     k_backing,
+                     head_dim,
+                     kv_tokens,
+                     kv_head_count,
+                     sizeof(ggml_fp16_t) *
+                         static_cast<size_t>(head_dim * kv_head_count),
+                     sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
+                     0);
+
+  ggml_tensor * v_backing =
+      ggml_new_tensor_1d(c.ctx, GGML_TYPE_F16, static_cast<int64_t>(kv_size));
+  ggml_tensor * v = v_backing == nullptr
+      ? nullptr
+      : ggml_view_3d(c.ctx,
+                     v_backing,
+                     head_dim,
+                     kv_tokens,
+                     kv_head_count,
+                     sizeof(ggml_fp16_t) *
+                         static_cast<size_t>(head_dim * kv_head_count),
+                     sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
+                     0);
+
   if (q == nullptr || k == nullptr || v == nullptr) {
     return false;
   }
 
-  set_tensor_f32(q, std::vector<float>(q_data.begin(), q_data.end()));
+  std::memcpy(ggml_get_data(q_backing), q_data.data(), q_size * sizeof(float));
 
   std::vector<ggml_fp16_t> k_f16(kv_size);
   std::vector<ggml_fp16_t> v_f16(kv_size);
@@ -9419,8 +9456,8 @@ bool run_ggml_flash_attn_ext_case(std::span<const float> q_data,
     k_f16[idx] = ggml_fp32_to_fp16(k_data[idx]);
     v_f16[idx] = ggml_fp32_to_fp16(v_data[idx]);
   }
-  std::memcpy(ggml_get_data(k), k_f16.data(), k_f16.size() * sizeof(ggml_fp16_t));
-  std::memcpy(ggml_get_data(v), v_f16.data(), v_f16.size() * sizeof(ggml_fp16_t));
+  std::memcpy(ggml_get_data(k_backing), k_f16.data(), k_f16.size() * sizeof(ggml_fp16_t));
+  std::memcpy(ggml_get_data(v_backing), v_f16.data(), v_f16.size() * sizeof(ggml_fp16_t));
 
   ggml_tensor * out_tensor =
       ggml_flash_attn_ext(c.ctx, q, k, v, nullptr, scale, 0.0f, 0.0f);
