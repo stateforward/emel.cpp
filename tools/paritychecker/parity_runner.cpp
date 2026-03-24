@@ -2712,6 +2712,36 @@ bool compute_attention_with_online_f32(
   return true;
 }
 
+bool compute_attention_with_ggml_flash_ext_helper(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position_limit,
+    std::span<const float> q_vector) {
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t layer_offset =
+      emel::generator::detail::layer_cache_offset(backend, layer_index, 0, kv_dim);
+  std::vector<float> attn_ctx;
+  if (!run_ggml_flash_attn_ext_case(
+          q_vector,
+          std::span<const float>(backend.key_cache.data() + layer_offset,
+                                 static_cast<size_t>(position_limit * kv_dim)),
+          std::span<const float>(backend.value_cache.data() + layer_offset,
+                                 static_cast<size_t>(position_limit * kv_dim)),
+          static_cast<int64_t>(backend.head_dim),
+          static_cast<int64_t>(position_limit),
+          static_cast<int64_t>(backend.n_head),
+          static_cast<int64_t>(backend.n_head_kv),
+          1.0f / std::sqrt(static_cast<float>(backend.head_dim)),
+          attn_ctx)) {
+    return false;
+  }
+  if (attn_ctx.size() != backend.attn_ctx.size()) {
+    return false;
+  }
+  std::copy(attn_ctx.begin(), attn_ctx.end(), backend.attn_ctx.begin());
+  return true;
+}
+
 inline void scale_fp16_buffer(std::span<ggml_fp16_t> values, const float scale) {
   for (ggml_fp16_t & value : values) {
     value = ggml_fp32_to_fp16(ggml_fp16_to_fp32(value) * scale);
@@ -3156,6 +3186,78 @@ bool run_layer_with_scalar_attention_online_f32(
   return true;
 }
 
+bool run_layer_with_scalar_attention_ggml_flash_ext(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position) {
+  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    return false;
+  }
+
+  emel::generator::detail::apply_rope(
+      backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+  emel::generator::detail::apply_rope(backend.k,
+                                      backend.n_head_kv,
+                                      backend.head_dim_kv,
+                                      backend.n_rot,
+                                      position,
+                                      backend.rope_freq_base);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
+
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t cache_offset =
+      emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
+
+  if (!compute_attention_with_ggml_flash_ext_helper(
+          backend,
+          layer_index,
+          position + 1,
+          std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd))) ||
+      !emel::generator::detail::matmul_vector(
+          backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+    backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+  }
+
+  if (!emel::generator::detail::matmul_vector(
+          backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  return true;
+}
+
 bool run_prefill_with_scalar_attention_ggml_f16_value_contraction(
     emel::generator::detail::native_backend & backend,
     std::span<const int32_t> prefix_tokens) {
@@ -3313,6 +3415,39 @@ bool run_prefill_with_scalar_attention_online_f32(
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
       if (!run_layer_with_scalar_attention_online_f32(backend, layer, position)) {
+        return false;
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+  }
+
+  return emel::generator::detail::compute_logits(backend);
+}
+
+bool run_prefill_with_scalar_attention_ggml_flash_ext(
+    emel::generator::detail::native_backend & backend,
+    std::span<const int32_t> prefix_tokens) {
+  if (prefix_tokens.empty()) {
+    return false;
+  }
+
+  backend.kv_cache_tokens = 0;
+  for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+    const int32_t token_id = prefix_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (token_id < 0 ||
+        token_id >= backend.token_embedding.rows ||
+        position < 0 ||
+        position >= backend.n_ctx) {
+      return false;
+    }
+
+    if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
+      return false;
+    }
+
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_layer_with_scalar_attention_ggml_flash_ext(backend, layer, position)) {
         return false;
       }
     }
@@ -4391,6 +4526,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
                       run_layer_with_scalar_attention_rounded_weight_scalar);
   dump_alt_generation("ggml_f16_full",
                       run_layer_with_scalar_attention_ggml_f16_value_contraction);
+  dump_alt_generation("ggml_flash_ext_full", run_layer_with_scalar_attention_ggml_flash_ext);
   dump_alt_generation("online_f32_full", run_layer_with_scalar_attention_online_f32);
   dump_alt_generation("ggml_online_f16_full",
                       run_layer_with_scalar_attention_ggml_online_f16);
@@ -6469,6 +6605,8 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
 
   std::vector<std::vector<float>> reference_value_cache_rows(
       static_cast<size_t>(backend.n_layer));
+  std::vector<std::vector<float>> reference_key_cache_rows(
+      static_cast<size_t>(backend.n_layer));
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
     if (!capture_reference_value_cache_rows(
             reference_ctx.get(),
@@ -6476,6 +6614,14 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
             reference_value_cache_rows[static_cast<size_t>(layer)])) {
       std::fprintf(stdout,
                    "generation_debug.state.layer%d.reference_value_cache: unavailable\n",
+                   layer);
+    }
+    if (!capture_reference_key_cache_rows(
+            reference_ctx.get(),
+            layer,
+            reference_key_cache_rows[static_cast<size_t>(layer)])) {
+      std::fprintf(stdout,
+                   "generation_debug.state.layer%d.reference_key_cache: unavailable\n",
                    layer);
     }
   }
@@ -6545,6 +6691,18 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
     dump_state_compare((layer_prefix + ".q").c_str(),
                        backend.q,
                        find_reference_tensor(graph_capture, ("Qcur-" + layer_suffix).c_str()));
+    {
+      const std::span<const float> reference_q = reference_last_token_row(
+          find_reference_tensor(graph_capture, ("Qcur-" + layer_suffix).c_str()),
+          static_cast<size_t>(backend.n_head * backend.head_dim));
+      if (reference_q.size() == backend.q_attn.size()) {
+        std::vector<float> reference_q_attn(reference_q.begin(), reference_q.end());
+        emel::generator::detail::store_fp16_rounded_cache(reference_q, reference_q_attn.data());
+        dump_state_compare((layer_prefix + ".q_attn").c_str(), backend.q_attn, reference_q_attn);
+      } else {
+        std::fprintf(stdout, "%s.q_attn: unavailable\n", layer_prefix.c_str());
+      }
+    }
     dump_state_compare((layer_prefix + ".k").c_str(),
                        backend.k,
                        find_reference_tensor(graph_capture, ("Kcur-" + layer_suffix).c_str()));
@@ -6579,6 +6737,109 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
 
       const size_t layer_cache_offset = emel::generator::detail::layer_cache_offset(
           backend, layer, 0, kv_dim);
+      const std::span<const float> reference_q =
+          reference_last_token_row(find_reference_tensor(graph_capture, ("Qcur-" + layer_suffix).c_str()),
+                                   static_cast<size_t>(backend.n_head * backend.head_dim));
+      const auto & reference_key_cache =
+          reference_key_cache_rows[static_cast<size_t>(layer)];
+      const auto & reference_value_cache =
+          reference_value_cache_rows[static_cast<size_t>(layer)];
+      const std::span<const float> reference_key_prefix =
+          reference_key_cache.size() >= static_cast<size_t>((position + 1) * kv_dim)
+              ? std::span<const float>(reference_key_cache.data(),
+                                       static_cast<size_t>((position + 1) * kv_dim))
+              : std::span<const float>{};
+      const std::span<const float> reference_value_prefix =
+          reference_value_cache.size() >= static_cast<size_t>((position + 1) * kv_dim)
+              ? std::span<const float>(reference_value_cache.data(),
+                                       static_cast<size_t>((position + 1) * kv_dim))
+              : std::span<const float>{};
+
+      if (!reference_key_prefix.empty()) {
+        float key_cache_max_abs = 0.0f;
+        int32_t key_cache_head = 0;
+        int32_t key_cache_pos = 0;
+        int32_t key_cache_dim = 0;
+        float key_cache_emel = 0.0f;
+        float key_cache_reference = 0.0f;
+        for (int32_t cache_pos = 0; cache_pos <= position; ++cache_pos) {
+          const size_t cache_row_offset =
+              emel::generator::detail::layer_cache_offset(backend, layer, cache_pos, kv_dim);
+          const std::span<const float> emel_cache_row{
+              backend.key_cache.data() + cache_row_offset,
+              static_cast<size_t>(kv_dim),
+          };
+          const std::span<const float> reference_cache_row = reference_key_prefix.subspan(
+              static_cast<size_t>(cache_pos) * static_cast<size_t>(kv_dim),
+              static_cast<size_t>(kv_dim));
+          for (int32_t head = 0; head < backend.n_head_kv; ++head) {
+            for (int32_t dim = 0; dim < backend.head_dim_kv; ++dim) {
+              const int32_t idx = head * backend.head_dim_kv + dim;
+              const float diff = std::fabs(emel_cache_row[static_cast<size_t>(idx)] -
+                                           reference_cache_row[static_cast<size_t>(idx)]);
+              if (diff > key_cache_max_abs) {
+                key_cache_max_abs = diff;
+                key_cache_head = head;
+                key_cache_pos = cache_pos;
+                key_cache_dim = dim;
+                key_cache_emel = emel_cache_row[static_cast<size_t>(idx)];
+                key_cache_reference = reference_cache_row[static_cast<size_t>(idx)];
+              }
+            }
+          }
+        }
+        std::fprintf(stdout,
+                     "%s.key_cache: max_abs=%g head=%d pos=%d dim=%d emel=%g reference=%g\n",
+                     layer_prefix.c_str(),
+                     key_cache_max_abs,
+                     key_cache_head,
+                     key_cache_pos,
+                     key_cache_dim,
+                     key_cache_emel,
+                     key_cache_reference);
+      }
+
+      const auto dump_ggml_flash_case =
+          [&](const std::string & label,
+              std::span<const float> q_rows,
+              std::span<const float> k_rows,
+              std::span<const float> v_rows) {
+            std::vector<float> ggml_flash_ctx;
+            if (run_ggml_flash_attn_ext_case(q_rows,
+                                             k_rows,
+                                             v_rows,
+                                             static_cast<int64_t>(backend.head_dim),
+                                             static_cast<int64_t>(position + 1),
+                                             static_cast<int64_t>(backend.n_head),
+                                             static_cast<int64_t>(backend.n_head_kv),
+                                             ::emel::kernel::detail::flash_attn_scale(flash_request),
+                                             ggml_flash_ctx)) {
+              dump_state_compare(
+                  label.c_str(),
+                  ggml_flash_ctx,
+                  find_reference_tensor(graph_capture, ("kqv_out-" + layer_suffix).c_str()));
+            } else {
+              std::fprintf(stdout, "%s: compute failed\n", label.c_str());
+            }
+          };
+
+      dump_ggml_flash_case(layer_prefix + ".kqv_out_ggml_flash_reference_qkv",
+                           reference_q,
+                           reference_key_prefix,
+                           reference_value_prefix);
+      dump_ggml_flash_case(layer_prefix + ".kqv_out_ggml_flash_reference_q_emel_kv",
+                           reference_q,
+                           std::span<const float>(backend.key_cache.data() + layer_cache_offset,
+                                                  static_cast<size_t>((position + 1) * kv_dim)),
+                           std::span<const float>(backend.value_cache.data() + layer_cache_offset,
+                                                  static_cast<size_t>((position + 1) * kv_dim)));
+      dump_ggml_flash_case(layer_prefix + ".kqv_out_ggml_flash_emel_q_reference_kv",
+                           std::span<const float>(
+                               backend.q.data(),
+                               static_cast<size_t>(backend.n_head * backend.head_dim)),
+                           reference_key_prefix,
+                           reference_value_prefix);
+
       std::vector<float> ggml_flash_ctx;
       if (run_ggml_flash_attn_ext_case(
               std::span<const float>(backend.q.data(),
