@@ -53,7 +53,8 @@ std::vector<float> flash_attn_reference_rounded_weight_dot(
   }
 
   std::vector<float> rounded_weights(static_cast<size_t>(kv_tokens), 0.0f);
-  const float inv_score_sum = score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+  const float inv_score_sum =
+      score_sum == 0.0f ? 0.0f : static_cast<float>(1.0 / score_sum);
   for (uint64_t token = 0; token < kv_tokens; ++token) {
     const float normalized =
         std::exp(scores[static_cast<size_t>(token)] - max_score) * inv_score_sum;

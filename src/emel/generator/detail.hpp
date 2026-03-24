@@ -769,8 +769,7 @@ inline bool compute_attention(native_backend & backend,
                                    backend.attn_probs_rounded);
 
     for (int32_t dim = 0; dim < head_dim; ++dim) {
-      const size_t cache_offset =
-          q_offset + static_cast<size_t>(dim);
+      const size_t cache_offset = q_offset + static_cast<size_t>(dim);
       for (int32_t position = 0; position < position_limit; ++position) {
         const size_t value_offset =
             layer_cache_offset(backend, layer_index, position, kv_dim) + kv_offset;
@@ -806,7 +805,7 @@ inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
   const float scale = 1.0f / std::sqrt(static_cast<float>(backend.head_dim));
   const uint32_t total_tokens = static_cast<uint32_t>(backend.n_ctx);
 
-  request.src0 = make_src_view_3d(backend.q.data(), head_dim, 1u, head_count);
+  request.src0 = make_src_view_3d(backend.q_attn.data(), head_dim, 1u, head_count);
   request.src1 = make_src_view_strided_3d(backend.key_cache.data() + layer_offset,
                                           kv_head_dim,
                                           kv_tokens,
