@@ -805,7 +805,7 @@ inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
   const float scale = 1.0f / std::sqrt(static_cast<float>(backend.head_dim));
   const uint32_t total_tokens = static_cast<uint32_t>(backend.n_ctx);
 
-  request.src0 = make_src_view_3d(backend.q_attn.data(), head_dim, 1u, head_count);
+  request.src0 = make_src_view_3d(backend.q.data(), head_dim, 1u, head_count);
   request.src1 = make_src_view_strided_3d(backend.key_cache.data() + layer_offset,
                                           kv_head_dim,
                                           kv_tokens,
