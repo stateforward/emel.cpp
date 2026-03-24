@@ -658,11 +658,7 @@ inline float dot_q3_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block
 inline float dot_q3_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q3_k * lhs,
                                     const ::emel::kernel::detail::quant::block_q8_k * rhs,
                                     const uint64_t block_count) noexcept {
-  float sum = 0.0f;
-  for (uint64_t block = 0; block < block_count; ++block) {
-    sum += dot_q3_k_q8_k_block_neon(lhs[block], rhs[block]);
-  }
-  return sum;
+  return ::emel::kernel::detail::dot_q3_k_q8_k_row_scalar(lhs, rhs, block_count);
 }
 
 inline float dot_q6_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block_q6_k & lhs,
@@ -756,11 +752,7 @@ inline float dot_q6_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block
 inline float dot_q6_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q6_k * lhs,
                                     const ::emel::kernel::detail::quant::block_q8_k * rhs,
                                     const uint64_t block_count) noexcept {
-  float sum = 0.0f;
-  for (uint64_t block = 0; block < block_count; ++block) {
-    sum += dot_q6_k_q8_k_block_neon(lhs[block], rhs[block]);
-  }
-  return sum;
+  return ::emel::kernel::detail::dot_q6_k_q8_k_row_scalar(lhs, rhs, block_count);
 }
 
 inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {

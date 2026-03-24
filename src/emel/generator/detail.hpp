@@ -602,7 +602,7 @@ inline void apply_rope(std::span<float> vector,
 }
 
 inline float silu(const float value) noexcept {
-  return value / (1.0f + std::exp(-value));
+  return value / (1.0f + ::expf(-value));
 }
 
 inline size_t layer_cache_offset(const native_backend & backend,

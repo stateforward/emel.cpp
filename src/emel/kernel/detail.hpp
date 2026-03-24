@@ -678,47 +678,75 @@ inline const float * tensor_row_ptr(const tensor_type & tensor,
 inline float dot_product_ggml_f16_scores(const float * lhs,
                                          const float * rhs,
                                          const uint64_t count) noexcept {
+  constexpr uint64_t k_chunk_size = 256u;
+  alignas(16) uint16_t lhs_f16[k_chunk_size] = {};
+  alignas(16) uint16_t rhs_f16[k_chunk_size] = {};
+
+  auto dot_f16_chunk = [](const uint16_t * lhs_bits,
+                          const uint16_t * rhs_bits,
+                          const uint64_t chunk_count) noexcept {
 #if defined(__aarch64__) || defined(__ARM_NEON)
 #if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
-  auto load_f16x8 = [](const float * src) noexcept {
-    const float16x4_t low = vcvt_f16_f32(vld1q_f32(src));
-    const float16x4_t high = vcvt_f16_f32(vld1q_f32(src + 4u));
-    return vcombine_f16(low, high);
+  float16x8_t sum[4] = {
+      vdupq_n_f16(0.0f),
+      vdupq_n_f16(0.0f),
+      vdupq_n_f16(0.0f),
+      vdupq_n_f16(0.0f),
+  };
+  uint64_t idx = 0u;
+  for (; idx + 32u <= chunk_count; idx += 32u) {
+    sum[0] = vfmaq_f16(sum[0],
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_bits + idx + 0u)),
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_bits + idx + 0u)));
+    sum[1] = vfmaq_f16(sum[1],
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_bits + idx + 8u)),
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_bits + idx + 8u)));
+    sum[2] = vfmaq_f16(sum[2],
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_bits + idx + 16u)),
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_bits + idx + 16u)));
+    sum[3] = vfmaq_f16(sum[3],
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_bits + idx + 24u)),
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_bits + idx + 24u)));
+  }
+
+  int offset = 2;
+  for (int i = 0; i < offset; ++i) {
+    sum[i] = vaddq_f16(sum[i], sum[offset + i]);
+  }
+  offset >>= 1;
+  for (int i = 0; i < offset; ++i) {
+    sum[i] = vaddq_f16(sum[i], sum[offset + i]);
+  }
+
+  const float32x4_t low = vcvt_f32_f16(vget_low_f16(sum[0]));
+  const float32x4_t high = vcvt_f32_f16(vget_high_f16(sum[0]));
+  double sumf = static_cast<double>(vaddvq_f32(vaddq_f32(low, high)));
+  for (; idx < chunk_count; ++idx) {
+    sumf += static_cast<double>(quant::fp16_to_fp32(lhs_bits[idx])) *
+            static_cast<double>(quant::fp16_to_fp32(rhs_bits[idx]));
+  }
+  return static_cast<float>(sumf);
+#endif
+#endif
+
+  double scalar_sum = 0.0;
+  for (uint64_t idx = 0u; idx < chunk_count; ++idx) {
+    scalar_sum += static_cast<double>(quant::fp16_to_fp32(lhs_bits[idx])) *
+                  static_cast<double>(quant::fp16_to_fp32(rhs_bits[idx]));
+  }
+  return static_cast<float>(scalar_sum);
   };
 
-  float16x8_t sum0 = vdupq_n_f16(0.0f);
-  float16x8_t sum1 = vdupq_n_f16(0.0f);
-  float16x8_t sum2 = vdupq_n_f16(0.0f);
-  float16x8_t sum3 = vdupq_n_f16(0.0f);
-  uint64_t idx = 0u;
-  for (; idx + 32u <= count; idx += 32u) {
-    sum0 = vfmaq_f16(sum0, load_f16x8(lhs + idx), load_f16x8(rhs + idx));
-    sum1 = vfmaq_f16(sum1, load_f16x8(lhs + idx + 8u), load_f16x8(rhs + idx + 8u));
-    sum2 = vfmaq_f16(sum2, load_f16x8(lhs + idx + 16u), load_f16x8(rhs + idx + 16u));
-    sum3 = vfmaq_f16(sum3, load_f16x8(lhs + idx + 24u), load_f16x8(rhs + idx + 24u));
+  double sum = 0.0;
+  for (uint64_t offset = 0u; offset < count; offset += k_chunk_size) {
+    const uint64_t chunk_count = std::min<uint64_t>(k_chunk_size, count - offset);
+    for (uint64_t idx = 0u; idx < chunk_count; ++idx) {
+      lhs_f16[idx] = quant::fp32_to_fp16(lhs[offset + idx]);
+      rhs_f16[idx] = quant::fp32_to_fp16(rhs[offset + idx]);
+    }
+    sum += static_cast<double>(dot_f16_chunk(lhs_f16, rhs_f16, chunk_count));
   }
-
-  sum0 = vaddq_f16(sum0, sum2);
-  sum1 = vaddq_f16(sum1, sum3);
-  sum0 = vaddq_f16(sum0, sum1);
-
-  const float32x4_t low = vcvt_f32_f16(vget_low_f16(sum0));
-  const float32x4_t high = vcvt_f32_f16(vget_high_f16(sum0));
-  float sum = vaddvq_f32(vaddq_f32(low, high));
-  for (; idx < count; ++idx) {
-    sum += quant::fp16_to_fp32(quant::fp32_to_fp16(lhs[idx])) *
-           quant::fp16_to_fp32(quant::fp32_to_fp16(rhs[idx]));
-  }
-  return sum;
-#endif
-#endif
-
-  float scalar_sum = 0.0f;
-  for (uint64_t idx = 0u; idx < count; ++idx) {
-    scalar_sum += quant::fp16_to_fp32(quant::fp32_to_fp16(lhs[idx])) *
-                  quant::fp16_to_fp32(quant::fp32_to_fp16(rhs[idx]));
-  }
-  return scalar_sum;
+  return static_cast<float>(sum);
 }
 
 template <class request_type>
@@ -835,6 +863,96 @@ inline float dot_q2_k_q8_k_block_scalar(const quant::block_q2_k & lhs,
 inline float dot_q2_k_q8_k_row_scalar(const quant::block_q2_k * lhs,
                                       const quant::block_q8_k * rhs,
                                       const uint64_t block_count) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+#if defined(__ARM_FEATURE_DOTPROD)
+  const uint8x16_t m3 = vdupq_n_u8(0x03u);
+  const uint8x16_t m4 = vdupq_n_u8(0x0fu);
+  const int32x4_t zero = vdupq_n_s32(0);
+
+  int8x16x2_t q2bytes{};
+  uint8_t scales_buf[16] = {};
+  float sum = 0.0f;
+
+  for (uint64_t block = 0; block < block_count; ++block) {
+    const float d = rhs[block].d * quant::fp16_to_fp32(lhs[block].d);
+    const float dmin = -rhs[block].d * quant::fp16_to_fp32(lhs[block].dmin);
+    const uint8_t * q2 = lhs[block].qs.data();
+    const int8_t * q8 = rhs[block].qs.data();
+    const uint8_t * scales_ptr = lhs[block].scales.data();
+
+    const uint8x16_t mins_and_scales = vld1q_u8(scales_ptr);
+    const uint8x16_t scales = vandq_u8(mins_and_scales, m4);
+    vst1q_u8(scales_buf, scales);
+
+    const uint8x16_t mins = vshrq_n_u8(mins_and_scales, 4);
+    const int16x8_t q8sums0 = vld1q_s16(rhs[block].bsums.data());
+    const int16x8_t q8sums1 = vld1q_s16(rhs[block].bsums.data() + 8);
+    const int16x8_t mins16_lo = vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(mins)));
+    const int16x8_t mins16_hi = vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(mins)));
+    const int32x4_t s0 = vaddq_s32(
+        vmull_s16(vget_low_s16(mins16_lo), vget_low_s16(q8sums0)),
+        vmull_s16(vget_high_s16(mins16_lo), vget_high_s16(q8sums0)));
+    const int32x4_t s1 = vaddq_s32(
+        vmull_s16(vget_low_s16(mins16_hi), vget_low_s16(q8sums1)),
+        vmull_s16(vget_high_s16(mins16_hi), vget_high_s16(q8sums1)));
+    sum += dmin * static_cast<float>(vaddvq_s32(vaddq_s32(s0, s1)));
+
+    int isum = 0;
+    int scale_index = 0;
+    for (uint64_t j = 0; j < (quant::QK_K / 128); ++j) {
+      const uint8x16_t q2bits0 = vld1q_u8(q2);
+      const uint8x16_t q2bits1 = vld1q_u8(q2 + 16);
+      q2 += 32;
+
+      {
+        const int8x16x2_t q8bytes = {{vld1q_s8(q8), vld1q_s8(q8 + 16)}};
+        q8 += 32;
+        q2bytes.val[0] = vreinterpretq_s8_u8(vandq_u8(q2bits0, m3));
+        q2bytes.val[1] = vreinterpretq_s8_u8(vandq_u8(q2bits1, m3));
+        isum += vaddvq_s32(vdotq_s32(zero, q2bytes.val[0], q8bytes.val[0])) *
+            scales_buf[scale_index + 0];
+        isum += vaddvq_s32(vdotq_s32(zero, q2bytes.val[1], q8bytes.val[1])) *
+            scales_buf[scale_index + 1];
+      }
+      {
+        const int8x16x2_t q8bytes = {{vld1q_s8(q8), vld1q_s8(q8 + 16)}};
+        q8 += 32;
+        q2bytes.val[0] = vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q2bits0, 2), m3));
+        q2bytes.val[1] = vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q2bits1, 2), m3));
+        isum += vaddvq_s32(vdotq_s32(zero, q2bytes.val[0], q8bytes.val[0])) *
+            scales_buf[scale_index + 2];
+        isum += vaddvq_s32(vdotq_s32(zero, q2bytes.val[1], q8bytes.val[1])) *
+            scales_buf[scale_index + 3];
+      }
+      {
+        const int8x16x2_t q8bytes = {{vld1q_s8(q8), vld1q_s8(q8 + 16)}};
+        q8 += 32;
+        q2bytes.val[0] = vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q2bits0, 4), m3));
+        q2bytes.val[1] = vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q2bits1, 4), m3));
+        isum += vaddvq_s32(vdotq_s32(zero, q2bytes.val[0], q8bytes.val[0])) *
+            scales_buf[scale_index + 4];
+        isum += vaddvq_s32(vdotq_s32(zero, q2bytes.val[1], q8bytes.val[1])) *
+            scales_buf[scale_index + 5];
+      }
+      {
+        const int8x16x2_t q8bytes = {{vld1q_s8(q8), vld1q_s8(q8 + 16)}};
+        q8 += 32;
+        q2bytes.val[0] = vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q2bits0, 6), m3));
+        q2bytes.val[1] = vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q2bits1, 6), m3));
+        isum += vaddvq_s32(vdotq_s32(zero, q2bytes.val[0], q8bytes.val[0])) *
+            scales_buf[scale_index + 6];
+        isum += vaddvq_s32(vdotq_s32(zero, q2bytes.val[1], q8bytes.val[1])) *
+            scales_buf[scale_index + 7];
+      }
+      scale_index += 8;
+    }
+
+    sum += d * static_cast<float>(isum);
+  }
+  return sum;
+#endif
+#endif
+
   float sumf = 0.0f;
   for (uint64_t block = 0; block < block_count; ++block) {
     sumf += dot_q2_k_q8_k_block_scalar(lhs[block], rhs[block]);

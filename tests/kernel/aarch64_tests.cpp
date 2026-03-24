@@ -32,34 +32,44 @@ std::vector<float> flash_attn_reference_ggml_f16_scores(
     const uint64_t head_dim,
     const uint64_t kv_tokens,
     const float scale) {
-  std::vector<float> scores(static_cast<size_t>(kv_tokens), 0.0f);
+  auto round_to_fp16 = [](const float value) noexcept {
+    return emel::kernel::detail::quant::fp16_to_fp32(
+        emel::kernel::detail::quant::fp32_to_fp16(value));
+  };
+
+  std::vector<float> out(static_cast<size_t>(head_dim), 0.0f);
+  float score_sum = 0.0f;
   float max_score = -INFINITY;
   for (uint64_t token = 0; token < kv_tokens; ++token) {
     const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
     const float score = emel::kernel::detail::dot_product_ggml_f16_scores(
-        q.data(),
-        k.data() + static_cast<std::ptrdiff_t>(offset),
-        head_dim) *
+                            q.data(),
+                            k.data() + static_cast<std::ptrdiff_t>(offset),
+                            head_dim) *
         scale;
-    scores[static_cast<size_t>(token)] = score;
-    max_score = std::max(max_score, score);
-  }
-
-  float denom = 0.0f;
-  for (float & score : scores) {
-    score = std::exp(score - max_score);
-    denom += score;
-  }
-
-  std::vector<float> out(static_cast<size_t>(head_dim), 0.0f);
-  for (uint64_t token = 0; token < kv_tokens; ++token) {
-    const float normalized = scores[static_cast<size_t>(token)] / denom;
-    const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
-    for (uint64_t dim = 0; dim < head_dim; ++dim) {
-      out[static_cast<size_t>(dim)] += normalized * v[offset + static_cast<size_t>(dim)];
+    const float old_max = max_score;
+    float max_scale = 1.0f;
+    float weight = 1.0f;
+    if (score > max_score) {
+      max_score = score;
+      max_scale = std::exp(old_max - max_score);
+    } else {
+      weight = std::exp(score - max_score);
     }
+
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      const size_t idx = static_cast<size_t>(dim);
+      out[idx] = round_to_fp16(out[idx] * max_scale);
+      out[idx] = round_to_fp16(out[idx] + round_to_fp16(v[offset + idx]) * weight);
+    }
+
+    score_sum = score_sum * max_scale + weight;
   }
 
+  const float inv_score_sum = score_sum == 0.0f ? 0.0f : 1.0f / score_sum;
+  for (float & value : out) {
+    value *= inv_score_sum;
+  }
   return out;
 }
 
