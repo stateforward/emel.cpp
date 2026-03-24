@@ -584,19 +584,19 @@ inline void apply_rope(std::span<float> vector,
     return;
   }
 
+  const float theta_scale = ::powf(rope_freq_base, -2.0f / static_cast<float>(rot_dim));
   for (int32_t head = 0; head < head_count; ++head) {
     float * head_ptr =
         vector.data() + (static_cast<size_t>(head) * static_cast<size_t>(head_dim));
+    float theta = static_cast<float>(position);
     for (int32_t dim = 0; dim + 1 < rot_dim; dim += 2) {
-      const float inv_freq =
-          std::pow(rope_freq_base, -static_cast<float>(dim) / static_cast<float>(rot_dim));
-      const float theta = static_cast<float>(position) * inv_freq;
-      const float cos_theta = std::cos(theta);
-      const float sin_theta = std::sin(theta);
+      const float cos_theta = ::cosf(theta);
+      const float sin_theta = ::sinf(theta);
       const float x0 = head_ptr[dim];
       const float x1 = head_ptr[dim + 1];
       head_ptr[dim] = x0 * cos_theta - x1 * sin_theta;
       head_ptr[dim + 1] = x0 * sin_theta + x1 * cos_theta;
+      theta *= theta_scale;
     }
   }
 }

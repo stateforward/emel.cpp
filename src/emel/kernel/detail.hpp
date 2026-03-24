@@ -203,6 +203,12 @@ inline uint32_t fp32_to_bits(const float value) noexcept {
 }
 
 inline float fp16_to_fp32(const uint16_t bits16) noexcept {
+#if defined(__ARM_NEON) && !(defined(__CUDACC__) && __CUDACC_VER_MAJOR__ <= 11) && \
+    !defined(__MUSACC__)
+  __fp16 tmp;
+  std::memcpy(&tmp, &bits16, sizeof(bits16));
+  return static_cast<float>(tmp);
+#else
   const uint32_t word = static_cast<uint32_t>(bits16) << 16u;
   const uint32_t sign = word & 0x80000000u;
   const uint32_t doubled = word + word;
@@ -220,9 +226,17 @@ inline float fp16_to_fp32(const uint16_t bits16) noexcept {
       sign | (doubled < denormalized_cutoff ? fp32_to_bits(denormalized)
                                             : fp32_to_bits(normalized));
   return fp32_from_bits(result);
+#endif
 }
 
 inline uint16_t fp32_to_fp16(const float value) noexcept {
+#if defined(__ARM_NEON) && !(defined(__CUDACC__) && __CUDACC_VER_MAJOR__ <= 11) && \
+    !defined(__MUSACC__)
+  uint16_t bits16 = 0u;
+  const __fp16 tmp = value;
+  std::memcpy(&bits16, &tmp, sizeof(bits16));
+  return bits16;
+#else
   const float scale_to_inf = 0x1.0p+112f;
   const float scale_to_zero = 0x1.0p-110f;
   float base = (std::fabs(value) * scale_to_inf) * scale_to_zero;
@@ -242,6 +256,7 @@ inline uint16_t fp32_to_fp16(const float value) noexcept {
   const uint32_t nonsign = exp_bits + mantissa_bits;
   return static_cast<uint16_t>(
       (sign >> 16u) | (doubled > 0xFF000000u ? 0x7E00u : nonsign));
+#endif
 }
 
 inline void dequantize_row_q2_k(const block_q2_k * x, float * y, const int64_t k) noexcept {

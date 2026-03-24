@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 
 #include <doctest/doctest.h>
 
@@ -13,6 +14,34 @@ using emel::generator::detail::quant::block_q2_k;
 using emel::generator::detail::quant::block_q3_k;
 using emel::generator::detail::quant::block_q6_k;
 
+void apply_rope_reference(std::span<float> vector,
+                          const int32_t head_count,
+                          const int32_t head_dim,
+                          const int32_t n_rot,
+                          const int32_t position,
+                          const float rope_freq_base) {
+  const int32_t rot_dim = std::min(n_rot, head_dim);
+  if (head_count <= 0 || head_dim <= 1 || rot_dim <= 1) {
+    return;
+  }
+
+  const float theta_scale = ::powf(rope_freq_base, -2.0f / static_cast<float>(rot_dim));
+  for (int32_t head = 0; head < head_count; ++head) {
+    float * head_ptr =
+        vector.data() + (static_cast<size_t>(head) * static_cast<size_t>(head_dim));
+    float theta = static_cast<float>(position);
+    for (int32_t dim = 0; dim + 1 < rot_dim; dim += 2) {
+      const float cos_theta = ::cosf(theta);
+      const float sin_theta = ::sinf(theta);
+      const float x0 = head_ptr[dim];
+      const float x1 = head_ptr[dim + 1];
+      head_ptr[dim] = x0 * cos_theta - x1 * sin_theta;
+      head_ptr[dim + 1] = x0 * sin_theta + x1 * cos_theta;
+      theta *= theta_scale;
+    }
+  }
+}
+
 }  // namespace
 
 TEST_CASE("generator_detail_fp16_to_fp32_handles_normal_special_and_subnormal_values") {
@@ -20,6 +49,50 @@ TEST_CASE("generator_detail_fp16_to_fp32_handles_normal_special_and_subnormal_va
   CHECK(emel::generator::detail::quant::fp16_to_fp32(0x3800u) == doctest::Approx(0.5f));
   CHECK(std::isinf(emel::generator::detail::quant::fp16_to_fp32(0x7c00u)));
   CHECK(emel::generator::detail::quant::fp16_to_fp32(0x0001u) > 0.0f);
+}
+
+TEST_CASE("generator_detail_fp16_conversion_matches_native_arm_fp16_rounding") {
+#if defined(__ARM_NEON) && !(defined(__CUDACC__) && __CUDACC_VER_MAJOR__ <= 11) && \
+    !defined(__MUSACC__)
+  constexpr std::array<float, 8> samples = {
+      0.0f,
+      0.5f,
+      -0.934325f,
+      0.0345459f,
+      -36.4516f,
+      65504.0f,
+      6.1035156e-05f,
+      -6.1035156e-05f,
+  };
+
+  for (const float sample : samples) {
+    uint16_t native_bits = 0u;
+    const __fp16 native_value = sample;
+    std::memcpy(&native_bits, &native_value, sizeof(native_bits));
+
+    CHECK(emel::generator::detail::quant::fp32_to_fp16(sample) == native_bits);
+    CHECK(emel::generator::detail::quant::fp16_to_fp32(native_bits) ==
+          doctest::Approx(static_cast<float>(native_value)));
+  }
+#else
+  CHECK(true);
+#endif
+}
+
+TEST_CASE("generator_detail_apply_rope_matches_ggml_float_recurrence") {
+  std::array<float, 64> actual = {};
+  std::array<float, 64> reference = {};
+  for (size_t idx = 0; idx < actual.size(); ++idx) {
+    actual[idx] = std::sin(static_cast<float>(idx) * 0.03125f) * 3.0f;
+  }
+  reference = actual;
+
+  emel::generator::detail::apply_rope(actual, 1, 64, 64, 103, 10000.0f);
+  apply_rope_reference(reference, 1, 64, 64, 103, 10000.0f);
+
+  for (size_t idx = 0; idx < actual.size(); ++idx) {
+    CHECK(actual[idx] == doctest::Approx(reference[idx]).epsilon(1.0e-8));
+  }
 }
 
 TEST_CASE("generator_detail_dequantizes_q2_k_blocks") {
