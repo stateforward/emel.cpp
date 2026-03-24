@@ -148,7 +148,8 @@ TEST_CASE("generator_detail_builds_flash_request_over_position_major_kv_cache") 
   backend.head_dim = 2;
   backend.head_dim_kv = 2;
   backend.n_ctx = 2;
-  backend.q = {1.0f, 0.0f, 0.0f, 1.0f};
+  backend.q = {1.0f, 0.1f, 0.2f, 1.0f};
+  backend.q_attn = {9.0f, 9.0f, 9.0f, 9.0f};
   backend.key_cache = {
       1.0f, 0.0f, 0.5f, 0.5f,
       0.0f, 1.0f, 0.25f, 0.75f,
@@ -161,10 +162,13 @@ TEST_CASE("generator_detail_builds_flash_request_over_position_major_kv_cache") 
 
   const auto request = emel::generator::detail::make_flash_attn_request(backend, 0, 1);
   float scale = 0.0f;
+  uint32_t total_tokens = 0u;
   std::memcpy(&scale, request.op_params.data(), sizeof(scale));
+  std::memcpy(&total_tokens, request.op_params.data() + sizeof(scale), sizeof(total_tokens));
 
   CHECK(request.src0.ne[0] == 2u);
   CHECK(request.src0.ne[2] == 2u);
+  CHECK(request.src0.data == backend.q.data());
   CHECK(request.src1.ne[0] == 2u);
   CHECK(request.src1.ne[1] == 2u);
   CHECK(request.src1.ne[2] == 2u);
@@ -172,7 +176,8 @@ TEST_CASE("generator_detail_builds_flash_request_over_position_major_kv_cache") 
   CHECK(request.src1.nb[2] == sizeof(float) * 2u);
   CHECK(request.dst.ne[0] == 2u);
   CHECK(request.dst.ne[2] == 2u);
-  CHECK(request.op_params_size == sizeof(float));
+  CHECK(request.op_params_size == sizeof(float) + sizeof(uint32_t));
   CHECK(scale == doctest::Approx(1.0f / std::sqrt(2.0f)));
+  CHECK(total_tokens == 2u);
   CHECK(emel::kernel::detail::can_run_flash_attn_ext(request));
 }

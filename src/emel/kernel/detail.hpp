@@ -149,6 +149,7 @@ inline constexpr uint64_t flash_attn_workspace_token_capacity = 4096u;
 
 struct flash_attn_workspace {
   std::array<float, flash_attn_workspace_token_capacity> score_buffer = {};
+  std::array<float, flash_attn_workspace_token_capacity> value_buffer = {};
   uint64_t prepared_tokens = 0;
   uint64_t reuse_count = 0;
 };
@@ -690,18 +691,21 @@ inline const float * tensor_row_ptr(const tensor_type & tensor,
   return reinterpret_cast<const float *>(base + row1 * tensor.nb[1] + row2 * tensor.nb[2]);
 }
 
+template <class tensor_type>
+inline float * tensor_row_ptr_mut(const tensor_type & tensor,
+                                  const uint64_t row1,
+                                  const uint64_t row2) noexcept {
+  auto * base = static_cast<char *>(tensor.data);
+  return reinterpret_cast<float *>(base + row1 * tensor.nb[1] + row2 * tensor.nb[2]);
+}
+
 inline float dot_product_ggml_f16_scores(const float * lhs,
                                          const float * rhs,
                                          const uint64_t count) noexcept {
-  constexpr uint64_t k_chunk_size = 256u;
-  alignas(16) uint16_t lhs_f16[k_chunk_size] = {};
-  alignas(16) uint16_t rhs_f16[k_chunk_size] = {};
-
-  auto dot_f16_chunk = [](const uint16_t * lhs_bits,
-                          const uint16_t * rhs_bits,
-                          const uint64_t chunk_count) noexcept {
 #if defined(__aarch64__) || defined(__ARM_NEON)
 #if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+  alignas(16) uint16_t lhs_f16[32] = {};
+  alignas(16) uint16_t rhs_f16[32] = {};
   float16x8_t sum[4] = {
       vdupq_n_f16(0.0f),
       vdupq_n_f16(0.0f),
@@ -709,59 +713,56 @@ inline float dot_product_ggml_f16_scores(const float * lhs,
       vdupq_n_f16(0.0f),
   };
   uint64_t idx = 0u;
-  for (; idx + 32u <= chunk_count; idx += 32u) {
+  for (; idx + 32u <= count; idx += 32u) {
+    for (uint64_t lane = 0u; lane < 32u; ++lane) {
+      lhs_f16[lane] = quant::fp32_to_fp16(lhs[idx + lane]);
+      rhs_f16[lane] = quant::fp32_to_fp16(rhs[idx + lane]);
+    }
+
     sum[0] = vfmaq_f16(sum[0],
-                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_bits + idx + 0u)),
-                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_bits + idx + 0u)));
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_f16 + 0u)),
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_f16 + 0u)));
     sum[1] = vfmaq_f16(sum[1],
-                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_bits + idx + 8u)),
-                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_bits + idx + 8u)));
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_f16 + 8u)),
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_f16 + 8u)));
     sum[2] = vfmaq_f16(sum[2],
-                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_bits + idx + 16u)),
-                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_bits + idx + 16u)));
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_f16 + 16u)),
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_f16 + 16u)));
     sum[3] = vfmaq_f16(sum[3],
-                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_bits + idx + 24u)),
-                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_bits + idx + 24u)));
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(lhs_f16 + 24u)),
+                       vld1q_f16(reinterpret_cast<const __fp16 *>(rhs_f16 + 24u)));
   }
 
-  int offset = 2;
-  for (int i = 0; i < offset; ++i) {
-    sum[i] = vaddq_f16(sum[i], sum[offset + i]);
-  }
-  offset >>= 1;
-  for (int i = 0; i < offset; ++i) {
-    sum[i] = vaddq_f16(sum[i], sum[offset + i]);
+  double sumf = 0.0;
+  if (idx != 0u) {
+    int offset = 2;
+    for (int i = 0; i < offset; ++i) {
+      sum[i] = vaddq_f16(sum[i], sum[offset + i]);
+    }
+    offset >>= 1;
+    for (int i = 0; i < offset; ++i) {
+      sum[i] = vaddq_f16(sum[i], sum[offset + i]);
+    }
+
+    const float32x4_t low = vcvt_f32_f16(vget_low_f16(sum[0]));
+    const float32x4_t high = vcvt_f32_f16(vget_high_f16(sum[0]));
+    sumf = static_cast<double>(vaddvq_f32(vaddq_f32(low, high)));
   }
 
-  const float32x4_t low = vcvt_f32_f16(vget_low_f16(sum[0]));
-  const float32x4_t high = vcvt_f32_f16(vget_high_f16(sum[0]));
-  double sumf = static_cast<double>(vaddvq_f32(vaddq_f32(low, high)));
-  for (; idx < chunk_count; ++idx) {
-    sumf += static_cast<double>(quant::fp16_to_fp32(lhs_bits[idx])) *
-            static_cast<double>(quant::fp16_to_fp32(rhs_bits[idx]));
+  for (; idx < count; ++idx) {
+    sumf += static_cast<double>(quant::fp16_to_fp32(quant::fp32_to_fp16(lhs[idx]))) *
+            static_cast<double>(quant::fp16_to_fp32(quant::fp32_to_fp16(rhs[idx])));
   }
   return static_cast<float>(sumf);
 #endif
 #endif
 
   double scalar_sum = 0.0;
-  for (uint64_t idx = 0u; idx < chunk_count; ++idx) {
-    scalar_sum += static_cast<double>(quant::fp16_to_fp32(lhs_bits[idx])) *
-                  static_cast<double>(quant::fp16_to_fp32(rhs_bits[idx]));
+  for (uint64_t idx = 0u; idx < count; ++idx) {
+    scalar_sum += static_cast<double>(quant::fp16_to_fp32(quant::fp32_to_fp16(lhs[idx]))) *
+                  static_cast<double>(quant::fp16_to_fp32(quant::fp32_to_fp16(rhs[idx])));
   }
   return static_cast<float>(scalar_sum);
-  };
-
-  double sum = 0.0;
-  for (uint64_t offset = 0u; offset < count; offset += k_chunk_size) {
-    const uint64_t chunk_count = std::min<uint64_t>(k_chunk_size, count - offset);
-    for (uint64_t idx = 0u; idx < chunk_count; ++idx) {
-      lhs_f16[idx] = quant::fp32_to_fp16(lhs[offset + idx]);
-      rhs_f16[idx] = quant::fp32_to_fp16(rhs[offset + idx]);
-    }
-    sum += static_cast<double>(dot_f16_chunk(lhs_f16, rhs_f16, chunk_count));
-  }
-  return static_cast<float>(sum);
 }
 
 template <class request_type>
@@ -1532,6 +1533,19 @@ inline float flash_attn_scale(const request_type & request) noexcept {
   return head_dim > 0.0f ? (1.0f / std::sqrt(head_dim)) : 1.0f;
 }
 
+template <class request_type>
+inline uint64_t flash_attn_total_tokens(const request_type & request) noexcept {
+  if (request.op_params_size >= sizeof(float) + sizeof(uint32_t)) {
+    uint32_t total_tokens = 0u;
+    std::memcpy(&total_tokens,
+                request.op_params.data() + sizeof(float),
+                sizeof(total_tokens));
+    return total_tokens;
+  }
+
+  return request.src1.ne[1];
+}
+
 inline float round_fp16_weight(const float value) noexcept {
   return quant::fp16_to_fp32(quant::fp32_to_fp16(value));
 }
@@ -1632,53 +1646,13 @@ inline bool can_execute_scalar(const request_type & request) noexcept {
 }
 
 template <class request_type>
+inline bool run_flash_attn_ext_with_workspace(const request_type & request,
+                                              flash_attn_workspace & workspace) noexcept;
+
+template <class request_type>
 inline bool run_flash_attn_ext(const request_type & request) noexcept {
-  if (!can_run_flash_attn_ext(request)) {
-    return false;
-  }
-
-  const uint64_t head_dim = request.src0.ne[0];
-  const uint64_t head_count = request.src0.ne[2];
-  const uint64_t kv_tokens = request.src1.ne[1];
-  const uint64_t kv_head_count = request.src1.ne[2];
-  const uint64_t n_rep = head_count / kv_head_count;
-  const float scale = flash_attn_scale(request);
-
-  for (uint64_t head = 0; head < head_count; ++head) {
-    const uint64_t kv_head = head / n_rep;
-    const float * q = tensor_row_ptr(request.src0, 0u, head);
-    float max_score = -INFINITY;
-
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float * k = tensor_row_ptr(request.src1, token, kv_head);
-      const float score = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
-      max_score = std::max(max_score, score);
-    }
-
-    float denom = 0.0f;
-    for (uint64_t dim = 0; dim < head_dim; ++dim) {
-      write_f32_at(request.dst, dim, 0, 0.0f, head);
-    }
-
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float * k = tensor_row_ptr(request.src1, token, kv_head);
-      const float score = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
-      denom += std::exp(score - max_score);
-    }
-
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float * k = tensor_row_ptr(request.src1, token, kv_head);
-      const float score = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
-      const float weight = std::exp(score - max_score) / denom;
-      for (uint64_t dim = 0; dim < head_dim; ++dim) {
-        const float value = read_f32_at(request.dst, dim, 0, head) +
-            weight * read_f32_at(request.src2, dim, token, kv_head);
-        write_f32_at(request.dst, dim, 0, value, head);
-      }
-    }
-  }
-
-  return true;
+  flash_attn_workspace workspace{};
+  return run_flash_attn_ext_with_workspace(request, workspace);
 }
 
 template <class request_type>
@@ -1689,7 +1663,11 @@ inline bool run_flash_attn_ext_with_workspace(const request_type & request,
   }
 
   const uint64_t kv_tokens = request.src1.ne[1];
+  const uint64_t attn_width = flash_attn_total_tokens(request);
   if (kv_tokens > workspace.score_buffer.size()) {
+    return false;
+  }
+  if (attn_width < kv_tokens || attn_width > workspace.score_buffer.size()) {
     return false;
   }
 
@@ -1708,6 +1686,7 @@ inline bool run_flash_attn_ext_with_workspace(const request_type & request,
   for (uint64_t head = 0; head < head_count; ++head) {
     const uint64_t kv_head = head / n_rep;
     const float * q = tensor_row_ptr(request.src0, 0u, head);
+    float * dst = tensor_row_ptr_mut(request.dst, 0u, head);
     float max_score = -INFINITY;
 
     for (uint64_t token = 0; token < kv_tokens; ++token) {
@@ -1717,25 +1696,34 @@ inline bool run_flash_attn_ext_with_workspace(const request_type & request,
       max_score = std::max(max_score, score);
     }
 
-    float denom = 0.0f;
+    double denom = 0.0;
     for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float weight =
-          std::exp(workspace.score_buffer[static_cast<size_t>(token)] - max_score);
+      const float weight = std::exp(workspace.score_buffer[static_cast<size_t>(token)] - max_score);
       workspace.score_buffer[static_cast<size_t>(token)] = weight;
       denom += weight;
     }
 
-    for (uint64_t dim = 0; dim < head_dim; ++dim) {
-      write_f32_at(request.dst, dim, 0, 0.0f, head);
+    const float inv_denom = denom == 0.0 ? 0.0f : static_cast<float>(1.0 / denom);
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const float normalized =
+          workspace.score_buffer[static_cast<size_t>(token)] * inv_denom;
+      workspace.score_buffer[static_cast<size_t>(token)] = round_fp16_weight(normalized);
+    }
+    for (uint64_t token = kv_tokens; token < attn_width; ++token) {
+      workspace.score_buffer[static_cast<size_t>(token)] = 0.0f;
     }
 
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float weight = workspace.score_buffer[static_cast<size_t>(token)] / denom;
-      for (uint64_t dim = 0; dim < head_dim; ++dim) {
-        const float value = read_f32_at(request.dst, dim, 0, head) +
-            weight * read_f32_at(request.src2, dim, token, kv_head);
-        write_f32_at(request.dst, dim, 0, value, head);
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      for (uint64_t token = 0; token < kv_tokens; ++token) {
+        const float * v = tensor_row_ptr(request.src2, token, kv_head);
+        workspace.value_buffer[static_cast<size_t>(token)] = v[dim];
       }
+      for (uint64_t token = kv_tokens; token < attn_width; ++token) {
+        workspace.value_buffer[static_cast<size_t>(token)] = 0.0f;
+      }
+      dst[dim] = dot_product_ggml_f16_scores(workspace.value_buffer.data(),
+                                             workspace.score_buffer.data(),
+                                             attn_width);
     }
   }
 

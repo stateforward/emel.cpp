@@ -102,6 +102,8 @@ struct native_backend {
   std::vector<float> v = {};
   std::vector<float> attn_scores = {};
   std::vector<float> attn_probs = {};
+  std::vector<float> attn_probs_rounded = {};
+  std::vector<float> attn_value_column = {};
   std::vector<float> attn_ctx = {};
   std::vector<float> projected = {};
   std::vector<float> gate = {};
@@ -680,6 +682,45 @@ inline bool store_bound_request(native_backend & backend,
   return true;
 }
 
+inline void fill_masked_softmax_probs_ggml(std::span<const float> scores,
+                                           const int32_t active_count,
+                                           std::span<float> probs_out,
+                                           std::span<float> rounded_probs_out) noexcept {
+  const int32_t width = static_cast<int32_t>(scores.size());
+  if (width <= 0 || active_count <= 0 || probs_out.size() != scores.size() ||
+      rounded_probs_out.size() != scores.size()) {
+    std::fill(probs_out.begin(), probs_out.end(), 0.0f);
+    std::fill(rounded_probs_out.begin(), rounded_probs_out.end(), 0.0f);
+    return;
+  }
+
+  float max_score = -std::numeric_limits<float>::infinity();
+  for (int32_t position = 0; position < active_count; ++position) {
+    max_score = std::max(max_score, scores[static_cast<size_t>(position)]);
+  }
+
+  double score_sum = 0.0;
+  for (int32_t position = 0; position < active_count; ++position) {
+    const float prob = std::exp(scores[static_cast<size_t>(position)] - max_score);
+    probs_out[static_cast<size_t>(position)] = prob;
+    score_sum += static_cast<double>(prob);
+  }
+
+  const float inv_score_sum =
+      score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+  for (int32_t position = 0; position < active_count; ++position) {
+    const float weight = probs_out[static_cast<size_t>(position)] * inv_score_sum;
+    probs_out[static_cast<size_t>(position)] = weight;
+    rounded_probs_out[static_cast<size_t>(position)] =
+        emel::kernel::detail::round_fp16_weight(weight);
+  }
+
+  for (int32_t position = active_count; position < width; ++position) {
+    probs_out[static_cast<size_t>(position)] = 0.0f;
+    rounded_probs_out[static_cast<size_t>(position)] = 0.0f;
+  }
+}
+
 inline bool compute_attention(native_backend & backend,
                               const int32_t layer_index,
                               const int32_t position_limit,
@@ -690,6 +731,15 @@ inline bool compute_attention(native_backend & backend,
   const int32_t kv_head_dim = backend.head_dim_kv;
   const int32_t kv_dim = kv_head_count * kv_head_dim;
   const float inv_scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+  const int32_t attn_width = backend.n_ctx;
+
+  if (position_limit <= 0 || position_limit > attn_width ||
+      backend.attn_scores.size() != static_cast<size_t>(attn_width) ||
+      backend.attn_probs.size() != static_cast<size_t>(attn_width) ||
+      backend.attn_probs_rounded.size() != static_cast<size_t>(attn_width) ||
+      backend.attn_value_column.size() != static_cast<size_t>(attn_width)) {
+    return false;
+  }
 
   std::fill(backend.attn_ctx.begin(), backend.attn_ctx.end(), 0.0f);
 
@@ -698,7 +748,6 @@ inline bool compute_attention(native_backend & backend,
     const size_t q_offset = static_cast<size_t>(head) * static_cast<size_t>(head_dim);
     const size_t kv_offset = static_cast<size_t>(kv_head) * static_cast<size_t>(kv_head_dim);
 
-    float max_score = -std::numeric_limits<float>::infinity();
     for (int32_t position = 0; position < position_limit; ++position) {
       const size_t cache_offset =
           layer_cache_offset(backend, layer_index, position, kv_dim) + kv_offset;
@@ -708,24 +757,33 @@ inline bool compute_attention(native_backend & backend,
           static_cast<uint64_t>(head_dim)) *
           inv_scale;
       backend.attn_scores[static_cast<size_t>(position)] = score;
-      max_score = std::max(max_score, score);
     }
 
-    float score_sum = 0.0f;
-    for (int32_t position = 0; position < position_limit; ++position) {
-      const float prob = std::exp(backend.attn_scores[static_cast<size_t>(position)] - max_score);
-      backend.attn_probs[static_cast<size_t>(position)] = prob;
-      score_sum += prob;
+    for (int32_t position = position_limit; position < attn_width; ++position) {
+      backend.attn_scores[static_cast<size_t>(position)] = -std::numeric_limits<float>::infinity();
     }
 
-    for (int32_t position = 0; position < position_limit; ++position) {
-      const float weight = backend.attn_probs[static_cast<size_t>(position)] / score_sum;
+    fill_masked_softmax_probs_ggml(backend.attn_scores,
+                                   position_limit,
+                                   backend.attn_probs,
+                                   backend.attn_probs_rounded);
+
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
       const size_t cache_offset =
-          layer_cache_offset(backend, layer_index, position, kv_dim) + kv_offset;
-      for (int32_t dim = 0; dim < head_dim; ++dim) {
-        backend.attn_ctx[q_offset + static_cast<size_t>(dim)] +=
-            weight * backend.value_cache[cache_offset + static_cast<size_t>(dim)];
+          q_offset + static_cast<size_t>(dim);
+      for (int32_t position = 0; position < position_limit; ++position) {
+        const size_t value_offset =
+            layer_cache_offset(backend, layer_index, position, kv_dim) + kv_offset;
+        backend.attn_value_column[static_cast<size_t>(position)] =
+            backend.value_cache[value_offset + static_cast<size_t>(dim)];
       }
+      for (int32_t position = position_limit; position < attn_width; ++position) {
+        backend.attn_value_column[static_cast<size_t>(position)] = 0.0f;
+      }
+      backend.attn_ctx[cache_offset] = emel::kernel::detail::dot_product_ggml_f16_scores(
+          backend.attn_value_column.data(),
+          backend.attn_probs_rounded.data(),
+          static_cast<uint64_t>(attn_width));
     }
   }
 
@@ -746,8 +804,9 @@ inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
   const size_t layer_offset = layer_cache_offset(
       backend, layer_index, 0, static_cast<int32_t>(kv_dim));
   const float scale = 1.0f / std::sqrt(static_cast<float>(backend.head_dim));
+  const uint32_t total_tokens = static_cast<uint32_t>(backend.n_ctx);
 
-  request.src0 = make_src_view_3d(backend.q_attn.data(), head_dim, 1u, head_count);
+  request.src0 = make_src_view_3d(backend.q.data(), head_dim, 1u, head_count);
   request.src1 = make_src_view_strided_3d(backend.key_cache.data() + layer_offset,
                                           kv_head_dim,
                                           kv_tokens,
@@ -763,7 +822,8 @@ inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
   request.dst = make_dst_view_3d(backend.attn_ctx.data(), head_dim, 1u, head_count);
   request.nth = 1;
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
-  request.op_params_size = sizeof(scale);
+  std::memcpy(request.op_params.data() + sizeof(scale), &total_tokens, sizeof(total_tokens));
+  request.op_params_size = sizeof(scale) + sizeof(total_tokens);
   return request;
 }
 
@@ -1020,6 +1080,8 @@ inline emel::error::type prepare(native_backend & backend,
   backend.v.resize(static_cast<size_t>(kv_dim));
   backend.attn_scores.resize(static_cast<size_t>(backend.n_ctx));
   backend.attn_probs.resize(static_cast<size_t>(backend.n_ctx));
+  backend.attn_probs_rounded.resize(static_cast<size_t>(backend.n_ctx));
+  backend.attn_value_column.resize(static_cast<size_t>(backend.n_ctx));
   backend.attn_ctx.resize(static_cast<size_t>(backend.n_embd));
   backend.projected.resize(static_cast<size_t>(backend.n_embd));
   backend.gate.resize(static_cast<size_t>(backend.blocks[0].feed_forward_gate.rows));

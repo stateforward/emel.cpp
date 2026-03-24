@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <cmath>
+#include <random>
 #include <span>
 #include <vector>
 
@@ -25,21 +26,16 @@ using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_src;
 
-std::vector<float> flash_attn_reference_ggml_f16_scores(
+std::vector<float> flash_attn_reference_rounded_weight_dot(
     std::span<const float> q,
     std::span<const float> k,
     std::span<const float> v,
     const uint64_t head_dim,
     const uint64_t kv_tokens,
     const float scale) {
-  auto round_to_fp16 = [](const float value) noexcept {
-    return emel::kernel::detail::quant::fp16_to_fp32(
-        emel::kernel::detail::quant::fp32_to_fp16(value));
-  };
-
   std::vector<float> out(static_cast<size_t>(head_dim), 0.0f);
-  float score_sum = 0.0f;
   float max_score = -INFINITY;
+  std::vector<float> scores(static_cast<size_t>(kv_tokens), 0.0f);
   for (uint64_t token = 0; token < kv_tokens; ++token) {
     const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
     const float score = emel::kernel::detail::dot_product_ggml_f16_scores(
@@ -47,29 +43,34 @@ std::vector<float> flash_attn_reference_ggml_f16_scores(
                             k.data() + static_cast<std::ptrdiff_t>(offset),
                             head_dim) *
         scale;
-    const float old_max = max_score;
-    float max_scale = 1.0f;
-    float weight = 1.0f;
-    if (score > max_score) {
-      max_score = score;
-      max_scale = std::exp(old_max - max_score);
-    } else {
-      weight = std::exp(score - max_score);
-    }
-
-    for (uint64_t dim = 0; dim < head_dim; ++dim) {
-      const size_t idx = static_cast<size_t>(dim);
-      out[idx] = round_to_fp16(out[idx] * max_scale);
-      out[idx] = round_to_fp16(out[idx] + round_to_fp16(v[offset + idx]) * weight);
-    }
-
-    score_sum = score_sum * max_scale + weight;
+    scores[static_cast<size_t>(token)] = score;
+    max_score = std::max(max_score, score);
   }
 
-  const float inv_score_sum = score_sum == 0.0f ? 0.0f : 1.0f / score_sum;
-  for (float & value : out) {
-    value *= inv_score_sum;
+  double score_sum = 0.0;
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    score_sum += std::exp(scores[static_cast<size_t>(token)] - max_score);
   }
+
+  std::vector<float> rounded_weights(static_cast<size_t>(kv_tokens), 0.0f);
+  const float inv_score_sum = score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    const float normalized =
+        std::exp(scores[static_cast<size_t>(token)] - max_score) * inv_score_sum;
+    rounded_weights[static_cast<size_t>(token)] =
+        emel::kernel::detail::round_fp16_weight(normalized);
+  }
+
+  std::vector<float> value_column(static_cast<size_t>(kv_tokens), 0.0f);
+  for (uint64_t dim = 0; dim < head_dim; ++dim) {
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
+      value_column[static_cast<size_t>(token)] = v[offset + static_cast<size_t>(dim)];
+    }
+    out[static_cast<size_t>(dim)] = emel::kernel::detail::dot_product_ggml_f16_scores(
+        value_column.data(), rounded_weights.data(), kv_tokens);
+  }
+
   return out;
 }
 
@@ -352,6 +353,52 @@ TEST_CASE("kernel_aarch64_q2_row_neon_matches_scalar") {
                                                              q8_blocks.size());
 
   CHECK(neon == doctest::Approx(scalar).epsilon(1e-7f));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q2_row_neon_matches_shared_accumulation_order") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q2_k;
+  using emel::kernel::detail::quant::block_q8_k;
+
+  constexpr size_t block_count = 64u;
+  std::array<block_q2_k, block_count> q2_blocks = {};
+  std::array<block_q8_k, block_count> q8_blocks = {};
+  std::mt19937 rng(0u);
+  std::uniform_int_distribution<int> bits_dist(0, 255);
+  std::uniform_int_distribution<int> half_dist(0x0400, 0x7bff);
+  std::uniform_real_distribution<float> value_dist(-4.0f, 4.0f);
+
+  for (size_t block = 0; block < block_count; ++block) {
+    auto & q2 = q2_blocks[block];
+    q2.d = static_cast<uint16_t>(half_dist(rng));
+    q2.dmin = static_cast<uint16_t>(half_dist(rng));
+    for (auto & value : q2.scales) {
+      value = static_cast<uint8_t>(bits_dist(rng));
+    }
+    for (auto & value : q2.qs) {
+      value = static_cast<uint8_t>(bits_dist(rng));
+    }
+
+    std::array<float, QK_K> src = {};
+    for (float & value : src) {
+      value = value_dist(rng);
+    }
+    emel::kernel::detail::quant::quantize_row_q8_k_strided(
+        src.data(), 1, &q8_blocks[block], emel::kernel::detail::quant::QK_K);
+  }
+
+  const float shared =
+      emel::kernel::detail::dot_q2_k_q8_k_row_scalar(q2_blocks.data(), q8_blocks.data(), block_count);
+  const float optimized =
+      emel::kernel::aarch64::detail::dot_q2_k_q8_k_row_neon(q2_blocks.data(),
+                                                             q8_blocks.data(),
+                                                             block_count);
+
+  CHECK(optimized == doctest::Approx(shared).epsilon(1e-8f));
 #endif
 }
 
@@ -1057,13 +1104,21 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_uses_optimized_backend_path") {
 
   emel::kernel::aarch64::action::exec_op_flash_attn_ext(dispatch, ctx);
 
+  const std::vector<float> expected = flash_attn_reference_rounded_weight_dot(
+      std::span<const float>(fixture.q, 4u),
+      std::span<const float>(fixture.k, 8u),
+      std::span<const float>(fixture.v, 8u),
+      4u,
+      2u,
+      1.0f);
+
   CHECK(dispatch_ctx.outcome == emel::kernel::aarch64::events::phase_outcome::done);
   CHECK(ctx.optimized_flash_dispatch_count == 1u);
   CHECK(ctx.shared_flash_dispatch_count == 0u);
-  CHECK(fixture.dst[0] == doctest::Approx(1.4621172f).epsilon(1e-5f));
-  CHECK(fixture.dst[1] == doctest::Approx(1.0757657f).epsilon(1e-5f));
-  CHECK(fixture.dst[2] == doctest::Approx(0.0f));
-  CHECK(fixture.dst[3] == doctest::Approx(0.0f));
+  CHECK(fixture.dst[0] == doctest::Approx(expected[0]).epsilon(1e-6f));
+  CHECK(fixture.dst[1] == doctest::Approx(expected[1]).epsilon(1e-6f));
+  CHECK(fixture.dst[2] == doctest::Approx(expected[2]).epsilon(1e-6f));
+  CHECK(fixture.dst[3] == doctest::Approx(expected[3]).epsilon(1e-6f));
 #endif
 }
 
@@ -1131,7 +1186,98 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_shared_workspace_on_long_kv_spa
 #endif
 }
 
-TEST_CASE("kernel_aarch64_flash_attn_ext_matches_ggml_f16_scores_reference") {
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_rounded_weight_reference_on_long_multihead_kv") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t head_dim = 64u;
+  constexpr uint64_t head_count = 12u;
+  constexpr uint64_t kv_head_count = 12u;
+  constexpr uint64_t kv_tokens = 104u;
+  const uint64_t kv_dim = head_dim * kv_head_count;
+
+  std::vector<float> q(head_dim * head_count);
+  std::vector<float> k(kv_dim * kv_tokens);
+  std::vector<float> v(kv_dim * kv_tokens);
+  std::vector<float> neon_dst(head_dim * head_count, 0.0f);
+  std::vector<float> shared_dst(head_dim * head_count, 0.0f);
+
+  for (uint64_t head = 0; head < head_count; ++head) {
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      const double angle = static_cast<double>((head + 1u) * (dim + 3u));
+      q[head * head_dim + dim] = static_cast<float>(std::sin(angle * 0.03125));
+    }
+  }
+
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    for (uint64_t head = 0; head < kv_head_count; ++head) {
+      for (uint64_t dim = 0; dim < head_dim; ++dim) {
+        const uint64_t offset = token * kv_dim + head * head_dim + dim;
+        const double base = static_cast<double>((token + 1u) * (head + 3u) * (dim + 5u));
+        k[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+            emel::kernel::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::cos(base * 0.0078125))));
+        v[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+            emel::kernel::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::sin(base * 0.01171875))));
+      }
+    }
+  }
+
+  emel::kernel::event::op_flash_attn_ext request{};
+  request.src0 = make_src(q.data(), dtype::f32, head_dim, 1u, head_count);
+  request.src1 = make_src(k.data(), dtype::f32, head_dim, kv_tokens, kv_head_count);
+  request.src2 = make_src(v.data(), dtype::f32, head_dim, kv_tokens, kv_head_count);
+  request.dst = make_dst(neon_dst.data(), dtype::f32, head_dim, 1u, head_count);
+  request.src1.nb[1] = sizeof(float) * kv_dim;
+  request.src1.nb[2] = sizeof(float) * head_dim;
+  request.src2.nb[1] = sizeof(float) * kv_dim;
+  request.src2.nb[2] = sizeof(float) * head_dim;
+  request.nth = 1;
+
+  const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+  std::memcpy(request.op_params.data(), &scale, sizeof(scale));
+  request.op_params_size = sizeof(scale);
+
+  auto shared_request = request;
+  shared_request.dst = make_dst(shared_dst.data(), dtype::f32, head_dim, 1u, head_count);
+
+  emel::kernel::detail::flash_attn_workspace neon_workspace{};
+  emel::kernel::detail::flash_attn_workspace shared_workspace{};
+  REQUIRE(emel::kernel::aarch64::detail::run_flash_attn_ext_neon(
+      request, true, neon_workspace));
+  REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(
+      shared_request, shared_workspace));
+
+  for (uint64_t head = 0; head < head_count; ++head) {
+    std::vector<float> k_head(kv_tokens * head_dim);
+    std::vector<float> v_head(kv_tokens * head_dim);
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const uint64_t src_offset = token * kv_dim + head * head_dim;
+      const uint64_t dst_offset = token * head_dim;
+      std::memcpy(k_head.data() + dst_offset, k.data() + src_offset, sizeof(float) * head_dim);
+      std::memcpy(v_head.data() + dst_offset, v.data() + src_offset, sizeof(float) * head_dim);
+    }
+    const std::vector<float> expected = flash_attn_reference_rounded_weight_dot(
+        std::span<const float>(q.data() + head * head_dim, head_dim),
+        k_head,
+        v_head,
+        head_dim,
+        kv_tokens,
+        scale);
+
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      const size_t idx = static_cast<size_t>(head * head_dim + dim);
+      CHECK(neon_dst[idx] ==
+            doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
+      CHECK(shared_dst[idx] ==
+            doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
+    }
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_rounded_weight_reference") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;
 #else
@@ -1185,7 +1331,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_ggml_f16_scores_reference") {
       shared_request, shared_workspace));
 
   const std::vector<float> expected =
-      flash_attn_reference_ggml_f16_scores(q, k, v, head_dim, kv_tokens, scale);
+      flash_attn_reference_rounded_weight_dot(q, k, v, head_dim, kv_tokens, scale);
   for (uint64_t dim = 0; dim < head_dim; ++dim) {
     CHECK(neon_dst[static_cast<size_t>(dim)] ==
           doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));

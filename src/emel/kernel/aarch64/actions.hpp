@@ -225,7 +225,11 @@ inline bool run_flash_attn_ext_neon(const request_type & request,
   }
 
   const uint64_t kv_tokens = request.src1.ne[1];
+  const uint64_t attn_width = ::emel::kernel::detail::flash_attn_total_tokens(request);
   if (kv_tokens > workspace.score_buffer.size()) {
+    return false;
+  }
+  if (attn_width < kv_tokens || attn_width > workspace.score_buffer.size()) {
     return false;
   }
 
@@ -255,20 +259,34 @@ inline bool run_flash_attn_ext_neon(const request_type & request,
       max_score = std::max(max_score, score);
     }
 
-    float denom = 0.0f;
+    double denom = 0.0;
     for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float weight =
-          std::exp(workspace.score_buffer[static_cast<size_t>(token)] - max_score);
+      const float weight = std::exp(workspace.score_buffer[static_cast<size_t>(token)] - max_score);
       workspace.score_buffer[static_cast<size_t>(token)] = weight;
       denom += weight;
     }
 
-    std::fill_n(dst, head_dim, 0.0f);
-    const float inv_denom = 1.0f / denom;
+    const float inv_denom = denom == 0.0 ? 0.0f : static_cast<float>(1.0 / denom);
     for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float * v = tensor_row_ptr(request.src2, token, kv_head);
-      const float weight = workspace.score_buffer[static_cast<size_t>(token)] * inv_denom;
-      axpy_f32_neon(dst, v, weight, head_dim);
+      const float normalized =
+          workspace.score_buffer[static_cast<size_t>(token)] * inv_denom;
+      workspace.score_buffer[static_cast<size_t>(token)] =
+          ::emel::kernel::detail::round_fp16_weight(normalized);
+    }
+    for (uint64_t token = kv_tokens; token < attn_width; ++token) {
+      workspace.score_buffer[static_cast<size_t>(token)] = 0.0f;
+    }
+
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      for (uint64_t token = 0; token < kv_tokens; ++token) {
+        const float * v = tensor_row_ptr(request.src2, token, kv_head);
+        workspace.value_buffer[static_cast<size_t>(token)] = v[dim];
+      }
+      for (uint64_t token = kv_tokens; token < attn_width; ++token) {
+        workspace.value_buffer[static_cast<size_t>(token)] = 0.0f;
+      }
+      dst[dim] = ::emel::kernel::detail::dot_product_ggml_f16_scores(
+          workspace.value_buffer.data(), workspace.score_buffer.data(), attn_width);
     }
   }
 
@@ -552,11 +570,9 @@ inline float dot_q2_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block
 inline float dot_q2_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q2_k * lhs,
                                     const ::emel::kernel::detail::quant::block_q8_k * rhs,
                                     const uint64_t block_count) noexcept {
-  float sum = 0.0f;
-  for (uint64_t block = 0; block < block_count; ++block) {
-    sum += dot_q2_k_q8_k_block_neon(lhs[block], rhs[block]);
-  }
-  return sum;
+  // Match the shared/reference accumulation order exactly. The block-summed variant drifts
+  // across longer decode prefixes even though individual row spot checks stay close.
+  return ::emel::kernel::detail::dot_q2_k_q8_k_row_scalar(lhs, rhs, block_count);
 }
 
 inline float dot_q3_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block_q3_k & lhs,
