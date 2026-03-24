@@ -765,6 +765,88 @@ inline float dot_product_ggml_f16_scores(const float * lhs,
   return static_cast<float>(scalar_sum);
 }
 
+inline float dot_product_f32(const float * lhs,
+                             const float * rhs,
+                             const uint64_t count) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  float32x4_t sum[4] = {
+      vdupq_n_f32(0.0f),
+      vdupq_n_f32(0.0f),
+      vdupq_n_f32(0.0f),
+      vdupq_n_f32(0.0f),
+  };
+  uint64_t idx = 0u;
+  for (; idx + 16u <= count; idx += 16u) {
+    sum[0] = vfmaq_f32(sum[0], vld1q_f32(lhs + idx + 0u), vld1q_f32(rhs + idx + 0u));
+    sum[1] = vfmaq_f32(sum[1], vld1q_f32(lhs + idx + 4u), vld1q_f32(rhs + idx + 4u));
+    sum[2] = vfmaq_f32(sum[2], vld1q_f32(lhs + idx + 8u), vld1q_f32(rhs + idx + 8u));
+    sum[3] = vfmaq_f32(sum[3], vld1q_f32(lhs + idx + 12u), vld1q_f32(rhs + idx + 12u));
+  }
+
+  float scalar_sum =
+      vaddvq_f32(vaddq_f32(vaddq_f32(sum[0], sum[1]), vaddq_f32(sum[2], sum[3])));
+  for (; idx < count; ++idx) {
+    scalar_sum += lhs[idx] * rhs[idx];
+  }
+  return scalar_sum;
+#else
+  float scalar_sum = 0.0f;
+  for (uint64_t idx = 0u; idx < count; ++idx) {
+    scalar_sum += lhs[idx] * rhs[idx];
+  }
+  return scalar_sum;
+#endif
+}
+
+inline void scale_buffer_f32(float * data,
+                             const uint64_t count,
+                             const float scale) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  const float32x4_t scale_vec = vdupq_n_f32(scale);
+  uint64_t idx = 0u;
+  for (; idx + 16u <= count; idx += 16u) {
+    vst1q_f32(data + idx + 0u, vmulq_f32(vld1q_f32(data + idx + 0u), scale_vec));
+    vst1q_f32(data + idx + 4u, vmulq_f32(vld1q_f32(data + idx + 4u), scale_vec));
+    vst1q_f32(data + idx + 8u, vmulq_f32(vld1q_f32(data + idx + 8u), scale_vec));
+    vst1q_f32(data + idx + 12u, vmulq_f32(vld1q_f32(data + idx + 12u), scale_vec));
+  }
+  for (; idx < count; ++idx) {
+    data[idx] *= scale;
+  }
+#else
+  for (uint64_t idx = 0u; idx < count; ++idx) {
+    data[idx] *= scale;
+  }
+#endif
+}
+
+inline void mad_buffer_f32(float * acc,
+                           const float * value,
+                           const uint64_t count,
+                           const float weight) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  const float32x4_t weight_vec = vdupq_n_f32(weight);
+  uint64_t idx = 0u;
+  for (; idx + 16u <= count; idx += 16u) {
+    vst1q_f32(acc + idx + 0u,
+              vfmaq_f32(vld1q_f32(acc + idx + 0u), vld1q_f32(value + idx + 0u), weight_vec));
+    vst1q_f32(acc + idx + 4u,
+              vfmaq_f32(vld1q_f32(acc + idx + 4u), vld1q_f32(value + idx + 4u), weight_vec));
+    vst1q_f32(acc + idx + 8u,
+              vfmaq_f32(vld1q_f32(acc + idx + 8u), vld1q_f32(value + idx + 8u), weight_vec));
+    vst1q_f32(acc + idx + 12u,
+              vfmaq_f32(vld1q_f32(acc + idx + 12u), vld1q_f32(value + idx + 12u), weight_vec));
+  }
+  for (; idx < count; ++idx) {
+    acc[idx] += value[idx] * weight;
+  }
+#else
+  for (uint64_t idx = 0u; idx < count; ++idx) {
+    acc[idx] += value[idx] * weight;
+  }
+#endif
+}
+
 template <class request_type>
 inline bool run_copy(const request_type & request) noexcept {
   const uint64_t count = tensor_element_count(request.dst);
@@ -1687,43 +1769,33 @@ inline bool run_flash_attn_ext_with_workspace(const request_type & request,
     const uint64_t kv_head = head / n_rep;
     const float * q = tensor_row_ptr(request.src0, 0u, head);
     float * dst = tensor_row_ptr_mut(request.dst, 0u, head);
-    float max_score = -INFINITY;
 
     for (uint64_t token = 0; token < kv_tokens; ++token) {
       const float * k = tensor_row_ptr(request.src1, token, kv_head);
-      const float score = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
-      workspace.score_buffer[static_cast<size_t>(token)] = score;
-      max_score = std::max(max_score, score);
+      workspace.score_buffer[token] = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
     }
 
-    double denom = 0.0;
+    float max_score = workspace.score_buffer[0];
+    for (uint64_t token = 1; token < kv_tokens; ++token) {
+      max_score = std::max(max_score, workspace.score_buffer[token]);
+    }
+
+    double score_sum = 0.0;
     for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float weight = std::exp(workspace.score_buffer[static_cast<size_t>(token)] - max_score);
-      workspace.score_buffer[static_cast<size_t>(token)] = weight;
-      denom += weight;
+      const float prob = std::exp(workspace.score_buffer[token] - max_score);
+      workspace.score_buffer[token] = prob;
+      score_sum += static_cast<double>(prob);
     }
 
-    const float inv_denom = denom == 0.0 ? 0.0f : static_cast<float>(1.0 / denom);
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float normalized =
-          workspace.score_buffer[static_cast<size_t>(token)] * inv_denom;
-      workspace.score_buffer[static_cast<size_t>(token)] = round_fp16_weight(normalized);
-    }
-    for (uint64_t token = kv_tokens; token < attn_width; ++token) {
-      workspace.score_buffer[static_cast<size_t>(token)] = 0.0f;
-    }
-
+    const float inv_score_sum = score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
     for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      float acc = 0.0f;
       for (uint64_t token = 0; token < kv_tokens; ++token) {
+        const float weight = workspace.score_buffer[token] * inv_score_sum;
         const float * v = tensor_row_ptr(request.src2, token, kv_head);
-        workspace.value_buffer[static_cast<size_t>(token)] = v[dim];
+        acc += weight * v[dim];
       }
-      for (uint64_t token = kv_tokens; token < attn_width; ++token) {
-        workspace.value_buffer[static_cast<size_t>(token)] = 0.0f;
-      }
-      dst[dim] = dot_product_ggml_f16_scores(workspace.value_buffer.data(),
-                                             workspace.score_buffer.data(),
-                                             attn_width);
+      dst[dim] = acc;
     }
   }
 

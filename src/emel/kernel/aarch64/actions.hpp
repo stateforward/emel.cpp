@@ -249,44 +249,34 @@ inline bool run_flash_attn_ext_neon(const request_type & request,
     const uint64_t kv_head = head / n_rep;
     const float * q = tensor_row_ptr(request.src0, 0u, head);
     float * dst = tensor_row_ptr_mut(request.dst, 0u, head);
-    float max_score = -INFINITY;
 
     for (uint64_t token = 0; token < kv_tokens; ++token) {
       const float * k = tensor_row_ptr(request.src1, token, kv_head);
-      const float score =
+      workspace.score_buffer[token] =
           ::emel::kernel::detail::dot_product_ggml_f16_scores(q, k, head_dim) * scale;
-      workspace.score_buffer[static_cast<size_t>(token)] = score;
-      max_score = std::max(max_score, score);
     }
 
-    double denom = 0.0;
+    float max_score = workspace.score_buffer[0];
+    for (uint64_t token = 1; token < kv_tokens; ++token) {
+      max_score = std::max(max_score, workspace.score_buffer[token]);
+    }
+
+    double score_sum = 0.0;
     for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float weight = std::exp(workspace.score_buffer[static_cast<size_t>(token)] - max_score);
-      workspace.score_buffer[static_cast<size_t>(token)] = weight;
-      denom += weight;
+      const float prob = std::exp(workspace.score_buffer[token] - max_score);
+      workspace.score_buffer[token] = prob;
+      score_sum += static_cast<double>(prob);
     }
 
-    const float inv_denom = denom == 0.0 ? 0.0f : static_cast<float>(1.0 / denom);
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float normalized =
-          workspace.score_buffer[static_cast<size_t>(token)] * inv_denom;
-      workspace.score_buffer[static_cast<size_t>(token)] =
-          ::emel::kernel::detail::round_fp16_weight(normalized);
-    }
-    for (uint64_t token = kv_tokens; token < attn_width; ++token) {
-      workspace.score_buffer[static_cast<size_t>(token)] = 0.0f;
-    }
-
+    const float inv_score_sum = score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
     for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      float acc = 0.0f;
       for (uint64_t token = 0; token < kv_tokens; ++token) {
+        const float weight = workspace.score_buffer[token] * inv_score_sum;
         const float * v = tensor_row_ptr(request.src2, token, kv_head);
-        workspace.value_buffer[static_cast<size_t>(token)] = v[dim];
+        acc += weight * v[dim];
       }
-      for (uint64_t token = kv_tokens; token < attn_width; ++token) {
-        workspace.value_buffer[static_cast<size_t>(token)] = 0.0f;
-      }
-      dst[dim] = ::emel::kernel::detail::dot_product_ggml_f16_scores(
-          workspace.value_buffer.data(), workspace.score_buffer.data(), attn_width);
+      dst[dim] = acc;
     }
   }
 
