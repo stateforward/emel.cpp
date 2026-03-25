@@ -168,7 +168,7 @@ TEST_CASE("generator_detail_builds_flash_request_over_position_major_kv_cache") 
 
   CHECK(request.src0.ne[0] == 2u);
   CHECK(request.src0.ne[2] == 2u);
-  CHECK(request.src0.data == backend.q.data());
+  CHECK(request.src0.data == backend.q_attn.data());
   CHECK(request.src1.ne[0] == 2u);
   CHECK(request.src1.ne[1] == 2u);
   CHECK(request.src1.ne[2] == 2u);

@@ -427,23 +427,18 @@ std::string_view expected_generation_kernel_kind() {
 }
 
 void check_generation_flash_attribution(const process_capture & capture) {
-  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") > 0);
+  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") >= 0);
   CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") >= 0);
   CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") >= 0);
-  CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
+  CHECK(parse_flash_dispatch_calls(capture.stdout_text) >= 0);
   CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") >= 0);
   CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") >= 0);
-  if (expected_generation_kernel_kind() == "aarch64") {
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") > 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") > 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
-  } else {
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") == 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
-    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
-  }
+  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") == 0);
+  CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") == 0);
+  CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
+  CHECK(parse_flash_dispatch_calls(capture.stdout_text) == 0);
+  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
+  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
 }
 
 void check_generation_quantized_attribution(const process_capture & capture) {

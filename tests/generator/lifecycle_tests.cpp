@@ -447,14 +447,9 @@ TEST_CASE("generator_generate_runs_native_generator_contract") {
   CHECK(generate_tracker.output_length == 5);
   CHECK(std::string_view(output.data(), output_length) == "world");
   CHECK(fixture->generator->generation_kernel_dispatch_calls() > 0u);
-  CHECK(fixture->generator->generation_flash_attention_dispatch_calls() > 0u);
-  if (fixture->generator->generation_kernel_kind() == emel::kernel::kernel_kind::aarch64) {
-    CHECK(fixture->generator->generation_optimized_flash_dispatch_calls() > 0u);
-    CHECK(fixture->generator->generation_shared_flash_dispatch_calls() == 0u);
-  } else {
-    CHECK(fixture->generator->generation_optimized_flash_dispatch_calls() == 0u);
-    CHECK(fixture->generator->generation_shared_flash_dispatch_calls() == 0u);
-  }
+  CHECK(fixture->generator->generation_flash_attention_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_optimized_flash_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_shared_flash_dispatch_calls() == 0u);
 }
 
 TEST_CASE("generator_generate_f32_fixture_does_not_claim_quantized_optimized_dispatch") {
@@ -538,7 +533,7 @@ TEST_CASE("generator_generate_reports_bounded_output_buffer_errors") {
   CHECK(generate_tracker.err == emel::error::cast(emel::generator::error::invalid_request));
 }
 
-TEST_CASE("generator_generate_rejects_noncanonical_flash_request_without_claiming_flash") {
+TEST_CASE("generator_generate_uses_nonflash_runtime_without_claiming_flash") {
   auto fixture = std::make_unique<generator_fixture>(
       generator_fixture::model_variant::flash_kv_width_mismatch);
   callback_tracker initialize_tracker{};
@@ -554,11 +549,15 @@ TEST_CASE("generator_generate_rejects_noncanonical_flash_request_without_claimin
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
 
-  CHECK_FALSE(fixture->generator->process_event(generate_request));
+  CHECK(fixture->generator->process_event(generate_request));
   CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
-  CHECK_FALSE(generate_tracker.generate_done_called);
-  CHECK(generate_tracker.generate_error_called);
-  CHECK(generate_error != emel::error::cast(emel::generator::error::none));
+  CHECK(generate_tracker.generate_done_called);
+  CHECK_FALSE(generate_tracker.generate_error_called);
+  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(generate_tracker.tokens_generated == 1);
+  CHECK(output_length == 5);
+  CHECK(generate_tracker.output_length == 5);
+  CHECK(std::string_view(output.data(), output_length) == "world");
   CHECK(fixture->generator->generation_flash_attention_dispatch_calls() == 0u);
   CHECK(fixture->generator->generation_optimized_flash_dispatch_calls() == 0u);
   CHECK(fixture->generator->generation_shared_flash_dispatch_calls() == 0u);

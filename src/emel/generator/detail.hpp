@@ -707,32 +707,27 @@ inline void fill_masked_softmax_probs_ggml(std::span<const float> scores,
                                            std::span<float> rounded_probs_out) noexcept {
   const int32_t width = static_cast<int32_t>(scores.size());
   if (width <= 0 || active_count <= 0 || probs_out.size() != scores.size() ||
-      rounded_probs_out.size() != scores.size()) {
+      rounded_probs_out.size() != scores.size() || active_count > width) {
     std::fill(probs_out.begin(), probs_out.end(), 0.0f);
     std::fill(rounded_probs_out.begin(), rounded_probs_out.end(), 0.0f);
     return;
   }
 
   float max_score = -std::numeric_limits<float>::infinity();
-  for (int32_t position = 0; position < active_count; ++position) {
+  for (int32_t position = 0; position < width; ++position) {
     max_score = std::max(max_score, scores[static_cast<size_t>(position)]);
   }
 
   const double score_sum = ::emel::kernel::detail::exp_and_sum_ggml_f32(
-      scores.data(), probs_out.data(), static_cast<uint64_t>(active_count), max_score);
+      scores.data(), probs_out.data(), static_cast<uint64_t>(width), max_score);
 
   const float inv_score_sum =
       score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
-  for (int32_t position = 0; position < active_count; ++position) {
+  for (int32_t position = 0; position < width; ++position) {
     const float weight = probs_out[static_cast<size_t>(position)] * inv_score_sum;
     probs_out[static_cast<size_t>(position)] = weight;
     rounded_probs_out[static_cast<size_t>(position)] =
         emel::kernel::detail::round_fp16_weight(weight);
-  }
-
-  for (int32_t position = active_count; position < width; ++position) {
-    probs_out[static_cast<size_t>(position)] = 0.0f;
-    rounded_probs_out[static_cast<size_t>(position)] = 0.0f;
   }
 }
 
@@ -883,7 +878,7 @@ inline bool run_layer(native_backend & backend,
       std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
       backend.value_cache.data() + cache_offset);
 
-  if (!dispatch_flash_attention(backend, layer_index, position) ||
+  if (!compute_attention(backend, layer_index, position + 1, backend.q_attn) ||
       !matmul_vector(backend, block.attention_output, backend.attn_ctx, backend.projected)) {
     return false;
   }

@@ -306,7 +306,7 @@ void print_compare(const std::vector<bench::result> & emel_results,
   }
 
   if (!bench::generation_flash_evidence_ready()) {
-    std::fprintf(stderr, "error: missing generation flash evidence\n");
+    std::fprintf(stderr, "error: missing generation runtime evidence\n");
     std::exit(1);
   }
 
@@ -331,10 +331,10 @@ void print_compare(const std::vector<bench::result> & emel_results,
   const auto emel_logits_calls = bench::generation_flash_evidence_emel_logits_calls();
   const auto reference_decode_calls = bench::generation_flash_evidence_reference_decode_calls();
   const auto reference_logits_calls = bench::generation_flash_evidence_reference_logits_calls();
-  if (flash_dispatch_calls == 0 || emel_decode_calls != 0 || emel_logits_calls != 0 ||
+  if (emel_decode_calls != 0 || emel_logits_calls != 0 ||
       reference_decode_calls != 0 || reference_logits_calls != 0) {
     std::fprintf(stderr,
-                 "error: invalid generation flash evidence flash_dispatch_calls=%" PRIu64
+                 "error: invalid generation runtime evidence flash_dispatch_calls=%" PRIu64
                  " optimized_flash_dispatch_calls=%" PRIu64
                  " shared_flash_dispatch_calls=%" PRIu64
                  " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
@@ -348,16 +348,25 @@ void print_compare(const std::vector<bench::result> & emel_results,
                  reference_logits_calls);
     std::exit(1);
   }
-  if (k_host_is_aarch64 &&
-      (optimized_flash_dispatch_calls == 0 || shared_flash_dispatch_calls != 0)) {
+  if (flash_dispatch_calls == 0 &&
+      (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
     std::fprintf(stderr,
-                 "error: invalid ARM optimized flash evidence optimized_flash_dispatch_calls=%" PRIu64
+                 "error: invalid zero-flash attribution optimized_flash_dispatch_calls=%" PRIu64
                  " shared_flash_dispatch_calls=%" PRIu64 "\n",
                  optimized_flash_dispatch_calls,
                  shared_flash_dispatch_calls);
     std::exit(1);
   }
-  if (!k_host_is_aarch64 &&
+  if (flash_dispatch_calls != 0 && k_host_is_aarch64 &&
+      (optimized_flash_dispatch_calls == 0 || shared_flash_dispatch_calls != 0)) {
+    std::fprintf(stderr,
+                 "error: invalid ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                 " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                 optimized_flash_dispatch_calls,
+                 shared_flash_dispatch_calls);
+    std::exit(1);
+  }
+  if (flash_dispatch_calls != 0 && !k_host_is_aarch64 &&
       (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
     std::fprintf(stderr,
                  "error: invalid non-ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64

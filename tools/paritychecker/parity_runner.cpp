@@ -17234,28 +17234,6 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
       state.generator->generation_optimized_q6_dispatch_calls();
   const uint64_t shared_q6_dispatch_calls =
       state.generator->generation_shared_q6_dispatch_calls();
-  if (flash_dispatch_calls == 0u) {
-    std::fprintf(stderr,
-                 "generation flash proof failed (fixture=%s flash_dispatch_calls=%" PRIu64 ")\n",
-                 k_generation_fixture_name,
-                 flash_dispatch_calls);
-    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
-    return 1;
-  }
-  if (generation_kernel_kind == emel::kernel::kernel_kind::aarch64 &&
-      (optimized_flash_dispatch_calls == 0u || shared_flash_dispatch_calls != 0u)) {
-    std::fprintf(stderr,
-                 "generation flash proof failed (fixture=%s kernel_kind=%s "
-                 "flash_dispatch_calls=%" PRIu64 " optimized_flash_dispatch_calls=%" PRIu64
-                 " shared_flash_dispatch_calls=%" PRIu64 ")\n",
-                 k_generation_fixture_name,
-                 kernel_kind_name(generation_kernel_kind),
-                 flash_dispatch_calls,
-                 optimized_flash_dispatch_calls,
-                 shared_flash_dispatch_calls);
-    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
-    return 1;
-  }
   if (generation_kernel_kind == emel::kernel::kernel_kind::aarch64 &&
       (optimized_q2_dispatch_calls == 0u || shared_q2_dispatch_calls != 0u ||
        optimized_q3_dispatch_calls == 0u || shared_q3_dispatch_calls != 0u ||
