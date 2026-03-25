@@ -7677,6 +7677,19 @@ void dump_generation_selected_step_stage_debug(
         !reference_ffn_norm.empty()) {
       dump_state_compare((label_prefix + ".ffn_norm").c_str(), backend.norm, reference_ffn_norm);
     }
+    dump_q8_quantize_compare((label_prefix + ".ffn_norm_q8").c_str(), backend.norm);
+    dump_matrix_compare(
+        (label_prefix + ".ffn_gate_matmul").c_str(), backend, block.feed_forward_gate, backend.norm);
+    dump_matrix_compare_reference_q8((label_prefix + ".ffn_gate_matmul_refq8").c_str(),
+                                     backend,
+                                     block.feed_forward_gate,
+                                     backend.norm);
+    dump_matrix_compare(
+        (label_prefix + ".ffn_up_matmul").c_str(), backend, block.feed_forward_up, backend.norm);
+    dump_matrix_compare_reference_q8((label_prefix + ".ffn_up_matmul_refq8").c_str(),
+                                     backend,
+                                     block.feed_forward_up,
+                                     backend.norm);
     if (const std::span<const float> reference_ffn_gate =
             reference_stage_row(("ffn_gate-" + std::to_string(layer)).c_str(), backend.gate.size());
         !reference_ffn_gate.empty()) {
@@ -7703,6 +7716,15 @@ void dump_generation_selected_step_stage_debug(
       std::fprintf(stdout, "%s.ffn_down: replay failed\n", label_prefix.c_str());
       return;
     }
+    dump_q8_quantize_compare((label_prefix + ".ffn_hidden_q8").c_str(), backend.ffn_hidden);
+    dump_matrix_compare((label_prefix + ".ffn_down_matmul").c_str(),
+                        backend,
+                        block.feed_forward_down,
+                        backend.ffn_hidden);
+    dump_matrix_compare_reference_q8((label_prefix + ".ffn_down_matmul_refq8").c_str(),
+                                     backend,
+                                     block.feed_forward_down,
+                                     backend.ffn_hidden);
     if (const std::span<const float> reference_ffn_out =
             reference_stage_row(("ffn_out-" + std::to_string(layer)).c_str(), backend.projected.size());
         !reference_ffn_out.empty()) {
@@ -11159,6 +11181,12 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   }
   if (token_mismatch_index > 5) {
     dump_generation_selected_step_stage_debug(state, opts, reference_result, 5);
+  }
+  if (token_mismatch_index > 6) {
+    dump_generation_selected_step_stage_debug(state, opts, reference_result, 6);
+  }
+  if (token_mismatch_index > 21) {
+    dump_generation_selected_step_stage_debug(state, opts, reference_result, 21);
   }
   if (runtime_exact_first_sig_step >= 0) {
     dump_generation_selected_step_stage_debug(
