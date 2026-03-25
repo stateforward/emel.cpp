@@ -28,8 +28,8 @@ verification before widening API surface or model scope.
 
 Phase: -
 Plan: -
-Status: Defining requirements
-Last activity: 2026-03-25 — Milestone v1.5 started
+Status: Ready to plan
+Last activity: 2026-03-25 — Roadmap created for milestone v1.5
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -38,9 +38,9 @@ Progress: [░░░░░░░░░░] 0%
 **Current milestone:**
 
 - Milestone: v1.5 Full ARM Quantized Path
-- Phases complete: 0/0
-- Plans complete: 0/0
-- Status: defining requirements and roadmap
+- Phases complete: 0/4
+- Plans complete: 0/8
+- Status: roadmap created; Phase 22 ready for discussion
 
 **Last shipped milestone:**
 
@@ -51,7 +51,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Next action:**
 
-- Write `.planning/REQUIREMENTS.md` for v1.5 and create the roadmap.
+- Run `$gsd-discuss-phase 22` to gather context for the quantized path audit.
 
 ## Accumulated Context
 
@@ -71,7 +71,7 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 - Define v1.5 requirements for the full ARM quantized path.
-- Create the phase roadmap starting at Phase 22.
+- Start Phase 22 quantized-path audit planning.
 
 ### Blockers/Concerns
 
@@ -82,6 +82,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-25T19:00:00Z
-Stopped at: milestone v1.5 started; next step is requirements definition
+Last session: 2026-03-25T19:10:00Z
+Stopped at: roadmap created for milestone v1.5; next step is `$gsd-discuss-phase 22`
 Resume file: None
