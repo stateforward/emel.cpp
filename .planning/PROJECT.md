@@ -3,30 +3,21 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. Shipped v1.3 now proves four narrow
+modeled as explicit actors instead of ad hoc control flow. Shipped v1.4 now proves five narrow
 brownfield outcomes on the canonical Llama-68M slice: a parity-checked generation path in
 `tools/paritychecker`, a truthful maintained benchmark workflow in `tools/bench`, an EMEL-owned
-flash-attention runtime path, and an optimized AArch64 flash implementation with maintained
-runtime/parity/benchmark attribution, all aligned with `docs/rules/sml.rules.md`.
+flash-attention runtime path, an optimized AArch64 flash implementation, and EMEL-owned vectorized
+AArch64 `q2_K/q3_K/q6_K` quantized hot-path kernels with maintained runtime/parity/benchmark
+publication, all aligned with `docs/rules/sml.rules.md`.
 
 ## Core Value
 
 Prove real end-to-end behavior with explicit SML orchestration and parity-oriented verification
 before widening API surface or model scope.
 
-## Current Milestone: v1.4 Full Vectorized Quantized Kernels
+## Current State
 
-**Goal:** Close the remaining canonical ARM inference gap by replacing the shipped scalar
-`q2_K/q3_K/q6_K x q8_K` hot path with EMEL-owned vectorized AArch64 kernels while preserving the
-existing Boost.SML orchestration contract.
-
-**Target features:**
-- Vectorized AArch64 `q2_K`, `q3_K`, and `q6_K` quantized dot-product coverage for the maintained
-  canonical operand path
-- Shipped runtime selection and deterministic fallback behavior for the canonical Llama-68M ARM
-  workload
-- Maintained parity, benchmark, and profiling evidence that the scalar row helpers are no longer
-  the dominant hot path
+Shipped version: `v1.4`
 
 ## Requirements
 
@@ -68,37 +59,40 @@ existing Boost.SML orchestration contract.
   flash attribution on the maintained canonical workload — v1.3 Phases 15-16
 - ✓ Maintained benchmark publication now preserves the prior ARM baseline separately and documents
   a `1.140x` canonical short-case speedup over that baseline — v1.3 Phase 16
+- ✓ The canonical ARM slice now executes maintained `q2_K/q3_K/q6_K x q8_K` hot-path dot
+  products through EMEL-owned vectorized AArch64 kernels instead of scalar row helpers — v1.4
+  Phases 17-19
+- ✓ The maintained quantized hot path preserves zero-allocation operand fidelity without
+  dequantize-to-f32 fallback and no longer depends on the scalar row helpers for supported
+  requests — v1.4 Phase 19
+- ✓ The shipped generator -> graph -> processor -> kernel chain now publishes maintained q2/q3/q6
+  runtime attribution and proves canonical parity across `1/10/100/1000` without actor rewrites
+  or API widening — v1.4 Phase 20
+- ✓ Kernel, runtime, and parity coverage now prove vectorized q2/q3/q6 correctness and
+  deterministic no-claim behavior on unsupported paths — v1.4 Phase 20
+- ✓ Maintained benchmark compare output and generated docs now publish quantized attribution plus
+  refreshed `1/10/100/1000` evidence against the preserved v1.3 scalar baseline — v1.4 Phase 21
 
 ### Active
 
-- [ ] `PORT-04`: The canonical Llama-68M ARM generation slice executes `q2_K/q3_K/q6_K x q8_K`
-  hot-path dot products through EMEL-owned vectorized AArch64 kernels instead of scalar row
-  helpers.
-- [ ] `PORT-07`: The vectorized quantized kernels preserve zero-allocation hot-path behavior and
-  keep the maintained effective operand class without dequantize-to-f32 fallbacks.
-- [ ] `ARCH-02`: The optimization remains a data-plane replacement inside the existing generator
-  -> graph -> processor -> kernel chain and does not widen the public API surface or rewrite
-  actor structure.
-- [ ] `PAR-04`: `tools/paritychecker --generation` keeps the maintained `1/10/100/1000` token
-  checks and proves the canonical ARM workload exercised the vectorized quantized path.
-- [ ] `VER-03`: Tests cover vectorized `q2_K/q3_K/q6_K` correctness, scalar equivalence, and
-  deterministic fallback behavior on AArch64.
-- [ ] `BENCH-08`: `tools/bench` publishes maintained canonical ARM compare output with attribution
-  that distinguishes the vectorized quantized path from the current scalar row-helper path.
-- [ ] `BENCH-09`: Maintained `1/10/100/1000` token compare output shows truthful end-to-end
-  impact over the current v1.3 baseline, with measurable improvement on at least one maintained
-  length.
+- [ ] `GEN-03`: Optimize ARM generator-side RMSNorm, RoPE, residual-add, and SwiGLU math after
+  the vectorized quantized kernel gain is measured.
+- [ ] `FLASH-03`: Broaden flash attention beyond the canonical Llama-68M shape and workload
+  contract.
+- [ ] `MODEL-01`: Roll optimized ARM flash attention out to additional model fixtures after the
+  canonical path remains correct and benchmarked.
+- [ ] `BENCH-07`: Revisit whether noisy benchmark drift should become a blocking repo gate once
+  ARM compare evidence stabilizes.
 
 ### Out of Scope
 
 - Broad repository cleanup unrelated to a milestone goal
 - Non-paritychecker product surfaces until a milestone explicitly broadens the acceptance boundary
-- Non-ARM backend flash specialization until the canonical ARM follow-on work is complete
+- Non-ARM backend kernel specialization until a milestone explicitly broadens beyond the canonical
+  ARM truth anchor
 - Whole-program state-machine or orchestration rewrites unrelated to a milestone acceptance surface
-
-## Current State
-
-Shipped version: `v1.3`
+- Dequantize-to-f32 or tool-only compute fallbacks in the shipped canonical hot path without
+  explicit milestone approval
 
 - 7 phases and 15 plans delivered the first canonical Llama-68M parity slice in v1.0.
 - 4 additional phases and 10 plans delivered the truthful benchmark slice in v1.1.
@@ -110,6 +104,10 @@ Shipped version: `v1.3`
   AArch64 flash kernel, the shipped runtime/parity surfaces publish optimized-vs-shared flash
   attribution, and maintained benchmark docs preserve the prior ARM baseline while publishing a
   measured short-case improvement.
+- 5 additional phases and 11 plans delivered v1.4: the canonical ARM slice now ships EMEL-owned
+  vectorized `q2_K/q3_K/q6_K` kernels, the runtime surfaces publish q2/q3/q6 attribution, full
+  maintained parity is green at `1/10/100/1000`, and the compare/docs workflow republishes
+  quantized evidence against the preserved v1.3 scalar baseline.
 - The validated E2E flows now include
   `paritychecker --generation --model tests/models/Llama-68M-Chat-v1-Q2_K.gguf --text hello --max-tokens 1`
   plus the maintained `scripts/bench.sh --compare` publication path that feeds
@@ -117,28 +115,23 @@ Shipped version: `v1.3`
   `optimized_flash_dispatch_calls=2`, `shared_flash_dispatch_calls=0`, and a preserved ARM
   baseline comparison.
 - The maintained generation and parity matrix now publishes `1`, `10`, `100`, and `1000` token
-  lengths, with parity currently passing `1` and `10` while drifting later in longer decode
-  sequences.
-- Focused ARM profiling on the maintained `1000`-token workload shows the remaining hot leaf time
-  is dominated by quantized matmul: about `89.8%` of sampled leaf cost is in
-  `dot_q2_k_q8_k_block_scalar`, `dot_q6_k_q8_k_row_scalar`, and `dot_q3_k_q8_k_row_scalar`,
-  with flash attention down near `7.3%`.
-- The shipped AArch64 backend already routes quantized matmul through `execute_neon_mul_mat`, but
-  the maintained `q2_K/q3_K/q6_K x q8_K` row path still calls scalar helpers rather than the
-  existing NEON block kernels.
+  lengths with parity green across the full maintained set on the canonical ARM workload.
+- Focused ARM profiling on the maintained `1000`-token workload identified scalar quantized matmul
+  as the remaining hot leaf; v1.4 closes that hotspot with native vectorized kernels on the same
+  maintained operand path.
 - Current non-blocking debt remains narrow: benchmark drift is still warning-only in
   `scripts/quality_gates.sh`, compare snapshot publication still refreshes the whole maintained
   suite, proof is re-derived from common generator counters across parity/bench/docs, and the
   bench/parity/docs toolchain still emits non-blocking environment warnings on this machine.
 
-## Current Milestone Goals
+## Next Milestone Goals
 
-- Replace the profiled scalar `q2_K/q3_K/q6_K x q8_K` inner loops with full vectorized AArch64
-  kernels on the maintained canonical workload.
-- Preserve the existing generator -> graph -> processor -> kernel architecture contract and make
-  fallback behavior explicit when requests fall outside the maintained optimized path.
-- Publish maintained parity, benchmark, and profiling evidence over `1/10/100/1000` token
-  lengths before revisiting broader generator math or model-coverage work.
+- Measure and optimize ARM generator-side math around the now-vectorized quantized path when the
+  benchmark evidence shows the next highest-return hotspot.
+- Decide whether broader flash/model coverage or benchmark-gate hardening is the next milestone's
+  narrowest honest scope.
+- Keep new milestone work anchored to the canonical Llama-68M slice until a broader contract is
+  explicitly planned and accepted.
 
 ## Context
 
@@ -185,6 +178,7 @@ explicit error publication, bounded actions, and deliberate machine-structure ch
 | Preserve the pre-refresh ARM compare row as a dedicated baseline artifact | Maintained benchmark claims needed a durable shared-scalar ARM comparison point before snapshot refresh | ✓ Good |
 | Target the quantized `q2_K/q3_K/q6_K x q8_K` row-dot path next | The latest flame graph shows the remaining ARM gap is dominated by scalar quantized matmul leaf cost, not orchestration frames | — Pending |
 | Skip milestone research and keep the acceptance boundary on the canonical ARM Llama-68M slice | This milestone is a direct continuation of already-profiled kernel work, so new-domain research would add delay without reducing uncertainty | — Pending |
+| Restore long-decode parity with the exact masked nonflash attention path | The maintained `100/1000` decode mismatch was a data-plane semantic drift, so the narrowest honest repair was to match the reference masked nonflash path instead of claiming flash dispatch | ✓ Good |
 
 ## Evolution
 
@@ -204,4 +198,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-22 after starting milestone v1.4*
+*Last updated: 2026-03-25 after shipping milestone v1.4*

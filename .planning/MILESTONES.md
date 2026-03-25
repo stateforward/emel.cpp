@@ -1,5 +1,31 @@
 # Project Milestones: EMEL
 
+## v1.4 Full Vectorized Quantized Kernels (Shipped: 2026-03-25)
+
+**Delivered:** The canonical CPU-hosted Llama-68M ARM slice now ships EMEL-owned vectorized
+`q2_K/q3_K/q6_K x q8_K` kernels, maintained runtime attribution, full `1/10/100/1000` parity
+proof, and refreshed benchmark publication against the preserved v1.3 scalar baseline.
+
+**Phases completed:** 5 phases, 11 plans, 0 tasks
+
+**Key accomplishments:**
+
+- Replaced the maintained scalar `q2_K`, `q3_K`, and `q6_K` row helpers with EMEL-owned
+  vectorized AArch64 kernels on the canonical operand path.
+- Closed the maintained quantized hot-path contract with alloc-free q2/q3/q6 dispatch and no
+  dequantize-to-f32 fallback.
+- Exposed shipped q2/q3/q6 optimized-versus-shared runtime attribution without widening the
+  actor or API surface.
+- Restored maintained parity across `1`, `10`, `100`, and `1000` tokens on the canonical ARM
+  workload.
+- Refreshed maintained benchmark compare output and docs with quantized attribution and preserved
+  v1.3 baseline context.
+
+**What's next:** Define the next milestone before broadening beyond the canonical CPU-hosted
+Llama-68M ARM slice or widening benchmark-gate policy.
+
+---
+
 ## v1.3 ARM Flash Optimizations (Shipped: 2026-03-22)
 
 **Delivered:** Optimized AArch64 flash execution now ships on the canonical Llama-68M ARM slice,
@@ -15,6 +41,7 @@ preserving the prior ARM baseline while showing a measured short-case improvemen
 - The shipped generator seam now reports optimized-vs-shared flash path selection.
 - Paritychecker and benchmark compare output now publish optimized-vs-shared ARM flash
   attribution on the maintained workload.
+
 - Maintained benchmark publication now preserves the prior ARM baseline and documents a `1.140x`
   short-case speedup.
 
