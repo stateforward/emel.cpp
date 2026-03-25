@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <concepts>
+#include <span>
 
 #include "test_helpers.hpp"
 #include "emel/kernel/any.hpp"
@@ -43,6 +44,7 @@ using metal_dispatch_event = emel::kernel::metal::event::dispatch_request;
 using vulkan_dispatch_event = emel::kernel::vulkan::event::dispatch_request;
 using emel::kernel::test::dtype;
 using emel::kernel::test::flash_attn_ext_fixture;
+using emel::kernel::test::flash_attn_reference_f16_scores;
 using emel::kernel::test::make_dst;
 using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_quantized_src;
@@ -591,22 +593,29 @@ TEST_CASE("kernel_backends_reject_quantized_dispatch_dtypes") {
 TEST_CASE("kernel_flash_attn_ext_requires_canonical_execution_path") {
   flash_attn_ext_fixture fixture{};
   const auto canonical = make_flash_attn_ext_event(fixture);
+  const auto expected = flash_attn_reference_f16_scores(
+      std::span<const float>(fixture.q, 4u),
+      std::span<const float>(fixture.k, 8u),
+      std::span<const float>(fixture.v, 8u),
+      4u,
+      2u,
+      1.0f);
 
   x86_64_sm x86_64_machine{};
   aarch64_sm aarch64_machine{};
   CHECK(x86_64_machine.process_event(canonical));
-  CHECK(fixture.dst[0] == doctest::Approx(1.4621172f).epsilon(1e-5f));
-  CHECK(fixture.dst[1] == doctest::Approx(1.0757657f).epsilon(1e-5f));
-  CHECK(fixture.dst[2] == doctest::Approx(0.0f));
-  CHECK(fixture.dst[3] == doctest::Approx(0.0f));
+  CHECK(fixture.dst[0] == doctest::Approx(expected[0]).epsilon(1e-5f));
+  CHECK(fixture.dst[1] == doctest::Approx(expected[1]).epsilon(1e-5f));
+  CHECK(fixture.dst[2] == doctest::Approx(expected[2]).epsilon(1e-5f));
+  CHECK(fixture.dst[3] == doctest::Approx(expected[3]).epsilon(1e-5f));
 
   flash_attn_ext_fixture aarch64_fixture{};
   const auto aarch64_canonical = make_flash_attn_ext_event(aarch64_fixture);
   CHECK(aarch64_machine.process_event(aarch64_canonical));
-  CHECK(aarch64_fixture.dst[0] == doctest::Approx(1.4621172f).epsilon(1e-5f));
-  CHECK(aarch64_fixture.dst[1] == doctest::Approx(1.0757657f).epsilon(1e-5f));
-  CHECK(aarch64_fixture.dst[2] == doctest::Approx(0.0f));
-  CHECK(aarch64_fixture.dst[3] == doctest::Approx(0.0f));
+  CHECK(aarch64_fixture.dst[0] == doctest::Approx(expected[0]).epsilon(1e-5f));
+  CHECK(aarch64_fixture.dst[1] == doctest::Approx(expected[1]).epsilon(1e-5f));
+  CHECK(aarch64_fixture.dst[2] == doctest::Approx(expected[2]).epsilon(1e-5f));
+  CHECK(aarch64_fixture.dst[3] == doctest::Approx(expected[3]).epsilon(1e-5f));
 
   flash_attn_ext_fixture invalid_fixture{};
   auto invalid = make_flash_attn_ext_event(invalid_fixture);

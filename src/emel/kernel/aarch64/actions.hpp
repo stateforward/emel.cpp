@@ -268,7 +268,7 @@ inline bool run_flash_attn_ext_neon(const request_type & request,
       score_sum += static_cast<double>(prob);
     }
 
-    const float inv_score_sum = score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+    const float inv_score_sum = score_sum == 0.0f ? 0.0f : static_cast<float>(1.0 / score_sum);
     for (uint64_t token = 0; token < kv_tokens; ++token) {
       const float weight = workspace.score_buffer[token] * inv_score_sum;
       workspace.score_buffer[token] = ::emel::kernel::detail::round_fp16_weight(weight);

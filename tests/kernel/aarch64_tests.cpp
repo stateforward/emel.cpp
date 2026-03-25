@@ -21,59 +21,11 @@ using aarch64_sm = emel::kernel::aarch64::sm;
 using allocation_scope = emel::test::allocation::allocation_scope;
 using emel::kernel::test::dtype;
 using emel::kernel::test::flash_attn_ext_fixture;
+using emel::kernel::test::flash_attn_reference_f16_scores;
 using emel::kernel::test::make_dst;
 using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_src;
-
-std::vector<float> flash_attn_reference_rounded_weight_dot(
-    std::span<const float> q,
-    std::span<const float> k,
-    std::span<const float> v,
-    const uint64_t head_dim,
-    const uint64_t kv_tokens,
-    const float scale) {
-  std::vector<float> out(static_cast<size_t>(head_dim), 0.0f);
-  float max_score = -INFINITY;
-  std::vector<float> scores(static_cast<size_t>(kv_tokens), 0.0f);
-  for (uint64_t token = 0; token < kv_tokens; ++token) {
-    const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
-    const float score = emel::kernel::detail::dot_product_ggml_f16_scores(
-                            q.data(),
-                            k.data() + static_cast<std::ptrdiff_t>(offset),
-                            head_dim) *
-        scale;
-    scores[static_cast<size_t>(token)] = score;
-    max_score = std::max(max_score, score);
-  }
-
-  double score_sum = 0.0;
-  for (uint64_t token = 0; token < kv_tokens; ++token) {
-    score_sum += std::exp(scores[static_cast<size_t>(token)] - max_score);
-  }
-
-  std::vector<float> rounded_weights(static_cast<size_t>(kv_tokens), 0.0f);
-  const float inv_score_sum =
-      score_sum == 0.0f ? 0.0f : static_cast<float>(1.0 / score_sum);
-  for (uint64_t token = 0; token < kv_tokens; ++token) {
-    const float normalized =
-        std::exp(scores[static_cast<size_t>(token)] - max_score) * inv_score_sum;
-    rounded_weights[static_cast<size_t>(token)] =
-        emel::kernel::detail::round_fp16_weight(normalized);
-  }
-
-  std::vector<float> value_column(static_cast<size_t>(kv_tokens), 0.0f);
-  for (uint64_t dim = 0; dim < head_dim; ++dim) {
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
-      value_column[static_cast<size_t>(token)] = v[offset + static_cast<size_t>(dim)];
-    }
-    out[static_cast<size_t>(dim)] = emel::kernel::detail::dot_product_ggml_f16_scores(
-        value_column.data(), rounded_weights.data(), kv_tokens);
-  }
-
-  return out;
-}
 
 }  // namespace
 
@@ -1105,7 +1057,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_uses_optimized_backend_path") {
 
   emel::kernel::aarch64::action::exec_op_flash_attn_ext(dispatch, ctx);
 
-  const std::vector<float> expected = flash_attn_reference_rounded_weight_dot(
+  const std::vector<float> expected = flash_attn_reference_f16_scores(
       std::span<const float>(fixture.q, 4u),
       std::span<const float>(fixture.k, 8u),
       std::span<const float>(fixture.v, 8u),
@@ -1187,7 +1139,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_shared_workspace_on_long_kv_spa
 #endif
 }
 
-TEST_CASE("kernel_aarch64_flash_attn_ext_matches_rounded_weight_reference_on_long_multihead_kv") {
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_f16_scores_reference_on_long_multihead_kv") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;
 #else
@@ -1259,7 +1211,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_rounded_weight_reference_on_lon
       std::memcpy(k_head.data() + dst_offset, k.data() + src_offset, sizeof(float) * head_dim);
       std::memcpy(v_head.data() + dst_offset, v.data() + src_offset, sizeof(float) * head_dim);
     }
-    const std::vector<float> expected = flash_attn_reference_rounded_weight_dot(
+    const std::vector<float> expected = flash_attn_reference_f16_scores(
         std::span<const float>(q.data() + head * head_dim, head_dim),
         k_head,
         v_head,
@@ -1278,7 +1230,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_rounded_weight_reference_on_lon
 #endif
 }
 
-TEST_CASE("kernel_aarch64_flash_attn_ext_matches_rounded_weight_reference") {
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_f16_scores_reference") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;
 #else
@@ -1332,7 +1284,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_rounded_weight_reference") {
       shared_request, shared_workspace));
 
   const std::vector<float> expected =
-      flash_attn_reference_rounded_weight_dot(q, k, v, head_dim, kv_tokens, scale);
+      flash_attn_reference_f16_scores(q, k, v, head_dim, kv_tokens, scale);
   for (uint64_t dim = 0; dim < head_dim; ++dim) {
     CHECK(neon_dst[static_cast<size_t>(dim)] ==
           doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
