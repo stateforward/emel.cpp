@@ -80,6 +80,12 @@ void ggml_vec_dot_q3_K_q8_K(
     int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
 void ggml_vec_dot_q6_K_q8_K(
     int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
+void ggml_vec_dot_q2_K_q8_K_generic(
+    int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
+void ggml_vec_dot_q3_K_q8_K_generic(
+    int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
+void ggml_vec_dot_q6_K_q8_K_generic(
+    int n, float * s, size_t bs, const void * vx, size_t bx, const void * vy, size_t by, int nrc);
 struct reference_block_q8_k {
   float d = 0.0f;
   std::array<int8_t, ::emel::kernel::detail::quant::QK_K> qs = {};
@@ -8117,15 +8123,15 @@ float ggml_row_dot_reference_q8(const emel::generator::detail::tensor_matrix & m
   float out = 0.0f;
   switch (static_cast<emel::kernel::event::dtype>(matrix.tensor->type)) {
     case emel::kernel::event::dtype::q2_k:
-      ggml_vec_dot_q2_K_q8_K(
+      ggml_vec_dot_q2_K_q8_K_generic(
           static_cast<int>(block_count * kernel_quant::QK_K), &out, 0, row_ptr, 0, q8_blocks, 0, 1);
       return out;
     case emel::kernel::event::dtype::q3_k:
-      ggml_vec_dot_q3_K_q8_K(
+      ggml_vec_dot_q3_K_q8_K_generic(
           static_cast<int>(block_count * kernel_quant::QK_K), &out, 0, row_ptr, 0, q8_blocks, 0, 1);
       return out;
     case emel::kernel::event::dtype::q6_k:
-      ggml_vec_dot_q6_K_q8_K(
+      ggml_vec_dot_q6_K_q8_K_generic(
           static_cast<int>(block_count * kernel_quant::QK_K), &out, 0, row_ptr, 0, q8_blocks, 0, 1);
       return out;
     default:
