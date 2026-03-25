@@ -12838,10 +12838,13 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
 
   emel::generator::detail::native_backend actor_backend = {};
+  emel::generator::detail::native_backend q2_exact_backend = {};
   emel::generator::detail::native_backend q2_reference_backend = {};
   emel::generator::detail::native_backend q3_reference_backend = {};
   emel::generator::detail::native_backend q3_scalar_backend = {};
   if (emel::generator::detail::prepare(actor_backend, *state.model_data) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::generator::detail::prepare(q2_exact_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
       emel::generator::detail::prepare(q2_reference_backend, *state.model_data) !=
           emel::error::cast(emel::model::loader::error::none) ||
@@ -12853,6 +12856,12 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     return;
   }
 
+  const exact_matmul_mode exact_q2_only{
+      .attention = true,
+      .ffn = true,
+      .output = true,
+      .only_dtype = static_cast<uint8_t>(emel::kernel::event::dtype::q2_k),
+  };
   const exact_matmul_mode reference_q2_only{
       .attention = true,
       .ffn = true,
@@ -12947,6 +12956,8 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
         prefix_tokens.data(), static_cast<size_t>(target_prefix_token_count - 1)};
     if (!run_prefill_with_scalar_attention(actor_backend, prior_tokens) ||
         !run_prefill_with_scalar_attention_matmul_mode(
+            q2_exact_backend, prior_tokens, exact_q2_only) ||
+        !run_prefill_with_scalar_attention_matmul_mode(
             q2_reference_backend, prior_tokens, reference_q2_only) ||
         !run_prefill_with_scalar_attention_matmul_mode(
             q3_reference_backend, prior_tokens, reference_q3_only) ||
@@ -12957,6 +12968,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
     }
   } else {
     actor_backend.kv_cache_tokens = 0;
+    q2_exact_backend.kv_cache_tokens = 0;
     q2_reference_backend.kv_cache_tokens = 0;
     q3_reference_backend.kv_cache_tokens = 0;
     q3_scalar_backend.kv_cache_tokens = 0;
@@ -12975,6 +12987,8 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   if (!emel::generator::detail::copy_tensor_row(
           *actor_backend.token_embedding.tensor, token_id, actor_backend.hidden) ||
       !emel::generator::detail::copy_tensor_row(
+          *q2_exact_backend.token_embedding.tensor, token_id, q2_exact_backend.hidden) ||
+      !emel::generator::detail::copy_tensor_row(
           *q2_reference_backend.token_embedding.tensor, token_id, q2_reference_backend.hidden) ||
       !emel::generator::detail::copy_tensor_row(
           *q3_reference_backend.token_embedding.tensor, token_id, q3_reference_backend.hidden) ||
@@ -12986,9 +13000,14 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
 
   auto dump_stage = [&](const char * label,
                         std::span<const float> actor_values,
+                        std::span<const float> q2_exact_values,
                         std::span<const float> q2_values,
                         std::span<const float> q3_values,
                         std::span<const float> q3_scalar_values) {
+    std::fprintf(stdout,
+                 "generation_debug.qref_stage.%s.q2_exact: max_abs=%g\n",
+                 label,
+                 max_abs_diff(actor_values, q2_exact_values));
     std::fprintf(stdout,
                  "generation_debug.qref_stage.%s.q2_reference: max_abs=%g\n",
                  label,
@@ -13005,6 +13024,8 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
 
   if (!run_layer_with_scalar_attention(actor_backend, 0, position) ||
       !run_layer_with_matmul_mode_scalar_attention(
+          q2_exact_backend, 0, position, exact_q2_only) ||
+      !run_layer_with_matmul_mode_scalar_attention(
           q2_reference_backend, 0, position, reference_q2_only) ||
       !run_layer_with_matmul_mode_scalar_attention(
           q3_reference_backend, 0, position, reference_q3_only) ||
@@ -13018,11 +13039,13 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
       "gen" + std::to_string(generated_index) + ".layer" + std::to_string(layer_index);
   dump_stage((stage_prefix + ".input_hidden").c_str(),
              actor_backend.hidden,
+             q2_exact_backend.hidden,
              q2_reference_backend.hidden,
              q3_reference_backend.hidden,
              q3_scalar_backend.hidden);
 
   auto & actor_block = actor_backend.blocks[static_cast<size_t>(layer_index)];
+  auto & q2_exact_block = q2_exact_backend.blocks[static_cast<size_t>(layer_index)];
   auto & q2_block = q2_reference_backend.blocks[static_cast<size_t>(layer_index)];
   auto & q3_block = q3_reference_backend.blocks[static_cast<size_t>(layer_index)];
   auto & q3_scalar_block = q3_scalar_backend.blocks[static_cast<size_t>(layer_index)];
@@ -13031,6 +13054,11 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
           actor_block.attention_norm,
           actor_backend.rms_epsilon,
           actor_backend.norm) ||
+      !emel::generator::detail::rms_norm(
+          q2_exact_backend.hidden,
+          q2_exact_block.attention_norm,
+          q2_exact_backend.rms_epsilon,
+          q2_exact_backend.norm) ||
       !emel::generator::detail::rms_norm(
           q2_reference_backend.hidden,
           q2_block.attention_norm,
@@ -13051,6 +13079,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
   dump_stage((stage_prefix + ".attn_norm").c_str(),
              actor_backend.norm,
+             q2_exact_backend.norm,
              q2_reference_backend.norm,
              q3_reference_backend.norm,
              q3_scalar_backend.norm);
@@ -13093,6 +13122,12 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
 
   if (!emel::generator::detail::matmul_vector(
           actor_backend, actor_block.attention_q, actor_backend.norm, actor_backend.q) ||
+      !run_mode_matmul(q2_exact_backend,
+                       q2_exact_block.attention_q,
+                       q2_exact_backend.norm,
+                       q2_exact_backend.q,
+                       exact_q2_only,
+                       true) ||
       !run_mode_matmul(q2_reference_backend,
                        q2_block.attention_q,
                        q2_reference_backend.norm,
@@ -13113,6 +13148,12 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
                        true) ||
       !emel::generator::detail::matmul_vector(
           actor_backend, actor_block.attention_k, actor_backend.norm, actor_backend.k) ||
+      !run_mode_matmul(q2_exact_backend,
+                       q2_exact_block.attention_k,
+                       q2_exact_backend.norm,
+                       q2_exact_backend.k,
+                       exact_q2_only,
+                       true) ||
       !run_mode_matmul(q2_reference_backend,
                        q2_block.attention_k,
                        q2_reference_backend.norm,
@@ -13133,6 +13174,12 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
                        true) ||
       !emel::generator::detail::matmul_vector(
           actor_backend, actor_block.attention_v, actor_backend.norm, actor_backend.v) ||
+      !run_mode_matmul(q2_exact_backend,
+                       q2_exact_block.attention_v,
+                       q2_exact_backend.norm,
+                       q2_exact_backend.v,
+                       exact_q2_only,
+                       true) ||
       !run_mode_matmul(q2_reference_backend,
                        q2_block.attention_v,
                        q2_reference_backend.norm,
@@ -13156,16 +13203,19 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
   dump_stage((stage_prefix + ".q_pre_rope").c_str(),
              actor_backend.q,
+             q2_exact_backend.q,
              q2_reference_backend.q,
              q3_reference_backend.q,
              q3_scalar_backend.q);
   dump_stage((stage_prefix + ".k_pre_rope").c_str(),
              actor_backend.k,
+             q2_exact_backend.k,
              q2_reference_backend.k,
              q3_reference_backend.k,
              q3_scalar_backend.k);
   dump_stage((stage_prefix + ".v_pre_cache").c_str(),
              actor_backend.v,
+             q2_exact_backend.v,
              q2_reference_backend.v,
              q3_reference_backend.v,
              q3_scalar_backend.v);
@@ -13193,37 +13243,45 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
         backend.value_cache.data() + cache_offset);
   };
   apply_rope_and_cache(actor_backend);
+  apply_rope_and_cache(q2_exact_backend);
   apply_rope_and_cache(q2_reference_backend);
   apply_rope_and_cache(q3_reference_backend);
   apply_rope_and_cache(q3_scalar_backend);
   dump_stage((stage_prefix + ".q").c_str(),
              actor_backend.q,
+             q2_exact_backend.q,
              q2_reference_backend.q,
              q3_reference_backend.q,
              q3_scalar_backend.q);
   dump_stage((stage_prefix + ".k").c_str(),
              actor_backend.k,
+             q2_exact_backend.k,
              q2_reference_backend.k,
              q3_reference_backend.k,
              q3_scalar_backend.k);
   dump_stage((stage_prefix + ".q_attn").c_str(),
              actor_backend.q_attn,
+             q2_exact_backend.q_attn,
              q2_reference_backend.q_attn,
              q3_reference_backend.q_attn,
              q3_scalar_backend.q_attn);
   dump_stage((stage_prefix + ".key_cache").c_str(),
              actor_backend.key_cache,
+             q2_exact_backend.key_cache,
              q2_reference_backend.key_cache,
              q3_reference_backend.key_cache,
              q3_scalar_backend.key_cache);
   dump_stage((stage_prefix + ".value_cache").c_str(),
              actor_backend.value_cache,
+             q2_exact_backend.value_cache,
              q2_reference_backend.value_cache,
              q3_reference_backend.value_cache,
              q3_scalar_backend.value_cache);
 
   if (!emel::generator::detail::compute_attention(
           actor_backend, layer_index, position + 1, actor_backend.q_attn) ||
+      !emel::generator::detail::compute_attention(
+          q2_exact_backend, layer_index, position + 1, q2_exact_backend.q_attn) ||
       !emel::generator::detail::compute_attention(
           q2_reference_backend, layer_index, position + 1, q2_reference_backend.q_attn) ||
       !emel::generator::detail::compute_attention(
@@ -13235,6 +13293,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
   dump_stage((stage_prefix + ".kqv_out").c_str(),
              actor_backend.attn_ctx,
+             q2_exact_backend.attn_ctx,
              q2_reference_backend.attn_ctx,
              q3_reference_backend.attn_ctx,
              q3_scalar_backend.attn_ctx);
@@ -13250,6 +13309,12 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
 
   if (!emel::generator::detail::matmul_vector(
           actor_backend, actor_block.attention_output, actor_backend.attn_ctx, actor_backend.projected) ||
+      !run_mode_matmul(q2_exact_backend,
+                       q2_exact_block.attention_output,
+                       q2_exact_backend.attn_ctx,
+                       q2_exact_backend.projected,
+                       exact_q2_only,
+                       true) ||
       !run_mode_matmul(q2_reference_backend,
                        q2_block.attention_output,
                        q2_reference_backend.attn_ctx,
@@ -13273,12 +13338,15 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
   dump_stage((stage_prefix + ".attn_out").c_str(),
              actor_backend.projected,
+             q2_exact_backend.projected,
              q2_reference_backend.projected,
              q3_reference_backend.projected,
              q3_scalar_backend.projected);
 
   for (int32_t idx = 0; idx < actor_backend.n_embd; ++idx) {
     actor_backend.hidden[static_cast<size_t>(idx)] += actor_backend.projected[static_cast<size_t>(idx)];
+    q2_exact_backend.hidden[static_cast<size_t>(idx)] +=
+        q2_exact_backend.projected[static_cast<size_t>(idx)];
     q2_reference_backend.hidden[static_cast<size_t>(idx)] +=
         q2_reference_backend.projected[static_cast<size_t>(idx)];
     q3_reference_backend.hidden[static_cast<size_t>(idx)] +=
@@ -13288,6 +13356,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
   dump_stage((stage_prefix + ".attn_residual").c_str(),
              actor_backend.hidden,
+             q2_exact_backend.hidden,
              q2_reference_backend.hidden,
              q3_reference_backend.hidden,
              q3_scalar_backend.hidden);
@@ -13297,6 +13366,11 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
           actor_block.feed_forward_norm,
           actor_backend.rms_epsilon,
           actor_backend.norm) ||
+      !emel::generator::detail::rms_norm(
+          q2_exact_backend.hidden,
+          q2_exact_block.feed_forward_norm,
+          q2_exact_backend.rms_epsilon,
+          q2_exact_backend.norm) ||
       !emel::generator::detail::rms_norm(
           q2_reference_backend.hidden,
           q2_block.feed_forward_norm,
@@ -13317,6 +13391,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
   dump_stage((stage_prefix + ".ffn_norm").c_str(),
              actor_backend.norm,
+             q2_exact_backend.norm,
              q2_reference_backend.norm,
              q3_reference_backend.norm,
              q3_scalar_backend.norm);
@@ -13340,6 +13415,12 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
 
   if (!emel::generator::detail::matmul_vector(
           actor_backend, actor_block.feed_forward_gate, actor_backend.norm, actor_backend.gate) ||
+      !run_mode_matmul(q2_exact_backend,
+                       q2_exact_block.feed_forward_gate,
+                       q2_exact_backend.norm,
+                       q2_exact_backend.gate,
+                       exact_q2_only,
+                       false) ||
       !run_mode_matmul(q2_reference_backend,
                        q2_block.feed_forward_gate,
                        q2_reference_backend.norm,
@@ -13360,6 +13441,12 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
                        false) ||
       !emel::generator::detail::matmul_vector(
           actor_backend, actor_block.feed_forward_up, actor_backend.norm, actor_backend.up) ||
+      !run_mode_matmul(q2_exact_backend,
+                       q2_exact_block.feed_forward_up,
+                       q2_exact_backend.norm,
+                       q2_exact_backend.up,
+                       exact_q2_only,
+                       false) ||
       !run_mode_matmul(q2_reference_backend,
                        q2_block.feed_forward_up,
                        q2_reference_backend.norm,
@@ -13383,11 +13470,13 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
   dump_stage((stage_prefix + ".ffn_gate").c_str(),
              actor_backend.gate,
+             q2_exact_backend.gate,
              q2_reference_backend.gate,
              q3_reference_backend.gate,
              q3_scalar_backend.gate);
   dump_stage((stage_prefix + ".ffn_up").c_str(),
              actor_backend.up,
+             q2_exact_backend.up,
              q2_reference_backend.up,
              q3_reference_backend.up,
              q3_scalar_backend.up);
@@ -13395,6 +13484,8 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   for (size_t idx = 0; idx < actor_backend.gate.size(); ++idx) {
     actor_backend.ffn_hidden[idx] =
         emel::generator::detail::silu(actor_backend.gate[idx]) * actor_backend.up[idx];
+    q2_exact_backend.ffn_hidden[idx] =
+        emel::generator::detail::silu(q2_exact_backend.gate[idx]) * q2_exact_backend.up[idx];
     q2_reference_backend.ffn_hidden[idx] =
         emel::generator::detail::silu(q2_reference_backend.gate[idx]) *
         q2_reference_backend.up[idx];
@@ -13407,6 +13498,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
   dump_stage((stage_prefix + ".ffn_swiglu").c_str(),
              actor_backend.ffn_hidden,
+             q2_exact_backend.ffn_hidden,
              q2_reference_backend.ffn_hidden,
              q3_reference_backend.ffn_hidden,
              q3_scalar_backend.ffn_hidden);
@@ -13422,6 +13514,12 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
 
   if (!emel::generator::detail::matmul_vector(
           actor_backend, actor_block.feed_forward_down, actor_backend.ffn_hidden, actor_backend.projected) ||
+      !run_mode_matmul(q2_exact_backend,
+                       q2_exact_block.feed_forward_down,
+                       q2_exact_backend.ffn_hidden,
+                       q2_exact_backend.projected,
+                       exact_q2_only,
+                       false) ||
       !run_mode_matmul(q2_reference_backend,
                        q2_block.feed_forward_down,
                        q2_reference_backend.ffn_hidden,
@@ -13445,12 +13543,15 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
   dump_stage((stage_prefix + ".ffn_out").c_str(),
              actor_backend.projected,
+             q2_exact_backend.projected,
              q2_reference_backend.projected,
              q3_reference_backend.projected,
              q3_scalar_backend.projected);
 
   for (int32_t idx = 0; idx < actor_backend.n_embd; ++idx) {
     actor_backend.hidden[static_cast<size_t>(idx)] += actor_backend.projected[static_cast<size_t>(idx)];
+    q2_exact_backend.hidden[static_cast<size_t>(idx)] +=
+        q2_exact_backend.projected[static_cast<size_t>(idx)];
     q2_reference_backend.hidden[static_cast<size_t>(idx)] +=
         q2_reference_backend.projected[static_cast<size_t>(idx)];
     q3_reference_backend.hidden[static_cast<size_t>(idx)] +=
@@ -13460,6 +13561,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
   dump_stage((stage_prefix + ".l_out").c_str(),
              actor_backend.hidden,
+             q2_exact_backend.hidden,
              q2_reference_backend.hidden,
              q3_reference_backend.hidden,
              q3_scalar_backend.hidden);
@@ -14536,6 +14638,7 @@ void dump_generation_failure_surface(generation_load_state & state,
     dump_generation_gen0_attention_debug(state, opts, *emel_result, *reference_result);
     dump_generation_target_attention_debug(state, opts, *emel_result, *reference_result);
     dump_generation_prefix_state_debug(state, opts, *emel_result, *reference_result);
+    dump_generation_reference_q_stage_debug(state, opts, *emel_result, *reference_result);
     dump_scalar_attention_debug(state, opts, *emel_result, *reference_result);
     return;
   }
