@@ -7794,6 +7794,11 @@ void dump_scalar_attention_debug(const generation_load_state & state,
     dump_generation_selected_step_stage_debug(state, opts, reference_result, 3);
     dump_generation_selected_step_stage_debug(state, opts, reference_result, 8);
     dump_generation_selected_step_stage_debug(state, opts, reference_result, 32);
+    if (token_mismatch_index > 0) {
+      dump_generation_selected_step_stage_debug(
+          state, opts, reference_result, token_mismatch_index - 1);
+    }
+    dump_generation_selected_step_stage_debug(state, opts, reference_result, token_mismatch_index);
     return;
   }
 

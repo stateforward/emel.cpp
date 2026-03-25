@@ -285,7 +285,7 @@ inline bool run_flash_attn_ext_neon(const request_type & request,
       for (uint64_t token = kv_tokens; token < attn_width; ++token) {
         workspace.value_buffer[token] = 0.0f;
       }
-      dst[dim] = ::emel::kernel::detail::dot_product_ggml_f16_scores(
+      dst[dim] = ::emel::kernel::detail::dot_product_f32(
           workspace.value_buffer.data(), workspace.score_buffer.data(), attn_width);
     }
   }

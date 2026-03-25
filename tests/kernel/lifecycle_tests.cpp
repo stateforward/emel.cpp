@@ -1,7 +1,10 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <concepts>
+#include <cstring>
 #include <span>
 
 #include "test_helpers.hpp"
@@ -45,6 +48,7 @@ using vulkan_dispatch_event = emel::kernel::vulkan::event::dispatch_request;
 using emel::kernel::test::dtype;
 using emel::kernel::test::flash_attn_ext_fixture;
 using emel::kernel::test::flash_attn_reference_f16_scores;
+using emel::kernel::test::flash_attn_reference_rounded_weight_float_values;
 using emel::kernel::test::make_dst;
 using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_quantized_src;
@@ -624,6 +628,51 @@ TEST_CASE("kernel_flash_attn_ext_requires_canonical_execution_path") {
 
   CHECK_FALSE(x86_64_machine.process_event(invalid));
   CHECK_FALSE(aarch64_machine.process_event(invalid));
+}
+
+TEST_CASE("kernel_flash_attn_ext_matches_rounded_weight_float_value_reference") {
+  constexpr uint64_t head_dim = 1u;
+  constexpr uint64_t kv_tokens = 64u;
+
+  std::array<float, head_dim> q = {0.0f};
+  std::array<float, head_dim * kv_tokens> k = {};
+  std::array<float, head_dim * kv_tokens> v = {};
+  std::array<float, head_dim> dst_x86 = {};
+  std::array<float, head_dim> dst_aarch64 = {};
+
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    v[token] = std::sin(static_cast<float>(token) * 0.37f) * 4.0f +
+        std::cos(static_cast<float>(token) * 0.11f) * 0.4f;
+  }
+
+  emel::kernel::event::op_flash_attn_ext request_x86{};
+  request_x86.src0 = make_src(q.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+  request_x86.src1 = make_src(k.data(), dtype::f32, head_dim, kv_tokens, 1u, 1u);
+  request_x86.src2 = make_src(v.data(), dtype::f32, head_dim, kv_tokens, 1u, 1u);
+  request_x86.dst = make_dst(dst_x86.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+  request_x86.nth = 1;
+  const float scale = 1.0f;
+  std::memcpy(request_x86.op_params.data(), &scale, sizeof(scale));
+  request_x86.op_params_size = sizeof(scale);
+
+  auto request_aarch64 = request_x86;
+  request_aarch64.dst = make_dst(dst_aarch64.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+
+  const auto expected = flash_attn_reference_rounded_weight_float_values(
+      std::span<const float>(q.data(), q.size()),
+      std::span<const float>(k.data(), k.size()),
+      std::span<const float>(v.data(), v.size()),
+      head_dim,
+      kv_tokens,
+      scale);
+
+  x86_64_sm x86_64_machine{};
+  aarch64_sm aarch64_machine{};
+  CHECK(x86_64_machine.process_event(request_x86));
+  CHECK(dst_x86[0] == doctest::Approx(expected[0]).epsilon(1e-7f));
+
+  CHECK(aarch64_machine.process_event(request_aarch64));
+  CHECK(dst_aarch64[0] == doctest::Approx(expected[0]).epsilon(1e-7f));
 }
 
 TEST_CASE("kernel_x86_64_flash_attn_ext_reuses_persistent_workspace") {

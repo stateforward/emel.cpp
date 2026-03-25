@@ -138,6 +138,55 @@ inline std::vector<float> flash_attn_reference_f16_scores(std::span<const float>
   return out;
 }
 
+inline std::vector<float> flash_attn_reference_rounded_weight_float_values(
+    std::span<const float> q,
+    std::span<const float> k,
+    std::span<const float> v,
+    const uint64_t head_dim,
+    const uint64_t kv_tokens,
+    const float scale) {
+  std::vector<float> out(static_cast<size_t>(head_dim), 0.0f);
+  std::vector<float> rounded_weights(static_cast<size_t>(kv_tokens), 0.0f);
+
+  float max_score = -INFINITY;
+  std::vector<float> scores(static_cast<size_t>(kv_tokens), 0.0f);
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
+    const float score = emel::kernel::detail::dot_product_ggml_f16_scores(
+                            q.data(),
+                            k.data() + static_cast<std::ptrdiff_t>(offset),
+                            head_dim) *
+        scale;
+    scores[static_cast<size_t>(token)] = score;
+    max_score = std::max(max_score, score);
+  }
+
+  double score_sum = 0.0;
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    score_sum += std::exp(scores[static_cast<size_t>(token)] - max_score);
+  }
+
+  const float inv_score_sum = score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    const float normalized =
+        std::exp(scores[static_cast<size_t>(token)] - max_score) * inv_score_sum;
+    rounded_weights[static_cast<size_t>(token)] =
+        emel::kernel::detail::round_fp16_weight(normalized);
+  }
+
+  for (uint64_t dim = 0; dim < head_dim; ++dim) {
+    float value_sum = 0.0f;
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
+      value_sum += rounded_weights[static_cast<size_t>(token)] *
+          v[offset + static_cast<size_t>(dim)];
+    }
+    out[static_cast<size_t>(dim)] = value_sum;
+  }
+
+  return out;
+}
+
 template <class event_type>
 inline event_type make_smoke_op_event() {
   event_type ev{};
