@@ -1788,14 +1788,24 @@ inline bool run_flash_attn_ext_with_workspace(const request_type & request,
     }
 
     const float inv_score_sum = score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const float weight = workspace.score_buffer[token] * inv_score_sum;
+      workspace.score_buffer[token] = round_fp16_weight(weight);
+    }
+    for (uint64_t token = kv_tokens; token < attn_width; ++token) {
+      workspace.score_buffer[token] = 0.0f;
+    }
+
     for (uint64_t dim = 0; dim < head_dim; ++dim) {
-      float acc = 0.0f;
       for (uint64_t token = 0; token < kv_tokens; ++token) {
-        const float weight = workspace.score_buffer[token] * inv_score_sum;
         const float * v = tensor_row_ptr(request.src2, token, kv_head);
-        acc += weight * v[dim];
+        workspace.value_buffer[token] = v[dim];
       }
-      dst[dim] = acc;
+      for (uint64_t token = kv_tokens; token < attn_width; ++token) {
+        workspace.value_buffer[token] = 0.0f;
+      }
+      dst[dim] = dot_product_ggml_f16_scores(
+          workspace.value_buffer.data(), workspace.score_buffer.data(), attn_width);
     }
   }
 

@@ -779,7 +779,7 @@ inline bool compute_attention(native_backend & backend,
       for (int32_t position = position_limit; position < attn_width; ++position) {
         backend.attn_value_column[static_cast<size_t>(position)] = 0.0f;
       }
-      backend.attn_ctx[cache_offset] = emel::kernel::detail::dot_product_f32(
+      backend.attn_ctx[cache_offset] = emel::kernel::detail::dot_product_ggml_f16_scores(
           backend.attn_value_column.data(),
           backend.attn_probs_rounded.data(),
           static_cast<uint64_t>(attn_width));
