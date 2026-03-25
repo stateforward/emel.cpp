@@ -608,39 +608,11 @@ inline void apply_rope(std::span<float> vector,
 }
 
 #if defined(__ARM_NEON) && defined(__aarch64__)
-inline float32x4_t expf4_neon(float32x4_t x) noexcept {
-  const float32x4_t r = vdupq_n_f32(0x1.8p23f);
-  const float32x4_t z = vfmaq_f32(r, x, vdupq_n_f32(0x1.715476p+0f));
-  const float32x4_t n = vsubq_f32(z, r);
-  const float32x4_t b = vfmsq_f32(
-      vfmsq_f32(x, n, vdupq_n_f32(0x1.62e4p-1f)), n, vdupq_n_f32(0x1.7f7d1cp-20f));
-  const uint32x4_t e = vshlq_n_u32(vreinterpretq_u32_f32(z), 23);
-  const float32x4_t k =
-      vreinterpretq_f32_u32(vaddq_u32(e, vreinterpretq_u32_f32(vdupq_n_f32(1.0f))));
-  const uint32x4_t c = vcagtq_f32(n, vdupq_n_f32(126.0f));
-  const float32x4_t u = vmulq_f32(b, b);
-  const float32x4_t j = vfmaq_f32(
-      vmulq_f32(vdupq_n_f32(0x1.ffffecp-1f), b),
-      vfmaq_f32(vfmaq_f32(vdupq_n_f32(0x1.fffdb6p-2f), vdupq_n_f32(0x1.555e66p-3f), b),
-                vfmaq_f32(vdupq_n_f32(0x1.573e2ep-5f), vdupq_n_f32(0x1.0e4020p-7f), b),
-                u),
-      u);
-  if (!vpaddd_u64(vreinterpretq_u64_u32(c))) {
-    return vfmaq_f32(k, j, k);
-  }
-  const uint32x4_t d = vandq_u32(vclezq_f32(n), vdupq_n_u32(0x82000000));
-  const float32x4_t s1 = vreinterpretq_f32_u32(vaddq_u32(d, vdupq_n_u32(0x7f000000)));
-  const float32x4_t s2 = vreinterpretq_f32_u32(vsubq_u32(e, d));
-  return vbslq_f32(vcagtq_f32(n, vdupq_n_f32(192.0f)),
-                   vmulq_f32(s1, s1),
-                   vbslq_f32(c, vmulq_f32(vfmaq_f32(s2, s2, j), s1), vfmaq_f32(k, k, j)));
-}
-
 inline float32x4_t silu4_neon(float32x4_t x) noexcept {
   const float32x4_t one = vdupq_n_f32(1.0f);
   const float32x4_t zero = vdupq_n_f32(0.0f);
   const float32x4_t neg_x = vsubq_f32(zero, x);
-  const float32x4_t exp_neg_x = expf4_neon(neg_x);
+  const float32x4_t exp_neg_x = ::emel::kernel::detail::expf4_ggml(neg_x);
   const float32x4_t one_plus_exp_neg_x = vaddq_f32(one, exp_neg_x);
   return vdivq_f32(x, one_plus_exp_neg_x);
 }
@@ -746,12 +718,8 @@ inline void fill_masked_softmax_probs_ggml(std::span<const float> scores,
     max_score = std::max(max_score, scores[static_cast<size_t>(position)]);
   }
 
-  double score_sum = 0.0;
-  for (int32_t position = 0; position < active_count; ++position) {
-    const float prob = std::exp(scores[static_cast<size_t>(position)] - max_score);
-    probs_out[static_cast<size_t>(position)] = prob;
-    score_sum += static_cast<double>(prob);
-  }
+  const double score_sum = ::emel::kernel::detail::exp_and_sum_ggml_f32(
+      scores.data(), probs_out.data(), static_cast<uint64_t>(active_count), max_score);
 
   const float inv_score_sum =
       score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);

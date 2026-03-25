@@ -261,12 +261,8 @@ inline bool run_flash_attn_ext_neon(const request_type & request,
       max_score = std::max(max_score, workspace.score_buffer[token]);
     }
 
-    double score_sum = 0.0;
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float prob = std::exp(workspace.score_buffer[token] - max_score);
-      workspace.score_buffer[token] = prob;
-      score_sum += static_cast<double>(prob);
-    }
+    const double score_sum = ::emel::kernel::detail::exp_and_sum_ggml_f32(
+        workspace.score_buffer.data(), workspace.score_buffer.data(), kv_tokens, max_score);
 
     const float inv_score_sum =
         score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);

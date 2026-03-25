@@ -684,6 +684,66 @@ inline float * tensor_row_ptr_mut(const tensor_type & tensor,
   return reinterpret_cast<float *>(base + row1 * tensor.nb[1] + row2 * tensor.nb[2]);
 }
 
+#if defined(__ARM_NEON) && defined(__aarch64__)
+inline float32x4_t expf4_ggml(float32x4_t x) noexcept {
+  const float32x4_t r = vdupq_n_f32(0x1.8p23f);
+  const float32x4_t z = vfmaq_f32(r, x, vdupq_n_f32(0x1.715476p+0f));
+  const float32x4_t n = vsubq_f32(z, r);
+  const float32x4_t b = vfmsq_f32(
+      vfmsq_f32(x, n, vdupq_n_f32(0x1.62e4p-1f)), n, vdupq_n_f32(0x1.7f7d1cp-20f));
+  const uint32x4_t e = vshlq_n_u32(vreinterpretq_u32_f32(z), 23);
+  const float32x4_t k =
+      vreinterpretq_f32_u32(vaddq_u32(e, vreinterpretq_u32_f32(vdupq_n_f32(1.0f))));
+  const uint32x4_t c = vcagtq_f32(n, vdupq_n_f32(126.0f));
+  const float32x4_t u = vmulq_f32(b, b);
+  const float32x4_t j = vfmaq_f32(
+      vmulq_f32(vdupq_n_f32(0x1.ffffecp-1f), b),
+      vfmaq_f32(vfmaq_f32(vdupq_n_f32(0x1.fffdb6p-2f), vdupq_n_f32(0x1.555e66p-3f), b),
+                vfmaq_f32(vdupq_n_f32(0x1.573e2ep-5f), vdupq_n_f32(0x1.0e4020p-7f), b),
+                u),
+      u);
+  if (!vpaddd_u64(vreinterpretq_u64_u32(c))) {
+    return vfmaq_f32(k, j, k);
+  }
+  const uint32x4_t d = vandq_u32(vclezq_f32(n), vdupq_n_u32(0x82000000));
+  const float32x4_t s1 = vreinterpretq_f32_u32(vaddq_u32(d, vdupq_n_u32(0x7f000000)));
+  const float32x4_t s2 = vreinterpretq_f32_u32(vsubq_u32(e, d));
+  return vbslq_f32(vcagtq_f32(n, vdupq_n_f32(192.0f)),
+                   vmulq_f32(s1, s1),
+                   vbslq_f32(c, vmulq_f32(vfmaq_f32(s2, s2, j), s1), vfmaq_f32(k, k, j)));
+}
+#endif
+
+inline double exp_and_sum_ggml_f32(const float * src,
+                                   float * dst,
+                                   const uint64_t count,
+                                   const float max_value) noexcept {
+#if defined(__ARM_NEON) && defined(__aarch64__)
+  uint64_t idx = 0u;
+  double sum = 0.0;
+  const float32x4_t max_vec = vdupq_n_f32(max_value);
+  for (; idx + 4u <= count; idx += 4u) {
+    const float32x4_t values = expf4_ggml(vsubq_f32(vld1q_f32(src + idx), max_vec));
+    vst1q_f32(dst + idx, values);
+    sum += static_cast<double>(vaddvq_f32(values));
+  }
+  for (; idx < count; ++idx) {
+    const float value = ::expf(src[idx] - max_value);
+    dst[idx] = value;
+    sum += static_cast<double>(value);
+  }
+  return sum;
+#else
+  double sum = 0.0;
+  for (uint64_t idx = 0u; idx < count; ++idx) {
+    const float value = ::expf(src[idx] - max_value);
+    dst[idx] = value;
+    sum += static_cast<double>(value);
+  }
+  return sum;
+#endif
+}
+
 inline float dot_product_ggml_f16_scores(const float * lhs,
                                          const float * rhs,
                                          const uint64_t count) noexcept {
@@ -1498,15 +1558,9 @@ inline bool run_soft_max(const request_type & request) noexcept {
       max_v = std::max(max_v, src_dense[offset + i]);
     }
 
-    float sum = 0.0f;
+    const double sum = exp_and_sum_ggml_f32(src_dense + offset, dst_dense + offset, width, max_v);
     for (uint64_t i = 0; i < width; ++i) {
-      const float e = std::exp(src_dense[offset + i] - max_v);
-      dst_dense[offset + i] = e;
-      sum += e;
-    }
-
-    for (uint64_t i = 0; i < width; ++i) {
-      dst_dense[offset + i] /= sum;
+      dst_dense[offset + i] /= static_cast<float>(sum);
     }
   }
 
@@ -1833,12 +1887,8 @@ inline bool run_flash_attn_ext_with_workspace(const request_type & request,
       max_score = std::max(max_score, workspace.score_buffer[token]);
     }
 
-    double score_sum = 0.0;
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float prob = std::exp(workspace.score_buffer[token] - max_score);
-      workspace.score_buffer[token] = prob;
-      score_sum += static_cast<double>(prob);
-    }
+    const double score_sum = exp_and_sum_ggml_f32(
+        workspace.score_buffer.data(), workspace.score_buffer.data(), kv_tokens, max_score);
 
     const float inv_score_sum =
         score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);

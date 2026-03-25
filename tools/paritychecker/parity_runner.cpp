@@ -1609,8 +1609,10 @@ llama_context_ptr make_reference_context(initialize_backend & backend) {
   llama_context_params context_params = llama_context_default_params();
   context_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
   context_params.n_ctx = 0;
-  context_params.n_batch = 512;
-  context_params.n_ubatch = 512;
+  const int32_t batch_capacity =
+      backend.model != nullptr ? std::max(512, llama_model_n_ctx_train(backend.model.get())) : 512;
+  context_params.n_batch = batch_capacity;
+  context_params.n_ubatch = batch_capacity;
   context_params.n_seq_max = 1;
   context_params.n_threads = 1;
   context_params.n_threads_batch = 1;
@@ -4336,6 +4338,37 @@ bool compute_attention_with_ggml_flash_ext_helper(
   return true;
 }
 
+bool compute_attention_with_ggml_flash_ext_masked_helper(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position_limit,
+    std::span<const float> q_vector) {
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t layer_offset =
+      emel::generator::detail::layer_cache_offset(backend, layer_index, 0, kv_dim);
+  std::vector<float> attn_ctx;
+  if (!run_ggml_flash_attn_ext_masked_case(
+          q_vector,
+          std::span<const float>(backend.key_cache.data() + layer_offset,
+                                 static_cast<size_t>(backend.n_ctx * kv_dim)),
+          std::span<const float>(backend.value_cache.data() + layer_offset,
+                                 static_cast<size_t>(backend.n_ctx * kv_dim)),
+          static_cast<int64_t>(backend.head_dim),
+          static_cast<int64_t>(backend.n_ctx),
+          static_cast<int64_t>(position_limit),
+          static_cast<int64_t>(backend.n_head),
+          static_cast<int64_t>(backend.n_head_kv),
+          1.0f / std::sqrt(static_cast<float>(backend.head_dim)),
+          attn_ctx)) {
+    return false;
+  }
+  if (attn_ctx.size() != backend.attn_ctx.size()) {
+    return false;
+  }
+  std::copy(attn_ctx.begin(), attn_ctx.end(), backend.attn_ctx.begin());
+  return true;
+}
+
 inline float round_scalar_to_fp16(const float value) {
   return ggml_fp16_to_fp32(ggml_fp32_to_fp16(value));
 }
@@ -4959,6 +4992,78 @@ bool run_layer_with_scalar_attention_ggml_flash_ext(
       backend.value_cache.data() + cache_offset);
 
   if (!compute_attention_with_ggml_flash_ext_helper(
+          backend,
+          layer_index,
+          position + 1,
+          std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd))) ||
+      !emel::generator::detail::matmul_vector(
+          backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+      !emel::generator::detail::matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
+    backend.ffn_hidden[idx] = emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+  }
+
+  if (!emel::generator::detail::matmul_vector(
+          backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+    backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
+  }
+
+  return true;
+}
+
+bool run_layer_with_scalar_attention_ggml_flash_ext_masked(
+    emel::generator::detail::native_backend & backend,
+    const int32_t layer_index,
+    const int32_t position) {
+  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  if (!emel::generator::detail::rms_norm(
+          backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+      !emel::generator::detail::matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    return false;
+  }
+
+  emel::generator::detail::apply_rope(
+      backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+  emel::generator::detail::apply_rope(backend.k,
+                                      backend.n_head_kv,
+                                      backend.head_dim_kv,
+                                      backend.n_rot,
+                                      position,
+                                      backend.rope_freq_base);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
+      backend.q_attn.data());
+
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const size_t cache_offset =
+      emel::generator::detail::layer_cache_offset(backend, layer_index, position, kv_dim);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
+      backend.key_cache.data() + cache_offset);
+  emel::generator::detail::store_fp16_rounded_cache(
+      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
+      backend.value_cache.data() + cache_offset);
+
+  if (!compute_attention_with_ggml_flash_ext_masked_helper(
           backend,
           layer_index,
           position + 1,
@@ -9700,8 +9805,9 @@ bool capture_reference_graph_for_tokens(const generation_load_state & state,
   llama_context_params context_params = llama_context_default_params();
   context_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
   context_params.n_ctx = 0;
-  context_params.n_batch = 512;
-  context_params.n_ubatch = 512;
+  const int32_t batch_capacity = std::max(512, state.model_data->params.n_ctx);
+  context_params.n_batch = batch_capacity;
+  context_params.n_ubatch = batch_capacity;
   context_params.n_seq_max = 1;
   context_params.n_threads = 1;
   context_params.n_threads_batch = 1;
@@ -9760,8 +9866,9 @@ bool capture_reference_graph_for_generation_prefix(const generation_load_state &
   llama_context_params context_params = llama_context_default_params();
   context_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
   context_params.n_ctx = 0;
-  context_params.n_batch = 512;
-  context_params.n_ubatch = 512;
+  const int32_t batch_capacity = std::max(512, state.model_data->params.n_ctx);
+  context_params.n_batch = batch_capacity;
+  context_params.n_ubatch = batch_capacity;
   context_params.n_seq_max = 1;
   context_params.n_threads = 1;
   context_params.n_threads_batch = 1;
@@ -10635,8 +10742,9 @@ void dump_logits_compare(const generation_load_state & state,
   llama_context_params context_params = llama_context_default_params();
   context_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
   context_params.n_ctx = 0;
-  context_params.n_batch = 512;
-  context_params.n_ubatch = 512;
+  const int32_t batch_capacity = std::max(512, state.model_data->params.n_ctx);
+  context_params.n_batch = batch_capacity;
+  context_params.n_ubatch = batch_capacity;
   context_params.n_seq_max = 1;
   context_params.n_threads = 1;
   context_params.n_threads_batch = 1;
@@ -11354,6 +11462,8 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   dump_full_generation_mode("rounded_weight_scalar",
                             run_layer_with_scalar_attention_rounded_weight_scalar);
   dump_full_generation_mode("runtime_flash_q_attn", run_layer_with_flash_request_q_attn);
+  dump_full_generation_mode("ggml_flash_ext_masked",
+                            run_layer_with_scalar_attention_ggml_flash_ext_masked);
   dump_full_generation_mode("emel_prod_style", run_layer_with_scalar_attention_emel_prod_style);
   dump_full_generation_mode("emel_prod_style_float_value",
                             run_layer_with_scalar_attention_emel_prod_style_float_value);
@@ -14947,6 +15057,62 @@ void dump_generation_live_backend_prefix_debug(const generation_load_state & sta
               };
           compare_flash_request("same_request_flash_dispatch_state", dispatch_backend);
           compare_flash_request("same_request_flash_shared_state", shared_backend);
+        }
+        {
+          auto prepare_attention_scratch =
+              [&](emel::generator::detail::native_backend & scratch) {
+                return emel::generator::detail::prepare(scratch, *state.model_data) ==
+                           emel::error::cast(emel::model::loader::error::none) &&
+                    ((scratch.kernel_kind = shared_backend.kernel_kind), true) &&
+                    ((scratch.kernel.set_kind(scratch.kernel_kind)), true) &&
+                    ((scratch.key_cache = shared_backend.key_cache), true) &&
+                    ((scratch.value_cache = shared_backend.value_cache), true) &&
+                    ((scratch.q_attn = shared_backend.q_attn), true);
+              };
+          const std::span<const float> reference_kqv_out = reference_token_row(
+              find_reference_tensor(graph_capture, ("kqv_out-" + layer_suffix).c_str()),
+              dispatch_backend.attn_ctx.size(),
+              static_cast<int32_t>(token_index));
+
+          emel::generator::detail::native_backend prod_backend = {};
+          if (prepare_attention_scratch(prod_backend) &&
+              compute_attention_with_emel_prod_style(
+                  prod_backend,
+                  layer,
+                  position + 1,
+                  std::span<const float>(prod_backend.q_attn.data(),
+                                         static_cast<size_t>(prod_backend.n_embd)))) {
+            std::fprintf(stdout,
+                         "%s.same_input_flash_vs_emel_prod_style: max_abs=%g\n",
+                         layer_prefix.c_str(),
+                         max_abs_diff(dispatch_backend.attn_ctx, prod_backend.attn_ctx));
+            if (!reference_kqv_out.empty()) {
+              std::fprintf(stdout,
+                           "%s.same_input_emel_prod_style_reference_kqv_out: max_abs=%g\n",
+                           layer_prefix.c_str(),
+                           max_abs_diff(prod_backend.attn_ctx, reference_kqv_out));
+            }
+          }
+
+          emel::generator::detail::native_backend exact_masked_backend = {};
+          if (prepare_attention_scratch(exact_masked_backend) &&
+              compute_attention_with_ggml_nonflash_exact_masked(
+                  exact_masked_backend,
+                  layer,
+                  position + 1,
+                  std::span<const float>(exact_masked_backend.q_attn.data(),
+                                         static_cast<size_t>(exact_masked_backend.n_embd)))) {
+            std::fprintf(stdout,
+                         "%s.same_input_flash_vs_exact_masked: max_abs=%g\n",
+                         layer_prefix.c_str(),
+                         max_abs_diff(dispatch_backend.attn_ctx, exact_masked_backend.attn_ctx));
+            if (!reference_kqv_out.empty()) {
+              std::fprintf(stdout,
+                           "%s.same_input_exact_masked_reference_kqv_out: max_abs=%g\n",
+                           layer_prefix.c_str(),
+                           max_abs_diff(exact_masked_backend.attn_ctx, reference_kqv_out));
+            }
+          }
         }
       }
 
