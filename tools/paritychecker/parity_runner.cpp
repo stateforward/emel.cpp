@@ -7348,6 +7348,65 @@ void dump_generation_selected_step_stage_debug(
                                                 static_cast<size_t>(kv_dim)));
     }
 
+    const std::span<const float> reference_kqv_out =
+        reference_stage_row(("kqv_out-" + std::to_string(layer)).c_str(), backend.attn_ctx.size());
+    if (!reference_kqv_out.empty()) {
+      const size_t layer_cache_offset =
+          emel::generator::detail::layer_cache_offset(backend, layer, 0, kv_dim);
+      const std::span<const float> q_attn_rows(
+          backend.q_attn.data(), static_cast<size_t>(backend.n_head * backend.head_dim));
+      const std::span<const float> key_rows(
+          backend.key_cache.data() + layer_cache_offset,
+          static_cast<size_t>(backend.n_ctx * kv_dim));
+      const std::span<const float> value_rows(
+          backend.value_cache.data() + layer_cache_offset,
+          static_cast<size_t>(backend.n_ctx * kv_dim));
+      std::vector<float> ggml_nonflash_exact_ctx;
+      if (run_ggml_nonflash_attn_case(q_attn_rows,
+                                      key_rows,
+                                      value_rows,
+                                      static_cast<int64_t>(backend.head_dim),
+                                      static_cast<int64_t>(backend.n_ctx),
+                                      static_cast<int64_t>(position + 1),
+                                      static_cast<int64_t>(backend.n_head),
+                                      static_cast<int64_t>(backend.n_head_kv),
+                                      1.0f / std::sqrt(static_cast<float>(backend.head_dim)),
+                                      ggml_nonflash_exact_ctx)) {
+        dump_state_compare((label_prefix + ".kqv_out.ggml_nonflash_exact").c_str(),
+                           ggml_nonflash_exact_ctx,
+                           reference_kqv_out);
+      } else {
+        std::fprintf(stdout,
+                     "%s.kqv_out.ggml_nonflash_exact: replay failed\n",
+                     label_prefix.c_str());
+      }
+
+      std::vector<float> emel_nonflash_f16_ctx;
+      if (run_emel_nonflash_f16_ggml_softmax_case(q_attn_rows,
+                                                  key_rows,
+                                                  value_rows,
+                                                  static_cast<int64_t>(backend.head_dim),
+                                                  static_cast<int64_t>(backend.n_ctx),
+                                                  static_cast<int64_t>(position + 1),
+                                                  static_cast<int64_t>(backend.n_head),
+                                                  static_cast<int64_t>(backend.n_head_kv),
+                                                  1.0f / std::sqrt(static_cast<float>(backend.head_dim)),
+                                                  emel_nonflash_f16_ctx)) {
+        dump_state_compare((label_prefix + ".kqv_out.emel_nonflash_f16").c_str(),
+                           emel_nonflash_f16_ctx,
+                           reference_kqv_out);
+        if (!ggml_nonflash_exact_ctx.empty()) {
+          dump_state_compare((label_prefix + ".kqv_out.emel_vs_exact_nonflash").c_str(),
+                             emel_nonflash_f16_ctx,
+                             ggml_nonflash_exact_ctx);
+        }
+      } else {
+        std::fprintf(stdout,
+                     "%s.kqv_out.emel_nonflash_f16: replay failed\n",
+                     label_prefix.c_str());
+      }
+    }
+
     if (!emel::generator::detail::compute_attention(
             backend, layer, position + 1, backend.q_attn) ||
         !emel::generator::detail::matmul_vector(
@@ -7355,9 +7414,7 @@ void dump_generation_selected_step_stage_debug(
       std::fprintf(stdout, "%s.attention: replay failed\n", label_prefix.c_str());
       return;
     }
-    if (const std::span<const float> reference_kqv_out =
-            reference_stage_row(("kqv_out-" + std::to_string(layer)).c_str(), backend.attn_ctx.size());
-        !reference_kqv_out.empty()) {
+    if (!reference_kqv_out.empty()) {
       dump_state_compare((label_prefix + ".kqv_out").c_str(), backend.attn_ctx, reference_kqv_out);
     }
     if (const std::span<const float> reference_attn_out =
@@ -10766,6 +10823,101 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   if (prefix_tokens.empty()) {
     std::fprintf(stdout, "generation_debug.state: empty prefix\n");
     return;
+  }
+
+  int32_t runtime_exact_first_sig_step = -1;
+  {
+    emel::generator::detail::native_backend runtime_backend = {};
+    emel::generator::detail::native_backend exact_nonflash_backend = {};
+    if (emel::generator::detail::prepare(runtime_backend, *state.model_data) ==
+            emel::error::cast(emel::model::loader::error::none) &&
+        emel::generator::detail::prepare(exact_nonflash_backend, *state.model_data) ==
+            emel::error::cast(emel::model::loader::error::none)) {
+      const auto runtime_exact_max_abs_diff = [](std::span<const float> lhs,
+                                                 std::span<const float> rhs) {
+        if (lhs.size() != rhs.size()) {
+          return std::numeric_limits<float>::infinity();
+        }
+
+        float max_abs = 0.0f;
+        for (size_t idx = 0; idx < lhs.size(); ++idx) {
+          max_abs = std::max(max_abs, std::fabs(lhs[idx] - rhs[idx]));
+        }
+        return max_abs;
+      };
+      const size_t prompt_count = prompt_tokens.size();
+      int32_t first_hidden_step = -1;
+      int32_t first_hidden_layer = -1;
+      float first_hidden_max_abs = 0.0f;
+      float first_hidden_attn_max_abs = 0.0f;
+      int32_t first_sig_step = -1;
+      int32_t first_sig_layer = -1;
+      float first_sig_hidden_max_abs = 0.0f;
+      float first_sig_attn_max_abs = 0.0f;
+
+      for (size_t token_index = 0; token_index < prefix_tokens.size(); ++token_index) {
+        const int32_t token_id = prefix_tokens[token_index];
+        const int32_t position = static_cast<int32_t>(token_index);
+        if (!emel::generator::detail::copy_tensor_row(
+                *runtime_backend.token_embedding.tensor, token_id, runtime_backend.hidden) ||
+            !emel::generator::detail::copy_tensor_row(
+                *exact_nonflash_backend.token_embedding.tensor,
+                token_id,
+                exact_nonflash_backend.hidden)) {
+          break;
+        }
+
+        for (int32_t layer = 0; layer < runtime_backend.n_layer; ++layer) {
+          if (!run_layer_with_flash_request_q_attn(runtime_backend, layer, position) ||
+              !run_layer_with_scalar_attention_ggml_nonflash_exact_masked(
+                  exact_nonflash_backend, layer, position)) {
+            token_index = prefix_tokens.size();
+            break;
+          }
+
+          const float hidden_max_abs =
+              runtime_exact_max_abs_diff(runtime_backend.hidden, exact_nonflash_backend.hidden);
+          const float attn_max_abs =
+              runtime_exact_max_abs_diff(runtime_backend.attn_ctx, exact_nonflash_backend.attn_ctx);
+          const int32_t generated_index =
+              static_cast<int32_t>(token_index) - static_cast<int32_t>(prompt_count);
+
+          if (first_hidden_step < 0 && hidden_max_abs > 1.0e-6f) {
+            first_hidden_step = generated_index;
+            first_hidden_layer = layer;
+            first_hidden_max_abs = hidden_max_abs;
+            first_hidden_attn_max_abs = attn_max_abs;
+          }
+          if (first_sig_step < 0 && hidden_max_abs > 1.0e-4f) {
+            first_sig_step = generated_index;
+            first_sig_layer = layer;
+            first_sig_hidden_max_abs = hidden_max_abs;
+            first_sig_attn_max_abs = attn_max_abs;
+          }
+        }
+
+        runtime_backend.kv_cache_tokens = position + 1;
+        exact_nonflash_backend.kv_cache_tokens = position + 1;
+      }
+
+      std::fprintf(stdout,
+                   "generation_debug.runtime_vs_exact_nonflash: first_hidden_gt_1e-6=%d "
+                   "layer=%d hidden_max_abs=%g attn_max_abs=%g "
+                   "first_hidden_gt_1e-4=%d layer=%d hidden_max_abs=%g attn_max_abs=%g\n",
+                   first_hidden_step,
+                   first_hidden_layer,
+                   first_hidden_max_abs,
+                   first_hidden_attn_max_abs,
+                   first_sig_step,
+                   first_sig_layer,
+                   first_sig_hidden_max_abs,
+                   first_sig_attn_max_abs);
+      runtime_exact_first_sig_step = first_sig_step;
+    }
+  }
+  if (runtime_exact_first_sig_step >= 0) {
+    dump_generation_selected_step_stage_debug(
+        state, opts, reference_result, runtime_exact_first_sig_step);
   }
 
   constexpr float target_q2_threshold = 1.0e-4f;
