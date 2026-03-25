@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 
+#include "../allocation_tracker.hpp"
 #include "emel/error/error.hpp"
 #include "emel/graph/errors.hpp"
 #include "emel/graph/events.hpp"
@@ -21,16 +22,9 @@
 #include "emel/tensor/errors.hpp"
 #include "emel/tensor/events.hpp"
 
-namespace {
-
-std::atomic<bool> g_track_allocations = false;
-std::atomic<size_t> g_allocation_count = 0u;
-
-}  // namespace
-
 void * operator new(const std::size_t size) {
-  if (g_track_allocations.load(std::memory_order_relaxed)) {
-    g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
+  if (emel::test::allocation::g_track_allocations.load(std::memory_order_relaxed)) {
+    emel::test::allocation::g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
   }
   if (void * ptr = std::malloc(size)) {
     return ptr;
@@ -39,8 +33,8 @@ void * operator new(const std::size_t size) {
 }
 
 void * operator new[](const std::size_t size) {
-  if (g_track_allocations.load(std::memory_order_relaxed)) {
-    g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
+  if (emel::test::allocation::g_track_allocations.load(std::memory_order_relaxed)) {
+    emel::test::allocation::g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
   }
   if (void * ptr = std::malloc(size)) {
     return ptr;
@@ -49,15 +43,15 @@ void * operator new[](const std::size_t size) {
 }
 
 void * operator new(const std::size_t size, const std::nothrow_t &) noexcept {
-  if (g_track_allocations.load(std::memory_order_relaxed)) {
-    g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
+  if (emel::test::allocation::g_track_allocations.load(std::memory_order_relaxed)) {
+    emel::test::allocation::g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
   }
   return std::malloc(size);
 }
 
 void * operator new[](const std::size_t size, const std::nothrow_t &) noexcept {
-  if (g_track_allocations.load(std::memory_order_relaxed)) {
-    g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
+  if (emel::test::allocation::g_track_allocations.load(std::memory_order_relaxed)) {
+    emel::test::allocation::g_allocation_count.fetch_add(1u, std::memory_order_relaxed);
   }
   return std::malloc(size);
 }
@@ -246,20 +240,7 @@ struct lifecycle_fixture {
   };
 };
 
-struct allocation_scope {
-  allocation_scope() noexcept {
-    g_allocation_count.store(0u, std::memory_order_relaxed);
-    g_track_allocations.store(true, std::memory_order_relaxed);
-  }
-
-  ~allocation_scope() {
-    g_track_allocations.store(false, std::memory_order_relaxed);
-  }
-
-  size_t allocations() const noexcept {
-    return g_allocation_count.load(std::memory_order_relaxed);
-  }
-};
+using allocation_scope = emel::test::allocation::allocation_scope;
 
 void copy_architecture(std::array<char, emel::model::data::k_max_architecture_name> & dest,
                        const std::string_view value) {

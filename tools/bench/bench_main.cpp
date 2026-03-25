@@ -16,6 +16,14 @@ namespace emel::bench {
 
 bool generation_flash_evidence_ready() noexcept;
 std::uint64_t generation_flash_evidence_dispatch_calls() noexcept;
+std::uint64_t generation_flash_evidence_optimized_dispatch_calls() noexcept;
+std::uint64_t generation_flash_evidence_shared_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_optimized_q2_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_shared_q2_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_optimized_q3_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_shared_q3_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_optimized_q6_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_shared_q6_dispatch_calls() noexcept;
 std::int32_t generation_flash_evidence_emel_decode_calls() noexcept;
 std::int32_t generation_flash_evidence_emel_logits_calls() noexcept;
 std::int32_t generation_flash_evidence_reference_decode_calls() noexcept;
@@ -298,26 +306,92 @@ void print_compare(const std::vector<bench::result> & emel_results,
   }
 
   if (!bench::generation_flash_evidence_ready()) {
-    std::fprintf(stderr, "error: missing generation flash evidence\n");
+    std::fprintf(stderr, "error: missing generation runtime evidence\n");
     std::exit(1);
   }
 
   const auto flash_dispatch_calls = bench::generation_flash_evidence_dispatch_calls();
+  const auto optimized_flash_dispatch_calls =
+      bench::generation_flash_evidence_optimized_dispatch_calls();
+  const auto shared_flash_dispatch_calls =
+      bench::generation_flash_evidence_shared_dispatch_calls();
+  const auto optimized_q2_dispatch_calls =
+      bench::generation_quantized_evidence_optimized_q2_dispatch_calls();
+  const auto shared_q2_dispatch_calls =
+      bench::generation_quantized_evidence_shared_q2_dispatch_calls();
+  const auto optimized_q3_dispatch_calls =
+      bench::generation_quantized_evidence_optimized_q3_dispatch_calls();
+  const auto shared_q3_dispatch_calls =
+      bench::generation_quantized_evidence_shared_q3_dispatch_calls();
+  const auto optimized_q6_dispatch_calls =
+      bench::generation_quantized_evidence_optimized_q6_dispatch_calls();
+  const auto shared_q6_dispatch_calls =
+      bench::generation_quantized_evidence_shared_q6_dispatch_calls();
   const auto emel_decode_calls = bench::generation_flash_evidence_emel_decode_calls();
   const auto emel_logits_calls = bench::generation_flash_evidence_emel_logits_calls();
   const auto reference_decode_calls = bench::generation_flash_evidence_reference_decode_calls();
   const auto reference_logits_calls = bench::generation_flash_evidence_reference_logits_calls();
-  if (flash_dispatch_calls == 0 || emel_decode_calls != 0 || emel_logits_calls != 0 ||
+  if (emel_decode_calls != 0 || emel_logits_calls != 0 ||
       reference_decode_calls != 0 || reference_logits_calls != 0) {
     std::fprintf(stderr,
-                 "error: invalid generation flash evidence flash_dispatch_calls=%" PRIu64
+                 "error: invalid generation runtime evidence flash_dispatch_calls=%" PRIu64
+                 " optimized_flash_dispatch_calls=%" PRIu64
+                 " shared_flash_dispatch_calls=%" PRIu64
                  " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
                  "reference_logits_calls=%d\n",
                  flash_dispatch_calls,
+                 optimized_flash_dispatch_calls,
+                 shared_flash_dispatch_calls,
                  emel_decode_calls,
                  emel_logits_calls,
                  reference_decode_calls,
                  reference_logits_calls);
+    std::exit(1);
+  }
+  if (flash_dispatch_calls == 0 &&
+      (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
+    std::fprintf(stderr,
+                 "error: invalid zero-flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                 " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                 optimized_flash_dispatch_calls,
+                 shared_flash_dispatch_calls);
+    std::exit(1);
+  }
+  if (flash_dispatch_calls != 0 && k_host_is_aarch64 &&
+      (optimized_flash_dispatch_calls == 0 || shared_flash_dispatch_calls != 0)) {
+    std::fprintf(stderr,
+                 "error: invalid ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                 " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                 optimized_flash_dispatch_calls,
+                 shared_flash_dispatch_calls);
+    std::exit(1);
+  }
+  if (flash_dispatch_calls != 0 && !k_host_is_aarch64 &&
+      (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
+    std::fprintf(stderr,
+                 "error: invalid non-ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                 " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                 optimized_flash_dispatch_calls,
+                 shared_flash_dispatch_calls);
+    std::exit(1);
+  }
+  if (k_host_is_aarch64 &&
+      (optimized_q2_dispatch_calls == 0 || shared_q2_dispatch_calls != 0 ||
+       optimized_q3_dispatch_calls == 0 || shared_q3_dispatch_calls != 0 ||
+       optimized_q6_dispatch_calls == 0 || shared_q6_dispatch_calls != 0)) {
+    std::fprintf(stderr,
+                 "error: invalid ARM quantized evidence optimized_q2_dispatch_calls=%" PRIu64
+                 " shared_q2_dispatch_calls=%" PRIu64
+                 " optimized_q3_dispatch_calls=%" PRIu64
+                 " shared_q3_dispatch_calls=%" PRIu64
+                 " optimized_q6_dispatch_calls=%" PRIu64
+                 " shared_q6_dispatch_calls=%" PRIu64 "\n",
+                 optimized_q2_dispatch_calls,
+                 shared_q2_dispatch_calls,
+                 optimized_q3_dispatch_calls,
+                 shared_q3_dispatch_calls,
+                 optimized_q6_dispatch_calls,
+                 shared_q6_dispatch_calls);
     std::exit(1);
   }
 
@@ -327,15 +401,33 @@ void print_compare(const std::vector<bench::result> & emel_results,
               static_cast<int>(k_bench_reference_ref.size()),
               k_bench_reference_ref.data());
   std::printf("# generation_flash_evidence: case=%.*s flash_dispatch_calls=%" PRIu64
+              " optimized_flash_dispatch_calls=%" PRIu64
+              " shared_flash_dispatch_calls=%" PRIu64
               " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
               "reference_logits_calls=%d\n",
               static_cast<int>(bench::k_generation_case_name.size()),
               bench::k_generation_case_name.data(),
               flash_dispatch_calls,
+              optimized_flash_dispatch_calls,
+              shared_flash_dispatch_calls,
               emel_decode_calls,
               emel_logits_calls,
               reference_decode_calls,
               reference_logits_calls);
+  std::printf("# generation_quantized_evidence: case=%.*s optimized_q2_dispatch_calls=%" PRIu64
+              " shared_q2_dispatch_calls=%" PRIu64
+              " optimized_q3_dispatch_calls=%" PRIu64
+              " shared_q3_dispatch_calls=%" PRIu64
+              " optimized_q6_dispatch_calls=%" PRIu64
+              " shared_q6_dispatch_calls=%" PRIu64 "\n",
+              static_cast<int>(bench::k_generation_case_name.size()),
+              bench::k_generation_case_name.data(),
+              optimized_q2_dispatch_calls,
+              shared_q2_dispatch_calls,
+              optimized_q3_dispatch_calls,
+              shared_q3_dispatch_calls,
+              optimized_q6_dispatch_calls,
+              shared_q6_dispatch_calls);
 
   const std::size_t count = std::min(emel_sorted.size(), ref_sorted.size());
   for (std::size_t i = 0; i < count; ++i) {

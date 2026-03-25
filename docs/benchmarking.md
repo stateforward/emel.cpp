@@ -142,6 +142,25 @@ for narrow local debugging, you can also isolate a single case with `EMEL_BENCH_
 you need seam-audit output for the generation case, set `EMEL_BENCH_AUDIT_GENERATION_SEAMS=1`;
 that audit output stays on stderr and does not change the normal compare row on stdout.
 
+## reproducible generation profiling
+
+for a reproducible macOS time-profiler capture of the maintained generation benchmark group, use:
+
+```bash
+scripts/profile_generation.sh
+```
+
+this script:
+
+- rebuilds `bench_runner` through the maintained bench workflow
+- profiles the current generation benchmark group with `xctrace`
+- writes trace, stdout, exported XML, and a compact hot-frame summary under `tmp/profiles/`
+- optionally writes flamegraphs when `stackcollapse-instruments.pl` and `flamegraph.pl` are
+  available on `PATH` or through `FLAMEGRAPH_DIR`
+
+use `--out-basename=...` to control the artifact prefix and `--case-index=...` if the generation
+group moves in `tools/bench/bench_main.cpp`.
+
 ## gate behavior
 
 the benchmark gate script enforces the following:

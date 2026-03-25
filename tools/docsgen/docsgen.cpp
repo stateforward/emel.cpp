@@ -33,7 +33,7 @@ struct doc_paths {
   fs::path mermaid_dir;
   fs::path benchmarks_md;
   fs::path benchmarks_snapshot;
-  fs::path generation_pre_flash_baseline;
+  fs::path generation_pre_arm_flash_optimized_baseline;
   fs::path benchmarks_template;
   fs::path readme_template;
   fs::path readme_path;
@@ -52,10 +52,19 @@ struct benchmark_snapshot {
   std::string reference_ref;
   std::string flash_case;
   std::string flash_dispatch_calls;
+  std::string optimized_flash_dispatch_calls;
+  std::string shared_flash_dispatch_calls;
   std::string emel_decode_calls;
   std::string emel_logits_calls;
   std::string reference_decode_calls;
   std::string reference_logits_calls;
+  std::string quantized_case;
+  std::string optimized_q2_dispatch_calls;
+  std::string shared_q2_dispatch_calls;
+  std::string optimized_q3_dispatch_calls;
+  std::string shared_q3_dispatch_calls;
+  std::string optimized_q6_dispatch_calls;
+  std::string shared_q6_dispatch_calls;
 };
 
 struct machine_spec {
@@ -465,6 +474,26 @@ parse_key_value_file(const fs::path & path) {
   return fields;
 }
 
+std::optional<std::unordered_map<std::string, std::string>>
+parse_inline_key_value_fields(const std::string & line, const char * prefix) {
+  const std::string_view prefix_view{prefix};
+  if (line.rfind(prefix_view.data(), 0u) != 0) {
+    return std::nullopt;
+  }
+
+  std::unordered_map<std::string, std::string> fields;
+  std::istringstream input(line.substr(prefix_view.size()));
+  for (std::string token; input >> token;) {
+    const std::size_t separator = token.find('=');
+    if (separator == std::string::npos || separator == 0u || separator + 1u >= token.size()) {
+      return std::nullopt;
+    }
+    fields.emplace(token.substr(0u, separator), token.substr(separator + 1u));
+  }
+
+  return fields;
+}
+
 std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & paths) {
   const std::string snapshot = read_file(paths.benchmarks_snapshot);
   if (snapshot.empty()) {
@@ -476,25 +505,79 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
   benchmark_snapshot parsed;
   const std::regex line_re(
       R"(^([^ ]+) emel\.cpp ([0-9.]+) ns/op, llama\.cpp ([0-9.]+) ns/op, ratio=([0-9.]+)x$)");
-  const std::regex reference_re(R"(^# reference_impl: source=([^ ]+) ref=([0-9a-f]+)$)");
-  const std::regex flash_re(
-      R"(^# generation_flash_evidence: case=([^ ]+) flash_dispatch_calls=([0-9]+) emel_decode_calls=([0-9]+) emel_logits_calls=([0-9]+) reference_decode_calls=([0-9]+) reference_logits_calls=([0-9]+)$)");
 
   std::istringstream input(snapshot);
   for (std::string line; std::getline(input, line);) {
     std::smatch match;
-    if (std::regex_match(line, match, reference_re)) {
-      parsed.reference_source = match[1].str();
-      parsed.reference_ref = match[2].str();
+    if (const auto metadata = parse_inline_key_value_fields(line, "# reference_impl: ");
+        metadata.has_value()) {
+      const auto source_it = metadata->find("source");
+      const auto ref_it = metadata->find("ref");
+      if (source_it == metadata->end() || ref_it == metadata->end()) {
+        std::fprintf(stderr,
+                     "error: invalid # reference_impl metadata in %s\n",
+                     paths.benchmarks_snapshot.string().c_str());
+        return std::nullopt;
+      }
+      parsed.reference_source = source_it->second;
+      parsed.reference_ref = ref_it->second;
       continue;
     }
-    if (std::regex_match(line, match, flash_re)) {
-      parsed.flash_case = match[1].str();
-      parsed.flash_dispatch_calls = match[2].str();
-      parsed.emel_decode_calls = match[3].str();
-      parsed.emel_logits_calls = match[4].str();
-      parsed.reference_decode_calls = match[5].str();
-      parsed.reference_logits_calls = match[6].str();
+    if (const auto metadata = parse_inline_key_value_fields(line, "# generation_flash_evidence: ");
+        metadata.has_value()) {
+      for (const char * field : {"case",
+                                 "flash_dispatch_calls",
+                                 "emel_decode_calls",
+                                 "emel_logits_calls",
+                                 "reference_decode_calls",
+                                 "reference_logits_calls"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # generation_flash_evidence metadata in %s\n",
+                       paths.benchmarks_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.flash_case = metadata->at("case");
+      parsed.flash_dispatch_calls = metadata->at("flash_dispatch_calls");
+      parsed.optimized_flash_dispatch_calls =
+          metadata->contains("optimized_flash_dispatch_calls")
+              ? metadata->at("optimized_flash_dispatch_calls")
+              : "0";
+      parsed.shared_flash_dispatch_calls =
+          metadata->contains("shared_flash_dispatch_calls")
+              ? metadata->at("shared_flash_dispatch_calls")
+              : "0";
+      parsed.emel_decode_calls = metadata->at("emel_decode_calls");
+      parsed.emel_logits_calls = metadata->at("emel_logits_calls");
+      parsed.reference_decode_calls = metadata->at("reference_decode_calls");
+      parsed.reference_logits_calls = metadata->at("reference_logits_calls");
+      continue;
+    }
+    if (const auto metadata =
+            parse_inline_key_value_fields(line, "# generation_quantized_evidence: ");
+        metadata.has_value()) {
+      for (const char * field : {"case",
+                                 "optimized_q2_dispatch_calls",
+                                 "shared_q2_dispatch_calls",
+                                 "optimized_q3_dispatch_calls",
+                                 "shared_q3_dispatch_calls",
+                                 "optimized_q6_dispatch_calls",
+                                 "shared_q6_dispatch_calls"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # generation_quantized_evidence metadata in %s\n",
+                       paths.benchmarks_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.quantized_case = metadata->at("case");
+      parsed.optimized_q2_dispatch_calls = metadata->at("optimized_q2_dispatch_calls");
+      parsed.shared_q2_dispatch_calls = metadata->at("shared_q2_dispatch_calls");
+      parsed.optimized_q3_dispatch_calls = metadata->at("optimized_q3_dispatch_calls");
+      parsed.shared_q3_dispatch_calls = metadata->at("shared_q3_dispatch_calls");
+      parsed.optimized_q6_dispatch_calls = metadata->at("optimized_q6_dispatch_calls");
+      parsed.shared_q6_dispatch_calls = metadata->at("shared_q6_dispatch_calls");
       continue;
     }
     if (line.empty() || line[0] == '#') {
@@ -520,6 +603,12 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
   if (parsed.flash_case.empty()) {
     std::fprintf(stderr,
                  "error: missing # generation_flash_evidence metadata in %s\n",
+                 paths.benchmarks_snapshot.string().c_str());
+    return std::nullopt;
+  }
+  if (parsed.quantized_case.empty()) {
+    std::fprintf(stderr,
+                 "error: missing # generation_quantized_evidence metadata in %s\n",
                  paths.benchmarks_snapshot.string().c_str());
     return std::nullopt;
   }
@@ -576,7 +665,8 @@ std::optional<double> parse_double_field(const std::string & raw_value,
 
 std::optional<std::string> build_flash_publication_section(const doc_paths & paths,
                                                            const benchmark_snapshot & snapshot) {
-  const auto baseline = parse_key_value_file(paths.generation_pre_flash_baseline);
+  const auto baseline =
+      parse_key_value_file(paths.generation_pre_arm_flash_optimized_baseline);
   if (!baseline.has_value()) {
     return std::nullopt;
   }
@@ -591,7 +681,7 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
       std::fprintf(stderr,
                    "error: missing %s in %s\n",
                    field,
-                   paths.generation_pre_flash_baseline.string().c_str());
+                   paths.generation_pre_arm_flash_optimized_baseline.string().c_str());
       return std::nullopt;
     }
   }
@@ -609,7 +699,7 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   const auto baseline_emel =
       parse_double_field(baseline->at("baseline_emel_ns"),
                          "baseline_emel_ns",
-                         paths.generation_pre_flash_baseline);
+                         paths.generation_pre_arm_flash_optimized_baseline);
   if (!baseline_emel.has_value()) {
     return std::nullopt;
   }
@@ -631,7 +721,9 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   std::string section;
   section += "## Current Flash Evidence\n\n";
   section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
-  section += "- Preserved baseline artifact: `snapshots/bench/generation_pre_flash_baseline.txt`\n";
+  section +=
+      "- Preserved baseline artifact: "
+      "`snapshots/bench/generation_pre_arm_flash_optimized_baseline.txt`\n";
   section += "- `reference_impl: source=";
   section += snapshot.reference_source;
   section += " ref=";
@@ -641,6 +733,10 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += snapshot.flash_case;
   section += " flash_dispatch_calls=";
   section += snapshot.flash_dispatch_calls;
+  section += " optimized_flash_dispatch_calls=";
+  section += snapshot.optimized_flash_dispatch_calls;
+  section += " shared_flash_dispatch_calls=";
+  section += snapshot.shared_flash_dispatch_calls;
   section += " emel_decode_calls=";
   section += snapshot.emel_decode_calls;
   section += " emel_logits_calls=";
@@ -659,8 +755,25 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += " ns/op, ratio=";
   section += current->ratio;
   section += "x`\n\n";
+  section += "## Current Quantized Evidence\n\n";
+  section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
+  section += "- `generation_quantized_evidence: case=";
+  section += snapshot.quantized_case;
+  section += " optimized_q2_dispatch_calls=";
+  section += snapshot.optimized_q2_dispatch_calls;
+  section += " shared_q2_dispatch_calls=";
+  section += snapshot.shared_q2_dispatch_calls;
+  section += " optimized_q3_dispatch_calls=";
+  section += snapshot.optimized_q3_dispatch_calls;
+  section += " shared_q3_dispatch_calls=";
+  section += snapshot.shared_q3_dispatch_calls;
+  section += " optimized_q6_dispatch_calls=";
+  section += snapshot.optimized_q6_dispatch_calls;
+  section += " shared_q6_dispatch_calls=";
+  section += snapshot.shared_q6_dispatch_calls;
+  section += "`\n\n";
 
-  section += "## Pre-Flash Baseline Comparison\n\n";
+  section += "## Preserved ARM Flash Baseline Comparison\n\n";
   section += "- `source_commit=";
   section += baseline->at("source_commit");
   section += "`\n";
@@ -711,8 +824,8 @@ int main(int argc, char ** argv) {
   paths.mermaid_dir = paths.architecture_dir / "mermaid";
   paths.benchmarks_md = paths.docs_dir / "benchmarks.md";
   paths.benchmarks_snapshot = paths.root / "snapshots/bench/benchmarks_compare.txt";
-  paths.generation_pre_flash_baseline =
-      paths.root / "snapshots/bench/generation_pre_flash_baseline.txt";
+  paths.generation_pre_arm_flash_optimized_baseline =
+      paths.root / "snapshots/bench/generation_pre_arm_flash_optimized_baseline.txt";
   paths.benchmarks_template = paths.docs_dir / "templates/benchmarks.md.j2";
   paths.readme_template = paths.docs_dir / "templates/README.md.j2";
   paths.readme_path = paths.root / "README.md";

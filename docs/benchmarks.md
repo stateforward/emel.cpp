@@ -9,103 +9,110 @@ are not. True benchmarks will be end-to-end once the system is complete.
 ## Current Flash Evidence
 
 - Source snapshot: `snapshots/bench/benchmarks_compare.txt`
-- Preserved baseline artifact: `snapshots/bench/generation_pre_flash_baseline.txt`
+- Preserved baseline artifact: `snapshots/bench/generation_pre_arm_flash_optimized_baseline.txt`
 - `reference_impl: source=cmake_fetch ref=ecbcb7ea9d3303097519723b264a8b5f1e977028`
-- `generation_flash_evidence: case=generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 flash_dispatch_calls=2 emel_decode_calls=0 emel_logits_calls=0 reference_decode_calls=0 reference_logits_calls=0`
-- Current compare row: `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 emel.cpp 6995375.000 ns/op, llama.cpp 5146125.000 ns/op, ratio=1.359x`
+- `generation_flash_evidence: case=generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 flash_dispatch_calls=0 optimized_flash_dispatch_calls=0 shared_flash_dispatch_calls=0 emel_decode_calls=0 emel_logits_calls=0 reference_decode_calls=0 reference_logits_calls=0`
+- Current compare row: `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 emel.cpp 4135459.000 ns/op, llama.cpp 3194500.000 ns/op, ratio=1.295x`
 
-## Pre-Flash Baseline Comparison
+## Current Quantized Evidence
 
-- `source_commit=2acd4fe^`
+- Source snapshot: `snapshots/bench/benchmarks_compare.txt`
+- `generation_quantized_evidence: case=generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 optimized_q2_dispatch_calls=8 shared_q2_dispatch_calls=0 optimized_q3_dispatch_calls=6 shared_q3_dispatch_calls=0 optimized_q6_dispatch_calls=1 shared_q6_dispatch_calls=0`
+
+## Preserved ARM Flash Baseline Comparison
+
+- `source_commit=3a5a4ee692912429a6d666bb709ec5934ef5655f`
 - `baseline_ref=ecbcb7ea9d3303097519723b264a8b5f1e977028`
 - `case=generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1`
-- `baseline_emel_ns=63837917.000`
-- `baseline_reference_ns=10451583.000`
-- `baseline_ratio=6.108x`
-- `current_emel_ns=6995375.000`
-- `current_reference_ns=5146125.000`
-- `current_ratio=1.359x`
-- `speedup=9.126x`
-- `latency_drop_pct=89.0`
+- `baseline_emel_ns=6995375.000`
+- `baseline_reference_ns=5146125.000`
+- `baseline_ratio=1.359x`
+- `current_emel_ns=4135459.000`
+- `current_reference_ns=3194500.000`
+- `current_ratio=1.295x`
+- `speedup=1.692x`
+- `latency_drop_pct=40.9`
 
 | Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |
 | --- | ---: | ---: | ---: |
-| `batch/planner_equal` | 2208.000 | 10208.000 | 0.216x |
-| `batch/planner_seq` | 2458.000 | 5167.000 | 0.476x |
-| `batch/planner_simple` | 1250.000 | 5625.000 | 0.222x |
-| `gbnf/rule_parser_basic` | 709.000 | 3042.000 | 0.233x |
-| `gbnf/rule_parser_complex` | 4000.000 | 5750.000 | 0.696x |
-| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1` | 6995375.000 | 5146125.000 | 1.359x |
-| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_8` | 51492917.000 | 15213333.000 | 3.385x |
-| `kernel/aarch64/op_add` | 709.000 | 7250.000 | 0.098x |
-| `kernel/aarch64/op_cos` | 1709.000 | 7000.000 | 0.244x |
-| `kernel/aarch64/op_div` | 125.000 | 7375.000 | 0.017x |
-| `kernel/aarch64/op_dup` | 333.000 | 6000.000 | 0.056x |
-| `kernel/aarch64/op_log` | 2167.000 | 6750.000 | 0.321x |
-| `kernel/aarch64/op_mul` | 291.000 | 8292.000 | 0.035x |
-| `kernel/aarch64/op_mul_mat` | 7791.000 | 10917.000 | 0.714x |
-| `kernel/aarch64/op_sin` | 1375.000 | 8959.000 | 0.153x |
-| `kernel/aarch64/op_soft_max` | 9917.000 | 5750.000 | 1.725x |
-| `kernel/aarch64/op_sqr` | 208.000 | 7583.000 | 0.027x |
-| `kernel/aarch64/op_sqrt` | 7916.000 | 9333.000 | 0.848x |
-| `kernel/aarch64/op_sub` | 11958.000 | 8041.000 | 1.487x |
-| `kernel/aarch64/op_unary_exp` | 1625.000 | 7500.000 | 0.217x |
-| `kernel/aarch64/op_unary_neg` | 7750.000 | 12917.000 | 0.600x |
-| `kernel/aarch64/op_unary_relu` | 167.000 | 6833.000 | 0.024x |
-| `logits/sampler_raw/vocab_128000` | 19000.000 | 20417.000 | 0.931x |
-| `logits/sampler_raw/vocab_256000` | 41292.000 | 40375.000 | 1.023x |
-| `logits/sampler_raw/vocab_32000` | 4708.000 | 7042.000 | 0.669x |
-| `logits/sampler_sml/vocab_128000` | 19000.000 | 22708.000 | 0.837x |
-| `logits/sampler_sml/vocab_256000` | 44042.000 | 40875.000 | 1.077x |
-| `logits/sampler_sml/vocab_32000` | 5917.000 | 5958.000 | 0.993x |
-| `logits/validator_raw/vocab_128000` | 94500.000 | 99833.000 | 0.947x |
-| `logits/validator_raw/vocab_256000` | 195083.000 | 229084.000 | 0.852x |
-| `logits/validator_raw/vocab_32000` | 23417.000 | 29625.000 | 0.790x |
-| `logits/validator_sml/vocab_128000` | 94459.000 | 94500.000 | 1.000x |
-| `logits/validator_sml/vocab_256000` | 187458.000 | 223667.000 | 0.838x |
-| `logits/validator_sml/vocab_32000` | 22875.000 | 38917.000 | 0.588x |
-| `memory/hybrid_full` | 1917.000 | 49750.000 | 0.039x |
-| `memory/kv_full` | 583.000 | 39583.000 | 0.015x |
-| `memory/recurrent_full` | 9666.000 | 8667.000 | 1.115x |
-| `text/encoders/bpe_long` | 83.000 | 84.000 | 0.988x |
-| `text/encoders/bpe_short` | 42.000 | 84.000 | 0.500x |
-| `text/encoders/fallback_long` | 2250.000 | 2459.000 | 0.915x |
-| `text/encoders/fallback_short` | 84.000 | 83.000 | 1.012x |
-| `text/encoders/plamo2_long` | 7042.000 | 7500.000 | 0.939x |
-| `text/encoders/plamo2_short` | 333.000 | 334.000 | 0.997x |
-| `text/encoders/rwkv_long` | 836458.000 | 841167.000 | 0.994x |
-| `text/encoders/rwkv_short` | 51209.000 | 63416.000 | 0.808x |
-| `text/encoders/spm_long` | 3572834.000 | 3581458.000 | 0.998x |
-| `text/encoders/spm_short` | 1458.000 | 1458.000 | 1.000x |
-| `text/encoders/ugm_long` | 1382500.000 | 1355125.000 | 1.020x |
-| `text/encoders/ugm_short` | 834.000 | 791.000 | 1.054x |
-| `text/encoders/wpm_long` | 28125.000 | 30792.000 | 0.913x |
-| `text/encoders/wpm_short` | 667.000 | 708.000 | 0.942x |
-| `text/jinja/formatter_long` | 125.000 | 385375.000 | 0.000x |
-| `text/jinja/formatter_short` | 167.000 | 558542.000 | 0.000x |
-| `text/jinja/parser_long` | 66042.000 | 57125.000 | 1.156x |
-| `text/jinja/parser_short` | 2750.000 | 1208.000 | 2.276x |
-| `tokenizer/full_bpe_long` | 12417.000 | 13292.000 | 0.934x |
-| `tokenizer/full_bpe_short` | 500.000 | 458.000 | 1.092x |
-| `tokenizer/full_plamo2_long` | 11375.000 | 12125.000 | 0.938x |
-| `tokenizer/full_plamo2_short` | 2416.000 | 2667.000 | 0.906x |
-| `tokenizer/full_rwkv_long` | 792958.000 | 801958.000 | 0.989x |
-| `tokenizer/full_rwkv_short` | 50875.000 | 62417.000 | 0.815x |
-| `tokenizer/full_spm_long` | 3416041.000 | 3476791.000 | 0.983x |
-| `tokenizer/full_spm_short` | 1792.000 | 1667.000 | 1.075x |
-| `tokenizer/full_ugm_long` | 1406042.000 | 1412291.000 | 0.996x |
-| `tokenizer/full_ugm_short` | 3041.000 | 3083.000 | 0.986x |
-| `tokenizer/full_wpm_long` | 29625.000 | 31458.000 | 0.942x |
-| `tokenizer/full_wpm_short` | 2958.000 | 2834.000 | 1.044x |
-| `tokenizer/preprocessor_bpe_long` | 3125.000 | 5833.000 | 0.536x |
-| `tokenizer/preprocessor_bpe_short` | 500.000 | 3583.000 | 0.140x |
-| `tokenizer/preprocessor_plamo2_long` | 5875.000 | 6667.000 | 0.881x |
-| `tokenizer/preprocessor_plamo2_short` | 3000.000 | 3916.000 | 0.766x |
-| `tokenizer/preprocessor_rwkv_long` | 4709.000 | 5667.000 | 0.831x |
-| `tokenizer/preprocessor_rwkv_short` | 3083.000 | 4125.000 | 0.747x |
-| `tokenizer/preprocessor_spm_long` | 4334.000 | 7625.000 | 0.568x |
-| `tokenizer/preprocessor_spm_short` | 2917.000 | 6208.000 | 0.470x |
-| `tokenizer/preprocessor_ugm_long` | 4708.000 | 6792.000 | 0.693x |
-| `tokenizer/preprocessor_ugm_short` | 2917.000 | 5000.000 | 0.583x |
-| `tokenizer/preprocessor_wpm_long` | 4708.000 | 5916.000 | 0.796x |
-| `tokenizer/preprocessor_wpm_short` | 2875.000 | 4083.000 | 0.704x |
+| `batch/planner_equal` | 1993.125 | 6422.541 | 0.310x |
+| `batch/planner_seq` | 2178.167 | 2702.042 | 0.806x |
+| `batch/planner_simple` | 1037.417 | 2400.042 | 0.432x |
+| `gbnf/rule_parser_basic` | 504.000 | 292.125 | 1.725x |
+| `gbnf/rule_parser_complex` | 3290.250 | 1527.250 | 2.154x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1` | 4135459.000 | 3194500.000 | 1.295x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_10` | 40107167.000 | 17093958.000 | 2.346x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_100` | 406015458.000 | 161191500.000 | 2.519x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1000` | 5289484000.000 | 1773140875.000 | 2.983x |
+| `kernel/aarch64/op_add` | 100.792 | 5482.166 | 0.018x |
+| `kernel/aarch64/op_cos` | 1676.666 | 6081.250 | 0.276x |
+| `kernel/aarch64/op_div` | 110.000 | 4501.375 | 0.024x |
+| `kernel/aarch64/op_dup` | 95.042 | 4495.875 | 0.021x |
+| `kernel/aarch64/op_log` | 1878.292 | 6531.041 | 0.288x |
+| `kernel/aarch64/op_mul` | 111.584 | 5553.000 | 0.020x |
+| `kernel/aarch64/op_mul_mat` | 4539.958 | 10807.209 | 0.420x |
+| `kernel/aarch64/op_sin` | 1307.625 | 5916.500 | 0.221x |
+| `kernel/aarch64/op_soft_max` | 1021.083 | 5275.541 | 0.194x |
+| `kernel/aarch64/op_sqr` | 101.250 | 4657.292 | 0.022x |
+| `kernel/aarch64/op_sqrt` | 147.916 | 4851.000 | 0.030x |
+| `kernel/aarch64/op_sub` | 100.958 | 5751.333 | 0.018x |
+| `kernel/aarch64/op_unary_exp` | 1380.958 | 5946.750 | 0.232x |
+| `kernel/aarch64/op_unary_neg` | 103.500 | 4797.583 | 0.022x |
+| `kernel/aarch64/op_unary_relu` | 115.750 | 4815.167 | 0.024x |
+| `logits/sampler_raw/vocab_128000` | 20166.458 | 18443.625 | 1.093x |
+| `logits/sampler_raw/vocab_256000` | 38104.417 | 38633.083 | 0.986x |
+| `logits/sampler_raw/vocab_32000` | 4329.000 | 5566.625 | 0.778x |
+| `logits/sampler_sml/vocab_128000` | 17653.834 | 18641.875 | 0.947x |
+| `logits/sampler_sml/vocab_256000` | 30503.000 | 32141.167 | 0.949x |
+| `logits/sampler_sml/vocab_32000` | 4977.084 | 3517.084 | 1.415x |
+| `logits/validator_raw/vocab_128000` | 163340.583 | 162545.084 | 1.005x |
+| `logits/validator_raw/vocab_256000` | 336142.125 | 326633.750 | 1.029x |
+| `logits/validator_raw/vocab_32000` | 41081.708 | 40939.917 | 1.003x |
+| `logits/validator_sml/vocab_128000` | 100361.625 | 98715.750 | 1.017x |
+| `logits/validator_sml/vocab_256000` | 198997.333 | 198059.125 | 1.005x |
+| `logits/validator_sml/vocab_32000` | 24616.167 | 24530.167 | 1.004x |
+| `memory/hybrid_full` | 450.167 | 34554.084 | 0.013x |
+| `memory/kv_full` | 134.083 | 33809.916 | 0.004x |
+| `memory/recurrent_full` | 143.791 | 4627.750 | 0.031x |
+| `text/encoders/bpe_long` | 62.333 | 63.000 | 0.989x |
+| `text/encoders/bpe_short` | 57.166 | 56.333 | 1.015x |
+| `text/encoders/fallback_long` | 2466.709 | 2420.792 | 1.019x |
+| `text/encoders/fallback_short` | 66.500 | 63.000 | 1.056x |
+| `text/encoders/plamo2_long` | 7536.542 | 7768.625 | 0.970x |
+| `text/encoders/plamo2_short` | 204.458 | 204.250 | 1.001x |
+| `text/encoders/rwkv_long` | 839269.583 | 850578.875 | 0.987x |
+| `text/encoders/rwkv_short` | 57024.584 | 56939.417 | 1.001x |
+| `text/encoders/spm_long` | 3664208.708 | 3678366.209 | 0.996x |
+| `text/encoders/spm_short` | 1270.583 | 1418.000 | 0.896x |
+| `text/encoders/ugm_long` | 1384060.375 | 1386069.583 | 0.999x |
+| `text/encoders/ugm_short` | 743.125 | 730.208 | 1.018x |
+| `text/encoders/wpm_long` | 30683.125 | 30725.375 | 0.999x |
+| `text/encoders/wpm_short` | 608.042 | 548.542 | 1.108x |
+| `text/jinja/formatter_long` | 59.291 | 222734.917 | 0.000x |
+| `text/jinja/formatter_short` | 15.750 | 3829.750 | 0.004x |
+| `text/jinja/parser_long` | 66000.667 | 50167.333 | 1.316x |
+| `text/jinja/parser_short` | 943.167 | 508.500 | 1.855x |
+| `tokenizer/full_bpe_long` | 13773.333 | 13852.291 | 0.994x |
+| `tokenizer/full_bpe_short` | 329.375 | 305.417 | 1.078x |
+| `tokenizer/full_plamo2_long` | 12623.583 | 12369.166 | 1.021x |
+| `tokenizer/full_plamo2_short` | 2001.500 | 1955.833 | 1.023x |
+| `tokenizer/full_rwkv_long` | 838232.833 | 833388.625 | 1.006x |
+| `tokenizer/full_rwkv_short` | 55368.125 | 55387.334 | 1.000x |
+| `tokenizer/full_spm_long` | 3653798.583 | 3680401.125 | 0.993x |
+| `tokenizer/full_spm_short` | 1466.000 | 1456.375 | 1.007x |
+| `tokenizer/full_ugm_long` | 1381470.625 | 1419978.250 | 0.973x |
+| `tokenizer/full_ugm_short` | 2452.709 | 2479.833 | 0.989x |
+| `tokenizer/full_wpm_long` | 32604.750 | 32727.083 | 0.996x |
+| `tokenizer/full_wpm_short` | 2262.084 | 2321.292 | 0.974x |
+| `tokenizer/preprocessor_bpe_long` | 3374.708 | 5376.792 | 0.628x |
+| `tokenizer/preprocessor_bpe_short` | 145.959 | 1717.916 | 0.085x |
+| `tokenizer/preprocessor_plamo2_long` | 4170.083 | 5634.708 | 0.740x |
+| `tokenizer/preprocessor_plamo2_short` | 2388.334 | 3732.917 | 0.640x |
+| `tokenizer/preprocessor_rwkv_long` | 4037.083 | 5455.000 | 0.740x |
+| `tokenizer/preprocessor_rwkv_short` | 2491.166 | 3652.958 | 0.682x |
+| `tokenizer/preprocessor_spm_long` | 3932.583 | 5568.458 | 0.706x |
+| `tokenizer/preprocessor_spm_short` | 2502.584 | 3591.375 | 0.697x |
+| `tokenizer/preprocessor_ugm_long` | 4356.416 | 5735.834 | 0.760x |
+| `tokenizer/preprocessor_ugm_short` | 2399.417 | 3626.792 | 0.662x |
+| `tokenizer/preprocessor_wpm_long` | 4255.708 | 5513.375 | 0.772x |
+| `tokenizer/preprocessor_wpm_short` | 2475.209 | 3676.458 | 0.673x |

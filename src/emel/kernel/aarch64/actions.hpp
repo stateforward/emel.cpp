@@ -148,6 +148,148 @@ inline bool can_use_neon(const request_type & request, const bool neon_available
 #endif
 }
 
+template <class request_type>
+inline bool can_use_neon_flash_attn_ext(const request_type & request,
+                                        const bool neon_available) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void) request;
+  (void) neon_available;
+  return false;
+#else
+  return neon_available && ::emel::kernel::detail::can_run_flash_attn_ext(request);
+#endif
+}
+
+template <class tensor_type>
+inline const float * tensor_row_ptr(const tensor_type & tensor,
+                                    const uint64_t row1,
+                                    const uint64_t row2) noexcept {
+  const auto * base = static_cast<const char *>(tensor.data);
+  return reinterpret_cast<const float *>(base + row1 * tensor.nb[1] + row2 * tensor.nb[2]);
+}
+
+template <class tensor_type>
+inline float * tensor_row_ptr_mut(const tensor_type & tensor,
+                                  const uint64_t row1,
+                                  const uint64_t row2) noexcept {
+  auto * base = static_cast<char *>(tensor.data);
+  return reinterpret_cast<float *>(base + row1 * tensor.nb[1] + row2 * tensor.nb[2]);
+}
+
+inline void scale_f32_neon(float * data, const float scale, const uint64_t count) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  const float32x4_t scale_v = vdupq_n_f32(scale);
+  uint64_t idx = 0;
+  for (; idx + 4 <= count; idx += 4) {
+    const float32x4_t data_v = vld1q_f32(data + idx);
+    vst1q_f32(data + idx, vmulq_f32(data_v, scale_v));
+  }
+  for (; idx < count; ++idx) {
+    data[idx] *= scale;
+  }
+#else
+  (void) data;
+  (void) scale;
+  (void) count;
+#endif
+}
+
+inline void axpy_f32_neon(float * dst, const float * src,
+                          const float alpha, const uint64_t count) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  const float32x4_t alpha_v = vdupq_n_f32(alpha);
+  uint64_t idx = 0;
+  for (; idx + 4 <= count; idx += 4) {
+    const float32x4_t dst_v = vld1q_f32(dst + idx);
+    const float32x4_t src_v = vld1q_f32(src + idx);
+    const float32x4_t prod_v = vmulq_f32(src_v, alpha_v);
+    vst1q_f32(dst + idx, vaddq_f32(dst_v, prod_v));
+  }
+  for (; idx < count; ++idx) {
+    dst[idx] += src[idx] * alpha;
+  }
+#else
+  (void) dst;
+  (void) src;
+  (void) alpha;
+  (void) count;
+#endif
+}
+
+template <class request_type>
+inline bool run_flash_attn_ext_neon(const request_type & request,
+                                    const bool neon_available,
+                                    ::emel::kernel::detail::flash_attn_workspace & workspace) noexcept {
+  if (!can_use_neon_flash_attn_ext(request, neon_available)) {
+    return false;
+  }
+
+  const uint64_t kv_tokens = request.src1.ne[1];
+  const uint64_t attn_width = ::emel::kernel::detail::flash_attn_total_tokens(request);
+  if (kv_tokens > workspace.score_buffer.size()) {
+    return false;
+  }
+  if (attn_width < kv_tokens || attn_width > workspace.score_buffer.size()) {
+    return false;
+  }
+
+  if (workspace.prepared_tokens == kv_tokens) {
+    ++workspace.reuse_count;
+  } else {
+    workspace.prepared_tokens = kv_tokens;
+  }
+
+  const uint64_t head_dim = request.src0.ne[0];
+  const uint64_t head_count = request.src0.ne[2];
+  const uint64_t kv_head_count = request.src1.ne[2];
+  const uint64_t n_rep = head_count / kv_head_count;
+  const float scale = ::emel::kernel::detail::flash_attn_scale(request);
+
+  for (uint64_t head = 0; head < head_count; ++head) {
+    const uint64_t kv_head = head / n_rep;
+    const float * q = tensor_row_ptr(request.src0, 0u, head);
+    float * dst = tensor_row_ptr_mut(request.dst, 0u, head);
+
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const float * k = tensor_row_ptr(request.src1, token, kv_head);
+      workspace.score_buffer[token] =
+          ::emel::kernel::detail::dot_product_ggml_f16_scores(q, k, head_dim) * scale;
+    }
+
+    float max_score = workspace.score_buffer[0];
+    for (uint64_t token = 1; token < kv_tokens; ++token) {
+      max_score = std::max(max_score, workspace.score_buffer[token]);
+    }
+
+    const double score_sum = ::emel::kernel::detail::exp_and_sum_ggml_f32(
+        workspace.score_buffer.data(), workspace.score_buffer.data(), kv_tokens, max_score);
+
+    const float inv_score_sum =
+        score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const float weight = workspace.score_buffer[token] * inv_score_sum;
+      workspace.score_buffer[token] = ::emel::kernel::detail::round_fp16_weight(weight);
+    }
+    for (uint64_t token = kv_tokens; token < attn_width; ++token) {
+      workspace.score_buffer[token] = 0.0f;
+    }
+
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      for (uint64_t token = 0; token < kv_tokens; ++token) {
+        const float * v = tensor_row_ptr(request.src2, token, kv_head);
+        workspace.value_buffer[token] = v[dim];
+      }
+      for (uint64_t token = kv_tokens; token < attn_width; ++token) {
+        workspace.value_buffer[token] = 0.0f;
+      }
+      dst[dim] = ::emel::kernel::detail::dot_product_ggml_f16_scores(
+          workspace.value_buffer.data(), workspace.score_buffer.data(), attn_width);
+    }
+  }
+
+  return true;
+}
+
 inline bool execute_neon_dup(const event::op_dup & request) noexcept {
 #if defined(__aarch64__) || defined(__ARM_NEON)
   const uint64_t count = ::emel::kernel::detail::tensor_element_count(request.dst);
@@ -422,6 +564,12 @@ inline float dot_q2_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block
 #endif
 }
 
+inline float dot_q2_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q2_k * lhs,
+                                    const ::emel::kernel::detail::quant::block_q8_k * rhs,
+                                    const uint64_t block_count) noexcept {
+  return ::emel::kernel::detail::dot_q2_k_q8_k_row_scalar(lhs, rhs, block_count);
+}
+
 inline float dot_q3_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block_q3_k & lhs,
                                       const ::emel::kernel::detail::quant::block_q8_k & rhs)
     noexcept {
@@ -518,6 +666,112 @@ inline float dot_q3_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block
 #endif
 }
 
+inline float dot_q3_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q3_k * lhs,
+                                    const ::emel::kernel::detail::quant::block_q8_k * rhs,
+                                    const uint64_t block_count) noexcept {
+#if !defined(__ARM_FEATURE_DOTPROD)
+  return ::emel::kernel::detail::dot_q3_k_q8_k_row_scalar(lhs, rhs, block_count);
+#else
+  constexpr uint32_t kmask1 = 0x03030303u;
+  constexpr uint32_t kmask2 = 0x0f0f0f0fu;
+
+  uint32_t aux[3] = {};
+  uint32_t utmp[4] = {};
+
+  const uint8x16_t m3b = vdupq_n_u8(0x03u);
+  const int32x4_t zero = vdupq_n_s32(0);
+  const uint8x16_t m0 = vdupq_n_u8(1u);
+  const uint8x16_t m1 = vshlq_n_u8(m0, 1);
+  const uint8x16_t m2 = vshlq_n_u8(m0, 2);
+  const uint8x16_t m3 = vshlq_n_u8(m0, 3);
+  const int8_t m32 = 32;
+
+  int8x16x4_t q3bytes{};
+  float sum = 0.0f;
+
+  for (uint64_t block = 0; block < block_count; ++block) {
+    const float d = rhs[block].d * ::emel::kernel::detail::quant::fp16_to_fp32(lhs[block].d);
+
+    const uint8_t * q3 = lhs[block].qs.data();
+    const uint8_t * qh = lhs[block].hmask.data();
+    const int8_t * q8 = rhs[block].qs.data();
+
+    uint8x16x2_t qhbits = load_u8x16x2(qh);
+    uint8x16x4_t q3h{};
+    int32_t isum = 0;
+
+    std::memcpy(aux, lhs[block].scales.data(), lhs[block].scales.size());
+    utmp[3] = ((aux[1] >> 4u) & kmask2) | (((aux[2] >> 6u) & kmask1) << 4u);
+    utmp[2] = ((aux[0] >> 4u) & kmask2) | (((aux[2] >> 4u) & kmask1) << 4u);
+    utmp[1] = (aux[1] & kmask2) | (((aux[2] >> 2u) & kmask1) << 4u);
+    utmp[0] = (aux[0] & kmask2) | (((aux[2] >> 0u) & kmask1) << 4u);
+
+    int8_t * scale = reinterpret_cast<int8_t *>(utmp);
+    for (uint64_t j = 0; j < 16; ++j) {
+      scale[j] = static_cast<int8_t>(scale[j] - m32);
+    }
+
+    for (uint64_t j = 0; j < (::emel::kernel::detail::quant::QK_K / 128); ++j) {
+      const uint8x16x2_t q3bits = load_u8x16x2(q3);
+      q3 += 32;
+      const int8x16x4_t q8bytes_1 = load_s8x16x4(q8);
+      q8 += 64;
+      const int8x16x4_t q8bytes_2 = load_s8x16x4(q8);
+      q8 += 64;
+
+      q3h.val[0] = vshlq_n_u8(vbicq_u8(m0, qhbits.val[0]), 2);
+      q3h.val[1] = vshlq_n_u8(vbicq_u8(m0, qhbits.val[1]), 2);
+      q3h.val[2] = vshlq_n_u8(vbicq_u8(m1, qhbits.val[0]), 1);
+      q3h.val[3] = vshlq_n_u8(vbicq_u8(m1, qhbits.val[1]), 1);
+
+      q3bytes.val[0] =
+          vsubq_s8(vreinterpretq_s8_u8(vandq_u8(q3bits.val[0], m3b)), vreinterpretq_s8_u8(q3h.val[0]));
+      q3bytes.val[1] =
+          vsubq_s8(vreinterpretq_s8_u8(vandq_u8(q3bits.val[1], m3b)), vreinterpretq_s8_u8(q3h.val[1]));
+      q3bytes.val[2] = vsubq_s8(vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q3bits.val[0], 2), m3b)),
+                                vreinterpretq_s8_u8(q3h.val[2]));
+      q3bytes.val[3] = vsubq_s8(vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q3bits.val[1], 2), m3b)),
+                                vreinterpretq_s8_u8(q3h.val[3]));
+
+      isum += vaddvq_s32(vdotq_s32(zero, q3bytes.val[0], q8bytes_1.val[0])) * scale[0];
+      isum += vaddvq_s32(vdotq_s32(zero, q3bytes.val[1], q8bytes_1.val[1])) * scale[1];
+      isum += vaddvq_s32(vdotq_s32(zero, q3bytes.val[2], q8bytes_1.val[2])) * scale[2];
+      isum += vaddvq_s32(vdotq_s32(zero, q3bytes.val[3], q8bytes_1.val[3])) * scale[3];
+      scale += 4;
+
+      q3h.val[0] = vbicq_u8(m2, qhbits.val[0]);
+      q3h.val[1] = vbicq_u8(m2, qhbits.val[1]);
+      q3h.val[2] = vshrq_n_u8(vbicq_u8(m3, qhbits.val[0]), 1);
+      q3h.val[3] = vshrq_n_u8(vbicq_u8(m3, qhbits.val[1]), 1);
+
+      q3bytes.val[0] = vsubq_s8(vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q3bits.val[0], 4), m3b)),
+                                vreinterpretq_s8_u8(q3h.val[0]));
+      q3bytes.val[1] = vsubq_s8(vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q3bits.val[1], 4), m3b)),
+                                vreinterpretq_s8_u8(q3h.val[1]));
+      q3bytes.val[2] = vsubq_s8(vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q3bits.val[0], 6), m3b)),
+                                vreinterpretq_s8_u8(q3h.val[2]));
+      q3bytes.val[3] = vsubq_s8(vreinterpretq_s8_u8(vandq_u8(vshrq_n_u8(q3bits.val[1], 6), m3b)),
+                                vreinterpretq_s8_u8(q3h.val[3]));
+
+      isum += vaddvq_s32(vdotq_s32(zero, q3bytes.val[0], q8bytes_2.val[0])) * scale[0];
+      isum += vaddvq_s32(vdotq_s32(zero, q3bytes.val[1], q8bytes_2.val[1])) * scale[1];
+      isum += vaddvq_s32(vdotq_s32(zero, q3bytes.val[2], q8bytes_2.val[2])) * scale[2];
+      isum += vaddvq_s32(vdotq_s32(zero, q3bytes.val[3], q8bytes_2.val[3])) * scale[3];
+      scale += 4;
+
+      if (j == 0) {
+        qhbits.val[0] = vshrq_n_u8(qhbits.val[0], 4);
+        qhbits.val[1] = vshrq_n_u8(qhbits.val[1], 4);
+      }
+    }
+
+    sum += d * static_cast<float>(isum);
+  }
+
+  return sum;
+#endif
+}
+
 inline float dot_q6_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block_q6_k & lhs,
                                       const ::emel::kernel::detail::quant::block_q8_k & rhs)
     noexcept {
@@ -606,6 +860,16 @@ inline float dot_q6_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block
 #endif
 }
 
+inline float dot_q6_k_q8_k_row_neon(const ::emel::kernel::detail::quant::block_q6_k * lhs,
+                                    const ::emel::kernel::detail::quant::block_q8_k * rhs,
+                                    const uint64_t block_count) noexcept {
+  float sum = 0.0f;
+  for (uint64_t block = 0; block < block_count; ++block) {
+    sum += dot_q6_k_q8_k_block_neon(lhs[block], rhs[block]);
+  }
+  return sum;
+}
+
 inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {
 #if defined(__aarch64__) || defined(__ARM_NEON)
   const uint64_t k = request.src0.ne[0];
@@ -643,17 +907,17 @@ inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {
       for (uint64_t i = 0; i < m; ++i) {
         const uint8_t * row_ptr = a + i * row_bytes;
         if (src0_type == ::emel::kernel::detail::dtype_q2_k) {
-          c[i * n + j] = ::emel::kernel::detail::dot_q2_k_q8_k_row_scalar(
+          c[i * n + j] = dot_q2_k_q8_k_row_neon(
               reinterpret_cast<const ::emel::kernel::detail::quant::block_q2_k *>(row_ptr),
               q8_blocks.data(),
               block_count);
         } else if (src0_type == ::emel::kernel::detail::dtype_q3_k) {
-          c[i * n + j] = ::emel::kernel::detail::dot_q3_k_q8_k_row_scalar(
+          c[i * n + j] = dot_q3_k_q8_k_row_neon(
               reinterpret_cast<const ::emel::kernel::detail::quant::block_q3_k *>(row_ptr),
               q8_blocks.data(),
               block_count);
         } else {
-          c[i * n + j] = ::emel::kernel::detail::dot_q6_k_q8_k_row_scalar(
+          c[i * n + j] = dot_q6_k_q8_k_row_neon(
               reinterpret_cast<const ::emel::kernel::detail::quant::block_q6_k *>(row_ptr),
               q8_blocks.data(),
               block_count);
@@ -936,14 +1200,29 @@ struct exec_scalar_op {
   void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
     using request_type = std::remove_cvref_t<decltype(ev.request)>;
     if constexpr (std::is_same_v<request_type, ::emel::kernel::event::op_flash_attn_ext>) {
-      if (::emel::kernel::detail::run_flash_attn_ext_with_workspace(ev.request,
-                                                                    ctx.flash_attn_workspace)) {
+      if (::emel::kernel::aarch64::detail::run_flash_attn_ext_neon(ev.request,
+                                                                   ctx.neon_available,
+                                                                   ctx.flash_attn_workspace)) {
+        ++ctx.optimized_flash_dispatch_count;
+        detail::mark_done(ev, ctx);
+      } else if (::emel::kernel::detail::run_flash_attn_ext_with_workspace(
+                     ev.request, ctx.flash_attn_workspace)) {
+        ++ctx.shared_flash_dispatch_count;
         detail::mark_done(ev, ctx);
       } else {
         detail::mark_error(
             ev, ctx, static_cast<int32_t>(emel::error::cast(error::invalid_request)));
       }
     } else {
+      if constexpr (std::is_same_v<request_type, ::emel::kernel::event::op_mul_mat>) {
+        const uint8_t src0_type = ::emel::kernel::detail::dtype_code(ev.request.src0.type);
+        ctx.shared_q2_dispatch_count +=
+            static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q2_k);
+        ctx.shared_q3_dispatch_count +=
+            static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q3_k);
+        ctx.shared_q6_dispatch_count +=
+            static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q6_k);
+      }
       ::emel::kernel::detail::execute_scalar_unchecked(ev.request);
       detail::mark_done(ev, ctx);
     }
@@ -953,6 +1232,16 @@ struct exec_scalar_op {
 template <class dispatch_event_type>
 struct exec_simd_op {
   void operator()(const dispatch_event_type & ev, context & ctx) const noexcept {
+    using request_type = std::remove_cvref_t<decltype(ev.request)>;
+    if constexpr (std::is_same_v<request_type, ::emel::kernel::event::op_mul_mat>) {
+      const uint8_t src0_type = ::emel::kernel::detail::dtype_code(ev.request.src0.type);
+      ctx.optimized_q2_dispatch_count +=
+          static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q2_k);
+      ctx.optimized_q3_dispatch_count +=
+          static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q3_k);
+      ctx.optimized_q6_dispatch_count +=
+          static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q6_k);
+    }
     ::emel::kernel::aarch64::detail::execute_simd_unchecked(ev.request);
     detail::mark_done(ev, ctx);
   }
