@@ -21,7 +21,7 @@ using aarch64_sm = emel::kernel::aarch64::sm;
 using allocation_scope = emel::test::allocation::allocation_scope;
 using emel::kernel::test::dtype;
 using emel::kernel::test::flash_attn_ext_fixture;
-using emel::kernel::test::flash_attn_reference_online_softmax_float_values;
+using emel::kernel::test::flash_attn_reference_f16_scores;
 using emel::kernel::test::make_dst;
 using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_quantized_src;
@@ -1057,7 +1057,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_uses_optimized_backend_path") {
 
   emel::kernel::aarch64::action::exec_op_flash_attn_ext(dispatch, ctx);
 
-  const std::vector<float> expected = flash_attn_reference_online_softmax_float_values(
+  const std::vector<float> expected = flash_attn_reference_f16_scores(
       std::span<const float>(fixture.q, 4u),
       std::span<const float>(fixture.k, 8u),
       std::span<const float>(fixture.v, 8u),
@@ -1211,7 +1211,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_float_value_refe
       std::memcpy(k_head.data() + dst_offset, k.data() + src_offset, sizeof(float) * head_dim);
       std::memcpy(v_head.data() + dst_offset, v.data() + src_offset, sizeof(float) * head_dim);
     }
-    const std::vector<float> expected = flash_attn_reference_online_softmax_float_values(
+    const std::vector<float> expected = flash_attn_reference_f16_scores(
         std::span<const float>(q.data() + head * head_dim, head_dim),
         k_head,
         v_head,
@@ -1284,7 +1284,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_float_value_refe
       shared_request, shared_workspace));
 
   const std::vector<float> expected =
-      flash_attn_reference_online_softmax_float_values(q, k, v, head_dim, kv_tokens, scale);
+      flash_attn_reference_f16_scores(q, k, v, head_dim, kv_tokens, scale);
   for (uint64_t dim = 0; dim < head_dim; ++dim) {
     CHECK(neon_dst[static_cast<size_t>(dim)] ==
           doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));

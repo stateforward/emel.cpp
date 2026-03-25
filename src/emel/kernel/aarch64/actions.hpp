@@ -242,36 +242,54 @@ inline bool run_flash_attn_ext_neon(const request_type & request,
   const uint64_t head_dim = request.src0.ne[0];
   const uint64_t head_count = request.src0.ne[2];
   const uint64_t kv_head_count = request.src1.ne[2];
+  const uint64_t n_rep = head_count / kv_head_count;
   const float scale = ::emel::kernel::detail::flash_attn_scale(request);
-  ::emel::kernel::detail::run_flash_attn_online_softmax_f32(
-      head_dim,
-      head_count,
-      kv_head_count,
-      kv_tokens,
-      scale,
-      [&](const uint64_t head) { return tensor_row_ptr(request.src0, 0u, head); },
-      [&](const uint64_t token, const uint64_t kv_head) {
-        return tensor_row_ptr(request.src1, token, kv_head);
-      },
-      [&](const uint64_t token, const uint64_t kv_head) {
-        return tensor_row_ptr(request.src2, token, kv_head);
-      },
-      [&](const uint64_t head) { return tensor_row_ptr_mut(request.dst, 0u, head); },
-      [](float * dst, const uint64_t count) { std::fill_n(dst, count, 0.0f); },
-      [](float * dst, const float factor, const uint64_t count) {
-        scale_f32_neon(dst, factor, count);
-      },
-      [](float * dst, const float * src, const float alpha, const uint64_t count) {
-        axpy_f32_neon(dst, src, alpha, count);
-      },
-      [&](const uint64_t, const uint64_t token, const float score) {
-        workspace.score_buffer[token] = score;
-      },
-      [&](const uint64_t, const uint64_t active_tokens) {
-        for (uint64_t token = active_tokens; token < attn_width; ++token) {
-          workspace.score_buffer[token] = -std::numeric_limits<float>::infinity();
-        }
-      });
+
+  for (uint64_t head = 0; head < head_count; ++head) {
+    const uint64_t kv_head = head / n_rep;
+    const float * q = tensor_row_ptr(request.src0, 0u, head);
+    float * dst = tensor_row_ptr_mut(request.dst, 0u, head);
+
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const float * k = tensor_row_ptr(request.src1, token, kv_head);
+      workspace.score_buffer[token] =
+          ::emel::kernel::detail::dot_product_ggml_f16_scores(q, k, head_dim) * scale;
+    }
+
+    float max_score = workspace.score_buffer[0];
+    for (uint64_t token = 1; token < kv_tokens; ++token) {
+      max_score = std::max(max_score, workspace.score_buffer[token]);
+    }
+
+    double score_sum = 0.0;
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const float prob = std::exp(workspace.score_buffer[token] - max_score);
+      workspace.score_buffer[token] = prob;
+      score_sum += static_cast<double>(prob);
+    }
+
+    const float inv_score_sum =
+        score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const float weight = workspace.score_buffer[token] * inv_score_sum;
+      workspace.score_buffer[token] = ::emel::kernel::detail::round_fp16_weight(weight);
+    }
+    for (uint64_t token = kv_tokens; token < attn_width; ++token) {
+      workspace.score_buffer[token] = 0.0f;
+    }
+
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      for (uint64_t token = 0; token < kv_tokens; ++token) {
+        const float * v = tensor_row_ptr(request.src2, token, kv_head);
+        workspace.value_buffer[token] = v[dim];
+      }
+      for (uint64_t token = kv_tokens; token < attn_width; ++token) {
+        workspace.value_buffer[token] = 0.0f;
+      }
+      dst[dim] = ::emel::kernel::detail::dot_product_ggml_f16_scores(
+          workspace.value_buffer.data(), workspace.score_buffer.data(), attn_width);
+    }
+  }
 
   return true;
 }

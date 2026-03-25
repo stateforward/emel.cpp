@@ -742,52 +742,48 @@ inline bool compute_attention(native_backend & backend,
   }
 
   std::fill(backend.attn_ctx.begin(), backend.attn_ctx.end(), 0.0f);
-  emel::kernel::detail::run_flash_attn_online_softmax_f32(
-      static_cast<uint64_t>(head_dim),
-      static_cast<uint64_t>(head_count),
-      static_cast<uint64_t>(kv_head_count),
-      static_cast<uint64_t>(position_limit),
-      inv_scale,
-      [&](const uint64_t head) {
-        const size_t q_offset = head * static_cast<size_t>(head_dim);
-        return q_vector.data() + static_cast<std::ptrdiff_t>(q_offset);
-      },
-      [&](const uint64_t position, const uint64_t kv_head) {
-        const size_t kv_offset = kv_head * static_cast<size_t>(kv_head_dim);
-        const size_t cache_offset = layer_cache_offset(
-            backend, layer_index, static_cast<int32_t>(position), kv_dim) + kv_offset;
-        return backend.key_cache.data() + static_cast<std::ptrdiff_t>(cache_offset);
-      },
-      [&](const uint64_t position, const uint64_t kv_head) {
-        const size_t kv_offset = kv_head * static_cast<size_t>(kv_head_dim);
-        const size_t value_offset = layer_cache_offset(
-            backend, layer_index, static_cast<int32_t>(position), kv_dim) + kv_offset;
-        return backend.value_cache.data() + static_cast<std::ptrdiff_t>(value_offset);
-      },
-      [&](const uint64_t head) {
-        const size_t q_offset = head * static_cast<size_t>(head_dim);
-        return backend.attn_ctx.data() + static_cast<std::ptrdiff_t>(q_offset);
-      },
-      [](float * dst, const uint64_t count) { std::fill_n(dst, count, 0.0f); },
-      [](float * dst, const float factor, const uint64_t count) {
-        emel::kernel::detail::scale_f32_scalar(dst, factor, count);
-      },
-      [](float * dst, const float * src, const float alpha, const uint64_t count) {
-        emel::kernel::detail::axpy_f32_scalar(dst, src, alpha, count);
-      },
-      [&](const uint64_t, const uint64_t position, const float score) {
-        backend.attn_scores[position] = score;
-      },
-      [&](const uint64_t, const uint64_t active_tokens) {
-        for (uint64_t position = active_tokens; position < static_cast<uint64_t>(attn_width);
-             ++position) {
-          backend.attn_scores[position] = -std::numeric_limits<float>::infinity();
-        }
-        fill_masked_softmax_probs_ggml(backend.attn_scores,
-                                       position_limit,
-                                       backend.attn_probs,
-                                       backend.attn_probs_rounded);
-      });
+  for (int32_t head = 0; head < head_count; ++head) {
+    const int32_t kv_head = head / backend.n_rep;
+    const size_t q_offset = static_cast<size_t>(head) * static_cast<size_t>(head_dim);
+    const size_t kv_offset = static_cast<size_t>(kv_head) * static_cast<size_t>(kv_head_dim);
+
+    for (int32_t position = 0; position < position_limit; ++position) {
+      const size_t cache_offset =
+          layer_cache_offset(backend, layer_index, position, kv_dim) + kv_offset;
+      const float score = emel::kernel::detail::dot_product_ggml_f16_scores(
+          q_vector.data() + static_cast<std::ptrdiff_t>(q_offset),
+          backend.key_cache.data() + static_cast<std::ptrdiff_t>(cache_offset),
+          static_cast<uint64_t>(head_dim)) *
+          inv_scale;
+      backend.attn_scores[static_cast<size_t>(position)] = score;
+    }
+
+    for (int32_t position = position_limit; position < attn_width; ++position) {
+      backend.attn_scores[static_cast<size_t>(position)] = -std::numeric_limits<float>::infinity();
+    }
+
+    fill_masked_softmax_probs_ggml(backend.attn_scores,
+                                   position_limit,
+                                   backend.attn_probs,
+                                   backend.attn_probs_rounded);
+
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
+      const size_t cache_offset = q_offset + static_cast<size_t>(dim);
+      for (int32_t position = 0; position < position_limit; ++position) {
+        const size_t value_offset =
+            layer_cache_offset(backend, layer_index, position, kv_dim) + kv_offset;
+        backend.attn_value_column[static_cast<size_t>(position)] =
+            backend.value_cache[value_offset + static_cast<size_t>(dim)];
+      }
+      for (int32_t position = position_limit; position < attn_width; ++position) {
+        backend.attn_value_column[static_cast<size_t>(position)] = 0.0f;
+      }
+      backend.attn_ctx[cache_offset] = emel::kernel::detail::dot_product_ggml_f16_scores(
+          backend.attn_value_column.data(),
+          backend.attn_probs_rounded.data(),
+          static_cast<uint64_t>(attn_width));
+    }
+  }
 
   return true;
 }
