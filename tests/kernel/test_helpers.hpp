@@ -187,6 +187,53 @@ inline std::vector<float> flash_attn_reference_rounded_weight_float_values(
   return out;
 }
 
+inline std::vector<float> flash_attn_reference_online_softmax_float_values(
+    std::span<const float> q,
+    std::span<const float> k,
+    std::span<const float> v,
+    const uint64_t head_dim,
+    const uint64_t kv_tokens,
+    const float scale) {
+  std::vector<float> out(static_cast<size_t>(head_dim), 0.0f);
+  float sum = 0.0f;
+  float max_score = -INFINITY;
+
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
+    const float score = emel::kernel::detail::dot_product_ggml_f16_scores(
+                            q.data(),
+                            k.data() + static_cast<std::ptrdiff_t>(offset),
+                            head_dim) *
+        scale;
+
+    const float old_max = max_score;
+    float max_scale = 1.0f;
+    float value_scale = 1.0f;
+    if (score > max_score) {
+      max_score = score;
+      max_scale = std::exp(old_max - max_score);
+      for (uint64_t dim = 0; dim < head_dim; ++dim) {
+        out[static_cast<size_t>(dim)] *= max_scale;
+      }
+    } else {
+      value_scale = std::exp(score - max_score);
+    }
+
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      out[static_cast<size_t>(dim)] +=
+          v[offset + static_cast<size_t>(dim)] * value_scale;
+    }
+    sum = sum * max_scale + value_scale;
+  }
+
+  const float inv_sum = sum == 0.0f ? 0.0f : (1.0f / sum);
+  for (uint64_t dim = 0; dim < head_dim; ++dim) {
+    out[static_cast<size_t>(dim)] *= inv_sum;
+  }
+
+  return out;
+}
+
 template <class event_type>
 inline event_type make_smoke_op_event() {
   event_type ev{};

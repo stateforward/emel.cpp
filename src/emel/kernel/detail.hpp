@@ -1617,6 +1617,74 @@ inline float round_fp16_weight(const float value) noexcept {
   return quant::fp16_to_fp32(quant::fp32_to_fp16(value));
 }
 
+inline void scale_f32_scalar(float * data, const float scale, const uint64_t count) noexcept {
+  for (uint64_t idx = 0; idx < count; ++idx) {
+    data[idx] *= scale;
+  }
+}
+
+inline void axpy_f32_scalar(float * dst, const float * src,
+                            const float alpha, const uint64_t count) noexcept {
+  for (uint64_t idx = 0; idx < count; ++idx) {
+    dst[idx] += src[idx] * alpha;
+  }
+}
+
+template <class get_q_fn, class get_k_fn, class get_v_fn, class get_dst_fn, class zero_fn,
+          class scale_fn, class axpy_fn, class record_score_fn, class finish_head_fn>
+inline void run_flash_attn_online_softmax_f32(const uint64_t head_dim,
+                                              const uint64_t head_count,
+                                              const uint64_t kv_head_count,
+                                              const uint64_t kv_tokens,
+                                              const float scale,
+                                              get_q_fn get_q,
+                                              get_k_fn get_k,
+                                              get_v_fn get_v,
+                                              get_dst_fn get_dst,
+                                              zero_fn zero_dst,
+                                              scale_fn scale_dst,
+                                              axpy_fn axpy_dst,
+                                              record_score_fn record_score,
+                                              finish_head_fn finish_head) noexcept {
+  const uint64_t n_rep = head_count / kv_head_count;
+
+  for (uint64_t head = 0; head < head_count; ++head) {
+    const uint64_t kv_head = head / n_rep;
+    const float * q = get_q(head);
+    float * dst = get_dst(head);
+    zero_dst(dst, head_dim);
+
+    float score_sum = 0.0f;
+    float max_score = -std::numeric_limits<float>::infinity();
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const float * k = get_k(token, kv_head);
+      const float score = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
+      record_score(head, token, score);
+
+      const float old_max = max_score;
+      float max_scale = 1.0f;
+      float value_scale = 1.0f;
+      if (score > max_score) {
+        max_score = score;
+        max_scale = std::exp(old_max - max_score);
+        scale_dst(dst, max_scale, head_dim);
+      } else {
+        value_scale = std::exp(score - max_score);
+      }
+
+      axpy_dst(dst, get_v(token, kv_head), value_scale, head_dim);
+      score_sum = score_sum * max_scale + value_scale;
+    }
+
+    if (score_sum == 0.0f) {
+      zero_dst(dst, head_dim);
+    } else {
+      scale_dst(dst, 1.0f / score_sum, head_dim);
+    }
+    finish_head(head, kv_tokens);
+  }
+}
+
 template <class request_type>
 inline bool has_required_src2(const request_type & request) noexcept {
   return request.src2.data != nullptr &&
@@ -1747,52 +1815,36 @@ inline bool run_flash_attn_ext_with_workspace(const request_type & request,
   const uint64_t head_dim = request.src0.ne[0];
   const uint64_t head_count = request.src0.ne[2];
   const uint64_t kv_head_count = request.src1.ne[2];
-  const uint64_t n_rep = head_count / kv_head_count;
   const float scale = flash_attn_scale(request);
-
-  for (uint64_t head = 0; head < head_count; ++head) {
-    const uint64_t kv_head = head / n_rep;
-    const float * q = tensor_row_ptr(request.src0, 0u, head);
-    float * dst = tensor_row_ptr_mut(request.dst, 0u, head);
-
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float * k = tensor_row_ptr(request.src1, token, kv_head);
-      workspace.score_buffer[token] = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
-    }
-
-    float max_score = workspace.score_buffer[0];
-    for (uint64_t token = 1; token < kv_tokens; ++token) {
-      max_score = std::max(max_score, workspace.score_buffer[token]);
-    }
-
-    double score_sum = 0.0;
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float prob = std::exp(workspace.score_buffer[token] - max_score);
-      workspace.score_buffer[token] = prob;
-      score_sum += static_cast<double>(prob);
-    }
-
-    const float inv_score_sum = score_sum == 0.0f ? 0.0f : static_cast<float>(1.0 / score_sum);
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float weight = workspace.score_buffer[token] * inv_score_sum;
-      workspace.score_buffer[token] = round_fp16_weight(weight);
-    }
-    for (uint64_t token = kv_tokens; token < attn_width; ++token) {
-      workspace.score_buffer[token] = 0.0f;
-    }
-
-    for (uint64_t dim = 0; dim < head_dim; ++dim) {
-      for (uint64_t token = 0; token < kv_tokens; ++token) {
-        const float * v = tensor_row_ptr(request.src2, token, kv_head);
-        workspace.value_buffer[token] = v[dim];
-      }
-      for (uint64_t token = kv_tokens; token < attn_width; ++token) {
-        workspace.value_buffer[token] = 0.0f;
-      }
-      dst[dim] = dot_product_f32(
-          workspace.value_buffer.data(), workspace.score_buffer.data(), attn_width);
-    }
-  }
+  run_flash_attn_online_softmax_f32(
+      head_dim,
+      head_count,
+      kv_head_count,
+      kv_tokens,
+      scale,
+      [&](const uint64_t head) { return tensor_row_ptr(request.src0, 0u, head); },
+      [&](const uint64_t token, const uint64_t kv_head) {
+        return tensor_row_ptr(request.src1, token, kv_head);
+      },
+      [&](const uint64_t token, const uint64_t kv_head) {
+        return tensor_row_ptr(request.src2, token, kv_head);
+      },
+      [&](const uint64_t head) { return tensor_row_ptr_mut(request.dst, 0u, head); },
+      [](float * dst, const uint64_t count) { std::fill_n(dst, count, 0.0f); },
+      [](float * dst, const float factor, const uint64_t count) {
+        scale_f32_scalar(dst, factor, count);
+      },
+      [](float * dst, const float * src, const float alpha, const uint64_t count) {
+        axpy_f32_scalar(dst, src, alpha, count);
+      },
+      [&](const uint64_t, const uint64_t token, const float score) {
+        workspace.score_buffer[token] = score;
+      },
+      [&](const uint64_t, const uint64_t active_tokens) {
+        for (uint64_t token = active_tokens; token < attn_width; ++token) {
+          workspace.score_buffer[token] = -std::numeric_limits<float>::infinity();
+        }
+      });
 
   return true;
 }
