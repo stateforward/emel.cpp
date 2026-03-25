@@ -10937,6 +10937,9 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   dump_full_generation_mode("ggml_f16_scores", run_layer_with_scalar_attention_ggml_f16_scores);
   dump_full_generation_mode("ggml_f16_scores_ggml_softmax",
                             run_layer_with_scalar_attention_ggml_f16_scores_ggml_softmax);
+  dump_full_generation_mode("ggml_f16_value_contraction",
+                            run_layer_with_scalar_attention_ggml_f16_value_contraction);
+  dump_full_generation_mode("online_f32", run_layer_with_scalar_attention_online_f32);
   dump_full_generation_mode("ggml_online_f16", run_layer_with_scalar_attention_ggml_online_f16);
   dump_full_generation_mode("ggml_nonflash_f16", run_layer_with_scalar_attention_ggml_nonflash_f16);
   dump_full_generation_mode("ggml_nonflash_f16_ggml_softmax",
@@ -11387,6 +11390,38 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
                                   static_cast<size_t>(backend.n_head * backend.head_dim)),
                               reference_key_padded,
                               reference_value_padded);
+      dump_emel_nonflash_case(layer_prefix + ".kqv_out_emel_nonflash_emel_q",
+                              std::span<const float>(
+                                  backend.q.data(),
+                                  static_cast<size_t>(backend.n_head * backend.head_dim)),
+                              std::span<const float>(backend.key_cache.data() + layer_cache_offset,
+                                                     static_cast<size_t>(total_kv_tokens * kv_dim)),
+                              std::span<const float>(backend.value_cache.data() + layer_cache_offset,
+                                                     static_cast<size_t>(total_kv_tokens * kv_dim)));
+      dump_emel_prod_style_case(layer_prefix + ".kqv_out_emel_prod_emel_q",
+                                std::span<const float>(
+                                    backend.q.data(),
+                                    static_cast<size_t>(backend.n_head * backend.head_dim)),
+                                std::span<const float>(backend.key_cache.data() + layer_cache_offset,
+                                                       static_cast<size_t>(total_kv_tokens * kv_dim)),
+                                std::span<const float>(backend.value_cache.data() + layer_cache_offset,
+                                                       static_cast<size_t>(total_kv_tokens * kv_dim)));
+      dump_ggml_nonflash_case(layer_prefix + ".kqv_out_ggml_nonflash_emel_q_attn",
+                              std::span<const float>(
+                                  backend.q_attn.data(),
+                                  static_cast<size_t>(backend.n_head * backend.head_dim)),
+                              std::span<const float>(backend.key_cache.data() + layer_cache_offset,
+                                                     static_cast<size_t>(total_kv_tokens * kv_dim)),
+                              std::span<const float>(backend.value_cache.data() + layer_cache_offset,
+                                                     static_cast<size_t>(total_kv_tokens * kv_dim)));
+      dump_emel_prod_style_case(layer_prefix + ".kqv_out_emel_prod_emel_q_attn",
+                                std::span<const float>(
+                                    backend.q_attn.data(),
+                                    static_cast<size_t>(backend.n_head * backend.head_dim)),
+                                std::span<const float>(backend.key_cache.data() + layer_cache_offset,
+                                                       static_cast<size_t>(total_kv_tokens * kv_dim)),
+                                std::span<const float>(backend.value_cache.data() + layer_cache_offset,
+                                                       static_cast<size_t>(total_kv_tokens * kv_dim)));
 
       std::vector<float> ggml_flash_ctx;
       if (run_ggml_flash_attn_ext_case(
