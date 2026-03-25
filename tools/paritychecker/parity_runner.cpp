@@ -7232,11 +7232,76 @@ void dump_generation_selected_step_stage_debug(
                                         backend.n_rot,
                                         position,
                                         backend.rope_freq_base);
+
+    const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+    const size_t layer_cache_row_offset =
+        static_cast<size_t>(position) * static_cast<size_t>(kv_dim);
+
+    if (const std::span<const float> reference_q =
+            reference_stage_row(("Qcur-" + std::to_string(layer)).c_str(), backend.q.size());
+        !reference_q.empty()) {
+      dump_state_compare((label_prefix + ".q").c_str(), backend.q, reference_q);
+    }
+    if (const std::span<const float> reference_k =
+            reference_stage_row(("Kcur-" + std::to_string(layer)).c_str(), backend.k.size());
+        !reference_k.empty()) {
+      dump_state_compare((label_prefix + ".k").c_str(), backend.k, reference_k);
+
+      std::vector<float> rounded_reference_k(reference_k.begin(), reference_k.end());
+      emel::generator::detail::store_fp16_rounded_cache(reference_k, rounded_reference_k.data());
+      if (layer == 0 && have_layer0_key_cache &&
+          reference_layer0_key_cache.size() >=
+              layer_cache_row_offset + static_cast<size_t>(backend.head_dim_kv * backend.n_head_kv)) {
+        dump_state_compare((label_prefix + ".k.reference_round_to_cache").c_str(),
+                           rounded_reference_k,
+                           std::span<const float>(reference_layer0_key_cache.data() +
+                                                      layer_cache_row_offset,
+                                                  static_cast<size_t>(backend.head_dim_kv *
+                                                                      backend.n_head_kv)));
+      }
+      if (layer == 1 && have_layer1_key_cache &&
+          reference_layer1_key_cache.size() >=
+              layer_cache_row_offset + static_cast<size_t>(backend.head_dim_kv * backend.n_head_kv)) {
+        dump_state_compare((label_prefix + ".k.reference_round_to_cache").c_str(),
+                           rounded_reference_k,
+                           std::span<const float>(reference_layer1_key_cache.data() +
+                                                      layer_cache_row_offset,
+                                                  static_cast<size_t>(backend.head_dim_kv *
+                                                                      backend.n_head_kv)));
+      }
+    }
+    if (const std::span<const float> reference_v =
+            reference_stage_row(("Vcur-" + std::to_string(layer)).c_str(), backend.v.size());
+        !reference_v.empty()) {
+      dump_state_compare((label_prefix + ".v").c_str(), backend.v, reference_v);
+
+      std::vector<float> rounded_reference_v(reference_v.begin(), reference_v.end());
+      emel::generator::detail::store_fp16_rounded_cache(reference_v, rounded_reference_v.data());
+      if (layer == 0 && have_layer0_value_cache &&
+          reference_layer0_value_cache.size() >=
+              layer_cache_row_offset + static_cast<size_t>(backend.head_dim_kv * backend.n_head_kv)) {
+        dump_state_compare((label_prefix + ".v.reference_round_to_cache").c_str(),
+                           rounded_reference_v,
+                           std::span<const float>(reference_layer0_value_cache.data() +
+                                                      layer_cache_row_offset,
+                                                  static_cast<size_t>(backend.head_dim_kv *
+                                                                      backend.n_head_kv)));
+      }
+      if (layer == 1 && have_layer1_value_cache &&
+          reference_layer1_value_cache.size() >=
+              layer_cache_row_offset + static_cast<size_t>(backend.head_dim_kv * backend.n_head_kv)) {
+        dump_state_compare((label_prefix + ".v.reference_round_to_cache").c_str(),
+                           rounded_reference_v,
+                           std::span<const float>(reference_layer1_value_cache.data() +
+                                                      layer_cache_row_offset,
+                                                  static_cast<size_t>(backend.head_dim_kv *
+                                                                      backend.n_head_kv)));
+      }
+    }
+
     emel::generator::detail::store_fp16_rounded_cache(
         std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
         backend.q_attn.data());
-
-    const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
     const size_t cache_offset =
         emel::generator::detail::layer_cache_offset(backend, layer, position, kv_dim);
     emel::generator::detail::store_fp16_rounded_cache(
@@ -7247,35 +7312,39 @@ void dump_generation_selected_step_stage_debug(
         backend.value_cache.data() + cache_offset);
 
     if (layer == 0 && have_layer0_key_cache &&
-        reference_layer0_key_cache.size() >= cache_offset + static_cast<size_t>(kv_dim)) {
+        reference_layer0_key_cache.size() >= layer_cache_row_offset + static_cast<size_t>(kv_dim)) {
       dump_state_compare((label_prefix + ".key_cache").c_str(),
                          std::span<const float>(backend.key_cache.data() + cache_offset,
                                                 static_cast<size_t>(kv_dim)),
-                         std::span<const float>(reference_layer0_key_cache.data() + cache_offset,
+                         std::span<const float>(reference_layer0_key_cache.data() +
+                                                    layer_cache_row_offset,
                                                 static_cast<size_t>(kv_dim)));
     }
     if (layer == 0 && have_layer0_value_cache &&
-        reference_layer0_value_cache.size() >= cache_offset + static_cast<size_t>(kv_dim)) {
+        reference_layer0_value_cache.size() >= layer_cache_row_offset + static_cast<size_t>(kv_dim)) {
       dump_state_compare((label_prefix + ".value_cache").c_str(),
                          std::span<const float>(backend.value_cache.data() + cache_offset,
                                                 static_cast<size_t>(kv_dim)),
-                         std::span<const float>(reference_layer0_value_cache.data() + cache_offset,
+                         std::span<const float>(reference_layer0_value_cache.data() +
+                                                    layer_cache_row_offset,
                                                 static_cast<size_t>(kv_dim)));
     }
     if (layer == 1 && have_layer1_key_cache &&
-        reference_layer1_key_cache.size() >= cache_offset + static_cast<size_t>(kv_dim)) {
+        reference_layer1_key_cache.size() >= layer_cache_row_offset + static_cast<size_t>(kv_dim)) {
       dump_state_compare((label_prefix + ".key_cache").c_str(),
                          std::span<const float>(backend.key_cache.data() + cache_offset,
                                                 static_cast<size_t>(kv_dim)),
-                         std::span<const float>(reference_layer1_key_cache.data() + cache_offset,
+                         std::span<const float>(reference_layer1_key_cache.data() +
+                                                    layer_cache_row_offset,
                                                 static_cast<size_t>(kv_dim)));
     }
     if (layer == 1 && have_layer1_value_cache &&
-        reference_layer1_value_cache.size() >= cache_offset + static_cast<size_t>(kv_dim)) {
+        reference_layer1_value_cache.size() >= layer_cache_row_offset + static_cast<size_t>(kv_dim)) {
       dump_state_compare((label_prefix + ".value_cache").c_str(),
                          std::span<const float>(backend.value_cache.data() + cache_offset,
                                                 static_cast<size_t>(kv_dim)),
-                         std::span<const float>(reference_layer1_value_cache.data() + cache_offset,
+                         std::span<const float>(reference_layer1_value_cache.data() +
+                                                    layer_cache_row_offset,
                                                 static_cast<size_t>(kv_dim)));
     }
 
@@ -7722,6 +7791,8 @@ void dump_scalar_attention_debug(const generation_load_state & state,
                  score_dot_probe.max_reference);
     dump_generation_prefix_timeline_debug(state, opts, emel_result, reference_result);
     dump_prompt0_reference_attn_out_ffn_debug(state, prompt_tokens);
+    dump_generation_selected_step_stage_debug(state, opts, reference_result, 3);
+    dump_generation_selected_step_stage_debug(state, opts, reference_result, 8);
     dump_generation_selected_step_stage_debug(state, opts, reference_result, 32);
     return;
   }
