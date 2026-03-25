@@ -7109,6 +7109,21 @@ void dump_prompt0_reference_attn_out_ffn_debug(
                      reference_l_out);
 }
 
+void dump_matrix_compare(const char * label,
+                         emel::generator::detail::native_backend & backend,
+                         const emel::generator::detail::tensor_matrix & matrix,
+                         std::span<const float> input);
+
+void dump_matrix_compare_reference_q8(const char * label,
+                                      emel::generator::detail::native_backend & backend,
+                                      const emel::generator::detail::tensor_matrix & matrix,
+                                      std::span<const float> input);
+
+float ggml_row_dot(const emel::generator::detail::tensor_matrix & matrix,
+                   uint32_t row,
+                   const kernel_quant::block_q8_k * q8_blocks,
+                   uint64_t block_count);
+
 void dump_generation_selected_step_stage_debug(
     const generation_load_state & state,
     const emel::paritychecker::parity_options & opts,
@@ -7197,6 +7212,137 @@ void dump_generation_selected_step_stage_debug(
                generated_index,
                prefix_tokens.size());
 
+  const auto dump_cache_rows_compare =
+      [](const std::string & label_prefix,
+         const char * suffix,
+         std::span<const float> runtime_rows,
+         std::span<const float> reference_rows,
+         const int32_t row_width) {
+        if (runtime_rows.size() != reference_rows.size() || row_width <= 0) {
+          std::fprintf(stdout, "%s.%s: unavailable\n", label_prefix.c_str(), suffix);
+          return;
+        }
+
+        float max_abs = 0.0f;
+        int32_t max_pos = 0;
+        int32_t max_dim = 0;
+        float max_emel = 0.0f;
+        float max_reference = 0.0f;
+        for (size_t idx = 0; idx < runtime_rows.size(); ++idx) {
+          const float emel_value = runtime_rows[idx];
+          const float reference_value = reference_rows[idx];
+          const float diff = std::fabs(emel_value - reference_value);
+          if (diff > max_abs) {
+            max_abs = diff;
+            max_pos = static_cast<int32_t>(idx / static_cast<size_t>(row_width));
+            max_dim = static_cast<int32_t>(idx % static_cast<size_t>(row_width));
+            max_emel = emel_value;
+            max_reference = reference_value;
+          }
+        }
+
+        std::fprintf(stdout,
+                     "%s.%s: max_abs=%g pos=%d dim=%d emel=%g reference=%g\n",
+                     label_prefix.c_str(),
+                     suffix,
+                     max_abs,
+                     max_pos,
+                     max_dim,
+                     max_emel,
+                     max_reference);
+      };
+
+  const auto dump_kernel_row_compare =
+      [&](const std::string & label_prefix,
+          const char * suffix,
+          const emel::generator::detail::tensor_matrix & matrix,
+          std::span<const float> input,
+          const uint32_t row,
+          std::span<const float> reference_values) {
+        std::array<kernel_quant::block_q8_k, kernel_quant::MAX_Q8_K_BLOCKS> q8_blocks = {};
+        uint64_t block_count = 0;
+        if (!quantize_input_blocks(input, q8_blocks, block_count) ||
+            row >= static_cast<uint32_t>(matrix.rows)) {
+          std::fprintf(stdout, "%s.%s: unavailable\n", label_prefix.c_str(), suffix);
+          return;
+        }
+
+        std::vector<float> emel_out(static_cast<size_t>(matrix.rows));
+        if (!emel::generator::detail::matmul_vector(
+                backend, matrix, input, std::span<float>(emel_out))) {
+          std::fprintf(stdout, "%s.%s: emel matmul failed\n", label_prefix.c_str(), suffix);
+          return;
+        }
+
+        const auto * row_ptr =
+            static_cast<const uint8_t *>(matrix.tensor->data) +
+            static_cast<size_t>(row) *
+                emel::generator::detail::row_storage_bytes(*matrix.tensor, matrix.cols);
+        const float ggml_value = ggml_row_dot(matrix, row, q8_blocks.data(), block_count);
+        float scalar_value = std::numeric_limits<float>::quiet_NaN();
+        float neon_value = std::numeric_limits<float>::quiet_NaN();
+        switch (static_cast<emel::kernel::event::dtype>(matrix.tensor->type)) {
+          case emel::kernel::event::dtype::q2_k: {
+            const auto * lhs =
+                reinterpret_cast<const kernel_quant::block_q2_k *>(row_ptr);
+            scalar_value =
+                emel::kernel::detail::dot_q2_k_q8_k_row_scalar(lhs, q8_blocks.data(), block_count);
+#if defined(__aarch64__) || defined(__ARM_NEON)
+            neon_value = emel::kernel::aarch64::detail::dot_q2_k_q8_k_row_neon(
+                lhs, q8_blocks.data(), block_count);
+#endif
+            break;
+          }
+          case emel::kernel::event::dtype::q3_k: {
+            const auto * lhs =
+                reinterpret_cast<const kernel_quant::block_q3_k *>(row_ptr);
+            scalar_value =
+                emel::kernel::detail::dot_q3_k_q8_k_row_scalar(lhs, q8_blocks.data(), block_count);
+#if defined(__aarch64__) || defined(__ARM_NEON)
+            neon_value = emel::kernel::aarch64::detail::dot_q3_k_q8_k_row_neon(
+                lhs, q8_blocks.data(), block_count);
+#endif
+            break;
+          }
+          case emel::kernel::event::dtype::q6_k: {
+            const auto * lhs =
+                reinterpret_cast<const kernel_quant::block_q6_k *>(row_ptr);
+            scalar_value =
+                emel::kernel::detail::dot_q6_k_q8_k_row_scalar(lhs, q8_blocks.data(), block_count);
+#if defined(__aarch64__) || defined(__ARM_NEON)
+            neon_value = emel::kernel::aarch64::detail::dot_q6_k_q8_k_row_neon(
+                lhs, q8_blocks.data(), block_count);
+#endif
+            break;
+          }
+          default:
+            break;
+        }
+
+        const float reference_value =
+            row < reference_values.size() ? reference_values[static_cast<size_t>(row)]
+                                          : std::numeric_limits<float>::quiet_NaN();
+        std::fprintf(stdout,
+                     "%s.%s: row=%u emel=%0.9g emel_bits=0x%08x "
+                     "ggml=%0.9g ggml_bits=0x%08x "
+                     "scalar=%0.9g scalar_bits=0x%08x "
+                     "neon=%0.9g neon_bits=0x%08x "
+                     "reference=%0.9g reference_bits=0x%08x\n",
+                     label_prefix.c_str(),
+                     suffix,
+                     row,
+                     emel_out[static_cast<size_t>(row)],
+                     kernel_quant::fp32_to_bits(emel_out[static_cast<size_t>(row)]),
+                     ggml_value,
+                     kernel_quant::fp32_to_bits(ggml_value),
+                     scalar_value,
+                     kernel_quant::fp32_to_bits(scalar_value),
+                     neon_value,
+                     kernel_quant::fp32_to_bits(neon_value),
+                     reference_value,
+                     kernel_quant::fp32_to_bits(reference_value));
+      };
+
   const auto reference_stage_row = [&](const char * key, const size_t width) {
     return reference_last_token_row(find_reference_tensor(graph_capture, key), width);
   };
@@ -7216,6 +7362,16 @@ void dump_generation_selected_step_stage_debug(
         !reference_attn_norm.empty()) {
       dump_state_compare((label_prefix + ".attn_norm").c_str(), backend.norm, reference_attn_norm);
     }
+    dump_q8_quantize_compare((label_prefix + ".attn_norm_q8").c_str(), backend.norm);
+    dump_matrix_compare((label_prefix + ".attn_q_matmul").c_str(), backend, block.attention_q, backend.norm);
+    dump_matrix_compare_reference_q8(
+        (label_prefix + ".attn_q_matmul_refq8").c_str(), backend, block.attention_q, backend.norm);
+    dump_matrix_compare((label_prefix + ".attn_k_matmul").c_str(), backend, block.attention_k, backend.norm);
+    dump_matrix_compare_reference_q8(
+        (label_prefix + ".attn_k_matmul_refq8").c_str(), backend, block.attention_k, backend.norm);
+    dump_matrix_compare((label_prefix + ".attn_v_matmul").c_str(), backend, block.attention_v, backend.norm);
+    dump_matrix_compare_reference_q8(
+        (label_prefix + ".attn_v_matmul_refq8").c_str(), backend, block.attention_v, backend.norm);
 
     if (!emel::generator::detail::matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
         !emel::generator::detail::matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
@@ -7234,8 +7390,25 @@ void dump_generation_selected_step_stage_debug(
                                         backend.rope_freq_base);
 
     const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+    const size_t layer_cache_base_offset =
+        emel::generator::detail::layer_cache_offset(backend, layer, 0, kv_dim);
     const size_t layer_cache_row_offset =
         static_cast<size_t>(position) * static_cast<size_t>(kv_dim);
+    const std::vector<float> * reference_key_cache = nullptr;
+    const std::vector<float> * reference_value_cache = nullptr;
+    bool have_reference_key_cache = false;
+    bool have_reference_value_cache = false;
+    if (layer == 0) {
+      reference_key_cache = &reference_layer0_key_cache;
+      reference_value_cache = &reference_layer0_value_cache;
+      have_reference_key_cache = have_layer0_key_cache;
+      have_reference_value_cache = have_layer0_value_cache;
+    } else if (layer == 1) {
+      reference_key_cache = &reference_layer1_key_cache;
+      reference_value_cache = &reference_layer1_value_cache;
+      have_reference_key_cache = have_layer1_key_cache;
+      have_reference_value_cache = have_layer1_value_cache;
+    }
 
     if (const std::span<const float> reference_q =
             reference_stage_row(("Qcur-" + std::to_string(layer)).c_str(), backend.q.size());
@@ -7297,11 +7470,47 @@ void dump_generation_selected_step_stage_debug(
                                                   static_cast<size_t>(backend.head_dim_kv *
                                                                       backend.n_head_kv)));
       }
+
+      if (generated_index == 2 && layer == 0) {
+        dump_kernel_row_compare(
+            label_prefix, "attn_v_row319", block.attention_v, backend.norm, 319u, reference_v);
+      }
+    }
+    if (generated_index == 2 && layer == 1) {
+      if (const std::span<const float> reference_k =
+              reference_stage_row(("Kcur-" + std::to_string(layer)).c_str(), backend.k.size());
+          !reference_k.empty()) {
+        dump_kernel_row_compare(
+            label_prefix, "attn_k_row475", block.attention_k, backend.norm, 475u, reference_k);
+      }
     }
 
     emel::generator::detail::store_fp16_rounded_cache(
         std::span<const float>(backend.q.data(), static_cast<size_t>(backend.n_embd)),
         backend.q_attn.data());
+    if (have_reference_key_cache && reference_key_cache != nullptr && position > 0 &&
+        reference_key_cache->size() >= static_cast<size_t>(position) * static_cast<size_t>(kv_dim)) {
+      dump_cache_rows_compare(
+          label_prefix,
+          "key_cache_prior",
+          std::span<const float>(backend.key_cache.data() + layer_cache_base_offset,
+                                 static_cast<size_t>(position) * static_cast<size_t>(kv_dim)),
+          std::span<const float>(reference_key_cache->data(),
+                                 static_cast<size_t>(position) * static_cast<size_t>(kv_dim)),
+          kv_dim);
+    }
+    if (have_reference_value_cache && reference_value_cache != nullptr && position > 0 &&
+        reference_value_cache->size() >=
+            static_cast<size_t>(position) * static_cast<size_t>(kv_dim)) {
+      dump_cache_rows_compare(
+          label_prefix,
+          "value_cache_prior",
+          std::span<const float>(backend.value_cache.data() + layer_cache_base_offset,
+                                 static_cast<size_t>(position) * static_cast<size_t>(kv_dim)),
+          std::span<const float>(reference_value_cache->data(),
+                                 static_cast<size_t>(position) * static_cast<size_t>(kv_dim)),
+          kv_dim);
+    }
     const size_t cache_offset =
         emel::generator::detail::layer_cache_offset(backend, layer, position, kv_dim);
     emel::generator::detail::store_fp16_rounded_cache(
@@ -7310,6 +7519,30 @@ void dump_generation_selected_step_stage_debug(
     emel::generator::detail::store_fp16_rounded_cache(
         std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
         backend.value_cache.data() + cache_offset);
+    if (have_reference_key_cache && reference_key_cache != nullptr &&
+        reference_key_cache->size() >=
+            static_cast<size_t>(position + 1) * static_cast<size_t>(kv_dim)) {
+      dump_cache_rows_compare(
+          label_prefix,
+          "key_cache_full",
+          std::span<const float>(backend.key_cache.data() + layer_cache_base_offset,
+                                 static_cast<size_t>(position + 1) * static_cast<size_t>(kv_dim)),
+          std::span<const float>(reference_key_cache->data(),
+                                 static_cast<size_t>(position + 1) * static_cast<size_t>(kv_dim)),
+          kv_dim);
+    }
+    if (have_reference_value_cache && reference_value_cache != nullptr &&
+        reference_value_cache->size() >=
+            static_cast<size_t>(position + 1) * static_cast<size_t>(kv_dim)) {
+      dump_cache_rows_compare(
+          label_prefix,
+          "value_cache_full",
+          std::span<const float>(backend.value_cache.data() + layer_cache_base_offset,
+                                 static_cast<size_t>(position + 1) * static_cast<size_t>(kv_dim)),
+          std::span<const float>(reference_value_cache->data(),
+                                 static_cast<size_t>(position + 1) * static_cast<size_t>(kv_dim)),
+          kv_dim);
+    }
 
     if (layer == 0 && have_layer0_key_cache &&
         reference_layer0_key_cache.size() >= layer_cache_row_offset + static_cast<size_t>(kv_dim)) {
@@ -10914,6 +11147,18 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
                    first_sig_attn_max_abs);
       runtime_exact_first_sig_step = first_sig_step;
     }
+  }
+  if (token_mismatch_index > 2) {
+    dump_generation_selected_step_stage_debug(state, opts, reference_result, 2);
+  }
+  if (token_mismatch_index > 3) {
+    dump_generation_selected_step_stage_debug(state, opts, reference_result, 3);
+  }
+  if (token_mismatch_index > 4) {
+    dump_generation_selected_step_stage_debug(state, opts, reference_result, 4);
+  }
+  if (token_mismatch_index > 5) {
+    dump_generation_selected_step_stage_debug(state, opts, reference_result, 5);
   }
   if (runtime_exact_first_sig_step >= 0) {
     dump_generation_selected_step_stage_debug(
