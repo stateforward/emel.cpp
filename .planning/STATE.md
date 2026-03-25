@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: null
-milestone_name: null
-status: between_milestones
-stopped_at: "v1.4 archived; next step is `$gsd-new-milestone`"
-last_updated: "2026-03-25T18:51:10Z"
+milestone: v1.5
+milestone_name: Full ARM Quantized Path
+status: planning
+stopped_at: "milestone v1.5 started; next step is requirements definition"
+last_updated: "2026-03-25T19:00:00Z"
 last_activity: 2026-03-25
 progress:
   total_phases: 0
@@ -22,18 +22,25 @@ See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Start the next milestone definition.
+**Current focus:** Define milestone v1.5 requirements and roadmap.
 
 ## Current Position
 
 Phase: -
 Plan: -
-Status: Between milestones
-Last activity: 2026-03-25
+Status: Defining requirements
+Last activity: 2026-03-25 — Milestone v1.5 started
 
-Progress: [██████████] v1.4 shipped
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
+
+**Current milestone:**
+
+- Milestone: v1.5 Full ARM Quantized Path
+- Phases complete: 0/0
+- Plans complete: 0/0
+- Status: defining requirements and roadmap
 
 **Last shipped milestone:**
 
@@ -44,7 +51,7 @@ Progress: [██████████] v1.4 shipped
 
 **Next action:**
 
-- Run `$gsd-new-milestone` to define the next milestone, requirements, and roadmap.
+- Write `.planning/REQUIREMENTS.md` for v1.5 and create the roadmap.
 
 ## Accumulated Context
 
@@ -58,19 +65,23 @@ Recent decisions affecting current work:
 - Long-decode parity is green again across the maintained `1/10/100/1000` surface on the
   canonical workload.
 - Benchmark drift remains warning-only repo policy until a future milestone explicitly changes it.
+- v1.5 will treat the rumored ARM f32 fallback as a quantized-path contract audit first and a
+  closure task second.
 
 ### Pending Todos
 
-- None.
+- Define v1.5 requirements for the full ARM quantized path.
+- Create the phase roadmap starting at Phase 22.
 
 ### Blockers/Concerns
 
-- No active milestone blockers.
+- It is not yet fully documented which maintained canonical ARM stages are native quantized, which
+  are approved dense-f32-by-contract, and which would count as disallowed fallback.
 - Remaining non-blocking debt is benchmark variance noise plus proof/publication churn across the
   parity, compare, and docs surfaces.
 
 ## Session Continuity
 
-Last session: 2026-03-25T18:51:10Z
-Stopped at: v1.4 archived; next step is `$gsd-new-milestone`
+Last session: 2026-03-25T19:00:00Z
+Stopped at: milestone v1.5 started; next step is requirements definition
 Resume file: None

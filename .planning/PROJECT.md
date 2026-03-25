@@ -15,6 +15,20 @@ publication, all aligned with `docs/rules/sml.rules.md`.
 Prove real end-to-end behavior with explicit SML orchestration and parity-oriented verification
 before widening API surface or model scope.
 
+## Current Milestone: v1.5 Full ARM Quantized Path
+
+**Goal:** Prove the maintained canonical ARM generation slice stays on the intended quantized
+operand path end to end, eliminate any disallowed f32/dequant detours that still exist, and make
+the remaining contract explicit where full quantized coverage still does not apply.
+
+**Target features:**
+- Audit the maintained canonical ARM generation chain and classify each quantized stage as native
+  quantized, approved dense-f32-by-contract, or disallowed fallback.
+- Close any remaining shipped ARM quantized-path branches that silently widen through disallowed
+  f32 or dequantize-to-f32 substitution on supported canonical requests.
+- Publish runtime, parity, and benchmark evidence that proves the final maintained contract and
+  exposes any remaining explicit no-claim cases.
+
 ## Current State
 
 Shipped version: `v1.4`
@@ -75,14 +89,19 @@ Shipped version: `v1.4`
 
 ### Active
 
-- [ ] `GEN-03`: Optimize ARM generator-side RMSNorm, RoPE, residual-add, and SwiGLU math after
-  the vectorized quantized kernel gain is measured.
-- [ ] `FLASH-03`: Broaden flash attention beyond the canonical Llama-68M shape and workload
-  contract.
-- [ ] `MODEL-01`: Roll optimized ARM flash attention out to additional model fixtures after the
-  canonical path remains correct and benchmarked.
-- [ ] `BENCH-07`: Revisit whether noisy benchmark drift should become a blocking repo gate once
-  ARM compare evidence stabilizes.
+- [ ] `AUD-01`: The canonical ARM generation chain has a maintained operand-path audit that
+  identifies where quantized execution is native, where dense-f32 input is still part of the
+  approved contract, and where disallowed fallback remains.
+- [ ] `PATH-01`: Supported canonical ARM quantized requests do not silently widen through
+  disallowed whole-row or operator-level dequantize-to-f32 fallback in the shipped runtime path.
+- [ ] `PATH-02`: Unsupported or not-yet-ported quantized cases publish explicit no-claim behavior
+  instead of silently taking a misleading f32 fallback path.
+- [ ] `ATTR-01`: Maintained paritychecker and benchmark outputs publish enough attribution to prove
+  whether the canonical ARM request stayed on the approved quantized path.
+- [ ] `VER-04`: Kernel, runtime, and regression tests cover the audited quantized-path branches and
+  fail if supported canonical requests regress back to disallowed f32 fallback.
+- [ ] `BENCH-10`: Maintained benchmark evidence isolates the end-to-end impact of full quantized
+  path closure from remaining generator-side ARM math cost.
 
 ### Out of Scope
 
@@ -93,6 +112,11 @@ Shipped version: `v1.4`
 - Whole-program state-machine or orchestration rewrites unrelated to a milestone acceptance surface
 - Dequantize-to-f32 or tool-only compute fallbacks in the shipped canonical hot path without
   explicit milestone approval
+- Generator-side ARM math optimization beyond what is needed to prove or close the quantized path
+  contract in this milestone
+- Broader flash/model rollout before the canonical ARM quantized path contract is fully audited and
+  proven
+- Benchmark gate hardening while the maintained quantized-path fidelity work is still unsettled
 
 - 7 phases and 15 plans delivered the first canonical Llama-68M parity slice in v1.0.
 - 4 additional phases and 10 plans delivered the truthful benchmark slice in v1.1.
@@ -119,19 +143,23 @@ Shipped version: `v1.4`
 - Focused ARM profiling on the maintained `1000`-token workload identified scalar quantized matmul
   as the remaining hot leaf; v1.4 closes that hotspot with native vectorized kernels on the same
   maintained operand path.
+- The shipped quantized `op_mul_mat` contract still consumes dense `f32` activations on the rhs
+  and repacks them into `q8_K` blocks at dispatch, so the next milestone must separate approved
+  operand-format choices from any disallowed f32/dequant fallback that might still exist elsewhere
+  in the maintained ARM path.
 - Current non-blocking debt remains narrow: benchmark drift is still warning-only in
   `scripts/quality_gates.sh`, compare snapshot publication still refreshes the whole maintained
   suite, proof is re-derived from common generator counters across parity/bench/docs, and the
   bench/parity/docs toolchain still emits non-blocking environment warnings on this machine.
 
-## Next Milestone Goals
+## Milestone Focus
 
-- Measure and optimize ARM generator-side math around the now-vectorized quantized path when the
-  benchmark evidence shows the next highest-return hotspot.
-- Decide whether broader flash/model coverage or benchmark-gate hardening is the next milestone's
-  narrowest honest scope.
-- Keep new milestone work anchored to the canonical Llama-68M slice until a broader contract is
-  explicitly planned and accepted.
+- Audit the maintained canonical ARM inference chain so any remaining f32 or dequant widening is
+  either removed or explicitly documented as outside the approved path contract.
+- Keep the milestone anchored to the canonical Llama-68M ARM slice and the existing paritychecker
+  plus bench acceptance surfaces.
+- Defer broader math optimization, broader model rollout, and benchmark-gate policy changes until
+  the quantized-path contract is explicit and measurable.
 
 ## Context
 
@@ -179,6 +207,7 @@ explicit error publication, bounded actions, and deliberate machine-structure ch
 | Target the quantized `q2_K/q3_K/q6_K x q8_K` row-dot path next | The latest flame graph shows the remaining ARM gap is dominated by scalar quantized matmul leaf cost, not orchestration frames | — Pending |
 | Skip milestone research and keep the acceptance boundary on the canonical ARM Llama-68M slice | This milestone is a direct continuation of already-profiled kernel work, so new-domain research would add delay without reducing uncertainty | — Pending |
 | Restore long-decode parity with the exact masked nonflash attention path | The maintained `100/1000` decode mismatch was a data-plane semantic drift, so the narrowest honest repair was to match the reference masked nonflash path instead of claiming flash dispatch | ✓ Good |
+| Treat the remaining ARM quantized-path question as a contract audit first, optimization second | The repo now needs proof about where operand formats widen before it can honestly claim a full quantized runtime path | — Pending |
 
 ## Evolution
 
@@ -198,4 +227,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-25 after shipping milestone v1.4*
+*Last updated: 2026-03-25 after starting milestone v1.5*
