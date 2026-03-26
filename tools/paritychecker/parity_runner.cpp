@@ -32,6 +32,7 @@
 #include "emel/kernel/x86_64/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
 #include "emel/model/data.hpp"
+#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
 #include "emel/model/loader/sm.hpp"
@@ -236,6 +237,13 @@ struct jinja_render_capture {
   bool error_called = false;
 };
 
+struct quantized_contract_summary {
+  uint32_t native_quantized = 0u;
+  uint32_t approved_dense_f32_by_contract = 0u;
+  uint32_t disallowed_fallback = 0u;
+  uint32_t explicit_no_claim = 0u;
+};
+
 bool on_jinja_parse_done(void * owner,
                          const emel::text::jinja::events::parsing_done &) {
   auto * capture = static_cast<jinja_parse_capture *>(owner);
@@ -262,6 +270,23 @@ bool on_jinja_render_error(void * owner,
   auto * capture = static_cast<jinja_render_capture *>(owner);
   capture->error_called = true;
   return true;
+}
+
+quantized_contract_summary build_quantized_contract_summary(
+    const emel::model::llama::detail::quantized_path_audit & audit) {
+  quantized_contract_summary summary{};
+  for (const auto & stage : audit.stages) {
+    summary.native_quantized += static_cast<uint32_t>(
+        stage.contract == emel::model::llama::detail::quantized_contract_kind::native_quantized);
+    summary.approved_dense_f32_by_contract += static_cast<uint32_t>(
+        stage.contract ==
+        emel::model::llama::detail::quantized_contract_kind::approved_dense_f32_by_contract);
+    summary.disallowed_fallback += static_cast<uint32_t>(
+        stage.contract == emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
+    summary.explicit_no_claim += static_cast<uint32_t>(
+        stage.contract == emel::model::llama::detail::quantized_contract_kind::explicit_no_claim);
+  }
+  return summary;
 }
 
 bool run_emel_jinja_parse(std::string_view template_text,
@@ -942,6 +967,25 @@ struct generation_load_state {
       : samplers{emel::logits::sampler::fn::from<generation_load_state, sampler_select_argmax>(
             this)} {}
 };
+
+quantized_contract_summary runtime_quantized_contract_summary(
+    const generation_load_state & state) {
+  return quantized_contract_summary{
+      .native_quantized = state.generator->generation_native_quantized_stage_count(),
+      .approved_dense_f32_by_contract =
+          state.generator->generation_approved_dense_f32_stage_count(),
+      .disallowed_fallback = state.generator->generation_disallowed_fallback_stage_count(),
+      .explicit_no_claim = state.generator->generation_explicit_no_claim_stage_count(),
+  };
+}
+
+bool quantized_contract_matches(const quantized_contract_summary & lhs,
+                                const quantized_contract_summary & rhs) {
+  return lhs.native_quantized == rhs.native_quantized &&
+         lhs.approved_dense_f32_by_contract == rhs.approved_dense_f32_by_contract &&
+         lhs.disallowed_fallback == rhs.disallowed_fallback &&
+         lhs.explicit_no_claim == rhs.explicit_no_claim;
+}
 
 emel::error::type sampler_select_argmax(generation_load_state & state,
                                         int32_t & candidate_ids,
@@ -1858,7 +1902,7 @@ bool run_prefill_from_token_prefix(emel::generator::detail::native_backend & bac
   backend.bound_token_count = static_cast<int32_t>(prefix_tokens.size());
   backend.bound_position_count = static_cast<int32_t>(prefix_tokens.size());
   backend.bound_ready = true;
-  return emel::generator::detail::run_prefill(backend);
+  return emel::generator::detail::run_prefill_flash(backend);
 }
 
 bool matmul_vector_dequantized(const emel::generator::detail::tensor_matrix & matrix,
@@ -14770,8 +14814,8 @@ void dump_generation_live_backend_prefix_debug(const generation_load_state & sta
     for (int32_t layer = 0; layer < dispatch_backend.n_layer; ++layer) {
       const std::vector<float> dispatch_hidden_in = dispatch_backend.hidden;
       const std::vector<float> shared_hidden_in = shared_backend.hidden;
-      if (!emel::generator::detail::run_layer(dispatch_backend, layer, position) ||
-          !emel::generator::detail::run_layer(shared_backend, layer, position)) {
+      if (!emel::generator::detail::run_layer_flash(dispatch_backend, layer, position) ||
+          !emel::generator::detail::run_layer_flash(shared_backend, layer, position)) {
         std::fprintf(stdout, "generation_debug.live: layer replay failed\n");
         return;
       }
@@ -15225,6 +15269,50 @@ void dump_reference_decode_seam(const generation_load_state & state) {
                shared_q3_dispatch_calls,
                optimized_q6_dispatch_calls,
                shared_q6_dispatch_calls);
+  const auto runtime_contract = runtime_quantized_contract_summary(state);
+  std::fprintf(stdout,
+               "quantized_runtime_contract: native_quantized=%u "
+               "approved_dense_f32_by_contract=%u disallowed_fallback=%u explicit_no_claim=%u\n",
+               runtime_contract.native_quantized,
+               runtime_contract.approved_dense_f32_by_contract,
+               runtime_contract.disallowed_fallback,
+               runtime_contract.explicit_no_claim);
+
+  emel::model::llama::detail::execution_view execution{};
+  if (emel::model::llama::detail::build_execution_view(*state.model_data, execution) ==
+      emel::error::cast(emel::model::loader::error::none)) {
+    const auto audit = emel::model::llama::detail::build_quantized_path_audit(execution);
+    const auto audit_contract = build_quantized_contract_summary(audit);
+
+    std::fprintf(stdout,
+                 "quantized_stage_inventory: native_quantized=%u "
+                 "approved_dense_f32_by_contract=%u disallowed_fallback=%u explicit_no_claim=%u\n",
+                 audit_contract.native_quantized,
+                 audit_contract.approved_dense_f32_by_contract,
+                 audit_contract.disallowed_fallback,
+                 audit_contract.explicit_no_claim);
+    for (const auto & stage : audit.stages) {
+      const auto stage_name = emel::model::llama::detail::quantized_stage_family_name(stage.family);
+      const auto tensor_name = emel::model::llama::detail::tensor_type_name(stage.tensor_type);
+      const auto contract_name =
+          emel::model::llama::detail::quantized_contract_kind_name(stage.contract);
+      const uint32_t supported =
+          stage.contract == emel::model::llama::detail::quantized_contract_kind::explicit_no_claim
+              ? 0u
+              : 1u;
+      std::fprintf(stdout,
+                   "quantized_stage_audit: stage=%.*s tensor_type=%.*s contract=%.*s "
+                   "supported=%u consistent_across_layers=%u\n",
+                   static_cast<int>(stage_name.size()),
+                   stage_name.data(),
+                   static_cast<int>(tensor_name.size()),
+                   tensor_name.data(),
+                   static_cast<int>(contract_name.size()),
+                   contract_name.data(),
+                   supported,
+                   stage.consistent_across_layers ? 1u : 0u);
+    }
+  }
 }
 
 void dump_generation_failure_surface(generation_load_state & state,
@@ -17234,6 +17322,36 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
       state.generator->generation_optimized_q6_dispatch_calls();
   const uint64_t shared_q6_dispatch_calls =
       state.generator->generation_shared_q6_dispatch_calls();
+  const auto runtime_contract = runtime_quantized_contract_summary(state);
+  if (generation_kernel_kind == emel::kernel::kernel_kind::aarch64 &&
+      (flash_dispatch_calls == 0u || optimized_flash_dispatch_calls == 0u ||
+       shared_flash_dispatch_calls != 0u)) {
+    std::fprintf(stderr,
+                 "generation flash proof failed (fixture=%s kernel_kind=%s "
+                 "flash_dispatch_calls=%" PRIu64
+                 " optimized_flash_dispatch_calls=%" PRIu64
+                 " shared_flash_dispatch_calls=%" PRIu64 ")\n",
+                 k_generation_fixture_name,
+                 kernel_kind_name(generation_kernel_kind),
+                 flash_dispatch_calls,
+                 optimized_flash_dispatch_calls,
+                 shared_flash_dispatch_calls);
+    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
+    return 1;
+  }
+  if (generation_kernel_kind != emel::kernel::kernel_kind::aarch64 &&
+      (optimized_flash_dispatch_calls != 0u || shared_flash_dispatch_calls != 0u)) {
+    std::fprintf(stderr,
+                 "generation non-arm flash attribution failed (fixture=%s kernel_kind=%s "
+                 "optimized_flash_dispatch_calls=%" PRIu64
+                 " shared_flash_dispatch_calls=%" PRIu64 ")\n",
+                 k_generation_fixture_name,
+                 kernel_kind_name(generation_kernel_kind),
+                 optimized_flash_dispatch_calls,
+                 shared_flash_dispatch_calls);
+    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
+    return 1;
+  }
   if (generation_kernel_kind == emel::kernel::kernel_kind::aarch64 &&
       (optimized_q2_dispatch_calls == 0u || shared_q2_dispatch_calls != 0u ||
        optimized_q3_dispatch_calls == 0u || shared_q3_dispatch_calls != 0u ||
@@ -17256,6 +17374,44 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  shared_q6_dispatch_calls);
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
+  }
+  if (runtime_contract.disallowed_fallback != 0u || runtime_contract.explicit_no_claim != 0u) {
+    std::fprintf(stderr,
+                 "generation quantized contract failed (fixture=%s native_quantized=%u "
+                 "approved_dense_f32_by_contract=%u disallowed_fallback=%u explicit_no_claim=%u)\n",
+                 k_generation_fixture_name,
+                 runtime_contract.native_quantized,
+                 runtime_contract.approved_dense_f32_by_contract,
+                 runtime_contract.disallowed_fallback,
+                 runtime_contract.explicit_no_claim);
+    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
+    return 1;
+  }
+
+  emel::model::llama::detail::execution_view execution{};
+  if (emel::model::llama::detail::build_execution_view(*state.model_data, execution) ==
+      emel::error::cast(emel::model::loader::error::none)) {
+    const auto audit = emel::model::llama::detail::build_quantized_path_audit(execution);
+    const auto audit_contract = build_quantized_contract_summary(audit);
+    if (!quantized_contract_matches(runtime_contract, audit_contract)) {
+      std::fprintf(stderr,
+                   "generation quantized attribution mismatch (fixture=%s "
+                   "runtime_native_quantized=%u runtime_approved_dense_f32_by_contract=%u "
+                   "runtime_disallowed_fallback=%u runtime_explicit_no_claim=%u "
+                   "audit_native_quantized=%u audit_approved_dense_f32_by_contract=%u "
+                   "audit_disallowed_fallback=%u audit_explicit_no_claim=%u)\n",
+                   k_generation_fixture_name,
+                   runtime_contract.native_quantized,
+                   runtime_contract.approved_dense_f32_by_contract,
+                   runtime_contract.disallowed_fallback,
+                   runtime_contract.explicit_no_claim,
+                   audit_contract.native_quantized,
+                   audit_contract.approved_dense_f32_by_contract,
+                   audit_contract.disallowed_fallback,
+                   audit_contract.explicit_no_claim);
+      dump_generation_failure_surface(state, &emel_result, nullptr, opts);
+      return 1;
+    }
   }
 
   generation_result reference_result{};

@@ -22,6 +22,7 @@ using allocation_scope = emel::test::allocation::allocation_scope;
 using emel::kernel::test::dtype;
 using emel::kernel::test::flash_attn_ext_fixture;
 using emel::kernel::test::flash_attn_reference_f16_scores;
+using emel::kernel::test::flash_attn_reference_masked_total_tokens;
 using emel::kernel::test::make_dst;
 using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_quantized_src;
@@ -1226,6 +1227,168 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_float_value_refe
       CHECK(shared_dst[idx] ==
             doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
     }
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_masked_total_token_reference") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t head_dim = 64u;
+  constexpr uint64_t kv_tokens = 257u;
+  constexpr uint32_t total_tokens = 2048u;
+  const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+
+  std::vector<float> q(head_dim);
+  std::vector<float> k(head_dim * kv_tokens);
+  std::vector<float> v(head_dim * kv_tokens);
+  std::vector<float> neon_dst(head_dim, 0.0f);
+  std::vector<float> shared_dst(head_dim, 0.0f);
+
+  for (uint64_t dim = 0; dim < head_dim; ++dim) {
+    const double angle = static_cast<double>((dim + 3u) * 11u);
+    q[dim] = emel::kernel::detail::quant::fp16_to_fp32(
+        emel::kernel::detail::quant::fp32_to_fp16(
+            static_cast<float>(std::sin(angle * 0.02197265625))));
+  }
+
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      const size_t offset = static_cast<size_t>(token * head_dim + dim);
+      const double base = static_cast<double>((token + 1u) * (dim + 5u));
+      k[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+          emel::kernel::detail::quant::fp32_to_fp16(
+              static_cast<float>(std::cos(base * 0.00390625))));
+      v[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+          emel::kernel::detail::quant::fp32_to_fp16(
+              static_cast<float>(std::sin(base * 0.005859375))));
+    }
+  }
+
+  emel::kernel::event::op_flash_attn_ext request{};
+  request.src0 = make_src(q.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+  request.src1 = make_src(k.data(), dtype::f32, head_dim, kv_tokens, 1u, 1u);
+  request.src2 = make_src(v.data(), dtype::f32, head_dim, kv_tokens, 1u, 1u);
+  request.dst = make_dst(neon_dst.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+  request.nth = 1;
+  std::memcpy(request.op_params.data(), &scale, sizeof(scale));
+  std::memcpy(request.op_params.data() + sizeof(scale), &total_tokens, sizeof(total_tokens));
+  request.op_params_size = sizeof(scale) + sizeof(total_tokens);
+
+  auto shared_request = request;
+  shared_request.dst = make_dst(shared_dst.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+
+  emel::kernel::detail::flash_attn_workspace neon_workspace{};
+  emel::kernel::detail::flash_attn_workspace shared_workspace{};
+  REQUIRE(emel::kernel::aarch64::detail::run_flash_attn_ext_neon(
+      request, true, neon_workspace));
+  REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(
+      shared_request, shared_workspace));
+
+  const std::vector<float> expected = flash_attn_reference_masked_total_tokens(
+      q, k, v, head_dim, kv_tokens, total_tokens, scale);
+  for (uint64_t dim = 0; dim < head_dim; ++dim) {
+    CHECK(neon_dst[static_cast<size_t>(dim)] ==
+          doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
+    CHECK(shared_dst[static_cast<size_t>(dim)] ==
+          doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_masked_total_token_reference_on_long_multihead_kv") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t head_dim = 64u;
+  constexpr uint64_t head_count = 12u;
+  constexpr uint64_t kv_head_count = 12u;
+  constexpr uint64_t kv_tokens = 769u;
+  constexpr uint32_t total_tokens = 2048u;
+  const uint64_t kv_dim = head_dim * kv_head_count;
+  const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+
+  std::vector<float> q(head_dim * head_count);
+  std::vector<float> k(kv_dim * kv_tokens);
+  std::vector<float> v(kv_dim * kv_tokens);
+  std::vector<float> neon_dst(head_dim * head_count, 0.0f);
+  std::vector<float> shared_dst(head_dim * head_count, 0.0f);
+
+  for (uint64_t head = 0; head < head_count; ++head) {
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      const double angle = static_cast<double>((head + 1u) * (dim + 3u));
+      q[head * head_dim + dim] = emel::kernel::detail::quant::fp16_to_fp32(
+          emel::kernel::detail::quant::fp32_to_fp16(
+              static_cast<float>(std::sin(angle * 0.03125))));
+    }
+  }
+
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    for (uint64_t head = 0; head < kv_head_count; ++head) {
+      for (uint64_t dim = 0; dim < head_dim; ++dim) {
+        const uint64_t offset = token * kv_dim + head * head_dim + dim;
+        const double base = static_cast<double>((token + 1u) * (head + 3u) * (dim + 5u));
+        k[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+            emel::kernel::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::cos(base * 0.0078125))));
+        v[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+            emel::kernel::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::sin(base * 0.01171875))));
+      }
+    }
+  }
+
+  emel::kernel::event::op_flash_attn_ext request{};
+  request.src0 = make_src(q.data(), dtype::f32, head_dim, 1u, head_count);
+  request.src1 = make_src(k.data(), dtype::f32, head_dim, kv_tokens, kv_head_count);
+  request.src2 = make_src(v.data(), dtype::f32, head_dim, kv_tokens, kv_head_count);
+  request.dst = make_dst(neon_dst.data(), dtype::f32, head_dim, 1u, head_count);
+  request.src1.nb[1] = sizeof(float) * kv_dim;
+  request.src1.nb[2] = sizeof(float) * head_dim;
+  request.src2.nb[1] = sizeof(float) * kv_dim;
+  request.src2.nb[2] = sizeof(float) * head_dim;
+  request.nth = 1;
+  std::memcpy(request.op_params.data(), &scale, sizeof(scale));
+  std::memcpy(request.op_params.data() + sizeof(scale), &total_tokens, sizeof(total_tokens));
+  request.op_params_size = sizeof(scale) + sizeof(total_tokens);
+
+  auto shared_request = request;
+  shared_request.dst = make_dst(shared_dst.data(), dtype::f32, head_dim, 1u, head_count);
+
+  emel::kernel::detail::flash_attn_workspace neon_workspace{};
+  emel::kernel::detail::flash_attn_workspace shared_workspace{};
+  REQUIRE(emel::kernel::aarch64::detail::run_flash_attn_ext_neon(
+      request, true, neon_workspace));
+  REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(
+      shared_request, shared_workspace));
+
+  std::vector<float> expected(head_dim * head_count, 0.0f);
+  for (uint64_t head = 0; head < head_count; ++head) {
+    std::vector<float> k_head(kv_tokens * head_dim);
+    std::vector<float> v_head(kv_tokens * head_dim);
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const uint64_t src_offset = token * kv_dim + head * head_dim;
+      const uint64_t dst_offset = token * head_dim;
+      std::memcpy(k_head.data() + dst_offset, k.data() + src_offset, sizeof(float) * head_dim);
+      std::memcpy(v_head.data() + dst_offset, v.data() + src_offset, sizeof(float) * head_dim);
+    }
+    const auto expected_head = flash_attn_reference_masked_total_tokens(
+        std::span<const float>(q.data() + static_cast<std::ptrdiff_t>(head * head_dim), head_dim),
+        k_head,
+        v_head,
+        head_dim,
+        kv_tokens,
+        total_tokens,
+        scale);
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      expected[head * head_dim + dim] = expected_head[static_cast<size_t>(dim)];
+    }
+  }
+
+  for (size_t idx = 0; idx < neon_dst.size(); ++idx) {
+    CHECK(neon_dst[idx] == doctest::Approx(expected[idx]).epsilon(1e-6f));
+    CHECK(shared_dst[idx] == doctest::Approx(expected[idx]).epsilon(1e-6f));
   }
 #endif
 }

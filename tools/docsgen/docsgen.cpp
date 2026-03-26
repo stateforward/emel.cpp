@@ -58,6 +58,11 @@ struct benchmark_snapshot {
   std::string emel_logits_calls;
   std::string reference_decode_calls;
   std::string reference_logits_calls;
+  std::string runtime_contract_case;
+  std::string native_quantized_stage_count;
+  std::string approved_dense_f32_stage_count;
+  std::string disallowed_fallback_stage_count;
+  std::string explicit_no_claim_stage_count;
   std::string quantized_case;
   std::string optimized_q2_dispatch_calls;
   std::string shared_q2_dispatch_calls;
@@ -580,6 +585,28 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       parsed.shared_q6_dispatch_calls = metadata->at("shared_q6_dispatch_calls");
       continue;
     }
+    if (const auto metadata =
+            parse_inline_key_value_fields(line, "# generation_runtime_contract: ");
+        metadata.has_value()) {
+      for (const char * field : {"case",
+                                 "native_quantized",
+                                 "approved_dense_f32_by_contract",
+                                 "disallowed_fallback",
+                                 "explicit_no_claim"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # generation_runtime_contract metadata in %s\n",
+                       paths.benchmarks_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.runtime_contract_case = metadata->at("case");
+      parsed.native_quantized_stage_count = metadata->at("native_quantized");
+      parsed.approved_dense_f32_stage_count = metadata->at("approved_dense_f32_by_contract");
+      parsed.disallowed_fallback_stage_count = metadata->at("disallowed_fallback");
+      parsed.explicit_no_claim_stage_count = metadata->at("explicit_no_claim");
+      continue;
+    }
     if (line.empty() || line[0] == '#') {
       continue;
     }
@@ -609,6 +636,12 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
   if (parsed.quantized_case.empty()) {
     std::fprintf(stderr,
                  "error: missing # generation_quantized_evidence metadata in %s\n",
+                 paths.benchmarks_snapshot.string().c_str());
+    return std::nullopt;
+  }
+  if (parsed.runtime_contract_case.empty()) {
+    std::fprintf(stderr,
+                 "error: missing # generation_runtime_contract metadata in %s\n",
                  paths.benchmarks_snapshot.string().c_str());
     return std::nullopt;
   }
@@ -757,6 +790,17 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += "x`\n\n";
   section += "## Current Quantized Evidence\n\n";
   section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
+  section += "- `generation_runtime_contract: case=";
+  section += snapshot.runtime_contract_case;
+  section += " native_quantized=";
+  section += snapshot.native_quantized_stage_count;
+  section += " approved_dense_f32_by_contract=";
+  section += snapshot.approved_dense_f32_stage_count;
+  section += " disallowed_fallback=";
+  section += snapshot.disallowed_fallback_stage_count;
+  section += " explicit_no_claim=";
+  section += snapshot.explicit_no_claim_stage_count;
+  section += "`\n";
   section += "- `generation_quantized_evidence: case=";
   section += snapshot.quantized_case;
   section += " optimized_q2_dispatch_calls=";
@@ -772,6 +816,10 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += " shared_q6_dispatch_calls=";
   section += snapshot.shared_q6_dispatch_calls;
   section += "`\n\n";
+  section += "- Contract summary: the maintained canonical workload stayed on the approved runtime "
+             "contract with native quantized matmul stages plus approved dense-f32-by-contract "
+             "token-embedding and norm-vector seams; there was no disallowed fallback and no "
+             "explicit no-claim branch on the supported path.\n\n";
 
   section += "## Preserved ARM Flash Baseline Comparison\n\n";
   section += "- `source_commit=";

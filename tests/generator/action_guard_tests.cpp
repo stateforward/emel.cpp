@@ -1,6 +1,7 @@
 #include <array>
 #include <doctest/doctest.h>
 #include <span>
+#include <vector>
 
 #include "emel/generator/actions.hpp"
 #include "emel/generator/guards.hpp"
@@ -401,4 +402,42 @@ TEST_CASE("generator phase guards classify invalid and backend errors") {
   CHECK(emel::generator::guard::initialize_result_invalid_request{}(initialize_run, context));
   generate_ctx.err = emel::error::cast(emel::generator::error::backend);
   CHECK(emel::generator::guard::generate_result_backend{}(generate_run, context));
+}
+
+TEST_CASE("generator runtime guards model explicit flash and nonflash compute selection") {
+  emel::generator::action::context context{};
+  auto & backend = context.compute.backend;
+  backend.n_layer = 1;
+  backend.n_head = 2;
+  backend.n_head_kv = 2;
+  backend.head_dim = 2;
+  backend.head_dim_kv = 2;
+  backend.n_ctx = 4;
+  backend.q_attn.resize(4, 0.0f);
+  backend.key_cache.resize(16, 0.0f);
+  backend.value_cache.resize(16, 0.0f);
+  backend.attn_ctx.resize(4, 0.0f);
+
+  callback_tracker tracker{};
+  emel::error::type error_out = emel::error::cast(emel::generator::error::none);
+  size_t output_length_out = 0;
+  auto generate = make_generate_request(&tracker, &error_out, output_length_out);
+  emel::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count = 2;
+  generate_ctx.kv_tokens = 1;
+  emel::generator::event::generate_run generate_run{generate, generate_ctx};
+
+  CHECK(emel::generator::guard::prefill_flash_runtime_supported{}(generate_run, context));
+  CHECK_FALSE(emel::generator::guard::prefill_nonflash_runtime_required{}(generate_run, context));
+  CHECK(emel::generator::guard::decode_flash_runtime_supported{}(generate_run, context));
+  CHECK_FALSE(emel::generator::guard::decode_nonflash_runtime_required{}(generate_run, context));
+
+  backend.head_dim_kv = 1;
+  backend.key_cache.resize(8, 0.0f);
+  backend.value_cache.resize(8, 0.0f);
+
+  CHECK_FALSE(emel::generator::guard::prefill_flash_runtime_supported{}(generate_run, context));
+  CHECK(emel::generator::guard::prefill_nonflash_runtime_required{}(generate_run, context));
+  CHECK_FALSE(emel::generator::guard::decode_flash_runtime_supported{}(generate_run, context));
+  CHECK(emel::generator::guard::decode_nonflash_runtime_required{}(generate_run, context));
 }

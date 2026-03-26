@@ -138,6 +138,53 @@ inline std::vector<float> flash_attn_reference_f16_scores(std::span<const float>
   return out;
 }
 
+inline std::vector<float> flash_attn_reference_masked_total_tokens(
+    std::span<const float> q,
+    std::span<const float> k,
+    std::span<const float> v,
+    const uint64_t head_dim,
+    const uint64_t kv_tokens,
+    const uint64_t total_tokens,
+    const float scale) {
+  std::vector<float> out(static_cast<size_t>(head_dim), 0.0f);
+  std::vector<float> scores(static_cast<size_t>(total_tokens), -INFINITY);
+  std::vector<float> probs(static_cast<size_t>(total_tokens), 0.0f);
+  std::vector<float> rounded_weights(static_cast<size_t>(total_tokens), 0.0f);
+  std::vector<float> value_column(static_cast<size_t>(total_tokens), 0.0f);
+
+  float max_score = -INFINITY;
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
+    const float score = emel::kernel::detail::dot_product_ggml_f16_scores(
+                            q.data(),
+                            k.data() + static_cast<std::ptrdiff_t>(offset),
+                            head_dim) *
+        scale;
+    scores[static_cast<size_t>(token)] = score;
+    max_score = std::max(max_score, score);
+  }
+
+  const double score_sum = emel::kernel::detail::exp_and_sum_ggml_f32(
+      scores.data(), probs.data(), total_tokens, max_score);
+  const float inv_score_sum = score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
+  for (uint64_t token = 0; token < total_tokens; ++token) {
+    const float weight = probs[static_cast<size_t>(token)] * inv_score_sum;
+    rounded_weights[static_cast<size_t>(token)] =
+        emel::kernel::detail::round_fp16_weight(weight);
+  }
+
+  for (uint64_t dim = 0; dim < head_dim; ++dim) {
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const size_t offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
+      value_column[static_cast<size_t>(token)] = v[offset + static_cast<size_t>(dim)];
+    }
+    out[static_cast<size_t>(dim)] = emel::kernel::detail::dot_product_ggml_f16_scores(
+        value_column.data(), rounded_weights.data(), total_tokens);
+  }
+
+  return out;
+}
+
 inline std::vector<float> flash_attn_reference_rounded_weight_float_values(
     std::span<const float> q,
     std::span<const float> k,

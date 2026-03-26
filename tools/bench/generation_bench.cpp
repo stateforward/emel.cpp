@@ -618,6 +618,10 @@ struct generation_flash_evidence_state {
   std::uint64_t flash_dispatch_calls = 0u;
   std::uint64_t optimized_flash_dispatch_calls = 0u;
   std::uint64_t shared_flash_dispatch_calls = 0u;
+  std::uint32_t native_quantized_stage_count = 0u;
+  std::uint32_t approved_dense_f32_stage_count = 0u;
+  std::uint32_t disallowed_fallback_stage_count = 0u;
+  std::uint32_t explicit_no_claim_stage_count = 0u;
   std::uint64_t optimized_q2_dispatch_calls = 0u;
   std::uint64_t shared_q2_dispatch_calls = 0u;
   std::uint64_t optimized_q3_dispatch_calls = 0u;
@@ -1741,6 +1745,22 @@ std::uint64_t generation_flash_evidence_shared_dispatch_calls() noexcept {
   return g_generation_flash_evidence.shared_flash_dispatch_calls;
 }
 
+std::uint32_t generation_runtime_contract_native_quantized_stage_count() noexcept {
+  return g_generation_flash_evidence.native_quantized_stage_count;
+}
+
+std::uint32_t generation_runtime_contract_approved_dense_f32_stage_count() noexcept {
+  return g_generation_flash_evidence.approved_dense_f32_stage_count;
+}
+
+std::uint32_t generation_runtime_contract_disallowed_fallback_stage_count() noexcept {
+  return g_generation_flash_evidence.disallowed_fallback_stage_count;
+}
+
+std::uint32_t generation_runtime_contract_explicit_no_claim_stage_count() noexcept {
+  return g_generation_flash_evidence.explicit_no_claim_stage_count;
+}
+
 std::uint64_t generation_quantized_evidence_optimized_q2_dispatch_calls() noexcept {
   return g_generation_flash_evidence.optimized_q2_dispatch_calls;
 }
@@ -1798,6 +1818,10 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
     std::uint64_t flash_dispatch_calls = 0u;
     std::uint64_t optimized_flash_dispatch_calls = 0u;
     std::uint64_t shared_flash_dispatch_calls = 0u;
+    std::uint32_t native_quantized_stage_count = 0u;
+    std::uint32_t approved_dense_f32_stage_count = 0u;
+    std::uint32_t disallowed_fallback_stage_count = 0u;
+    std::uint32_t explicit_no_claim_stage_count = 0u;
     std::uint64_t optimized_q2_dispatch_calls = 0u;
     std::uint64_t shared_q2_dispatch_calls = 0u;
     std::uint64_t optimized_q3_dispatch_calls = 0u;
@@ -1818,6 +1842,14 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
           session->generator->generation_optimized_flash_dispatch_calls();
       const std::uint64_t shared_flash_dispatch_calls_before =
           session->generator->generation_shared_flash_dispatch_calls();
+      native_quantized_stage_count =
+          session->generator->generation_native_quantized_stage_count();
+      approved_dense_f32_stage_count =
+          session->generator->generation_approved_dense_f32_stage_count();
+      disallowed_fallback_stage_count =
+          session->generator->generation_disallowed_fallback_stage_count();
+      explicit_no_claim_stage_count =
+          session->generator->generation_explicit_no_claim_stage_count();
       const std::uint64_t optimized_q2_dispatch_calls_before =
           session->generator->generation_optimized_q2_dispatch_calls();
       const std::uint64_t shared_q2_dispatch_calls_before =
@@ -1878,6 +1910,12 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
       g_generation_flash_evidence.optimized_flash_dispatch_calls =
           optimized_flash_dispatch_calls;
       g_generation_flash_evidence.shared_flash_dispatch_calls = shared_flash_dispatch_calls;
+      g_generation_flash_evidence.native_quantized_stage_count = native_quantized_stage_count;
+      g_generation_flash_evidence.approved_dense_f32_stage_count =
+          approved_dense_f32_stage_count;
+      g_generation_flash_evidence.disallowed_fallback_stage_count =
+          disallowed_fallback_stage_count;
+      g_generation_flash_evidence.explicit_no_claim_stage_count = explicit_no_claim_stage_count;
       g_generation_flash_evidence.optimized_q2_dispatch_calls = optimized_q2_dispatch_calls;
       g_generation_flash_evidence.shared_q2_dispatch_calls = shared_q2_dispatch_calls;
       g_generation_flash_evidence.optimized_q3_dispatch_calls = optimized_q3_dispatch_calls;

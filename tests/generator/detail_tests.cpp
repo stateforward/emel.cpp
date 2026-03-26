@@ -181,3 +181,160 @@ TEST_CASE("generator_detail_builds_flash_request_over_position_major_kv_cache") 
   CHECK(total_tokens == 2u);
   CHECK(emel::kernel::detail::can_run_flash_attn_ext(request));
 }
+
+TEST_CASE("generator_detail_flash_dispatch_matches_compute_attention_on_same_backend_state") {
+  emel::generator::detail::native_backend backend{};
+  backend.n_head = 12;
+  backend.n_head_kv = 12;
+  backend.n_rep = 1;
+  backend.head_dim = 64;
+  backend.head_dim_kv = 64;
+  backend.n_ctx = 256;
+  backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+
+  const size_t n_embd =
+      static_cast<size_t>(backend.n_head) * static_cast<size_t>(backend.head_dim);
+  const size_t kv_dim =
+      static_cast<size_t>(backend.n_head_kv) * static_cast<size_t>(backend.head_dim_kv);
+  const int32_t position = 255;
+  const int32_t position_limit = position + 1;
+
+  backend.q.resize(n_embd);
+  backend.q_attn.resize(n_embd);
+  backend.key_cache.resize(static_cast<size_t>(backend.n_ctx) * kv_dim);
+  backend.value_cache.resize(static_cast<size_t>(backend.n_ctx) * kv_dim);
+  backend.attn_scores.resize(static_cast<size_t>(backend.n_ctx));
+  backend.attn_probs.resize(static_cast<size_t>(backend.n_ctx));
+  backend.attn_probs_rounded.resize(static_cast<size_t>(backend.n_ctx));
+  backend.attn_value_column.resize(static_cast<size_t>(backend.n_ctx));
+  backend.attn_ctx.resize(n_embd);
+
+  for (size_t idx = 0; idx < backend.q.size(); ++idx) {
+    const float raw = static_cast<float>(std::sin(static_cast<double>(idx + 1u) * 0.03125));
+    backend.q[idx] = raw;
+    backend.q_attn[idx] = emel::generator::detail::quant::fp16_to_fp32(
+        emel::generator::detail::quant::fp32_to_fp16(raw));
+  }
+
+  for (int32_t token = 0; token < position_limit; ++token) {
+    for (int32_t head = 0; head < backend.n_head_kv; ++head) {
+      for (int32_t dim = 0; dim < backend.head_dim_kv; ++dim) {
+        const size_t offset =
+            (static_cast<size_t>(token) * kv_dim) +
+            (static_cast<size_t>(head) * static_cast<size_t>(backend.head_dim_kv)) +
+            static_cast<size_t>(dim);
+        const double base =
+            static_cast<double>((token + 1) * (head + 3) * (dim + 5));
+        backend.key_cache[offset] = emel::generator::detail::quant::fp16_to_fp32(
+            emel::generator::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::cos(base * 0.0078125))));
+        backend.value_cache[offset] = emel::generator::detail::quant::fp16_to_fp32(
+            emel::generator::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::sin(base * 0.01171875))));
+      }
+    }
+  }
+
+  std::vector<float> flash_ctx(backend.attn_ctx.size(), 0.0f);
+  std::vector<float> exact_ctx(backend.attn_ctx.size(), 0.0f);
+  backend.attn_ctx = flash_ctx;
+  REQUIRE(emel::generator::detail::dispatch_flash_attention(backend, 0, position));
+  flash_ctx = backend.attn_ctx;
+  backend.attn_ctx = exact_ctx;
+  REQUIRE(emel::generator::detail::compute_attention(
+      backend, 0, position_limit, backend.q_attn));
+  exact_ctx = backend.attn_ctx;
+
+  for (size_t idx = 0; idx < flash_ctx.size(); ++idx) {
+    CHECK(flash_ctx[idx] == doctest::Approx(exact_ctx[idx]).epsilon(1e-6f));
+  }
+}
+
+TEST_CASE("generator_detail_flash_dispatch_matches_compute_attention_across_long_reuse") {
+  emel::generator::detail::native_backend backend{};
+  backend.n_head = 12;
+  backend.n_head_kv = 12;
+  backend.n_rep = 1;
+  backend.head_dim = 64;
+  backend.head_dim_kv = 64;
+  backend.n_ctx = 1024;
+  backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+
+  const size_t n_embd =
+      static_cast<size_t>(backend.n_head) * static_cast<size_t>(backend.head_dim);
+  const size_t kv_dim =
+      static_cast<size_t>(backend.n_head_kv) * static_cast<size_t>(backend.head_dim_kv);
+
+  backend.q.resize(n_embd);
+  backend.q_attn.resize(n_embd);
+  backend.key_cache.resize(static_cast<size_t>(backend.n_ctx) * kv_dim);
+  backend.value_cache.resize(static_cast<size_t>(backend.n_ctx) * kv_dim);
+  backend.attn_scores.resize(static_cast<size_t>(backend.n_ctx));
+  backend.attn_probs.resize(static_cast<size_t>(backend.n_ctx));
+  backend.attn_probs_rounded.resize(static_cast<size_t>(backend.n_ctx));
+  backend.attn_value_column.resize(static_cast<size_t>(backend.n_ctx));
+  backend.attn_ctx.resize(n_embd);
+
+  int32_t first_position = -1;
+  size_t first_index = 0u;
+  float first_flash = 0.0f;
+  float first_exact = 0.0f;
+  float max_abs = 0.0f;
+
+  for (int32_t position = 0; position < backend.n_ctx; ++position) {
+    for (size_t idx = 0; idx < backend.q.size(); ++idx) {
+      const double q_base = static_cast<double>((position + 1) * (idx + 1u));
+      const float raw = static_cast<float>(std::sin(q_base * 0.0009765625));
+      backend.q[idx] = raw;
+      backend.q_attn[idx] = emel::generator::detail::quant::fp16_to_fp32(
+          emel::generator::detail::quant::fp32_to_fp16(raw));
+    }
+
+    const size_t row_offset =
+        emel::generator::detail::layer_cache_offset(backend, 0, position, static_cast<int32_t>(kv_dim));
+    for (int32_t head = 0; head < backend.n_head_kv; ++head) {
+      for (int32_t dim = 0; dim < backend.head_dim_kv; ++dim) {
+        const size_t offset = row_offset +
+            (static_cast<size_t>(head) * static_cast<size_t>(backend.head_dim_kv)) +
+            static_cast<size_t>(dim);
+        const double kv_base =
+            static_cast<double>((position + 1) * (head + 3) * (dim + 5));
+        backend.key_cache[offset] = emel::generator::detail::quant::fp16_to_fp32(
+            emel::generator::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::cos(kv_base * 0.0078125))));
+        backend.value_cache[offset] = emel::generator::detail::quant::fp16_to_fp32(
+            emel::generator::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::sin(kv_base * 0.01171875))));
+      }
+    }
+
+    std::vector<float> flash_ctx(backend.attn_ctx.size(), 0.0f);
+    std::vector<float> exact_ctx(backend.attn_ctx.size(), 0.0f);
+    backend.attn_ctx = flash_ctx;
+    REQUIRE(emel::generator::detail::dispatch_flash_attention(backend, 0, position));
+    flash_ctx = backend.attn_ctx;
+    backend.attn_ctx = exact_ctx;
+    REQUIRE(emel::generator::detail::compute_attention(
+        backend, 0, position + 1, backend.q_attn));
+    exact_ctx = backend.attn_ctx;
+
+    for (size_t idx = 0; idx < flash_ctx.size(); ++idx) {
+      const float diff = std::fabs(flash_ctx[idx] - exact_ctx[idx]);
+      if (diff > max_abs) {
+        max_abs = diff;
+      }
+      if (first_position < 0 &&
+          flash_ctx[idx] != doctest::Approx(exact_ctx[idx]).epsilon(1e-6f)) {
+        first_position = position;
+        first_index = idx;
+        first_flash = flash_ctx[idx];
+        first_exact = exact_ctx[idx];
+      }
+    }
+  }
+
+  INFO("first_position=" << first_position << " first_index=" << first_index
+                         << " first_flash=" << first_flash << " first_exact=" << first_exact
+                         << " max_abs=" << max_abs);
+  CHECK(first_position < 0);
+}

@@ -1881,23 +1881,23 @@ inline bool run_flash_attn_ext_with_workspace(const request_type & request,
       const float * k = tensor_row_ptr(request.src1, token, kv_head);
       workspace.score_buffer[token] = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
     }
+    for (uint64_t token = kv_tokens; token < attn_width; ++token) {
+      workspace.score_buffer[token] = -std::numeric_limits<float>::infinity();
+    }
 
     float max_score = workspace.score_buffer[0];
-    for (uint64_t token = 1; token < kv_tokens; ++token) {
+    for (uint64_t token = 1; token < attn_width; ++token) {
       max_score = std::max(max_score, workspace.score_buffer[token]);
     }
 
     const double score_sum = exp_and_sum_ggml_f32(
-        workspace.score_buffer.data(), workspace.score_buffer.data(), kv_tokens, max_score);
+        workspace.score_buffer.data(), workspace.value_buffer.data(), attn_width, max_score);
 
     const float inv_score_sum =
         score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float weight = workspace.score_buffer[token] * inv_score_sum;
+    for (uint64_t token = 0; token < attn_width; ++token) {
+      const float weight = workspace.value_buffer[token] * inv_score_sum;
       workspace.score_buffer[token] = round_fp16_weight(weight);
-    }
-    for (uint64_t token = kv_tokens; token < attn_width; ++token) {
-      workspace.score_buffer[token] = 0.0f;
     }
 
     for (uint64_t dim = 0; dim < head_dim; ++dim) {

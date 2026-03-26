@@ -148,15 +148,26 @@ std::vector<parity_case> base_cases() {
   };
 }
 
+std::filesystem::path paritychecker_binary_path() {
+#ifdef PARITYCHECKER_BINARY_PATH
+  return PARITYCHECKER_BINARY_PATH;
+#else
+  return std::filesystem::path("paritychecker");
+#endif
+}
+
 bool run_paritychecker_process(const std::string & model, const parity_case & test_case) {
   std::string command;
 #if defined(_WIN32)
-  command = ".\\paritychecker --model ";
+  command = quote_arg_windows(paritychecker_binary_path().string());
+  command += " --model ";
   command += quote_arg_windows(model);
   command += " --text-file ";
   command += quote_arg_windows(test_case.text_path.string());
 #else
-  command = "ulimit -s 8192; ./paritychecker --model ";
+  command = "ulimit -s 8192; ";
+  command += quote_arg_posix(paritychecker_binary_path().string());
+  command += " --model ";
   command += quote_arg_posix(model);
   command += " --text-file ";
   command += quote_arg_posix(test_case.text_path.string());
@@ -184,10 +195,13 @@ bool run_paritychecker_process(const std::string & model, const parity_case & te
 bool run_gbnf_paritychecker_process(const std::filesystem::path & grammar_path) {
   std::string command;
 #if defined(_WIN32)
-  command = ".\\paritychecker --gbnf --text-file ";
+  command = quote_arg_windows(paritychecker_binary_path().string());
+  command += " --gbnf --text-file ";
   command += quote_arg_windows(grammar_path.string());
 #else
-  command = "ulimit -s 8192; ./paritychecker --gbnf --text-file ";
+  command = "ulimit -s 8192; ";
+  command += quote_arg_posix(paritychecker_binary_path().string());
+  command += " --gbnf --text-file ";
   command += quote_arg_posix(grammar_path.string());
 #endif
   const int status = std::system(command.c_str());
@@ -207,9 +221,12 @@ bool run_gbnf_paritychecker_process(const std::filesystem::path & grammar_path) 
 bool run_kernel_paritychecker_process() {
   std::string command;
 #if defined(_WIN32)
-  command = ".\\paritychecker --kernel --text kernel";
+  command = quote_arg_windows(paritychecker_binary_path().string());
+  command += " --kernel --text kernel";
 #else
-  command = "ulimit -s 8192; ./paritychecker --kernel --text kernel";
+  command = "ulimit -s 8192; ";
+  command += quote_arg_posix(paritychecker_binary_path().string());
+  command += " --kernel --text kernel";
 #endif
   const int status = std::system(command.c_str());
   if (status == -1) {
@@ -228,10 +245,13 @@ bool run_kernel_paritychecker_process() {
 bool run_jinja_paritychecker_process(const std::filesystem::path & template_path) {
   std::string command;
 #if defined(_WIN32)
-  command = ".\\paritychecker --jinja --text-file ";
+  command = quote_arg_windows(paritychecker_binary_path().string());
+  command += " --jinja --text-file ";
   command += quote_arg_windows(template_path.string());
 #else
-  command = "ulimit -s 8192; ./paritychecker --jinja --text-file ";
+  command = "ulimit -s 8192; ";
+  command += quote_arg_posix(paritychecker_binary_path().string());
+  command += " --jinja --text-file ";
   command += quote_arg_posix(template_path.string());
 #endif
   const int status = std::system(command.c_str());
@@ -281,7 +301,7 @@ process_capture run_generation_paritychecker_capture_with_args(
   const std::filesystem::path stderr_path = make_temp_capture_path("paritychecker-stderr");
   std::string command;
 #if defined(_WIN32)
-  command = ".\\paritychecker";
+  command = quote_arg_windows(paritychecker_binary_path().string());
   for (const auto & arg : args) {
     command += " ";
     command += quote_arg_windows(arg);
@@ -291,7 +311,8 @@ process_capture run_generation_paritychecker_capture_with_args(
   command += " 2> ";
   command += quote_arg_windows(stderr_path.string());
 #else
-  command = "ulimit -s 8192; ./paritychecker";
+  command = "ulimit -s 8192; ";
+  command += quote_arg_posix(paritychecker_binary_path().string());
   for (const auto & arg : args) {
     command += " ";
     command += quote_arg_posix(arg);
@@ -338,6 +359,35 @@ int parse_named_metric(const std::string & text, const std::string & key) {
   }
 
   size_t value_pos = key_pos + needle.size();
+  size_t value_end = value_pos;
+  while (value_end < text.size() && text[value_end] >= '0' && text[value_end] <= '9') {
+    ++value_end;
+  }
+  if (value_pos == value_end) {
+    return -1;
+  }
+  return std::atoi(text.substr(value_pos, value_end - value_pos).c_str());
+}
+
+int parse_named_metric_on_line(const std::string & text,
+                               const std::string & line_prefix,
+                               const std::string & key) {
+  const size_t line_pos = text.find(line_prefix);
+  if (line_pos == std::string::npos) {
+    return -1;
+  }
+
+  const size_t metric_pos = text.find(key + "=", line_pos);
+  if (metric_pos == std::string::npos) {
+    return -1;
+  }
+
+  const size_t line_end = text.find('\n', line_pos);
+  if (line_end != std::string::npos && metric_pos > line_end) {
+    return -1;
+  }
+
+  const size_t value_pos = metric_pos + key.size() + 1u;
   size_t value_end = value_pos;
   while (value_end < text.size() && text[value_end] >= '0' && text[value_end] <= '9') {
     ++value_end;
@@ -433,12 +483,19 @@ void check_generation_flash_attribution(const process_capture & capture) {
   CHECK(parse_flash_dispatch_calls(capture.stdout_text) >= 0);
   CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") >= 0);
   CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") >= 0);
-  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") == 0);
-  CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") == 0);
-  CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
-  CHECK(parse_flash_dispatch_calls(capture.stdout_text) == 0);
-  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
-  CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") > 0);
+  CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
+  if (expected_generation_kernel_kind() == "aarch64") {
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") > 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") > 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+  } else {
+    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
+    CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
+  }
 }
 
 void check_generation_quantized_attribution(const process_capture & capture) {
@@ -463,6 +520,40 @@ void check_generation_quantized_attribution(const process_capture & capture) {
     CHECK(parse_named_metric(capture.stdout_text, "optimized_q6_dispatch_calls") == 0);
     CHECK(parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls") == 0);
   }
+}
+
+void check_generation_quantized_stage_audit(const process_capture & capture) {
+  CHECK(capture.stdout_text.find("quantized_runtime_contract:") != std::string::npos);
+  CHECK(capture.stdout_text.find("quantized_stage_inventory:") != std::string::npos);
+  CHECK(capture.stdout_text.find("quantized_stage_audit: stage=token_embedding") !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find("quantized_stage_audit: stage=attention_q") !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find("approved_dense_f32_by_contract") != std::string::npos);
+  CHECK(parse_named_metric_on_line(capture.stdout_text,
+                                   "quantized_runtime_contract:",
+                                   "native_quantized") == 8);
+  CHECK(parse_named_metric_on_line(capture.stdout_text,
+                                   "quantized_runtime_contract:",
+                                   "approved_dense_f32_by_contract") == 4);
+  CHECK(parse_named_metric_on_line(capture.stdout_text,
+                                   "quantized_runtime_contract:",
+                                   "disallowed_fallback") == 0);
+  CHECK(parse_named_metric_on_line(capture.stdout_text,
+                                   "quantized_runtime_contract:",
+                                   "explicit_no_claim") == 0);
+  CHECK(parse_named_metric_on_line(capture.stdout_text,
+                                   "quantized_stage_inventory:",
+                                   "native_quantized") == 8);
+  CHECK(parse_named_metric_on_line(capture.stdout_text,
+                                   "quantized_stage_inventory:",
+                                   "approved_dense_f32_by_contract") == 4);
+  CHECK(parse_named_metric_on_line(capture.stdout_text,
+                                   "quantized_stage_inventory:",
+                                   "disallowed_fallback") == 0);
+  CHECK(parse_named_metric_on_line(capture.stdout_text,
+                                   "quantized_stage_inventory:",
+                                   "explicit_no_claim") == 0);
 }
 
 }  // namespace
@@ -538,6 +629,7 @@ TEST_CASE("paritychecker generation keeps parity across the maintained decode le
     }
     check_generation_flash_attribution(capture);
     check_generation_quantized_attribution(capture);
+    check_generation_quantized_stage_audit(capture);
   }
 }
 

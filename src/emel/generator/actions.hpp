@@ -391,13 +391,49 @@ struct request_memory_snapshot {
   }
 };
 
-struct request_prefill_compute {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::graph::error::none));
+template <emel::generator::detail::step_kind kind, auto run_kernel_fn>
+inline void request_phase_compute(const event::generate_run & ev, context & ctx) noexcept {
+  ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::graph::error::none));
+  ev.ctx.graph_output = {};
+  ev.ctx.io.backend_ctx = &ctx.compute.backend;
+  ev.ctx.io.logits = ctx.buffers.logits.get();
+  ev.ctx.io.logits_capacity = ctx.buffers.vocab_size;
+  const auto on_done =
+      emel::callback<bool(const emel::graph::events::compute_done &)>::from<
+          capture_graph_compute_done>();
+  const auto on_error =
+      emel::callback<bool(const emel::graph::events::compute_error &)>::from<
+          event::generate_ctx,
+          capture_graph_compute_error>(&ev.ctx);
+  emel::graph::event::compute compute_ev{
+    .node_count_hint = ctx.state.graph_reservation.node_count,
+    .tensor_count_hint = ctx.state.graph_reservation.tensor_count,
+    .bytes_per_tensor = ctx.compute.model_topology.bytes_per_tensor,
+    .workspace_capacity_bytes = ctx.compute.model_topology.workspace_capacity_bytes,
+    .memory_sm = &ctx.memory,
+    .memory_view = &ctx.state.memory_snapshot,
+    .compute_ctx = &ev.ctx.io,
+    .seq_masks = ctx.buffers.seq_masks.data(),
+    .seq_mask_words = k_sequence_mask_words,
+    .seq_masks_count = 1,
+    .seq_primary_ids = ctx.buffers.seq_primary_ids.data(),
+    .seq_primary_ids_count = 1,
+    .validate = emel::generator::detail::validate,
+    .prepare_graph = emel::generator::detail::prepare_graph,
+    .alloc_graph = emel::generator::detail::alloc_graph,
+    .bind_inputs = emel::generator::detail::bind_inputs,
+    .run_kernel = run_kernel_fn,
+    .extract_outputs = emel::generator::detail::extract_outputs,
+    .dispatch_done = on_done,
+    .dispatch_error = on_error,
+  };
+  if constexpr (kind == emel::generator::detail::step_kind::prefill) {
     for (int32_t idx = 0; idx < ev.ctx.prompt_token_count; ++idx) {
       ctx.buffers.positions[static_cast<size_t>(idx)] = idx;
     }
-    const auto * lifecycle = emel::generator::detail::phase_lifecycle(
+    compute_ev.step_plan = &ctx.compute.prefill_plan;
+    compute_ev.output_out = &ev.ctx.graph_output;
+    compute_ev.lifecycle = emel::generator::detail::phase_lifecycle(
         ctx.compute.backend,
         ctx.buffers.prompt_tokens.data(),
         ctx.limits.prompt_capacity,
@@ -406,50 +442,51 @@ struct request_prefill_compute {
         ctx.buffers.logits.get(),
         ctx.buffers.vocab_size,
         ctx.compute.prefill_plan.kind);
-    ev.ctx.graph_output = {};
-    ev.ctx.io.backend_ctx = &ctx.compute.backend;
     ev.ctx.io.token_ids = ctx.buffers.prompt_tokens.data();
     ev.ctx.io.token_count = ev.ctx.prompt_token_count;
-    ev.ctx.io.logits = ctx.buffers.logits.get();
-    ev.ctx.io.logits_capacity = ctx.buffers.vocab_size;
-    const auto on_done =
-        emel::callback<bool(const emel::graph::events::compute_done &)>::from<capture_graph_compute_done>();
-    const auto on_error =
-        emel::callback<bool(const emel::graph::events::compute_error &)>::from<
-            event::generate_ctx,
-            capture_graph_compute_error>(&ev.ctx);
-    emel::graph::event::compute compute_ev{
-      .step_plan = &ctx.compute.prefill_plan,
-      .output_out = &ev.ctx.graph_output,
-      .lifecycle = lifecycle,
-      .node_count_hint = ctx.state.graph_reservation.node_count,
-      .tensor_count_hint = ctx.state.graph_reservation.tensor_count,
-      .bytes_per_tensor = ctx.compute.model_topology.bytes_per_tensor,
-      .workspace_capacity_bytes = ctx.compute.model_topology.workspace_capacity_bytes,
-      .step_index = 0,
-      .step_size = ev.ctx.prefill_step_size,
-      .kv_tokens = 0,
-      .memory_sm = &ctx.memory,
-      .memory_view = &ctx.state.memory_snapshot,
-      .expected_outputs = ev.ctx.plan_outputs,
-      .compute_ctx = &ev.ctx.io,
-      .positions = ctx.buffers.positions.data(),
-      .positions_count = ev.ctx.prompt_token_count,
-      .seq_masks = ctx.buffers.seq_masks.data(),
-      .seq_mask_words = k_sequence_mask_words,
-      .seq_masks_count = 1,
-      .seq_primary_ids = ctx.buffers.seq_primary_ids.data(),
-      .seq_primary_ids_count = 1,
-      .validate = emel::generator::detail::validate,
-      .prepare_graph = emel::generator::detail::prepare_graph,
-      .alloc_graph = emel::generator::detail::alloc_graph,
-      .bind_inputs = emel::generator::detail::bind_inputs,
-      .run_kernel = emel::generator::detail::run_kernel,
-      .extract_outputs = emel::generator::detail::extract_outputs,
-      .dispatch_done = on_done,
-      .dispatch_error = on_error,
-    };
-    ev.ctx.phase_accepted = ctx.graph.process_event(compute_ev);
+    compute_ev.step_index = 0;
+    compute_ev.step_size = ev.ctx.prefill_step_size;
+    compute_ev.kv_tokens = 0;
+    compute_ev.expected_outputs = ev.ctx.plan_outputs;
+    compute_ev.positions = ctx.buffers.positions.data();
+    compute_ev.positions_count = ev.ctx.prompt_token_count;
+  } else {
+    ctx.buffers.prompt_tokens[0] = ev.ctx.selected_token;
+    ctx.buffers.positions[0] = ev.ctx.kv_tokens;
+    compute_ev.step_plan = &ctx.compute.decode_plan;
+    compute_ev.output_out = &ev.ctx.graph_output;
+    compute_ev.lifecycle = emel::generator::detail::phase_lifecycle(
+        ctx.compute.backend,
+        ctx.buffers.prompt_tokens.data(),
+        ctx.limits.prompt_capacity,
+        ctx.buffers.positions.data(),
+        ctx.limits.prompt_capacity,
+        ctx.buffers.logits.get(),
+        ctx.buffers.vocab_size,
+        ctx.compute.decode_plan.kind);
+    ev.ctx.io.token_ids = ctx.buffers.prompt_tokens.data();
+    ev.ctx.io.token_count = 1;
+    compute_ev.step_index = 0;
+    compute_ev.step_size = 1;
+    compute_ev.kv_tokens = ev.ctx.kv_tokens;
+    compute_ev.expected_outputs = 1;
+    compute_ev.positions = ctx.buffers.positions.data();
+    compute_ev.positions_count = 1;
+  }
+  ev.ctx.phase_accepted = ctx.graph.process_event(compute_ev);
+}
+
+struct request_prefill_compute_flash {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<emel::generator::detail::step_kind::prefill,
+                          emel::generator::detail::run_kernel_flash>(ev, ctx);
+  }
+};
+
+struct request_prefill_compute_nonflash {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<emel::generator::detail::step_kind::prefill,
+                          emel::generator::detail::run_kernel_nonflash>(ev, ctx);
   }
 };
 
@@ -467,64 +504,17 @@ struct request_decode_slots {
   }
 };
 
-struct request_decode_compute {
+struct request_decode_compute_flash {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::graph::error::none));
-    ctx.buffers.prompt_tokens[0] = ev.ctx.selected_token;
-    ctx.buffers.positions[0] = ev.ctx.kv_tokens;
-    const auto * lifecycle = emel::generator::detail::phase_lifecycle(
-        ctx.compute.backend,
-        ctx.buffers.prompt_tokens.data(),
-        ctx.limits.prompt_capacity,
-        ctx.buffers.positions.data(),
-        ctx.limits.prompt_capacity,
-        ctx.buffers.logits.get(),
-        ctx.buffers.vocab_size,
-        ctx.compute.decode_plan.kind);
-    ev.ctx.graph_output = {};
-    ev.ctx.io.backend_ctx = &ctx.compute.backend;
-    ev.ctx.io.token_ids = ctx.buffers.prompt_tokens.data();
-    ev.ctx.io.token_count = 1;
-    ev.ctx.io.logits = ctx.buffers.logits.get();
-    ev.ctx.io.logits_capacity = ctx.buffers.vocab_size;
-    const auto on_done =
-        emel::callback<bool(const emel::graph::events::compute_done &)>::from<capture_graph_compute_done>();
-    const auto on_error =
-        emel::callback<bool(const emel::graph::events::compute_error &)>::from<
-            event::generate_ctx,
-            capture_graph_compute_error>(&ev.ctx);
-    emel::graph::event::compute compute_ev{
-      .step_plan = &ctx.compute.decode_plan,
-      .output_out = &ev.ctx.graph_output,
-      .lifecycle = lifecycle,
-      .node_count_hint = ctx.state.graph_reservation.node_count,
-      .tensor_count_hint = ctx.state.graph_reservation.tensor_count,
-      .bytes_per_tensor = ctx.compute.model_topology.bytes_per_tensor,
-      .workspace_capacity_bytes = ctx.compute.model_topology.workspace_capacity_bytes,
-      .step_index = 0,
-      .step_size = 1,
-      .kv_tokens = ev.ctx.kv_tokens,
-      .memory_sm = &ctx.memory,
-      .memory_view = &ctx.state.memory_snapshot,
-      .expected_outputs = 1,
-      .compute_ctx = &ev.ctx.io,
-      .positions = ctx.buffers.positions.data(),
-      .positions_count = 1,
-      .seq_masks = ctx.buffers.seq_masks.data(),
-      .seq_mask_words = k_sequence_mask_words,
-      .seq_masks_count = 1,
-      .seq_primary_ids = ctx.buffers.seq_primary_ids.data(),
-      .seq_primary_ids_count = 1,
-      .validate = emel::generator::detail::validate,
-      .prepare_graph = emel::generator::detail::prepare_graph,
-      .alloc_graph = emel::generator::detail::alloc_graph,
-      .bind_inputs = emel::generator::detail::bind_inputs,
-      .run_kernel = emel::generator::detail::run_kernel,
-      .extract_outputs = emel::generator::detail::extract_outputs,
-      .dispatch_done = on_done,
-      .dispatch_error = on_error,
-    };
-    ev.ctx.phase_accepted = ctx.graph.process_event(compute_ev);
+    request_phase_compute<emel::generator::detail::step_kind::decode,
+                          emel::generator::detail::run_kernel_flash>(ev, ctx);
+  }
+};
+
+struct request_decode_compute_nonflash {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<emel::generator::detail::step_kind::decode,
+                          emel::generator::detail::run_kernel_nonflash>(ev, ctx);
   }
 };
 
@@ -777,9 +767,11 @@ inline constexpr request_planning request_planning{};
 inline constexpr request_allocate_sequence request_allocate_sequence{};
 inline constexpr request_prefill_slots request_prefill_slots{};
 inline constexpr request_memory_snapshot request_memory_snapshot{};
-inline constexpr request_prefill_compute request_prefill_compute{};
+inline constexpr request_prefill_compute_flash request_prefill_compute_flash{};
+inline constexpr request_prefill_compute_nonflash request_prefill_compute_nonflash{};
 inline constexpr request_decode_slots request_decode_slots{};
-inline constexpr request_decode_compute request_decode_compute{};
+inline constexpr request_decode_compute_flash request_decode_compute_flash{};
+inline constexpr request_decode_compute_nonflash request_decode_compute_nonflash{};
 inline constexpr request_decode_sample request_decode_sample{};
 inline constexpr request_decode_render request_decode_render{};
 inline constexpr request_flush request_flush{};
