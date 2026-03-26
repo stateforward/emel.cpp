@@ -18,6 +18,10 @@ bool generation_flash_evidence_ready() noexcept;
 std::uint64_t generation_flash_evidence_dispatch_calls() noexcept;
 std::uint64_t generation_flash_evidence_optimized_dispatch_calls() noexcept;
 std::uint64_t generation_flash_evidence_shared_dispatch_calls() noexcept;
+std::uint32_t generation_runtime_contract_native_quantized_stage_count() noexcept;
+std::uint32_t generation_runtime_contract_approved_dense_f32_stage_count() noexcept;
+std::uint32_t generation_runtime_contract_disallowed_fallback_stage_count() noexcept;
+std::uint32_t generation_runtime_contract_explicit_no_claim_stage_count() noexcept;
 std::uint64_t generation_quantized_evidence_optimized_q2_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_shared_q2_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_optimized_q3_dispatch_calls() noexcept;
@@ -315,6 +319,14 @@ void print_compare(const std::vector<bench::result> & emel_results,
       bench::generation_flash_evidence_optimized_dispatch_calls();
   const auto shared_flash_dispatch_calls =
       bench::generation_flash_evidence_shared_dispatch_calls();
+  const auto native_quantized_stage_count =
+      bench::generation_runtime_contract_native_quantized_stage_count();
+  const auto approved_dense_f32_stage_count =
+      bench::generation_runtime_contract_approved_dense_f32_stage_count();
+  const auto disallowed_fallback_stage_count =
+      bench::generation_runtime_contract_disallowed_fallback_stage_count();
+  const auto explicit_no_claim_stage_count =
+      bench::generation_runtime_contract_explicit_no_claim_stage_count();
   const auto optimized_q2_dispatch_calls =
       bench::generation_quantized_evidence_optimized_q2_dispatch_calls();
   const auto shared_q2_dispatch_calls =
@@ -357,6 +369,12 @@ void print_compare(const std::vector<bench::result> & emel_results,
                  shared_flash_dispatch_calls);
     std::exit(1);
   }
+  if (k_host_is_aarch64 && flash_dispatch_calls == 0) {
+    std::fprintf(stderr,
+                 "error: missing ARM flash attribution flash_dispatch_calls=%" PRIu64 "\n",
+                 flash_dispatch_calls);
+    std::exit(1);
+  }
   if (flash_dispatch_calls != 0 && k_host_is_aarch64 &&
       (optimized_flash_dispatch_calls == 0 || shared_flash_dispatch_calls != 0)) {
     std::fprintf(stderr,
@@ -394,6 +412,19 @@ void print_compare(const std::vector<bench::result> & emel_results,
                  shared_q6_dispatch_calls);
     std::exit(1);
   }
+  if (native_quantized_stage_count != 8u || approved_dense_f32_stage_count != 4u ||
+      disallowed_fallback_stage_count != 0u || explicit_no_claim_stage_count != 0u) {
+    std::fprintf(stderr,
+                 "error: invalid generation runtime contract native_quantized=%" PRIu32
+                 " approved_dense_f32_by_contract=%" PRIu32
+                 " disallowed_fallback=%" PRIu32
+                 " explicit_no_claim=%" PRIu32 "\n",
+                 native_quantized_stage_count,
+                 approved_dense_f32_stage_count,
+                 disallowed_fallback_stage_count,
+                 explicit_no_claim_stage_count);
+    std::exit(1);
+  }
 
   std::printf("# reference_impl: source=%.*s ref=%.*s\n",
               static_cast<int>(k_bench_reference_source.size()),
@@ -414,6 +445,16 @@ void print_compare(const std::vector<bench::result> & emel_results,
               emel_logits_calls,
               reference_decode_calls,
               reference_logits_calls);
+  std::printf("# generation_runtime_contract: case=%.*s native_quantized=%" PRIu32
+              " approved_dense_f32_by_contract=%" PRIu32
+              " disallowed_fallback=%" PRIu32
+              " explicit_no_claim=%" PRIu32 "\n",
+              static_cast<int>(bench::k_generation_case_name.size()),
+              bench::k_generation_case_name.data(),
+              native_quantized_stage_count,
+              approved_dense_f32_stage_count,
+              disallowed_fallback_stage_count,
+              explicit_no_claim_stage_count);
   std::printf("# generation_quantized_evidence: case=%.*s optimized_q2_dispatch_calls=%" PRIu64
               " shared_q2_dispatch_calls=%" PRIu64
               " optimized_q3_dispatch_calls=%" PRIu64

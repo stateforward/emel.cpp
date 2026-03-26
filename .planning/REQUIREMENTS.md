@@ -8,33 +8,33 @@ parity-oriented verification before widening API surface or model scope.
 
 ### Quantized Path Audit
 
-- [ ] **AUD-01**: The canonical Llama-68M ARM generation slice has a maintained operand-path audit
+- [x] **AUD-01**: The canonical Llama-68M ARM generation slice has a maintained operand-path audit
   that classifies each quantized stage as native quantized, approved dense-f32-by-contract, or
   disallowed fallback.
 
 ### Path Closure
 
-- [ ] **PATH-01**: Supported canonical ARM quantized requests do not silently widen through
+- [x] **PATH-01**: Supported canonical ARM quantized requests do not silently widen through
   disallowed whole-row or operator-level dequantize-to-f32 substitution in the shipped runtime
   path.
-- [ ] **PATH-02**: Unsupported or not-yet-ported quantized cases publish explicit no-claim
+- [x] **PATH-02**: Unsupported or not-yet-ported quantized cases publish explicit no-claim
   behavior instead of silently routing through a misleading f32 fallback path.
 
 ### Runtime Attribution
 
-- [ ] **ATTR-01**: Maintained paritychecker and benchmark outputs publish enough attribution to
+- [x] **ATTR-01**: Maintained paritychecker and benchmark outputs publish enough attribution to
   prove whether the canonical ARM request stayed on the approved quantized path.
 
 ### Verification
 
-- [ ] **VER-04**: Kernel, runtime, and regression tests cover the audited quantized-path branches
+- [x] **VER-04**: Kernel, runtime, and regression tests cover the audited quantized-path branches
   and fail if supported canonical requests regress back to disallowed f32 fallback.
-- [ ] **PAR-05**: `tools/paritychecker --generation` proves the canonical ARM workload stays on the
+- [x] **PAR-05**: `tools/paritychecker --generation` proves the canonical ARM workload stays on the
   maintained approved quantized path across `1`, `10`, `100`, and `1000` tokens.
 
 ### Benchmarking
 
-- [ ] **BENCH-10**: Maintained benchmark evidence isolates the end-to-end impact of full
+- [x] **BENCH-10**: Maintained benchmark evidence isolates the end-to-end impact of full
   quantized-path closure from remaining generator-side ARM math cost.
 
 ## v2 Requirements
@@ -70,13 +70,13 @@ parity-oriented verification before widening API surface or model scope.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| AUD-01 | Phase 22 | Pending |
-| PATH-01 | Phase 23 | Pending |
-| PATH-02 | Phase 22 | Pending |
-| ATTR-01 | Phase 24 | Pending |
-| VER-04 | Phase 24 | Pending |
-| PAR-05 | Phase 24 | Pending |
-| BENCH-10 | Phase 25 | Pending |
+| AUD-01 | Phase 22 | Complete |
+| PATH-01 | Phase 23 | Complete |
+| PATH-02 | Phase 22 | Complete |
+| ATTR-01 | Phase 24 | Complete |
+| VER-04 | Phase 24 | Complete |
+| PAR-05 | Phase 24 | Complete |
+| BENCH-10 | Phase 25 | Complete |
 
 **Coverage:**
 - v1 requirements: 7 total
@@ -85,4 +85,4 @@ parity-oriented verification before widening API surface or model scope.
 
 ---
 *Requirements defined: 2026-03-25*
-*Last updated: 2026-03-25 after milestone v1.5 definition*
+*Last updated: 2026-03-25 after completing Phase 25*

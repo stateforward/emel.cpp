@@ -55,6 +55,7 @@ struct native_backend {
   tensor_matrix token_embedding = {};
   std::vector<float> output_norm = {};
   tensor_matrix output = {};
+  emel::model::llama::detail::quantized_path_audit quantized_audit = {};
   std::vector<block_weights> blocks = {};
 
   int32_t n_vocab = 0;
@@ -126,7 +127,6 @@ using step_plan = emel::model::llama::detail::step_plan;
 
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_invalid = 1;
-
 constexpr emel::kernel::kernel_kind detect_host_kernel_kind() noexcept {
 #if defined(__aarch64__) || defined(_M_ARM64)
   return emel::kernel::kernel_kind::aarch64;
@@ -799,7 +799,7 @@ inline bool compute_attention(native_backend & backend,
 }
 
 inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
-    native_backend & backend,
+    const native_backend & backend,
     const int32_t layer_index,
     const int32_t position) noexcept {
   emel::kernel::event::op_flash_attn_ext request{};
@@ -814,25 +814,38 @@ inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
   const float scale = 1.0f / std::sqrt(static_cast<float>(backend.head_dim));
   const uint32_t total_tokens = static_cast<uint32_t>(backend.n_ctx);
 
-  request.src0 = make_src_view_3d(backend.q_attn.data(), head_dim, 1u, head_count);
-  request.src1 = make_src_view_strided_3d(backend.key_cache.data() + layer_offset,
+  request.src0 = make_src_view_3d(
+      const_cast<float *>(backend.q_attn.data()), head_dim, 1u, head_count);
+  request.src1 = make_src_view_strided_3d(
+      const_cast<float *>(backend.key_cache.data() + layer_offset),
                                           kv_head_dim,
                                           kv_tokens,
                                           kv_head_count,
                                           sizeof(float) * kv_dim,
                                           sizeof(float) * kv_head_dim);
-  request.src2 = make_src_view_strided_3d(backend.value_cache.data() + layer_offset,
+  request.src2 = make_src_view_strided_3d(
+      const_cast<float *>(backend.value_cache.data() + layer_offset),
                                           kv_head_dim,
                                           kv_tokens,
                                           kv_head_count,
                                           sizeof(float) * kv_dim,
                                           sizeof(float) * kv_head_dim);
-  request.dst = make_dst_view_3d(backend.attn_ctx.data(), head_dim, 1u, head_count);
+  request.dst = make_dst_view_3d(
+      const_cast<float *>(backend.attn_ctx.data()), head_dim, 1u, head_count);
   request.nth = 1;
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
   std::memcpy(request.op_params.data() + sizeof(scale), &total_tokens, sizeof(total_tokens));
   request.op_params_size = sizeof(scale) + sizeof(total_tokens);
   return request;
+}
+
+inline bool flash_attention_supported(const native_backend & backend,
+                                      const int32_t position) noexcept {
+  if (backend.n_layer <= 0 || position < 0 || position >= backend.n_ctx) {
+    return false;
+  }
+  return emel::kernel::detail::can_run_flash_attn_ext(
+      make_flash_attn_request(backend, 0, position));
 }
 
 inline bool dispatch_flash_attention(native_backend & backend,
@@ -846,6 +859,18 @@ inline bool dispatch_flash_attention(native_backend & backend,
   return ok;
 }
 
+template <emel::generator::attention_mode mode>
+inline bool run_attention(native_backend & backend,
+                          const int32_t layer_index,
+                          const int32_t position) noexcept {
+  if constexpr (mode == emel::generator::attention_mode::flash) {
+    return dispatch_flash_attention(backend, layer_index, position);
+  } else {
+    return compute_attention(backend, layer_index, position + 1, backend.q_attn);
+  }
+}
+
+template <emel::generator::attention_mode mode>
 inline bool run_layer(native_backend & backend,
                       const int32_t layer_index,
                       const int32_t position) noexcept {
@@ -878,7 +903,7 @@ inline bool run_layer(native_backend & backend,
       std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
       backend.value_cache.data() + cache_offset);
 
-  if (!compute_attention(backend, layer_index, position + 1, backend.q_attn) ||
+  if (!run_attention<mode>(backend, layer_index, position) ||
       !matmul_vector(backend, block.attention_output, backend.attn_ctx, backend.projected)) {
     return false;
   }
@@ -908,11 +933,24 @@ inline bool run_layer(native_backend & backend,
   return true;
 }
 
+inline bool run_layer_flash(native_backend & backend,
+                            const int32_t layer_index,
+                            const int32_t position) noexcept {
+  return run_layer<emel::generator::attention_mode::flash>(backend, layer_index, position);
+}
+
+inline bool run_layer_nonflash(native_backend & backend,
+                               const int32_t layer_index,
+                               const int32_t position) noexcept {
+  return run_layer<emel::generator::attention_mode::nonflash>(backend, layer_index, position);
+}
+
 inline bool compute_logits(native_backend & backend) noexcept {
   return rms_norm(backend.hidden, backend.output_norm, backend.rms_epsilon, backend.norm) &&
          matmul_vector(backend, backend.output, backend.norm, backend.bound_logits);
 }
 
+template <emel::generator::attention_mode mode>
 inline bool run_prefill(native_backend & backend) noexcept {
   backend.kv_cache_tokens = 0;
 
@@ -932,7 +970,7 @@ inline bool run_prefill(native_backend & backend) noexcept {
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_layer(backend, layer, position)) {
+      if (!run_layer<mode>(backend, layer, position)) {
         return false;
       }
     }
@@ -942,6 +980,15 @@ inline bool run_prefill(native_backend & backend) noexcept {
   return compute_logits(backend);
 }
 
+inline bool run_prefill_flash(native_backend & backend) noexcept {
+  return run_prefill<emel::generator::attention_mode::flash>(backend);
+}
+
+inline bool run_prefill_nonflash(native_backend & backend) noexcept {
+  return run_prefill<emel::generator::attention_mode::nonflash>(backend);
+}
+
+template <emel::generator::attention_mode mode>
 inline bool run_decode(native_backend & backend,
                        const emel::graph::processor::event::execute & request) noexcept {
   if (backend.bound_token_count != 1 ||
@@ -965,7 +1012,7 @@ inline bool run_decode(native_backend & backend,
   }
 
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    if (!run_layer(backend, layer, position)) {
+    if (!run_layer<mode>(backend, layer, position)) {
       return false;
     }
   }
@@ -992,6 +1039,8 @@ inline emel::error::type prepare(native_backend & backend,
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
+  backend.quantized_audit =
+      emel::model::llama::detail::build_quantized_path_audit(backend.execution);
   backend.model = &model_data;
   backend.n_vocab = model_data.params.n_vocab;
   backend.n_embd = model_data.params.n_embd;
@@ -1100,6 +1149,16 @@ inline emel::error::type prepare(native_backend & backend,
   return emel::error::cast(emel::model::loader::error::none);
 }
 
+inline uint32_t quantized_contract_stage_count(
+    const native_backend & backend,
+    const emel::model::llama::detail::quantized_contract_kind kind) noexcept {
+  uint32_t count = 0u;
+  for (const auto & stage : backend.quantized_audit.stages) {
+    count += static_cast<uint32_t>(stage.contract == kind);
+  }
+  return count;
+}
+
 inline bool validate(const emel::graph::processor::event::execute & request,
                      int32_t * err_out) noexcept {
   auto * io = static_cast<emel::generator::compute_io *>(request.compute_ctx);
@@ -1155,8 +1214,9 @@ inline bool bind_inputs(const emel::graph::processor::event::execute & request,
   return store_bound_request(*backend, request, err_out);
 }
 
-inline bool run_kernel(const emel::graph::processor::event::execute & request,
-                       int32_t * err_out) noexcept {
+template <emel::generator::attention_mode mode>
+inline bool run_kernel_mode(const emel::graph::processor::event::execute & request,
+                            int32_t * err_out) noexcept {
   auto * io = static_cast<emel::generator::compute_io *>(request.compute_ctx);
   auto * backend = static_cast<native_backend *>(io != nullptr ? io->backend_ctx : nullptr);
   const auto * plan = request_plan(request, err_out);
@@ -1167,12 +1227,22 @@ inline bool run_kernel(const emel::graph::processor::event::execute & request,
     return false;
   }
 
-  const bool ok = plan->kind == step_kind::prefill ? run_prefill(*backend)
-                                                   : run_decode(*backend, request);
+  const bool ok = plan->kind == step_kind::prefill ? run_prefill<mode>(*backend)
+                                                   : run_decode<mode>(*backend, request);
   if (err_out != nullptr) {
     *err_out = ok ? k_error_ok : k_error_invalid;
   }
   return ok;
+}
+
+inline bool run_kernel_flash(const emel::graph::processor::event::execute & request,
+                             int32_t * err_out) noexcept {
+  return run_kernel_mode<emel::generator::attention_mode::flash>(request, err_out);
+}
+
+inline bool run_kernel_nonflash(const emel::graph::processor::event::execute & request,
+                                int32_t * err_out) noexcept {
+  return run_kernel_mode<emel::generator::attention_mode::nonflash>(request, err_out);
 }
 
 inline bool extract_outputs(const emel::graph::processor::event::execute & request,

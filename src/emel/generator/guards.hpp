@@ -517,6 +517,20 @@ struct snapshot_backend_error {
   }
 };
 
+struct prefill_flash_runtime_supported {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return ev.ctx.prompt_token_count > 0 &&
+           emel::generator::detail::flash_attention_supported(
+               ctx.compute.backend, ev.ctx.prompt_token_count - 1);
+  }
+};
+
+struct prefill_nonflash_runtime_required {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return !prefill_flash_runtime_supported{}(ev, ctx);
+  }
+};
+
 struct prefill_compute_ok {
   bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
     return detail::has_phase_success(ev);
@@ -580,6 +594,20 @@ struct decode_snapshot_backend_error {
            (detail::phase_rejected_without_code(ev) ||
             detail::memory_backend_code(ev.ctx.phase_code) ||
             !invalid);
+  }
+};
+
+struct decode_flash_runtime_supported {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return ev.ctx.kv_tokens >= 0 &&
+           emel::generator::detail::flash_attention_supported(
+               ctx.compute.backend, ev.ctx.kv_tokens);
+  }
+};
+
+struct decode_nonflash_runtime_required {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return !decode_flash_runtime_supported{}(ev, ctx);
   }
 };
 

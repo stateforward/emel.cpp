@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdio>
 
+#include "emel/kernel/detail.hpp"
+#include "emel/kernel/events.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 
@@ -72,6 +74,95 @@ bool make_block_tensor_name(const int32_t block_index,
   return true;
 }
 
+constexpr std::array<llama::detail::quantized_stage_family,
+                     llama::detail::k_quantized_stage_family_count>
+    k_stage_families = {
+        llama::detail::quantized_stage_family::token_embedding,
+        llama::detail::quantized_stage_family::output_norm,
+        llama::detail::quantized_stage_family::output,
+        llama::detail::quantized_stage_family::attention_norm,
+        llama::detail::quantized_stage_family::attention_q,
+        llama::detail::quantized_stage_family::attention_k,
+        llama::detail::quantized_stage_family::attention_v,
+        llama::detail::quantized_stage_family::attention_output,
+        llama::detail::quantized_stage_family::feed_forward_norm,
+        llama::detail::quantized_stage_family::feed_forward_gate,
+        llama::detail::quantized_stage_family::feed_forward_down,
+        llama::detail::quantized_stage_family::feed_forward_up,
+    };
+
+bool is_supported_quantized_type(const int32_t tensor_type) noexcept {
+  return ::emel::kernel::detail::is_quantized_k_dtype(static_cast<uint8_t>(tensor_type));
+}
+
+bool is_f32_type(const int32_t tensor_type) noexcept {
+  return static_cast<uint8_t>(tensor_type) == ::emel::kernel::detail::dtype_f32;
+}
+
+bool is_vector_dequant_stage(const llama::detail::quantized_stage_family family) noexcept {
+  return family == llama::detail::quantized_stage_family::token_embedding ||
+         family == llama::detail::quantized_stage_family::output_norm ||
+         family == llama::detail::quantized_stage_family::attention_norm ||
+         family == llama::detail::quantized_stage_family::feed_forward_norm;
+}
+
+llama::detail::quantized_contract_kind classify_contract(
+    const llama::detail::quantized_stage_family family,
+    const int32_t tensor_type,
+    const bool consistent_across_layers) noexcept {
+  if (!consistent_across_layers) {
+    return llama::detail::quantized_contract_kind::explicit_no_claim;
+  }
+
+  if (is_vector_dequant_stage(family)) {
+    return is_f32_type(tensor_type)
+               ? llama::detail::quantized_contract_kind::approved_dense_f32_by_contract
+               : is_supported_quantized_type(tensor_type)
+                     ? llama::detail::quantized_contract_kind::approved_dense_f32_by_contract
+                     : llama::detail::quantized_contract_kind::explicit_no_claim;
+  }
+
+  if (is_supported_quantized_type(tensor_type)) {
+    return llama::detail::quantized_contract_kind::native_quantized;
+  }
+
+  return is_f32_type(tensor_type)
+             ? llama::detail::quantized_contract_kind::approved_dense_f32_by_contract
+               : llama::detail::quantized_contract_kind::explicit_no_claim;
+}
+
+const data::tensor_record * stage_tensor(const llama::detail::execution_view & execution,
+                                         const llama::detail::block_view * block,
+                                         const llama::detail::quantized_stage_family family) noexcept {
+  switch (family) {
+    case llama::detail::quantized_stage_family::token_embedding:
+      return execution.token_embedding.tensor;
+    case llama::detail::quantized_stage_family::output_norm:
+      return execution.output_norm.tensor;
+    case llama::detail::quantized_stage_family::output:
+      return execution.output.tensor;
+    case llama::detail::quantized_stage_family::attention_norm:
+      return block != nullptr ? block->attention_norm.tensor : nullptr;
+    case llama::detail::quantized_stage_family::attention_q:
+      return block != nullptr ? block->attention_q.tensor : nullptr;
+    case llama::detail::quantized_stage_family::attention_k:
+      return block != nullptr ? block->attention_k.tensor : nullptr;
+    case llama::detail::quantized_stage_family::attention_v:
+      return block != nullptr ? block->attention_v.tensor : nullptr;
+    case llama::detail::quantized_stage_family::attention_output:
+      return block != nullptr ? block->attention_output.tensor : nullptr;
+    case llama::detail::quantized_stage_family::feed_forward_norm:
+      return block != nullptr ? block->feed_forward_norm.tensor : nullptr;
+    case llama::detail::quantized_stage_family::feed_forward_gate:
+      return block != nullptr ? block->feed_forward_gate.tensor : nullptr;
+    case llama::detail::quantized_stage_family::feed_forward_down:
+      return block != nullptr ? block->feed_forward_down.tensor : nullptr;
+    case llama::detail::quantized_stage_family::feed_forward_up:
+      return block != nullptr ? block->feed_forward_up.tensor : nullptr;
+  }
+  return nullptr;
+}
+
 }  // namespace
 
 std::string_view tensor_name_view(const data & model_data,
@@ -123,6 +214,68 @@ std::string_view architecture_name_view(const data & model_data) noexcept {
 }
 
 namespace llama::detail {
+
+std::string_view quantized_stage_family_name(const quantized_stage_family family) noexcept {
+  switch (family) {
+    case quantized_stage_family::token_embedding:
+      return "token_embedding";
+    case quantized_stage_family::output_norm:
+      return "output_norm";
+    case quantized_stage_family::output:
+      return "output";
+    case quantized_stage_family::attention_norm:
+      return "attention_norm";
+    case quantized_stage_family::attention_q:
+      return "attention_q";
+    case quantized_stage_family::attention_k:
+      return "attention_k";
+    case quantized_stage_family::attention_v:
+      return "attention_v";
+    case quantized_stage_family::attention_output:
+      return "attention_output";
+    case quantized_stage_family::feed_forward_norm:
+      return "feed_forward_norm";
+    case quantized_stage_family::feed_forward_gate:
+      return "feed_forward_gate";
+    case quantized_stage_family::feed_forward_down:
+      return "feed_forward_down";
+    case quantized_stage_family::feed_forward_up:
+      return "feed_forward_up";
+  }
+  return "unknown_stage";
+}
+
+std::string_view quantized_contract_kind_name(const quantized_contract_kind kind) noexcept {
+  switch (kind) {
+    case quantized_contract_kind::native_quantized:
+      return "native_quantized";
+    case quantized_contract_kind::approved_dense_f32_by_contract:
+      return "approved_dense_f32_by_contract";
+    case quantized_contract_kind::disallowed_fallback:
+      return "disallowed_fallback";
+    case quantized_contract_kind::explicit_no_claim:
+      return "explicit_no_claim";
+  }
+  return "unknown_contract";
+}
+
+std::string_view tensor_type_name(const int32_t tensor_type) noexcept {
+  switch (static_cast<emel::kernel::event::dtype>(tensor_type)) {
+    case emel::kernel::event::dtype::f32:
+      return "f32";
+    case emel::kernel::event::dtype::q2_k:
+      return "q2_k";
+    case emel::kernel::event::dtype::q3_k:
+      return "q3_k";
+    case emel::kernel::event::dtype::q6_k:
+      return "q6_k";
+    default:
+      break;
+  }
+
+  return static_cast<uint8_t>(tensor_type) == emel::kernel::detail::dtype_q4_0 ? "q4_0"
+                                                                                : "unknown";
+}
 
 emel::error::type lookup_block_view(const execution_view & execution,
                                     const int32_t block_index,
@@ -240,6 +393,55 @@ emel::error::type build_step_plans(const topology & topology_in,
   decode_out.max_step_tokens = 1;
 
   return emel::error::cast(emel::model::loader::error::none);
+}
+
+quantized_path_audit build_quantized_path_audit(const execution_view & execution) noexcept {
+  quantized_path_audit audit = {};
+
+  for (size_t idx = 0; idx < k_stage_families.size(); ++idx) {
+    const auto family = k_stage_families[idx];
+    quantized_stage_audit stage{};
+    stage.family = family;
+
+    if (family == quantized_stage_family::token_embedding ||
+        family == quantized_stage_family::output_norm ||
+        family == quantized_stage_family::output) {
+      const auto * tensor = stage_tensor(execution, nullptr, family);
+      stage.tensor_type = tensor != nullptr ? tensor->type : -1;
+      stage.contract = classify_contract(family, stage.tensor_type, true);
+      audit.stages[idx] = stage;
+      continue;
+    }
+
+    bool first = true;
+    int32_t first_type = -1;
+    bool consistent = execution.block_count > 0;
+    for (int32_t block_index = 0; block_index < execution.block_count; ++block_index) {
+      block_view block{};
+      if (lookup_block_view(execution, block_index, block) !=
+          emel::error::cast(emel::model::loader::error::none)) {
+        consistent = false;
+        first_type = -1;
+        break;
+      }
+
+      const auto * tensor = stage_tensor(execution, &block, family);
+      const int32_t tensor_type = tensor != nullptr ? tensor->type : -1;
+      if (first) {
+        first_type = tensor_type;
+        first = false;
+      } else if (tensor_type != first_type) {
+        consistent = false;
+      }
+    }
+
+    stage.tensor_type = first_type;
+    stage.consistent_across_layers = consistent;
+    stage.contract = classify_contract(family, stage.tensor_type, consistent);
+    audit.stages[idx] = stage;
+  }
+
+  return audit;
 }
 
 }  // namespace llama::detail

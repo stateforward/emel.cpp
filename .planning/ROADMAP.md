@@ -26,16 +26,19 @@ and publish explicit proof where full quantized coverage still does not apply.
 
 ## Phases
 
-- [ ] **Phase 22: Quantized Path Audit And Contract** - Inventory the maintained canonical ARM
+- [x] **Phase 22: Quantized Path Audit And Contract** - Inventory the maintained canonical ARM
   operand path and make explicit which branches are native quantized, approved dense-f32-by-
   contract, or disallowed fallback.
-- [ ] **Phase 23: ARM Quantized Path Closure** - Remove any remaining disallowed f32 or
-  dequantize-to-f32 widening on supported canonical ARM quantized requests without changing actor
-  structure.
-- [ ] **Phase 24: Quantized Path Proof And Regression** - Extend paritychecker and test coverage
+- [x] **Phase 23: ARM Quantized Path Closure** - Codify and prove that supported canonical ARM
+  quantized requests have zero disallowed fallback stages at the shipped generator boundary
+  without changing actor structure.
+- [x] **Phase 24: Quantized Path Proof And Regression** - Extend paritychecker and test coverage
   so maintained proof surfaces fail if the canonical ARM request regresses to disallowed fallback.
-- [ ] **Phase 25: Quantized Attribution And Impact** - Publish benchmark attribution that shows the
+- [x] **Phase 25: Quantized Attribution And Impact** - Publish benchmark attribution that shows the
   end-to-end impact of full quantized-path closure and isolates the next bottleneck honestly.
+- [ ] **Phase 25.1: Restore Canonical Flash-Attention Dispatch On The Maintained Generator Path**
+  `(INSERTED)` - Restore the maintained canonical generator path so benchmark and parity surfaces
+  execute through flash attention instead of the manual generator-space attention fallback.
 
 ## Phase Details
 
@@ -53,14 +56,14 @@ unsupported quantized-path contract explicitly.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 22-01: Audit the maintained canonical ARM generation chain and capture the operand-format
+- [x] 22-01: Audit the maintained canonical ARM generation chain and capture the operand-format
   contract for each quantized stage.
-- [ ] 22-02: Encode explicit no-claim behavior and operator inventory surfaces for unsupported or
+- [x] 22-02: Encode explicit no-claim behavior and operator inventory surfaces for unsupported or
   not-yet-ported quantized branches.
 
 ### Phase 23: ARM Quantized Path Closure
-**Goal**: Remove any remaining disallowed f32 or dequantize-to-f32 widening on supported canonical
-ARM quantized requests.
+**Goal**: Codify and prove the supported canonical ARM zero-disallowed-fallback runtime contract
+at the shipped generator boundary.
 **Depends on**: Phase 22
 **Requirements**: PATH-01
 **Success Criteria** (what must be TRUE):
@@ -72,10 +75,10 @@ ARM quantized requests.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 23-01: Close the remaining supported canonical ARM branches that still widen through
-  disallowed f32 or dequantize-to-f32 pathing.
-- [ ] 23-02: Prove the shipped runtime path preserves the approved operand contract after the
-  closure work.
+- [x] 23-01: Codify the audited canonical ARM runtime contract at the shipped generator boundary
+  and expose additive stage-count accessors.
+- [x] 23-02: Prove the shipped runtime path preserves the approved operand contract with zero
+  disallowed fallback on the supported canonical fixture.
 
 ### Phase 24: Quantized Path Proof And Regression
 **Goal**: Extend maintained proof and regression surfaces so they fail if the canonical ARM
@@ -92,9 +95,9 @@ request regresses away from the approved quantized path.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 24-01: Extend paritychecker and runtime attribution so maintained proof fails on disallowed
+- [x] 24-01: Extend paritychecker and runtime attribution so maintained proof fails on disallowed
   canonical ARM fallback.
-- [ ] 24-02: Add kernel and regression coverage for the audited quantized-path branches and their
+- [x] 24-02: Add kernel and regression coverage for the audited quantized-path branches and their
   explicit no-claim cases.
 
 ### Phase 25: Quantized Attribution And Impact
@@ -112,19 +115,35 @@ quantized-path closure and honestly isolates the next bottleneck.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 25-01: Refresh the maintained compare workflow to publish quantized-path attribution after
+- [x] 25-01: Refresh the maintained compare workflow to publish quantized-path attribution after
   path closure.
-- [ ] 25-02: Regenerate stored benchmark evidence and docs that isolate the next post-closure
+- [x] 25-02: Regenerate stored benchmark evidence and docs that isolate the next post-closure
   bottleneck honestly.
+
+### Phase 25.1: Restore canonical flash-attention dispatch on the maintained generator path (INSERTED)
+
+**Goal:** Restore the maintained canonical generator path so the shipped runtime uses flash-
+attention dispatch on the supported benchmark and parity surfaces instead of the manual
+generator-space attention loop.
+**Requirements**: TBD
+**Depends on:** Phase 25
+**Plans:** 2 plans
+
+Plans:
+- [x] 25.1-01: Restore shipped generator flash dispatch on the maintained canonical path while
+  keeping the explicit mismatch fixture on the nonflash path.
+- [ ] 25.1-02: Refresh stored benchmark/docs artifacts after explicit approval so checked-in
+  publication matches the restored live flash evidence.
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 22 -> 23 -> 24 -> 25
+Phases execute in numeric order: 22 -> 23 -> 24 -> 25 -> 25.1
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 22. Quantized Path Audit And Contract | 0/2 | Not started | - |
-| 23. ARM Quantized Path Closure | 0/2 | Not started | - |
-| 24. Quantized Path Proof And Regression | 0/2 | Not started | - |
-| 25. Quantized Attribution And Impact | 0/2 | Not started | - |
+| 22. Quantized Path Audit And Contract | 2/2 | Complete | 2026-03-25 |
+| 23. ARM Quantized Path Closure | 2/2 | Complete | 2026-03-25 |
+| 24. Quantized Path Proof And Regression | 2/2 | Complete | 2026-03-25 |
+| 25. Quantized Attribution And Impact | 2/2 | Complete | 2026-03-25 |
+| 25.1. Restore canonical flash-attention dispatch on the maintained generator path | 1/2 | Approval pending | - |

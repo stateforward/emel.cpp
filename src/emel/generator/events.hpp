@@ -27,6 +27,11 @@ struct generation_error;
 
 namespace emel::generator {
 
+enum class attention_mode : uint8_t {
+  flash,
+  nonflash,
+};
+
 using tokenizer_bind_dispatch_fn =
     bool(void * tokenizer_sm, const emel::text::tokenizer::event::bind &);
 using tokenizer_tokenize_dispatch_fn =
