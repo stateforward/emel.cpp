@@ -65,12 +65,19 @@ stateDiagram-v2
   ready --> ready : dispatch_op_group_norm [dispatch_op_group_norm__] / dispatch_op_group_norm__
   ready --> ready : dispatch_op_l2_norm [dispatch_op_l2_norm__] / dispatch_op_l2_norm__
   ready --> ready : dispatch_op_l2_norm [dispatch_op_l2_norm__] / dispatch_op_l2_norm__
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_] / exec_simd_q6_vector_prepared_q8_rhs_i8mm_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat_argmax [simd_op_mul_mat_argmax_q6_vector_q8_argmax_prepared_i8mm_] / exec_simd_q6_vector_q8_argmax_prepared_i8mm_op_mul_mat_argmax_
+  ready --> ready : dispatch_op_mul_mat_argmax [simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs_] / exec_simd_q6_vector_packed_q8_rhs_op_mul_mat_argmax_
+  ready --> ready : dispatch_op_mul_mat_argmax [simd_op_mul_mat_argmax_q6_vector_prepared_q8_rhs_i8mm_] / exec_simd_q6_vector_prepared_q8_rhs_i8mm_op_mul_mat_argmax_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_prepared_q8_rhs_] / exec_simd_q6_vector_prepared_q8_rhs_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_packed_q8_rhs_] / exec_simd_q6_vector_packed_q8_rhs_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_packed_] / exec_simd_q6_vector_packed_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_] / exec_simd_q6_vector_op_mul_mat_
   ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_generic_] / dispatch_op_mul_mat__
   ready --> ready : dispatch_op_mul_mat [dispatch_op_mul_mat__] / dispatch_op_mul_mat__
   ready --> ready : dispatch_op_mul_mat [dispatch_op_mul_mat__] / dispatch_op_mul_mat__
+  ready --> ready : dispatch_op_mul_mat_argmax [dispatch_op_mul_mat_argmax__] / dispatch_op_mul_mat_argmax__
+  ready --> ready : dispatch_op_mul_mat_argmax [dispatch_op_mul_mat_argmax__] / dispatch_op_mul_mat_argmax__
   ready --> ready : dispatch_op_mul_mat_id [dispatch_op_mul_mat_id__] / dispatch_op_mul_mat_id__
   ready --> ready : dispatch_op_mul_mat_id [dispatch_op_mul_mat_id__] / dispatch_op_mul_mat_id__
   ready --> ready : dispatch_op_out_prod [dispatch_op_out_prod__] / dispatch_op_out_prod__

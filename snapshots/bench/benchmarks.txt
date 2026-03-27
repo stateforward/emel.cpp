@@ -1,83 +1,84 @@
 # ref=ecbcb7ea9d3303097519723b264a8b5f1e977028
 # toolchain=/opt/homebrew/bin/zig
-batch/planner_equal ns_per_op=1993.125
-batch/planner_seq ns_per_op=2178.167
-batch/planner_simple ns_per_op=1037.417
-gbnf/rule_parser_basic ns_per_op=504.000
-gbnf/rule_parser_complex ns_per_op=3290.250
-generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 ns_per_op=4135459.000
-generation/preloaded_request/llama_68m_prompt_hello_max_tokens_10 ns_per_op=40107167.000
-generation/preloaded_request/llama_68m_prompt_hello_max_tokens_100 ns_per_op=406015458.000
-generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1000 ns_per_op=5289484000.000
-kernel/aarch64/op_add ns_per_op=100.792
-kernel/aarch64/op_cos ns_per_op=1676.666
-kernel/aarch64/op_div ns_per_op=110.000
-kernel/aarch64/op_dup ns_per_op=95.042
-kernel/aarch64/op_log ns_per_op=1878.292
-kernel/aarch64/op_mul ns_per_op=111.584
-kernel/aarch64/op_mul_mat ns_per_op=4539.958
-kernel/aarch64/op_sin ns_per_op=1307.625
-kernel/aarch64/op_soft_max ns_per_op=1021.083
-kernel/aarch64/op_sqr ns_per_op=101.250
-kernel/aarch64/op_sqrt ns_per_op=147.916
-kernel/aarch64/op_sub ns_per_op=100.958
-kernel/aarch64/op_unary_exp ns_per_op=1380.958
-kernel/aarch64/op_unary_neg ns_per_op=103.500
-kernel/aarch64/op_unary_relu ns_per_op=115.750
-logits/sampler_raw/vocab_128000 ns_per_op=20166.458
-logits/sampler_raw/vocab_256000 ns_per_op=38104.417
-logits/sampler_raw/vocab_32000 ns_per_op=4329.000
-logits/sampler_sml/vocab_128000 ns_per_op=17653.834
-logits/sampler_sml/vocab_256000 ns_per_op=30503.000
-logits/sampler_sml/vocab_32000 ns_per_op=4977.084
-logits/validator_raw/vocab_128000 ns_per_op=163340.583
-logits/validator_raw/vocab_256000 ns_per_op=336142.125
-logits/validator_raw/vocab_32000 ns_per_op=41081.708
-logits/validator_sml/vocab_128000 ns_per_op=100361.625
-logits/validator_sml/vocab_256000 ns_per_op=198997.333
-logits/validator_sml/vocab_32000 ns_per_op=24616.167
-memory/hybrid_full ns_per_op=450.167
-memory/kv_full ns_per_op=134.083
-memory/recurrent_full ns_per_op=143.791
-text/encoders/bpe_long ns_per_op=62.333
-text/encoders/bpe_short ns_per_op=57.166
-text/encoders/fallback_long ns_per_op=2466.709
-text/encoders/fallback_short ns_per_op=66.500
-text/encoders/plamo2_long ns_per_op=7536.542
-text/encoders/plamo2_short ns_per_op=204.458
-text/encoders/rwkv_long ns_per_op=839269.583
-text/encoders/rwkv_short ns_per_op=57024.584
-text/encoders/spm_long ns_per_op=3664208.708
-text/encoders/spm_short ns_per_op=1270.583
-text/encoders/ugm_long ns_per_op=1384060.375
-text/encoders/ugm_short ns_per_op=743.125
-text/encoders/wpm_long ns_per_op=30683.125
-text/encoders/wpm_short ns_per_op=608.042
-text/jinja/formatter_long ns_per_op=59.291
-text/jinja/formatter_short ns_per_op=15.750
-text/jinja/parser_long ns_per_op=66000.667
-text/jinja/parser_short ns_per_op=943.167
-tokenizer/full_bpe_long ns_per_op=13773.333
-tokenizer/full_bpe_short ns_per_op=329.375
-tokenizer/full_plamo2_long ns_per_op=12623.583
-tokenizer/full_plamo2_short ns_per_op=2001.500
-tokenizer/full_rwkv_long ns_per_op=838232.833
-tokenizer/full_rwkv_short ns_per_op=55368.125
-tokenizer/full_spm_long ns_per_op=3653798.583
-tokenizer/full_spm_short ns_per_op=1466.000
-tokenizer/full_ugm_long ns_per_op=1381470.625
-tokenizer/full_ugm_short ns_per_op=2452.709
-tokenizer/full_wpm_long ns_per_op=32604.750
-tokenizer/full_wpm_short ns_per_op=2262.084
-tokenizer/preprocessor_bpe_long ns_per_op=3374.708
-tokenizer/preprocessor_bpe_short ns_per_op=145.959
-tokenizer/preprocessor_plamo2_long ns_per_op=4170.083
-tokenizer/preprocessor_plamo2_short ns_per_op=2388.334
-tokenizer/preprocessor_rwkv_long ns_per_op=4037.083
-tokenizer/preprocessor_rwkv_short ns_per_op=2491.166
-tokenizer/preprocessor_spm_long ns_per_op=3932.583
-tokenizer/preprocessor_spm_short ns_per_op=2502.584
-tokenizer/preprocessor_ugm_long ns_per_op=4356.416
-tokenizer/preprocessor_ugm_short ns_per_op=2399.417
-tokenizer/preprocessor_wpm_long ns_per_op=4255.708
-tokenizer/preprocessor_wpm_short ns_per_op=2475.209
+batch/planner_equal ns_per_op=2069.125 iter=1000 runs=3
+batch/planner_seq ns_per_op=2449.875 iter=1000 runs=3
+batch/planner_simple ns_per_op=1252.583 iter=1000 runs=3
+flash_attention/aarch64/op_flash_attn_ext_decode_like ns_per_op=15445.000 iter=1000 runs=3
+gbnf/rule_parser_basic ns_per_op=466.708 iter=1000 runs=3
+gbnf/rule_parser_complex ns_per_op=3374.666 iter=1000 runs=3
+generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 ns_per_op=1426250.000 iter=1 runs=3
+generation/preloaded_request/llama_68m_prompt_hello_max_tokens_10 ns_per_op=13813958.000 iter=1 runs=3
+generation/preloaded_request/llama_68m_prompt_hello_max_tokens_100 ns_per_op=138989625.000 iter=1 runs=3
+generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1000 ns_per_op=1522112417.000 iter=1 runs=3
+kernel/aarch64/op_add ns_per_op=108.333 iter=1000 runs=3
+kernel/aarch64/op_cos ns_per_op=1706.833 iter=1000 runs=3
+kernel/aarch64/op_div ns_per_op=107.875 iter=1000 runs=3
+kernel/aarch64/op_dup ns_per_op=101.958 iter=1000 runs=3
+kernel/aarch64/op_log ns_per_op=1909.583 iter=1000 runs=3
+kernel/aarch64/op_mul ns_per_op=107.750 iter=1000 runs=3
+kernel/aarch64/op_mul_mat ns_per_op=4795.542 iter=1000 runs=3
+kernel/aarch64/op_sin ns_per_op=1322.666 iter=1000 runs=3
+kernel/aarch64/op_soft_max ns_per_op=1059.916 iter=1000 runs=3
+kernel/aarch64/op_sqr ns_per_op=101.000 iter=1000 runs=3
+kernel/aarch64/op_sqrt ns_per_op=146.500 iter=1000 runs=3
+kernel/aarch64/op_sub ns_per_op=109.250 iter=1000 runs=3
+kernel/aarch64/op_unary_exp ns_per_op=1336.625 iter=1000 runs=3
+kernel/aarch64/op_unary_neg ns_per_op=115.667 iter=1000 runs=3
+kernel/aarch64/op_unary_relu ns_per_op=131.375 iter=1000 runs=3
+logits/sampler_raw/vocab_128000 ns_per_op=18416.625 iter=1000 runs=3
+logits/sampler_raw/vocab_256000 ns_per_op=37597.125 iter=1000 runs=3
+logits/sampler_raw/vocab_32000 ns_per_op=6363.208 iter=1000 runs=3
+logits/sampler_sml/vocab_128000 ns_per_op=15946.875 iter=1000 runs=3
+logits/sampler_sml/vocab_256000 ns_per_op=36818.417 iter=1000 runs=3
+logits/sampler_sml/vocab_32000 ns_per_op=5779.125 iter=1000 runs=3
+logits/validator_raw/vocab_128000 ns_per_op=92518.167 iter=1000 runs=3
+logits/validator_raw/vocab_256000 ns_per_op=186305.916 iter=1000 runs=3
+logits/validator_raw/vocab_32000 ns_per_op=24180.875 iter=1000 runs=3
+logits/validator_sml/vocab_128000 ns_per_op=100664.209 iter=1000 runs=3
+logits/validator_sml/vocab_256000 ns_per_op=200156.333 iter=1000 runs=3
+logits/validator_sml/vocab_32000 ns_per_op=24649.250 iter=1000 runs=3
+memory/hybrid_full ns_per_op=423.166 iter=1000 runs=3
+memory/kv_full ns_per_op=138.541 iter=1000 runs=3
+memory/recurrent_full ns_per_op=131.667 iter=1000 runs=3
+text/encoders/bpe_long ns_per_op=62.917 iter=1000 runs=3
+text/encoders/bpe_short ns_per_op=58.459 iter=1000 runs=3
+text/encoders/fallback_long ns_per_op=2504.584 iter=1000 runs=3
+text/encoders/fallback_short ns_per_op=64.584 iter=1000 runs=3
+text/encoders/plamo2_long ns_per_op=7800.208 iter=1000 runs=3
+text/encoders/plamo2_short ns_per_op=206.916 iter=1000 runs=3
+text/encoders/rwkv_long ns_per_op=837269.542 iter=1000 runs=3
+text/encoders/rwkv_short ns_per_op=56842.042 iter=1000 runs=3
+text/encoders/spm_long ns_per_op=3580269.875 iter=1000 runs=3
+text/encoders/spm_short ns_per_op=1328.750 iter=1000 runs=3
+text/encoders/ugm_long ns_per_op=1382554.833 iter=1000 runs=3
+text/encoders/ugm_short ns_per_op=737.833 iter=1000 runs=3
+text/encoders/wpm_long ns_per_op=30612.167 iter=1000 runs=3
+text/encoders/wpm_short ns_per_op=556.958 iter=1000 runs=3
+text/jinja/formatter_long ns_per_op=61.625 iter=1000 runs=3
+text/jinja/formatter_short ns_per_op=15.959 iter=1000 runs=3
+text/jinja/parser_long ns_per_op=65226.250 iter=1000 runs=3
+text/jinja/parser_short ns_per_op=953.292 iter=1000 runs=3
+tokenizer/full_bpe_long ns_per_op=13650.750 iter=1000 runs=3
+tokenizer/full_bpe_short ns_per_op=322.708 iter=1000 runs=3
+tokenizer/full_plamo2_long ns_per_op=12504.583 iter=1000 runs=3
+tokenizer/full_plamo2_short ns_per_op=2209.375 iter=1000 runs=3
+tokenizer/full_rwkv_long ns_per_op=845076.250 iter=1000 runs=3
+tokenizer/full_rwkv_short ns_per_op=55353.750 iter=1000 runs=3
+tokenizer/full_spm_long ns_per_op=3601443.750 iter=1000 runs=3
+tokenizer/full_spm_short ns_per_op=1528.208 iter=1000 runs=3
+tokenizer/full_ugm_long ns_per_op=1384035.291 iter=1000 runs=3
+tokenizer/full_ugm_short ns_per_op=2454.208 iter=1000 runs=3
+tokenizer/full_wpm_long ns_per_op=32124.917 iter=1000 runs=3
+tokenizer/full_wpm_short ns_per_op=2303.750 iter=1000 runs=3
+tokenizer/preprocessor_bpe_long ns_per_op=3277.042 iter=1000 runs=3
+tokenizer/preprocessor_bpe_short ns_per_op=144.542 iter=1000 runs=3
+tokenizer/preprocessor_plamo2_long ns_per_op=4018.375 iter=1000 runs=3
+tokenizer/preprocessor_plamo2_short ns_per_op=2453.083 iter=1000 runs=3
+tokenizer/preprocessor_rwkv_long ns_per_op=4154.834 iter=1000 runs=3
+tokenizer/preprocessor_rwkv_short ns_per_op=2470.208 iter=1000 runs=3
+tokenizer/preprocessor_spm_long ns_per_op=4041.166 iter=1000 runs=3
+tokenizer/preprocessor_spm_short ns_per_op=2453.458 iter=1000 runs=3
+tokenizer/preprocessor_ugm_long ns_per_op=4331.917 iter=1000 runs=3
+tokenizer/preprocessor_ugm_short ns_per_op=2437.417 iter=1000 runs=3
+tokenizer/preprocessor_wpm_long ns_per_op=4113.375 iter=1000 runs=3
+tokenizer/preprocessor_wpm_short ns_per_op=2500.542 iter=1000 runs=3

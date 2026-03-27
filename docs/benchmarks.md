@@ -12,7 +12,7 @@ are not. True benchmarks will be end-to-end once the system is complete.
 - Preserved baseline artifact: `snapshots/bench/generation_pre_arm_flash_optimized_baseline.txt`
 - `reference_impl: source=cmake_fetch ref=ecbcb7ea9d3303097519723b264a8b5f1e977028`
 - `generation_flash_evidence: case=generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 flash_dispatch_calls=2 optimized_flash_dispatch_calls=2 shared_flash_dispatch_calls=0 emel_decode_calls=0 emel_logits_calls=0 reference_decode_calls=0 reference_logits_calls=0`
-- Current compare row: `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 emel.cpp 4949333.000 ns/op, llama.cpp 5688875.000 ns/op, ratio=0.870x`
+- Current compare row: `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 emel.cpp 1375791.000 ns/op, llama.cpp 3006209.000 ns/op, ratio=0.458x`
 
 ## Current Quantized Evidence
 
@@ -30,92 +30,93 @@ are not. True benchmarks will be end-to-end once the system is complete.
 - `baseline_emel_ns=6995375.000`
 - `baseline_reference_ns=5146125.000`
 - `baseline_ratio=1.359x`
-- `current_emel_ns=4949333.000`
-- `current_reference_ns=5688875.000`
-- `current_ratio=0.870x`
-- `speedup=1.413x`
-- `latency_drop_pct=29.2`
+- `current_emel_ns=1375791.000`
+- `current_reference_ns=3006209.000`
+- `current_ratio=0.458x`
+- `speedup=5.085x`
+- `latency_drop_pct=80.3`
 
 | Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |
 | --- | ---: | ---: | ---: |
-| `batch/planner_equal` | 2417.000 | 8166.000 | 0.296x |
-| `batch/planner_seq` | 2666.000 | 3666.000 | 0.727x |
-| `batch/planner_simple` | 1459.000 | 7125.000 | 0.205x |
-| `gbnf/rule_parser_basic` | 750.000 | 2958.000 | 0.254x |
-| `gbnf/rule_parser_complex` | 4125.000 | 4959.000 | 0.832x |
-| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1` | 4949333.000 | 5688875.000 | 0.870x |
-| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_10` | 41555334.000 | 17504083.000 | 2.374x |
-| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_100` | 434737166.000 | 160401167.000 | 2.710x |
-| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1000` | 5400116583.000 | 1796303041.000 | 3.006x |
-| `kernel/aarch64/op_add` | 542.000 | 7500.000 | 0.072x |
-| `kernel/aarch64/op_cos` | 1709.000 | 7916.000 | 0.216x |
-| `kernel/aarch64/op_div` | 250.000 | 38750.000 | 0.006x |
-| `kernel/aarch64/op_dup` | 500.000 | 5625.000 | 0.089x |
-| `kernel/aarch64/op_log` | 2208.000 | 7042.000 | 0.314x |
-| `kernel/aarch64/op_mul` | 292.000 | 5792.000 | 0.050x |
-| `kernel/aarch64/op_mul_mat` | 9833.000 | 11583.000 | 0.849x |
-| `kernel/aarch64/op_sin` | 1375.000 | 6500.000 | 0.212x |
-| `kernel/aarch64/op_soft_max` | 9500.000 | 6792.000 | 1.399x |
-| `kernel/aarch64/op_sqr` | 8416.000 | 5875.000 | 1.433x |
-| `kernel/aarch64/op_sqrt` | 375.000 | 5750.000 | 0.065x |
-| `kernel/aarch64/op_sub` | 9458.000 | 5958.000 | 1.587x |
-| `kernel/aarch64/op_unary_exp` | 1667.000 | 6208.000 | 0.269x |
-| `kernel/aarch64/op_unary_neg` | 8834.000 | 6583.000 | 1.342x |
-| `kernel/aarch64/op_unary_relu` | 167.000 | 5500.000 | 0.030x |
-| `logits/sampler_raw/vocab_128000` | 18250.000 | 30792.000 | 0.593x |
-| `logits/sampler_raw/vocab_256000` | 44166.000 | 44916.000 | 0.983x |
-| `logits/sampler_raw/vocab_32000` | 5917.000 | 3792.000 | 1.560x |
-| `logits/sampler_sml/vocab_128000` | 15917.000 | 22750.000 | 0.700x |
-| `logits/sampler_sml/vocab_256000` | 34708.000 | 48083.000 | 0.722x |
-| `logits/sampler_sml/vocab_32000` | 5125.000 | 6333.000 | 0.809x |
-| `logits/validator_raw/vocab_128000` | 96667.000 | 96750.000 | 0.999x |
-| `logits/validator_raw/vocab_256000` | 204791.000 | 191959.000 | 1.067x |
-| `logits/validator_raw/vocab_32000` | 23459.000 | 23041.000 | 1.018x |
-| `logits/validator_sml/vocab_128000` | 96709.000 | 96875.000 | 0.998x |
-| `logits/validator_sml/vocab_256000` | 191958.000 | 202666.000 | 0.947x |
-| `logits/validator_sml/vocab_32000` | 23833.000 | 22125.000 | 1.077x |
-| `memory/hybrid_full` | 1125.000 | 39333.000 | 0.029x |
-| `memory/kv_full` | 17292.000 | 38584.000 | 0.448x |
-| `memory/recurrent_full` | 625.000 | 6375.000 | 0.098x |
-| `text/encoders/bpe_long` | 83.000 | 83.000 | 1.000x |
-| `text/encoders/bpe_short` | 83.000 | 84.000 | 0.988x |
-| `text/encoders/fallback_long` | 2583.000 | 2542.000 | 1.016x |
-| `text/encoders/fallback_short` | 84.000 | 83.000 | 1.012x |
-| `text/encoders/plamo2_long` | 9541.000 | 7708.000 | 1.238x |
-| `text/encoders/plamo2_short` | 375.000 | 333.000 | 1.126x |
-| `text/encoders/rwkv_long` | 855208.000 | 842458.000 | 1.015x |
-| `text/encoders/rwkv_short` | 60417.000 | 55958.000 | 1.080x |
-| `text/encoders/spm_long` | 3642291.000 | 3414500.000 | 1.067x |
-| `text/encoders/spm_short` | 1584.000 | 1417.000 | 1.118x |
-| `text/encoders/ugm_long` | 1400375.000 | 1389458.000 | 1.008x |
-| `text/encoders/ugm_short` | 791.000 | 834.000 | 0.948x |
-| `text/encoders/wpm_long` | 35459.000 | 30750.000 | 1.153x |
-| `text/encoders/wpm_short` | 708.000 | 708.000 | 1.000x |
-| `text/jinja/formatter_long` | 125.000 | 248750.000 | 0.001x |
-| `text/jinja/formatter_short` | 167.000 | 481542.000 | 0.000x |
-| `text/jinja/parser_long` | 65500.000 | 49375.000 | 1.327x |
-| `text/jinja/parser_short` | 2500.000 | 875.000 | 2.857x |
-| `tokenizer/full_bpe_long` | 13084.000 | 13875.000 | 0.943x |
-| `tokenizer/full_bpe_short` | 459.000 | 500.000 | 0.918x |
-| `tokenizer/full_plamo2_long` | 15791.000 | 12792.000 | 1.234x |
-| `tokenizer/full_plamo2_short` | 2625.000 | 2709.000 | 0.969x |
-| `tokenizer/full_rwkv_long` | 827917.000 | 841750.000 | 0.984x |
-| `tokenizer/full_rwkv_short` | 55333.000 | 55250.000 | 1.002x |
-| `tokenizer/full_spm_long` | 3581791.000 | 3425666.000 | 1.046x |
-| `tokenizer/full_spm_short` | 1792.000 | 1583.000 | 1.132x |
-| `tokenizer/full_ugm_long` | 1358250.000 | 1374458.000 | 0.988x |
-| `tokenizer/full_ugm_short` | 3250.000 | 4000.000 | 0.812x |
-| `tokenizer/full_wpm_long` | 33042.000 | 32875.000 | 1.005x |
-| `tokenizer/full_wpm_short` | 3083.000 | 3250.000 | 0.949x |
-| `tokenizer/preprocessor_bpe_long` | 4208.000 | 5791.000 | 0.727x |
-| `tokenizer/preprocessor_bpe_short` | 333.000 | 3625.000 | 0.092x |
-| `tokenizer/preprocessor_plamo2_long` | 4458.000 | 7083.000 | 0.629x |
-| `tokenizer/preprocessor_plamo2_short` | 3000.000 | 5083.000 | 0.590x |
-| `tokenizer/preprocessor_rwkv_long` | 4500.000 | 7166.000 | 0.628x |
-| `tokenizer/preprocessor_rwkv_short` | 2916.000 | 5208.000 | 0.560x |
-| `tokenizer/preprocessor_spm_long` | 4500.000 | 8167.000 | 0.551x |
-| `tokenizer/preprocessor_spm_short` | 3875.000 | 6667.000 | 0.581x |
-| `tokenizer/preprocessor_ugm_long` | 4542.000 | 7459.000 | 0.609x |
-| `tokenizer/preprocessor_ugm_short` | 2625.000 | 6042.000 | 0.434x |
-| `tokenizer/preprocessor_wpm_long` | 4625.000 | 7000.000 | 0.661x |
-| `tokenizer/preprocessor_wpm_short` | 2875.000 | 5167.000 | 0.556x |
+| `batch/planner_equal` | 2200.708 | 6221.209 | 0.354x |
+| `batch/planner_seq` | 2625.333 | 2669.042 | 0.984x |
+| `batch/planner_simple` | 1025.875 | 2270.375 | 0.452x |
+| `flash_attention/aarch64/op_flash_attn_ext_decode_like` | 15758.792 | 18112.875 | 0.870x |
+| `gbnf/rule_parser_basic` | 483.750 | 277.584 | 1.743x |
+| `gbnf/rule_parser_complex` | 3355.375 | 1479.375 | 2.268x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1` | 1375791.000 | 3006209.000 | 0.458x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_10` | 13788250.000 | 16811000.000 | 0.820x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_100` | 139125333.000 | 156398708.000 | 0.890x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1000` | 1542089417.000 | 1750086292.000 | 0.881x |
+| `kernel/aarch64/op_add` | 108.416 | 5349.084 | 0.020x |
+| `kernel/aarch64/op_cos` | 1727.583 | 6766.541 | 0.255x |
+| `kernel/aarch64/op_div` | 109.125 | 4936.375 | 0.022x |
+| `kernel/aarch64/op_dup` | 102.333 | 4381.542 | 0.023x |
+| `kernel/aarch64/op_log` | 1867.250 | 6488.375 | 0.288x |
+| `kernel/aarch64/op_mul` | 107.916 | 5572.333 | 0.019x |
+| `kernel/aarch64/op_mul_mat` | 4714.250 | 11052.583 | 0.427x |
+| `kernel/aarch64/op_sin` | 1327.417 | 5753.417 | 0.231x |
+| `kernel/aarch64/op_soft_max` | 1053.375 | 5389.875 | 0.195x |
+| `kernel/aarch64/op_sqr` | 99.125 | 4931.583 | 0.020x |
+| `kernel/aarch64/op_sqrt` | 143.292 | 5002.875 | 0.029x |
+| `kernel/aarch64/op_sub` | 112.584 | 5528.625 | 0.020x |
+| `kernel/aarch64/op_unary_exp` | 1326.625 | 5964.500 | 0.222x |
+| `kernel/aarch64/op_unary_neg` | 119.250 | 4713.000 | 0.025x |
+| `kernel/aarch64/op_unary_relu` | 132.708 | 4458.209 | 0.030x |
+| `logits/sampler_raw/vocab_128000` | 19767.291 | 20513.250 | 0.964x |
+| `logits/sampler_raw/vocab_256000` | 38920.125 | 36743.375 | 1.059x |
+| `logits/sampler_raw/vocab_32000` | 5158.834 | 4961.917 | 1.040x |
+| `logits/sampler_sml/vocab_128000` | 17178.875 | 14146.750 | 1.214x |
+| `logits/sampler_sml/vocab_256000` | 32049.667 | 30232.750 | 1.060x |
+| `logits/sampler_sml/vocab_32000` | 3624.958 | 4063.792 | 0.892x |
+| `logits/validator_raw/vocab_128000` | 94824.750 | 92297.750 | 1.027x |
+| `logits/validator_raw/vocab_256000` | 191876.666 | 188562.666 | 1.018x |
+| `logits/validator_raw/vocab_32000` | 24527.792 | 24094.917 | 1.018x |
+| `logits/validator_sml/vocab_128000` | 104854.209 | 99870.000 | 1.050x |
+| `logits/validator_sml/vocab_256000` | 205330.000 | 197989.750 | 1.037x |
+| `logits/validator_sml/vocab_32000` | 25097.917 | 24151.583 | 1.039x |
+| `memory/hybrid_full` | 439.459 | 34456.292 | 0.013x |
+| `memory/kv_full` | 145.333 | 33753.958 | 0.004x |
+| `memory/recurrent_full` | 143.500 | 4596.000 | 0.031x |
+| `text/encoders/bpe_long` | 63.208 | 63.292 | 0.999x |
+| `text/encoders/bpe_short` | 57.833 | 57.208 | 1.011x |
+| `text/encoders/fallback_long` | 2512.750 | 2488.417 | 1.010x |
+| `text/encoders/fallback_short` | 59.875 | 63.625 | 0.941x |
+| `text/encoders/plamo2_long` | 7658.500 | 7666.208 | 0.999x |
+| `text/encoders/plamo2_short` | 207.541 | 202.375 | 1.026x |
+| `text/encoders/rwkv_long` | 835311.792 | 834922.541 | 1.000x |
+| `text/encoders/rwkv_short` | 56386.750 | 56691.292 | 0.995x |
+| `text/encoders/spm_long` | 3640918.125 | 3626919.458 | 1.004x |
+| `text/encoders/spm_short` | 1451.875 | 1306.875 | 1.111x |
+| `text/encoders/ugm_long` | 1381454.291 | 1392619.875 | 0.992x |
+| `text/encoders/ugm_short` | 702.375 | 747.041 | 0.940x |
+| `text/encoders/wpm_long` | 30510.750 | 30731.708 | 0.993x |
+| `text/encoders/wpm_short` | 529.875 | 518.000 | 1.023x |
+| `text/jinja/formatter_long` | 60.375 | 227094.000 | 0.000x |
+| `text/jinja/formatter_short` | 16.292 | 3829.000 | 0.004x |
+| `text/jinja/parser_long` | 65053.917 | 48712.166 | 1.335x |
+| `text/jinja/parser_short` | 920.875 | 489.333 | 1.882x |
+| `tokenizer/full_bpe_long` | 13513.500 | 13494.417 | 1.001x |
+| `tokenizer/full_bpe_short` | 328.250 | 309.334 | 1.061x |
+| `tokenizer/full_plamo2_long` | 12516.750 | 12624.542 | 0.991x |
+| `tokenizer/full_plamo2_short` | 1970.666 | 2480.333 | 0.795x |
+| `tokenizer/full_rwkv_long` | 836135.750 | 832237.958 | 1.005x |
+| `tokenizer/full_rwkv_short` | 55617.333 | 55375.667 | 1.004x |
+| `tokenizer/full_spm_long` | 3625536.333 | 3626327.042 | 1.000x |
+| `tokenizer/full_spm_short` | 1530.750 | 1511.416 | 1.013x |
+| `tokenizer/full_ugm_long` | 1382505.750 | 1383240.875 | 0.999x |
+| `tokenizer/full_ugm_short` | 2441.000 | 2417.333 | 1.010x |
+| `tokenizer/full_wpm_long` | 32302.042 | 32673.208 | 0.989x |
+| `tokenizer/full_wpm_short` | 2190.667 | 2253.292 | 0.972x |
+| `tokenizer/preprocessor_bpe_long` | 3584.167 | 5378.458 | 0.666x |
+| `tokenizer/preprocessor_bpe_short` | 127.292 | 1712.833 | 0.074x |
+| `tokenizer/preprocessor_plamo2_long` | 5472.084 | 5384.292 | 1.016x |
+| `tokenizer/preprocessor_plamo2_short` | 2584.459 | 3684.583 | 0.701x |
+| `tokenizer/preprocessor_rwkv_long` | 5926.500 | 5467.167 | 1.084x |
+| `tokenizer/preprocessor_rwkv_short` | 2468.875 | 3590.291 | 0.688x |
+| `tokenizer/preprocessor_spm_long` | 4167.833 | 5443.708 | 0.766x |
+| `tokenizer/preprocessor_spm_short` | 2520.917 | 3800.625 | 0.663x |
+| `tokenizer/preprocessor_ugm_long` | 4361.750 | 5660.292 | 0.771x |
+| `tokenizer/preprocessor_ugm_short` | 2550.709 | 3618.625 | 0.705x |
+| `tokenizer/preprocessor_wpm_long` | 4138.875 | 5489.458 | 0.754x |
+| `tokenizer/preprocessor_wpm_short` | 2461.334 | 3669.167 | 0.671x |
