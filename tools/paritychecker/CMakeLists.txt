@@ -200,6 +200,7 @@ target_include_directories(paritychecker_tests
 target_compile_definitions(paritychecker_tests
   PRIVATE
     PARITYCHECKER_REPO_ROOT=\"${EMEL_ROOT}\"
+    PARITYCHECKER_BINARY_PATH=\"$<TARGET_FILE:paritychecker>\"
     PARITYCHECKER_REFERENCE_SOURCE=\"${PARITYCHECKER_REFERENCE_SOURCE}\"
     PARITYCHECKER_REFERENCE_REF=\"${PARITYCHECKER_REFERENCE_REF_VALUE}\"
 )

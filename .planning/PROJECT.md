@@ -3,30 +3,35 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. Shipped v1.3 now proves four narrow
+modeled as explicit actors instead of ad hoc control flow. Shipped v1.4 now proves five narrow
 brownfield outcomes on the canonical Llama-68M slice: a parity-checked generation path in
 `tools/paritychecker`, a truthful maintained benchmark workflow in `tools/bench`, an EMEL-owned
-flash-attention runtime path, and an optimized AArch64 flash implementation with maintained
-runtime/parity/benchmark attribution, all aligned with `docs/rules/sml.rules.md`.
+flash-attention runtime path, an optimized AArch64 flash implementation, and EMEL-owned vectorized
+AArch64 `q2_K/q3_K/q6_K` quantized hot-path kernels with maintained runtime/parity/benchmark
+publication, all aligned with `docs/rules/sml.rules.md`.
 
 ## Core Value
 
 Prove real end-to-end behavior with explicit SML orchestration and parity-oriented verification
 before widening API surface or model scope.
 
-## Current Milestone: v1.4 Full Vectorized Quantized Kernels
+## Current Milestone: v1.5 Full ARM Quantized Path
 
-**Goal:** Close the remaining canonical ARM inference gap by replacing the shipped scalar
-`q2_K/q3_K/q6_K x q8_K` hot path with EMEL-owned vectorized AArch64 kernels while preserving the
-existing Boost.SML orchestration contract.
+**Goal:** Prove the maintained canonical ARM generation slice stays on the intended quantized
+operand path end to end, eliminate any disallowed f32/dequant detours that still exist, and make
+the remaining contract explicit where full quantized coverage still does not apply.
 
 **Target features:**
-- Vectorized AArch64 `q2_K`, `q3_K`, and `q6_K` quantized dot-product coverage for the maintained
-  canonical operand path
-- Shipped runtime selection and deterministic fallback behavior for the canonical Llama-68M ARM
-  workload
-- Maintained parity, benchmark, and profiling evidence that the scalar row helpers are no longer
-  the dominant hot path
+- Audit the maintained canonical ARM generation chain and classify each quantized stage as native
+  quantized, approved dense-f32-by-contract, or disallowed fallback.
+- Close any remaining shipped ARM quantized-path branches that silently widen through disallowed
+  f32 or dequantize-to-f32 substitution on supported canonical requests.
+- Publish runtime, parity, and benchmark evidence that proves the final maintained contract and
+  exposes any remaining explicit no-claim cases.
+
+## Current State
+
+Shipped version: `v1.4`
 
 ## Requirements
 
@@ -68,37 +73,59 @@ existing Boost.SML orchestration contract.
   flash attribution on the maintained canonical workload — v1.3 Phases 15-16
 - ✓ Maintained benchmark publication now preserves the prior ARM baseline separately and documents
   a `1.140x` canonical short-case speedup over that baseline — v1.3 Phase 16
+- ✓ The canonical ARM slice now executes maintained `q2_K/q3_K/q6_K x q8_K` hot-path dot
+  products through EMEL-owned vectorized AArch64 kernels instead of scalar row helpers — v1.4
+  Phases 17-19
+- ✓ The maintained quantized hot path preserves zero-allocation operand fidelity without
+  dequantize-to-f32 fallback and no longer depends on the scalar row helpers for supported
+  requests — v1.4 Phase 19
+- ✓ The shipped generator -> graph -> processor -> kernel chain now publishes maintained q2/q3/q6
+  runtime attribution and proves canonical parity across `1/10/100/1000` without actor rewrites
+  or API widening — v1.4 Phase 20
+- ✓ Kernel, runtime, and parity coverage now prove vectorized q2/q3/q6 correctness and
+  deterministic no-claim behavior on unsupported paths — v1.4 Phase 20
+- ✓ Maintained benchmark compare output and generated docs now publish quantized attribution plus
+  refreshed `1/10/100/1000` evidence against the preserved v1.3 scalar baseline — v1.4 Phase 21
+- ✓ The canonical ARM generation slice now has a shared execution-view audit that classifies each
+  maintained stage family as native quantized, approved dense-f32-by-contract, or explicit
+  no-claim when unsupported — v1.5 Phase 22
+- ✓ Unsupported quantized stage families now publish explicit no-claim behavior through the shared
+  audit helper and maintained paritychecker output instead of silently inheriting approved claims
+  — v1.5 Phase 22
+- ✓ The shipped generator runtime now exposes additive audited stage-count accessors and proves the
+  supported canonical initialized fixture reports `native_quantized=8`,
+  `approved_dense_f32_by_contract=4`, `disallowed_fallback=0`, and
+  `explicit_no_claim=0` — v1.5 Phase 23
+- ✓ Maintained paritychecker generation now publishes the shipped runtime contract and proves the
+  canonical ARM workload stays on the approved `8/4/0/0` contract across `1/10/100/1000`
+  tokens — v1.5 Phase 24
+- ✓ Generator and parity regression coverage now prove the supported contract survives a real
+  `generate` call without collapsing unsupported-stage proof away from explicit `no-claim`
+  behavior — v1.5 Phase 24
+- ✓ Maintained benchmark compare output, stored snapshot evidence, and generated docs now publish
+  the shipped `8/4/0/0` runtime contract and honest dense-f32-by-contract attribution for the
+  canonical ARM workload — v1.5 Phase 25
 
 ### Active
 
-- [ ] `PORT-04`: The canonical Llama-68M ARM generation slice executes `q2_K/q3_K/q6_K x q8_K`
-  hot-path dot products through EMEL-owned vectorized AArch64 kernels instead of scalar row
-  helpers.
-- [ ] `PORT-07`: The vectorized quantized kernels preserve zero-allocation hot-path behavior and
-  keep the maintained effective operand class without dequantize-to-f32 fallbacks.
-- [ ] `ARCH-02`: The optimization remains a data-plane replacement inside the existing generator
-  -> graph -> processor -> kernel chain and does not widen the public API surface or rewrite
-  actor structure.
-- [ ] `PAR-04`: `tools/paritychecker --generation` keeps the maintained `1/10/100/1000` token
-  checks and proves the canonical ARM workload exercised the vectorized quantized path.
-- [ ] `VER-03`: Tests cover vectorized `q2_K/q3_K/q6_K` correctness, scalar equivalence, and
-  deterministic fallback behavior on AArch64.
-- [ ] `BENCH-08`: `tools/bench` publishes maintained canonical ARM compare output with attribution
-  that distinguishes the vectorized quantized path from the current scalar row-helper path.
-- [ ] `BENCH-09`: Maintained `1/10/100/1000` token compare output shows truthful end-to-end
-  impact over the current v1.3 baseline, with measurable improvement on at least one maintained
-  length.
+- [ ] Approval-gated follow-on after live Phase 25.1 completion: refresh
+  `snapshots/bench/benchmarks_compare.txt` and `docs/benchmarks.md` so checked-in publication
+  matches the restored canonical flash evidence.
 
 ### Out of Scope
 
 - Broad repository cleanup unrelated to a milestone goal
 - Non-paritychecker product surfaces until a milestone explicitly broadens the acceptance boundary
-- Non-ARM backend flash specialization until the canonical ARM follow-on work is complete
+- Non-ARM backend kernel specialization until a milestone explicitly broadens beyond the canonical
+  ARM truth anchor
 - Whole-program state-machine or orchestration rewrites unrelated to a milestone acceptance surface
-
-## Current State
-
-Shipped version: `v1.3`
+- Dequantize-to-f32 or tool-only compute fallbacks in the shipped canonical hot path without
+  explicit milestone approval
+- Generator-side ARM math optimization beyond what is needed to prove or close the quantized path
+  contract in this milestone
+- Broader flash/model rollout before the canonical ARM quantized path contract is fully audited and
+  proven
+- Benchmark gate hardening while the maintained quantized-path fidelity work is still unsettled
 
 - 7 phases and 15 plans delivered the first canonical Llama-68M parity slice in v1.0.
 - 4 additional phases and 10 plans delivered the truthful benchmark slice in v1.1.
@@ -110,6 +137,10 @@ Shipped version: `v1.3`
   AArch64 flash kernel, the shipped runtime/parity surfaces publish optimized-vs-shared flash
   attribution, and maintained benchmark docs preserve the prior ARM baseline while publishing a
   measured short-case improvement.
+- 5 additional phases and 11 plans delivered v1.4: the canonical ARM slice now ships EMEL-owned
+  vectorized `q2_K/q3_K/q6_K` kernels, the runtime surfaces publish q2/q3/q6 attribution, full
+  maintained parity is green at `1/10/100/1000`, and the compare/docs workflow republishes
+  quantized evidence against the preserved v1.3 scalar baseline.
 - The validated E2E flows now include
   `paritychecker --generation --model tests/models/Llama-68M-Chat-v1-Q2_K.gguf --text hello --max-tokens 1`
   plus the maintained `scripts/bench.sh --compare` publication path that feeds
@@ -117,28 +148,29 @@ Shipped version: `v1.3`
   `optimized_flash_dispatch_calls=2`, `shared_flash_dispatch_calls=0`, and a preserved ARM
   baseline comparison.
 - The maintained generation and parity matrix now publishes `1`, `10`, `100`, and `1000` token
-  lengths, with parity currently passing `1` and `10` while drifting later in longer decode
-  sequences.
-- Focused ARM profiling on the maintained `1000`-token workload shows the remaining hot leaf time
-  is dominated by quantized matmul: about `89.8%` of sampled leaf cost is in
-  `dot_q2_k_q8_k_block_scalar`, `dot_q6_k_q8_k_row_scalar`, and `dot_q3_k_q8_k_row_scalar`,
-  with flash attention down near `7.3%`.
-- The shipped AArch64 backend already routes quantized matmul through `execute_neon_mul_mat`, but
-  the maintained `q2_K/q3_K/q6_K x q8_K` row path still calls scalar helpers rather than the
-  existing NEON block kernels.
+  lengths with parity green across the full maintained set on the canonical ARM workload.
+- Focused ARM profiling on the maintained `1000`-token workload identified scalar quantized matmul
+  as the remaining hot leaf; v1.4 closes that hotspot with native vectorized kernels on the same
+  maintained operand path.
+- v1.5 Phase 25 completed the publication half of the milestone: compare output now prints the
+  shipped `generation_runtime_contract`, the stored compare snapshot and generated docs preserve
+  that contract, and the benchmark story explicitly keeps token embedding and norm-vector seams in
+  the approved dense-f32-by-contract bucket instead of overstating the path as "fully quantized
+  everywhere."
 - Current non-blocking debt remains narrow: benchmark drift is still warning-only in
-  `scripts/quality_gates.sh`, compare snapshot publication still refreshes the whole maintained
-  suite, proof is re-derived from common generator counters across parity/bench/docs, and the
-  bench/parity/docs toolchain still emits non-blocking environment warnings on this machine.
+  `scripts/quality_gates.sh`; the latest full gate observed warning-only regressions in
+  `logits/sampler_raw/vocab_32000` and `kernel/aarch64/op_soft_max`; compare snapshot publication
+  still refreshes the whole maintained suite; and the bench/parity/docs toolchain still emits
+  non-blocking environment warnings on this machine.
 
-## Current Milestone Goals
+## Milestone Focus
 
-- Replace the profiled scalar `q2_K/q3_K/q6_K x q8_K` inner loops with full vectorized AArch64
-  kernels on the maintained canonical workload.
-- Preserve the existing generator -> graph -> processor -> kernel architecture contract and make
-  fallback behavior explicit when requests fall outside the maintained optimized path.
-- Publish maintained parity, benchmark, and profiling evidence over `1/10/100/1000` token
-  lengths before revisiting broader generator math or model-coverage work.
+- Finish the approval-gated publication refresh for Phase 25.1 now that the live canonical
+  generator path and maintained proof surfaces are back on truthful flash attribution.
+- Keep the stored benchmark/docs story aligned with the restored live compare output without
+  silently updating snapshots.
+- Defer broader generator math optimization, broader model rollout, and benchmark-gate policy
+  changes until after the flash-dispatch publication step is resolved.
 
 ## Context
 
@@ -183,8 +215,17 @@ explicit error publication, bounded actions, and deliberate machine-structure ch
 | Expose optimized/shared flash counts through wrappers instead of new events or transition rows | Runtime truth had to be observable without changing machine structure | ✓ Good |
 | Extend the existing parity and benchmark proof channels instead of inventing new ones | Reusing maintained operator surfaces kept proof honest and minimized publication churn | ✓ Good |
 | Preserve the pre-refresh ARM compare row as a dedicated baseline artifact | Maintained benchmark claims needed a durable shared-scalar ARM comparison point before snapshot refresh | ✓ Good |
-| Target the quantized `q2_K/q3_K/q6_K x q8_K` row-dot path next | The latest flame graph shows the remaining ARM gap is dominated by scalar quantized matmul leaf cost, not orchestration frames | — Pending |
+| Target the quantized `q2_K/q3_K/q6_K x q8_K` row-dot path next | The latest flame graph shows the remaining ARM gap is dominated by scalar quantized matmul leaf cost, not orchestration frames | ✓ Good |
 | Skip milestone research and keep the acceptance boundary on the canonical ARM Llama-68M slice | This milestone is a direct continuation of already-profiled kernel work, so new-domain research would add delay without reducing uncertainty | — Pending |
+| Restore long-decode parity with the exact masked nonflash attention path | The maintained `100/1000` decode mismatch was a data-plane semantic drift, so the narrowest honest repair was to match the reference masked nonflash path instead of claiming flash dispatch | ✓ Good |
+| Treat the remaining ARM quantized-path question as a contract audit first, optimization second | The repo now needs proof about where operand formats widen before it can honestly claim a full quantized runtime path | ✓ Good |
+| Build the quantized-path audit from `llama::detail::execution_view` plus maintained stage-family mapping | Aggregate dispatch counters alone cannot classify token embedding, norm-vector seams, or unsupported branches truthfully | ✓ Good |
+| Treat canonical q2/q3/q6 matmul stages as `native_quantized` and token embedding or norm-vector seams as `approved_dense_f32_by_contract` | This matches the shipped operand contract and avoids mislabeling the dense-rhs `q8_K` repack path as fallback | ✓ Good |
+| Publish unsupported quantized branches as explicit `no-claim` rows in paritychecker output | Unsupported cases must stay visible without silently inheriting an approved contract label | ✓ Good |
+| Close Phase 23 by codifying and proving the zero-gap runtime contract instead of inventing a fake fallback bug | Phase 22 research plus direct runtime inspection showed the supported canonical path already had zero disallowed-fallback stages, so honest closure meant additive publication and proof only | ✓ Good |
+| Promote parity proof from model-local audit printing to shipped runtime-contract enforcement | The maintained proof surface should fail on supported-path regression based on what the generator actually ran, while still cross-checking the stage audit for consistency | ✓ Good |
+| Reuse the existing explicit-no-claim negative surface instead of fabricating a supported fallback fixture for Phase 24 | Unsupported-stage proof was already truthful and deterministic, so additional fake fallback scaffolding would have reduced clarity rather than improved coverage | ✓ Good |
+| Publish benchmark-time runtime contract through the existing compare/docs workflow after explicit approval | This completed `BENCH-10` without inventing parallel publication tooling and kept the approved dense-f32 seams explicit in stored evidence | ✓ Good |
 
 ## Evolution
 
@@ -204,4 +245,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-22 after starting milestone v1.4*
+*Last updated: 2026-03-25 after completing Phase 25*

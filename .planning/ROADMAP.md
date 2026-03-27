@@ -6,152 +6,144 @@
 - [x] [v1.1: EMEL Llama-68M Generation Benchmark](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.1-ROADMAP.md) — shipped 2026-03-11 with 4 phases and 10 plans; added one truthful canonical Llama-68M generation benchmark in `tools/bench`, native EMEL decode benchmarking, compare output, and snapshot/docs integration.
 - [x] [v1.2: Flash Attention](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.2-ROADMAP.md) — shipped 2026-03-22 with 5 phases and 13 plans; added an EMEL-owned flash-attention path to the canonical Llama-68M slice, hard-cut runtime tensor lifecycle through `emel::tensor::sm`, and published maintained benchmark evidence over a preserved pre-flash baseline.
 - [x] [v1.3: ARM Flash Optimizations](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.3-ROADMAP.md) — shipped 2026-03-22 with 3 phases and 7 plans; delivered optimized AArch64 flash execution, maintained runtime/parity attribution, and preserved-baseline benchmark publication for the canonical ARM Llama-68M slice.
+- [x] [v1.4: Full Vectorized Quantized Kernels](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.4-ROADMAP.md) — shipped 2026-03-25 with 5 phases and 11 plans; delivered EMEL-owned vectorized q2/q3/q6 kernels, full maintained `1/10/100/1000` parity proof, and quantized benchmark attribution on the canonical ARM slice.
 
 ## Current Milestone
 
-### v1.4 Full Vectorized Quantized Kernels
+### v1.5 Full ARM Quantized Path
 
-**Milestone Goal:** Close the remaining canonical ARM inference gap by replacing the shipped
-scalar `q2_K/q3_K/q6_K x q8_K` hot path with EMEL-owned vectorized AArch64 kernels while
-preserving the existing Boost.SML orchestration contract and maintained `1/10/100/1000` parity
-and benchmark surfaces.
+**Milestone Goal:** Prove the maintained canonical ARM generation slice stays on the intended
+quantized operand path end to end, eliminate any disallowed f32/dequant detours that still exist,
+and publish explicit proof where full quantized coverage still does not apply.
 
 **Scope Guardrails:**
 - Keep the milestone narrow to the canonical CPU-hosted Llama-68M ARM slice.
 - Keep `tools/paritychecker` and `tools/bench` as the only acceptance surfaces.
-- Preserve the existing generator -> graph -> processor -> kernel chain and current actor
-  structure.
-- Do not accept dequantize-to-f32 or tool-only compute fallbacks in the shipped hot path.
+- Preserve the existing generator -> graph -> processor -> kernel actor chain and current public
+  API boundaries.
+- Do not accept dequantize-to-f32 or tool-only compute fallbacks in the shipped canonical hot path
+  without explicit user approval.
 
 ## Phases
 
-- [x] **Phase 17: Vectorized q2_K Kernel** - Replace the maintained `q2_K x q8_K` scalar row (completed 2026-03-23)
-  helper with an EMEL-owned vectorized AArch64 kernel.
-- [x] **Phase 18: Vectorized q3_K Kernel** - Replace the maintained `q3_K x q8_K` scalar row (completed 2026-03-23)
-  helper with an EMEL-owned vectorized AArch64 kernel.
-- [x] **Phase 19: Vectorized q6_K Kernel And Hot-Path Contract** - Finish the `q6_K x q8_K` (completed 2026-03-23)
-  cutover and lock zero-allocation operand fidelity across the maintained quantized path.
-- [x] **Phase 20: Runtime Integration And Proof** - Adopt the full vectorized kernel set in the (completed 2026-03-23)
-  shipped chain and prove supported plus fallback behavior without changing actor structure.
-- [x] **Phase 21: Benchmark Attribution And Impact** - Publish maintained ARM compare evidence (completed 2026-03-23)
-  that distinguishes the vectorized quantized path from the v1.3 scalar baseline.
+- [x] **Phase 22: Quantized Path Audit And Contract** - Inventory the maintained canonical ARM
+  operand path and make explicit which branches are native quantized, approved dense-f32-by-
+  contract, or disallowed fallback.
+- [x] **Phase 23: ARM Quantized Path Closure** - Codify and prove that supported canonical ARM
+  quantized requests have zero disallowed fallback stages at the shipped generator boundary
+  without changing actor structure.
+- [x] **Phase 24: Quantized Path Proof And Regression** - Extend paritychecker and test coverage
+  so maintained proof surfaces fail if the canonical ARM request regresses to disallowed fallback.
+- [x] **Phase 25: Quantized Attribution And Impact** - Publish benchmark attribution that shows the
+  end-to-end impact of full quantized-path closure and isolates the next bottleneck honestly.
+- [ ] **Phase 25.1: Restore Canonical Flash-Attention Dispatch On The Maintained Generator Path**
+  `(INSERTED)` - Restore the maintained canonical generator path so benchmark and parity surfaces
+  execute through flash attention instead of the manual generator-space attention fallback.
 
 ## Phase Details
 
-### Phase 17: Vectorized q2_K Kernel
-**Goal**: Replace the maintained `q2_K x q8_K` scalar row helper with an EMEL-owned vectorized
-AArch64 kernel on the canonical ARM workload.
-**Depends on**: Phase 16
-**Requirements**: PORT-04
+### Phase 22: Quantized Path Audit And Contract
+**Goal**: Inventory the maintained canonical ARM operand path and encode the supported versus
+unsupported quantized-path contract explicitly.
+**Depends on**: Phase 21
+**Requirements**: AUD-01, PATH-02
 **Success Criteria** (what must be TRUE):
-  1. The canonical Llama-68M ARM workload can execute maintained `q2_K x q8_K` hot-path dot
-     products through an EMEL-owned vectorized AArch64 kernel instead of the current scalar row
-     helper.
-  2. Maintained proof at the kernel seam can distinguish supported vectorized `q2_K` execution
-     from the prior scalar helper on the canonical operand path.
+  1. The canonical ARM generation chain has a maintained audit that identifies each quantized stage
+     as native quantized, approved dense-f32-by-contract, or disallowed fallback.
+  2. Unsupported or not-yet-ported quantized cases publish explicit no-claim behavior instead of
+     silently routing through a misleading f32 fallback path.
+  3. The audit output is grounded in the shipped runtime chain rather than tool-local assumptions.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 17-01: Land the maintained vectorized `q2_K x q8_K` AArch64 kernel through the existing
-  quantized backend seam.
-- [ ] 17-02: Prove vectorized `q2_K` path selection on the canonical operand path without
-  widening the acceptance surface.
+- [x] 22-01: Audit the maintained canonical ARM generation chain and capture the operand-format
+  contract for each quantized stage.
+- [x] 22-02: Encode explicit no-claim behavior and operator inventory surfaces for unsupported or
+  not-yet-ported quantized branches.
 
-### Phase 18: Vectorized q3_K Kernel
-**Goal**: Replace the maintained `q3_K x q8_K` scalar row helper with an EMEL-owned vectorized
-AArch64 kernel on the canonical ARM workload.
-**Depends on**: Phase 17
-**Requirements**: PORT-05
+### Phase 23: ARM Quantized Path Closure
+**Goal**: Codify and prove the supported canonical ARM zero-disallowed-fallback runtime contract
+at the shipped generator boundary.
+**Depends on**: Phase 22
+**Requirements**: PATH-01
 **Success Criteria** (what must be TRUE):
-  1. The canonical Llama-68M ARM workload can execute maintained `q3_K x q8_K` hot-path dot
-     products through an EMEL-owned vectorized AArch64 kernel instead of the current scalar row
-     helper.
-  2. Maintained proof at the kernel seam can distinguish supported vectorized `q3_K` execution
-     from the prior scalar helper on the canonical operand path.
+  1. Supported canonical ARM quantized requests do not silently widen through disallowed whole-row
+     or operator-level dequantize-to-f32 substitution in the shipped runtime path.
+  2. The closure work preserves the existing generator -> graph -> processor -> kernel actor chain
+     and public API boundaries.
+  3. Any still-unsupported cases remain explicit no-claim paths instead of silent fallback.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 18-01: Land the maintained vectorized `q3_K x q8_K` AArch64 kernel through the existing
-  quantized backend seam.
-- [ ] 18-02: Prove vectorized `q3_K` path selection on the canonical operand path without
-  widening the acceptance surface.
+- [x] 23-01: Codify the audited canonical ARM runtime contract at the shipped generator boundary
+  and expose additive stage-count accessors.
+- [x] 23-02: Prove the shipped runtime path preserves the approved operand contract with zero
+  disallowed fallback on the supported canonical fixture.
 
-### Phase 19: Vectorized q6_K Kernel And Hot-Path Contract
-**Goal**: Complete the `q6_K x q8_K` cutover and lock the maintained quantized hot path to the
-same effective operand class with zero-allocation behavior.
-**Depends on**: Phase 18
-**Requirements**: PORT-06, PORT-07
+### Phase 24: Quantized Path Proof And Regression
+**Goal**: Extend maintained proof and regression surfaces so they fail if the canonical ARM
+request regresses away from the approved quantized path.
+**Depends on**: Phase 23
+**Requirements**: ATTR-01, VER-04, PAR-05
 **Success Criteria** (what must be TRUE):
-  1. The canonical Llama-68M ARM workload can execute maintained `q6_K x q8_K` hot-path dot
-     products through an EMEL-owned vectorized AArch64 kernel instead of the current scalar row
-     helper.
-  2. Supported maintained `q2_K/q3_K/q6_K x q8_K` hot-path requests stay zero-allocation during
-     dispatch and keep the current effective operand class rather than dequantize-to-f32
-     fallbacks.
-  3. The maintained optimized quantized path no longer depends on the scalar `q2_K/q3_K/q6_K`
-     row helpers for supported canonical ARM requests.
+  1. Maintained paritychecker output proves the canonical ARM workload stays on the approved
+     quantized path across `1`, `10`, `100`, and `1000` tokens.
+  2. Kernel, runtime, and regression tests cover the audited quantized-path branches and detect
+     regressions back to disallowed f32 fallback.
+  3. Maintained proof surfaces publish enough attribution to distinguish approved contract stages
+     from disallowed fallback.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 19-01: Land the maintained vectorized `q6_K x q8_K` AArch64 kernel and retire scalar row
-  helper dependence for supported optimized requests.
-- [ ] 19-02: Prove zero-allocation dispatch and no dequantize-to-f32 fallback across the
-  maintained `q2_K/q3_K/q6_K` optimized path.
+- [x] 24-01: Extend paritychecker and runtime attribution so maintained proof fails on disallowed
+  canonical ARM fallback.
+- [x] 24-02: Add kernel and regression coverage for the audited quantized-path branches and their
+  explicit no-claim cases.
 
-### Phase 20: Runtime Integration And Proof
-**Goal**: Adopt the complete vectorized quantized kernel set in the shipped runtime chain and
-prove supported plus fallback behavior without changing public APIs or actor structure.
-**Depends on**: Phase 19
-**Requirements**: ARCH-02, PAR-04, VER-03
+### Phase 25: Quantized Attribution And Impact
+**Goal**: Publish maintained benchmark attribution that shows the end-to-end impact of full
+quantized-path closure and honestly isolates the next bottleneck.
+**Depends on**: Phase 24
+**Requirements**: BENCH-10
 **Success Criteria** (what must be TRUE):
-  1. The shipped generator -> graph -> processor -> kernel chain selects the maintained
-     vectorized quantized path for supported canonical ARM requests without queue-based
-     orchestration, public API widening, or actor-structure rewrites.
-  2. `tools/paritychecker --generation` keeps the maintained `1/10/100/1000` token checks and
-     publishes proof that the canonical ARM workload exercised the vectorized quantized path.
-  3. Regression and kernel tests cover `q2_K`, `q3_K`, and `q6_K` vectorized correctness against
-     the scalar path plus deterministic behavior when optimization is unsupported or forced off.
-  4. Unsupported or forced-off requests publish explicit deterministic fallback behavior instead
-     of silent optimized-path claims.
-**Plans**: 3 plans
-
-Plans:
-- [ ] 20-01: Adopt the full vectorized `q2_K/q3_K/q6_K` kernel set in the shipped generator ->
-  graph -> processor -> kernel chain without changing actor structure or API boundaries.
-- [ ] 20-02: Publish maintained `1/10/100/1000` parity proof and deterministic supported or
-  fallback behavior for the canonical ARM workload.
-- [ ] 20-03: Add regression and kernel coverage for scalar equivalence and deterministic fallback
-  behavior on AArch64.
-
-### Phase 21: Benchmark Attribution And Impact
-**Goal**: Publish maintained benchmark evidence that proves and measures the vectorized quantized
-path against the current v1.3 scalar baseline.
-**Depends on**: Phase 20
-**Requirements**: BENCH-08, BENCH-09
-**Success Criteria** (what must be TRUE):
-  1. `tools/bench` runs the maintained canonical ARM compare workload through the vectorized
-     quantized path and publishes attribution distinct from the scalar row-helper path.
-  2. Maintained compare output republishes `1`, `10`, `100`, and `1000` token results against
-     the current v1.3 baseline on the canonical workload.
-  3. At least one maintained generation length shows measurable end-to-end improvement over the
-     current v1.3 baseline without overstating unsupported cases.
+  1. Maintained benchmark output attributes whether the canonical ARM request stayed on the
+     approved quantized path.
+  2. Published benchmark evidence isolates the end-to-end impact of the path-closure work from
+     remaining generator-side ARM math cost.
+  3. The generated docs and stored compare artifacts tell the truthful post-closure performance
+     story without overstating unsupported cases.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 21-01: Run the maintained canonical ARM compare workflow through the vectorized quantized
-  path and publish attribution distinct from scalar row helpers.
-- [ ] 21-02: Refresh maintained `1/10/100/1000` compare evidence against the v1.3 baseline and
-  publish measurable end-to-end improvement where it exists.
+- [x] 25-01: Refresh the maintained compare workflow to publish quantized-path attribution after
+  path closure.
+- [x] 25-02: Regenerate stored benchmark evidence and docs that isolate the next post-closure
+  bottleneck honestly.
+
+### Phase 25.1: Restore canonical flash-attention dispatch on the maintained generator path (INSERTED)
+
+**Goal:** Restore the maintained canonical generator path so the shipped runtime uses flash-
+attention dispatch on the supported benchmark and parity surfaces instead of the manual
+generator-space attention loop.
+**Requirements**: TBD
+**Depends on:** Phase 25
+**Plans:** 2 plans
+
+Plans:
+- [x] 25.1-01: Restore shipped generator flash dispatch on the maintained canonical path while
+  keeping the explicit mismatch fixture on the nonflash path.
+- [ ] 25.1-02: Refresh stored benchmark/docs artifacts after explicit approval so checked-in
+  publication matches the restored live flash evidence.
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 17 -> 18 -> 19 -> 20 -> 21
+Phases execute in numeric order: 22 -> 23 -> 24 -> 25 -> 25.1
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 17. Vectorized q2_K Kernel | 0/2 | Complete    | 2026-03-23 |
-| 18. Vectorized q3_K Kernel | 0/2 | Complete    | 2026-03-23 |
-| 19. Vectorized q6_K Kernel And Hot-Path Contract | 0/2 | Complete    | 2026-03-23 |
-| 20. Runtime Integration And Proof | 0/3 | Complete    | 2026-03-23 |
-| 21. Benchmark Attribution And Impact | 0/2 | Complete    | 2026-03-23 |
+| 22. Quantized Path Audit And Contract | 2/2 | Complete | 2026-03-25 |
+| 23. ARM Quantized Path Closure | 2/2 | Complete | 2026-03-25 |
+| 24. Quantized Path Proof And Regression | 2/2 | Complete | 2026-03-25 |
+| 25. Quantized Attribution And Impact | 2/2 | Complete | 2026-03-25 |
+| 25.1. Restore canonical flash-attention dispatch on the maintained generator path | 1/2 | Approval pending | - |

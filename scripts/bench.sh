@@ -10,11 +10,12 @@ COMPARE_UPDATE=false
 UPDATE=false
 USE_ZIG=true
 MODE_FLAG=""
+SUITE_FILTER=""
 COMBINED=false
 
 usage() {
   cat <<'USAGE'
-usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [--zig|--system] [--llama-only|--emel-only]
+usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [--zig|--system] [--llama-only|--emel-only] [--generation-only|--suite=<name>]
 
   --snapshot   run EMEL benchmark snapshot gate
   --compare    build and run reference comparison
@@ -24,6 +25,8 @@ usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [
   --system     use system cc/c++
   --llama-only run only the reference benchmarks
   --emel-only  run only the EMEL benchmarks
+  --generation-only run only the generation benchmark suite
+  --suite=...  run only the named benchmark suite
 USAGE
 }
 
@@ -37,6 +40,8 @@ for arg in "$@"; do
     --system) USE_ZIG=false ;;
     --llama-only) MODE_FLAG="--mode=reference" ;;
     --emel-only) MODE_FLAG="--mode=emel" ;;
+    --generation-only) SUITE_FILTER="generation" ;;
+    --suite=*) SUITE_FILTER="${arg#--suite=}" ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "error: unknown argument '$arg'" >&2
@@ -95,6 +100,16 @@ prepare_toolchain() {
   fi
 }
 
+run_bench_runner() {
+  local build_dir="$1"
+  shift
+  if [[ -n "$SUITE_FILTER" ]]; then
+    EMEL_BENCH_SUITE="$SUITE_FILTER" "$build_dir/bench_runner" "$@"
+    return
+  fi
+  "$build_dir/bench_runner" "$@"
+}
+
 configure_bench_build() {
   local build_dir="$1"
 
@@ -140,7 +155,7 @@ if $COMBINED; then
   configure_bench_build "$build_dir"
 
   compare_output="$(mktemp)"
-  "$build_dir/bench_runner" --mode=compare > "$compare_output"
+  run_bench_runner "$build_dir" --mode=compare > "$compare_output"
 
   current_snapshot="$(mktemp)"
   trap 'rm -f "$compare_output" "$current_snapshot"' EXIT
@@ -380,7 +395,7 @@ if $SNAPSHOT; then
 
   cmake --build "$build_dir" --parallel --target bench_runner
 
-  "$build_dir/bench_runner" --mode=emel > "$CURRENT"
+  run_bench_runner "$build_dir" --mode=emel > "$CURRENT"
 
   for name in "${ready_names[@]+${ready_names[@]}}"; do
     if ! grep -q "^${name} " "$CURRENT"; then
@@ -525,14 +540,14 @@ if $COMPARE; then
     {
       printf "# ref=%s\n" "$ref_value"
       printf "# toolchain=%s\n" "$bench_cxx"
-      "$compare_build_dir/bench_runner" --mode=compare
+      run_bench_runner "$compare_build_dir" --mode=compare
     } > "$compare_baseline"
     echo "updated $compare_baseline"
   else
     if [[ -n "$MODE_FLAG" ]]; then
-      "$compare_build_dir/bench_runner" "$MODE_FLAG"
+      run_bench_runner "$compare_build_dir" "$MODE_FLAG"
     else
-      "$compare_build_dir/bench_runner" --mode=compare
+      run_bench_runner "$compare_build_dir" --mode=compare
     fi
   fi
 fi

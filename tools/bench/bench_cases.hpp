@@ -21,6 +21,7 @@ using append_case_fn = void (*)(std::vector<result> & results, const config & cf
 struct test_case {
   append_case_fn append_emel = nullptr;
   append_case_fn append_reference = nullptr;
+  std::string_view suite = {};
   bool tokenizer_case = false;
 };
 
@@ -50,6 +51,8 @@ void append_emel_gbnf_rule_parser_cases(std::vector<result> & results, const con
 void append_reference_gbnf_rule_parser_cases(std::vector<result> & results, const config & cfg);
 void append_emel_generation_cases(std::vector<result> & results, const config & cfg);
 void append_reference_generation_cases(std::vector<result> & results, const config & cfg);
+void append_emel_flash_attention_cases(std::vector<result> & results, const config & cfg);
+void append_reference_flash_attention_cases(std::vector<result> & results, const config & cfg);
 void append_emel_logits_validator_cases(std::vector<result> & results, const config & cfg);
 void append_reference_logits_validator_cases(std::vector<result> & results, const config & cfg);
 void append_emel_logits_sampler_cases(std::vector<result> & results, const config & cfg);

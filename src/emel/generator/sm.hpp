@@ -56,8 +56,11 @@ struct reserving_memory {};
 struct reserving_memory_decision {};
 struct reserving_graph {};
 struct reserving_graph_decision {};
+struct configuring_sampling_mode_decision {};
 struct configuring_sampler {};
 struct configuring_sampler_decision {};
+struct configure_preselected_argmax {};
+struct configure_preselected_argmax_decision {};
 struct initialize_done_channel_decision {};
 struct initialize_error_channel_decision {};
 
@@ -74,16 +77,35 @@ struct prefill_slots {};
 struct prefill_slots_decision {};
 struct snapshot_prefill {};
 struct snapshot_prefill_decision {};
-struct prefill_compute {};
-struct prefill_compute_decision {};
+struct prefill_compute_runtime_decision {};
+struct prefill_compute_flash {};
+struct prefill_compute_flash_preselected_argmax {};
+struct prefill_compute_flash_preselected_argmax_decision {};
+struct prefill_compute_flash_decision {};
+struct prefill_compute_nonflash {};
+struct prefill_compute_nonflash_preselected_argmax {};
+struct prefill_compute_nonflash_preselected_argmax_decision {};
+struct prefill_compute_nonflash_decision {};
 struct decode_slots {};
 struct decode_slots_decision {};
 struct snapshot_decode {};
 struct snapshot_decode_decision {};
-struct decode_compute {};
-struct decode_compute_decision {};
+struct decode_compute_runtime_decision {};
+struct decode_compute_flash {};
+struct decode_compute_flash_preselected_argmax {};
+struct decode_compute_flash_preselected_argmax_decision {};
+struct decode_compute_flash_decision {};
+struct decode_compute_nonflash {};
+struct decode_compute_nonflash_preselected_argmax {};
+struct decode_compute_nonflash_preselected_argmax_decision {};
+struct decode_compute_nonflash_decision {};
+struct decode_selection_mode_decision {};
 struct decode_sample {};
 struct decode_sample_decision {};
+struct decode_preselected_argmax {};
+struct decode_preselected_argmax_decision {};
+struct decode_sample_preselected {};
+struct decode_sample_preselected_decision {};
 struct decode_render {};
 struct decode_render_decision {};
 struct decode_loop_decision {};
@@ -175,7 +197,7 @@ struct model {
                  + sml::completion<event::initialize_run>
                  / action::request_memory_reserve
 
-      , sml::state<configuring_sampler> <= sml::state<reserving_memory_decision>
+      , sml::state<configuring_sampling_mode_decision> <= sml::state<reserving_memory_decision>
                  + sml::completion<event::initialize_run>
                  [ guard::memory_reserve_with_existing_graph{} ]
 
@@ -197,7 +219,7 @@ struct model {
                  + sml::completion<event::initialize_run>
                  / action::request_graph_reserve
 
-      , sml::state<configuring_sampler> <= sml::state<reserving_graph_decision>
+      , sml::state<configuring_sampling_mode_decision> <= sml::state<reserving_graph_decision>
                  + sml::completion<event::initialize_run>
                  [ guard::graph_reserve_ok{} ]
 
@@ -211,6 +233,14 @@ struct model {
                  [ guard::graph_reserve_backend_error{} ]
                  / action::mark_backend_error
 
+      , sml::state<configuring_sampler> <= sml::state<configuring_sampling_mode_decision>
+                 + sml::completion<event::initialize_run>
+                 [ guard::initialize_uses_materialized_logits{} ]
+
+      , sml::state<configure_preselected_argmax> <= sml::state<configuring_sampling_mode_decision>
+                 + sml::completion<event::initialize_run>
+                 [ guard::initialize_uses_preselected_argmax{} ]
+
       , sml::state<configuring_sampler_decision> <= sml::state<configuring_sampler>
                  + sml::completion<event::initialize_run>
                  / action::configure_sampler
@@ -220,6 +250,19 @@ struct model {
                  [ guard::sampler_configured{} ]
 
       , sml::state<initialize_error_channel_decision> <= sml::state<configuring_sampler_decision>
+                 + sml::completion<event::initialize_run>
+                 [ guard::sampler_config_failed{} ]
+                 / action::mark_backend_error
+
+      , sml::state<configure_preselected_argmax_decision> <= sml::state<configure_preselected_argmax>
+                 + sml::completion<event::initialize_run>
+                 / action::configure_preselected_argmax
+
+      , sml::state<initialize_done_channel_decision> <= sml::state<configure_preselected_argmax_decision>
+                 + sml::completion<event::initialize_run>
+                 [ guard::sampler_configured{} ]
+
+      , sml::state<initialize_error_channel_decision> <= sml::state<configure_preselected_argmax_decision>
                  + sml::completion<event::initialize_run>
                  [ guard::sampler_config_failed{} ]
                  / action::mark_backend_error
@@ -390,7 +433,7 @@ struct model {
                  + sml::completion<event::generate_run>
                  / action::request_memory_snapshot
 
-      , sml::state<prefill_compute> <= sml::state<snapshot_prefill_decision>
+      , sml::state<prefill_compute_runtime_decision> <= sml::state<snapshot_prefill_decision>
                  + sml::completion<event::generate_run>
                  [ guard::snapshot_ok{} ]
 
@@ -404,32 +447,150 @@ struct model {
                  [ guard::snapshot_backend_error{} ]
                  / action::mark_backend_error
 
-      , sml::state<prefill_compute_decision> <= sml::state<prefill_compute>
+      , sml::state<prefill_compute_flash> <= sml::state<prefill_compute_runtime_decision>
                  + sml::completion<event::generate_run>
-                 / action::request_prefill_compute
+                 [ guard::prefill_flash_runtime_supported{} ]
 
-      , sml::state<decode_sample> <= sml::state<prefill_compute_decision>
+      , sml::state<prefill_compute_nonflash> <= sml::state<prefill_compute_runtime_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::prefill_nonflash_runtime_required{} ]
+
+      , sml::state<prefill_compute_flash_preselected_argmax> <= sml::state<prefill_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::compute_uses_preselected_argmax_direct{} ]
+
+      , sml::state<prefill_compute_flash_decision> <= sml::state<prefill_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::compute_uses_materialized_logits{} ]
+                 / action::request_prefill_compute_flash
+
+      , sml::state<prefill_compute_nonflash_preselected_argmax> <=
+               sml::state<prefill_compute_nonflash>
+                 + sml::completion<event::generate_run>
+                 [ guard::compute_uses_preselected_argmax_direct{} ]
+
+      , sml::state<prefill_compute_nonflash_decision> <= sml::state<prefill_compute_nonflash>
+                 + sml::completion<event::generate_run>
+                 [ guard::compute_uses_materialized_logits{} ]
+                 / action::request_prefill_compute_nonflash
+
+      , sml::state<prefill_compute_flash_preselected_argmax_decision> <=
+               sml::state<prefill_compute_flash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 / action::request_prefill_compute_flash_preselected_argmax
+
+      , sml::state<prefill_compute_nonflash_preselected_argmax_decision> <=
+               sml::state<prefill_compute_nonflash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 / action::request_prefill_compute_nonflash_preselected_argmax
+
+      , sml::state<decode_selection_mode_decision> <= sml::state<prefill_compute_flash_decision>
                  + sml::completion<event::generate_run>
                  [ guard::prefill_compute_ok{} ]
                  / action::mark_prefill_cached
 
-      , sml::state<generate_ready_error_channel_decision> <= sml::state<prefill_compute_decision>
+      , sml::state<decode_selection_mode_decision> <= sml::state<prefill_compute_nonflash_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::prefill_compute_ok{} ]
+                 / action::mark_prefill_cached
+
+      , sml::state<decode_sample_preselected> <=
+               sml::state<prefill_compute_flash_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::prefill_compute_ok{} ]
+                 / action::mark_prefill_cached
+
+      , sml::state<decode_sample_preselected> <=
+               sml::state<prefill_compute_nonflash_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::prefill_compute_ok{} ]
+                 / action::mark_prefill_cached
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<prefill_compute_flash_decision>
                  + sml::completion<event::generate_run>
                  [ guard::prefill_compute_invalid_request{} ]
                  / action::mark_invalid_request
 
-      , sml::state<generate_ready_error_channel_decision> <= sml::state<prefill_compute_decision>
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<prefill_compute_flash_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::prefill_compute_backend_error{} ]
+                 / action::mark_backend_error
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<prefill_compute_nonflash_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::prefill_compute_invalid_request{} ]
+                 / action::mark_invalid_request
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<prefill_compute_nonflash_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::prefill_compute_backend_error{} ]
+                 / action::mark_backend_error
+
+      , sml::state<generate_ready_error_channel_decision> <=
+               sml::state<prefill_compute_flash_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::prefill_compute_invalid_request{} ]
+                 / action::mark_invalid_request
+
+      , sml::state<generate_ready_error_channel_decision> <=
+               sml::state<prefill_compute_flash_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::prefill_compute_backend_error{} ]
+                 / action::mark_backend_error
+
+      , sml::state<generate_ready_error_channel_decision> <=
+               sml::state<prefill_compute_nonflash_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::prefill_compute_invalid_request{} ]
+                 / action::mark_invalid_request
+
+      , sml::state<generate_ready_error_channel_decision> <=
+               sml::state<prefill_compute_nonflash_preselected_argmax_decision>
                  + sml::completion<event::generate_run>
                  [ guard::prefill_compute_backend_error{} ]
                  / action::mark_backend_error
 
       //------------------------------------------------------------------------------//
       // Decode loop.
+      , sml::state<decode_sample> <= sml::state<decode_selection_mode_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_uses_materialized_logits{} ]
+
+      , sml::state<decode_preselected_argmax> <= sml::state<decode_selection_mode_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_uses_preselected_argmax{} ]
+
       , sml::state<decode_sample_decision> <= sml::state<decode_sample>
                  + sml::completion<event::generate_run>
                  / action::request_decode_sample
 
+      , sml::state<decode_preselected_argmax_decision> <= sml::state<decode_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 / action::request_decode_select_argmax
+
+      , sml::state<decode_sample_preselected> <= sml::state<decode_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_sample_ok{} ]
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_sample_invalid_request{} ]
+                 / action::mark_invalid_request
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_sample_backend_error{} ]
+                 / action::mark_backend_error
+
+      , sml::state<decode_sample_preselected_decision> <= sml::state<decode_sample_preselected>
+                 + sml::completion<event::generate_run>
+                 / action::request_decode_sample_preselected
+
       , sml::state<decode_render> <= sml::state<decode_sample_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_sample_ok{} ]
+
+      , sml::state<decode_render> <= sml::state<decode_sample_preselected_decision>
                  + sml::completion<event::generate_run>
                  [ guard::decode_sample_ok{} ]
 
@@ -439,6 +600,16 @@ struct model {
                  / action::mark_invalid_request
 
       , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_sample_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_sample_backend_error{} ]
+                 / action::mark_backend_error
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_sample_preselected_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_sample_invalid_request{} ]
+                 / action::mark_invalid_request
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_sample_preselected_decision>
                  + sml::completion<event::generate_run>
                  [ guard::decode_sample_backend_error{} ]
                  / action::mark_backend_error
@@ -492,7 +663,7 @@ struct model {
                  + sml::completion<event::generate_run>
                  / action::request_memory_snapshot
 
-      , sml::state<decode_compute> <= sml::state<snapshot_decode_decision>
+      , sml::state<decode_compute_runtime_decision> <= sml::state<snapshot_decode_decision>
                  + sml::completion<event::generate_run>
                  [ guard::decode_snapshot_ok{} ]
 
@@ -506,21 +677,105 @@ struct model {
                  [ guard::decode_snapshot_backend_error{} ]
                  / action::mark_backend_error
 
-      , sml::state<decode_compute_decision> <= sml::state<decode_compute>
+      , sml::state<decode_compute_flash> <= sml::state<decode_compute_runtime_decision>
                  + sml::completion<event::generate_run>
-                 / action::request_decode_compute
+                 [ guard::decode_flash_runtime_supported{} ]
 
-      , sml::state<decode_sample> <= sml::state<decode_compute_decision>
+      , sml::state<decode_compute_nonflash> <= sml::state<decode_compute_runtime_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_nonflash_runtime_required{} ]
+
+      , sml::state<decode_compute_flash_preselected_argmax> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::compute_uses_preselected_argmax_direct{} ]
+
+      , sml::state<decode_compute_flash_decision> <= sml::state<decode_compute_flash>
+                 + sml::completion<event::generate_run>
+                 [ guard::compute_uses_materialized_logits{} ]
+                 / action::request_decode_compute_flash
+
+      , sml::state<decode_compute_nonflash_preselected_argmax> <=
+               sml::state<decode_compute_nonflash>
+                 + sml::completion<event::generate_run>
+                 [ guard::compute_uses_preselected_argmax_direct{} ]
+
+      , sml::state<decode_compute_nonflash_decision> <= sml::state<decode_compute_nonflash>
+                 + sml::completion<event::generate_run>
+                 [ guard::compute_uses_materialized_logits{} ]
+                 / action::request_decode_compute_nonflash
+
+      , sml::state<decode_compute_flash_preselected_argmax_decision> <=
+               sml::state<decode_compute_flash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 / action::request_decode_compute_flash_preselected_argmax
+
+      , sml::state<decode_compute_nonflash_preselected_argmax_decision> <=
+               sml::state<decode_compute_nonflash_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 / action::request_decode_compute_nonflash_preselected_argmax
+
+      , sml::state<decode_selection_mode_decision> <= sml::state<decode_compute_flash_decision>
                  + sml::completion<event::generate_run>
                  [ guard::decode_compute_ok{} ]
                  / action::advance_kv_cache
 
-      , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_compute_decision>
+      , sml::state<decode_selection_mode_decision> <= sml::state<decode_compute_nonflash_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_compute_ok{} ]
+                 / action::advance_kv_cache
+
+      , sml::state<decode_sample_preselected> <=
+               sml::state<decode_compute_flash_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_compute_ok{} ]
+                 / action::advance_kv_cache
+
+      , sml::state<decode_sample_preselected> <=
+               sml::state<decode_compute_nonflash_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_compute_ok{} ]
+                 / action::advance_kv_cache
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_compute_flash_decision>
                  + sml::completion<event::generate_run>
                  [ guard::decode_compute_invalid_request{} ]
                  / action::mark_invalid_request
 
-      , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_compute_decision>
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_compute_flash_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_compute_backend_error{} ]
+                 / action::mark_backend_error
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_compute_nonflash_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_compute_invalid_request{} ]
+                 / action::mark_invalid_request
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_compute_nonflash_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_compute_backend_error{} ]
+                 / action::mark_backend_error
+
+      , sml::state<generate_ready_error_channel_decision> <=
+               sml::state<decode_compute_flash_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_compute_invalid_request{} ]
+                 / action::mark_invalid_request
+
+      , sml::state<generate_ready_error_channel_decision> <=
+               sml::state<decode_compute_flash_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_compute_backend_error{} ]
+                 / action::mark_backend_error
+
+      , sml::state<generate_ready_error_channel_decision> <=
+               sml::state<decode_compute_nonflash_preselected_argmax_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_compute_invalid_request{} ]
+                 / action::mark_invalid_request
+
+      , sml::state<generate_ready_error_channel_decision> <=
+               sml::state<decode_compute_nonflash_preselected_argmax_decision>
                  + sml::completion<event::generate_run>
                  [ guard::decode_compute_backend_error{} ]
                  / action::mark_backend_error
@@ -629,9 +884,16 @@ struct model {
                  / action::on_unexpected
       , sml::state<uninitialized> <= sml::state<reserving_graph_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
+      , sml::state<uninitialized> <= sml::state<configuring_sampling_mode_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
       , sml::state<uninitialized> <= sml::state<configuring_sampler> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<uninitialized> <= sml::state<configuring_sampler_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<uninitialized> <= sml::state<configure_preselected_argmax> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<uninitialized> <= sml::state<configure_preselected_argmax_decision>
+                 + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<initialize_done_channel_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
@@ -662,9 +924,29 @@ struct model {
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<snapshot_prefill_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<prefill_compute_runtime_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_decision> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<prefill_compute_flash> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<prefill_compute_flash_preselected_argmax>
+                 + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<prefill_compute_flash_preselected_argmax_decision>
+                 + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<prefill_compute_flash_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<prefill_compute_nonflash> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<prefill_compute_nonflash_preselected_argmax>
+                 + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<prefill_compute_nonflash_preselected_argmax_decision>
+                 + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<prefill_compute_nonflash_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_selection_mode_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<decode_slots> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
@@ -674,13 +956,39 @@ struct model {
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<snapshot_decode_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-      , sml::state<ready> <= sml::state<decode_compute> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<decode_compute_runtime_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-      , sml::state<ready> <= sml::state<decode_compute_decision> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<decode_compute_flash> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_compute_flash_preselected_argmax>
+                 + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_compute_flash_preselected_argmax_decision>
+                 + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_compute_flash_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_compute_nonflash> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_compute_nonflash_preselected_argmax>
+                 + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_compute_nonflash_preselected_argmax_decision>
+                 + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_compute_nonflash_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<decode_sample> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<decode_sample_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_preselected_argmax> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_preselected_argmax_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_sample_preselected> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<decode_sample_preselected_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<decode_render> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
@@ -791,8 +1099,77 @@ struct sm : public emel::sm<model, action::context> {
     return this->context_.compute.backend.kernel.optimized_q6_dispatch_count();
   }
 
+  uint64_t generation_optimized_q6_vector_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q6_vector_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q6_vector_argmax_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q6_vector_argmax_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q6_vector_packed_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q6_vector_packed_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q6_vector_packed_q8_rhs_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel
+        .optimized_q6_vector_packed_q8_rhs_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel
+        .optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q6_vector_prepared_q8_rhs_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel
+        .optimized_q6_vector_prepared_q8_rhs_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel
+        .optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls()
+      const noexcept {
+    return this->context_.compute.backend.kernel
+        .optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls()
+      const noexcept {
+    return this->context_.compute.backend.kernel
+        .optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count();
+  }
+
   uint64_t generation_shared_q6_dispatch_calls() const noexcept {
     return this->context_.compute.backend.kernel.shared_q6_dispatch_count();
+  }
+
+  uint32_t generation_native_quantized_stage_count() const noexcept {
+    return detail::quantized_contract_stage_count(
+        this->context_.compute.backend,
+        emel::model::llama::detail::quantized_contract_kind::native_quantized);
+  }
+
+  uint32_t generation_approved_dense_f32_stage_count() const noexcept {
+    return detail::quantized_contract_stage_count(
+        this->context_.compute.backend,
+        emel::model::llama::detail::quantized_contract_kind::
+            approved_dense_f32_by_contract);
+  }
+
+  uint32_t generation_disallowed_fallback_stage_count() const noexcept {
+    return detail::quantized_contract_stage_count(
+        this->context_.compute.backend,
+        emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
+  }
+
+  uint32_t generation_explicit_no_claim_stage_count() const noexcept {
+    return detail::quantized_contract_stage_count(
+        this->context_.compute.backend,
+        emel::model::llama::detail::quantized_contract_kind::explicit_no_claim);
   }
 
   const emel::graph::event::reserve_output & graph_reservation() const noexcept {

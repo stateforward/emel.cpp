@@ -9,6 +9,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include(CheckCXXCompilerFlag)
+
 if(MSVC)
   add_compile_options(/W4 /WX)
 else()
@@ -17,6 +19,9 @@ endif()
 
 option(EMEL_ENABLE_TESTS "Build tests" ON)
 option(EMEL_ENABLE_FUZZ "Build fuzz targets" OFF)
+option(EMEL_ENABLE_AARCH64_HOST_FEATURES
+  "Enable host-tuned AArch64 compile flags for EMEL-owned C++ code"
+  ON)
 
 include(FetchContent)
 include(cmake/sml_version.cmake)
@@ -35,6 +40,32 @@ target_include_directories(emel_core
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${boost_sml_SOURCE_DIR}/include
 )
+
+set(EMEL_AARCH64_HOST_CXX_FLAG "")
+if(EMEL_ENABLE_AARCH64_HOST_FEATURES AND NOT CMAKE_CROSSCOMPILING)
+  string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" EMEL_SYSTEM_PROCESSOR_LOWER)
+  if(EMEL_SYSTEM_PROCESSOR_LOWER MATCHES "^(arm64|aarch64)$")
+    check_cxx_compiler_flag("-mcpu=native+dotprod+i8mm"
+                            EMEL_HAS_AARCH64_NATIVE_DOTPROD_I8MM)
+    if(APPLE)
+      if(EMEL_HAS_AARCH64_NATIVE_DOTPROD_I8MM)
+        set(EMEL_AARCH64_HOST_CXX_FLAG "-mcpu=native+dotprod+i8mm")
+      endif()
+    else()
+      if(EMEL_HAS_AARCH64_NATIVE_DOTPROD_I8MM)
+        set(EMEL_AARCH64_HOST_CXX_FLAG "-mcpu=native+dotprod+i8mm")
+      endif()
+    endif()
+  endif()
+endif()
+
+if(NOT EMEL_AARCH64_HOST_CXX_FLAG STREQUAL "")
+  message(STATUS "EMEL enabling AArch64 host compile flag: ${EMEL_AARCH64_HOST_CXX_FLAG}")
+  target_compile_options(emel_core
+    INTERFACE
+      "$<$<COMPILE_LANGUAGE:CXX>:${EMEL_AARCH64_HOST_CXX_FLAG}>"
+  )
+endif()
 
 add_library(emel STATIC
   src/emel/model/data.cpp

@@ -133,6 +133,115 @@ class any {
     return count;
   }
 
+  uint64_t optimized_q6_vector_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q6_vector_dispatch_count(); }) {
+        count = sm.optimized_q6_vector_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_q6_vector_argmax_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q6_vector_argmax_dispatch_count(); }) {
+        count = sm.optimized_q6_vector_argmax_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_q6_vector_packed_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q6_vector_packed_dispatch_count(); }) {
+        count = sm.optimized_q6_vector_packed_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_q6_vector_packed_q8_rhs_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q6_vector_packed_q8_rhs_dispatch_count(); }) {
+        count = sm.optimized_q6_vector_packed_q8_rhs_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count(); }) {
+        count = sm.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_q6_vector_prepared_q8_rhs_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q6_vector_prepared_q8_rhs_dispatch_count(); }) {
+        count = sm.optimized_q6_vector_prepared_q8_rhs_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count(); }) {
+        count = sm.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (
+          requires { sm.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count(); }) {
+        count = sm.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count(); }) {
+        count = sm.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
   uint64_t shared_q6_dispatch_count() const noexcept {
     uint64_t count = 0u;
     core_.visit([&](const auto & sm) {

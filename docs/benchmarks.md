@@ -11,13 +11,16 @@ are not. True benchmarks will be end-to-end once the system is complete.
 - Source snapshot: `snapshots/bench/benchmarks_compare.txt`
 - Preserved baseline artifact: `snapshots/bench/generation_pre_arm_flash_optimized_baseline.txt`
 - `reference_impl: source=cmake_fetch ref=ecbcb7ea9d3303097519723b264a8b5f1e977028`
-- `generation_flash_evidence: case=generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 flash_dispatch_calls=0 optimized_flash_dispatch_calls=0 shared_flash_dispatch_calls=0 emel_decode_calls=0 emel_logits_calls=0 reference_decode_calls=0 reference_logits_calls=0`
-- Current compare row: `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 emel.cpp 4135459.000 ns/op, llama.cpp 3194500.000 ns/op, ratio=1.295x`
+- `generation_flash_evidence: case=generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 flash_dispatch_calls=2 optimized_flash_dispatch_calls=2 shared_flash_dispatch_calls=0 emel_decode_calls=0 emel_logits_calls=0 reference_decode_calls=0 reference_logits_calls=0`
+- Current compare row: `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 emel.cpp 1375791.000 ns/op, llama.cpp 3006209.000 ns/op, ratio=0.458x`
 
 ## Current Quantized Evidence
 
 - Source snapshot: `snapshots/bench/benchmarks_compare.txt`
+- `generation_runtime_contract: case=generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 native_quantized=8 approved_dense_f32_by_contract=4 disallowed_fallback=0 explicit_no_claim=0`
 - `generation_quantized_evidence: case=generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 optimized_q2_dispatch_calls=8 shared_q2_dispatch_calls=0 optimized_q3_dispatch_calls=6 shared_q3_dispatch_calls=0 optimized_q6_dispatch_calls=1 shared_q6_dispatch_calls=0`
+
+- Contract summary: the maintained canonical workload stayed on the approved runtime contract with native quantized matmul stages plus approved dense-f32-by-contract token-embedding and norm-vector seams; there was no disallowed fallback and no explicit no-claim branch on the supported path.
 
 ## Preserved ARM Flash Baseline Comparison
 
@@ -27,92 +30,93 @@ are not. True benchmarks will be end-to-end once the system is complete.
 - `baseline_emel_ns=6995375.000`
 - `baseline_reference_ns=5146125.000`
 - `baseline_ratio=1.359x`
-- `current_emel_ns=4135459.000`
-- `current_reference_ns=3194500.000`
-- `current_ratio=1.295x`
-- `speedup=1.692x`
-- `latency_drop_pct=40.9`
+- `current_emel_ns=1375791.000`
+- `current_reference_ns=3006209.000`
+- `current_ratio=0.458x`
+- `speedup=5.085x`
+- `latency_drop_pct=80.3`
 
 | Benchmark | emel.cpp ns/op | llama.cpp ns/op | ratio |
 | --- | ---: | ---: | ---: |
-| `batch/planner_equal` | 1993.125 | 6422.541 | 0.310x |
-| `batch/planner_seq` | 2178.167 | 2702.042 | 0.806x |
-| `batch/planner_simple` | 1037.417 | 2400.042 | 0.432x |
-| `gbnf/rule_parser_basic` | 504.000 | 292.125 | 1.725x |
-| `gbnf/rule_parser_complex` | 3290.250 | 1527.250 | 2.154x |
-| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1` | 4135459.000 | 3194500.000 | 1.295x |
-| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_10` | 40107167.000 | 17093958.000 | 2.346x |
-| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_100` | 406015458.000 | 161191500.000 | 2.519x |
-| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1000` | 5289484000.000 | 1773140875.000 | 2.983x |
-| `kernel/aarch64/op_add` | 100.792 | 5482.166 | 0.018x |
-| `kernel/aarch64/op_cos` | 1676.666 | 6081.250 | 0.276x |
-| `kernel/aarch64/op_div` | 110.000 | 4501.375 | 0.024x |
-| `kernel/aarch64/op_dup` | 95.042 | 4495.875 | 0.021x |
-| `kernel/aarch64/op_log` | 1878.292 | 6531.041 | 0.288x |
-| `kernel/aarch64/op_mul` | 111.584 | 5553.000 | 0.020x |
-| `kernel/aarch64/op_mul_mat` | 4539.958 | 10807.209 | 0.420x |
-| `kernel/aarch64/op_sin` | 1307.625 | 5916.500 | 0.221x |
-| `kernel/aarch64/op_soft_max` | 1021.083 | 5275.541 | 0.194x |
-| `kernel/aarch64/op_sqr` | 101.250 | 4657.292 | 0.022x |
-| `kernel/aarch64/op_sqrt` | 147.916 | 4851.000 | 0.030x |
-| `kernel/aarch64/op_sub` | 100.958 | 5751.333 | 0.018x |
-| `kernel/aarch64/op_unary_exp` | 1380.958 | 5946.750 | 0.232x |
-| `kernel/aarch64/op_unary_neg` | 103.500 | 4797.583 | 0.022x |
-| `kernel/aarch64/op_unary_relu` | 115.750 | 4815.167 | 0.024x |
-| `logits/sampler_raw/vocab_128000` | 20166.458 | 18443.625 | 1.093x |
-| `logits/sampler_raw/vocab_256000` | 38104.417 | 38633.083 | 0.986x |
-| `logits/sampler_raw/vocab_32000` | 4329.000 | 5566.625 | 0.778x |
-| `logits/sampler_sml/vocab_128000` | 17653.834 | 18641.875 | 0.947x |
-| `logits/sampler_sml/vocab_256000` | 30503.000 | 32141.167 | 0.949x |
-| `logits/sampler_sml/vocab_32000` | 4977.084 | 3517.084 | 1.415x |
-| `logits/validator_raw/vocab_128000` | 163340.583 | 162545.084 | 1.005x |
-| `logits/validator_raw/vocab_256000` | 336142.125 | 326633.750 | 1.029x |
-| `logits/validator_raw/vocab_32000` | 41081.708 | 40939.917 | 1.003x |
-| `logits/validator_sml/vocab_128000` | 100361.625 | 98715.750 | 1.017x |
-| `logits/validator_sml/vocab_256000` | 198997.333 | 198059.125 | 1.005x |
-| `logits/validator_sml/vocab_32000` | 24616.167 | 24530.167 | 1.004x |
-| `memory/hybrid_full` | 450.167 | 34554.084 | 0.013x |
-| `memory/kv_full` | 134.083 | 33809.916 | 0.004x |
-| `memory/recurrent_full` | 143.791 | 4627.750 | 0.031x |
-| `text/encoders/bpe_long` | 62.333 | 63.000 | 0.989x |
-| `text/encoders/bpe_short` | 57.166 | 56.333 | 1.015x |
-| `text/encoders/fallback_long` | 2466.709 | 2420.792 | 1.019x |
-| `text/encoders/fallback_short` | 66.500 | 63.000 | 1.056x |
-| `text/encoders/plamo2_long` | 7536.542 | 7768.625 | 0.970x |
-| `text/encoders/plamo2_short` | 204.458 | 204.250 | 1.001x |
-| `text/encoders/rwkv_long` | 839269.583 | 850578.875 | 0.987x |
-| `text/encoders/rwkv_short` | 57024.584 | 56939.417 | 1.001x |
-| `text/encoders/spm_long` | 3664208.708 | 3678366.209 | 0.996x |
-| `text/encoders/spm_short` | 1270.583 | 1418.000 | 0.896x |
-| `text/encoders/ugm_long` | 1384060.375 | 1386069.583 | 0.999x |
-| `text/encoders/ugm_short` | 743.125 | 730.208 | 1.018x |
-| `text/encoders/wpm_long` | 30683.125 | 30725.375 | 0.999x |
-| `text/encoders/wpm_short` | 608.042 | 548.542 | 1.108x |
-| `text/jinja/formatter_long` | 59.291 | 222734.917 | 0.000x |
-| `text/jinja/formatter_short` | 15.750 | 3829.750 | 0.004x |
-| `text/jinja/parser_long` | 66000.667 | 50167.333 | 1.316x |
-| `text/jinja/parser_short` | 943.167 | 508.500 | 1.855x |
-| `tokenizer/full_bpe_long` | 13773.333 | 13852.291 | 0.994x |
-| `tokenizer/full_bpe_short` | 329.375 | 305.417 | 1.078x |
-| `tokenizer/full_plamo2_long` | 12623.583 | 12369.166 | 1.021x |
-| `tokenizer/full_plamo2_short` | 2001.500 | 1955.833 | 1.023x |
-| `tokenizer/full_rwkv_long` | 838232.833 | 833388.625 | 1.006x |
-| `tokenizer/full_rwkv_short` | 55368.125 | 55387.334 | 1.000x |
-| `tokenizer/full_spm_long` | 3653798.583 | 3680401.125 | 0.993x |
-| `tokenizer/full_spm_short` | 1466.000 | 1456.375 | 1.007x |
-| `tokenizer/full_ugm_long` | 1381470.625 | 1419978.250 | 0.973x |
-| `tokenizer/full_ugm_short` | 2452.709 | 2479.833 | 0.989x |
-| `tokenizer/full_wpm_long` | 32604.750 | 32727.083 | 0.996x |
-| `tokenizer/full_wpm_short` | 2262.084 | 2321.292 | 0.974x |
-| `tokenizer/preprocessor_bpe_long` | 3374.708 | 5376.792 | 0.628x |
-| `tokenizer/preprocessor_bpe_short` | 145.959 | 1717.916 | 0.085x |
-| `tokenizer/preprocessor_plamo2_long` | 4170.083 | 5634.708 | 0.740x |
-| `tokenizer/preprocessor_plamo2_short` | 2388.334 | 3732.917 | 0.640x |
-| `tokenizer/preprocessor_rwkv_long` | 4037.083 | 5455.000 | 0.740x |
-| `tokenizer/preprocessor_rwkv_short` | 2491.166 | 3652.958 | 0.682x |
-| `tokenizer/preprocessor_spm_long` | 3932.583 | 5568.458 | 0.706x |
-| `tokenizer/preprocessor_spm_short` | 2502.584 | 3591.375 | 0.697x |
-| `tokenizer/preprocessor_ugm_long` | 4356.416 | 5735.834 | 0.760x |
-| `tokenizer/preprocessor_ugm_short` | 2399.417 | 3626.792 | 0.662x |
-| `tokenizer/preprocessor_wpm_long` | 4255.708 | 5513.375 | 0.772x |
-| `tokenizer/preprocessor_wpm_short` | 2475.209 | 3676.458 | 0.673x |
+| `batch/planner_equal` | 2200.708 | 6221.209 | 0.354x |
+| `batch/planner_seq` | 2625.333 | 2669.042 | 0.984x |
+| `batch/planner_simple` | 1025.875 | 2270.375 | 0.452x |
+| `flash_attention/aarch64/op_flash_attn_ext_decode_like` | 15758.792 | 18112.875 | 0.870x |
+| `gbnf/rule_parser_basic` | 483.750 | 277.584 | 1.743x |
+| `gbnf/rule_parser_complex` | 3355.375 | 1479.375 | 2.268x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1` | 1375791.000 | 3006209.000 | 0.458x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_10` | 13788250.000 | 16811000.000 | 0.820x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_100` | 139125333.000 | 156398708.000 | 0.890x |
+| `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1000` | 1542089417.000 | 1750086292.000 | 0.881x |
+| `kernel/aarch64/op_add` | 108.416 | 5349.084 | 0.020x |
+| `kernel/aarch64/op_cos` | 1727.583 | 6766.541 | 0.255x |
+| `kernel/aarch64/op_div` | 109.125 | 4936.375 | 0.022x |
+| `kernel/aarch64/op_dup` | 102.333 | 4381.542 | 0.023x |
+| `kernel/aarch64/op_log` | 1867.250 | 6488.375 | 0.288x |
+| `kernel/aarch64/op_mul` | 107.916 | 5572.333 | 0.019x |
+| `kernel/aarch64/op_mul_mat` | 4714.250 | 11052.583 | 0.427x |
+| `kernel/aarch64/op_sin` | 1327.417 | 5753.417 | 0.231x |
+| `kernel/aarch64/op_soft_max` | 1053.375 | 5389.875 | 0.195x |
+| `kernel/aarch64/op_sqr` | 99.125 | 4931.583 | 0.020x |
+| `kernel/aarch64/op_sqrt` | 143.292 | 5002.875 | 0.029x |
+| `kernel/aarch64/op_sub` | 112.584 | 5528.625 | 0.020x |
+| `kernel/aarch64/op_unary_exp` | 1326.625 | 5964.500 | 0.222x |
+| `kernel/aarch64/op_unary_neg` | 119.250 | 4713.000 | 0.025x |
+| `kernel/aarch64/op_unary_relu` | 132.708 | 4458.209 | 0.030x |
+| `logits/sampler_raw/vocab_128000` | 19767.291 | 20513.250 | 0.964x |
+| `logits/sampler_raw/vocab_256000` | 38920.125 | 36743.375 | 1.059x |
+| `logits/sampler_raw/vocab_32000` | 5158.834 | 4961.917 | 1.040x |
+| `logits/sampler_sml/vocab_128000` | 17178.875 | 14146.750 | 1.214x |
+| `logits/sampler_sml/vocab_256000` | 32049.667 | 30232.750 | 1.060x |
+| `logits/sampler_sml/vocab_32000` | 3624.958 | 4063.792 | 0.892x |
+| `logits/validator_raw/vocab_128000` | 94824.750 | 92297.750 | 1.027x |
+| `logits/validator_raw/vocab_256000` | 191876.666 | 188562.666 | 1.018x |
+| `logits/validator_raw/vocab_32000` | 24527.792 | 24094.917 | 1.018x |
+| `logits/validator_sml/vocab_128000` | 104854.209 | 99870.000 | 1.050x |
+| `logits/validator_sml/vocab_256000` | 205330.000 | 197989.750 | 1.037x |
+| `logits/validator_sml/vocab_32000` | 25097.917 | 24151.583 | 1.039x |
+| `memory/hybrid_full` | 439.459 | 34456.292 | 0.013x |
+| `memory/kv_full` | 145.333 | 33753.958 | 0.004x |
+| `memory/recurrent_full` | 143.500 | 4596.000 | 0.031x |
+| `text/encoders/bpe_long` | 63.208 | 63.292 | 0.999x |
+| `text/encoders/bpe_short` | 57.833 | 57.208 | 1.011x |
+| `text/encoders/fallback_long` | 2512.750 | 2488.417 | 1.010x |
+| `text/encoders/fallback_short` | 59.875 | 63.625 | 0.941x |
+| `text/encoders/plamo2_long` | 7658.500 | 7666.208 | 0.999x |
+| `text/encoders/plamo2_short` | 207.541 | 202.375 | 1.026x |
+| `text/encoders/rwkv_long` | 835311.792 | 834922.541 | 1.000x |
+| `text/encoders/rwkv_short` | 56386.750 | 56691.292 | 0.995x |
+| `text/encoders/spm_long` | 3640918.125 | 3626919.458 | 1.004x |
+| `text/encoders/spm_short` | 1451.875 | 1306.875 | 1.111x |
+| `text/encoders/ugm_long` | 1381454.291 | 1392619.875 | 0.992x |
+| `text/encoders/ugm_short` | 702.375 | 747.041 | 0.940x |
+| `text/encoders/wpm_long` | 30510.750 | 30731.708 | 0.993x |
+| `text/encoders/wpm_short` | 529.875 | 518.000 | 1.023x |
+| `text/jinja/formatter_long` | 60.375 | 227094.000 | 0.000x |
+| `text/jinja/formatter_short` | 16.292 | 3829.000 | 0.004x |
+| `text/jinja/parser_long` | 65053.917 | 48712.166 | 1.335x |
+| `text/jinja/parser_short` | 920.875 | 489.333 | 1.882x |
+| `tokenizer/full_bpe_long` | 13513.500 | 13494.417 | 1.001x |
+| `tokenizer/full_bpe_short` | 328.250 | 309.334 | 1.061x |
+| `tokenizer/full_plamo2_long` | 12516.750 | 12624.542 | 0.991x |
+| `tokenizer/full_plamo2_short` | 1970.666 | 2480.333 | 0.795x |
+| `tokenizer/full_rwkv_long` | 836135.750 | 832237.958 | 1.005x |
+| `tokenizer/full_rwkv_short` | 55617.333 | 55375.667 | 1.004x |
+| `tokenizer/full_spm_long` | 3625536.333 | 3626327.042 | 1.000x |
+| `tokenizer/full_spm_short` | 1530.750 | 1511.416 | 1.013x |
+| `tokenizer/full_ugm_long` | 1382505.750 | 1383240.875 | 0.999x |
+| `tokenizer/full_ugm_short` | 2441.000 | 2417.333 | 1.010x |
+| `tokenizer/full_wpm_long` | 32302.042 | 32673.208 | 0.989x |
+| `tokenizer/full_wpm_short` | 2190.667 | 2253.292 | 0.972x |
+| `tokenizer/preprocessor_bpe_long` | 3584.167 | 5378.458 | 0.666x |
+| `tokenizer/preprocessor_bpe_short` | 127.292 | 1712.833 | 0.074x |
+| `tokenizer/preprocessor_plamo2_long` | 5472.084 | 5384.292 | 1.016x |
+| `tokenizer/preprocessor_plamo2_short` | 2584.459 | 3684.583 | 0.701x |
+| `tokenizer/preprocessor_rwkv_long` | 5926.500 | 5467.167 | 1.084x |
+| `tokenizer/preprocessor_rwkv_short` | 2468.875 | 3590.291 | 0.688x |
+| `tokenizer/preprocessor_spm_long` | 4167.833 | 5443.708 | 0.766x |
+| `tokenizer/preprocessor_spm_short` | 2520.917 | 3800.625 | 0.663x |
+| `tokenizer/preprocessor_ugm_long` | 4361.750 | 5660.292 | 0.771x |
+| `tokenizer/preprocessor_ugm_short` | 2550.709 | 3618.625 | 0.705x |
+| `tokenizer/preprocessor_wpm_long` | 4138.875 | 5489.458 | 0.754x |
+| `tokenizer/preprocessor_wpm_short` | 2461.334 | 3669.167 | 0.671x |

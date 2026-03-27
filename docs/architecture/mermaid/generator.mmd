@@ -14,17 +14,22 @@ stateDiagram-v2
   initializing_renderer_decision --> initialize_error_channel_decision : completion_initialize_run_ [renderer_initialize_invalid_request_] / mark_invalid_request_
   initializing_renderer_decision --> initialize_error_channel_decision : completion_initialize_run_ [renderer_initialize_backend_error_] / mark_backend_error_
   reserving_memory --> reserving_memory_decision : completion_initialize_run_ [always] / request_memory_reserve_
-  reserving_memory_decision --> configuring_sampler : completion_initialize_run_ [memory_reserve_with_existing_graph_] / none
+  reserving_memory_decision --> configuring_sampling_mode_decision : completion_initialize_run_ [memory_reserve_with_existing_graph_] / none
   reserving_memory_decision --> reserving_graph : completion_initialize_run_ [memory_reserve_with_missing_graph_] / none
   reserving_memory_decision --> initialize_error_channel_decision : completion_initialize_run_ [memory_reserve_invalid_request_] / mark_invalid_request_
   reserving_memory_decision --> initialize_error_channel_decision : completion_initialize_run_ [memory_reserve_backend_error_] / mark_backend_error_
   reserving_graph --> reserving_graph_decision : completion_initialize_run_ [always] / request_graph_reserve_
-  reserving_graph_decision --> configuring_sampler : completion_initialize_run_ [graph_reserve_ok_] / none
+  reserving_graph_decision --> configuring_sampling_mode_decision : completion_initialize_run_ [graph_reserve_ok_] / none
   reserving_graph_decision --> initialize_error_channel_decision : completion_initialize_run_ [graph_reserve_invalid_request_] / mark_invalid_request_
   reserving_graph_decision --> initialize_error_channel_decision : completion_initialize_run_ [graph_reserve_backend_error_] / mark_backend_error_
+  configuring_sampling_mode_decision --> configuring_sampler : completion_initialize_run_ [initialize_uses_materialized_logits_] / none
+  configuring_sampling_mode_decision --> configure_preselected_argmax : completion_initialize_run_ [initialize_uses_preselected_argmax_] / none
   configuring_sampler --> configuring_sampler_decision : completion_initialize_run_ [always] / configure_sampler_
   configuring_sampler_decision --> initialize_done_channel_decision : completion_initialize_run_ [sampler_configured_] / none
   configuring_sampler_decision --> initialize_error_channel_decision : completion_initialize_run_ [sampler_config_failed_] / mark_backend_error_
+  configure_preselected_argmax --> configure_preselected_argmax_decision : completion_initialize_run_ [always] / configure_preselected_argmax_
+  configure_preselected_argmax_decision --> initialize_done_channel_decision : completion_initialize_run_ [sampler_configured_] / none
+  configure_preselected_argmax_decision --> initialize_error_channel_decision : completion_initialize_run_ [sampler_config_failed_] / mark_backend_error_
   initialize_done_channel_decision --> ready : completion_initialize_run_ [initialize_done_callback_with_error_out_] / dispatch_initialize_done_with_callback_and_error_out_
   initialize_done_channel_decision --> ready : completion_initialize_run_ [initialize_done_callback_without_error_out_] / dispatch_initialize_done_with_callback_only_
   initialize_done_channel_decision --> ready : completion_initialize_run_ [initialize_no_done_callback_with_error_out_] / dispatch_initialize_done_with_error_out_only_
@@ -58,17 +63,43 @@ stateDiagram-v2
   prefill_slots_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_slots_invalid_request_] / mark_invalid_request_
   prefill_slots_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_slots_backend_error_] / mark_backend_error_
   snapshot_prefill --> snapshot_prefill_decision : completion_generate_run_ [always] / request_memory_snapshot_
-  snapshot_prefill_decision --> prefill_compute : completion_generate_run_ [snapshot_ok_] / none
+  snapshot_prefill_decision --> prefill_compute_runtime_decision : completion_generate_run_ [snapshot_ok_] / none
   snapshot_prefill_decision --> generate_ready_error_channel_decision : completion_generate_run_ [snapshot_invalid_request_] / mark_invalid_request_
   snapshot_prefill_decision --> generate_ready_error_channel_decision : completion_generate_run_ [snapshot_backend_error_] / mark_backend_error_
-  prefill_compute --> prefill_compute_decision : completion_generate_run_ [always] / request_prefill_compute_
-  prefill_compute_decision --> decode_sample : completion_generate_run_ [prefill_compute_ok_] / mark_prefill_cached_
-  prefill_compute_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_compute_invalid_request_] / mark_invalid_request_
-  prefill_compute_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_compute_backend_error_] / mark_backend_error_
+  prefill_compute_runtime_decision --> prefill_compute_flash : completion_generate_run_ [prefill_flash_runtime_supported_] / none
+  prefill_compute_runtime_decision --> prefill_compute_nonflash : completion_generate_run_ [prefill_nonflash_runtime_required_] / none
+  prefill_compute_flash --> prefill_compute_flash_preselected_argmax : completion_generate_run_ [compute_uses_preselected_argmax_direct_] / none
+  prefill_compute_flash --> prefill_compute_flash_decision : completion_generate_run_ [compute_uses_materialized_logits_] / request_prefill_compute_flash_
+  prefill_compute_nonflash --> prefill_compute_nonflash_preselected_argmax : completion_generate_run_ [compute_uses_preselected_argmax_direct_] / none
+  prefill_compute_nonflash --> prefill_compute_nonflash_decision : completion_generate_run_ [compute_uses_materialized_logits_] / request_prefill_compute_nonflash_
+  prefill_compute_flash_preselected_argmax --> prefill_compute_flash_preselected_argmax_decision : completion_generate_run_ [always] / request_prefill_compute_flash_preselected_argmax_
+  prefill_compute_nonflash_preselected_argmax --> prefill_compute_nonflash_preselected_argmax_decision : completion_generate_run_ [always] / request_prefill_compute_nonflash_preselected_argmax_
+  prefill_compute_flash_decision --> decode_selection_mode_decision : completion_generate_run_ [prefill_compute_ok_] / mark_prefill_cached_
+  prefill_compute_nonflash_decision --> decode_selection_mode_decision : completion_generate_run_ [prefill_compute_ok_] / mark_prefill_cached_
+  prefill_compute_flash_preselected_argmax_decision --> decode_sample_preselected : completion_generate_run_ [prefill_compute_ok_] / mark_prefill_cached_
+  prefill_compute_nonflash_preselected_argmax_decision --> decode_sample_preselected : completion_generate_run_ [prefill_compute_ok_] / mark_prefill_cached_
+  prefill_compute_flash_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_compute_invalid_request_] / mark_invalid_request_
+  prefill_compute_flash_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_compute_backend_error_] / mark_backend_error_
+  prefill_compute_nonflash_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_compute_invalid_request_] / mark_invalid_request_
+  prefill_compute_nonflash_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_compute_backend_error_] / mark_backend_error_
+  prefill_compute_flash_preselected_argmax_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_compute_invalid_request_] / mark_invalid_request_
+  prefill_compute_flash_preselected_argmax_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_compute_backend_error_] / mark_backend_error_
+  prefill_compute_nonflash_preselected_argmax_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_compute_invalid_request_] / mark_invalid_request_
+  prefill_compute_nonflash_preselected_argmax_decision --> generate_ready_error_channel_decision : completion_generate_run_ [prefill_compute_backend_error_] / mark_backend_error_
+  decode_selection_mode_decision --> decode_sample : completion_generate_run_ [decode_uses_materialized_logits_] / none
+  decode_selection_mode_decision --> decode_preselected_argmax : completion_generate_run_ [decode_uses_preselected_argmax_] / none
   decode_sample --> decode_sample_decision : completion_generate_run_ [always] / request_decode_sample_
+  decode_preselected_argmax --> decode_preselected_argmax_decision : completion_generate_run_ [always] / request_decode_select_argmax_
+  decode_preselected_argmax_decision --> decode_sample_preselected : completion_generate_run_ [decode_sample_ok_] / none
+  decode_preselected_argmax_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_sample_invalid_request_] / mark_invalid_request_
+  decode_preselected_argmax_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_sample_backend_error_] / mark_backend_error_
+  decode_sample_preselected --> decode_sample_preselected_decision : completion_generate_run_ [always] / request_decode_sample_preselected_
   decode_sample_decision --> decode_render : completion_generate_run_ [decode_sample_ok_] / none
+  decode_sample_preselected_decision --> decode_render : completion_generate_run_ [decode_sample_ok_] / none
   decode_sample_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_sample_invalid_request_] / mark_invalid_request_
   decode_sample_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_sample_backend_error_] / mark_backend_error_
+  decode_sample_preselected_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_sample_invalid_request_] / mark_invalid_request_
+  decode_sample_preselected_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_sample_backend_error_] / mark_backend_error_
   decode_render --> decode_render_decision : completion_generate_run_ [always] / request_decode_render_
   decode_render_decision --> decode_loop_decision : completion_generate_run_ [decode_render_ok_] / commit_render_output_
   decode_render_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_render_invalid_request_] / mark_invalid_request_
@@ -80,13 +111,29 @@ stateDiagram-v2
   decode_slots_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_slots_invalid_request_] / mark_invalid_request_
   decode_slots_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_slots_backend_error_] / mark_backend_error_
   snapshot_decode --> snapshot_decode_decision : completion_generate_run_ [always] / request_memory_snapshot_
-  snapshot_decode_decision --> decode_compute : completion_generate_run_ [decode_snapshot_ok_] / none
+  snapshot_decode_decision --> decode_compute_runtime_decision : completion_generate_run_ [decode_snapshot_ok_] / none
   snapshot_decode_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_snapshot_invalid_request_] / mark_invalid_request_
   snapshot_decode_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_snapshot_backend_error_] / mark_backend_error_
-  decode_compute --> decode_compute_decision : completion_generate_run_ [always] / request_decode_compute_
-  decode_compute_decision --> decode_sample : completion_generate_run_ [decode_compute_ok_] / advance_kv_cache_
-  decode_compute_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_compute_invalid_request_] / mark_invalid_request_
-  decode_compute_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_compute_backend_error_] / mark_backend_error_
+  decode_compute_runtime_decision --> decode_compute_flash : completion_generate_run_ [decode_flash_runtime_supported_] / none
+  decode_compute_runtime_decision --> decode_compute_nonflash : completion_generate_run_ [decode_nonflash_runtime_required_] / none
+  decode_compute_flash --> decode_compute_flash_preselected_argmax : completion_generate_run_ [compute_uses_preselected_argmax_direct_] / none
+  decode_compute_flash --> decode_compute_flash_decision : completion_generate_run_ [compute_uses_materialized_logits_] / request_decode_compute_flash_
+  decode_compute_nonflash --> decode_compute_nonflash_preselected_argmax : completion_generate_run_ [compute_uses_preselected_argmax_direct_] / none
+  decode_compute_nonflash --> decode_compute_nonflash_decision : completion_generate_run_ [compute_uses_materialized_logits_] / request_decode_compute_nonflash_
+  decode_compute_flash_preselected_argmax --> decode_compute_flash_preselected_argmax_decision : completion_generate_run_ [always] / request_decode_compute_flash_preselected_argmax_
+  decode_compute_nonflash_preselected_argmax --> decode_compute_nonflash_preselected_argmax_decision : completion_generate_run_ [always] / request_decode_compute_nonflash_preselected_argmax_
+  decode_compute_flash_decision --> decode_selection_mode_decision : completion_generate_run_ [decode_compute_ok_] / advance_kv_cache_
+  decode_compute_nonflash_decision --> decode_selection_mode_decision : completion_generate_run_ [decode_compute_ok_] / advance_kv_cache_
+  decode_compute_flash_preselected_argmax_decision --> decode_sample_preselected : completion_generate_run_ [decode_compute_ok_] / advance_kv_cache_
+  decode_compute_nonflash_preselected_argmax_decision --> decode_sample_preselected : completion_generate_run_ [decode_compute_ok_] / advance_kv_cache_
+  decode_compute_flash_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_compute_invalid_request_] / mark_invalid_request_
+  decode_compute_flash_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_compute_backend_error_] / mark_backend_error_
+  decode_compute_nonflash_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_compute_invalid_request_] / mark_invalid_request_
+  decode_compute_nonflash_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_compute_backend_error_] / mark_backend_error_
+  decode_compute_flash_preselected_argmax_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_compute_invalid_request_] / mark_invalid_request_
+  decode_compute_flash_preselected_argmax_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_compute_backend_error_] / mark_backend_error_
+  decode_compute_nonflash_preselected_argmax_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_compute_invalid_request_] / mark_invalid_request_
+  decode_compute_nonflash_preselected_argmax_decision --> generate_ready_error_channel_decision : completion_generate_run_ [decode_compute_backend_error_] / mark_backend_error_
   flushing --> flushing_decision : completion_generate_run_ [always] / request_flush_
   flushing_decision --> generate_done_channel_decision : completion_generate_run_ [flush_ok_] / commit_flush_output_
   flushing_decision --> generate_ready_error_channel_decision : completion_generate_run_ [flush_invalid_request_] / mark_invalid_request_
@@ -113,8 +160,11 @@ stateDiagram-v2
   reserving_memory_decision --> uninitialized : _ [always] / on_unexpected_
   reserving_graph --> uninitialized : _ [always] / on_unexpected_
   reserving_graph_decision --> uninitialized : _ [always] / on_unexpected_
+  configuring_sampling_mode_decision --> uninitialized : _ [always] / on_unexpected_
   configuring_sampler --> uninitialized : _ [always] / on_unexpected_
   configuring_sampler_decision --> uninitialized : _ [always] / on_unexpected_
+  configure_preselected_argmax --> uninitialized : _ [always] / on_unexpected_
+  configure_preselected_argmax_decision --> uninitialized : _ [always] / on_unexpected_
   initialize_done_channel_decision --> ready : _ [always] / on_unexpected_
   initialize_error_channel_decision --> uninitialized : _ [always] / on_unexpected_
   reset_sequence --> ready : _ [always] / on_unexpected_
@@ -129,16 +179,35 @@ stateDiagram-v2
   prefill_slots_decision --> ready : _ [always] / on_unexpected_
   snapshot_prefill --> ready : _ [always] / on_unexpected_
   snapshot_prefill_decision --> ready : _ [always] / on_unexpected_
-  prefill_compute --> ready : _ [always] / on_unexpected_
-  prefill_compute_decision --> ready : _ [always] / on_unexpected_
+  prefill_compute_runtime_decision --> ready : _ [always] / on_unexpected_
+  prefill_compute_flash --> ready : _ [always] / on_unexpected_
+  prefill_compute_flash_preselected_argmax --> ready : _ [always] / on_unexpected_
+  prefill_compute_flash_preselected_argmax_decision --> ready : _ [always] / on_unexpected_
+  prefill_compute_flash_decision --> ready : _ [always] / on_unexpected_
+  prefill_compute_nonflash --> ready : _ [always] / on_unexpected_
+  prefill_compute_nonflash_preselected_argmax --> ready : _ [always] / on_unexpected_
+  prefill_compute_nonflash_preselected_argmax_decision --> ready : _ [always] / on_unexpected_
+  prefill_compute_nonflash_decision --> ready : _ [always] / on_unexpected_
+  decode_selection_mode_decision --> ready : _ [always] / on_unexpected_
   decode_slots --> ready : _ [always] / on_unexpected_
   decode_slots_decision --> ready : _ [always] / on_unexpected_
   snapshot_decode --> ready : _ [always] / on_unexpected_
   snapshot_decode_decision --> ready : _ [always] / on_unexpected_
-  decode_compute --> ready : _ [always] / on_unexpected_
-  decode_compute_decision --> ready : _ [always] / on_unexpected_
+  decode_compute_runtime_decision --> ready : _ [always] / on_unexpected_
+  decode_compute_flash --> ready : _ [always] / on_unexpected_
+  decode_compute_flash_preselected_argmax --> ready : _ [always] / on_unexpected_
+  decode_compute_flash_preselected_argmax_decision --> ready : _ [always] / on_unexpected_
+  decode_compute_flash_decision --> ready : _ [always] / on_unexpected_
+  decode_compute_nonflash --> ready : _ [always] / on_unexpected_
+  decode_compute_nonflash_preselected_argmax --> ready : _ [always] / on_unexpected_
+  decode_compute_nonflash_preselected_argmax_decision --> ready : _ [always] / on_unexpected_
+  decode_compute_nonflash_decision --> ready : _ [always] / on_unexpected_
   decode_sample --> ready : _ [always] / on_unexpected_
   decode_sample_decision --> ready : _ [always] / on_unexpected_
+  decode_preselected_argmax --> ready : _ [always] / on_unexpected_
+  decode_preselected_argmax_decision --> ready : _ [always] / on_unexpected_
+  decode_sample_preselected --> ready : _ [always] / on_unexpected_
+  decode_sample_preselected_decision --> ready : _ [always] / on_unexpected_
   decode_render --> ready : _ [always] / on_unexpected_
   decode_render_decision --> ready : _ [always] / on_unexpected_
   decode_loop_decision --> ready : _ [always] / on_unexpected_

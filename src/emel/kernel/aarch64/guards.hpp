@@ -17,6 +17,133 @@ struct simd_op {
   }
 };
 
+struct simd_op_mul_mat_q6_vector {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_q6_vector(
+        ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_q6_vector_packed {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_q6_vector_packed(
+        ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_q6_vector_packed_q8_rhs {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_q6_vector_packed_q8_rhs(
+        ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_q6_vector_prepared_q8_rhs {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_q6_vector_prepared_q8_rhs(
+        ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm(
+        ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_argmax_q6_vector_packed_q8_rhs(
+        ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_argmax_q6_vector_prepared_q8_rhs_i8mm {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::
+        can_use_neon_mul_mat_argmax_q6_vector_prepared_q8_rhs_i8mm(
+            ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_argmax_q6_vector_q8_argmax_prepared_i8mm {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::
+        can_use_neon_mul_mat_argmax_q6_vector_q8_argmax_prepared_i8mm(
+            ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_generic {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  const action::context & ctx) const noexcept {
+    return simd_op<::emel::kernel::aarch64::event::dispatch_op_mul_mat>{}(ev, ctx) &&
+        !simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm{}(ev, ctx) &&
+        !simd_op_mul_mat_q6_vector_prepared_q8_rhs{}(ev, ctx) &&
+        !simd_op_mul_mat_q6_vector_packed_q8_rhs{}(ev, ctx) &&
+        !simd_op_mul_mat_q6_vector_packed{}(ev, ctx) &&
+        !simd_op_mul_mat_q6_vector{}(ev, ctx);
+  }
+};
+
+struct simd_op_flash_attn_ext_f16kv_one_chunk {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_flash_attn_ext & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_flash_attn_ext_f16kv_one_chunk(
+        ev.request, ctx.neon_available);
+  }
+};
+
+struct valid_op_flash_attn_ext_shared {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_flash_attn_ext & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    if (!::emel::kernel::detail::can_run_backend_request(ev.request)) {
+      return false;
+    }
+    return
+        !simd_op_flash_attn_ext_f16kv_one_chunk{}(ev, ctx);
+  }
+};
+
 template <class dispatch_event_type>
 struct valid_op {
   bool operator()(const dispatch_event_type & ev, const action::context & ctx) const noexcept {

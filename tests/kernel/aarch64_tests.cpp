@@ -22,10 +22,19 @@ using allocation_scope = emel::test::allocation::allocation_scope;
 using emel::kernel::test::dtype;
 using emel::kernel::test::flash_attn_ext_fixture;
 using emel::kernel::test::flash_attn_reference_f16_scores;
+using emel::kernel::test::flash_attn_reference_masked_total_tokens;
+using emel::kernel::test::flash_attn_reference_online_softmax_f16_values;
+using emel::kernel::test::k_flash_online_f16_abs_tolerance;
 using emel::kernel::test::make_dst;
+using emel::kernel::test::make_argmax_prepared_q6_k_x8_q8_src;
 using emel::kernel::test::make_flash_attn_ext_event;
+using emel::kernel::test::make_packed_q6_k_x8_src;
+using emel::kernel::test::make_prepared_q6_k_x8_q8_src;
+using emel::kernel::test::make_q8_k_vector_src;
 using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_src;
+using emel::kernel::test::to_fp16_storage;
+using emel::kernel::test::within_flash_online_f16_tolerance;
 
 }  // namespace
 
@@ -722,6 +731,7 @@ TEST_CASE("kernel_aarch64_supported_quantized_dispatch_is_alloc_free") {
   CHECK(machine.optimized_q3_dispatch_count() == 1u);
   CHECK(machine.shared_q3_dispatch_count() == 0u);
   CHECK(machine.optimized_q6_dispatch_count() == 1u);
+  CHECK(machine.optimized_q6_vector_dispatch_count() == 1u);
   CHECK(machine.shared_q6_dispatch_count() == 0u);
 #else
   CHECK(machine.optimized_q2_dispatch_count() == 0u);
@@ -729,7 +739,313 @@ TEST_CASE("kernel_aarch64_supported_quantized_dispatch_is_alloc_free") {
   CHECK(machine.optimized_q3_dispatch_count() == 0u);
   CHECK(machine.shared_q3_dispatch_count() == 1u);
   CHECK(machine.optimized_q6_dispatch_count() == 0u);
+  CHECK(machine.optimized_q6_vector_dispatch_count() == 0u);
   CHECK(machine.shared_q6_dispatch_count() == 1u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q6_matrix_dispatch_does_not_claim_vector_path") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q6_k;
+
+  std::array<float, QK_K * 2u> input = {};
+  for (size_t idx = 0; idx < input.size(); ++idx) {
+    const int32_t centered = static_cast<int32_t>(idx % 17u) - 8;
+    input[idx] = static_cast<float>(centered) * 0.125f;
+  }
+
+  block_q6_k q6 = {};
+  q6.d = 0x3c00u;
+  std::fill(q6.scales.begin(), q6.scales.end(), static_cast<int8_t>(3));
+  std::fill(q6.ql.begin(), q6.ql.end(), static_cast<uint8_t>(0x66u));
+  std::fill(q6.qh.begin(), q6.qh.end(), static_cast<uint8_t>(0x77u));
+
+  std::array<float, 2u> out = {};
+  const emel::kernel::event::op_mul_mat q6_ev{
+      .src0 = make_quantized_src(&q6, dtype::q6_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 2u, QK_K),
+      .dst = make_dst(out.data(), dtype::f32, 2u, 1u),
+      .nth = 1,
+  };
+
+  aarch64_sm machine{};
+  CHECK(machine.process_event(q6_ev));
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  CHECK(machine.optimized_q6_dispatch_count() == 1u);
+  CHECK(machine.optimized_q6_vector_dispatch_count() == 0u);
+  CHECK(machine.shared_q6_dispatch_count() == 0u);
+#else
+  CHECK(machine.optimized_q6_dispatch_count() == 0u);
+  CHECK(machine.optimized_q6_vector_dispatch_count() == 0u);
+  CHECK(machine.shared_q6_dispatch_count() == 1u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q6_packed_vector_route_is_explicit_and_numeric_match") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q6_k;
+
+  constexpr uint64_t k_rows = 8u;
+  std::array<block_q6_k, k_rows> native_rows = {};
+  for (size_t row = 0; row < native_rows.size(); ++row) {
+    native_rows[row].d = 0x3c00u;
+    for (size_t idx = 0; idx < native_rows[row].scales.size(); ++idx) {
+      native_rows[row].scales[idx] =
+          static_cast<int8_t>((static_cast<int32_t>((row + idx) % 13u)) - 6);
+    }
+    for (size_t idx = 0; idx < native_rows[row].ql.size(); ++idx) {
+      native_rows[row].ql[idx] = static_cast<uint8_t>(((row + 1u) * 17u + idx * 7u) & 0xffu);
+    }
+    for (size_t idx = 0; idx < native_rows[row].qh.size(); ++idx) {
+      native_rows[row].qh[idx] = static_cast<uint8_t>(((row + 3u) * 11u + idx * 5u) & 0xffu);
+    }
+  }
+
+  const std::array<float, QK_K> input = [] {
+    std::array<float, QK_K> values = {};
+    for (size_t idx = 0; idx < values.size(); ++idx) {
+      const int32_t centered = static_cast<int32_t>(idx % 29u) - 14;
+      values[idx] = static_cast<float>(centered) * 0.0625f;
+    }
+    return values;
+  }();
+
+  std::array<uint8_t,
+             sizeof(emel::kernel::detail::quant::block_q6_kx8) * (QK_K / QK_K)>
+      packed_storage = {};
+  std::array<uint8_t,
+             sizeof(emel::kernel::detail::quant::block_q6_kx8_q8_argmax_prepared) * (QK_K / QK_K)>
+      argmax_prepared_storage = {};
+  REQUIRE(emel::kernel::detail::quant::pack_q6_k_rows_x8(
+      native_rows.data(),
+      k_rows,
+      QK_K,
+      packed_storage.data()));
+  REQUIRE(emel::kernel::detail::quant::pack_q6_k_rows_x8_q8_argmax_prepared(
+      native_rows.data(),
+      k_rows,
+      QK_K,
+      argmax_prepared_storage.data()));
+  std::array<uint8_t,
+             sizeof(emel::kernel::detail::quant::block_q6_kx8_q8_prepared) * (QK_K / QK_K)>
+      prepared_storage = {};
+  REQUIRE(emel::kernel::detail::quant::pack_q6_k_rows_x8_q8_prepared(
+      native_rows.data(),
+      k_rows,
+      QK_K,
+      prepared_storage.data()));
+
+  std::array<emel::kernel::detail::quant::block_q8_k, QK_K / QK_K> q8_input = {};
+  emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      input.data(),
+      1u,
+      q8_input.data(),
+      static_cast<int64_t>(QK_K));
+
+  std::array<float, k_rows> native_out = {};
+  std::array<float, k_rows> packed_out = {};
+  std::array<float, k_rows> prepared_out = {};
+  const emel::kernel::event::op_mul_mat native_ev{
+      .src0 = make_quantized_src(native_rows.data(), dtype::q6_k, QK_K, k_rows),
+      .src1 = make_src(input.data(), dtype::f32, 1u, QK_K),
+      .dst = make_dst(native_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat packed_ev{
+      .src0 = make_packed_q6_k_x8_src(packed_storage.data(), QK_K, k_rows),
+      .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
+      .dst = make_dst(packed_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat prepared_ev{
+      .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), QK_K, k_rows),
+      .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
+      .dst = make_dst(prepared_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
+  };
+
+  aarch64_sm native_machine{};
+  aarch64_sm packed_machine{};
+  aarch64_sm prepared_machine{};
+  CHECK(native_machine.process_event(native_ev));
+  CHECK(packed_machine.process_event(packed_ev));
+  CHECK(prepared_machine.process_event(prepared_ev));
+
+  for (size_t row = 0; row < native_out.size(); ++row) {
+    CHECK(packed_out[row] == doctest::Approx(native_out[row]).epsilon(1.0e-6f));
+    CHECK(prepared_out[row] == doctest::Approx(native_out[row]).epsilon(1.0e-6f));
+  }
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+  CHECK(packed_machine.optimized_q6_dispatch_count() == 1u);
+  CHECK(packed_machine.optimized_q6_vector_dispatch_count() == 1u);
+  CHECK(packed_machine.optimized_q6_vector_packed_dispatch_count() == 1u);
+  CHECK(packed_machine.optimized_q6_vector_packed_q8_rhs_dispatch_count() == 1u);
+  CHECK(packed_machine.shared_q6_dispatch_count() == 0u);
+  CHECK(prepared_machine.optimized_q6_dispatch_count() == 1u);
+  CHECK(prepared_machine.optimized_q6_vector_dispatch_count() == 1u);
+  CHECK(prepared_machine.optimized_q6_vector_packed_dispatch_count() == 1u);
+  CHECK(prepared_machine.optimized_q6_vector_packed_q8_rhs_dispatch_count() == 1u);
+  CHECK(prepared_machine.optimized_q6_vector_prepared_q8_rhs_dispatch_count() == 1u);
+#if defined(__ARM_FEATURE_MATMUL_INT8)
+  CHECK(prepared_machine.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() == 1u);
+#else
+  CHECK(prepared_machine.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() == 0u);
+#endif
+  CHECK(prepared_machine.shared_q6_dispatch_count() == 0u);
+#else
+  CHECK(packed_machine.optimized_q6_dispatch_count() == 0u);
+  CHECK(packed_machine.optimized_q6_vector_dispatch_count() == 0u);
+  CHECK(packed_machine.optimized_q6_vector_packed_dispatch_count() == 0u);
+  CHECK(packed_machine.optimized_q6_vector_packed_q8_rhs_dispatch_count() == 0u);
+  CHECK(packed_machine.shared_q6_dispatch_count() == 0u);
+  CHECK(prepared_machine.optimized_q6_dispatch_count() == 0u);
+  CHECK(prepared_machine.optimized_q6_vector_dispatch_count() == 0u);
+  CHECK(prepared_machine.optimized_q6_vector_packed_dispatch_count() == 0u);
+  CHECK(prepared_machine.optimized_q6_vector_packed_q8_rhs_dispatch_count() == 0u);
+  CHECK(prepared_machine.optimized_q6_vector_prepared_q8_rhs_dispatch_count() == 0u);
+  CHECK(prepared_machine.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() == 0u);
+  CHECK(prepared_machine.shared_q6_dispatch_count() == 0u);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q6_packed_vector_argmax_route_is_explicit_and_numeric_match") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q6_k;
+
+  constexpr uint64_t k_rows = 8u;
+  std::array<block_q6_k, k_rows> native_rows = {};
+  for (size_t row = 0; row < native_rows.size(); ++row) {
+    native_rows[row].d = 0x3c00u;
+    for (size_t idx = 0; idx < native_rows[row].scales.size(); ++idx) {
+      native_rows[row].scales[idx] =
+          static_cast<int8_t>((static_cast<int32_t>((row + idx) % 13u)) - 6);
+    }
+    for (size_t idx = 0; idx < native_rows[row].ql.size(); ++idx) {
+      native_rows[row].ql[idx] = static_cast<uint8_t>(((row + 1u) * 17u + idx * 7u) & 0xffu);
+    }
+    for (size_t idx = 0; idx < native_rows[row].qh.size(); ++idx) {
+      native_rows[row].qh[idx] = static_cast<uint8_t>(((row + 3u) * 11u + idx * 5u) & 0xffu);
+    }
+  }
+
+  const std::array<float, QK_K> input = [] {
+    std::array<float, QK_K> values = {};
+    for (size_t idx = 0; idx < values.size(); ++idx) {
+      const int32_t centered = static_cast<int32_t>(idx % 29u) - 14;
+      values[idx] = static_cast<float>(centered) * 0.0625f;
+    }
+    return values;
+  }();
+
+  std::array<uint8_t,
+             sizeof(emel::kernel::detail::quant::block_q6_kx8) * (QK_K / QK_K)>
+      packed_storage = {};
+  std::array<uint8_t,
+             sizeof(emel::kernel::detail::quant::block_q6_kx8_q8_argmax_prepared) *
+                 (QK_K / QK_K)>
+      argmax_prepared_storage = {};
+  REQUIRE(emel::kernel::detail::quant::pack_q6_k_rows_x8(
+      native_rows.data(),
+      k_rows,
+      QK_K,
+      packed_storage.data()));
+  REQUIRE(emel::kernel::detail::quant::pack_q6_k_rows_x8_q8_argmax_prepared(
+      native_rows.data(),
+      k_rows,
+      QK_K,
+      argmax_prepared_storage.data()));
+
+  std::array<emel::kernel::detail::quant::block_q8_k, QK_K / QK_K> q8_input = {};
+  emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      input.data(),
+      1u,
+      q8_input.data(),
+      static_cast<int64_t>(QK_K));
+
+  std::array<float, k_rows> native_out = {};
+  const emel::kernel::event::op_mul_mat native_ev{
+      .src0 = make_quantized_src(native_rows.data(), dtype::q6_k, QK_K, k_rows),
+      .src1 = make_src(input.data(), dtype::f32, 1u, QK_K),
+      .dst = make_dst(native_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
+  };
+  float argmax_score = 0.0f;
+  int32_t argmax_index = -1;
+  float argmax_prepared_score = 0.0f;
+  int32_t argmax_prepared_index = -1;
+  const emel::kernel::event::op_mul_mat_argmax packed_argmax_ev{
+      .src0 = make_packed_q6_k_x8_src(packed_storage.data(), QK_K, k_rows),
+      .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
+      .dst = make_dst(&argmax_score, dtype::f32, 1u, 1u),
+      .nth = 1,
+      .index_out = &argmax_index,
+  };
+  const emel::kernel::event::op_mul_mat_argmax argmax_prepared_ev{
+      .src0 = make_argmax_prepared_q6_k_x8_q8_src(argmax_prepared_storage.data(), QK_K, k_rows),
+      .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
+      .dst = make_dst(&argmax_prepared_score, dtype::f32, 1u, 1u),
+      .nth = 1,
+      .index_out = &argmax_prepared_index,
+  };
+
+  aarch64_sm native_machine{};
+  aarch64_sm packed_machine{};
+  aarch64_sm argmax_prepared_machine{};
+  CHECK(native_machine.process_event(native_ev));
+  CHECK(packed_machine.process_event(packed_argmax_ev));
+  CHECK(argmax_prepared_machine.process_event(argmax_prepared_ev));
+
+  int32_t expected_index = 0;
+  float expected_score = native_out[0];
+  for (size_t row = 1; row < native_out.size(); ++row) {
+    if (native_out[row] > expected_score) {
+      expected_score = native_out[row];
+      expected_index = static_cast<int32_t>(row);
+    }
+  }
+
+  CHECK(argmax_index == expected_index);
+  CHECK(argmax_score == doctest::Approx(expected_score).epsilon(1.0e-6f));
+  CHECK(argmax_prepared_index == expected_index);
+  CHECK(argmax_prepared_score == doctest::Approx(expected_score).epsilon(1.0e-6f));
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+  CHECK(packed_machine.optimized_q6_dispatch_count() == 1u);
+  CHECK(packed_machine.optimized_q6_vector_dispatch_count() == 1u);
+  CHECK(packed_machine.optimized_q6_vector_argmax_dispatch_count() == 1u);
+  CHECK(packed_machine.optimized_q6_vector_packed_dispatch_count() == 1u);
+  CHECK(packed_machine.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count() == 1u);
+  CHECK(packed_machine.shared_q6_dispatch_count() == 0u);
+#if defined(__ARM_FEATURE_MATMUL_INT8)
+  CHECK(argmax_prepared_machine.optimized_q6_dispatch_count() == 1u);
+  CHECK(argmax_prepared_machine.optimized_q6_vector_dispatch_count() == 1u);
+  CHECK(argmax_prepared_machine.optimized_q6_vector_argmax_dispatch_count() == 1u);
+  CHECK(argmax_prepared_machine.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count() ==
+        1u);
+  CHECK(argmax_prepared_machine.shared_q6_dispatch_count() == 0u);
+#else
+  CHECK(argmax_prepared_machine.optimized_q6_dispatch_count() == 0u);
+  CHECK(argmax_prepared_machine.optimized_q6_vector_dispatch_count() == 0u);
+  CHECK(argmax_prepared_machine.optimized_q6_vector_argmax_dispatch_count() == 0u);
+  CHECK(argmax_prepared_machine.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count() ==
+        0u);
+  CHECK(argmax_prepared_machine.shared_q6_dispatch_count() == 0u);
+#endif
+#else
+  CHECK(packed_machine.optimized_q6_dispatch_count() == 0u);
+  CHECK(packed_machine.optimized_q6_vector_dispatch_count() == 0u);
+  CHECK(packed_machine.optimized_q6_vector_argmax_dispatch_count() == 0u);
+  CHECK(packed_machine.optimized_q6_vector_packed_dispatch_count() == 0u);
+  CHECK(packed_machine.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count() == 0u);
+  CHECK(packed_machine.shared_q6_dispatch_count() == 0u);
+  CHECK(argmax_prepared_machine.optimized_q6_dispatch_count() == 0u);
+  CHECK(argmax_prepared_machine.optimized_q6_vector_dispatch_count() == 0u);
+  CHECK(argmax_prepared_machine.optimized_q6_vector_argmax_dispatch_count() == 0u);
+  CHECK(argmax_prepared_machine.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count() ==
+        0u);
+  CHECK(argmax_prepared_machine.shared_q6_dispatch_count() == 0u);
 #endif
 }
 
@@ -1018,7 +1334,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_reuses_persistent_workspace") {
   const emel::kernel::aarch64::event::dispatch_op_flash_attn_ext dispatch0{request, dispatch_ctx0};
   const float * scratch = ctx.flash_attn_workspace.score_buffer.data();
 
-  emel::kernel::aarch64::action::exec_op_flash_attn_ext(dispatch0, ctx);
+  emel::kernel::aarch64::action::exec_simd_op_flash_attn_ext_f16kv_one_chunk(dispatch0, ctx);
   CHECK(dispatch_ctx0.outcome == emel::kernel::aarch64::events::phase_outcome::done);
   CHECK(ctx.optimized_flash_dispatch_count == 1u);
   CHECK(ctx.shared_flash_dispatch_count == 0u);
@@ -1034,7 +1350,7 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_reuses_persistent_workspace") {
   emel::kernel::aarch64::event::dispatch_ctx dispatch_ctx1{};
   const emel::kernel::aarch64::event::dispatch_op_flash_attn_ext dispatch1{request, dispatch_ctx1};
 
-  emel::kernel::aarch64::action::exec_op_flash_attn_ext(dispatch1, ctx);
+  emel::kernel::aarch64::action::exec_simd_op_flash_attn_ext_f16kv_one_chunk(dispatch1, ctx);
   CHECK(dispatch_ctx1.outcome == emel::kernel::aarch64::events::phase_outcome::done);
   CHECK(ctx.optimized_flash_dispatch_count == 2u);
   CHECK(ctx.shared_flash_dispatch_count == 0u);
@@ -1055,12 +1371,12 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_uses_optimized_backend_path") {
   emel::kernel::aarch64::event::dispatch_ctx dispatch_ctx{};
   const emel::kernel::aarch64::event::dispatch_op_flash_attn_ext dispatch{request, dispatch_ctx};
 
-  emel::kernel::aarch64::action::exec_op_flash_attn_ext(dispatch, ctx);
+  emel::kernel::aarch64::action::exec_simd_op_flash_attn_ext_f16kv_one_chunk(dispatch, ctx);
 
   const std::vector<float> expected = flash_attn_reference_f16_scores(
       std::span<const float>(fixture.q, 4u),
-      std::span<const float>(fixture.k, 8u),
-      std::span<const float>(fixture.v, 8u),
+      std::span<const uint16_t>(fixture.k, 8u),
+      std::span<const uint16_t>(fixture.v, 8u),
       4u,
       2u,
       1.0f);
@@ -1068,10 +1384,10 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_uses_optimized_backend_path") {
   CHECK(dispatch_ctx.outcome == emel::kernel::aarch64::events::phase_outcome::done);
   CHECK(ctx.optimized_flash_dispatch_count == 1u);
   CHECK(ctx.shared_flash_dispatch_count == 0u);
-  CHECK(fixture.dst[0] == doctest::Approx(expected[0]).epsilon(1e-6f));
-  CHECK(fixture.dst[1] == doctest::Approx(expected[1]).epsilon(1e-6f));
-  CHECK(fixture.dst[2] == doctest::Approx(expected[2]).epsilon(1e-6f));
-  CHECK(fixture.dst[3] == doctest::Approx(expected[3]).epsilon(1e-6f));
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[0], expected[0]));
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[1], expected[1]));
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[2], expected[2]));
+  CHECK(within_flash_online_f16_tolerance(fixture.dst[3], expected[3]));
 #endif
 }
 
@@ -1108,16 +1424,18 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_shared_workspace_on_long_kv_spa
       }
     }
   }
+  const auto k_fp16 = to_fp16_storage(k);
+  const auto v_fp16 = to_fp16_storage(v);
 
   emel::kernel::event::op_flash_attn_ext request{};
   request.src0 = make_src(q.data(), dtype::f32, head_dim, 1u, head_count);
-  request.src1 = make_src(k.data(), dtype::f32, head_dim, kv_tokens, kv_head_count);
-  request.src2 = make_src(v.data(), dtype::f32, head_dim, kv_tokens, kv_head_count);
+  request.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens, kv_head_count);
+  request.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens, kv_head_count);
   request.dst = make_dst(dst_neon.data(), dtype::f32, head_dim, 1u, head_count);
-  request.src1.nb[1] = sizeof(float) * kv_dim;
-  request.src1.nb[2] = sizeof(float) * head_dim;
-  request.src2.nb[1] = sizeof(float) * kv_dim;
-  request.src2.nb[2] = sizeof(float) * head_dim;
+  request.src1.nb[1] = sizeof(uint16_t) * kv_dim;
+  request.src1.nb[2] = sizeof(uint16_t) * head_dim;
+  request.src2.nb[1] = sizeof(uint16_t) * kv_dim;
+  request.src2.nb[2] = sizeof(uint16_t) * head_dim;
   request.nth = 1;
 
   const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
@@ -1134,12 +1452,12 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_shared_workspace_on_long_kv_spa
   REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(request, shared_workspace));
 
   for (size_t idx = 0; idx < dst_neon.size(); ++idx) {
-    CHECK(dst_neon[idx] == doctest::Approx(dst_shared[idx]).epsilon(1e-7f));
+    CHECK(within_flash_online_f16_tolerance(dst_neon[idx], dst_shared[idx]));
   }
 #endif
 }
 
-TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_float_value_reference_on_long_multihead_kv") {
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_f16_reference_on_long_multihead_kv") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;
 #else
@@ -1176,16 +1494,18 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_float_value_refe
       }
     }
   }
+  const auto k_fp16 = to_fp16_storage(k);
+  const auto v_fp16 = to_fp16_storage(v);
 
   emel::kernel::event::op_flash_attn_ext request{};
   request.src0 = make_src(q.data(), dtype::f32, head_dim, 1u, head_count);
-  request.src1 = make_src(k.data(), dtype::f32, head_dim, kv_tokens, kv_head_count);
-  request.src2 = make_src(v.data(), dtype::f32, head_dim, kv_tokens, kv_head_count);
+  request.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens, kv_head_count);
+  request.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens, kv_head_count);
   request.dst = make_dst(neon_dst.data(), dtype::f32, head_dim, 1u, head_count);
-  request.src1.nb[1] = sizeof(float) * kv_dim;
-  request.src1.nb[2] = sizeof(float) * head_dim;
-  request.src2.nb[1] = sizeof(float) * kv_dim;
-  request.src2.nb[2] = sizeof(float) * head_dim;
+  request.src1.nb[1] = sizeof(uint16_t) * kv_dim;
+  request.src1.nb[2] = sizeof(uint16_t) * head_dim;
+  request.src2.nb[1] = sizeof(uint16_t) * kv_dim;
+  request.src2.nb[2] = sizeof(uint16_t) * head_dim;
   request.nth = 1;
 
   const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
@@ -1211,26 +1531,242 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_float_value_refe
       std::memcpy(k_head.data() + dst_offset, k.data() + src_offset, sizeof(float) * head_dim);
       std::memcpy(v_head.data() + dst_offset, v.data() + src_offset, sizeof(float) * head_dim);
     }
-    const std::vector<float> expected = flash_attn_reference_f16_scores(
+    const auto k_head_fp16 = to_fp16_storage(k_head);
+    const auto v_head_fp16 = to_fp16_storage(v_head);
+    const std::vector<float> expected =
+        flash_attn_reference_online_softmax_f16_values(
         std::span<const float>(q.data() + head * head_dim, head_dim),
-        k_head,
-        v_head,
+        std::span<const uint16_t>(k_head_fp16.data(), k_head_fp16.size()),
+        std::span<const uint16_t>(v_head_fp16.data(), v_head_fp16.size()),
         head_dim,
         kv_tokens,
         scale);
 
     for (uint64_t dim = 0; dim < head_dim; ++dim) {
       const size_t idx = static_cast<size_t>(head * head_dim + dim);
-      CHECK(neon_dst[idx] ==
-            doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
-      CHECK(shared_dst[idx] ==
-            doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
+      CHECK(within_flash_online_f16_tolerance(
+          neon_dst[idx], expected[static_cast<size_t>(dim)]));
+      CHECK(within_flash_online_f16_tolerance(
+          shared_dst[idx], expected[static_cast<size_t>(dim)]));
     }
   }
 #endif
 }
 
-TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_float_value_reference") {
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_masked_total_token_reference") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t head_dim = 64u;
+  constexpr uint64_t kv_tokens = 257u;
+  constexpr uint32_t total_tokens = 2048u;
+  const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+
+  std::vector<float> q(head_dim);
+  std::vector<float> k(head_dim * kv_tokens);
+  std::vector<float> v(head_dim * kv_tokens);
+  std::vector<float> neon_dst(head_dim, 0.0f);
+  std::vector<float> shared_dst(head_dim, 0.0f);
+
+  for (uint64_t dim = 0; dim < head_dim; ++dim) {
+    const double angle = static_cast<double>((dim + 3u) * 11u);
+    q[dim] = emel::kernel::detail::quant::fp16_to_fp32(
+        emel::kernel::detail::quant::fp32_to_fp16(
+            static_cast<float>(std::sin(angle * 0.02197265625))));
+  }
+
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      const size_t offset = static_cast<size_t>(token * head_dim + dim);
+      const double base = static_cast<double>((token + 1u) * (dim + 5u));
+      k[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+          emel::kernel::detail::quant::fp32_to_fp16(
+              static_cast<float>(std::cos(base * 0.00390625))));
+      v[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+          emel::kernel::detail::quant::fp32_to_fp16(
+              static_cast<float>(std::sin(base * 0.005859375))));
+    }
+  }
+  const auto k_fp16 = to_fp16_storage(k);
+  const auto v_fp16 = to_fp16_storage(v);
+
+  emel::kernel::event::op_flash_attn_ext request{};
+  request.src0 = make_src(q.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+  request.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens, 1u, 1u);
+  request.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens, 1u, 1u);
+  request.dst = make_dst(neon_dst.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+  request.nth = 1;
+  std::memcpy(request.op_params.data(), &scale, sizeof(scale));
+  std::memcpy(request.op_params.data() + sizeof(scale), &total_tokens, sizeof(total_tokens));
+  request.op_params_size = sizeof(scale) + sizeof(total_tokens);
+
+  auto shared_request = request;
+  shared_request.dst = make_dst(shared_dst.data(), dtype::f32, head_dim, 1u, 1u, 1u);
+
+  emel::kernel::detail::flash_attn_workspace neon_workspace{};
+  emel::kernel::detail::flash_attn_workspace shared_workspace{};
+  REQUIRE(emel::kernel::aarch64::detail::run_flash_attn_ext_neon(
+      request, true, neon_workspace));
+  REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(
+      shared_request, shared_workspace));
+
+  const std::vector<float> expected = flash_attn_reference_masked_total_tokens(
+      std::span<const float>(q.data(), q.size()),
+      std::span<const uint16_t>(k_fp16.data(), k_fp16.size()),
+      std::span<const uint16_t>(v_fp16.data(), v_fp16.size()),
+      head_dim,
+      kv_tokens,
+      total_tokens,
+      scale);
+  for (uint64_t dim = 0; dim < head_dim; ++dim) {
+    CHECK(within_flash_online_f16_tolerance(
+        neon_dst[static_cast<size_t>(dim)], expected[static_cast<size_t>(dim)]));
+    CHECK(within_flash_online_f16_tolerance(
+        shared_dst[static_cast<size_t>(dim)], expected[static_cast<size_t>(dim)]));
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_masked_total_token_reference_on_long_multihead_kv") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t head_dim = 64u;
+  constexpr uint64_t head_count = 12u;
+  constexpr uint64_t kv_head_count = 12u;
+  constexpr uint64_t kv_tokens = 769u;
+  constexpr uint32_t total_tokens = 2048u;
+  const uint64_t kv_dim = head_dim * kv_head_count;
+  const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+
+  std::vector<float> q(head_dim * head_count);
+  std::vector<float> k(kv_dim * kv_tokens);
+  std::vector<float> v(kv_dim * kv_tokens);
+  std::vector<float> neon_dst(head_dim * head_count, 0.0f);
+  std::vector<float> shared_dst(head_dim * head_count, 0.0f);
+
+  for (uint64_t head = 0; head < head_count; ++head) {
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      const double angle = static_cast<double>((head + 1u) * (dim + 3u));
+      q[head * head_dim + dim] = emel::kernel::detail::quant::fp16_to_fp32(
+          emel::kernel::detail::quant::fp32_to_fp16(
+              static_cast<float>(std::sin(angle * 0.03125))));
+    }
+  }
+
+  for (uint64_t token = 0; token < kv_tokens; ++token) {
+    for (uint64_t head = 0; head < kv_head_count; ++head) {
+      for (uint64_t dim = 0; dim < head_dim; ++dim) {
+        const uint64_t offset = token * kv_dim + head * head_dim + dim;
+        const double base = static_cast<double>((token + 1u) * (head + 3u) * (dim + 5u));
+        k[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+            emel::kernel::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::cos(base * 0.0078125))));
+        v[offset] = emel::kernel::detail::quant::fp16_to_fp32(
+            emel::kernel::detail::quant::fp32_to_fp16(
+                static_cast<float>(std::sin(base * 0.01171875))));
+      }
+    }
+  }
+  const auto k_fp16 = to_fp16_storage(k);
+  const auto v_fp16 = to_fp16_storage(v);
+
+  emel::kernel::event::op_flash_attn_ext request{};
+  request.src0 = make_src(q.data(), dtype::f32, head_dim, 1u, head_count);
+  request.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens, kv_head_count);
+  request.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens, kv_head_count);
+  request.dst = make_dst(neon_dst.data(), dtype::f32, head_dim, 1u, head_count);
+  request.src1.nb[1] = sizeof(uint16_t) * kv_dim;
+  request.src1.nb[2] = sizeof(uint16_t) * head_dim;
+  request.src2.nb[1] = sizeof(uint16_t) * kv_dim;
+  request.src2.nb[2] = sizeof(uint16_t) * head_dim;
+  request.nth = 1;
+  std::memcpy(request.op_params.data(), &scale, sizeof(scale));
+  std::memcpy(request.op_params.data() + sizeof(scale), &total_tokens, sizeof(total_tokens));
+  request.op_params_size = sizeof(scale) + sizeof(total_tokens);
+
+  auto shared_request = request;
+  shared_request.dst = make_dst(shared_dst.data(), dtype::f32, head_dim, 1u, head_count);
+
+  emel::kernel::detail::flash_attn_workspace neon_workspace{};
+  emel::kernel::detail::flash_attn_workspace shared_workspace{};
+  REQUIRE(emel::kernel::aarch64::detail::run_flash_attn_ext_neon(
+      request, true, neon_workspace));
+  REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(
+      shared_request, shared_workspace));
+
+  std::vector<float> expected(head_dim * head_count, 0.0f);
+  for (uint64_t head = 0; head < head_count; ++head) {
+    std::vector<float> k_head(kv_tokens * head_dim);
+    std::vector<float> v_head(kv_tokens * head_dim);
+    for (uint64_t token = 0; token < kv_tokens; ++token) {
+      const uint64_t src_offset = token * kv_dim + head * head_dim;
+      const uint64_t dst_offset = token * head_dim;
+      std::memcpy(k_head.data() + dst_offset, k.data() + src_offset, sizeof(float) * head_dim);
+      std::memcpy(v_head.data() + dst_offset, v.data() + src_offset, sizeof(float) * head_dim);
+    }
+    const auto expected_head = flash_attn_reference_masked_total_tokens(
+        std::span<const float>(q.data() + static_cast<std::ptrdiff_t>(head * head_dim), head_dim),
+        std::span<const float>(k_head.data(), k_head.size()),
+        std::span<const float>(v_head.data(), v_head.size()),
+        head_dim,
+        kv_tokens,
+        total_tokens,
+        scale);
+    for (uint64_t dim = 0; dim < head_dim; ++dim) {
+      expected[head * head_dim + dim] = expected_head[static_cast<size_t>(dim)];
+    }
+  }
+
+  for (size_t idx = 0; idx < neon_dst.size(); ++idx) {
+    CHECK(within_flash_online_f16_tolerance(neon_dst[idx], expected[idx]));
+    CHECK(within_flash_online_f16_tolerance(shared_dst[idx], expected[idx]));
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_flash_attn_ext_does_not_materialize_masked_tail_into_workspace_requirements") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  flash_attn_ext_fixture fixture{};
+  auto request = make_flash_attn_ext_event(fixture);
+  constexpr uint32_t total_tokens =
+      static_cast<uint32_t>(emel::kernel::detail::flash_attn_workspace_token_capacity + 1024u);
+  const float scale = 1.0f;
+  std::memcpy(request.op_params.data(), &scale, sizeof(scale));
+  std::memcpy(request.op_params.data() + sizeof(scale), &total_tokens, sizeof(total_tokens));
+  request.op_params_size = sizeof(scale) + sizeof(total_tokens);
+
+  std::array<float, 4u> shared_dst = {};
+  auto shared_request = request;
+  shared_request.dst = make_dst(shared_dst.data(), dtype::f32, 4u, 1u, 1u, 1u);
+
+  const std::vector<float> expected = flash_attn_reference_f16_scores(
+      std::span<const float>(fixture.q, 4u),
+      std::span<const uint16_t>(fixture.k, 8u),
+      std::span<const uint16_t>(fixture.v, 8u),
+      4u,
+      2u,
+      scale);
+
+  emel::kernel::detail::flash_attn_workspace neon_workspace{};
+  emel::kernel::detail::flash_attn_workspace shared_workspace{};
+  REQUIRE(emel::kernel::aarch64::detail::run_flash_attn_ext_neon(
+      request, true, neon_workspace));
+  REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(
+      shared_request, shared_workspace));
+
+  for (uint64_t dim = 0; dim < 4u; ++dim) {
+    CHECK(within_flash_online_f16_tolerance(
+        fixture.dst[static_cast<size_t>(dim)], expected[static_cast<size_t>(dim)]));
+    CHECK(within_flash_online_f16_tolerance(
+        shared_dst[static_cast<size_t>(dim)], expected[static_cast<size_t>(dim)]));
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_f16_reference") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;
 #else
@@ -1263,11 +1799,13 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_float_value_refe
           emel::kernel::detail::quant::fp32_to_fp16(raw_value));
     }
   }
+  const auto k_fp16 = to_fp16_storage(k);
+  const auto v_fp16 = to_fp16_storage(v);
 
   emel::kernel::event::op_flash_attn_ext request{};
   request.src0 = make_src(q.data(), dtype::f32, head_dim, 1, 1, 1);
-  request.src1 = make_src(k.data(), dtype::f32, head_dim, kv_tokens, 1, 1);
-  request.src2 = make_src(v.data(), dtype::f32, head_dim, kv_tokens, 1, 1);
+  request.src1 = make_src(k_fp16.data(), dtype::f16, head_dim, kv_tokens, 1, 1);
+  request.src2 = make_src(v_fp16.data(), dtype::f16, head_dim, kv_tokens, 1, 1);
   request.dst = make_dst(neon_dst.data(), dtype::f32, head_dim, 1, 1, 1);
   request.nth = 1;
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
@@ -1284,12 +1822,18 @@ TEST_CASE("kernel_aarch64_flash_attn_ext_matches_online_softmax_float_value_refe
       shared_request, shared_workspace));
 
   const std::vector<float> expected =
-      flash_attn_reference_f16_scores(q, k, v, head_dim, kv_tokens, scale);
+      flash_attn_reference_online_softmax_f16_values(
+          std::span<const float>(q.data(), q.size()),
+          std::span<const uint16_t>(k_fp16.data(), k_fp16.size()),
+          std::span<const uint16_t>(v_fp16.data(), v_fp16.size()),
+          head_dim,
+          kv_tokens,
+          scale);
   for (uint64_t dim = 0; dim < head_dim; ++dim) {
-    CHECK(neon_dst[static_cast<size_t>(dim)] ==
-          doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
-    CHECK(shared_dst[static_cast<size_t>(dim)] ==
-          doctest::Approx(expected[static_cast<size_t>(dim)]).epsilon(1e-6f));
+    CHECK(within_flash_online_f16_tolerance(
+        neon_dst[static_cast<size_t>(dim)], expected[static_cast<size_t>(dim)]));
+    CHECK(within_flash_online_f16_tolerance(
+        shared_dst[static_cast<size_t>(dim)], expected[static_cast<size_t>(dim)]));
   }
 #endif
 }
