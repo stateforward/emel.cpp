@@ -1453,7 +1453,7 @@ llama_context_ptr make_reference_context(llama_model * model) {
   if (probe != nullptr && !reference_graph_contains_flash_attn_op(*probe)) {
     fail_bench_setup("make_reference_context", "reference graph missing flash attention op");
   }
-  return init_reference_context(model, params);
+  return probe;
 }
 
 void prepare_emel_session(const emel_fixture & fixture, emel_session & session) {

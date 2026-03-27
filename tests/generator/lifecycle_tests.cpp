@@ -704,6 +704,39 @@ TEST_CASE("generator_quantized_path_audit_marks_unsupported_quantized_stage_no_c
   CHECK(attention_q.consistent_across_layers);
 }
 
+TEST_CASE("generator_quantized_path_audit_marks_nonvector_f32_stage_disallowed_fallback") {
+  auto prepared = std::make_unique<prepared_model>();
+  build_prepared_model(*prepared);
+
+  REQUIRE(find_tensor(*prepared, "token_embd.weight") != nullptr);
+  REQUIRE(find_tensor(*prepared, "output.weight") != nullptr);
+  REQUIRE(find_tensor(*prepared, "blk.0.attn_q.weight") != nullptr);
+
+  find_tensor(*prepared, "token_embd.weight")->type = emel::kernel::detail::dtype_f32;
+  find_tensor(*prepared, "output.weight")->type = emel::kernel::detail::dtype_f32;
+  find_tensor(*prepared, "blk.0.attn_q.weight")->type = emel::kernel::detail::dtype_f32;
+
+  emel::model::llama::detail::execution_view execution{};
+  REQUIRE(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  const auto audit = emel::model::llama::detail::build_quantized_path_audit(execution);
+  const auto & token_embedding = find_stage_audit(
+      audit, emel::model::llama::detail::quantized_stage_family::token_embedding);
+  const auto & output = find_stage_audit(
+      audit, emel::model::llama::detail::quantized_stage_family::output);
+  const auto & attention_q = find_stage_audit(
+      audit, emel::model::llama::detail::quantized_stage_family::attention_q);
+
+  CHECK(token_embedding.contract ==
+        emel::model::llama::detail::quantized_contract_kind::
+            approved_dense_f32_by_contract);
+  CHECK(output.contract ==
+        emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
+  CHECK(attention_q.contract ==
+        emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
+}
+
 TEST_CASE("generator_initialize_quantized_contract_fixture_reports_zero_disallowed_fallback_stages") {
   auto fixture = std::make_unique<generator_fixture>(
       generator_fixture::model_variant::quantized_contract);

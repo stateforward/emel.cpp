@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstring>
 #include <span>
+#include <vector>
 
 #include "test_helpers.hpp"
 #include "emel/kernel/any.hpp"
@@ -53,7 +54,10 @@ using emel::kernel::test::flash_attn_reference_online_softmax_f16_values;
 using emel::kernel::test::k_flash_online_f16_abs_tolerance;
 using emel::kernel::test::make_dst;
 using emel::kernel::test::make_flash_attn_ext_event;
+using emel::kernel::test::make_packed_q6_k_x8_src;
+using emel::kernel::test::make_prepared_q6_k_x8_q8_src;
 using emel::kernel::test::make_quantized_src;
+using emel::kernel::test::make_q8_k_vector_src;
 using emel::kernel::test::make_smoke_op_event;
 using emel::kernel::test::make_src;
 using emel::kernel::test::to_fp16_storage;
@@ -154,6 +158,37 @@ TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
   CHECK(q2_out[0] == doctest::Approx(-256.0f));
   CHECK(q3_out[0] == doctest::Approx(32768.0f));
   CHECK(q6_out[0] == doctest::Approx(-8192.0f));
+}
+
+TEST_CASE("kernel_mul_mat_rejects_packed_q6_q8_requests_without_explicit_simd_route") {
+  using emel::kernel::detail::quant::QK_K;
+  constexpr uint64_t k_rows = 8u;
+
+  std::vector<uint8_t> packed_storage(
+      emel::kernel::detail::quant::packed_q6_k_x8_group_storage_bytes(QK_K));
+  std::vector<uint8_t> prepared_storage(
+      emel::kernel::detail::quant::prepared_q6_k_x8_q8_group_storage_bytes(QK_K));
+  std::array<emel::kernel::detail::quant::block_q8_k, 1> q8_input = {};
+  std::array<float, k_rows> packed_out = {};
+  std::array<float, k_rows> prepared_out = {};
+
+  const emel::kernel::event::op_mul_mat packed_ev{
+      .src0 = make_packed_q6_k_x8_src(packed_storage.data(), QK_K, k_rows),
+      .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
+      .dst = make_dst(packed_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat prepared_ev{
+      .src0 = make_prepared_q6_k_x8_q8_src(prepared_storage.data(), QK_K, k_rows),
+      .src1 = make_q8_k_vector_src(q8_input.data(), QK_K),
+      .dst = make_dst(prepared_out.data(), dtype::f32, 1u, k_rows),
+      .nth = 1,
+  };
+
+  CHECK(emel::kernel::detail::validate_dispatch_request(packed_ev));
+  CHECK(emel::kernel::detail::validate_dispatch_request(prepared_ev));
+  CHECK_FALSE(emel::kernel::detail::can_run_backend_request(packed_ev));
+  CHECK_FALSE(emel::kernel::detail::can_run_backend_request(prepared_ev));
 }
 
 TEST_CASE("kernel_aarch64_backend_reports_q2_vectorized_or_shared_dispatch") {

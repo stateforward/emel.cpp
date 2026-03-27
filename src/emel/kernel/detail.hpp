@@ -2244,56 +2244,7 @@ inline bool can_run_mul_mat(const request_type & request) noexcept {
       request.src0.nb[1] == quantized_row_storage_bytes(src0_type, k) &&
       request.src0.nb[2] == request.src0.nb[1] * m &&
       request.src0.nb[3] == request.src0.nb[2];
-  const bool packed_q6_vector_q8_rhs_path = src0_type == dtype_q6_k_x8 &&
-      src1_type == dtype_q8_k &&
-      dst_type == dtype_f32 &&
-      (k % quant::QK_K) == 0u &&
-      (k / quant::QK_K) <= quant::MAX_Q8_K_BLOCKS &&
-      request.src0.nb[0] == 1u &&
-      request.src0.nb[1] == quant::packed_q6_k_x8_group_storage_bytes(k) &&
-      request.src0.nb[2] ==
-          request.src0.nb[1] * quant::packed_q6_k_x8_group_count(m) &&
-      request.src0.nb[3] == request.src0.nb[2] &&
-      request.src1.nb[0] == 1u &&
-      request.src1.nb[1] == quantized_row_storage_bytes(src1_type, k) &&
-      request.src1.nb[2] == request.src1.nb[1] &&
-      request.src1.nb[3] == request.src1.nb[2] &&
-      is_dense_contiguous(request.dst);
-  const bool prepared_q6_vector_q8_rhs_path = src0_type == dtype_q6_k_x8_q8_prepared &&
-      src1_type == dtype_q8_k &&
-      dst_type == dtype_f32 &&
-      (k % quant::QK_K) == 0u &&
-      (k / quant::QK_K) <= quant::MAX_Q8_K_BLOCKS &&
-      request.src0.nb[0] == 1u &&
-      request.src0.nb[1] == quant::prepared_q6_k_x8_q8_group_storage_bytes(k) &&
-      request.src0.nb[2] ==
-          request.src0.nb[1] * quant::packed_q6_k_x8_group_count(m) &&
-      request.src0.nb[3] == request.src0.nb[2] &&
-      request.src1.nb[0] == 1u &&
-      request.src1.nb[1] == quantized_row_storage_bytes(src1_type, k) &&
-      request.src1.nb[2] == request.src1.nb[1] &&
-      request.src1.nb[3] == request.src1.nb[2] &&
-      is_dense_contiguous(request.dst);
-  const bool argmax_prepared_q6_vector_q8_rhs_path =
-      src0_type == dtype_q6_k_x8_q8_argmax_prepared &&
-      src1_type == dtype_q8_k &&
-      dst_type == dtype_f32 &&
-      (k % quant::QK_K) == 0u &&
-      (k / quant::QK_K) <= quant::MAX_Q8_K_BLOCKS &&
-      request.src0.nb[0] == 1u &&
-      request.src0.nb[1] == quant::argmax_prepared_q6_k_x8_q8_group_storage_bytes(k) &&
-      request.src0.nb[2] ==
-          request.src0.nb[1] * quant::packed_q6_k_x8_group_count(m) &&
-      request.src0.nb[3] == request.src0.nb[2] &&
-      request.src1.nb[0] == 1u &&
-      request.src1.nb[1] == quantized_row_storage_bytes(src1_type, k) &&
-      request.src1.nb[2] == request.src1.nb[1] &&
-      request.src1.nb[3] == request.src1.nb[2] &&
-      is_dense_contiguous(request.dst);
-  return !has_empty_dim &&
-      valid_shape &&
-      (f32_path || quantized_path || packed_q6_vector_q8_rhs_path ||
-       prepared_q6_vector_q8_rhs_path || argmax_prepared_q6_vector_q8_rhs_path);
+  return !has_empty_dim && valid_shape && (f32_path || quantized_path);
 }
 
 template <class request_type>

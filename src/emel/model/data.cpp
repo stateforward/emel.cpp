@@ -127,7 +127,7 @@ llama::detail::quantized_contract_kind classify_contract(
   }
 
   return is_f32_type(tensor_type)
-             ? llama::detail::quantized_contract_kind::approved_dense_f32_by_contract
+             ? llama::detail::quantized_contract_kind::disallowed_fallback
                : llama::detail::quantized_contract_kind::explicit_no_claim;
 }
 
