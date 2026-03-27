@@ -1,4 +1,0 @@
-generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 ns_per_op=4854625.000 iter=1 runs=1
-generation/preloaded_request/llama_68m_prompt_hello_max_tokens_10 ns_per_op=17848500.000 iter=1 runs=1
-generation/preloaded_request/llama_68m_prompt_hello_max_tokens_100 ns_per_op=163058000.000 iter=1 runs=1
-generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1000 ns_per_op=1782722625.000 iter=1 runs=1
