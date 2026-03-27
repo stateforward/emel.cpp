@@ -58,6 +58,9 @@ enum class dtype : uint8_t {
   q4_0_8_8 = 33,
   tq1_0 = 34,
   tq2_0 = 35,
+  q6_k_x8 = 36,
+  q6_k_x8_q8_prepared = 37,
+  q6_k_x8_q8_argmax_prepared = 38,
   unknown = 255,
 };
 
@@ -158,6 +161,10 @@ EMEL_KERNEL_DECLARE_OP(op_rms_norm_back);
 EMEL_KERNEL_DECLARE_OP(op_group_norm);
 EMEL_KERNEL_DECLARE_OP(op_l2_norm);
 EMEL_KERNEL_DECLARE_OP(op_mul_mat);
+struct op_mul_mat_argmax {
+  EMEL_KERNEL_GENERIC_OP_FIELDS
+  int32_t * index_out = nullptr;
+};
 EMEL_KERNEL_DECLARE_OP(op_mul_mat_id);
 EMEL_KERNEL_DECLARE_OP(op_out_prod);
 EMEL_KERNEL_DECLARE_OP(op_scale);

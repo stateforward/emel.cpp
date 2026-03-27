@@ -184,15 +184,27 @@ bool sampled_stop_token(const runtime_event & ev, const action::context & ctx) n
   return ev.ctx.selected_token == vocab.eos_id || ev.ctx.selected_token == vocab.eot_id;
 }
 
+inline bool uses_preselected_argmax_direct(const action::context & ctx) noexcept {
+  return ctx.state.selection_mode == emel::generator::selection_mode::preselected_argmax &&
+      emel::generator::detail::preselected_argmax_direct_supported(ctx.compute.backend);
+}
+
 }  // namespace detail
 
 struct valid_initialize {
   bool operator()(const event::initialize_run & ev, const action::context & ctx) const noexcept {
+    const bool sample_logits =
+        ev.request.selection_mode == emel::generator::selection_mode::sample_logits;
+    const bool preselected_argmax =
+        ev.request.selection_mode == emel::generator::selection_mode::preselected_argmax;
+    const bool sampler_contract_valid =
+        (sample_logits && !ev.request.sampler_fns.empty()) ||
+        (preselected_argmax && ev.request.sampler_fns.empty());
     return ctx.model != nullptr &&
            ctx.conditioner != nullptr &&
            ctx.format_prompt != nullptr &&
            ev.request.tokenizer_sm != nullptr &&
-           !ev.request.sampler_fns.empty() &&
+           sampler_contract_valid &&
            ev.request.max_prompt_tokens > 0 &&
            ev.request.max_prompt_tokens <= action::MAX_GENERATION_STEPS &&
            ev.request.max_generated_tokens > 0 &&
@@ -205,6 +217,30 @@ struct valid_initialize {
 struct invalid_initialize {
   bool operator()(const event::initialize_run & ev, const action::context & ctx) const noexcept {
     return !valid_initialize{}(ev, ctx);
+  }
+};
+
+struct initialize_uses_materialized_logits {
+  bool operator()(const event::initialize_run &, const action::context & ctx) const noexcept {
+    return ctx.state.selection_mode == emel::generator::selection_mode::sample_logits;
+  }
+};
+
+struct initialize_uses_preselected_argmax {
+  bool operator()(const event::initialize_run &, const action::context & ctx) const noexcept {
+    return ctx.state.selection_mode == emel::generator::selection_mode::preselected_argmax;
+  }
+};
+
+struct compute_uses_materialized_logits {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return !detail::uses_preselected_argmax_direct(ctx);
+  }
+};
+
+struct compute_uses_preselected_argmax_direct {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return detail::uses_preselected_argmax_direct(ctx);
   }
 };
 
@@ -652,6 +688,18 @@ struct decode_sample_backend_error {
            (detail::phase_rejected_without_code(ev) ||
             detail::sampler_backend_code(ev.ctx.phase_code) ||
             !invalid);
+  }
+};
+
+struct decode_uses_materialized_logits {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return ctx.state.selection_mode == emel::generator::selection_mode::sample_logits;
+  }
+};
+
+struct decode_uses_preselected_argmax {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return ctx.state.selection_mode == emel::generator::selection_mode::preselected_argmax;
   }
 };
 

@@ -123,61 +123,99 @@ std::int32_t read_env_i32(const char * name, const std::int32_t fallback) {
 
 constexpr bench::test_case make_test_case(const bench::append_case_fn emel_fn,
                                           const bench::append_case_fn reference_fn,
+                                          const std::string_view suite,
                                           const bool tokenizer_case = false) {
   return bench::test_case{
     .append_emel = emel_fn,
     .append_reference = reference_fn,
+    .suite = suite,
     .tokenizer_case = tokenizer_case,
   };
 }
 
 const auto & default_test_cases() {
-  static const std::array<bench::test_case, 26> cases = {{
+  static const std::array<bench::test_case, 27> cases = {{
     make_test_case(bench::append_emel_batch_planner_cases,
-                   bench::append_reference_batch_planner_cases),
-    make_test_case(bench::append_emel_memory_kv_cases, bench::append_reference_memory_kv_cases),
+                   bench::append_reference_batch_planner_cases,
+                   "batch_planner"),
+    make_test_case(bench::append_emel_memory_kv_cases,
+                   bench::append_reference_memory_kv_cases,
+                   "memory_kv"),
     make_test_case(bench::append_emel_memory_recurrent_cases,
-                   bench::append_reference_memory_recurrent_cases),
+                   bench::append_reference_memory_recurrent_cases,
+                   "memory_recurrent"),
     make_test_case(bench::append_emel_memory_hybrid_cases,
-                   bench::append_reference_memory_hybrid_cases),
+                   bench::append_reference_memory_hybrid_cases,
+                   "memory_hybrid"),
     make_test_case(bench::append_emel_jinja_parser_cases,
-                   bench::append_reference_jinja_parser_cases),
+                   bench::append_reference_jinja_parser_cases,
+                   "jinja_parser"),
     make_test_case(bench::append_emel_jinja_formatter_cases,
-                   bench::append_reference_jinja_formatter_cases),
+                   bench::append_reference_jinja_formatter_cases,
+                   "jinja_formatter"),
     make_test_case(bench::append_emel_gbnf_rule_parser_cases,
-                   bench::append_reference_gbnf_rule_parser_cases),
-    make_test_case(bench::append_emel_generation_cases, bench::append_reference_generation_cases),
+                   bench::append_reference_gbnf_rule_parser_cases,
+                   "gbnf_rule_parser"),
+    make_test_case(bench::append_emel_generation_cases,
+                   bench::append_reference_generation_cases,
+                   "generation"),
+    make_test_case(bench::append_emel_flash_attention_cases,
+                   bench::append_reference_flash_attention_cases,
+                   "flash_attention"),
     make_test_case(bench::append_emel_logits_validator_cases,
-                   bench::append_reference_logits_validator_cases),
+                   bench::append_reference_logits_validator_cases,
+                   "logits_validator"),
     make_test_case(bench::append_emel_logits_sampler_cases,
-                   bench::append_reference_logits_sampler_cases),
+                   bench::append_reference_logits_sampler_cases,
+                   "logits_sampler"),
     make_test_case(bench::append_emel_kernel_x86_64_cases,
-                   bench::append_reference_kernel_x86_64_cases),
+                   bench::append_reference_kernel_x86_64_cases,
+                   "kernel_x86_64"),
     make_test_case(bench::append_emel_kernel_aarch64_cases,
-                   bench::append_reference_kernel_aarch64_cases),
-    make_test_case(bench::append_emel_sm_any_cases, bench::append_reference_sm_any_cases),
+                   bench::append_reference_kernel_aarch64_cases,
+                   "kernel_aarch64"),
+    make_test_case(bench::append_emel_sm_any_cases,
+                   bench::append_reference_sm_any_cases,
+                   "sm_any"),
     make_test_case(bench::append_emel_tokenizer_preprocessor_bpe_cases,
-                   bench::append_reference_tokenizer_preprocessor_bpe_cases),
+                   bench::append_reference_tokenizer_preprocessor_bpe_cases,
+                   "tokenizer_preprocessor_bpe"),
     make_test_case(bench::append_emel_tokenizer_preprocessor_spm_cases,
-                   bench::append_reference_tokenizer_preprocessor_spm_cases),
+                   bench::append_reference_tokenizer_preprocessor_spm_cases,
+                   "tokenizer_preprocessor_spm"),
     make_test_case(bench::append_emel_tokenizer_preprocessor_ugm_cases,
-                   bench::append_reference_tokenizer_preprocessor_ugm_cases),
+                   bench::append_reference_tokenizer_preprocessor_ugm_cases,
+                   "tokenizer_preprocessor_ugm"),
     make_test_case(bench::append_emel_tokenizer_preprocessor_wpm_cases,
-                   bench::append_reference_tokenizer_preprocessor_wpm_cases),
+                   bench::append_reference_tokenizer_preprocessor_wpm_cases,
+                   "tokenizer_preprocessor_wpm"),
     make_test_case(bench::append_emel_tokenizer_preprocessor_rwkv_cases,
-                   bench::append_reference_tokenizer_preprocessor_rwkv_cases),
+                   bench::append_reference_tokenizer_preprocessor_rwkv_cases,
+                   "tokenizer_preprocessor_rwkv"),
     make_test_case(bench::append_emel_tokenizer_preprocessor_plamo2_cases,
-                   bench::append_reference_tokenizer_preprocessor_plamo2_cases),
-    make_test_case(bench::append_emel_encoder_bpe_cases, bench::append_reference_encoder_bpe_cases),
-    make_test_case(bench::append_emel_encoder_spm_cases, bench::append_reference_encoder_spm_cases),
-    make_test_case(bench::append_emel_encoder_wpm_cases, bench::append_reference_encoder_wpm_cases),
-    make_test_case(bench::append_emel_encoder_ugm_cases, bench::append_reference_encoder_ugm_cases),
+                   bench::append_reference_tokenizer_preprocessor_plamo2_cases,
+                   "tokenizer_preprocessor_plamo2"),
+    make_test_case(bench::append_emel_encoder_bpe_cases,
+                   bench::append_reference_encoder_bpe_cases,
+                   "encoder_bpe"),
+    make_test_case(bench::append_emel_encoder_spm_cases,
+                   bench::append_reference_encoder_spm_cases,
+                   "encoder_spm"),
+    make_test_case(bench::append_emel_encoder_wpm_cases,
+                   bench::append_reference_encoder_wpm_cases,
+                   "encoder_wpm"),
+    make_test_case(bench::append_emel_encoder_ugm_cases,
+                   bench::append_reference_encoder_ugm_cases,
+                   "encoder_ugm"),
     make_test_case(bench::append_emel_encoder_rwkv_cases,
-                   bench::append_reference_encoder_rwkv_cases),
+                   bench::append_reference_encoder_rwkv_cases,
+                   "encoder_rwkv"),
     make_test_case(bench::append_emel_encoder_plamo2_cases,
-                   bench::append_reference_encoder_plamo2_cases),
+                   bench::append_reference_encoder_plamo2_cases,
+                   "encoder_plamo2"),
     make_test_case(bench::append_emel_encoder_fallback_cases,
-                   bench::append_reference_encoder_fallback_cases),
+                   bench::append_reference_encoder_fallback_cases,
+                   "encoder_fallback"),
   }};
   return cases;
 }
@@ -185,9 +223,11 @@ const auto & default_test_cases() {
 const auto & kernel_test_cases() {
   static const std::array<bench::test_case, 2> cases = {{
     make_test_case(bench::append_emel_kernel_x86_64_cases,
-                   bench::append_reference_kernel_x86_64_cases),
+                   bench::append_reference_kernel_x86_64_cases,
+                   "kernel_x86_64"),
     make_test_case(bench::append_emel_kernel_aarch64_cases,
-                   bench::append_reference_kernel_aarch64_cases),
+                   bench::append_reference_kernel_aarch64_cases,
+                   "kernel_aarch64"),
   }};
   return cases;
 }
@@ -200,13 +240,18 @@ std::vector<bench::result> run_benchmarks(const bench::config & cfg,
   std::vector<bench::result> results;
   results.reserve(k_case_count + 1);
   const std::int32_t selected_case_index = read_env_i32("EMEL_BENCH_CASE_INDEX", -1);
+  const char * selected_suite = std::getenv("EMEL_BENCH_SUITE");
+  const bool filter_by_suite = selected_suite != nullptr && selected_suite[0] != '\0';
+  bool suite_seen = false;
 
   std::size_t case_index = 0;
   for (const bench::test_case & tc : cases) {
     const bool selected_case = selected_case_index < 0 ||
         static_cast<std::int32_t>(case_index) == selected_case_index;
+    const bool selected_suite_case = !filter_by_suite || tc.suite == selected_suite;
+    suite_seen = suite_seen || selected_suite_case;
     case_index += 1;
-    if (!selected_case) {
+    if (!selected_case || !selected_suite_case) {
       continue;
     }
     if (tc.tokenizer_case && !include_tokenizer) {
@@ -221,14 +266,29 @@ std::vector<bench::result> run_benchmarks(const bench::config & cfg,
   if (include_tokenizer) {
     const bool selected_tokenizer = selected_case_index < 0 ||
       selected_case_index == static_cast<std::int32_t>(k_case_count);
+    const bool selected_tokenizer_suite = !filter_by_suite ||
+      std::string_view{"tokenizer"} == selected_suite;
+    suite_seen = suite_seen || selected_tokenizer_suite;
     if (!selected_tokenizer) {
+      if (filter_by_suite && !suite_seen) {
+        std::fprintf(stderr, "error: unknown benchmark suite '%s'\n", selected_suite);
+        std::exit(1);
+      }
       return results;
     }
     const bench::test_case tokenizer_case = make_test_case(
       bench::append_emel_tokenizer_cases,
       bench::append_reference_tokenizer_cases,
+      "tokenizer",
       true);
-    bench::append_test_case(results, cfg, tokenizer_case, reference);
+    if (selected_tokenizer_suite) {
+      bench::append_test_case(results, cfg, tokenizer_case, reference);
+    }
+  }
+
+  if (filter_by_suite && !suite_seen) {
+    std::fprintf(stderr, "error: unknown benchmark suite '%s'\n", selected_suite);
+    std::exit(1);
   }
   return results;
 }
@@ -284,18 +344,23 @@ void print_compare(const std::vector<bench::result> & emel_results,
     emel_sorted.begin(), emel_sorted.end(), [](const bench::result & entry) {
       return entry.name == bench::k_generation_case_name;
     });
-  if (generation_emel == emel_sorted.end()) {
+  const auto generation_ref = std::find_if(
+    ref_sorted.begin(), ref_sorted.end(), [](const bench::result & entry) {
+      return entry.name == bench::k_generation_case_name;
+    });
+  const bool generation_present = generation_emel != emel_sorted.end() ||
+      generation_ref != ref_sorted.end();
+  if ((generation_emel == emel_sorted.end()) != (generation_ref == ref_sorted.end())) {
+    std::fprintf(stderr, "error: generation case mismatch between emel and reference\n");
+    std::exit(1);
+  }
+  if (generation_present && generation_emel == emel_sorted.end()) {
     std::fprintf(stderr, "error: missing emel generation case %.*s\n",
                  static_cast<int>(bench::k_generation_case_name.size()),
                  bench::k_generation_case_name.data());
     std::exit(1);
   }
-
-  const auto generation_ref = std::find_if(
-    ref_sorted.begin(), ref_sorted.end(), [](const bench::result & entry) {
-      return entry.name == bench::k_generation_case_name;
-    });
-  if (generation_ref == ref_sorted.end()) {
+  if (generation_present && generation_ref == ref_sorted.end()) {
     std::fprintf(stderr, "error: missing reference generation case %.*s\n",
                  static_cast<int>(bench::k_generation_case_name.size()),
                  bench::k_generation_case_name.data());
@@ -309,166 +374,169 @@ void print_compare(const std::vector<bench::result> & emel_results,
     std::exit(1);
   }
 
-  if (!bench::generation_flash_evidence_ready()) {
-    std::fprintf(stderr, "error: missing generation runtime evidence\n");
-    std::exit(1);
-  }
-
-  const auto flash_dispatch_calls = bench::generation_flash_evidence_dispatch_calls();
-  const auto optimized_flash_dispatch_calls =
-      bench::generation_flash_evidence_optimized_dispatch_calls();
-  const auto shared_flash_dispatch_calls =
-      bench::generation_flash_evidence_shared_dispatch_calls();
-  const auto native_quantized_stage_count =
-      bench::generation_runtime_contract_native_quantized_stage_count();
-  const auto approved_dense_f32_stage_count =
-      bench::generation_runtime_contract_approved_dense_f32_stage_count();
-  const auto disallowed_fallback_stage_count =
-      bench::generation_runtime_contract_disallowed_fallback_stage_count();
-  const auto explicit_no_claim_stage_count =
-      bench::generation_runtime_contract_explicit_no_claim_stage_count();
-  const auto optimized_q2_dispatch_calls =
-      bench::generation_quantized_evidence_optimized_q2_dispatch_calls();
-  const auto shared_q2_dispatch_calls =
-      bench::generation_quantized_evidence_shared_q2_dispatch_calls();
-  const auto optimized_q3_dispatch_calls =
-      bench::generation_quantized_evidence_optimized_q3_dispatch_calls();
-  const auto shared_q3_dispatch_calls =
-      bench::generation_quantized_evidence_shared_q3_dispatch_calls();
-  const auto optimized_q6_dispatch_calls =
-      bench::generation_quantized_evidence_optimized_q6_dispatch_calls();
-  const auto shared_q6_dispatch_calls =
-      bench::generation_quantized_evidence_shared_q6_dispatch_calls();
-  const auto emel_decode_calls = bench::generation_flash_evidence_emel_decode_calls();
-  const auto emel_logits_calls = bench::generation_flash_evidence_emel_logits_calls();
-  const auto reference_decode_calls = bench::generation_flash_evidence_reference_decode_calls();
-  const auto reference_logits_calls = bench::generation_flash_evidence_reference_logits_calls();
-  if (emel_decode_calls != 0 || emel_logits_calls != 0 ||
-      reference_decode_calls != 0 || reference_logits_calls != 0) {
-    std::fprintf(stderr,
-                 "error: invalid generation runtime evidence flash_dispatch_calls=%" PRIu64
-                 " optimized_flash_dispatch_calls=%" PRIu64
-                 " shared_flash_dispatch_calls=%" PRIu64
-                 " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
-                 "reference_logits_calls=%d\n",
-                 flash_dispatch_calls,
-                 optimized_flash_dispatch_calls,
-                 shared_flash_dispatch_calls,
-                 emel_decode_calls,
-                 emel_logits_calls,
-                 reference_decode_calls,
-                 reference_logits_calls);
-    std::exit(1);
-  }
-  if (flash_dispatch_calls == 0 &&
-      (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
-    std::fprintf(stderr,
-                 "error: invalid zero-flash attribution optimized_flash_dispatch_calls=%" PRIu64
-                 " shared_flash_dispatch_calls=%" PRIu64 "\n",
-                 optimized_flash_dispatch_calls,
-                 shared_flash_dispatch_calls);
-    std::exit(1);
-  }
-  if (k_host_is_aarch64 && flash_dispatch_calls == 0) {
-    std::fprintf(stderr,
-                 "error: missing ARM flash attribution flash_dispatch_calls=%" PRIu64 "\n",
-                 flash_dispatch_calls);
-    std::exit(1);
-  }
-  if (flash_dispatch_calls != 0 && k_host_is_aarch64 &&
-      (optimized_flash_dispatch_calls == 0 || shared_flash_dispatch_calls != 0)) {
-    std::fprintf(stderr,
-                 "error: invalid ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
-                 " shared_flash_dispatch_calls=%" PRIu64 "\n",
-                 optimized_flash_dispatch_calls,
-                 shared_flash_dispatch_calls);
-    std::exit(1);
-  }
-  if (flash_dispatch_calls != 0 && !k_host_is_aarch64 &&
-      (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
-    std::fprintf(stderr,
-                 "error: invalid non-ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
-                 " shared_flash_dispatch_calls=%" PRIu64 "\n",
-                 optimized_flash_dispatch_calls,
-                 shared_flash_dispatch_calls);
-    std::exit(1);
-  }
-  if (k_host_is_aarch64 &&
-      (optimized_q2_dispatch_calls == 0 || shared_q2_dispatch_calls != 0 ||
-       optimized_q3_dispatch_calls == 0 || shared_q3_dispatch_calls != 0 ||
-       optimized_q6_dispatch_calls == 0 || shared_q6_dispatch_calls != 0)) {
-    std::fprintf(stderr,
-                 "error: invalid ARM quantized evidence optimized_q2_dispatch_calls=%" PRIu64
-                 " shared_q2_dispatch_calls=%" PRIu64
-                 " optimized_q3_dispatch_calls=%" PRIu64
-                 " shared_q3_dispatch_calls=%" PRIu64
-                 " optimized_q6_dispatch_calls=%" PRIu64
-                 " shared_q6_dispatch_calls=%" PRIu64 "\n",
-                 optimized_q2_dispatch_calls,
-                 shared_q2_dispatch_calls,
-                 optimized_q3_dispatch_calls,
-                 shared_q3_dispatch_calls,
-                 optimized_q6_dispatch_calls,
-                 shared_q6_dispatch_calls);
-    std::exit(1);
-  }
-  if (native_quantized_stage_count != 8u || approved_dense_f32_stage_count != 4u ||
-      disallowed_fallback_stage_count != 0u || explicit_no_claim_stage_count != 0u) {
-    std::fprintf(stderr,
-                 "error: invalid generation runtime contract native_quantized=%" PRIu32
-                 " approved_dense_f32_by_contract=%" PRIu32
-                 " disallowed_fallback=%" PRIu32
-                 " explicit_no_claim=%" PRIu32 "\n",
-                 native_quantized_stage_count,
-                 approved_dense_f32_stage_count,
-                 disallowed_fallback_stage_count,
-                 explicit_no_claim_stage_count);
-    std::exit(1);
-  }
-
   std::printf("# reference_impl: source=%.*s ref=%.*s\n",
               static_cast<int>(k_bench_reference_source.size()),
               k_bench_reference_source.data(),
               static_cast<int>(k_bench_reference_ref.size()),
               k_bench_reference_ref.data());
-  std::printf("# generation_flash_evidence: case=%.*s flash_dispatch_calls=%" PRIu64
-              " optimized_flash_dispatch_calls=%" PRIu64
-              " shared_flash_dispatch_calls=%" PRIu64
-              " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
-              "reference_logits_calls=%d\n",
-              static_cast<int>(bench::k_generation_case_name.size()),
-              bench::k_generation_case_name.data(),
-              flash_dispatch_calls,
-              optimized_flash_dispatch_calls,
-              shared_flash_dispatch_calls,
-              emel_decode_calls,
-              emel_logits_calls,
-              reference_decode_calls,
-              reference_logits_calls);
-  std::printf("# generation_runtime_contract: case=%.*s native_quantized=%" PRIu32
-              " approved_dense_f32_by_contract=%" PRIu32
-              " disallowed_fallback=%" PRIu32
-              " explicit_no_claim=%" PRIu32 "\n",
-              static_cast<int>(bench::k_generation_case_name.size()),
-              bench::k_generation_case_name.data(),
-              native_quantized_stage_count,
-              approved_dense_f32_stage_count,
-              disallowed_fallback_stage_count,
-              explicit_no_claim_stage_count);
-  std::printf("# generation_quantized_evidence: case=%.*s optimized_q2_dispatch_calls=%" PRIu64
-              " shared_q2_dispatch_calls=%" PRIu64
-              " optimized_q3_dispatch_calls=%" PRIu64
-              " shared_q3_dispatch_calls=%" PRIu64
-              " optimized_q6_dispatch_calls=%" PRIu64
-              " shared_q6_dispatch_calls=%" PRIu64 "\n",
-              static_cast<int>(bench::k_generation_case_name.size()),
-              bench::k_generation_case_name.data(),
-              optimized_q2_dispatch_calls,
-              shared_q2_dispatch_calls,
-              optimized_q3_dispatch_calls,
-              shared_q3_dispatch_calls,
-              optimized_q6_dispatch_calls,
-              shared_q6_dispatch_calls);
+
+  if (generation_present) {
+    if (!bench::generation_flash_evidence_ready()) {
+      std::fprintf(stderr, "error: missing generation runtime evidence\n");
+      std::exit(1);
+    }
+
+    const auto flash_dispatch_calls = bench::generation_flash_evidence_dispatch_calls();
+    const auto optimized_flash_dispatch_calls =
+        bench::generation_flash_evidence_optimized_dispatch_calls();
+    const auto shared_flash_dispatch_calls =
+        bench::generation_flash_evidence_shared_dispatch_calls();
+    const auto native_quantized_stage_count =
+        bench::generation_runtime_contract_native_quantized_stage_count();
+    const auto approved_dense_f32_stage_count =
+        bench::generation_runtime_contract_approved_dense_f32_stage_count();
+    const auto disallowed_fallback_stage_count =
+        bench::generation_runtime_contract_disallowed_fallback_stage_count();
+    const auto explicit_no_claim_stage_count =
+        bench::generation_runtime_contract_explicit_no_claim_stage_count();
+    const auto optimized_q2_dispatch_calls =
+        bench::generation_quantized_evidence_optimized_q2_dispatch_calls();
+    const auto shared_q2_dispatch_calls =
+        bench::generation_quantized_evidence_shared_q2_dispatch_calls();
+    const auto optimized_q3_dispatch_calls =
+        bench::generation_quantized_evidence_optimized_q3_dispatch_calls();
+    const auto shared_q3_dispatch_calls =
+        bench::generation_quantized_evidence_shared_q3_dispatch_calls();
+    const auto optimized_q6_dispatch_calls =
+        bench::generation_quantized_evidence_optimized_q6_dispatch_calls();
+    const auto shared_q6_dispatch_calls =
+        bench::generation_quantized_evidence_shared_q6_dispatch_calls();
+    const auto emel_decode_calls = bench::generation_flash_evidence_emel_decode_calls();
+    const auto emel_logits_calls = bench::generation_flash_evidence_emel_logits_calls();
+    const auto reference_decode_calls = bench::generation_flash_evidence_reference_decode_calls();
+    const auto reference_logits_calls = bench::generation_flash_evidence_reference_logits_calls();
+    if (emel_decode_calls != 0 || emel_logits_calls != 0 ||
+        reference_decode_calls != 0 || reference_logits_calls != 0) {
+      std::fprintf(stderr,
+                   "error: invalid generation runtime evidence flash_dispatch_calls=%" PRIu64
+                   " optimized_flash_dispatch_calls=%" PRIu64
+                   " shared_flash_dispatch_calls=%" PRIu64
+                   " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
+                   "reference_logits_calls=%d\n",
+                   flash_dispatch_calls,
+                   optimized_flash_dispatch_calls,
+                   shared_flash_dispatch_calls,
+                   emel_decode_calls,
+                   emel_logits_calls,
+                   reference_decode_calls,
+                   reference_logits_calls);
+      std::exit(1);
+    }
+    if (flash_dispatch_calls == 0 &&
+        (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
+      std::fprintf(stderr,
+                   "error: invalid zero-flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                   " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                   optimized_flash_dispatch_calls,
+                   shared_flash_dispatch_calls);
+      std::exit(1);
+    }
+    if (k_host_is_aarch64 && flash_dispatch_calls == 0) {
+      std::fprintf(stderr,
+                   "error: missing ARM flash attribution flash_dispatch_calls=%" PRIu64 "\n",
+                   flash_dispatch_calls);
+      std::exit(1);
+    }
+    if (flash_dispatch_calls != 0 && k_host_is_aarch64 &&
+        (optimized_flash_dispatch_calls == 0 || shared_flash_dispatch_calls != 0)) {
+      std::fprintf(stderr,
+                   "error: invalid ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                   " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                   optimized_flash_dispatch_calls,
+                   shared_flash_dispatch_calls);
+      std::exit(1);
+    }
+    if (flash_dispatch_calls != 0 && !k_host_is_aarch64 &&
+        (optimized_flash_dispatch_calls != 0 || shared_flash_dispatch_calls != 0)) {
+      std::fprintf(stderr,
+                   "error: invalid non-ARM flash attribution optimized_flash_dispatch_calls=%" PRIu64
+                   " shared_flash_dispatch_calls=%" PRIu64 "\n",
+                   optimized_flash_dispatch_calls,
+                   shared_flash_dispatch_calls);
+      std::exit(1);
+    }
+    if (k_host_is_aarch64 &&
+        (optimized_q2_dispatch_calls == 0 || shared_q2_dispatch_calls != 0 ||
+         optimized_q3_dispatch_calls == 0 || shared_q3_dispatch_calls != 0 ||
+         optimized_q6_dispatch_calls == 0 || shared_q6_dispatch_calls != 0)) {
+      std::fprintf(stderr,
+                   "error: invalid ARM quantized evidence optimized_q2_dispatch_calls=%" PRIu64
+                   " shared_q2_dispatch_calls=%" PRIu64
+                   " optimized_q3_dispatch_calls=%" PRIu64
+                   " shared_q3_dispatch_calls=%" PRIu64
+                   " optimized_q6_dispatch_calls=%" PRIu64
+                   " shared_q6_dispatch_calls=%" PRIu64 "\n",
+                   optimized_q2_dispatch_calls,
+                   shared_q2_dispatch_calls,
+                   optimized_q3_dispatch_calls,
+                   shared_q3_dispatch_calls,
+                   optimized_q6_dispatch_calls,
+                   shared_q6_dispatch_calls);
+      std::exit(1);
+    }
+    if (native_quantized_stage_count != 8u || approved_dense_f32_stage_count != 4u ||
+        disallowed_fallback_stage_count != 0u || explicit_no_claim_stage_count != 0u) {
+      std::fprintf(stderr,
+                   "error: invalid generation runtime contract native_quantized=%" PRIu32
+                   " approved_dense_f32_by_contract=%" PRIu32
+                   " disallowed_fallback=%" PRIu32
+                   " explicit_no_claim=%" PRIu32 "\n",
+                   native_quantized_stage_count,
+                   approved_dense_f32_stage_count,
+                   disallowed_fallback_stage_count,
+                   explicit_no_claim_stage_count);
+      std::exit(1);
+    }
+
+    std::printf("# generation_flash_evidence: case=%.*s flash_dispatch_calls=%" PRIu64
+                " optimized_flash_dispatch_calls=%" PRIu64
+                " shared_flash_dispatch_calls=%" PRIu64
+                " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
+                "reference_logits_calls=%d\n",
+                static_cast<int>(bench::k_generation_case_name.size()),
+                bench::k_generation_case_name.data(),
+                flash_dispatch_calls,
+                optimized_flash_dispatch_calls,
+                shared_flash_dispatch_calls,
+                emel_decode_calls,
+                emel_logits_calls,
+                reference_decode_calls,
+                reference_logits_calls);
+    std::printf("# generation_runtime_contract: case=%.*s native_quantized=%" PRIu32
+                " approved_dense_f32_by_contract=%" PRIu32
+                " disallowed_fallback=%" PRIu32
+                " explicit_no_claim=%" PRIu32 "\n",
+                static_cast<int>(bench::k_generation_case_name.size()),
+                bench::k_generation_case_name.data(),
+                native_quantized_stage_count,
+                approved_dense_f32_stage_count,
+                disallowed_fallback_stage_count,
+                explicit_no_claim_stage_count);
+    std::printf("# generation_quantized_evidence: case=%.*s optimized_q2_dispatch_calls=%" PRIu64
+                " shared_q2_dispatch_calls=%" PRIu64
+                " optimized_q3_dispatch_calls=%" PRIu64
+                " shared_q3_dispatch_calls=%" PRIu64
+                " optimized_q6_dispatch_calls=%" PRIu64
+                " shared_q6_dispatch_calls=%" PRIu64 "\n",
+                static_cast<int>(bench::k_generation_case_name.size()),
+                bench::k_generation_case_name.data(),
+                optimized_q2_dispatch_calls,
+                shared_q2_dispatch_calls,
+                optimized_q3_dispatch_calls,
+                shared_q3_dispatch_calls,
+                optimized_q6_dispatch_calls,
+                shared_q6_dispatch_calls);
+  }
 
   const std::size_t count = std::min(emel_sorted.size(), ref_sorted.size());
   for (std::size_t i = 0; i < count; ++i) {

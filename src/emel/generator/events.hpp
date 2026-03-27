@@ -32,6 +32,11 @@ enum class attention_mode : uint8_t {
   nonflash,
 };
 
+enum class selection_mode : uint8_t {
+  sample_logits,
+  preselected_argmax,
+};
+
 using tokenizer_bind_dispatch_fn =
     bool(void * tokenizer_sm, const emel::text::tokenizer::event::bind &);
 using tokenizer_tokenize_dispatch_fn =
@@ -43,6 +48,8 @@ struct compute_io {
   int32_t token_count = 0;
   float * logits = nullptr;
   int32_t logits_capacity = 0;
+  int32_t * selected_token_out = nullptr;
+  float * selected_score_out = nullptr;
 };
 
 }  // namespace emel::generator
@@ -69,6 +76,8 @@ struct initialize {
   bool add_special = true;
   bool parse_special = false;
   std::span<emel::logits::sampler::fn> sampler_fns = {};
+  emel::generator::selection_mode selection_mode =
+      emel::generator::selection_mode::sample_logits;
   int32_t max_prompt_tokens = 0;
   int32_t max_generated_tokens = 0;
   int32_t max_blocks = 0;
@@ -123,6 +132,7 @@ struct generate_ctx {
   int32_t plan_outputs = 0;
   int32_t kv_tokens = 0;
   int32_t selected_token = -1;
+  float selected_score = 0.0f;
   size_t output_length = 0;
   size_t phase_output_length = 0;
   emel::text::renderer::sequence_status render_status =

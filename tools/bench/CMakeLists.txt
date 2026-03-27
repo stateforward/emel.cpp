@@ -117,6 +117,7 @@ set(BENCH_RUNNER_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/generation_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/rule_parser_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/kernel/aarch64_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/kernel/flash_attention_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/kernel/x86_64_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/logits/sampler_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/logits/validator_bench.cpp

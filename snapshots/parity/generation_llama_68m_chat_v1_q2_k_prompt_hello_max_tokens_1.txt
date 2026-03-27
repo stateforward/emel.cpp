@@ -1,0 +1,11 @@
+format=emel_generation_baseline_v1
+contract=generation_online_f16_final_normalize_v1
+fixture=Llama-68M-Chat-v1-Q2_K.gguf
+prompt_hex=68656c6c6f
+max_tokens=1
+tokens_generated=1
+output_length=5
+trace_token_count=1
+token_ids=304
+top_score_gaps=0.258874893
+output_hex=e29681746f

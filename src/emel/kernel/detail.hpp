@@ -44,6 +44,7 @@
   X(op_group_norm) \
   X(op_l2_norm) \
   X(op_mul_mat) \
+  X(op_mul_mat_argmax) \
   X(op_mul_mat_id) \
   X(op_out_prod) \
   X(op_scale) \
@@ -141,15 +142,23 @@ inline constexpr bool is_op_event_v = is_op_event<event_type>::value;
 namespace emel::kernel::detail {
 
 inline constexpr uint8_t dtype_f32 = 0;
+inline constexpr uint8_t dtype_f16 = 1;
 inline constexpr uint8_t dtype_q4_0 = 2;
 inline constexpr uint8_t dtype_q2_k = 10;
 inline constexpr uint8_t dtype_q3_k = 11;
 inline constexpr uint8_t dtype_q6_k = 14;
+inline constexpr uint8_t dtype_q8_k = 15;
+inline constexpr uint8_t dtype_q6_k_x8 = 36;
+inline constexpr uint8_t dtype_q6_k_x8_q8_prepared = 37;
+inline constexpr uint8_t dtype_q6_k_x8_q8_argmax_prepared = 38;
 inline constexpr uint64_t flash_attn_workspace_token_capacity = 4096u;
 
 struct flash_attn_workspace {
-  std::array<float, flash_attn_workspace_token_capacity> score_buffer = {};
-  std::array<float, flash_attn_workspace_token_capacity> value_buffer = {};
+  alignas(64) std::array<float, flash_attn_workspace_token_capacity> score_buffer = {};
+  alignas(64) std::array<float, flash_attn_workspace_token_capacity> value_buffer = {};
+  alignas(64) std::array<float, flash_attn_workspace_token_capacity> accum_buffer = {};
+  alignas(64) std::array<uint16_t, flash_attn_workspace_token_capacity> q_buffer_f16 = {};
+  alignas(64) std::array<uint16_t, flash_attn_workspace_token_capacity> accum_buffer_f16 = {};
   uint64_t prepared_tokens = 0;
   uint64_t reuse_count = 0;
 };
@@ -158,6 +167,7 @@ namespace quant {
 
 constexpr uint64_t QK_K = 256u;
 constexpr uint64_t MAX_Q8_K_BLOCKS = 128u;
+constexpr uint64_t Q6_K_X8_ROWS = 8u;
 
 struct block_q2_k {
   std::array<uint8_t, QK_K / 16> scales = {};
@@ -180,6 +190,25 @@ struct block_q6_k {
   uint16_t d = 0;
 };
 
+struct block_q6_kx8 {
+  std::array<uint16_t, Q6_K_X8_ROWS> d = {};
+  std::array<int8_t, (QK_K / 16) * Q6_K_X8_ROWS> scales = {};
+  std::array<uint8_t, (QK_K / 2) * Q6_K_X8_ROWS> ql = {};
+  std::array<uint8_t, (QK_K / 4) * Q6_K_X8_ROWS> qh = {};
+};
+
+struct block_q6_kx8_q8_prepared {
+  std::array<uint16_t, Q6_K_X8_ROWS> d = {};
+  std::array<int8_t, (QK_K / 16) * Q6_K_X8_ROWS> scales = {};
+  std::array<int8_t, QK_K * Q6_K_X8_ROWS> qs = {};
+};
+
+struct block_q6_kx8_q8_argmax_prepared {
+  std::array<float, Q6_K_X8_ROWS> d = {};
+  std::array<int8_t, (QK_K / 16) * Q6_K_X8_ROWS> scales = {};
+  std::array<int8_t, QK_K * Q6_K_X8_ROWS> qs = {};
+};
+
 struct block_q8_k {
   float d = 0.0f;
   std::array<int8_t, QK_K> qs = {};
@@ -189,6 +218,17 @@ struct block_q8_k {
 static_assert(sizeof(block_q2_k) == 2 * sizeof(uint16_t) + (QK_K / 16) + (QK_K / 4));
 static_assert(sizeof(block_q3_k) == sizeof(uint16_t) + (QK_K / 4) + (QK_K / 8) + 12);
 static_assert(sizeof(block_q6_k) == sizeof(uint16_t) + (QK_K / 16) + (3 * QK_K / 4));
+static_assert(
+    sizeof(block_q6_kx8) ==
+    sizeof(uint16_t) * Q6_K_X8_ROWS + (QK_K / 16) * Q6_K_X8_ROWS + (3 * QK_K / 4) * Q6_K_X8_ROWS);
+static_assert(
+    sizeof(block_q6_kx8_q8_prepared) ==
+    sizeof(uint16_t) * Q6_K_X8_ROWS + sizeof(int8_t) * (QK_K / 16) * Q6_K_X8_ROWS +
+        sizeof(int8_t) * QK_K * Q6_K_X8_ROWS);
+static_assert(
+    sizeof(block_q6_kx8_q8_argmax_prepared) ==
+    sizeof(float) * Q6_K_X8_ROWS + sizeof(int8_t) * (QK_K / 16) * Q6_K_X8_ROWS +
+        sizeof(int8_t) * QK_K * Q6_K_X8_ROWS);
 static_assert(sizeof(block_q8_k) == sizeof(float) + QK_K + (QK_K / 16) * sizeof(int16_t));
 
 inline float fp32_from_bits(const uint32_t bits) noexcept {
@@ -411,6 +451,276 @@ inline void quantize_row_q8_k_strided(const float * x,
   }
 }
 
+inline constexpr uint64_t packed_q6_k_x8_group_count(const uint64_t rows) noexcept {
+  return (rows + Q6_K_X8_ROWS - 1u) / Q6_K_X8_ROWS;
+}
+
+inline size_t packed_q6_k_x8_group_storage_bytes(const uint64_t cols) noexcept {
+  if ((cols % QK_K) != 0u) {
+    return 0u;
+  }
+  const uint64_t block_count = cols / QK_K;
+  return static_cast<size_t>(block_count) * sizeof(block_q6_kx8);
+}
+
+inline size_t prepared_q6_k_x8_q8_group_storage_bytes(const uint64_t cols) noexcept {
+  if ((cols % QK_K) != 0u) {
+    return 0u;
+  }
+  const uint64_t block_count = cols / QK_K;
+  return static_cast<size_t>(block_count) * sizeof(block_q6_kx8_q8_prepared);
+}
+
+inline size_t argmax_prepared_q6_k_x8_q8_group_storage_bytes(const uint64_t cols) noexcept {
+  if ((cols % QK_K) != 0u) {
+    return 0u;
+  }
+  const uint64_t block_count = cols / QK_K;
+  return static_cast<size_t>(block_count) * sizeof(block_q6_kx8_q8_argmax_prepared);
+}
+
+inline block_q6_kx8 make_block_q6_k_x8(const block_q6_k * rows) noexcept {
+  block_q6_kx8 out = {};
+  constexpr uint64_t interleave_block_bytes = 8u;
+  constexpr uint64_t end_low_bytes = (QK_K * 4u) / interleave_block_bytes;
+  constexpr uint64_t end_high_bytes = end_low_bytes / 2u;
+  constexpr uint64_t scale_count = QK_K / 16u;
+
+  for (uint64_t row = 0; row < Q6_K_X8_ROWS; ++row) {
+    out.d[row] = rows[row].d;
+  }
+
+  for (uint64_t i = 0; i < end_low_bytes; ++i) {
+    const uint64_t src_row = i % Q6_K_X8_ROWS;
+    const uint64_t src_offset = (i / Q6_K_X8_ROWS) * interleave_block_bytes;
+    const uint64_t dst_offset = i * interleave_block_bytes;
+    std::memcpy(out.ql.data() + dst_offset,
+                rows[src_row].ql.data() + src_offset,
+                interleave_block_bytes);
+  }
+
+  for (uint64_t i = 0; i < end_high_bytes; ++i) {
+    const uint64_t src_row = i % Q6_K_X8_ROWS;
+    const uint64_t src_offset = (i / Q6_K_X8_ROWS) * interleave_block_bytes;
+    const uint64_t dst_offset = i * interleave_block_bytes;
+    std::memcpy(out.qh.data() + dst_offset,
+                rows[src_row].qh.data() + src_offset,
+                interleave_block_bytes);
+  }
+
+  for (uint64_t row = 0; row < Q6_K_X8_ROWS; ++row) {
+    for (uint64_t scale = 0; scale < scale_count; ++scale) {
+      out.scales[scale * Q6_K_X8_ROWS + row] = rows[row].scales[scale];
+    }
+  }
+
+  return out;
+}
+
+inline block_q6_kx8_q8_prepared make_block_q6_k_x8_q8_prepared(const block_q6_k * rows) noexcept {
+  block_q6_kx8_q8_prepared out = {};
+
+  for (uint64_t row = 0; row < Q6_K_X8_ROWS; ++row) {
+    out.d[row] = rows[row].d;
+    std::array<int8_t, QK_K> decoded = {};
+    for (uint64_t half = 0; half < (QK_K / 128u); ++half) {
+      const uint64_t half_value_base = half * 128u;
+      const uint64_t ql_half_base = half * 64u;
+      const uint64_t qh_half_base = half * 32u;
+      for (uint64_t lane = 0; lane < 32u; ++lane) {
+        const uint8_t qh_byte = rows[row].qh[qh_half_base + lane];
+        const uint8_t ql_low = rows[row].ql[ql_half_base + lane];
+        const uint8_t ql_high = rows[row].ql[ql_half_base + 32u + lane];
+        decoded[half_value_base + lane + 0u] =
+            static_cast<int8_t>(
+                static_cast<int32_t>((ql_low & 0x0fu) | (((qh_byte >> 0u) & 0x03u) << 4u)) -
+                32);
+        decoded[half_value_base + lane + 32u] =
+            static_cast<int8_t>(
+                static_cast<int32_t>((ql_high & 0x0fu) | (((qh_byte >> 2u) & 0x03u) << 4u)) -
+                32);
+        decoded[half_value_base + lane + 64u] =
+            static_cast<int8_t>(
+                static_cast<int32_t>(((ql_low >> 4u) & 0x0fu) |
+                                     (((qh_byte >> 4u) & 0x03u) << 4u)) -
+                32);
+        decoded[half_value_base + lane + 96u] =
+            static_cast<int8_t>(
+                static_cast<int32_t>(((ql_high >> 4u) & 0x0fu) |
+                                     (((qh_byte >> 6u) & 0x03u) << 4u)) -
+                32);
+      }
+    }
+
+    for (uint64_t scale = 0; scale < (QK_K / 16u); ++scale) {
+      const size_t scale_offset = static_cast<size_t>(scale) * Q6_K_X8_ROWS + row;
+      out.scales[scale_offset] = rows[row].scales[scale];
+#if defined(__ARM_FEATURE_MATMUL_INT8)
+      const size_t scale_base =
+          static_cast<size_t>(scale) * (Q6_K_X8_ROWS / 2u) * 32u;
+      const size_t pair_index = row / 2u;
+      const size_t pair_base = scale_base + pair_index * 32u;
+      const size_t half_base = pair_base + (row % 2u) * 8u;
+      for (uint64_t lane = 0; lane < 8u; ++lane) {
+        out.qs[half_base + lane] = decoded[scale * 16u + lane];
+        out.qs[half_base + 16u + lane] = decoded[scale * 16u + 8u + lane];
+      }
+#else
+      for (uint64_t lane = 0; lane < 16u; ++lane) {
+        const size_t qs_offset = (static_cast<size_t>(scale) * Q6_K_X8_ROWS + row) * 16u + lane;
+        out.qs[qs_offset] = decoded[scale * 16u + lane];
+      }
+#endif
+    }
+  }
+
+  return out;
+}
+
+inline block_q6_kx8_q8_argmax_prepared make_block_q6_k_x8_q8_argmax_prepared(
+    const block_q6_k * rows) noexcept {
+  block_q6_kx8_q8_argmax_prepared out = {};
+
+  for (uint64_t row = 0; row < Q6_K_X8_ROWS; ++row) {
+    out.d[row] = fp16_to_fp32(rows[row].d);
+    std::array<int8_t, QK_K> decoded = {};
+    for (uint64_t half = 0; half < (QK_K / 128u); ++half) {
+      const uint64_t half_value_base = half * 128u;
+      const uint64_t ql_half_base = half * 64u;
+      const uint64_t qh_half_base = half * 32u;
+      for (uint64_t lane = 0; lane < 32u; ++lane) {
+        const uint8_t qh_byte = rows[row].qh[qh_half_base + lane];
+        const uint8_t ql_low = rows[row].ql[ql_half_base + lane];
+        const uint8_t ql_high = rows[row].ql[ql_half_base + 32u + lane];
+        decoded[half_value_base + lane + 0u] =
+            static_cast<int8_t>(
+                static_cast<int32_t>((ql_low & 0x0fu) | (((qh_byte >> 0u) & 0x03u) << 4u)) -
+                32);
+        decoded[half_value_base + lane + 32u] =
+            static_cast<int8_t>(
+                static_cast<int32_t>((ql_high & 0x0fu) | (((qh_byte >> 2u) & 0x03u) << 4u)) -
+                32);
+        decoded[half_value_base + lane + 64u] =
+            static_cast<int8_t>(
+                static_cast<int32_t>(((ql_low >> 4u) & 0x0fu) |
+                                     (((qh_byte >> 4u) & 0x03u) << 4u)) -
+                32);
+        decoded[half_value_base + lane + 96u] =
+            static_cast<int8_t>(
+                static_cast<int32_t>(((ql_high >> 4u) & 0x0fu) |
+                                     (((qh_byte >> 6u) & 0x03u) << 4u)) -
+                32);
+      }
+    }
+
+    for (uint64_t scale = 0; scale < (QK_K / 16u); ++scale) {
+      out.scales[static_cast<size_t>(scale) * Q6_K_X8_ROWS + row] = rows[row].scales[scale];
+      const size_t scale_base =
+          static_cast<size_t>(scale) * (Q6_K_X8_ROWS / 2u) * 32u;
+      const size_t pair_index = row / 2u;
+      const size_t pair_base = scale_base + pair_index * 32u;
+      const size_t half_base = pair_base + (row % 2u) * 8u;
+      for (uint64_t lane = 0; lane < 8u; ++lane) {
+        out.qs[half_base + lane] = decoded[scale * 16u + lane];
+        out.qs[half_base + 16u + lane] = decoded[scale * 16u + 8u + lane];
+      }
+    }
+  }
+
+  return out;
+}
+
+inline bool pack_q6_k_rows_x8(const block_q6_k * src,
+                              const uint64_t rows,
+                              const uint64_t cols,
+                              void * dst) noexcept {
+  if (src == nullptr || dst == nullptr) {
+    return false;
+  }
+  if ((cols % QK_K) != 0u) {
+    return false;
+  }
+
+  const uint64_t block_count = cols / QK_K;
+  const uint64_t group_count = packed_q6_k_x8_group_count(rows);
+  auto * dst_blocks = static_cast<block_q6_kx8 *>(dst);
+  for (uint64_t group = 0; group < group_count; ++group) {
+    const uint64_t row_base = group * Q6_K_X8_ROWS;
+    for (uint64_t block = 0; block < block_count; ++block) {
+      std::array<block_q6_k, Q6_K_X8_ROWS> group_rows = {};
+      for (uint64_t row = 0; row < Q6_K_X8_ROWS; ++row) {
+        const uint64_t logical_row = row_base + row;
+        if (logical_row < rows) {
+          group_rows[row] = src[logical_row * block_count + block];
+        }
+      }
+      dst_blocks[group * block_count + block] = make_block_q6_k_x8(group_rows.data());
+    }
+  }
+  return true;
+}
+
+inline bool pack_q6_k_rows_x8_q8_prepared(const block_q6_k * src,
+                                          const uint64_t rows,
+                                          const uint64_t cols,
+                                          void * dst) noexcept {
+  if (src == nullptr || dst == nullptr) {
+    return false;
+  }
+  if ((cols % QK_K) != 0u) {
+    return false;
+  }
+
+  const uint64_t block_count = cols / QK_K;
+  const uint64_t group_count = packed_q6_k_x8_group_count(rows);
+  auto * dst_blocks = static_cast<block_q6_kx8_q8_prepared *>(dst);
+  for (uint64_t group = 0; group < group_count; ++group) {
+    const uint64_t row_base = group * Q6_K_X8_ROWS;
+    for (uint64_t block = 0; block < block_count; ++block) {
+      std::array<block_q6_k, Q6_K_X8_ROWS> group_rows = {};
+      for (uint64_t row = 0; row < Q6_K_X8_ROWS; ++row) {
+        const uint64_t logical_row = row_base + row;
+        if (logical_row < rows) {
+          group_rows[row] = src[logical_row * block_count + block];
+        }
+      }
+      dst_blocks[group * block_count + block] = make_block_q6_k_x8_q8_prepared(group_rows.data());
+    }
+  }
+  return true;
+}
+
+inline bool pack_q6_k_rows_x8_q8_argmax_prepared(const block_q6_k * src,
+                                                 const uint64_t rows,
+                                                 const uint64_t cols,
+                                                 void * dst) noexcept {
+  if (src == nullptr || dst == nullptr) {
+    return false;
+  }
+  if ((cols % QK_K) != 0u) {
+    return false;
+  }
+
+  const uint64_t block_count = cols / QK_K;
+  const uint64_t group_count = packed_q6_k_x8_group_count(rows);
+  auto * dst_blocks = static_cast<block_q6_kx8_q8_argmax_prepared *>(dst);
+  for (uint64_t group = 0; group < group_count; ++group) {
+    const uint64_t row_base = group * Q6_K_X8_ROWS;
+    for (uint64_t block = 0; block < block_count; ++block) {
+      std::array<block_q6_k, Q6_K_X8_ROWS> group_rows = {};
+      for (uint64_t row = 0; row < Q6_K_X8_ROWS; ++row) {
+        const uint64_t logical_row = row_base + row;
+        if (logical_row < rows) {
+          group_rows[row] = src[logical_row * block_count + block];
+        }
+      }
+      dst_blocks[group * block_count + block] =
+          make_block_q6_k_x8_q8_argmax_prepared(group_rows.data());
+    }
+  }
+  return true;
+}
+
 }  // namespace quant
 
 inline uint64_t select_u64(const bool choose_true,
@@ -436,29 +746,56 @@ inline bool is_quantized_k_dtype(const uint8_t code) noexcept {
   return code == dtype_q2_k || code == dtype_q3_k || code == dtype_q6_k;
 }
 
+inline bool is_rhs_q8_k_dtype(const uint8_t code) noexcept {
+  return code == dtype_q8_k;
+}
+
+inline bool is_packed_q6_vector_dtype(const uint8_t code) noexcept {
+  return code == dtype_q6_k_x8;
+}
+
+inline bool is_prepared_q6_vector_q8_rhs_dtype(const uint8_t code) noexcept {
+  return code == dtype_q6_k_x8_q8_prepared;
+}
+
+inline bool is_argmax_prepared_q6_vector_q8_rhs_dtype(const uint8_t code) noexcept {
+  return code == dtype_q6_k_x8_q8_argmax_prepared;
+}
+
 inline bool is_supported_dtype(const uint8_t code) noexcept {
-  return code == dtype_f32 || is_quantized_k_dtype(code);
+  return code == dtype_f32 || code == dtype_f16 || is_quantized_k_dtype(code) ||
+      is_rhs_q8_k_dtype(code) || is_packed_q6_vector_dtype(code) ||
+      is_prepared_q6_vector_q8_rhs_dtype(code) ||
+      is_argmax_prepared_q6_vector_q8_rhs_dtype(code);
 }
 
 inline size_t dtype_size_bytes(const uint8_t code) noexcept {
-  const std::array<size_t, 5> size_candidates = {
+  const std::array<size_t, 7> size_candidates = {
       0u,
       4u,
+      2u,
       sizeof(quant::block_q2_k) / quant::QK_K,
       sizeof(quant::block_q3_k) / quant::QK_K,
       sizeof(quant::block_q6_k) / quant::QK_K,
+      sizeof(quant::block_q8_k) / quant::QK_K,
   };
   if (code == dtype_f32) {
     return size_candidates[1];
   }
-  if (code == dtype_q2_k) {
+  if (code == dtype_f16) {
     return size_candidates[2];
   }
-  if (code == dtype_q3_k) {
+  if (code == dtype_q2_k) {
     return size_candidates[3];
   }
-  if (code == dtype_q6_k) {
+  if (code == dtype_q3_k) {
     return size_candidates[4];
+  }
+  if (code == dtype_q6_k) {
+    return size_candidates[5];
+  }
+  if (code == dtype_q8_k) {
+    return size_candidates[6];
   }
   return size_candidates[0];
 }
@@ -476,6 +813,15 @@ inline size_t quantized_row_storage_bytes(const uint8_t code, const uint64_t col
   }
   if (code == dtype_q6_k) {
     return static_cast<size_t>(block_count) * sizeof(quant::block_q6_k);
+  }
+  if (code == dtype_q8_k) {
+    return static_cast<size_t>(block_count) * sizeof(quant::block_q8_k);
+  }
+  if (code == dtype_q6_k_x8_q8_prepared) {
+    return quant::prepared_q6_k_x8_q8_group_storage_bytes(cols);
+  }
+  if (code == dtype_q6_k_x8_q8_argmax_prepared) {
+    return quant::argmax_prepared_q6_k_x8_q8_group_storage_bytes(cols);
   }
   return 0u;
 }
@@ -568,12 +914,49 @@ inline constexpr bool requires_src1_v =
     std::is_same_v<request_type, event::op_sub> ||
     std::is_same_v<request_type, event::op_mul> ||
     std::is_same_v<request_type, event::op_div> ||
-    std::is_same_v<request_type, event::op_mul_mat>;
+    std::is_same_v<request_type, event::op_mul_mat> ||
+    std::is_same_v<request_type, event::op_mul_mat_argmax>;
 
 template <class request_type>
 inline bool has_required_src0(const request_type & request) noexcept {
-  if constexpr (std::is_same_v<request_type, event::op_mul_mat>) {
+  if constexpr (std::is_same_v<request_type, event::op_mul_mat> ||
+                std::is_same_v<request_type, event::op_mul_mat_argmax>) {
     const uint8_t src0_type = dtype_code(request.src0.type);
+    if (is_prepared_q6_vector_q8_rhs_dtype(src0_type) ||
+        is_argmax_prepared_q6_vector_q8_rhs_dtype(src0_type)) {
+      const uint64_t cols = request.src0.ne[0];
+      const uint64_t rows = request.src0.ne[1];
+      const uint64_t group_count = quant::packed_q6_k_x8_group_count(rows);
+      const size_t group_bytes = is_prepared_q6_vector_q8_rhs_dtype(src0_type)
+          ? quant::prepared_q6_k_x8_q8_group_storage_bytes(cols)
+          : quant::argmax_prepared_q6_k_x8_q8_group_storage_bytes(cols);
+      return request.src0.data != nullptr &&
+             cols != 0u &&
+             rows != 0u &&
+             group_bytes != 0u &&
+             request.src0.ne[2] == 1u &&
+             request.src0.ne[3] == 1u &&
+             request.src0.nb[0] == 1u &&
+             request.src0.nb[1] == group_bytes &&
+             request.src0.nb[2] == group_bytes * group_count &&
+             request.src0.nb[3] == request.src0.nb[2];
+    }
+    if (is_packed_q6_vector_dtype(src0_type)) {
+      const uint64_t cols = request.src0.ne[0];
+      const uint64_t rows = request.src0.ne[1];
+      const uint64_t group_count = quant::packed_q6_k_x8_group_count(rows);
+      const size_t group_bytes = quant::packed_q6_k_x8_group_storage_bytes(cols);
+      return request.src0.data != nullptr &&
+             cols != 0u &&
+             rows != 0u &&
+             group_bytes != 0u &&
+             request.src0.ne[2] == 1u &&
+             request.src0.ne[3] == 1u &&
+             request.src0.nb[0] == 1u &&
+             request.src0.nb[1] == group_bytes &&
+             request.src0.nb[2] == group_bytes * group_count &&
+             request.src0.nb[3] == request.src0.nb[2];
+    }
     if (is_quantized_k_dtype(src0_type)) {
       const uint64_t cols = request.src0.ne[0];
       const uint64_t rows = request.src0.ne[1];
@@ -669,19 +1052,47 @@ inline void write_f32_at(const tensor_type & tensor, const uint64_t i0, const ui
 }
 
 template <class tensor_type>
+inline const void * tensor_row_ptr_void(const tensor_type & tensor,
+                                        const uint64_t row1,
+                                        const uint64_t row2) noexcept {
+  const auto * base = static_cast<const char *>(tensor.data);
+  return base + row1 * tensor.nb[1] + row2 * tensor.nb[2];
+}
+
+template <class elem_type, class tensor_type>
+inline const elem_type * tensor_row_ptr_as(const tensor_type & tensor,
+                                           const uint64_t row1,
+                                           const uint64_t row2) noexcept {
+  return reinterpret_cast<const elem_type *>(tensor_row_ptr_void(tensor, row1, row2));
+}
+
+template <class tensor_type>
 inline const float * tensor_row_ptr(const tensor_type & tensor,
                                     const uint64_t row1,
                                     const uint64_t row2) noexcept {
-  const auto * base = static_cast<const char *>(tensor.data);
-  return reinterpret_cast<const float *>(base + row1 * tensor.nb[1] + row2 * tensor.nb[2]);
+  return tensor_row_ptr_as<float>(tensor, row1, row2);
+}
+
+template <class tensor_type>
+inline void * tensor_row_ptr_mut_void(const tensor_type & tensor,
+                                      const uint64_t row1,
+                                      const uint64_t row2) noexcept {
+  auto * base = static_cast<char *>(tensor.data);
+  return base + row1 * tensor.nb[1] + row2 * tensor.nb[2];
+}
+
+template <class elem_type, class tensor_type>
+inline elem_type * tensor_row_ptr_mut_as(const tensor_type & tensor,
+                                         const uint64_t row1,
+                                         const uint64_t row2) noexcept {
+  return reinterpret_cast<elem_type *>(tensor_row_ptr_mut_void(tensor, row1, row2));
 }
 
 template <class tensor_type>
 inline float * tensor_row_ptr_mut(const tensor_type & tensor,
                                   const uint64_t row1,
                                   const uint64_t row2) noexcept {
-  auto * base = static_cast<char *>(tensor.data);
-  return reinterpret_cast<float *>(base + row1 * tensor.nb[1] + row2 * tensor.nb[2]);
+  return tensor_row_ptr_mut_as<float>(tensor, row1, row2);
 }
 
 #if defined(__ARM_NEON) && defined(__aarch64__)
@@ -808,6 +1219,99 @@ inline float dot_product_ggml_f16_scores(const float * lhs,
                   static_cast<double>(quant::fp16_to_fp32(quant::fp32_to_fp16(rhs[idx])));
   }
   return static_cast<float>(scalar_sum);
+}
+
+inline float dot_product_f16_f16_scores(const uint16_t * lhs,
+                                        const uint16_t * rhs,
+                                        const uint64_t count) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+  float16x8_t sum[4] = {
+      vdupq_n_f16(0.0f),
+      vdupq_n_f16(0.0f),
+      vdupq_n_f16(0.0f),
+      vdupq_n_f16(0.0f),
+  };
+  uint64_t idx = 0u;
+  const auto * lhs_f16 = reinterpret_cast<const __fp16 *>(lhs);
+  const auto * rhs_f16 = reinterpret_cast<const __fp16 *>(rhs);
+  for (; idx + 32u <= count; idx += 32u) {
+    sum[0] = vfmaq_f16(sum[0], vld1q_f16(lhs_f16 + idx + 0u), vld1q_f16(rhs_f16 + idx + 0u));
+    sum[1] = vfmaq_f16(sum[1], vld1q_f16(lhs_f16 + idx + 8u), vld1q_f16(rhs_f16 + idx + 8u));
+    sum[2] = vfmaq_f16(sum[2], vld1q_f16(lhs_f16 + idx + 16u), vld1q_f16(rhs_f16 + idx + 16u));
+    sum[3] = vfmaq_f16(sum[3], vld1q_f16(lhs_f16 + idx + 24u), vld1q_f16(rhs_f16 + idx + 24u));
+  }
+
+  double sumf = 0.0;
+  if (idx != 0u) {
+    int offset = 2;
+    for (int i = 0; i < offset; ++i) {
+      sum[i] = vaddq_f16(sum[i], sum[offset + i]);
+    }
+    offset >>= 1;
+    for (int i = 0; i < offset; ++i) {
+      sum[i] = vaddq_f16(sum[i], sum[offset + i]);
+    }
+
+    const float32x4_t low = vcvt_f32_f16(vget_low_f16(sum[0]));
+    const float32x4_t high = vcvt_f32_f16(vget_high_f16(sum[0]));
+    sumf = static_cast<double>(vaddvq_f32(vaddq_f32(low, high)));
+  }
+
+  for (; idx < count; ++idx) {
+    sumf += static_cast<double>(quant::fp16_to_fp32(lhs[idx])) *
+            static_cast<double>(quant::fp16_to_fp32(rhs[idx]));
+  }
+  return static_cast<float>(sumf);
+#endif
+#endif
+
+  double scalar_sum = 0.0;
+  for (uint64_t idx = 0u; idx < count; ++idx) {
+    scalar_sum += static_cast<double>(quant::fp16_to_fp32(lhs[idx])) *
+                  static_cast<double>(quant::fp16_to_fp32(rhs[idx]));
+  }
+  return static_cast<float>(scalar_sum);
+}
+
+inline float dot_product_f32_f16_scores(const float * lhs,
+                                        const uint16_t * rhs,
+                                        const uint64_t count) noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+  float32x4_t sum_lo = vdupq_n_f32(0.0f);
+  float32x4_t sum_hi = vdupq_n_f32(0.0f);
+  uint64_t idx = 0u;
+  for (; idx + 8u <= count; idx += 8u) {
+    const float32x4_t lhs0 = vld1q_f32(lhs + idx + 0u);
+    const float32x4_t lhs1 = vld1q_f32(lhs + idx + 4u);
+    const float16x8_t lhs_f16 = vcombine_f16(vcvt_f16_f32(lhs0), vcvt_f16_f32(lhs1));
+    const float16x8_t rhs_f16 = vreinterpretq_f16_u16(vld1q_u16(rhs + idx));
+    sum_lo = vfmlalq_low_f16(sum_lo, lhs_f16, rhs_f16);
+    sum_hi = vfmlalq_high_f16(sum_hi, lhs_f16, rhs_f16);
+  }
+
+  double sumf = static_cast<double>(vaddvq_f32(vaddq_f32(sum_lo, sum_hi)));
+  for (; idx < count; ++idx) {
+    sumf += static_cast<double>(quant::fp16_to_fp32(quant::fp32_to_fp16(lhs[idx]))) *
+            static_cast<double>(quant::fp16_to_fp32(rhs[idx]));
+  }
+  return static_cast<float>(sumf);
+#endif
+#endif
+
+  double scalar_sum = 0.0;
+  for (uint64_t idx = 0u; idx < count; ++idx) {
+    scalar_sum += static_cast<double>(quant::fp16_to_fp32(quant::fp32_to_fp16(lhs[idx]))) *
+                  static_cast<double>(quant::fp16_to_fp32(rhs[idx]));
+  }
+  return static_cast<float>(scalar_sum);
+}
+
+inline float dot_product_ggml_f16_scores(const float * lhs,
+                                         const uint16_t * rhs,
+                                         const uint64_t count) noexcept {
+  return dot_product_f32_f16_scores(lhs, rhs, count);
 }
 
 inline float dot_product_f32(const float * lhs,
@@ -1535,6 +2039,115 @@ inline bool run_mul_mat(const request_type & request) noexcept {
 }
 
 template <class request_type>
+inline bool can_run_mul_mat_argmax(const request_type & request) noexcept {
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t n = request.src1.ne[0];
+  const bool has_empty_dim = k == 0 || m == 0 || n != 1u;
+  const uint8_t src0_type = dtype_code(request.src0.type);
+  const uint8_t src1_type = dtype_code(request.src1.type);
+  const uint8_t dst_type = dtype_code(request.dst.type);
+  const bool valid_shape =
+      request.src1.ne[1] == k &&
+      request.dst.ne[0] == 1u &&
+      request.dst.ne[1] == 1u &&
+      request.src0.ne[2] == 1u &&
+      request.src0.ne[3] == 1u &&
+      request.src1.ne[2] == 1u &&
+      request.src1.ne[3] == 1u &&
+      request.dst.ne[2] == 1u &&
+      request.dst.ne[3] == 1u;
+  const bool f32_path = src0_type == dtype_f32 &&
+      src1_type == dtype_f32 &&
+      dst_type == dtype_f32 &&
+      is_dense_contiguous(request.src0) &&
+      is_dense_contiguous(request.src1) &&
+      is_dense_contiguous(request.dst);
+  const bool quantized_path = is_quantized_k_dtype(src0_type) &&
+      src1_type == dtype_f32 &&
+      dst_type == dtype_f32 &&
+      (k % quant::QK_K) == 0u &&
+      (k / quant::QK_K) <= quant::MAX_Q8_K_BLOCKS &&
+      is_dense_contiguous(request.src1) &&
+      is_dense_contiguous(request.dst) &&
+      request.src0.nb[0] == 1u &&
+      request.src0.nb[1] == quantized_row_storage_bytes(src0_type, k) &&
+      request.src0.nb[2] == request.src0.nb[1] * m &&
+      request.src0.nb[3] == request.src0.nb[2];
+  return !has_empty_dim &&
+      request.index_out != nullptr &&
+      valid_shape &&
+      (f32_path || quantized_path);
+}
+
+template <class request_type>
+inline bool run_mul_mat_argmax(const request_type & request) noexcept {
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const bool valid = can_run_mul_mat_argmax(request);
+  if (!valid) {
+    return false;
+  }
+
+  const uint8_t src0_type = dtype_code(request.src0.type);
+  const float * b_dense = static_cast<const float *>(request.src1.data);
+  float * best_value_out = static_cast<float *>(request.dst.data);
+  int32_t best_index = 0;
+  float best_value = -std::numeric_limits<float>::infinity();
+
+  if (src0_type == dtype_f32) {
+    const float * a_dense = static_cast<const float *>(request.src0.data);
+    for (uint64_t row = 0; row < m; ++row) {
+      float acc = 0.0f;
+      for (uint64_t col = 0; col < k; ++col) {
+        acc += a_dense[row * k + col] * b_dense[col];
+      }
+      if (acc > best_value || row == 0u) {
+        best_value = acc;
+        best_index = static_cast<int32_t>(row);
+      }
+    }
+    *best_value_out = best_value;
+    *request.index_out = best_index;
+    return true;
+  }
+
+  if (is_quantized_k_dtype(src0_type)) {
+    const auto * a_base = static_cast<const uint8_t *>(request.src0.data);
+    const size_t row_bytes = request.src0.nb[1];
+    const uint64_t block_count = k / quant::QK_K;
+    std::array<quant::block_q8_k, quant::MAX_Q8_K_BLOCKS> q8_blocks = {};
+    if (block_count > q8_blocks.size()) {
+      return false;
+    }
+    quant::quantize_row_q8_k_strided(b_dense, 1u, q8_blocks.data(), static_cast<int64_t>(k));
+    for (uint64_t row = 0; row < m; ++row) {
+      const uint8_t * row_ptr = a_base + row * row_bytes;
+      float value = 0.0f;
+      if (src0_type == dtype_q2_k) {
+        value = dot_q2_k_q8_k_row_scalar(
+            reinterpret_cast<const quant::block_q2_k *>(row_ptr), q8_blocks.data(), block_count);
+      } else if (src0_type == dtype_q3_k) {
+        value = dot_q3_k_q8_k_row_scalar(
+            reinterpret_cast<const quant::block_q3_k *>(row_ptr), q8_blocks.data(), block_count);
+      } else {
+        value = dot_q6_k_q8_k_row_scalar(
+            reinterpret_cast<const quant::block_q6_k *>(row_ptr), q8_blocks.data(), block_count);
+      }
+      if (value > best_value || row == 0u) {
+        best_value = value;
+        best_index = static_cast<int32_t>(row);
+      }
+    }
+    *best_value_out = best_value;
+    *request.index_out = best_index;
+    return true;
+  }
+
+  return false;
+}
+
+template <class request_type>
 inline bool run_soft_max(const request_type & request) noexcept {
   const uint64_t width = request.src0.ne[0];
   const uint64_t count = tensor_element_count(request.src0);
@@ -1631,7 +2244,56 @@ inline bool can_run_mul_mat(const request_type & request) noexcept {
       request.src0.nb[1] == quantized_row_storage_bytes(src0_type, k) &&
       request.src0.nb[2] == request.src0.nb[1] * m &&
       request.src0.nb[3] == request.src0.nb[2];
-  return !has_empty_dim && valid_shape && (f32_path || quantized_path);
+  const bool packed_q6_vector_q8_rhs_path = src0_type == dtype_q6_k_x8 &&
+      src1_type == dtype_q8_k &&
+      dst_type == dtype_f32 &&
+      (k % quant::QK_K) == 0u &&
+      (k / quant::QK_K) <= quant::MAX_Q8_K_BLOCKS &&
+      request.src0.nb[0] == 1u &&
+      request.src0.nb[1] == quant::packed_q6_k_x8_group_storage_bytes(k) &&
+      request.src0.nb[2] ==
+          request.src0.nb[1] * quant::packed_q6_k_x8_group_count(m) &&
+      request.src0.nb[3] == request.src0.nb[2] &&
+      request.src1.nb[0] == 1u &&
+      request.src1.nb[1] == quantized_row_storage_bytes(src1_type, k) &&
+      request.src1.nb[2] == request.src1.nb[1] &&
+      request.src1.nb[3] == request.src1.nb[2] &&
+      is_dense_contiguous(request.dst);
+  const bool prepared_q6_vector_q8_rhs_path = src0_type == dtype_q6_k_x8_q8_prepared &&
+      src1_type == dtype_q8_k &&
+      dst_type == dtype_f32 &&
+      (k % quant::QK_K) == 0u &&
+      (k / quant::QK_K) <= quant::MAX_Q8_K_BLOCKS &&
+      request.src0.nb[0] == 1u &&
+      request.src0.nb[1] == quant::prepared_q6_k_x8_q8_group_storage_bytes(k) &&
+      request.src0.nb[2] ==
+          request.src0.nb[1] * quant::packed_q6_k_x8_group_count(m) &&
+      request.src0.nb[3] == request.src0.nb[2] &&
+      request.src1.nb[0] == 1u &&
+      request.src1.nb[1] == quantized_row_storage_bytes(src1_type, k) &&
+      request.src1.nb[2] == request.src1.nb[1] &&
+      request.src1.nb[3] == request.src1.nb[2] &&
+      is_dense_contiguous(request.dst);
+  const bool argmax_prepared_q6_vector_q8_rhs_path =
+      src0_type == dtype_q6_k_x8_q8_argmax_prepared &&
+      src1_type == dtype_q8_k &&
+      dst_type == dtype_f32 &&
+      (k % quant::QK_K) == 0u &&
+      (k / quant::QK_K) <= quant::MAX_Q8_K_BLOCKS &&
+      request.src0.nb[0] == 1u &&
+      request.src0.nb[1] == quant::argmax_prepared_q6_k_x8_q8_group_storage_bytes(k) &&
+      request.src0.nb[2] ==
+          request.src0.nb[1] * quant::packed_q6_k_x8_group_count(m) &&
+      request.src0.nb[3] == request.src0.nb[2] &&
+      request.src1.nb[0] == 1u &&
+      request.src1.nb[1] == quantized_row_storage_bytes(src1_type, k) &&
+      request.src1.nb[2] == request.src1.nb[1] &&
+      request.src1.nb[3] == request.src1.nb[2] &&
+      is_dense_contiguous(request.dst);
+  return !has_empty_dim &&
+      valid_shape &&
+      (f32_path || quantized_path || packed_q6_vector_q8_rhs_path ||
+       prepared_q6_vector_q8_rhs_path || argmax_prepared_q6_vector_q8_rhs_path);
 }
 
 template <class request_type>
@@ -1655,7 +2317,12 @@ inline float flash_attn_scale(const request_type & request) noexcept {
 }
 
 template <class request_type>
-inline uint64_t flash_attn_total_tokens(const request_type & request) noexcept {
+inline uint64_t flash_attn_active_tokens(const request_type & request) noexcept {
+  return request.src1.ne[1];
+}
+
+template <class request_type>
+inline uint64_t flash_attn_masked_total_tokens(const request_type & request) noexcept {
   if (request.op_params_size >= sizeof(float) + sizeof(uint32_t)) {
     uint32_t total_tokens = 0u;
     std::memcpy(&total_tokens,
@@ -1664,11 +2331,15 @@ inline uint64_t flash_attn_total_tokens(const request_type & request) noexcept {
     return total_tokens;
   }
 
-  return request.src1.ne[1];
+  return flash_attn_active_tokens(request);
+}
+
+inline float round_fp16_scalar(const float value) noexcept {
+  return quant::fp16_to_fp32(quant::fp32_to_fp16(value));
 }
 
 inline float round_fp16_weight(const float value) noexcept {
-  return quant::fp16_to_fp32(quant::fp32_to_fp16(value));
+  return round_fp16_scalar(value);
 }
 
 inline void scale_f32_scalar(float * data, const float scale, const uint64_t count) noexcept {
@@ -1684,58 +2355,67 @@ inline void axpy_f32_scalar(float * dst, const float * src,
   }
 }
 
-template <class get_q_fn, class get_k_fn, class get_v_fn, class get_dst_fn, class zero_fn,
-          class scale_fn, class axpy_fn, class record_score_fn, class finish_head_fn>
-inline void run_flash_attn_online_softmax_f32(const uint64_t head_dim,
-                                              const uint64_t head_count,
-                                              const uint64_t kv_head_count,
-                                              const uint64_t kv_tokens,
-                                              const float scale,
-                                              get_q_fn get_q,
-                                              get_k_fn get_k,
-                                              get_v_fn get_v,
-                                              get_dst_fn get_dst,
-                                              zero_fn zero_dst,
-                                              scale_fn scale_dst,
-                                              axpy_fn axpy_dst,
-                                              record_score_fn record_score,
-                                              finish_head_fn finish_head) noexcept {
-  const uint64_t n_rep = head_count / kv_head_count;
+inline void scale_f16_effective_accumulator_scalar(float * data,
+                                                   const float scale,
+                                                   const uint64_t count) noexcept {
+  const float rounded_scale = round_fp16_scalar(scale);
+  for (uint64_t idx = 0; idx < count; ++idx) {
+    data[idx] = round_fp16_scalar(round_fp16_scalar(data[idx]) * rounded_scale);
+  }
+}
 
-  for (uint64_t head = 0; head < head_count; ++head) {
-    const uint64_t kv_head = head / n_rep;
-    const float * q = get_q(head);
-    float * dst = get_dst(head);
-    zero_dst(dst, head_dim);
+inline void axpy_f16_effective_accumulator_scalar(float * dst,
+                                                  const float * src,
+                                                  const float alpha,
+                                                  const uint64_t count) noexcept {
+  const float rounded_alpha = round_fp16_scalar(alpha);
+  for (uint64_t idx = 0; idx < count; ++idx) {
+    const float rounded_dst = round_fp16_scalar(dst[idx]);
+    const float rounded_src = round_fp16_scalar(src[idx]);
+    dst[idx] = round_fp16_scalar(rounded_dst + rounded_src * rounded_alpha);
+  }
+}
 
-    float score_sum = 0.0f;
-    float max_score = -std::numeric_limits<float>::infinity();
-    for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float * k = get_k(token, kv_head);
-      const float score = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
-      record_score(head, token, score);
+inline void convert_f32_to_fp16_buffer_scalar(const float * src,
+                                              uint16_t * dst,
+                                              const uint64_t count) noexcept {
+  for (uint64_t idx = 0; idx < count; ++idx) {
+    dst[idx] = quant::fp32_to_fp16(src[idx]);
+  }
+}
 
-      const float old_max = max_score;
-      float max_scale = 1.0f;
-      float value_scale = 1.0f;
-      if (score > max_score) {
-        max_score = score;
-        max_scale = std::exp(old_max - max_score);
-        scale_dst(dst, max_scale, head_dim);
-      } else {
-        value_scale = std::exp(score - max_score);
-      }
+inline void zero_f16_buffer_scalar(uint16_t * dst, const uint64_t count) noexcept {
+  std::fill_n(dst, count, static_cast<uint16_t>(0u));
+}
 
-      axpy_dst(dst, get_v(token, kv_head), value_scale, head_dim);
-      score_sum = score_sum * max_scale + value_scale;
-    }
+inline void scale_f16_buffer_scalar(uint16_t * data,
+                                    const float scale,
+                                    const uint64_t count) noexcept {
+  const float rounded_scale = round_fp16_scalar(scale);
+  for (uint64_t idx = 0; idx < count; ++idx) {
+    const float rounded_value = quant::fp16_to_fp32(data[idx]);
+    data[idx] = quant::fp32_to_fp16(round_fp16_scalar(rounded_value * rounded_scale));
+  }
+}
 
-    if (score_sum == 0.0f) {
-      zero_dst(dst, head_dim);
-    } else {
-      scale_dst(dst, 1.0f / score_sum, head_dim);
-    }
-    finish_head(head, kv_tokens);
+inline void axpy_f16_buffer_scalar(uint16_t * dst,
+                                   const uint16_t * src,
+                                   const float alpha,
+                                   const uint64_t count) noexcept {
+  const float rounded_alpha = round_fp16_scalar(alpha);
+  for (uint64_t idx = 0; idx < count; ++idx) {
+    const float rounded_dst = quant::fp16_to_fp32(dst[idx]);
+    const float rounded_src = quant::fp16_to_fp32(src[idx]);
+    dst[idx] = quant::fp32_to_fp16(
+        round_fp16_scalar(rounded_dst + rounded_src * rounded_alpha));
+  }
+}
+
+inline void convert_f16_buffer_to_f32_scalar(const uint16_t * src,
+                                             float * dst,
+                                             const uint64_t count) noexcept {
+  for (uint64_t idx = 0; idx < count; ++idx) {
+    dst[idx] = quant::fp16_to_fp32(src[idx]);
   }
 }
 
@@ -1756,12 +2436,13 @@ inline bool can_run_flash_attn_ext(const request_type & request) noexcept {
   const uint64_t head_dim = request.src0.ne[0];
   const uint64_t query_count = request.src0.ne[1];
   const uint64_t head_count = request.src0.ne[2];
-  const uint64_t kv_tokens = request.src1.ne[1];
+  const uint64_t kv_tokens = flash_attn_active_tokens(request);
   const uint64_t kv_head_count = request.src1.ne[2];
+  const uint64_t masked_total_tokens = flash_attn_masked_total_tokens(request);
 
-  const bool f32_only = src0_type == dtype_f32 &&
-      src1_type == dtype_f32 &&
-      src2_type == dtype_f32 &&
+  const bool explicit_operand_contract = src0_type == dtype_f32 &&
+      src1_type == dtype_f16 &&
+      src2_type == dtype_f16 &&
       dst_type == dtype_f32;
   const bool dims_present =
       head_dim != 0u && query_count == 1u && head_count != 0u && kv_tokens != 0u &&
@@ -1787,7 +2468,9 @@ inline bool can_run_flash_attn_ext(const request_type & request) noexcept {
       is_dense_contiguous(request.dst);
   const float scale = flash_attn_scale(request);
 
-  return f32_only && dims_present && src2_valid && shape_match && layout_supported &&
+  return explicit_operand_contract && dims_present && src2_valid && shape_match &&
+      layout_supported &&
+      masked_total_tokens >= kv_tokens &&
       std::isfinite(scale) &&
       scale > 0.0f;
 }
@@ -1824,6 +2507,8 @@ inline bool can_execute_scalar(const request_type & request) noexcept {
     return can_run_unary(request);
   } else if constexpr (std::is_same_v<request_type, event::op_mul_mat>) {
     return can_run_mul_mat(request);
+  } else if constexpr (std::is_same_v<request_type, event::op_mul_mat_argmax>) {
+    return can_run_mul_mat_argmax(request);
   } else if constexpr (std::is_same_v<request_type, event::op_soft_max>) {
     return can_run_soft_max(request);
   } else if constexpr (std::is_same_v<request_type, event::op_flash_attn_ext>) {
@@ -1845,18 +2530,12 @@ inline bool run_flash_attn_ext(const request_type & request) noexcept {
 }
 
 template <class request_type>
-inline bool run_flash_attn_ext_with_workspace(const request_type & request,
-                                              flash_attn_workspace & workspace) noexcept {
-  if (!can_run_flash_attn_ext(request)) {
-    return false;
-  }
-
-  const uint64_t kv_tokens = request.src1.ne[1];
-  const uint64_t attn_width = flash_attn_total_tokens(request);
-  if (kv_tokens > workspace.score_buffer.size()) {
-    return false;
-  }
-  if (attn_width < kv_tokens || attn_width > workspace.score_buffer.size()) {
+inline bool run_flash_attn_ext_active_kv_with_workspace(
+    const request_type & request,
+    flash_attn_workspace & workspace) noexcept {
+  const uint64_t kv_tokens = flash_attn_active_tokens(request);
+  const uint64_t masked_total_tokens = flash_attn_masked_total_tokens(request);
+  if (masked_total_tokens < kv_tokens) {
     return false;
   }
 
@@ -1869,51 +2548,62 @@ inline bool run_flash_attn_ext_with_workspace(const request_type & request,
   const uint64_t head_dim = request.src0.ne[0];
   const uint64_t head_count = request.src0.ne[2];
   const uint64_t kv_head_count = request.src1.ne[2];
-  const uint64_t n_rep = head_count / kv_head_count;
   const float scale = flash_attn_scale(request);
+  if (head_dim > workspace.q_buffer_f16.size() || head_dim > workspace.accum_buffer_f16.size()) {
+    return false;
+  }
 
+  (void) masked_total_tokens;
+  const uint64_t n_rep = head_count / kv_head_count;
   for (uint64_t head = 0; head < head_count; ++head) {
     const uint64_t kv_head = head / n_rep;
     const float * q = tensor_row_ptr(request.src0, 0u, head);
+    uint16_t * accum = workspace.accum_buffer_f16.data();
     float * dst = tensor_row_ptr_mut(request.dst, 0u, head);
+    convert_f32_to_fp16_buffer_scalar(q, workspace.q_buffer_f16.data(), head_dim);
+    zero_f16_buffer_scalar(accum, head_dim);
 
+    float score_sum = 0.0f;
+    float max_score = -std::numeric_limits<float>::infinity();
     for (uint64_t token = 0; token < kv_tokens; ++token) {
-      const float * k = tensor_row_ptr(request.src1, token, kv_head);
-      workspace.score_buffer[token] = dot_product_ggml_f16_scores(q, k, head_dim) * scale;
-    }
-    for (uint64_t token = kv_tokens; token < attn_width; ++token) {
-      workspace.score_buffer[token] = -std::numeric_limits<float>::infinity();
-    }
-
-    float max_score = workspace.score_buffer[0];
-    for (uint64_t token = 1; token < attn_width; ++token) {
-      max_score = std::max(max_score, workspace.score_buffer[token]);
-    }
-
-    const double score_sum = exp_and_sum_ggml_f32(
-        workspace.score_buffer.data(), workspace.value_buffer.data(), attn_width, max_score);
-
-    const float inv_score_sum =
-        score_sum == 0.0 ? 0.0f : static_cast<float>(1.0 / score_sum);
-    for (uint64_t token = 0; token < attn_width; ++token) {
-      const float weight = workspace.value_buffer[token] * inv_score_sum;
-      workspace.score_buffer[token] = round_fp16_weight(weight);
-    }
-
-    for (uint64_t dim = 0; dim < head_dim; ++dim) {
-      for (uint64_t token = 0; token < kv_tokens; ++token) {
-        const float * v = tensor_row_ptr(request.src2, token, kv_head);
-        workspace.value_buffer[token] = v[dim];
+      const uint16_t * k = tensor_row_ptr_as<uint16_t>(request.src1, token, kv_head);
+      const float score = dot_product_f16_f16_scores(workspace.q_buffer_f16.data(), k, head_dim) *
+          scale;
+      const float old_max = max_score;
+      float max_scale = 1.0f;
+      float value_scale = 1.0f;
+      if (score > max_score) {
+        max_score = score;
+        max_scale = std::exp(old_max - max_score);
+        scale_f16_buffer_scalar(accum, max_scale, head_dim);
+      } else {
+        value_scale = std::exp(score - max_score);
       }
-      for (uint64_t token = kv_tokens; token < attn_width; ++token) {
-        workspace.value_buffer[token] = 0.0f;
-      }
-      dst[dim] = dot_product_ggml_f16_scores(
-          workspace.value_buffer.data(), workspace.score_buffer.data(), attn_width);
+
+      const uint16_t * v = tensor_row_ptr_as<uint16_t>(request.src2, token, kv_head);
+      axpy_f16_buffer_scalar(accum, v, value_scale, head_dim);
+      score_sum = score_sum * max_scale + value_scale;
+    }
+
+    convert_f16_buffer_to_f32_scalar(accum, dst, head_dim);
+    if (score_sum == 0.0f) {
+      std::fill_n(dst, head_dim, 0.0f);
+    } else {
+      scale_f32_scalar(dst, 1.0f / score_sum, head_dim);
     }
   }
 
   return true;
+}
+
+template <class request_type>
+inline bool run_flash_attn_ext_with_workspace(const request_type & request,
+                                              flash_attn_workspace & workspace) noexcept {
+  if (!can_run_flash_attn_ext(request)) {
+    return false;
+  }
+
+  return run_flash_attn_ext_active_kv_with_workspace(request, workspace);
 }
 
 template <class request_type>
@@ -1948,6 +2638,8 @@ inline void execute_scalar_unchecked(const request_type & request) noexcept {
     (void) run_unary(request, [](const float v) { return std::cos(v); });
   } else if constexpr (std::is_same_v<request_type, event::op_mul_mat>) {
     (void) run_mul_mat(request);
+  } else if constexpr (std::is_same_v<request_type, event::op_mul_mat_argmax>) {
+    (void) run_mul_mat_argmax(request);
   } else if constexpr (std::is_same_v<request_type, event::op_soft_max>) {
     (void) run_soft_max(request);
   } else if constexpr (std::is_same_v<request_type, event::op_flash_attn_ext>) {

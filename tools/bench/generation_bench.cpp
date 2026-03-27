@@ -36,6 +36,8 @@
 
 #include "ggml.h"
 #include "llama.h"
+#include "llama-context.h"
+#include "llama-memory.h"
 #include "llama-vocab.h"
 
 namespace {
@@ -75,6 +77,8 @@ constexpr generation_case_spec k_generation_1000_case = {
 
 using llama_model_ptr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
 using llama_context_ptr = std::unique_ptr<llama_context, decltype(&llama_free)>;
+
+constexpr llama_flash_attn_type k_reference_flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
 
 std::uint64_t read_env_u64(const char * name, const std::uint64_t fallback) {
   const char * value = std::getenv(name);
@@ -1404,9 +1408,40 @@ llama_model_ptr load_reference_model(const std::string & model_path) {
   return llama_model_ptr{llama_model_load_from_file(model_path.c_str(), params), llama_model_free};
 }
 
+bool reference_graph_contains_flash_attn_op(llama_context & ctx) {
+  const auto & cparams = ctx.get_cparams();
+  if (!cparams.flash_attn || cparams.auto_fa) {
+    return false;
+  }
+
+  llama_memory_context_ptr mctx;
+  if (llama_memory_t memory = ctx.get_memory()) {
+    mctx = memory->init_full();
+  }
+
+  ggml_cgraph * graph = ctx.graph_reserve(1u, 1u, 1u, mctx.get(), true);
+  if (graph == nullptr) {
+    return false;
+  }
+
+  for (int32_t idx = 0; idx < ggml_graph_n_nodes(graph); ++idx) {
+    ggml_tensor * node = ggml_graph_node(graph, idx);
+    if (node != nullptr && node->op == GGML_OP_FLASH_ATTN_EXT) {
+      return true;
+    }
+  }
+  return false;
+}
+
+llama_context_ptr init_reference_context(llama_model * model,
+                                         const llama_context_params & params) {
+  return llama_context_ptr{model != nullptr ? llama_init_from_model(model, params) : nullptr,
+                           llama_free};
+}
+
 llama_context_ptr make_reference_context(llama_model * model) {
   llama_context_params params = llama_context_default_params();
-  params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+  params.flash_attn_type = k_reference_flash_attn_type;
   params.n_ctx = 0;
   params.n_batch = 512;
   params.n_ubatch = 512;
@@ -1414,13 +1449,15 @@ llama_context_ptr make_reference_context(llama_model * model) {
   params.n_threads = 1;
   params.n_threads_batch = 1;
   params.embeddings = false;
-  return llama_context_ptr{model != nullptr ? llama_init_from_model(model, params) : nullptr,
-                           llama_free};
+  llama_context_ptr probe = init_reference_context(model, params);
+  if (probe != nullptr && !reference_graph_contains_flash_attn_op(*probe)) {
+    fail_bench_setup("make_reference_context", "reference graph missing flash attention op");
+  }
+  return init_reference_context(model, params);
 }
 
 void prepare_emel_session(const emel_fixture & fixture, emel_session & session) {
   session.model_data = fixture.model_data;
-  session.samplers[0] = emel::logits::sampler::fn::from<sampler_select_argmax>();
   session.generator = std::make_unique<emel::generator::sm>(
       session.model_data,
       session.conditioner,
@@ -1444,12 +1481,13 @@ bool initialize_emel_session(emel_session & session, const generation_case_spec 
       &session.tokenizer,
       tokenizer_bind_dispatch,
       tokenizer_tokenize_dispatch,
-      std::span<emel::logits::sampler::fn>{session.samplers},
+      std::span<emel::logits::sampler::fn>{},
   };
   request.preprocessor_variant = generation_preprocessor_variant(session.model_data);
   request.encoder_variant = generation_encoder_variant(session.model_data);
   request.add_special = false;
   request.parse_special = false;
+  request.selection_mode = emel::generator::selection_mode::preselected_argmax;
   request.max_prompt_tokens = prompt_capacity;
   request.max_generated_tokens = decode_capacity;
   request.max_blocks = block_capacity;
@@ -1483,7 +1521,6 @@ bool run_emel_generate(emel_session & session,
   request.error_out = &error_out;
   request.on_done = {&session, on_generation_done};
   request.on_error = {&session, on_generation_error};
-
   const bool accepted = session.generator->process_event(request);
   if (!accepted || !session.generation.done || session.generation.error ||
       error_out != emel::error::cast(emel::generator::error::none)) {

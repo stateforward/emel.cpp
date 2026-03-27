@@ -318,6 +318,16 @@ struct model {
                  / action::reject_invalid_op_mul_mat
 
       , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::cuda::event::dispatch_op_mul_mat_argmax>
+                 [ guard::valid_op_mul_mat_argmax{} ]
+                 / action::exec_op_mul_mat_argmax
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::cuda::event::dispatch_op_mul_mat_argmax>
+                 [ guard::invalid_op_mul_mat_argmax{} ]
+                 / action::reject_invalid_op_mul_mat_argmax
+
+      , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::cuda::event::dispatch_op_mul_mat_id>
                  [ guard::valid_op_mul_mat_id{} ]
                  / action::exec_op_mul_mat_id

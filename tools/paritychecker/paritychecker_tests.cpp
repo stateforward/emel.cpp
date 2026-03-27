@@ -616,8 +616,11 @@ TEST_CASE("paritychecker generation keeps parity across the maintained decode le
     CHECK(capture.exit_code == 0);
     CHECK(capture.stderr_text.empty());
     CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
-    CHECK(capture.stdout_text.find("reference_impl: source=") != std::string::npos);
+    CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") !=
+          std::string::npos);
     CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
+    CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") == 0);
+    CHECK(parse_named_metric(capture.stdout_text, "reference_logits_calls") == 0);
     CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
     CHECK(capture.stdout_text.find("generation initialize ok") == std::string::npos);
     CHECK(capture.stdout_text.find("emel generator path ready") == std::string::npos);
@@ -651,8 +654,69 @@ TEST_CASE("paritychecker generation dump proves the EMEL path avoids the referen
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
   CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+  CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") !=
+        std::string::npos);
   CHECK(capture.stdout_text.find("max_tokens=1") != std::string::npos);
   CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
+  CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") == 0);
+  CHECK(parse_named_metric(capture.stdout_text, "reference_logits_calls") == 0);
+}
+
+TEST_CASE("paritychecker generation attribution reports maintained runtime phase buckets") {
+  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+  REQUIRE(file_exists(model_path));
+
+  const process_capture capture = run_generation_paritychecker_capture_with_args({
+    "--generation",
+    "--model",
+    model_path.string(),
+    "--text",
+    "hello",
+    "--max-tokens",
+    "1",
+    "--attribution",
+  });
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+  CHECK(capture.stdout_text.find("generation_attribution:") != std::string::npos);
+  CHECK(capture.stdout_text.find("generation_attribution.bucket: name=rms_norm") !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find("generation_attribution.bucket: name=attention") !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find("generation_attribution.bucket: name=swiglu") !=
+        std::string::npos);
+}
+
+TEST_CASE("paritychecker generation can write a maintained baseline artifact") {
+  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+  REQUIRE(file_exists(model_path));
+
+  const auto baseline_path =
+      make_temp_fixture_path("paritychecker-generation-baseline", "generation-baseline.txt");
+  const process_capture capture = run_generation_paritychecker_capture_with_args({
+    "--generation",
+    "--model",
+    model_path.string(),
+    "--text",
+    "hello",
+    "--max-tokens",
+    "1",
+    "--write-generation-baseline",
+    baseline_path.string(),
+  });
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  CHECK(capture.stdout_text.find("generation baseline written") != std::string::npos);
+  CHECK(file_exists(baseline_path));
+  const std::string baseline_text = read_text_file(baseline_path);
+  CHECK(baseline_text.find("format=emel_generation_baseline_v1") != std::string::npos);
+  CHECK(baseline_text.find("contract=generation_online_f16_final_normalize_v1") !=
+        std::string::npos);
+  CHECK(baseline_text.find("max_tokens=1") != std::string::npos);
+  std::filesystem::remove_all(baseline_path.parent_path());
 }
 
 TEST_CASE("paritychecker help describes the canonical generation fixture contract") {
@@ -662,6 +726,7 @@ TEST_CASE("paritychecker help describes the canonical generation fixture contrac
   CHECK(capture.stdout_text.empty());
   CHECK(capture.stderr_text.find("--generation mode requires --model tests/models/"
                                  "Llama-68M-Chat-v1-Q2_K.gguf") != std::string::npos);
+  CHECK(capture.stderr_text.find("snapshots/parity/") != std::string::npos);
   CHECK(capture.stderr_text.find("reserves the generation CLI contract") == std::string::npos);
 }
 

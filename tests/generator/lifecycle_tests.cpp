@@ -389,17 +389,24 @@ struct generator_fixture {
 
   emel::generator::event::initialize make_initialize(
       callback_tracker & tracker,
-      emel::error::type * error_out = nullptr) {
+      emel::error::type * error_out = nullptr,
+      const emel::generator::selection_mode selection_mode =
+          emel::generator::selection_mode::sample_logits) {
+    const std::span<emel::logits::sampler::fn> sampler_span =
+        selection_mode == emel::generator::selection_mode::sample_logits
+            ? std::span<emel::logits::sampler::fn>{samplers}
+            : std::span<emel::logits::sampler::fn>{};
     emel::generator::event::initialize request{
       &tokenizer,
       tokenizer_bind_dispatch,
       tokenizer_tokenize_dispatch,
-      std::span<emel::logits::sampler::fn>{samplers},
+      sampler_span,
     };
     request.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
     request.encoder_variant = emel::text::encoders::encoder_kind::bpe;
     request.add_special = false;
     request.parse_special = false;
+    request.selection_mode = selection_mode;
     request.max_prompt_tokens = 8;
     request.max_generated_tokens = 4;
     request.max_blocks = 8;
@@ -488,6 +495,20 @@ TEST_CASE("generator_initialize_succeeds_and_enters_ready") {
   callback_tracker tracker{};
   emel::error::type error = emel::error::cast(emel::generator::error::backend);
   const auto request = fixture->make_initialize(tracker, &error);
+
+  CHECK(fixture->generator->process_event(request));
+  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK(tracker.initialize_done_called);
+  CHECK_FALSE(tracker.initialize_error_called);
+  CHECK(error == emel::error::cast(emel::generator::error::none));
+}
+
+TEST_CASE("generator_initialize_accepts_explicit_preselected_argmax_mode_without_sampler_chain") {
+  auto fixture = std::make_unique<generator_fixture>();
+  callback_tracker tracker{};
+  emel::error::type error = emel::error::cast(emel::generator::error::backend);
+  const auto request = fixture->make_initialize(
+      tracker, &error, emel::generator::selection_mode::preselected_argmax);
 
   CHECK(fixture->generator->process_event(request));
   CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
@@ -607,6 +628,10 @@ TEST_CASE("generator_generate_f32_fixture_does_not_claim_quantized_optimized_dis
   CHECK(fixture->generator->generation_optimized_q3_dispatch_calls() == 0u);
   CHECK(fixture->generator->generation_shared_q3_dispatch_calls() == 0u);
   CHECK(fixture->generator->generation_optimized_q6_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_optimized_q6_vector_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_optimized_q6_vector_packed_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_dispatch_calls() == 0u);
+  CHECK(fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_dispatch_calls() == 0u);
   CHECK(fixture->generator->generation_shared_q6_dispatch_calls() == 0u);
 }
 
@@ -720,6 +745,198 @@ TEST_CASE("generator_generate_quantized_contract_fixture_preserves_zero_disallow
   CHECK(fixture->generator->generation_approved_dense_f32_stage_count() == 4u);
   CHECK(fixture->generator->generation_disallowed_fallback_stage_count() == 0u);
   CHECK(fixture->generator->generation_explicit_no_claim_stage_count() == 0u);
+  if (host_is_aarch64()) {
+    CHECK(fixture->generator->generation_optimized_q6_vector_dispatch_calls() > 0u);
+    CHECK(fixture->generator->generation_optimized_q6_vector_packed_dispatch_calls() > 0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_dispatch_calls() > 0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls() ==
+        0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_dispatch_calls() == 0u);
+  } else {
+    CHECK(fixture->generator->generation_optimized_q6_vector_dispatch_calls() == 0u);
+    CHECK(fixture->generator->generation_optimized_q6_vector_packed_dispatch_calls() == 0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_dispatch_calls() == 0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_dispatch_calls() == 0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls() ==
+        0u);
+  }
+}
+
+TEST_CASE("generator_generate_quantized_contract_fixture_supports_explicit_preselected_argmax_mode") {
+  auto fixture = std::make_unique<generator_fixture>(
+      generator_fixture::model_variant::quantized_contract);
+  callback_tracker initialize_tracker{};
+  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  const auto initialize_request = fixture->make_initialize(
+      initialize_tracker,
+      &initialize_error,
+      emel::generator::selection_mode::preselected_argmax);
+  auto long_initialize_request = initialize_request;
+  long_initialize_request.max_generated_tokens = 16;
+  long_initialize_request.max_blocks = 32;
+
+  REQUIRE(fixture->generator->process_event(long_initialize_request));
+  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+
+  callback_tracker generate_tracker{};
+  std::array<char, 32> output = {};
+  size_t output_length = 0;
+  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  const auto generate_request =
+      fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
+                             &generate_error);
+
+  REQUIRE(fixture->generator->process_event(generate_request));
+  CHECK_FALSE(generate_tracker.generate_error_called);
+  CHECK(generate_tracker.generate_done_called);
+  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(output_length > 0u);
+  if (host_is_aarch64()) {
+    CHECK(fixture->generator->generation_optimized_q6_vector_argmax_dispatch_calls() > 0u);
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls() >
+        0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls() ==
+        0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls() ==
+        0u);
+#else
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls() ==
+        0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls() ==
+        0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls() ==
+        0u);
+#endif
+  } else {
+    CHECK(fixture->generator->generation_optimized_q6_vector_argmax_dispatch_calls() == 0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls() ==
+        0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls() ==
+        0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls() ==
+        0u);
+  }
+}
+
+TEST_CASE(
+    "generator_generate_quantized_contract_fixture_allows_repeated_explicit_preselected_argmax_generates") {
+  auto fixture = std::make_unique<generator_fixture>(
+      generator_fixture::model_variant::quantized_contract);
+  callback_tracker initialize_tracker{};
+  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  const auto initialize_request = fixture->make_initialize(
+      initialize_tracker,
+      &initialize_error,
+      emel::generator::selection_mode::preselected_argmax);
+
+  REQUIRE(fixture->generator->process_event(initialize_request));
+  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+
+  callback_tracker first_tracker{};
+  std::array<char, 64> first_output = {};
+  size_t first_output_length = 0;
+  emel::error::type first_error = emel::error::cast(emel::generator::error::backend);
+  const auto first_request = fixture->make_generate(
+      first_tracker, first_output.data(), first_output.size(), first_output_length, &first_error);
+
+  REQUIRE(fixture->generator->process_event(first_request));
+  REQUIRE_FALSE(first_tracker.generate_error_called);
+  REQUIRE(first_tracker.generate_done_called);
+  REQUIRE(first_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(first_output_length > 0u);
+
+  callback_tracker second_tracker{};
+  std::array<char, 64> second_output = {};
+  size_t second_output_length = 0;
+  emel::error::type second_error = emel::error::cast(emel::generator::error::backend);
+  const auto second_request = fixture->make_generate(
+      second_tracker,
+      second_output.data(),
+      second_output.size(),
+      second_output_length,
+      &second_error);
+
+  CHECK(fixture->generator->process_event(second_request));
+  CHECK_FALSE(second_tracker.generate_error_called);
+  CHECK(second_tracker.generate_done_called);
+  CHECK(second_error == emel::error::cast(emel::generator::error::none));
+  CHECK(second_output_length > 0u);
+}
+
+TEST_CASE(
+    "generator_generate_quantized_contract_fixture_allows_repeated_multi_token_explicit_preselected_argmax_generates") {
+  auto fixture = std::make_unique<generator_fixture>(
+      generator_fixture::model_variant::quantized_contract);
+  callback_tracker initialize_tracker{};
+  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  const auto initialize_request = fixture->make_initialize(
+      initialize_tracker,
+      &initialize_error,
+      emel::generator::selection_mode::preselected_argmax);
+
+  REQUIRE(fixture->generator->process_event(initialize_request));
+  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+
+  const auto make_long_generate =
+      [](callback_tracker & tracker,
+         std::array<char, 256> & output,
+         size_t & output_length,
+         emel::error::type * error_out) {
+        emel::generator::event::generate request{
+          generator_fixture::k_phase_4_prompt,
+          2,
+          std::span<char>{output.data(), output.size()},
+          output_length,
+        };
+        request.error_out = error_out;
+        request.on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
+            &tracker, on_generate_done);
+        request.on_error = emel::callback<void(const emel::generator::events::generation_error &)>(
+            &tracker, on_generate_error);
+        return request;
+      };
+
+  callback_tracker first_tracker{};
+  std::array<char, 256> first_output = {};
+  size_t first_output_length = 0;
+  emel::error::type first_error = emel::error::cast(emel::generator::error::backend);
+  const auto first_request =
+      make_long_generate(first_tracker, first_output, first_output_length, &first_error);
+
+  REQUIRE(fixture->generator->process_event(first_request));
+  REQUIRE_FALSE(first_tracker.generate_error_called);
+  REQUIRE(first_tracker.generate_done_called);
+  REQUIRE(first_error == emel::error::cast(emel::generator::error::none));
+  REQUIRE(first_output_length > 0u);
+
+  callback_tracker second_tracker{};
+  std::array<char, 256> second_output = {};
+  size_t second_output_length = 0;
+  emel::error::type second_error = emel::error::cast(emel::generator::error::backend);
+  const auto second_request =
+      make_long_generate(second_tracker, second_output, second_output_length, &second_error);
+
+  CHECK(fixture->generator->process_event(second_request));
+  CHECK_FALSE(second_tracker.generate_error_called);
+  CHECK(second_tracker.generate_done_called);
+  CHECK(second_error == emel::error::cast(emel::generator::error::none));
+  CHECK(second_output_length > 0u);
 }
 
 TEST_CASE("generator_generate_pins_the_phase_4_request_contract") {

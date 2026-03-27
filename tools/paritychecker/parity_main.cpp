@@ -13,13 +13,15 @@ void print_usage(const char * exe) {
   std::fprintf(stderr,
                "usage: %s [--gbnf | --kernel | --jinja | --generation] [--model <path>] "
                "(--text <text> | --text-file <path>) "
-               "[--max-tokens <count>] [--add-special] [--parse-special] [--dump]\n"
+               "[--max-tokens <count>] [--add-special] [--parse-special] [--dump] "
+               "[--attribution] [--write-generation-baseline <path>]\n"
                "  default mode compares tokenizer parity and requires --model\n"
                "  --gbnf mode compares GBNF parser parity and ignores --model\n"
                "  --kernel mode compares kernel parity and ignores --model\n"
                "  --jinja mode compares jinja parser/formatter parity and ignores --model\n"
                "  --generation mode requires --model tests/models/Llama-68M-Chat-v1-Q2_K.gguf "
-               "and prompt text\n",
+               "and prompt text; it compares against maintained baseline artifacts under "
+               "snapshots/parity/\n",
                exe);
 }
 
@@ -123,6 +125,17 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
       out.dump = true;
       continue;
     }
+    if (arg == "--attribution") {
+      out.attribution = true;
+      continue;
+    }
+    if (arg == "--write-generation-baseline") {
+      if (i + 1 >= argc) {
+        return false;
+      }
+      out.write_generation_baseline_path = argv[++i];
+      continue;
+    }
     if (arg == "--max-tokens") {
       if (i + 1 >= argc) {
         return false;
@@ -149,15 +162,22 @@ bool parse_args(int argc, char ** argv, parity_options & out) {
     return false;
   }
   if (out.mode == emel::paritychecker::parity_mode::gbnf_parser &&
-      (out.add_special || out.parse_special)) {
+      (out.add_special || out.parse_special || out.attribution)) {
     return false;
   }
   if (out.mode == emel::paritychecker::parity_mode::jinja &&
-      (out.add_special || out.parse_special)) {
+      (out.add_special || out.parse_special || out.attribution)) {
     return false;
   }
   if (out.mode == emel::paritychecker::parity_mode::generation &&
       (out.add_special || out.parse_special)) {
+    return false;
+  }
+  if (out.mode != emel::paritychecker::parity_mode::generation && out.attribution) {
+    return false;
+  }
+  if (out.mode != emel::paritychecker::parity_mode::generation &&
+      !out.write_generation_baseline_path.empty()) {
     return false;
   }
   return true;

@@ -68,6 +68,8 @@ struct session_buffers {
 
 struct session_state {
   bool sequence_live = false;
+  emel::generator::selection_mode selection_mode =
+      emel::generator::selection_mode::sample_logits;
   emel::graph::event::reserve_output graph_reservation = {};
   emel::memory::view::snapshot memory_snapshot = {};
 };

@@ -65,7 +65,10 @@ stateDiagram-v2
   ready --> ready : dispatch_op_group_norm [dispatch_op_group_norm__] / dispatch_op_group_norm__
   ready --> ready : dispatch_op_l2_norm [dispatch_op_l2_norm__] / dispatch_op_l2_norm__
   ready --> ready : dispatch_op_l2_norm [dispatch_op_l2_norm__] / dispatch_op_l2_norm__
-  ready --> ready : dispatch_op_mul_mat [dispatch_op_mul_mat__] / dispatch_op_mul_mat__
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_packed_q8_rhs_] / exec_simd_q6_vector_packed_q8_rhs_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_packed_] / exec_simd_q6_vector_packed_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_q6_vector_] / exec_simd_q6_vector_op_mul_mat_
+  ready --> ready : dispatch_op_mul_mat [simd_op_mul_mat_generic_] / dispatch_op_mul_mat__
   ready --> ready : dispatch_op_mul_mat [dispatch_op_mul_mat__] / dispatch_op_mul_mat__
   ready --> ready : dispatch_op_mul_mat [dispatch_op_mul_mat__] / dispatch_op_mul_mat__
   ready --> ready : dispatch_op_mul_mat_id [dispatch_op_mul_mat_id__] / dispatch_op_mul_mat_id__
@@ -154,7 +157,8 @@ stateDiagram-v2
   ready --> ready : dispatch_op_tri [dispatch_op_tri__] / dispatch_op_tri__
   ready --> ready : dispatch_op_fill [dispatch_op_fill__] / dispatch_op_fill__
   ready --> ready : dispatch_op_fill [dispatch_op_fill__] / dispatch_op_fill__
-  ready --> ready : dispatch_op_flash_attn_ext [dispatch_op_flash_attn_ext__] / dispatch_op_flash_attn_ext__
+  ready --> ready : dispatch_op_flash_attn_ext [simd_op_flash_attn_ext_f16kv_one_chunk_] / exec_simd_flash_attn_ext_f16kv_one_chunk_
+  ready --> ready : dispatch_op_flash_attn_ext [valid_op_flash_attn_ext_shared_] / dispatch_op_flash_attn_ext__
   ready --> ready : dispatch_op_flash_attn_ext [dispatch_op_flash_attn_ext__] / dispatch_op_flash_attn_ext__
   ready --> ready : dispatch_op_flash_attn_back [dispatch_op_flash_attn_back__] / dispatch_op_flash_attn_back__
   ready --> ready : dispatch_op_flash_attn_back [dispatch_op_flash_attn_back__] / dispatch_op_flash_attn_back__

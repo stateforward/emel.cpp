@@ -344,7 +344,47 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
-                 [ guard::simd_op_mul_mat{} ]
+                 [ guard::simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm{} ]
+                 / action::exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax>
+                 [ guard::simd_op_mul_mat_argmax_q6_vector_q8_argmax_prepared_i8mm{} ]
+                 / action::exec_simd_op_mul_mat_argmax_q6_vector_q8_argmax_prepared_i8mm
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax>
+                 [ guard::simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs{} ]
+                 / action::exec_simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax>
+                 [ guard::simd_op_mul_mat_argmax_q6_vector_prepared_q8_rhs_i8mm{} ]
+                 / action::exec_simd_op_mul_mat_argmax_q6_vector_prepared_q8_rhs_i8mm
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q6_vector_prepared_q8_rhs{} ]
+                 / action::exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q6_vector_packed_q8_rhs{} ]
+                 / action::exec_simd_op_mul_mat_q6_vector_packed_q8_rhs
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q6_vector_packed{} ]
+                 / action::exec_simd_op_mul_mat_q6_vector_packed
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q6_vector{} ]
+                 / action::exec_simd_op_mul_mat_q6_vector
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_generic{} ]
                  / action::exec_simd_op_mul_mat
 
       , sml::state<ready> <= sml::state<ready> +
@@ -356,6 +396,16 @@ struct model {
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
                  [ guard::invalid_op_mul_mat{} ]
                  / action::reject_invalid_op_mul_mat
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax>
+                 [ guard::valid_op_mul_mat_argmax{} ]
+                 / action::exec_op_mul_mat_argmax
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat_argmax>
+                 [ guard::invalid_op_mul_mat_argmax{} ]
+                 / action::reject_invalid_op_mul_mat_argmax
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat_id>
@@ -789,7 +839,12 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_flash_attn_ext>
-                 [ guard::valid_op_flash_attn_ext{} ]
+                 [ guard::simd_op_flash_attn_ext_f16kv_one_chunk{} ]
+                 / action::exec_simd_op_flash_attn_ext_f16kv_one_chunk
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_flash_attn_ext>
+                 [ guard::valid_op_flash_attn_ext_shared{} ]
                  / action::exec_op_flash_attn_ext
 
       , sml::state<ready> <= sml::state<ready> +
@@ -1087,6 +1142,42 @@ struct sm : public emel::sm<model, action::context> {
 
   uint64_t optimized_q6_dispatch_count() const noexcept {
     return this->context_.optimized_q6_dispatch_count;
+  }
+
+  uint64_t optimized_q6_vector_dispatch_count() const noexcept {
+    return this->context_.optimized_q6_vector_dispatch_count;
+  }
+
+  uint64_t optimized_q6_vector_argmax_dispatch_count() const noexcept {
+    return this->context_.optimized_q6_vector_argmax_dispatch_count;
+  }
+
+  uint64_t optimized_q6_vector_packed_dispatch_count() const noexcept {
+    return this->context_.optimized_q6_vector_packed_dispatch_count;
+  }
+
+  uint64_t optimized_q6_vector_packed_q8_rhs_dispatch_count() const noexcept {
+    return this->context_.optimized_q6_vector_packed_q8_rhs_dispatch_count;
+  }
+
+  uint64_t optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count() const noexcept {
+    return this->context_.optimized_q6_vector_packed_q8_rhs_argmax_dispatch_count;
+  }
+
+  uint64_t optimized_q6_vector_prepared_q8_rhs_dispatch_count() const noexcept {
+    return this->context_.optimized_q6_vector_prepared_q8_rhs_dispatch_count;
+  }
+
+  uint64_t optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count() const noexcept {
+    return this->context_.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count;
+  }
+
+  uint64_t optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count() const noexcept {
+    return this->context_.optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_count;
+  }
+
+  uint64_t optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count() const noexcept {
+    return this->context_.optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_count;
   }
 
   uint64_t shared_q6_dispatch_count() const noexcept {
