@@ -750,11 +750,19 @@ TEST_CASE("generator_generate_quantized_contract_fixture_preserves_zero_disallow
     CHECK(fixture->generator->generation_optimized_q6_vector_packed_dispatch_calls() > 0u);
     CHECK(
         fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_dispatch_calls() > 0u);
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_dispatch_calls() > 0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls() >
+        0u);
+#else
     CHECK(
         fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_calls() ==
         0u);
     CHECK(
         fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_dispatch_calls() == 0u);
+#endif
   } else {
     CHECK(fixture->generator->generation_optimized_q6_vector_dispatch_calls() == 0u);
     CHECK(fixture->generator->generation_optimized_q6_vector_packed_dispatch_calls() == 0u);
@@ -799,7 +807,17 @@ TEST_CASE("generator_generate_quantized_contract_fixture_supports_explicit_prese
   CHECK(output_length > 0u);
   if (host_is_aarch64()) {
     CHECK(fixture->generator->generation_optimized_q6_vector_argmax_dispatch_calls() > 0u);
-#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls() ==
+        0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_prepared_q8_rhs_argmax_i8mm_dispatch_calls() ==
+        0u);
+    CHECK(
+        fixture->generator->generation_optimized_q6_vector_q8_argmax_prepared_i8mm_dispatch_calls() >
+        0u);
+#elif defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
     CHECK(
         fixture->generator->generation_optimized_q6_vector_packed_q8_rhs_argmax_dispatch_calls() >
         0u);
