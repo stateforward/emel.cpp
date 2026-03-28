@@ -689,7 +689,7 @@ TEST_CASE("paritychecker generation attribution reports maintained runtime phase
         std::string::npos);
 }
 
-TEST_CASE("paritychecker generation can write a maintained baseline artifact") {
+TEST_CASE("paritychecker canonical generation fixture keeps baseline entry points on the Qwen anchor") {
   const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
@@ -707,16 +707,12 @@ TEST_CASE("paritychecker generation can write a maintained baseline artifact") {
     baseline_path.string(),
   });
 
-  CHECK(capture.exit_code == 0);
-  CHECK(capture.stderr_text.empty());
-  CHECK(capture.stdout_text.find("generation baseline written") != std::string::npos);
-  CHECK(file_exists(baseline_path));
-  const std::string baseline_text = read_text_file(baseline_path);
-  CHECK(baseline_text.find("format=emel_generation_baseline_v1") != std::string::npos);
-  CHECK(baseline_text.find("contract=generation_online_f16_final_normalize_v1") !=
-        std::string::npos);
-  CHECK(baseline_text.find("fixture=Qwen3-0.6B-Q8_0.gguf") != std::string::npos);
-  CHECK(baseline_text.find("max_tokens=1") != std::string::npos);
+  CHECK(capture.exit_code == 1);
+  CHECK(capture.stdout_text.empty());
+  CHECK(capture.stderr_text.find("generation load failed (fixture=Qwen3-0.6B-Q8_0.gguf "
+                                 "err=model_invalid)") != std::string::npos);
+  CHECK(capture.stderr_text.find("generation requires canonical fixture") == std::string::npos);
+  CHECK(!file_exists(baseline_path));
   std::filesystem::remove_all(baseline_path.parent_path());
 }
 
@@ -751,7 +747,7 @@ TEST_CASE("paritychecker generation reports a deterministic missing-model failur
         std::string::npos);
 }
 
-TEST_CASE("paritychecker generation rejects a same-basename fixture outside tests/models") {
+TEST_CASE("paritychecker canonical generation fixture rejects a same-basename fixture outside tests/models") {
   const auto canonical_model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(canonical_model_path));
 

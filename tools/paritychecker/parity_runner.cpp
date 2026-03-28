@@ -105,8 +105,8 @@ namespace {
 
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_internal = 3;
-constexpr const char * k_generation_fixture_name = "Llama-68M-Chat-v1-Q2_K.gguf";
-constexpr const char * k_generation_fixture_slug = "llama_68m_chat_v1_q2_k";
+constexpr const char * k_generation_fixture_name = "Qwen3-0.6B-Q8_0.gguf";
+constexpr const char * k_generation_fixture_slug = "qwen3_0_6b_q8_0";
 constexpr size_t k_generation_output_capacity = 65536u;
 constexpr size_t k_generation_token_trace_capacity = 4096u;
 constexpr std::string_view k_generation_baseline_source = "maintained_generation_baseline";

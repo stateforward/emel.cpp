@@ -1,5 +1,14 @@
 # Test Models
 
+## Qwen3-0.6B-Q8_0.gguf
+- Source: `https://huggingface.co/Qwen/Qwen3-0.6B-GGUF`
+- File: `Qwen3-0.6B-Q8_0.gguf`
+- Stable maintained path: `tests/models/Qwen3-0.6B-Q8_0.gguf`
+- License: Apache-2.0
+- Size: `639446688` bytes (`610M`)
+- SHA256: `9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031`
+- Download URL: `https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf`
+
 ## Llama-68M-Chat-v1-Q2_K.gguf
 - Source: `https://huggingface.co/tensorblock/Llama-68M-Chat-v1-GGUF`
 - File: `Llama-68M-Chat-v1-Q2_K.gguf`

@@ -42,7 +42,7 @@
 
 namespace {
 
-constexpr char k_generation_fixture_rel[] = "tests/models/Llama-68M-Chat-v1-Q2_K.gguf";
+constexpr char k_generation_fixture_rel[] = "tests/models/Qwen3-0.6B-Q8_0.gguf";
 constexpr size_t k_generation_output_capacity = 65536u;
 
 struct generation_case_spec {
