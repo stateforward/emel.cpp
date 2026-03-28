@@ -2734,7 +2734,8 @@ bool run_layer_with_flash_attribution(emel::generator::detail::native_backend & 
 emel::error::type run_attributed_native_generate(generation_load_state & state,
                                                  const emel::paritychecker::parity_options & opts,
                                                  generation_result & result_out,
-                                                 generation_attribution & attribution_out) {
+                                                 generation_attribution & attribution_out,
+                                                 const emel::kernel::kernel_kind kernel_kind) {
   const initialize_backend & backend_ref = state.backend;
   if (state.model_data == nullptr) {
     return emel::error::cast(emel::generator::error::invalid_request);
@@ -2753,6 +2754,8 @@ emel::error::type run_attributed_native_generate(generation_load_state & state,
       emel::error::cast(emel::model::loader::error::none)) {
     return emel::error::cast(emel::generator::error::backend);
   }
+  backend.kernel_kind = kernel_kind;
+  backend.kernel.set_kind(backend.kernel_kind);
 
   emel::text::renderer::sm renderer = {};
   int32_t renderer_err = emel::error::cast(emel::text::renderer::error::none);
@@ -16399,6 +16402,8 @@ void dump_reference_decode_seam(const generation_load_state & state) {
   const emel::kernel::kernel_kind kernel_kind = state.generator->generation_kernel_kind();
   const uint64_t native_q8_0_dispatch_calls =
       state.generator->generation_native_q8_0_dispatch_calls();
+  const uint64_t packed_q8_0_dispatch_calls =
+      state.generator->generation_packed_q8_0_dispatch_calls();
   const uint64_t optimized_flash_dispatch_calls =
       state.generator->generation_optimized_flash_dispatch_calls();
   const uint64_t shared_flash_dispatch_calls =
@@ -16444,14 +16449,16 @@ void dump_reference_decode_seam(const generation_load_state & state) {
                " shared_q3_dispatch_calls=%" PRIu64
                " optimized_q6_dispatch_calls=%" PRIu64
                " shared_q6_dispatch_calls=%" PRIu64
-               " native_q8_0_dispatch_calls=%" PRIu64 "\n",
+               " native_q8_0_dispatch_calls=%" PRIu64
+               " packed_q8_0_dispatch_calls=%" PRIu64 "\n",
                optimized_q2_dispatch_calls,
                shared_q2_dispatch_calls,
                optimized_q3_dispatch_calls,
                shared_q3_dispatch_calls,
                optimized_q6_dispatch_calls,
                shared_q6_dispatch_calls,
-               native_q8_0_dispatch_calls);
+               native_q8_0_dispatch_calls,
+               packed_q8_0_dispatch_calls);
   const auto runtime_contract = runtime_quantized_contract_summary(state);
   std::fprintf(stdout,
                "quantized_runtime_contract: native_quantized=%u "
@@ -18779,6 +18786,8 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
       state.generator->generation_shared_flash_dispatch_calls();
   const uint64_t native_q8_0_dispatch_calls =
       state.generator->generation_native_q8_0_dispatch_calls();
+  const uint64_t packed_q8_0_dispatch_calls =
+      state.generator->generation_packed_q8_0_dispatch_calls();
   const uint64_t optimized_q2_dispatch_calls =
       state.generator->generation_optimized_q2_dispatch_calls();
   const uint64_t shared_q2_dispatch_calls =
@@ -18843,13 +18852,15 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
-  if (native_q8_0_dispatch_calls == 0u) {
+  if (native_q8_0_dispatch_calls == 0u && packed_q8_0_dispatch_calls == 0u) {
     std::fprintf(stderr,
                  "generation q8_0 dispatch proof failed (fixture=%s kernel_kind=%s "
-                 "native_q8_0_dispatch_calls=%" PRIu64 ")\n",
+                 "native_q8_0_dispatch_calls=%" PRIu64
+                 " packed_q8_0_dispatch_calls=%" PRIu64 ")\n",
                  k_generation_fixture_name,
                  kernel_kind_name(generation_kernel_kind),
-                 native_q8_0_dispatch_calls);
+                 native_q8_0_dispatch_calls,
+                 packed_q8_0_dispatch_calls);
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
@@ -18996,7 +19007,11 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     generation_result attributed_result{};
     generation_attribution attribution{};
     const emel::error::type attribution_err = run_attributed_native_generate(
-        state, opts, attributed_result, attribution);
+        state,
+        opts,
+        attributed_result,
+        attribution,
+        state.generator->generation_kernel_kind());
     if (attribution_err != emel::error::cast(emel::generator::error::none)) {
       std::fprintf(stderr,
                    "generation attribution failed (fixture=%s err=%s)\n",

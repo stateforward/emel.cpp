@@ -199,5 +199,9 @@ TEST_CASE("bench_runner qwen3 generation compare stays on the maintained canonic
   CHECK(capture.stdout_text.find("# generation_quantized_evidence: case=generation/preloaded_request/"
                                  "qwen3_0_6b_q8_0_prompt_hello_max_tokens_1") !=
         std::string::npos);
-  CHECK(parse_named_metric(capture.stdout_text, "native_q8_0_dispatch_calls") > 0u);
+  const std::uint64_t native_q8_0_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "native_q8_0_dispatch_calls");
+  const std::uint64_t packed_q8_0_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "packed_q8_0_dispatch_calls");
+  CHECK(native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls > 0u);
 }

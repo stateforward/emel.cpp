@@ -637,6 +637,7 @@ struct generation_flash_evidence_state {
   std::uint32_t disallowed_fallback_stage_count = 0u;
   std::uint32_t explicit_no_claim_stage_count = 0u;
   std::uint64_t native_q8_0_dispatch_calls = 0u;
+  std::uint64_t packed_q8_0_dispatch_calls = 0u;
   std::uint64_t optimized_q2_dispatch_calls = 0u;
   std::uint64_t shared_q2_dispatch_calls = 0u;
   std::uint64_t optimized_q3_dispatch_calls = 0u;
@@ -1998,6 +1999,10 @@ std::uint64_t generation_quantized_evidence_native_q8_0_dispatch_calls() noexcep
   return g_generation_flash_evidence.native_q8_0_dispatch_calls;
 }
 
+std::uint64_t generation_quantized_evidence_packed_q8_0_dispatch_calls() noexcept {
+  return g_generation_flash_evidence.packed_q8_0_dispatch_calls;
+}
+
 std::uint64_t generation_quantized_evidence_optimized_q2_dispatch_calls() noexcept {
   return g_generation_flash_evidence.optimized_q2_dispatch_calls;
 }
@@ -2060,6 +2065,7 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
     std::uint32_t disallowed_fallback_stage_count = 0u;
     std::uint32_t explicit_no_claim_stage_count = 0u;
     std::uint64_t native_q8_0_dispatch_calls = 0u;
+    std::uint64_t packed_q8_0_dispatch_calls = 0u;
     std::uint64_t optimized_q2_dispatch_calls = 0u;
     std::uint64_t shared_q2_dispatch_calls = 0u;
     std::uint64_t optimized_q3_dispatch_calls = 0u;
@@ -2090,6 +2096,8 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
           session->generator->generation_explicit_no_claim_stage_count();
       const std::uint64_t native_q8_0_dispatch_calls_before =
           session->generator->generation_native_q8_0_dispatch_calls();
+      const std::uint64_t packed_q8_0_dispatch_calls_before =
+          session->generator->generation_packed_q8_0_dispatch_calls();
       const std::uint64_t optimized_q2_dispatch_calls_before =
           session->generator->generation_optimized_q2_dispatch_calls();
       const std::uint64_t shared_q2_dispatch_calls_before =
@@ -2115,6 +2123,8 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
           session->generator->generation_shared_flash_dispatch_calls();
       const std::uint64_t native_q8_0_dispatch_calls_after =
           session->generator->generation_native_q8_0_dispatch_calls();
+      const std::uint64_t packed_q8_0_dispatch_calls_after =
+          session->generator->generation_packed_q8_0_dispatch_calls();
       const std::uint64_t optimized_q2_dispatch_calls_after =
           session->generator->generation_optimized_q2_dispatch_calls();
       const std::uint64_t shared_q2_dispatch_calls_after =
@@ -2135,6 +2145,8 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
           shared_flash_dispatch_calls_after - shared_flash_dispatch_calls_before;
       native_q8_0_dispatch_calls =
           native_q8_0_dispatch_calls_after - native_q8_0_dispatch_calls_before;
+      packed_q8_0_dispatch_calls =
+          packed_q8_0_dispatch_calls_after - packed_q8_0_dispatch_calls_before;
       optimized_q2_dispatch_calls =
           optimized_q2_dispatch_calls_after - optimized_q2_dispatch_calls_before;
       shared_q2_dispatch_calls = shared_q2_dispatch_calls_after - shared_q2_dispatch_calls_before;
@@ -2161,6 +2173,7 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
           disallowed_fallback_stage_count;
       g_generation_flash_evidence.explicit_no_claim_stage_count = explicit_no_claim_stage_count;
       g_generation_flash_evidence.native_q8_0_dispatch_calls = native_q8_0_dispatch_calls;
+      g_generation_flash_evidence.packed_q8_0_dispatch_calls = packed_q8_0_dispatch_calls;
       g_generation_flash_evidence.optimized_q2_dispatch_calls = optimized_q2_dispatch_calls;
       g_generation_flash_evidence.shared_q2_dispatch_calls = shared_q2_dispatch_calls;
       g_generation_flash_evidence.optimized_q3_dispatch_calls = optimized_q3_dispatch_calls;

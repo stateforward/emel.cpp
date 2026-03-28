@@ -504,7 +504,13 @@ void check_generation_quantized_attribution(const process_capture & capture) {
   CHECK(parse_named_metric(capture.stdout_text, "shared_q3_dispatch_calls") >= 0);
   CHECK(parse_named_metric(capture.stdout_text, "optimized_q6_dispatch_calls") >= 0);
   CHECK(parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls") >= 0);
-  CHECK(parse_named_metric(capture.stdout_text, "native_q8_0_dispatch_calls") > 0);
+  const int native_q8_0_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "native_q8_0_dispatch_calls");
+  const int packed_q8_0_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "packed_q8_0_dispatch_calls");
+  CHECK(native_q8_0_dispatch_calls >= 0);
+  CHECK(packed_q8_0_dispatch_calls >= 0);
+  CHECK(native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls > 0);
   CHECK(parse_named_metric(capture.stdout_text, "optimized_q2_dispatch_calls") == 0);
   CHECK(parse_named_metric(capture.stdout_text, "shared_q2_dispatch_calls") == 0);
   CHECK(parse_named_metric(capture.stdout_text, "optimized_q3_dispatch_calls") == 0);

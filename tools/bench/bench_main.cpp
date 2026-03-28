@@ -24,6 +24,7 @@ std::uint32_t generation_runtime_contract_approved_dense_f32_stage_count() noexc
 std::uint32_t generation_runtime_contract_disallowed_fallback_stage_count() noexcept;
 std::uint32_t generation_runtime_contract_explicit_no_claim_stage_count() noexcept;
 std::uint64_t generation_quantized_evidence_native_q8_0_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_packed_q8_0_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_optimized_q2_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_shared_q2_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_optimized_q3_dispatch_calls() noexcept;
@@ -436,6 +437,8 @@ void print_compare(const std::vector<bench::result> & emel_results,
         bench::generation_runtime_contract_explicit_no_claim_stage_count();
     const auto native_q8_0_dispatch_calls =
         bench::generation_quantized_evidence_native_q8_0_dispatch_calls();
+    const auto packed_q8_0_dispatch_calls =
+        bench::generation_quantized_evidence_packed_q8_0_dispatch_calls();
     const auto optimized_q2_dispatch_calls =
         bench::generation_quantized_evidence_optimized_q2_dispatch_calls();
     const auto shared_q2_dispatch_calls =
@@ -502,12 +505,13 @@ void print_compare(const std::vector<bench::result> & emel_results,
                    shared_flash_dispatch_calls);
       std::exit(1);
     }
-    if (native_q8_0_dispatch_calls == 0 ||
+    if ((native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls) == 0 ||
         optimized_q2_dispatch_calls != 0 || shared_q2_dispatch_calls != 0 ||
         optimized_q3_dispatch_calls != 0 || shared_q3_dispatch_calls != 0 ||
         optimized_q6_dispatch_calls != 0 || shared_q6_dispatch_calls != 0) {
       std::fprintf(stderr,
                    "error: invalid generation quantized evidence native_q8_0_dispatch_calls=%" PRIu64
+                   " packed_q8_0_dispatch_calls=%" PRIu64
                    " optimized_q2_dispatch_calls=%" PRIu64
                    " shared_q2_dispatch_calls=%" PRIu64
                    " optimized_q3_dispatch_calls=%" PRIu64
@@ -515,6 +519,7 @@ void print_compare(const std::vector<bench::result> & emel_results,
                    " optimized_q6_dispatch_calls=%" PRIu64
                    " shared_q6_dispatch_calls=%" PRIu64 "\n",
                    native_q8_0_dispatch_calls,
+                   packed_q8_0_dispatch_calls,
                    optimized_q2_dispatch_calls,
                    shared_q2_dispatch_calls,
                    optimized_q3_dispatch_calls,
@@ -562,6 +567,7 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 disallowed_fallback_stage_count,
                 explicit_no_claim_stage_count);
     std::printf("# generation_quantized_evidence: case=%.*s native_q8_0_dispatch_calls=%" PRIu64
+                " packed_q8_0_dispatch_calls=%" PRIu64
                 " optimized_q2_dispatch_calls=%" PRIu64
                 " shared_q2_dispatch_calls=%" PRIu64
                 " optimized_q3_dispatch_calls=%" PRIu64
@@ -571,6 +577,7 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 static_cast<int>(bench::k_generation_case_name.size()),
                 bench::k_generation_case_name.data(),
                 native_q8_0_dispatch_calls,
+                packed_q8_0_dispatch_calls,
                 optimized_q2_dispatch_calls,
                 shared_q2_dispatch_calls,
                 optimized_q3_dispatch_calls,

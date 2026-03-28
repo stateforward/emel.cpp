@@ -344,6 +344,21 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q8_0_packed_bl8{} ]
+                 / action::exec_simd_op_mul_mat_q8_0_packed_bl8
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q8_0_packed_bl4{} ]
+                 / action::exec_simd_op_mul_mat_q8_0_packed_bl4
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q8_0_vector{} ]
+                 / action::exec_simd_op_mul_mat_q8_0_vector
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
                  [ guard::simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm{} ]
                  / action::exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm
 
@@ -1122,6 +1137,30 @@ struct sm : public emel::sm<model, action::context> {
 
   uint64_t optimized_flash_dispatch_count() const noexcept {
     return this->context_.optimized_flash_dispatch_count;
+  }
+
+  uint64_t optimized_q8_0_dispatch_count() const noexcept {
+    return this->context_.optimized_q8_0_dispatch_count;
+  }
+
+  uint64_t optimized_q8_0_vector_dispatch_count() const noexcept {
+    return this->context_.optimized_q8_0_vector_dispatch_count;
+  }
+
+  uint64_t optimized_q8_0_packed_dispatch_count() const noexcept {
+    return this->context_.optimized_q8_0_packed_dispatch_count;
+  }
+
+  uint64_t optimized_q8_0_packed_bl4_dispatch_count() const noexcept {
+    return this->context_.optimized_q8_0_packed_bl4_dispatch_count;
+  }
+
+  uint64_t optimized_q8_0_packed_bl8_dispatch_count() const noexcept {
+    return this->context_.optimized_q8_0_packed_bl8_dispatch_count;
+  }
+
+  uint64_t shared_q8_0_dispatch_count() const noexcept {
+    return this->context_.shared_q8_0_dispatch_count;
   }
 
   uint64_t optimized_q2_dispatch_count() const noexcept {

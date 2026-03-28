@@ -1071,6 +1071,10 @@ struct sm : public emel::sm<model, action::context> {
     return this->context_.compute.backend.native_q8_0_dispatch_calls;
   }
 
+  uint64_t generation_packed_q8_0_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.packed_q8_0_dispatch_calls;
+  }
+
   uint64_t generation_flash_attention_dispatch_calls() const noexcept {
     return this->context_.compute.backend.flash_attention_dispatch_calls;
   }
