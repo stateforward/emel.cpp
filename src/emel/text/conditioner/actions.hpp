@@ -146,7 +146,9 @@ struct dispatch_format {
     const auto &ev = detail::unwrap_runtime_event(runtime_ev);
 
     emel::text::formatter::format_request request = {};
-    request.input = ev.request.input;
+    request.messages = ev.request.messages;
+    request.add_generation_prompt = ev.request.add_generation_prompt;
+    request.enable_thinking = ev.request.enable_thinking;
     request.output = ev.ctx.formatted;
     request.output_capacity = ev.ctx.formatted_capacity;
     request.output_length_out = &ev.ctx.formatted_length;

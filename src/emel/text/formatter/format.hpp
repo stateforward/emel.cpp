@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <span>
 #include <string_view>
 
 namespace emel::text::formatter {
@@ -16,8 +17,15 @@ constexpr int32_t error_code(const error value) noexcept {
   return static_cast<int32_t>(value);
 }
 
+struct chat_message {
+  std::string_view role = {};
+  std::string_view content = {};
+};
+
 struct format_request {
-  std::string_view input = {};
+  std::span<const chat_message> messages = {};
+  bool add_generation_prompt = false;
+  bool enable_thinking = false;
   char * output = nullptr;
   size_t output_capacity = 0;
   size_t * output_length_out = nullptr;
@@ -36,21 +44,37 @@ inline bool format_raw(void *,
   if (request.output_length_out != nullptr) {
     *request.output_length_out = 0;
   }
-  if ((request.output == nullptr && request.output_capacity > 0) ||
-      request.input.size() > request.output_capacity) {
+  if (request.output == nullptr && request.output_capacity > 0) {
     if (error_out != nullptr) {
       *error_out = error_code(error::invalid_request);
     }
     return false;
   }
 
-  if (request.input.empty()) {
-    return true;
+  size_t output_length = 0;
+  for (const auto & message : request.messages) {
+    output_length += message.content.size();
   }
 
-  std::memcpy(request.output, request.input.data(), request.input.size());
+  if (output_length > request.output_capacity) {
+    if (error_out != nullptr) {
+      *error_out = error_code(error::invalid_request);
+    }
+    return false;
+  }
+
+  size_t write_offset = 0;
+  for (const auto & message : request.messages) {
+    if (!message.content.empty()) {
+      std::memcpy(request.output + write_offset,
+                  message.content.data(),
+                  message.content.size());
+    }
+    write_offset += message.content.size();
+  }
+
   if (request.output_length_out != nullptr) {
-    *request.output_length_out = request.input.size();
+    *request.output_length_out = output_length;
   }
   return true;
 }

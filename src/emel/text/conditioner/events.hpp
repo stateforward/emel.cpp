@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 #include "emel/model/data.hpp"
@@ -54,7 +55,9 @@ struct prepare {
       : token_count_out(token_count_out_ref),
         error_out(error_out_ref) {}
 
-  std::string_view input = {};
+  std::span<const emel::text::formatter::chat_message> messages = {};
+  bool add_generation_prompt = false;
+  bool enable_thinking = false;
   bool add_special = true;
   bool parse_special = false;
   bool use_bind_defaults = true;
