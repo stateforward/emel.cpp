@@ -60,6 +60,12 @@ int dummy_tokenizer_actor = 4;
 std::array<emel::logits::sampler::fn, 1> dummy_samplers = {
     emel::logits::sampler::fn::from<sampler_passthrough>(),
 };
+constexpr std::array<emel::text::formatter::chat_message, 1> k_generate_messages = {
+    emel::text::formatter::chat_message{
+        .role = "user",
+        .content = "hello",
+    },
+};
 
 emel::model::data & test_model() {
   static auto * model = []() {
@@ -109,11 +115,13 @@ emel::generator::event::generate make_generate_request(
     size_t & output_length_out) {
   static char output_storage[16] = {};
   emel::generator::event::generate request{
-    "hello",
+    std::span<const emel::text::formatter::chat_message>{k_generate_messages},
     2,
     std::span<char>{output_storage},
     output_length_out,
   };
+  request.add_generation_prompt = true;
+  request.enable_thinking = false;
   request.error_out = error_out;
   request.on_done = tracker == nullptr
                         ? emel::callback<void(const emel::generator::events::generation_done &)>{}
@@ -243,7 +251,7 @@ TEST_CASE("generator generate dispatch actions cover channel variants") {
                                                                     context);
 }
 
-TEST_CASE("generator request and channel guards classify callback and request variants") {
+TEST_CASE("generator structured message request and channel guards classify callback variants") {
   emel::generator::action::context context{};
   emel::text::conditioner::sm conditioner{};
   context.model = &test_model();
@@ -263,6 +271,11 @@ TEST_CASE("generator request and channel guards classify callback and request va
   generate_ctx.selected_token = 1;
   emel::generator::event::generate_run generate_run{generate, generate_ctx};
 
+  CHECK(generate.messages.size() == 1u);
+  CHECK(generate.messages[0].role == "user");
+  CHECK(generate.messages[0].content == "hello");
+  CHECK(generate.add_generation_prompt);
+  CHECK_FALSE(generate.enable_thinking);
   CHECK(emel::generator::guard::valid_generate{}(generate_run, context));
   CHECK(emel::generator::guard::valid_generate_with_reset{}(generate_run, context));
   CHECK_FALSE(emel::generator::guard::valid_generate_without_reset{}(generate_run, context));
@@ -291,6 +304,9 @@ TEST_CASE("generator request and channel guards classify callback and request va
   generate.max_tokens = 0;
   CHECK(emel::generator::guard::invalid_generate{}(generate_run, context));
   generate.max_tokens = 2;
+  generate.messages = {};
+  CHECK(emel::generator::guard::invalid_generate{}(generate_run, context));
+  generate.messages = std::span<const emel::text::formatter::chat_message>{k_generate_messages};
   generate_ctx.tokens_generated = 2;
   CHECK(emel::generator::guard::decode_complete{}(generate_run, context));
   generate_ctx.tokens_generated = 0;

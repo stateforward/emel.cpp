@@ -318,17 +318,9 @@ struct request_conditioning {
       ev.ctx.prompt_token_count,
       ev.ctx.phase_code,
     };
-    // Bridge the legacy flat prompt boundary until Phase 26-03 widens generator::event::generate.
-    const emel::text::formatter::chat_message prompt_message{
-      .role = "user",
-      .content = ev.request.prompt,
-    };
-    prepare_ev.messages = std::span<const emel::text::formatter::chat_message>{
-      &prompt_message,
-      1u,
-    };
-    prepare_ev.add_generation_prompt = false;
-    prepare_ev.enable_thinking = false;
+    prepare_ev.messages = ev.request.messages;
+    prepare_ev.add_generation_prompt = ev.request.add_generation_prompt;
+    prepare_ev.enable_thinking = ev.request.enable_thinking;
     prepare_ev.add_special = ctx.conditioning.add_special;
     prepare_ev.parse_special = ctx.conditioning.parse_special;
     prepare_ev.use_bind_defaults = true;

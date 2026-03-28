@@ -142,11 +142,81 @@ static_assert(std::is_same_v<
               std::span<emel::logits::sampler::fn>>);
 static_assert(std::is_same_v<
               std::remove_cvref_t<
+                  decltype(std::declval<const emel::generator::event::generate &>().messages)>,
+              std::span<const emel::text::formatter::chat_message>>);
+static_assert(std::is_same_v<
+              std::remove_cvref_t<
                   decltype(std::declval<const emel::generator::event::generate &>().output)>,
               std::span<char>>);
 static_assert(std::is_reference_v<
               decltype(std::declval<const emel::generator::event::generate &>()
                            .output_length_out)>);
+
+struct checked_formatter_ctx {
+  std::span<const emel::text::formatter::chat_message> expected_messages = {};
+  bool expected_add_generation_prompt = false;
+  bool expected_enable_thinking = false;
+  std::string_view formatted = {};
+  bool seen = false;
+};
+
+bool format_checked_messages(void * formatter_ctx,
+                             const emel::text::formatter::format_request & request,
+                             int32_t * error_out) {
+  if (error_out != nullptr) {
+    *error_out = emel::text::formatter::error_code(emel::text::formatter::error::none);
+  }
+  if (request.output_length_out != nullptr) {
+    *request.output_length_out = 0u;
+  }
+  if (formatter_ctx == nullptr || request.output == nullptr ||
+      request.output_capacity < request.messages.size()) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
+
+  auto & ctx = *static_cast<checked_formatter_ctx *>(formatter_ctx);
+  if (request.messages.size() != ctx.expected_messages.size() ||
+      request.add_generation_prompt != ctx.expected_add_generation_prompt ||
+      request.enable_thinking != ctx.expected_enable_thinking) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
+
+  for (size_t idx = 0; idx < request.messages.size(); ++idx) {
+    if (request.messages[idx].role != ctx.expected_messages[idx].role ||
+        request.messages[idx].content != ctx.expected_messages[idx].content) {
+      if (error_out != nullptr) {
+        *error_out = emel::text::formatter::error_code(
+            emel::text::formatter::error::invalid_request);
+      }
+      return false;
+    }
+  }
+
+  if (request.output_capacity < ctx.formatted.size()) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
+
+  if (!ctx.formatted.empty()) {
+    std::memcpy(request.output, ctx.formatted.data(), ctx.formatted.size());
+  }
+  if (request.output_length_out != nullptr) {
+    *request.output_length_out = ctx.formatted.size();
+  }
+  ctx.seen = true;
+  return true;
+}
 
 void build_prepared_model(prepared_model & prepared) {
   prepared.tensor_storage.reserve(12);
@@ -351,7 +421,15 @@ void apply_quantized_contract_tensor_types(prepared_model & prepared) {
 }
 
 struct generator_fixture {
-  static constexpr std::string_view k_phase_4_prompt = "hello";
+  static constexpr std::string_view k_phase_4_user_content = "hello";
+  static constexpr std::array<emel::text::formatter::chat_message, 1> k_phase_4_messages = {
+      emel::text::formatter::chat_message{
+          .role = "user",
+          .content = k_phase_4_user_content,
+      },
+  };
+  static constexpr bool k_phase_4_add_generation_prompt = false;
+  static constexpr bool k_phase_4_enable_thinking = false;
   static constexpr int32_t k_phase_4_max_tokens = 1;
 
   prepared_model prepared = {};
@@ -370,7 +448,11 @@ struct generator_fixture {
     quantized_contract,
   };
 
-  explicit generator_fixture(const model_variant variant = model_variant::canonical)
+  explicit generator_fixture(
+      const model_variant variant = model_variant::canonical,
+      void * formatter_ctx = nullptr,
+      emel::text::formatter::format_fn format_prompt =
+          emel::text::formatter::format_raw)
       : prepared() {
     if (variant == model_variant::quantized_contract) {
       build_quantized_contract_prepared_model(prepared);
@@ -382,7 +464,7 @@ struct generator_fixture {
       apply_flash_kv_width_mismatch(prepared);
     }
     generator = std::make_unique<emel::generator::sm>(
-        stabilize_model(prepared), conditioner, nullptr, emel::text::formatter::format_raw);
+        stabilize_model(prepared), conditioner, formatter_ctx, format_prompt);
     hello_id = prepared.hello_id;
     world_id = prepared.world_id;
   }
@@ -426,11 +508,13 @@ struct generator_fixture {
                                                  size_t & output_length_out,
                                                  emel::error::type * error_out = nullptr) {
     emel::generator::event::generate request{
-      k_phase_4_prompt,
+      std::span<const emel::text::formatter::chat_message>{k_phase_4_messages},
       k_phase_4_max_tokens,
       std::span<char>{output, output_capacity},
       output_length_out,
     };
+    request.add_generation_prompt = k_phase_4_add_generation_prompt;
+    request.enable_thinking = k_phase_4_enable_thinking;
     request.error_out = error_out;
     request.on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
         &tracker, on_generate_done);
@@ -950,11 +1034,14 @@ TEST_CASE(
          size_t & output_length,
          emel::error::type * error_out) {
         emel::generator::event::generate request{
-          generator_fixture::k_phase_4_prompt,
+          std::span<const emel::text::formatter::chat_message>{
+              generator_fixture::k_phase_4_messages},
           2,
           std::span<char>{output.data(), output.size()},
           output_length,
         };
+        request.add_generation_prompt = generator_fixture::k_phase_4_add_generation_prompt;
+        request.enable_thinking = generator_fixture::k_phase_4_enable_thinking;
         request.error_out = error_out;
         request.on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
             &tracker, on_generate_done);
@@ -990,7 +1077,7 @@ TEST_CASE(
   CHECK(second_output_length > 0u);
 }
 
-TEST_CASE("generator_generate_pins_the_phase_4_request_contract") {
+TEST_CASE("generator structured message request pins the phase 4 contract") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};
   emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
@@ -1005,7 +1092,14 @@ TEST_CASE("generator_generate_pins_the_phase_4_request_contract") {
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
 
-  CHECK(generate_request.prompt == generator_fixture::k_phase_4_prompt);
+  CHECK(generate_request.messages.size() == generator_fixture::k_phase_4_messages.size());
+  CHECK(generate_request.messages[0].role == generator_fixture::k_phase_4_messages[0].role);
+  CHECK(generate_request.messages[0].content ==
+        generator_fixture::k_phase_4_messages[0].content);
+  CHECK(generate_request.add_generation_prompt ==
+        generator_fixture::k_phase_4_add_generation_prompt);
+  CHECK(generate_request.enable_thinking ==
+        generator_fixture::k_phase_4_enable_thinking);
   CHECK(generate_request.max_tokens == generator_fixture::k_phase_4_max_tokens);
   CHECK(generate_request.output.data() == output.data());
   CHECK(generate_request.output.size() == output.size());
@@ -1016,6 +1110,61 @@ TEST_CASE("generator_generate_pins_the_phase_4_request_contract") {
   CHECK(generate_tracker.tokens_generated == generator_fixture::k_phase_4_max_tokens);
   CHECK(generate_tracker.output_length == 5);
   CHECK(output_length == generate_tracker.output_length);
+  CHECK(std::string_view(output.data(), output_length) == "world");
+}
+
+TEST_CASE("generator structured message request reaches the conditioner formatter") {
+  static constexpr std::array<emel::text::formatter::chat_message, 2> k_messages = {
+      emel::text::formatter::chat_message{
+          .role = "system",
+          .content = "policy",
+      },
+      emel::text::formatter::chat_message{
+          .role = "user",
+          .content = "hello",
+      },
+  };
+  checked_formatter_ctx formatter_ctx{
+      .expected_messages = std::span<const emel::text::formatter::chat_message>{k_messages},
+      .expected_add_generation_prompt = true,
+      .expected_enable_thinking = false,
+      .formatted = "hello",
+      .seen = false,
+  };
+  auto fixture = std::make_unique<generator_fixture>(generator_fixture::model_variant::canonical,
+                                                     &formatter_ctx,
+                                                     format_checked_messages);
+  callback_tracker initialize_tracker{};
+  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
+  REQUIRE(fixture->generator->process_event(initialize_request));
+  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+
+  callback_tracker generate_tracker{};
+  std::array<char, 32> output = {};
+  size_t output_length = 0;
+  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  emel::generator::event::generate generate_request{
+      std::span<const emel::text::formatter::chat_message>{k_messages},
+      1,
+      std::span<char>{output.data(), output.size()},
+      output_length,
+  };
+  generate_request.add_generation_prompt = true;
+  generate_request.enable_thinking = false;
+  generate_request.error_out = &generate_error;
+  generate_request.on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
+      &generate_tracker, on_generate_done);
+  generate_request.on_error =
+      emel::callback<void(const emel::generator::events::generation_error &)>(
+          &generate_tracker, on_generate_error);
+
+  REQUIRE(fixture->generator->process_event(generate_request));
+  CHECK(formatter_ctx.seen);
+  CHECK_FALSE(generate_tracker.generate_error_called);
+  CHECK(generate_tracker.generate_done_called);
+  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(generate_tracker.tokens_generated == 1);
   CHECK(std::string_view(output.data(), output_length) == "world");
 }
 

@@ -102,16 +102,18 @@ struct initialize_run {
 };
 
 struct generate {
-  generate(std::string_view prompt_ref,
+  generate(std::span<const emel::text::formatter::chat_message> messages_ref,
            int32_t max_tokens_value,
            std::span<char> output_ref,
            size_t & output_length_out_ref) noexcept
-    : prompt(prompt_ref),
+    : messages(messages_ref),
       max_tokens(max_tokens_value),
       output(output_ref),
       output_length_out(output_length_out_ref) {}
 
-  std::string_view prompt = {};
+  std::span<const emel::text::formatter::chat_message> messages = {};
+  bool add_generation_prompt = false;
+  bool enable_thinking = false;
   int32_t max_tokens = 0;
   std::span<char> output = {};
   size_t & output_length_out;
