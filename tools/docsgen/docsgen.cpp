@@ -50,6 +50,8 @@ struct benchmark_snapshot {
   std::vector<benchmark_row> rows;
   std::string reference_source;
   std::string reference_ref;
+  std::string benchmark_config;
+  std::string formatter_contract;
   std::string flash_case;
   std::string flash_dispatch_calls;
   std::string optimized_flash_dispatch_calls;
@@ -64,6 +66,7 @@ struct benchmark_snapshot {
   std::string disallowed_fallback_stage_count;
   std::string explicit_no_claim_stage_count;
   std::string quantized_case;
+  std::string native_q8_0_dispatch_calls;
   std::string optimized_q2_dispatch_calls;
   std::string shared_q2_dispatch_calls;
   std::string optimized_q3_dispatch_calls;
@@ -510,10 +513,21 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
   benchmark_snapshot parsed;
   const std::regex line_re(
       R"(^([^ ]+) emel\.cpp ([0-9.]+) ns/op, llama\.cpp ([0-9.]+) ns/op, ratio=([0-9.]+)x$)");
+  constexpr std::string_view k_benchmark_config_prefix = "# benchmark_config: ";
+  constexpr std::string_view k_generation_formatter_contract_prefix =
+      "# generation_formatter_contract: ";
 
   std::istringstream input(snapshot);
   for (std::string line; std::getline(input, line);) {
     std::smatch match;
+    if (line.rfind(k_benchmark_config_prefix.data(), 0u) == 0u) {
+      parsed.benchmark_config = line.substr(k_benchmark_config_prefix.size());
+      continue;
+    }
+    if (line.rfind(k_generation_formatter_contract_prefix.data(), 0u) == 0u) {
+      parsed.formatter_contract = line.substr(k_generation_formatter_contract_prefix.size());
+      continue;
+    }
     if (const auto metadata = parse_inline_key_value_fields(line, "# reference_impl: ");
         metadata.has_value()) {
       const auto source_it = metadata->find("source");
@@ -562,13 +576,7 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
     if (const auto metadata =
             parse_inline_key_value_fields(line, "# generation_quantized_evidence: ");
         metadata.has_value()) {
-      for (const char * field : {"case",
-                                 "optimized_q2_dispatch_calls",
-                                 "shared_q2_dispatch_calls",
-                                 "optimized_q3_dispatch_calls",
-                                 "shared_q3_dispatch_calls",
-                                 "optimized_q6_dispatch_calls",
-                                 "shared_q6_dispatch_calls"}) {
+      for (const char * field : {"case", "native_q8_0_dispatch_calls"}) {
         if (!metadata->contains(field)) {
           std::fprintf(stderr,
                        "error: invalid # generation_quantized_evidence metadata in %s\n",
@@ -577,12 +585,31 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
         }
       }
       parsed.quantized_case = metadata->at("case");
-      parsed.optimized_q2_dispatch_calls = metadata->at("optimized_q2_dispatch_calls");
-      parsed.shared_q2_dispatch_calls = metadata->at("shared_q2_dispatch_calls");
-      parsed.optimized_q3_dispatch_calls = metadata->at("optimized_q3_dispatch_calls");
-      parsed.shared_q3_dispatch_calls = metadata->at("shared_q3_dispatch_calls");
-      parsed.optimized_q6_dispatch_calls = metadata->at("optimized_q6_dispatch_calls");
-      parsed.shared_q6_dispatch_calls = metadata->at("shared_q6_dispatch_calls");
+      parsed.native_q8_0_dispatch_calls = metadata->at("native_q8_0_dispatch_calls");
+      parsed.optimized_q2_dispatch_calls =
+          metadata->contains("optimized_q2_dispatch_calls")
+              ? metadata->at("optimized_q2_dispatch_calls")
+              : "0";
+      parsed.shared_q2_dispatch_calls =
+          metadata->contains("shared_q2_dispatch_calls")
+              ? metadata->at("shared_q2_dispatch_calls")
+              : "0";
+      parsed.optimized_q3_dispatch_calls =
+          metadata->contains("optimized_q3_dispatch_calls")
+              ? metadata->at("optimized_q3_dispatch_calls")
+              : "0";
+      parsed.shared_q3_dispatch_calls =
+          metadata->contains("shared_q3_dispatch_calls")
+              ? metadata->at("shared_q3_dispatch_calls")
+              : "0";
+      parsed.optimized_q6_dispatch_calls =
+          metadata->contains("optimized_q6_dispatch_calls")
+              ? metadata->at("optimized_q6_dispatch_calls")
+              : "0";
+      parsed.shared_q6_dispatch_calls =
+          metadata->contains("shared_q6_dispatch_calls")
+              ? metadata->at("shared_q6_dispatch_calls")
+              : "0";
       continue;
     }
     if (const auto metadata =
@@ -624,6 +651,18 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
   if (parsed.reference_source.empty() || parsed.reference_ref.empty()) {
     std::fprintf(stderr,
                  "error: missing # reference_impl metadata in %s\n",
+                 paths.benchmarks_snapshot.string().c_str());
+    return std::nullopt;
+  }
+  if (parsed.benchmark_config.empty()) {
+    std::fprintf(stderr,
+                 "error: missing # benchmark_config metadata in %s\n",
+                 paths.benchmarks_snapshot.string().c_str());
+    return std::nullopt;
+  }
+  if (parsed.formatter_contract.empty()) {
+    std::fprintf(stderr,
+                 "error: missing # generation_formatter_contract metadata in %s\n",
                  paths.benchmarks_snapshot.string().c_str());
     return std::nullopt;
   }
@@ -698,69 +737,28 @@ std::optional<double> parse_double_field(const std::string & raw_value,
 
 std::optional<std::string> build_flash_publication_section(const doc_paths & paths,
                                                            const benchmark_snapshot & snapshot) {
-  const auto baseline =
-      parse_key_value_file(paths.generation_pre_arm_flash_optimized_baseline);
-  if (!baseline.has_value()) {
-    return std::nullopt;
-  }
-
-  for (const char * field : {"source_commit",
-                             "baseline_ref",
-                             "case",
-                             "baseline_emel_ns",
-                             "baseline_reference_ns",
-                             "baseline_ratio"}) {
-    if (!baseline->contains(field)) {
-      std::fprintf(stderr,
-                   "error: missing %s in %s\n",
-                   field,
-                   paths.generation_pre_arm_flash_optimized_baseline.string().c_str());
-      return std::nullopt;
-    }
-  }
-
-  const std::string & baseline_case = baseline->at("case");
-  const benchmark_row * current = find_benchmark_row(snapshot, baseline_case);
+  const benchmark_row * current = find_benchmark_row(snapshot, snapshot.flash_case);
   if (current == nullptr) {
     std::fprintf(stderr,
                  "error: missing benchmark row for %s in %s\n",
-                 baseline_case.c_str(),
+                 snapshot.flash_case.c_str(),
                  paths.benchmarks_snapshot.string().c_str());
     return std::nullopt;
   }
 
-  const auto baseline_emel =
-      parse_double_field(baseline->at("baseline_emel_ns"),
-                         "baseline_emel_ns",
-                         paths.generation_pre_arm_flash_optimized_baseline);
-  if (!baseline_emel.has_value()) {
-    return std::nullopt;
-  }
-
-  const auto current_emel =
-      parse_double_field(current->emel_ns, "current_emel_ns", paths.benchmarks_snapshot);
-  if (!current_emel.has_value()) {
-    return std::nullopt;
-  }
-
-  const double speedup = *baseline_emel / *current_emel;
-  const double latency_drop_pct = ((*baseline_emel - *current_emel) / *baseline_emel) * 100.0;
-
-  char speedup_buf[32];
-  char latency_buf[32];
-  std::snprintf(speedup_buf, sizeof(speedup_buf), "%.3fx", speedup);
-  std::snprintf(latency_buf, sizeof(latency_buf), "%.1f", latency_drop_pct);
-
   std::string section;
-  section += "## Current Flash Evidence\n\n";
+  section += "## Current Generation Evidence\n\n";
   section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
-  section +=
-      "- Preserved baseline artifact: "
-      "`snapshots/bench/generation_pre_arm_flash_optimized_baseline.txt`\n";
+  section += "- `benchmark_config: ";
+  section += snapshot.benchmark_config;
+  section += "`\n";
   section += "- `reference_impl: source=";
   section += snapshot.reference_source;
   section += " ref=";
   section += snapshot.reference_ref;
+  section += "`\n";
+  section += "- `generation_formatter_contract: ";
+  section += snapshot.formatter_contract;
   section += "`\n";
   section += "- `generation_flash_evidence: case=";
   section += snapshot.flash_case;
@@ -803,6 +801,8 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += "`\n";
   section += "- `generation_quantized_evidence: case=";
   section += snapshot.quantized_case;
+  section += " native_q8_0_dispatch_calls=";
+  section += snapshot.native_q8_0_dispatch_calls;
   section += " optimized_q2_dispatch_calls=";
   section += snapshot.optimized_q2_dispatch_calls;
   section += " shared_q2_dispatch_calls=";
@@ -816,12 +816,39 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += " shared_q6_dispatch_calls=";
   section += snapshot.shared_q6_dispatch_calls;
   section += "`\n\n";
-  section += "- Contract summary: the maintained canonical workload stayed on the approved runtime "
-             "contract with native quantized matmul stages plus approved dense-f32-by-contract "
-             "token-embedding and norm-vector seams; there was no disallowed fallback and no "
-             "explicit no-claim branch on the supported path.\n\n";
+  section += "- Contract summary: the maintained canonical Qwen3 workload stayed on the approved "
+             "runtime contract with native q8_0 projection and output dispatch, explicit "
+             "dense-f32-by-contract token embedding and per-head Q/K RMS norm vectors, and no "
+             "disallowed fallback or explicit no-claim branch on the supported path.\n\n";
 
-  section += "## Preserved ARM Flash Baseline Comparison\n\n";
+  if (!fs::exists(paths.generation_pre_arm_flash_optimized_baseline)) {
+    return section;
+  }
+
+  const auto baseline =
+      parse_key_value_file(paths.generation_pre_arm_flash_optimized_baseline);
+  if (!baseline.has_value()) {
+    return std::nullopt;
+  }
+
+  for (const char * field : {"source_commit",
+                             "baseline_ref",
+                             "case",
+                             "baseline_emel_ns",
+                             "baseline_reference_ns",
+                             "baseline_ratio"}) {
+    if (!baseline->contains(field)) {
+      std::fprintf(stderr,
+                   "error: missing %s in %s\n",
+                   field,
+                   paths.generation_pre_arm_flash_optimized_baseline.string().c_str());
+      return std::nullopt;
+    }
+  }
+
+  section += "## Preserved ARM Flash Baseline\n\n";
+  section += "- Preserved baseline artifact: "
+             "`snapshots/bench/generation_pre_arm_flash_optimized_baseline.txt`\n";
   section += "- `source_commit=";
   section += baseline->at("source_commit");
   section += "`\n";
@@ -829,7 +856,7 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += baseline->at("baseline_ref");
   section += "`\n";
   section += "- `case=";
-  section += baseline_case;
+  section += baseline->at("case");
   section += "`\n";
   section += "- `baseline_emel_ns=";
   section += baseline->at("baseline_emel_ns");
@@ -840,14 +867,47 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += "- `baseline_ratio=";
   section += baseline->at("baseline_ratio");
   section += "`\n";
+
+  const std::string & baseline_case = baseline->at("case");
+  const benchmark_row * current_baseline_case = find_benchmark_row(snapshot, baseline_case);
+  if (current_baseline_case == nullptr) {
+    section += "- Note: this preserved ARM flash baseline remains tied to the archived Llama "
+               "canonical slice and is not directly compared against the current canonical "
+               "Qwen3 publication because the benchmark case identity changed explicitly.\n";
+    return section;
+  }
+
+  const auto baseline_emel =
+      parse_double_field(baseline->at("baseline_emel_ns"),
+                         "baseline_emel_ns",
+                         paths.generation_pre_arm_flash_optimized_baseline);
+  if (!baseline_emel.has_value()) {
+    return std::nullopt;
+  }
+
+  const auto current_emel =
+      parse_double_field(current_baseline_case->emel_ns,
+                         "current_emel_ns",
+                         paths.benchmarks_snapshot);
+  if (!current_emel.has_value()) {
+    return std::nullopt;
+  }
+
+  const double speedup = *baseline_emel / *current_emel;
+  const double latency_drop_pct = ((*baseline_emel - *current_emel) / *baseline_emel) * 100.0;
+
+  char speedup_buf[32];
+  char latency_buf[32];
+  std::snprintf(speedup_buf, sizeof(speedup_buf), "%.3fx", speedup);
+  std::snprintf(latency_buf, sizeof(latency_buf), "%.1f", latency_drop_pct);
   section += "- `current_emel_ns=";
-  section += current->emel_ns;
+  section += current_baseline_case->emel_ns;
   section += "`\n";
   section += "- `current_reference_ns=";
-  section += current->llama_ns;
+  section += current_baseline_case->llama_ns;
   section += "`\n";
   section += "- `current_ratio=";
-  section += current->ratio;
+  section += current_baseline_case->ratio;
   section += "x`\n";
   section += "- `speedup=";
   section += speedup_buf;

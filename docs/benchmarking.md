@@ -44,6 +44,8 @@ the compare mode expects exact case-name matches and prints `ratio` values for q
 run it via `scripts/bench.sh --compare`.
 when updating the comparison snapshot used by documentation, run:
 `scripts/bench.sh --compare-update`.
+the stored compare snapshot also records `# benchmark_config: ...`, so any publication-time env
+overrides are explicit in the artifact instead of staying implicit in local shell state.
 
 ## canonical generation compare workflow
 
@@ -62,7 +64,7 @@ scripts/bench.sh --compare
 
 the stable generation case name is:
 
-`generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1`
+`generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1`
 
 to isolate that row from the normal compare output:
 
@@ -72,10 +74,10 @@ EMEL_BENCH_RUNS=1 \
 EMEL_BENCH_WARMUP_ITERS=0 \
 EMEL_BENCH_WARMUP_RUNS=0 \
 scripts/bench.sh --compare | \
-rg '^generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 .* ratio='
+rg '^generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1 .* ratio='
 ```
 
-the canonical workload is fixed to the checked-in llama-68m fixture, prompt `hello`, and
+the canonical workload is fixed to the checked-in qwen3-0.6b q8_0 fixture, prompt `hello`, and
 `max_tokens=1`. fixture loading and one-time setup stay outside the timed loop; this case measures
 preloaded request latency.
 
@@ -88,6 +90,9 @@ phase 13 keeps flash-evidence publication on the existing benchmark surfaces onl
 the BENCH-03 approval gate is the canonical short case:
 
 `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1`
+
+this phase-13 artifact is historical and stays tied to the archived llama canonical slice. it is
+not the live maintained generation identity for the current qwen3 benchmark publication.
 
 before any checked-in snapshot refresh, compare the preserved non-flash artifact
 `snapshots/bench/generation_pre_flash_baseline.txt` against the current compare snapshot with:
@@ -121,7 +126,7 @@ as permission to refresh checked-in snapshot or generated benchmark evidence fil
 compare mode prints one row per matched case:
 
 ```text
-generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1 emel.cpp 21368041.000 ns/op, llama.cpp 6660042.000 ns/op, ratio=3.208x
+generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1 emel.cpp 21368041.000 ns/op, llama.cpp 6660042.000 ns/op, ratio=3.208x
 ```
 
 - `emel.cpp` is the measured EMEL-side time for the canonical generation case.

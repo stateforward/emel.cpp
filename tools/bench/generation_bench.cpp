@@ -636,6 +636,7 @@ struct generation_flash_evidence_state {
   std::uint32_t approved_dense_f32_stage_count = 0u;
   std::uint32_t disallowed_fallback_stage_count = 0u;
   std::uint32_t explicit_no_claim_stage_count = 0u;
+  std::uint64_t native_q8_0_dispatch_calls = 0u;
   std::uint64_t optimized_q2_dispatch_calls = 0u;
   std::uint64_t shared_q2_dispatch_calls = 0u;
   std::uint64_t optimized_q3_dispatch_calls = 0u;
@@ -1061,6 +1062,46 @@ bool decode_integer_value(const emel_fixture & fixture,
   }
 }
 
+bool decode_float_value(const emel_fixture & fixture,
+                        const emel::gguf::loader::kv_entry & entry,
+                        float & value_out) {
+  const std::span<const uint8_t> bytes = kv_value_view(fixture, entry);
+  namespace constants = emel::gguf::loader::detail::constants;
+
+  if (entry.value_type == constants::gguf_type_float32) {
+    if (bytes.size() != sizeof(float)) {
+      return false;
+    }
+    std::memcpy(&value_out, bytes.data(), sizeof(float));
+    return true;
+  }
+
+  if (entry.value_type == constants::gguf_type_float64) {
+    if (bytes.size() != sizeof(double)) {
+      return false;
+    }
+    double value = 0.0;
+    std::memcpy(&value, bytes.data(), sizeof(double));
+    value_out = static_cast<float>(value);
+    return true;
+  }
+
+  return false;
+}
+
+bool decode_bool_value(const emel_fixture & fixture,
+                       const emel::gguf::loader::kv_entry & entry,
+                       bool & value_out) {
+  const std::span<const uint8_t> bytes = kv_value_view(fixture, entry);
+  namespace constants = emel::gguf::loader::detail::constants;
+  if (entry.value_type != constants::gguf_type_bool || bytes.size() != 1u) {
+    return false;
+  }
+
+  value_out = bytes[0] != 0u;
+  return true;
+}
+
 bool decode_string_value(const emel_fixture & fixture,
                          const emel::gguf::loader::kv_entry & entry,
                          std::string_view & value_out) {
@@ -1183,6 +1224,11 @@ emel::error::type populate_model_metadata(const emel_fixture & fixture,
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
   copy_name(model_data.architecture_name, architecture);
+  const bool is_llama = architecture == "llama";
+  const bool is_qwen3 = architecture == "qwen3";
+  if (!is_llama && !is_qwen3) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
 
   const auto assign_i32 = [&](const std::string_view key, int32_t & field) {
     const auto * entry = find_kv_entry(fixture, key);
@@ -1200,15 +1246,92 @@ emel::error::type populate_model_metadata(const emel_fixture & fixture,
     return true;
   };
 
-  if (!assign_i32("llama.context_length", model_data.params.n_ctx) ||
-      !assign_i32("llama.embedding_length", model_data.params.n_embd) ||
-      !assign_i32("llama.feed_forward_length", model_data.params.n_ff) ||
-      !assign_i32("llama.attention.head_count", model_data.params.n_head) ||
-      !assign_i32("llama.attention.head_count_kv", model_data.params.n_head_kv) ||
-      !assign_i32("llama.rope.dimension_count", model_data.params.n_rot) ||
-      !assign_i32("llama.block_count", model_data.params.n_layer) ||
-      !assign_i32("llama.vocab_size", model_data.params.n_vocab)) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
+  const auto assign_f32 = [&](const std::string_view key, float & field) {
+    const auto * entry = find_kv_entry(fixture, key);
+    if (entry == nullptr) {
+      return true;
+    }
+
+    float value = 0.0f;
+    if (!decode_float_value(fixture, *entry, value)) {
+      return false;
+    }
+
+    field = value;
+    return true;
+  };
+
+  const auto assign_bool = [&](const std::string_view key, bool & field) {
+    const auto * entry = find_kv_entry(fixture, key);
+    if (entry == nullptr) {
+      return true;
+    }
+
+    bool value = false;
+    if (!decode_bool_value(fixture, *entry, value)) {
+      return false;
+    }
+
+    field = value;
+    return true;
+  };
+
+  if (is_llama) {
+    if (!assign_i32("llama.context_length", model_data.params.n_ctx) ||
+        !assign_i32("llama.embedding_length", model_data.params.n_embd) ||
+        !assign_i32("llama.embedding_length_out", model_data.params.n_embd_out) ||
+        !assign_i32("llama.feed_forward_length", model_data.params.n_ff) ||
+        !assign_i32("llama.attention.head_count", model_data.params.n_head) ||
+        !assign_i32("llama.attention.head_count_kv", model_data.params.n_head_kv) ||
+        !assign_i32("llama.rope.dimension_count", model_data.params.n_rot) ||
+        !assign_i32("llama.block_count", model_data.params.n_layer) ||
+        !assign_i32("llama.vocab_size", model_data.params.n_vocab) ||
+        !assign_f32("llama.attention.layer_norm_epsilon",
+                    model_data.params.attention_layer_norm_epsilon) ||
+        !assign_f32("llama.attention.layer_norm_rms_epsilon",
+                    model_data.params.attention_layer_norm_rms_epsilon) ||
+        !assign_f32("llama.attention.clamp_kqv", model_data.params.attention_clamp_kqv) ||
+        !assign_f32("llama.attn_logit_softcapping", model_data.params.attn_logit_softcapping) ||
+        !assign_f32("llama.final_logit_softcapping",
+                    model_data.params.final_logit_softcapping) ||
+        !assign_f32("llama.residual_scale", model_data.params.residual_scale) ||
+        !assign_f32("llama.embedding_scale", model_data.params.embedding_scale) ||
+        !assign_f32("llama.rope.freq_base", model_data.params.rope_freq_base) ||
+        !assign_f32("llama.rope.freq_base_swa", model_data.params.rope_freq_base_swa) ||
+        !assign_bool("llama.use_parallel_residual",
+                     model_data.params.use_parallel_residual)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+  }
+
+  if (is_qwen3) {
+    int32_t qwen3_key_length = 0;
+    int32_t qwen3_value_length = 0;
+    if (!assign_i32("qwen3.context_length", model_data.params.n_ctx) ||
+        !assign_i32("qwen3.embedding_length", model_data.params.n_embd) ||
+        !assign_i32("qwen3.feed_forward_length", model_data.params.n_ff) ||
+        !assign_i32("qwen3.attention.head_count", model_data.params.n_head) ||
+        !assign_i32("qwen3.attention.head_count_kv", model_data.params.n_head_kv) ||
+        !assign_i32("qwen3.attention.key_length", qwen3_key_length) ||
+        !assign_i32("qwen3.attention.value_length", qwen3_value_length) ||
+        !assign_i32("qwen3.block_count", model_data.params.n_layer) ||
+        !assign_f32("qwen3.attention.layer_norm_rms_epsilon",
+                    model_data.params.attention_layer_norm_rms_epsilon) ||
+        !assign_f32("qwen3.rope.freq_base", model_data.params.rope_freq_base)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+
+    model_data.params.attention_key_length = qwen3_key_length;
+    model_data.params.attention_value_length = qwen3_value_length;
+    if (model_data.params.n_embd_out == 0) {
+      model_data.params.n_embd_out = model_data.params.n_embd;
+    }
+    if (model_data.params.n_rot == 0) {
+      model_data.params.n_rot = qwen3_key_length;
+    }
+    if (qwen3_key_length <= 0 || qwen3_value_length <= 0) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
   }
 
   const auto * tokens_entry = find_kv_entry(fixture, "tokenizer.tokens");
@@ -1416,7 +1539,8 @@ emel::error::type run_emel_validate_structure(void *,
 
 emel::error::type run_emel_validate_architecture(void *,
                                                  const emel::model::loader::event::load & req) {
-  return emel::model::architecture_name_view(req.model_data) == "llama"
+  const std::string_view architecture = emel::model::architecture_name_view(req.model_data);
+  return (architecture == "llama" || architecture == "qwen3")
              ? emel::error::cast(emel::model::loader::error::none)
              : emel::error::cast(emel::model::loader::error::model_invalid);
 }
@@ -1613,12 +1737,18 @@ bool tokenize_reference_prompt(const emel_fixture & fixture,
     return false;
   }
 
+  std::string formatted_prompt = {};
+  if (!emel::tools::generation_formatter_contract::format_single_user_prompt(
+          fixture.formatter_binding, spec.prompt, formatted_prompt)) {
+    return false;
+  }
+
   int32_t token_capacity =
-      std::max<int32_t>(8, static_cast<int32_t>(spec.prompt.size()) + 8);
+      std::max<int32_t>(8, static_cast<int32_t>(formatted_prompt.size()) + 8);
   tokens_out.resize(static_cast<size_t>(token_capacity));
   int32_t token_count = llama_tokenize(fixture.reference_vocab,
-                                       spec.prompt.data(),
-                                       static_cast<int32_t>(spec.prompt.size()),
+                                       formatted_prompt.data(),
+                                       static_cast<int32_t>(formatted_prompt.size()),
                                        tokens_out.data(),
                                        token_capacity,
                                        false,
@@ -1627,8 +1757,8 @@ bool tokenize_reference_prompt(const emel_fixture & fixture,
     token_capacity = -token_count;
     tokens_out.resize(static_cast<size_t>(token_capacity));
     token_count = llama_tokenize(fixture.reference_vocab,
-                                 spec.prompt.data(),
-                                 static_cast<int32_t>(spec.prompt.size()),
+                                 formatted_prompt.data(),
+                                 static_cast<int32_t>(formatted_prompt.size()),
                                  tokens_out.data(),
                                  token_capacity,
                                  false,
@@ -1864,6 +1994,10 @@ std::uint32_t generation_runtime_contract_explicit_no_claim_stage_count() noexce
   return g_generation_flash_evidence.explicit_no_claim_stage_count;
 }
 
+std::uint64_t generation_quantized_evidence_native_q8_0_dispatch_calls() noexcept {
+  return g_generation_flash_evidence.native_q8_0_dispatch_calls;
+}
+
 std::uint64_t generation_quantized_evidence_optimized_q2_dispatch_calls() noexcept {
   return g_generation_flash_evidence.optimized_q2_dispatch_calls;
 }
@@ -1925,6 +2059,7 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
     std::uint32_t approved_dense_f32_stage_count = 0u;
     std::uint32_t disallowed_fallback_stage_count = 0u;
     std::uint32_t explicit_no_claim_stage_count = 0u;
+    std::uint64_t native_q8_0_dispatch_calls = 0u;
     std::uint64_t optimized_q2_dispatch_calls = 0u;
     std::uint64_t shared_q2_dispatch_calls = 0u;
     std::uint64_t optimized_q3_dispatch_calls = 0u;
@@ -1953,6 +2088,8 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
           session->generator->generation_disallowed_fallback_stage_count();
       explicit_no_claim_stage_count =
           session->generator->generation_explicit_no_claim_stage_count();
+      const std::uint64_t native_q8_0_dispatch_calls_before =
+          session->generator->generation_native_q8_0_dispatch_calls();
       const std::uint64_t optimized_q2_dispatch_calls_before =
           session->generator->generation_optimized_q2_dispatch_calls();
       const std::uint64_t shared_q2_dispatch_calls_before =
@@ -1976,6 +2113,8 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
           session->generator->generation_optimized_flash_dispatch_calls();
       const std::uint64_t shared_flash_dispatch_calls_after =
           session->generator->generation_shared_flash_dispatch_calls();
+      const std::uint64_t native_q8_0_dispatch_calls_after =
+          session->generator->generation_native_q8_0_dispatch_calls();
       const std::uint64_t optimized_q2_dispatch_calls_after =
           session->generator->generation_optimized_q2_dispatch_calls();
       const std::uint64_t shared_q2_dispatch_calls_after =
@@ -1994,6 +2133,8 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
           optimized_flash_dispatch_calls_after - optimized_flash_dispatch_calls_before;
       shared_flash_dispatch_calls =
           shared_flash_dispatch_calls_after - shared_flash_dispatch_calls_before;
+      native_q8_0_dispatch_calls =
+          native_q8_0_dispatch_calls_after - native_q8_0_dispatch_calls_before;
       optimized_q2_dispatch_calls =
           optimized_q2_dispatch_calls_after - optimized_q2_dispatch_calls_before;
       shared_q2_dispatch_calls = shared_q2_dispatch_calls_after - shared_q2_dispatch_calls_before;
@@ -2019,6 +2160,7 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
       g_generation_flash_evidence.disallowed_fallback_stage_count =
           disallowed_fallback_stage_count;
       g_generation_flash_evidence.explicit_no_claim_stage_count = explicit_no_claim_stage_count;
+      g_generation_flash_evidence.native_q8_0_dispatch_calls = native_q8_0_dispatch_calls;
       g_generation_flash_evidence.optimized_q2_dispatch_calls = optimized_q2_dispatch_calls;
       g_generation_flash_evidence.shared_q2_dispatch_calls = shared_q2_dispatch_calls;
       g_generation_flash_evidence.optimized_q3_dispatch_calls = optimized_q3_dispatch_calls;
