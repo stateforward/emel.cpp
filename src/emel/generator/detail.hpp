@@ -34,6 +34,8 @@ struct block_weights {
   tensor_matrix attention_q = {};
   tensor_matrix attention_k = {};
   tensor_matrix attention_v = {};
+  std::vector<float> attention_q_norm = {};
+  std::vector<float> attention_k_norm = {};
   tensor_matrix attention_output = {};
   std::vector<float> feed_forward_norm = {};
   tensor_matrix feed_forward_gate = {};
@@ -50,6 +52,7 @@ struct native_backend {
   emel::kernel::sm kernel = {};
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
   uint64_t kernel_dispatch_calls = 0;
+  uint64_t native_q8_0_dispatch_calls = 0;
   uint64_t flash_attention_dispatch_calls = 0;
 
   tensor_matrix token_embedding = {};
@@ -358,8 +361,8 @@ inline bool bind_tensor_rows(const tensor_record & tensor,
   }
 
   const uint8_t dtype = static_cast<uint8_t>(tensor.type);
-  if (emel::kernel::detail::is_quantized_k_dtype(dtype) &&
-      (cols % static_cast<int32_t>(quant::QK_K)) != 0) {
+  const uint64_t block_size = emel::kernel::detail::quantized_block_size(dtype);
+  if (block_size != 0u && (static_cast<uint64_t>(cols) % block_size) != 0u) {
     return false;
   }
 
@@ -417,6 +420,11 @@ inline bool copy_tensor_row(const tensor_record & tensor,
                                  out.data(),
                                  cols);
       return true;
+    case emel::kernel::event::dtype::q8_0:
+      quant::dequantize_row_q8_0(reinterpret_cast<const quant::block_q8_0 *>(src_row),
+                                 out.data(),
+                                 cols);
+      return true;
     default:
       return false;
   }
@@ -431,6 +439,69 @@ inline bool dequantize_tensor_vector(const tensor_record & tensor,
   }
   out.resize(static_cast<size_t>(cols));
   return copy_tensor_row(tensor, 0, out);
+}
+
+inline bool is_qwen3_runtime(const native_backend & backend) noexcept {
+  return backend.model != nullptr && emel::model::architecture_name_view(*backend.model) == "qwen3";
+}
+
+inline const tensor_record * select_output_projection_tensor(
+    const emel::model::llama::detail::execution_view & execution) noexcept {
+  if (execution.output.tensor != nullptr) {
+    return execution.output.tensor;
+  }
+
+  const auto * token_embedding = execution.token_embedding.tensor;
+  if (token_embedding == nullptr || token_embedding->data == nullptr || token_embedding->n_dims != 2) {
+    return nullptr;
+  }
+
+  return token_embedding;
+}
+
+inline bool bind_output_projection(native_backend & backend) noexcept {
+  const auto * tensor = select_output_projection_tensor(backend.execution);
+  return tensor != nullptr && bind_tensor_rows(*tensor, backend.output_native);
+}
+
+inline bool apply_headwise_rms_norm(std::span<float> vector,
+                                    std::span<const float> weights,
+                                    const int32_t head_count,
+                                    const int32_t head_dim,
+                                    const float epsilon) noexcept {
+  if (head_count <= 0 ||
+      head_dim <= 0 ||
+      static_cast<size_t>(head_count) * static_cast<size_t>(head_dim) != vector.size() ||
+      static_cast<size_t>(head_dim) != weights.size()) {
+    return false;
+  }
+
+  for (int32_t head = 0; head < head_count; ++head) {
+    const size_t head_offset =
+        static_cast<size_t>(head) * static_cast<size_t>(head_dim);
+    float square_sum = 0.0f;
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
+      const float value = vector[head_offset + static_cast<size_t>(dim)];
+      square_sum += value * value;
+    }
+
+    const float inv_rms =
+        1.0f / std::sqrt(square_sum / static_cast<float>(head_dim) + epsilon);
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
+      vector[head_offset + static_cast<size_t>(dim)] *=
+          inv_rms * weights[static_cast<size_t>(dim)];
+    }
+  }
+
+  return true;
+}
+
+inline bool apply_qwen3_attention_qk_norm(native_backend & backend,
+                                          const block_weights & block) noexcept {
+  return apply_headwise_rms_norm(
+             backend.q, block.attention_q_norm, backend.n_head, backend.head_dim, backend.rms_epsilon) &&
+      apply_headwise_rms_norm(
+             backend.k, block.attention_k_norm, backend.n_head_kv, backend.head_dim_kv, backend.rms_epsilon);
 }
 
 inline void reset_output_logits(native_backend & backend) noexcept {
@@ -707,6 +778,18 @@ inline void build_lifecycle(native_backend & backend) {
         backend,
         const_cast<void *>(block.attention_v.tensor->data),
         matrix_buffer_bytes(block.attention_v));
+    if (!block.attention_q_norm.empty()) {
+      append_leaf_lifecycle_tensor(
+          backend,
+          block.attention_q_norm.data(),
+          static_cast<uint64_t>(block.attention_q_norm.size()) * sizeof(float));
+    }
+    if (!block.attention_k_norm.empty()) {
+      append_leaf_lifecycle_tensor(
+          backend,
+          block.attention_k_norm.data(),
+          static_cast<uint64_t>(block.attention_k_norm.size()) * sizeof(float));
+    }
     append_leaf_lifecycle_tensor(
         backend,
         const_cast<void *>(block.attention_output.tensor->data),
@@ -838,6 +921,9 @@ inline bool matmul_vector(native_backend & backend,
   backend.kernel.set_kind(backend.kernel_kind);
   const bool ok = backend.kernel.process_event(ev);
   backend.kernel_dispatch_calls += 1;
+  backend.native_q8_0_dispatch_calls += static_cast<uint64_t>(
+      matrix.tensor != nullptr &&
+      static_cast<uint8_t>(matrix.tensor->type) == emel::kernel::detail::dtype_q8_0);
   return ok;
 }
 
@@ -866,6 +952,9 @@ inline bool matmul_vector_argmax(native_backend & backend,
   backend.kernel.set_kind(backend.kernel_kind);
   const bool ok = backend.kernel.process_event(ev);
   backend.kernel_dispatch_calls += 1;
+  backend.native_q8_0_dispatch_calls += static_cast<uint64_t>(
+      matrix.tensor != nullptr &&
+      static_cast<uint8_t>(matrix.tensor->type) == emel::kernel::detail::dtype_q8_0);
   return ok;
 }
 
@@ -1159,11 +1248,14 @@ inline bool compute_attention(native_backend & backend,
   const int32_t kv_head_count = backend.n_head_kv;
   const int32_t head_dim = backend.head_dim;
   const int32_t kv_head_dim = backend.head_dim_kv;
+  const int32_t q_dim = head_count * head_dim;
   const int32_t kv_dim = kv_head_count * kv_head_dim;
   const float inv_scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
   const int32_t attn_width = backend.n_ctx;
 
   if (position_limit <= 0 || position_limit > attn_width ||
+      q_vector.size() != static_cast<size_t>(q_dim) ||
+      backend.attn_ctx.size() != static_cast<size_t>(q_dim) ||
       backend.attn_scores.size() != static_cast<size_t>(attn_width) ||
       backend.attn_probs.size() != static_cast<size_t>(attn_width) ||
       backend.attn_probs_rounded.size() != static_cast<size_t>(attn_width) ||
@@ -1307,6 +1399,10 @@ inline bool run_layer(native_backend & backend,
       !matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
       !matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
       !matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    return false;
+  }
+
+  if (is_qwen3_runtime(backend) && !apply_qwen3_attention_qk_norm(backend, block)) {
     return false;
   }
 
@@ -1620,10 +1716,9 @@ inline emel::error::type prepare(native_backend & backend,
   }
 
   backend.head_dim = backend.n_embd / backend.n_head;
-
   if (!bind_tensor_rows(*backend.execution.token_embedding.tensor, backend.token_embedding) ||
       !dequantize_tensor_vector(*backend.execution.output_norm.tensor, backend.output_norm) ||
-      !bind_tensor_rows(*backend.execution.output.tensor, backend.output_native) ||
+      !bind_output_projection(backend) ||
       !prepare_output_logits(backend) ||
       !prepare_logits_input_q8_workspace(backend)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -1638,6 +1733,7 @@ inline emel::error::type prepare(native_backend & backend,
   }
 
   backend.blocks.resize(static_cast<size_t>(backend.n_layer));
+  const bool qwen3_runtime = is_qwen3_runtime(backend);
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
     emel::model::llama::detail::block_view block = {};
     if (emel::model::llama::detail::lookup_block_view(backend.execution, layer, block) !=
@@ -1650,6 +1746,10 @@ inline emel::error::type prepare(native_backend & backend,
         !bind_tensor_rows(*block.attention_q.tensor, weights.attention_q) ||
         !bind_tensor_rows(*block.attention_k.tensor, weights.attention_k) ||
         !bind_tensor_rows(*block.attention_v.tensor, weights.attention_v) ||
+        (qwen3_runtime &&
+         !dequantize_tensor_vector(*block.attention_q_norm.tensor, weights.attention_q_norm)) ||
+        (qwen3_runtime &&
+         !dequantize_tensor_vector(*block.attention_k_norm.tensor, weights.attention_k_norm)) ||
         !bind_tensor_rows(*block.attention_output.tensor, weights.attention_output) ||
         !dequantize_tensor_vector(*block.feed_forward_norm.tensor, weights.feed_forward_norm) ||
         !bind_tensor_rows(*block.feed_forward_gate.tensor, weights.feed_forward_gate) ||
@@ -1659,12 +1759,26 @@ inline emel::error::type prepare(native_backend & backend,
     }
   }
 
-  backend.head_dim_kv = backend.blocks[0].attention_k.rows / backend.n_head_kv;
+  const int32_t declared_key_length = model_data.params.attention_key_length;
+  const int32_t declared_value_length = model_data.params.attention_value_length;
+  backend.head_dim = declared_key_length > 0 ? declared_key_length : backend.n_embd / backend.n_head;
+  backend.head_dim_kv =
+      declared_key_length > 0 ? declared_key_length : backend.blocks[0].attention_k.rows / backend.n_head_kv;
   backend.n_rep = backend.n_head / backend.n_head_kv;
+  const int32_t q_dim = backend.n_head * backend.head_dim;
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
 
   if (backend.head_dim_kv <= 0 ||
+      backend.head_dim <= 0 ||
       backend.n_rep <= 0 ||
-      backend.blocks[0].attention_q.rows != backend.n_embd ||
+      (declared_value_length > 0 && declared_value_length != backend.head_dim_kv) ||
+      backend.blocks[0].attention_q.cols != backend.n_embd ||
+      backend.blocks[0].attention_q.rows != q_dim ||
+      backend.blocks[0].attention_k.cols != backend.n_embd ||
+      backend.blocks[0].attention_k.rows != kv_dim ||
+      backend.blocks[0].attention_v.cols != backend.n_embd ||
+      backend.blocks[0].attention_v.rows != kv_dim ||
+      backend.blocks[0].attention_output.cols != q_dim ||
       backend.blocks[0].attention_output.rows != backend.n_embd ||
       static_cast<int32_t>(backend.blocks[0].attention_norm.size()) != backend.n_embd ||
       static_cast<int32_t>(backend.blocks[0].feed_forward_norm.size()) != backend.n_embd ||
@@ -1674,7 +1788,15 @@ inline emel::error::type prepare(native_backend & backend,
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
-  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  if (qwen3_runtime) {
+    for (const auto & block : backend.blocks) {
+      if (static_cast<int32_t>(block.attention_q_norm.size()) != backend.head_dim ||
+          static_cast<int32_t>(block.attention_k_norm.size()) != backend.head_dim_kv) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+    }
+  }
+
   backend.key_cache.resize(static_cast<size_t>(backend.n_layer) *
                            static_cast<size_t>(backend.n_ctx) *
                            static_cast<size_t>(kv_dim));
@@ -1692,15 +1814,15 @@ inline emel::error::type prepare(native_backend & backend,
   backend.bound_positions.resize(static_cast<size_t>(backend.n_ctx));
   backend.hidden.resize(static_cast<size_t>(backend.n_embd));
   backend.norm.resize(static_cast<size_t>(backend.n_embd));
-  backend.q.resize(static_cast<size_t>(backend.n_embd));
-  backend.q_attn.resize(static_cast<size_t>(backend.n_embd));
+  backend.q.resize(static_cast<size_t>(q_dim));
+  backend.q_attn.resize(static_cast<size_t>(q_dim));
   backend.k.resize(static_cast<size_t>(kv_dim));
   backend.v.resize(static_cast<size_t>(kv_dim));
   backend.attn_scores.resize(static_cast<size_t>(backend.n_ctx));
   backend.attn_probs.resize(static_cast<size_t>(backend.n_ctx));
   backend.attn_probs_rounded.resize(static_cast<size_t>(backend.n_ctx));
   backend.attn_value_column.resize(static_cast<size_t>(backend.n_ctx));
-  backend.attn_ctx.resize(static_cast<size_t>(backend.n_embd));
+  backend.attn_ctx.resize(static_cast<size_t>(q_dim));
   backend.projected.resize(static_cast<size_t>(backend.n_embd));
   backend.gate.resize(static_cast<size_t>(backend.blocks[0].feed_forward_gate.rows));
   backend.up.resize(static_cast<size_t>(backend.blocks[0].feed_forward_up.rows));

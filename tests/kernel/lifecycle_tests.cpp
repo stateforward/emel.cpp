@@ -160,6 +160,69 @@ TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
   CHECK(q6_out[0] == doctest::Approx(-8192.0f));
 }
 
+TEST_CASE("kernel_mul_mat_accepts_q8_0_weights") {
+  using emel::kernel::detail::quant::QK8_0;
+  using emel::kernel::detail::quant::block_q8_0;
+
+  std::array<float, QK8_0> input = {};
+  input.fill(1.0f);
+  std::array<block_q8_0, 2> q8_rows = {};
+  for (auto & block : q8_rows) {
+    block.d = emel::kernel::detail::quant::fp32_to_fp16(1.0f / 127.0f);
+  }
+  q8_rows[0].qs.fill(127);
+  q8_rows[1].qs.fill(0);
+  std::array<float, 2> out = {};
+  const float q8_0_unit =
+      127.0f * emel::kernel::detail::quant::fp16_to_fp32(q8_rows[0].d);
+  const float expected_sum =
+      q8_0_unit * q8_0_unit * static_cast<float>(QK8_0);
+
+  kernel_sm machine{};
+  const emel::kernel::event::op_mul_mat q8_ev{
+      .src0 = make_quantized_src(q8_rows.data(), dtype::q8_0, QK8_0, 2),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK8_0),
+      .dst = make_dst(out.data(), dtype::f32, 1, 2),
+      .nth = 1,
+  };
+
+  CHECK(machine.process_event(q8_ev));
+  CHECK(out[0] == doctest::Approx(expected_sum).epsilon(1.0e-6f));
+  CHECK(out[1] == doctest::Approx(0.0f).epsilon(1.0e-6f));
+}
+
+TEST_CASE("kernel_mul_mat_argmax_accepts_q8_0_weights") {
+  using emel::kernel::detail::quant::QK8_0;
+  using emel::kernel::detail::quant::block_q8_0;
+
+  std::array<float, QK8_0> input = {};
+  input.fill(1.0f);
+  std::array<block_q8_0, 2> q8_rows = {};
+  for (auto & block : q8_rows) {
+    block.d = emel::kernel::detail::quant::fp32_to_fp16(1.0f / 127.0f);
+  }
+  q8_rows[0].qs.fill(127);
+  q8_rows[1].qs.fill(63);
+  const float q8_0_unit =
+      127.0f * emel::kernel::detail::quant::fp16_to_fp32(q8_rows[0].d);
+  float best_score = 0.0f;
+  int32_t best_index = -1;
+
+  kernel_sm machine{};
+  const emel::kernel::event::op_mul_mat_argmax q8_ev{
+      .src0 = make_quantized_src(q8_rows.data(), dtype::q8_0, QK8_0, 2),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK8_0),
+      .dst = make_dst(&best_score, dtype::f32, 1, 1),
+      .nth = 1,
+      .index_out = &best_index,
+  };
+
+  CHECK(machine.process_event(q8_ev));
+  CHECK(best_index == 0);
+  CHECK(best_score ==
+        doctest::Approx(q8_0_unit * q8_0_unit * static_cast<float>(QK8_0)).epsilon(1.0e-6f));
+}
+
 TEST_CASE("kernel_mul_mat_rejects_packed_q6_q8_requests_without_explicit_simd_route") {
   using emel::kernel::detail::quant::QK_K;
   constexpr uint64_t k_rows = 8u;

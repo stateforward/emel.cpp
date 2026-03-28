@@ -251,6 +251,29 @@ TEST_CASE("generator generate dispatch actions cover channel variants") {
                                                                     context);
 }
 
+TEST_CASE(
+    "generator request_planning accepts multi-token single-sequence prompt metadata") {
+  emel::generator::action::context context{};
+  callback_tracker tracker{};
+  emel::error::type error_out = emel::error::cast(emel::generator::error::backend);
+  size_t output_length_out = 0;
+
+  auto generate = make_generate_request(&tracker, &error_out, output_length_out);
+  emel::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count = 2;
+  emel::generator::event::generate_run generate_run{generate, generate_ctx};
+  context.buffers.prompt_tokens[0] = 11;
+  context.buffers.prompt_tokens[1] = 13;
+
+  emel::generator::action::request_planning(generate_run, context);
+
+  CHECK(generate_ctx.phase_accepted);
+  CHECK(generate_ctx.phase_code == 0);
+  CHECK(generate_ctx.prefill_step_size == 1);
+  CHECK(generate_ctx.plan_step_count == 2);
+  CHECK(generate_ctx.plan_outputs >= 0);
+}
+
 TEST_CASE("generator structured message request and channel guards classify callback variants") {
   emel::generator::action::context context{};
   emel::text::conditioner::sm conditioner{};
@@ -404,6 +427,11 @@ TEST_CASE("generator phase guards classify invalid and backend errors") {
   generate_ctx.phase_code =
       static_cast<int32_t>(emel::error::cast(emel::batch::planner::error::invalid_step_size));
   CHECK(emel::generator::guard::planning_invalid_request{}(generate_run, context));
+  generate_ctx.phase_code = static_cast<int32_t>(emel::error::set(
+      emel::error::cast(emel::batch::planner::error::invalid_request),
+      emel::batch::planner::error::invalid_sequence_metadata));
+  CHECK(emel::generator::guard::planning_invalid_request{}(generate_run, context));
+  CHECK_FALSE(emel::generator::guard::planning_backend_error{}(generate_run, context));
   generate_ctx.phase_accepted = true;
   generate_ctx.phase_code = 0;
   generate_ctx.plan_step_count = 0;

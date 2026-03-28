@@ -16282,6 +16282,8 @@ void dump_generation_live_backend_prefix_debug(const generation_load_state & sta
 
 void dump_reference_decode_seam(const generation_load_state & state) {
   const emel::kernel::kernel_kind kernel_kind = state.generator->generation_kernel_kind();
+  const uint64_t native_q8_0_dispatch_calls =
+      state.generator->generation_native_q8_0_dispatch_calls();
   const uint64_t optimized_flash_dispatch_calls =
       state.generator->generation_optimized_flash_dispatch_calls();
   const uint64_t shared_flash_dispatch_calls =
@@ -16326,13 +16328,15 @@ void dump_reference_decode_seam(const generation_load_state & state) {
                " optimized_q3_dispatch_calls=%" PRIu64
                " shared_q3_dispatch_calls=%" PRIu64
                " optimized_q6_dispatch_calls=%" PRIu64
-               " shared_q6_dispatch_calls=%" PRIu64 "\n",
+               " shared_q6_dispatch_calls=%" PRIu64
+               " native_q8_0_dispatch_calls=%" PRIu64 "\n",
                optimized_q2_dispatch_calls,
                shared_q2_dispatch_calls,
                optimized_q3_dispatch_calls,
                shared_q3_dispatch_calls,
                optimized_q6_dispatch_calls,
-               shared_q6_dispatch_calls);
+               shared_q6_dispatch_calls,
+               native_q8_0_dispatch_calls);
   const auto runtime_contract = runtime_quantized_contract_summary(state);
   std::fprintf(stdout,
                "quantized_runtime_contract: native_quantized=%u "
@@ -16676,6 +16680,11 @@ emel::error::type populate_model_metadata(const generation_load_state & state,
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
   copy_name(model_data.architecture_name, architecture);
+  const bool is_llama = architecture == "llama";
+  const bool is_qwen3 = architecture == "qwen3";
+  if (!is_llama && !is_qwen3) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
 
   const auto assign_i32 = [&](const std::string_view key, int32_t & field) {
     const auto * entry = find_kv_entry(state, key);
@@ -16723,28 +16732,61 @@ emel::error::type populate_model_metadata(const generation_load_state & state,
     return true;
   };
 
-  if (!assign_i32("llama.context_length", model_data.params.n_ctx) ||
-      !assign_i32("llama.embedding_length", model_data.params.n_embd) ||
-      !assign_i32("llama.embedding_length_out", model_data.params.n_embd_out) ||
-      !assign_i32("llama.feed_forward_length", model_data.params.n_ff) ||
-      !assign_i32("llama.attention.head_count", model_data.params.n_head) ||
-      !assign_i32("llama.attention.head_count_kv", model_data.params.n_head_kv) ||
-      !assign_i32("llama.rope.dimension_count", model_data.params.n_rot) ||
-      !assign_i32("llama.block_count", model_data.params.n_layer) ||
-      !assign_i32("llama.vocab_size", model_data.params.n_vocab) ||
-      !assign_f32("llama.attention.layer_norm_epsilon", model_data.params.attention_layer_norm_epsilon) ||
-      !assign_f32(
-          "llama.attention.layer_norm_rms_epsilon",
-          model_data.params.attention_layer_norm_rms_epsilon) ||
-      !assign_f32("llama.attention.clamp_kqv", model_data.params.attention_clamp_kqv) ||
-      !assign_f32("llama.attn_logit_softcapping", model_data.params.attn_logit_softcapping) ||
-      !assign_f32("llama.final_logit_softcapping", model_data.params.final_logit_softcapping) ||
-      !assign_f32("llama.residual_scale", model_data.params.residual_scale) ||
-      !assign_f32("llama.embedding_scale", model_data.params.embedding_scale) ||
-      !assign_f32("llama.rope.freq_base", model_data.params.rope_freq_base) ||
-      !assign_f32("llama.rope.freq_base_swa", model_data.params.rope_freq_base_swa) ||
-      !assign_bool("llama.use_parallel_residual", model_data.params.use_parallel_residual)) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
+  if (is_llama) {
+    if (!assign_i32("llama.context_length", model_data.params.n_ctx) ||
+        !assign_i32("llama.embedding_length", model_data.params.n_embd) ||
+        !assign_i32("llama.embedding_length_out", model_data.params.n_embd_out) ||
+        !assign_i32("llama.feed_forward_length", model_data.params.n_ff) ||
+        !assign_i32("llama.attention.head_count", model_data.params.n_head) ||
+        !assign_i32("llama.attention.head_count_kv", model_data.params.n_head_kv) ||
+        !assign_i32("llama.rope.dimension_count", model_data.params.n_rot) ||
+        !assign_i32("llama.block_count", model_data.params.n_layer) ||
+        !assign_i32("llama.vocab_size", model_data.params.n_vocab) ||
+        !assign_f32("llama.attention.layer_norm_epsilon", model_data.params.attention_layer_norm_epsilon) ||
+        !assign_f32(
+            "llama.attention.layer_norm_rms_epsilon",
+            model_data.params.attention_layer_norm_rms_epsilon) ||
+        !assign_f32("llama.attention.clamp_kqv", model_data.params.attention_clamp_kqv) ||
+        !assign_f32("llama.attn_logit_softcapping", model_data.params.attn_logit_softcapping) ||
+        !assign_f32("llama.final_logit_softcapping", model_data.params.final_logit_softcapping) ||
+        !assign_f32("llama.residual_scale", model_data.params.residual_scale) ||
+        !assign_f32("llama.embedding_scale", model_data.params.embedding_scale) ||
+        !assign_f32("llama.rope.freq_base", model_data.params.rope_freq_base) ||
+        !assign_f32("llama.rope.freq_base_swa", model_data.params.rope_freq_base_swa) ||
+        !assign_bool("llama.use_parallel_residual", model_data.params.use_parallel_residual)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+  }
+
+  if (is_qwen3) {
+    int32_t qwen3_key_length = 0;
+    int32_t qwen3_value_length = 0;
+    if (!assign_i32("qwen3.context_length", model_data.params.n_ctx) ||
+        !assign_i32("qwen3.embedding_length", model_data.params.n_embd) ||
+        !assign_i32("qwen3.feed_forward_length", model_data.params.n_ff) ||
+        !assign_i32("qwen3.attention.head_count", model_data.params.n_head) ||
+        !assign_i32("qwen3.attention.head_count_kv", model_data.params.n_head_kv) ||
+        !assign_i32("qwen3.attention.key_length", qwen3_key_length) ||
+        !assign_i32("qwen3.attention.value_length", qwen3_value_length) ||
+        !assign_i32("qwen3.block_count", model_data.params.n_layer) ||
+        !assign_f32(
+            "qwen3.attention.layer_norm_rms_epsilon",
+            model_data.params.attention_layer_norm_rms_epsilon) ||
+        !assign_f32("qwen3.rope.freq_base", model_data.params.rope_freq_base)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+
+    model_data.params.attention_key_length = qwen3_key_length;
+    model_data.params.attention_value_length = qwen3_value_length;
+    if (model_data.params.n_embd_out == 0) {
+      model_data.params.n_embd_out = model_data.params.n_embd;
+    }
+    if (model_data.params.n_rot == 0) {
+      model_data.params.n_rot = qwen3_key_length;
+    }
+    if (qwen3_key_length <= 0 || qwen3_value_length <= 0) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
   }
 
   const auto * tokens_entry = find_kv_entry(state, "tokenizer.tokens");
@@ -17008,7 +17050,8 @@ emel::error::type run_emel_validate_structure(void *,
 emel::error::type run_emel_validate_architecture(
     void *,
     const emel::model::loader::event::load & req) {
-  return emel::model::architecture_name_view(req.model_data) == "llama"
+  const std::string_view architecture = emel::model::architecture_name_view(req.model_data);
+  return (architecture == "llama" || architecture == "qwen3")
              ? emel::error::cast(emel::model::loader::error::none)
              : emel::error::cast(emel::model::loader::error::model_invalid);
 }
@@ -18529,6 +18572,56 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   const emel::error::type initialize_err = run_emel_initialize_generator(state, opts);
   if (initialize_err != emel::error::cast(emel::generator::error::none)) {
     print_generation_formatter_contract(stderr, state);
+    int32_t output_weight_count = 0;
+    int32_t q_norm_count = 0;
+    int32_t k_norm_count = 0;
+    for (uint32_t idx = 0; idx < state.model_data->n_tensors; ++idx) {
+      const std::string_view name =
+          emel::model::tensor_name_view(*state.model_data, state.model_data->tensors[idx]);
+      output_weight_count += static_cast<int32_t>(name == "output.weight");
+      q_norm_count += static_cast<int32_t>(name.find("attn_q_norm.weight") != std::string_view::npos);
+      k_norm_count += static_cast<int32_t>(name.find("attn_k_norm.weight") != std::string_view::npos);
+    }
+    std::fprintf(stderr,
+                 "generation initialize debug architecture=%.*s n_layers=%d n_tensors=%u "
+                 "output_weight=%d q_norm=%d k_norm=%d\n",
+                 static_cast<int>(emel::model::architecture_name_view(*state.model_data).size()),
+                 emel::model::architecture_name_view(*state.model_data).data(),
+                 state.model_data->n_layers,
+                 state.model_data->n_tensors,
+                 output_weight_count,
+                 q_norm_count,
+                 k_norm_count);
+    emel::model::llama::detail::execution_view debug_execution{};
+    if (emel::model::llama::detail::build_execution_view(*state.model_data, debug_execution) ==
+        emel::error::cast(emel::model::loader::error::none)) {
+      emel::model::llama::detail::block_view debug_block{};
+      if (emel::model::llama::detail::lookup_block_view(debug_execution, 0, debug_block) ==
+          emel::error::cast(emel::model::loader::error::none)) {
+        const auto print_tensor_shape = [&](const char * label,
+                                            const emel::model::data::tensor_record * tensor) {
+          if (tensor == nullptr) {
+            std::fprintf(stderr, "generation initialize debug %s=<null>\n", label);
+            return;
+          }
+          const uint64_t dim0 = tensor->n_dims > 0 ? tensor->dims[0] : 0u;
+          const uint64_t dim1 = tensor->n_dims > 1 ? tensor->dims[1] : 1u;
+          std::fprintf(stderr,
+                       "generation initialize debug %s type=%d dims=%" PRIu64 "x%" PRIu64 "\n",
+                       label,
+                       tensor->type,
+                       dim0,
+                       dim1);
+        };
+        print_tensor_shape("attn_q", debug_block.attention_q.tensor);
+        print_tensor_shape("attn_k", debug_block.attention_k.tensor);
+        print_tensor_shape("attn_q_norm", debug_block.attention_q_norm.tensor);
+        print_tensor_shape("attn_k_norm", debug_block.attention_k_norm.tensor);
+        print_tensor_shape("output", debug_execution.output.tensor);
+      }
+    } else {
+      std::fprintf(stderr, "generation initialize debug build_execution_view failed\n");
+    }
     std::fprintf(stderr,
                  "generation initialize failed (fixture=%s err=%s)\n",
                  k_generation_fixture_name,
@@ -18567,6 +18660,8 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
       state.generator->generation_optimized_flash_dispatch_calls();
   const uint64_t shared_flash_dispatch_calls =
       state.generator->generation_shared_flash_dispatch_calls();
+  const uint64_t native_q8_0_dispatch_calls =
+      state.generator->generation_native_q8_0_dispatch_calls();
   const uint64_t optimized_q2_dispatch_calls =
       state.generator->generation_optimized_q2_dispatch_calls();
   const uint64_t shared_q2_dispatch_calls =
@@ -18609,12 +18704,11 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
-  if (generation_kernel_kind == emel::kernel::kernel_kind::aarch64 &&
-      (optimized_q2_dispatch_calls == 0u || shared_q2_dispatch_calls != 0u ||
-       optimized_q3_dispatch_calls == 0u || shared_q3_dispatch_calls != 0u ||
-       optimized_q6_dispatch_calls == 0u || shared_q6_dispatch_calls != 0u)) {
+  if (optimized_q2_dispatch_calls != 0u || shared_q2_dispatch_calls != 0u ||
+      optimized_q3_dispatch_calls != 0u || shared_q3_dispatch_calls != 0u ||
+      optimized_q6_dispatch_calls != 0u || shared_q6_dispatch_calls != 0u) {
     std::fprintf(stderr,
-                 "generation quantized proof failed (fixture=%s kernel_kind=%s "
+                 "generation quantized legacy-dispatch proof failed (fixture=%s kernel_kind=%s "
                  "optimized_q2_dispatch_calls=%" PRIu64
                  " shared_q2_dispatch_calls=%" PRIu64
                  " optimized_q3_dispatch_calls=%" PRIu64
@@ -18629,6 +18723,16 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  shared_q3_dispatch_calls,
                  optimized_q6_dispatch_calls,
                  shared_q6_dispatch_calls);
+    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
+    return 1;
+  }
+  if (native_q8_0_dispatch_calls == 0u) {
+    std::fprintf(stderr,
+                 "generation q8_0 dispatch proof failed (fixture=%s kernel_kind=%s "
+                 "native_q8_0_dispatch_calls=%" PRIu64 ")\n",
+                 k_generation_fixture_name,
+                 kernel_kind_name(generation_kernel_kind),
+                 native_q8_0_dispatch_calls);
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }

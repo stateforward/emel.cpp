@@ -71,6 +71,22 @@ bool assign_tensor_view(const data & model_data,
   return true;
 }
 
+bool assign_output_view(const data & model_data,
+                        const std::string_view architecture,
+                        const llama::detail::tensor_view & token_embedding,
+                        llama::detail::tensor_view & output_out) noexcept {
+  if (assign_tensor_view(model_data, k_output_name, output_out)) {
+    return true;
+  }
+
+  if (!uses_qwen3_block_contract(architecture) || token_embedding.tensor == nullptr) {
+    return false;
+  }
+
+  output_out = token_embedding;
+  return true;
+}
+
 bool make_block_tensor_name(const int32_t block_index,
                             const std::string_view suffix,
                             std::array<char, 64> & buffer,
@@ -110,7 +126,7 @@ constexpr std::array<llama::detail::quantized_stage_family,
     };
 
 bool is_supported_quantized_type(const int32_t tensor_type) noexcept {
-  return ::emel::kernel::detail::is_quantized_k_dtype(static_cast<uint8_t>(tensor_type));
+  return ::emel::kernel::detail::is_native_quantized_dtype(static_cast<uint8_t>(tensor_type));
 }
 
 bool is_f32_type(const int32_t tensor_type) noexcept {
@@ -375,7 +391,7 @@ emel::error::type build_execution_view(const emel::model::data & model_data,
 
   if (!assign_tensor_view(model_data, k_token_embedding_name, view.token_embedding) ||
       !assign_tensor_view(model_data, k_output_norm_name, view.output_norm) ||
-      !assign_tensor_view(model_data, k_output_name, view.output)) {
+      !assign_output_view(model_data, architecture, view.token_embedding, view.output)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 

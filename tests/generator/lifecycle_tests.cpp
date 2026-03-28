@@ -303,6 +303,8 @@ void build_quantized_contract_prepared_model(prepared_model & prepared) {
   prepared.data.params.n_head_kv = 1;
   prepared.data.params.n_ctx = 8;
   prepared.data.params.n_rot = 2;
+  prepared.data.params.attention_key_length = k_n_embd;
+  prepared.data.params.attention_value_length = k_n_embd;
   prepared.data.params.n_layer = 1;
   prepared.data.n_layers = 1;
   prepared.data.weights_data = prepared.data.tensors.data();
@@ -445,6 +447,8 @@ void build_qwen3_prepared_model(prepared_model & prepared) {
   prepared.data.params.n_head_kv = 2;
   prepared.data.params.n_ctx = 8;
   prepared.data.params.n_rot = 2;
+  prepared.data.params.attention_key_length = 2;
+  prepared.data.params.attention_value_length = 2;
   prepared.data.params.n_layer = 1;
   prepared.data.n_layers = 1;
   prepared.data.weights_data = prepared.data.tensors.data();

@@ -443,3 +443,24 @@ TEST_CASE("model_llama_detail_rejects_qwen3_execution_view_without_attention_k_n
   CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
   CHECK(view.model == nullptr);
 }
+
+TEST_CASE("model_llama_detail_builds_qwen3_execution_view_with_tied_output_fallback") {
+  auto model = std::make_unique<emel::model::data>();
+  build_qwen3_model(*model, 1, true, true);
+
+  for (uint32_t idx = 0; idx < model->n_tensors; ++idx) {
+    auto & tensor = model->tensors[idx];
+    if (emel::model::tensor_name_view(*model, tensor) == "output.weight") {
+      tensor.data = nullptr;
+      tensor.data_size = 0u;
+      break;
+    }
+  }
+
+  emel::model::llama::detail::execution_view view = {};
+  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+
+  CHECK(err == emel::error::cast(emel::model::loader::error::none));
+  CHECK(view.model == model.get());
+  CHECK(view.output.name == "token_embd.weight");
+}

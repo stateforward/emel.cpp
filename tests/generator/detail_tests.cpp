@@ -13,9 +13,11 @@ namespace {
 
 using emel::generator::detail::quant::QK_K;
 using emel::generator::detail::quant::Q6_K_X8_ROWS;
+using emel::generator::detail::quant::QK8_0;
 using emel::generator::detail::quant::block_q2_k;
 using emel::generator::detail::quant::block_q3_k;
 using emel::generator::detail::quant::block_q6_k;
+using emel::generator::detail::quant::block_q8_0;
 using emel::kernel::test::flash_attn_reference_online_softmax_f16_values;
 using emel::kernel::test::k_flash_online_f16_abs_tolerance;
 using emel::kernel::test::within_flash_online_f16_tolerance;
@@ -396,6 +398,22 @@ TEST_CASE("generator_detail_dequantizes_q6_k_blocks") {
   CHECK(out.back() == doctest::Approx(-32.0f));
 }
 
+TEST_CASE("generator_detail_dequantizes_q8_0_blocks") {
+  block_q8_0 block = {};
+  block.d = emel::generator::detail::quant::fp32_to_fp16(0.5f);
+  for (size_t idx = 0; idx < block.qs.size(); ++idx) {
+    block.qs[idx] = static_cast<int8_t>((static_cast<int32_t>(idx % 7u)) - 3);
+  }
+
+  std::array<float, QK8_0> out = {};
+  emel::generator::detail::quant::dequantize_row_q8_0(&block, out.data(), QK8_0);
+
+  CHECK(out.front() == doctest::Approx(-1.5f));
+  CHECK(out[1] == doctest::Approx(-1.0f));
+  CHECK(out[2] == doctest::Approx(-0.5f));
+  CHECK(out.back() == doctest::Approx(0.0f));
+}
+
 TEST_CASE("generator_detail_prepares_explicit_logits_routes_and_support_predicates") {
   auto q6_rows = make_q6_rows();
   auto q6_tensor = make_tensor_record(
@@ -520,6 +538,16 @@ TEST_CASE("generator_detail_tensor_binding_and_copy_helpers_accept_explicit_quan
   REQUIRE(emel::generator::detail::copy_tensor_row(q3_tensor, 0, q3_out));
   CHECK(q3_out.front() == doctest::Approx(128.0f));
   CHECK_FALSE(emel::generator::detail::copy_tensor_row(q3_tensor, 1, q3_out));
+
+  block_q8_0 q8_block = {};
+  q8_block.d = emel::generator::detail::quant::fp32_to_fp16(0.25f);
+  q8_block.qs.fill(4);
+  auto q8_tensor = make_tensor_record(&q8_block, emel::kernel::detail::dtype_q8_0,
+                                      static_cast<int32_t>(QK8_0), 1);
+  std::vector<float> q8_out(QK8_0, 0.0f);
+  REQUIRE(emel::generator::detail::copy_tensor_row(q8_tensor, 0, q8_out));
+  CHECK(q8_out.front() == doctest::Approx(1.0f));
+  CHECK(q8_out.back() == doctest::Approx(1.0f));
 
   std::vector<float> q6_out = {};
   REQUIRE(emel::generator::detail::dequantize_tensor_vector(q6_tensor, q6_out) == false);
@@ -1007,13 +1035,15 @@ TEST_CASE("generator_detail_qwen3_generator_applies_per_head_qk_norm_before_rope
   apply_rope_reference(expected_k, 2, 2, 2, 1, backend->rope_freq_base);
 
   REQUIRE(emel::generator::detail::run_layer_nonflash(*backend, 0, 1));
+  const size_t cache_offset = emel::generator::detail::layer_cache_offset(
+      *backend, 0, 1, backend->n_head_kv * backend->head_dim_kv);
 
   for (size_t idx = 0; idx < expected_q.size(); ++idx) {
     CHECK(backend->q[idx] == doctest::Approx(expected_q[idx]).epsilon(1.0e-5));
     CHECK(backend->q_attn[idx] ==
           doctest::Approx(round_fp16_value(expected_q[idx])).epsilon(1.0e-5));
     CHECK(backend->k[idx] == doctest::Approx(expected_k[idx]).epsilon(1.0e-5));
-    CHECK(emel::generator::detail::quant::fp16_to_fp32(backend->key_cache[idx]) ==
+    CHECK(emel::generator::detail::quant::fp16_to_fp32(backend->key_cache[cache_offset + idx]) ==
           doctest::Approx(round_fp16_value(expected_k[idx])).epsilon(1.0e-5));
   }
 }
