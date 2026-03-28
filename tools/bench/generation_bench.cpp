@@ -1,4 +1,5 @@
 #include "bench_cases.hpp"
+#include "../generation_formatter_contract.hpp"
 
 #include <algorithm>
 #include <array>
@@ -118,7 +119,15 @@ std::string resolve_generation_model_path() {
   return (bench_root_path() / k_generation_fixture_rel).string();
 }
 
+extern std::string_view g_generation_formatter_contract;
+
 [[noreturn]] void fail_bench_setup(const char * step, const char * detail) {
+  if (!g_generation_formatter_contract.empty()) {
+    std::fprintf(stderr,
+                 "# generation_formatter_contract: %.*s\n",
+                 static_cast<int>(g_generation_formatter_contract.size()),
+                 g_generation_formatter_contract.data());
+  }
   std::fprintf(stderr, "error: generation bench setup failed at %s (%s)\n", step, detail);
   std::abort();
 }
@@ -608,6 +617,7 @@ struct emel_fixture {
   const llama_vocab * reference_vocab = nullptr;
   int32_t reference_vocab_size = 0;
   int32_t fallback_token_id = 0;
+  emel::tools::generation_formatter_contract::formatter_binding formatter_binding = {};
 };
 
 struct generation_seam_audit {
@@ -641,12 +651,14 @@ struct emel_session {
   emel::text::conditioner::sm conditioner = {};
   std::unique_ptr<emel::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {};
+  emel::tools::generation_formatter_contract::formatter_binding formatter_binding = {};
   generation_seam_audit seam = {};
   initialize_capture initialize = {};
   generation_capture generation = {};
 };
 
 generation_flash_evidence_state g_generation_flash_evidence = {};
+std::string_view g_generation_formatter_contract = {};
 
 uint32_t read_u32_le(const std::span<const uint8_t> bytes) {
   uint32_t value = 0u;
@@ -970,6 +982,37 @@ const emel::gguf::loader::kv_entry * find_kv_entry(const emel_fixture & fixture,
     }
   }
   return nullptr;
+}
+
+bool decode_string_value(const emel_fixture & fixture,
+                         const emel::gguf::loader::kv_entry & entry,
+                         std::string_view & value_out);
+
+emel::tools::generation_formatter_contract::formatter_binding
+resolve_fixture_formatter_binding(const emel_fixture & fixture) {
+  std::string_view primary_template = {};
+  const auto * entry = find_kv_entry(fixture, "tokenizer.chat_template");
+  if (entry != nullptr && !decode_string_value(fixture, *entry, primary_template)) {
+    return emel::tools::generation_formatter_contract::formatter_binding{
+        .formatter_ctx = nullptr,
+        .format_prompt = emel::text::formatter::format_raw,
+        .support = emel::tools::generation_formatter_contract::support_kind::unsupported_template,
+        .contract = emel::tools::generation_formatter_contract::k_unsupported_template_contract,
+    };
+  }
+
+  uint32_t named_template_count = 0u;
+  for (const auto & candidate : fixture.kv_entries) {
+    const std::string_view key = kv_key_view(fixture, candidate);
+    if (key.starts_with("tokenizer.chat_template.") &&
+        key != "tokenizer.chat_template") {
+      named_template_count += 1u;
+    }
+  }
+
+  return emel::tools::generation_formatter_contract::resolve_primary_template_binding(
+      primary_template,
+      named_template_count);
 }
 
 bool decode_integer_value(const emel_fixture & fixture,
@@ -1395,6 +1438,14 @@ bool prepare_emel_fixture(emel_fixture & fixture, const std::string & model_path
   load_ev.on_done = {&fixture, on_load_done};
   load_ev.on_error = {&fixture, on_load_error};
   if (!fixture.model_loader.process_event(load_ev) || !fixture.load.done || fixture.load.error) {
+    fixture.formatter_binding = resolve_fixture_formatter_binding(fixture);
+    g_generation_formatter_contract = fixture.formatter_binding.contract;
+    return false;
+  }
+  fixture.formatter_binding = resolve_fixture_formatter_binding(fixture);
+  g_generation_formatter_contract = fixture.formatter_binding.contract;
+  if (!emel::tools::generation_formatter_contract::binding_supported(
+          fixture.formatter_binding)) {
     return false;
   }
   return true;
@@ -1458,11 +1509,12 @@ llama_context_ptr make_reference_context(llama_model * model) {
 
 void prepare_emel_session(const emel_fixture & fixture, emel_session & session) {
   session.model_data = fixture.model_data;
+  session.formatter_binding = fixture.formatter_binding;
   session.generator = std::make_unique<emel::generator::sm>(
       session.model_data,
       session.conditioner,
-      nullptr,
-      emel::text::formatter::format_raw);
+      session.formatter_binding.formatter_ctx,
+      session.formatter_binding.format_prompt);
 }
 
 bool initialize_emel_session(emel_session & session, const generation_case_spec & spec) {
@@ -1470,8 +1522,14 @@ bool initialize_emel_session(emel_session & session, const generation_case_spec 
     return false;
   }
 
+  std::string formatted_prompt = {};
+  if (!emel::tools::generation_formatter_contract::format_single_user_prompt(
+          session.formatter_binding, spec.prompt, formatted_prompt)) {
+    return false;
+  }
+
   const int32_t prompt_capacity =
-      std::max<int32_t>(32, static_cast<int32_t>(spec.prompt.size()) + 8);
+      std::max<int32_t>(32, static_cast<int32_t>(formatted_prompt.size()) + 8);
   const int32_t decode_capacity = std::max<int32_t>(4, spec.max_tokens);
   const int32_t block_capacity = std::max<int32_t>(8, prompt_capacity + decode_capacity);
 
@@ -1512,12 +1570,16 @@ bool run_emel_generate(emel_session & session,
   result_out = {};
   reset_generation_capture(session);
   emel::error::type error_out = emel::error::cast(emel::generator::error::none);
+  std::array<emel::text::formatter::chat_message, 1> message_storage = {};
   emel::generator::event::generate request{
-      spec.prompt,
+      emel::tools::generation_formatter_contract::single_user_messages(
+          message_storage, spec.prompt),
       spec.max_tokens,
       std::span<char>{result_out.output},
       result_out.output_length,
   };
+  request.add_generation_prompt = true;
+  request.enable_thinking = false;
   request.error_out = &error_out;
   request.on_done = {&session, on_generation_done};
   request.on_error = {&session, on_generation_error};
@@ -1765,6 +1827,10 @@ const emel_fixture & canonical_generation_fixture() {
 }  // namespace
 
 namespace emel::bench {
+
+std::string_view generation_formatter_contract() noexcept {
+  return g_generation_formatter_contract;
+}
 
 bool generation_flash_evidence_ready() noexcept {
   return g_generation_flash_evidence.ready;

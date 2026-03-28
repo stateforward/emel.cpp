@@ -18,6 +18,7 @@ bool generation_flash_evidence_ready() noexcept;
 std::uint64_t generation_flash_evidence_dispatch_calls() noexcept;
 std::uint64_t generation_flash_evidence_optimized_dispatch_calls() noexcept;
 std::uint64_t generation_flash_evidence_shared_dispatch_calls() noexcept;
+std::string_view generation_formatter_contract() noexcept;
 std::uint32_t generation_runtime_contract_native_quantized_stage_count() noexcept;
 std::uint32_t generation_runtime_contract_approved_dense_f32_stage_count() noexcept;
 std::uint32_t generation_runtime_contract_disallowed_fallback_stage_count() noexcept;
@@ -379,6 +380,14 @@ void print_compare(const std::vector<bench::result> & emel_results,
               k_bench_reference_source.data(),
               static_cast<int>(k_bench_reference_ref.size()),
               k_bench_reference_ref.data());
+  if (generation_present) {
+    const std::string_view formatter_contract = bench::generation_formatter_contract();
+    if (!formatter_contract.empty()) {
+      std::printf("# generation_formatter_contract: %.*s\n",
+                  static_cast<int>(formatter_contract.size()),
+                  formatter_contract.data());
+    }
+  }
 
   if (generation_present) {
     if (!bench::generation_flash_evidence_ready()) {

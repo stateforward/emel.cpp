@@ -1,5 +1,6 @@
 #include "parity_runner.hpp"
 #include "tokenizer_parity.hpp"
+#include "../generation_formatter_contract.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1471,6 +1472,7 @@ struct generation_load_state {
   load_capture load = {};
   initialize_capture initialize = {};
   generation_capture generation = {};
+  emel::tools::generation_formatter_contract::formatter_binding formatter_binding = {};
 
   generation_load_state()
       : samplers{emel::logits::sampler::fn::from<generation_load_state, sampler_select_argmax>(
@@ -1958,16 +1960,22 @@ emel::error::type run_emel_initialize_generator(
     return emel::error::cast(emel::generator::error::invalid_request);
   }
 
+  std::string formatted_prompt = {};
+  if (!emel::tools::generation_formatter_contract::format_single_user_prompt(
+          state.formatter_binding, opts.text, formatted_prompt)) {
+    return emel::error::cast(emel::generator::error::invalid_request);
+  }
+
   const int32_t prompt_capacity =
-      std::max<int32_t>(32, static_cast<int32_t>(opts.text.size()) + 8);
+      std::max<int32_t>(32, static_cast<int32_t>(formatted_prompt.size()) + 8);
   const int32_t decode_capacity = std::max<int32_t>(4, opts.max_tokens);
   const int32_t block_capacity = std::max<int32_t>(8, prompt_capacity + decode_capacity);
 
   state.generator = std::make_unique<emel::generator::sm>(
       *state.model_data,
       state.conditioner,
-      nullptr,
-      emel::text::formatter::format_raw);
+      state.formatter_binding.formatter_ctx,
+      state.formatter_binding.format_prompt);
 
   reset_initialize_capture(state);
   emel::error::type error_out = emel::error::cast(emel::generator::error::none);
@@ -2017,12 +2025,16 @@ emel::error::type run_emel_generate(generation_load_state & state,
   trace_out = {};
   state.emel_trace = &trace_out;
   emel::error::type error_out = emel::error::cast(emel::generator::error::none);
+  std::array<emel::text::formatter::chat_message, 1> message_storage = {};
   emel::generator::event::generate request{
-    opts.text,
+    emel::tools::generation_formatter_contract::single_user_messages(
+        message_storage, opts.text),
     opts.max_tokens,
     output,
     output_length_out,
   };
+  request.add_generation_prompt = true;
+  request.enable_thinking = false;
   request.error_out = &error_out;
   request.on_done = {&state, on_generation_done};
   request.on_error = {&state, on_generation_error};
@@ -11964,8 +11976,12 @@ void dump_generation_tensor_compare(generation_load_state & state,
   int32_t conditioned_count = 0;
   int32_t conditioned_error = 0;
   std::array<int32_t, 64> conditioned_tokens = {};
+  std::array<emel::text::formatter::chat_message, 1> conditioned_messages = {};
   emel::text::conditioner::event::prepare prepare_ev{conditioned_count, conditioned_error};
-  prepare_ev.input = opts.text;
+  prepare_ev.messages = emel::tools::generation_formatter_contract::single_user_messages(
+      conditioned_messages, opts.text);
+  prepare_ev.add_generation_prompt = true;
+  prepare_ev.enable_thinking = false;
   prepare_ev.token_ids_out = conditioned_tokens.data();
   prepare_ev.token_capacity = static_cast<int32_t>(conditioned_tokens.size());
   const bool conditioned_accepted = state.conditioner.process_event(prepare_ev);
@@ -16757,6 +16773,45 @@ std::string_view architecture_name_view(const emel::model::data & model_data) {
   return std::string_view{model_data.architecture_name.data(), length};
 }
 
+void resolve_generation_formatter_binding(generation_load_state & state) {
+  std::string_view primary_template = {};
+  const auto * entry = find_kv_entry(state, "tokenizer.chat_template");
+  if (entry != nullptr && !decode_string_value(state, *entry, primary_template)) {
+    state.formatter_binding = emel::tools::generation_formatter_contract::formatter_binding{
+      .formatter_ctx = nullptr,
+      .format_prompt = emel::text::formatter::format_raw,
+      .support = emel::tools::generation_formatter_contract::support_kind::unsupported_template,
+      .contract = emel::tools::generation_formatter_contract::k_unsupported_template_contract,
+    };
+    return;
+  }
+
+  uint32_t named_template_count = 0u;
+  for (const auto & candidate : state.kv_entries) {
+    const std::string_view key = kv_key_view(state, candidate);
+    if (key.starts_with("tokenizer.chat_template.") &&
+        key != "tokenizer.chat_template") {
+      named_template_count += 1u;
+    }
+  }
+
+  state.formatter_binding =
+      emel::tools::generation_formatter_contract::resolve_primary_template_binding(
+          primary_template,
+          named_template_count);
+}
+
+void print_generation_formatter_contract(FILE * stream,
+                                         const generation_load_state & state) {
+  if (stream == nullptr || state.formatter_binding.contract.empty()) {
+    return;
+  }
+  std::fprintf(stream,
+               "formatter_contract=%.*s\n",
+               static_cast<int>(state.formatter_binding.contract.size()),
+               state.formatter_binding.contract.data());
+}
+
 emel::error::type run_emel_parse_model(void * owner,
                                        const emel::model::loader::event::load & req) {
   auto & state = *static_cast<generation_load_state *>(owner);
@@ -18439,6 +18494,8 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   request.on_error = {&state, on_load_error};
 
   if (!state.model_loader.process_event(request) || !state.load.done || state.load.error) {
+    resolve_generation_formatter_binding(state);
+    print_generation_formatter_contract(stderr, state);
     const emel::error::type err = state.load.error
                                       ? state.load.err
                                       : emel::error::cast(emel::model::loader::error::internal_error);
@@ -18449,7 +18506,20 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     return 1;
   }
 
+  resolve_generation_formatter_binding(state);
+  if (!emel::tools::generation_formatter_contract::binding_supported(
+          state.formatter_binding)) {
+    print_generation_formatter_contract(stderr, state);
+    std::fprintf(stderr,
+                 "generation load failed (fixture=%s err=%s)\n",
+                 k_generation_fixture_name,
+                 model_loader_error_name(
+                     emel::error::cast(emel::model::loader::error::model_invalid)));
+    return 1;
+  }
+
   if (!load_generation_vocab_from_llama(opts.model_path, state)) {
+    print_generation_formatter_contract(stderr, state);
     std::fprintf(stderr,
                  "generation vocab load failed (fixture=%s)\n",
                  k_generation_fixture_name);
@@ -18458,6 +18528,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
 
   const emel::error::type initialize_err = run_emel_initialize_generator(state, opts);
   if (initialize_err != emel::error::cast(emel::generator::error::none)) {
+    print_generation_formatter_contract(stderr, state);
     std::fprintf(stderr,
                  "generation initialize failed (fixture=%s err=%s)\n",
                  k_generation_fixture_name,
@@ -18474,6 +18545,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                         emel_result.output_length,
                         emel_result.trace);
   if (generation_err != emel::error::cast(emel::generator::error::none)) {
+    print_generation_formatter_contract(stderr, state);
     std::fprintf(stderr,
                  "generation error (fixture=%s err=%s generated_tokens=%d output_bytes=%zu)\n",
                  k_generation_fixture_name,
@@ -18623,6 +18695,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  opts.max_tokens,
                  emel_result.tokens_generated,
                  emel_result.output_length);
+    print_generation_formatter_contract(stdout, state);
     std::fprintf(stdout,
                  "reference_impl: source=%.*s contract=%.*s baseline=%s\n",
                  static_cast<int>(k_generation_baseline_source.size()),
@@ -18689,6 +18762,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                shared_flash_dispatch_calls,
                static_cast<int>(emel_result.output_length),
                emel_result.output.data());
+  print_generation_formatter_contract(stdout, state);
   std::fprintf(stdout,
                "reference_impl: source=%.*s contract=%.*s baseline=%s\n",
                static_cast<int>(k_generation_baseline_source.size()),

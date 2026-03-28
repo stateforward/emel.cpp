@@ -12,6 +12,8 @@
 
 #include <doctest/doctest.h>
 
+#include "../generation_formatter_contract.hpp"
+
 #if !defined(_WIN32)
 #include <sys/wait.h>
 #endif
@@ -709,6 +711,11 @@ TEST_CASE("paritychecker canonical generation fixture keeps baseline entry point
 
   CHECK(capture.exit_code == 1);
   CHECK(capture.stdout_text.empty());
+  CHECK(capture.stderr_text.find("formatter_contract=source=tokenizer.chat_template "
+                                 "support=supported_contract "
+                                 "shape=structured_chat_messages_v1 tools=none "
+                                 "add_generation_prompt=true enable_thinking=false") !=
+        std::string::npos);
   CHECK(capture.stderr_text.find("generation load failed (fixture=Qwen3-0.6B-Q8_0.gguf "
                                  "err=model_invalid)") != std::string::npos);
   CHECK(capture.stderr_text.find("generation requires canonical fixture") == std::string::npos);
@@ -745,6 +752,41 @@ TEST_CASE("paritychecker generation reports a deterministic missing-model failur
   CHECK(capture.stdout_text.find("generation parity ok") == std::string::npos);
   CHECK(capture.stderr_text.find("generation load failed: missing model file") !=
         std::string::npos);
+}
+
+TEST_CASE("generation formatter contract classifier models supported and unsupported templates explicitly") {
+  std::string supported_template = {};
+  for (const std::string_view marker :
+       emel::tools::generation_formatter_contract::k_supported_primary_template_markers) {
+    supported_template.append(marker);
+    supported_template.push_back('\n');
+  }
+
+  const auto supported =
+      emel::tools::generation_formatter_contract::resolve_primary_template_binding(
+          supported_template, 0u);
+  CHECK(emel::tools::generation_formatter_contract::binding_supported(supported));
+  CHECK(supported.contract ==
+        emel::tools::generation_formatter_contract::k_supported_contract);
+
+  std::string formatted_prompt = {};
+  CHECK(emel::tools::generation_formatter_contract::format_single_user_prompt(
+      supported, "hello", formatted_prompt));
+  CHECK(formatted_prompt == "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n");
+
+  const auto unsupported =
+      emel::tools::generation_formatter_contract::resolve_primary_template_binding(
+          "{{ unsupported }}", 0u);
+  CHECK_FALSE(emel::tools::generation_formatter_contract::binding_supported(unsupported));
+  CHECK(unsupported.contract ==
+        emel::tools::generation_formatter_contract::k_unsupported_template_contract);
+
+  const auto named_variant =
+      emel::tools::generation_formatter_contract::resolve_primary_template_binding(
+          supported_template, 1u);
+  CHECK_FALSE(emel::tools::generation_formatter_contract::binding_supported(named_variant));
+  CHECK(named_variant.contract ==
+        emel::tools::generation_formatter_contract::k_unsupported_template_contract);
 }
 
 TEST_CASE("paritychecker canonical generation fixture rejects a same-basename fixture outside tests/models") {
