@@ -10,7 +10,7 @@ namespace emel::model::llama::detail {
 
 constexpr uint32_t k_global_tensor_count = 3u;
 constexpr uint32_t k_block_tensor_count = 8u;
-constexpr uint32_t k_quantized_stage_family_count = 12u;
+constexpr uint32_t k_quantized_stage_family_count = 14u;
 
 struct tensor_view {
   const emel::model::data::tensor_record * tensor = nullptr;
@@ -23,6 +23,8 @@ struct block_view {
   tensor_view attention_q = {};
   tensor_view attention_k = {};
   tensor_view attention_v = {};
+  tensor_view attention_q_norm = {};
+  tensor_view attention_k_norm = {};
   tensor_view attention_output = {};
   tensor_view feed_forward_norm = {};
   tensor_view feed_forward_gate = {};
@@ -68,6 +70,8 @@ enum class quantized_stage_family : uint8_t {
   attention_q,
   attention_k,
   attention_v,
+  attention_q_norm,
+  attention_k_norm,
   attention_output,
   feed_forward_norm,
   feed_forward_gate,
@@ -80,6 +84,7 @@ enum class quantized_contract_kind : uint8_t {
   approved_dense_f32_by_contract,
   disallowed_fallback,
   explicit_no_claim,
+  not_applicable,
 };
 
 struct quantized_stage_audit {
