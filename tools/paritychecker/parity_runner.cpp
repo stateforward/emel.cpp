@@ -50,6 +50,7 @@
 #include "emel/text/jinja/parser/detail.hpp"
 #include "emel/text/jinja/parser/errors.hpp"
 #include "emel/text/jinja/parser/sm.hpp"
+#include "emel/text/renderer/sm.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 
 #include "ggml-cpu.h"
@@ -1282,6 +1283,7 @@ struct initialize_backend {
   const llama_vocab * vocab = nullptr;
   int32_t vocab_size = 0;
   int32_t fallback_token_id = 0;
+  emel::tools::generation_formatter_contract::formatter_binding formatter_binding = {};
   int32_t emel_reference_decode_calls = 0;
   int32_t emel_reference_logits_calls = 0;
   int32_t direct_reference_decode_calls = 0;
@@ -2086,13 +2088,19 @@ bool tokenize_reference_prompt(const initialize_backend & backend,
     return false;
   }
 
-  int32_t token_capacity = static_cast<int32_t>(opts.text.size()) + 8;
+  std::string formatted_prompt = {};
+  if (!emel::tools::generation_formatter_contract::format_single_user_prompt(
+          backend.formatter_binding, opts.text, formatted_prompt)) {
+    return false;
+  }
+
+  int32_t token_capacity = static_cast<int32_t>(formatted_prompt.size()) + 8;
   token_capacity = std::max(token_capacity, 8);
   tokens_out.resize(static_cast<size_t>(token_capacity));
   int32_t token_count = llama_tokenize(
       backend.vocab,
-      opts.text.c_str(),
-      static_cast<int32_t>(opts.text.size()),
+      formatted_prompt.c_str(),
+      static_cast<int32_t>(formatted_prompt.size()),
       tokens_out.data(),
       token_capacity,
       false,
@@ -2102,14 +2110,40 @@ bool tokenize_reference_prompt(const initialize_backend & backend,
     tokens_out.resize(static_cast<size_t>(token_capacity));
     token_count = llama_tokenize(
         backend.vocab,
-        opts.text.c_str(),
-        static_cast<int32_t>(opts.text.size()),
+        formatted_prompt.c_str(),
+        static_cast<int32_t>(formatted_prompt.size()),
         tokens_out.data(),
         token_capacity,
         false,
         false);
   }
   if (token_count <= 0) {
+    return false;
+  }
+
+  tokens_out.resize(static_cast<size_t>(token_count));
+  return true;
+}
+
+bool tokenize_conditioned_prompt(generation_load_state & state,
+                                 const emel::paritychecker::parity_options & opts,
+                                 std::vector<int32_t> & tokens_out) {
+  const int32_t token_capacity =
+      std::max<int32_t>(1024, static_cast<int32_t>(opts.text.size()) * 8 + 64);
+  tokens_out.assign(static_cast<size_t>(token_capacity), 0);
+
+  int32_t token_count = 0;
+  int32_t conditioned_error = 0;
+  std::array<emel::text::formatter::chat_message, 1> message_storage = {};
+  emel::text::conditioner::event::prepare prepare_ev{token_count, conditioned_error};
+  prepare_ev.messages =
+      emel::tools::generation_formatter_contract::single_user_messages(message_storage, opts.text);
+  prepare_ev.add_generation_prompt = true;
+  prepare_ev.enable_thinking = false;
+  prepare_ev.token_ids_out = tokens_out.data();
+  prepare_ev.token_capacity = token_capacity;
+  const bool accepted = state.conditioner.process_event(prepare_ev);
+  if (!accepted || conditioned_error != 0 || token_count <= 0 || token_count > token_capacity) {
     return false;
   }
 
@@ -2168,6 +2202,61 @@ bool append_reference_piece(const initialize_backend & backend,
     std::memcpy(result_out.output.data() + result_out.output_length, piece_view.data(), piece_len);
   }
   result_out.output_length += piece_len;
+  return true;
+}
+
+bool append_rendered_token(emel::text::renderer::sm & renderer,
+                           const int32_t token_id,
+                           generation_result & result_out) {
+  if (result_out.output_length > result_out.output.size()) {
+    return false;
+  }
+
+  size_t appended_length = 0;
+  emel::text::renderer::sequence_status status =
+      emel::text::renderer::sequence_status::running;
+  int32_t render_err = emel::error::cast(emel::text::renderer::error::none);
+  emel::text::renderer::event::render render_ev = {};
+  render_ev.token_id = token_id;
+  render_ev.sequence_id = 0;
+  render_ev.emit_special = false;
+  render_ev.output = result_out.output.data() + result_out.output_length;
+  render_ev.output_capacity = result_out.output.size() - result_out.output_length;
+  render_ev.output_length_out = &appended_length;
+  render_ev.status_out = &status;
+  render_ev.error_out = &render_err;
+  if (!renderer.process_event(render_ev) ||
+      render_err != emel::error::cast(emel::text::renderer::error::none)) {
+    return false;
+  }
+
+  result_out.output_length += appended_length;
+  return true;
+}
+
+bool flush_rendered_output(emel::text::renderer::sm & renderer,
+                           generation_result & result_out) {
+  if (result_out.output_length > result_out.output.size()) {
+    return false;
+  }
+
+  size_t flush_length = 0;
+  emel::text::renderer::sequence_status status =
+      emel::text::renderer::sequence_status::running;
+  int32_t flush_err = emel::error::cast(emel::text::renderer::error::none);
+  emel::text::renderer::event::flush flush_ev = {};
+  flush_ev.sequence_id = 0;
+  flush_ev.output = result_out.output.data() + result_out.output_length;
+  flush_ev.output_capacity = result_out.output.size() - result_out.output_length;
+  flush_ev.output_length_out = &flush_length;
+  flush_ev.status_out = &status;
+  flush_ev.error_out = &flush_err;
+  if (!renderer.process_event(flush_ev) ||
+      flush_err != emel::error::cast(emel::text::renderer::error::none)) {
+    return false;
+  }
+
+  result_out.output_length += flush_length;
   return true;
 }
 
@@ -2533,6 +2622,13 @@ bool run_layer_with_flash_attribution(emel::generator::detail::native_backend & 
     return false;
   }
 
+  if (emel::generator::detail::is_qwen3_runtime(backend) &&
+      !time_bucket_bool(attribution.rms_norm, [&] {
+        return emel::generator::detail::apply_qwen3_attention_qk_norm(backend, block);
+      })) {
+    return false;
+  }
+
   time_bucket_void(attribution.rope, [&] {
     emel::generator::detail::apply_rope(
         backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
@@ -2635,28 +2731,43 @@ bool run_layer_with_flash_attribution(emel::generator::detail::native_backend & 
   return true;
 }
 
-emel::error::type run_attributed_native_generate(
-    const initialize_backend & backend_ref,
-    const emel::model::data & model_data,
-    const emel::paritychecker::parity_options & opts,
-    generation_result & result_out,
-    generation_attribution & attribution_out) {
+emel::error::type run_attributed_native_generate(generation_load_state & state,
+                                                 const emel::paritychecker::parity_options & opts,
+                                                 generation_result & result_out,
+                                                 generation_attribution & attribution_out) {
+  const initialize_backend & backend_ref = state.backend;
+  if (state.model_data == nullptr) {
+    return emel::error::cast(emel::generator::error::invalid_request);
+  }
   if (backend_ref.vocab == nullptr || backend_ref.vocab_size <= 0) {
     return emel::error::cast(emel::generator::error::invalid_request);
   }
 
-  std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(backend_ref, opts, prompt_tokens) || prompt_tokens.empty()) {
+  std::vector<int32_t> prompt_tokens;
+  if (!tokenize_conditioned_prompt(state, opts, prompt_tokens) || prompt_tokens.empty()) {
     return emel::error::cast(emel::generator::error::invalid_request);
   }
 
   emel::generator::detail::native_backend backend = {};
-  if (emel::generator::detail::prepare(backend, model_data) !=
+  if (emel::generator::detail::prepare(backend, *state.model_data) !=
       emel::error::cast(emel::model::loader::error::none)) {
     return emel::error::cast(emel::generator::error::backend);
   }
 
+  emel::text::renderer::sm renderer = {};
+  int32_t renderer_err = emel::error::cast(emel::text::renderer::error::none);
+  emel::text::renderer::event::initialize initialize_renderer_ev{state.model_data->vocab_data};
+  initialize_renderer_ev.strip_leading_space = false;
+  initialize_renderer_ev.stop_sequences = nullptr;
+  initialize_renderer_ev.stop_sequence_count = 0;
+  initialize_renderer_ev.error_out = &renderer_err;
+  if (!renderer.process_event(initialize_renderer_ev) ||
+      renderer_err != emel::error::cast(emel::text::renderer::error::none)) {
+    return emel::error::cast(emel::generator::error::backend);
+  }
+
   result_out = {};
+  result_out.trace_available = false;
   attribution_out = {};
   attribution_out.prompt_tokens = static_cast<int32_t>(prompt_tokens.size());
   const auto total_begin = attribution_clock::now();
@@ -2665,7 +2776,7 @@ emel::error::type run_attributed_native_generate(
 
   const auto prefill_begin = attribution_clock::now();
   for (size_t token_index = 0; token_index < prompt_tokens.size(); ++token_index) {
-    const int32_t token_id = static_cast<int32_t>(prompt_tokens[token_index]);
+    const int32_t token_id = prompt_tokens[token_index];
     const int32_t position = static_cast<int32_t>(token_index);
     if (!time_bucket_bool(attribution_out.embedding_lookup, [&] {
           return emel::generator::detail::copy_tensor_row(
@@ -2693,7 +2804,7 @@ emel::error::type run_attributed_native_generate(
         result_out.trace, selected_token, selected_score, selected_score);
     result_out.tokens_generated += 1;
     if (!time_bucket_bool(attribution_out.output_append, [&] {
-          return append_reference_piece(backend_ref, selected, result_out);
+          return append_rendered_token(renderer, selected_token, result_out);
         })) {
       return emel::error::cast(emel::generator::error::backend);
     }
@@ -2721,6 +2832,10 @@ emel::error::type run_attributed_native_generate(
       return emel::error::cast(emel::generator::error::backend);
     }
     attribution_out.decode_ns += elapsed_ns(decode_begin, attribution_clock::now());
+  }
+
+  if (!flush_rendered_output(renderer, result_out)) {
+    return emel::error::cast(emel::generator::error::backend);
   }
 
   attribution_out.generated_tokens = result_out.tokens_generated;
@@ -16825,6 +16940,7 @@ void resolve_generation_formatter_binding(generation_load_state & state) {
       .support = emel::tools::generation_formatter_contract::support_kind::unsupported_template,
       .contract = emel::tools::generation_formatter_contract::k_unsupported_template_contract,
     };
+    state.backend.formatter_binding = state.formatter_binding;
     return;
   }
 
@@ -16841,6 +16957,7 @@ void resolve_generation_formatter_binding(generation_load_state & state) {
       emel::tools::generation_formatter_contract::resolve_primary_template_binding(
           primary_template,
           named_template_count);
+  state.backend.formatter_binding = state.formatter_binding;
 }
 
 void print_generation_formatter_contract(FILE * stream,
@@ -18879,7 +18996,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     generation_result attributed_result{};
     generation_attribution attribution{};
     const emel::error::type attribution_err = run_attributed_native_generate(
-        state.backend, *state.model_data, opts, attributed_result, attribution);
+        state, opts, attributed_result, attribution);
     if (attribution_err != emel::error::cast(emel::generator::error::none)) {
       std::fprintf(stderr,
                    "generation attribution failed (fixture=%s err=%s)\n",
@@ -18888,12 +19005,37 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
       return 1;
     }
     if (!generation_results_match(attributed_result, reference_result)) {
+      const size_t mismatch_offset = first_mismatch_offset(attributed_result, reference_result);
+      const int32_t token_mismatch_index =
+          first_token_mismatch_index(attributed_result, reference_result);
+      const bool attributed_token_available =
+          token_mismatch_index >= 0 &&
+          token_mismatch_index < attributed_result.trace.token_count;
+      const bool reference_token_available =
+          token_mismatch_index >= 0 &&
+          token_mismatch_index < reference_result.trace.token_count;
+      const int32_t attributed_token =
+          attributed_token_available
+          ? attributed_result.trace.token_ids[static_cast<size_t>(token_mismatch_index)]
+          : -1;
+      const int32_t reference_token =
+          reference_token_available
+          ? reference_result.trace.token_ids[static_cast<size_t>(token_mismatch_index)]
+          : -1;
       std::fprintf(stderr,
                    "generation attribution replay mismatch (fixture=%s emel_tokens=%d "
-                   "reference_tokens=%d)\n",
+                   "reference_tokens=%d first_mismatch=%zu first_token_mismatch=%d "
+                   "attributed_token=%d reference_token=%d "
+                   "attributed_output_bytes=%zu reference_output_bytes=%zu)\n",
                    k_generation_fixture_name,
                    attributed_result.tokens_generated,
-                   reference_result.tokens_generated);
+                   reference_result.tokens_generated,
+                   mismatch_offset,
+                   token_mismatch_index,
+                   attributed_token,
+                   reference_token,
+                   attributed_result.output_length,
+                   reference_result.output_length);
       return 1;
     }
     dump_generation_attribution(attribution);

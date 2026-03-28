@@ -599,15 +599,13 @@ TEST_CASE("paritychecker matches llama kernel outputs") {
   CHECK(run_kernel_paritychecker_process());
 }
 
-TEST_CASE("paritychecker qwen3 generation writes maintained baseline across the decode lengths") {
+TEST_CASE("paritychecker qwen3 generation keeps maintained parity across the decode lengths") {
   const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
   constexpr std::array<int32_t, 4> generation_lengths{1, 10, 100, 1000};
   for (const int32_t max_tokens : generation_lengths) {
     INFO("max_tokens=" << max_tokens);
-    const auto baseline_path = make_temp_fixture_path(
-        "paritychecker-qwen3-generation", "generation-baseline.txt");
     const process_capture capture = run_generation_paritychecker_capture_with_args({
       "--generation",
       "--model",
@@ -616,13 +614,11 @@ TEST_CASE("paritychecker qwen3 generation writes maintained baseline across the 
       "hello",
       "--max-tokens",
       std::to_string(max_tokens),
-      "--write-generation-baseline",
-      baseline_path.string(),
     });
 
     CHECK(capture.exit_code == 0);
     CHECK(capture.stderr_text.empty());
-    CHECK(capture.stdout_text.find("generation baseline written") != std::string::npos);
+    CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
     CHECK(capture.stdout_text.find("formatter_contract=source=tokenizer.chat_template "
                                    "support=supported_contract "
                                    "shape=structured_chat_messages_v1 tools=none "
@@ -634,7 +630,6 @@ TEST_CASE("paritychecker qwen3 generation writes maintained baseline across the 
     CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") == 0);
     CHECK(parse_named_metric(capture.stdout_text, "reference_logits_calls") == 0);
     CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
-    CHECK(file_exists(baseline_path));
     CHECK(capture.stdout_text.find("max_tokens=" + std::to_string(max_tokens)) != std::string::npos);
     if (max_tokens == 1) {
       CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
@@ -644,15 +639,12 @@ TEST_CASE("paritychecker qwen3 generation writes maintained baseline across the 
     check_generation_flash_attribution(capture);
     check_generation_quantized_attribution(capture);
     check_generation_quantized_stage_audit(capture);
-    std::filesystem::remove_all(baseline_path.parent_path());
   }
 }
 
-TEST_CASE("paritychecker qwen3 generation dump flag stays on the maintained baseline-write path") {
+TEST_CASE("paritychecker qwen3 generation dump stays on the maintained stored-baseline path") {
   const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
-  const auto baseline_path = make_temp_fixture_path(
-      "paritychecker-qwen3-generation-dump", "generation-baseline.txt");
 
   const process_capture capture = run_generation_paritychecker_capture_with_args({
     "--generation",
@@ -662,14 +654,12 @@ TEST_CASE("paritychecker qwen3 generation dump flag stays on the maintained base
     "hello",
     "--max-tokens",
     "1",
-    "--write-generation-baseline",
-    baseline_path.string(),
     "--dump",
   });
 
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
-  CHECK(capture.stdout_text.find("generation baseline written") != std::string::npos);
+  CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
   CHECK(capture.stdout_text.find("formatter_contract=source=tokenizer.chat_template "
                                  "support=supported_contract "
                                  "shape=structured_chat_messages_v1 tools=none "
@@ -681,16 +671,14 @@ TEST_CASE("paritychecker qwen3 generation dump flag stays on the maintained base
   CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
   CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") == 0);
   CHECK(parse_named_metric(capture.stdout_text, "reference_logits_calls") == 0);
-  CHECK(file_exists(baseline_path));
+  CHECK(capture.stdout_text.find("emel: generated_tokens=1") != std::string::npos);
+  CHECK(capture.stdout_text.find("reference: generated_tokens=1") != std::string::npos);
   CHECK(capture.stdout_text.find("generation_attribution:") == std::string::npos);
-  std::filesystem::remove_all(baseline_path.parent_path());
 }
 
-TEST_CASE("paritychecker qwen3 generation attribution flag stays on the maintained baseline-write path") {
+TEST_CASE("paritychecker qwen3 generation attribution stays on the maintained stored-baseline path") {
   const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
-  const auto baseline_path = make_temp_fixture_path(
-      "paritychecker-qwen3-generation-attribution", "generation-baseline.txt");
 
   const process_capture capture = run_generation_paritychecker_capture_with_args({
     "--generation",
@@ -700,14 +688,12 @@ TEST_CASE("paritychecker qwen3 generation attribution flag stays on the maintain
     "hello",
     "--max-tokens",
     "1",
-    "--write-generation-baseline",
-    baseline_path.string(),
     "--attribution",
   });
 
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
-  CHECK(capture.stdout_text.find("generation baseline written") != std::string::npos);
+  CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
   CHECK(capture.stdout_text.find("formatter_contract=source=tokenizer.chat_template "
                                  "support=supported_contract "
                                  "shape=structured_chat_messages_v1 tools=none "
@@ -716,17 +702,15 @@ TEST_CASE("paritychecker qwen3 generation attribution flag stays on the maintain
   CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") !=
         std::string::npos);
   CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") == 0);
-  CHECK(file_exists(baseline_path));
-  CHECK(capture.stdout_text.find("generation_attribution:") == std::string::npos);
-  std::filesystem::remove_all(baseline_path.parent_path());
+  CHECK(capture.stdout_text.find("generation_attribution: prompt_tokens=") != std::string::npos);
+  CHECK(capture.stdout_text.find("generation_attribution.bucket: name=attention") !=
+        std::string::npos);
 }
 
 TEST_CASE("paritychecker canonical generation fixture keeps baseline entry points on the Qwen anchor") {
   const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
-  const auto baseline_path =
-      make_temp_fixture_path("paritychecker-generation-baseline", "generation-baseline.txt");
   const process_capture capture = run_generation_paritychecker_capture_with_args({
     "--generation",
     "--model",
@@ -735,13 +719,11 @@ TEST_CASE("paritychecker canonical generation fixture keeps baseline entry point
     "hello",
     "--max-tokens",
     "1",
-    "--write-generation-baseline",
-    baseline_path.string(),
   });
 
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
-  CHECK(capture.stdout_text.find("generation baseline written") != std::string::npos);
+  CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
   CHECK(capture.stdout_text.find("formatter_contract=source=tokenizer.chat_template "
                                  "support=supported_contract "
                                  "shape=structured_chat_messages_v1 tools=none "
@@ -749,8 +731,9 @@ TEST_CASE("paritychecker canonical generation fixture keeps baseline entry point
         std::string::npos);
   CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") !=
         std::string::npos);
-  CHECK(file_exists(baseline_path));
-  std::filesystem::remove_all(baseline_path.parent_path());
+  CHECK(capture.stdout_text.find(
+            "snapshots/parity/generation_qwen3_0_6b_q8_0_prompt_hello_max_tokens_1.txt") !=
+        std::string::npos);
 }
 
 TEST_CASE("paritychecker help describes the canonical generation fixture contract") {
