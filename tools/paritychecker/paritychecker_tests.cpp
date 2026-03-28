@@ -605,7 +605,7 @@ TEST_CASE("paritychecker matches llama kernel outputs") {
 }
 
 TEST_CASE("paritychecker generation keeps parity across the maintained decode lengths") {
-  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+  const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
   constexpr std::array<int32_t, 4> generation_lengths{1, 10, 100, 1000};
@@ -637,7 +637,7 @@ TEST_CASE("paritychecker generation keeps parity across the maintained decode le
 }
 
 TEST_CASE("paritychecker generation dump proves the EMEL path avoids the reference decode seam") {
-  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+  const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
   const process_capture capture = run_generation_paritychecker_capture_with_args({
@@ -663,7 +663,7 @@ TEST_CASE("paritychecker generation dump proves the EMEL path avoids the referen
 }
 
 TEST_CASE("paritychecker generation attribution reports maintained runtime phase buckets") {
-  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+  const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
   const process_capture capture = run_generation_paritychecker_capture_with_args({
@@ -690,7 +690,7 @@ TEST_CASE("paritychecker generation attribution reports maintained runtime phase
 }
 
 TEST_CASE("paritychecker generation can write a maintained baseline artifact") {
-  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+  const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
   const auto baseline_path =
@@ -715,6 +715,7 @@ TEST_CASE("paritychecker generation can write a maintained baseline artifact") {
   CHECK(baseline_text.find("format=emel_generation_baseline_v1") != std::string::npos);
   CHECK(baseline_text.find("contract=generation_online_f16_final_normalize_v1") !=
         std::string::npos);
+  CHECK(baseline_text.find("fixture=Qwen3-0.6B-Q8_0.gguf") != std::string::npos);
   CHECK(baseline_text.find("max_tokens=1") != std::string::npos);
   std::filesystem::remove_all(baseline_path.parent_path());
 }
@@ -725,7 +726,7 @@ TEST_CASE("paritychecker help describes the canonical generation fixture contrac
   CHECK(capture.exit_code == 2);
   CHECK(capture.stdout_text.empty());
   CHECK(capture.stderr_text.find("--generation mode requires --model tests/models/"
-                                 "Llama-68M-Chat-v1-Q2_K.gguf") != std::string::npos);
+                                 "Qwen3-0.6B-Q8_0.gguf") != std::string::npos);
   CHECK(capture.stderr_text.find("snapshots/parity/") != std::string::npos);
   CHECK(capture.stderr_text.find("reserves the generation CLI contract") == std::string::npos);
 }
@@ -751,7 +752,7 @@ TEST_CASE("paritychecker generation reports a deterministic missing-model failur
 }
 
 TEST_CASE("paritychecker generation rejects a same-basename fixture outside tests/models") {
-  const auto canonical_model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+  const auto canonical_model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(canonical_model_path));
 
   const std::filesystem::path impostor_model_path =
