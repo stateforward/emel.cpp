@@ -2,6 +2,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <string_view>
 
 #include <doctest/doctest.h>
 
@@ -108,6 +109,117 @@ struct runtime_request_fixture {
     request.kv_tokens = 0;
   }
 };
+
+struct qwen3_runtime_fixture {
+  emel::model::data model = {};
+  std::vector<std::vector<float>> tensor_storage = {};
+
+  qwen3_runtime_fixture() {
+    tensor_storage.reserve(14);
+    model.params.n_vocab = 2;
+    model.params.n_embd = 4;
+    model.params.n_head = 2;
+    model.params.n_head_kv = 2;
+    model.params.n_ctx = 8;
+    model.params.n_rot = 2;
+    model.params.n_layer = 1;
+    model.params.attention_layer_norm_rms_epsilon = 1.0e-5f;
+    model.params.rope_freq_base = 10000.0f;
+    model.n_layers = 1;
+    model.weights_data = model.tensors.data();
+    model.weights_size = 1u;
+    std::memcpy(model.architecture_name.data(), "qwen3", 5u);
+
+    uint32_t tensor_index = 0u;
+    const auto add_name = [&](emel::model::data::tensor_record & tensor,
+                              const std::string_view name) {
+      tensor.name_offset = model.name_bytes_used;
+      tensor.name_length = static_cast<uint32_t>(name.size());
+      std::memcpy(model.name_storage.data() + model.name_bytes_used, name.data(), name.size());
+      model.name_bytes_used += static_cast<uint32_t>(name.size());
+    };
+    const auto add_vector = [&](const std::string_view name, const std::vector<float> & values) {
+      auto & tensor = model.tensors[tensor_index++];
+      add_name(tensor, name);
+      tensor_storage.push_back(values);
+      tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+      tensor.n_dims = 1;
+      tensor.dims[0] = static_cast<uint64_t>(values.size());
+      tensor.data = tensor_storage.back().data();
+      tensor.data_size = static_cast<uint64_t>(values.size() * sizeof(float));
+    };
+    const auto add_matrix = [&](const std::string_view name,
+                                const int32_t rows,
+                                const int32_t cols,
+                                const std::vector<float> & values) {
+      auto & tensor = model.tensors[tensor_index++];
+      add_name(tensor, name);
+      tensor_storage.push_back(values);
+      tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+      tensor.n_dims = 2;
+      tensor.dims[0] = static_cast<uint64_t>(cols);
+      tensor.dims[1] = static_cast<uint64_t>(rows);
+      tensor.data = tensor_storage.back().data();
+      tensor.data_size = static_cast<uint64_t>(values.size() * sizeof(float));
+    };
+
+    const std::vector<float> identity = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+
+    add_matrix("token_embd.weight", 2, 4, {
+        1.0f, 2.0f, 3.0f, 4.0f,
+        0.0f, 0.0f, 0.0f, 0.0f,
+    });
+    add_vector("output_norm.weight", {1.0f, 1.0f, 1.0f, 1.0f});
+    add_matrix("output.weight", 2, 4, std::vector<float>(8, 0.0f));
+    add_vector("blk.0.attn_norm.weight", {1.0f, 1.0f, 1.0f, 1.0f});
+    add_matrix("blk.0.attn_q.weight", 4, 4, identity);
+    add_matrix("blk.0.attn_k.weight", 4, 4, identity);
+    add_matrix("blk.0.attn_v.weight", 4, 4, identity);
+    add_vector("blk.0.attn_q_norm.weight", {2.0f, 0.5f});
+    add_vector("blk.0.attn_k_norm.weight", {1.5f, 0.25f});
+    add_matrix("blk.0.attn_output.weight", 4, 4, std::vector<float>(16, 0.0f));
+    add_vector("blk.0.ffn_norm.weight", {1.0f, 1.0f, 1.0f, 1.0f});
+    add_matrix("blk.0.ffn_gate.weight", 4, 4, std::vector<float>(16, 0.0f));
+    add_matrix("blk.0.ffn_down.weight", 4, 4, std::vector<float>(16, 0.0f));
+    add_matrix("blk.0.ffn_up.weight", 4, 4, std::vector<float>(16, 0.0f));
+    model.n_tensors = tensor_index;
+  }
+};
+
+float round_fp16_value(const float value) {
+  return emel::generator::detail::quant::fp16_to_fp32(
+      emel::generator::detail::quant::fp32_to_fp16(value));
+}
+
+void apply_qwen3_headwise_rms_norm(std::span<float> vector,
+                                   std::span<const float> weights,
+                                   const int32_t head_count,
+                                   const int32_t head_dim,
+                                   const float epsilon) {
+  REQUIRE(head_count > 0);
+  REQUIRE(head_dim > 0);
+  REQUIRE(weights.size() == static_cast<size_t>(head_dim));
+  for (int32_t head = 0; head < head_count; ++head) {
+    const size_t head_offset =
+        static_cast<size_t>(head) * static_cast<size_t>(head_dim);
+    float square_sum = 0.0f;
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
+      const float value = vector[head_offset + static_cast<size_t>(dim)];
+      square_sum += value * value;
+    }
+    const float inv_rms =
+        1.0f / std::sqrt(square_sum / static_cast<float>(head_dim) + epsilon);
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
+      vector[head_offset + static_cast<size_t>(dim)] *=
+          inv_rms * weights[static_cast<size_t>(dim)];
+    }
+  }
+}
 
 void apply_rope_reference(std::span<float> vector,
                           const int32_t head_count,
@@ -868,4 +980,40 @@ TEST_CASE("generator_detail_flash_dispatch_matches_online_softmax_reference_acro
                          << " first_expected=" << first_expected
                          << " max_abs=" << max_abs);
   CHECK(max_abs <= k_flash_online_f16_abs_tolerance);
+}
+
+TEST_CASE("generator_detail_qwen3_generator_applies_per_head_qk_norm_before_rope") {
+  auto fixture = std::make_unique<qwen3_runtime_fixture>();
+  auto backend = std::make_unique<emel::generator::detail::native_backend>();
+  REQUIRE(emel::generator::detail::prepare(*backend, fixture->model) ==
+          emel::error::cast(emel::model::loader::error::none));
+  REQUIRE(emel::generator::detail::copy_tensor_row(
+      *backend->token_embedding.tensor, 0, backend->hidden));
+
+  std::array<float, 4> hidden_after_input_norm = {};
+  REQUIRE(emel::generator::detail::rms_norm(
+      backend->hidden,
+      backend->blocks[0].attention_norm,
+      backend->rms_epsilon,
+      std::span<float>(hidden_after_input_norm.data(), hidden_after_input_norm.size())));
+
+  std::array<float, 4> expected_q = hidden_after_input_norm;
+  std::array<float, 4> expected_k = hidden_after_input_norm;
+  constexpr std::array<float, 2> q_norm = {2.0f, 0.5f};
+  constexpr std::array<float, 2> k_norm = {1.5f, 0.25f};
+  apply_qwen3_headwise_rms_norm(expected_q, q_norm, 2, 2, backend->rms_epsilon);
+  apply_qwen3_headwise_rms_norm(expected_k, k_norm, 2, 2, backend->rms_epsilon);
+  apply_rope_reference(expected_q, 2, 2, 2, 1, backend->rope_freq_base);
+  apply_rope_reference(expected_k, 2, 2, 2, 1, backend->rope_freq_base);
+
+  REQUIRE(emel::generator::detail::run_layer_nonflash(*backend, 0, 1));
+
+  for (size_t idx = 0; idx < expected_q.size(); ++idx) {
+    CHECK(backend->q[idx] == doctest::Approx(expected_q[idx]).epsilon(1.0e-5));
+    CHECK(backend->q_attn[idx] ==
+          doctest::Approx(round_fp16_value(expected_q[idx])).epsilon(1.0e-5));
+    CHECK(backend->k[idx] == doctest::Approx(expected_k[idx]).epsilon(1.0e-5));
+    CHECK(emel::generator::detail::quant::fp16_to_fp32(backend->key_cache[idx]) ==
+          doctest::Approx(round_fp16_value(expected_k[idx])).epsilon(1.0e-5));
+  }
 }

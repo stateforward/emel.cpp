@@ -606,7 +606,7 @@ TEST_CASE("paritychecker matches llama kernel outputs") {
   CHECK(run_kernel_paritychecker_process());
 }
 
-TEST_CASE("paritychecker generation keeps parity across the maintained decode lengths") {
+TEST_CASE("paritychecker qwen3 generation keeps parity across the maintained decode lengths") {
   const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
@@ -618,6 +618,11 @@ TEST_CASE("paritychecker generation keeps parity across the maintained decode le
     CHECK(capture.exit_code == 0);
     CHECK(capture.stderr_text.empty());
     CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+    CHECK(capture.stdout_text.find("formatter_contract=source=tokenizer.chat_template "
+                                   "support=supported_contract "
+                                   "shape=structured_chat_messages_v1 tools=none "
+                                   "add_generation_prompt=true enable_thinking=false") !=
+          std::string::npos);
     CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") !=
           std::string::npos);
     CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
@@ -638,7 +643,7 @@ TEST_CASE("paritychecker generation keeps parity across the maintained decode le
   }
 }
 
-TEST_CASE("paritychecker generation dump proves the EMEL path avoids the reference decode seam") {
+TEST_CASE("paritychecker qwen3 generation dump proves the EMEL path avoids the reference decode seam") {
   const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
@@ -656,6 +661,11 @@ TEST_CASE("paritychecker generation dump proves the EMEL path avoids the referen
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
   CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+  CHECK(capture.stdout_text.find("formatter_contract=source=tokenizer.chat_template "
+                                 "support=supported_contract "
+                                 "shape=structured_chat_messages_v1 tools=none "
+                                 "add_generation_prompt=true enable_thinking=false") !=
+        std::string::npos);
   CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") !=
         std::string::npos);
   CHECK(capture.stdout_text.find("max_tokens=1") != std::string::npos);
@@ -664,7 +674,7 @@ TEST_CASE("paritychecker generation dump proves the EMEL path avoids the referen
   CHECK(parse_named_metric(capture.stdout_text, "reference_logits_calls") == 0);
 }
 
-TEST_CASE("paritychecker generation attribution reports maintained runtime phase buckets") {
+TEST_CASE("paritychecker qwen3 generation attribution reports maintained runtime phase buckets") {
   const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
@@ -682,6 +692,14 @@ TEST_CASE("paritychecker generation attribution reports maintained runtime phase
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
   CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+  CHECK(capture.stdout_text.find("formatter_contract=source=tokenizer.chat_template "
+                                 "support=supported_contract "
+                                 "shape=structured_chat_messages_v1 tools=none "
+                                 "add_generation_prompt=true enable_thinking=false") !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") !=
+        std::string::npos);
+  CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") == 0);
   CHECK(capture.stdout_text.find("generation_attribution:") != std::string::npos);
   CHECK(capture.stdout_text.find("generation_attribution.bucket: name=rms_norm") !=
         std::string::npos);
