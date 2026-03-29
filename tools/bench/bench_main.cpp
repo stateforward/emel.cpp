@@ -18,10 +18,13 @@ bool generation_flash_evidence_ready() noexcept;
 std::uint64_t generation_flash_evidence_dispatch_calls() noexcept;
 std::uint64_t generation_flash_evidence_optimized_dispatch_calls() noexcept;
 std::uint64_t generation_flash_evidence_shared_dispatch_calls() noexcept;
+std::string_view generation_formatter_contract() noexcept;
 std::uint32_t generation_runtime_contract_native_quantized_stage_count() noexcept;
 std::uint32_t generation_runtime_contract_approved_dense_f32_stage_count() noexcept;
 std::uint32_t generation_runtime_contract_disallowed_fallback_stage_count() noexcept;
 std::uint32_t generation_runtime_contract_explicit_no_claim_stage_count() noexcept;
+std::uint64_t generation_quantized_evidence_native_q8_0_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_packed_q8_0_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_optimized_q2_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_shared_q2_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_optimized_q3_dispatch_calls() noexcept;
@@ -232,6 +235,28 @@ const auto & kernel_test_cases() {
   return cases;
 }
 
+void print_benchmark_config(const bench::config & cfg) {
+  const auto generation_iterations = read_env_u64("EMEL_BENCH_GENERATION_ITERS", 1u);
+  const auto generation_runs = read_env_size("EMEL_BENCH_GENERATION_RUNS", cfg.runs);
+  const auto generation_warmup_iterations =
+      read_env_u64("EMEL_BENCH_GENERATION_WARMUP_ITERS", 0u);
+  const auto generation_warmup_runs =
+      read_env_size("EMEL_BENCH_GENERATION_WARMUP_RUNS", 0u);
+  std::printf("# benchmark_config: iterations=%" PRIu64
+              " runs=%zu warmup_iterations=%" PRIu64
+              " warmup_runs=%zu generation_iterations=%" PRIu64
+              " generation_runs=%zu generation_warmup_iterations=%" PRIu64
+              " generation_warmup_runs=%zu\n",
+              cfg.iterations,
+              cfg.runs,
+              cfg.warmup_iterations,
+              cfg.warmup_runs,
+              generation_iterations,
+              generation_runs,
+              generation_warmup_iterations,
+              generation_warmup_runs);
+}
+
 template <size_t k_case_count>
 std::vector<bench::result> run_benchmarks(const bench::config & cfg,
                                           const std::array<bench::test_case, k_case_count> & cases,
@@ -293,12 +318,13 @@ std::vector<bench::result> run_benchmarks(const bench::config & cfg,
   return results;
 }
 
-void print_snapshot(const std::vector<bench::result> & results) {
+void print_snapshot(const std::vector<bench::result> & results, const bench::config & cfg) {
   std::vector<bench::result> sorted = results;
   std::sort(sorted.begin(), sorted.end(), [](const bench::result & a, const bench::result & b) {
     return a.name < b.name;
   });
 
+  print_benchmark_config(cfg);
   for (const auto & entry : sorted) {
     std::printf("%s ns_per_op=%.3f iter=%" PRIu64 " runs=%zu\n",
                 entry.name.c_str(),
@@ -309,7 +335,8 @@ void print_snapshot(const std::vector<bench::result> & results) {
 }
 
 void print_compare(const std::vector<bench::result> & emel_results,
-                   const std::vector<bench::result> & reference_results) {
+                   const std::vector<bench::result> & reference_results,
+                   const bench::config & cfg) {
   std::vector<bench::result> emel_sorted = emel_results;
   std::vector<bench::result> ref_sorted = reference_results;
 
@@ -379,6 +406,15 @@ void print_compare(const std::vector<bench::result> & emel_results,
               k_bench_reference_source.data(),
               static_cast<int>(k_bench_reference_ref.size()),
               k_bench_reference_ref.data());
+  print_benchmark_config(cfg);
+  if (generation_present) {
+    const std::string_view formatter_contract = bench::generation_formatter_contract();
+    if (!formatter_contract.empty()) {
+      std::printf("# generation_formatter_contract: %.*s\n",
+                  static_cast<int>(formatter_contract.size()),
+                  formatter_contract.data());
+    }
+  }
 
   if (generation_present) {
     if (!bench::generation_flash_evidence_ready()) {
@@ -399,6 +435,10 @@ void print_compare(const std::vector<bench::result> & emel_results,
         bench::generation_runtime_contract_disallowed_fallback_stage_count();
     const auto explicit_no_claim_stage_count =
         bench::generation_runtime_contract_explicit_no_claim_stage_count();
+    const auto native_q8_0_dispatch_calls =
+        bench::generation_quantized_evidence_native_q8_0_dispatch_calls();
+    const auto packed_q8_0_dispatch_calls =
+        bench::generation_quantized_evidence_packed_q8_0_dispatch_calls();
     const auto optimized_q2_dispatch_calls =
         bench::generation_quantized_evidence_optimized_q2_dispatch_calls();
     const auto shared_q2_dispatch_calls =
@@ -465,17 +505,21 @@ void print_compare(const std::vector<bench::result> & emel_results,
                    shared_flash_dispatch_calls);
       std::exit(1);
     }
-    if (k_host_is_aarch64 &&
-        (optimized_q2_dispatch_calls == 0 || shared_q2_dispatch_calls != 0 ||
-         optimized_q3_dispatch_calls == 0 || shared_q3_dispatch_calls != 0 ||
-         optimized_q6_dispatch_calls == 0 || shared_q6_dispatch_calls != 0)) {
+    if ((native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls) == 0 ||
+        optimized_q2_dispatch_calls != 0 || shared_q2_dispatch_calls != 0 ||
+        optimized_q3_dispatch_calls != 0 || shared_q3_dispatch_calls != 0 ||
+        optimized_q6_dispatch_calls != 0 || shared_q6_dispatch_calls != 0) {
       std::fprintf(stderr,
-                   "error: invalid ARM quantized evidence optimized_q2_dispatch_calls=%" PRIu64
+                   "error: invalid generation quantized evidence native_q8_0_dispatch_calls=%" PRIu64
+                   " packed_q8_0_dispatch_calls=%" PRIu64
+                   " optimized_q2_dispatch_calls=%" PRIu64
                    " shared_q2_dispatch_calls=%" PRIu64
                    " optimized_q3_dispatch_calls=%" PRIu64
                    " shared_q3_dispatch_calls=%" PRIu64
                    " optimized_q6_dispatch_calls=%" PRIu64
                    " shared_q6_dispatch_calls=%" PRIu64 "\n",
+                   native_q8_0_dispatch_calls,
+                   packed_q8_0_dispatch_calls,
                    optimized_q2_dispatch_calls,
                    shared_q2_dispatch_calls,
                    optimized_q3_dispatch_calls,
@@ -484,17 +528,17 @@ void print_compare(const std::vector<bench::result> & emel_results,
                    shared_q6_dispatch_calls);
       std::exit(1);
     }
-    if (native_quantized_stage_count != 8u || approved_dense_f32_stage_count != 4u ||
+    if (native_quantized_stage_count != 8u || approved_dense_f32_stage_count != 6u ||
         disallowed_fallback_stage_count != 0u || explicit_no_claim_stage_count != 0u) {
       std::fprintf(stderr,
                    "error: invalid generation runtime contract native_quantized=%" PRIu32
                    " approved_dense_f32_by_contract=%" PRIu32
                    " disallowed_fallback=%" PRIu32
                    " explicit_no_claim=%" PRIu32 "\n",
-                   native_quantized_stage_count,
-                   approved_dense_f32_stage_count,
-                   disallowed_fallback_stage_count,
-                   explicit_no_claim_stage_count);
+                native_quantized_stage_count,
+                approved_dense_f32_stage_count,
+                disallowed_fallback_stage_count,
+                explicit_no_claim_stage_count);
       std::exit(1);
     }
 
@@ -522,7 +566,9 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 approved_dense_f32_stage_count,
                 disallowed_fallback_stage_count,
                 explicit_no_claim_stage_count);
-    std::printf("# generation_quantized_evidence: case=%.*s optimized_q2_dispatch_calls=%" PRIu64
+    std::printf("# generation_quantized_evidence: case=%.*s native_q8_0_dispatch_calls=%" PRIu64
+                " packed_q8_0_dispatch_calls=%" PRIu64
+                " optimized_q2_dispatch_calls=%" PRIu64
                 " shared_q2_dispatch_calls=%" PRIu64
                 " optimized_q3_dispatch_calls=%" PRIu64
                 " shared_q3_dispatch_calls=%" PRIu64
@@ -530,6 +576,8 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 " shared_q6_dispatch_calls=%" PRIu64 "\n",
                 static_cast<int>(bench::k_generation_case_name.size()),
                 bench::k_generation_case_name.data(),
+                native_q8_0_dispatch_calls,
+                packed_q8_0_dispatch_calls,
                 optimized_q2_dispatch_calls,
                 shared_q2_dispatch_calls,
                 optimized_q3_dispatch_calls,
@@ -605,37 +653,37 @@ int main(int argc, char ** argv) {
 
   if (run_mode == mode::k_kernel_emel) {
     const auto results = run_benchmarks(cfg, kernel_test_cases(), false, false);
-    print_snapshot(results);
+    print_snapshot(results, cfg);
     return 0;
   }
 
   if (run_mode == mode::k_kernel_reference) {
     const auto results = run_benchmarks(cfg, kernel_test_cases(), true, false);
-    print_snapshot(results);
+    print_snapshot(results, cfg);
     return 0;
   }
 
   if (run_mode == mode::k_kernel_compare) {
     const auto emel_results = run_benchmarks(cfg, kernel_test_cases(), false, false);
     const auto ref_results = run_benchmarks(cfg, kernel_test_cases(), true, false);
-    print_compare(emel_results, ref_results);
+    print_compare(emel_results, ref_results, cfg);
     return 0;
   }
 
   if (run_mode == mode::k_emel) {
     const auto results = run_benchmarks(cfg, default_test_cases(), false, true);
-    print_snapshot(results);
+    print_snapshot(results, cfg);
     return 0;
   }
 
   if (run_mode == mode::k_reference) {
     const auto results = run_benchmarks(cfg, default_test_cases(), true, true);
-    print_snapshot(results);
+    print_snapshot(results, cfg);
     return 0;
   }
 
   const auto emel_results = run_benchmarks(cfg, default_test_cases(), false, true);
   const auto ref_results = run_benchmarks(cfg, default_test_cases(), true, true);
-  print_compare(emel_results, ref_results);
+  print_compare(emel_results, ref_results, cfg);
   return 0;
 }

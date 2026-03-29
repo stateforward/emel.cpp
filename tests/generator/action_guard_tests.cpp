@@ -60,6 +60,12 @@ int dummy_tokenizer_actor = 4;
 std::array<emel::logits::sampler::fn, 1> dummy_samplers = {
     emel::logits::sampler::fn::from<sampler_passthrough>(),
 };
+constexpr std::array<emel::text::formatter::chat_message, 1> k_generate_messages = {
+    emel::text::formatter::chat_message{
+        .role = "user",
+        .content = "hello",
+    },
+};
 
 emel::model::data & test_model() {
   static auto * model = []() {
@@ -109,11 +115,13 @@ emel::generator::event::generate make_generate_request(
     size_t & output_length_out) {
   static char output_storage[16] = {};
   emel::generator::event::generate request{
-    "hello",
+    std::span<const emel::text::formatter::chat_message>{k_generate_messages},
     2,
     std::span<char>{output_storage},
     output_length_out,
   };
+  request.add_generation_prompt = true;
+  request.enable_thinking = false;
   request.error_out = error_out;
   request.on_done = tracker == nullptr
                         ? emel::callback<void(const emel::generator::events::generation_done &)>{}
@@ -243,7 +251,30 @@ TEST_CASE("generator generate dispatch actions cover channel variants") {
                                                                     context);
 }
 
-TEST_CASE("generator request and channel guards classify callback and request variants") {
+TEST_CASE(
+    "generator request_planning accepts multi-token single-sequence prompt metadata") {
+  emel::generator::action::context context{};
+  callback_tracker tracker{};
+  emel::error::type error_out = emel::error::cast(emel::generator::error::backend);
+  size_t output_length_out = 0;
+
+  auto generate = make_generate_request(&tracker, &error_out, output_length_out);
+  emel::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count = 2;
+  emel::generator::event::generate_run generate_run{generate, generate_ctx};
+  context.buffers.prompt_tokens[0] = 11;
+  context.buffers.prompt_tokens[1] = 13;
+
+  emel::generator::action::request_planning(generate_run, context);
+
+  CHECK(generate_ctx.phase_accepted);
+  CHECK(generate_ctx.phase_code == 0);
+  CHECK(generate_ctx.prefill_step_size == 1);
+  CHECK(generate_ctx.plan_step_count == 2);
+  CHECK(generate_ctx.plan_outputs >= 0);
+}
+
+TEST_CASE("generator structured message request and channel guards classify callback variants") {
   emel::generator::action::context context{};
   emel::text::conditioner::sm conditioner{};
   context.model = &test_model();
@@ -263,6 +294,11 @@ TEST_CASE("generator request and channel guards classify callback and request va
   generate_ctx.selected_token = 1;
   emel::generator::event::generate_run generate_run{generate, generate_ctx};
 
+  CHECK(generate.messages.size() == 1u);
+  CHECK(generate.messages[0].role == "user");
+  CHECK(generate.messages[0].content == "hello");
+  CHECK(generate.add_generation_prompt);
+  CHECK_FALSE(generate.enable_thinking);
   CHECK(emel::generator::guard::valid_generate{}(generate_run, context));
   CHECK(emel::generator::guard::valid_generate_with_reset{}(generate_run, context));
   CHECK_FALSE(emel::generator::guard::valid_generate_without_reset{}(generate_run, context));
@@ -291,6 +327,16 @@ TEST_CASE("generator request and channel guards classify callback and request va
   generate.max_tokens = 0;
   CHECK(emel::generator::guard::invalid_generate{}(generate_run, context));
   generate.max_tokens = 2;
+  std::array<char, 16> output_buffer = {};
+  generate.messages = {};
+  CHECK(emel::generator::guard::invalid_generate{}(generate_run, context));
+  generate.messages = std::span<const emel::text::formatter::chat_message>{
+      static_cast<const emel::text::formatter::chat_message *>(nullptr), 1u};
+  CHECK(emel::generator::guard::invalid_generate{}(generate_run, context));
+  generate.messages = std::span<const emel::text::formatter::chat_message>{k_generate_messages};
+  generate.output = std::span<char>{static_cast<char *>(nullptr), 1u};
+  CHECK(emel::generator::guard::invalid_generate{}(generate_run, context));
+  generate.output = std::span<char>{output_buffer};
   generate_ctx.tokens_generated = 2;
   CHECK(emel::generator::guard::decode_complete{}(generate_run, context));
   generate_ctx.tokens_generated = 0;
@@ -388,6 +434,11 @@ TEST_CASE("generator phase guards classify invalid and backend errors") {
   generate_ctx.phase_code =
       static_cast<int32_t>(emel::error::cast(emel::batch::planner::error::invalid_step_size));
   CHECK(emel::generator::guard::planning_invalid_request{}(generate_run, context));
+  generate_ctx.phase_code = static_cast<int32_t>(emel::error::set(
+      emel::error::cast(emel::batch::planner::error::invalid_request),
+      emel::batch::planner::error::invalid_sequence_metadata));
+  CHECK(emel::generator::guard::planning_invalid_request{}(generate_run, context));
+  CHECK_FALSE(emel::generator::guard::planning_backend_error{}(generate_run, context));
   generate_ctx.phase_accepted = true;
   generate_ctx.phase_code = 0;
   generate_ctx.plan_step_count = 0;

@@ -90,37 +90,27 @@ inline bool graph_backend_code(const int32_t code) noexcept {
 
 inline bool planner_invalid_code(const int32_t code) noexcept {
   const auto err = static_cast<emel::error::type>(code);
-  switch (err) {
-    case emel::error::cast(emel::batch::planner::error::invalid_request):
-    case emel::error::cast(emel::batch::planner::error::invalid_token_data):
-    case emel::error::cast(emel::batch::planner::error::invalid_step_size):
-    case emel::error::cast(emel::batch::planner::error::invalid_sequence_metadata):
-    case emel::error::cast(emel::batch::planner::error::invalid_sequence_id):
-    case emel::error::cast(emel::batch::planner::error::invalid_sequence_mask):
-    case emel::error::cast(emel::batch::planner::error::multiple_bits_in_mask):
-    case emel::error::cast(emel::batch::planner::error::missing_mode):
-    case emel::error::cast(emel::batch::planner::error::invalid_mode):
-    case emel::error::cast(emel::batch::planner::error::output_plan_full):
-    case emel::error::cast(emel::batch::planner::error::output_indices_full):
-    case emel::error::cast(emel::batch::planner::error::output_steps_full):
-    case emel::error::cast(emel::batch::planner::error::unsupported_layout):
-      return true;
-    default:
-      return false;
-  }
+  return emel::error::has(err, emel::batch::planner::error::invalid_request) ||
+         emel::error::has(err, emel::batch::planner::error::invalid_token_data) ||
+         emel::error::has(err, emel::batch::planner::error::invalid_step_size) ||
+         emel::error::has(err, emel::batch::planner::error::invalid_sequence_metadata) ||
+         emel::error::has(err, emel::batch::planner::error::invalid_sequence_id) ||
+         emel::error::has(err, emel::batch::planner::error::invalid_sequence_mask) ||
+         emel::error::has(err, emel::batch::planner::error::multiple_bits_in_mask) ||
+         emel::error::has(err, emel::batch::planner::error::missing_mode) ||
+         emel::error::has(err, emel::batch::planner::error::invalid_mode) ||
+         emel::error::has(err, emel::batch::planner::error::output_plan_full) ||
+         emel::error::has(err, emel::batch::planner::error::output_indices_full) ||
+         emel::error::has(err, emel::batch::planner::error::output_steps_full) ||
+         emel::error::has(err, emel::batch::planner::error::unsupported_layout);
 }
 
 inline bool planner_backend_code(const int32_t code) noexcept {
   const auto err = static_cast<emel::error::type>(code);
-  switch (err) {
-    case emel::error::cast(emel::batch::planner::error::planning_progress_stalled):
-    case emel::error::cast(emel::batch::planner::error::algorithm_failed):
-    case emel::error::cast(emel::batch::planner::error::internal_error):
-    case emel::error::cast(emel::batch::planner::error::untracked):
-      return true;
-    default:
-      return false;
-  }
+  return emel::error::has(err, emel::batch::planner::error::planning_progress_stalled) ||
+         emel::error::has(err, emel::batch::planner::error::algorithm_failed) ||
+         emel::error::has(err, emel::batch::planner::error::internal_error) ||
+         emel::error::has(err, emel::batch::planner::error::untracked);
 }
 
 inline bool sampler_invalid_code(const int32_t code) noexcept {
@@ -187,6 +177,12 @@ bool sampled_stop_token(const runtime_event & ev, const action::context & ctx) n
 inline bool uses_preselected_argmax_direct(const action::context & ctx) noexcept {
   return ctx.state.selection_mode == emel::generator::selection_mode::preselected_argmax &&
       emel::generator::detail::preselected_argmax_direct_supported(ctx.compute.backend);
+}
+
+inline bool uses_prefill_chunk4_q8_gemm(const event::generate_run & ev,
+                                        const action::context & ctx) noexcept {
+  return ev.ctx.prompt_token_count >= emel::generator::detail::k_prefill_q8_chunk_rows &&
+      emel::generator::detail::prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
 }
 
 }  // namespace detail
@@ -374,11 +370,12 @@ struct sampler_config_failed {
 
 struct valid_generate {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return ev.request.prompt.data() != nullptr &&
-           !ev.request.prompt.empty() &&
+    return !ev.request.messages.empty() &&
+           ev.request.messages.data() != nullptr &&
            ev.request.max_tokens > 0 &&
            ev.request.max_tokens <= ctx.limits.decode_capacity &&
-           !ev.request.output.empty();
+           !ev.request.output.empty() &&
+           ev.request.output.data() != nullptr;
   }
 };
 
@@ -564,6 +561,46 @@ struct prefill_flash_runtime_supported {
 struct prefill_nonflash_runtime_required {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return !prefill_flash_runtime_supported{}(ev, ctx);
+  }
+};
+
+struct prefill_chunk4_q8_gemm_supported {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
+  }
+};
+
+struct prefill_chunk4_q8_gemm_required {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return !prefill_chunk4_q8_gemm_supported{}(ev, ctx);
+  }
+};
+
+struct compute_uses_materialized_logits_with_prefill_chunk4_q8_gemm {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return compute_uses_materialized_logits{}(ev, ctx) &&
+        prefill_chunk4_q8_gemm_supported{}(ev, ctx);
+  }
+};
+
+struct compute_uses_materialized_logits_with_prefill_scalar_runtime {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return compute_uses_materialized_logits{}(ev, ctx) &&
+        prefill_chunk4_q8_gemm_required{}(ev, ctx);
+  }
+};
+
+struct compute_uses_preselected_argmax_direct_with_prefill_chunk4_q8_gemm {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return compute_uses_preselected_argmax_direct{}(ev, ctx) &&
+        prefill_chunk4_q8_gemm_supported{}(ev, ctx);
+  }
+};
+
+struct compute_uses_preselected_argmax_direct_with_prefill_scalar_runtime {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return compute_uses_preselected_argmax_direct{}(ev, ctx) &&
+        prefill_chunk4_q8_gemm_required{}(ev, ctx);
   }
 };
 

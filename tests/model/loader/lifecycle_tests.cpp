@@ -145,6 +145,50 @@ void build_canonical_model(emel::model::data & model, const int32_t block_count)
   model.n_tensors = tensor_index;
 }
 
+void build_qwen3_model(emel::model::data & model,
+                       const int32_t block_count,
+                       const bool include_q_norm,
+                       const bool include_k_norm) {
+  std::memset(&model, 0, sizeof(model));
+  copy_name(model.architecture_name, "qwen3");
+  model.n_layers = block_count;
+  model.params.n_embd = 64;
+  model.params.n_ctx = 128;
+  model.weights_data = model.tensors.data();
+  model.weights_size = 4096u;
+
+  uint32_t tensor_index = 0u;
+  const auto add = [&](const std::string_view name) {
+    append_tensor_name(model, model.tensors[tensor_index], name);
+    ++tensor_index;
+  };
+  const auto add_block = [&](const int32_t block, const std::string_view suffix) {
+    add(std::string{"blk."} + std::to_string(block) + "." + std::string{suffix});
+  };
+
+  add("token_embd.weight");
+  add("output_norm.weight");
+  add("output.weight");
+  for (int32_t block = 0; block < block_count; ++block) {
+    add_block(block, "attn_norm.weight");
+    add_block(block, "attn_q.weight");
+    add_block(block, "attn_k.weight");
+    add_block(block, "attn_v.weight");
+    if (include_q_norm) {
+      add_block(block, "attn_q_norm.weight");
+    }
+    if (include_k_norm) {
+      add_block(block, "attn_k_norm.weight");
+    }
+    add_block(block, "attn_output.weight");
+    add_block(block, "ffn_norm.weight");
+    add_block(block, "ffn_gate.weight");
+    add_block(block, "ffn_down.weight");
+    add_block(block, "ffn_up.weight");
+  }
+  model.n_tensors = tensor_index;
+}
+
 }  // namespace
 
 TEST_CASE("model loader lifecycle succeeds on full load path") {
@@ -357,4 +401,66 @@ TEST_CASE("model_llama_detail_rejects_missing_required_tensor") {
 
   CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
   CHECK(view.model == nullptr);
+}
+
+TEST_CASE("model_llama_detail_builds_qwen3_execution_view_for_canonical_tensor_set") {
+  auto model = std::make_unique<emel::model::data>();
+  build_qwen3_model(*model, 1, true, true);
+
+  emel::model::llama::detail::execution_view view = {};
+  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+
+  CHECK(err == emel::error::cast(emel::model::loader::error::none));
+  CHECK(view.model == model.get());
+  CHECK(view.block_count == 1);
+  CHECK(view.output.name == "output.weight");
+
+  emel::model::llama::detail::block_view block = {};
+  CHECK(emel::model::llama::detail::lookup_block_view(view, 0, block) ==
+        emel::error::cast(emel::model::loader::error::none));
+  CHECK(block.attention_q_norm.name == "blk.0.attn_q_norm.weight");
+  CHECK(block.attention_k_norm.name == "blk.0.attn_k_norm.weight");
+}
+
+TEST_CASE("model_llama_detail_rejects_qwen3_execution_view_without_attention_q_norm") {
+  auto model = std::make_unique<emel::model::data>();
+  build_qwen3_model(*model, 1, false, true);
+
+  emel::model::llama::detail::execution_view view = {};
+  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+
+  CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(view.model == nullptr);
+}
+
+TEST_CASE("model_llama_detail_rejects_qwen3_execution_view_without_attention_k_norm") {
+  auto model = std::make_unique<emel::model::data>();
+  build_qwen3_model(*model, 1, true, false);
+
+  emel::model::llama::detail::execution_view view = {};
+  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+
+  CHECK(err == emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(view.model == nullptr);
+}
+
+TEST_CASE("model_llama_detail_builds_qwen3_execution_view_with_tied_output_fallback") {
+  auto model = std::make_unique<emel::model::data>();
+  build_qwen3_model(*model, 1, true, true);
+
+  for (uint32_t idx = 0; idx < model->n_tensors; ++idx) {
+    auto & tensor = model->tensors[idx];
+    if (emel::model::tensor_name_view(*model, tensor) == "output.weight") {
+      tensor.data = nullptr;
+      tensor.data_size = 0u;
+      break;
+    }
+  }
+
+  emel::model::llama::detail::execution_view view = {};
+  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+
+  CHECK(err == emel::error::cast(emel::model::loader::error::none));
+  CHECK(view.model == model.get());
+  CHECK(view.output.name == "token_embd.weight");
 }

@@ -142,11 +142,81 @@ static_assert(std::is_same_v<
               std::span<emel::logits::sampler::fn>>);
 static_assert(std::is_same_v<
               std::remove_cvref_t<
+                  decltype(std::declval<const emel::generator::event::generate &>().messages)>,
+              std::span<const emel::text::formatter::chat_message>>);
+static_assert(std::is_same_v<
+              std::remove_cvref_t<
                   decltype(std::declval<const emel::generator::event::generate &>().output)>,
               std::span<char>>);
 static_assert(std::is_reference_v<
               decltype(std::declval<const emel::generator::event::generate &>()
                            .output_length_out)>);
+
+struct checked_formatter_ctx {
+  std::span<const emel::text::formatter::chat_message> expected_messages = {};
+  bool expected_add_generation_prompt = false;
+  bool expected_enable_thinking = false;
+  std::string_view formatted = {};
+  bool seen = false;
+};
+
+bool format_checked_messages(void * formatter_ctx,
+                             const emel::text::formatter::format_request & request,
+                             int32_t * error_out) {
+  if (error_out != nullptr) {
+    *error_out = emel::text::formatter::error_code(emel::text::formatter::error::none);
+  }
+  if (request.output_length_out != nullptr) {
+    *request.output_length_out = 0u;
+  }
+  if (formatter_ctx == nullptr || request.output == nullptr ||
+      request.output_capacity < request.messages.size()) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
+
+  auto & ctx = *static_cast<checked_formatter_ctx *>(formatter_ctx);
+  if (request.messages.size() != ctx.expected_messages.size() ||
+      request.add_generation_prompt != ctx.expected_add_generation_prompt ||
+      request.enable_thinking != ctx.expected_enable_thinking) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
+
+  for (size_t idx = 0; idx < request.messages.size(); ++idx) {
+    if (request.messages[idx].role != ctx.expected_messages[idx].role ||
+        request.messages[idx].content != ctx.expected_messages[idx].content) {
+      if (error_out != nullptr) {
+        *error_out = emel::text::formatter::error_code(
+            emel::text::formatter::error::invalid_request);
+      }
+      return false;
+    }
+  }
+
+  if (request.output_capacity < ctx.formatted.size()) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
+
+  if (!ctx.formatted.empty()) {
+    std::memcpy(request.output, ctx.formatted.data(), ctx.formatted.size());
+  }
+  if (request.output_length_out != nullptr) {
+    *request.output_length_out = ctx.formatted.size();
+  }
+  ctx.seen = true;
+  return true;
+}
 
 void build_prepared_model(prepared_model & prepared) {
   prepared.tensor_storage.reserve(12);
@@ -233,6 +303,8 @@ void build_quantized_contract_prepared_model(prepared_model & prepared) {
   prepared.data.params.n_head_kv = 1;
   prepared.data.params.n_ctx = 8;
   prepared.data.params.n_rot = 2;
+  prepared.data.params.attention_key_length = k_n_embd;
+  prepared.data.params.attention_value_length = k_n_embd;
   prepared.data.params.n_layer = 1;
   prepared.data.n_layers = 1;
   prepared.data.weights_data = prepared.data.tensors.data();
@@ -283,6 +355,156 @@ void build_quantized_contract_prepared_model(prepared_model & prepared) {
   add_matrix("blk.0.ffn_gate.weight", k_n_embd, k_n_embd);
   add_matrix("blk.0.ffn_down.weight", k_n_embd, k_n_embd);
   add_matrix("blk.0.ffn_up.weight", k_n_embd, k_n_embd);
+  prepared.data.n_tensors = tensor_index;
+}
+
+void build_qwen3_quantized_contract_prepared_model(prepared_model & prepared,
+                                                   const bool include_q_norm,
+                                                   const bool include_k_norm) {
+  constexpr int32_t k_n_embd =
+      static_cast<int32_t>(emel::kernel::detail::quant::QK_K);
+  prepared.tensor_storage.reserve(14);
+  prepared.data.vocab_data.tokenizer_model_id = emel::model::data::tokenizer_model::BPE;
+  prepared.data.vocab_data.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
+  prepared.data.vocab_data.ignore_merges = true;
+  prepared.hello_id = add_token(prepared.data.vocab_data, "hello");
+  prepared.world_id = add_token(prepared.data.vocab_data, "world");
+  prepared.data.params.n_vocab = static_cast<int32_t>(prepared.data.vocab_data.n_tokens);
+  prepared.data.params.n_embd = k_n_embd;
+  prepared.data.params.n_head = 1;
+  prepared.data.params.n_head_kv = 1;
+  prepared.data.params.n_ctx = 8;
+  prepared.data.params.n_rot = 2;
+  prepared.data.params.n_layer = 1;
+  prepared.data.n_layers = 1;
+  prepared.data.weights_data = prepared.data.tensors.data();
+  prepared.data.weights_size = 1u;
+  std::memcpy(prepared.data.architecture_name.data(), "qwen3", 5u);
+
+  uint32_t tensor_index = 0u;
+  const auto add_name = [&](emel::model::data::tensor_record & tensor, const std::string_view name) {
+    tensor.name_offset = prepared.data.name_bytes_used;
+    tensor.name_length = static_cast<uint32_t>(name.size());
+    std::memcpy(prepared.data.name_storage.data() + prepared.data.name_bytes_used,
+                name.data(),
+                name.size());
+    prepared.data.name_bytes_used += static_cast<uint32_t>(name.size());
+  };
+  const auto add_vector = [&](const std::string_view name, const int32_t cols) {
+    auto & tensor = prepared.data.tensors[tensor_index++];
+    add_name(tensor, name);
+    prepared.tensor_storage.emplace_back(static_cast<size_t>(cols), 1.0f);
+    tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+    tensor.n_dims = 1;
+    tensor.dims[0] = cols;
+    tensor.data = prepared.tensor_storage.back().data();
+    tensor.data_size = static_cast<uint64_t>(prepared.tensor_storage.back().size() * sizeof(float));
+  };
+  const auto add_matrix = [&](const std::string_view name, const int32_t rows, const int32_t cols) {
+    auto & tensor = prepared.data.tensors[tensor_index++];
+    add_name(tensor, name);
+    prepared.tensor_storage.emplace_back(static_cast<size_t>(rows) * static_cast<size_t>(cols),
+                                         0.0f);
+    tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+    tensor.n_dims = 2;
+    tensor.dims[0] = cols;
+    tensor.dims[1] = rows;
+    tensor.data = prepared.tensor_storage.back().data();
+    tensor.data_size = static_cast<uint64_t>(prepared.tensor_storage.back().size() * sizeof(float));
+  };
+
+  add_matrix("token_embd.weight", 2, k_n_embd);
+  add_vector("output_norm.weight", k_n_embd);
+  add_matrix("output.weight", 2, k_n_embd);
+  add_vector("blk.0.attn_norm.weight", k_n_embd);
+  add_matrix("blk.0.attn_q.weight", k_n_embd, k_n_embd);
+  add_matrix("blk.0.attn_k.weight", k_n_embd, k_n_embd);
+  add_matrix("blk.0.attn_v.weight", k_n_embd, k_n_embd);
+  if (include_q_norm) {
+    add_vector("blk.0.attn_q_norm.weight", k_n_embd);
+  }
+  if (include_k_norm) {
+    add_vector("blk.0.attn_k_norm.weight", k_n_embd);
+  }
+  add_matrix("blk.0.attn_output.weight", k_n_embd, k_n_embd);
+  add_vector("blk.0.ffn_norm.weight", k_n_embd);
+  add_matrix("blk.0.ffn_gate.weight", k_n_embd, k_n_embd);
+  add_matrix("blk.0.ffn_down.weight", k_n_embd, k_n_embd);
+  add_matrix("blk.0.ffn_up.weight", k_n_embd, k_n_embd);
+  prepared.data.n_tensors = tensor_index;
+}
+
+void build_qwen3_prepared_model(prepared_model & prepared) {
+  prepared.tensor_storage.reserve(14);
+  prepared.data.vocab_data.tokenizer_model_id = emel::model::data::tokenizer_model::BPE;
+  prepared.data.vocab_data.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
+  prepared.data.vocab_data.ignore_merges = true;
+  prepared.hello_id = add_token(prepared.data.vocab_data, "hello");
+  prepared.world_id = add_token(prepared.data.vocab_data, "world");
+  prepared.data.params.n_vocab = static_cast<int32_t>(prepared.data.vocab_data.n_tokens);
+  prepared.data.params.n_embd = 4;
+  prepared.data.params.n_head = 2;
+  prepared.data.params.n_head_kv = 2;
+  prepared.data.params.n_ctx = 8;
+  prepared.data.params.n_rot = 2;
+  prepared.data.params.attention_key_length = 2;
+  prepared.data.params.attention_value_length = 2;
+  prepared.data.params.n_layer = 1;
+  prepared.data.n_layers = 1;
+  prepared.data.weights_data = prepared.data.tensors.data();
+  prepared.data.weights_size = 1u;
+  std::memcpy(prepared.data.architecture_name.data(), "qwen3", 5u);
+
+  uint32_t tensor_index = 0u;
+  const auto add_name = [&](emel::model::data::tensor_record & tensor, const std::string_view name) {
+    tensor.name_offset = prepared.data.name_bytes_used;
+    tensor.name_length = static_cast<uint32_t>(name.size());
+    std::memcpy(prepared.data.name_storage.data() + prepared.data.name_bytes_used,
+                name.data(),
+                name.size());
+    prepared.data.name_bytes_used += static_cast<uint32_t>(name.size());
+  };
+  const auto add_vector = [&](const std::string_view name, const std::vector<float> & values) {
+    auto & tensor = prepared.data.tensors[tensor_index++];
+    add_name(tensor, name);
+    prepared.tensor_storage.push_back(values);
+    tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+    tensor.n_dims = 1;
+    tensor.dims[0] = static_cast<int64_t>(values.size());
+    tensor.data = prepared.tensor_storage.back().data();
+    tensor.data_size = static_cast<uint64_t>(values.size() * sizeof(float));
+  };
+  const auto add_matrix = [&](const std::string_view name,
+                              const int32_t rows,
+                              const int32_t cols,
+                              const std::vector<float> & values) {
+    auto & tensor = prepared.data.tensors[tensor_index++];
+    add_name(tensor, name);
+    prepared.tensor_storage.push_back(values);
+    tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+    tensor.n_dims = 2;
+    tensor.dims[0] = cols;
+    tensor.dims[1] = rows;
+    tensor.data = prepared.tensor_storage.back().data();
+    tensor.data_size = static_cast<uint64_t>(values.size() * sizeof(float));
+  };
+
+  add_matrix("token_embd.weight", 2, 4, {1.0f, 0.0f, 0.0f, 0.0f,
+                                         1.0f, 0.0f, 0.0f, 0.0f});
+  add_vector("output_norm.weight", {1.0f, 1.0f, 1.0f, 1.0f});
+  add_matrix("output.weight", 2, 4, {0.0f, 0.0f, 0.0f, 0.0f,
+                                     1.0f, 0.0f, 0.0f, 0.0f});
+  add_vector("blk.0.attn_norm.weight", {1.0f, 1.0f, 1.0f, 1.0f});
+  add_matrix("blk.0.attn_q.weight", 4, 4, std::vector<float>(16, 0.0f));
+  add_matrix("blk.0.attn_k.weight", 4, 4, std::vector<float>(16, 0.0f));
+  add_matrix("blk.0.attn_v.weight", 4, 4, std::vector<float>(16, 0.0f));
+  add_vector("blk.0.attn_q_norm.weight", {1.0f, 1.0f});
+  add_vector("blk.0.attn_k_norm.weight", {1.0f, 1.0f});
+  add_matrix("blk.0.attn_output.weight", 4, 4, std::vector<float>(16, 0.0f));
+  add_vector("blk.0.ffn_norm.weight", {1.0f, 1.0f, 1.0f, 1.0f});
+  add_matrix("blk.0.ffn_gate.weight", 4, 4, std::vector<float>(16, 0.0f));
+  add_matrix("blk.0.ffn_down.weight", 4, 4, std::vector<float>(16, 0.0f));
+  add_matrix("blk.0.ffn_up.weight", 4, 4, std::vector<float>(16, 0.0f));
   prepared.data.n_tensors = tensor_index;
 }
 
@@ -350,8 +572,24 @@ void apply_quantized_contract_tensor_types(prepared_model & prepared) {
       static_cast<int32_t>(emel::kernel::event::dtype::q2_k);
 }
 
+void apply_qwen3_quantized_contract_tensor_types(prepared_model & prepared) {
+  apply_quantized_contract_tensor_types(prepared);
+  find_tensor(prepared, "blk.0.attn_q_norm.weight")->type =
+      static_cast<int32_t>(emel::kernel::event::dtype::f32);
+  find_tensor(prepared, "blk.0.attn_k_norm.weight")->type =
+      static_cast<int32_t>(emel::kernel::event::dtype::f32);
+}
+
 struct generator_fixture {
-  static constexpr std::string_view k_phase_4_prompt = "hello";
+  static constexpr std::string_view k_phase_4_user_content = "hello";
+  static constexpr std::array<emel::text::formatter::chat_message, 1> k_phase_4_messages = {
+      emel::text::formatter::chat_message{
+          .role = "user",
+          .content = k_phase_4_user_content,
+      },
+  };
+  static constexpr bool k_phase_4_add_generation_prompt = false;
+  static constexpr bool k_phase_4_enable_thinking = false;
   static constexpr int32_t k_phase_4_max_tokens = 1;
 
   prepared_model prepared = {};
@@ -368,13 +606,20 @@ struct generator_fixture {
     canonical,
     flash_kv_width_mismatch,
     quantized_contract,
+    qwen3_canonical,
   };
 
-  explicit generator_fixture(const model_variant variant = model_variant::canonical)
+  explicit generator_fixture(
+      const model_variant variant = model_variant::canonical,
+      void * formatter_ctx = nullptr,
+      emel::text::formatter::format_fn format_prompt =
+          emel::text::formatter::format_raw)
       : prepared() {
     if (variant == model_variant::quantized_contract) {
       build_quantized_contract_prepared_model(prepared);
       apply_quantized_contract_tensor_types(prepared);
+    } else if (variant == model_variant::qwen3_canonical) {
+      build_qwen3_prepared_model(prepared);
     } else {
       build_prepared_model(prepared);
     }
@@ -382,7 +627,7 @@ struct generator_fixture {
       apply_flash_kv_width_mismatch(prepared);
     }
     generator = std::make_unique<emel::generator::sm>(
-        stabilize_model(prepared), conditioner, nullptr, emel::text::formatter::format_raw);
+        stabilize_model(prepared), conditioner, formatter_ctx, format_prompt);
     hello_id = prepared.hello_id;
     world_id = prepared.world_id;
   }
@@ -426,11 +671,13 @@ struct generator_fixture {
                                                  size_t & output_length_out,
                                                  emel::error::type * error_out = nullptr) {
     emel::generator::event::generate request{
-      k_phase_4_prompt,
+      std::span<const emel::text::formatter::chat_message>{k_phase_4_messages},
       k_phase_4_max_tokens,
       std::span<char>{output, output_capacity},
       output_length_out,
     };
+    request.add_generation_prompt = k_phase_4_add_generation_prompt;
+    request.enable_thinking = k_phase_4_enable_thinking;
     request.error_out = error_out;
     request.on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
         &tracker, on_generate_done);
@@ -606,6 +853,34 @@ TEST_CASE("generator_generate_runs_native_generator_contract") {
   }
 }
 
+TEST_CASE("generator_qwen3_generator_initializes_and_generates_one_token") {
+  auto fixture = std::make_unique<generator_fixture>(generator_fixture::model_variant::qwen3_canonical);
+  callback_tracker initialize_tracker{};
+  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
+
+  REQUIRE(fixture->generator->process_event(initialize_request));
+  REQUIRE(initialize_tracker.initialize_done_called);
+  REQUIRE_FALSE(initialize_tracker.initialize_error_called);
+  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+
+  callback_tracker generate_tracker{};
+  std::array<char, 32> output = {};
+  size_t output_length = 0u;
+  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  const auto generate_request =
+      fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
+                             &generate_error);
+
+  CHECK(fixture->generator->process_event(generate_request));
+  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK_FALSE(generate_tracker.generate_error_called);
+  CHECK(generate_tracker.generate_done_called);
+  CHECK(generate_tracker.tokens_generated == 1);
+  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(output_length > 0u);
+}
+
 TEST_CASE("generator_generate_f32_fixture_does_not_claim_quantized_optimized_dispatch") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};
@@ -681,6 +956,51 @@ TEST_CASE("generator_quantized_path_audit_classifies_canonical_stage_families") 
   CHECK(feed_forward_norm.contract ==
         emel::model::llama::detail::quantized_contract_kind::
             approved_dense_f32_by_contract);
+}
+
+TEST_CASE("generator_qwen3_quantized_path_audit_publishes_explicit_norm_stage_families") {
+  auto prepared = std::make_unique<prepared_model>();
+  build_qwen3_quantized_contract_prepared_model(*prepared, true, true);
+  apply_qwen3_quantized_contract_tensor_types(*prepared);
+
+  emel::model::llama::detail::execution_view execution{};
+  REQUIRE(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  const auto audit = emel::model::llama::detail::build_quantized_path_audit(execution);
+  const auto & attention_q_norm = find_stage_audit(
+      audit, emel::model::llama::detail::quantized_stage_family::attention_q_norm);
+  const auto & attention_k_norm = find_stage_audit(
+      audit, emel::model::llama::detail::quantized_stage_family::attention_k_norm);
+  const auto & attention_q = find_stage_audit(
+      audit, emel::model::llama::detail::quantized_stage_family::attention_q);
+
+  CHECK(attention_q_norm.contract ==
+        emel::model::llama::detail::quantized_contract_kind::
+            approved_dense_f32_by_contract);
+  CHECK(attention_k_norm.contract ==
+        emel::model::llama::detail::quantized_contract_kind::
+            approved_dense_f32_by_contract);
+  CHECK(attention_q.contract ==
+        emel::model::llama::detail::quantized_contract_kind::native_quantized);
+}
+
+TEST_CASE("generator_qwen3_quantized_path_audit_requires_attention_q_norm_tensor") {
+  auto prepared = std::make_unique<prepared_model>();
+  build_qwen3_quantized_contract_prepared_model(*prepared, false, true);
+
+  emel::model::llama::detail::execution_view execution{};
+  CHECK(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+}
+
+TEST_CASE("generator_qwen3_quantized_path_audit_requires_attention_k_norm_tensor") {
+  auto prepared = std::make_unique<prepared_model>();
+  build_qwen3_quantized_contract_prepared_model(*prepared, true, false);
+
+  emel::model::llama::detail::execution_view execution{};
+  CHECK(emel::model::llama::detail::build_execution_view(stabilize_model(*prepared), execution) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
 TEST_CASE("generator_quantized_path_audit_marks_unsupported_quantized_stage_no_claim") {
@@ -950,11 +1270,14 @@ TEST_CASE(
          size_t & output_length,
          emel::error::type * error_out) {
         emel::generator::event::generate request{
-          generator_fixture::k_phase_4_prompt,
+          std::span<const emel::text::formatter::chat_message>{
+              generator_fixture::k_phase_4_messages},
           2,
           std::span<char>{output.data(), output.size()},
           output_length,
         };
+        request.add_generation_prompt = generator_fixture::k_phase_4_add_generation_prompt;
+        request.enable_thinking = generator_fixture::k_phase_4_enable_thinking;
         request.error_out = error_out;
         request.on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
             &tracker, on_generate_done);
@@ -990,7 +1313,7 @@ TEST_CASE(
   CHECK(second_output_length > 0u);
 }
 
-TEST_CASE("generator_generate_pins_the_phase_4_request_contract") {
+TEST_CASE("generator structured message request pins the phase 4 contract") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};
   emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
@@ -1005,7 +1328,14 @@ TEST_CASE("generator_generate_pins_the_phase_4_request_contract") {
       fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
                              &generate_error);
 
-  CHECK(generate_request.prompt == generator_fixture::k_phase_4_prompt);
+  CHECK(generate_request.messages.size() == generator_fixture::k_phase_4_messages.size());
+  CHECK(generate_request.messages[0].role == generator_fixture::k_phase_4_messages[0].role);
+  CHECK(generate_request.messages[0].content ==
+        generator_fixture::k_phase_4_messages[0].content);
+  CHECK(generate_request.add_generation_prompt ==
+        generator_fixture::k_phase_4_add_generation_prompt);
+  CHECK(generate_request.enable_thinking ==
+        generator_fixture::k_phase_4_enable_thinking);
   CHECK(generate_request.max_tokens == generator_fixture::k_phase_4_max_tokens);
   CHECK(generate_request.output.data() == output.data());
   CHECK(generate_request.output.size() == output.size());
@@ -1016,6 +1346,61 @@ TEST_CASE("generator_generate_pins_the_phase_4_request_contract") {
   CHECK(generate_tracker.tokens_generated == generator_fixture::k_phase_4_max_tokens);
   CHECK(generate_tracker.output_length == 5);
   CHECK(output_length == generate_tracker.output_length);
+  CHECK(std::string_view(output.data(), output_length) == "world");
+}
+
+TEST_CASE("generator structured message request reaches the conditioner formatter") {
+  static constexpr std::array<emel::text::formatter::chat_message, 2> k_messages = {
+      emel::text::formatter::chat_message{
+          .role = "system",
+          .content = "policy",
+      },
+      emel::text::formatter::chat_message{
+          .role = "user",
+          .content = "hello",
+      },
+  };
+  checked_formatter_ctx formatter_ctx{
+      .expected_messages = std::span<const emel::text::formatter::chat_message>{k_messages},
+      .expected_add_generation_prompt = true,
+      .expected_enable_thinking = false,
+      .formatted = "hello",
+      .seen = false,
+  };
+  auto fixture = std::make_unique<generator_fixture>(generator_fixture::model_variant::canonical,
+                                                     &formatter_ctx,
+                                                     format_checked_messages);
+  callback_tracker initialize_tracker{};
+  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
+  REQUIRE(fixture->generator->process_event(initialize_request));
+  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+
+  callback_tracker generate_tracker{};
+  std::array<char, 32> output = {};
+  size_t output_length = 0;
+  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  emel::generator::event::generate generate_request{
+      std::span<const emel::text::formatter::chat_message>{k_messages},
+      1,
+      std::span<char>{output.data(), output.size()},
+      output_length,
+  };
+  generate_request.add_generation_prompt = true;
+  generate_request.enable_thinking = false;
+  generate_request.error_out = &generate_error;
+  generate_request.on_done = emel::callback<void(const emel::generator::events::generation_done &)>(
+      &generate_tracker, on_generate_done);
+  generate_request.on_error =
+      emel::callback<void(const emel::generator::events::generation_error &)>(
+          &generate_tracker, on_generate_error);
+
+  REQUIRE(fixture->generator->process_event(generate_request));
+  CHECK(formatter_ctx.seen);
+  CHECK_FALSE(generate_tracker.generate_error_called);
+  CHECK(generate_tracker.generate_done_called);
+  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(generate_tracker.tokens_generated == 1);
   CHECK(std::string_view(output.data(), output_length) == "world");
 }
 

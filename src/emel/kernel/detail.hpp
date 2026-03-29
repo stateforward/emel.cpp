@@ -144,6 +144,7 @@ namespace emel::kernel::detail {
 inline constexpr uint8_t dtype_f32 = 0;
 inline constexpr uint8_t dtype_f16 = 1;
 inline constexpr uint8_t dtype_q4_0 = 2;
+inline constexpr uint8_t dtype_q8_0 = 8;
 inline constexpr uint8_t dtype_q2_k = 10;
 inline constexpr uint8_t dtype_q3_k = 11;
 inline constexpr uint8_t dtype_q6_k = 14;
@@ -151,6 +152,8 @@ inline constexpr uint8_t dtype_q8_k = 15;
 inline constexpr uint8_t dtype_q6_k_x8 = 36;
 inline constexpr uint8_t dtype_q6_k_x8_q8_prepared = 37;
 inline constexpr uint8_t dtype_q6_k_x8_q8_argmax_prepared = 38;
+inline constexpr uint8_t dtype_q8_0_x4_bl4 = 39;
+inline constexpr uint8_t dtype_q8_0_x4_bl8 = 40;
 inline constexpr uint64_t flash_attn_workspace_token_capacity = 4096u;
 
 struct flash_attn_workspace {
@@ -165,9 +168,22 @@ struct flash_attn_workspace {
 
 namespace quant {
 
+constexpr uint64_t QK8_0 = 32u;
 constexpr uint64_t QK_K = 256u;
 constexpr uint64_t MAX_Q8_K_BLOCKS = 128u;
+constexpr uint64_t MAX_Q8_0_BLOCKS = MAX_Q8_K_BLOCKS * (QK_K / QK8_0);
 constexpr uint64_t Q6_K_X8_ROWS = 8u;
+constexpr uint64_t Q8_0_X4_ROWS = 4u;
+
+struct block_q8_0 {
+  uint16_t d = 0;
+  std::array<int8_t, QK8_0> qs = {};
+};
+
+struct block_q8_0x4 {
+  std::array<uint16_t, Q8_0_X4_ROWS> d = {};
+  std::array<int8_t, QK8_0 * Q8_0_X4_ROWS> qs = {};
+};
 
 struct block_q2_k {
   std::array<uint8_t, QK_K / 16> scales = {};
@@ -215,6 +231,7 @@ struct block_q8_k {
   std::array<int16_t, QK_K / 16> bsums = {};
 };
 
+static_assert(sizeof(block_q8_0) == sizeof(uint16_t) + QK8_0);
 static_assert(sizeof(block_q2_k) == 2 * sizeof(uint16_t) + (QK_K / 16) + (QK_K / 4));
 static_assert(sizeof(block_q3_k) == sizeof(uint16_t) + (QK_K / 4) + (QK_K / 8) + 12);
 static_assert(sizeof(block_q6_k) == sizeof(uint16_t) + (QK_K / 16) + (3 * QK_K / 4));
@@ -400,11 +417,46 @@ inline void dequantize_row_q6_k(const block_q6_k * x, float * y, const int64_t k
   }
 }
 
+inline void dequantize_row_q8_0(const block_q8_0 * x, float * y, const int64_t k) noexcept {
+  const int64_t nb = k / static_cast<int64_t>(QK8_0);
+
+  for (int64_t i = 0; i < nb; ++i) {
+    const float d = fp16_to_fp32(x[i].d);
+    for (uint64_t j = 0; j < QK8_0; ++j) {
+      y[i * static_cast<int64_t>(QK8_0) + static_cast<int64_t>(j)] =
+          d * static_cast<float>(x[i].qs[j]);
+    }
+  }
+}
+
 inline int nearest_int(const float value) noexcept {
   float biased = value + 12582912.0f;
   int bits = 0;
   std::memcpy(&bits, &biased, sizeof(bits));
   return (bits & 0x007fffff) - 0x00400000;
+}
+
+inline void quantize_row_q8_0_strided(const float * x,
+                                      const uint64_t stride,
+                                      block_q8_0 * y,
+                                      const int64_t k) noexcept {
+  const int64_t nb = k / static_cast<int64_t>(QK8_0);
+
+  for (int64_t i = 0; i < nb; ++i) {
+    float amax = 0.0f;
+    const float * block = x + i * static_cast<int64_t>(QK8_0) * static_cast<int64_t>(stride);
+    for (uint64_t j = 0; j < QK8_0; ++j) {
+      amax = std::max(amax, std::fabs(block[j * stride]));
+    }
+
+    const float d = amax / 127.0f;
+    const float inv_d = d != 0.0f ? 1.0f / d : 0.0f;
+    y[i].d = fp32_to_fp16(d);
+    for (uint64_t j = 0; j < QK8_0; ++j) {
+      const int quant = static_cast<int>(std::round(block[j * stride] * inv_d));
+      y[i].qs[j] = static_cast<int8_t>(std::clamp(quant, -127, 127));
+    }
+  }
 }
 
 inline void quantize_row_q8_k_strided(const float * x,
@@ -455,12 +507,24 @@ inline constexpr uint64_t packed_q6_k_x8_group_count(const uint64_t rows) noexce
   return (rows + Q6_K_X8_ROWS - 1u) / Q6_K_X8_ROWS;
 }
 
+inline constexpr uint64_t packed_q8_0_x4_group_count(const uint64_t rows) noexcept {
+  return (rows + Q8_0_X4_ROWS - 1u) / Q8_0_X4_ROWS;
+}
+
 inline size_t packed_q6_k_x8_group_storage_bytes(const uint64_t cols) noexcept {
   if ((cols % QK_K) != 0u) {
     return 0u;
   }
   const uint64_t block_count = cols / QK_K;
   return static_cast<size_t>(block_count) * sizeof(block_q6_kx8);
+}
+
+inline size_t packed_q8_0_x4_group_storage_bytes(const uint64_t cols) noexcept {
+  if ((cols % QK8_0) != 0u) {
+    return 0u;
+  }
+  const uint64_t block_count = cols / QK8_0;
+  return static_cast<size_t>(block_count) * sizeof(block_q8_0x4);
 }
 
 inline size_t prepared_q6_k_x8_q8_group_storage_bytes(const uint64_t cols) noexcept {
@@ -515,6 +579,38 @@ inline block_q6_kx8 make_block_q6_k_x8(const block_q6_k * rows) noexcept {
   }
 
   return out;
+}
+
+inline block_q8_0x4 make_block_q8_0_x4(const block_q8_0 * rows,
+                                        const uint64_t interleave_block_bytes) noexcept {
+  block_q8_0x4 out = {};
+  if (interleave_block_bytes == 0u || (QK8_0 % interleave_block_bytes) != 0u) {
+    return out;
+  }
+
+  for (uint64_t row = 0; row < Q8_0_X4_ROWS; ++row) {
+    out.d[row] = rows[row].d;
+  }
+
+  const uint64_t end = (QK8_0 * Q8_0_X4_ROWS) / interleave_block_bytes;
+  for (uint64_t i = 0; i < end; ++i) {
+    const uint64_t src_row = i % Q8_0_X4_ROWS;
+    const uint64_t src_offset = (i / Q8_0_X4_ROWS) * interleave_block_bytes;
+    const uint64_t dst_offset = i * interleave_block_bytes;
+    std::memcpy(out.qs.data() + dst_offset,
+                rows[src_row].qs.data() + src_offset,
+                static_cast<size_t>(interleave_block_bytes));
+  }
+
+  return out;
+}
+
+inline block_q8_0x4 make_block_q8_0_x4_bl4(const block_q8_0 * rows) noexcept {
+  return make_block_q8_0_x4(rows, 4u);
+}
+
+inline block_q8_0x4 make_block_q8_0_x4_bl8(const block_q8_0 * rows) noexcept {
+  return make_block_q8_0_x4(rows, 8u);
 }
 
 inline block_q6_kx8_q8_prepared make_block_q6_k_x8_q8_prepared(const block_q6_k * rows) noexcept {
@@ -660,6 +756,53 @@ inline bool pack_q6_k_rows_x8(const block_q6_k * src,
   return true;
 }
 
+inline bool pack_q8_0_rows_x4(const block_q8_0 * src,
+                              const uint64_t rows,
+                              const uint64_t cols,
+                              void * dst,
+                              const uint64_t interleave_block_bytes) noexcept {
+  if (src == nullptr || dst == nullptr) {
+    return false;
+  }
+  if ((cols % QK8_0) != 0u ||
+      (interleave_block_bytes != 4u && interleave_block_bytes != 8u)) {
+    return false;
+  }
+
+  const uint64_t block_count = cols / QK8_0;
+  const uint64_t group_count = packed_q8_0_x4_group_count(rows);
+  auto * dst_blocks = static_cast<block_q8_0x4 *>(dst);
+  for (uint64_t group = 0; group < group_count; ++group) {
+    const uint64_t row_base = group * Q8_0_X4_ROWS;
+    for (uint64_t block = 0; block < block_count; ++block) {
+      std::array<block_q8_0, Q8_0_X4_ROWS> group_rows = {};
+      for (uint64_t row = 0; row < Q8_0_X4_ROWS; ++row) {
+        const uint64_t logical_row = row_base + row;
+        if (logical_row < rows) {
+          group_rows[row] = src[logical_row * block_count + block];
+        }
+      }
+      dst_blocks[group * block_count + block] =
+          make_block_q8_0_x4(group_rows.data(), interleave_block_bytes);
+    }
+  }
+  return true;
+}
+
+inline bool pack_q8_0_rows_x4_bl4(const block_q8_0 * src,
+                                  const uint64_t rows,
+                                  const uint64_t cols,
+                                  void * dst) noexcept {
+  return pack_q8_0_rows_x4(src, rows, cols, dst, 4u);
+}
+
+inline bool pack_q8_0_rows_x4_bl8(const block_q8_0 * src,
+                                  const uint64_t rows,
+                                  const uint64_t cols,
+                                  void * dst) noexcept {
+  return pack_q8_0_rows_x4(src, rows, cols, dst, 8u);
+}
+
 inline bool pack_q6_k_rows_x8_q8_prepared(const block_q6_k * src,
                                           const uint64_t rows,
                                           const uint64_t cols,
@@ -742,12 +885,56 @@ inline uint8_t dtype_code(const dtype_type type) noexcept {
   return static_cast<uint8_t>(type);
 }
 
+inline bool is_q8_0_dtype(const uint8_t code) noexcept {
+  return code == dtype_q8_0;
+}
+
 inline bool is_quantized_k_dtype(const uint8_t code) noexcept {
   return code == dtype_q2_k || code == dtype_q3_k || code == dtype_q6_k;
 }
 
+inline bool is_native_quantized_dtype(const uint8_t code) noexcept {
+  return is_q8_0_dtype(code) || is_quantized_k_dtype(code);
+}
+
+inline uint64_t quantized_block_size(const uint8_t code) noexcept {
+  if (is_q8_0_dtype(code)) {
+    return quant::QK8_0;
+  }
+  if (is_quantized_k_dtype(code)) {
+    return quant::QK_K;
+  }
+  return 0u;
+}
+
+inline uint64_t max_quantized_block_count(const uint8_t code) noexcept {
+  if (is_q8_0_dtype(code)) {
+    return quant::MAX_Q8_0_BLOCKS;
+  }
+  if (is_quantized_k_dtype(code)) {
+    return quant::MAX_Q8_K_BLOCKS;
+  }
+  return 0u;
+}
+
 inline bool is_rhs_q8_k_dtype(const uint8_t code) noexcept {
   return code == dtype_q8_k;
+}
+
+inline bool is_rhs_q8_0_dtype(const uint8_t code) noexcept {
+  return code == dtype_q8_0;
+}
+
+inline bool is_packed_q8_0_vector_bl4_dtype(const uint8_t code) noexcept {
+  return code == dtype_q8_0_x4_bl4;
+}
+
+inline bool is_packed_q8_0_vector_bl8_dtype(const uint8_t code) noexcept {
+  return code == dtype_q8_0_x4_bl8;
+}
+
+inline bool is_packed_q8_0_vector_dtype(const uint8_t code) noexcept {
+  return is_packed_q8_0_vector_bl4_dtype(code) || is_packed_q8_0_vector_bl8_dtype(code);
 }
 
 inline bool is_packed_q6_vector_dtype(const uint8_t code) noexcept {
@@ -763,44 +950,46 @@ inline bool is_argmax_prepared_q6_vector_q8_rhs_dtype(const uint8_t code) noexce
 }
 
 inline bool is_supported_dtype(const uint8_t code) noexcept {
-  return code == dtype_f32 || code == dtype_f16 || is_quantized_k_dtype(code) ||
-      is_rhs_q8_k_dtype(code) || is_packed_q6_vector_dtype(code) ||
+  return code == dtype_f32 || code == dtype_f16 || is_native_quantized_dtype(code) ||
+      is_rhs_q8_k_dtype(code) || is_packed_q8_0_vector_dtype(code) ||
+      is_packed_q6_vector_dtype(code) ||
       is_prepared_q6_vector_q8_rhs_dtype(code) ||
       is_argmax_prepared_q6_vector_q8_rhs_dtype(code);
 }
 
 inline size_t dtype_size_bytes(const uint8_t code) noexcept {
-  const std::array<size_t, 7> size_candidates = {
-      0u,
-      4u,
-      2u,
-      sizeof(quant::block_q2_k) / quant::QK_K,
-      sizeof(quant::block_q3_k) / quant::QK_K,
-      sizeof(quant::block_q6_k) / quant::QK_K,
-      sizeof(quant::block_q8_k) / quant::QK_K,
-  };
   if (code == dtype_f32) {
-    return size_candidates[1];
+    return sizeof(float);
   }
   if (code == dtype_f16) {
-    return size_candidates[2];
+    return sizeof(uint16_t);
+  }
+  if (code == dtype_q8_0) {
+    return sizeof(quant::block_q8_0) / quant::QK8_0;
   }
   if (code == dtype_q2_k) {
-    return size_candidates[3];
+    return sizeof(quant::block_q2_k) / quant::QK_K;
   }
   if (code == dtype_q3_k) {
-    return size_candidates[4];
+    return sizeof(quant::block_q3_k) / quant::QK_K;
   }
   if (code == dtype_q6_k) {
-    return size_candidates[5];
+    return sizeof(quant::block_q6_k) / quant::QK_K;
   }
   if (code == dtype_q8_k) {
-    return size_candidates[6];
+    return sizeof(quant::block_q8_k) / quant::QK_K;
   }
-  return size_candidates[0];
+  return 0u;
 }
 
 inline size_t quantized_row_storage_bytes(const uint8_t code, const uint64_t cols) noexcept {
+  if (code == dtype_q8_0) {
+    if ((cols % quant::QK8_0) != 0u) {
+      return 0u;
+    }
+    const uint64_t block_count = cols / quant::QK8_0;
+    return static_cast<size_t>(block_count) * sizeof(quant::block_q8_0);
+  }
   if ((cols % quant::QK_K) != 0u) {
     return 0u;
   }
@@ -922,6 +1111,22 @@ inline bool has_required_src0(const request_type & request) noexcept {
   if constexpr (std::is_same_v<request_type, event::op_mul_mat> ||
                 std::is_same_v<request_type, event::op_mul_mat_argmax>) {
     const uint8_t src0_type = dtype_code(request.src0.type);
+    if (is_packed_q8_0_vector_dtype(src0_type)) {
+      const uint64_t cols = request.src0.ne[0];
+      const uint64_t rows = request.src0.ne[1];
+      const uint64_t group_count = quant::packed_q8_0_x4_group_count(rows);
+      const size_t group_bytes = quant::packed_q8_0_x4_group_storage_bytes(cols);
+      return request.src0.data != nullptr &&
+             cols != 0u &&
+             rows != 0u &&
+             group_bytes != 0u &&
+             request.src0.ne[2] == 1u &&
+             request.src0.ne[3] == 1u &&
+             request.src0.nb[0] == 1u &&
+             request.src0.nb[1] == group_bytes &&
+             request.src0.nb[2] == group_bytes * group_count &&
+             request.src0.nb[3] == request.src0.nb[2];
+    }
     if (is_prepared_q6_vector_q8_rhs_dtype(src0_type) ||
         is_argmax_prepared_q6_vector_q8_rhs_dtype(src0_type)) {
       const uint64_t cols = request.src0.ne[0];
@@ -957,7 +1162,7 @@ inline bool has_required_src0(const request_type & request) noexcept {
              request.src0.nb[2] == group_bytes * group_count &&
              request.src0.nb[3] == request.src0.nb[2];
     }
-    if (is_quantized_k_dtype(src0_type)) {
+    if (is_native_quantized_dtype(src0_type)) {
       const uint64_t cols = request.src0.ne[0];
       const uint64_t rows = request.src0.ne[1];
       const size_t row_bytes = quantized_row_storage_bytes(src0_type, cols);
@@ -982,6 +1187,25 @@ template <class request_type>
 inline bool has_required_src1(const request_type & request) noexcept {
   if constexpr (!requires_src1_v<request_type>) {
     return true;
+  }
+  if constexpr (std::is_same_v<request_type, event::op_mul_mat>) {
+    const uint8_t src1_type = dtype_code(request.src1.type);
+    if (is_packed_q8_0_vector_dtype(src1_type)) {
+      const uint64_t rows = request.src1.ne[0];
+      const uint64_t cols = request.src1.ne[1];
+      const uint64_t group_count = quant::packed_q8_0_x4_group_count(rows);
+      const size_t group_bytes = quant::packed_q8_0_x4_group_storage_bytes(cols);
+      return request.src1.data != nullptr &&
+             cols != 0u &&
+             rows != 0u &&
+             group_bytes != 0u &&
+             request.src1.ne[2] == 1u &&
+             request.src1.ne[3] == 1u &&
+             request.src1.nb[0] == 1u &&
+             request.src1.nb[1] == group_bytes &&
+             request.src1.nb[2] == group_bytes * group_count &&
+             request.src1.nb[3] == request.src1.nb[2];
+    }
   }
   return request.src1.data != nullptr &&
          is_supported_dtype(dtype_code(request.src1.type)) &&
@@ -1909,6 +2133,24 @@ inline float dot_q6_k_q8_k_row_scalar(const quant::block_q6_k * lhs,
   return sumf;
 }
 
+inline float dot_q8_0_q8_0_row_scalar(const quant::block_q8_0 * lhs,
+                                      const quant::block_q8_0 * rhs,
+                                      const uint64_t block_count) noexcept {
+  float sumf = 0.0f;
+
+  for (uint64_t block = 0; block < block_count; ++block) {
+    int32_t sumi = 0;
+    for (uint64_t j = 0; j < quant::QK8_0; ++j) {
+      sumi += static_cast<int32_t>(lhs[block].qs[j]) * static_cast<int32_t>(rhs[block].qs[j]);
+    }
+
+    sumf += static_cast<float>(sumi) *
+        (quant::fp16_to_fp32(lhs[block].d) * quant::fp16_to_fp32(rhs[block].d));
+  }
+
+  return sumf;
+}
+
 inline constexpr uint8_t unary_subop_abs = 0u;
 inline constexpr uint8_t unary_subop_neg = 2u;
 inline constexpr uint8_t unary_subop_relu = 6u;
@@ -1966,7 +2208,37 @@ inline bool run_mul_mat(const request_type & request) noexcept {
       request.dst.ne[2] != 1 || request.dst.ne[3] != 1;
   const bool valid = !(has_empty_dim || shape_mismatch || invalid_rank);
   const uint8_t src0_type = dtype_code(request.src0.type);
+  const bool q8_0_src0 = is_q8_0_dtype(src0_type);
   const bool quantized_src0 = is_quantized_k_dtype(src0_type);
+
+  if (valid && q8_0_src0) {
+    const auto * b_dense = static_cast<const float *>(request.src1.data);
+    auto * c_dense = static_cast<float *>(request.dst.data);
+    const auto * a_base = static_cast<const uint8_t *>(request.src0.data);
+    const size_t row_bytes = request.src0.nb[1];
+    const uint64_t block_count = k / quant::QK8_0;
+    std::array<quant::block_q8_0, quant::MAX_Q8_0_BLOCKS> q8_blocks = {};
+    if (block_count > q8_blocks.size()) {
+      return false;
+    }
+
+    for (uint64_t j = 0; j < n; ++j) {
+      for (uint64_t i = 0; i < m; ++i) {
+        c_dense[i * n + j] = 0.0f;
+      }
+      for (uint64_t block = 0; block < block_count; ++block) {
+        quant::quantize_row_q8_0_strided(
+            b_dense + block * quant::QK8_0 * n + j, n, &q8_blocks[block], quant::QK8_0);
+      }
+      for (uint64_t i = 0; i < m; ++i) {
+        const uint8_t * row_ptr = a_base + i * row_bytes;
+        c_dense[i * n + j] = dot_q8_0_q8_0_row_scalar(
+            reinterpret_cast<const quant::block_q8_0 *>(row_ptr), q8_blocks.data(), block_count);
+      }
+    }
+
+    return true;
+  }
 
   if (valid && quantized_src0) {
     const auto * b_dense = static_cast<const float *>(request.src1.data);
@@ -2047,6 +2319,8 @@ inline bool can_run_mul_mat_argmax(const request_type & request) noexcept {
   const uint8_t src0_type = dtype_code(request.src0.type);
   const uint8_t src1_type = dtype_code(request.src1.type);
   const uint8_t dst_type = dtype_code(request.dst.type);
+  const uint64_t quant_block_size = quantized_block_size(src0_type);
+  const uint64_t quant_block_count_limit = max_quantized_block_count(src0_type);
   const bool valid_shape =
       request.src1.ne[1] == k &&
       request.dst.ne[0] == 1u &&
@@ -2063,11 +2337,12 @@ inline bool can_run_mul_mat_argmax(const request_type & request) noexcept {
       is_dense_contiguous(request.src0) &&
       is_dense_contiguous(request.src1) &&
       is_dense_contiguous(request.dst);
-  const bool quantized_path = is_quantized_k_dtype(src0_type) &&
+  const bool quantized_path = is_native_quantized_dtype(src0_type) &&
       src1_type == dtype_f32 &&
       dst_type == dtype_f32 &&
-      (k % quant::QK_K) == 0u &&
-      (k / quant::QK_K) <= quant::MAX_Q8_K_BLOCKS &&
+      quant_block_size != 0u &&
+      (k % quant_block_size) == 0u &&
+      (k / quant_block_size) <= quant_block_count_limit &&
       is_dense_contiguous(request.src1) &&
       is_dense_contiguous(request.dst) &&
       request.src0.nb[0] == 1u &&
@@ -2104,6 +2379,29 @@ inline bool run_mul_mat_argmax(const request_type & request) noexcept {
       }
       if (acc > best_value || row == 0u) {
         best_value = acc;
+        best_index = static_cast<int32_t>(row);
+      }
+    }
+    *best_value_out = best_value;
+    *request.index_out = best_index;
+    return true;
+  }
+
+  if (is_q8_0_dtype(src0_type)) {
+    const auto * a_base = static_cast<const uint8_t *>(request.src0.data);
+    const size_t row_bytes = request.src0.nb[1];
+    const uint64_t block_count = k / quant::QK8_0;
+    std::array<quant::block_q8_0, quant::MAX_Q8_0_BLOCKS> q8_blocks = {};
+    if (block_count > q8_blocks.size()) {
+      return false;
+    }
+    quant::quantize_row_q8_0_strided(b_dense, 1u, q8_blocks.data(), static_cast<int64_t>(k));
+    for (uint64_t row = 0; row < m; ++row) {
+      const uint8_t * row_ptr = a_base + row * row_bytes;
+      const float value = dot_q8_0_q8_0_row_scalar(
+          reinterpret_cast<const quant::block_q8_0 *>(row_ptr), q8_blocks.data(), block_count);
+      if (value > best_value || row == 0u) {
+        best_value = value;
         best_index = static_cast<int32_t>(row);
       }
     }
@@ -2225,6 +2523,8 @@ inline bool can_run_mul_mat(const request_type & request) noexcept {
   const uint8_t src0_type = dtype_code(request.src0.type);
   const uint8_t src1_type = dtype_code(request.src1.type);
   const uint8_t dst_type = dtype_code(request.dst.type);
+  const uint64_t quant_block_size = quantized_block_size(src0_type);
+  const uint64_t quant_block_count_limit = max_quantized_block_count(src0_type);
   const bool valid_shape = request.src1.ne[1] == k && request.dst.ne[0] == n &&
          request.dst.ne[1] == m && request.src0.ne[2] == 1 &&
          request.src0.ne[3] == 1 && request.src1.ne[2] == 1 &&
@@ -2233,11 +2533,12 @@ inline bool can_run_mul_mat(const request_type & request) noexcept {
   const bool f32_path = src0_type == dtype_f32 &&
       src1_type == dtype_f32 &&
       dst_type == dtype_f32;
-  const bool quantized_path = is_quantized_k_dtype(src0_type) &&
+  const bool quantized_path = is_native_quantized_dtype(src0_type) &&
       src1_type == dtype_f32 &&
       dst_type == dtype_f32 &&
-      (k % quant::QK_K) == 0u &&
-      (k / quant::QK_K) <= quant::MAX_Q8_K_BLOCKS &&
+      quant_block_size != 0u &&
+      (k % quant_block_size) == 0u &&
+      (k / quant_block_size) <= quant_block_count_limit &&
       is_dense_contiguous(request.src1) &&
       is_dense_contiguous(request.dst) &&
       request.src0.nb[0] == 1u &&
@@ -2481,30 +2782,35 @@ inline bool run_flash_attn_ext(const request_type & request) noexcept {
 }
 
 template <class request_type>
-inline bool run_flash_attn_ext_active_kv_with_workspace(
+inline bool can_run_flash_attn_ext_with_workspace(const request_type & request,
+                                                  const flash_attn_workspace & workspace) noexcept {
+  const uint64_t head_dim = request.src0.ne[0];
+  return can_run_flash_attn_ext(request) &&
+      head_dim <= workspace.q_buffer_f16.size() &&
+      head_dim <= workspace.accum_buffer_f16.size();
+}
+
+template <class request_type>
+inline void prepare_flash_attn_workspace_active_kv(const request_type & request,
+                                                   flash_attn_workspace & workspace) noexcept {
+  const uint64_t kv_tokens = flash_attn_active_tokens(request);
+  const bool reusing = workspace.prepared_tokens == kv_tokens;
+  workspace.reuse_count += static_cast<uint64_t>(reusing);
+  workspace.prepared_tokens = kv_tokens;
+}
+
+template <class request_type>
+inline void run_flash_attn_ext_active_kv_with_workspace_unchecked(
     const request_type & request,
     flash_attn_workspace & workspace) noexcept {
+  prepare_flash_attn_workspace_active_kv(request, workspace);
+
   const uint64_t kv_tokens = flash_attn_active_tokens(request);
-  const uint64_t masked_total_tokens = flash_attn_masked_total_tokens(request);
-  if (masked_total_tokens < kv_tokens) {
-    return false;
-  }
-
-  if (workspace.prepared_tokens == kv_tokens) {
-    ++workspace.reuse_count;
-  } else {
-    workspace.prepared_tokens = kv_tokens;
-  }
-
   const uint64_t head_dim = request.src0.ne[0];
   const uint64_t head_count = request.src0.ne[2];
   const uint64_t kv_head_count = request.src1.ne[2];
   const float scale = flash_attn_scale(request);
-  if (head_dim > workspace.q_buffer_f16.size() || head_dim > workspace.accum_buffer_f16.size()) {
-    return false;
-  }
 
-  (void) masked_total_tokens;
   const uint64_t n_rep = head_count / kv_head_count;
   for (uint64_t head = 0; head < head_count; ++head) {
     const uint64_t kv_head = head / n_rep;
@@ -2543,18 +2849,28 @@ inline bool run_flash_attn_ext_active_kv_with_workspace(
       scale_f32_scalar(dst, 1.0f / score_sum, head_dim);
     }
   }
+}
 
+template <class request_type>
+inline bool run_flash_attn_ext_active_kv_with_workspace(
+    const request_type & request,
+    flash_attn_workspace & workspace) noexcept {
+  if (!can_run_flash_attn_ext_with_workspace(request, workspace)) {
+    return false;
+  }
+  run_flash_attn_ext_active_kv_with_workspace_unchecked(request, workspace);
   return true;
 }
 
 template <class request_type>
 inline bool run_flash_attn_ext_with_workspace(const request_type & request,
                                               flash_attn_workspace & workspace) noexcept {
-  if (!can_run_flash_attn_ext(request)) {
+  if (!can_run_flash_attn_ext_with_workspace(request, workspace)) {
     return false;
   }
 
-  return run_flash_attn_ext_active_kv_with_workspace(request, workspace);
+  run_flash_attn_ext_active_kv_with_workspace_unchecked(request, workspace);
+  return true;
 }
 
 template <class request_type>

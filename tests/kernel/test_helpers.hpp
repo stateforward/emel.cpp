@@ -82,6 +82,60 @@ inline tensor_view make_packed_q6_k_x8_src(const void * data,
   return out;
 }
 
+inline tensor_view make_packed_q8_0_x4_bl4_src(const void * data,
+                                               const uint64_t ne0,
+                                               const uint64_t ne1) {
+  tensor_view out{};
+  const size_t group_bytes =
+      emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(ne0);
+  const uint64_t group_count =
+      emel::kernel::detail::quant::packed_q8_0_x4_group_count(ne1);
+  out.data = data;
+  out.type = dtype::q8_0_x4_bl4;
+  out.ne = {ne0, ne1, 1, 1};
+  out.nb[0] = 1;
+  out.nb[1] = group_bytes;
+  out.nb[2] = group_bytes * group_count;
+  out.nb[3] = out.nb[2];
+  return out;
+}
+
+inline tensor_view make_packed_q8_0_x4_bl8_src(const void * data,
+                                               const uint64_t ne0,
+                                               const uint64_t ne1) {
+  tensor_view out{};
+  const size_t group_bytes =
+      emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(ne0);
+  const uint64_t group_count =
+      emel::kernel::detail::quant::packed_q8_0_x4_group_count(ne1);
+  out.data = data;
+  out.type = dtype::q8_0_x4_bl8;
+  out.ne = {ne0, ne1, 1, 1};
+  out.nb[0] = 1;
+  out.nb[1] = group_bytes;
+  out.nb[2] = group_bytes * group_count;
+  out.nb[3] = out.nb[2];
+  return out;
+}
+
+inline tensor_view make_packed_q8_0_x4_bl8_rhs_src(const void * data,
+                                                   const uint64_t rows,
+                                                   const uint64_t cols) {
+  tensor_view out{};
+  const size_t group_bytes =
+      emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(cols);
+  const uint64_t group_count =
+      emel::kernel::detail::quant::packed_q8_0_x4_group_count(rows);
+  out.data = data;
+  out.type = dtype::q8_0_x4_bl8;
+  out.ne = {rows, cols, 1, 1};
+  out.nb[0] = 1;
+  out.nb[1] = group_bytes;
+  out.nb[2] = group_bytes * group_count;
+  out.nb[3] = out.nb[2];
+  return out;
+}
+
 inline tensor_view make_prepared_q6_k_x8_q8_src(const void * data,
                                                 const uint64_t ne0,
                                                 const uint64_t ne1) {
@@ -133,6 +187,21 @@ inline tensor_view make_q8_k_vector_src(const void * data, const uint64_t cols) 
   return out;
 }
 
+inline tensor_view make_q8_0_vector_src(const void * data, const uint64_t cols) {
+  tensor_view out{};
+  const size_t row_bytes =
+      emel::kernel::detail::quantized_row_storage_bytes(
+          emel::kernel::detail::dtype_q8_0, cols);
+  out.data = data;
+  out.type = dtype::q8_0;
+  out.ne = {1u, cols, 1u, 1u};
+  out.nb[0] = 1u;
+  out.nb[1] = row_bytes;
+  out.nb[2] = row_bytes;
+  out.nb[3] = row_bytes;
+  return out;
+}
+
 inline tensor_view_mut make_dst(void * data, const dtype type, const uint64_t ne0,
                                 const uint64_t ne1 = 1, const uint64_t ne2 = 1,
                                 const uint64_t ne3 = 1) {
@@ -141,6 +210,24 @@ inline tensor_view_mut make_dst(void * data, const dtype type, const uint64_t ne
   out.type = type;
   out.ne = {ne0, ne1, ne2, ne3};
   fill_default_nb(out);
+  return out;
+}
+
+inline tensor_view_mut make_batch_major_dst(void * data,
+                                            const dtype type,
+                                            const uint64_t rows,
+                                            const uint64_t cols) {
+  tensor_view_mut out{};
+  const uint64_t elem_size =
+      emel::kernel::detail::dtype_size_bytes(
+          emel::kernel::detail::dtype_code(type));
+  out.data = data;
+  out.type = type;
+  out.ne = {rows, cols, 1, 1};
+  out.nb[0] = elem_size * cols;
+  out.nb[1] = elem_size;
+  out.nb[2] = out.nb[0] * rows;
+  out.nb[3] = out.nb[2];
   return out;
 }
 

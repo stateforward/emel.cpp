@@ -128,6 +128,11 @@ bool on_prepare_error(
 
 struct fixed_formatter_ctx {
   std::string_view text = {};
+  std::string_view expected_role = {};
+  std::string_view expected_content = {};
+  size_t expected_message_count = 0u;
+  bool expected_add_generation_prompt = false;
+  bool expected_enable_thinking = false;
 };
 
 bool format_fixed(void *formatter_ctx,
@@ -148,6 +153,18 @@ bool format_fixed(void *formatter_ctx,
   }
 
   const auto *ctx = static_cast<const fixed_formatter_ctx *>(formatter_ctx);
+  if (request.messages.size() != ctx->expected_message_count ||
+      (ctx->expected_message_count > 0u &&
+       (request.messages[0].role != ctx->expected_role ||
+        request.messages[0].content != ctx->expected_content)) ||
+      request.add_generation_prompt != ctx->expected_add_generation_prompt ||
+      request.enable_thinking != ctx->expected_enable_thinking) {
+    if (error_out != nullptr) {
+      *error_out =
+          conditioner_code(emel::text::conditioner::error::invalid_argument);
+    }
+    return false;
+  }
   if ((request.output == nullptr && request.output_capacity > 0) ||
       request.output_capacity < ctx->text.size()) {
     if (error_out != nullptr) {
@@ -248,7 +265,7 @@ bool formatter_oversized_length(
 
 } // namespace
 
-TEST_CASE("conditioner_bind_and_prepare_with_default_formatter") {
+TEST_CASE("conditioner_structured_messages_bind_and_prepare_with_default_formatter") {
   auto &vocab = make_bpe_vocab();
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
@@ -273,10 +290,13 @@ TEST_CASE("conditioner_bind_and_prepare_with_default_formatter") {
   CHECK(recorder.bind_error == 0);
 
   std::array<int32_t, 8> tokens = {};
+  const std::array messages = {
+      emel::text::formatter::chat_message{.role = "user", .content = "hello world"},
+  };
   int32_t token_count = 0;
   int32_t prepare_err = conditioner_code(emel::text::conditioner::error::none);
   emel::text::conditioner::event::prepare prepare_ev{token_count, prepare_err};
-  prepare_ev.input = "hello world";
+  prepare_ev.messages = messages;
   prepare_ev.use_bind_defaults = true;
   prepare_ev.token_ids_out = tokens.data();
   prepare_ev.token_capacity = static_cast<int32_t>(tokens.size());
@@ -302,10 +322,13 @@ TEST_CASE("conditioner_prepare_requires_bind") {
   callback_recorder recorder{};
 
   std::array<int32_t, 4> tokens = {};
+  const std::array messages = {
+      emel::text::formatter::chat_message{.role = "user", .content = "hello"},
+  };
   int32_t token_count = 0;
   int32_t prepare_err = conditioner_code(emel::text::conditioner::error::none);
   emel::text::conditioner::event::prepare prepare_ev{token_count, prepare_err};
-  prepare_ev.input = "hello";
+  prepare_ev.messages = messages;
   prepare_ev.token_ids_out = tokens.data();
   prepare_ev.token_capacity = static_cast<int32_t>(tokens.size());
   prepare_ev.owner_sm = &recorder;
@@ -323,13 +346,18 @@ TEST_CASE("conditioner_prepare_requires_bind") {
   CHECK(vocab.n_tokens >= 2);
 }
 
-TEST_CASE("conditioner_uses_injected_formatter_function") {
+TEST_CASE("conditioner_structured_messages_use_injected_formatter_function") {
   auto &vocab = make_bpe_vocab();
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
 
   fixed_formatter_ctx formatter_ctx{};
   formatter_ctx.text = "hello world";
+  formatter_ctx.expected_role = "user";
+  formatter_ctx.expected_content = "ignored";
+  formatter_ctx.expected_message_count = 1u;
+  formatter_ctx.expected_add_generation_prompt = true;
+  formatter_ctx.expected_enable_thinking = false;
 
   int32_t bind_err = conditioner_code(emel::text::conditioner::error::none);
   emel::text::conditioner::event::bind bind_ev{vocab};
@@ -349,10 +377,15 @@ TEST_CASE("conditioner_uses_injected_formatter_function") {
   CHECK(bind_err == conditioner_code(emel::text::conditioner::error::none));
 
   std::array<int32_t, 4> tokens = {};
+  const std::array messages = {
+      emel::text::formatter::chat_message{.role = "user", .content = "ignored"},
+  };
   int32_t token_count = 0;
   int32_t prepare_err = conditioner_code(emel::text::conditioner::error::none);
   emel::text::conditioner::event::prepare prepare_ev{token_count, prepare_err};
-  prepare_ev.input = "ignored";
+  prepare_ev.messages = messages;
+  prepare_ev.add_generation_prompt = true;
+  prepare_ev.enable_thinking = false;
   prepare_ev.use_bind_defaults = true;
   prepare_ev.token_ids_out = tokens.data();
   prepare_ev.token_capacity = static_cast<int32_t>(tokens.size());
@@ -379,6 +412,9 @@ TEST_CASE("conditioner_action_and_guard_error_paths") {
   emel::text::conditioner::event::bind_runtime bind_runtime{bind_ev, bind_ctx};
   emel::text::conditioner::event::prepare prepare_ev{token_count, err};
   emel::text::conditioner::event::prepare_ctx prepare_ctx = {};
+  const std::array prepare_messages = {
+      emel::text::formatter::chat_message{.role = "user", .content = "hello world"},
+  };
   std::array<char, emel::text::conditioner::action::k_max_formatted_bytes>
       formatted = {};
   prepare_ctx.formatted = formatted.data();
@@ -443,7 +479,9 @@ TEST_CASE("conditioner_action_and_guard_error_paths") {
   CHECK(ctx.is_bound);
 
   std::array<int32_t, 8> tokens = {};
-  prepare_ev.input = "hello world";
+  prepare_ev.messages = prepare_messages;
+  prepare_ev.add_generation_prompt = true;
+  prepare_ev.enable_thinking = false;
   prepare_ev.use_bind_defaults = false;
   prepare_ev.add_special = false;
   prepare_ev.parse_special = true;

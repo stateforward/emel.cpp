@@ -185,6 +185,34 @@ target_include_directories(bench_runner
     ${NLOHMANN_JSON_INCLUDE_DIR}
 )
 
+set(DOCTEST_INCLUDE_DIR ${EMEL_ROOT}/third_party/doctest)
+if(NOT EXISTS ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h)
+  message(FATAL_ERROR "Missing doctest header at ${DOCTEST_INCLUDE_DIR}/doctest/doctest.h")
+endif()
+
+add_executable(bench_runner_tests
+  ${CMAKE_CURRENT_SOURCE_DIR}/bench_runner_tests.cpp
+)
+
+add_dependencies(bench_runner_tests bench_runner)
+
+target_include_directories(bench_runner_tests
+  PRIVATE
+    ${DOCTEST_INCLUDE_DIR}
+)
+
+target_compile_definitions(bench_runner_tests
+  PRIVATE
+    BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
+    BENCH_RUNNER_BINARY_PATH=\"$<TARGET_FILE:bench_runner>\"
+)
+
+enable_testing()
+add_test(
+  NAME bench_runner_tests
+  COMMAND bench_runner_tests
+)
+
 add_executable(gbnf_bench_runner
   ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/rule_parser_bench.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/gbnf/bench_main.cpp

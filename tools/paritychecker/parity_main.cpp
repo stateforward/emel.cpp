@@ -19,7 +19,7 @@ void print_usage(const char * exe) {
                "  --gbnf mode compares GBNF parser parity and ignores --model\n"
                "  --kernel mode compares kernel parity and ignores --model\n"
                "  --jinja mode compares jinja parser/formatter parity and ignores --model\n"
-               "  --generation mode requires --model tests/models/Llama-68M-Chat-v1-Q2_K.gguf "
+               "  --generation mode requires --model tests/models/Qwen3-0.6B-Q8_0.gguf "
                "and prompt text; it compares against maintained baseline artifacts under "
                "snapshots/parity/\n",
                exe);

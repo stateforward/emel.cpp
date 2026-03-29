@@ -13,9 +13,25 @@ namespace emel::model {
 namespace {
 
 constexpr std::string_view k_llama_architecture = "llama";
+constexpr std::string_view k_qwen3_architecture = "qwen3";
 constexpr std::string_view k_token_embedding_name = "token_embd.weight";
 constexpr std::string_view k_output_norm_name = "output_norm.weight";
 constexpr std::string_view k_output_name = "output.weight";
+constexpr uint32_t k_qwen3_extra_block_tensor_count = 2u;
+
+bool is_supported_execution_architecture(const std::string_view architecture) noexcept {
+  return architecture == k_llama_architecture || architecture == k_qwen3_architecture;
+}
+
+bool uses_qwen3_block_contract(const std::string_view architecture) noexcept {
+  return architecture == k_qwen3_architecture;
+}
+
+uint32_t block_tensor_count_for_architecture(const std::string_view architecture) noexcept {
+  return uses_qwen3_block_contract(architecture)
+             ? llama::detail::k_block_tensor_count + k_qwen3_extra_block_tensor_count
+             : llama::detail::k_block_tensor_count;
+}
 
 const data::tensor_record * find_tensor_by_name(const data & model_data,
                                                 const std::string_view name) noexcept {
@@ -55,6 +71,22 @@ bool assign_tensor_view(const data & model_data,
   return true;
 }
 
+bool assign_output_view(const data & model_data,
+                        const std::string_view architecture,
+                        const llama::detail::tensor_view & token_embedding,
+                        llama::detail::tensor_view & output_out) noexcept {
+  if (assign_tensor_view(model_data, k_output_name, output_out)) {
+    return true;
+  }
+
+  if (!uses_qwen3_block_contract(architecture) || token_embedding.tensor == nullptr) {
+    return false;
+  }
+
+  output_out = token_embedding;
+  return true;
+}
+
 bool make_block_tensor_name(const int32_t block_index,
                             const std::string_view suffix,
                             std::array<char, 64> & buffer,
@@ -84,6 +116,8 @@ constexpr std::array<llama::detail::quantized_stage_family,
         llama::detail::quantized_stage_family::attention_q,
         llama::detail::quantized_stage_family::attention_k,
         llama::detail::quantized_stage_family::attention_v,
+        llama::detail::quantized_stage_family::attention_q_norm,
+        llama::detail::quantized_stage_family::attention_k_norm,
         llama::detail::quantized_stage_family::attention_output,
         llama::detail::quantized_stage_family::feed_forward_norm,
         llama::detail::quantized_stage_family::feed_forward_gate,
@@ -92,7 +126,7 @@ constexpr std::array<llama::detail::quantized_stage_family,
     };
 
 bool is_supported_quantized_type(const int32_t tensor_type) noexcept {
-  return ::emel::kernel::detail::is_quantized_k_dtype(static_cast<uint8_t>(tensor_type));
+  return ::emel::kernel::detail::is_native_quantized_dtype(static_cast<uint8_t>(tensor_type));
 }
 
 bool is_f32_type(const int32_t tensor_type) noexcept {
@@ -103,7 +137,14 @@ bool is_vector_dequant_stage(const llama::detail::quantized_stage_family family)
   return family == llama::detail::quantized_stage_family::token_embedding ||
          family == llama::detail::quantized_stage_family::output_norm ||
          family == llama::detail::quantized_stage_family::attention_norm ||
+         family == llama::detail::quantized_stage_family::attention_q_norm ||
+         family == llama::detail::quantized_stage_family::attention_k_norm ||
          family == llama::detail::quantized_stage_family::feed_forward_norm;
+}
+
+bool is_qwen3_only_stage(const llama::detail::quantized_stage_family family) noexcept {
+  return family == llama::detail::quantized_stage_family::attention_q_norm ||
+         family == llama::detail::quantized_stage_family::attention_k_norm;
 }
 
 llama::detail::quantized_contract_kind classify_contract(
@@ -149,6 +190,10 @@ const data::tensor_record * stage_tensor(const llama::detail::execution_view & e
       return block != nullptr ? block->attention_k.tensor : nullptr;
     case llama::detail::quantized_stage_family::attention_v:
       return block != nullptr ? block->attention_v.tensor : nullptr;
+    case llama::detail::quantized_stage_family::attention_q_norm:
+      return block != nullptr ? block->attention_q_norm.tensor : nullptr;
+    case llama::detail::quantized_stage_family::attention_k_norm:
+      return block != nullptr ? block->attention_k_norm.tensor : nullptr;
     case llama::detail::quantized_stage_family::attention_output:
       return block != nullptr ? block->attention_output.tensor : nullptr;
     case llama::detail::quantized_stage_family::feed_forward_norm:
@@ -231,6 +276,10 @@ std::string_view quantized_stage_family_name(const quantized_stage_family family
       return "attention_k";
     case quantized_stage_family::attention_v:
       return "attention_v";
+    case quantized_stage_family::attention_q_norm:
+      return "attention_q_norm";
+    case quantized_stage_family::attention_k_norm:
+      return "attention_k_norm";
     case quantized_stage_family::attention_output:
       return "attention_output";
     case quantized_stage_family::feed_forward_norm:
@@ -255,6 +304,8 @@ std::string_view quantized_contract_kind_name(const quantized_contract_kind kind
       return "disallowed_fallback";
     case quantized_contract_kind::explicit_no_claim:
       return "explicit_no_claim";
+    case quantized_contract_kind::not_applicable:
+      return "not_applicable";
   }
   return "unknown_contract";
 }
@@ -286,6 +337,10 @@ emel::error::type lookup_block_view(const execution_view & execution,
 
   block_out = {};
   block_out.index = block_index;
+  const auto architecture = architecture_name_view(*execution.model);
+  if (!is_supported_execution_architecture(architecture)) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
 
   std::array<char, 64> buffer = {};
   std::string_view name = {};
@@ -298,6 +353,10 @@ emel::error::type lookup_block_view(const execution_view & execution,
                   bind("attn_q.weight", block_out.attention_q) &&
                   bind("attn_k.weight", block_out.attention_k) &&
                   bind("attn_v.weight", block_out.attention_v) &&
+                  (!uses_qwen3_block_contract(architecture) ||
+                   bind("attn_q_norm.weight", block_out.attention_q_norm)) &&
+                  (!uses_qwen3_block_contract(architecture) ||
+                   bind("attn_k_norm.weight", block_out.attention_k_norm)) &&
                   bind("attn_output.weight", block_out.attention_output) &&
                   bind("ffn_norm.weight", block_out.feed_forward_norm) &&
                   bind("ffn_gate.weight", block_out.feed_forward_gate) &&
@@ -314,8 +373,9 @@ emel::error::type lookup_block_view(const execution_view & execution,
 emel::error::type build_execution_view(const emel::model::data & model_data,
                                        execution_view & view_out) noexcept {
   view_out = {};
+  const auto architecture = architecture_name_view(model_data);
 
-  if (architecture_name_view(model_data) != k_llama_architecture ||
+  if (!is_supported_execution_architecture(architecture) ||
       model_data.n_tensors == 0u ||
       model_data.n_layers <= 0 ||
       model_data.params.n_embd <= 0 ||
@@ -331,7 +391,7 @@ emel::error::type build_execution_view(const emel::model::data & model_data,
 
   if (!assign_tensor_view(model_data, k_token_embedding_name, view.token_embedding) ||
       !assign_tensor_view(model_data, k_output_norm_name, view.output_norm) ||
-      !assign_tensor_view(model_data, k_output_name, view.output)) {
+      !assign_output_view(model_data, architecture, view.token_embedding, view.output)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
@@ -357,9 +417,11 @@ emel::error::type build_topology(const execution_view & execution,
   }
 
   topology_out.execution = &execution;
+  const auto architecture = architecture_name_view(*execution.model);
   topology_out.tensor_count =
       k_global_tensor_count +
-      (static_cast<uint32_t>(execution.block_count) * k_block_tensor_count);
+      (static_cast<uint32_t>(execution.block_count) *
+       block_tensor_count_for_architecture(architecture));
   topology_out.node_count = topology_out.tensor_count;
   topology_out.bytes_per_tensor = sizeof(float);
   topology_out.workspace_capacity_bytes =
@@ -397,11 +459,20 @@ emel::error::type build_step_plans(const topology & topology_in,
 
 quantized_path_audit build_quantized_path_audit(const execution_view & execution) noexcept {
   quantized_path_audit audit = {};
+  const auto architecture = execution.model != nullptr ? architecture_name_view(*execution.model)
+                                                       : std::string_view{};
 
   for (size_t idx = 0; idx < k_stage_families.size(); ++idx) {
     const auto family = k_stage_families[idx];
     quantized_stage_audit stage{};
     stage.family = family;
+
+    if (!uses_qwen3_block_contract(architecture) && is_qwen3_only_stage(family)) {
+      stage.tensor_type = -1;
+      stage.contract = quantized_contract_kind::not_applicable;
+      audit.stages[idx] = stage;
+      continue;
+    }
 
     if (family == quantized_stage_family::token_embedding ||
         family == quantized_stage_family::output_norm ||

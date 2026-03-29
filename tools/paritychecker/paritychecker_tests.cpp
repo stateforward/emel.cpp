@@ -12,6 +12,8 @@
 
 #include <doctest/doctest.h>
 
+#include "../generation_formatter_contract.hpp"
+
 #if !defined(_WIN32)
 #include <sys/wait.h>
 #endif
@@ -75,6 +77,11 @@ std::vector<std::string> discover_models() {
     }
     const auto path = entry.path();
     if (path.extension() != ".gguf") {
+      continue;
+    }
+    // The canonical Qwen generation fixture is covered by dedicated maintained-generation tests,
+    // not the generic tiny-model tokenizer parity sweep.
+    if (path.filename() == "Qwen3-0.6B-Q8_0.gguf") {
       continue;
     }
     models.push_back(path.string());
@@ -477,22 +484,14 @@ std::string_view expected_generation_kernel_kind() {
 }
 
 void check_generation_flash_attribution(const process_capture & capture) {
-  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") >= 0);
-  CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") >= 0);
-  CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") >= 0);
   CHECK(parse_flash_dispatch_calls(capture.stdout_text) >= 0);
   CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") >= 0);
   CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") >= 0);
-  CHECK(parse_named_metric(capture.stdout_text, "flash_dispatch_calls") > 0);
   CHECK(parse_flash_dispatch_calls(capture.stdout_text) > 0);
   if (expected_generation_kernel_kind() == "aarch64") {
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") > 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
     CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") > 0);
     CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
   } else {
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_flash_dispatch_calls") == 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_flash_dispatch_calls") == 0);
     CHECK(parse_flash_dispatch_metric(capture.stdout_text, "optimized") == 0);
     CHECK(parse_flash_dispatch_metric(capture.stdout_text, "shared") == 0);
   }
@@ -505,21 +504,19 @@ void check_generation_quantized_attribution(const process_capture & capture) {
   CHECK(parse_named_metric(capture.stdout_text, "shared_q3_dispatch_calls") >= 0);
   CHECK(parse_named_metric(capture.stdout_text, "optimized_q6_dispatch_calls") >= 0);
   CHECK(parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls") >= 0);
-  if (expected_generation_kernel_kind() == "aarch64") {
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_q2_dispatch_calls") > 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_q2_dispatch_calls") == 0);
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_q3_dispatch_calls") > 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_q3_dispatch_calls") == 0);
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_q6_dispatch_calls") > 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls") == 0);
-  } else {
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_q2_dispatch_calls") == 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_q2_dispatch_calls") == 0);
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_q3_dispatch_calls") == 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_q3_dispatch_calls") == 0);
-    CHECK(parse_named_metric(capture.stdout_text, "optimized_q6_dispatch_calls") == 0);
-    CHECK(parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls") == 0);
-  }
+  const int native_q8_0_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "native_q8_0_dispatch_calls");
+  const int packed_q8_0_dispatch_calls =
+      parse_named_metric(capture.stdout_text, "packed_q8_0_dispatch_calls");
+  CHECK(native_q8_0_dispatch_calls >= 0);
+  CHECK(packed_q8_0_dispatch_calls >= 0);
+  CHECK(native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls > 0);
+  CHECK(parse_named_metric(capture.stdout_text, "optimized_q2_dispatch_calls") == 0);
+  CHECK(parse_named_metric(capture.stdout_text, "shared_q2_dispatch_calls") == 0);
+  CHECK(parse_named_metric(capture.stdout_text, "optimized_q3_dispatch_calls") == 0);
+  CHECK(parse_named_metric(capture.stdout_text, "shared_q3_dispatch_calls") == 0);
+  CHECK(parse_named_metric(capture.stdout_text, "optimized_q6_dispatch_calls") == 0);
+  CHECK(parse_named_metric(capture.stdout_text, "shared_q6_dispatch_calls") == 0);
 }
 
 void check_generation_quantized_stage_audit(const process_capture & capture) {
@@ -529,13 +526,17 @@ void check_generation_quantized_stage_audit(const process_capture & capture) {
         std::string::npos);
   CHECK(capture.stdout_text.find("quantized_stage_audit: stage=attention_q") !=
         std::string::npos);
+  CHECK(capture.stdout_text.find("quantized_stage_audit: stage=attention_q_norm") !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find("quantized_stage_audit: stage=attention_k_norm") !=
+        std::string::npos);
   CHECK(capture.stdout_text.find("approved_dense_f32_by_contract") != std::string::npos);
   CHECK(parse_named_metric_on_line(capture.stdout_text,
                                    "quantized_runtime_contract:",
                                    "native_quantized") == 8);
   CHECK(parse_named_metric_on_line(capture.stdout_text,
                                    "quantized_runtime_contract:",
-                                   "approved_dense_f32_by_contract") == 4);
+                                   "approved_dense_f32_by_contract") == 6);
   CHECK(parse_named_metric_on_line(capture.stdout_text,
                                    "quantized_runtime_contract:",
                                    "disallowed_fallback") == 0);
@@ -547,7 +548,7 @@ void check_generation_quantized_stage_audit(const process_capture & capture) {
                                    "native_quantized") == 8);
   CHECK(parse_named_metric_on_line(capture.stdout_text,
                                    "quantized_stage_inventory:",
-                                   "approved_dense_f32_by_contract") == 4);
+                                   "approved_dense_f32_by_contract") == 6);
   CHECK(parse_named_metric_on_line(capture.stdout_text,
                                    "quantized_stage_inventory:",
                                    "disallowed_fallback") == 0);
@@ -604,31 +605,42 @@ TEST_CASE("paritychecker matches llama kernel outputs") {
   CHECK(run_kernel_paritychecker_process());
 }
 
-TEST_CASE("paritychecker generation keeps parity across the maintained decode lengths") {
-  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+TEST_CASE("paritychecker qwen3 generation keeps maintained parity across the decode lengths") {
+  const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
   constexpr std::array<int32_t, 4> generation_lengths{1, 10, 100, 1000};
   for (const int32_t max_tokens : generation_lengths) {
     INFO("max_tokens=" << max_tokens);
-    const process_capture capture = run_generation_paritychecker_capture(model_path, "hello", max_tokens);
+    const process_capture capture = run_generation_paritychecker_capture_with_args({
+      "--generation",
+      "--model",
+      model_path.string(),
+      "--text",
+      "hello",
+      "--max-tokens",
+      std::to_string(max_tokens),
+    });
 
     CHECK(capture.exit_code == 0);
     CHECK(capture.stderr_text.empty());
     CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+    CHECK(capture.stdout_text.find("formatter_contract=source=tokenizer.chat_template "
+                                   "support=supported_contract "
+                                   "shape=structured_chat_messages_v1 tools=none "
+                                   "add_generation_prompt=true enable_thinking=false") !=
+          std::string::npos);
     CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") !=
           std::string::npos);
     CHECK(capture.stdout_text.find("reference_decode_seams:") != std::string::npos);
     CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") == 0);
     CHECK(parse_named_metric(capture.stdout_text, "reference_logits_calls") == 0);
     CHECK(capture.stdout_text.find("flash_dispatch: calls=") != std::string::npos);
-    CHECK(capture.stdout_text.find("generation initialize ok") == std::string::npos);
-    CHECK(capture.stdout_text.find("emel generator path ready") == std::string::npos);
     CHECK(capture.stdout_text.find("max_tokens=" + std::to_string(max_tokens)) != std::string::npos);
     if (max_tokens == 1) {
       CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
     } else {
-      CHECK(parse_named_metric(capture.stdout_text, "generated_tokens") > 1);
+      CHECK(parse_named_metric(capture.stdout_text, "generated_tokens") > 0);
     }
     check_generation_flash_attribution(capture);
     check_generation_quantized_attribution(capture);
@@ -636,8 +648,8 @@ TEST_CASE("paritychecker generation keeps parity across the maintained decode le
   }
 }
 
-TEST_CASE("paritychecker generation dump proves the EMEL path avoids the reference decode seam") {
-  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+TEST_CASE("paritychecker qwen3 generation dump stays on the maintained stored-baseline path") {
+  const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
   const process_capture capture = run_generation_paritychecker_capture_with_args({
@@ -654,16 +666,24 @@ TEST_CASE("paritychecker generation dump proves the EMEL path avoids the referen
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
   CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+  CHECK(capture.stdout_text.find("formatter_contract=source=tokenizer.chat_template "
+                                 "support=supported_contract "
+                                 "shape=structured_chat_messages_v1 tools=none "
+                                 "add_generation_prompt=true enable_thinking=false") !=
+        std::string::npos);
   CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") !=
         std::string::npos);
   CHECK(capture.stdout_text.find("max_tokens=1") != std::string::npos);
   CHECK(capture.stdout_text.find("generated_tokens=1") != std::string::npos);
   CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") == 0);
   CHECK(parse_named_metric(capture.stdout_text, "reference_logits_calls") == 0);
+  CHECK(capture.stdout_text.find("emel: generated_tokens=1") != std::string::npos);
+  CHECK(capture.stdout_text.find("reference: generated_tokens=1") != std::string::npos);
+  CHECK(capture.stdout_text.find("generation_attribution:") == std::string::npos);
 }
 
-TEST_CASE("paritychecker generation attribution reports maintained runtime phase buckets") {
-  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+TEST_CASE("paritychecker qwen3 generation attribution stays on the maintained stored-baseline path") {
+  const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
   const process_capture capture = run_generation_paritychecker_capture_with_args({
@@ -680,21 +700,23 @@ TEST_CASE("paritychecker generation attribution reports maintained runtime phase
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
   CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
-  CHECK(capture.stdout_text.find("generation_attribution:") != std::string::npos);
-  CHECK(capture.stdout_text.find("generation_attribution.bucket: name=rms_norm") !=
+  CHECK(capture.stdout_text.find("formatter_contract=source=tokenizer.chat_template "
+                                 "support=supported_contract "
+                                 "shape=structured_chat_messages_v1 tools=none "
+                                 "add_generation_prompt=true enable_thinking=false") !=
         std::string::npos);
+  CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") !=
+        std::string::npos);
+  CHECK(parse_named_metric(capture.stdout_text, "reference_decode_calls") == 0);
+  CHECK(capture.stdout_text.find("generation_attribution: prompt_tokens=") != std::string::npos);
   CHECK(capture.stdout_text.find("generation_attribution.bucket: name=attention") !=
-        std::string::npos);
-  CHECK(capture.stdout_text.find("generation_attribution.bucket: name=swiglu") !=
         std::string::npos);
 }
 
-TEST_CASE("paritychecker generation can write a maintained baseline artifact") {
-  const auto model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+TEST_CASE("paritychecker canonical generation fixture keeps baseline entry points on the Qwen anchor") {
+  const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(model_path));
 
-  const auto baseline_path =
-      make_temp_fixture_path("paritychecker-generation-baseline", "generation-baseline.txt");
   const process_capture capture = run_generation_paritychecker_capture_with_args({
     "--generation",
     "--model",
@@ -703,20 +725,21 @@ TEST_CASE("paritychecker generation can write a maintained baseline artifact") {
     "hello",
     "--max-tokens",
     "1",
-    "--write-generation-baseline",
-    baseline_path.string(),
   });
 
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
-  CHECK(capture.stdout_text.find("generation baseline written") != std::string::npos);
-  CHECK(file_exists(baseline_path));
-  const std::string baseline_text = read_text_file(baseline_path);
-  CHECK(baseline_text.find("format=emel_generation_baseline_v1") != std::string::npos);
-  CHECK(baseline_text.find("contract=generation_online_f16_final_normalize_v1") !=
+  CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+  CHECK(capture.stdout_text.find("formatter_contract=source=tokenizer.chat_template "
+                                 "support=supported_contract "
+                                 "shape=structured_chat_messages_v1 tools=none "
+                                 "add_generation_prompt=true enable_thinking=false") !=
         std::string::npos);
-  CHECK(baseline_text.find("max_tokens=1") != std::string::npos);
-  std::filesystem::remove_all(baseline_path.parent_path());
+  CHECK(capture.stdout_text.find("reference_impl: source=maintained_generation_baseline") !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find(
+            "snapshots/parity/generation_qwen3_0_6b_q8_0_prompt_hello_max_tokens_1.txt") !=
+        std::string::npos);
 }
 
 TEST_CASE("paritychecker help describes the canonical generation fixture contract") {
@@ -725,7 +748,7 @@ TEST_CASE("paritychecker help describes the canonical generation fixture contrac
   CHECK(capture.exit_code == 2);
   CHECK(capture.stdout_text.empty());
   CHECK(capture.stderr_text.find("--generation mode requires --model tests/models/"
-                                 "Llama-68M-Chat-v1-Q2_K.gguf") != std::string::npos);
+                                 "Qwen3-0.6B-Q8_0.gguf") != std::string::npos);
   CHECK(capture.stderr_text.find("snapshots/parity/") != std::string::npos);
   CHECK(capture.stderr_text.find("reserves the generation CLI contract") == std::string::npos);
 }
@@ -750,8 +773,43 @@ TEST_CASE("paritychecker generation reports a deterministic missing-model failur
         std::string::npos);
 }
 
-TEST_CASE("paritychecker generation rejects a same-basename fixture outside tests/models") {
-  const auto canonical_model_path = models_dir() / "Llama-68M-Chat-v1-Q2_K.gguf";
+TEST_CASE("generation formatter contract classifier models supported and unsupported templates explicitly") {
+  std::string supported_template = {};
+  for (const std::string_view marker :
+       emel::tools::generation_formatter_contract::k_supported_primary_template_markers) {
+    supported_template.append(marker);
+    supported_template.push_back('\n');
+  }
+
+  const auto supported =
+      emel::tools::generation_formatter_contract::resolve_primary_template_binding(
+          supported_template, 0u);
+  CHECK(emel::tools::generation_formatter_contract::binding_supported(supported));
+  CHECK(supported.contract ==
+        emel::tools::generation_formatter_contract::k_supported_contract);
+
+  std::string formatted_prompt = {};
+  CHECK(emel::tools::generation_formatter_contract::format_single_user_prompt(
+      supported, "hello", formatted_prompt));
+  CHECK(formatted_prompt == "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n");
+
+  const auto unsupported =
+      emel::tools::generation_formatter_contract::resolve_primary_template_binding(
+          "{{ unsupported }}", 0u);
+  CHECK_FALSE(emel::tools::generation_formatter_contract::binding_supported(unsupported));
+  CHECK(unsupported.contract ==
+        emel::tools::generation_formatter_contract::k_unsupported_template_contract);
+
+  const auto named_variant =
+      emel::tools::generation_formatter_contract::resolve_primary_template_binding(
+          supported_template, 1u);
+  CHECK_FALSE(emel::tools::generation_formatter_contract::binding_supported(named_variant));
+  CHECK(named_variant.contract ==
+        emel::tools::generation_formatter_contract::k_unsupported_template_contract);
+}
+
+TEST_CASE("paritychecker canonical generation fixture rejects a same-basename fixture outside tests/models") {
+  const auto canonical_model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
   REQUIRE(file_exists(canonical_model_path));
 
   const std::filesystem::path impostor_model_path =

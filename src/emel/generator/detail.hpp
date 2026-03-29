@@ -29,16 +29,30 @@ struct tensor_matrix {
   int32_t cols = 0;
 };
 
+struct packed_q8_0_binding {
+  emel::model::data::tensor_record tensor = {};
+  std::vector<uint8_t> storage = {};
+};
+
 struct block_weights {
   std::vector<float> attention_norm = {};
   tensor_matrix attention_q = {};
+  packed_q8_0_binding attention_q_packed = {};
   tensor_matrix attention_k = {};
+  packed_q8_0_binding attention_k_packed = {};
   tensor_matrix attention_v = {};
+  packed_q8_0_binding attention_v_packed = {};
+  std::vector<float> attention_q_norm = {};
+  std::vector<float> attention_k_norm = {};
   tensor_matrix attention_output = {};
+  packed_q8_0_binding attention_output_packed = {};
   std::vector<float> feed_forward_norm = {};
   tensor_matrix feed_forward_gate = {};
+  packed_q8_0_binding feed_forward_gate_packed = {};
   tensor_matrix feed_forward_down = {};
+  packed_q8_0_binding feed_forward_down_packed = {};
   tensor_matrix feed_forward_up = {};
+  packed_q8_0_binding feed_forward_up_packed = {};
 };
 
 struct native_backend {
@@ -50,6 +64,8 @@ struct native_backend {
   emel::kernel::sm kernel = {};
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
   uint64_t kernel_dispatch_calls = 0;
+  uint64_t native_q8_0_dispatch_calls = 0;
+  uint64_t packed_q8_0_dispatch_calls = 0;
   uint64_t flash_attention_dispatch_calls = 0;
 
   tensor_matrix token_embedding = {};
@@ -66,6 +82,9 @@ struct native_backend {
   emel::model::data::tensor_record output_argmax_prepared_tensor = {};
   std::vector<uint8_t> output_argmax_prepared_storage = {};
   std::vector<emel::kernel::detail::quant::block_q8_k> logits_input_q8_storage = {};
+  std::vector<emel::kernel::detail::quant::block_q8_0> packed_q8_0_input_storage = {};
+  std::vector<emel::kernel::detail::quant::block_q8_0> packed_q8_0_chunk4_rows = {};
+  std::vector<uint8_t> packed_q8_0_chunk4_input_storage = {};
   emel::model::llama::detail::quantized_path_audit quantized_audit = {};
   std::vector<block_weights> blocks = {};
 
@@ -113,20 +132,30 @@ struct native_backend {
   int32_t bound_position_count = 0;
 
   std::vector<float> hidden = {};
+  std::vector<float> hidden_chunk4 = {};
   std::vector<float> norm = {};
+  std::vector<float> norm_chunk4 = {};
   std::vector<float> q = {};
   std::vector<float> q_attn = {};
+  std::vector<float> q_chunk4 = {};
   std::vector<float> k = {};
+  std::vector<float> k_chunk4 = {};
   std::vector<float> v = {};
+  std::vector<float> v_chunk4 = {};
   std::vector<float> attn_scores = {};
   std::vector<float> attn_probs = {};
   std::vector<float> attn_probs_rounded = {};
   std::vector<float> attn_value_column = {};
   std::vector<float> attn_ctx = {};
+  std::vector<float> attn_ctx_chunk4 = {};
   std::vector<float> projected = {};
+  std::vector<float> projected_chunk4 = {};
   std::vector<float> gate = {};
+  std::vector<float> gate_chunk4 = {};
   std::vector<float> up = {};
+  std::vector<float> up_chunk4 = {};
   std::vector<float> ffn_hidden = {};
+  std::vector<float> ffn_hidden_chunk4 = {};
   bool bound_ready = false;
 };
 
@@ -140,6 +169,7 @@ using step_plan = emel::model::llama::detail::step_plan;
 
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_invalid = 1;
+constexpr int32_t k_prefill_q8_chunk_rows = 4;
 constexpr emel::kernel::kernel_kind detect_host_kernel_kind() noexcept {
 #if defined(__aarch64__) || defined(_M_ARM64)
   return emel::kernel::kernel_kind::aarch64;
@@ -194,6 +224,46 @@ inline emel::kernel::event::tensor_view make_q8_k_vector_view(
   tensor.nb[1] = row_bytes;
   tensor.nb[2] = row_bytes;
   tensor.nb[3] = row_bytes;
+  return tensor;
+}
+
+inline emel::kernel::event::tensor_view make_q8_0_vector_view(
+    const emel::kernel::detail::quant::block_q8_0 * data,
+    const uint64_t cols) noexcept {
+  emel::kernel::event::tensor_view tensor{};
+  const size_t row_bytes =
+      emel::kernel::detail::quantized_row_storage_bytes(
+          emel::kernel::detail::dtype_q8_0, cols);
+  tensor.data = data;
+  tensor.type = emel::kernel::event::dtype::q8_0;
+  tensor.ne = {1u, cols, 1u, 1u};
+  tensor.nb[0] = 1u;
+  tensor.nb[1] = row_bytes;
+  tensor.nb[2] = row_bytes;
+  tensor.nb[3] = row_bytes;
+  return tensor;
+}
+
+inline emel::kernel::event::tensor_view make_packed_q8_0_rhs_chunk4_view(
+    const void * data,
+    const uint64_t cols) noexcept {
+  emel::kernel::event::tensor_view tensor{};
+  const size_t group_bytes =
+      emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(cols);
+  const uint64_t group_count =
+      emel::kernel::detail::quant::packed_q8_0_x4_group_count(k_prefill_q8_chunk_rows);
+  tensor.data = data;
+  tensor.type = emel::kernel::event::dtype::q8_0_x4_bl8;
+  tensor.ne = {
+      static_cast<uint64_t>(k_prefill_q8_chunk_rows),
+      cols,
+      1u,
+      1u,
+  };
+  tensor.nb[0] = 1u;
+  tensor.nb[1] = group_bytes;
+  tensor.nb[2] = group_bytes * group_count;
+  tensor.nb[3] = tensor.nb[2];
   return tensor;
 }
 
@@ -269,10 +339,30 @@ inline emel::kernel::event::tensor_view_mut make_dst_view_3d(float * data,
   return tensor;
 }
 
+inline emel::kernel::event::tensor_view_mut make_batch_major_dst_view(
+    float * data,
+    const uint64_t rows,
+    const uint64_t cols) noexcept {
+  emel::kernel::event::tensor_view_mut tensor{};
+  tensor.data = data;
+  tensor.type = emel::kernel::event::dtype::f32;
+  tensor.ne = {rows, cols, 1u, 1u};
+  tensor.nb[0] = sizeof(float) * cols;
+  tensor.nb[1] = sizeof(float);
+  tensor.nb[2] = tensor.nb[0] * rows;
+  tensor.nb[3] = tensor.nb[2];
+  return tensor;
+}
+
 inline size_t row_storage_bytes(const tensor_record & tensor, const int32_t cols) noexcept {
   const uint8_t dtype = static_cast<uint8_t>(tensor.type);
   if (dtype == emel::kernel::detail::dtype_f32) {
     return static_cast<size_t>(cols) * sizeof(float);
+  }
+  if (dtype == emel::kernel::detail::dtype_q8_0_x4_bl4 ||
+      dtype == emel::kernel::detail::dtype_q8_0_x4_bl8) {
+    return emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(
+        static_cast<uint64_t>(cols));
   }
   if (dtype == emel::kernel::detail::dtype_q6_k_x8) {
     return emel::kernel::detail::quant::packed_q6_k_x8_group_storage_bytes(
@@ -305,6 +395,79 @@ inline bool prepared_q6_k_x8_q8_logits_supported(const native_backend & backend)
   (void) backend;
   return false;
 #endif
+}
+
+inline bool packed_q8_0_input_path_supported(const native_backend & backend,
+                                             const tensor_matrix & matrix) noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON)
+  if (backend.kernel_kind != emel::kernel::kernel_kind::aarch64 ||
+      backend.packed_q8_0_input_storage.empty() ||
+      matrix.tensor == nullptr) {
+    return false;
+  }
+
+  return emel::kernel::detail::is_packed_q8_0_vector_dtype(
+      static_cast<uint8_t>(matrix.tensor->type));
+#else
+  (void) backend;
+  (void) matrix;
+  return false;
+#endif
+}
+
+inline bool packed_q8_0_chunk4_input_path_supported(const native_backend & backend,
+                                                    const tensor_matrix & matrix) noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+  if (backend.kernel_kind != emel::kernel::kernel_kind::aarch64 ||
+      backend.packed_q8_0_chunk4_rows.empty() ||
+      backend.packed_q8_0_chunk4_input_storage.empty() ||
+      matrix.tensor == nullptr) {
+    return false;
+  }
+
+  return static_cast<uint8_t>(matrix.tensor->type) == emel::kernel::detail::dtype_q8_0_x4_bl8 &&
+      (matrix.rows % k_prefill_q8_chunk_rows) == 0;
+#else
+  (void) backend;
+  (void) matrix;
+  return false;
+#endif
+}
+
+inline bool prefill_chunk4_q8_gemm_supported(const native_backend & backend) noexcept {
+  if (backend.blocks.empty() || backend.n_layer <= 0) {
+    return false;
+  }
+
+  for (const auto & block : backend.blocks) {
+    if (!packed_q8_0_chunk4_input_path_supported(backend, block.attention_q) ||
+        !packed_q8_0_chunk4_input_path_supported(backend, block.attention_k) ||
+        !packed_q8_0_chunk4_input_path_supported(backend, block.attention_v) ||
+        !packed_q8_0_chunk4_input_path_supported(backend, block.attention_output) ||
+        !packed_q8_0_chunk4_input_path_supported(backend, block.feed_forward_gate) ||
+        !packed_q8_0_chunk4_input_path_supported(backend, block.feed_forward_down) ||
+        !packed_q8_0_chunk4_input_path_supported(backend, block.feed_forward_up)) {
+      return false;
+    }
+  }
+
+  return backend.hidden_chunk4.size() ==
+          static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(backend.n_embd) &&
+      backend.norm_chunk4.size() == backend.hidden_chunk4.size() &&
+      backend.projected_chunk4.size() == backend.hidden_chunk4.size() &&
+      backend.attn_ctx_chunk4.size() ==
+          static_cast<size_t>(k_prefill_q8_chunk_rows) *
+              static_cast<size_t>(backend.n_head * backend.head_dim) &&
+      backend.q_chunk4.size() == backend.attn_ctx_chunk4.size() &&
+      backend.k_chunk4.size() ==
+          static_cast<size_t>(k_prefill_q8_chunk_rows) *
+              static_cast<size_t>(backend.n_head_kv * backend.head_dim_kv) &&
+      backend.v_chunk4.size() == backend.k_chunk4.size() &&
+      backend.gate_chunk4.size() ==
+          static_cast<size_t>(k_prefill_q8_chunk_rows) *
+              static_cast<size_t>(backend.blocks.front().feed_forward_gate.rows) &&
+      backend.up_chunk4.size() == backend.gate_chunk4.size() &&
+      backend.ffn_hidden_chunk4.size() == backend.gate_chunk4.size();
 }
 
 inline bool q8_logits_input_path_supported(const tensor_matrix & matrix) noexcept {
@@ -358,8 +521,8 @@ inline bool bind_tensor_rows(const tensor_record & tensor,
   }
 
   const uint8_t dtype = static_cast<uint8_t>(tensor.type);
-  if (emel::kernel::detail::is_quantized_k_dtype(dtype) &&
-      (cols % static_cast<int32_t>(quant::QK_K)) != 0) {
+  const uint64_t block_size = emel::kernel::detail::quantized_block_size(dtype);
+  if (block_size != 0u && (static_cast<uint64_t>(cols) % block_size) != 0u) {
     return false;
   }
 
@@ -417,6 +580,11 @@ inline bool copy_tensor_row(const tensor_record & tensor,
                                  out.data(),
                                  cols);
       return true;
+    case emel::kernel::event::dtype::q8_0:
+      quant::dequantize_row_q8_0(reinterpret_cast<const quant::block_q8_0 *>(src_row),
+                                 out.data(),
+                                 cols);
+      return true;
     default:
       return false;
   }
@@ -433,6 +601,69 @@ inline bool dequantize_tensor_vector(const tensor_record & tensor,
   return copy_tensor_row(tensor, 0, out);
 }
 
+inline bool is_qwen3_runtime(const native_backend & backend) noexcept {
+  return backend.model != nullptr && emel::model::architecture_name_view(*backend.model) == "qwen3";
+}
+
+inline const tensor_record * select_output_projection_tensor(
+    const emel::model::llama::detail::execution_view & execution) noexcept {
+  if (execution.output.tensor != nullptr) {
+    return execution.output.tensor;
+  }
+
+  const auto * token_embedding = execution.token_embedding.tensor;
+  if (token_embedding == nullptr || token_embedding->data == nullptr || token_embedding->n_dims != 2) {
+    return nullptr;
+  }
+
+  return token_embedding;
+}
+
+inline bool bind_output_projection(native_backend & backend) noexcept {
+  const auto * tensor = select_output_projection_tensor(backend.execution);
+  return tensor != nullptr && bind_tensor_rows(*tensor, backend.output_native);
+}
+
+inline bool apply_headwise_rms_norm(std::span<float> vector,
+                                    std::span<const float> weights,
+                                    const int32_t head_count,
+                                    const int32_t head_dim,
+                                    const float epsilon) noexcept {
+  if (head_count <= 0 ||
+      head_dim <= 0 ||
+      static_cast<size_t>(head_count) * static_cast<size_t>(head_dim) != vector.size() ||
+      static_cast<size_t>(head_dim) != weights.size()) {
+    return false;
+  }
+
+  for (int32_t head = 0; head < head_count; ++head) {
+    const size_t head_offset =
+        static_cast<size_t>(head) * static_cast<size_t>(head_dim);
+    float square_sum = 0.0f;
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
+      const float value = vector[head_offset + static_cast<size_t>(dim)];
+      square_sum += value * value;
+    }
+
+    const float inv_rms =
+        1.0f / std::sqrt(square_sum / static_cast<float>(head_dim) + epsilon);
+    for (int32_t dim = 0; dim < head_dim; ++dim) {
+      vector[head_offset + static_cast<size_t>(dim)] *=
+          inv_rms * weights[static_cast<size_t>(dim)];
+    }
+  }
+
+  return true;
+}
+
+inline bool apply_qwen3_attention_qk_norm(native_backend & backend,
+                                          const block_weights & block) noexcept {
+  return apply_headwise_rms_norm(
+             backend.q, block.attention_q_norm, backend.n_head, backend.head_dim, backend.rms_epsilon) &&
+      apply_headwise_rms_norm(
+             backend.k, block.attention_k_norm, backend.n_head_kv, backend.head_dim_kv, backend.rms_epsilon);
+}
+
 inline void reset_output_logits(native_backend & backend) noexcept {
   backend.output = backend.output_native;
   backend.output_argmax = backend.output_native;
@@ -444,6 +675,102 @@ inline void reset_output_logits(native_backend & backend) noexcept {
   backend.output_argmax_packed_storage.clear();
   backend.output_argmax_prepared_tensor = {};
   backend.output_argmax_prepared_storage.clear();
+}
+
+template <uint8_t packed_dtype>
+inline bool prepare_packed_q8_0_tensor_layout(const tensor_record & source,
+                                              const int32_t rows,
+                                              const int32_t cols,
+                                              tensor_record & packed_tensor,
+                                              std::vector<uint8_t> & packed_storage) noexcept {
+  if (source.data == nullptr ||
+      static_cast<uint8_t>(source.type) != emel::kernel::detail::dtype_q8_0 ||
+      rows <= 0 ||
+      cols <= 0) {
+    return false;
+  }
+
+  const uint64_t urows = static_cast<uint64_t>(rows);
+  const uint64_t ucols = static_cast<uint64_t>(cols);
+  const uint64_t group_count = emel::kernel::detail::quant::packed_q8_0_x4_group_count(urows);
+  const size_t group_bytes =
+      emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(ucols);
+  const uint64_t storage_bytes = static_cast<uint64_t>(group_bytes) * group_count;
+  if (group_bytes == 0u || storage_bytes == 0u) {
+    return false;
+  }
+
+  packed_storage.resize(static_cast<size_t>(storage_bytes));
+  const auto * src =
+      reinterpret_cast<const emel::kernel::detail::quant::block_q8_0 *>(source.data);
+  bool packed_ok = false;
+  if constexpr (packed_dtype == emel::kernel::detail::dtype_q8_0_x4_bl8) {
+    packed_ok = emel::kernel::detail::quant::pack_q8_0_rows_x4_bl8(
+        src, urows, ucols, packed_storage.data());
+  } else if constexpr (packed_dtype == emel::kernel::detail::dtype_q8_0_x4_bl4) {
+    packed_ok = emel::kernel::detail::quant::pack_q8_0_rows_x4_bl4(
+        src, urows, ucols, packed_storage.data());
+  }
+  if (!packed_ok) {
+    return false;
+  }
+
+  packed_tensor = source;
+  packed_tensor.type = packed_dtype;
+  packed_tensor.data = packed_storage.data();
+  packed_tensor.data_size = storage_bytes;
+  return true;
+}
+
+template <uint8_t packed_dtype>
+inline bool prepare_packed_q8_0_matrix_layout(tensor_matrix & matrix,
+                                              packed_q8_0_binding & packed) noexcept {
+  if (matrix.tensor == nullptr) {
+    return false;
+  }
+  if (static_cast<uint8_t>(matrix.tensor->type) != emel::kernel::detail::dtype_q8_0) {
+    return true;
+  }
+  if (!prepare_packed_q8_0_tensor_layout<packed_dtype>(
+          *matrix.tensor, matrix.rows, matrix.cols, packed.tensor, packed.storage)) {
+    return false;
+  }
+  matrix.tensor = &packed.tensor;
+  return true;
+}
+
+template <uint8_t packed_dtype>
+inline bool prepare_packed_q8_0_output_logits_layout(native_backend & backend) noexcept {
+  const auto * tensor = backend.output_native.tensor;
+  if (tensor == nullptr) {
+    return false;
+  }
+
+  if (!prepare_packed_q8_0_tensor_layout<packed_dtype>(
+          *tensor,
+          backend.output_native.rows,
+          backend.output_native.cols,
+          backend.output_packed_tensor,
+          backend.output_packed_storage)) {
+    return false;
+  }
+
+  backend.output.tensor = &backend.output_packed_tensor;
+  backend.output_argmax = backend.output_native;
+  return true;
+}
+
+inline bool prepare_packed_q8_0_output_logits(native_backend & backend) noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+  return prepare_packed_q8_0_output_logits_layout<emel::kernel::detail::dtype_q8_0_x4_bl8>(
+      backend);
+#elif defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+  return prepare_packed_q8_0_output_logits_layout<emel::kernel::detail::dtype_q8_0_x4_bl4>(
+      backend);
+#else
+  (void) backend;
+  return true;
+#endif
 }
 
 inline bool prepare_prepared_output_logits(native_backend & backend) noexcept {
@@ -540,6 +867,9 @@ inline bool prepare_output_logits(native_backend & backend) noexcept {
   }
 
   const uint8_t dtype = static_cast<uint8_t>(tensor->type);
+  if (dtype == emel::kernel::detail::dtype_q8_0) {
+    return prepare_packed_q8_0_output_logits(backend);
+  }
   if (dtype != emel::kernel::detail::dtype_q6_k) {
     return true;
   }
@@ -553,6 +883,53 @@ inline bool prepare_output_logits(native_backend & backend) noexcept {
   }
 
   return true;
+}
+
+inline bool prepare_block_packed_q8_0_matrices(native_backend & backend) noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+  for (auto & block : backend.blocks) {
+    if (!prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl8>(
+            block.attention_q, block.attention_q_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl8>(
+            block.attention_k, block.attention_k_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl8>(
+            block.attention_v, block.attention_v_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl8>(
+            block.attention_output, block.attention_output_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl8>(
+            block.feed_forward_gate, block.feed_forward_gate_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl8>(
+            block.feed_forward_down, block.feed_forward_down_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl8>(
+            block.feed_forward_up, block.feed_forward_up_packed)) {
+      return false;
+    }
+  }
+  return true;
+#elif defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+  for (auto & block : backend.blocks) {
+    if (!prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl4>(
+            block.attention_q, block.attention_q_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl4>(
+            block.attention_k, block.attention_k_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl4>(
+            block.attention_v, block.attention_v_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl4>(
+            block.attention_output, block.attention_output_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl4>(
+            block.feed_forward_gate, block.feed_forward_gate_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl4>(
+            block.feed_forward_down, block.feed_forward_down_packed) ||
+        !prepare_packed_q8_0_matrix_layout<emel::kernel::detail::dtype_q8_0_x4_bl4>(
+            block.feed_forward_up, block.feed_forward_up_packed)) {
+      return false;
+    }
+  }
+  return true;
+#else
+  (void) backend;
+  return true;
+#endif
 }
 
 inline bool prepare_logits_input_q8_workspace(native_backend & backend) noexcept {
@@ -574,16 +951,110 @@ inline bool prepare_logits_input_q8_workspace(native_backend & backend) noexcept
   return true;
 }
 
+inline bool update_packed_q8_0_input_requirement(const tensor_matrix & matrix,
+                                                 size_t & max_block_count) noexcept {
+  if (matrix.tensor == nullptr ||
+      !emel::kernel::detail::is_packed_q8_0_vector_dtype(
+          static_cast<uint8_t>(matrix.tensor->type))) {
+    return true;
+  }
+
+  if (matrix.cols <= 0 ||
+      (matrix.cols % static_cast<int32_t>(quant::QK8_0)) != 0) {
+    return false;
+  }
+
+  const size_t block_count =
+      static_cast<size_t>(matrix.cols) / static_cast<size_t>(quant::QK8_0);
+  if (block_count == 0u || block_count > quant::MAX_Q8_0_BLOCKS) {
+    return false;
+  }
+
+  max_block_count = std::max(max_block_count, block_count);
+  return true;
+}
+
+inline bool prepare_packed_q8_0_input_workspace(native_backend & backend) noexcept {
+  backend.packed_q8_0_input_storage.clear();
+
+  size_t max_block_count = 0u;
+  if (!update_packed_q8_0_input_requirement(backend.output, max_block_count)) {
+    return false;
+  }
+
+  for (const auto & block : backend.blocks) {
+    if (!update_packed_q8_0_input_requirement(block.attention_q, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.attention_k, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.attention_v, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.attention_output, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.feed_forward_gate, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.feed_forward_down, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.feed_forward_up, max_block_count)) {
+      return false;
+    }
+  }
+
+  if (max_block_count == 0u) {
+    return true;
+  }
+
+  backend.packed_q8_0_input_storage.resize(max_block_count);
+  return true;
+}
+
+inline bool prepare_packed_q8_0_chunk4_input_workspace(native_backend & backend) noexcept {
+  backend.packed_q8_0_chunk4_rows.clear();
+  backend.packed_q8_0_chunk4_input_storage.clear();
+
+  size_t max_block_count = 0u;
+  if (!update_packed_q8_0_input_requirement(backend.output, max_block_count)) {
+    return false;
+  }
+
+  for (const auto & block : backend.blocks) {
+    if (!update_packed_q8_0_input_requirement(block.attention_q, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.attention_k, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.attention_v, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.attention_output, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.feed_forward_gate, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.feed_forward_down, max_block_count) ||
+        !update_packed_q8_0_input_requirement(block.feed_forward_up, max_block_count)) {
+      return false;
+    }
+  }
+
+  if (max_block_count == 0u) {
+    return true;
+  }
+
+  const uint64_t chunk_row_count = static_cast<uint64_t>(k_prefill_q8_chunk_rows);
+  const uint64_t cols = static_cast<uint64_t>(max_block_count) * quant::QK8_0;
+  const size_t packed_bytes =
+      emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(cols);
+  if (packed_bytes == 0u) {
+    return false;
+  }
+
+  backend.packed_q8_0_chunk4_rows.resize(chunk_row_count * max_block_count);
+  backend.packed_q8_0_chunk4_input_storage.resize(packed_bytes);
+  return true;
+}
+
 inline emel::kernel::event::tensor_view make_src_view(const tensor_matrix & matrix) noexcept {
   emel::kernel::event::tensor_view tensor{};
   const uint8_t dtype = static_cast<uint8_t>(matrix.tensor->type);
   const size_t row_bytes = row_storage_bytes(*matrix.tensor, matrix.cols);
   const uint64_t rows = static_cast<uint64_t>(matrix.rows);
-  const bool packed_q6_grouped =
+  const bool packed_grouped =
+      dtype == emel::kernel::detail::dtype_q8_0_x4_bl4 ||
+      dtype == emel::kernel::detail::dtype_q8_0_x4_bl8 ||
       dtype == emel::kernel::detail::dtype_q6_k_x8 ||
       dtype == emel::kernel::detail::dtype_q6_k_x8_q8_prepared ||
       dtype == emel::kernel::detail::dtype_q6_k_x8_q8_argmax_prepared;
-  const uint64_t storage_rows = packed_q6_grouped
+  const uint64_t storage_rows = dtype == emel::kernel::detail::dtype_q8_0_x4_bl4 ||
+          dtype == emel::kernel::detail::dtype_q8_0_x4_bl8
+      ? emel::kernel::detail::quant::packed_q8_0_x4_group_count(rows)
+      : packed_grouped
       ? emel::kernel::detail::quant::packed_q6_k_x8_group_count(rows)
       : rows;
 
@@ -599,11 +1070,14 @@ inline emel::kernel::event::tensor_view make_src_view(const tensor_matrix & matr
 
 inline uint64_t matrix_buffer_bytes(const tensor_matrix & matrix) noexcept {
   const uint8_t dtype = static_cast<uint8_t>(matrix.tensor->type);
-  const uint64_t storage_rows =
-      (dtype == emel::kernel::detail::dtype_q6_k_x8 ||
-       dtype == emel::kernel::detail::dtype_q6_k_x8_q8_prepared ||
-       dtype == emel::kernel::detail::dtype_q6_k_x8_q8_argmax_prepared)
-      ? emel::kernel::detail::quant::packed_q6_k_x8_group_count(static_cast<uint64_t>(matrix.rows))
+  const uint64_t storage_rows = dtype == emel::kernel::detail::dtype_q8_0_x4_bl4 ||
+          dtype == emel::kernel::detail::dtype_q8_0_x4_bl8
+      ? emel::kernel::detail::quant::packed_q8_0_x4_group_count(static_cast<uint64_t>(matrix.rows))
+      : (dtype == emel::kernel::detail::dtype_q6_k_x8 ||
+         dtype == emel::kernel::detail::dtype_q6_k_x8_q8_prepared ||
+         dtype == emel::kernel::detail::dtype_q6_k_x8_q8_argmax_prepared)
+      ? emel::kernel::detail::quant::packed_q6_k_x8_group_count(
+            static_cast<uint64_t>(matrix.rows))
       : static_cast<uint64_t>(matrix.rows);
   return static_cast<uint64_t>(row_storage_bytes(*matrix.tensor, matrix.cols)) * storage_rows;
 }
@@ -707,6 +1181,18 @@ inline void build_lifecycle(native_backend & backend) {
         backend,
         const_cast<void *>(block.attention_v.tensor->data),
         matrix_buffer_bytes(block.attention_v));
+    if (!block.attention_q_norm.empty()) {
+      append_leaf_lifecycle_tensor(
+          backend,
+          block.attention_q_norm.data(),
+          static_cast<uint64_t>(block.attention_q_norm.size()) * sizeof(float));
+    }
+    if (!block.attention_k_norm.empty()) {
+      append_leaf_lifecycle_tensor(
+          backend,
+          block.attention_k_norm.data(),
+          static_cast<uint64_t>(block.attention_k_norm.size()) * sizeof(float));
+    }
     append_leaf_lifecycle_tensor(
         backend,
         const_cast<void *>(block.attention_output.tensor->data),
@@ -813,6 +1299,25 @@ inline const emel::graph::processor::event::lifecycle_manifest * phase_lifecycle
   return manifests[static_cast<size_t>(kind)];
 }
 
+inline bool prepare_packed_q8_0_input(native_backend & backend,
+                                      std::span<const float> input) noexcept;
+
+inline bool matmul_vector_prepared_packed_q8_0_input(
+    native_backend & backend,
+    const tensor_matrix & matrix,
+    const int32_t input_cols,
+    std::span<float> output) noexcept;
+
+inline bool prepare_packed_q8_0_chunk4_input(native_backend & backend,
+                                             std::span<const float> input,
+                                             const int32_t input_cols) noexcept;
+
+inline bool matmul_chunk4_prepared_packed_q8_0_input(
+    native_backend & backend,
+    const tensor_matrix & matrix,
+    const int32_t input_cols,
+    std::span<float> output) noexcept;
+
 inline bool matmul_vector(native_backend & backend,
                           const tensor_matrix & matrix,
                           std::span<const float> input,
@@ -822,6 +1327,11 @@ inline bool matmul_vector(native_backend & backend,
       static_cast<size_t>(matrix.cols) != input.size() ||
       static_cast<size_t>(matrix.rows) != output.size()) {
     return false;
+  }
+
+  if (packed_q8_0_input_path_supported(backend, matrix)) {
+    return prepare_packed_q8_0_input(backend, input) &&
+        matmul_vector_prepared_packed_q8_0_input(backend, matrix, matrix.cols, output);
   }
 
   emel::kernel::event::op_mul_mat ev{
@@ -838,6 +1348,9 @@ inline bool matmul_vector(native_backend & backend,
   backend.kernel.set_kind(backend.kernel_kind);
   const bool ok = backend.kernel.process_event(ev);
   backend.kernel_dispatch_calls += 1;
+  backend.native_q8_0_dispatch_calls += static_cast<uint64_t>(
+      matrix.tensor != nullptr &&
+      static_cast<uint8_t>(matrix.tensor->type) == emel::kernel::detail::dtype_q8_0);
   return ok;
 }
 
@@ -866,6 +1379,9 @@ inline bool matmul_vector_argmax(native_backend & backend,
   backend.kernel.set_kind(backend.kernel_kind);
   const bool ok = backend.kernel.process_event(ev);
   backend.kernel_dispatch_calls += 1;
+  backend.native_q8_0_dispatch_calls += static_cast<uint64_t>(
+      matrix.tensor != nullptr &&
+      static_cast<uint8_t>(matrix.tensor->type) == emel::kernel::detail::dtype_q8_0);
   return ok;
 }
 
@@ -878,6 +1394,22 @@ inline bool quantize_vector_q8_k(
   }
 
   emel::kernel::detail::quant::quantize_row_q8_k_strided(
+      input.data(),
+      1u,
+      output.data(),
+      static_cast<int64_t>(input.size()));
+  return true;
+}
+
+inline bool quantize_vector_q8_0(
+    std::span<const float> input,
+    std::span<emel::kernel::detail::quant::block_q8_0> output) noexcept {
+  if ((input.size() % quant::QK8_0) != 0u ||
+      output.size() != input.size() / quant::QK8_0) {
+    return false;
+  }
+
+  emel::kernel::detail::quant::quantize_row_q8_0_strided(
       input.data(),
       1u,
       output.data(),
@@ -911,6 +1443,156 @@ inline bool matmul_vector_q8_input(
   backend.kernel.set_kind(backend.kernel_kind);
   const bool ok = backend.kernel.process_event(ev);
   backend.kernel_dispatch_calls += 1;
+  return ok;
+}
+
+inline bool matmul_vector_q8_0_input(
+    native_backend & backend,
+    const tensor_matrix & matrix,
+    std::span<const emel::kernel::detail::quant::block_q8_0> input,
+    const int32_t input_cols,
+    std::span<float> output) noexcept {
+  if (matrix.cols <= 0 ||
+      matrix.rows <= 0 ||
+      input_cols != matrix.cols ||
+      input_cols <= 0 ||
+      static_cast<size_t>(matrix.rows) != output.size() ||
+      (input_cols % static_cast<int32_t>(quant::QK8_0)) != 0 ||
+      static_cast<size_t>(input_cols / static_cast<int32_t>(quant::QK8_0)) != input.size()) {
+    return false;
+  }
+
+  emel::kernel::event::op_mul_mat ev{
+      .src0 = make_src_view(matrix),
+      .src1 = make_q8_0_vector_view(input.data(), static_cast<uint64_t>(input_cols)),
+      .dst = make_dst_view(
+          output.data(), static_cast<uint64_t>(1u), static_cast<uint64_t>(output.size())),
+      .nth = 1,
+  };
+  backend.kernel.set_kind(backend.kernel_kind);
+  const bool ok = backend.kernel.process_event(ev);
+  backend.kernel_dispatch_calls += 1;
+  backend.packed_q8_0_dispatch_calls += static_cast<uint64_t>(
+      matrix.tensor != nullptr &&
+      emel::kernel::detail::is_packed_q8_0_vector_dtype(
+          static_cast<uint8_t>(matrix.tensor->type)) &&
+      ok);
+  return ok;
+}
+
+inline bool prepare_packed_q8_0_input(native_backend & backend,
+                                      std::span<const float> input) noexcept {
+  if (backend.packed_q8_0_input_storage.empty() ||
+      (input.size() % quant::QK8_0) != 0u) {
+    return false;
+  }
+
+  const size_t block_count = input.size() / quant::QK8_0;
+  if (block_count > backend.packed_q8_0_input_storage.size()) {
+    return false;
+  }
+
+  return quantize_vector_q8_0(
+      input,
+      std::span<emel::kernel::detail::quant::block_q8_0>(
+          backend.packed_q8_0_input_storage.data(), block_count));
+}
+
+inline bool prepare_packed_q8_0_chunk4_input(native_backend & backend,
+                                             std::span<const float> input,
+                                             const int32_t input_cols) noexcept {
+  const size_t expected_size =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(input_cols);
+  if (backend.packed_q8_0_chunk4_rows.empty() ||
+      backend.packed_q8_0_chunk4_input_storage.empty() ||
+      input_cols <= 0 ||
+      input.size() != expected_size ||
+      (static_cast<size_t>(input_cols) % quant::QK8_0) != 0u) {
+    return false;
+  }
+
+  const size_t block_count = static_cast<size_t>(input_cols) / quant::QK8_0;
+  const size_t required_rows =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * block_count;
+  if (required_rows > backend.packed_q8_0_chunk4_rows.size()) {
+    return false;
+  }
+
+  for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
+    if (!quantize_vector_q8_0(
+            input.subspan(
+                static_cast<size_t>(row) * static_cast<size_t>(input_cols),
+                static_cast<size_t>(input_cols)),
+            std::span<emel::kernel::detail::quant::block_q8_0>(
+                backend.packed_q8_0_chunk4_rows.data() +
+                    (static_cast<size_t>(row) * block_count),
+                block_count))) {
+      return false;
+    }
+  }
+
+  return emel::kernel::detail::quant::pack_q8_0_rows_x4_bl8(
+      backend.packed_q8_0_chunk4_rows.data(),
+      static_cast<uint64_t>(k_prefill_q8_chunk_rows),
+      static_cast<uint64_t>(input_cols),
+      backend.packed_q8_0_chunk4_input_storage.data());
+}
+
+inline bool matmul_vector_prepared_packed_q8_0_input(
+    native_backend & backend,
+    const tensor_matrix & matrix,
+    const int32_t input_cols,
+    std::span<float> output) noexcept {
+  if (!packed_q8_0_input_path_supported(backend, matrix) ||
+      input_cols <= 0 ||
+      (input_cols % static_cast<int32_t>(quant::QK8_0)) != 0) {
+    return false;
+  }
+
+  const size_t block_count =
+      static_cast<size_t>(input_cols) / static_cast<size_t>(quant::QK8_0);
+  if (block_count > backend.packed_q8_0_input_storage.size()) {
+    return false;
+  }
+
+  return matmul_vector_q8_0_input(
+      backend,
+      matrix,
+      std::span<const emel::kernel::detail::quant::block_q8_0>(
+          backend.packed_q8_0_input_storage.data(), block_count),
+      input_cols,
+      output);
+}
+
+inline bool matmul_chunk4_prepared_packed_q8_0_input(
+    native_backend & backend,
+    const tensor_matrix & matrix,
+    const int32_t input_cols,
+    std::span<float> output) noexcept {
+  const size_t expected_size =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(matrix.rows);
+  if (!packed_q8_0_chunk4_input_path_supported(backend, matrix) ||
+      input_cols <= 0 ||
+      input_cols != matrix.cols ||
+      output.size() != expected_size) {
+    return false;
+  }
+
+  emel::kernel::event::op_mul_mat ev{
+      .src0 = make_src_view(matrix),
+      .src1 = make_packed_q8_0_rhs_chunk4_view(
+          backend.packed_q8_0_chunk4_input_storage.data(),
+          static_cast<uint64_t>(input_cols)),
+      .dst = make_batch_major_dst_view(
+          output.data(),
+          static_cast<uint64_t>(k_prefill_q8_chunk_rows),
+          static_cast<uint64_t>(matrix.rows)),
+      .nth = 1,
+  };
+  backend.kernel.set_kind(backend.kernel_kind);
+  const bool ok = backend.kernel.process_event(ev);
+  backend.kernel_dispatch_calls += 1;
+  backend.packed_q8_0_dispatch_calls += static_cast<uint64_t>(ok);
   return ok;
 }
 
@@ -963,6 +1645,88 @@ inline bool rms_norm(std::span<const float> input,
     output[i] *= weight[i];
   }
   return true;
+}
+
+template <class value_type>
+inline std::span<value_type> chunk4_row_span(std::span<value_type> values,
+                                             const int32_t row,
+                                             const int32_t cols) noexcept {
+  return values.subspan(
+      static_cast<size_t>(row) * static_cast<size_t>(cols),
+      static_cast<size_t>(cols));
+}
+
+template <class value_type>
+inline std::span<const value_type> chunk4_row_span(std::span<const value_type> values,
+                                                   const int32_t row,
+                                                   const int32_t cols) noexcept {
+  return values.subspan(
+      static_cast<size_t>(row) * static_cast<size_t>(cols),
+      static_cast<size_t>(cols));
+}
+
+inline bool rms_norm_chunk4(std::span<const float> input,
+                            const int32_t cols,
+                            std::span<const float> weight,
+                            const float epsilon,
+                            std::span<float> output) noexcept {
+  const size_t expected_size =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(cols);
+  if (cols <= 0 || input.size() != expected_size || output.size() != expected_size) {
+    return false;
+  }
+
+  for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
+    if (!rms_norm(
+            chunk4_row_span<const float>(input, row, cols),
+            weight,
+            epsilon,
+            chunk4_row_span<float>(output, row, cols))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool add_chunk4_rows_in_place(std::span<float> dst,
+                                     std::span<const float> src,
+                                     const int32_t cols) noexcept {
+  const size_t expected_size =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(cols);
+  if (cols <= 0 || dst.size() != expected_size || src.size() != expected_size) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < expected_size; ++idx) {
+    dst[idx] += src[idx];
+  }
+  return true;
+}
+
+inline float silu(const float value) noexcept;
+
+inline bool apply_silu_mul_chunk4(std::span<const float> gate,
+                                  std::span<const float> up,
+                                  const int32_t cols,
+                                  std::span<float> output) noexcept {
+  const size_t expected_size =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(cols);
+  if (cols <= 0 || gate.size() != expected_size || up.size() != expected_size ||
+      output.size() != expected_size) {
+    return false;
+  }
+
+  for (size_t idx = 0; idx < expected_size; ++idx) {
+    output[idx] = silu(gate[idx]) * up[idx];
+  }
+  return true;
+}
+
+inline void round_q_for_nonflash(std::span<const float> q_source,
+                                 std::span<float> q_target) noexcept {
+  for (size_t idx = 0; idx < q_source.size(); ++idx) {
+    q_target[idx] = quant::fp16_to_fp32(quant::fp32_to_fp16(q_source[idx]));
+  }
 }
 
 inline void apply_rope(std::span<float> vector,
@@ -1159,11 +1923,14 @@ inline bool compute_attention(native_backend & backend,
   const int32_t kv_head_count = backend.n_head_kv;
   const int32_t head_dim = backend.head_dim;
   const int32_t kv_head_dim = backend.head_dim_kv;
+  const int32_t q_dim = head_count * head_dim;
   const int32_t kv_dim = kv_head_count * kv_head_dim;
   const float inv_scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
   const int32_t attn_width = backend.n_ctx;
 
   if (position_limit <= 0 || position_limit > attn_width ||
+      q_vector.size() != static_cast<size_t>(q_dim) ||
+      backend.attn_ctx.size() != static_cast<size_t>(q_dim) ||
       backend.attn_scores.size() != static_cast<size_t>(attn_width) ||
       backend.attn_probs.size() != static_cast<size_t>(attn_width) ||
       backend.attn_probs_rounded.size() != static_cast<size_t>(attn_width) ||
@@ -1287,15 +2054,64 @@ inline bool dispatch_flash_attention(native_backend & backend,
   return ok;
 }
 
+inline bool store_attention_kv_cache(native_backend & backend,
+                                     const int32_t layer_index,
+                                     const int32_t position,
+                                     std::span<const float> k_vector,
+                                     std::span<const float> v_vector) noexcept {
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  if (position < 0 ||
+      position >= backend.n_ctx ||
+      k_vector.size() != static_cast<size_t>(kv_dim) ||
+      v_vector.size() != static_cast<size_t>(kv_dim)) {
+    return false;
+  }
+
+  const size_t cache_offset = layer_cache_offset(backend, layer_index, position, kv_dim);
+  store_fp16_rounded_cache(k_vector, backend.key_cache.data() + cache_offset);
+  store_fp16_rounded_cache(v_vector, backend.value_cache.data() + cache_offset);
+
+  for (int32_t kv_head = 0; kv_head < backend.n_head_kv; ++kv_head) {
+    const size_t src_offset =
+        static_cast<size_t>(kv_head) * static_cast<size_t>(backend.head_dim_kv);
+    const size_t flash_cache_offset = flash_layer_cache_head_position_offset(
+        backend, layer_index, kv_head, position, backend.head_dim_kv);
+    store_fp16_rounded_cache(
+        k_vector.subspan(src_offset, static_cast<size_t>(backend.head_dim_kv)),
+        backend.flash_key_cache.data() + flash_cache_offset);
+    store_fp16_rounded_cache(
+        v_vector.subspan(src_offset, static_cast<size_t>(backend.head_dim_kv)),
+        backend.flash_value_cache.data() + flash_cache_offset);
+  }
+
+  return true;
+}
+
+template <emel::generator::attention_mode mode>
+inline bool run_attention_for_q_vector(native_backend & backend,
+                                       const int32_t layer_index,
+                                       const int32_t position,
+                                       std::span<const float> q_vector) noexcept {
+  if constexpr (mode == emel::generator::attention_mode::flash) {
+    if (q_vector.size() != backend.q.size()) {
+      return false;
+    }
+    std::copy(q_vector.begin(), q_vector.end(), backend.q.begin());
+    return dispatch_flash_attention(backend, layer_index, position);
+  } else {
+    if (q_vector.size() != backend.q_attn.size()) {
+      return false;
+    }
+    round_q_for_nonflash(q_vector, backend.q_attn);
+    return compute_attention(backend, layer_index, position + 1, backend.q_attn);
+  }
+}
+
 template <emel::generator::attention_mode mode>
 inline bool run_attention(native_backend & backend,
                           const int32_t layer_index,
                           const int32_t position) noexcept {
-  if constexpr (mode == emel::generator::attention_mode::flash) {
-    return dispatch_flash_attention(backend, layer_index, position);
-  } else {
-    return compute_attention(backend, layer_index, position + 1, backend.q_attn);
-  }
+  return run_attention_for_q_vector<mode>(backend, layer_index, position, backend.q);
 }
 
 template <emel::generator::attention_mode mode>
@@ -1303,10 +2119,31 @@ inline bool run_layer(native_backend & backend,
                       const int32_t layer_index,
                       const int32_t position) noexcept {
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
-  if (!rms_norm(backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm) ||
-      !matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
-      !matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
-      !matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+  if (!rms_norm(backend.hidden, block.attention_norm, backend.rms_epsilon, backend.norm)) {
+    return false;
+  }
+
+  const bool qkv_shared_packed_q8_0 =
+      packed_q8_0_input_path_supported(backend, block.attention_q) &&
+      packed_q8_0_input_path_supported(backend, block.attention_k) &&
+      packed_q8_0_input_path_supported(backend, block.attention_v);
+  if (qkv_shared_packed_q8_0) {
+    if (!prepare_packed_q8_0_input(backend, backend.norm) ||
+        !matmul_vector_prepared_packed_q8_0_input(
+            backend, block.attention_q, block.attention_q.cols, backend.q) ||
+        !matmul_vector_prepared_packed_q8_0_input(
+            backend, block.attention_k, block.attention_k.cols, backend.k) ||
+        !matmul_vector_prepared_packed_q8_0_input(
+            backend, block.attention_v, block.attention_v.cols, backend.v)) {
+      return false;
+    }
+  } else if (!matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
+             !matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
+             !matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    return false;
+  }
+
+  if (is_qwen3_runtime(backend) && !apply_qwen3_attention_qk_norm(backend, block)) {
     return false;
   }
 
@@ -1318,39 +2155,13 @@ inline bool run_layer(native_backend & backend,
              backend.n_rot,
              position,
              backend.rope_freq_base);
-  if constexpr (mode == emel::generator::attention_mode::nonflash) {
-    for (size_t idx = 0; idx < backend.q_attn.size(); ++idx) {
-      backend.q_attn[idx] = quant::fp16_to_fp32(quant::fp32_to_fp16(backend.q[idx]));
-    }
-  }
-
-  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
-  const size_t cache_offset = layer_cache_offset(backend, layer_index, position, kv_dim);
-  store_fp16_rounded_cache(
-      std::span<const float>(backend.k.data(), static_cast<size_t>(kv_dim)),
-      backend.key_cache.data() + cache_offset);
-  store_fp16_rounded_cache(
-      std::span<const float>(backend.v.data(), static_cast<size_t>(kv_dim)),
-      backend.value_cache.data() + cache_offset);
-
-  for (int32_t kv_head = 0; kv_head < backend.n_head_kv; ++kv_head) {
-    const size_t src_offset =
-        static_cast<size_t>(kv_head) * static_cast<size_t>(backend.head_dim_kv);
-    const size_t flash_cache_offset = flash_layer_cache_head_position_offset(
-        backend, layer_index, kv_head, position, backend.head_dim_kv);
-    store_fp16_rounded_cache(
-        std::span<const float>(
-            backend.k.data() + static_cast<std::ptrdiff_t>(src_offset),
-            static_cast<size_t>(backend.head_dim_kv)),
-        backend.flash_key_cache.data() + flash_cache_offset);
-    store_fp16_rounded_cache(
-        std::span<const float>(
-            backend.v.data() + static_cast<std::ptrdiff_t>(src_offset),
-            static_cast<size_t>(backend.head_dim_kv)),
-        backend.flash_value_cache.data() + flash_cache_offset);
-  }
-
-  if (!run_attention<mode>(backend, layer_index, position) ||
+  if (!store_attention_kv_cache(
+          backend,
+          layer_index,
+          position,
+          std::span<const float>(backend.k.data(), backend.k.size()),
+          std::span<const float>(backend.v.data(), backend.v.size())) ||
+      !run_attention<mode>(backend, layer_index, position) ||
       !matmul_vector(backend, block.attention_output, backend.attn_ctx, backend.projected)) {
     return false;
   }
@@ -1359,9 +2170,23 @@ inline bool run_layer(native_backend & backend,
     backend.hidden[static_cast<size_t>(idx)] += backend.projected[static_cast<size_t>(idx)];
   }
 
-  if (!rms_norm(backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm) ||
-      !matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
-      !matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+  if (!rms_norm(backend.hidden, block.feed_forward_norm, backend.rms_epsilon, backend.norm)) {
+    return false;
+  }
+
+  const bool gate_up_shared_packed_q8_0 =
+      packed_q8_0_input_path_supported(backend, block.feed_forward_gate) &&
+      packed_q8_0_input_path_supported(backend, block.feed_forward_up);
+  if (gate_up_shared_packed_q8_0) {
+    if (!prepare_packed_q8_0_input(backend, backend.norm) ||
+        !matmul_vector_prepared_packed_q8_0_input(
+            backend, block.feed_forward_gate, block.feed_forward_gate.cols, backend.gate) ||
+        !matmul_vector_prepared_packed_q8_0_input(
+            backend, block.feed_forward_up, block.feed_forward_up.cols, backend.up)) {
+      return false;
+    }
+  } else if (!matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
+             !matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
     return false;
   }
 
@@ -1395,6 +2220,14 @@ inline bool run_layer_nonflash(native_backend & backend,
 inline bool compute_logits(native_backend & backend) noexcept {
   if (!rms_norm(backend.hidden, backend.output_norm, backend.rms_epsilon, backend.norm)) {
     return false;
+  }
+
+  const bool packed_q8_0_logits_path =
+      packed_q8_0_input_path_supported(backend, backend.output);
+  if (packed_q8_0_logits_path) {
+    return prepare_packed_q8_0_input(backend, backend.norm) &&
+        matmul_vector_prepared_packed_q8_0_input(
+               backend, backend.output, backend.n_embd, backend.bound_logits);
   }
 
   const bool packed_q8_logits_path =
@@ -1438,11 +2271,10 @@ inline bool compute_logits_preselected_argmax(native_backend & backend,
 }
 
 template <emel::generator::attention_mode mode>
-inline bool run_prefill(native_backend & backend) noexcept {
-  backend.kv_cache_tokens = 0;
-
-  const size_t token_count = static_cast<size_t>(backend.bound_token_count);
-  for (size_t token_index = 0; token_index < token_count; ++token_index) {
+inline bool run_prefill_scalar_tokens(native_backend & backend,
+                                      const size_t token_begin,
+                                      const size_t token_end) noexcept {
+  for (size_t token_index = token_begin; token_index < token_end; ++token_index) {
     const int32_t token_id = backend.bound_tokens[token_index];
     const int32_t position = backend.bound_positions[token_index];
     if (token_id < 0 ||
@@ -1464,6 +2296,188 @@ inline bool run_prefill(native_backend & backend) noexcept {
     backend.kv_cache_tokens = position + 1;
   }
 
+  return true;
+}
+
+template <emel::generator::attention_mode mode>
+inline bool run_layer_chunk4(native_backend & backend,
+                             const int32_t layer_index,
+                             const size_t token_base) noexcept {
+  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  const int32_t q_dim = backend.n_head * backend.head_dim;
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const int32_t ffn_dim = block.feed_forward_gate.rows;
+
+  if (!rms_norm_chunk4(
+          backend.hidden_chunk4,
+          backend.n_embd,
+          block.attention_norm,
+          backend.rms_epsilon,
+          backend.norm_chunk4) ||
+      !prepare_packed_q8_0_chunk4_input(backend, backend.norm_chunk4, backend.n_embd) ||
+      !matmul_chunk4_prepared_packed_q8_0_input(
+          backend, block.attention_q, block.attention_q.cols, backend.q_chunk4) ||
+      !matmul_chunk4_prepared_packed_q8_0_input(
+          backend, block.attention_k, block.attention_k.cols, backend.k_chunk4) ||
+      !matmul_chunk4_prepared_packed_q8_0_input(
+          backend, block.attention_v, block.attention_v.cols, backend.v_chunk4)) {
+    return false;
+  }
+
+  const bool qwen3_runtime = is_qwen3_runtime(backend);
+  for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
+    const int32_t position = backend.bound_positions[token_base + static_cast<size_t>(row)];
+    auto q_row = chunk4_row_span<float>(std::span<float>(backend.q_chunk4), row, q_dim);
+    auto k_row = chunk4_row_span<float>(std::span<float>(backend.k_chunk4), row, kv_dim);
+    const auto v_row = chunk4_row_span<const float>(
+        std::span<const float>(backend.v_chunk4), row, kv_dim);
+
+    if (qwen3_runtime &&
+        (!apply_headwise_rms_norm(
+             q_row,
+             block.attention_q_norm,
+             backend.n_head,
+             backend.head_dim,
+             backend.rms_epsilon) ||
+         !apply_headwise_rms_norm(
+             k_row,
+             block.attention_k_norm,
+             backend.n_head_kv,
+             backend.head_dim_kv,
+             backend.rms_epsilon))) {
+      return false;
+    }
+
+    apply_rope(
+        q_row, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
+    apply_rope(k_row,
+               backend.n_head_kv,
+               backend.head_dim_kv,
+               backend.n_rot,
+               position,
+               backend.rope_freq_base);
+
+    if (!store_attention_kv_cache(backend, layer_index, position, k_row, v_row) ||
+        !run_attention_for_q_vector<mode>(backend, layer_index, position, q_row)) {
+      return false;
+    }
+
+    std::copy(
+        backend.attn_ctx.begin(),
+        backend.attn_ctx.end(),
+        chunk4_row_span<float>(std::span<float>(backend.attn_ctx_chunk4), row, q_dim).begin());
+    backend.kv_cache_tokens = position + 1;
+  }
+
+  if (!prepare_packed_q8_0_chunk4_input(backend, backend.attn_ctx_chunk4, q_dim) ||
+      !matmul_chunk4_prepared_packed_q8_0_input(
+          backend,
+          block.attention_output,
+          block.attention_output.cols,
+          backend.projected_chunk4) ||
+      !add_chunk4_rows_in_place(backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd) ||
+      !rms_norm_chunk4(
+          backend.hidden_chunk4,
+          backend.n_embd,
+          block.feed_forward_norm,
+          backend.rms_epsilon,
+          backend.norm_chunk4) ||
+      !prepare_packed_q8_0_chunk4_input(backend, backend.norm_chunk4, backend.n_embd) ||
+      !matmul_chunk4_prepared_packed_q8_0_input(
+          backend,
+          block.feed_forward_gate,
+          block.feed_forward_gate.cols,
+          backend.gate_chunk4) ||
+      !matmul_chunk4_prepared_packed_q8_0_input(
+          backend,
+          block.feed_forward_up,
+          block.feed_forward_up.cols,
+          backend.up_chunk4) ||
+      !apply_silu_mul_chunk4(
+          backend.gate_chunk4, backend.up_chunk4, ffn_dim, backend.ffn_hidden_chunk4) ||
+      !prepare_packed_q8_0_chunk4_input(backend, backend.ffn_hidden_chunk4, ffn_dim) ||
+      !matmul_chunk4_prepared_packed_q8_0_input(
+          backend,
+          block.feed_forward_down,
+          block.feed_forward_down.cols,
+          backend.projected_chunk4) ||
+      !add_chunk4_rows_in_place(backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd)) {
+    return false;
+  }
+
+  return true;
+}
+
+template <emel::generator::attention_mode mode>
+inline bool run_prefill_chunk4_tokens(native_backend & backend,
+                                      const size_t token_limit) noexcept {
+  for (size_t token_base = 0; token_base < token_limit;
+       token_base += static_cast<size_t>(k_prefill_q8_chunk_rows)) {
+    for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
+      const size_t token_index = token_base + static_cast<size_t>(row);
+      const int32_t token_id = backend.bound_tokens[token_index];
+      const int32_t position = backend.bound_positions[token_index];
+      if (token_id < 0 ||
+          token_id >= backend.token_embedding.rows ||
+          position < 0 ||
+          position >= backend.n_ctx ||
+          !copy_tensor_row(
+              *backend.token_embedding.tensor,
+              token_id,
+              chunk4_row_span<float>(
+                  std::span<float>(backend.hidden_chunk4), row, backend.n_embd))) {
+        return false;
+      }
+    }
+
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_layer_chunk4<mode>(backend, layer, token_base)) {
+        return false;
+      }
+    }
+
+    std::copy(
+        chunk4_row_span<const float>(
+            std::span<const float>(backend.hidden_chunk4),
+            k_prefill_q8_chunk_rows - 1,
+            backend.n_embd)
+            .begin(),
+        chunk4_row_span<const float>(
+            std::span<const float>(backend.hidden_chunk4),
+            k_prefill_q8_chunk_rows - 1,
+            backend.n_embd)
+            .end(),
+        backend.hidden.begin());
+  }
+
+  return true;
+}
+
+template <emel::generator::attention_mode mode>
+inline bool run_prefill(native_backend & backend) noexcept {
+  backend.kv_cache_tokens = 0;
+
+  const size_t token_count = static_cast<size_t>(backend.bound_token_count);
+  if (!run_prefill_scalar_tokens<mode>(backend, 0u, token_count)) {
+    return false;
+  }
+
+  return compute_logits(backend);
+}
+
+template <emel::generator::attention_mode mode>
+inline bool run_prefill_chunk4(native_backend & backend) noexcept {
+  backend.kv_cache_tokens = 0;
+
+  const size_t token_count = static_cast<size_t>(backend.bound_token_count);
+  const size_t chunk_limit =
+      token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk_rows));
+  if (chunk_limit == 0u ||
+      !run_prefill_chunk4_tokens<mode>(backend, chunk_limit) ||
+      !run_prefill_scalar_tokens<mode>(backend, chunk_limit, token_count)) {
+    return false;
+  }
+
   return compute_logits(backend);
 }
 
@@ -1480,28 +2494,27 @@ inline bool run_prefill_preselected_argmax(native_backend & backend,
                                            int32_t & selected_index,
                                            float & selected_score) noexcept {
   backend.kv_cache_tokens = 0;
+  if (!run_prefill_scalar_tokens<mode>(
+          backend, 0u, static_cast<size_t>(backend.bound_token_count))) {
+    return false;
+  }
+
+  return compute_logits_preselected_argmax(backend, selected_index, selected_score);
+}
+
+template <emel::generator::attention_mode mode>
+inline bool run_prefill_chunk4_preselected_argmax(native_backend & backend,
+                                                  int32_t & selected_index,
+                                                  float & selected_score) noexcept {
+  backend.kv_cache_tokens = 0;
 
   const size_t token_count = static_cast<size_t>(backend.bound_token_count);
-  for (size_t token_index = 0; token_index < token_count; ++token_index) {
-    const int32_t token_id = backend.bound_tokens[token_index];
-    const int32_t position = backend.bound_positions[token_index];
-    if (token_id < 0 ||
-        token_id >= backend.token_embedding.rows ||
-        position < 0 ||
-        position >= backend.n_ctx) {
-      return false;
-    }
-
-    if (!copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
-      return false;
-    }
-
-    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_layer<mode>(backend, layer, position)) {
-        return false;
-      }
-    }
-    backend.kv_cache_tokens = position + 1;
+  const size_t chunk_limit =
+      token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk_rows));
+  if (chunk_limit == 0u ||
+      !run_prefill_chunk4_tokens<mode>(backend, chunk_limit) ||
+      !run_prefill_scalar_tokens<mode>(backend, chunk_limit, token_count)) {
+    return false;
   }
 
   return compute_logits_preselected_argmax(backend, selected_index, selected_score);
@@ -1620,12 +2633,10 @@ inline emel::error::type prepare(native_backend & backend,
   }
 
   backend.head_dim = backend.n_embd / backend.n_head;
-
   if (!bind_tensor_rows(*backend.execution.token_embedding.tensor, backend.token_embedding) ||
       !dequantize_tensor_vector(*backend.execution.output_norm.tensor, backend.output_norm) ||
-      !bind_tensor_rows(*backend.execution.output.tensor, backend.output_native) ||
-      !prepare_output_logits(backend) ||
-      !prepare_logits_input_q8_workspace(backend)) {
+      !bind_output_projection(backend) ||
+      !prepare_output_logits(backend)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
@@ -1638,6 +2649,7 @@ inline emel::error::type prepare(native_backend & backend,
   }
 
   backend.blocks.resize(static_cast<size_t>(backend.n_layer));
+  const bool qwen3_runtime = is_qwen3_runtime(backend);
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
     emel::model::llama::detail::block_view block = {};
     if (emel::model::llama::detail::lookup_block_view(backend.execution, layer, block) !=
@@ -1650,6 +2662,10 @@ inline emel::error::type prepare(native_backend & backend,
         !bind_tensor_rows(*block.attention_q.tensor, weights.attention_q) ||
         !bind_tensor_rows(*block.attention_k.tensor, weights.attention_k) ||
         !bind_tensor_rows(*block.attention_v.tensor, weights.attention_v) ||
+        (qwen3_runtime &&
+         !dequantize_tensor_vector(*block.attention_q_norm.tensor, weights.attention_q_norm)) ||
+        (qwen3_runtime &&
+         !dequantize_tensor_vector(*block.attention_k_norm.tensor, weights.attention_k_norm)) ||
         !bind_tensor_rows(*block.attention_output.tensor, weights.attention_output) ||
         !dequantize_tensor_vector(*block.feed_forward_norm.tensor, weights.feed_forward_norm) ||
         !bind_tensor_rows(*block.feed_forward_gate.tensor, weights.feed_forward_gate) ||
@@ -1659,12 +2675,33 @@ inline emel::error::type prepare(native_backend & backend,
     }
   }
 
-  backend.head_dim_kv = backend.blocks[0].attention_k.rows / backend.n_head_kv;
+  if (!prepare_block_packed_q8_0_matrices(backend) ||
+      !prepare_logits_input_q8_workspace(backend) ||
+      !prepare_packed_q8_0_input_workspace(backend) ||
+      !prepare_packed_q8_0_chunk4_input_workspace(backend)) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  const int32_t declared_key_length = model_data.params.attention_key_length;
+  const int32_t declared_value_length = model_data.params.attention_value_length;
+  backend.head_dim = declared_key_length > 0 ? declared_key_length : backend.n_embd / backend.n_head;
+  backend.head_dim_kv =
+      declared_key_length > 0 ? declared_key_length : backend.blocks[0].attention_k.rows / backend.n_head_kv;
   backend.n_rep = backend.n_head / backend.n_head_kv;
+  const int32_t q_dim = backend.n_head * backend.head_dim;
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
 
   if (backend.head_dim_kv <= 0 ||
+      backend.head_dim <= 0 ||
       backend.n_rep <= 0 ||
-      backend.blocks[0].attention_q.rows != backend.n_embd ||
+      (declared_value_length > 0 && declared_value_length != backend.head_dim_kv) ||
+      backend.blocks[0].attention_q.cols != backend.n_embd ||
+      backend.blocks[0].attention_q.rows != q_dim ||
+      backend.blocks[0].attention_k.cols != backend.n_embd ||
+      backend.blocks[0].attention_k.rows != kv_dim ||
+      backend.blocks[0].attention_v.cols != backend.n_embd ||
+      backend.blocks[0].attention_v.rows != kv_dim ||
+      backend.blocks[0].attention_output.cols != q_dim ||
       backend.blocks[0].attention_output.rows != backend.n_embd ||
       static_cast<int32_t>(backend.blocks[0].attention_norm.size()) != backend.n_embd ||
       static_cast<int32_t>(backend.blocks[0].feed_forward_norm.size()) != backend.n_embd ||
@@ -1674,7 +2711,15 @@ inline emel::error::type prepare(native_backend & backend,
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
-  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  if (qwen3_runtime) {
+    for (const auto & block : backend.blocks) {
+      if (static_cast<int32_t>(block.attention_q_norm.size()) != backend.head_dim ||
+          static_cast<int32_t>(block.attention_k_norm.size()) != backend.head_dim_kv) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+    }
+  }
+
   backend.key_cache.resize(static_cast<size_t>(backend.n_layer) *
                            static_cast<size_t>(backend.n_ctx) *
                            static_cast<size_t>(kv_dim));
@@ -1691,20 +2736,37 @@ inline emel::error::type prepare(native_backend & backend,
   backend.bound_tokens.resize(static_cast<size_t>(backend.n_ctx));
   backend.bound_positions.resize(static_cast<size_t>(backend.n_ctx));
   backend.hidden.resize(static_cast<size_t>(backend.n_embd));
+  backend.hidden_chunk4.resize(
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(backend.n_embd));
   backend.norm.resize(static_cast<size_t>(backend.n_embd));
-  backend.q.resize(static_cast<size_t>(backend.n_embd));
-  backend.q_attn.resize(static_cast<size_t>(backend.n_embd));
+  backend.norm_chunk4.resize(backend.hidden_chunk4.size());
+  backend.q.resize(static_cast<size_t>(q_dim));
+  backend.q_attn.resize(static_cast<size_t>(q_dim));
+  backend.q_chunk4.resize(
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(q_dim));
   backend.k.resize(static_cast<size_t>(kv_dim));
+  backend.k_chunk4.resize(
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(kv_dim));
   backend.v.resize(static_cast<size_t>(kv_dim));
+  backend.v_chunk4.resize(backend.k_chunk4.size());
   backend.attn_scores.resize(static_cast<size_t>(backend.n_ctx));
   backend.attn_probs.resize(static_cast<size_t>(backend.n_ctx));
   backend.attn_probs_rounded.resize(static_cast<size_t>(backend.n_ctx));
   backend.attn_value_column.resize(static_cast<size_t>(backend.n_ctx));
-  backend.attn_ctx.resize(static_cast<size_t>(backend.n_embd));
+  backend.attn_ctx.resize(static_cast<size_t>(q_dim));
+  backend.attn_ctx_chunk4.resize(backend.q_chunk4.size());
   backend.projected.resize(static_cast<size_t>(backend.n_embd));
+  backend.projected_chunk4.resize(backend.hidden_chunk4.size());
   backend.gate.resize(static_cast<size_t>(backend.blocks[0].feed_forward_gate.rows));
+  backend.gate_chunk4.resize(
+      static_cast<size_t>(k_prefill_q8_chunk_rows) *
+      static_cast<size_t>(backend.blocks[0].feed_forward_gate.rows));
   backend.up.resize(static_cast<size_t>(backend.blocks[0].feed_forward_up.rows));
+  backend.up_chunk4.resize(
+      static_cast<size_t>(k_prefill_q8_chunk_rows) *
+      static_cast<size_t>(backend.blocks[0].feed_forward_up.rows));
   backend.ffn_hidden.resize(static_cast<size_t>(backend.blocks[0].feed_forward_gate.rows));
+  backend.ffn_hidden_chunk4.resize(backend.gate_chunk4.size());
   build_lifecycle(backend);
 
   return emel::error::cast(emel::model::loader::error::none);
@@ -1856,6 +2918,44 @@ inline bool run_kernel_nonflash(const emel::graph::processor::event::execute & r
   return run_kernel_mode<emel::generator::attention_mode::nonflash>(request, err_out);
 }
 
+template <emel::generator::attention_mode mode>
+inline bool run_kernel_prefill_chunk4_mode(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  auto * io = static_cast<emel::generator::compute_io *>(request.compute_ctx);
+  auto * backend = static_cast<native_backend *>(io != nullptr ? io->backend_ctx : nullptr);
+  const auto * plan = request_plan(request, err_out);
+  if (plan == nullptr || plan->kind != step_kind::prefill ||
+      !check_backend(backend, err_out) || !backend->bound_ready ||
+      backend->bound_token_count < k_prefill_q8_chunk_rows ||
+      !prefill_chunk4_q8_gemm_supported(*backend)) {
+    if (err_out != nullptr) {
+      *err_out = k_error_invalid;
+    }
+    return false;
+  }
+
+  const bool ok = run_prefill_chunk4<mode>(*backend);
+  if (err_out != nullptr) {
+    *err_out = ok ? k_error_ok : k_error_invalid;
+  }
+  return ok;
+}
+
+inline bool run_kernel_flash_prefill_chunk4(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_mode<emel::generator::attention_mode::flash>(
+      request, err_out);
+}
+
+inline bool run_kernel_nonflash_prefill_chunk4(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_mode<emel::generator::attention_mode::nonflash>(
+      request, err_out);
+}
+
 inline bool run_kernel_flash_preselected_argmax(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
@@ -1868,6 +2968,46 @@ inline bool run_kernel_nonflash_preselected_argmax(
     int32_t * err_out) noexcept {
   return run_kernel_mode_preselected_argmax<emel::generator::attention_mode::nonflash>(
       request, err_out);
+}
+
+template <emel::generator::attention_mode mode>
+inline bool run_kernel_prefill_chunk4_preselected_argmax_mode(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  auto * io = static_cast<emel::generator::compute_io *>(request.compute_ctx);
+  auto * backend = static_cast<native_backend *>(io != nullptr ? io->backend_ctx : nullptr);
+  const auto * plan = request_plan(request, err_out);
+  if (plan == nullptr || plan->kind != step_kind::prefill ||
+      !check_backend(backend, err_out) || !backend->bound_ready ||
+      backend->bound_token_count < k_prefill_q8_chunk_rows ||
+      !prefill_chunk4_q8_gemm_supported(*backend) ||
+      io == nullptr || io->selected_token_out == nullptr || io->selected_score_out == nullptr) {
+    if (err_out != nullptr) {
+      *err_out = k_error_invalid;
+    }
+    return false;
+  }
+
+  const bool ok = run_prefill_chunk4_preselected_argmax<mode>(
+      *backend, *io->selected_token_out, *io->selected_score_out);
+  if (err_out != nullptr) {
+    *err_out = ok ? k_error_ok : k_error_invalid;
+  }
+  return ok;
+}
+
+inline bool run_kernel_flash_prefill_chunk4_preselected_argmax(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_preselected_argmax_mode<
+      emel::generator::attention_mode::flash>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_prefill_chunk4_preselected_argmax(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_preselected_argmax_mode<
+      emel::generator::attention_mode::nonflash>(request, err_out);
 }
 
 inline bool extract_outputs(const emel::graph::processor::event::execute & request,

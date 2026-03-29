@@ -318,7 +318,9 @@ struct request_conditioning {
       ev.ctx.prompt_token_count,
       ev.ctx.phase_code,
     };
-    prepare_ev.input = ev.request.prompt;
+    prepare_ev.messages = ev.request.messages;
+    prepare_ev.add_generation_prompt = ev.request.add_generation_prompt;
+    prepare_ev.enable_thinking = ev.request.enable_thinking;
     prepare_ev.add_special = ctx.conditioning.add_special;
     prepare_ev.parse_special = ctx.conditioning.parse_special;
     prepare_ev.use_bind_defaults = true;
@@ -346,10 +348,11 @@ struct request_planning {
       .n_tokens = ev.ctx.prompt_token_count,
       .n_steps = 1,
       .mode = emel::batch::planner::event::plan_mode::simple,
-      .seq_masks = ctx.buffers.seq_masks.data(),
-      .seq_masks_count = 1,
-      .seq_primary_ids = ctx.buffers.seq_primary_ids.data(),
-      .seq_primary_ids_count = 1,
+      // Simple single-sequence prompt planning does not need per-token sequence metadata.
+      .seq_masks = nullptr,
+      .seq_masks_count = 0,
+      .seq_primary_ids = nullptr,
+      .seq_primary_ids_count = 0,
       .equal_sequential = true,
       .seq_mask_words = k_sequence_mask_words,
       .output_mask = nullptr,
@@ -583,10 +586,24 @@ struct request_prefill_compute_flash {
   }
 };
 
+struct request_prefill_compute_flash_chunk4 {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<emel::generator::detail::step_kind::prefill,
+                          emel::generator::detail::run_kernel_flash_prefill_chunk4>(ev, ctx);
+  }
+};
+
 struct request_prefill_compute_nonflash {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
     request_phase_compute<emel::generator::detail::step_kind::prefill,
                           emel::generator::detail::run_kernel_nonflash>(ev, ctx);
+  }
+};
+
+struct request_prefill_compute_nonflash_chunk4 {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute<emel::generator::detail::step_kind::prefill,
+                          emel::generator::detail::run_kernel_nonflash_prefill_chunk4>(ev, ctx);
   }
 };
 
@@ -598,11 +615,27 @@ struct request_prefill_compute_flash_preselected_argmax {
   }
 };
 
+struct request_prefill_compute_flash_chunk4_preselected_argmax {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute_preselected_argmax<
+        emel::generator::detail::step_kind::prefill,
+        emel::generator::detail::run_kernel_flash_prefill_chunk4_preselected_argmax>(ev, ctx);
+  }
+};
+
 struct request_prefill_compute_nonflash_preselected_argmax {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
     request_phase_compute_preselected_argmax<emel::generator::detail::step_kind::prefill,
                                              emel::generator::detail::
                                                  run_kernel_nonflash_preselected_argmax>(ev, ctx);
+  }
+};
+
+struct request_prefill_compute_nonflash_chunk4_preselected_argmax {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    request_phase_compute_preselected_argmax<
+        emel::generator::detail::step_kind::prefill,
+        emel::generator::detail::run_kernel_nonflash_prefill_chunk4_preselected_argmax>(ev, ctx);
   }
 };
 
@@ -939,11 +972,17 @@ inline constexpr request_allocate_sequence request_allocate_sequence{};
 inline constexpr request_prefill_slots request_prefill_slots{};
 inline constexpr request_memory_snapshot request_memory_snapshot{};
 inline constexpr request_prefill_compute_flash request_prefill_compute_flash{};
+inline constexpr request_prefill_compute_flash_chunk4 request_prefill_compute_flash_chunk4{};
 inline constexpr request_prefill_compute_nonflash request_prefill_compute_nonflash{};
+inline constexpr request_prefill_compute_nonflash_chunk4 request_prefill_compute_nonflash_chunk4{};
 inline constexpr request_prefill_compute_flash_preselected_argmax
     request_prefill_compute_flash_preselected_argmax{};
+inline constexpr request_prefill_compute_flash_chunk4_preselected_argmax
+    request_prefill_compute_flash_chunk4_preselected_argmax{};
 inline constexpr request_prefill_compute_nonflash_preselected_argmax
     request_prefill_compute_nonflash_preselected_argmax{};
+inline constexpr request_prefill_compute_nonflash_chunk4_preselected_argmax
+    request_prefill_compute_nonflash_chunk4_preselected_argmax{};
 inline constexpr request_decode_slots request_decode_slots{};
 inline constexpr request_decode_compute_flash request_decode_compute_flash{};
 inline constexpr request_decode_compute_nonflash request_decode_compute_nonflash{};
