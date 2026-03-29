@@ -25,9 +25,11 @@ using emel::kernel::test::flash_attn_reference_f16_scores;
 using emel::kernel::test::flash_attn_reference_masked_total_tokens;
 using emel::kernel::test::flash_attn_reference_online_softmax_f16_values;
 using emel::kernel::test::k_flash_online_f16_abs_tolerance;
+using emel::kernel::test::make_batch_major_dst;
 using emel::kernel::test::make_dst;
 using emel::kernel::test::make_packed_q8_0_x4_bl4_src;
 using emel::kernel::test::make_packed_q8_0_x4_bl8_src;
+using emel::kernel::test::make_packed_q8_0_x4_bl8_rhs_src;
 using emel::kernel::test::make_argmax_prepared_q6_k_x8_q8_src;
 using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_packed_q6_k_x8_src;
@@ -1295,6 +1297,102 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_matches_multi_block_native_reference
       .nth = 1,
   };
   CHECK_FALSE(machine.process_event(ev));
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q8_0_packed_bl8_matrix_x4_route_is_explicit_and_numeric_match") {
+  using emel::kernel::detail::quant::Q8_0_X4_ROWS;
+  using emel::kernel::detail::quant::QK8_0;
+  using emel::kernel::detail::quant::block_q8_0;
+
+  constexpr uint64_t row_count = 8u;
+  constexpr uint64_t rhs_rows = Q8_0_X4_ROWS;
+  constexpr uint64_t col_count = QK8_0 * 8u;
+  constexpr uint64_t block_count = col_count / QK8_0;
+
+  std::vector<block_q8_0> native_rows(static_cast<size_t>(row_count * block_count));
+  for (size_t row = 0; row < static_cast<size_t>(row_count); ++row) {
+    for (size_t block = 0; block < static_cast<size_t>(block_count); ++block) {
+      auto & cell = native_rows[row * static_cast<size_t>(block_count) + block];
+      cell.d = emel::kernel::detail::quant::fp32_to_fp16(
+          0.0078125f * static_cast<float>(((row + 3u) * (block + 5u)) % 23u + 1u));
+      for (size_t idx = 0; idx < cell.qs.size(); ++idx) {
+        const int32_t centered =
+            static_cast<int32_t>(((row + 7u) * 17u + (block + 11u) * 13u + idx * 5u) % 255u) -
+            127;
+        cell.qs[idx] = static_cast<int8_t>(std::clamp(centered, -127, 127));
+      }
+    }
+  }
+
+  std::vector<float> rhs_dense(static_cast<size_t>(rhs_rows * col_count), 0.0f);
+  for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
+    for (size_t col = 0; col < static_cast<size_t>(col_count); ++col) {
+      const int32_t centered =
+          static_cast<int32_t>(((row + 5u) * 19u + col * 7u) % 63u) - 31;
+      rhs_dense[row * static_cast<size_t>(col_count) + col] =
+          static_cast<float>(centered) * 0.015625f;
+    }
+  }
+
+  std::vector<block_q8_0> rhs_q8(static_cast<size_t>(rhs_rows * block_count));
+  for (size_t row = 0; row < static_cast<size_t>(rhs_rows); ++row) {
+    emel::kernel::detail::quant::quantize_row_q8_0_strided(
+        rhs_dense.data() + row * static_cast<size_t>(col_count),
+        1u,
+        rhs_q8.data() + row * static_cast<size_t>(block_count),
+        static_cast<int64_t>(col_count));
+  }
+
+  std::vector<float> reference(static_cast<size_t>(rhs_rows * row_count), 0.0f);
+  for (size_t rhs_row = 0; rhs_row < static_cast<size_t>(rhs_rows); ++rhs_row) {
+    for (size_t lhs_row = 0; lhs_row < static_cast<size_t>(row_count); ++lhs_row) {
+      reference[rhs_row * static_cast<size_t>(row_count) + lhs_row] =
+          emel::kernel::detail::dot_q8_0_q8_0_row_scalar(
+              native_rows.data() + lhs_row * static_cast<size_t>(block_count),
+              rhs_q8.data() + rhs_row * static_cast<size_t>(block_count),
+              block_count);
+    }
+  }
+
+  std::vector<uint8_t> packed_bl8(
+      sizeof(emel::kernel::detail::quant::block_q8_0x4) *
+      emel::kernel::detail::quant::packed_q8_0_x4_group_count(row_count) * block_count);
+  std::vector<uint8_t> rhs_packed_bl8(
+      sizeof(emel::kernel::detail::quant::block_q8_0x4) * block_count);
+  REQUIRE(emel::kernel::detail::quant::pack_q8_0_rows_x4_bl8(
+      native_rows.data(), row_count, col_count, packed_bl8.data()));
+  REQUIRE(emel::kernel::detail::quant::pack_q8_0_rows_x4_bl8(
+      rhs_q8.data(), rhs_rows, col_count, rhs_packed_bl8.data()));
+
+  std::vector<float> packed_out(static_cast<size_t>(rhs_rows * row_count), 0.0f);
+  aarch64_sm machine{};
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_packed_q8_0_x4_bl8_src(packed_bl8.data(), col_count, row_count),
+      .src1 = make_packed_q8_0_x4_bl8_rhs_src(rhs_packed_bl8.data(), rhs_rows, col_count),
+      .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
+  };
+  CHECK(machine.process_event(ev));
+  for (size_t idx = 0; idx < packed_out.size(); ++idx) {
+    CHECK(packed_out[idx] == doctest::Approx(reference[idx]).epsilon(1.0e-6f));
+  }
+  CHECK(machine.optimized_q8_0_dispatch_count() == 1u);
+  CHECK(machine.optimized_q8_0_packed_dispatch_count() == 1u);
+  CHECK(machine.optimized_q8_0_packed_bl8_dispatch_count() == 1u);
+  CHECK(machine.optimized_q8_0_packed_bl8_full_groups_dispatch_count() == 0u);
+  CHECK(machine.optimized_q8_0_packed_bl8_matrix_x4_dispatch_count() == 1u);
+#else
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_packed_q8_0_x4_bl8_src(packed_bl8.data(), col_count, row_count),
+      .src1 = make_packed_q8_0_x4_bl8_rhs_src(rhs_packed_bl8.data(), rhs_rows, col_count),
+      .dst = make_batch_major_dst(packed_out.data(), dtype::f32, rhs_rows, row_count),
+      .nth = 1,
+  };
+  CHECK_FALSE(machine.process_event(ev));
+  CHECK(machine.optimized_q8_0_packed_bl8_matrix_x4_dispatch_count() == 0u);
 #endif
 }
 

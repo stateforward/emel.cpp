@@ -179,6 +179,12 @@ inline bool uses_preselected_argmax_direct(const action::context & ctx) noexcept
       emel::generator::detail::preselected_argmax_direct_supported(ctx.compute.backend);
 }
 
+inline bool uses_prefill_chunk4_q8_gemm(const event::generate_run & ev,
+                                        const action::context & ctx) noexcept {
+  return ev.ctx.prompt_token_count >= emel::generator::detail::k_prefill_q8_chunk_rows &&
+      emel::generator::detail::prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
+}
+
 }  // namespace detail
 
 struct valid_initialize {
@@ -553,6 +559,46 @@ struct prefill_flash_runtime_supported {
 struct prefill_nonflash_runtime_required {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return !prefill_flash_runtime_supported{}(ev, ctx);
+  }
+};
+
+struct prefill_chunk4_q8_gemm_supported {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
+  }
+};
+
+struct prefill_chunk4_q8_gemm_required {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return !prefill_chunk4_q8_gemm_supported{}(ev, ctx);
+  }
+};
+
+struct compute_uses_materialized_logits_with_prefill_chunk4_q8_gemm {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return compute_uses_materialized_logits{}(ev, ctx) &&
+        prefill_chunk4_q8_gemm_supported{}(ev, ctx);
+  }
+};
+
+struct compute_uses_materialized_logits_with_prefill_scalar_runtime {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return compute_uses_materialized_logits{}(ev, ctx) &&
+        prefill_chunk4_q8_gemm_required{}(ev, ctx);
+  }
+};
+
+struct compute_uses_preselected_argmax_direct_with_prefill_chunk4_q8_gemm {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return compute_uses_preselected_argmax_direct{}(ev, ctx) &&
+        prefill_chunk4_q8_gemm_supported{}(ev, ctx);
+  }
+};
+
+struct compute_uses_preselected_argmax_direct_with_prefill_scalar_runtime {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return compute_uses_preselected_argmax_direct{}(ev, ctx) &&
+        prefill_chunk4_q8_gemm_required{}(ev, ctx);
   }
 };
 

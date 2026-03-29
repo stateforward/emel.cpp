@@ -1188,6 +1188,25 @@ inline bool has_required_src1(const request_type & request) noexcept {
   if constexpr (!requires_src1_v<request_type>) {
     return true;
   }
+  if constexpr (std::is_same_v<request_type, event::op_mul_mat>) {
+    const uint8_t src1_type = dtype_code(request.src1.type);
+    if (is_packed_q8_0_vector_dtype(src1_type)) {
+      const uint64_t rows = request.src1.ne[0];
+      const uint64_t cols = request.src1.ne[1];
+      const uint64_t group_count = quant::packed_q8_0_x4_group_count(rows);
+      const size_t group_bytes = quant::packed_q8_0_x4_group_storage_bytes(cols);
+      return request.src1.data != nullptr &&
+             cols != 0u &&
+             rows != 0u &&
+             group_bytes != 0u &&
+             request.src1.ne[2] == 1u &&
+             request.src1.ne[3] == 1u &&
+             request.src1.nb[0] == 1u &&
+             request.src1.nb[1] == group_bytes &&
+             request.src1.nb[2] == group_bytes * group_count &&
+             request.src1.nb[3] == request.src1.nb[2];
+    }
+  }
   return request.src1.data != nullptr &&
          is_supported_dtype(dtype_code(request.src1.type)) &&
          has_valid_tensor_layout(request.src1) &&
