@@ -58,7 +58,7 @@ inline constexpr std::string_view k_im_end = "<|im_end|>\n";
 inline constexpr std::string_view k_assistant_generation_prefix =
     "<|im_start|>assistant\n";
 inline constexpr std::string_view k_message_separator = "\n";
-inline constexpr int k_supported_formatter_sentinel = 0;
+inline int k_supported_formatter_sentinel = 0;
 
 inline bool role_supported(const std::string_view role) noexcept {
   return role == "system" || role == "user" || role == "assistant";
@@ -170,7 +170,7 @@ inline formatter_binding resolve_primary_template_binding(
     };
   }
   return formatter_binding{
-      .formatter_ctx = const_cast<int *>(&k_supported_formatter_sentinel),
+      .formatter_ctx = &k_supported_formatter_sentinel,
       .format_prompt = format_supported_contract,
       .support = support_kind::supported_contract,
       .contract = k_supported_contract,

@@ -371,9 +371,11 @@ struct sampler_config_failed {
 struct valid_generate {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
     return !ev.request.messages.empty() &&
+           ev.request.messages.data() != nullptr &&
            ev.request.max_tokens > 0 &&
            ev.request.max_tokens <= ctx.limits.decode_capacity &&
-           !ev.request.output.empty();
+           !ev.request.output.empty() &&
+           ev.request.output.data() != nullptr;
   }
 };
 

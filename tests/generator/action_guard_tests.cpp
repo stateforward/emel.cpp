@@ -327,9 +327,16 @@ TEST_CASE("generator structured message request and channel guards classify call
   generate.max_tokens = 0;
   CHECK(emel::generator::guard::invalid_generate{}(generate_run, context));
   generate.max_tokens = 2;
+  std::array<char, 16> output_buffer = {};
   generate.messages = {};
   CHECK(emel::generator::guard::invalid_generate{}(generate_run, context));
+  generate.messages = std::span<const emel::text::formatter::chat_message>{
+      static_cast<const emel::text::formatter::chat_message *>(nullptr), 1u};
+  CHECK(emel::generator::guard::invalid_generate{}(generate_run, context));
   generate.messages = std::span<const emel::text::formatter::chat_message>{k_generate_messages};
+  generate.output = std::span<char>{static_cast<char *>(nullptr), 1u};
+  CHECK(emel::generator::guard::invalid_generate{}(generate_run, context));
+  generate.output = std::span<char>{output_buffer};
   generate_ctx.tokens_generated = 2;
   CHECK(emel::generator::guard::decode_complete{}(generate_run, context));
   generate_ctx.tokens_generated = 0;
