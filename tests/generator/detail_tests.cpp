@@ -622,6 +622,42 @@ TEST_CASE("generator_detail_logits_route_helpers_cover_explicit_failure_edges") 
   CHECK_FALSE(emel::generator::detail::prepare_logits_input_q8_workspace(huge_backend));
 }
 
+TEST_CASE("generator_detail_packed_q8_0_input_workspace_helpers_are_explicit") {
+  std::vector<uint8_t> packed_storage(sizeof(emel::kernel::detail::quant::block_q8_0x4));
+  auto packed_tensor = make_tensor_record(
+      packed_storage.data(), emel::kernel::detail::dtype_q8_0_x4_bl8,
+      static_cast<int32_t>(QK8_0), 4);
+
+  emel::generator::detail::native_backend backend{};
+  backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+  backend.output.tensor = &packed_tensor;
+  backend.output.cols = static_cast<int32_t>(QK8_0);
+  backend.output.rows = 4;
+
+  REQUIRE(emel::generator::detail::prepare_packed_q8_0_input_workspace(backend));
+  CHECK(backend.packed_q8_0_input_storage.size() == 1u);
+
+#if defined(__aarch64__) && defined(__ARM_NEON)
+  CHECK(emel::generator::detail::packed_q8_0_input_path_supported(backend, backend.output));
+#else
+  CHECK_FALSE(emel::generator::detail::packed_q8_0_input_path_supported(backend, backend.output));
+#endif
+
+  std::vector<uint8_t> oversized_storage(
+      sizeof(emel::kernel::detail::quant::block_q8_0x4) *
+      (emel::generator::detail::quant::MAX_Q8_0_BLOCKS + 1u));
+  auto oversized_tensor = make_tensor_record(
+      oversized_storage.data(), emel::kernel::detail::dtype_q8_0_x4_bl8,
+      static_cast<int32_t>(
+          (emel::generator::detail::quant::MAX_Q8_0_BLOCKS + 1u) * QK8_0),
+      4);
+  backend.output.tensor = &oversized_tensor;
+  backend.output.cols = static_cast<int32_t>(
+      (emel::generator::detail::quant::MAX_Q8_0_BLOCKS + 1u) * QK8_0);
+  backend.output.rows = 4;
+  CHECK_FALSE(emel::generator::detail::prepare_packed_q8_0_input_workspace(backend));
+}
+
 TEST_CASE("generator_detail_tensor_helpers_reject_invalid_records_explicitly") {
   emel::generator::detail::tensor_matrix out = {};
   emel::model::data::tensor_record empty_tensor = {};
@@ -655,6 +691,7 @@ TEST_CASE("generator_detail_numeric_helpers_reject_invalid_shapes_explicitly") {
   int32_t selected_index = -1;
   float selected_score = 0.0f;
   std::array<emel::kernel::detail::quant::block_q8_k, 1> q8_input = {};
+  std::array<emel::kernel::detail::quant::block_q8_0, 1> q8_0_input = {};
 
   CHECK_FALSE(emel::generator::detail::matmul_vector(
       backend, empty_matrix, std::span<const float>(input.data(), input.size()),
@@ -667,11 +704,19 @@ TEST_CASE("generator_detail_numeric_helpers_reject_invalid_shapes_explicitly") {
       selected_score));
   CHECK_FALSE(emel::generator::detail::quantize_vector_q8_k(
       std::span<const float>(input.data(), 3u), std::span(q8_input.data(), q8_input.size())));
+  CHECK_FALSE(emel::generator::detail::quantize_vector_q8_0(
+      std::span<const float>(input.data(), 3u), std::span(q8_0_input.data(), q8_0_input.size())));
   CHECK_FALSE(emel::generator::detail::matmul_vector_q8_input(
       backend,
       empty_matrix,
       std::span<const emel::kernel::detail::quant::block_q8_k>(q8_input.data(), q8_input.size()),
       static_cast<int32_t>(QK_K),
+      std::span<float>(output.data(), output.size())));
+  CHECK_FALSE(emel::generator::detail::matmul_vector_q8_0_input(
+      backend,
+      empty_matrix,
+      std::span<const emel::kernel::detail::quant::block_q8_0>(q8_0_input.data(), q8_0_input.size()),
+      static_cast<int32_t>(QK8_0),
       std::span<float>(output.data(), output.size())));
   CHECK_FALSE(emel::generator::detail::matmul_vector_q8_input_argmax(
       backend,

@@ -32,6 +32,7 @@ using emel::kernel::test::make_argmax_prepared_q6_k_x8_q8_src;
 using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_packed_q6_k_x8_src;
 using emel::kernel::test::make_prepared_q6_k_x8_q8_src;
+using emel::kernel::test::make_q8_0_vector_src;
 using emel::kernel::test::make_q8_k_vector_src;
 using emel::kernel::test::make_quantized_src;
 using emel::kernel::test::make_src;
@@ -794,7 +795,7 @@ TEST_CASE("kernel_aarch64_supported_quantized_dispatch_is_alloc_free") {
       q8_rows.data(), 4u, QK8_0, q8_packed_storage.data()));
   const emel::kernel::event::op_mul_mat q8_packed_ev{
       .src0 = make_packed_q8_0_x4_bl4_src(q8_packed_storage.data(), QK8_0, 4u),
-      .src1 = make_src(q8_input.data(), dtype::f32, 1u, QK8_0),
+      .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(q8_out, dtype::f32, 1, 4u),
       .nth = 1,
   };
@@ -1034,6 +1035,9 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_packed_dispatch_at_kernel_seam") {
     }
     return values;
   }();
+  std::array<block_q8_0, QK8_0 / QK8_0> q8_input = {};
+  emel::kernel::detail::quant::quantize_row_q8_0_strided(
+      input.data(), 1u, q8_input.data(), static_cast<int64_t>(QK8_0));
 
   std::array<uint8_t,
              sizeof(emel::kernel::detail::quant::block_q8_0x4) *
@@ -1054,7 +1058,7 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_packed_dispatch_at_kernel_seam") {
 #if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
   const emel::kernel::event::op_mul_mat ev{
       .src0 = make_packed_q8_0_x4_bl8_src(packed_bl8.data(), QK8_0, row_count),
-      .src1 = make_src(input.data(), dtype::f32, 1u, QK8_0),
+      .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(out, dtype::f32, 1u, row_count),
       .nth = 1,
   };
@@ -1068,7 +1072,7 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_packed_dispatch_at_kernel_seam") {
 #elif defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
   const emel::kernel::event::op_mul_mat ev{
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), QK8_0, row_count),
-      .src1 = make_src(input.data(), dtype::f32, 1u, QK8_0),
+      .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(out, dtype::f32, 1u, row_count),
       .nth = 1,
   };
@@ -1082,7 +1086,7 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_packed_dispatch_at_kernel_seam") {
 #else
   const emel::kernel::event::op_mul_mat ev{
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), QK8_0, row_count),
-      .src1 = make_src(input.data(), dtype::f32, 1u, QK8_0),
+      .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(out, dtype::f32, 1u, row_count),
       .nth = 1,
   };
@@ -1148,7 +1152,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_is_explicit_and_numeric_match") {
 #if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
   const emel::kernel::event::op_mul_mat ev{
       .src0 = make_packed_q8_0_x4_bl8_src(packed_bl8.data(), QK8_0, row_count),
-      .src1 = make_src(input.data(), dtype::f32, 1u, QK8_0),
+      .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
       .nth = 1,
   };
@@ -1165,7 +1169,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_is_explicit_and_numeric_match") {
 #elif defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
   const emel::kernel::event::op_mul_mat ev{
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), QK8_0, row_count),
-      .src1 = make_src(input.data(), dtype::f32, 1u, QK8_0),
+      .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
       .nth = 1,
   };
@@ -1182,7 +1186,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_is_explicit_and_numeric_match") {
 #else
   const emel::kernel::event::op_mul_mat ev{
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), QK8_0, row_count),
-      .src1 = make_src(input.data(), dtype::f32, 1u, QK8_0),
+      .src1 = make_q8_0_vector_src(q8_input.data(), QK8_0),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
       .nth = 1,
   };
@@ -1254,7 +1258,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_matches_multi_block_native_reference
 #if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
   const emel::kernel::event::op_mul_mat ev{
       .src0 = make_packed_q8_0_x4_bl8_src(packed_bl8.data(), col_count, row_count),
-      .src1 = make_src(input.data(), dtype::f32, 1u, col_count),
+      .src1 = make_q8_0_vector_src(q8_input.data(), col_count),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
       .nth = 1,
   };
@@ -1265,7 +1269,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_matches_multi_block_native_reference
 #elif defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
   const emel::kernel::event::op_mul_mat ev{
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), col_count, row_count),
-      .src1 = make_src(input.data(), dtype::f32, 1u, col_count),
+      .src1 = make_q8_0_vector_src(q8_input.data(), col_count),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
       .nth = 1,
   };
@@ -1276,7 +1280,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_matches_multi_block_native_reference
 #else
   const emel::kernel::event::op_mul_mat ev{
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), col_count, row_count),
-      .src1 = make_src(input.data(), dtype::f32, 1u, col_count),
+      .src1 = make_q8_0_vector_src(q8_input.data(), col_count),
       .dst = make_dst(packed_out.data(), dtype::f32, 1u, row_count),
       .nth = 1,
   };

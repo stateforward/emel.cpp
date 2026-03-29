@@ -258,6 +258,9 @@ inline bool can_run_neon_mul_mat_q8_0_packed_request(const event::op_mul_mat & r
   const uint64_t group_count = ::emel::kernel::detail::quant::packed_q8_0_x4_group_count(m);
   const size_t group_bytes =
       ::emel::kernel::detail::quant::packed_q8_0_x4_group_storage_bytes(k);
+  const size_t rhs_row_bytes =
+      ::emel::kernel::detail::quantized_row_storage_bytes(
+          ::emel::kernel::detail::dtype_q8_0, k);
   return k != 0u &&
       m != 0u &&
       block_count != 0u &&
@@ -274,15 +277,19 @@ inline bool can_run_neon_mul_mat_q8_0_packed_request(const event::op_mul_mat & r
       request.dst.ne[3] == 1u &&
       ::emel::kernel::detail::dtype_code(request.src0.type) == packed_dtype &&
       ::emel::kernel::detail::dtype_code(request.src1.type) ==
-          ::emel::kernel::detail::dtype_f32 &&
+          ::emel::kernel::detail::dtype_q8_0 &&
       ::emel::kernel::detail::dtype_code(request.dst.type) ==
           ::emel::kernel::detail::dtype_f32 &&
       request.src0.nb[0] == 1u &&
       group_bytes != 0u &&
+      rhs_row_bytes != 0u &&
       request.src0.nb[1] == group_bytes &&
       request.src0.nb[2] == group_bytes * group_count &&
       request.src0.nb[3] == request.src0.nb[2] &&
-      is_dense_contiguous(request.src1) &&
+      request.src1.nb[0] == 1u &&
+      request.src1.nb[1] == rhs_row_bytes &&
+      request.src1.nb[2] == rhs_row_bytes &&
+      request.src1.nb[3] == rhs_row_bytes &&
       is_dense_contiguous(request.dst);
 }
 
@@ -1678,30 +1685,20 @@ inline void store_q8_0_x4_results(float * dst,
   }
 }
 
-inline void store_q8_0_x4_results(float * dst,
-                                  const uint64_t row_base,
-                                  const uint64_t total_rows,
-                                  const std::array<float, 4> & values) noexcept {
-  const uint64_t remaining = total_rows - row_base;
-  const uint64_t store_count = std::min<uint64_t>(remaining, 4u);
-  for (uint64_t lane = 0; lane < store_count; ++lane) {
-    dst[row_base + lane] = values[static_cast<size_t>(lane)];
-  }
-}
-
-inline void accumulate_q8_0_x4_block(
+inline float32x4_t q8_0_x4_block_scale_neon(
     const ::emel::kernel::detail::quant::block_q8_0x4 & lhs,
-    const ::emel::kernel::detail::quant::block_q8_0 & rhs,
-    const int32x4_t isum_vec,
-    std::array<float, 4> & acc) noexcept {
-  alignas(16) int32_t isum[4] = {};
-  vst1q_s32(isum, isum_vec);
-  const float rhs_scale = ::emel::kernel::detail::quant::fp16_to_fp32(rhs.d);
-  for (uint64_t lane = 0; lane < 4u; ++lane) {
-    acc[static_cast<size_t>(lane)] +=
-        static_cast<float>(isum[lane]) *
-        (::emel::kernel::detail::quant::fp16_to_fp32(lhs.d[lane]) * rhs_scale);
-  }
+    const ::emel::kernel::detail::quant::block_q8_0 & rhs) noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON)
+  const float32x4_t lhs_scale =
+      vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(lhs.d.data())));
+  const float32x4_t rhs_scale =
+      vcvt_f32_f16(vreinterpret_f16_u16(vdup_n_u16(rhs.d)));
+  return vmulq_f32(lhs_scale, rhs_scale);
+#else
+  (void) lhs;
+  (void) rhs;
+  return vdupq_n_f32(0.0f);
+#endif
 }
 
 inline int32_t q6_k_sum_mins_neon(const ::emel::kernel::detail::quant::block_q6_k & lhs,
@@ -2622,27 +2619,22 @@ inline void execute_neon_mul_mat_q8_0_packed_bl4_unchecked(
   const uint64_t m = request.src0.ne[1];
   const uint64_t block_count = k / ::emel::kernel::detail::quant::QK8_0;
   const uint64_t group_count = ::emel::kernel::detail::quant::packed_q8_0_x4_group_count(m);
-  alignas(64) std::array<::emel::kernel::detail::quant::block_q8_0,
-                         ::emel::kernel::detail::quant::MAX_Q8_0_BLOCKS>
-      q8_blocks = {};
-
-  ::emel::kernel::detail::quant::quantize_row_q8_0_strided(
-      static_cast<const float *>(request.src1.data),
-      1u,
-      q8_blocks.data(),
-      static_cast<int64_t>(k));
   const auto * packed =
       static_cast<const ::emel::kernel::detail::quant::block_q8_0x4 *>(request.src0.data);
+  const auto * q8_blocks =
+      static_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(request.src1.data);
   float * dst = static_cast<float *>(request.dst.data);
 
   for (uint64_t group = 0; group < group_count; ++group) {
-    std::array<float, 4> acc = {};
+    float32x4_t acc = vdupq_n_f32(0.0f);
     const uint64_t group_offset = group * block_count;
     for (uint64_t block = 0; block < block_count; ++block) {
       const auto & lhs_block = packed[group_offset + block];
       const auto & rhs_block = q8_blocks[block];
       const int32x4_t isum = dot_q8_0_x4_block_sum_bl4_neon(lhs_block, rhs_block);
-      accumulate_q8_0_x4_block(lhs_block, rhs_block, isum, acc);
+      acc = vfmaq_f32(acc,
+                      vcvtq_f32_s32(isum),
+                      q8_0_x4_block_scale_neon(lhs_block, rhs_block));
     }
     store_q8_0_x4_results(dst, group * 4u, m, acc);
   }
@@ -2658,27 +2650,22 @@ inline void execute_neon_mul_mat_q8_0_packed_bl8_unchecked(
   const uint64_t m = request.src0.ne[1];
   const uint64_t block_count = k / ::emel::kernel::detail::quant::QK8_0;
   const uint64_t group_count = ::emel::kernel::detail::quant::packed_q8_0_x4_group_count(m);
-  alignas(64) std::array<::emel::kernel::detail::quant::block_q8_0,
-                         ::emel::kernel::detail::quant::MAX_Q8_0_BLOCKS>
-      q8_blocks = {};
-
-  ::emel::kernel::detail::quant::quantize_row_q8_0_strided(
-      static_cast<const float *>(request.src1.data),
-      1u,
-      q8_blocks.data(),
-      static_cast<int64_t>(k));
   const auto * packed =
       static_cast<const ::emel::kernel::detail::quant::block_q8_0x4 *>(request.src0.data);
+  const auto * q8_blocks =
+      static_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(request.src1.data);
   float * dst = static_cast<float *>(request.dst.data);
 
   for (uint64_t group = 0; group < group_count; ++group) {
-    std::array<float, 4> acc = {};
+    float32x4_t acc = vdupq_n_f32(0.0f);
     const uint64_t group_offset = group * block_count;
     for (uint64_t block = 0; block < block_count; ++block) {
       const auto & lhs_block = packed[group_offset + block];
       const auto & rhs_block = q8_blocks[block];
       const int32x4_t isum = dot_q8_0_x4_block_sum_bl8_neon(lhs_block, rhs_block);
-      accumulate_q8_0_x4_block(lhs_block, rhs_block, isum, acc);
+      acc = vfmaq_f32(acc,
+                      vcvtq_f32_s32(isum),
+                      q8_0_x4_block_scale_neon(lhs_block, rhs_block));
     }
     store_q8_0_x4_results(dst, group * 4u, m, acc);
   }
