@@ -1617,65 +1617,15 @@ inline float dot_q8_0_q8_0_row_neon(const ::emel::kernel::detail::quant::block_q
   return sum;
 }
 
-inline int32x4_t dot_q8_0_x4_block_sum_bl4_neon(
-    const ::emel::kernel::detail::quant::block_q8_0x4 & lhs,
-    const ::emel::kernel::detail::quant::block_q8_0 & rhs) noexcept {
-#if defined(__ARM_FEATURE_DOTPROD)
-  const int8x16x4_t lhs_low = vld1q_s8_x4(lhs.qs.data());
-  const int8x16x4_t lhs_high = vld1q_s8_x4(lhs.qs.data() + 64);
-  const int8x16x2_t rhs_chunks = vld1q_s8_x2(rhs.qs.data());
-
-  int32x4_t acc = vdupq_n_s32(0);
-  acc = vdotq_laneq_s32(acc, lhs_low.val[0], rhs_chunks.val[0], 0);
-  acc = vdotq_laneq_s32(acc, lhs_low.val[1], rhs_chunks.val[0], 1);
-  acc = vdotq_laneq_s32(acc, lhs_low.val[2], rhs_chunks.val[0], 2);
-  acc = vdotq_laneq_s32(acc, lhs_low.val[3], rhs_chunks.val[0], 3);
-  acc = vdotq_laneq_s32(acc, lhs_high.val[0], rhs_chunks.val[1], 0);
-  acc = vdotq_laneq_s32(acc, lhs_high.val[1], rhs_chunks.val[1], 1);
-  acc = vdotq_laneq_s32(acc, lhs_high.val[2], rhs_chunks.val[1], 2);
-  acc = vdotq_laneq_s32(acc, lhs_high.val[3], rhs_chunks.val[1], 3);
-  return acc;
-#else
-  (void) lhs;
-  (void) rhs;
-  return vdupq_n_s32(0);
-#endif
-}
-
-inline int32x4_t dot_q8_0_x4_block_sum_bl8_neon(
-    const ::emel::kernel::detail::quant::block_q8_0x4 & lhs,
-    const ::emel::kernel::detail::quant::block_q8_0 & rhs) noexcept {
-#if defined(__ARM_FEATURE_DOTPROD)
-  const int8x16x4_t lhs_low = vld1q_s8_x4(lhs.qs.data());
-  const int8x16x4_t lhs_high = vld1q_s8_x4(lhs.qs.data() + 64);
-  const int8x8x4_t rhs_chunks = vld1_s8_x4(rhs.qs.data());
-  const int8x16_t rhs0 = vcombine_s8(rhs_chunks.val[0], rhs_chunks.val[0]);
-  const int8x16_t rhs1 = vcombine_s8(rhs_chunks.val[1], rhs_chunks.val[1]);
-  const int8x16_t rhs2 = vcombine_s8(rhs_chunks.val[2], rhs_chunks.val[2]);
-  const int8x16_t rhs3 = vcombine_s8(rhs_chunks.val[3], rhs_chunks.val[3]);
-
-  int32x4_t acc0 = vdupq_n_s32(0);
-  int32x4_t acc1 = vdupq_n_s32(0);
-  acc0 = vdotq_s32(acc0, lhs_low.val[0], rhs0);
-  acc1 = vdotq_s32(acc1, lhs_low.val[1], rhs0);
-  acc0 = vdotq_s32(acc0, lhs_low.val[2], rhs1);
-  acc1 = vdotq_s32(acc1, lhs_low.val[3], rhs1);
-  acc0 = vdotq_s32(acc0, lhs_high.val[0], rhs2);
-  acc1 = vdotq_s32(acc1, lhs_high.val[1], rhs2);
-  acc0 = vdotq_s32(acc0, lhs_high.val[2], rhs3);
-  acc1 = vdotq_s32(acc1, lhs_high.val[3], rhs3);
-  return vpaddq_s32(acc0, acc1);
-#else
-  (void) lhs;
-  (void) rhs;
-  return vdupq_n_s32(0);
-#endif
-}
-
 inline void store_q8_0_x4_results(float * dst,
                                   const uint64_t row_base,
                                   const uint64_t total_rows,
                                   const float32x4_t values) noexcept {
+  if ((row_base + 4u) <= total_rows) {
+    vst1q_f32(dst + row_base, values);
+    return;
+  }
+
   alignas(16) float lanes[4] = {};
   vst1q_f32(lanes, values);
   const uint64_t remaining = total_rows - row_base;
@@ -1683,22 +1633,6 @@ inline void store_q8_0_x4_results(float * dst,
   for (uint64_t lane = 0; lane < store_count; ++lane) {
     dst[row_base + lane] = lanes[lane];
   }
-}
-
-inline float32x4_t q8_0_x4_block_scale_neon(
-    const ::emel::kernel::detail::quant::block_q8_0x4 & lhs,
-    const ::emel::kernel::detail::quant::block_q8_0 & rhs) noexcept {
-#if defined(__aarch64__) && defined(__ARM_NEON)
-  const float32x4_t lhs_scale =
-      vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(lhs.d.data())));
-  const float32x4_t rhs_scale =
-      vcvt_f32_f16(vreinterpret_f16_u16(vdup_n_u16(rhs.d)));
-  return vmulq_f32(lhs_scale, rhs_scale);
-#else
-  (void) lhs;
-  (void) rhs;
-  return vdupq_n_f32(0.0f);
-#endif
 }
 
 inline int32_t q6_k_sum_mins_neon(const ::emel::kernel::detail::quant::block_q6_k & lhs,
@@ -2619,22 +2553,39 @@ inline void execute_neon_mul_mat_q8_0_packed_bl4_unchecked(
   const uint64_t m = request.src0.ne[1];
   const uint64_t block_count = k / ::emel::kernel::detail::quant::QK8_0;
   const uint64_t group_count = ::emel::kernel::detail::quant::packed_q8_0_x4_group_count(m);
-  const auto * packed =
+  const auto * packed_base =
       static_cast<const ::emel::kernel::detail::quant::block_q8_0x4 *>(request.src0.data);
   const auto * q8_blocks =
       static_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(request.src1.data);
   float * dst = static_cast<float *>(request.dst.data);
 
   for (uint64_t group = 0; group < group_count; ++group) {
+    const auto * packed = packed_base + (group * block_count);
     float32x4_t acc = vdupq_n_f32(0.0f);
-    const uint64_t group_offset = group * block_count;
     for (uint64_t block = 0; block < block_count; ++block) {
-      const auto & lhs_block = packed[group_offset + block];
+      const auto & lhs_block = *packed++;
       const auto & rhs_block = q8_blocks[block];
-      const int32x4_t isum = dot_q8_0_x4_block_sum_bl4_neon(lhs_block, rhs_block);
+      const int8x16x4_t lhs_low = vld1q_s8_x4(lhs_block.qs.data());
+      const int8x16x4_t lhs_high = vld1q_s8_x4(lhs_block.qs.data() + 64);
+      const int8x16x2_t rhs_chunks = vld1q_s8_x2(rhs_block.qs.data());
+      const float32x4_t lhs_scale =
+          vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(lhs_block.d.data())));
+      const float32x4_t rhs_scale =
+          vcvt_f32_f16(vreinterpret_f16_u16(vdup_n_u16(rhs_block.d)));
+
+      int32x4_t isum = vdupq_n_s32(0);
+      isum = vdotq_laneq_s32(isum, lhs_low.val[0], rhs_chunks.val[0], 0);
+      isum = vdotq_laneq_s32(isum, lhs_low.val[1], rhs_chunks.val[0], 1);
+      isum = vdotq_laneq_s32(isum, lhs_low.val[2], rhs_chunks.val[0], 2);
+      isum = vdotq_laneq_s32(isum, lhs_low.val[3], rhs_chunks.val[0], 3);
+      isum = vdotq_laneq_s32(isum, lhs_high.val[0], rhs_chunks.val[1], 0);
+      isum = vdotq_laneq_s32(isum, lhs_high.val[1], rhs_chunks.val[1], 1);
+      isum = vdotq_laneq_s32(isum, lhs_high.val[2], rhs_chunks.val[1], 2);
+      isum = vdotq_laneq_s32(isum, lhs_high.val[3], rhs_chunks.val[1], 3);
+
       acc = vfmaq_f32(acc,
                       vcvtq_f32_s32(isum),
-                      q8_0_x4_block_scale_neon(lhs_block, rhs_block));
+                      vmulq_f32(lhs_scale, rhs_scale));
     }
     store_q8_0_x4_results(dst, group * 4u, m, acc);
   }
@@ -2650,22 +2601,45 @@ inline void execute_neon_mul_mat_q8_0_packed_bl8_unchecked(
   const uint64_t m = request.src0.ne[1];
   const uint64_t block_count = k / ::emel::kernel::detail::quant::QK8_0;
   const uint64_t group_count = ::emel::kernel::detail::quant::packed_q8_0_x4_group_count(m);
-  const auto * packed =
+  const auto * packed_base =
       static_cast<const ::emel::kernel::detail::quant::block_q8_0x4 *>(request.src0.data);
   const auto * q8_blocks =
       static_cast<const ::emel::kernel::detail::quant::block_q8_0 *>(request.src1.data);
   float * dst = static_cast<float *>(request.dst.data);
 
   for (uint64_t group = 0; group < group_count; ++group) {
+    const auto * packed = packed_base + (group * block_count);
     float32x4_t acc = vdupq_n_f32(0.0f);
-    const uint64_t group_offset = group * block_count;
     for (uint64_t block = 0; block < block_count; ++block) {
-      const auto & lhs_block = packed[group_offset + block];
+      const auto & lhs_block = *packed++;
       const auto & rhs_block = q8_blocks[block];
-      const int32x4_t isum = dot_q8_0_x4_block_sum_bl8_neon(lhs_block, rhs_block);
+      const int8x16x4_t lhs_low = vld1q_s8_x4(lhs_block.qs.data());
+      const int8x16x4_t lhs_high = vld1q_s8_x4(lhs_block.qs.data() + 64);
+      const int8x8x4_t rhs_chunks = vld1_s8_x4(rhs_block.qs.data());
+      const int8x16_t rhs0 = vcombine_s8(rhs_chunks.val[0], rhs_chunks.val[0]);
+      const int8x16_t rhs1 = vcombine_s8(rhs_chunks.val[1], rhs_chunks.val[1]);
+      const int8x16_t rhs2 = vcombine_s8(rhs_chunks.val[2], rhs_chunks.val[2]);
+      const int8x16_t rhs3 = vcombine_s8(rhs_chunks.val[3], rhs_chunks.val[3]);
+      const float32x4_t lhs_scale =
+          vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(lhs_block.d.data())));
+      const float32x4_t rhs_scale =
+          vcvt_f32_f16(vreinterpret_f16_u16(vdup_n_u16(rhs_block.d)));
+
+      int32x4_t isum0 = vdupq_n_s32(0);
+      int32x4_t isum1 = vdupq_n_s32(0);
+      isum0 = vdotq_s32(isum0, lhs_low.val[0], rhs0);
+      isum1 = vdotq_s32(isum1, lhs_low.val[1], rhs0);
+      isum0 = vdotq_s32(isum0, lhs_low.val[2], rhs1);
+      isum1 = vdotq_s32(isum1, lhs_low.val[3], rhs1);
+      isum0 = vdotq_s32(isum0, lhs_high.val[0], rhs2);
+      isum1 = vdotq_s32(isum1, lhs_high.val[1], rhs2);
+      isum0 = vdotq_s32(isum0, lhs_high.val[2], rhs3);
+      isum1 = vdotq_s32(isum1, lhs_high.val[3], rhs3);
+      const int32x4_t isum = vpaddq_s32(isum0, isum1);
+
       acc = vfmaq_f32(acc,
                       vcvtq_f32_s32(isum),
-                      q8_0_x4_block_scale_neon(lhs_block, rhs_block));
+                      vmulq_f32(lhs_scale, rhs_scale));
     }
     store_q8_0_x4_results(dst, group * 4u, m, acc);
   }
