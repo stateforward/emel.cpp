@@ -45,7 +45,18 @@ struct simd_op_mul_mat_q8_0_packed_bl8 {
     if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
       return false;
     }
-    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_q8_0_packed_bl8(
+    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_q8_0_packed_bl8_tail_safe(
+        ev.request, ctx.neon_available);
+  }
+};
+
+struct simd_op_mul_mat_q8_0_packed_bl8_full_groups {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_q8_0_packed_bl8_full_groups(
         ev.request, ctx.neon_available);
   }
 };
@@ -144,6 +155,7 @@ struct simd_op_mul_mat_generic {
   bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
                   const action::context & ctx) const noexcept {
     return simd_op<::emel::kernel::aarch64::event::dispatch_op_mul_mat>{}(ev, ctx) &&
+        !simd_op_mul_mat_q8_0_packed_bl8_full_groups{}(ev, ctx) &&
         !simd_op_mul_mat_q8_0_packed_bl8{}(ev, ctx) &&
         !simd_op_mul_mat_q8_0_packed_bl4{}(ev, ctx) &&
         !simd_op_mul_mat_q8_0_vector{}(ev, ctx) &&

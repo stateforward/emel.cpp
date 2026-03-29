@@ -344,6 +344,11 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q8_0_packed_bl8_full_groups{} ]
+                 / action::exec_simd_op_mul_mat_q8_0_packed_bl8_full_groups
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
                  [ guard::simd_op_mul_mat_q8_0_packed_bl8{} ]
                  / action::exec_simd_op_mul_mat_q8_0_packed_bl8
 
@@ -1157,6 +1162,10 @@ struct sm : public emel::sm<model, action::context> {
 
   uint64_t optimized_q8_0_packed_bl8_dispatch_count() const noexcept {
     return this->context_.optimized_q8_0_packed_bl8_dispatch_count;
+  }
+
+  uint64_t optimized_q8_0_packed_bl8_full_groups_dispatch_count() const noexcept {
+    return this->context_.optimized_q8_0_packed_bl8_full_groups_dispatch_count;
   }
 
   uint64_t shared_q8_0_dispatch_count() const noexcept {

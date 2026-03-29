@@ -28,6 +28,7 @@ struct context {
   uint64_t optimized_q8_0_packed_dispatch_count = 0;
   uint64_t optimized_q8_0_packed_bl4_dispatch_count = 0;
   uint64_t optimized_q8_0_packed_bl8_dispatch_count = 0;
+  uint64_t optimized_q8_0_packed_bl8_full_groups_dispatch_count = 0;
   uint64_t shared_q8_0_dispatch_count = 0;
   uint64_t optimized_q2_dispatch_count = 0;
   uint64_t shared_q2_dispatch_count = 0;

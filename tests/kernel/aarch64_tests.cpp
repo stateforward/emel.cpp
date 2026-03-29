@@ -1066,6 +1066,7 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_packed_dispatch_at_kernel_seam") {
   CHECK(machine.optimized_q8_0_dispatch_count() == 1u);
   CHECK(machine.optimized_q8_0_packed_dispatch_count() == 1u);
   CHECK(machine.optimized_q8_0_packed_bl8_dispatch_count() == 1u);
+  CHECK(machine.optimized_q8_0_packed_bl8_full_groups_dispatch_count() == 1u);
   CHECK(machine.optimized_q8_0_packed_bl4_dispatch_count() == 0u);
   CHECK(machine.optimized_q8_0_vector_dispatch_count() == 0u);
   CHECK(machine.shared_q8_0_dispatch_count() == 0u);
@@ -1081,6 +1082,7 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_packed_dispatch_at_kernel_seam") {
   CHECK(machine.optimized_q8_0_packed_dispatch_count() == 1u);
   CHECK(machine.optimized_q8_0_packed_bl4_dispatch_count() == 1u);
   CHECK(machine.optimized_q8_0_packed_bl8_dispatch_count() == 0u);
+  CHECK(machine.optimized_q8_0_packed_bl8_full_groups_dispatch_count() == 0u);
   CHECK(machine.optimized_q8_0_vector_dispatch_count() == 0u);
   CHECK(machine.shared_q8_0_dispatch_count() == 0u);
 #else
@@ -1095,6 +1097,7 @@ TEST_CASE("kernel_aarch64_sm_reports_q8_0_packed_dispatch_at_kernel_seam") {
   CHECK(machine.optimized_q8_0_packed_dispatch_count() == 0u);
   CHECK(machine.optimized_q8_0_packed_bl4_dispatch_count() == 0u);
   CHECK(machine.optimized_q8_0_packed_bl8_dispatch_count() == 0u);
+  CHECK(machine.optimized_q8_0_packed_bl8_full_groups_dispatch_count() == 0u);
   CHECK(machine.optimized_q8_0_vector_dispatch_count() == 0u);
   CHECK(machine.shared_q8_0_dispatch_count() == 0u);
 #endif
@@ -1163,6 +1166,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_is_explicit_and_numeric_match") {
   CHECK(machine.optimized_q8_0_dispatch_count() == 1u);
   CHECK(machine.optimized_q8_0_packed_dispatch_count() == 1u);
   CHECK(machine.optimized_q8_0_packed_bl8_dispatch_count() == 1u);
+  CHECK(machine.optimized_q8_0_packed_bl8_full_groups_dispatch_count() == 1u);
   CHECK(machine.optimized_q8_0_packed_bl4_dispatch_count() == 0u);
   CHECK(machine.optimized_q8_0_vector_dispatch_count() == 0u);
   CHECK(machine.shared_q8_0_dispatch_count() == 0u);
@@ -1181,6 +1185,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_is_explicit_and_numeric_match") {
   CHECK(machine.optimized_q8_0_packed_dispatch_count() == 1u);
   CHECK(machine.optimized_q8_0_packed_bl4_dispatch_count() == 1u);
   CHECK(machine.optimized_q8_0_packed_bl8_dispatch_count() == 0u);
+  CHECK(machine.optimized_q8_0_packed_bl8_full_groups_dispatch_count() == 0u);
   CHECK(machine.optimized_q8_0_vector_dispatch_count() == 0u);
   CHECK(machine.shared_q8_0_dispatch_count() == 0u);
 #else
@@ -1195,6 +1200,7 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_is_explicit_and_numeric_match") {
   CHECK(machine.optimized_q8_0_packed_dispatch_count() == 0u);
   CHECK(machine.optimized_q8_0_packed_bl4_dispatch_count() == 0u);
   CHECK(machine.optimized_q8_0_packed_bl8_dispatch_count() == 0u);
+  CHECK(machine.optimized_q8_0_packed_bl8_full_groups_dispatch_count() == 0u);
   CHECK(machine.optimized_q8_0_vector_dispatch_count() == 0u);
   CHECK(machine.shared_q8_0_dispatch_count() == 0u);
 #endif
@@ -1266,6 +1272,10 @@ TEST_CASE("kernel_aarch64_q8_0_packed_route_matches_multi_block_native_reference
   for (size_t row = 0; row < packed_out.size(); ++row) {
     CHECK(packed_out[row] == doctest::Approx(reference[row]).epsilon(1.0e-6f));
   }
+  CHECK(machine.optimized_q8_0_dispatch_count() == 1u);
+  CHECK(machine.optimized_q8_0_packed_dispatch_count() == 1u);
+  CHECK(machine.optimized_q8_0_packed_bl8_dispatch_count() == 1u);
+  CHECK(machine.optimized_q8_0_packed_bl8_full_groups_dispatch_count() == 0u);
 #elif defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
   const emel::kernel::event::op_mul_mat ev{
       .src0 = make_packed_q8_0_x4_bl4_src(packed_bl4.data(), col_count, row_count),
