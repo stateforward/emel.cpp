@@ -3,10 +3,9 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. Shipped v1.6 now proves two truthful
-maintained brownfield anchors: the canonical Llama-68M ARM quantized/flash slice and one canonical
-`Qwen3-0.6B-Q8_0.gguf` slice with explicit GGUF-derived conditioning, native `src/emel` `q8_0`
-runtime support, stored parity, and benchmark publication, all aligned with
+modeled as explicit actors instead of ad hoc control flow. Shipped v1.7 now adds an explicit
+generator-domain `prefill` machine and request-scoped prefill contract routing on top of the
+repo's truthful maintained Llama ARM and canonical Qwen anchors, all aligned with
 `docs/rules/sml.rules.md`.
 
 ## Core Value
@@ -16,35 +15,35 @@ before widening API surface or model scope.
 
 ## Current State
 
-Shipped version: `v1.6`
+Shipped version: `v1.7`
 
-Status: Between milestones. The repo now ships truthful maintained Llama ARM and canonical Qwen
-surfaces through the generator, paritychecker, benchmark, snapshot, and docs workflows.
+Status: Between milestones. The repo now ships explicit generator-domain prefill orchestration
+without broadening beyond the maintained Llama ARM and canonical Qwen acceptance surfaces.
 
-Release summary: `v1.6 Qwen3-0.6B Parity And Benchmark` shipped on `2026-03-30` with `5` phases
-and `12` plans. Remaining open debt is milestone-bookkeeping freshness plus benchmark-warning
-review under the existing warning-only repo policy.
+Release summary: `v1.7 Generator Prefill Submachine Decomposition` shipped on `2026-03-30` with
+`3` phases and `6` plans. Remaining open debt is decode-side generator decomposition plus the
+existing warning-only benchmark drift outside `generator/prefill`.
 
-## Latest Milestone: v1.6 Qwen3-0.6B Parity And Benchmark
+## Latest Milestone: v1.7 Generator Prefill Submachine Decomposition
 
 <details>
 <summary>Shipped on 2026-03-30</summary>
 
-**Goal:** Prove one truthful canonical Qwen3-0.6B GGUF slice through the maintained EMEL
-generator, paritychecker, and benchmark workflow without widening the acceptance boundary beyond
-that slice.
+**Goal:** Decompose the generator’s prefill orchestration into a smaller explicit machine inside
+the `generator` domain while keeping request-scoped behavior modeled via typed events, guards, and
+transitions instead of hidden action/detail control flow.
 
 **Delivered:**
-- Locked one official `Qwen3-0.6B-Q8_0.gguf` maintained fixture with explicit provenance and
-  stable tool identity.
-- Bound the maintained Qwen path to the primary GGUF `tokenizer.chat_template` through an
-  explicit structured-message conditioning contract with no implicit raw fallback.
-- Added native `src/emel` `q8_0` runtime support and explicit `qwen3` topology handling for the
-  canonical slice.
-- Proved maintained stored-baseline parity on `1/10/100/1000` while preserving the prior Llama
-  anchor.
-- Published one truthful canonical Qwen benchmark compare/docs path aligned to the same
-  formatter/runtime contract.
+- Collapsed the repeated top-level prefill routing matrix into explicit request-scoped prefill
+  compute contracts.
+- Extracted `src/emel/generator/prefill` as the first generator-owned orchestration submachine for
+  prefill slots, snapshot, compute dispatch, and handoff.
+- Kept prefill request-scoped orchestration data on typed runtime/internal events instead of
+  generator context flags or phase fields.
+- Materially shrank the top-level generator surface and published split `generator_prefill`
+  architecture docs.
+- Re-proved maintained generator, paritychecker, and compare behavior on the extracted prefill
+  boundary while carrying forward the existing warning-only benchmark policy.
 
 </details>
 
@@ -75,9 +74,25 @@ that slice.
 - ✓ v1.6 published one truthful canonical Qwen benchmark compare/docs path aligned with the same
   parity-backed formatter/runtime contract.
 - ✓ The v1.6 milestone audit passed with `8/8` requirements satisfied and only tech-debt findings.
+- ✓ v1.7 extracted an explicit `src/emel/generator/prefill` orchestration machine for prefill
+  slots, snapshot, compute dispatch, and handoff.
+- ✓ v1.7 kept prefill request-scoped orchestration data on typed runtime/internal events instead of
+  generator context phase fields.
+- ✓ v1.7 collapsed the old top-level prefill routing matrix into explicit request-scoped prefill
+  compute contracts.
+- ✓ v1.7 preserved explicit route selection through guards, states, and transitions with no hidden
+  action/detail routing branch added by the decomposition.
+- ✓ v1.7 materially shrank the top-level generator surface and published the split
+  `generator_prefill` architecture.
+- ✓ v1.7 preserved maintained generator, paritychecker, and compare proof; unrelated broad
+  benchmark snapshot regressions outside `generator/prefill` were explicitly waived for closeout.
 
 ### Active
 
+- [ ] `DECODE-01`: Extract generator decode orchestration into a smaller generator-owned machine
+  after the prefill extraction pattern is proven.
+- [ ] `ATTN-01`: Revisit attention-family decomposition such as `flash` vs `nonflash` through
+  `sm_any` only after the prefill routing matrix is no longer the main duplication source.
 - [ ] `MODEL-02`: Broaden beyond the canonical Qwen3-0.6B fixture to additional Qwen
   architectures or quantizations once the first slice is proven and benchmarked.
 - [ ] `COND-02`: Add richer Qwen chat or tool-calling request surfaces only after the canonical
@@ -89,6 +104,8 @@ that slice.
 
 ### Out of Scope
 
+- Decode extraction or broader generator-family decomposition without an explicit milestone goal
+- Attention-family `sm_any` extraction before the remaining generator routing shape is clear
 - Broad repository cleanup unrelated to a milestone goal
 - Broad Qwen-family or multi-fixture support without an explicit maintained identity and milestone
   goal
@@ -101,53 +118,47 @@ that slice.
 
 ## Next Milestone Goals
 
-- Decide whether the next milestone should broaden beyond the canonical Qwen3-0.6B slice or stay
-  focused on performance and debt cleanup on the current maintained truth anchors.
-- Add richer Qwen request surfaces only if the next milestone explicitly broadens the conditioning
-  contract beyond the current canonical template boundary.
-- Optimize remaining generator-side hot spots now that the canonical Qwen slice is parity-backed
-  and benchmarked.
-- Revisit benchmark drift policy and publication freshness only after the maintained compare
-  surfaces are stable enough to justify a stricter gate.
+- Decide whether the next milestone should continue Issue `#41` with decode extraction now that the
+  prefill pattern is proven.
+- Revisit attention-family decomposition such as `flash` vs `nonflash` through `sm_any` only after
+  the remaining generator routing shape is clearer.
+- Preserve maintained Llama/Qwen proof while any further generator decomposition lands.
+- Revisit benchmark drift policy only after generator decomposition and maintained compare surfaces
+  are stable enough to justify a stricter gate.
 
 ## Context
 
-This is a brownfield repository with an existing codebase map under `.planning/codebase/`. v1.6
-showed that the existing subsystem families under `src/emel/` are sufficient to bring up a
-non-Llama maintained slice truthfully without widening the public C API surface or hiding
-formatter/runtime behavior behind implicit fallbacks. The repo remains governed by `AGENTS.md` and
-`docs/rules/sml.rules.md`, so future work still needs to preserve same-RTC actor semantics,
-explicit error publication, bounded actions, and deliberate machine-structure changes.
-Non-blocking benchmark warnings plus milestone-evidence freshness remain the main carried technical
-debt entering the next milestone.
+This is a brownfield repository with an existing codebase map under `.planning/codebase/`. v1.7
+proved that generator decomposition can stay inside the `generator` domain and preserve explicit
+same-RTC event handoff instead of falling back to context phase flags or hidden helper routing. The
+repo already has explicit actor seams for `graph`, `memory`, `logits::sampler`, and backend-family
+selection through `sm_any`; the remaining open generator question is how far the same pattern
+should continue into decode and any later attention-family split. The repo remains governed by
+`AGENTS.md` and `docs/rules/sml.rules.md`, so future work still needs to preserve same-RTC actor
+semantics, explicit error publication, bounded actions, and deliberate machine-structure changes.
 
 ## Constraints
 
 - **Architecture**: Follow `docs/rules/sml.rules.md` and the local machine conventions in
-  `AGENTS.md` so generation work preserves the RTC actor model and no-queue invariant.
-- **Acceptance boundary**: Milestones should expand intentionally; maintained proof still lives on
-  the shipped generator, paritychecker, benchmark, snapshot, and docs surfaces.
-- **Model scope**: The repo now has one canonical Llama ARM anchor and one canonical Qwen anchor;
-  broader model matrices should still widen only under an explicit milestone goal.
-- **Performance philosophy**: Favor explicit orchestration correctness first, then optimize once
-  parity-oriented behavior is locked.
-- **Repository state**: This is an active brownfield codebase, so milestone work should still
-  minimize unrelated churn.
+  `AGENTS.md` so generator work preserves the RTC actor model and no-queue invariant.
+- **Explicit behavior modeling**: Further generator decomposition must keep control flow on guards,
+  states, typed events, and transitions rather than action/detail routing shortcuts.
+- **Domain boundary**: Request orchestration belongs to `generator`; leaf compute still belongs to
+  `graph` and sampling to `logits::sampler`.
+- **Acceptance boundary**: Maintained proof still lives on the shipped generator, paritychecker,
+  benchmark, snapshot, and docs surfaces.
+- **Repository state**: This is an active brownfield codebase, so milestone work should minimize
+  unrelated churn and leave non-milestone artifacts alone.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Define done in paritychecker and maintained bench surfaces, not the public C API | The immediate goal is truthful brownfield end-to-end proof, not API surface expansion | ✓ Good |
-| Keep milestones narrow to one canonical maintained slice at a time | This avoids overstating support while runtime and conditioning contracts are still being hardened | ✓ Good |
-| Keep benchmark maintenance on the existing compare/snapshot/docs surfaces | One operator workflow is more honest than benchmark-only publication paths | ✓ Good |
-| Preserve benchmark drift as warning-only until a milestone explicitly hardens the repo gate | This avoids turning noisy publication debt into false-negative release blockers too early | ⚠ Revisit |
-| Restore stored evidence whenever live maintained proof changes materially | Stored compare/docs artifacts must match the live proof contract | ✓ Good |
-| Keep v1.6 scoped to one canonical `Qwen3-0.6B-Q8_0.gguf` slice | The maintained generator, paritychecker, and benchmark surfaces were still Llama-shaped, so truthful Qwen progress required one narrow vertical slice first | ✓ Good |
-| Use the primary GGUF `tokenizer.chat_template` as the maintained formatter source of truth | This kept EMEL, paritychecker, and benchmark publication on one explicit conditioning contract | ✓ Good |
-| Insert Phase `26.1` before resuming Qwen bring-up | Native `q8_0` runtime support was a real blocker and had to land in `src/emel` before truthful generator bring-up | ✓ Good |
-| Reuse the shipped paritychecker and `tools/bench` surfaces as the only v1.6 acceptance boundary | This kept the milestone brownfield and made parity and benchmark claims share one maintained contract | ✓ Good |
-| Preserve the prior Llama anchor while widening to canonical Qwen | The maintained Qwen lane had to expand without silently displacing the prior truthful anchor | ✓ Good |
+| Start decomposition with `generator/prefill` instead of splitting the whole generator at once | Prefill was the clearest request-phase boundary and the largest current duplication source | ✓ Good |
+| Collapse the prefill compute-routing matrix before broader extraction | File movement alone would have just relocated the cartesian product instead of reducing it | ✓ Good |
+| Keep prefill request-scoped data on typed runtime/internal events | This preserved explicit behavior modeling and avoided context phase flags | ✓ Good |
+| Defer decode extraction until the prefill pattern is proven | Decode also owns sampling, rendering, and loop control, so it was the riskier first cut | ✓ Good |
+| Defer `attention::any` / `sm_any` extraction until after prefill collapse | Attention mode is only one axis of the duplication and should not hide unresolved top-level routing | ⚠ Revisit |
 
 ## Evolution
 
@@ -167,4 +178,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-30 after shipping v1.6*
+*Last updated: 2026-03-30 after shipping v1.7*
