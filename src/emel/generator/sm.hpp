@@ -77,19 +77,10 @@ struct prefill_slots {};
 struct prefill_slots_decision {};
 struct snapshot_prefill {};
 struct snapshot_prefill_decision {};
-struct prefill_compute_runtime_decision {};
-struct prefill_compute_flash {};
-struct prefill_compute_flash_preselected_argmax {};
-struct prefill_compute_flash_preselected_argmax_decision {};
-struct prefill_compute_flash_chunk4_preselected_argmax_decision {};
-struct prefill_compute_flash_chunk4_decision {};
-struct prefill_compute_flash_decision {};
-struct prefill_compute_nonflash {};
-struct prefill_compute_nonflash_preselected_argmax {};
-struct prefill_compute_nonflash_preselected_argmax_decision {};
-struct prefill_compute_nonflash_chunk4_preselected_argmax_decision {};
-struct prefill_compute_nonflash_chunk4_decision {};
-struct prefill_compute_nonflash_decision {};
+struct prefill_contract_runtime_decision {};
+struct prefill_contract_flash_decision {};
+struct prefill_contract_nonflash_decision {};
+struct prefill_compute_result_decision {};
 struct decode_slots {};
 struct decode_slots_decision {};
 struct snapshot_decode {};
@@ -437,7 +428,7 @@ struct model {
                  + sml::completion<event::generate_run>
                  / action::request_memory_snapshot
 
-      , sml::state<prefill_compute_runtime_decision> <= sml::state<snapshot_prefill_decision>
+      , sml::state<prefill_contract_runtime_decision> <= sml::state<snapshot_prefill_decision>
                  + sml::completion<event::generate_run>
                  [ guard::snapshot_ok{} ]
 
@@ -451,202 +442,79 @@ struct model {
                  [ guard::snapshot_backend_error{} ]
                  / action::mark_backend_error
 
-      , sml::state<prefill_compute_flash> <= sml::state<prefill_compute_runtime_decision>
+      , sml::state<prefill_contract_flash_decision> <= sml::state<prefill_contract_runtime_decision>
                  + sml::completion<event::generate_run>
                  [ guard::prefill_flash_runtime_supported{} ]
 
-      , sml::state<prefill_compute_nonflash> <= sml::state<prefill_compute_runtime_decision>
+      , sml::state<prefill_contract_nonflash_decision> <=
+               sml::state<prefill_contract_runtime_decision>
                  + sml::completion<event::generate_run>
                  [ guard::prefill_nonflash_runtime_required{} ]
 
-      , sml::state<prefill_compute_flash_preselected_argmax> <= sml::state<prefill_compute_flash>
-                 + sml::completion<event::generate_run>
-                 [ guard::compute_uses_preselected_argmax_direct{} ]
-
-      , sml::state<prefill_compute_flash_chunk4_decision> <= sml::state<prefill_compute_flash>
+      , sml::state<prefill_compute_result_decision> <= sml::state<prefill_contract_flash_decision>
                  + sml::completion<event::generate_run>
                  [ guard::compute_uses_materialized_logits_with_prefill_chunk4_q8_gemm{} ]
-                 / action::request_prefill_compute_flash_chunk4
+                 / action::request_prefill_contract_flash_materialized_chunk4
 
-      , sml::state<prefill_compute_flash_decision> <= sml::state<prefill_compute_flash>
+      , sml::state<prefill_compute_result_decision> <= sml::state<prefill_contract_flash_decision>
                  + sml::completion<event::generate_run>
                  [ guard::compute_uses_materialized_logits_with_prefill_scalar_runtime{} ]
-                 / action::request_prefill_compute_flash
+                 / action::request_prefill_contract_flash_materialized_scalar
 
-      , sml::state<prefill_compute_nonflash_preselected_argmax> <=
-               sml::state<prefill_compute_nonflash>
+      , sml::state<prefill_compute_result_decision> <= sml::state<prefill_contract_flash_decision>
                  + sml::completion<event::generate_run>
-                 [ guard::compute_uses_preselected_argmax_direct{} ]
+                 [ guard::compute_uses_preselected_argmax_direct_with_prefill_chunk4_q8_gemm{} ]
+                 / action::request_prefill_contract_flash_preselected_chunk4
 
-      , sml::state<prefill_compute_nonflash_chunk4_decision> <=
-               sml::state<prefill_compute_nonflash>
+      , sml::state<prefill_compute_result_decision> <= sml::state<prefill_contract_flash_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::compute_uses_preselected_argmax_direct_with_prefill_scalar_runtime{} ]
+                 / action::request_prefill_contract_flash_preselected_scalar
+
+      , sml::state<prefill_compute_result_decision> <=
+               sml::state<prefill_contract_nonflash_decision>
                  + sml::completion<event::generate_run>
                  [ guard::compute_uses_materialized_logits_with_prefill_chunk4_q8_gemm{} ]
-                 / action::request_prefill_compute_nonflash_chunk4
+                 / action::request_prefill_contract_nonflash_materialized_chunk4
 
-      , sml::state<prefill_compute_nonflash_decision> <= sml::state<prefill_compute_nonflash>
+      , sml::state<prefill_compute_result_decision> <=
+               sml::state<prefill_contract_nonflash_decision>
                  + sml::completion<event::generate_run>
                  [ guard::compute_uses_materialized_logits_with_prefill_scalar_runtime{} ]
-                 / action::request_prefill_compute_nonflash
+                 / action::request_prefill_contract_nonflash_materialized_scalar
 
-      , sml::state<prefill_compute_flash_chunk4_preselected_argmax_decision> <=
-               sml::state<prefill_compute_flash_preselected_argmax>
+      , sml::state<prefill_compute_result_decision> <=
+               sml::state<prefill_contract_nonflash_decision>
                  + sml::completion<event::generate_run>
-                 [ guard::prefill_chunk4_q8_gemm_supported{} ]
-                 / action::request_prefill_compute_flash_chunk4_preselected_argmax
+                 [ guard::compute_uses_preselected_argmax_direct_with_prefill_chunk4_q8_gemm{} ]
+                 / action::request_prefill_contract_nonflash_preselected_chunk4
 
-      , sml::state<prefill_compute_flash_preselected_argmax_decision> <=
-               sml::state<prefill_compute_flash_preselected_argmax>
+      , sml::state<prefill_compute_result_decision> <=
+               sml::state<prefill_contract_nonflash_decision>
                  + sml::completion<event::generate_run>
-                 [ guard::prefill_chunk4_q8_gemm_required{} ]
-                 / action::request_prefill_compute_flash_preselected_argmax
-
-      , sml::state<prefill_compute_nonflash_chunk4_preselected_argmax_decision> <=
-               sml::state<prefill_compute_nonflash_preselected_argmax>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_chunk4_q8_gemm_supported{} ]
-                 / action::request_prefill_compute_nonflash_chunk4_preselected_argmax
-
-      , sml::state<prefill_compute_nonflash_preselected_argmax_decision> <=
-               sml::state<prefill_compute_nonflash_preselected_argmax>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_chunk4_q8_gemm_required{} ]
-                 / action::request_prefill_compute_nonflash_preselected_argmax
+                 [ guard::compute_uses_preselected_argmax_direct_with_prefill_scalar_runtime{} ]
+                 / action::request_prefill_contract_nonflash_preselected_scalar
 
       , sml::state<decode_selection_mode_decision> <=
-               sml::state<prefill_compute_flash_chunk4_decision>
+               sml::state<prefill_compute_result_decision>
                  + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_ok{} ]
-                 / action::mark_prefill_cached
-
-      , sml::state<decode_selection_mode_decision> <= sml::state<prefill_compute_flash_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_ok{} ]
-                 / action::mark_prefill_cached
-
-      , sml::state<decode_selection_mode_decision> <=
-               sml::state<prefill_compute_nonflash_chunk4_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_ok{} ]
-                 / action::mark_prefill_cached
-
-      , sml::state<decode_selection_mode_decision> <= sml::state<prefill_compute_nonflash_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_ok{} ]
+                 [ guard::prefill_compute_ok_with_materialized_logits_contract{} ]
                  / action::mark_prefill_cached
 
       , sml::state<decode_sample_preselected> <=
-               sml::state<prefill_compute_flash_chunk4_preselected_argmax_decision>
+               sml::state<prefill_compute_result_decision>
                  + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_ok{} ]
-                 / action::mark_prefill_cached
-
-      , sml::state<decode_sample_preselected> <=
-               sml::state<prefill_compute_flash_preselected_argmax_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_ok{} ]
-                 / action::mark_prefill_cached
-
-      , sml::state<decode_sample_preselected> <=
-               sml::state<prefill_compute_nonflash_chunk4_preselected_argmax_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_ok{} ]
-                 / action::mark_prefill_cached
-
-      , sml::state<decode_sample_preselected> <=
-               sml::state<prefill_compute_nonflash_preselected_argmax_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_ok{} ]
+                 [ guard::prefill_compute_ok_with_preselected_argmax_contract{} ]
                  / action::mark_prefill_cached
 
       , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_flash_chunk4_decision>
+               sml::state<prefill_compute_result_decision>
                  + sml::completion<event::generate_run>
                  [ guard::prefill_compute_invalid_request{} ]
                  / action::mark_invalid_request
 
       , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_flash_chunk4_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_backend_error{} ]
-                 / action::mark_backend_error
-
-      , sml::state<generate_ready_error_channel_decision> <= sml::state<prefill_compute_flash_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_invalid_request{} ]
-                 / action::mark_invalid_request
-
-      , sml::state<generate_ready_error_channel_decision> <= sml::state<prefill_compute_flash_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_backend_error{} ]
-                 / action::mark_backend_error
-
-      , sml::state<generate_ready_error_channel_decision> <= sml::state<prefill_compute_nonflash_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_invalid_request{} ]
-                 / action::mark_invalid_request
-
-      , sml::state<generate_ready_error_channel_decision> <= sml::state<prefill_compute_nonflash_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_backend_error{} ]
-                 / action::mark_backend_error
-
-      , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_nonflash_chunk4_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_invalid_request{} ]
-                 / action::mark_invalid_request
-
-      , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_nonflash_chunk4_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_backend_error{} ]
-                 / action::mark_backend_error
-
-      , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_flash_chunk4_preselected_argmax_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_invalid_request{} ]
-                 / action::mark_invalid_request
-
-      , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_flash_chunk4_preselected_argmax_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_backend_error{} ]
-                 / action::mark_backend_error
-
-      , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_flash_preselected_argmax_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_invalid_request{} ]
-                 / action::mark_invalid_request
-
-      , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_flash_preselected_argmax_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_backend_error{} ]
-                 / action::mark_backend_error
-
-      , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_nonflash_preselected_argmax_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_invalid_request{} ]
-                 / action::mark_invalid_request
-
-      , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_nonflash_preselected_argmax_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_backend_error{} ]
-                 / action::mark_backend_error
-
-      , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_nonflash_chunk4_preselected_argmax_decision>
-                 + sml::completion<event::generate_run>
-                 [ guard::prefill_compute_invalid_request{} ]
-                 / action::mark_invalid_request
-
-      , sml::state<generate_ready_error_channel_decision> <=
-               sml::state<prefill_compute_nonflash_chunk4_preselected_argmax_decision>
+               sml::state<prefill_compute_result_decision>
                  + sml::completion<event::generate_run>
                  [ guard::prefill_compute_backend_error{} ]
                  / action::mark_backend_error
@@ -1025,39 +893,13 @@ struct model {
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<snapshot_prefill_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_runtime_decision> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<prefill_contract_runtime_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_flash> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<prefill_contract_flash_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_flash_preselected_argmax>
-                 + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<prefill_contract_nonflash_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_flash_chunk4_preselected_argmax_decision>
-                 + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_flash_preselected_argmax_decision>
-                 + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_flash_chunk4_decision>
-                 + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_flash_decision> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_nonflash> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_nonflash_preselected_argmax>
-                 + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_nonflash_chunk4_preselected_argmax_decision>
-                 + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_nonflash_preselected_argmax_decision>
-                 + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_nonflash_chunk4_decision>
-                 + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<ready> <= sml::state<prefill_compute_nonflash_decision> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<prefill_compute_result_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<decode_selection_mode_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected

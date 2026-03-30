@@ -185,6 +185,22 @@ inline bool uses_prefill_chunk4_q8_gemm(const event::generate_run & ev,
       emel::generator::detail::prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
 }
 
+inline bool prefill_contract_uses_materialized_logits(
+    const emel::generator::prefill_compute_contract contract) noexcept {
+  return contract == emel::generator::prefill_compute_contract::flash_materialized_scalar ||
+         contract == emel::generator::prefill_compute_contract::flash_materialized_chunk4 ||
+         contract == emel::generator::prefill_compute_contract::nonflash_materialized_scalar ||
+         contract == emel::generator::prefill_compute_contract::nonflash_materialized_chunk4;
+}
+
+inline bool prefill_contract_uses_preselected_argmax(
+    const emel::generator::prefill_compute_contract contract) noexcept {
+  return contract == emel::generator::prefill_compute_contract::flash_preselected_scalar ||
+         contract == emel::generator::prefill_compute_contract::flash_preselected_chunk4 ||
+         contract == emel::generator::prefill_compute_contract::nonflash_preselected_scalar ||
+         contract == emel::generator::prefill_compute_contract::nonflash_preselected_chunk4;
+}
+
 }  // namespace detail
 
 struct valid_initialize {
@@ -623,6 +639,30 @@ struct prefill_compute_backend_error {
            (detail::phase_rejected_without_code(ev) ||
             detail::graph_backend_code(ev.ctx.phase_code) ||
             !invalid);
+  }
+};
+
+struct prefill_contract_uses_materialized_logits {
+  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
+    return detail::prefill_contract_uses_materialized_logits(ev.ctx.prefill_contract);
+  }
+};
+
+struct prefill_contract_uses_preselected_argmax {
+  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
+    return detail::prefill_contract_uses_preselected_argmax(ev.ctx.prefill_contract);
+  }
+};
+
+struct prefill_compute_ok_with_materialized_logits_contract {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return prefill_compute_ok{}(ev, ctx) && prefill_contract_uses_materialized_logits{}(ev, ctx);
+  }
+};
+
+struct prefill_compute_ok_with_preselected_argmax_contract {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return prefill_compute_ok{}(ev, ctx) && prefill_contract_uses_preselected_argmax{}(ev, ctx);
   }
 };
 

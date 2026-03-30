@@ -262,6 +262,7 @@ struct begin_generate {
     ev.ctx.err = emel::error::cast(error::none);
     ev.ctx.phase_accepted = false;
     ev.ctx.phase_code = 0;
+    ev.ctx.prefill_contract = emel::generator::prefill_compute_contract::none;
     ev.ctx.tokens_generated = 0;
     ev.ctx.target_tokens = ev.request.max_tokens;
     ev.ctx.prompt_token_count = 0;
@@ -639,6 +640,14 @@ struct request_prefill_compute_nonflash_chunk4_preselected_argmax {
   }
 };
 
+template <emel::generator::prefill_compute_contract contract, auto request_action>
+struct request_prefill_compute_contract {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    ev.ctx.prefill_contract = contract;
+    request_action(ev, ctx);
+  }
+};
+
 struct request_decode_slots {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
     ev.ctx.phase_code = static_cast<int32_t>(
@@ -983,6 +992,38 @@ inline constexpr request_prefill_compute_nonflash_preselected_argmax
     request_prefill_compute_nonflash_preselected_argmax{};
 inline constexpr request_prefill_compute_nonflash_chunk4_preselected_argmax
     request_prefill_compute_nonflash_chunk4_preselected_argmax{};
+inline constexpr request_prefill_compute_contract<
+    emel::generator::prefill_compute_contract::flash_materialized_scalar,
+    request_prefill_compute_flash>
+    request_prefill_contract_flash_materialized_scalar{};
+inline constexpr request_prefill_compute_contract<
+    emel::generator::prefill_compute_contract::flash_materialized_chunk4,
+    request_prefill_compute_flash_chunk4>
+    request_prefill_contract_flash_materialized_chunk4{};
+inline constexpr request_prefill_compute_contract<
+    emel::generator::prefill_compute_contract::flash_preselected_scalar,
+    request_prefill_compute_flash_preselected_argmax>
+    request_prefill_contract_flash_preselected_scalar{};
+inline constexpr request_prefill_compute_contract<
+    emel::generator::prefill_compute_contract::flash_preselected_chunk4,
+    request_prefill_compute_flash_chunk4_preselected_argmax>
+    request_prefill_contract_flash_preselected_chunk4{};
+inline constexpr request_prefill_compute_contract<
+    emel::generator::prefill_compute_contract::nonflash_materialized_scalar,
+    request_prefill_compute_nonflash>
+    request_prefill_contract_nonflash_materialized_scalar{};
+inline constexpr request_prefill_compute_contract<
+    emel::generator::prefill_compute_contract::nonflash_materialized_chunk4,
+    request_prefill_compute_nonflash_chunk4>
+    request_prefill_contract_nonflash_materialized_chunk4{};
+inline constexpr request_prefill_compute_contract<
+    emel::generator::prefill_compute_contract::nonflash_preselected_scalar,
+    request_prefill_compute_nonflash_preselected_argmax>
+    request_prefill_contract_nonflash_preselected_scalar{};
+inline constexpr request_prefill_compute_contract<
+    emel::generator::prefill_compute_contract::nonflash_preselected_chunk4,
+    request_prefill_compute_nonflash_chunk4_preselected_argmax>
+    request_prefill_contract_nonflash_preselected_chunk4{};
 inline constexpr request_decode_slots request_decode_slots{};
 inline constexpr request_decode_compute_flash request_decode_compute_flash{};
 inline constexpr request_decode_compute_nonflash request_decode_compute_nonflash{};

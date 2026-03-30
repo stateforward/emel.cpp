@@ -37,6 +37,18 @@ enum class selection_mode : uint8_t {
   preselected_argmax,
 };
 
+enum class prefill_compute_contract : uint8_t {
+  none = 0,
+  flash_materialized_scalar = 1,
+  flash_materialized_chunk4 = 2,
+  flash_preselected_scalar = 3,
+  flash_preselected_chunk4 = 4,
+  nonflash_materialized_scalar = 5,
+  nonflash_materialized_chunk4 = 6,
+  nonflash_preselected_scalar = 7,
+  nonflash_preselected_chunk4 = 8,
+};
+
 using tokenizer_bind_dispatch_fn =
     bool(void * tokenizer_sm, const emel::text::tokenizer::event::bind &);
 using tokenizer_tokenize_dispatch_fn =
@@ -126,6 +138,8 @@ struct generate_ctx {
   emel::error::type err = emel::error::cast(error::none);
   bool phase_accepted = false;
   int32_t phase_code = 0;
+  emel::generator::prefill_compute_contract prefill_contract =
+      emel::generator::prefill_compute_contract::none;
   int32_t tokens_generated = 0;
   int32_t target_tokens = 0;
   int32_t prompt_token_count = 0;
