@@ -1,5 +1,29 @@
 # Project Milestones: EMEL
 
+## v1.6 Qwen3-0.6B Parity And Benchmark (Shipped: 2026-03-30)
+
+**Delivered:** EMEL now ships one truthful canonical `Qwen3-0.6B-Q8_0.gguf` maintained slice with
+an explicit GGUF-derived formatter contract, native `src/emel` `q8_0` runtime support, stored
+generation parity, and benchmark publication aligned to the same operator-facing Qwen workflow.
+
+**Phases completed:** 5 phases, 12 plans, 6 tasks
+
+**Key accomplishments:**
+
+- Locked one official canonical Qwen3 fixture and primary-template-only formatter contract on the
+  maintained paritychecker and benchmark surfaces
+- Added native `q8_0` runtime support for the canonical Qwen blocker tensors in `src/emel`
+- Brought the shipped generator path up on the canonical `qwen3` slice without broad family claims
+- Proved maintained stored-baseline parity across `1/10/100/1000` while keeping the prior Llama
+  anchor protected
+- Published one truthful canonical Qwen benchmark compare, snapshot, and docs path with explicit
+  formatter/runtime evidence
+
+**What's next:** Define the next milestone before broadening Qwen scope, widening request surfaces,
+or hardening benchmark-gate policy.
+
+---
+
 ## v1.5 Full ARM Quantized Path (Shipped: 2026-03-27)
 
 **Delivered:** The canonical CPU-hosted Llama-68M ARM slice now ships an explicit maintained
