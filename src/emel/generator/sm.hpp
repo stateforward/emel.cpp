@@ -409,7 +409,13 @@ struct model {
       // Prefill.
       , sml::state<prefill_result_decision> <= sml::state<prefill_running>
                  + sml::completion<event::generate_run>
+                 [ guard::prefill_dispatch_available{} ]
                  / action::request_prefill
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<prefill_running>
+                 + sml::completion<event::generate_run>
+                 [ guard::prefill_dispatch_unavailable{} ]
+                 / action::mark_backend_error
 
       , sml::state<decode_selection_mode_decision> <= sml::state<prefill_result_decision>
                  + sml::completion<event::generate_run>
@@ -443,7 +449,13 @@ struct model {
 
       , sml::state<decode_preselected_argmax_decision> <= sml::state<decode_preselected_argmax>
                  + sml::completion<event::generate_run>
+                 [ guard::decode_argmax_ready{} ]
                  / action::request_decode_select_argmax
+
+      , sml::state<generate_ready_error_channel_decision> <= sml::state<decode_preselected_argmax>
+                 + sml::completion<event::generate_run>
+                 [ guard::decode_argmax_invalid_request{} ]
+                 / action::mark_invalid_request
 
       , sml::state<decode_sample_preselected> <= sml::state<decode_preselected_argmax_decision>
                  + sml::completion<event::generate_run>

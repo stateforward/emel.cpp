@@ -381,17 +381,8 @@ struct request_allocate_sequence {
 
 struct request_prefill {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    if (ctx.prefill_actor == nullptr || ctx.dispatch_prefill == nullptr) {
-      ev.ctx.phase_accepted = false;
-      ev.ctx.err = emel::error::cast(error::backend);
-      return;
-    }
     const emel::generator::prefill::event::run runtime{ev.request, ev.ctx};
-    const bool accepted = ctx.dispatch_prefill(ctx.prefill_actor, runtime);
-    if (!accepted) {
-      ev.ctx.phase_accepted = false;
-      ev.ctx.err = emel::error::cast(error::backend);
-    }
+    ev.ctx.phase_accepted = ctx.dispatch_prefill(ctx.prefill_actor, runtime);
   }
 };
 
@@ -646,13 +637,6 @@ struct request_decode_sample {
 
 struct request_decode_select_argmax {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    ev.ctx.phase_accepted = false;
-    ev.ctx.phase_code = static_cast<int32_t>(
-        emel::error::cast(emel::logits::sampler::error::invalid_request));
-    if (ctx.buffers.vocab_size <= 0 || ctx.buffers.logits == nullptr) {
-      return;
-    }
-
     int32_t best_index = 0;
     float best_value = ctx.buffers.logits[0];
     for (int32_t idx = 1; idx < ctx.buffers.vocab_size; ++idx) {

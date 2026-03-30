@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <doctest/doctest.h>
 #include <span>
@@ -479,6 +480,20 @@ TEST_CASE("generator phase guards classify invalid and backend errors") {
   CHECK(emel::generator::guard::prefill_result_invalid_request{}(generate_run, context));
   generate_ctx.err = emel::error::cast(emel::generator::error::backend);
   CHECK(emel::generator::guard::prefill_result_backend_error{}(generate_run, context));
+  context.prefill_actor = &dummy_tokenizer_actor;
+  context.dispatch_prefill = [](void *, const emel::generator::prefill::event::run &) { return true; };
+  CHECK(emel::generator::guard::prefill_dispatch_available{}(generate_run, context));
+  context.prefill_actor = nullptr;
+  context.dispatch_prefill = nullptr;
+  CHECK(emel::generator::guard::prefill_dispatch_unavailable{}(generate_run, context));
+  context.buffers.vocab_size = 4;
+  static float logits[4] = {1.0f, 2.0f, 0.5f, -1.0f};
+  context.buffers.logits.reset();
+  context.buffers.logits = std::make_unique<float[]>(4);
+  std::copy(std::begin(logits), std::end(logits), context.buffers.logits.get());
+  CHECK(emel::generator::guard::decode_argmax_ready{}(generate_run, context));
+  context.buffers.logits.reset();
+  CHECK(emel::generator::guard::decode_argmax_invalid_request{}(generate_run, context));
   CHECK(emel::generator::guard::generate_result_backend{}(generate_run, context));
 }
 

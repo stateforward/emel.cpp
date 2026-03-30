@@ -522,6 +522,18 @@ struct allocate_sequence_backend_error {
   }
 };
 
+struct prefill_dispatch_available {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return ctx.prefill_actor != nullptr && ctx.dispatch_prefill != nullptr;
+  }
+};
+
+struct prefill_dispatch_unavailable {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return !prefill_dispatch_available{}(ev, ctx);
+  }
+};
+
 struct prefill_result_ok_with_materialized_logits_contract {
   bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
     return detail::result_none(ev) &&
@@ -544,7 +556,19 @@ struct prefill_result_invalid_request {
 
 struct prefill_result_backend_error {
   bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
-    return detail::result_backend(ev);
+    return detail::result_backend(ev) || (!ev.ctx.phase_accepted && detail::result_none(ev));
+  }
+};
+
+struct decode_argmax_ready {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return ctx.buffers.vocab_size > 0 && ctx.buffers.logits != nullptr;
+  }
+};
+
+struct decode_argmax_invalid_request {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return !decode_argmax_ready{}(ev, ctx);
   }
 };
 
