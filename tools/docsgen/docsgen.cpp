@@ -67,6 +67,7 @@ struct benchmark_snapshot {
   std::string explicit_no_claim_stage_count;
   std::string quantized_case;
   std::string native_q8_0_dispatch_calls;
+  std::string packed_q8_0_dispatch_calls;
   std::string optimized_q2_dispatch_calls;
   std::string shared_q2_dispatch_calls;
   std::string optimized_q3_dispatch_calls;
@@ -576,7 +577,8 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
     if (const auto metadata =
             parse_inline_key_value_fields(line, "# generation_quantized_evidence: ");
         metadata.has_value()) {
-      for (const char * field : {"case", "native_q8_0_dispatch_calls"}) {
+      for (const char * field :
+           {"case", "native_q8_0_dispatch_calls", "packed_q8_0_dispatch_calls"}) {
         if (!metadata->contains(field)) {
           std::fprintf(stderr,
                        "error: invalid # generation_quantized_evidence metadata in %s\n",
@@ -586,6 +588,7 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       }
       parsed.quantized_case = metadata->at("case");
       parsed.native_q8_0_dispatch_calls = metadata->at("native_q8_0_dispatch_calls");
+      parsed.packed_q8_0_dispatch_calls = metadata->at("packed_q8_0_dispatch_calls");
       parsed.optimized_q2_dispatch_calls =
           metadata->contains("optimized_q2_dispatch_calls")
               ? metadata->at("optimized_q2_dispatch_calls")
@@ -803,6 +806,8 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += snapshot.quantized_case;
   section += " native_q8_0_dispatch_calls=";
   section += snapshot.native_q8_0_dispatch_calls;
+  section += " packed_q8_0_dispatch_calls=";
+  section += snapshot.packed_q8_0_dispatch_calls;
   section += " optimized_q2_dispatch_calls=";
   section += snapshot.optimized_q2_dispatch_calls;
   section += " shared_q2_dispatch_calls=";
