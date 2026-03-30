@@ -1,5 +1,53 @@
 # Project Milestones: EMEL
 
+## v1.6 Qwen3-0.6B Parity And Benchmark (Shipped: 2026-03-30)
+
+**Delivered:** EMEL now ships one truthful canonical `Qwen3-0.6B-Q8_0.gguf` maintained slice with
+an explicit GGUF-derived formatter contract, native `src/emel` `q8_0` runtime support, stored
+generation parity, and benchmark publication aligned to the same operator-facing Qwen workflow.
+
+**Phases completed:** 5 phases, 12 plans, 6 tasks
+
+**Key accomplishments:**
+
+- Locked one official canonical Qwen3 fixture and primary-template-only formatter contract on the
+  maintained paritychecker and benchmark surfaces
+- Added native `q8_0` runtime support for the canonical Qwen blocker tensors in `src/emel`
+- Brought the shipped generator path up on the canonical `qwen3` slice without broad family claims
+- Proved maintained stored-baseline parity across `1/10/100/1000` while keeping the prior Llama
+  anchor protected
+- Published one truthful canonical Qwen benchmark compare, snapshot, and docs path with explicit
+  formatter/runtime evidence
+
+**What's next:** Define the next milestone before broadening Qwen scope, widening request surfaces,
+or hardening benchmark-gate policy.
+
+---
+
+## v1.5 Full ARM Quantized Path (Shipped: 2026-03-27)
+
+**Delivered:** The canonical CPU-hosted Llama-68M ARM slice now ships an explicit maintained
+quantized-path contract, zero supported disallowed fallback, and restored checked-in flash
+attribution/publication across paritychecker, compare snapshots, and generated benchmark docs.
+
+**Phases completed:** 5 phases, 10 plans, 0 tasks
+
+**Key accomplishments:**
+
+- The canonical ARM slice now has a shared stage-by-stage quantized-path audit
+- Unsupported quantized branches now publish explicit no-claim behavior
+- The shipped generator runtime, paritychecker, and regression surfaces now prove the canonical
+  `8/4/0/0` runtime contract with zero supported disallowed fallback
+- Benchmark compare output, stored snapshots, and generated docs now publish the same runtime
+  contract without overstating approved dense-f32-by-contract seams
+- Canonical flash-attention dispatch and checked-in benchmark publication were restored together so
+  maintained live proof and stored evidence match again
+
+**What's next:** Define the next milestone before widening scope beyond the canonical CPU-hosted
+Llama-68M ARM slice or changing benchmark-gate policy.
+
+---
+
 ## v1.4 Full Vectorized Quantized Kernels (Shipped: 2026-03-25)
 
 **Delivered:** The canonical CPU-hosted Llama-68M ARM slice now ships EMEL-owned vectorized
@@ -12,12 +60,16 @@ proof, and refreshed benchmark publication against the preserved v1.3 scalar bas
 
 - Replaced the maintained scalar `q2_K`, `q3_K`, and `q6_K` row helpers with EMEL-owned
   vectorized AArch64 kernels on the canonical operand path.
+
 - Closed the maintained quantized hot-path contract with alloc-free q2/q3/q6 dispatch and no
   dequantize-to-f32 fallback.
+
 - Exposed shipped q2/q3/q6 optimized-versus-shared runtime attribution without widening the
   actor or API surface.
+
 - Restored maintained parity across `1`, `10`, `100`, and `1000` tokens on the canonical ARM
   workload.
+
 - Refreshed maintained benchmark compare output and docs with quantized attribution and preserved
   v1.3 baseline context.
 

@@ -1,323 +1,238 @@
 # Pitfalls Research
 
-**Domain:** Flash attention added to an existing CPU-hosted inference path with parity and benchmark
-obligations
-**Researched:** 2026-03-12
+**Domain:** Adding one maintained Qwen3-0.6B slice to an existing Llama-shaped parity and benchmark
+stack
+**Researched:** 2026-03-27
 **Confidence:** HIGH
 
 ## Critical Pitfalls
 
-### Pitfall 1: Shipping a "flash attention" milestone that still runs the old attention path
+### Pitfall 1: Updating the fixture name while the repo still rejects `qwen3`
 
 **What goes wrong:**
-The repo reports flash attention as delivered, but the canonical generation path still materializes
-attention scores/probabilities in `src/emel/generator/detail.hpp`, or only tool-local code uses a
-fused path.
+The planning docs say Qwen3 is the next milestone, but maintained generation surfaces still hard
+reject any model whose architecture is not `"llama"`.
 
 **Why it happens:**
-It is faster to add a benchmark demo, a tool-only experiment, or a partial kernel stub than to
-replace the real runtime path. In a brownfield system this can look complete because the outputs
-still match.
+The fixture constant is visible and easy to change, while the real architecture gates are spread
+across paritychecker, bench, and EMEL runtime helpers.
 
 **How to avoid:**
-Make `src/emel/generator/detail.hpp` the first runtime truth point. The milestone is not done until
-`run_layer()` stops depending on the old `compute_attention()` materialization as the shipped path
-and the fused operator is invoked from the real generation flow.
+Treat fixture identity, architecture validation, and runtime support as one unit of work. If EMEL
+cannot yet run one canonical Qwen3 slice, keep the tool surfaces rejecting it explicitly until that
+support lands.
 
 **Warning signs:**
-- `tools/paritychecker` or `tools/bench` mention flash attention, but `generator/detail.hpp` still
-  owns the old score/probability path.
-- Only `tools/` files changed.
-- The kernel event `op_flash_attn_ext` exists, but no real generator call site uses it.
+- `tests/models/README.md` adds a Qwen fixture, but `run_emel_validate_architecture()` still
+  returns success only for `"llama"`.
+- Tool usage text mentions Qwen while generated output still depends on the Llama fixture.
+- Only slug/path constants changed.
 
 **Phase to address:**
-Phase 1: Kernel bring-up and runtime truth wiring.
+Phase 26: fixture and architecture gate setup.
 
 ---
 
-### Pitfall 2: Breaking exact generation parity while chasing a faster kernel
+### Pitfall 2: Treating Qwen3 as a Llama alias
 
 **What goes wrong:**
-The flash-attention path changes generated text, token counts, or logits enough that canonical
-generation parity fails on the Llama-68M fixture.
+The tool accepts `qwen3`, but runtime code still assumes the Llama tensor family and fails later or
+produces misleading results.
 
 **Why it happens:**
-Online softmax, causal masking, head-grouping, RoPE positioning, or accumulation precision is
-implemented slightly differently than the reference path. These errors often only show up at decode
-time or after several layers.
+The architecture string looks like the obvious difference, but local reference source shows Qwen3
+has distinct attention-normalization tensors such as `attn_q_norm` and `attn_k_norm`.
 
 **How to avoid:**
-Bring up the shared/scalar operator first, match the canonical causal self-attention subset
-exactly, and add focused kernel tests before x86_64 optimization. Treat paritychecker as the
-primary acceptance gate, not an optional final check.
+Make runtime support explicit at the model/execution-view boundary. Do not equate "accepted the
+architecture string" with "supports the topology."
 
 **Warning signs:**
-- `generation parity mismatch` appears only for generated tokens, not initial prompt processing.
-- Short runs pass but the 8-token case diverges.
-- Max-logit or seam comparisons drift after the first decode step.
+- `src/emel/model/data.cpp` or `generator/detail.hpp` still depends entirely on
+  `emel::model::llama::detail::*`.
+- Qwen3 passes loader validation but fails when building the execution view.
+- Debug output shows extra norm tensors present in the model, but EMEL has nowhere to bind them.
 
 **Phase to address:**
-Phase 2: Generator integration and parity stabilization.
+Phase 27: runtime architecture bring-up.
 
 ---
 
-### Pitfall 3: Claiming parity while EMEL and the reference path use different operand classes
+### Pitfall 3: Shipping a misleading prompt contract
 
 **What goes wrong:**
-EMEL is benchmarked or parity-checked against `llama.cpp`, but one side still uses non-flash
-attention, a different KV layout, or a different effective operand path.
+EMEL benchmarks or parity-checks a Qwen3 instruct model with raw prompt bytes and argmax selection,
+then presents that as the canonical Qwen slice.
 
 **Why it happens:**
-The existing tool surfaces currently disable reference flash attention, and it is easy to forget to
-realign them once the EMEL path changes.
+The current maintained tools already inject `format_raw`, and changing prompt conditioning feels
+optional compared with runtime bring-up.
 
 **How to avoid:**
-After the EMEL runtime path is real, explicitly align `tools/paritychecker` and `tools/bench`
-reference contexts to the flash-attention algorithm class. If operand classes still differ, report
-results as end-to-end generation comparison, not kernel parity.
+Define one explicit request-conditioning contract up front. If the slice uses chat-template
+conditioning, wire that through the formatter/conditioner seam. If it uses a narrower interim
+contract, label it clearly and keep reference and EMEL aligned.
 
 **Warning signs:**
-- `LLAMA_FLASH_ATTN_TYPE_DISABLED` remains in reference generation paths after EMEL flash-attn
-  lands.
-- Bench numbers improve dramatically but parity language still says "same path" without proof.
-- Compare output is discussed as kernel parity even though the underlying operand pipelines differ.
+- `format_raw` remains the only formatter path in the maintained Qwen flow.
+- Official Qwen docs are cited, but the request contract does not use their documented local-use
+  flow.
+- Generated output includes empty or unstable `<think>` blocks under argmax.
 
 **Phase to address:**
-Phase 3: Reference alignment in paritychecker and bench.
+Phase 26: conditioning contract decision.
 
 ---
 
-### Pitfall 4: Smuggling orchestration branching into actions or context flags
+### Pitfall 4: Letting thinking-mode behavior leak into a greedy benchmark path
 
 **What goes wrong:**
-Flash-attention enable/disable logic is added as runtime branching in actions, or per-dispatch
-phase/mode flags are stored in SML context to steer control flow.
+Parity or benchmark runs become unstable, repetitive, or hard to interpret because the canonical
+request still allows default thinking-mode behavior while the maintained tools select argmax.
 
 **Why it happens:**
-When retrofitting a new algorithm into an existing actor, it is tempting to add `if` branches or a
-`flash_enabled` scratch flag instead of changing the data-plane implementation directly.
+Official Qwen docs note that thinking mode is the default and also warn against greedy decoding.
+The repo's current maintained generation flow is deterministic and argmax-oriented.
 
 **How to avoid:**
-Keep the milestone narrow enough that the canonical path has one runtime implementation. Do not add
-per-dispatch flash mode flags to context. Keep runtime control in the existing transition graph and
-data-plane work inside bounded detail/kernels.
+Choose a deterministic non-ambiguous request contract for the maintained slice and apply the same
+contract in both EMEL and `llama.cpp`.
 
 **Warning signs:**
-- New action code branches between old attention and flash attention.
-- Context gains fields that look like `mode`, `phase`, `flag`, `step`, or request mirrors.
-- A new SML state is added only to choose between two kernel implementations.
+- Long or repetitive generations appear on small prompts.
+- Bench numbers vary because prompt expansion is inconsistent.
+- Operators cannot explain whether the canonical request was thinking or non-thinking.
 
 **Phase to address:**
-Phase 1: Runtime design review before implementation.
+Phase 26: conditioning contract, then Phase 28: parity validation.
 
 ---
 
-### Pitfall 5: Allocation regressions in the hot path
+### Pitfall 5: Publishing benchmark numbers before parity is real
 
 **What goes wrong:**
-Flash attention works functionally, but allocates during prefill or decode because scratch buffers,
-partials, or views are created on each dispatch.
+The repo lands benchmark rows and docs for a Qwen slice whose correctness, topology support, or
+prompt contract is still unresolved.
 
 **Why it happens:**
-Fused attention typically needs tile scratch and temporary reductions, and it is easy to bolt those
-onto request-local execution with `std::vector` growth.
+Benchmark publication is a visible milestone artifact, so it is tempting to refresh it before the
+runtime story is complete.
 
 **How to avoid:**
-Allocate reusable workspace once in backend-owned persistent state during initialize/prepare. Reuse
-it across dispatches. Keep request-local payloads in events and persistent buffers in
-`generator::action::context::compute.backend`.
+Keep the same discipline as earlier milestones: runtime truth first, parity second, publication
+last.
 
 **Warning signs:**
-- `std::vector::resize` or `assign` appears on every prefill/decode call in new code.
-- Dispatch-time allocation tests or instrumentation start failing.
-- Benchmark variance increases unexpectedly after enabling flash attention.
+- Compare output changes before `tools/paritychecker --generation` passes on the same fixture.
+- Benchmark docs require a long explanation about why they should not yet be read as parity-backed.
+- The Qwen row exists, but there is no matching parity regression.
 
 **Phase to address:**
-Phase 1: Kernel and backend workspace design.
+Phase 29: benchmark publication only after Phase 28 is complete.
 
 ---
 
-### Pitfall 6: Preserving the wrong cache semantics
+### Pitfall 6: Scope explosion into the rest of the Qwen family
 
 **What goes wrong:**
-KV cache writes, positions, grouped-query indexing, or decode `kv_tokens` handling no longer match
-the pre-existing generator assumptions, causing subtle wrong-token bugs.
+The milestone grows from one Qwen3-0.6B fixture into Qwen3.5, Qwen3Next, alternative quants, or
+MoE variants before the first maintained slice is stable.
 
 **Why it happens:**
-Flash attention changes how attention is computed, but it should not silently change cache meaning.
-Implementers often optimize the access pattern and accidentally change layout assumptions.
+Qwen support looks like a family problem, and the reference implementation enumerates many related
+architectures nearby.
 
 **How to avoid:**
-Keep the existing cache ownership and sequence semantics in the generator backend. Replace only the
-attention reduction, not the meaning of `key_cache`, `value_cache`, positions, or `kv_tokens`
-without an explicit milestone decision.
+Use one official Qwen3-0.6B fixture as the only v1.6 truth anchor. Treat every additional model or
+quant as future scope unless explicitly promoted later.
 
 **Warning signs:**
-- Prefill passes but first decode token fails.
-- Decode only works when `kv_tokens == 0`.
-- Head/group indexing fixes appear repeatedly during debugging.
+- Multiple Qwen fixtures appear in planning before the first one is parity-backed.
+- Bench or parity slugs multiply before the first canonical row is stable.
+- Requirements start talking about "Qwen support" instead of "one canonical Qwen3-0.6B slice."
 
 **Phase to address:**
-Phase 2: Generator backend integration tests.
-
----
-
-### Pitfall 7: Optimizing x86_64 before the scalar path is trustworthy
-
-**What goes wrong:**
-AVX2 code lands early, bugs are hard to localize, and parity mismatches become ambiguous between
-algorithm errors and SIMD-specific errors.
-
-**Why it happens:**
-Performance pressure makes optimization feel urgent, especially in a flash-attention milestone.
-
-**How to avoid:**
-Bring up the shared/scalar implementation first, prove it through kernel tests and paritychecker,
-then add x86_64 specialization behind the same operator contract.
-
-**Warning signs:**
-- The first working implementation exists only in `kernel/x86_64/actions.hpp`.
-- Failures reproduce only on some hosts or only with AVX2 available.
-- No scalar/shared reference path exists for A/B comparison.
-
-**Phase to address:**
-Phase 2: Correctness first, Phase 3: host-specific optimization.
-
----
-
-### Pitfall 8: Turning the benchmark into a different workload than the parity slice
-
-**What goes wrong:**
-The benchmark compares a flash-attention path, but on a different prompt length, token budget,
-initialization mode, or reference setting than the canonical parity slice.
-
-**Why it happens:**
-Bench work often drifts toward "interesting numbers" rather than "same accepted workload."
-
-**How to avoid:**
-Keep the existing canonical bench case names and workload shape. Only change the internal algorithm
-class once parity is already stable. Bench should measure the shipped canonical slice, not a
-special-case demo path.
-
-**Warning signs:**
-- New benchmark-only prompt or token-budget constants appear for flash attention.
-- The canonical row disappears or is renamed.
-- Bench must be interpreted with a long explanation about how it differs from parity mode.
-
-**Phase to address:**
-Phase 3: Benchmark alignment and reporting.
-
----
-
-### Pitfall 9: Silent verification blind spots
-
-**What goes wrong:**
-The milestone "passes," but no one has actually verified that flash attention is active in both the
-short and long canonical cases, or that the tool surfaces are exercising the intended path.
-
-**Why it happens:**
-Existing parity and bench flows already pass today, so it is easy to assume unchanged green checks
-mean the new path was covered.
-
-**How to avoid:**
-Add targeted tests and, where useful, seam/dump visibility that confirms the flash-attention path
-was executed. Coverage should include at least canonical parity and both canonical benchmark cases.
-
-**Warning signs:**
-- No new kernel or generator tests accompany the change.
-- Debug output cannot tell whether the fused path ran.
-- The long benchmark case is ignored during validation.
-
-**Phase to address:**
-Phase 2: Verification instrumentation and tests.
+Every phase; especially roadmap definition.
 
 ## Technical Debt Patterns
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Keep old `compute_attention()` path behind a hidden fallback | Easier bring-up when flash attention is unstable | Two runtime truths, misleading parity/bench interpretation, harder maintenance | Only if explicitly approved as `interim`; otherwise never |
-| Tool-only flash-attention prototype in `tools/` | Fastest way to show numbers | Does not satisfy milestone architecture and drifts from shipped runtime | Never as the landed milestone solution |
-| Dequantize or repack into a simpler operand class in the hot path | Simplifies early kernel code | Breaks parity claims about the effective operand path and can hide real costs | Only with explicit user approval and clear interim labeling |
-| Bench first, parity later | Gives early performance feedback | Encourages optimizing a path that may still be wrong | Acceptable only for local exploration, not for milestone completion |
+| Accept `qwen3` at the tool gate but keep Llama runtime assumptions underneath | Makes early CLI smoke tests look better | Produces false readiness and late runtime failures | Never for shipped milestone state |
+| Keep `format_raw` temporarily for Qwen bring-up | Avoids deciding prompt conditioning immediately | Makes parity and benchmark claims ambiguous | Only as a clearly labeled local probe, not as the milestone's final contract |
+| Use a community quant or local conversion as the canonical fixture | Smaller download and faster iteration | Weakens provenance and makes later comparisons harder to trust | Acceptable only for private experiments |
+| Refresh benchmark publication before parity proof | Gives visible progress fast | Creates ungrounded performance claims | Never for milestone completion |
 
 ## Integration Gotchas
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| `src/emel/generator` ↔ `src/emel/kernel` | Calling a new helper path directly instead of going through the kernel actor event surface | Dispatch `op_flash_attn_ext` through the existing kernel actor boundary |
-| `tools/paritychecker` ↔ reference `llama.cpp` | Leaving reference flash attention disabled after EMEL switches to flash attention | Align reference context settings once the runtime path is real |
-| `tools/bench` ↔ canonical generation case | Adding flash-attention-only benchmark cases instead of reusing the canonical rows | Keep the canonical rows and compare workflow, then interpret results on that basis |
-| `generator` context ↔ per-dispatch runtime data | Storing request-local flash control or temporary counts in context | Keep dispatch-local data in events / `generate_ctx::io`; keep only persistent workspace in backend state |
+| `tests/models/README.md` ↔ tool constants | Documenting one file but benchmarking another | Keep fixture name, README entry, and tool slug/path constants aligned |
+| Formatter/conditioner ↔ parity/bench reference path | EMEL and `llama.cpp` use different prompt-conditioning contracts | Choose one canonical contract and apply it in both paths |
+| Tool architecture validation ↔ runtime execution view | Letting the tool accept `qwen3` before runtime support exists | Keep the gate narrow and explicit until runtime support is real |
+| Qwen fixture bring-up ↔ existing Llama anchor | Breaking the prior canonical slice while widening support | Keep Llama regressions in place while Qwen is added |
 
 ## Performance Traps
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| Materializing full score/probability buffers after adding a fused operator name | Memory traffic stays high, benchmark improvement is weak or noisy | Use online softmax and bounded tile scratch in the real operator path | Breaks immediately on prefill-heavy cases and becomes more obvious as context length grows |
-| Per-dispatch scratch allocation | Extra variance, slower decode, allocator noise | Preallocate persistent workspace during initialize/prepare | Breaks immediately in the canonical benchmark and worsens with longer runs |
-| SIMD-only implementation with no scalar reference | Host-specific correctness drift | Keep a shared/scalar implementation for correctness and non-AVX2 hosts | Breaks as soon as validation runs on a different host or compiler setup |
-| Benchmarking setup cost instead of steady-state generation path changes | Bench deltas do not reflect the new kernel | Keep benchmark contract consistent with existing preloaded request flow | Breaks immediately when trying to interpret benchmark results |
+| Measuring load/provenance work instead of generation | Compare rows reflect setup churn, not runtime behavior | Keep the existing preloaded benchmark discipline and compare the maintained request path only | Immediately when the fixture is much larger than Llama-68M |
+| Different prompt token counts between EMEL and `llama.cpp` | Parity fails or bench becomes incomparable | Make prompt conditioning explicit and shared | Immediately once chat-template behavior diverges |
+| Publishing numbers from the wrong quant artifact | Apparent speedups or slowdowns are really fixture changes | Lock the official file name and checksum into the canonical slice | As soon as a second GGUF file appears locally |
 
 ## Security Mistakes
 
 | Mistake | Risk | Prevention |
 |---------|------|------------|
-| Letting mutable internal-event pointers outlive the RTC chain | Use-after-scope or undefined behavior in debug or future refactors | Keep same-RTC pointer handoff internal only and never retain it beyond dispatch |
-| Exposing flash-attention internal buffers or mutable payloads through a public API | Boundary violations and unstable ABI expectations | Keep all mutable flash-attention wiring inside `src/emel` internals and existing tool-only integration surfaces |
-| Copying unchecked tensor/view metadata from tool/reference code into runtime | Invalid memory access or silent wrong-shape execution | Validate shapes and dispatch requests in kernel/detail and existing guards before execution |
+| Trusting an undocumented model download | Operators cannot reproduce or verify the benchmark slice | Record source repo, file name, checksum, and URL in `tests/models/README.md` |
+| Treating local-only fixture substitutions as shipped truth | Published results become unreproducible | Keep the official fixture identity explicit in planning and docs |
 
 ## UX Pitfalls
 
 | Pitfall | User Impact | Better Approach |
 |---------|-------------|-----------------|
-| Benchmark output does not make it clear the canonical row changed algorithm class | Operators misread trend changes across milestones | Add minimal labeling or release-note context while keeping the same compare workflow |
-| Parity failures provide no clue whether the flash path ran | Debugging slows down and confidence drops | Reuse existing dump/seam reporting to surface path identity when needed |
-| A new CLI or knob is required to access flash attention | Users/operators now have two ways to run "canonical generation" | Keep flash attention behind the existing accepted surfaces for this milestone |
+| "Qwen supported" language without naming the exact slice | Operators assume broader support than the repo actually has | Name the exact fixture and conditioning contract everywhere |
+| Benchmark rows that do not make the fixture obvious | Reviewers cannot tell which slice the numbers represent | Use explicit Qwen fixture naming in compare/docs output |
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Kernel operator:** Often missing exact causal masking or online softmax behavior — verify the scalar/shared operator matches canonical parity before SIMD work
-- [ ] **Generator integration:** Often missing real runtime adoption — verify `generator/detail.hpp` no longer relies on the old materialized attention path as the shipped implementation
-- [ ] **Paritychecker:** Often missing reference alignment — verify the reference generation context is configured for the same algorithm class
-- [ ] **Bench:** Often missing workload consistency — verify the canonical benchmark row and preloaded request shape are unchanged
-- [ ] **Verification:** Often missing long-case coverage — verify both the 1-token and 8-token canonical generation cases exercise the new path
+- [ ] **Fixture support:** `tests/models/README.md` names the official Qwen3 file and checksum, not just a local path.
+- [ ] **Architecture support:** maintained tools no longer reject `qwen3`, and runtime has real topology support behind that gate.
+- [ ] **Conditioning contract:** parity and bench use the same documented request contract, not implicit raw formatting.
+- [ ] **Parity proof:** `tools/paritychecker --generation` passes on the canonical Qwen3 slice before any benchmark publication is refreshed.
+- [ ] **Publication:** compare/docs output names the same Qwen fixture that parity already proved.
 
 ## Recovery Strategies
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Old path still shipped under a flash-attention label | MEDIUM | Revert tool-surface claims, wire the real runtime path first, then re-run parity and bench |
-| Exact parity regressions | HIGH | Freeze optimization work, diff kernel outputs or seam dumps, restore scalar correctness, then reintroduce optimized paths incrementally |
-| Operand-class mismatch between EMEL and reference | MEDIUM | Correct tool reference settings or narrow the claim language to end-to-end generation compare until operand alignment is real |
-| SML rule violations from branching/context abuse | MEDIUM | Refactor branching back into existing orchestration decisions and move data-plane work into bounded detail/kernels |
-| Per-dispatch allocation or workspace churn | LOW | Move scratch into persistent backend-owned buffers and add allocation checks in tests |
-| Benchmark workload drift | LOW | Re-pin benchmark to canonical case names and settings, regenerate truthful measurements, and avoid snapshot churn until stable |
+| Tool gate updated without runtime support | MEDIUM | Re-tighten the architecture gate, add failing tests, then re-open only the supported slice |
+| Wrong prompt contract chosen | MEDIUM | Document the failure mode, pick one new canonical contract, and refresh parity before bench |
+| Wrong fixture published | LOW | Correct README provenance, purge the incorrect publication row, and regenerate from the official artifact |
+| Scope explosion | LOW | Move extra Qwen work back to v2/out-of-scope docs and re-anchor on the canonical 0.6B slice |
 
 ## Pitfall-to-Phase Mapping
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| Shipping the old path under a flash-attention label | Phase 1: kernel bring-up and runtime truth wiring | Verify `src/emel/generator/detail.hpp` calls the fused operator in the shipped generation flow |
-| Breaking exact generation parity | Phase 2: generator integration and parity stabilization | `tools/paritychecker --generation` passes on the canonical fixture |
-| Operand-class mismatch in reference comparison | Phase 3: paritychecker and bench reference alignment | Reference contexts are aligned and any remaining claim scope is stated precisely |
-| SML branching/context abuse | Phase 1: design review and integration planning | Review new actions/context fields against `AGENTS.md` and `docs/rules/sml.rules.md` |
-| Allocation regressions | Phase 1: workspace design | Allocation-sensitive tests and code inspection show no dispatch-time growth |
-| KV/cache semantic drift | Phase 2: generator backend integration | Prefill and decode both pass canonical parity cases |
-| Premature x86_64 optimization | Phase 3: host-specific optimization | Scalar path is already green before AVX2 specialization is enabled |
-| Benchmark workload drift | Phase 3: benchmark integration | Canonical bench row names and workload settings remain intact |
-| Silent verification blind spots | Phase 2: tests and observability | New kernel/generator coverage exists and long-case validation is exercised |
+| Tool gate still rejects `qwen3` | Phase 26 | Maintained tool usage/help and validation paths accept only the new canonical slice intentionally |
+| Qwen3 treated as a Llama alias | Phase 27 | Runtime tests prove the Qwen execution view works and extra norm tensors are handled explicitly |
+| Misleading prompt contract | Phase 26 | Planning docs and parity tests name one explicit conditioning contract |
+| Thinking-mode leakage into argmax | Phase 26 and Phase 28 | Parity output is stable and the request contract is documented |
+| Bench before parity | Phase 29 | No Qwen compare/docs refresh lands before Qwen parity is green |
+| Scope explosion | Roadmap definition | Requirements and roadmap stay locked to one official Qwen3-0.6B fixture |
 
 ## Sources
 
-- `.planning/PROJECT.md` - milestone goal, current acceptance boundary, and explicit out-of-scope constraints. Confidence: HIGH.
-- `AGENTS.md` - repo-specific rules for runtime truth, parity claims, no-queue actor semantics, and interim fallback restrictions. Confidence: HIGH.
-- `docs/rules/sml.rules.md` - bounded-work, no-allocation, and no-runtime-branching constraints that create flash-attention integration risk. Confidence: HIGH.
-- `.planning/research/STACK.md` - stack-level decisions and non-goals for this milestone. Confidence: HIGH.
-- `.planning/research/FEATURES.md` - table-stakes verification and milestone scope expectations. Confidence: HIGH.
-- `.planning/research/ARCHITECTURE.md` - integration points and build-order assumptions for the same milestone. Confidence: HIGH.
-- `tools/paritychecker/parity_runner.cpp` and `tools/bench/generation_bench.cpp` - current reference flash-attention disable points and canonical surface assumptions. Confidence: HIGH.
-- `src/emel/generator/detail.hpp` and `src/emel/kernel/**` - current runtime integration seam where most flash-attention mistakes will occur. Confidence: HIGH.
+- `.planning/PROJECT.md` - milestone scope and narrow acceptance boundary.
+- `AGENTS.md` - rules against overstated parity claims and silent fallback.
+- `tools/paritychecker/parity_runner.cpp` and `tools/bench/generation_bench.cpp` - current Llama-only gates and raw formatting path.
+- `src/emel/model/data.cpp` and `src/emel/generator/detail.hpp` - current runtime assumptions.
+- `build/paritychecker/_deps/reference_impl-src/src/llama-arch.cpp` and `build/paritychecker/_deps/reference_impl-src/src/llama-model.cpp` - local reference evidence that Qwen3 is a distinct architecture.
+- https://huggingface.co/Qwen/Qwen3-0.6B - official model card.
+- https://huggingface.co/Qwen/Qwen3-0.6B-GGUF - official GGUF model card.
+- https://qwen.readthedocs.io/en/latest/run_locally/llama.cpp.html - official Qwen `llama.cpp` guidance and thinking-mode caveats.
 
 ---
-*Pitfalls research for: EMEL v1.2 flash attention*
-*Researched: 2026-03-12*
+*Pitfalls research for: EMEL v1.6 Qwen3-0.6B parity and benchmark*
+*Researched: 2026-03-27*

@@ -1,8 +1,8 @@
 # Architecture Research
 
-**Domain:** Flash-attention integration for the existing EMEL canonical Llama-68M generation slice
-**Researched:** 2026-03-12
-**Confidence:** HIGH
+**Domain:** Qwen3-0.6B bring-up on EMEL's maintained generation, parity, and benchmark surfaces
+**Researched:** 2026-03-27
+**Confidence:** MEDIUM-HIGH
 
 ## Standard Architecture
 
@@ -10,43 +10,44 @@
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                          Verification Surfaces                              │
+│                           Verification Surfaces                             │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  tools/paritychecker        tools/bench                                     │
-│  generation parity          canonical compare benchmark                     │
+│  generation parity          compare/snapshot/docs publication               │
 └───────────────────────────────┬──────────────────────────────────────────────┘
-                                │ existing initialize/generate flow
+                                │ one canonical fixture + one canonical request
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                          Orchestration Layer                                │
+│                         Prompt Conditioning Layer                           │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  src/emel/text/formatter   src/emel/text/conditioner   src/emel/text/jinja │
+│  choose request contract   apply formatter before      render chat template │
+│                             tokenization                 if needed           │
+└───────────────────────────────┬──────────────────────────────────────────────┘
+                                │ formatter output + tokenizer settings
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                           Runtime Orchestration                             │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │  src/emel/generator::sm                                                    │
-│  - conditioning                                                            │
-│  - planning                                                                │
-│  - memory reservation/snapshot                                             │
-│  - graph compute dispatch                                                  │
-│  - sampling / rendering                                                    │
+│  - initialize tokenizer/conditioner                                        │
+│  - prepare prompt + decode capacities                                      │
+│  - run shipped generate flow                                               │
 └───────────────────────────────┬──────────────────────────────────────────────┘
-                                │ existing graph::event::compute callbacks
+                                │ model/execution view + graph compute
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                            Compute Layer                                    │
+│                         Model And Execution View                            │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│  src/emel/graph::sm                                                         │
-│    └── src/emel/graph::processor::sm                                        │
-│         validate → prepare → alloc → bind → kernel → extract               │
-│                            │                                                 │
-│                            └── run_kernel callback into                      │
-│                                src/emel/generator/detail.hpp                │
+│  src/emel/model/data.*                                                     │
+│  src/emel/model/llama/detail.hpp (current truth)                           │
+│  future qwen3-aware detail or equivalent runtime support                   │
 └───────────────────────────────┬──────────────────────────────────────────────┘
-                                │ existing kernel actor dispatch
+                                │ typed tensor views / step plans
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                             Kernel Layer                                    │
+│                            Reference Boundary                              │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│  src/emel/kernel::sm                                                        │
-│    ├── x86_64::sm                                                           │
-│    └── other backend actors (unchanged this milestone)                      │
-│                                                                              │
-│  New behavior for milestone: real op_flash_attn_ext execution in the        │
-│  shared/scalar path plus x86_64 fast path                                   │
+│  llama.cpp CPU reference                                                   │
+│  - same fixture                                                            │
+│  - same conditioning contract                                              │
+│  - same max-token budget                                                   │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -54,178 +55,153 @@
 
 | Component | Responsibility | Typical Implementation |
 |-----------|----------------|------------------------|
-| `src/emel/generator` | Own end-to-end generation orchestration and persistent session/backend state | Existing Boost.SML actor plus `detail.hpp` native backend callbacks |
-| `src/emel/graph` | Keep compute execution structured as reserve/assemble/execute phases | Existing Boost.SML graph actor and processor actor |
-| `src/emel/generator/detail.hpp` native backend callbacks | Bind model tensors, KV cache, and request-local token/position inputs to the graph processor callback contract | Existing callback-based compute implementation; this is where flash attention should replace the current explicit score/probability path |
-| `src/emel/kernel` | Own opcode-level execution and backend dispatch | Existing kernel actor with per-backend subactors and typed op events |
-| `tools/paritychecker` | Verify canonical generation correctness against `llama.cpp` | Existing tool surface; should remain the acceptance boundary |
-| `tools/bench` | Publish canonical EMEL vs `llama.cpp` generation timings | Existing benchmark surface; should remain the only benchmark integration point for the milestone |
+| `tests/models/README.md` plus maintained fixture constants | Own canonical fixture identity and provenance | Documented file name, source repo, checksum, and download URL |
+| `tools/paritychecker` | Own maintained Qwen parity acceptance | Existing CLI surface; should gain one canonical Qwen slice without widening into a model matrix |
+| `tools/bench` | Own maintained compare publication | Existing compare/docs flow; should publish the same Qwen slice that parity already proves |
+| `src/emel/text/formatter` / `text::conditioner` | Own prompt-conditioning contract | Existing seam currently uses `format_raw`; v1.6 should use it to make Qwen conditioning explicit |
+| `src/emel/model/data.*` and model-detail helpers | Own architecture name, metadata, and execution-view truth | Current truth is Llama-specific; Qwen3 support must land here or remain rejected |
+| `src/emel/generator` | Own shipped initialize/generate flow | Existing Boost.SML actor; v1.6 should avoid actor-graph rewrites and stay within current seams |
 
 ## Recommended Project Structure
 
 ```text
-src/
-├── emel/
-│   ├── generator/
-│   │   ├── context.hpp      # Owns backend and generation session state
-│   │   ├── actions.hpp      # Dispatches existing graph compute requests
-│   │   ├── events.hpp       # Existing initialize/generate payloads
-│   │   └── detail.hpp       # Native backend compute callbacks; flash-attn integration point
-│   ├── graph/
-│   │   ├── sm.hpp           # Reserve/compute orchestration stays unchanged
-│   │   ├── events.hpp       # Existing callback-based compute contract
-│   │   └── processor/
-│   │       ├── sm.hpp       # Existing phase pipeline stays unchanged
-│   │       └── kernel_step/ # Existing run_kernel callback phase stays unchanged
-│   └── kernel/
-│       ├── events.hpp       # Existing op_flash_attn_ext event surface
-│       ├── detail.hpp       # Shared/scalar flash-attn validation + execution
-│       ├── x86_64/
-│       │   ├── actions.hpp  # x86_64 fast path for flash attention
-│       │   ├── guards.hpp   # Existing valid/simd/invalid dispatch guards
-│       │   └── sm.hpp       # Existing row already routes op_flash_attn_ext
-│       └── [other backends]/ # Leave unchanged for this milestone
+tests/
+├── models/
+│   └── README.md                 # Canonical Qwen3 fixture provenance
 tools/
 ├── paritychecker/
-│   └── parity_runner.cpp    # Existing generation acceptance surface
+│   ├── parity_main.cpp           # Usage/help text and canonical fixture guidance
+│   └── parity_runner.cpp         # Maintained generation surface and architecture gates
 └── bench/
-    └── generation_bench.cpp # Existing canonical compare surface
-tests/
-├── kernel/                  # Add flash-attn operator tests here
-└── generator/               # Add generation integration tests here
+    └── generation_bench.cpp      # Maintained compare path and fixture gates
+src/
+├── emel/
+│   ├── model/
+│   │   ├── data.hpp              # Architecture metadata and chat-template fields
+│   │   ├── data.cpp              # Architecture-aware execution-view logic
+│   │   └── llama/detail.hpp      # Current Llama-only detail truth
+│   ├── generator/
+│   │   ├── context.hpp           # Runtime-owned generation state
+│   │   ├── detail.hpp            # Current execution path depends on model::llama::detail
+│   │   └── sm.hpp                # Keep actor structure stable
+│   └── text/
+│       ├── formatter/format.hpp  # Existing formatter injection seam
+│       ├── formatter/sm.hpp      # Chat-formatting design intent
+│       ├── conditioner/**        # Pre-tokenization request shaping
+│       └── jinja/**              # Existing parser/formatter support
 ```
 
 ### Structure Rationale
 
-- **`src/emel/generator/`:** keep flash-attention adoption inside the shipped generation actor rather than creating a sidecar runtime path.
-- **`src/emel/graph/`:** preserve the current compute pipeline contract so flash attention remains a callback implementation detail, not a graph-orchestration redesign.
-- **`src/emel/kernel/`:** the opcode already exists here, so this is the correct place for the fused data-plane implementation.
-- **`tools/paritychecker/` and `tools/bench/`:** reuse the existing acceptance surfaces instead of inventing milestone-specific tooling.
+- **Fixture and tool files move first:** the milestone needs an explicit truth anchor before runtime claims become meaningful.
+- **Prompt conditioning is a first-class layer:** Qwen3 is not just a different tensor file; its operator-facing request contract matters.
+- **Model/execution-view support is the real runtime gate:** current EMEL generation depends on `model::llama::detail`, so architecture work must happen before the tools can honestly claim support.
+- **Generator actor structure should stay stable:** AGENTS requires asking before state-machine structure changes, so v1.6 should prefer seam-level and data-plane changes over actor rewrites.
 
 ## Architectural Patterns
 
-### Pattern 1: Callback-Owned Compute, Actor-Owned Orchestration
+### Pattern 1: Truth Anchor First
 
-**What:** Keep Boost.SML actors responsible for phase ordering, while the heavy numeric work stays in bounded callback/detail kernels.
-**When to use:** When a milestone changes math or kernels but should not change the orchestration graph.
-**Trade-offs:** Preserves repo invariants and minimizes churn, but it requires discipline to keep new behavior inside existing callback boundaries.
+**What:** Establish one official fixture, one canonical slug/path, and one documented request contract before widening runtime support.
+**When to use:** Any time a brownfield milestone adds a new model family to maintained surfaces.
+**Trade-offs:** Front-loads planning and provenance work, but it prevents later benchmark/parity drift.
 
-**Example:**
-```cpp
-emel::graph::event::compute compute_ev{
-  .step_plan = &ctx.compute.prefill_plan,
-  .compute_ctx = &ev.ctx.io,
-  .validate = emel::generator::detail::validate,
-  .prepare_graph = emel::generator::detail::prepare_graph,
-  .alloc_graph = emel::generator::detail::alloc_graph,
-  .bind_inputs = emel::generator::detail::bind_inputs,
-  .run_kernel = emel::generator::detail::run_kernel,
-  .extract_outputs = emel::generator::detail::extract_outputs,
-};
-```
+### Pattern 2: Condition Through Existing Formatter Injection
 
-### Pattern 2: Replace Data-Plane Logic, Preserve Actor Graph
+**What:** Use `formatter::format_fn` plus `text::conditioner` to make Qwen request shaping explicit instead of adding ad hoc prompt logic inside generator actions.
+**When to use:** When the model family needs a different prompt contract but the actor graph should stay unchanged.
+**Trade-offs:** Requires a clean formatter decision up front, but avoids illegal runtime branching inside SML actions.
 
-**What:** Swap the attention math inside `generator/detail.hpp` and `kernel/detail.hpp` while keeping the existing generator, graph, and processor states intact.
-**When to use:** When the milestone is algorithmic rather than orchestration-focused.
-**Trade-offs:** Safest for parity and regression control, but it intentionally avoids broader architectural cleanup.
+### Pattern 3: Add Architecture Support at the Model-View Boundary
 
-**Example:**
-```cpp
-// Current architecture-safe change:
-// run_layer() still computes q/k/v projections and writes KV cache,
-// but attention context is produced by kernel.process_event(op_flash_attn_ext)
-// instead of explicit attn_scores/attn_probs materialization.
-```
+**What:** Teach EMEL's model/view layer how one Qwen3 slice maps into runtime tensor views and step plans, instead of pretending the architecture is already Llama-compatible.
+**When to use:** When the reference implementation shows distinct architecture/tensor semantics.
+**Trade-offs:** More upfront runtime work, but much less risk of false readiness. Local reference code shows Qwen3 includes `attn_q_norm` and `attn_k_norm`, so a simple string alias is unsafe.
 
-### Pattern 3: Persistent Backend-Owned Workspace
+### Pattern 4: Keep Verification And Publication On Existing Surfaces
 
-**What:** Keep flash-attention scratch/workspace in the persistent backend owned by `generator::action::context::compute.backend`, not in dispatch-local SML context.
-**When to use:** When a kernel needs reusable buffers across many top-level dispatches.
-**Trade-offs:** Matches repo rules and avoids per-dispatch allocation, but it means buffer ownership must stay tightly scoped to the existing backend object.
+**What:** Reuse the current paritychecker generation mode and bench compare/docs flow.
+**When to use:** When the goal is honest brownfield expansion, not a new product surface.
+**Trade-offs:** Constrains scope to what the existing tools can publish, but that is exactly what keeps the milestone truthful.
 
 ## Data Flow
 
 ### Request Flow
 
 ```text
-tools/paritychecker or tools/bench
+canonical Qwen fixture path
     ↓
-generator::sm.process_event(generate)
+tool surface loads GGUF metadata and validates architecture
     ↓
-generator actions build graph::event::compute
+formatter chooses one canonical request contract
     ↓
-graph::sm → graph::processor::sm
+conditioner prepares prompt bytes for tokenization
     ↓
-validate → prepare → alloc → bind → kernel → extract
+generator::sm initialize/generate on the Qwen slice
     ↓
-generator::detail::run_kernel()
+model/execution-view support binds Qwen tensors for runtime use
     ↓
-run_prefill()/run_decode()
+EMEL output is compared against llama.cpp using the same fixture and request contract
     ↓
-run_layer()
-    ↓
-q/k/v projections + rope + KV cache write
-    ↓
-kernel.process_event(op_flash_attn_ext)
-    ↓
-attention output returned to generator backend
-    ↓
-output projection → FFN → logits extraction
-    ↓
-sampling / rendering / parity or benchmark reporting
+bench/docs publish only after parity is already real
 ```
 
 ### State Management
 
 ```text
 generator::action::context
-    ↓ owns
-graph_binding.backend (persistent native backend)
-    ↓ owns
-model execution view, topology, plans, KV cache, logits/workspace, kernel actor
-    ↓ receives per-dispatch input through
-generator::event::generate_ctx::io + graph::event::compute payload
+    ↓ owns persistent runtime state
+model_data + backend/session storage
+    ↓ receives request-local prompt input through
+formatter → conditioner → generate event
+    ↓ returns generated output to paritychecker or bench
 ```
 
 ### Key Data Flows
 
-1. **Prefill flow:** prompt tokens are conditioned and planned in the generator, then passed to graph compute, then bound into the native backend, which computes each layer and calls `op_flash_attn_ext` after Q/K/V projection and RoPE.
-2. **Decode flow:** one sampled token plus current `kv_tokens` is passed through the same graph processor contract, with flash attention consuming the existing KV cache and current token position for single-token decode.
-3. **Verification flow:** paritychecker and bench do not call flash attention directly; they exercise the same generator surface and observe the results through existing success/error and compare/reporting contracts.
+1. **Fixture provenance flow:** official model file identity is documented in `tests/models/README.md` and mirrored in maintained tool constants.
+2. **Conditioning flow:** one canonical prompt contract is rendered before tokenization so EMEL and `llama.cpp` consume the same operator-facing request.
+3. **Runtime flow:** Qwen3 metadata and tensors are turned into an execution view that the existing generator path can use without changing its actor graph.
+4. **Verification flow:** paritychecker proves correctness before bench/docs refresh publication.
 
 ## Scaling Considerations
 
 | Scale | Architecture Adjustments |
 |-------|--------------------------|
-| Canonical single-model milestone | Keep all work inside existing generator/graph/kernel components; no new actors are needed |
-| More models in same family | Add shape/feature validation around the same callback seam before broadening tool acceptance |
-| Broader backend rollout | Introduce backend-specific fast paths behind the same `op_flash_attn_ext` event, not new generator architectures |
+| One canonical Qwen3 fixture | Keep all work inside existing tool, formatter, model, and generator seams |
+| More Qwen3 prompts on the same fixture | Add prompt-contract documentation and tests, not new runtime families |
+| More Qwen-family models | Re-evaluate topology and conditioning per family before reusing v1.6 assumptions |
 
 ### Scaling Priorities
 
-1. **First bottleneck:** the current generator attention implementation in `src/emel/generator/detail.hpp`; replace explicit score/probability materialization with fused flash-attn dispatch before attempting broader backend work.
-2. **Second bottleneck:** backend specialization in `src/emel/kernel/x86_64/actions.hpp`; only after the shared/scalar path is correct should x86_64-specific optimization become the focus.
+1. **First bottleneck:** model/execution-view support, because current runtime still depends on `model::llama::detail`.
+2. **Second bottleneck:** conditioning fidelity, because Qwen3 benchmark/parity claims are weak if EMEL and `llama.cpp` do not use the same prompt contract.
 
 ## Anti-Patterns
 
-### Anti-Pattern 1: New Flash-Attention Actor or Parallel Orchestration Path
+### Anti-Pattern 1: Update Only The Fixture Name
 
-**What people do:** Add a dedicated flash-attention state machine or tool-local compute actor.
-**Why it's wrong:** It duplicates orchestration, expands the call graph, and violates the repo preference that `src/` machines remain the source of truth.
-**Do this instead:** Keep flash attention as an opcode implementation behind the existing generator → graph → processor → kernel chain.
+**What people do:** Swap `Llama-68M-Chat-v1-Q2_K.gguf` for a Qwen path and call the milestone started.
+**Why it's wrong:** The current maintained tools still validate `architecture == "llama"` and the runtime still builds a Llama-only execution view.
+**Do this instead:** Change fixture constants, architecture gates, and runtime support together in a narrow, explicit Qwen slice.
 
-### Anti-Pattern 2: Put Algorithm Selection Logic in Generator Actions
+### Anti-Pattern 2: Treat Qwen3 As A Llama Alias
 
-**What people do:** Branch in `generator/actions.hpp` between old attention and flash attention, or introduce per-dispatch mode flags in context.
-**Why it's wrong:** The repo rules forbid runtime branching in actions and forbid storing dispatch-local phase/control flags in context.
-**Do this instead:** Make the canonical generation backend use one implementation path for the milestone, with shape validation in kernel/detail and backend selection in existing kernel guards.
+**What people do:** Allow `qwen3` through the same runtime path without accounting for distinct tensor families.
+**Why it's wrong:** Local reference source shows Qwen3 includes attention-normalization tensors beyond the current Llama tensor set.
+**Do this instead:** Add explicit Qwen3-aware runtime handling or keep the model rejected until that support exists.
 
-### Anti-Pattern 3: Change Graph/Processor Phases for a Kernel Milestone
+### Anti-Pattern 3: Keep `format_raw` And Claim Official Qwen Behavior
 
-**What people do:** Add extra graph phases like "flash_prepare" or "attention_execute."
-**Why it's wrong:** The graph processor already has the necessary `bind → kernel → extract` contract, and phase churn increases risk across paritychecker and bench for no milestone benefit.
-**Do this instead:** Keep flash attention inside the existing `run_kernel` callback and only extend data-plane helpers or backend-owned workspace as needed.
+**What people do:** Reuse the current raw prompt path because it is already wired into generator initialization.
+**Why it's wrong:** It avoids the hard prompt-contract decision and can produce misleading parity or endless-repetition behavior for an instruct model.
+**Do this instead:** Make the Qwen request contract explicit through the existing formatter/conditioner seam.
+
+### Anti-Pattern 4: Publish Benchmarks Before Parity
+
+**What people do:** Land compare output first because it is visible.
+**Why it's wrong:** It creates performance claims for a slice whose correctness and conditioning contract are still unproven.
+**Do this instead:** Make parity and runtime tests precede benchmark publication.
 
 ## Integration Points
 
@@ -233,96 +209,61 @@ generator::event::generate_ctx::io + graph::event::compute payload
 
 | Service | Integration Pattern | Notes |
 |---------|---------------------|-------|
-| `tools/paritychecker` reference `llama.cpp` context | Tool-only reference comparison | Keep it outside `src/emel`; align reference flash-attention settings only after the EMEL path is real |
-| `tools/bench` reference `llama.cpp` context | Tool-only compare benchmark | Reuse the existing compare workflow and canonical case names |
+| Official Hugging Face Qwen GGUF repo | Manual fixture acquisition plus README provenance | Use for one canonical artifact only |
+| `llama.cpp` CPU reference | Tool-only parity and benchmark comparison | Keep fixture, prompt contract, and token budget aligned with EMEL |
 
 ### Internal Boundaries
 
 | Boundary | Communication | Notes |
 |----------|---------------|-------|
-| `generator::sm` ↔ `graph::sm` | `graph::event::reserve` / `graph::event::compute` | No new events needed for the milestone; keep the existing callback bundle |
-| `graph::processor::kernel_step` ↔ `generator::detail` | `run_kernel` callback | Safest place to swap in flash attention without changing processor states |
-| `generator::detail` ↔ `kernel::sm` | `kernel.process_event(op_flash_attn_ext)` | This is the main new runtime integration point |
-| `kernel::sm` ↔ `kernel/x86_64::sm` | Existing backend subactor dispatch | x86_64 specialization should remain behind the same op event |
-| `generator::action::context::compute.backend` ↔ `generator::event::generate_ctx::io` | Pointer-based same-RTC handoff | Keep request-local inputs in `generate_ctx::io`; keep persistent workspace in backend-owned storage |
+| `tools/paritychecker` ↔ `src/emel/generator` | Existing initialize/generate flow | Keep CLI surface stable; change runtime truth underneath it |
+| `tools/bench` ↔ `src/emel/generator` | Existing benchmark session setup | Keep compare flow stable; add one Qwen slice only after parity is real |
+| `text::formatter` ↔ `text::conditioner` | Existing `format_fn` injection | Preferred place to make Qwen prompt conditioning explicit |
+| `src/emel/model/data.*` ↔ `src/emel/generator/detail.hpp` | Execution-view and tensor-topology handoff | Current runtime is Llama-only here; this is the core architecture gate |
 
 ## New vs Modified Components
 
 ### Modified Runtime Components
 
+- `src/emel/model/data.cpp`
+  - Current execution-view builder rejects non-Llama architectures and assumes Llama tensor families.
+  - v1.6 likely needs explicit Qwen3-aware handling here or an adjacent detail helper.
 - `src/emel/generator/detail.hpp`
-  - Replace `compute_attention()` usage inside `run_layer()` with `op_flash_attn_ext` dispatch.
-  - Remove or stop depending on `attn_scores` / `attn_probs` as the primary path.
-  - Add any reusable flash-attn workspace to `native_backend`.
-- `src/emel/generator/context.hpp`
-  - Only if additional persistent backend workspace fields are needed.
-  - Do not add dispatch-local flash mode or request fields.
-- `src/emel/kernel/detail.hpp`
-  - Add shared/scalar validation and execution for `op_flash_attn_ext`.
-  - Keep it limited to the causal self-attention subset needed by canonical generation.
-- `src/emel/kernel/x86_64/actions.hpp`
-  - Add x86_64 fast-path execution for `op_flash_attn_ext` behind the existing dispatch pattern.
-- `tools/paritychecker/parity_runner.cpp`
-  - Keep the same generation CLI and acceptance messaging, but align the reference path once EMEL flash attention is live.
+  - Current runtime depends on `emel::model::llama::detail::*`.
+  - v1.6 needs enough runtime generalization to execute one Qwen3 slice honestly.
+- `src/emel/text/formatter/format.hpp` or adjacent formatter helper
+  - Likely integration point for a canonical Qwen request contract if raw formatting is insufficient.
+
+### Modified Tooling Components
+
+- `tests/models/README.md`
+  - Add the official Qwen3-0.6B fixture provenance.
+- `tools/paritychecker/parity_main.cpp` / `tools/paritychecker/parity_runner.cpp`
+  - Update generation usage text, canonical fixture constants, architecture validation, and reference alignment.
 - `tools/bench/generation_bench.cpp`
-  - Keep the same benchmark cases and compare flow, but align reference execution once EMEL flash attention is live.
+  - Update the maintained compare path to the same canonical Qwen request shape.
 
-### New Runtime Components
+## Suggested Build Order
 
-- **None required at the actor/component level.**
-  - No new `src/emel/<component>/sm.hpp` should be added for this milestone.
-  - No new public events or public API surfaces are required if the canonical causal slice uses the existing `op_flash_attn_ext` event schema.
-
-### New Test/Verification Components
-
-- `tests/kernel/...`
-  - Add flash-attn operator tests scoped to the kernel component.
-- `tests/generator/...`
-  - Add or extend generation integration tests proving the canonical flash path stays inside the existing acceptance boundary.
-
-## Safest Build Order
-
-1. **Shared kernel contract first**
-   - Implement `op_flash_attn_ext` validation and scalar/shared execution in `src/emel/kernel/detail.hpp`.
-   - Reason: this creates a correct, backend-neutral operator before touching generator behavior.
-
-2. **Generator backend integration second**
-   - Modify `src/emel/generator/detail.hpp` so `run_layer()` uses the new operator while preserving existing graph/generator orchestration.
-   - Reason: this is the first point where the shipped runtime actually changes.
-
-3. **x86_64 fast path third**
-   - Add `src/emel/kernel/x86_64/actions.hpp` specialization after scalar correctness is established.
-   - Reason: optimize only after the canonical path is functionally correct.
-
-4. **Runtime-focused tests fourth**
-   - Add kernel and generator tests around the new operator path before changing acceptance tools.
-   - Reason: paritychecker and bench failures are easier to interpret once lower-level correctness is already covered.
-
-5. **Paritychecker integration fifth**
-   - Keep `tools/paritychecker --generation` unchanged at the surface, then align the reference flash-attention path and confirm canonical parity.
-   - Reason: parity is the primary milestone gate and depends on the runtime being real first.
-
-6. **Bench integration sixth**
-   - Update `tools/bench/generation_bench.cpp` compare behavior after parity is stable.
-   - Reason: benchmark evidence is only meaningful once correctness is already locked.
-
-7. **Quality gates last**
-   - Run the normal repo gates after implementation and verification are wired.
-   - Reason: this preserves the repo's existing acceptance order and avoids snapshot/bench churn while the runtime path is still moving.
+1. Fixture provenance and maintained tool constants.
+2. Canonical prompt-conditioning contract.
+3. Runtime architecture support for one Qwen3 slice.
+4. Parity and regression tests.
+5. Benchmark compare/docs refresh.
 
 ## Sources
 
-- `.planning/PROJECT.md` - milestone goal, active requirements, and acceptance boundaries. Confidence: HIGH.
-- `AGENTS.md` - repo-specific architectural and SML integration rules. Confidence: HIGH.
-- `docs/rules/sml.rules.md` - RTC/no-queue and bounded-action semantics that constrain flash-attention integration. Confidence: HIGH.
-- `src/emel/generator/context.hpp` - current generator ownership boundary for backend state. Confidence: HIGH.
-- `src/emel/generator/actions.hpp` - current generator → graph compute dispatch seam. Confidence: HIGH.
-- `src/emel/generator/detail.hpp` - current native backend and attention implementation to be modified. Confidence: HIGH.
-- `src/emel/graph/events.hpp` and `src/emel/graph/processor/events.hpp` - current callback contract for compute execution. Confidence: HIGH.
-- `src/emel/graph/sm.hpp` and `src/emel/graph/processor/sm.hpp` - current orchestration phases that should remain unchanged. Confidence: HIGH.
-- `src/emel/kernel/events.hpp`, `src/emel/kernel/detail.hpp`, `src/emel/kernel/context.hpp`, `src/emel/kernel/x86_64/actions.hpp`, `src/emel/kernel/x86_64/sm.hpp` - existing operator/event/backend dispatch surfaces for flash attention. Confidence: HIGH.
-- `.planning/research/STACK.md` and `.planning/research/FEATURES.md` - supporting stack and milestone-scope conclusions for the same milestone. Confidence: HIGH.
+- `.planning/PROJECT.md` - v1.6 scope and acceptance boundary.
+- `AGENTS.md` - requirement to avoid silent fallback claims and to ask before state-machine structure changes.
+- `src/emel/model/data.cpp` - current execution-view logic rejects non-Llama architectures.
+- `src/emel/generator/detail.hpp` - current runtime depends on `emel::model::llama::detail`.
+- `src/emel/text/formatter/format.hpp`, `src/emel/text/formatter/sm.hpp`, and `src/emel/text/conditioner/**` - existing prompt-conditioning seam.
+- `tools/paritychecker/parity_runner.cpp` and `tools/bench/generation_bench.cpp` - current Llama-only fixture and architecture gates.
+- `build/paritychecker/_deps/reference_impl-src/src/llama-arch.cpp` - local reference source enumerates `qwen3` as a distinct architecture.
+- `build/paritychecker/_deps/reference_impl-src/src/llama-arch.cpp` and `build/paritychecker/_deps/reference_impl-src/src/llama-model.cpp` - local reference source shows Qwen3-specific tensor and hparam expectations, including attention-normalization tensors.
+- https://huggingface.co/Qwen/Qwen3-0.6B - official model card.
+- https://qwen.readthedocs.io/en/latest/run_locally/llama.cpp.html - official Qwen `llama.cpp` guidance.
 
 ---
-*Architecture research for: EMEL v1.2 flash attention*
-*Researched: 2026-03-12*
+*Architecture research for: EMEL v1.6 Qwen3-0.6B parity and benchmark*
+*Researched: 2026-03-27*

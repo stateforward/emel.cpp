@@ -1,60 +1,56 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.5
-milestone_name: Full ARM Quantized Path
-status: awaiting_approval
-stopped_at: "phase 25.1 restored live flash proof; stored compare snapshot/docs refresh pending approval"
-last_updated: "2026-03-26T05:51:00Z"
-last_activity: 2026-03-25
+milestone: v1.6
+milestone_name: Qwen3-0.6B Parity And Benchmark
+status: milestone_complete
+stopped_at: "v1.6 archived; ready to define the next milestone"
+last_updated: "2026-03-30T00:48:26Z"
+last_activity: 2026-03-30
 progress:
   total_phases: 5
-  completed_phases: 4
-  total_plans: 10
-  completed_plans: 9
-  percent: 90
+  completed_phases: 5
+  total_plans: 12
+  completed_plans: 12
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-25)
+See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Close the approval-gated publication step for Phase 25.1 after restoring live
-canonical flash attribution and maintained parity.
+**Current focus:** Define the next milestone after shipping v1.6.
 
 ## Current Position
 
-Phase: 25.1
-Plan: 25.1-02
-Status: Live runtime/proof restored; stored compare snapshot/docs refresh pending approval
-Last activity: 2026-03-25 — Phase 25.1 restored bounded canonical flash dispatch and live compare proof
+Status: Between milestones
+Last activity: 2026-03-30 — Archived v1.6 after merging planning state and milestone audit onto
+updated `main`
 
-Progress: [█████████░] 90%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
-**Current milestone:**
-
-- Milestone: v1.5 Full ARM Quantized Path
-- Phases complete: 4/5
-- Plans complete: 9/10
-- Status: Runtime/proof work complete for Phase 25.1; waiting on approval to refresh stored
-  benchmark publication artifacts
-
 **Last shipped milestone:**
 
-- Milestone: v1.4 Full Vectorized Quantized Kernels
+- Milestone: v1.6 Qwen3-0.6B Parity And Benchmark
 - Phases complete: 5/5
-- Plans complete: 11/11
-- Audit status: passed
+- Plans complete: 12/12
+- Audit status: tech_debt
+
+**Previous shipped milestone:**
+
+- Milestone: v1.5 Full ARM Quantized Path
+- Phases complete: 5/5
+- Plans complete: 10/10
+- Audit status: tech_debt
 
 **Next action:**
 
-- Approve or defer refresh of `snapshots/bench/benchmarks_compare.txt` and `docs/benchmarks.md`
-  now that the live canonical compare surface is back on truthful flash attribution.
+- Define the next milestone with `$gsd-new-milestone`.
 
 ## Accumulated Context
 
@@ -63,45 +59,30 @@ Progress: [█████████░] 90%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- v1.4 closed the remaining canonical ARM quantized kernel gap without changing state-machine
-  structure or widening the acceptance boundary.
-- Long-decode parity is green again across the maintained `1/10/100/1000` surface on the
-  canonical workload.
+- v1.6 stayed narrow to one canonical `Qwen3-0.6B-Q8_0.gguf` maintained slice.
+- The maintained Qwen formatter contract comes from the primary GGUF
+  `tokenizer.chat_template`, with structured chat-message input and no implicit raw fallback.
+- Phase `26.1` inserted before Phase `27` so native `q8_0` runtime support landed in `src/emel`
+  before truthful Qwen generator bring-up resumed.
+- The prior Llama anchor remains protected while the canonical Qwen parity and benchmark surfaces
+  are maintained alongside it.
 - Benchmark drift remains warning-only repo policy until a future milestone explicitly changes it.
-- v1.5 Phase 22 established the canonical truth source as a shared execution-view audit rather
-  than aggregate dispatch counters alone.
-- Supported canonical q2/q3/q6 matmul stages are now explicitly published as `native_quantized`,
-  while token embedding row copy and norm-vector stages remain
-  `approved_dense_f32_by_contract`.
-- Unsupported quantized stage families now publish explicit `no-claim` behavior on the maintained
-  paritychecker surface.
-- Phase 23 proved the supported canonical runtime already had zero disallowed-fallback stages and
-  codified that `8/4/0/0` contract at the shipped generator wrapper boundary.
-- Phase 24 promoted that `8/4/0/0` contract into maintained paritychecker hard-fail proof across
-  `1/10/100/1000` and added post-generate regression coverage on the shipped generator surface.
-- Phase 25 promoted the same `8/4/0/0` contract into maintained compare output, stored benchmark
-  artifacts, and generated docs without overstating the approved dense-f32-by-contract seams.
-
-### Roadmap Evolution
-
-- Phase 25.1 inserted after Phase 25: Restore canonical flash-attention dispatch on the maintained
-  generator path (URGENT)
 
 ### Pending Todos
 
-- Refresh stored benchmark/docs artifacts for Phase 25.1 only after explicit approval.
+- None.
 
 ### Blockers/Concerns
 
-- Benchmark attribution must continue to describe the approved dense-f32-by-contract seams
-  honestly rather than collapsing into a misleading "fully quantized everywhere" claim.
-- Live runtime and compare proof are restored, but checked-in publication artifacts still report
-  stale zero-flash evidence until the approval-gated refresh is performed.
-- The latest full `scripts/quality_gates.sh` pass still emitted warning-only benchmark regressions
-  in `kernel/aarch64/op_soft_max`; current repo policy treats that as non-blocking.
+- Non-blocking benchmark warning debt remains in `batch/planner_simple`, `memory/hybrid_full`,
+  `kernel/aarch64/op_log`, `logits/sampler_raw/vocab_32000`, and `kernel/aarch64/op_soft_max`.
+- v1.6 archived with tech debt, not requirement gaps: the phase `26` validation artifact still
+  says partial, parity-vs-bench provenance can drift locally, and published benchmark artifacts may
+  lag later merged performance work.
+- The next milestone scope is not defined yet.
 
 ## Session Continuity
 
-Last session: 2026-03-26T05:51:00Z
-Stopped at: Phase 25.1 restored live flash proof; stored compare snapshot/docs refresh pending approval
+Last session: 2026-03-30T00:48:26Z
+Stopped at: v1.6 archived; ready for `$gsd-new-milestone`
 Resume file: None
