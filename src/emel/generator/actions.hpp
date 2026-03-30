@@ -395,20 +395,6 @@ struct request_prefill {
   }
 };
 
-struct request_prefill_slots {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    ev.ctx.phase_code = static_cast<int32_t>(
-        emel::error::cast(emel::memory::hybrid::error::none));
-    emel::memory::event::allocate_slots allocate_ev{
-      .seq_id = k_sequence_id,
-      .token_count = ev.ctx.prompt_token_count,
-      .block_count_out = nullptr,
-      .error_out = &ev.ctx.phase_code,
-    };
-    ev.ctx.phase_accepted = ctx.memory.process_event(allocate_ev);
-  }
-};
-
 struct request_memory_snapshot {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
     ev.ctx.phase_code = static_cast<int32_t>(
@@ -597,74 +583,6 @@ inline void request_phase_compute_preselected_argmax(const event::generate_run &
   ev.ctx.phase_accepted = ctx.graph.process_event(compute_ev);
 }
 
-struct request_prefill_compute_flash {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::generator::detail::step_kind::prefill,
-                          emel::generator::detail::run_kernel_flash>(ev, ctx);
-  }
-};
-
-struct request_prefill_compute_flash_chunk4 {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::generator::detail::step_kind::prefill,
-                          emel::generator::detail::run_kernel_flash_prefill_chunk4>(ev, ctx);
-  }
-};
-
-struct request_prefill_compute_nonflash {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::generator::detail::step_kind::prefill,
-                          emel::generator::detail::run_kernel_nonflash>(ev, ctx);
-  }
-};
-
-struct request_prefill_compute_nonflash_chunk4 {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute<emel::generator::detail::step_kind::prefill,
-                          emel::generator::detail::run_kernel_nonflash_prefill_chunk4>(ev, ctx);
-  }
-};
-
-struct request_prefill_compute_flash_preselected_argmax {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<emel::generator::detail::step_kind::prefill,
-                                             emel::generator::detail::
-                                                 run_kernel_flash_preselected_argmax>(ev, ctx);
-  }
-};
-
-struct request_prefill_compute_flash_chunk4_preselected_argmax {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::generator::detail::step_kind::prefill,
-        emel::generator::detail::run_kernel_flash_prefill_chunk4_preselected_argmax>(ev, ctx);
-  }
-};
-
-struct request_prefill_compute_nonflash_preselected_argmax {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<emel::generator::detail::step_kind::prefill,
-                                             emel::generator::detail::
-                                                 run_kernel_nonflash_preselected_argmax>(ev, ctx);
-  }
-};
-
-struct request_prefill_compute_nonflash_chunk4_preselected_argmax {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    request_phase_compute_preselected_argmax<
-        emel::generator::detail::step_kind::prefill,
-        emel::generator::detail::run_kernel_nonflash_prefill_chunk4_preselected_argmax>(ev, ctx);
-  }
-};
-
-template <emel::generator::prefill_compute_contract contract, auto request_action>
-struct request_prefill_compute_contract {
-  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
-    ev.ctx.prefill_contract = contract;
-    request_action(ev, ctx);
-  }
-};
-
 struct request_decode_slots {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
     ev.ctx.phase_code = static_cast<int32_t>(
@@ -825,12 +743,6 @@ struct mark_sequence_clear {
 struct mark_sequence_live {
   void operator()(const event::generate_run &, context & ctx) const noexcept {
     ctx.state.sequence_live = true;
-  }
-};
-
-struct mark_prefill_cached {
-  void operator()(const event::generate_run & ev, context &) const noexcept {
-    ev.ctx.kv_tokens = ev.ctx.prompt_token_count;
   }
 };
 
@@ -996,52 +908,7 @@ inline constexpr request_conditioning request_conditioning{};
 inline constexpr request_planning request_planning{};
 inline constexpr request_allocate_sequence request_allocate_sequence{};
 inline constexpr request_prefill request_prefill{};
-inline constexpr request_prefill_slots request_prefill_slots{};
 inline constexpr request_memory_snapshot request_memory_snapshot{};
-inline constexpr request_prefill_compute_flash request_prefill_compute_flash{};
-inline constexpr request_prefill_compute_flash_chunk4 request_prefill_compute_flash_chunk4{};
-inline constexpr request_prefill_compute_nonflash request_prefill_compute_nonflash{};
-inline constexpr request_prefill_compute_nonflash_chunk4 request_prefill_compute_nonflash_chunk4{};
-inline constexpr request_prefill_compute_flash_preselected_argmax
-    request_prefill_compute_flash_preselected_argmax{};
-inline constexpr request_prefill_compute_flash_chunk4_preselected_argmax
-    request_prefill_compute_flash_chunk4_preselected_argmax{};
-inline constexpr request_prefill_compute_nonflash_preselected_argmax
-    request_prefill_compute_nonflash_preselected_argmax{};
-inline constexpr request_prefill_compute_nonflash_chunk4_preselected_argmax
-    request_prefill_compute_nonflash_chunk4_preselected_argmax{};
-inline constexpr request_prefill_compute_contract<
-    emel::generator::prefill_compute_contract::flash_materialized_scalar,
-    request_prefill_compute_flash>
-    request_prefill_contract_flash_materialized_scalar{};
-inline constexpr request_prefill_compute_contract<
-    emel::generator::prefill_compute_contract::flash_materialized_chunk4,
-    request_prefill_compute_flash_chunk4>
-    request_prefill_contract_flash_materialized_chunk4{};
-inline constexpr request_prefill_compute_contract<
-    emel::generator::prefill_compute_contract::flash_preselected_scalar,
-    request_prefill_compute_flash_preselected_argmax>
-    request_prefill_contract_flash_preselected_scalar{};
-inline constexpr request_prefill_compute_contract<
-    emel::generator::prefill_compute_contract::flash_preselected_chunk4,
-    request_prefill_compute_flash_chunk4_preselected_argmax>
-    request_prefill_contract_flash_preselected_chunk4{};
-inline constexpr request_prefill_compute_contract<
-    emel::generator::prefill_compute_contract::nonflash_materialized_scalar,
-    request_prefill_compute_nonflash>
-    request_prefill_contract_nonflash_materialized_scalar{};
-inline constexpr request_prefill_compute_contract<
-    emel::generator::prefill_compute_contract::nonflash_materialized_chunk4,
-    request_prefill_compute_nonflash_chunk4>
-    request_prefill_contract_nonflash_materialized_chunk4{};
-inline constexpr request_prefill_compute_contract<
-    emel::generator::prefill_compute_contract::nonflash_preselected_scalar,
-    request_prefill_compute_nonflash_preselected_argmax>
-    request_prefill_contract_nonflash_preselected_scalar{};
-inline constexpr request_prefill_compute_contract<
-    emel::generator::prefill_compute_contract::nonflash_preselected_chunk4,
-    request_prefill_compute_nonflash_chunk4_preselected_argmax>
-    request_prefill_contract_nonflash_preselected_chunk4{};
 inline constexpr request_decode_slots request_decode_slots{};
 inline constexpr request_decode_compute_flash request_decode_compute_flash{};
 inline constexpr request_decode_compute_nonflash request_decode_compute_nonflash{};
@@ -1058,7 +925,6 @@ inline constexpr mark_invalid_request mark_invalid_request{};
 inline constexpr mark_backend_error mark_backend_error{};
 inline constexpr mark_sequence_clear mark_sequence_clear{};
 inline constexpr mark_sequence_live mark_sequence_live{};
-inline constexpr mark_prefill_cached mark_prefill_cached{};
 inline constexpr advance_kv_cache advance_kv_cache{};
 inline constexpr commit_render_output commit_render_output{};
 inline constexpr commit_flush_output commit_flush_output{};

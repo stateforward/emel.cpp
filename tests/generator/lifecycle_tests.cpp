@@ -13,6 +13,7 @@
 #include "emel/docs/detail.hpp"
 #include "emel/emel.h"
 #include "emel/generator/errors.hpp"
+#include "emel/generator/prefill/sm.hpp"
 #include "emel/generator/sm.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
@@ -1607,6 +1608,18 @@ TEST_CASE("generator_sm_models_explicit_prefill_boundary_and_decode_compute_stat
   CHECK(emel::detail::type_list_contains<
         emel::generator::prefill_result_decision,
         states>::value);
+  CHECK_FALSE(emel::detail::type_list_contains<
+              emel::generator::prefill::contract_runtime_decision,
+              states>::value);
+  CHECK_FALSE(emel::detail::type_list_contains<
+              emel::generator::prefill::contract_flash_decision,
+              states>::value);
+  CHECK_FALSE(emel::detail::type_list_contains<
+              emel::generator::prefill::contract_nonflash_decision,
+              states>::value);
+  CHECK_FALSE(emel::detail::type_list_contains<
+              emel::generator::prefill::compute_result_decision,
+              states>::value);
   CHECK(emel::detail::type_list_contains<emel::generator::decode_compute_flash, states>::value);
   CHECK(emel::detail::type_list_contains<
         emel::generator::decode_compute_nonflash,

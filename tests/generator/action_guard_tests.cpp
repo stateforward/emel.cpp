@@ -5,6 +5,7 @@
 
 #include "emel/generator/actions.hpp"
 #include "emel/generator/guards.hpp"
+#include "emel/generator/prefill/guards.hpp"
 #include "emel/model/data.hpp"
 
 namespace {
@@ -445,11 +446,7 @@ TEST_CASE("generator phase guards classify invalid and backend errors") {
   CHECK(emel::generator::guard::planning_backend_error{}(generate_run, context));
   generate_ctx.phase_accepted = false;
   generate_ctx.phase_code =
-      static_cast<int32_t>(emel::error::cast(emel::graph::error::invalid_request));
-  CHECK(emel::generator::guard::prefill_compute_invalid_request{}(generate_run, context));
-  generate_ctx.phase_code =
       static_cast<int32_t>(emel::error::cast(emel::graph::error::processor_failed));
-  CHECK(emel::generator::guard::prefill_compute_backend_error{}(generate_run, context));
   CHECK(emel::generator::guard::decode_compute_backend_error{}(generate_run, context));
   generate_ctx.phase_code =
       static_cast<int32_t>(emel::error::cast(emel::logits::sampler::error::invalid_request));
@@ -470,7 +467,18 @@ TEST_CASE("generator phase guards classify invalid and backend errors") {
   CHECK(emel::generator::guard::generate_result_none{}(generate_run, context));
   initialize_ctx.err = emel::error::cast(emel::generator::error::invalid_request);
   CHECK(emel::generator::guard::initialize_result_invalid_request{}(initialize_run, context));
+  generate_ctx.prefill_contract =
+      emel::generator::prefill_compute_contract::flash_materialized_scalar;
+  CHECK(emel::generator::guard::prefill_result_ok_with_materialized_logits_contract{}(
+      generate_run, context));
+  generate_ctx.prefill_contract =
+      emel::generator::prefill_compute_contract::flash_preselected_scalar;
+  CHECK(emel::generator::guard::prefill_result_ok_with_preselected_argmax_contract{}(
+      generate_run, context));
+  generate_ctx.err = emel::error::cast(emel::generator::error::invalid_request);
+  CHECK(emel::generator::guard::prefill_result_invalid_request{}(generate_run, context));
   generate_ctx.err = emel::error::cast(emel::generator::error::backend);
+  CHECK(emel::generator::guard::prefill_result_backend_error{}(generate_run, context));
   CHECK(emel::generator::guard::generate_result_backend{}(generate_run, context));
 }
 
@@ -498,9 +506,6 @@ TEST_CASE("generator runtime guards model explicit flash and nonflash compute se
   generate_ctx.prompt_token_count = 2;
   generate_ctx.kv_tokens = 1;
   emel::generator::event::generate_run generate_run{generate, generate_ctx};
-
-  CHECK(emel::generator::guard::prefill_flash_runtime_supported{}(generate_run, context));
-  CHECK_FALSE(emel::generator::guard::prefill_nonflash_runtime_required{}(generate_run, context));
   CHECK(emel::generator::guard::decode_flash_runtime_supported{}(generate_run, context));
   CHECK_FALSE(emel::generator::guard::decode_nonflash_runtime_required{}(generate_run, context));
 
@@ -510,8 +515,58 @@ TEST_CASE("generator runtime guards model explicit flash and nonflash compute se
   backend.flash_key_cache.resize(8, 0.0f);
   backend.flash_value_cache.resize(8, 0.0f);
 
-  CHECK_FALSE(emel::generator::guard::prefill_flash_runtime_supported{}(generate_run, context));
-  CHECK(emel::generator::guard::prefill_nonflash_runtime_required{}(generate_run, context));
   CHECK_FALSE(emel::generator::guard::decode_flash_runtime_supported{}(generate_run, context));
   CHECK(emel::generator::guard::decode_nonflash_runtime_required{}(generate_run, context));
+}
+
+TEST_CASE("generator prefill runtime guards model explicit flash and compute result selection") {
+  emel::generator::action::context generator_context{};
+  auto & backend = generator_context.compute.backend;
+  backend.n_layer = 1;
+  backend.n_head = 2;
+  backend.n_head_kv = 2;
+  backend.head_dim = 2;
+  backend.head_dim_kv = 2;
+  backend.n_ctx = 4;
+  backend.q_attn.resize(4, 0.0f);
+  backend.key_cache.resize(16, 0.0f);
+  backend.value_cache.resize(16, 0.0f);
+  backend.flash_key_cache.resize(16, 0.0f);
+  backend.flash_value_cache.resize(16, 0.0f);
+  backend.attn_ctx.resize(4, 0.0f);
+
+  emel::generator::prefill::action::context prefill_context{generator_context};
+  callback_tracker tracker{};
+  emel::error::type error_out = emel::error::cast(emel::generator::error::none);
+  size_t output_length_out = 0;
+  auto generate = make_generate_request(&tracker, &error_out, output_length_out);
+  emel::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count = 2;
+  emel::generator::prefill::event::run prefill_run{generate, generate_ctx};
+
+  CHECK(emel::generator::prefill::guard::flash_runtime_supported{}(
+      prefill_run, prefill_context));
+  CHECK_FALSE(emel::generator::prefill::guard::nonflash_runtime_required{}(
+      prefill_run, prefill_context));
+
+  generate_ctx.phase_accepted = false;
+  generate_ctx.phase_code =
+      static_cast<int32_t>(emel::error::cast(emel::graph::error::invalid_request));
+  CHECK(emel::generator::prefill::guard::compute_invalid_request{}(
+      prefill_run, prefill_context));
+  generate_ctx.phase_code =
+      static_cast<int32_t>(emel::error::cast(emel::graph::error::processor_failed));
+  CHECK(emel::generator::prefill::guard::compute_backend_error{}(
+      prefill_run, prefill_context));
+
+  backend.head_dim_kv = 1;
+  backend.key_cache.resize(8, 0.0f);
+  backend.value_cache.resize(8, 0.0f);
+  backend.flash_key_cache.resize(8, 0.0f);
+  backend.flash_value_cache.resize(8, 0.0f);
+
+  CHECK_FALSE(emel::generator::prefill::guard::flash_runtime_supported{}(
+      prefill_run, prefill_context));
+  CHECK(emel::generator::prefill::guard::nonflash_runtime_required{}(
+      prefill_run, prefill_context));
 }
