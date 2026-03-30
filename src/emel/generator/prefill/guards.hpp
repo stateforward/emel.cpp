@@ -1,5 +1,6 @@
 #pragma once
 
+#include "emel/generator/context.hpp"
 #include "emel/generator/detail.hpp"
 #include "emel/generator/prefill/context.hpp"
 #include "emel/generator/prefill/detail.hpp"

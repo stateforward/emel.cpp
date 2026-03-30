@@ -911,6 +911,11 @@ struct sm : public emel::sm<model, action::context> {
     }
   }
 
+  sm(const sm &) = delete;
+  sm(sm &&) = delete;
+  sm & operator=(const sm &) = delete;
+  sm & operator=(sm &&) = delete;
+
   bool process_event(const event::initialize & ev) {
     if (!this->context_.compute.backend_ready) {
       detail::dispatch_initialize_backend_error(ev);
