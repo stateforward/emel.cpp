@@ -185,6 +185,22 @@ inline bool uses_prefill_chunk4_q8_gemm(const event::generate_run & ev,
       emel::generator::detail::prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
 }
 
+inline bool prefill_contract_uses_materialized_logits(
+    const emel::generator::prefill_compute_contract contract) noexcept {
+  return contract == emel::generator::prefill_compute_contract::flash_materialized_scalar ||
+         contract == emel::generator::prefill_compute_contract::flash_materialized_chunk4 ||
+         contract == emel::generator::prefill_compute_contract::nonflash_materialized_scalar ||
+         contract == emel::generator::prefill_compute_contract::nonflash_materialized_chunk4;
+}
+
+inline bool prefill_contract_uses_preselected_argmax(
+    const emel::generator::prefill_compute_contract contract) noexcept {
+  return contract == emel::generator::prefill_compute_contract::flash_preselected_scalar ||
+         contract == emel::generator::prefill_compute_contract::flash_preselected_chunk4 ||
+         contract == emel::generator::prefill_compute_contract::nonflash_preselected_scalar ||
+         contract == emel::generator::prefill_compute_contract::nonflash_preselected_chunk4;
+}
+
 }  // namespace detail
 
 struct valid_initialize {
@@ -506,123 +522,53 @@ struct allocate_sequence_backend_error {
   }
 };
 
-struct prefill_slots_ok {
-  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
-    return detail::has_phase_success(ev);
+struct prefill_dispatch_available {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return ctx.prefill_actor != nullptr && ctx.dispatch_prefill != nullptr;
   }
 };
 
-struct prefill_slots_invalid_request {
-  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
-    return detail::has_invalid_result(ev, detail::memory_invalid_code);
-  }
-};
-
-struct prefill_slots_backend_error {
-  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
-    const bool invalid = detail::memory_invalid_code(ev.ctx.phase_code);
-    return !detail::has_phase_success(ev) &&
-           (detail::phase_rejected_without_code(ev) ||
-            detail::memory_backend_code(ev.ctx.phase_code) ||
-            !invalid);
-  }
-};
-
-struct snapshot_ok {
-  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
-    return detail::has_phase_success(ev);
-  }
-};
-
-struct snapshot_invalid_request {
-  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
-    return detail::has_invalid_result(ev, detail::memory_invalid_code);
-  }
-};
-
-struct snapshot_backend_error {
-  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
-    const bool invalid = detail::memory_invalid_code(ev.ctx.phase_code);
-    return !detail::has_phase_success(ev) &&
-           (detail::phase_rejected_without_code(ev) ||
-            detail::memory_backend_code(ev.ctx.phase_code) ||
-            !invalid);
-  }
-};
-
-struct prefill_flash_runtime_supported {
+struct prefill_dispatch_unavailable {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return ev.ctx.prompt_token_count > 0 &&
-           emel::generator::detail::flash_attention_supported(
-               ctx.compute.backend, ev.ctx.prompt_token_count - 1);
+    return !prefill_dispatch_available{}(ev, ctx);
   }
 };
 
-struct prefill_nonflash_runtime_required {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return !prefill_flash_runtime_supported{}(ev, ctx);
-  }
-};
-
-struct prefill_chunk4_q8_gemm_supported {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
-  }
-};
-
-struct prefill_chunk4_q8_gemm_required {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return !prefill_chunk4_q8_gemm_supported{}(ev, ctx);
-  }
-};
-
-struct compute_uses_materialized_logits_with_prefill_chunk4_q8_gemm {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return compute_uses_materialized_logits{}(ev, ctx) &&
-        prefill_chunk4_q8_gemm_supported{}(ev, ctx);
-  }
-};
-
-struct compute_uses_materialized_logits_with_prefill_scalar_runtime {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return compute_uses_materialized_logits{}(ev, ctx) &&
-        prefill_chunk4_q8_gemm_required{}(ev, ctx);
-  }
-};
-
-struct compute_uses_preselected_argmax_direct_with_prefill_chunk4_q8_gemm {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return compute_uses_preselected_argmax_direct{}(ev, ctx) &&
-        prefill_chunk4_q8_gemm_supported{}(ev, ctx);
-  }
-};
-
-struct compute_uses_preselected_argmax_direct_with_prefill_scalar_runtime {
-  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return compute_uses_preselected_argmax_direct{}(ev, ctx) &&
-        prefill_chunk4_q8_gemm_required{}(ev, ctx);
-  }
-};
-
-struct prefill_compute_ok {
+struct prefill_result_ok_with_materialized_logits_contract {
   bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
-    return detail::has_phase_success(ev);
+    return detail::result_none(ev) &&
+           detail::prefill_contract_uses_materialized_logits(ev.ctx.prefill_contract);
   }
 };
 
-struct prefill_compute_invalid_request {
+struct prefill_result_ok_with_preselected_argmax_contract {
   bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
-    return detail::has_invalid_result(ev, detail::graph_invalid_code);
+    return detail::result_none(ev) &&
+           detail::prefill_contract_uses_preselected_argmax(ev.ctx.prefill_contract);
   }
 };
 
-struct prefill_compute_backend_error {
+struct prefill_result_invalid_request {
   bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
-    const bool invalid = detail::graph_invalid_code(ev.ctx.phase_code);
-    return !detail::has_phase_success(ev) &&
-           (detail::phase_rejected_without_code(ev) ||
-            detail::graph_backend_code(ev.ctx.phase_code) ||
-            !invalid);
+    return detail::result_invalid_request(ev);
+  }
+};
+
+struct prefill_result_backend_error {
+  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
+    return detail::result_backend(ev) || (!ev.ctx.phase_accepted && detail::result_none(ev));
+  }
+};
+
+struct decode_argmax_ready {
+  bool operator()(const event::generate_run &, const action::context & ctx) const noexcept {
+    return ctx.buffers.vocab_size > 0 && ctx.buffers.logits != nullptr;
+  }
+};
+
+struct decode_argmax_invalid_request {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return !decode_argmax_ready{}(ev, ctx);
   }
 };
 

@@ -19,6 +19,10 @@
 #include "emel/text/renderer/sm.hpp"
 #include "emel/text/tokenizer/events.hpp"
 
+namespace emel::generator::prefill::event {
+struct run;
+}
+
 namespace emel::generator::action {
 
 inline constexpr int32_t MAX_GENERATION_STEPS = 4096;
@@ -38,6 +42,9 @@ struct tokenizer_binding {
   bool add_special = true;
   bool parse_special = false;
 };
+
+using prefill_dispatch_fn = bool(void * prefill_sm,
+                                 const emel::generator::prefill::event::run &);
 
 struct graph_binding {
   emel::generator::detail::native_backend backend = {};
@@ -96,6 +103,8 @@ struct context {
   emel::memory::hybrid::sm memory = {};
   emel::graph::sm graph = {};
   emel::logits::sampler::sm sampler = {};
+  void * prefill_actor = nullptr;
+  emel::generator::action::prefill_dispatch_fn * dispatch_prefill = nullptr;
 
   tokenizer_binding conditioning = {};
   graph_binding compute = {};
