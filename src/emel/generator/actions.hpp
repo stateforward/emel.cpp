@@ -7,6 +7,7 @@
 #include "emel/generator/context.hpp"
 #include "emel/generator/errors.hpp"
 #include "emel/generator/events.hpp"
+#include "emel/generator/prefill/detail.hpp"
 #include "emel/graph/events.hpp"
 #include "emel/logits/sampler/errors.hpp"
 #include "emel/memory/events.hpp"
@@ -375,6 +376,22 @@ struct request_allocate_sequence {
       .error_out = &ev.ctx.phase_code,
     };
     ev.ctx.phase_accepted = ctx.memory.process_event(allocate_ev);
+  }
+};
+
+struct request_prefill {
+  void operator()(const event::generate_run & ev, context & ctx) const noexcept {
+    if (ctx.prefill_actor == nullptr || ctx.dispatch_prefill == nullptr) {
+      ev.ctx.phase_accepted = false;
+      ev.ctx.err = emel::error::cast(error::backend);
+      return;
+    }
+    const emel::generator::prefill::event::run runtime{ev.request, ev.ctx};
+    const bool accepted = ctx.dispatch_prefill(ctx.prefill_actor, runtime);
+    if (!accepted) {
+      ev.ctx.phase_accepted = false;
+      ev.ctx.err = emel::error::cast(error::backend);
+    }
   }
 };
 
@@ -978,6 +995,7 @@ inline constexpr request_reset_sequence request_reset_sequence{};
 inline constexpr request_conditioning request_conditioning{};
 inline constexpr request_planning request_planning{};
 inline constexpr request_allocate_sequence request_allocate_sequence{};
+inline constexpr request_prefill request_prefill{};
 inline constexpr request_prefill_slots request_prefill_slots{};
 inline constexpr request_memory_snapshot request_memory_snapshot{};
 inline constexpr request_prefill_compute_flash request_prefill_compute_flash{};

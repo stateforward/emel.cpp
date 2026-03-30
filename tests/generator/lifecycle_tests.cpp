@@ -1597,18 +1597,15 @@ TEST_CASE("generator_docs_table_uses_typed_completion_event_names") {
   CHECK(has_generate_completion);
 }
 
-TEST_CASE("generator_sm_models_explicit_prefill_contract_and_decode_compute_states") {
+TEST_CASE("generator_sm_models_explicit_prefill_boundary_and_decode_compute_states") {
   using machine_t = boost::sml::sm<emel::generator::model>;
   using states = typename machine_t::states;
 
   CHECK(emel::detail::type_list_contains<
-        emel::generator::prefill_contract_flash_decision,
+        emel::generator::prefill_running,
         states>::value);
   CHECK(emel::detail::type_list_contains<
-        emel::generator::prefill_contract_nonflash_decision,
-        states>::value);
-  CHECK(emel::detail::type_list_contains<
-        emel::generator::prefill_compute_result_decision,
+        emel::generator::prefill_result_decision,
         states>::value);
   CHECK(emel::detail::type_list_contains<emel::generator::decode_compute_flash, states>::value);
   CHECK(emel::detail::type_list_contains<

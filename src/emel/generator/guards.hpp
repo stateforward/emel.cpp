@@ -666,6 +666,32 @@ struct prefill_compute_ok_with_preselected_argmax_contract {
   }
 };
 
+struct prefill_result_ok_with_materialized_logits_contract {
+  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
+    return detail::result_none(ev) &&
+           detail::prefill_contract_uses_materialized_logits(ev.ctx.prefill_contract);
+  }
+};
+
+struct prefill_result_ok_with_preselected_argmax_contract {
+  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
+    return detail::result_none(ev) &&
+           detail::prefill_contract_uses_preselected_argmax(ev.ctx.prefill_contract);
+  }
+};
+
+struct prefill_result_invalid_request {
+  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
+    return detail::result_invalid_request(ev);
+  }
+};
+
+struct prefill_result_backend_error {
+  bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
+    return detail::result_backend(ev);
+  }
+};
+
 struct decode_slots_ok {
   bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
     return detail::has_phase_success(ev);
