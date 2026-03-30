@@ -3,35 +3,66 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. Shipped v1.4 now proves five narrow
-brownfield outcomes on the canonical Llama-68M slice: a parity-checked generation path in
+modeled as explicit actors instead of ad hoc control flow. Shipped v1.5 now proves six narrow
+brownfield outcomes on the canonical Llama-68M ARM slice: a parity-checked generation path in
 `tools/paritychecker`, a truthful maintained benchmark workflow in `tools/bench`, an EMEL-owned
-flash-attention runtime path, an optimized AArch64 flash implementation, and EMEL-owned vectorized
-AArch64 `q2_K/q3_K/q6_K` quantized hot-path kernels with maintained runtime/parity/benchmark
-publication, all aligned with `docs/rules/sml.rules.md`.
+flash-attention runtime path, an optimized AArch64 flash implementation, EMEL-owned vectorized
+AArch64 `q2_K/q3_K/q6_K` quantized hot-path kernels, and a maintained end-to-end quantized-path
+contract with restored checked-in flash attribution and publication, all aligned with
+`docs/rules/sml.rules.md`.
 
 ## Core Value
 
 Prove real end-to-end behavior with explicit SML orchestration and parity-oriented verification
 before widening API surface or model scope.
 
-## Current Milestone: v1.5 Full ARM Quantized Path
+## Current State
+
+Current milestone: `v1.6`
+
+Status: Defining requirements for a new narrow brownfield milestone. The shipped canonical ARM
+Llama-68M slice still anchors truth for the current repo surfaces, while the next milestone is
+intended to prove one maintained Qwen3-0.6B GGUF slice through the same paritychecker and
+benchmark channels without overstating model breadth.
+
+Transition summary: `v1.5 Full ARM Quantized Path` shipped on `2026-03-27` with `5` phases and
+`10` plans. `v1.6` now starts from that shipped baseline and keeps the existing benchmark-warning
+policy as carried technical debt.
+
+## Current Milestone: v1.6 Qwen3-0.6B Parity And Benchmark
+
+**Goal:** Prove one truthful canonical Qwen3-0.6B GGUF slice through the maintained EMEL
+generation, paritychecker, and benchmark workflow without widening the acceptance boundary beyond
+that slice.
+
+**Target features:**
+- Add one maintained canonical Qwen3-0.6B GGUF fixture with documented provenance and stable
+  operator-facing identity.
+- Extend the shipped brownfield generator/parity path only as far as needed to load, run, and
+  compare that Qwen slice honestly.
+- Publish one maintained benchmark compare/docs flow for the same Qwen3-0.6B slice so parity and
+  benchmark claims stay aligned.
+
+## Latest Milestone: v1.5 Full ARM Quantized Path
+
+<details>
+<summary>Shipped on 2026-03-27</summary>
 
 **Goal:** Prove the maintained canonical ARM generation slice stays on the intended quantized
 operand path end to end, eliminate any disallowed f32/dequant detours that still exist, and make
 the remaining contract explicit where full quantized coverage still does not apply.
 
-**Target features:**
-- Audit the maintained canonical ARM generation chain and classify each quantized stage as native
-  quantized, approved dense-f32-by-contract, or disallowed fallback.
-- Close any remaining shipped ARM quantized-path branches that silently widen through disallowed
-  f32 or dequantize-to-f32 substitution on supported canonical requests.
-- Publish runtime, parity, and benchmark evidence that proves the final maintained contract and
-  exposes any remaining explicit no-claim cases.
+**Delivered:**
+- Audited the maintained canonical ARM generation chain and classified each quantized stage as
+  native quantized, approved dense-f32-by-contract, or explicit no-claim when unsupported.
+- Codified and proved the supported shipped runtime contract as
+  `native_quantized=8 approved_dense_f32_by_contract=4 disallowed_fallback=0 explicit_no_claim=0`.
+- Hardened maintained paritychecker, runtime regression, and benchmark publication so supported
+  canonical requests fail on disallowed fallback.
+- Restored canonical flash-attention dispatch on the maintained generator path and refreshed the
+  stored compare/docs publication so checked-in evidence matches the live flash proof again.
 
-## Current State
-
-Shipped version: `v1.4`
+</details>
 
 ## Requirements
 
@@ -105,12 +136,20 @@ Shipped version: `v1.4`
 - ✓ Maintained benchmark compare output, stored snapshot evidence, and generated docs now publish
   the shipped `8/4/0/0` runtime contract and honest dense-f32-by-contract attribution for the
   canonical ARM workload — v1.5 Phase 25
+- ✓ The maintained generator path, compare snapshot, and generated benchmark docs now publish
+  restored canonical flash attribution alongside the same shipped `8/4/0/0` runtime contract
+  again — v1.5 Phase 25.1
 
 ### Active
 
-- [ ] Approval-gated follow-on after live Phase 25.1 completion: refresh
-  `snapshots/bench/benchmarks_compare.txt` and `docs/benchmarks.md` so checked-in publication
-  matches the restored canonical flash evidence.
+- [ ] `QWEN-01`: A single maintained canonical Qwen3-0.6B GGUF fixture is documented and usable as
+  the v1.6 truth anchor.
+- [ ] `QWEN-02`: The shipped generator and paritychecker surfaces can load and run that canonical
+  Qwen3-0.6B slice without widening support claims to other Qwen variants.
+- [ ] `QWEN-03`: Parity output proves EMEL against the reference implementation on that one
+  canonical Qwen3-0.6B slice through the maintained operator workflow.
+- [ ] `QWEN-04`: `tools/bench` publishes one truthful maintained compare/docs path for the same
+  canonical Qwen3-0.6B slice.
 
 ### Out of Scope
 
@@ -121,64 +160,27 @@ Shipped version: `v1.4`
 - Whole-program state-machine or orchestration rewrites unrelated to a milestone acceptance surface
 - Dequantize-to-f32 or tool-only compute fallbacks in the shipped canonical hot path without
   explicit milestone approval
-- Generator-side ARM math optimization beyond what is needed to prove or close the quantized path
-  contract in this milestone
-- Broader flash/model rollout before the canonical ARM quantized path contract is fully audited and
-  proven
-- Benchmark gate hardening while the maintained quantized-path fidelity work is still unsettled
-
-- 7 phases and 15 plans delivered the first canonical Llama-68M parity slice in v1.0.
-- 4 additional phases and 10 plans delivered the truthful benchmark slice in v1.1.
-- 5 additional phases and 13 plans delivered v1.2: flash attention is live in the shipped
-  canonical generator path, paritychecker proves it against fetched upstream `llama.cpp`,
-  graph/generator runtime ownership is hard-cut through `emel::tensor::sm`, and the maintained
-  benchmark workflow now publishes flash evidence plus a preserved pre-flash baseline.
-- 3 additional phases and 7 plans delivered v1.3: the canonical ARM slice now ships an optimized
-  AArch64 flash kernel, the shipped runtime/parity surfaces publish optimized-vs-shared flash
-  attribution, and maintained benchmark docs preserve the prior ARM baseline while publishing a
-  measured short-case improvement.
-- 5 additional phases and 11 plans delivered v1.4: the canonical ARM slice now ships EMEL-owned
-  vectorized `q2_K/q3_K/q6_K` kernels, the runtime surfaces publish q2/q3/q6 attribution, full
-  maintained parity is green at `1/10/100/1000`, and the compare/docs workflow republishes
-  quantized evidence against the preserved v1.3 scalar baseline.
-- The validated E2E flows now include
-  `paritychecker --generation --model tests/models/Llama-68M-Chat-v1-Q2_K.gguf --text hello --max-tokens 1`
-  plus the maintained `scripts/bench.sh --compare` publication path that feeds
-  `snapshots/bench/benchmarks_compare.txt` and `docs/benchmarks.md` with
-  `optimized_flash_dispatch_calls=2`, `shared_flash_dispatch_calls=0`, and a preserved ARM
-  baseline comparison.
-- The maintained generation and parity matrix now publishes `1`, `10`, `100`, and `1000` token
-  lengths with parity green across the full maintained set on the canonical ARM workload.
-- Focused ARM profiling on the maintained `1000`-token workload identified scalar quantized matmul
-  as the remaining hot leaf; v1.4 closes that hotspot with native vectorized kernels on the same
-  maintained operand path.
-- v1.5 Phase 25 completed the publication half of the milestone: compare output now prints the
-  shipped `generation_runtime_contract`, the stored compare snapshot and generated docs preserve
-  that contract, and the benchmark story explicitly keeps token embedding and norm-vector seams in
-  the approved dense-f32-by-contract bucket instead of overstating the path as "fully quantized
-  everywhere."
-- Current non-blocking debt remains narrow: benchmark drift is still warning-only in
-  `scripts/quality_gates.sh`; the latest full gate observed warning-only regressions in
-  `logits/sampler_raw/vocab_32000` and `kernel/aarch64/op_soft_max`; compare snapshot publication
-  still refreshes the whole maintained suite; and the bench/parity/docs toolchain still emits
-  non-blocking environment warnings on this machine.
 
 ## Milestone Focus
 
-- Finish the approval-gated publication refresh for Phase 25.1 now that the live canonical
-  generator path and maintained proof surfaces are back on truthful flash attribution.
-- Keep the stored benchmark/docs story aligned with the restored live compare output without
-  silently updating snapshots.
-- Defer broader generator math optimization, broader model rollout, and benchmark-gate policy
-  changes until after the flash-dispatch publication step is resolved.
+- Keep the milestone narrow to one canonical Qwen3-0.6B GGUF fixture instead of broad Qwen-family
+  enablement.
+- Preserve the existing acceptance boundary on the maintained generator, paritychecker, compare,
+  snapshot, and docs surfaces.
+- Prefer truthful brownfield bring-up over premature optimization so benchmark claims do not outrun
+  actual parity coverage.
 
 ## Context
 
-This is a brownfield repository with an existing codebase map under `.planning/codebase/`. v1.0
-showed that the existing subsystem families under `src/emel/` are sufficient to prove one real
-generation path without widening the public API surface. The repo remains governed by `AGENTS.md`
-and `docs/rules/sml.rules.md`, so future work still needs to preserve same-RTC actor semantics,
-explicit error publication, bounded actions, and deliberate machine-structure changes.
+This is a brownfield repository with an existing codebase map under `.planning/codebase/`. v1.5
+showed that the existing subsystem families under `src/emel/` are also sufficient to audit, prove,
+and publish the canonical ARM quantized-path contract end to end without widening the public C API
+surface. The repo remains governed by `AGENTS.md` and `docs/rules/sml.rules.md`, so future work
+still needs to preserve same-RTC actor semantics, explicit error publication, bounded actions, and
+deliberate machine-structure changes. The current repo already recognizes Qwen-family model
+metadata in some loader/tokenizer paths, but the maintained generator, paritychecker, and benchmark
+truth anchors are still Llama-specific today. Non-blocking benchmark warnings remain the main
+carried technical debt entering the next milestone.
 
 ## Constraints
 
@@ -216,7 +218,6 @@ explicit error publication, bounded actions, and deliberate machine-structure ch
 | Extend the existing parity and benchmark proof channels instead of inventing new ones | Reusing maintained operator surfaces kept proof honest and minimized publication churn | ✓ Good |
 | Preserve the pre-refresh ARM compare row as a dedicated baseline artifact | Maintained benchmark claims needed a durable shared-scalar ARM comparison point before snapshot refresh | ✓ Good |
 | Target the quantized `q2_K/q3_K/q6_K x q8_K` row-dot path next | The latest flame graph shows the remaining ARM gap is dominated by scalar quantized matmul leaf cost, not orchestration frames | ✓ Good |
-| Skip milestone research and keep the acceptance boundary on the canonical ARM Llama-68M slice | This milestone is a direct continuation of already-profiled kernel work, so new-domain research would add delay without reducing uncertainty | — Pending |
 | Restore long-decode parity with the exact masked nonflash attention path | The maintained `100/1000` decode mismatch was a data-plane semantic drift, so the narrowest honest repair was to match the reference masked nonflash path instead of claiming flash dispatch | ✓ Good |
 | Treat the remaining ARM quantized-path question as a contract audit first, optimization second | The repo now needs proof about where operand formats widen before it can honestly claim a full quantized runtime path | ✓ Good |
 | Build the quantized-path audit from `llama::detail::execution_view` plus maintained stage-family mapping | Aggregate dispatch counters alone cannot classify token embedding, norm-vector seams, or unsupported branches truthfully | ✓ Good |
@@ -226,6 +227,9 @@ explicit error publication, bounded actions, and deliberate machine-structure ch
 | Promote parity proof from model-local audit printing to shipped runtime-contract enforcement | The maintained proof surface should fail on supported-path regression based on what the generator actually ran, while still cross-checking the stage audit for consistency | ✓ Good |
 | Reuse the existing explicit-no-claim negative surface instead of fabricating a supported fallback fixture for Phase 24 | Unsupported-stage proof was already truthful and deterministic, so additional fake fallback scaffolding would have reduced clarity rather than improved coverage | ✓ Good |
 | Publish benchmark-time runtime contract through the existing compare/docs workflow after explicit approval | This completed `BENCH-10` without inventing parallel publication tooling and kept the approved dense-f32 seams explicit in stored evidence | ✓ Good |
+| Insert Phase 25.1 before closing v1.5 | The live canonical generator path and the stored benchmark publication had drifted apart, so truthful closeout required restoring flash dispatch and refreshing checked-in compare/docs evidence before archival | ✓ Good |
+| Keep v1.6 scoped to one canonical Qwen3-0.6B GGUF slice | The maintained generator, paritychecker, and benchmark surfaces are still Llama-shaped today, so truthful progress requires one narrow vertical slice before any broader Qwen rollout | — Pending |
+| Reuse the shipped paritychecker and `tools/bench` surfaces as the only v1.6 acceptance boundary | The milestone is about honest brownfield expansion, not a new product surface or benchmark-only harness | — Pending |
 
 ## Evolution
 
@@ -245,4 +249,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-25 after completing Phase 25*
+*Last updated: 2026-03-27 after starting milestone v1.6*

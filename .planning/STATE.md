@@ -1,60 +1,54 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.5
-milestone_name: Full ARM Quantized Path
-status: awaiting_approval
-stopped_at: "phase 25.1 restored live flash proof; stored compare snapshot/docs refresh pending approval"
-last_updated: "2026-03-26T05:51:00Z"
-last_activity: 2026-03-25
+milestone: v1.6
+milestone_name: Qwen3-0.6B Parity And Benchmark
+status: ready_for_milestone_audit
+stopped_at: "Completed 29-02 canonical Qwen benchmark publication and full gate verification"
+last_updated: "2026-03-28T13:42:57Z"
 progress:
   total_phases: 5
-  completed_phases: 4
-  total_plans: 10
-  completed_plans: 9
-  percent: 90
+  completed_phases: 5
+  total_plans: 12
+  completed_plans: 12
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-25)
+See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Close the approval-gated publication step for Phase 25.1 after restoring live
-canonical flash attribution and maintained parity.
+**Current focus:** Milestone closeout for v1.6
 
 ## Current Position
 
-Phase: 25.1
-Plan: 25.1-02
-Status: Live runtime/proof restored; stored compare snapshot/docs refresh pending approval
-Last activity: 2026-03-25 — Phase 25.1 restored bounded canonical flash dispatch and live compare proof
-
-Progress: [█████████░] 90%
+Phase: 29 (qwen3-benchmark-publication) — COMPLETE
+All v1.6 phases are complete. The canonical Qwen3 slice now proves maintained stored-baseline
+generation parity on `1/10/100/1000`, maintained benchmark compare and snapshot publication use
+the same GGUF-derived formatter contract and native `q8_0` runtime evidence, and the preserved ARM
+Llama flash baseline remains documented as a historical artifact instead of a live comparison row.
 
 ## Performance Metrics
 
 **Current milestone:**
 
-- Milestone: v1.5 Full ARM Quantized Path
-- Phases complete: 4/5
-- Plans complete: 9/10
-- Status: Runtime/proof work complete for Phase 25.1; waiting on approval to refresh stored
-  benchmark publication artifacts
+- Milestone: v1.6 Qwen3-0.6B Parity And Benchmark
+- Phases complete: 5/5
+- Plans complete: 12/12
+- Audit status: not started
 
 **Last shipped milestone:**
 
-- Milestone: v1.4 Full Vectorized Quantized Kernels
+- Milestone: v1.5 Full ARM Quantized Path
 - Phases complete: 5/5
-- Plans complete: 11/11
-- Audit status: passed
+- Plans complete: 10/10
+- Audit status: tech_debt
 
 **Next action:**
 
-- Approve or defer refresh of `snapshots/bench/benchmarks_compare.txt` and `docs/benchmarks.md`
-  now that the live canonical compare surface is back on truthful flash attribution.
+- Run `$gsd-audit-milestone v1.6` or `$gsd-complete-milestone v1.6`.
 
 ## Accumulated Context
 
@@ -63,45 +57,68 @@ Progress: [█████████░] 90%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- v1.4 closed the remaining canonical ARM quantized kernel gap without changing state-machine
-  structure or widening the acceptance boundary.
-- Long-decode parity is green again across the maintained `1/10/100/1000` surface on the
-  canonical workload.
+- v1.5 closed the canonical ARM quantized-path contract at `8/4/0/0`.
+- Phase 25.1 restored canonical flash dispatch and aligned stored compare/docs evidence with the
+  live proof surface.
+
 - Benchmark drift remains warning-only repo policy until a future milestone explicitly changes it.
-- v1.5 Phase 22 established the canonical truth source as a shared execution-view audit rather
-  than aggregate dispatch counters alone.
-- Supported canonical q2/q3/q6 matmul stages are now explicitly published as `native_quantized`,
-  while token embedding row copy and norm-vector stages remain
-  `approved_dense_f32_by_contract`.
-- Unsupported quantized stage families now publish explicit `no-claim` behavior on the maintained
-  paritychecker surface.
-- Phase 23 proved the supported canonical runtime already had zero disallowed-fallback stages and
-  codified that `8/4/0/0` contract at the shipped generator wrapper boundary.
-- Phase 24 promoted that `8/4/0/0` contract into maintained paritychecker hard-fail proof across
-  `1/10/100/1000` and added post-generate regression coverage on the shipped generator surface.
-- Phase 25 promoted the same `8/4/0/0` contract into maintained compare output, stored benchmark
-  artifacts, and generated docs without overstating the approved dense-f32-by-contract seams.
+- v1.6 stays narrow to one canonical Qwen3-0.6B GGUF slice on the maintained paritychecker and
+  benchmark surfaces.
+
+- v1.6 uses one explicit request-conditioning contract, does not treat `qwen3` as a Llama alias,
+  and now has approval to widen the formatter/request shape to structured chat messages for the
+  canonical maintained slice.
+
+- Phase 26 was re-scoped during execution so the maintained paritychecker and bench paths must fail
+  truthfully on the canonical Qwen fixture before runtime bring-up exists; successful Qwen runtime
+  support remains Phase 27 work.
+
+- Phase 26-02 widened formatter and conditioner to explicit structured chat messages.
+- Phase 26-03 widened `generator::event::generate` to structured chat messages and removed the
+  temporary prompt-reconstruction bridge.
+
+- Phase 26-04 bound the maintained formatter contract from the primary GGUF template on parity and
+  bench tool surfaces, publishing that contract before truthful pre-runtime failure.
+
+- [Phase 27]: Canonical qwen3 execution-view construction requires explicit attn_q_norm and attn_k_norm tensors. — The canonical qwen3 GGUF slice declares dedicated q/k norm weights, so the maintained execution-view contract must reject missing tensors instead of treating qwen3 as a llama alias.
+- [Phase 27]: Qwen3-only quantized audit stages are reported as not_applicable outside qwen3. — This preserves prior llama audit truth while keeping the expanded shared inventory explicit for the canonical qwen3 slice.
+- [Phase 26.1]: Native hot-path proof for the canonical Qwen slice must be reported with `native_q8_0_dispatch_calls`, not reused `q2/q3/q6` attribution counters from the earlier ARM slice.
+- [Phase 27]: Structured-message planner requests stay explicit about sequence metadata. Single-sequence multi-token prompt planning sends null sequence metadata unless multiple sequences are actually present.
+- [Phase 27]: Maintained Qwen runtime bring-up is proven on the temp-baseline write path first; stored snapshot-backed parity comparison remains Phase 28 work.
+- [Phase 28]: Maintained Qwen generation parity is only truthful in stored compare mode when the
+  reference tokenizer uses the same GGUF-derived formatter contract and attribution replay consumes
+  the same conditioned prompt tokens as the shipped generator.
+- [Phase 28]: The prior Llama anchor stays protected by keeping the canonical Qwen compare-mode
+  work inside the existing paritychecker suite instead of inventing a Qwen-only regression lane.
+- [Phase 29]: Stored benchmark publication records explicit `benchmark_config` metadata so the
+  published contract names the exact iteration and warmup envelope instead of leaving it implicit
+  in scripts.
+- [Phase 29]: The canonical maintained benchmark identity is now Qwen `1/10/100/1000` on both
+  compare and snapshot surfaces; the prior ARM Llama flash baseline is preserved as historical
+  evidence only and is not presented as a live comparator for the Qwen publication slice.
 
 ### Roadmap Evolution
 
-- Phase 25.1 inserted after Phase 25: Restore canonical flash-attention dispatch on the maintained
-  generator path (URGENT)
+- Phase 26.1 inserted after Phase 26: Native q8_0 projection and output runtime support for canonical Qwen3 (URGENT)
+- Phase 26.1 completed as two narrow steps: explicit native `q8_0` shared-runtime support, then canonical Qwen backend-unblock proof before Phase 27 resumed.
 
 ### Pending Todos
 
-- Refresh stored benchmark/docs artifacts for Phase 25.1 only after explicit approval.
+- None.
 
 ### Blockers/Concerns
 
-- Benchmark attribution must continue to describe the approved dense-f32-by-contract seams
-  honestly rather than collapsing into a misleading "fully quantized everywhere" claim.
-- Live runtime and compare proof are restored, but checked-in publication artifacts still report
-  stale zero-flash evidence until the approval-gated refresh is performed.
-- The latest full `scripts/quality_gates.sh` pass still emitted warning-only benchmark regressions
-  in `kernel/aarch64/op_soft_max`; current repo policy treats that as non-blocking.
+- Non-blocking benchmark warning debt remains in `batch/planner_simple`, `memory/hybrid_full`,
+  `kernel/aarch64/op_log`, `logits/sampler_raw/vocab_32000`, and `kernel/aarch64/op_soft_max`.
+
+- Qwen bring-up must stay narrow and truthful so the milestone does not over-claim broader model
+  support.
+
+- The formatter/request boundary widening is approved only for the explicit maintained Qwen slice
+  captured in Phase 26 and should not be generalized implicitly during execution.
 
 ## Session Continuity
 
-Last session: 2026-03-26T05:51:00Z
-Stopped at: Phase 25.1 restored live flash proof; stored compare snapshot/docs refresh pending approval
+Last session: 2026-03-28T13:42:57Z
+Stopped at: Completed 29-02 canonical Qwen benchmark publication and full gate verification
 Resume file: None
