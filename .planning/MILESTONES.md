@@ -1,5 +1,31 @@
 # Project Milestones: EMEL
 
+## v1.7 Generator Prefill Submachine Decomposition (Shipped: 2026-03-30)
+
+**Delivered:** The generator now ships an explicit generator-owned `prefill` child machine with
+request-scoped prefill contracts, a materially smaller top-level generator surface, and maintained
+Llama/Qwen proof preserved across the refactor.
+
+**Phases completed:** 3 phases, 6 plans, 0 tasks
+
+**Key accomplishments:**
+
+- Collapsed the repeated top-level prefill routing matrix into explicit request-scoped prefill
+  compute contracts.
+- Extracted `src/emel/generator/prefill` as a generator-domain child machine with its own typed
+  `run` event and explicit contract/result states.
+- Kept prefill orchestration data on typed runtime/internal events instead of generator context
+  phase flags.
+- Reduced the parent generator surface materially and published the split `generator_prefill`
+  architecture docs.
+- Re-ran maintained generator, paritychecker, and compare proof on the extracted prefill boundary,
+  with unrelated broad benchmark drift explicitly waived for milestone closeout.
+
+**What's next:** Decide whether to continue Issue `#41` with decode extraction or revisit deeper
+generator-family decomposition after the prefill pattern.
+
+---
+
 ## v1.6 Qwen3-0.6B Parity And Benchmark (Shipped: 2026-03-30)
 
 **Delivered:** EMEL now ships one truthful canonical `Qwen3-0.6B-Q8_0.gguf` maintained slice with
