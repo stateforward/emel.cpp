@@ -185,21 +185,26 @@ Use `scripts/generate_docs.sh --check` in CI to validate generated artifacts.
 
 ## Embedded size
 
-Generated from `scripts/embedded_size.sh --snapshot-update` using a static MinSizeRel build with function/data section splitting.
+Generated from `scripts/embedded_size.sh --snapshot-update` using final dead-stripped probe executables for a matched kernel workload.
 
 - Snapshot: `snapshots/embedded_size/summary.txt`
+- Mode: `linked_executable`
+- Scope: `kernel_runtime`
+- Workload: `kernel_suite_v1`
+- Backend: `aarch64`
 - Reference ref: `ecbcb7ea9d3303097519723b264a8b5f1e977028`
 - Toolchain: `/opt/homebrew/bin/zig`
 - Build type: `MinSizeRel`
 - Compile flags: `-ffunction-sections,-fdata-sections`
+- Link flags: `-Wl,-dead_strip`
 
-| Payload | raw bytes | stripped bytes | section bytes |
+| Executable | raw bytes | stripped bytes | section bytes |
 | --- | ---: | ---: | ---: |
-| `emel` | 15360 | 14280 | 6717 |
-| `llama + ggml` | 6395456 | 6393840 | 3815211 |
+| `emel` | 368736 | 368736 | 214117 |
+| `llama.cpp/ggml reference` | 887848 | 765528 | 1211403 |
 
-- Ratio (`emel / llama+ggml`) raw: `0.002x`
-- Ratio (`emel / llama+ggml`) stripped: `0.002x`
-- Ratio (`emel / llama+ggml`) section: `0.002x`
+- Ratio (`emel / reference`) raw: `0.415x`
+- Ratio (`emel / reference`) stripped: `0.482x`
+- Ratio (`emel / reference`) section: `0.177x`
 
-This is a static payload estimate, not a final flashed image. Because EMEL is currently header-heavy, its archive payload is a lower-bound for code instantiated in downstream translation units.
+This is a final linked executable estimate for a matched kernel workload, not a whole-product feature-parity claim. emel does not yet ship the full llama.cpp surface, and both binaries still include the platform runtime selected by the toolchain.

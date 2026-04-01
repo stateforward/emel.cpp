@@ -1,4 +1,5 @@
 # embedded_size_config: reference_ref=ecbcb7ea9d3303097519723b264a8b5f1e977028 toolchain=/opt/homebrew/bin/zig build_type=MinSizeRel compile_flags=-ffunction-sections,-fdata-sections
-# embedded_size_emel: raw_bytes=15360 stripped_bytes=14280 section_bytes=6717
-# embedded_size_reference: raw_bytes=6395456 stripped_bytes=6393840 section_bytes=3815211
-# embedded_size_ratio: raw=0.002 stripped=0.002 section=0.002
+# embedded_size_measurement: mode=linked_executable scope=kernel_runtime workload=kernel_suite_v1 backend=aarch64 link_flags=-Wl,-dead_strip
+# embedded_size_emel: raw_bytes=368736 stripped_bytes=368736 section_bytes=214117 binary=build/embedded_size/emel_probe_build/emel_embedded_probe
+# embedded_size_reference: raw_bytes=887848 stripped_bytes=765528 section_bytes=1211403 binary=build/embedded_size/reference_probe_build/reference_embedded_probe
+# embedded_size_ratio: raw=0.415 stripped=0.482 section=0.177

@@ -111,6 +111,11 @@ struct embedded_size_snapshot {
   std::string toolchain;
   std::string build_type;
   std::string compile_flags;
+  std::string measurement_mode;
+  std::string measurement_scope;
+  std::string workload;
+  std::string backend;
+  std::string link_flags;
   std::string emel_raw_bytes;
   std::string emel_stripped_bytes;
   std::string emel_section_bytes;
@@ -852,6 +857,23 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
       parsed.compile_flags = metadata->at("compile_flags");
       continue;
     }
+    if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_measurement: ");
+        metadata.has_value()) {
+      for (const char * field : {"mode", "scope", "workload", "backend", "link_flags"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # embedded_size_measurement metadata in %s\n",
+                       paths.embedded_size_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.measurement_mode = metadata->at("mode");
+      parsed.measurement_scope = metadata->at("scope");
+      parsed.workload = metadata->at("workload");
+      parsed.backend = metadata->at("backend");
+      parsed.link_flags = metadata->at("link_flags");
+      continue;
+    }
     if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_emel: ");
         metadata.has_value()) {
       for (const char * field : {"raw_bytes", "stripped_bytes", "section_bytes"}) {
@@ -900,7 +922,9 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
   }
 
   if (parsed.reference_ref.empty() || parsed.toolchain.empty() || parsed.build_type.empty() ||
-      parsed.compile_flags.empty() || parsed.emel_raw_bytes.empty() ||
+      parsed.compile_flags.empty() || parsed.measurement_mode.empty() ||
+      parsed.measurement_scope.empty() || parsed.workload.empty() || parsed.backend.empty() ||
+      parsed.link_flags.empty() || parsed.emel_raw_bytes.empty() ||
       parsed.emel_stripped_bytes.empty() || parsed.emel_section_bytes.empty() ||
       parsed.reference_raw_bytes.empty() || parsed.reference_stripped_bytes.empty() ||
       parsed.reference_section_bytes.empty() || parsed.ratio_raw.empty() ||
@@ -916,9 +940,21 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
 
 std::string build_embedded_size_section(const embedded_size_snapshot & snapshot) {
   std::string section;
-  section += "Generated from `scripts/embedded_size.sh --snapshot-update` using a static "
-             "MinSizeRel build with function/data section splitting.\n\n";
+  section += "Generated from `scripts/embedded_size.sh --snapshot-update` using final "
+             "dead-stripped probe executables for a matched kernel workload.\n\n";
   section += "- Snapshot: `snapshots/embedded_size/summary.txt`\n";
+  section += "- Mode: `";
+  section += snapshot.measurement_mode;
+  section += "`\n";
+  section += "- Scope: `";
+  section += snapshot.measurement_scope;
+  section += "`\n";
+  section += "- Workload: `";
+  section += snapshot.workload;
+  section += "`\n";
+  section += "- Backend: `";
+  section += snapshot.backend;
+  section += "`\n";
   section += "- Reference ref: `";
   section += snapshot.reference_ref;
   section += "`\n";
@@ -930,8 +966,11 @@ std::string build_embedded_size_section(const embedded_size_snapshot & snapshot)
   section += "`\n";
   section += "- Compile flags: `";
   section += snapshot.compile_flags;
+  section += "`\n";
+  section += "- Link flags: `";
+  section += snapshot.link_flags;
   section += "`\n\n";
-  section += "| Payload | raw bytes | stripped bytes | section bytes |\n";
+  section += "| Executable | raw bytes | stripped bytes | section bytes |\n";
   section += "| --- | ---: | ---: | ---: |\n";
   section += "| `emel` | ";
   section += snapshot.emel_raw_bytes;
@@ -940,25 +979,26 @@ std::string build_embedded_size_section(const embedded_size_snapshot & snapshot)
   section += " | ";
   section += snapshot.emel_section_bytes;
   section += " |\n";
-  section += "| `llama + ggml` | ";
+  section += "| `llama.cpp/ggml reference` | ";
   section += snapshot.reference_raw_bytes;
   section += " | ";
   section += snapshot.reference_stripped_bytes;
   section += " | ";
   section += snapshot.reference_section_bytes;
   section += " |\n\n";
-  section += "- Ratio (`emel / llama+ggml`) raw: `";
+  section += "- Ratio (`emel / reference`) raw: `";
   section += snapshot.ratio_raw;
   section += "x`\n";
-  section += "- Ratio (`emel / llama+ggml`) stripped: `";
+  section += "- Ratio (`emel / reference`) stripped: `";
   section += snapshot.ratio_stripped;
   section += "x`\n";
-  section += "- Ratio (`emel / llama+ggml`) section: `";
+  section += "- Ratio (`emel / reference`) section: `";
   section += snapshot.ratio_section;
   section += "x`\n\n";
-  section += "This is a static payload estimate, not a final flashed image. "
-             "Because EMEL is currently header-heavy, its archive payload is a lower-bound "
-             "for code instantiated in downstream translation units.";
+  section += "This is a final linked executable estimate for a matched kernel workload, "
+             "not a whole-product feature-parity claim. emel does not yet ship the full "
+             "llama.cpp surface, and both binaries still include the platform runtime "
+             "selected by the toolchain.";
   return section;
 }
 
