@@ -1,0 +1,4 @@
+# embedded_size_config: reference_ref=ecbcb7ea9d3303097519723b264a8b5f1e977028 toolchain=/opt/homebrew/bin/zig build_type=MinSizeRel compile_flags=-ffunction-sections,-fdata-sections
+# embedded_size_emel: raw_bytes=15360 stripped_bytes=14280 section_bytes=6717
+# embedded_size_reference: raw_bytes=6395456 stripped_bytes=6393840 section_bytes=3815211
+# embedded_size_ratio: raw=0.002 stripped=0.002 section=0.002

@@ -182,3 +182,24 @@ scripts/generate_docs.sh
 ```
 
 Use `scripts/generate_docs.sh --check` in CI to validate generated artifacts.
+
+## Embedded size
+
+Generated from `scripts/embedded_size.sh --snapshot-update` using a static MinSizeRel build with function/data section splitting.
+
+- Snapshot: `snapshots/embedded_size/summary.txt`
+- Reference ref: `ecbcb7ea9d3303097519723b264a8b5f1e977028`
+- Toolchain: `/opt/homebrew/bin/zig`
+- Build type: `MinSizeRel`
+- Compile flags: `-ffunction-sections,-fdata-sections`
+
+| Payload | raw bytes | stripped bytes | section bytes |
+| --- | ---: | ---: | ---: |
+| `emel` | 15360 | 14280 | 6717 |
+| `llama + ggml` | 6395456 | 6393840 | 3815211 |
+
+- Ratio (`emel / llama+ggml`) raw: `0.002x`
+- Ratio (`emel / llama+ggml`) stripped: `0.002x`
+- Ratio (`emel / llama+ggml`) section: `0.002x`
+
+This is a static payload estimate, not a final flashed image. Because EMEL is currently header-heavy, its archive payload is a lower-bound for code instantiated in downstream translation units.
