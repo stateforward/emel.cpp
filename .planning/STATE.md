@@ -4,8 +4,8 @@ milestone: v1.9
 milestone_name: Liquid LFM2.5-1.2B Thinking ARM Slice
 status: ready_for_phase_planning
 stopped_at: "Roadmap created for v1.9; ready for $gsd-discuss-phase 33"
-last_updated: "2026-03-31T20:31:08Z"
-last_activity: 2026-03-31
+last_updated: "2026-04-01T15:55:49Z"
+last_activity: 2026-04-01
 progress:
   total_phases: 5
   completed_phases: 0
@@ -30,7 +30,9 @@ maintained Liquid conditioning contract.
 Phase: 33
 Plan: —
 Status: Roadmap created
-Last activity: 2026-03-31 — Rescoped v1.9 from the prior `Q8_0` anchor to one official Liquid
+Last activity: 2026-04-01 — Completed quick task 260401-ejm and retained the v1.9 roadmap for
+the official Liquid `Q4_K_M` maintained anchor
+Previous roadmap activity: 2026-03-31 — Rescoped v1.9 from the prior `Q8_0` anchor to one official Liquid
 `Q4_K_M` fixture, keeping the same five-phase shape but accepting the broader quant-runtime bring-up
 implied by the new maintained truth anchor
 
@@ -93,8 +95,16 @@ Recent decisions affecting current work:
   use metadata truth consistently.
 - Benchmark warning debt still exists outside the maintained Liquid scope and is not part of v1.9.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260401-ejm | Add non-blocking benchmark binary size comparison between emel and llama for reference in quality gates/benchmarks | 2026-04-01 | 3b9888e | [260401-ejm-add-non-blocking-benchmark-binary-size-c](./quick/260401-ejm-add-non-blocking-benchmark-binary-size-c/) |
+
 ## Session Continuity
 
-Last session: 2026-03-31T20:25:13Z
+Last session: 2026-04-01T15:55:49Z
 Stopped at: Roadmap created for v1.9; ready for `$gsd-discuss-phase 33`
 Resume file: None
+Last activity: 2026-04-01 - Completed quick task 260401-ejm: Add non-blocking benchmark binary
+size comparison between emel and llama for reference in quality gates/benchmarks
