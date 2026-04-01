@@ -108,6 +108,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`docs/architecture/gbnf_sampler_matcher_parser.md`](docs/architecture/gbnf_sampler_matcher_parser.md)
 - [`docs/architecture/gbnf_sampler.md`](docs/architecture/gbnf_sampler.md)
 - [`docs/architecture/gbnf_sampler_token_parser.md`](docs/architecture/gbnf_sampler_token_parser.md)
+- [`docs/architecture/generator_initializer.md`](docs/architecture/generator_initializer.md)
 - [`docs/architecture/generator_prefill.md`](docs/architecture/generator_prefill.md)
 - [`docs/architecture/generator.md`](docs/architecture/generator.md)
 - [`docs/architecture/gguf_loader.md`](docs/architecture/gguf_loader.md)

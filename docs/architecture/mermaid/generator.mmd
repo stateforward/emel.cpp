@@ -1,35 +1,14 @@
 stateDiagram-v2
   direction TB
   [*] --> uninitialized
-  uninitialized --> binding_conditioner : initialize_run [valid_initialize_] / begin_initialize_
+  uninitialized --> initializing : initialize_run [valid_initialize_] / none
   uninitialized --> initialize_error_channel_decision : initialize_run [invalid_initialize_] / reject_initialize_
-  ready --> binding_conditioner : initialize_run [valid_initialize_] / begin_initialize_
+  ready --> initializing : initialize_run [valid_initialize_] / none
   ready --> initialize_error_channel_decision : initialize_run [invalid_initialize_] / reject_initialize_
-  binding_conditioner --> binding_conditioner_decision : completion_initialize_run_ [always] / request_conditioner_bind_
-  binding_conditioner_decision --> initializing_renderer : completion_initialize_run_ [conditioner_bind_ok_] / none
-  binding_conditioner_decision --> initialize_error_channel_decision : completion_initialize_run_ [conditioner_bind_invalid_request_] / mark_invalid_request_
-  binding_conditioner_decision --> initialize_error_channel_decision : completion_initialize_run_ [conditioner_bind_backend_error_] / mark_backend_error_
-  initializing_renderer --> initializing_renderer_decision : completion_initialize_run_ [always] / request_renderer_initialize_
-  initializing_renderer_decision --> reserving_memory : completion_initialize_run_ [renderer_initialize_ok_] / none
-  initializing_renderer_decision --> initialize_error_channel_decision : completion_initialize_run_ [renderer_initialize_invalid_request_] / mark_invalid_request_
-  initializing_renderer_decision --> initialize_error_channel_decision : completion_initialize_run_ [renderer_initialize_backend_error_] / mark_backend_error_
-  reserving_memory --> reserving_memory_decision : completion_initialize_run_ [always] / request_memory_reserve_
-  reserving_memory_decision --> configuring_sampling_mode_decision : completion_initialize_run_ [memory_reserve_with_existing_graph_] / none
-  reserving_memory_decision --> reserving_graph : completion_initialize_run_ [memory_reserve_with_missing_graph_] / none
-  reserving_memory_decision --> initialize_error_channel_decision : completion_initialize_run_ [memory_reserve_invalid_request_] / mark_invalid_request_
-  reserving_memory_decision --> initialize_error_channel_decision : completion_initialize_run_ [memory_reserve_backend_error_] / mark_backend_error_
-  reserving_graph --> reserving_graph_decision : completion_initialize_run_ [always] / request_graph_reserve_
-  reserving_graph_decision --> configuring_sampling_mode_decision : completion_initialize_run_ [graph_reserve_ok_] / none
-  reserving_graph_decision --> initialize_error_channel_decision : completion_initialize_run_ [graph_reserve_invalid_request_] / mark_invalid_request_
-  reserving_graph_decision --> initialize_error_channel_decision : completion_initialize_run_ [graph_reserve_backend_error_] / mark_backend_error_
-  configuring_sampling_mode_decision --> configuring_sampler : completion_initialize_run_ [initialize_uses_materialized_logits_] / none
-  configuring_sampling_mode_decision --> configure_preselected_argmax : completion_initialize_run_ [initialize_uses_preselected_argmax_] / none
-  configuring_sampler --> configuring_sampler_decision : completion_initialize_run_ [always] / configure_sampler_
-  configuring_sampler_decision --> initialize_done_channel_decision : completion_initialize_run_ [sampler_configured_] / none
-  configuring_sampler_decision --> initialize_error_channel_decision : completion_initialize_run_ [sampler_config_failed_] / mark_backend_error_
-  configure_preselected_argmax --> configure_preselected_argmax_decision : completion_initialize_run_ [always] / configure_preselected_argmax_
-  configure_preselected_argmax_decision --> initialize_done_channel_decision : completion_initialize_run_ [sampler_configured_] / none
-  configure_preselected_argmax_decision --> initialize_error_channel_decision : completion_initialize_run_ [sampler_config_failed_] / mark_backend_error_
+  initializing --> initializer_result_decision : completion_initialize_run_ [always] / request_initializer_
+  initializer_result_decision --> initialize_done_channel_decision : completion_initialize_run_ [initialize_result_none_] / none
+  initializer_result_decision --> initialize_error_channel_decision : completion_initialize_run_ [initialize_result_invalid_request_] / none
+  initializer_result_decision --> initialize_error_channel_decision : completion_initialize_run_ [initialize_result_backend_] / none
   initialize_done_channel_decision --> ready : completion_initialize_run_ [initialize_done_callback_with_error_out_] / dispatch_initialize_done_with_callback_and_error_out_
   initialize_done_channel_decision --> ready : completion_initialize_run_ [initialize_done_callback_without_error_out_] / dispatch_initialize_done_with_callback_only_
   initialize_done_channel_decision --> ready : completion_initialize_run_ [initialize_no_done_callback_with_error_out_] / dispatch_initialize_done_with_error_out_only_
@@ -131,19 +110,8 @@ stateDiagram-v2
   generate_uninitialized_error_channel_decision --> uninitialized : completion_generate_run_ [generate_no_error_callback_without_error_out_] / dispatch_generate_error_without_channels_
   uninitialized --> uninitialized : _ [always] / on_unexpected_
   ready --> ready : _ [always] / on_unexpected_
-  binding_conditioner --> uninitialized : _ [always] / on_unexpected_
-  binding_conditioner_decision --> uninitialized : _ [always] / on_unexpected_
-  initializing_renderer --> uninitialized : _ [always] / on_unexpected_
-  initializing_renderer_decision --> uninitialized : _ [always] / on_unexpected_
-  reserving_memory --> uninitialized : _ [always] / on_unexpected_
-  reserving_memory_decision --> uninitialized : _ [always] / on_unexpected_
-  reserving_graph --> uninitialized : _ [always] / on_unexpected_
-  reserving_graph_decision --> uninitialized : _ [always] / on_unexpected_
-  configuring_sampling_mode_decision --> uninitialized : _ [always] / on_unexpected_
-  configuring_sampler --> uninitialized : _ [always] / on_unexpected_
-  configuring_sampler_decision --> uninitialized : _ [always] / on_unexpected_
-  configure_preselected_argmax --> uninitialized : _ [always] / on_unexpected_
-  configure_preselected_argmax_decision --> uninitialized : _ [always] / on_unexpected_
+  initializing --> uninitialized : _ [always] / on_unexpected_
+  initializer_result_decision --> uninitialized : _ [always] / on_unexpected_
   initialize_done_channel_decision --> ready : _ [always] / on_unexpected_
   initialize_error_channel_decision --> uninitialized : _ [always] / on_unexpected_
   reset_sequence --> ready : _ [always] / on_unexpected_

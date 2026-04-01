@@ -3,10 +3,10 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. Shipped v1.7 now adds an explicit
-generator-domain `prefill` machine and request-scoped prefill contract routing on top of the
-repo's truthful maintained Llama ARM and canonical Qwen anchors, all aligned with
-`docs/rules/sml.rules.md`.
+modeled as explicit actors instead of ad hoc control flow. Shipped v1.7 added an explicit
+generator-domain `prefill` machine; v1.8 now focuses on splitting the cold generator initialize
+path into an explicit `initializer` machine while preserving the repo's truthful maintained Llama
+ARM and canonical Qwen anchors under `docs/rules/sml.rules.md`.
 
 ## Core Value
 
@@ -17,19 +17,34 @@ before widening API surface or model scope.
 
 Shipped version: `v1.7`
 
-Status: Between milestones. The repo now ships explicit generator-domain prefill orchestration
-without broadening beyond the maintained Llama ARM and canonical Qwen acceptance surfaces.
+Status: Starting `v1.8`. The repo is between implementation phases after shipping
+`generator/prefill`, and the next milestone is scoped to cold-path initializer decomposition
+rather than another hot decode split.
 
 Release summary: `v1.7 Generator Prefill Submachine Decomposition` shipped on `2026-03-30` with
-`3` phases and `6` plans. Remaining open debt is decode-side generator decomposition plus the
-existing warning-only benchmark drift outside `generator/prefill`.
+`3` phases and `6` plans. The next active goal is to extract `generator/initializer` without
+broadening into decode actor work or benchmark-gate policy.
+
+## Current Milestone: v1.8 Generator Initializer Submachine
+
+**Goal:** Extract the generator's initialize pipeline into an explicit generator-owned
+`initializer` machine while preserving RTC/no-queue semantics, typed request-scoped handoff, and
+maintained proof surfaces.
+
+**Target features:**
+- explicit `src/emel/generator/initializer` machine for conditioner binding, renderer init,
+  memory/graph reserve, and sampling configuration
+- parent generator delegation of `initialize_run` through typed events and explicit outcomes
+  rather than duplicated top-level init orchestration
+- smaller top-level generator initialize/publication surface with maintained Llama/Qwen proof
+  unchanged
 
 ## Latest Milestone: v1.7 Generator Prefill Submachine Decomposition
 
 <details>
 <summary>Shipped on 2026-03-30</summary>
 
-**Goal:** Decompose the generator’s prefill orchestration into a smaller explicit machine inside
+**Goal:** Decompose the generator's prefill orchestration into a smaller explicit machine inside
 the `generator` domain while keeping request-scoped behavior modeled via typed events, guards, and
 transitions instead of hidden action/detail control flow.
 
@@ -89,37 +104,33 @@ transitions instead of hidden action/detail control flow.
 
 ### Active
 
-- [ ] `DECODE-01`: Extract generator decode orchestration into a smaller generator-owned machine
-  after the prefill extraction pattern is proven.
-- [ ] `ATTN-01`: Revisit attention-family decomposition such as `flash` vs `nonflash` through
-  `sm_any` only after the prefill routing matrix is no longer the main duplication source.
-- [ ] `MODEL-02`: Broaden beyond the canonical Qwen3-0.6B fixture to additional Qwen
-  architectures or quantizations once the first slice is proven and benchmarked.
-- [ ] `COND-02`: Add richer Qwen chat or tool-calling request surfaces only after the canonical
-  maintained slice has an explicit and stable conditioning contract.
-- [ ] `GEN-03`: Optimize remaining generator-side hot spots after the canonical Qwen slice is
-  correct, parity-backed, and benchmarked.
-- [ ] `BENCH-07`: Revisit whether noisy benchmark drift should become a blocking repo gate once the
-  maintained compare surfaces are stable enough to justify it.
+- [ ] `INIT-01`: Extract generator initialization orchestration into explicit
+      `src/emel/generator/initializer`.
+- [ ] `INIT-02`: Keep initialize request-scoped orchestration data on typed runtime/internal
+      events instead of generator context phase fields.
+- [ ] `INIT-03`: Keep initializer routing explicit through guards, states, and transitions with no
+      hidden helper branching.
+- [ ] `ARCH-02`: Shrink the top-level generator initialize/publication surface after the
+      initializer split.
+- [ ] `VERIFY-02`: Preserve maintained generator, paritychecker, benchmark, and quality-gate proof
+      across the initializer boundary.
 
 ### Out of Scope
 
-- Decode extraction or broader generator-family decomposition without an explicit milestone goal
-- Attention-family `sm_any` extraction before the remaining generator routing shape is clear
-- Broad repository cleanup unrelated to a milestone goal
-- Broad Qwen-family or multi-fixture support without an explicit maintained identity and milestone
-  goal
-- Broad new public C API or CLI surface without explicit milestone approval
-- Non-ARM backend kernel specialization until a milestone explicitly broadens beyond the current
-  maintained truth anchors
-- Whole-program actor or orchestration rewrites unrelated to a milestone acceptance surface
-- Dequantize-to-f32 or tool-only compute fallbacks in the shipped canonical hot path without
-  explicit milestone approval
+- Decode submachine extraction in v1.8 because the previous decode split attempt regressed
+  hot-path performance and this milestone is intentionally cold-path only.
+- Internal request-flow or `preprocessor` machine splits in v1.8 because the user chose one new
+  machine, `generator/initializer`, for this slice.
+- Attention-family `sm_any` extraction before the initializer boundary is landed and proven.
+- Broader Qwen-family, richer request-surface, or benchmark-gate-policy work without explicit
+  milestone approval.
+- Separate session/runtime actor redesign as part of Issue `#41`.
+- Hidden control-flow shortcuts in actions or detail helpers.
 
-## Next Milestone Goals
+## Future Milestone Candidates
 
-- Decide whether the next milestone should continue Issue `#41` with decode extraction now that the
-  prefill pattern is proven.
+- Revisit decode decomposition only if the next step can reduce top-level duplication without
+  paying another per-token child-dispatch cost.
 - Revisit attention-family decomposition such as `flash` vs `nonflash` through `sm_any` only after
   the remaining generator routing shape is clearer.
 - Preserve maintained Llama/Qwen proof while any further generator decomposition lands.
@@ -130,12 +141,15 @@ transitions instead of hidden action/detail control flow.
 
 This is a brownfield repository with an existing codebase map under `.planning/codebase/`. v1.7
 proved that generator decomposition can stay inside the `generator` domain and preserve explicit
-same-RTC event handoff instead of falling back to context phase flags or hidden helper routing. The
-repo already has explicit actor seams for `graph`, `memory`, `logits::sampler`, and backend-family
-selection through `sm_any`; the remaining open generator question is how far the same pattern
-should continue into decode and any later attention-family split. The repo remains governed by
-`AGENTS.md` and `docs/rules/sml.rules.md`, so future work still needs to preserve same-RTC actor
-semantics, explicit error publication, bounded actions, and deliberate machine-structure changes.
+same-RTC event handoff instead of falling back to context phase flags or hidden helper routing.
+The next attempt to split decode was discussed but rejected for this milestone because decode lives
+on the per-token hot path and prior decomposition work regressed performance; v1.8 therefore
+targets the cold initialize path instead. The repo already has explicit actor seams for `graph`,
+`memory`, `logits::sampler`, and backend-family selection through `sm_any`; the remaining accepted
+generator question for this milestone is how to split `initialize_run` cleanly without weakening
+the modeled-behavior contract. The repo remains governed by `AGENTS.md` and
+`docs/rules/sml.rules.md`, so future work still needs to preserve same-RTC actor semantics,
+explicit error publication, bounded actions, and deliberate machine-structure changes.
 
 ## Constraints
 
@@ -143,6 +157,8 @@ semantics, explicit error publication, bounded actions, and deliberate machine-s
   `AGENTS.md` so generator work preserves the RTC actor model and no-queue invariant.
 - **Explicit behavior modeling**: Further generator decomposition must keep control flow on guards,
   states, typed events, and transitions rather than action/detail routing shortcuts.
+- **Performance**: Keep the per-token decode loop on the parent generator in this milestone; do
+  not reintroduce a decode child-dispatch cost without benchmark-backed approval.
 - **Domain boundary**: Request orchestration belongs to `generator`; leaf compute still belongs to
   `graph` and sampling to `logits::sampler`.
 - **Acceptance boundary**: Maintained proof still lives on the shipped generator, paritychecker,
@@ -159,6 +175,8 @@ semantics, explicit error publication, bounded actions, and deliberate machine-s
 | Keep prefill request-scoped data on typed runtime/internal events | This preserved explicit behavior modeling and avoided context phase flags | ✓ Good |
 | Defer decode extraction until the prefill pattern is proven | Decode also owns sampling, rendering, and loop control, so it was the riskier first cut | ✓ Good |
 | Defer `attention::any` / `sm_any` extraction until after prefill collapse | Attention mode is only one axis of the duplication and should not hide unresolved top-level routing | ⚠ Revisit |
+| Start v1.8 with `generator/initializer` instead of `generator/decode` | Decode decomposition touched the hot per-token loop and previously regressed performance, while initializer is cold-path and semantically clear | — Pending |
+| Keep v1.8 to one new machine only | The user explicitly rejected a broader multi-machine slice such as `generate_setup` or `preprocessor` | — Pending |
 
 ## Evolution
 
@@ -178,4 +196,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-30 after shipping v1.7*
+*Last updated: 2026-03-31 after starting v1.8*
