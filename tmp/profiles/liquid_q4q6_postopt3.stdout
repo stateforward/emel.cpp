@@ -1,0 +1,6 @@
+2026-04-01 07:56:30.870325-0500 bench_runner[30893:1717134689] flock failed to lock list file (/var/folders/tw/l56r2v8n43j0g44gwpl7t7bc0000gn/C//com.apple.metal/32024/libraries.list): errno = 35
+# benchmark_config: iterations=1 runs=1 warmup_iterations=0 warmup_runs=1 generation_iterations=1 generation_runs=1 generation_warmup_iterations=0 generation_warmup_runs=0
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 ns_per_op=844733333.000 iter=1 runs=1
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_10 ns_per_op=1179285042.000 iter=1 runs=1
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_100 ns_per_op=4083531333.000 iter=1 runs=1
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1000 ns_per_op=34397012292.000 iter=1 runs=1

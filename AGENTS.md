@@ -237,8 +237,18 @@ ALWAYS implement equivalent functionality natively without external llama.cpp or
 ggml linkage.
 NEVER link "emel" against llama.cpp or ggml outside `tools/bench` or
 `tools/paritychecker`.
-ALWAYS link llama.cpp and ggml together with emel in `tools/bench` and
-`tools/paritychecker` only.
+ALWAYS keep any llama.cpp/ggml linkage in `tools/bench` and
+`tools/paritychecker` confined to the explicit reference-side comparison path
+only.
+NEVER let the EMEL side of `tools/bench` or `tools/paritychecker` call into,
+bootstrap from, or otherwise depend on llama.cpp/ggml for vocab state,
+tokenizer state, formatter state, model loading, tensor metadata, runtime
+execution, or output generation.
+NEVER share llama.cpp/ggml-created model, vocab, tokenizer, formatter, context,
+or cache objects with the EMEL side in benchmark or parity harnesses.
+ALWAYS keep benchmark and parity harnesses split into two clearly separated
+lanes: an EMEL-owned lane using only EMEL-owned code for the EMEL result, and a
+reference lane using llama.cpp/ggml only for the comparison result.
 NEVER use `llama_` or `ggml_` prefixes in identifiers, symbols, files, or APIs
 outside `tools/bench` or `tools/paritychecker`.
 ALWAYS use `emel_` or `EMEL_` prefixes for project-owned identifiers, symbols,

@@ -1,0 +1,5 @@
+# benchmark_config: iterations=1 runs=1 warmup_iterations=0 warmup_runs=1 generation_iterations=1 generation_runs=1 generation_warmup_iterations=0 generation_warmup_runs=0
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 ns_per_op=745321500.000 iter=1 runs=1
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_10 ns_per_op=992841375.000 iter=1 runs=1
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_100 ns_per_op=3573022791.000 iter=1 runs=1
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1000 ns_per_op=30683099291.000 iter=1 runs=1

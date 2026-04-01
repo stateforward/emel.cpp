@@ -480,32 +480,12 @@ inline bool split_llama3(const uint32_t * cpts, size_t cpt_count,
       if (flags.is_number) {
         size_t ini = pos;
         while (get_flags(pos).is_number) {
-          pos++;
-        }
-        const size_t len = pos - ini;
-        if (len > 3) {
-          pos = ini + 3;
-        }
-        if (!add_token(pos)) {
-          return false;
-        }
-        continue;
-      }
-
-      if (!(flags.is_whitespace | flags.is_letter | flags.is_number) &&
-          flags.as_uint()) {
-        if (cpt != ' ' && (cpt == '\r' || cpt == '\n')) {
-          pos += 1;
-        } else if (cpt == ' ') {
-          pos += 1;
-        }
-        while (!(get_flags(pos).is_whitespace | get_flags(pos).is_letter |
-                 get_flags(pos).is_number) &&
-               get_flags(pos).as_uint()) {
-          pos++;
-        }
-        while (get_cpt(pos) == '\r' || get_cpt(pos) == '\n') {
-          pos++;
+          if (++pos - ini >= 3) {
+            if (!add_token(pos)) {
+              return false;
+            }
+            ini = pos;
+          }
         }
         if (!add_token(pos)) {
           return false;
@@ -513,9 +493,17 @@ inline bool split_llama3(const uint32_t * cpts, size_t cpt_count,
         continue;
       }
 
-      if (cpt == '\r' || cpt == '\n') {
-        while (get_cpt(pos) == '\r' || get_cpt(pos) == '\n') {
-          pos++;
+      auto flags2 = (cpt == ' ') ? get_flags(pos + 1) : flags;
+      if (!(flags2.is_whitespace | flags2.is_letter | flags2.is_number) &&
+          flags2.as_uint()) {
+        pos += (cpt == ' ');
+        while (!(flags2.is_whitespace | flags2.is_letter | flags2.is_number) &&
+               flags2.as_uint()) {
+          flags2 = get_flags(++pos);
+        }
+        uint32_t cpt2 = get_cpt(pos);
+        while (cpt2 == '\r' || cpt2 == '\n') {
+          cpt2 = get_cpt(++pos);
         }
         if (!add_token(pos)) {
           return false;
@@ -524,8 +512,21 @@ inline bool split_llama3(const uint32_t * cpts, size_t cpt_count,
       }
 
       size_t num_whitespaces = 0;
+      size_t last_end_r_or_n = 0;
       while (get_flags(pos + num_whitespaces).is_whitespace) {
+        const uint32_t cpt2 = get_cpt(pos + num_whitespaces);
+        if (cpt2 == '\r' || cpt2 == '\n') {
+          last_end_r_or_n = pos + num_whitespaces + 1;
+        }
         num_whitespaces++;
+      }
+
+      if (last_end_r_or_n > 0) {
+        pos = last_end_r_or_n;
+        if (!add_token(pos)) {
+          return false;
+        }
+        continue;
       }
 
       if (num_whitespaces > 1 &&

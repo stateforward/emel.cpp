@@ -29,21 +29,24 @@ std::uint64_t generation_quantized_evidence_optimized_q2_dispatch_calls() noexce
 std::uint64_t generation_quantized_evidence_shared_q2_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_optimized_q3_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_shared_q3_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_optimized_q4_dispatch_calls() noexcept;
+std::uint64_t generation_quantized_evidence_shared_q4_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_optimized_q6_dispatch_calls() noexcept;
 std::uint64_t generation_quantized_evidence_shared_q6_dispatch_calls() noexcept;
 std::int32_t generation_flash_evidence_emel_decode_calls() noexcept;
 std::int32_t generation_flash_evidence_emel_logits_calls() noexcept;
 std::int32_t generation_flash_evidence_reference_decode_calls() noexcept;
 std::int32_t generation_flash_evidence_reference_logits_calls() noexcept;
+std::string_view generation_architecture_contract() noexcept;
 
 }  // namespace emel::bench
 
 namespace {
 namespace bench = emel::bench;
 
-constexpr std::uint64_t k_default_iterations = 100000;
-constexpr std::size_t k_default_runs = 5;
-constexpr std::uint64_t k_default_warmup_iterations = 1000;
+constexpr std::uint64_t k_default_iterations = 1000;
+constexpr std::size_t k_default_runs = 3;
+constexpr std::uint64_t k_default_warmup_iterations = 100;
 constexpr std::size_t k_default_warmup_runs = 1;
 constexpr std::size_t k_max_runs = 25;
 
@@ -74,6 +77,10 @@ constexpr std::string_view k_bench_reference_ref =
 #else
   "unknown";
 #endif
+
+bool is_generation_case_name(const std::string & name) {
+  return name.rfind("generation/preloaded_request/", 0u) == 0u;
+}
 
 bool case_supported_on_host(const bench::test_case & tc) {
   if (tc.append_emel == bench::append_emel_kernel_x86_64_cases ||
@@ -375,8 +382,27 @@ void print_compare(const std::vector<bench::result> & emel_results,
     ref_sorted.begin(), ref_sorted.end(), [](const bench::result & entry) {
       return entry.name == bench::k_generation_case_name;
     });
+  const bool any_generation_emel =
+      std::any_of(emel_sorted.begin(), emel_sorted.end(), [](const bench::result & entry) {
+        return is_generation_case_name(entry.name);
+      });
+  const bool any_generation_ref =
+      std::any_of(ref_sorted.begin(), ref_sorted.end(), [](const bench::result & entry) {
+        return is_generation_case_name(entry.name);
+      });
+  if (any_generation_emel != any_generation_ref) {
+    std::fprintf(stderr, "error: generation suite mismatch between emel and reference\n");
+    std::exit(1);
+  }
   const bool generation_present = generation_emel != emel_sorted.end() ||
       generation_ref != ref_sorted.end();
+  if ((any_generation_emel || any_generation_ref) && !generation_present) {
+    std::fprintf(stderr,
+                 "error: missing current maintained generation case %.*s\n",
+                 static_cast<int>(bench::k_generation_case_name.size()),
+                 bench::k_generation_case_name.data());
+    std::exit(1);
+  }
   if ((generation_emel == emel_sorted.end()) != (generation_ref == ref_sorted.end())) {
     std::fprintf(stderr, "error: generation case mismatch between emel and reference\n");
     std::exit(1);
@@ -409,6 +435,12 @@ void print_compare(const std::vector<bench::result> & emel_results,
   print_benchmark_config(cfg);
   if (generation_present) {
     const std::string_view formatter_contract = bench::generation_formatter_contract();
+    const std::string_view architecture_contract = bench::generation_architecture_contract();
+    if (!architecture_contract.empty()) {
+      std::printf("# generation_architecture: %.*s\n",
+                  static_cast<int>(architecture_contract.size()),
+                  architecture_contract.data());
+    }
     if (!formatter_contract.empty()) {
       std::printf("# generation_formatter_contract: %.*s\n",
                   static_cast<int>(formatter_contract.size()),
@@ -447,10 +479,16 @@ void print_compare(const std::vector<bench::result> & emel_results,
         bench::generation_quantized_evidence_optimized_q3_dispatch_calls();
     const auto shared_q3_dispatch_calls =
         bench::generation_quantized_evidence_shared_q3_dispatch_calls();
+    const auto optimized_q4_dispatch_calls =
+        bench::generation_quantized_evidence_optimized_q4_dispatch_calls();
+    const auto shared_q4_dispatch_calls =
+        bench::generation_quantized_evidence_shared_q4_dispatch_calls();
     const auto optimized_q6_dispatch_calls =
         bench::generation_quantized_evidence_optimized_q6_dispatch_calls();
     const auto shared_q6_dispatch_calls =
         bench::generation_quantized_evidence_shared_q6_dispatch_calls();
+    const bool is_lfm2_generation =
+        bench::generation_architecture_contract() == std::string_view{"lfm2"};
     const auto emel_decode_calls = bench::generation_flash_evidence_emel_decode_calls();
     const auto emel_logits_calls = bench::generation_flash_evidence_emel_logits_calls();
     const auto reference_decode_calls = bench::generation_flash_evidence_reference_decode_calls();
@@ -505,10 +543,20 @@ void print_compare(const std::vector<bench::result> & emel_results,
                    shared_flash_dispatch_calls);
       std::exit(1);
     }
-    if ((native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls) == 0 ||
+    const bool invalid_lfm2_quantized_evidence =
+        native_q8_0_dispatch_calls != 0 || packed_q8_0_dispatch_calls != 0 ||
         optimized_q2_dispatch_calls != 0 || shared_q2_dispatch_calls != 0 ||
         optimized_q3_dispatch_calls != 0 || shared_q3_dispatch_calls != 0 ||
-        optimized_q6_dispatch_calls != 0 || shared_q6_dispatch_calls != 0) {
+        optimized_q4_dispatch_calls == 0 || shared_q4_dispatch_calls != 0 ||
+        optimized_q6_dispatch_calls == 0 || shared_q6_dispatch_calls != 0;
+    const bool invalid_default_quantized_evidence =
+        (native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls) == 0 ||
+        optimized_q2_dispatch_calls != 0 || shared_q2_dispatch_calls != 0 ||
+        optimized_q3_dispatch_calls != 0 || shared_q3_dispatch_calls != 0 ||
+        optimized_q4_dispatch_calls != 0 || shared_q4_dispatch_calls != 0 ||
+        optimized_q6_dispatch_calls != 0 || shared_q6_dispatch_calls != 0;
+    if ((is_lfm2_generation && invalid_lfm2_quantized_evidence) ||
+        (!is_lfm2_generation && invalid_default_quantized_evidence)) {
       std::fprintf(stderr,
                    "error: invalid generation quantized evidence native_q8_0_dispatch_calls=%" PRIu64
                    " packed_q8_0_dispatch_calls=%" PRIu64
@@ -516,6 +564,8 @@ void print_compare(const std::vector<bench::result> & emel_results,
                    " shared_q2_dispatch_calls=%" PRIu64
                    " optimized_q3_dispatch_calls=%" PRIu64
                    " shared_q3_dispatch_calls=%" PRIu64
+                   " optimized_q4_dispatch_calls=%" PRIu64
+                   " shared_q4_dispatch_calls=%" PRIu64
                    " optimized_q6_dispatch_calls=%" PRIu64
                    " shared_q6_dispatch_calls=%" PRIu64 "\n",
                    native_q8_0_dispatch_calls,
@@ -524,6 +574,8 @@ void print_compare(const std::vector<bench::result> & emel_results,
                    shared_q2_dispatch_calls,
                    optimized_q3_dispatch_calls,
                    shared_q3_dispatch_calls,
+                   optimized_q4_dispatch_calls,
+                   shared_q4_dispatch_calls,
                    optimized_q6_dispatch_calls,
                    shared_q6_dispatch_calls);
       std::exit(1);
@@ -572,6 +624,8 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 " shared_q2_dispatch_calls=%" PRIu64
                 " optimized_q3_dispatch_calls=%" PRIu64
                 " shared_q3_dispatch_calls=%" PRIu64
+                " optimized_q4_dispatch_calls=%" PRIu64
+                " shared_q4_dispatch_calls=%" PRIu64
                 " optimized_q6_dispatch_calls=%" PRIu64
                 " shared_q6_dispatch_calls=%" PRIu64 "\n",
                 static_cast<int>(bench::k_generation_case_name.size()),
@@ -582,6 +636,8 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 shared_q2_dispatch_calls,
                 optimized_q3_dispatch_calls,
                 shared_q3_dispatch_calls,
+                optimized_q4_dispatch_calls,
+                shared_q4_dispatch_calls,
                 optimized_q6_dispatch_calls,
                 shared_q6_dispatch_calls);
   }

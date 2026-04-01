@@ -862,6 +862,27 @@ struct sm : public emel::sm<model, action::context> {
     return this->context_.compute.backend.kernel.shared_q3_dispatch_count();
   }
 
+  uint64_t generation_optimized_q4_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q4_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q4_vector_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q4_vector_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q4_vector_packed_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q4_vector_packed_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q4_vector_packed_q8_rhs_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel
+        .optimized_q4_vector_packed_q8_rhs_dispatch_count();
+  }
+
+  uint64_t generation_shared_q4_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.shared_q4_dispatch_count();
+  }
+
   uint64_t generation_optimized_q6_dispatch_calls() const noexcept {
     return this->context_.compute.backend.kernel.optimized_q6_dispatch_count();
   }

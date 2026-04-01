@@ -102,6 +102,7 @@ TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
   using emel::kernel::detail::quant::QK_K;
   using emel::kernel::detail::quant::block_q2_k;
   using emel::kernel::detail::quant::block_q3_k;
+  using emel::kernel::detail::quant::block_q4_k;
   using emel::kernel::detail::quant::block_q6_k;
 
   const std::array<float, QK_K> input = [] {
@@ -111,6 +112,7 @@ TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
   }();
   float q2_out[1] = {};
   float q3_out[1] = {};
+  float q4_out[1] = {};
   float q6_out[1] = {};
 
   block_q2_k q2 = {};
@@ -124,6 +126,24 @@ TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
   std::fill(q3.scales.begin(), q3.scales.end(), static_cast<uint8_t>(0x00u));
   std::fill(q3.hmask.begin(), q3.hmask.end(), static_cast<uint8_t>(0x00u));
   std::fill(q3.qs.begin(), q3.qs.end(), static_cast<uint8_t>(0x00u));
+
+  block_q4_k q4 = {};
+  q4.d = 0x3c00u;
+  q4.dmin = 0x3c00u;
+  q4.scales.fill(0u);
+  q4.scales[0] = 0x01u;
+  q4.scales[1] = 0x01u;
+  q4.scales[2] = 0x01u;
+  q4.scales[3] = 0x01u;
+  q4.scales[4] = 0x01u;
+  q4.scales[5] = 0x01u;
+  q4.scales[6] = 0x01u;
+  q4.scales[7] = 0x01u;
+  q4.scales[8] = 0x11u;
+  q4.scales[9] = 0x11u;
+  q4.scales[10] = 0x11u;
+  q4.scales[11] = 0x11u;
+  std::fill(q4.qs.begin(), q4.qs.end(), static_cast<uint8_t>(0x00u));
 
   block_q6_k q6 = {};
   q6.d = 0x3c00u;
@@ -145,6 +165,12 @@ TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
       .dst = make_dst(q3_out, dtype::f32, 1, 1),
       .nth = 1,
   };
+  const emel::kernel::event::op_mul_mat q4_ev{
+      .src0 = make_quantized_src(&q4, dtype::q4_k, QK_K, 1),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(q4_out, dtype::f32, 1, 1),
+      .nth = 1,
+  };
   const emel::kernel::event::op_mul_mat q6_ev{
       .src0 = make_quantized_src(&q6, dtype::q6_k, QK_K, 1),
       .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
@@ -154,10 +180,57 @@ TEST_CASE("kernel_mul_mat_accepts_quantized_qk_weights") {
 
   CHECK(machine.process_event(q2_ev));
   CHECK(machine.process_event(q3_ev));
+  CHECK(machine.process_event(q4_ev));
   CHECK(machine.process_event(q6_ev));
   CHECK(q2_out[0] == doctest::Approx(-256.0f));
   CHECK(q3_out[0] == doctest::Approx(32768.0f));
+  CHECK(q4_out[0] == doctest::Approx(-256.0f));
   CHECK(q6_out[0] == doctest::Approx(-8192.0f));
+}
+
+TEST_CASE("kernel_mul_mat_argmax_accepts_q4_k_weights") {
+  using emel::kernel::detail::quant::QK_K;
+  using emel::kernel::detail::quant::block_q4_k;
+
+  const std::array<float, QK_K> input = [] {
+    std::array<float, QK_K> values = {};
+    values.fill(1.0f);
+    return values;
+  }();
+
+  std::array<block_q4_k, 2> q4_rows = {};
+  q4_rows[0].d = 0x3c00u;
+  q4_rows[0].dmin = 0x3c00u;
+  q4_rows[0].scales.fill(0u);
+  q4_rows[0].scales[0] = 0x01u;
+  q4_rows[0].scales[1] = 0x01u;
+  q4_rows[0].scales[2] = 0x01u;
+  q4_rows[0].scales[3] = 0x01u;
+  q4_rows[0].scales[4] = 0x01u;
+  q4_rows[0].scales[5] = 0x01u;
+  q4_rows[0].scales[6] = 0x01u;
+  q4_rows[0].scales[7] = 0x01u;
+  q4_rows[0].scales[8] = 0x11u;
+  q4_rows[0].scales[9] = 0x11u;
+  q4_rows[0].scales[10] = 0x11u;
+  q4_rows[0].scales[11] = 0x11u;
+  std::fill(q4_rows[0].qs.begin(), q4_rows[0].qs.end(), static_cast<uint8_t>(0x00u));
+
+  float best_score = 0.0f;
+  int32_t best_index = -1;
+
+  kernel_sm machine{};
+  const emel::kernel::event::op_mul_mat_argmax q4_ev{
+      .src0 = make_quantized_src(q4_rows.data(), dtype::q4_k, QK_K, 2),
+      .src1 = make_src(input.data(), dtype::f32, 1, QK_K),
+      .dst = make_dst(&best_score, dtype::f32, 1, 1),
+      .nth = 1,
+      .index_out = &best_index,
+  };
+
+  CHECK(machine.process_event(q4_ev));
+  CHECK(best_index == 1);
+  CHECK(best_score == doctest::Approx(0.0f).epsilon(1.0e-6f));
 }
 
 TEST_CASE("kernel_mul_mat_accepts_q8_0_weights") {

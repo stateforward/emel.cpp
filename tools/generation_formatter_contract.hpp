@@ -20,20 +20,39 @@ enum class support_kind : uint8_t {
 
 inline constexpr std::string_view k_supported_contract =
     "source=tokenizer.chat_template support=supported_contract "
-    "shape=structured_chat_messages_v1 tools=none add_generation_prompt=true "
-    "enable_thinking=false";
+    "shape=structured_chat_messages_v1 roles=system,user tools=none "
+    "add_generation_prompt=true enable_thinking=false keep_past_thinking=false "
+    "bos=<|startoftext|>";
+inline constexpr std::string_view k_supported_qwen_contract =
+    "source=tokenizer.chat_template support=supported_contract "
+    "shape=structured_chat_messages_v1 roles=system,user,assistant tools=none "
+    "add_generation_prompt=true enable_thinking=false bos=none";
 
 inline constexpr std::string_view k_no_template_contract =
     "source=tokenizer.chat_template support=no_template "
-    "shape=structured_chat_messages_v1 tools=none add_generation_prompt=true "
-    "enable_thinking=false";
+    "shape=structured_chat_messages_v1 roles=system,user tools=none "
+    "add_generation_prompt=true enable_thinking=false keep_past_thinking=false "
+    "bos=<|startoftext|>";
 
 inline constexpr std::string_view k_unsupported_template_contract =
     "source=tokenizer.chat_template support=unsupported_template "
-    "shape=structured_chat_messages_v1 tools=none add_generation_prompt=true "
-    "enable_thinking=false";
+    "shape=structured_chat_messages_v1 roles=system,user tools=none "
+    "add_generation_prompt=true enable_thinking=false keep_past_thinking=false "
+    "bos=<|startoftext|>";
 
 inline constexpr std::array<std::string_view, 9> k_supported_primary_template_markers = {
+    "{{- bos_token -}}",
+    "keep_past_thinking",
+    "messages[0][\"role\"] == \"system\"",
+    "\"List of tools: [\"",
+    "message[\"role\"] == \"assistant\"",
+    "</think>",
+    "add_generation_prompt",
+    "<|im_start|>assistant\\n",
+    "<|im_start|>system\\n",
+};
+
+inline constexpr std::array<std::string_view, 9> k_supported_qwen_primary_template_markers = {
     "<|im_start|>",
     "<|im_end|>",
     "messages[0].role == 'system'",
@@ -53,15 +72,59 @@ struct formatter_binding {
   std::string_view contract = k_no_template_contract;
 };
 
+inline constexpr std::string_view k_bos = "<|startoftext|>";
 inline constexpr std::string_view k_im_start = "<|im_start|>";
 inline constexpr std::string_view k_im_end = "<|im_end|>\n";
 inline constexpr std::string_view k_assistant_generation_prefix =
     "<|im_start|>assistant\n";
 inline constexpr std::string_view k_message_separator = "\n";
 inline int k_supported_formatter_sentinel = 0;
+inline int k_supported_qwen_formatter_sentinel = 0;
+
+inline bool qwen_role_supported(const std::string_view role) noexcept {
+  return role == "system" || role == "user" || role == "assistant";
+}
 
 inline bool role_supported(const std::string_view role) noexcept {
-  return role == "system" || role == "user" || role == "assistant";
+  return role == "system" || role == "user";
+}
+
+inline bool qwen_messages_supported(
+    const std::span<const emel::text::formatter::chat_message> messages) noexcept {
+  if (messages.empty()) {
+    return false;
+  }
+
+  for (const auto & message : messages) {
+    if (!qwen_role_supported(message.role)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool messages_supported(
+    const std::span<const emel::text::formatter::chat_message> messages) noexcept {
+  if (messages.empty()) {
+    return false;
+  }
+
+  bool saw_user = false;
+  bool allow_system = true;
+  for (const auto & message : messages) {
+    if (!role_supported(message.role)) {
+      return false;
+    }
+    if (message.role == "system") {
+      if (!allow_system) {
+        return false;
+      }
+      continue;
+    }
+    saw_user = true;
+    allow_system = false;
+  }
+  return saw_user;
 }
 
 inline bool append_bytes(const std::string_view bytes,
@@ -78,6 +141,62 @@ inline bool append_bytes(const std::string_view bytes,
   return true;
 }
 
+inline bool format_supported_qwen_contract(void *,
+                                           const emel::text::formatter::format_request & request,
+                                           int32_t * error_out) noexcept {
+  if (error_out != nullptr) {
+    *error_out = emel::text::formatter::error_code(
+        emel::text::formatter::error::none);
+  }
+  if (request.output_length_out != nullptr) {
+    *request.output_length_out = 0u;
+  }
+  if ((request.output == nullptr && request.output_capacity > 0u) ||
+      !qwen_messages_supported(request.messages) ||
+      !request.add_generation_prompt ||
+      request.enable_thinking) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
+
+  size_t output_length = 0u;
+  for (const auto & message : request.messages) {
+    if (!append_bytes(k_im_start, request.output, request.output_capacity, output_length) ||
+        !append_bytes(message.role, request.output, request.output_capacity, output_length) ||
+        !append_bytes(k_message_separator,
+                      request.output,
+                      request.output_capacity,
+                      output_length) ||
+        !append_bytes(message.content, request.output, request.output_capacity, output_length) ||
+        !append_bytes(k_im_end, request.output, request.output_capacity, output_length)) {
+      if (error_out != nullptr) {
+        *error_out = emel::text::formatter::error_code(
+            emel::text::formatter::error::invalid_request);
+      }
+      return false;
+    }
+  }
+
+  if (!append_bytes(k_assistant_generation_prefix,
+                    request.output,
+                    request.output_capacity,
+                    output_length)) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
+
+  if (request.output_length_out != nullptr) {
+    *request.output_length_out = output_length;
+  }
+  return true;
+}
+
 inline bool format_supported_contract(void *,
                                       const emel::text::formatter::format_request & request,
                                       int32_t * error_out) noexcept {
@@ -89,7 +208,7 @@ inline bool format_supported_contract(void *,
     *request.output_length_out = 0u;
   }
   if ((request.output == nullptr && request.output_capacity > 0u) ||
-      request.messages.empty() ||
+      !messages_supported(request.messages) ||
       !request.add_generation_prompt ||
       request.enable_thinking) {
     if (error_out != nullptr) {
@@ -99,17 +218,14 @@ inline bool format_supported_contract(void *,
     return false;
   }
 
-  for (const auto & message : request.messages) {
-    if (!role_supported(message.role)) {
-      if (error_out != nullptr) {
-        *error_out = emel::text::formatter::error_code(
-            emel::text::formatter::error::invalid_request);
-      }
-      return false;
-    }
-  }
-
   size_t output_length = 0u;
+  if (!append_bytes(k_bos, request.output, request.output_capacity, output_length)) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
   for (const auto & message : request.messages) {
     if (!append_bytes(k_im_start, request.output, request.output_capacity, output_length) ||
         !append_bytes(message.role, request.output, request.output_capacity, output_length) ||
@@ -154,14 +270,23 @@ inline bool template_matches_supported_contract(
   return true;
 }
 
+inline bool template_matches_supported_qwen_contract(
+    const std::string_view primary_template) noexcept {
+  for (const std::string_view marker : k_supported_qwen_primary_template_markers) {
+    if (primary_template.find(marker) == std::string_view::npos) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline formatter_binding resolve_primary_template_binding(
     const std::string_view primary_template,
     const uint32_t named_template_count) noexcept {
   if (primary_template.empty()) {
     return formatter_binding{};
   }
-  if (named_template_count != 0u ||
-      !template_matches_supported_contract(primary_template)) {
+  if (named_template_count != 0u) {
     return formatter_binding{
         .formatter_ctx = nullptr,
         .format_prompt = emel::text::formatter::format_raw,
@@ -169,11 +294,27 @@ inline formatter_binding resolve_primary_template_binding(
         .contract = k_unsupported_template_contract,
     };
   }
+  if (template_matches_supported_contract(primary_template)) {
+    return formatter_binding{
+        .formatter_ctx = &k_supported_formatter_sentinel,
+        .format_prompt = format_supported_contract,
+        .support = support_kind::supported_contract,
+        .contract = k_supported_contract,
+    };
+  }
+  if (template_matches_supported_qwen_contract(primary_template)) {
+    return formatter_binding{
+        .formatter_ctx = &k_supported_qwen_formatter_sentinel,
+        .format_prompt = format_supported_qwen_contract,
+        .support = support_kind::supported_contract,
+        .contract = k_supported_qwen_contract,
+    };
+  }
   return formatter_binding{
-      .formatter_ctx = &k_supported_formatter_sentinel,
-      .format_prompt = format_supported_contract,
-      .support = support_kind::supported_contract,
-      .contract = k_supported_contract,
+      .formatter_ctx = nullptr,
+      .format_prompt = emel::text::formatter::format_raw,
+      .support = support_kind::unsupported_template,
+      .contract = k_unsupported_template_contract,
   };
 }
 
@@ -192,9 +333,13 @@ single_user_messages(std::array<emel::text::formatter::chat_message, 1> & storag
 }
 
 inline size_t formatted_capacity_upper_bound(
+    const formatter_binding & binding,
     const std::span<const emel::text::formatter::chat_message> messages,
     const bool add_generation_prompt) noexcept {
   size_t capacity = 0u;
+  if (binding.contract == k_supported_contract || binding.contract == k_no_template_contract) {
+    capacity += k_bos.size();
+  }
   for (const auto & message : messages) {
     capacity += k_im_start.size() + message.role.size() + k_message_separator.size() +
         message.content.size() + k_im_end.size();
@@ -215,7 +360,7 @@ inline bool format_single_user_prompt(const formatter_binding & binding,
 
   std::array<emel::text::formatter::chat_message, 1> message_storage = {};
   const auto messages = single_user_messages(message_storage, text);
-  output.resize(formatted_capacity_upper_bound(messages, true));
+  output.resize(formatted_capacity_upper_bound(binding, messages, true));
   size_t output_length = 0u;
   int32_t error_out = emel::text::formatter::error_code(
       emel::text::formatter::error::none);

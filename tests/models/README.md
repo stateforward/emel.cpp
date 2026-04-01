@@ -9,6 +9,18 @@
 - SHA256: `9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031`
 - Download URL: `https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf`
 
+## LFM2.5-1.2B-Thinking-Q4_K_M.gguf
+- Source: `https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF`
+- File: `LFM2.5-1.2B-Thinking-Q4_K_M.gguf`
+- Stable maintained path: `tests/models/LFM2.5-1.2B-Thinking-Q4_K_M.gguf`
+- License: Apache-2.0
+- Size: `730895360` bytes (`697M`)
+- SHA256: `7223a2202405b02e8e1e6c5baa543c43dc98c1d9741a5c2a0ee1583212e1231b`
+- Download URL: `https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF/resolve/main/LFM2.5-1.2B-Thinking-Q4_K_M.gguf`
+- Executable metadata truth: treat GGUF/config metadata as authoritative for this maintained slice,
+  including `general.architecture=lfm2` and context length `128000`, even though some prose still
+  mentions `32,768`.
+
 ## Llama-68M-Chat-v1-Q2_K.gguf
 - Source: `https://huggingface.co/tensorblock/Llama-68M-Chat-v1-GGUF`
 - File: `Llama-68M-Chat-v1-Q2_K.gguf`

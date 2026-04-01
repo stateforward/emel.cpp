@@ -51,6 +51,7 @@ struct benchmark_snapshot {
   std::string reference_source;
   std::string reference_ref;
   std::string benchmark_config;
+  std::string architecture_contract;
   std::string formatter_contract;
   std::string flash_case;
   std::string flash_dispatch_calls;
@@ -72,6 +73,8 @@ struct benchmark_snapshot {
   std::string shared_q2_dispatch_calls;
   std::string optimized_q3_dispatch_calls;
   std::string shared_q3_dispatch_calls;
+  std::string optimized_q4_dispatch_calls;
+  std::string shared_q4_dispatch_calls;
   std::string optimized_q6_dispatch_calls;
   std::string shared_q6_dispatch_calls;
 };
@@ -515,6 +518,7 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
   const std::regex line_re(
       R"(^([^ ]+) emel\.cpp ([0-9.]+) ns/op, llama\.cpp ([0-9.]+) ns/op, ratio=([0-9.]+)x$)");
   constexpr std::string_view k_benchmark_config_prefix = "# benchmark_config: ";
+  constexpr std::string_view k_generation_architecture_prefix = "# generation_architecture: ";
   constexpr std::string_view k_generation_formatter_contract_prefix =
       "# generation_formatter_contract: ";
 
@@ -523,6 +527,10 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
     std::smatch match;
     if (line.rfind(k_benchmark_config_prefix.data(), 0u) == 0u) {
       parsed.benchmark_config = line.substr(k_benchmark_config_prefix.size());
+      continue;
+    }
+    if (line.rfind(k_generation_architecture_prefix.data(), 0u) == 0u) {
+      parsed.architecture_contract = line.substr(k_generation_architecture_prefix.size());
       continue;
     }
     if (line.rfind(k_generation_formatter_contract_prefix.data(), 0u) == 0u) {
@@ -604,6 +612,14 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       parsed.shared_q3_dispatch_calls =
           metadata->contains("shared_q3_dispatch_calls")
               ? metadata->at("shared_q3_dispatch_calls")
+              : "0";
+      parsed.optimized_q4_dispatch_calls =
+          metadata->contains("optimized_q4_dispatch_calls")
+              ? metadata->at("optimized_q4_dispatch_calls")
+              : "0";
+      parsed.shared_q4_dispatch_calls =
+          metadata->contains("shared_q4_dispatch_calls")
+              ? metadata->at("shared_q4_dispatch_calls")
               : "0";
       parsed.optimized_q6_dispatch_calls =
           metadata->contains("optimized_q6_dispatch_calls")
@@ -760,6 +776,11 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += " ref=";
   section += snapshot.reference_ref;
   section += "`\n";
+  if (!snapshot.architecture_contract.empty()) {
+    section += "- `generation_architecture: ";
+    section += snapshot.architecture_contract;
+    section += "`\n";
+  }
   section += "- `generation_formatter_contract: ";
   section += snapshot.formatter_contract;
   section += "`\n";
@@ -789,6 +810,9 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += " ns/op, ratio=";
   section += current->ratio;
   section += "x`\n\n";
+  section += "- The compare table below keeps additive generation rows for all maintained "
+             "supported fixtures; this evidence block stays tied to the current maintained "
+             "publication case.\n\n";
   section += "## Current Quantized Evidence\n\n";
   section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
   section += "- `generation_runtime_contract: case=";
@@ -816,15 +840,20 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += snapshot.optimized_q3_dispatch_calls;
   section += " shared_q3_dispatch_calls=";
   section += snapshot.shared_q3_dispatch_calls;
+  section += " optimized_q4_dispatch_calls=";
+  section += snapshot.optimized_q4_dispatch_calls;
+  section += " shared_q4_dispatch_calls=";
+  section += snapshot.shared_q4_dispatch_calls;
   section += " optimized_q6_dispatch_calls=";
   section += snapshot.optimized_q6_dispatch_calls;
   section += " shared_q6_dispatch_calls=";
   section += snapshot.shared_q6_dispatch_calls;
   section += "`\n\n";
-  section += "- Contract summary: the maintained canonical Qwen3 workload stayed on the approved "
-             "runtime contract with native q8_0 projection and output dispatch, explicit "
-             "dense-f32-by-contract token embedding and per-head Q/K RMS norm vectors, and no "
-             "disallowed fallback or explicit no-claim branch on the supported path.\n\n";
+  section += "- Contract summary: the maintained canonical ";
+  section += snapshot.architecture_contract == "lfm2" ? "Liquid" : "generation";
+  section += " workload stayed on the approved runtime contract with explicit "
+             "dense-f32-by-contract stages, native quantized dispatch on the maintained path, "
+             "and no disallowed fallback or explicit no-claim branch on the supported path.\n\n";
 
   if (!fs::exists(paths.generation_pre_arm_flash_optimized_baseline)) {
     return section;
@@ -877,8 +906,8 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   const benchmark_row * current_baseline_case = find_benchmark_row(snapshot, baseline_case);
   if (current_baseline_case == nullptr) {
     section += "- Note: this preserved ARM flash baseline remains tied to the archived Llama "
-               "canonical slice and is not directly compared against the current canonical "
-               "Qwen3 publication because the benchmark case identity changed explicitly.\n";
+               "canonical slice and is not directly compared against the current maintained "
+               "publication because the benchmark case identity changed explicitly.\n";
     return section;
   }
 

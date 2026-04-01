@@ -10,7 +10,7 @@
 namespace emel::text::tokenizer::preprocessor {
 
 constexpr size_t k_max_fragments = 1024;
-constexpr size_t k_max_special_tokens = 256;
+constexpr size_t k_max_special_tokens = 1024;
 
 enum class fragment_kind : uint8_t {
   raw_text = 0,

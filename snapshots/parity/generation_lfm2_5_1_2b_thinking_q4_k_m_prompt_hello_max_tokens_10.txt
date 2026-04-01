@@ -1,0 +1,11 @@
+format=emel_generation_baseline_v1
+contract=generation_online_f16_final_normalize_v1
+fixture=LFM2.5-1.2B-Thinking-Q4_K_M.gguf
+prompt_hex=68656c6c6f
+max_tokens=10
+tokens_generated=10
+output_length=22
+trace_token_count=0
+token_ids=
+top_score_gaps=
+output_hex=3c7c696d5f656e647c3ec48a3c7c696d5f7374617274

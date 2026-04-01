@@ -8,12 +8,20 @@
 namespace emel::bench {
 
 inline constexpr std::string_view k_generation_case_name =
-  "generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1";
+  "generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1";
 inline constexpr std::string_view k_generation_10_case_name =
-  "generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_10";
+  "generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_10";
 inline constexpr std::string_view k_generation_100_case_name =
-  "generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_100";
+  "generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_100";
 inline constexpr std::string_view k_generation_1000_case_name =
+  "generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1000";
+inline constexpr std::string_view k_generation_qwen3_case_name =
+  "generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1";
+inline constexpr std::string_view k_generation_qwen3_10_case_name =
+  "generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_10";
+inline constexpr std::string_view k_generation_qwen3_100_case_name =
+  "generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_100";
+inline constexpr std::string_view k_generation_qwen3_1000_case_name =
   "generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1000";
 
 using append_case_fn = void (*)(std::vector<result> & results, const config & cfg);

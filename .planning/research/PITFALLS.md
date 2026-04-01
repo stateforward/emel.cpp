@@ -1,238 +1,187 @@
 # Pitfalls Research
 
-**Domain:** Adding one maintained Qwen3-0.6B slice to an existing Llama-shaped parity and benchmark
-stack
-**Researched:** 2026-03-27
+**Domain:** Brownfield C++ GGUF inference engine adding one maintained LiquidAI
+`LFM2.5-1.2B-Thinking-GGUF` ARM slice
+**Researched:** 2026-03-31
 **Confidence:** HIGH
 
 ## Critical Pitfalls
 
-### Pitfall 1: Updating the fixture name while the repo still rejects `qwen3`
+### Pitfall 1: False Architecture Readiness
 
 **What goes wrong:**
-The planning docs say Qwen3 is the next milestone, but maintained generation surfaces still hard
-reject any model whose architecture is not `"llama"`.
+The repo accepts the Liquid fixture by name while runtime/model code still assumes only
+`llama`/`qwen3`.
 
 **Why it happens:**
-The fixture constant is visible and easy to change, while the real architecture gates are spread
-across paritychecker, bench, and EMEL runtime helpers.
+GGUF makes models look interchangeable, so it is tempting to widen an allow-list before the
+execution path is real.
 
 **How to avoid:**
-Treat fixture identity, architecture validation, and runtime support as one unit of work. If EMEL
-cannot yet run one canonical Qwen3 slice, keep the tool surfaces rejecting it explicitly until that
-support lands.
+Add explicit `lfm2` model and runtime requirements before parity or benchmark work starts.
 
 **Warning signs:**
-- `tests/models/README.md` adds a Qwen fixture, but `run_emel_validate_architecture()` still
-  returns success only for `"llama"`.
-- Tool usage text mentions Qwen while generated output still depends on the Llama fixture.
-- Only slug/path constants changed.
+Architecture gates are widened, but generator/model code still only mentions existing families.
 
 **Phase to address:**
-Phase 26: fixture and architecture gate setup.
+Phase 34
 
 ---
 
-### Pitfall 2: Treating Qwen3 as a Llama alias
+### Pitfall 2: Template False Positive
 
 **What goes wrong:**
-The tool accepts `qwen3`, but runtime code still assumes the Llama tensor family and fails later or
-produces misleading results.
+The maintained path claims Liquid template support by reusing the old Qwen matcher even though the
+official Liquid template includes `keep_past_thinking` and different tool markers.
 
 **Why it happens:**
-The architecture string looks like the obvious difference, but local reference source shows Qwen3
-has distinct attention-normalization tensors such as `attn_q_norm` and `attn_k_norm`.
+Both templates use ChatML-like framing, so superficial token similarity looks "close enough".
 
 **How to avoid:**
-Make runtime support explicit at the model/execution-view boundary. Do not equate "accepted the
-architecture string" with "supports the topology."
+Match one Liquid-specific maintained contract only: structured chat messages, `tools=none`,
+`add_generation_prompt=true`, `keep_past_thinking=false`.
 
 **Warning signs:**
-- `src/emel/model/data.cpp` or `generator/detail.hpp` still depends entirely on
-  `emel::model::llama::detail::*`.
-- Qwen3 passes loader validation but fails when building the execution view.
-- Debug output shows extra norm tensors present in the model, but EMEL has nowhere to bind them.
+Formatter-contract output still says `enable_thinking=false` on a path that never explicitly
+resolved Liquid semantics.
 
 **Phase to address:**
-Phase 27: runtime architecture bring-up.
+Phase 33
 
 ---
 
-### Pitfall 3: Shipping a misleading prompt contract
+### Pitfall 3: Metadata Drift
 
 **What goes wrong:**
-EMEL benchmarks or parity-checks a Qwen3 instruct model with raw prompt bytes and argmax selection,
-then presents that as the canonical Qwen slice.
+Planning or docs use stale prose metadata instead of executable GGUF/config truth.
 
 **Why it happens:**
-The current maintained tools already inject `format_raw`, and changing prompt conditioning feels
-optional compared with runtime bring-up.
+The official model card prose advertises `32,768` context while config/GGUF metadata publish
+`128000`, so casual reading produces conflicting assumptions.
 
 **How to avoid:**
-Define one explicit request-conditioning contract up front. If the slice uses chat-template
-conditioning, wire that through the formatter/conditioner seam. If it uses a narrower interim
-contract, label it clearly and keep reference and EMEL aligned.
+Treat GGUF/config metadata as the maintained truth source and document the discrepancy explicitly in
+fixture/setup work.
 
 **Warning signs:**
-- `format_raw` remains the only formatter path in the maintained Qwen flow.
-- Official Qwen docs are cited, but the request contract does not use their documented local-use
-  flow.
-- Generated output includes empty or unstable `<think>` blocks under argmax.
+Docs, tests, and tool constants disagree on context length or architecture naming.
 
 **Phase to address:**
-Phase 26: conditioning contract decision.
+Phase 33
 
 ---
 
-### Pitfall 4: Letting thinking-mode behavior leak into a greedy benchmark path
+### Pitfall 4: Silent Quant Scope Creep
 
 **What goes wrong:**
-Parity or benchmark runs become unstable, repetitive, or hard to interpret because the canonical
-request still allows default thinking-mode behavior while the maintained tools select argmax.
+The first Liquid milestone turns into broad quant-matrix work because the official repo publishes
+multiple quants.
 
 **Why it happens:**
-Official Qwen docs note that thinking mode is the default and also warn against greedy decoding.
-The repo's current maintained generation flow is deterministic and argmax-oriented.
+Once the model page shows `Q4_0`, `Q4_K_M`, `Q5_K_M`, `Q6_K`, `Q8_0`, `BF16`, and `F16`, it feels
+natural to say the repo supports "the model" instead of one exact file.
 
 **How to avoid:**
-Choose a deterministic non-ambiguous request contract for the maintained slice and apply the same
-contract in both EMEL and `llama.cpp`.
+Pin one official maintained fixture only and state explicitly that sibling quants remain unsupported
+until a later milestone proves them.
 
 **Warning signs:**
-- Long or repetitive generations appear on small prompts.
-- Bench numbers vary because prompt expansion is inconsistent.
-- Operators cannot explain whether the canonical request was thinking or non-thinking.
+Requirements or docs say `LFM2.5-1.2B-Thinking-GGUF` without naming one exact file.
 
 **Phase to address:**
-Phase 26: conditioning contract, then Phase 28: parity validation.
+Phase 33
 
 ---
 
-### Pitfall 5: Publishing benchmark numbers before parity is real
+### Pitfall 5: Benchmark Claims Before Correctness
 
 **What goes wrong:**
-The repo lands benchmark rows and docs for a Qwen slice whose correctness, topology support, or
-prompt contract is still unresolved.
+The repo publishes Liquid benchmark output before parity and regression prove the same slice.
 
 **Why it happens:**
-Benchmark publication is a visible milestone artifact, so it is tempting to refresh it before the
-runtime story is complete.
+Benchmark rows are visible and easy to demo, while parity/runtime bring-up is slower.
 
 **How to avoid:**
-Keep the same discipline as earlier milestones: runtime truth first, parity second, publication
-last.
+Keep the existing ordering discipline: runtime truth first, parity and regression second, benchmark
+publication last.
 
 **Warning signs:**
-- Compare output changes before `tools/paritychecker --generation` passes on the same fixture.
-- Benchmark docs require a long explanation about why they should not yet be read as parity-backed.
-- The Qwen row exists, but there is no matching parity regression.
+Bench case names or docs land before paritychecker accepts the exact same fixture and contract.
 
 **Phase to address:**
-Phase 29: benchmark publication only after Phase 28 is complete.
-
----
-
-### Pitfall 6: Scope explosion into the rest of the Qwen family
-
-**What goes wrong:**
-The milestone grows from one Qwen3-0.6B fixture into Qwen3.5, Qwen3Next, alternative quants, or
-MoE variants before the first maintained slice is stable.
-
-**Why it happens:**
-Qwen support looks like a family problem, and the reference implementation enumerates many related
-architectures nearby.
-
-**How to avoid:**
-Use one official Qwen3-0.6B fixture as the only v1.6 truth anchor. Treat every additional model or
-quant as future scope unless explicitly promoted later.
-
-**Warning signs:**
-- Multiple Qwen fixtures appear in planning before the first one is parity-backed.
-- Bench or parity slugs multiply before the first canonical row is stable.
-- Requirements start talking about "Qwen support" instead of "one canonical Qwen3-0.6B slice."
-
-**Phase to address:**
-Every phase; especially roadmap definition.
+Phase 36 and Phase 37
 
 ## Technical Debt Patterns
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Accept `qwen3` at the tool gate but keep Llama runtime assumptions underneath | Makes early CLI smoke tests look better | Produces false readiness and late runtime failures | Never for shipped milestone state |
-| Keep `format_raw` temporarily for Qwen bring-up | Avoids deciding prompt conditioning immediately | Makes parity and benchmark claims ambiguous | Only as a clearly labeled local probe, not as the milestone's final contract |
-| Use a community quant or local conversion as the canonical fixture | Smaller download and faster iteration | Weakens provenance and makes later comparisons harder to trust | Acceptable only for private experiments |
-| Refresh benchmark publication before parity proof | Gives visible progress fast | Creates ungrounded performance claims | Never for milestone completion |
+| Alias `lfm2` to `llama` or `qwen3` | Faster first compile | False readiness and brittle runtime behavior | Never |
+| Reuse the old Qwen formatter matcher | Avoids adding a new maintained contract | Benchmark/parity claims no longer mean what docs say | Never |
+| Say "Liquid support" without naming one file | Simpler docs language | Unbounded scope and unverifiable claims | Never |
+| Use prose metadata over GGUF/config truth | Faster research | Docs/tests/tooling drift on context and architecture | Never |
+| Skip regression protection for Llama/Qwen | Faster Liquid landing | Existing maintained anchors can silently break | Never |
 
 ## Integration Gotchas
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| `tests/models/README.md` ↔ tool constants | Documenting one file but benchmarking another | Keep fixture name, README entry, and tool slug/path constants aligned |
-| Formatter/conditioner ↔ parity/bench reference path | EMEL and `llama.cpp` use different prompt-conditioning contracts | Choose one canonical contract and apply it in both paths |
-| Tool architecture validation ↔ runtime execution view | Letting the tool accept `qwen3` before runtime support exists | Keep the gate narrow and explicit until runtime support is real |
-| Qwen fixture bring-up ↔ existing Llama anchor | Breaking the prior canonical slice while widening support | Keep Llama regressions in place while Qwen is added |
+| Liquid Hugging Face repo | Treat all official quants as equivalent scope | Pin one exact file and record provenance |
+| Liquid chat template | Assume ChatML-like means Qwen-compatible | Match one Liquid-specific maintained subset only |
+| llama.cpp reference | Assume a new reference pin is required | Start from the current repo pin; only upgrade if a concrete `lfm2` blocker appears |
+| EMEL parity/bench tooling | Add Liquid as a benchmark-only row | Bring parity and regression up before publication |
 
 ## Performance Traps
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| Measuring load/provenance work instead of generation | Compare rows reflect setup churn, not runtime behavior | Keep the existing preloaded benchmark discipline and compare the maintained request path only | Immediately when the fixture is much larger than Llama-68M |
-| Different prompt token counts between EMEL and `llama.cpp` | Parity fails or bench becomes incomparable | Make prompt conditioning explicit and shared | Immediately once chat-template behavior diverges |
-| Publishing numbers from the wrong quant artifact | Apparent speedups or slowdowns are really fixture changes | Lock the official file name and checksum into the canonical slice | As soon as a second GGUF file appears locally |
-
-## Security Mistakes
-
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| Trusting an undocumented model download | Operators cannot reproduce or verify the benchmark slice | Record source repo, file name, checksum, and URL in `tests/models/README.md` |
-| Treating local-only fixture substitutions as shipped truth | Published results become unreproducible | Keep the official fixture identity explicit in planning and docs |
-
-## UX Pitfalls
-
-| Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| "Qwen supported" language without naming the exact slice | Operators assume broader support than the repo actually has | Name the exact fixture and conditioning contract everywhere |
-| Benchmark rows that do not make the fixture obvious | Reviewers cannot tell which slice the numbers represent | Use explicit Qwen fixture naming in compare/docs output |
+| Picking a maintained quant with broader runtime needs | New kernel/runtime blockers appear before architecture work is even started | Make the user-selected `Q4_K_M` scope explicit in the milestone and verify it early in Phase 35 | Immediately |
+| Publishing a long-context claim from the wrong source | Reported limits drift between docs and runtime | Use GGUF/config metadata as truth | As soon as docs/tests are written |
+| Broadening to generic template execution | Parity becomes hard to interpret and debug | Keep one fixed maintained contract | As soon as multiple templates appear |
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Fixture support:** `tests/models/README.md` names the official Qwen3 file and checksum, not just a local path.
-- [ ] **Architecture support:** maintained tools no longer reject `qwen3`, and runtime has real topology support behind that gate.
-- [ ] **Conditioning contract:** parity and bench use the same documented request contract, not implicit raw formatting.
-- [ ] **Parity proof:** `tools/paritychecker --generation` passes on the canonical Qwen3 slice before any benchmark publication is refreshed.
-- [ ] **Publication:** compare/docs output names the same Qwen fixture that parity already proved.
+- [ ] **Fixture support:** verify the milestone names one exact official file, not just a repo.
+- [ ] **Architecture support:** verify runtime truth is explicit `lfm2`, not a widened allow-list.
+- [ ] **Conditioning support:** verify the maintained formatter contract is Liquid-specific and
+      published on setup output.
+- [ ] **Parity support:** verify paritychecker uses the same fixture and contract as EMEL.
+- [ ] **Benchmark support:** verify benchmark publication happens only after parity is green.
+- [ ] **Regression support:** verify prior maintained Llama and Qwen anchors still pass.
 
 ## Recovery Strategies
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| Tool gate updated without runtime support | MEDIUM | Re-tighten the architecture gate, add failing tests, then re-open only the supported slice |
-| Wrong prompt contract chosen | MEDIUM | Document the failure mode, pick one new canonical contract, and refresh parity before bench |
-| Wrong fixture published | LOW | Correct README provenance, purge the incorrect publication row, and regenerate from the official artifact |
-| Scope explosion | LOW | Move extra Qwen work back to v2/out-of-scope docs and re-anchor on the canonical 0.6B slice |
+| False architecture readiness | HIGH | Re-tighten architecture acceptance, add failing runtime tests, then re-land explicit `lfm2` support |
+| Template false positive | MEDIUM | Revert matcher widening, add Liquid-specific contract tests, then re-publish formatter metadata |
+| Metadata drift | LOW | Update fixture docs/constants to GGUF/config truth and add regression checks for architecture/context |
+| Silent quant scope creep | MEDIUM | Narrow docs/tests back to one file and move sibling quants to future scope |
+| Benchmark-first publication | MEDIUM | Remove published Liquid row, finish parity/regression, then re-publish from the proven slice |
 
 ## Pitfall-to-Phase Mapping
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| Tool gate still rejects `qwen3` | Phase 26 | Maintained tool usage/help and validation paths accept only the new canonical slice intentionally |
-| Qwen3 treated as a Llama alias | Phase 27 | Runtime tests prove the Qwen execution view works and extra norm tensors are handled explicitly |
-| Misleading prompt contract | Phase 26 | Planning docs and parity tests name one explicit conditioning contract |
-| Thinking-mode leakage into argmax | Phase 26 and Phase 28 | Parity output is stable and the request contract is documented |
-| Bench before parity | Phase 29 | No Qwen compare/docs refresh lands before Qwen parity is green |
-| Scope explosion | Roadmap definition | Requirements and roadmap stay locked to one official Qwen3-0.6B fixture |
+| False architecture readiness | Phase 34 | Liquid fixture remains rejected until explicit `lfm2` runtime support exists |
+| Template false positive | Phase 33 | Formatter contract output names one Liquid-specific maintained contract |
+| Metadata drift | Phase 33 | Fixture docs/tool constants match GGUF/config truth |
+| Silent quant scope creep | Phase 33 | Requirements and docs name exactly one maintained file |
+| Benchmark claims before correctness | Phase 36 and Phase 37 | Bench row lands only after parity/regression pass |
 
 ## Sources
 
-- `.planning/PROJECT.md` - milestone scope and narrow acceptance boundary.
-- `AGENTS.md` - rules against overstated parity claims and silent fallback.
-- `tools/paritychecker/parity_runner.cpp` and `tools/bench/generation_bench.cpp` - current Llama-only gates and raw formatting path.
-- `src/emel/model/data.cpp` and `src/emel/generator/detail.hpp` - current runtime assumptions.
-- `build/paritychecker/_deps/reference_impl-src/src/llama-arch.cpp` and `build/paritychecker/_deps/reference_impl-src/src/llama-model.cpp` - local reference evidence that Qwen3 is a distinct architecture.
-- https://huggingface.co/Qwen/Qwen3-0.6B - official model card.
-- https://huggingface.co/Qwen/Qwen3-0.6B-GGUF - official GGUF model card.
-- https://qwen.readthedocs.io/en/latest/run_locally/llama.cpp.html - official Qwen `llama.cpp` guidance and thinking-mode caveats.
+- https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking
+- https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF
+- https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking/raw/main/config.json
+- https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking/raw/main/tokenizer_config.json
+- https://docs.liquid.ai/lfm/models/lfm25-1.2b-thinking
+- https://docs.liquid.ai/deployment/on-device/llama-cpp
+- /Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/.planning/PROJECT.md
+- /Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/src/emel/model/data.cpp
+- /Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/tools/generation_formatter_contract.hpp
+- /Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/tools/paritychecker/parity_runner.cpp
+- /Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/tools/bench/generation_bench.cpp
 
 ---
-*Pitfalls research for: EMEL v1.6 Qwen3-0.6B parity and benchmark*
-*Researched: 2026-03-27*
+*Pitfalls research for: EMEL Liquid LFM2.5-1.2B-Thinking GGUF ARM slice*
+*Researched: 2026-03-31*

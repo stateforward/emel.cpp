@@ -24,6 +24,7 @@ endif()
 include(FetchContent)
 set(BENCH_REFERENCE_SOURCE "cmake_fetch")
 set(BENCH_REFERENCE_REF_VALUE "${REF_IMPL_REF}")
+string(REGEX MATCH "^[0-9A-Fa-f]{7,40}$" REF_IMPL_REF_IS_HASH "${REF_IMPL_REF}")
 FetchContent_Declare(
   reference_impl
   GIT_REPOSITORY ${REF_IMPL_REPOSITORY}
@@ -32,6 +33,25 @@ FetchContent_Declare(
 FetchContent_GetProperties(reference_impl)
 if(NOT reference_impl_POPULATED)
   FetchContent_Populate(reference_impl)
+endif()
+if(REF_IMPL_REF_IS_HASH STREQUAL "")
+  execute_process(
+    COMMAND git -C "${reference_impl_SOURCE_DIR}" fetch --depth 1 origin "${REF_IMPL_REF}"
+    RESULT_VARIABLE REF_IMPL_FETCH_STATUS
+    OUTPUT_QUIET
+    ERROR_QUIET
+  )
+  if(REF_IMPL_FETCH_STATUS EQUAL 0)
+    execute_process(
+      COMMAND git -C "${reference_impl_SOURCE_DIR}" checkout --detach FETCH_HEAD
+      RESULT_VARIABLE REF_IMPL_CHECKOUT_STATUS
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    if(REF_IMPL_CHECKOUT_STATUS EQUAL 0)
+      set(BENCH_REFERENCE_SOURCE "cmake_fetch_latest")
+    endif()
+  endif()
 endif()
 execute_process(
   COMMAND git -C "${reference_impl_SOURCE_DIR}" rev-parse HEAD

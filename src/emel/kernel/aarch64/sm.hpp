@@ -369,6 +369,16 @@ struct model {
 
       , sml::state<ready> <= sml::state<ready> +
                sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8{} ]
+                 / action::exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
+                 [ guard::simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4{} ]
+                 / action::exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4
+
+      , sml::state<ready> <= sml::state<ready> +
+               sml::event<::emel::kernel::aarch64::event::dispatch_op_mul_mat>
                  [ guard::simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm{} ]
                  / action::exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm
 
@@ -1195,6 +1205,26 @@ struct sm : public emel::sm<model, action::context> {
 
   uint64_t shared_q3_dispatch_count() const noexcept {
     return this->context_.shared_q3_dispatch_count;
+  }
+
+  uint64_t optimized_q4_dispatch_count() const noexcept {
+    return this->context_.optimized_q4_dispatch_count;
+  }
+
+  uint64_t optimized_q4_vector_dispatch_count() const noexcept {
+    return this->context_.optimized_q4_vector_dispatch_count;
+  }
+
+  uint64_t optimized_q4_vector_packed_dispatch_count() const noexcept {
+    return this->context_.optimized_q4_vector_packed_dispatch_count;
+  }
+
+  uint64_t optimized_q4_vector_packed_q8_rhs_dispatch_count() const noexcept {
+    return this->context_.optimized_q4_vector_packed_q8_rhs_dispatch_count;
+  }
+
+  uint64_t shared_q4_dispatch_count() const noexcept {
+    return this->context_.shared_q4_dispatch_count;
   }
 
   uint64_t optimized_q6_dispatch_count() const noexcept {
