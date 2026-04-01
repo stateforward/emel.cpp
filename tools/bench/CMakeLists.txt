@@ -191,6 +191,8 @@ target_compile_definitions(bench_runner
     EMEL_BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
     BENCH_REFERENCE_SOURCE=\"${BENCH_REFERENCE_SOURCE}\"
     BENCH_REFERENCE_REF=\"${BENCH_REFERENCE_REF_VALUE}\"
+    EMEL_BENCH_EMEL_ARTIFACT_PATH=\"$<TARGET_FILE:emel>\"
+    EMEL_BENCH_LLAMA_ARTIFACT_PATH=\"$<TARGET_FILE:llama>\"
 )
 
 target_include_directories(bench_runner
