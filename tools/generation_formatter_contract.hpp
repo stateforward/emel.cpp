@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -7,6 +8,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+
+#include "llama.h"
 
 #include "emel/text/formatter/format.hpp"
 
@@ -68,6 +71,13 @@ struct formatter_binding {
   void * formatter_ctx = nullptr;
   emel::text::formatter::format_fn format_prompt =
       emel::text::formatter::format_raw;
+  support_kind support = support_kind::no_template;
+  std::string_view contract = k_no_template_contract;
+};
+
+struct reference_formatter_info {
+  std::string primary_template = {};
+  uint32_t named_template_count = 0u;
   support_kind support = support_kind::no_template;
   std::string_view contract = k_no_template_contract;
 };
@@ -322,6 +332,72 @@ inline bool binding_supported(const formatter_binding & binding) noexcept {
   return binding.support == support_kind::supported_contract;
 }
 
+inline bool reference_binding_supported(
+    const reference_formatter_info & formatter) noexcept {
+  return formatter.support == support_kind::supported_contract;
+}
+
+inline uint32_t count_reference_named_chat_templates(
+    const llama_model * model) noexcept {
+  if (model == nullptr) {
+    return 0u;
+  }
+
+  constexpr std::string_view k_primary_key = "tokenizer.chat_template";
+  constexpr std::string_view k_named_prefix = "tokenizer.chat_template.";
+  uint32_t named_template_count = 0u;
+  const int32_t metadata_count = llama_model_meta_count(model);
+  for (int32_t index = 0; index < metadata_count; ++index) {
+    char key_storage[256] = {};
+    const int32_t key_length =
+        llama_model_meta_key_by_index(model, index, key_storage, sizeof(key_storage));
+    if (key_length <= 0) {
+      continue;
+    }
+
+    const std::string_view key{key_storage, static_cast<size_t>(key_length)};
+    if (key.starts_with(k_named_prefix) && key != k_primary_key) {
+      named_template_count += 1u;
+    }
+  }
+  return named_template_count;
+}
+
+inline reference_formatter_info resolve_reference_formatter_info(
+    const llama_model * model) noexcept {
+  reference_formatter_info formatter = {};
+  formatter.named_template_count = count_reference_named_chat_templates(model);
+
+  const char * primary_template =
+      model != nullptr ? llama_model_chat_template(model, nullptr) : nullptr;
+  if (primary_template == nullptr || primary_template[0] == '\0') {
+    return formatter;
+  }
+
+  formatter.primary_template = primary_template;
+  if (formatter.named_template_count != 0u) {
+    formatter.support = support_kind::unsupported_template;
+    formatter.contract = k_unsupported_template_contract;
+    return formatter;
+  }
+
+  if (template_matches_supported_contract(formatter.primary_template)) {
+    formatter.support = support_kind::supported_contract;
+    formatter.contract = k_supported_contract;
+    return formatter;
+  }
+
+  if (template_matches_supported_qwen_contract(formatter.primary_template)) {
+    formatter.support = support_kind::supported_contract;
+    formatter.contract = k_supported_qwen_contract;
+    return formatter;
+  }
+
+  formatter.support = support_kind::unsupported_template;
+  formatter.contract = k_unsupported_template_contract;
+  return formatter;
+}
+
 inline std::span<const emel::text::formatter::chat_message>
 single_user_messages(std::array<emel::text::formatter::chat_message, 1> & storage,
                      const std::string_view text) noexcept {
@@ -378,6 +454,43 @@ inline bool format_single_user_prompt(const formatter_binding & binding,
   }
   output.resize(output_length);
   return true;
+}
+
+inline bool format_reference_single_user_prompt(
+    const reference_formatter_info & formatter,
+    const std::string_view text,
+    std::string & output) {
+  if (!reference_binding_supported(formatter) || formatter.primary_template.empty()) {
+    output.clear();
+    return false;
+  }
+
+  std::string prompt_text{text};
+  const llama_chat_message message = {
+      "user",
+      prompt_text.c_str(),
+  };
+
+  int32_t output_capacity =
+      std::max<int32_t>(64, static_cast<int32_t>(text.size()) * 4 + 64);
+  for (;;) {
+    output.resize(static_cast<size_t>(output_capacity));
+    const int32_t output_length = llama_chat_apply_template(formatter.primary_template.c_str(),
+                                                            &message,
+                                                            1u,
+                                                            true,
+                                                            output.data(),
+                                                            output_capacity);
+    if (output_length < 0) {
+      output.clear();
+      return false;
+    }
+    if (output_length <= output_capacity) {
+      output.resize(static_cast<size_t>(output_length));
+      return true;
+    }
+    output_capacity = output_length;
+  }
 }
 
 }  // namespace emel::tools::generation_formatter_contract

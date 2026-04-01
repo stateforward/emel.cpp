@@ -1003,12 +1003,11 @@ bool run_compute_logits_preselected_argmax_with_attribution(
     int32_t & selected_index,
     float & selected_score);
 
-struct initialize_backend {
+struct reference_backend {
   llama_model_ptr model = {nullptr, llama_model_free};
   const llama_vocab * vocab = nullptr;
   int32_t vocab_size = 0;
-  int32_t fallback_token_id = 0;
-  emel::tools::generation_formatter_contract::formatter_binding formatter_binding = {};
+  emel::tools::generation_formatter_contract::reference_formatter_info formatter = {};
   int32_t emel_reference_decode_calls = 0;
   int32_t emel_reference_logits_calls = 0;
   int32_t direct_reference_decode_calls = 0;
@@ -1190,7 +1189,7 @@ struct generation_load_state {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
   std::unique_ptr<emel::generator::sm> generator = {};
-  initialize_backend backend = {};
+  reference_backend reference = {};
   generation_trace * emel_trace = nullptr;
   std::array<emel::logits::sampler::fn, 1> samplers = {};
   std::vector<uint8_t> kv_arena = {};
@@ -1620,7 +1619,7 @@ bool tokenizer_tokenize_dispatch(
   return static_cast<emel::text::tokenizer::sm *>(tokenizer_sm)->process_event(ev);
 }
 
-void reset_reference_decode_seam(initialize_backend & backend) {
+void reset_reference_decode_seam(reference_backend & backend) {
   backend.emel_reference_decode_calls = 0;
   backend.emel_reference_logits_calls = 0;
   backend.direct_reference_decode_calls = 0;
@@ -1708,34 +1707,6 @@ bool is_printable_ascii_token(const std::string_view piece) {
   return true;
 }
 
-int32_t find_generation_fallback_token_id(const emel::model::data::vocab & vocab) {
-  constexpr std::array<std::string_view, 4> k_preferred_tokens = {
-      "hello",
-      "world",
-      "Hello",
-      "!",
-  };
-
-  for (const std::string_view preferred : k_preferred_tokens) {
-    for (uint32_t token_id = 0; token_id < vocab.n_tokens; ++token_id) {
-      if (vocab_token_view(vocab, static_cast<int32_t>(token_id)) == preferred) {
-        return static_cast<int32_t>(token_id);
-      }
-    }
-  }
-
-  const int32_t normal_type = emel::model::detail::k_token_type_normal;
-  for (uint32_t token_id = 0; token_id < vocab.n_tokens; ++token_id) {
-    const auto & entry = vocab.entries[token_id];
-    const std::string_view piece = vocab_token_view(vocab, static_cast<int32_t>(token_id));
-    if (entry.type == normal_type && is_printable_ascii_token(piece)) {
-      return static_cast<int32_t>(token_id);
-    }
-  }
-
-  return vocab.eos_id >= 0 ? vocab.eos_id : 0;
-}
-
 bool load_generation_reference_backend(const std::string & model_path,
                                        generation_load_state & state) {
   llama_model_params model_params = llama_model_default_params();
@@ -1762,12 +1733,16 @@ bool load_generation_reference_backend(const std::string & model_path,
 
   state.model_data->params.n_vocab =
       static_cast<int32_t>(state.model_data->vocab_data.n_tokens);
-  state.backend.fallback_token_id =
-      find_generation_fallback_token_id(state.model_data->vocab_data);
-  state.backend.vocab = vocab_ptr;
-  state.backend.vocab_size = llama_vocab_n_tokens(vocab_ptr);
+  state.reference.vocab = vocab_ptr;
+  state.reference.vocab_size = llama_vocab_n_tokens(vocab_ptr);
+  state.reference.formatter =
+      emel::tools::generation_formatter_contract::resolve_reference_formatter_info(model.get());
+  if (!emel::tools::generation_formatter_contract::reference_binding_supported(
+          state.reference.formatter)) {
+    return false;
+  }
 
-  state.backend.model = std::move(model);
+  state.reference.model = std::move(model);
   return true;
 }
 
@@ -1917,7 +1892,7 @@ argmax_summary select_argmax_from_logits(const float * logits, const int32_t voc
   return summary;
 }
 
-bool tokenize_reference_prompt(const initialize_backend & backend,
+bool tokenize_reference_prompt(const reference_backend & backend,
                                const emel::paritychecker::parity_options & opts,
                                std::vector<llama_token> & tokens_out) {
   if (backend.vocab == nullptr) {
@@ -1925,8 +1900,8 @@ bool tokenize_reference_prompt(const initialize_backend & backend,
   }
 
   std::string formatted_prompt = {};
-  if (!emel::tools::generation_formatter_contract::format_single_user_prompt(
-          backend.formatter_binding, opts.text, formatted_prompt)) {
+  if (!emel::tools::generation_formatter_contract::format_reference_single_user_prompt(
+          backend.formatter, opts.text, formatted_prompt)) {
     return false;
   }
 
@@ -1987,19 +1962,19 @@ bool tokenize_conditioned_prompt(generation_load_state & state,
   return true;
 }
 
-int32_t run_direct_reference_decode(initialize_backend & backend,
+int32_t run_direct_reference_decode(reference_backend & backend,
                                     llama_context * ctx,
                                     const llama_batch batch) {
   backend.direct_reference_decode_calls += 1;
   return llama_decode(ctx, batch);
 }
 
-float * read_direct_reference_logits(initialize_backend & backend, llama_context * ctx) {
+float * read_direct_reference_logits(reference_backend & backend, llama_context * ctx) {
   backend.direct_reference_logits_calls += 1;
   return llama_get_logits_ith(ctx, -1);
 }
 
-bool append_reference_piece(const initialize_backend & backend,
+bool append_reference_piece(const reference_backend & backend,
                             const llama_token token,
                             generation_result & result_out) {
   if (backend.vocab == nullptr || result_out.output_length >= result_out.output.size()) {
@@ -2096,7 +2071,23 @@ bool flush_rendered_output(emel::text::renderer::sm & renderer,
   return true;
 }
 
-llama_context_ptr make_reference_context(initialize_backend & backend) {
+bool initialize_emel_renderer(const emel::model::data & model_data,
+                              emel::text::renderer::sm & renderer) {
+  int32_t renderer_err = emel::error::cast(emel::text::renderer::error::none);
+  emel::text::renderer::event::initialize initialize_renderer_ev{model_data.vocab_data};
+  initialize_renderer_ev.strip_leading_space = false;
+  initialize_renderer_ev.stop_sequences = nullptr;
+  initialize_renderer_ev.stop_sequence_count = 0;
+  initialize_renderer_ev.error_out = &renderer_err;
+  return renderer.process_event(initialize_renderer_ev) &&
+         renderer_err == emel::error::cast(emel::text::renderer::error::none);
+}
+
+bool emel_token_is_stop(const emel::model::data::vocab & vocab, const int32_t token_id) {
+  return token_id == vocab.eos_id || token_id == vocab.eot_id;
+}
+
+llama_context_ptr make_reference_context(reference_backend & backend) {
   llama_context_params context_params = llama_context_default_params();
   context_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
   context_params.n_ctx = 0;
@@ -2114,7 +2105,7 @@ llama_context_ptr make_reference_context(initialize_backend & backend) {
   };
 }
 
-emel::error::type run_reference_generate(initialize_backend & backend,
+emel::error::type run_reference_generate(reference_backend & backend,
                                          const emel::paritychecker::parity_options & opts,
                                          generation_result & result_out) {
   if (backend.model == nullptr || backend.vocab == nullptr || backend.vocab_size <= 0) {
@@ -2357,30 +2348,35 @@ inline float read_debug_value(std::span<const uint16_t> values, const size_t idx
 }
 
 emel::error::type run_custom_native_generate(
-    const initialize_backend & backend_ref,
-    const emel::model::data & model_data,
+    generation_load_state & state,
     const emel::paritychecker::parity_options & opts,
     const native_layer_runner run_layer_fn,
     generation_result & result_out) {
-  if (backend_ref.vocab == nullptr || backend_ref.vocab_size <= 0 || run_layer_fn == nullptr) {
+  if (state.model_data == nullptr || run_layer_fn == nullptr) {
     return emel::error::cast(emel::generator::error::invalid_request);
   }
 
-  std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(backend_ref, opts, prompt_tokens) || prompt_tokens.empty()) {
+  std::vector<int32_t> prompt_tokens;
+  if (!tokenize_conditioned_prompt(state, opts, prompt_tokens) || prompt_tokens.empty()) {
     return emel::error::cast(emel::generator::error::invalid_request);
   }
 
   emel::generator::detail::native_backend backend = {};
-  if (emel::generator::detail::prepare(backend, model_data) !=
+  if (emel::generator::detail::prepare(backend, *state.model_data) !=
       emel::error::cast(emel::model::loader::error::none)) {
     return emel::error::cast(emel::generator::error::backend);
   }
 
+  emel::text::renderer::sm renderer = {};
+  if (!initialize_emel_renderer(*state.model_data, renderer)) {
+    return emel::error::cast(emel::generator::error::backend);
+  }
+
   result_out = {};
+  result_out.trace_available = false;
 
   for (size_t token_index = 0; token_index < prompt_tokens.size(); ++token_index) {
-    const int32_t token_id = static_cast<int32_t>(prompt_tokens[token_index]);
+    const int32_t token_id = prompt_tokens[token_index];
     const int32_t position = static_cast<int32_t>(token_index);
     if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
       return emel::error::cast(emel::generator::error::backend);
@@ -2400,14 +2396,13 @@ emel::error::type run_custom_native_generate(
   for (int32_t step = 0; step < opts.max_tokens; ++step) {
     const argmax_summary summary =
         select_argmax_from_logits(backend.bound_logits.data(), backend.n_vocab);
-    const llama_token selected = static_cast<llama_token>(summary.selected_token);
     append_trace_token(
         result_out.trace, summary.selected_token, summary.best_score, summary.second_best_score);
     result_out.tokens_generated += 1;
-    if (!append_reference_piece(backend_ref, selected, result_out)) {
+    if (!append_rendered_token(renderer, summary.selected_token, result_out)) {
       return emel::error::cast(emel::generator::error::backend);
     }
-    if (llama_vocab_is_eog(backend_ref.vocab, selected)) {
+    if (emel_token_is_stop(state.model_data->vocab_data, summary.selected_token)) {
       break;
     }
 
@@ -2426,6 +2421,10 @@ emel::error::type run_custom_native_generate(
     if (!emel::generator::detail::compute_logits(backend)) {
       return emel::error::cast(emel::generator::error::backend);
     }
+  }
+
+  if (!flush_rendered_output(renderer, result_out)) {
+    return emel::error::cast(emel::generator::error::backend);
   }
 
   return emel::error::cast(emel::generator::error::none);
@@ -2572,11 +2571,7 @@ emel::error::type run_attributed_native_generate(generation_load_state & state,
                                                  generation_result & result_out,
                                                  generation_attribution & attribution_out,
                                                  const emel::kernel::kernel_kind kernel_kind) {
-  const initialize_backend & backend_ref = state.backend;
   if (state.model_data == nullptr) {
-    return emel::error::cast(emel::generator::error::invalid_request);
-  }
-  if (backend_ref.vocab == nullptr || backend_ref.vocab_size <= 0) {
     return emel::error::cast(emel::generator::error::invalid_request);
   }
 
@@ -2594,14 +2589,7 @@ emel::error::type run_attributed_native_generate(generation_load_state & state,
   backend.kernel.set_kind(backend.kernel_kind);
 
   emel::text::renderer::sm renderer = {};
-  int32_t renderer_err = emel::error::cast(emel::text::renderer::error::none);
-  emel::text::renderer::event::initialize initialize_renderer_ev{state.model_data->vocab_data};
-  initialize_renderer_ev.strip_leading_space = false;
-  initialize_renderer_ev.stop_sequences = nullptr;
-  initialize_renderer_ev.stop_sequence_count = 0;
-  initialize_renderer_ev.error_out = &renderer_err;
-  if (!renderer.process_event(initialize_renderer_ev) ||
-      renderer_err != emel::error::cast(emel::text::renderer::error::none)) {
+  if (!initialize_emel_renderer(*state.model_data, renderer)) {
     return emel::error::cast(emel::generator::error::backend);
   }
 
@@ -2647,7 +2635,7 @@ emel::error::type run_attributed_native_generate(generation_load_state & state,
         })) {
       return emel::error::cast(emel::generator::error::backend);
     }
-    if (llama_vocab_is_eog(backend_ref.vocab, selected)) {
+    if (emel_token_is_stop(state.model_data->vocab_data, selected_token)) {
       attribution_out.decode_ns += elapsed_ns(decode_begin, attribution_clock::now());
       break;
     }
@@ -4504,7 +4492,7 @@ bool run_layer_with_scalar_attention_reference_cache(
 
 bool run_prefill_with_scalar_attention_reference_cache(
     emel::generator::detail::native_backend & backend,
-    initialize_backend & reference_backend,
+    reference_backend & reference_backend,
     std::span<const int32_t> prefix_tokens,
     const bool inject_key_cache,
     const bool inject_value_cache) {
@@ -8003,7 +7991,7 @@ void dump_prompt0_reference_attn_out_ffn_debug(
   std::vector<float> expected_reference_attn_ctx = {};
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx != nullptr &&
       run_reference_prefix_decode(reference_ctx.get(),
                                   std::span<const llama_token>(prompt_tokens.data(), 1u),
@@ -8180,7 +8168,7 @@ void dump_generation_selected_step_stage_debug(
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "generation_debug.gen_step: tokenize failed\n");
     return;
   }
@@ -8196,7 +8184,7 @@ void dump_generation_selected_step_stage_debug(
   }
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr ||
       !run_reference_prefix_decode(
           reference_ctx.get(), prompt_tokens, std::span<const int32_t>(generated_prefix))) {
@@ -8820,7 +8808,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     return;
   }
 
@@ -9564,16 +9552,16 @@ void dump_scalar_attention_debug(const generation_load_state & state,
       !run_prefill_with_scalar_attention_matmul_mode(
           q6_reference_backend, prefix_tokens, reference_q6_only) ||
       !run_prefill_with_scalar_attention_reference_cache(
-          reference_key_cache_backend, const_cast<initialize_backend &>(state.backend), prefix_tokens, true, false) ||
+          reference_key_cache_backend, const_cast<reference_backend &>(state.reference), prefix_tokens, true, false) ||
       !run_prefill_with_scalar_attention_reference_cache(
           reference_value_cache_backend,
-          const_cast<initialize_backend &>(state.backend),
+          const_cast<reference_backend &>(state.reference),
           prefix_tokens,
           false,
           true) ||
       !run_prefill_with_scalar_attention_reference_cache(
           reference_kv_cache_backend,
-          const_cast<initialize_backend &>(state.backend),
+          const_cast<reference_backend &>(state.reference),
           prefix_tokens,
           true,
           true) ||
@@ -9710,9 +9698,9 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   const int32_t emel_token = emel_result.trace.token_ids[static_cast<size_t>(token_mismatch_index)];
   const int32_t reference_token =
       reference_result.trace.token_ids[static_cast<size_t>(token_mismatch_index)];
-  if (state.backend.model != nullptr && state.backend.model->layers.size() >= 2) {
+  if (state.reference.model != nullptr && state.reference.model->layers.size() >= 2) {
     for (int32_t layer = 0; layer < 2; ++layer) {
-      const auto & ref_layer = state.backend.model->layers[static_cast<size_t>(layer)];
+      const auto & ref_layer = state.reference.model->layers[static_cast<size_t>(layer)];
       std::fprintf(stdout,
                    "generation_debug.reference.layer%d.transforms: bo=%d wo_scale=%d "
                    "ffn_gate_b=%d ffn_up_b=%d ffn_down_b=%d "
@@ -10113,7 +10101,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   const auto dump_alt_generation = [&](const char * label, const native_layer_runner run_layer_fn) {
     generation_result alt_result = {};
     const emel::error::type alt_err = run_custom_native_generate(
-        state.backend, *state.model_data, opts, run_layer_fn, alt_result);
+        const_cast<generation_load_state &>(state), opts, run_layer_fn, alt_result);
     if (alt_err == emel::error::cast(emel::generator::error::none)) {
       std::fprintf(stdout,
                    "generation_debug.alt.%s: match=%d token_mismatch=%d "
@@ -10160,7 +10148,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
       "generation_debug.flash.output_exact", output_exact_backend, emel_token, reference_token);
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr) {
     std::fprintf(stdout, "generation_debug.reference: unable to create reference context\n");
     return;
@@ -10210,7 +10198,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
                reference_logits[reference_token]);
 }
 
-std::string_view token_piece_view(const initialize_backend & backend, const int32_t token_id) {
+std::string_view token_piece_view(const reference_backend & backend, const int32_t token_id) {
   if (backend.vocab == nullptr || token_id < 0) {
     return {};
   }
@@ -10233,7 +10221,7 @@ void dump_generation_result(const char * label, const generation_result & result
 }
 
 void dump_generation_trace_window(const char * label,
-                                  const initialize_backend & backend,
+                                  const reference_backend & backend,
                                   const generation_result & result,
                                   const int32_t center_index) {
   const int32_t start = std::max(0, center_index - 2);
@@ -10755,8 +10743,8 @@ bool capture_reference_graph_for_tokens(const generation_load_state & state,
   context_params.cb_eval = capture_reference_eval_tensor;
   context_params.cb_eval_user_data = &graph_capture;
   llama_context_ptr ctx = llama_context_ptr{
-      state.backend.model != nullptr
-          ? llama_init_from_model(state.backend.model.get(), context_params)
+      state.reference.model != nullptr
+          ? llama_init_from_model(state.reference.model.get(), context_params)
           : nullptr,
       llama_free,
   };
@@ -10816,8 +10804,8 @@ bool capture_reference_graph_for_generation_prefix(const generation_load_state &
   context_params.cb_eval = capture_reference_eval_tensor;
   context_params.cb_eval_user_data = &graph_capture;
   llama_context_ptr ctx = llama_context_ptr{
-      state.backend.model != nullptr
-          ? llama_init_from_model(state.backend.model.get(), context_params)
+      state.reference.model != nullptr
+          ? llama_init_from_model(state.reference.model.get(), context_params)
           : nullptr,
       llama_free,
   };
@@ -10832,7 +10820,7 @@ bool capture_reference_graph(const generation_load_state & state,
                              const emel::paritychecker::parity_options & opts,
                              reference_graph_capture & graph_capture) {
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     return false;
   }
   return capture_reference_graph_for_tokens(state, prompt_tokens, graph_capture);
@@ -11779,8 +11767,8 @@ void dump_logits_compare(const generation_load_state & state,
   context_params.cb_eval = capture_reference_eval_tensor;
   context_params.cb_eval_user_data = &graph_capture;
   llama_context_ptr ctx = llama_context_ptr{
-      state.backend.model != nullptr
-          ? llama_init_from_model(state.backend.model.get(), context_params)
+      state.reference.model != nullptr
+          ? llama_init_from_model(state.reference.model.get(), context_params)
           : nullptr,
       llama_free,
   };
@@ -11790,7 +11778,7 @@ void dump_logits_compare(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "tensor_compare.logits: tokenize failed\n");
     return;
   }
@@ -11833,7 +11821,7 @@ void dump_logits_compare(const generation_load_state & state,
   int32_t reference_best = 0;
   float emel_best_score = emel_logits[0];
   float reference_best_score = reference_logits[0];
-  for (int32_t idx = 0; idx < state.backend.vocab_size; ++idx) {
+  for (int32_t idx = 0; idx < state.reference.vocab_size; ++idx) {
     const float emel_score = emel_logits[static_cast<size_t>(idx)];
     const float reference_score = reference_logits[idx];
     const float diff = std::fabs(emel_score - reference_score);
@@ -11873,7 +11861,7 @@ void dump_generation_tensor_compare(generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "tensor_compare: tokenize failed\n");
     return;
   }
@@ -12200,7 +12188,7 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.state: tokenize failed\n");
     return;
   }
@@ -12469,7 +12457,7 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
       [&](const char * label, const native_layer_runner run_layer_fn) {
         generation_result alt_result = {};
         const emel::error::type alt_err = run_custom_native_generate(
-            state.backend, *state.model_data, opts, run_layer_fn, alt_result);
+            const_cast<generation_load_state &>(state), opts, run_layer_fn, alt_result);
         if (alt_err == emel::error::cast(emel::generator::error::none)) {
           std::fprintf(stdout,
                        "generation_debug.mode_full.%s: match=%d token_mismatch=%d "
@@ -12529,7 +12517,7 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   dump_full_generation_mode("reference_q236", run_layer_with_reference_q236_scalar_attention);
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr ||
       !run_reference_prefix_decode(reference_ctx.get(), prompt_tokens, generated_prefix)) {
     std::fprintf(stdout, "generation_debug.state: reference decode replay failed\n");
@@ -13418,7 +13406,7 @@ void dump_generation_prefix_timeline_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.timeline: tokenize failed\n");
     return;
   }
@@ -13472,7 +13460,7 @@ void dump_generation_prefix_timeline_debug(const generation_load_state & state,
   };
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr) {
     std::fprintf(stdout, "generation_debug.timeline: reference context failed\n");
     return;
@@ -13820,7 +13808,7 @@ void dump_generation_q23_timeline_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.q23_timeline: tokenize failed\n");
     return;
   }
@@ -13910,7 +13898,7 @@ void dump_generation_reference_q_timeline_debug(const generation_load_state & st
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.qref_timeline: tokenize failed\n");
     return;
   }
@@ -14071,12 +14059,12 @@ void dump_generation_q23_stage_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "generation_debug.q23_stage: tokenize failed\n");
     return;
   }
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr) {
     std::fprintf(stdout, "generation_debug.q23_stage: reference context failed\n");
     return;
@@ -14452,7 +14440,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "generation_debug.qref_stage: tokenize failed\n");
     return;
   }
@@ -15211,7 +15199,7 @@ void dump_generation_gen0_attention_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "generation_debug.gen0: tokenize failed\n");
     return;
   }
@@ -15235,7 +15223,7 @@ void dump_generation_gen0_attention_debug(const generation_load_state & state,
   }
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr ||
       !run_reference_prefix_decode(reference_ctx.get(), prompt_tokens, generated_prefix)) {
     std::fprintf(stdout, "generation_debug.gen0: reference decode replay failed\n");
@@ -15424,7 +15412,7 @@ void dump_generation_target_attention_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "generation_debug.target: tokenize failed\n");
     return;
   }
@@ -15456,7 +15444,7 @@ void dump_generation_target_attention_debug(const generation_load_state & state,
     }
 
     llama_context_ptr reference_ctx =
-        make_reference_context(const_cast<initialize_backend &>(state.backend));
+        make_reference_context(const_cast<reference_backend &>(state.reference));
     if (reference_ctx == nullptr ||
         !run_reference_prefix_decode(reference_ctx.get(), prompt_tokens, generated_prefix)) {
       std::fprintf(stdout, "generation_debug.target: reference decode replay failed\n");
@@ -15612,7 +15600,7 @@ void dump_generation_residual_l2_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.residual_l2: tokenize failed\n");
     return;
   }
@@ -15775,7 +15763,7 @@ void dump_generation_live_backend_prefix_debug(const generation_load_state & sta
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.live: tokenize failed\n");
     return;
   }
@@ -16266,10 +16254,10 @@ void dump_reference_decode_seam(const generation_load_state & state) {
   std::fprintf(stdout,
                "reference_decode_seams: emel_decode_calls=%d emel_logits_calls=%d "
                "reference_decode_calls=%d reference_logits_calls=%d\n",
-               state.backend.emel_reference_decode_calls,
-               state.backend.emel_reference_logits_calls,
-               state.backend.direct_reference_decode_calls,
-               state.backend.direct_reference_logits_calls);
+               state.reference.emel_reference_decode_calls,
+               state.reference.emel_reference_logits_calls,
+               state.reference.direct_reference_decode_calls,
+               state.reference.direct_reference_logits_calls);
   std::fprintf(stdout,
                "kernel_dispatch: kind=%s calls=%" PRIu64 "\n",
                kernel_kind_name(kernel_kind),
@@ -16372,8 +16360,8 @@ void dump_generation_failure_surface(generation_load_state & state,
                    emel_result->trace.top_score_gaps[static_cast<size_t>(token_mismatch_index)],
                    reference_result->trace.token_ids[static_cast<size_t>(token_mismatch_index)],
                    reference_result->trace.top_score_gaps[static_cast<size_t>(token_mismatch_index)]);
-      dump_generation_trace_window("emel", state.backend, *emel_result, token_mismatch_index);
-      dump_generation_trace_window("reference", state.backend, *reference_result, token_mismatch_index);
+      dump_generation_trace_window("emel", state.reference, *emel_result, token_mismatch_index);
+      dump_generation_trace_window("reference", state.reference, *reference_result, token_mismatch_index);
     }
     dump_generation_live_backend_prefix_debug(state, opts, *emel_result, *reference_result);
     dump_generation_gen0_attention_debug(state, opts, *emel_result, *reference_result);
@@ -16895,7 +16883,6 @@ void resolve_generation_formatter_binding(generation_load_state & state) {
       .support = emel::tools::generation_formatter_contract::support_kind::unsupported_template,
       .contract = emel::tools::generation_formatter_contract::k_unsupported_template_contract,
     };
-    state.backend.formatter_binding = state.formatter_binding;
     return;
   }
 
@@ -16912,7 +16899,6 @@ void resolve_generation_formatter_binding(generation_load_state & state) {
       emel::tools::generation_formatter_contract::resolve_primary_template_binding(
           primary_template,
           named_template_count);
-  state.backend.formatter_binding = state.formatter_binding;
 }
 
 void print_generation_formatter_contract(FILE * stream,
@@ -18654,7 +18640,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     return 1;
   }
 
-  reset_reference_decode_seam(state.backend);
+  reset_reference_decode_seam(state.reference);
   generation_result emel_result{};
   const emel::error::type generation_err =
       run_emel_generate(state,

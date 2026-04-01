@@ -316,34 +316,6 @@ bool is_printable_ascii_token(const std::string_view piece) {
   return true;
 }
 
-int32_t find_generation_fallback_token_id(const emel::model::data::vocab & vocab) {
-  constexpr std::array<std::string_view, 4> k_preferred_tokens = {
-      "hello",
-      "world",
-      "Hello",
-      "!",
-  };
-
-  for (const std::string_view preferred : k_preferred_tokens) {
-    for (uint32_t token_id = 0u; token_id < vocab.n_tokens; ++token_id) {
-      if (vocab_token_view(vocab, static_cast<int32_t>(token_id)) == preferred) {
-        return static_cast<int32_t>(token_id);
-      }
-    }
-  }
-
-  const int32_t normal_type = emel::model::detail::k_token_type_normal;
-  for (uint32_t token_id = 0u; token_id < vocab.n_tokens; ++token_id) {
-    const auto & entry = vocab.entries[token_id];
-    const std::string_view piece = vocab_token_view(vocab, static_cast<int32_t>(token_id));
-    if (entry.type == normal_type && is_printable_ascii_token(piece)) {
-      return static_cast<int32_t>(token_id);
-    }
-  }
-
-  return vocab.eos_id >= 0 ? vocab.eos_id : 0;
-}
-
 struct gguf_capture {
   bool probe_done = false;
   bool probe_error = false;
@@ -408,18 +380,27 @@ struct emel_fixture {
   gguf_capture gguf = {};
   weight_capture weight = {};
   load_capture load = {};
-  llama_model_ptr reference_model = {nullptr, llama_model_free};
-  const llama_vocab * reference_vocab = nullptr;
-  int32_t reference_vocab_size = 0;
-  int32_t fallback_token_id = 0;
   emel::tools::generation_formatter_contract::formatter_binding formatter_binding = {};
+};
+
+struct reference_fixture {
+  llama_model_ptr model = {nullptr, llama_model_free};
+  const llama_vocab * vocab = nullptr;
+  int32_t vocab_size = 0;
+  emel::tools::generation_formatter_contract::reference_formatter_info formatter = {};
 };
 
 struct generation_seam_audit {
   int32_t emel_reference_decode_calls = 0;
   int32_t emel_reference_logits_calls = 0;
+  int32_t emel_reference_formatter_calls = 0;
+  int32_t emel_reference_tokenize_calls = 0;
+  int32_t emel_reference_vocab_calls = 0;
   int32_t direct_reference_decode_calls = 0;
   int32_t direct_reference_logits_calls = 0;
+  int32_t direct_reference_formatter_calls = 0;
+  int32_t direct_reference_tokenize_calls = 0;
+  int32_t direct_reference_vocab_calls = 0;
 };
 
 struct generation_flash_evidence_state {
@@ -458,7 +439,8 @@ struct emel_session {
 
 struct prepared_generation_fixture {
   const generation_fixture_spec * spec = nullptr;
-  emel_fixture fixture = {};
+  emel_fixture emel = {};
+  reference_fixture reference = {};
 };
 
 emel::model::detail::kv_binding kv_binding_from_fixture(const emel_fixture & fixture) {
@@ -529,47 +511,81 @@ emel::error::type sampler_select_argmax(int32_t & candidate_ids,
   return emel::error::cast(emel::logits::sampler::error::none);
 }
 
-void reset_gguf_capture(emel_fixture & fixture) { fixture.gguf = {}; }
+template <class fixture_type>
+void reset_gguf_capture(fixture_type & fixture) {
+  fixture.gguf = {};
+}
+
 void reset_weight_capture(emel_fixture & fixture) { fixture.weight = {}; }
 void reset_load_capture(emel_fixture & fixture) { fixture.load = {}; }
 void reset_initialize_capture(emel_session & session) { session.initialize = {}; }
 void reset_generation_capture(emel_session & session) { session.generation = {}; }
 
-void on_probe_done(void * owner, const emel::gguf::loader::events::probe_done & ev) {
-  auto & fixture = *static_cast<emel_fixture *>(owner);
+template <class fixture_type>
+void on_probe_done_impl(void * owner, const emel::gguf::loader::events::probe_done & ev) {
+  auto & fixture = *static_cast<fixture_type *>(owner);
   fixture.gguf.probe_done = true;
   fixture.gguf.probe_error = false;
   fixture.gguf.requirements = ev.requirements_out;
 }
 
-void on_probe_error(void * owner, const emel::gguf::loader::events::probe_error & ev) {
-  auto & fixture = *static_cast<emel_fixture *>(owner);
+void on_probe_done(void * owner, const emel::gguf::loader::events::probe_done & ev) {
+  on_probe_done_impl<emel_fixture>(owner, ev);
+}
+
+template <class fixture_type>
+void on_probe_error_impl(void * owner, const emel::gguf::loader::events::probe_error & ev) {
+  auto & fixture = *static_cast<fixture_type *>(owner);
   fixture.gguf.probe_error = true;
   fixture.gguf.err = ev.err;
 }
 
-void on_bind_done(void * owner, const emel::gguf::loader::events::bind_done &) {
-  auto & fixture = *static_cast<emel_fixture *>(owner);
+void on_probe_error(void * owner, const emel::gguf::loader::events::probe_error & ev) {
+  on_probe_error_impl<emel_fixture>(owner, ev);
+}
+
+template <class fixture_type>
+void on_bind_done_impl(void * owner, const emel::gguf::loader::events::bind_done &) {
+  auto & fixture = *static_cast<fixture_type *>(owner);
   fixture.gguf.bind_done = true;
   fixture.gguf.bind_error = false;
 }
 
-void on_bind_error(void * owner, const emel::gguf::loader::events::bind_error & ev) {
-  auto & fixture = *static_cast<emel_fixture *>(owner);
+void on_bind_done(void * owner, const emel::gguf::loader::events::bind_done & ev) {
+  on_bind_done_impl<emel_fixture>(owner, ev);
+}
+
+template <class fixture_type>
+void on_bind_error_impl(void * owner, const emel::gguf::loader::events::bind_error & ev) {
+  auto & fixture = *static_cast<fixture_type *>(owner);
   fixture.gguf.bind_error = true;
   fixture.gguf.err = ev.err;
 }
 
-void on_parse_done(void * owner, const emel::gguf::loader::events::parse_done &) {
-  auto & fixture = *static_cast<emel_fixture *>(owner);
+void on_bind_error(void * owner, const emel::gguf::loader::events::bind_error & ev) {
+  on_bind_error_impl<emel_fixture>(owner, ev);
+}
+
+template <class fixture_type>
+void on_parse_done_impl(void * owner, const emel::gguf::loader::events::parse_done &) {
+  auto & fixture = *static_cast<fixture_type *>(owner);
   fixture.gguf.parse_done = true;
   fixture.gguf.parse_error = false;
 }
 
-void on_parse_error(void * owner, const emel::gguf::loader::events::parse_error & ev) {
-  auto & fixture = *static_cast<emel_fixture *>(owner);
+void on_parse_done(void * owner, const emel::gguf::loader::events::parse_done & ev) {
+  on_parse_done_impl<emel_fixture>(owner, ev);
+}
+
+template <class fixture_type>
+void on_parse_error_impl(void * owner, const emel::gguf::loader::events::parse_error & ev) {
+  auto & fixture = *static_cast<fixture_type *>(owner);
   fixture.gguf.parse_error = true;
   fixture.gguf.err = ev.err;
+}
+
+void on_parse_error(void * owner, const emel::gguf::loader::events::parse_error & ev) {
+  on_parse_error_impl<emel_fixture>(owner, ev);
 }
 
 void on_weight_bind_done(void * owner, const emel::model::weight_loader::events::bind_done &) {
@@ -687,24 +703,39 @@ bool generation_seam_audit_enabled() {
 void print_generation_seam_audit(const char * label, const generation_seam_audit & seam) {
   std::fprintf(stderr,
                "generation_bench_seams[%s]: emel_decode_calls=%d emel_logits_calls=%d "
-               "reference_decode_calls=%d reference_logits_calls=%d\n",
+               "emel_formatter_calls=%d emel_tokenize_calls=%d emel_vocab_calls=%d "
+               "reference_decode_calls=%d reference_logits_calls=%d "
+               "reference_formatter_calls=%d reference_tokenize_calls=%d "
+               "reference_vocab_calls=%d\n",
                label,
                seam.emel_reference_decode_calls,
                seam.emel_reference_logits_calls,
+               seam.emel_reference_formatter_calls,
+               seam.emel_reference_tokenize_calls,
+               seam.emel_reference_vocab_calls,
                seam.direct_reference_decode_calls,
-               seam.direct_reference_logits_calls);
+               seam.direct_reference_logits_calls,
+               seam.direct_reference_formatter_calls,
+               seam.direct_reference_tokenize_calls,
+               seam.direct_reference_vocab_calls);
 }
 
 void verify_emel_generation_seam(const generation_seam_audit & seam) {
   if (seam.emel_reference_decode_calls != 0 || seam.emel_reference_logits_calls != 0 ||
-      seam.direct_reference_decode_calls != 0 || seam.direct_reference_logits_calls != 0) {
+      seam.emel_reference_formatter_calls != 0 || seam.emel_reference_tokenize_calls != 0 ||
+      seam.emel_reference_vocab_calls != 0 || seam.direct_reference_decode_calls != 0 ||
+      seam.direct_reference_logits_calls != 0 || seam.direct_reference_formatter_calls != 0 ||
+      seam.direct_reference_tokenize_calls != 0 || seam.direct_reference_vocab_calls != 0) {
     fail_bench_setup("generation seam audit", "EMEL benchmark path touched reference decode seam");
   }
 }
 
 void verify_reference_generation_seam(const generation_seam_audit & seam) {
   if (seam.emel_reference_decode_calls != 0 || seam.emel_reference_logits_calls != 0 ||
-      seam.direct_reference_decode_calls <= 0 || seam.direct_reference_logits_calls <= 0) {
+      seam.emel_reference_formatter_calls != 0 || seam.emel_reference_tokenize_calls != 0 ||
+      seam.emel_reference_vocab_calls != 0 || seam.direct_reference_decode_calls <= 0 ||
+      seam.direct_reference_logits_calls <= 0 || seam.direct_reference_formatter_calls <= 0 ||
+      seam.direct_reference_tokenize_calls <= 0 || seam.direct_reference_vocab_calls <= 0) {
     fail_bench_setup("generation seam audit",
                      "reference benchmark path did not stay on the explicit reference seam");
   }
@@ -720,6 +751,54 @@ int32_t run_direct_reference_decode(generation_seam_audit & seam,
 float * read_direct_reference_logits(generation_seam_audit & seam, llama_context * ctx) {
   seam.direct_reference_logits_calls += 1;
   return llama_get_logits_ith(ctx, -1);
+}
+
+bool format_direct_reference_prompt(
+    generation_seam_audit & seam,
+    const emel::tools::generation_formatter_contract::reference_formatter_info & formatter,
+    const std::string_view prompt,
+    std::string & formatted_prompt) {
+  seam.direct_reference_formatter_calls += 1;
+  return emel::tools::generation_formatter_contract::format_reference_single_user_prompt(
+      formatter,
+      prompt,
+      formatted_prompt);
+}
+
+int32_t tokenize_direct_reference_prompt(generation_seam_audit & seam,
+                                         const llama_vocab * vocab,
+                                         const std::string & formatted_prompt,
+                                         llama_token * tokens,
+                                         const int32_t token_capacity) {
+  seam.direct_reference_tokenize_calls += 1;
+  return llama_tokenize(vocab,
+                        formatted_prompt.data(),
+                        static_cast<int32_t>(formatted_prompt.size()),
+                        tokens,
+                        token_capacity,
+                        false,
+                        false);
+}
+
+bool reference_vocab_is_control(generation_seam_audit & seam,
+                                const llama_vocab * vocab,
+                                const llama_token token) {
+  seam.direct_reference_vocab_calls += 1;
+  return llama_vocab_is_control(vocab, token);
+}
+
+bool reference_vocab_is_eog(generation_seam_audit & seam,
+                            const llama_vocab * vocab,
+                            const llama_token token) {
+  seam.direct_reference_vocab_calls += 1;
+  return llama_vocab_is_eog(vocab, token);
+}
+
+const char * reference_vocab_text(generation_seam_audit & seam,
+                                  const llama_vocab * vocab,
+                                  const llama_token token) {
+  seam.direct_reference_vocab_calls += 1;
+  return llama_vocab_get_text(vocab, token);
 }
 
 emel::error::type map_gguf_error(const emel::error::type err) {
@@ -768,7 +847,8 @@ emel::error::type map_weight_loader_error(const emel::error::type err) {
   }
 }
 
-std::string_view kv_key_view(const emel_fixture & fixture,
+template <class fixture_type>
+std::string_view kv_key_view(const fixture_type & fixture,
                              const emel::gguf::loader::kv_entry & entry) {
   if (static_cast<size_t>(entry.key_offset) + static_cast<size_t>(entry.key_length) >
       fixture.kv_arena.size()) {
@@ -781,7 +861,8 @@ std::string_view kv_key_view(const emel_fixture & fixture,
   };
 }
 
-std::span<const uint8_t> kv_value_view(const emel_fixture & fixture,
+template <class fixture_type>
+std::span<const uint8_t> kv_value_view(const fixture_type & fixture,
                                        const emel::gguf::loader::kv_entry & entry) {
   if (static_cast<size_t>(entry.value_offset) + static_cast<size_t>(entry.value_length) >
       fixture.kv_arena.size()) {
@@ -791,7 +872,8 @@ std::span<const uint8_t> kv_value_view(const emel_fixture & fixture,
   return std::span<const uint8_t>{fixture.kv_arena.data() + entry.value_offset, entry.value_length};
 }
 
-const emel::gguf::loader::kv_entry * find_kv_entry(const emel_fixture & fixture,
+template <class fixture_type>
+const emel::gguf::loader::kv_entry * find_kv_entry(const fixture_type & fixture,
                                                    const std::string_view key) {
   for (const auto & entry : fixture.kv_entries) {
     if (kv_key_view(fixture, entry) == key) {
@@ -801,12 +883,14 @@ const emel::gguf::loader::kv_entry * find_kv_entry(const emel_fixture & fixture,
   return nullptr;
 }
 
-bool decode_string_value(const emel_fixture & fixture,
+template <class fixture_type>
+bool decode_string_value(const fixture_type & fixture,
                          const emel::gguf::loader::kv_entry & entry,
                          std::string_view & value_out);
 
+template <class fixture_type>
 emel::tools::generation_formatter_contract::formatter_binding
-resolve_fixture_formatter_binding(const emel_fixture & fixture) {
+resolve_fixture_formatter_binding(const fixture_type & fixture) {
   std::string_view primary_template = {};
   const auto * entry = find_kv_entry(fixture, "tokenizer.chat_template");
   if (entry != nullptr && !decode_string_value(fixture, *entry, primary_template)) {
@@ -832,7 +916,8 @@ resolve_fixture_formatter_binding(const emel_fixture & fixture) {
       named_template_count);
 }
 
-bool decode_integer_value(const emel_fixture & fixture,
+template <class fixture_type>
+bool decode_integer_value(const fixture_type & fixture,
                           const emel::gguf::loader::kv_entry & entry,
                           uint64_t & value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(fixture, entry);
@@ -878,7 +963,8 @@ bool decode_integer_value(const emel_fixture & fixture,
   }
 }
 
-bool decode_float_value(const emel_fixture & fixture,
+template <class fixture_type>
+bool decode_float_value(const fixture_type & fixture,
                         const emel::gguf::loader::kv_entry & entry,
                         float & value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(fixture, entry);
@@ -905,7 +991,8 @@ bool decode_float_value(const emel_fixture & fixture,
   return false;
 }
 
-bool decode_bool_value(const emel_fixture & fixture,
+template <class fixture_type>
+bool decode_bool_value(const fixture_type & fixture,
                        const emel::gguf::loader::kv_entry & entry,
                        bool & value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(fixture, entry);
@@ -918,7 +1005,8 @@ bool decode_bool_value(const emel_fixture & fixture,
   return true;
 }
 
-bool decode_string_value(const emel_fixture & fixture,
+template <class fixture_type>
+bool decode_string_value(const fixture_type & fixture,
                          const emel::gguf::loader::kv_entry & entry,
                          std::string_view & value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(fixture, entry);
@@ -940,7 +1028,8 @@ bool decode_string_value(const emel_fixture & fixture,
   return true;
 }
 
-bool decode_string_array_count(const emel_fixture & fixture,
+template <class fixture_type>
+bool decode_string_array_count(const fixture_type & fixture,
                                const emel::gguf::loader::kv_entry & entry,
                                uint32_t & count_out) {
   const std::span<const uint8_t> bytes = kv_value_view(fixture, entry);
@@ -965,7 +1054,8 @@ bool decode_string_array_count(const emel_fixture & fixture,
   return true;
 }
 
-bool decode_integer_array_first_nonzero(const emel_fixture & fixture,
+template <class fixture_type>
+bool decode_integer_array_first_nonzero(const fixture_type & fixture,
                                         const emel::gguf::loader::kv_entry & entry,
                                         int32_t & value_out) {
   const std::span<const uint8_t> bytes = kv_value_view(fixture, entry);
@@ -1470,7 +1560,6 @@ emel::error::type run_emel_validate_architecture(void *,
 }
 
 bool prepare_emel_fixture(emel_fixture & fixture, const std::string & model_path) {
-  g_generation_architecture_contract.clear();
   if (!read_file_bytes(model_path, fixture.file_bytes)) {
     return false;
   }
@@ -1488,18 +1577,39 @@ bool prepare_emel_fixture(emel_fixture & fixture, const std::string & model_path
   load_ev.on_error = {&fixture, on_load_error};
   if (!fixture.model_loader.process_event(load_ev) || !fixture.load.done || fixture.load.error) {
     fixture.formatter_binding = resolve_fixture_formatter_binding(fixture);
-    g_generation_formatter_contract.assign(fixture.formatter_binding.contract);
     return false;
   }
   fixture.formatter_binding = resolve_fixture_formatter_binding(fixture);
-  g_generation_architecture_contract.assign(
-      emel::model::architecture_name_view(fixture.model_data));
-  g_generation_formatter_contract.assign(fixture.formatter_binding.contract);
   if (!emel::tools::generation_formatter_contract::binding_supported(
           fixture.formatter_binding)) {
     return false;
   }
   return true;
+}
+
+llama_model_ptr load_reference_model(const std::string & model_path);
+
+bool prepare_reference_fixture(reference_fixture & fixture, const std::string & model_path) {
+  fixture.model = load_reference_model(model_path);
+  if (fixture.model == nullptr) {
+    return false;
+  }
+
+  fixture.vocab = llama_model_get_vocab(fixture.model.get());
+  if (fixture.vocab == nullptr) {
+    return false;
+  }
+
+  fixture.formatter =
+      emel::tools::generation_formatter_contract::resolve_reference_formatter_info(
+          fixture.model.get());
+  if (!emel::tools::generation_formatter_contract::reference_binding_supported(
+          fixture.formatter)) {
+    return false;
+  }
+
+  fixture.vocab_size = llama_vocab_n_tokens(fixture.vocab);
+  return fixture.vocab_size > 0;
 }
 
 llama_model_ptr load_reference_model(const std::string & model_path) {
@@ -1657,39 +1767,36 @@ llama_token select_argmax_token_from_logits(const float * logits, const int32_t 
   return static_cast<llama_token>(best_index);
 }
 
-bool tokenize_reference_prompt(const emel_fixture & fixture,
+bool tokenize_reference_prompt(const reference_fixture & fixture,
                                const generation_case_spec & spec,
+                               generation_seam_audit & seam,
                                std::vector<llama_token> & tokens_out) {
-  if (fixture.reference_vocab == nullptr) {
+  if (fixture.vocab == nullptr) {
     return false;
   }
 
   std::string formatted_prompt = {};
-  if (!emel::tools::generation_formatter_contract::format_single_user_prompt(
-          fixture.formatter_binding, spec.prompt, formatted_prompt)) {
+  if (!format_direct_reference_prompt(seam, fixture.formatter, spec.prompt, formatted_prompt)) {
     return false;
   }
 
   int32_t token_capacity =
       std::max<int32_t>(8, static_cast<int32_t>(formatted_prompt.size()) + 8);
   tokens_out.resize(static_cast<size_t>(token_capacity));
-  int32_t token_count = llama_tokenize(fixture.reference_vocab,
-                                       formatted_prompt.data(),
-                                       static_cast<int32_t>(formatted_prompt.size()),
-                                       tokens_out.data(),
-                                       token_capacity,
-                                       false,
-                                       false);
+  int32_t token_count = tokenize_direct_reference_prompt(
+      seam,
+      fixture.vocab,
+      formatted_prompt,
+      tokens_out.data(),
+      token_capacity);
   if (token_count < 0) {
     token_capacity = -token_count;
     tokens_out.resize(static_cast<size_t>(token_capacity));
-    token_count = llama_tokenize(fixture.reference_vocab,
-                                 formatted_prompt.data(),
-                                 static_cast<int32_t>(formatted_prompt.size()),
-                                 tokens_out.data(),
-                                 token_capacity,
-                                 false,
-                                 false);
+    token_count = tokenize_direct_reference_prompt(seam,
+                                                   fixture.vocab,
+                                                   formatted_prompt,
+                                                   tokens_out.data(),
+                                                   token_capacity);
   }
   if (token_count <= 0) {
     return false;
@@ -1699,19 +1806,20 @@ bool tokenize_reference_prompt(const emel_fixture & fixture,
   return true;
 }
 
-bool append_reference_piece(const emel_fixture & fixture,
+bool append_reference_piece(const reference_fixture & fixture,
+                            generation_seam_audit & seam,
                             const llama_token token,
                             generation_result & result_out) {
-  if (fixture.reference_vocab == nullptr || result_out.output_length >= result_out.output.size()) {
+  if (fixture.vocab == nullptr || result_out.output_length >= result_out.output.size()) {
     return false;
   }
 
-  if (llama_vocab_is_control(fixture.reference_vocab, token) ||
-      llama_vocab_is_eog(fixture.reference_vocab, token)) {
+  if (reference_vocab_is_control(seam, fixture.vocab, token) ||
+      reference_vocab_is_eog(seam, fixture.vocab, token)) {
     return true;
   }
 
-  const char * piece = llama_vocab_get_text(fixture.reference_vocab, token);
+  const char * piece = reference_vocab_text(seam, fixture.vocab, token);
   if (piece == nullptr) {
     return false;
   }
@@ -1728,22 +1836,21 @@ bool append_reference_piece(const emel_fixture & fixture,
   return true;
 }
 
-bool run_reference_generate(const emel_fixture & fixture,
+bool run_reference_generate(const reference_fixture & fixture,
                             const generation_case_spec & spec,
                             generation_seam_audit & seam,
                             generation_result & result_out) {
-  if (fixture.reference_model == nullptr || fixture.reference_vocab == nullptr ||
-      fixture.reference_vocab_size <= 0) {
+  if (fixture.model == nullptr || fixture.vocab == nullptr || fixture.vocab_size <= 0) {
     return false;
   }
 
-  llama_context_ptr ctx = make_reference_context(fixture.reference_model.get());
+  llama_context_ptr ctx = make_reference_context(fixture.model.get());
   if (ctx == nullptr) {
     return false;
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(fixture, spec, prompt_tokens)) {
+  if (!tokenize_reference_prompt(fixture, spec, seam, prompt_tokens)) {
     return false;
   }
 
@@ -1760,12 +1867,12 @@ bool run_reference_generate(const emel_fixture & fixture,
       return false;
     }
 
-    const llama_token selected = select_argmax_token_from_logits(logits, fixture.reference_vocab_size);
+    const llama_token selected = select_argmax_token_from_logits(logits, fixture.vocab_size);
     result_out.tokens_generated += 1;
-    if (!append_reference_piece(fixture, selected, result_out)) {
+    if (!append_reference_piece(fixture, seam, selected, result_out)) {
       return false;
     }
-    if (llama_vocab_is_eog(fixture.reference_vocab, selected)) {
+    if (reference_vocab_is_eog(seam, fixture.vocab, selected)) {
       break;
     }
 
@@ -1792,14 +1899,14 @@ bool reset_reference_context(llama_context * ctx) {
   return true;
 }
 
-bool run_reference_generate_preloaded(const emel_fixture & fixture,
+bool run_reference_generate_preloaded(const reference_fixture & fixture,
                                       const generation_case_spec & spec,
                                       llama_context * ctx,
                                       const std::vector<llama_token> & prompt_tokens,
                                       generation_seam_audit & seam,
                                       generation_result & result_out) {
-  if (fixture.reference_vocab == nullptr ||
-      fixture.reference_vocab_size <= 0 ||
+  if (fixture.vocab == nullptr ||
+      fixture.vocab_size <= 0 ||
       ctx == nullptr ||
       prompt_tokens.empty()) {
     return false;
@@ -1823,12 +1930,12 @@ bool run_reference_generate_preloaded(const emel_fixture & fixture,
       return false;
     }
 
-    const llama_token selected = select_argmax_token_from_logits(logits, fixture.reference_vocab_size);
+    const llama_token selected = select_argmax_token_from_logits(logits, fixture.vocab_size);
     result_out.tokens_generated += 1;
-    if (!append_reference_piece(fixture, selected, result_out)) {
+    if (!append_reference_piece(fixture, seam, selected, result_out)) {
       return false;
     }
-    if (llama_vocab_is_eog(fixture.reference_vocab, selected)) {
+    if (reference_vocab_is_eog(seam, fixture.vocab, selected)) {
       break;
     }
 
@@ -1862,31 +1969,21 @@ const std::vector<prepared_generation_fixture> & maintained_generation_fixtures(
       g_generation_fixture_rel = spec.fixture->fixture_rel;
 
       const std::string model_path = resolve_generation_model_path(spec.fixture->fixture_rel);
-      if (!prepare_emel_fixture(prepared_fixture.fixture, model_path)) {
+      if (!prepare_emel_fixture(prepared_fixture.emel, model_path)) {
         fail_bench_setup("prepare_emel_fixture", model_path.c_str());
       }
 
-      prepared_fixture.fixture.reference_model = load_reference_model(model_path);
-      if (prepared_fixture.fixture.reference_model == nullptr) {
-        fail_bench_setup("load_reference_model", model_path.c_str());
+      if (!prepare_reference_fixture(prepared_fixture.reference, model_path)) {
+        fail_bench_setup("prepare_reference_fixture", model_path.c_str());
       }
 
-      prepared_fixture.fixture.reference_vocab =
-          llama_model_get_vocab(prepared_fixture.fixture.reference_model.get());
-      if (prepared_fixture.fixture.reference_vocab == nullptr) {
-        fail_bench_setup("llama_model_get_vocab", model_path.c_str());
-      }
-      prepared_fixture.fixture.reference_vocab_size =
-          llama_vocab_n_tokens(prepared_fixture.fixture.reference_vocab);
       if (!emel::model::detail::load_vocab_from_gguf(
-              kv_binding_from_fixture(prepared_fixture.fixture),
-              prepared_fixture.fixture.model_data.vocab_data)) {
+              kv_binding_from_fixture(prepared_fixture.emel),
+              prepared_fixture.emel.model_data.vocab_data)) {
         fail_bench_setup("load_vocab_from_gguf", model_path.c_str());
       }
-      prepared_fixture.fixture.model_data.params.n_vocab =
-          static_cast<int32_t>(prepared_fixture.fixture.model_data.vocab_data.n_tokens);
-      prepared_fixture.fixture.fallback_token_id =
-          find_generation_fallback_token_id(prepared_fixture.fixture.model_data.vocab_data);
+      prepared_fixture.emel.model_data.params.n_vocab =
+          static_cast<int32_t>(prepared_fixture.emel.model_data.vocab_data.n_tokens);
     }
 
     return prepared_fixtures;
@@ -2001,7 +2098,7 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
 
   reset_generation_flash_evidence();
   for (const prepared_generation_fixture & prepared_fixture : fixtures) {
-    const emel_fixture & fixture = prepared_fixture.fixture;
+    const emel_fixture & fixture = prepared_fixture.emel;
     g_generation_fixture_rel = prepared_fixture.spec->fixture->fixture_rel;
     for (const generation_case_spec & generation_case : prepared_fixture.spec->cases) {
       volatile std::size_t sink = 0u;
@@ -2025,9 +2122,6 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
       std::uint64_t shared_q6_dispatch_calls = 0u;
       auto session = std::make_unique<emel_session>();
       prepare_emel_session(fixture, *session);
-      g_generation_architecture_contract.assign(
-          emel::model::architecture_name_view(session->model_data));
-      g_generation_formatter_contract.assign(session->formatter_binding.contract);
       if (!initialize_emel_session(*session, generation_case)) {
         fail_bench_setup("initialize_emel_session", generation_case.name.data());
       }
@@ -2179,7 +2273,7 @@ void append_reference_generation_cases(std::vector<result> & results, const conf
   const config case_cfg = generation_case_config(cfg);
 
   for (const prepared_generation_fixture & prepared_fixture : fixtures) {
-    const emel_fixture & fixture = prepared_fixture.fixture;
+    const reference_fixture & fixture = prepared_fixture.reference;
     g_generation_fixture_rel = prepared_fixture.spec->fixture->fixture_rel;
     for (const generation_case_spec & generation_case : prepared_fixture.spec->cases) {
       volatile std::size_t sink = 0u;
