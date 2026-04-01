@@ -7,6 +7,7 @@
 #include "emel/generator/actions.hpp"
 #include "emel/generator/events.hpp"
 #include "emel/generator/guards.hpp"
+#include "emel/generator/initializer/sm.hpp"
 #include "emel/generator/prefill/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/sm.hpp"
@@ -47,6 +48,12 @@ inline void dispatch_initialize_backend_error(const event::initialize & ev) noex
   }
 }
 
+inline bool dispatch_initializer_run(
+    void * actor,
+    const emel::generator::initializer::event::run & ev) noexcept {
+  return static_cast<emel::generator::initializer::sm *>(actor)->process_event(ev);
+}
+
 inline bool dispatch_prefill_run(void * actor,
                                  const emel::generator::prefill::event::run & ev) noexcept {
   return static_cast<emel::generator::prefill::sm *>(actor)->process_event(ev);
@@ -55,19 +62,8 @@ inline bool dispatch_prefill_run(void * actor,
 }  // namespace detail
 
 struct uninitialized {};
-struct binding_conditioner {};
-struct binding_conditioner_decision {};
-struct initializing_renderer {};
-struct initializing_renderer_decision {};
-struct reserving_memory {};
-struct reserving_memory_decision {};
-struct reserving_graph {};
-struct reserving_graph_decision {};
-struct configuring_sampling_mode_decision {};
-struct configuring_sampler {};
-struct configuring_sampler_decision {};
-struct configure_preselected_argmax {};
-struct configure_preselected_argmax_decision {};
+struct initializing {};
+struct initializer_result_decision {};
 struct initialize_done_channel_decision {};
 struct initialize_error_channel_decision {};
 
@@ -133,18 +129,16 @@ struct model {
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
       // Session initialize validation.
-        sml::state<binding_conditioner> <= *sml::state<uninitialized> + sml::event<event::initialize_run>
+        sml::state<initializing> <= *sml::state<uninitialized> + sml::event<event::initialize_run>
                  [ guard::valid_initialize{} ]
-                 / action::begin_initialize
 
       , sml::state<initialize_error_channel_decision> <= sml::state<uninitialized>
                  + sml::event<event::initialize_run>
                  [ guard::invalid_initialize{} ]
                  / action::reject_initialize
 
-      , sml::state<binding_conditioner> <= sml::state<ready> + sml::event<event::initialize_run>
+      , sml::state<initializing> <= sml::state<ready> + sml::event<event::initialize_run>
                  [ guard::valid_initialize{} ]
-                 / action::begin_initialize
 
       , sml::state<initialize_error_channel_decision> <= sml::state<ready>
                  + sml::event<event::initialize_run>
@@ -153,115 +147,21 @@ struct model {
 
       //------------------------------------------------------------------------------//
       // Initialize pipeline.
-      , sml::state<binding_conditioner_decision> <= sml::state<binding_conditioner>
+      , sml::state<initializer_result_decision> <= sml::state<initializing>
                  + sml::completion<event::initialize_run>
-                 / action::request_conditioner_bind
+                 / action::request_initializer
 
-      , sml::state<initializing_renderer> <= sml::state<binding_conditioner_decision>
+      , sml::state<initialize_done_channel_decision> <= sml::state<initializer_result_decision>
                  + sml::completion<event::initialize_run>
-                 [ guard::conditioner_bind_ok{} ]
+                 [ guard::initialize_result_none{} ]
 
-      , sml::state<initialize_error_channel_decision> <= sml::state<binding_conditioner_decision>
+      , sml::state<initialize_error_channel_decision> <= sml::state<initializer_result_decision>
                  + sml::completion<event::initialize_run>
-                 [ guard::conditioner_bind_invalid_request{} ]
-                 / action::mark_invalid_request
+                 [ guard::initialize_result_invalid_request{} ]
 
-      , sml::state<initialize_error_channel_decision> <= sml::state<binding_conditioner_decision>
+      , sml::state<initialize_error_channel_decision> <= sml::state<initializer_result_decision>
                  + sml::completion<event::initialize_run>
-                 [ guard::conditioner_bind_backend_error{} ]
-                 / action::mark_backend_error
-
-      , sml::state<initializing_renderer_decision> <= sml::state<initializing_renderer>
-                 + sml::completion<event::initialize_run>
-                 / action::request_renderer_initialize
-
-      , sml::state<reserving_memory> <= sml::state<initializing_renderer_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::renderer_initialize_ok{} ]
-
-      , sml::state<initialize_error_channel_decision> <= sml::state<initializing_renderer_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::renderer_initialize_invalid_request{} ]
-                 / action::mark_invalid_request
-
-      , sml::state<initialize_error_channel_decision> <= sml::state<initializing_renderer_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::renderer_initialize_backend_error{} ]
-                 / action::mark_backend_error
-
-      , sml::state<reserving_memory_decision> <= sml::state<reserving_memory>
-                 + sml::completion<event::initialize_run>
-                 / action::request_memory_reserve
-
-      , sml::state<configuring_sampling_mode_decision> <= sml::state<reserving_memory_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::memory_reserve_with_existing_graph{} ]
-
-      , sml::state<reserving_graph> <= sml::state<reserving_memory_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::memory_reserve_with_missing_graph{} ]
-
-      , sml::state<initialize_error_channel_decision> <= sml::state<reserving_memory_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::memory_reserve_invalid_request{} ]
-                 / action::mark_invalid_request
-
-      , sml::state<initialize_error_channel_decision> <= sml::state<reserving_memory_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::memory_reserve_backend_error{} ]
-                 / action::mark_backend_error
-
-      , sml::state<reserving_graph_decision> <= sml::state<reserving_graph>
-                 + sml::completion<event::initialize_run>
-                 / action::request_graph_reserve
-
-      , sml::state<configuring_sampling_mode_decision> <= sml::state<reserving_graph_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::graph_reserve_ok{} ]
-
-      , sml::state<initialize_error_channel_decision> <= sml::state<reserving_graph_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::graph_reserve_invalid_request{} ]
-                 / action::mark_invalid_request
-
-      , sml::state<initialize_error_channel_decision> <= sml::state<reserving_graph_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::graph_reserve_backend_error{} ]
-                 / action::mark_backend_error
-
-      , sml::state<configuring_sampler> <= sml::state<configuring_sampling_mode_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::initialize_uses_materialized_logits{} ]
-
-      , sml::state<configure_preselected_argmax> <= sml::state<configuring_sampling_mode_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::initialize_uses_preselected_argmax{} ]
-
-      , sml::state<configuring_sampler_decision> <= sml::state<configuring_sampler>
-                 + sml::completion<event::initialize_run>
-                 / action::configure_sampler
-
-      , sml::state<initialize_done_channel_decision> <= sml::state<configuring_sampler_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::sampler_configured{} ]
-
-      , sml::state<initialize_error_channel_decision> <= sml::state<configuring_sampler_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::sampler_config_failed{} ]
-                 / action::mark_backend_error
-
-      , sml::state<configure_preselected_argmax_decision> <= sml::state<configure_preselected_argmax>
-                 + sml::completion<event::initialize_run>
-                 / action::configure_preselected_argmax
-
-      , sml::state<initialize_done_channel_decision> <= sml::state<configure_preselected_argmax_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::sampler_configured{} ]
-
-      , sml::state<initialize_error_channel_decision> <= sml::state<configure_preselected_argmax_decision>
-                 + sml::completion<event::initialize_run>
-                 [ guard::sampler_config_failed{} ]
-                 / action::mark_backend_error
+                 [ guard::initialize_result_backend{} ]
 
       //------------------------------------------------------------------------------//
       // Initialize publication.
@@ -757,31 +657,9 @@ struct model {
       , sml::state<ready> <= sml::state<ready> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
 
-      , sml::state<uninitialized> <= sml::state<binding_conditioner> + sml::unexpected_event<sml::_>
+      , sml::state<uninitialized> <= sml::state<initializing> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<binding_conditioner_decision> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<initializing_renderer> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<initializing_renderer_decision> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<reserving_memory> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<reserving_memory_decision> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<reserving_graph> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<reserving_graph_decision> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<configuring_sampling_mode_decision> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<configuring_sampler> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<configuring_sampler_decision> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<configure_preselected_argmax> + sml::unexpected_event<sml::_>
-                 / action::on_unexpected
-      , sml::state<uninitialized> <= sml::state<configure_preselected_argmax_decision>
+      , sml::state<uninitialized> <= sml::state<initializer_result_decision>
                  + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<initialize_done_channel_decision> + sml::unexpected_event<sml::_>
@@ -881,6 +759,9 @@ struct sm : public emel::sm<model, action::context> {
   using base_type::visit_current_states;
 
   sm() : base_type() {
+    initializer_actor_.emplace(emel::generator::initializer::action::context{this->context_});
+    this->context_.initializer_actor = &initializer_actor_.value();
+    this->context_.dispatch_initializer = detail::dispatch_initializer_run;
     prefill_actor_.emplace(emel::generator::prefill::action::context{this->context_});
     this->context_.prefill_actor = &prefill_actor_.value();
     this->context_.dispatch_prefill = detail::dispatch_prefill_run;
@@ -892,6 +773,9 @@ struct sm : public emel::sm<model, action::context> {
      emel::text::formatter::format_fn format_prompt =
          emel::text::formatter::format_raw)
       : base_type() {
+    initializer_actor_.emplace(emel::generator::initializer::action::context{this->context_});
+    this->context_.initializer_actor = &initializer_actor_.value();
+    this->context_.dispatch_initializer = detail::dispatch_initializer_run;
     prefill_actor_.emplace(emel::generator::prefill::action::context{this->context_});
     this->context_.prefill_actor = &prefill_actor_.value();
     this->context_.dispatch_prefill = detail::dispatch_prefill_run;
@@ -1066,6 +950,7 @@ struct sm : public emel::sm<model, action::context> {
   }
 
  private:
+  std::optional<emel::generator::initializer::sm> initializer_actor_ = {};
   std::optional<emel::generator::prefill::sm> prefill_actor_ = {};
 };
 

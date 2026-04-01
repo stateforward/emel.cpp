@@ -23,6 +23,10 @@ namespace emel::generator::prefill::event {
 struct run;
 }
 
+namespace emel::generator::initializer::event {
+struct run;
+}
+
 namespace emel::generator::action {
 
 inline constexpr int32_t MAX_GENERATION_STEPS = 4096;
@@ -45,6 +49,8 @@ struct tokenizer_binding {
 
 using prefill_dispatch_fn = bool(void * prefill_sm,
                                  const emel::generator::prefill::event::run &);
+using initializer_dispatch_fn = bool(void * initializer_sm,
+                                     const emel::generator::initializer::event::run &);
 
 struct graph_binding {
   emel::generator::detail::native_backend backend = {};
@@ -103,6 +109,8 @@ struct context {
   emel::memory::hybrid::sm memory = {};
   emel::graph::sm graph = {};
   emel::logits::sampler::sm sampler = {};
+  void * initializer_actor = nullptr;
+  emel::generator::action::initializer_dispatch_fn * dispatch_initializer = nullptr;
   void * prefill_actor = nullptr;
   emel::generator::action::prefill_dispatch_fn * dispatch_prefill = nullptr;
 

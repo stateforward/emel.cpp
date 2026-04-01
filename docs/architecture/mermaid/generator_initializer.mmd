@@ -1,0 +1,43 @@
+stateDiagram-v2
+  direction TB
+  [*] --> idle
+  idle --> binding_conditioner : run [always] / begin_initialize_
+  binding_conditioner --> binding_conditioner_decision : completion_run_ [always] / request_conditioner_bind_
+  binding_conditioner_decision --> initializing_renderer : completion_run_ [conditioner_bind_ok_] / none
+  binding_conditioner_decision --> idle : completion_run_ [conditioner_bind_invalid_request_] / mark_invalid_request_
+  binding_conditioner_decision --> idle : completion_run_ [conditioner_bind_backend_error_] / mark_backend_error_
+  initializing_renderer --> initializing_renderer_decision : completion_run_ [always] / request_renderer_initialize_
+  initializing_renderer_decision --> reserving_memory : completion_run_ [renderer_initialize_ok_] / none
+  initializing_renderer_decision --> idle : completion_run_ [renderer_initialize_invalid_request_] / mark_invalid_request_
+  initializing_renderer_decision --> idle : completion_run_ [renderer_initialize_backend_error_] / mark_backend_error_
+  reserving_memory --> reserving_memory_decision : completion_run_ [always] / request_memory_reserve_
+  reserving_memory_decision --> configuring_sampling_mode_decision : completion_run_ [memory_reserve_with_existing_graph_] / none
+  reserving_memory_decision --> reserving_graph : completion_run_ [memory_reserve_with_missing_graph_] / none
+  reserving_memory_decision --> idle : completion_run_ [memory_reserve_invalid_request_] / mark_invalid_request_
+  reserving_memory_decision --> idle : completion_run_ [memory_reserve_backend_error_] / mark_backend_error_
+  reserving_graph --> reserving_graph_decision : completion_run_ [always] / request_graph_reserve_
+  reserving_graph_decision --> configuring_sampling_mode_decision : completion_run_ [graph_reserve_ok_] / none
+  reserving_graph_decision --> idle : completion_run_ [graph_reserve_invalid_request_] / mark_invalid_request_
+  reserving_graph_decision --> idle : completion_run_ [graph_reserve_backend_error_] / mark_backend_error_
+  configuring_sampling_mode_decision --> configuring_sampler : completion_run_ [uses_materialized_logits_] / none
+  configuring_sampling_mode_decision --> configure_preselected_argmax : completion_run_ [uses_preselected_argmax_] / none
+  configuring_sampler --> configuring_sampler_decision : completion_run_ [always] / configure_sampler_
+  configuring_sampler_decision --> idle : completion_run_ [sampler_configured_] / none
+  configuring_sampler_decision --> idle : completion_run_ [sampler_config_failed_] / mark_backend_error_
+  configure_preselected_argmax --> configure_preselected_argmax_decision : completion_run_ [always] / configure_preselected_argmax_
+  configure_preselected_argmax_decision --> idle : completion_run_ [sampler_configured_] / none
+  configure_preselected_argmax_decision --> idle : completion_run_ [sampler_config_failed_] / mark_backend_error_
+  idle --> idle : _ [always] / on_unexpected_
+  binding_conditioner --> idle : _ [always] / on_unexpected_
+  binding_conditioner_decision --> idle : _ [always] / on_unexpected_
+  initializing_renderer --> idle : _ [always] / on_unexpected_
+  initializing_renderer_decision --> idle : _ [always] / on_unexpected_
+  reserving_memory --> idle : _ [always] / on_unexpected_
+  reserving_memory_decision --> idle : _ [always] / on_unexpected_
+  reserving_graph --> idle : _ [always] / on_unexpected_
+  reserving_graph_decision --> idle : _ [always] / on_unexpected_
+  configuring_sampling_mode_decision --> idle : _ [always] / on_unexpected_
+  configuring_sampler --> idle : _ [always] / on_unexpected_
+  configuring_sampler_decision --> idle : _ [always] / on_unexpected_
+  configure_preselected_argmax --> idle : _ [always] / on_unexpected_
+  configure_preselected_argmax_decision --> idle : _ [always] / on_unexpected_

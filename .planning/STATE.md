@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.7
-milestone_name: Generator Prefill Submachine Decomposition
-status: milestone_complete
-stopped_at: "v1.7 archived; ready to define the next milestone"
-last_updated: "2026-03-30T04:41:15Z"
-last_activity: 2026-03-29
+milestone: v1.8
+milestone_name: Generator Initializer Submachine
+status: execution_complete
+stopped_at: "v1.8 phases 33-34 executed; ready for $gsd-complete-milestone"
+last_updated: "2026-04-01T03:05:00Z"
+last_activity: 2026-03-31
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
+  total_phases: 2
+  completed_phases: 2
+  total_plans: 4
+  completed_plans: 4
   percent: 100
 ---
 
@@ -18,19 +18,18 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-30)
+See: .planning/PROJECT.md (updated 2026-03-31)
 
-**Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
-verification before widening API surface or model scope.
-**Current focus:** Define the next milestone after shipping v1.7.
+**Core value:** Prove real end-to-end behavior with explicit SML orchestration and
+parity-oriented verification before widening API surface or model scope.
+**Current focus:** Close out v1.8 after the `generator/initializer` extraction and proof run.
 
 ## Current Position
 
-Status: Between milestones
-Last activity: 2026-03-30 — Archived v1.7 after the explicit `generator/prefill` extraction,
-top-level generator shrink, maintained generator/parity/compare proof refresh, and user-approved
-waiver for unrelated broad benchmark regressions outside `generator/prefill`
-
+Phase: 34 complete
+Plan: 34-02
+Status: Milestone execution complete; ready for archive/audit
+Last activity: 2026-03-31 — Phases 33 and 34 completed for the `generator/initializer` submachine
 Progress: [██████████] 100%
 
 ## Performance Metrics
@@ -51,7 +50,7 @@ Progress: [██████████] 100%
 
 **Next action:**
 
-- Define the next milestone with `$gsd-new-milestone`.
+- Archive/close the milestone with `$gsd-complete-milestone`.
 
 ## Accumulated Context
 
@@ -69,8 +68,13 @@ Recent decisions affecting current work:
   are maintained alongside it.
 - v1.7 started with `generator/prefill` as the first decomposition cut rather than forcing a full
   generator split or separate session actor redesign.
-- v1.7 shipped without a separate milestone audit; the user chose direct completion after the
-  maintained generator-specific proof and explicit benchmark-noise waiver.
+- v1.8 starts with `generator/initializer` instead of a decode child machine because decode lives
+  on the hot per-token path and prior decode decomposition attempts regressed performance.
+- v1.8 stays narrow to one new machine; broader `generate_setup` / `preprocessor` decomposition is
+  deferred.
+- The parent generator now owns one explicit initialize seam
+  (`initializing -> initializer_result_decision`) while `src/emel/generator/initializer` owns the
+  initialize pipeline states.
 
 ### Pending Todos
 
@@ -80,14 +84,16 @@ Recent decisions affecting current work:
 
 - Non-blocking benchmark warning debt remains in `batch/planner_simple`, `memory/hybrid_full`,
   `kernel/aarch64/op_log`, `logits/sampler_raw/vocab_32000`, and `kernel/aarch64/op_soft_max`.
-- The next milestone scope is not defined yet.
-- Decode extraction and any attention-family `sm_any` work remain deferred until the next
-  milestone explicitly picks them up.
-- Warning-only benchmark debt still exists outside `generator/prefill`; v1.7 closeout accepted
-  that carried debt rather than hardening the broader repo gate.
+- Decode extraction and any attention-family `sm_any` work remain deferred until a later milestone.
+- The next generator decomposition step after initializer is still open and should be benchmark-led
+  if decode is reconsidered.
+- Warning-only benchmark debt still exists outside `generator/prefill`; v1.8 does not harden the
+  broader repo gate.
+- `scripts/quality_gates.sh` still reports an ignored broad benchmark snapshot warning in
+  `text/jinja/formatter_long`, but it did not fail the gate and is outside the initializer slice.
 
 ## Session Continuity
 
-Last session: 2026-03-30T04:41:15Z
-Stopped at: v1.7 archived; ready for `$gsd-new-milestone`
+Last session: 2026-04-01T03:05:00Z
+Stopped at: v1.8 phases 33-34 executed; ready for `$gsd-complete-milestone`
 Resume file: None

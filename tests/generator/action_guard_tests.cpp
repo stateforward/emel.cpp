@@ -6,6 +6,7 @@
 
 #include "emel/generator/actions.hpp"
 #include "emel/generator/guards.hpp"
+#include "emel/generator/initializer/guards.hpp"
 #include "emel/generator/prefill/guards.hpp"
 #include "emel/model/data.hpp"
 
@@ -366,10 +367,16 @@ TEST_CASE("generator structured message request and channel guards classify call
   emel::generator::event::initialize_run preselected_run{
       preselected_initialize, preselected_ctx};
   context.state.selection_mode = emel::generator::selection_mode::preselected_argmax;
+  emel::generator::initializer::action::context initializer_context{context};
+  const emel::generator::initializer::event::run initializer_run{
+      preselected_run.request,
+      preselected_run.ctx,
+  };
   CHECK(emel::generator::guard::valid_initialize{}(preselected_run, context));
-  CHECK(emel::generator::guard::initialize_uses_preselected_argmax{}(preselected_run, context));
-  CHECK_FALSE(
-      emel::generator::guard::initialize_uses_materialized_logits{}(preselected_run, context));
+  CHECK(emel::generator::initializer::guard::uses_preselected_argmax{}(
+      initializer_run, initializer_context));
+  CHECK_FALSE(emel::generator::initializer::guard::uses_materialized_logits{}(
+      initializer_run, initializer_context));
 }
 
 TEST_CASE("generator phase guards classify invalid and backend errors") {
@@ -384,35 +391,50 @@ TEST_CASE("generator phase guards classify invalid and backend errors") {
   auto initialize = make_initialize_request(&tracker, &error_out);
   emel::generator::event::initialize_ctx initialize_ctx{};
   emel::generator::event::initialize_run initialize_run{initialize, initialize_ctx};
+  emel::generator::initializer::action::context initializer_context{context};
+  const emel::generator::initializer::event::run initializer_run{
+      initialize_run.request,
+      initialize_run.ctx,
+  };
 
   initialize_ctx.phase_accepted = false;
   initialize_ctx.phase_code =
       static_cast<int32_t>(emel::text::conditioner::error::invalid_argument);
-  CHECK(emel::generator::guard::conditioner_bind_invalid_request{}(initialize_run, context));
+  CHECK(emel::generator::initializer::guard::conditioner_bind_invalid_request{}(
+      initializer_run, initializer_context));
   initialize_ctx.phase_code = static_cast<int32_t>(emel::text::conditioner::error::backend);
-  CHECK(emel::generator::guard::conditioner_bind_backend_error{}(initialize_run, context));
+  CHECK(emel::generator::initializer::guard::conditioner_bind_backend_error{}(
+      initializer_run, initializer_context));
   initialize_ctx.phase_code =
       static_cast<int32_t>(emel::error::cast(emel::text::renderer::error::invalid_request));
-  CHECK(emel::generator::guard::renderer_initialize_invalid_request{}(initialize_run, context));
+  CHECK(emel::generator::initializer::guard::renderer_initialize_invalid_request{}(
+      initializer_run, initializer_context));
   initialize_ctx.phase_code =
       static_cast<int32_t>(emel::error::cast(emel::text::renderer::error::backend_error));
-  CHECK(emel::generator::guard::renderer_initialize_backend_error{}(initialize_run, context));
+  CHECK(emel::generator::initializer::guard::renderer_initialize_backend_error{}(
+      initializer_run, initializer_context));
   initialize_ctx.phase_code =
       static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::invalid_request));
-  CHECK(emel::generator::guard::memory_reserve_invalid_request{}(initialize_run, context));
+  CHECK(emel::generator::initializer::guard::memory_reserve_invalid_request{}(
+      initializer_run, initializer_context));
   initialize_ctx.phase_code =
       static_cast<int32_t>(emel::error::cast(emel::memory::hybrid::error::backend_error));
-  CHECK(emel::generator::guard::memory_reserve_backend_error{}(initialize_run, context));
+  CHECK(emel::generator::initializer::guard::memory_reserve_backend_error{}(
+      initializer_run, initializer_context));
   initialize_ctx.phase_code =
       static_cast<int32_t>(emel::error::cast(emel::graph::error::invalid_request));
-  CHECK(emel::generator::guard::graph_reserve_invalid_request{}(initialize_run, context));
+  CHECK(emel::generator::initializer::guard::graph_reserve_invalid_request{}(
+      initializer_run, initializer_context));
   initialize_ctx.phase_code =
       static_cast<int32_t>(emel::error::cast(emel::graph::error::assembler_failed));
-  CHECK(emel::generator::guard::graph_reserve_backend_error{}(initialize_run, context));
+  CHECK(emel::generator::initializer::guard::graph_reserve_backend_error{}(
+      initializer_run, initializer_context));
   initialize_ctx.buffers_ready = true;
-  CHECK(emel::generator::guard::sampler_configured{}(initialize_run, context));
+  CHECK(emel::generator::initializer::guard::sampler_configured{}(
+      initializer_run, initializer_context));
   initialize_ctx.buffers_ready = false;
-  CHECK(emel::generator::guard::sampler_config_failed{}(initialize_run, context));
+  CHECK(emel::generator::initializer::guard::sampler_config_failed{}(
+      initializer_run, initializer_context));
 
   auto generate = make_generate_request(&tracker, &error_out, output_length_out);
   emel::generator::event::generate_ctx generate_ctx{};

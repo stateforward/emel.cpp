@@ -7,6 +7,7 @@
 #include "emel/generator/context.hpp"
 #include "emel/generator/errors.hpp"
 #include "emel/generator/events.hpp"
+#include "emel/generator/initializer/detail.hpp"
 #include "emel/generator/prefill/detail.hpp"
 #include "emel/graph/events.hpp"
 #include "emel/logits/sampler/errors.hpp"
@@ -120,141 +121,12 @@ inline bool dispatch_renderer_initialize(context & ctx,
   return ctx.renderer.process_event(initialize_ev);
 }
 
-struct begin_initialize {
-  void operator()(const event::initialize_run & ev, context & ctx) const noexcept {
-    ev.ctx.err = emel::error::cast(error::none);
-    ev.ctx.phase_accepted = false;
-    ev.ctx.phase_code = 0;
-    ev.ctx.buffers_ready = false;
-
-    ctx.conditioning.actor = ev.request.tokenizer_sm;
-    ctx.conditioning.dispatch_bind = ev.request.dispatch_tokenizer_bind;
-    ctx.conditioning.dispatch_tokenize = ev.request.dispatch_tokenizer_tokenize;
-    ctx.conditioning.preprocessor = ev.request.preprocessor_variant;
-    ctx.conditioning.encoder = ev.request.encoder_variant;
-    ctx.conditioning.add_special = ev.request.add_special;
-    ctx.conditioning.parse_special = ev.request.parse_special;
-
-    ctx.limits.prompt_capacity = ev.request.max_prompt_tokens;
-    ctx.limits.decode_capacity = ev.request.max_generated_tokens;
-    ctx.limits.block_capacity = ev.request.max_blocks;
-    ctx.limits.block_tokens = ev.request.block_tokens;
-    ctx.state.selection_mode = ev.request.selection_mode;
-
-    ctx.buffers.seq_masks[0] = 1u;
-    ctx.buffers.seq_primary_ids[0] = k_sequence_id;
-
-    capture_renderer_session(ev.request, ctx);
-    reset_generation_tensor_epochs(ctx);
-    ctx.state.sequence_live = false;
-    ctx.state.memory_snapshot = {};
-  }
-};
-
 struct reject_initialize {
   void operator()(const event::initialize_run & ev, context &) const noexcept {
     ev.ctx.err = emel::error::cast(error::invalid_request);
     ev.ctx.phase_accepted = false;
     ev.ctx.phase_code = 0;
     ev.ctx.buffers_ready = false;
-  }
-};
-
-struct request_conditioner_bind {
-  void operator()(const event::initialize_run & ev, context & ctx) const noexcept {
-    ev.ctx.phase_code = 0;
-    emel::text::conditioner::event::bind bind_ev{ctx.model->vocab_data};
-    bind_ev.preprocessor_variant = ctx.conditioning.preprocessor;
-    bind_ev.encoder_variant = ctx.conditioning.encoder;
-    bind_ev.tokenizer_sm = ctx.conditioning.actor;
-    bind_ev.dispatch_tokenizer_bind = ctx.conditioning.dispatch_bind;
-    bind_ev.dispatch_tokenizer_tokenize = ctx.conditioning.dispatch_tokenize;
-    bind_ev.formatter_ctx = ctx.formatter_ctx;
-    bind_ev.format_prompt = ctx.format_prompt;
-    bind_ev.add_special = ctx.conditioning.add_special;
-    bind_ev.parse_special = ctx.conditioning.parse_special;
-    bind_ev.error_out = &ev.ctx.phase_code;
-    ev.ctx.phase_accepted = ctx.conditioner->process_event(bind_ev);
-  }
-};
-
-struct request_renderer_initialize {
-  void operator()(const event::initialize_run & ev, context & ctx) const noexcept {
-    ev.ctx.phase_code = 0;
-    ev.ctx.phase_accepted = dispatch_renderer_initialize(ctx, ev.ctx.phase_code);
-  }
-};
-
-struct request_memory_reserve {
-  void operator()(const event::initialize_run & ev, context & ctx) const noexcept {
-    ev.ctx.phase_code = static_cast<int32_t>(
-        emel::error::cast(emel::memory::hybrid::error::none));
-    emel::memory::event::reserve reserve_ev{
-      .max_sequences = 1,
-      .max_blocks = ctx.limits.block_capacity,
-      .block_tokens = ctx.limits.block_tokens,
-      .error_out = &ev.ctx.phase_code,
-    };
-    ev.ctx.phase_accepted = ctx.memory.process_event(reserve_ev);
-  }
-};
-
-struct request_graph_reserve {
-  void operator()(const event::initialize_run & ev, context & ctx) const noexcept {
-    ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::graph::error::none));
-    const auto * lifecycle = emel::generator::detail::reserve_lifecycle(
-        ctx.compute.backend,
-        ctx.buffers.prompt_tokens.data(),
-        ctx.limits.prompt_capacity,
-        ctx.buffers.positions.data(),
-        ctx.limits.prompt_capacity,
-        ctx.buffers.logits.get(),
-        ctx.buffers.vocab_size);
-    const auto on_done =
-        emel::callback<bool(const emel::graph::events::reserve_done &)>::from<capture_graph_reserve_done>();
-    const auto on_error =
-        emel::callback<bool(const emel::graph::events::reserve_error &)>::from<
-            event::initialize_ctx,
-            capture_graph_reserve_error>(&ev.ctx);
-    emel::graph::event::reserve reserve_ev{
-      .model_topology = &ctx.compute.model_topology,
-      .output_out = &ctx.state.graph_reservation,
-      .lifecycle = lifecycle,
-      .max_node_count = ctx.compute.model_topology.node_count,
-      .max_tensor_count = ctx.compute.model_topology.tensor_count,
-      .bytes_per_tensor = ctx.compute.model_topology.bytes_per_tensor,
-      .workspace_capacity_bytes = ctx.compute.model_topology.workspace_capacity_bytes,
-      .dispatch_done = on_done,
-      .dispatch_error = on_error,
-    };
-    ev.ctx.phase_accepted = ctx.graph.process_event(reserve_ev);
-  }
-};
-
-struct configure_sampler {
-  void operator()(const event::initialize_run & ev, context & ctx) const noexcept {
-    emel::error::type sampler_error = emel::error::cast(emel::logits::sampler::error::none);
-    emel::logits::sampler::event::configure configure_ev{
-      ev.request.sampler_fns.front(),
-      static_cast<int32_t>(ev.request.sampler_fns.size()),
-      sampler_error,
-    };
-    const bool sampler_ready = ctx.sampler.process_event(configure_ev);
-    ev.ctx.buffers_ready = ctx.buffers.vocab_size > 0 &&
-                           ctx.buffers.logits != nullptr &&
-                           ctx.buffers.candidate_ids != nullptr &&
-                           ctx.buffers.candidate_scores != nullptr &&
-                           sampler_ready;
-    ev.ctx.phase_accepted = ev.ctx.buffers_ready;
-    ev.ctx.phase_code = static_cast<int32_t>(sampler_error);
-  }
-};
-
-struct configure_preselected_argmax {
-  void operator()(const event::initialize_run & ev, context & ctx) const noexcept {
-    ev.ctx.buffers_ready = ctx.buffers.vocab_size > 0 && ctx.buffers.logits != nullptr;
-    ev.ctx.phase_accepted = ev.ctx.buffers_ready;
-    ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::generator::error::none));
   }
 };
 
@@ -376,6 +248,13 @@ struct request_allocate_sequence {
       .error_out = &ev.ctx.phase_code,
     };
     ev.ctx.phase_accepted = ctx.memory.process_event(allocate_ev);
+  }
+};
+
+struct request_initializer {
+  void operator()(const event::initialize_run & ev, context & ctx) const noexcept {
+    const emel::generator::initializer::event::run runtime{ev.request, ev.ctx};
+    ev.ctx.phase_accepted = ctx.dispatch_initializer(ctx.initializer_actor, runtime);
   }
 };
 
@@ -876,14 +755,7 @@ struct on_unexpected {
   }
 };
 
-inline constexpr begin_initialize begin_initialize{};
 inline constexpr reject_initialize reject_initialize{};
-inline constexpr request_conditioner_bind request_conditioner_bind{};
-inline constexpr request_renderer_initialize request_renderer_initialize{};
-inline constexpr request_memory_reserve request_memory_reserve{};
-inline constexpr request_graph_reserve request_graph_reserve{};
-inline constexpr configure_sampler configure_sampler{};
-inline constexpr configure_preselected_argmax configure_preselected_argmax{};
 inline constexpr begin_generate begin_generate{};
 inline constexpr reject_invalid_generate reject_invalid_generate{};
 inline constexpr reject_uninitialized_generate reject_uninitialized_generate{};
@@ -891,6 +763,7 @@ inline constexpr request_reset_sequence request_reset_sequence{};
 inline constexpr request_conditioning request_conditioning{};
 inline constexpr request_planning request_planning{};
 inline constexpr request_allocate_sequence request_allocate_sequence{};
+inline constexpr request_initializer request_initializer{};
 inline constexpr request_prefill request_prefill{};
 inline constexpr request_memory_snapshot request_memory_snapshot{};
 inline constexpr request_decode_slots request_decode_slots{};

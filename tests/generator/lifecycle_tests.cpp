@@ -13,6 +13,7 @@
 #include "emel/docs/detail.hpp"
 #include "emel/emel.h"
 #include "emel/generator/errors.hpp"
+#include "emel/generator/initializer/sm.hpp"
 #include "emel/generator/prefill/sm.hpp"
 #include "emel/generator/sm.hpp"
 #include "emel/kernel/detail.hpp"
@@ -1624,6 +1625,22 @@ TEST_CASE("generator_sm_models_explicit_prefill_boundary_and_decode_compute_stat
   CHECK(emel::detail::type_list_contains<
         emel::generator::decode_compute_nonflash,
         states>::value);
+}
+
+TEST_CASE("generator_sm_models_explicit_initializer_boundary") {
+  using machine_t = boost::sml::sm<emel::generator::model>;
+  using states = typename machine_t::states;
+
+  CHECK(emel::detail::type_list_contains<emel::generator::initializing, states>::value);
+  CHECK(emel::detail::type_list_contains<
+        emel::generator::initializer_result_decision,
+        states>::value);
+  CHECK_FALSE(emel::detail::type_list_contains<
+              emel::generator::initializer::binding_conditioner,
+              states>::value);
+  CHECK_FALSE(emel::detail::type_list_contains<
+              emel::generator::initializer::configuring_sampler_decision,
+              states>::value);
 }
 
 TEST_CASE("docs_detail_shortens_lambda_type_names_for_mermaid") {
