@@ -1,5 +1,24 @@
 # Project Milestones: EMEL
 
+## v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice (Shipped: 2026-04-02)
+
+**Phases completed:** 8 phases, 9 plans, 0 tasks
+
+**Key accomplishments:**
+
+- Documented one official maintained `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture with executable
+  metadata truth anchored on `lfm2` and `128000` context.
+- Added explicit `lfm2` model and runtime support for one maintained Liquid ARM slice through the
+  shipped generator path.
+- Proved maintained Liquid parity against `llama.cpp` while preserving additive maintained Qwen
+  coverage.
+- Published one maintained Liquid benchmark/docs path aligned with the parity-backed fixture and
+  contract.
+- Reconstructed missing closeout artifacts and validation coverage so the milestone could pass
+  audit and archive cleanly.
+
+---
+
 ## v1.7 Generator Prefill Submachine Decomposition (Shipped: 2026-03-30)
 
 **Delivered:** The generator now ships an explicit generator-owned `prefill` child machine with
@@ -12,12 +31,16 @@ Llama/Qwen proof preserved across the refactor.
 
 - Collapsed the repeated top-level prefill routing matrix into explicit request-scoped prefill
   compute contracts.
+
 - Extracted `src/emel/generator/prefill` as a generator-domain child machine with its own typed
   `run` event and explicit contract/result states.
+
 - Kept prefill orchestration data on typed runtime/internal events instead of generator context
   phase flags.
+
 - Reduced the parent generator surface materially and published the split `generator_prefill`
   architecture docs.
+
 - Re-ran maintained generator, paritychecker, and compare proof on the extracted prefill boundary,
   with unrelated broad benchmark drift explicitly waived for milestone closeout.
 
@@ -38,10 +61,12 @@ generation parity, and benchmark publication aligned to the same operator-facing
 
 - Locked one official canonical Qwen3 fixture and primary-template-only formatter contract on the
   maintained paritychecker and benchmark surfaces
+
 - Added native `q8_0` runtime support for the canonical Qwen blocker tensors in `src/emel`
 - Brought the shipped generator path up on the canonical `qwen3` slice without broad family claims
 - Proved maintained stored-baseline parity across `1/10/100/1000` while keeping the prior Llama
   anchor protected
+
 - Published one truthful canonical Qwen benchmark compare, snapshot, and docs path with explicit
   formatter/runtime evidence
 
@@ -64,8 +89,10 @@ attribution/publication across paritychecker, compare snapshots, and generated b
 - Unsupported quantized branches now publish explicit no-claim behavior
 - The shipped generator runtime, paritychecker, and regression surfaces now prove the canonical
   `8/4/0/0` runtime contract with zero supported disallowed fallback
+
 - Benchmark compare output, stored snapshots, and generated docs now publish the same runtime
   contract without overstating approved dense-f32-by-contract seams
+
 - Canonical flash-attention dispatch and checked-in benchmark publication were restored together so
   maintained live proof and stored evidence match again
 

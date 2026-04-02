@@ -17,14 +17,15 @@ before widening API surface or model scope.
 
 Shipped version: `v1.7`
 
-Status: Milestone v1.9 is defined and ready for phase planning on this branch. The shipped repo
-still reflects v1.7 plus the existing maintained Llama ARM and canonical Qwen acceptance surfaces.
+Status: Milestone v1.9 is complete on this branch. The shipped repo now includes one maintained
+Liquid `lfm2` ARM slice alongside the existing maintained Llama ARM and canonical Qwen surfaces.
 
-Release summary: `v1.7 Generator Prefill Submachine Decomposition` shipped on `2026-03-30` with
-`3` phases and `6` plans. Remaining open debt is decode-side generator decomposition plus the
-existing warning-only benchmark drift outside `generator/prefill`.
+Release summary: `v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice` shipped on `2026-04-02` with `8`
+phases after gap-closure reconstruction. Remaining open debt is broader Liquid coverage, richer
+Liquid prompting, further Liquid prefill optimization, and the existing warning-only benchmark
+drift outside the maintained Liquid slice.
 
-## Current Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
+## Latest Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
 
 **Goal:** Prove one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-GGUF` ARM slice through the
 existing EMEL generator, paritychecker, and benchmark workflow, with `Q4_K_M` as the maintained
@@ -99,20 +100,27 @@ transitions instead of hidden action/detail control flow.
   `generator_prefill` architecture.
 - ✓ v1.7 preserved maintained generator, paritychecker, and compare proof; unrelated broad
   benchmark snapshot regressions outside `generator/prefill` were explicitly waived for closeout.
+- ✓ v1.9 documented one official maintained `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture and bound
+  the maintained Liquid path to explicit executable metadata truth plus one explicit structured
+  chat contract.
+- ✓ v1.9 added explicit `lfm2` model/runtime support for one maintained Liquid ARM slice through
+  the shipped generator path.
+- ✓ v1.9 proved maintained Liquid parity against `llama.cpp`, preserved additive maintained Qwen
+  coverage, and published one truthful Liquid benchmark/docs path aligned with the parity-backed
+  slice.
+- ✓ v1.9 repaired its missing closeout artifacts, validation layer, and milestone bookkeeping so
+  the milestone could pass audit and archive cleanly.
 
 ### Active
 
-- [ ] `FIX-02`: Document one official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` maintained fixture with
-  checksum, source, stable path, and download URL.
-- [ ] `COND-03`: Add one explicit Liquid request-conditioning contract derived from the primary
-  `tokenizer.chat_template`, with structured chat-message input, `tools=none`, and no implicit raw
-  fallback on the maintained slice.
-- [ ] `RUN-03`: Add truthful `lfm2` architecture/runtime support for one maintained Liquid Thinking
-  ARM slice through the shipped generator path.
-- [ ] `PAR-02`: Prove the maintained Liquid slice against `llama.cpp` on the same fixture and
-  conditioning contract.
-- [ ] `BENCH-08`: Publish one truthful Liquid benchmark compare/docs path for the same parity-
-  backed maintained slice.
+- [ ] `MODEL-03`: Broaden beyond the canonical `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture to
+  additional Liquid checkpoints or sibling quantizations after the first slice is proven.
+- [ ] `COND-04`: Add richer Liquid system-message, multi-turn thinking-history, or tool-calling
+  request surfaces after the canonical maintained slice has a stable contract.
+- [ ] `GEN-04`: Optimize Liquid-specific runtime hot spots now that the canonical slice is correct,
+  parity-backed, and benchmarked.
+- [ ] `BENCH-07`: Revisit whether noisy benchmark drift should remain warning-only once the
+  maintained compare surfaces are stable enough to justify a harder gate.
 
 ### Out of Scope
 
@@ -134,11 +142,12 @@ transitions instead of hidden action/detail control flow.
 
 ## Next Milestone Goals
 
-- Land one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` ARM slice.
-- Preserve maintained Llama/Qwen proof while Liquid support is added.
-- Keep the milestone narrow to one explicit `lfm2` fixture and one explicit conditioning contract.
-- Revisit decode extraction, broader generator decomposition, and benchmark-gate hardening only
-  after the Liquid slice is parity-backed and benchmarked.
+- Broaden Liquid support beyond the first maintained `Q4_K_M` truth anchor only when the next
+  milestone explicitly approves it.
+- Improve Liquid prompting breadth and runtime performance without weakening the actor-model and
+  maintained-proof constraints.
+- Revisit benchmark-gate hardening only after the latest-reference compare lane is stable enough to
+  stop producing warning-only drift.
 
 ## Context
 
@@ -176,10 +185,10 @@ actions, and deliberate machine-structure changes.
 | Keep prefill request-scoped data on typed runtime/internal events | This preserved explicit behavior modeling and avoided context phase flags | ✓ Good |
 | Defer decode extraction until the prefill pattern is proven | Decode also owns sampling, rendering, and loop control, so it was the riskier first cut | ✓ Good |
 | Defer `attention::any` / `sm_any` extraction until after prefill collapse | Attention mode is only one axis of the duplication and should not hide unresolved top-level routing | ⚠ Revisit |
-| Keep v1.9 fixed to one official Liquid Thinking GGUF slice | The repo needs one truthful maintained Liquid anchor before any broader family claims | — Pending |
-| Use GGUF/config metadata as the maintained truth source for Liquid | Official prose and executable metadata disagree on context length, so docs must follow executable truth | — Pending |
-| Start v1.9 with `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` | The user explicitly reprioritized the milestone around the docs-recommended quant, accepting that this broadens runtime scope beyond the prior `Q8_0` anchor | — Pending |
-| Keep the maintained Liquid contract on `tools=none` and no thinking-history replay | Tool use and `keep_past_thinking` widen the request surface beyond the first-slice milestone | — Pending |
+| Keep v1.9 fixed to one official Liquid Thinking GGUF slice | The repo needs one truthful maintained Liquid anchor before any broader family claims | ✓ Good |
+| Use GGUF/config metadata as the maintained truth source for Liquid | Official prose and executable metadata disagree on context length, so docs must follow executable truth | ✓ Good |
+| Start v1.9 with `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` | The user explicitly reprioritized the milestone around the docs-recommended quant, accepting that this broadens runtime scope beyond the prior `Q8_0` anchor | ✓ Good |
+| Keep the maintained Liquid contract on `tools=none` and no thinking-history replay | Tool use and `keep_past_thinking` widen the request surface beyond the first-slice milestone | ✓ Good |
 
 ## Evolution
 
@@ -199,4 +208,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-31 after starting v1.9*
+*Last updated: 2026-04-02 after completing v1.9*
