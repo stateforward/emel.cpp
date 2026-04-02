@@ -76,7 +76,10 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- None.
+- 2026-04-02 — Move eager quant prepack into generator initializer
+- 2026-04-02 — Reuse q8 RHS across LFM2.5 prefill matmuls
+- 2026-04-02 — Optimize LFM2.5 q4 prefill kernel
+- 2026-04-02 — Optimize LFM2.5 q6 prefill kernel
 
 ### Blockers/Concerns
 
