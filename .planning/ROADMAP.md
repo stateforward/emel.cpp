@@ -2,106 +2,115 @@
 
 ## Overview
 
-v1.9 delivers one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` ARM slice
-through the existing generator, paritychecker, and benchmark workflow. The milestone stays narrow:
-one official fixture, one explicit Liquid conditioning contract, one explicit `lfm2` runtime
-path, then maintained parity and benchmark publication for that exact slice.
+`v1.11` delivers one truthful maintained text-generation slice for the brand new official
+`ggml-org/gemma-4-E2B-it-GGUF` release through the existing generator, paritychecker, and
+benchmark workflow. The milestone stays narrow: one official text fixture, one explicit Gemma 4
+text-only conditioning contract, one explicit `gemma4` runtime path, one explicit reference-lane
+readiness step, then maintained parity and benchmark publication for that exact slice.
+
+This milestone explicitly does **not** include `mmproj`, image/audio/video inputs, tool-use
+surfaces, or the `F16` sibling file.
 
 ## Phases
 
 **Phase Numbering:**
 - Integer phases continue across milestones.
-- v1.9 starts at Phase 33 because v1.7 ended at Phase 32.
+- `v1.11` starts at Phase 38 because the current visible roadmap ceiling in `.planning/phases/` is
+  Phase 37.
 
-- [ ] **Phase 33: Fixture, Metadata, And Contract Lock** - Lock the exact Liquid fixture,
-      executable metadata truth, and maintained conditioning contract.
-- [ ] **Phase 34: `lfm2` Model Contract Bring-Up** - Make EMEL truthfully recognize the canonical
-      Liquid slice as `lfm2` with an explicit maintained model contract.
-- [ ] **Phase 35: Maintained Runtime Execution On ARM** - Bring the shipped generator path up on
-      the canonical Liquid slice with a truthful `Q4_K_M` runtime contract.
-- [ ] **Phase 36: Parity And Regression Proof** - Prove the maintained Liquid slice against
-      `llama.cpp` and protect the prior maintained anchors.
-- [ ] **Phase 37: Benchmark And Docs Publication** - Publish one parity-backed Liquid benchmark
-      path and maintained docs for the same slice.
+- [ ] **Phase 38: Fixture, Metadata, And Text-Only Contract Lock** - Lock the exact Gemma 4
+      fixture, executable metadata truth, and maintained text-only conditioning contract.
+- [ ] **Phase 39: `gemma4` Model Contract Bring-Up** - Make EMEL truthfully recognize the
+      canonical Gemma 4 fixture as `gemma4` with an explicit text-only model contract.
+- [ ] **Phase 40: Maintained Text Runtime Execution On ARM** - Bring the shipped generator path up
+      on the canonical Gemma 4 text slice on ARM.
+- [ ] **Phase 41: Reference, Parity, And Regression Proof** - Make the reference lane Gemma
+      4-capable, then prove the maintained slice against `llama.cpp` and protect the prior
+      maintained anchors.
+- [ ] **Phase 42: Benchmark And Docs Publication** - Publish one parity-backed Gemma 4 benchmark
+      path and maintained docs for the same text slice.
 
 ## Phase Details
 
-### Phase 33: Fixture, Metadata, And Contract Lock
-**Goal**: The repo names one exact maintained Liquid fixture and one exact maintained request
+### Phase 38: Fixture, Metadata, And Text-Only Contract Lock
+**Goal**: The repo names one exact maintained Gemma 4 text fixture and one exact text-only request
 contract before runtime work starts.
-**Depends on**: Shipped Phase 32
-**Requirements**: FIX-02, META-01, COND-03
+**Depends on**: Phase 37
+**Requirements**: FIX-03, META-02, COND-04
 **Success Criteria** (what must be TRUE):
   1. The repo documents exactly one official maintained fixture at
-     `tests/models/LFM2.5-1.2B-Thinking-Q4_K_M.gguf` with checksum, source, stable path, and
-     download URL.
+     `tests/models/gemma-4-e2b-it-Q8_0.gguf` with checksum, source, stable path, and download URL.
   2. Maintained repo evidence records executable model truth for the slice from official
-     GGUF/config metadata, including `architecture=lfm2`, instead of stale prose-only metadata.
-  3. The maintained Liquid request path exposes one explicit structured chat-message contract with
-     `tools=none`, `add_generation_prompt=true`, and no implicit raw fallback.
+     GGUF/config metadata, including `architecture=gemma4`, `context_length=131072`, the
+     text-layer schedule, and the separate `mmproj` companion file.
+  3. The maintained request path exposes one explicit structured text chat contract with
+     `add_generation_prompt=true` and no implicit raw fallback.
 **Plans**: TBD
 
-### Phase 34: `lfm2` Model Contract Bring-Up
-**Goal**: EMEL-owned model-loading surfaces truthfully accept the canonical Liquid fixture as
-`lfm2` and expose its maintained topology contract.
-**Depends on**: Phase 33
-**Requirements**: RUN-03, RUN-05
+### Phase 39: `gemma4` Model Contract Bring-Up
+**Goal**: EMEL-owned model-loading surfaces truthfully accept the canonical Gemma 4 fixture as
+`gemma4` and expose its maintained text-only topology contract.
+**Depends on**: Phase 38
+**Requirements**: COND-05, RUN-07, RUN-09
 **Success Criteria** (what must be TRUE):
-  1. EMEL-owned model metadata/loading surfaces identify the maintained fixture as `lfm2` instead
-     of rejecting it or aliasing it to `llama` or `qwen3`.
-  2. The canonical Liquid slice's required metadata, tensor naming, and hybrid block contract are
-     represented explicitly in `src/emel` for the maintained fixture.
-  3. Repo-visible model contract evidence makes the maintained Liquid path auditable as a
-     dedicated `lfm2` architecture slice rather than a generic Llama-family claim.
+  1. EMEL-owned model metadata/loading surfaces identify the maintained fixture as `gemma4`
+     instead of rejecting it or aliasing it to `llama`, `qwen3`, or `lfm2`.
+  2. The canonical Gemma 4 text slice's required metadata and topology, including alternating
+     sliding/full attention, shared-KV layers, rope handling, and tied embeddings, are represented
+     explicitly in `src/emel` for the maintained fixture.
+  3. Repo-visible contract evidence makes the maintained Gemma 4 path auditable as text-only and
+     rejects `mmproj`, media, and tool-call request shapes explicitly.
 **Plans**: TBD
 
-### Phase 35: Maintained Runtime Execution On ARM
-**Goal**: The shipped generator path can initialize and generate on the canonical Liquid slice on
-ARM without widening beyond the maintained `Q4_K_M` truth anchor.
-**Depends on**: Phase 34
-**Requirements**: RUN-04, RUN-06
+### Phase 40: Maintained Text Runtime Execution On ARM
+**Goal**: The shipped generator path can initialize and generate on the canonical Gemma 4 text
+slice on ARM without widening beyond the maintained `Q8_0` truth anchor.
+**Depends on**: Phase 39
+**Requirements**: RUN-08
 **Success Criteria** (what must be TRUE):
-  1. The maintained generator path initializes the official
-     `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture and produces bounded generation on ARM.
-  2. Runtime execution for the maintained Liquid slice uses the explicit `lfm2` path and the
-     maintained `Q4_K_M` surface rather than broad sibling-quant or generic Liquid claims.
+  1. The maintained generator path initializes the official `gemma-4-e2b-it-Q8_0.gguf` fixture and
+     produces bounded text generation on ARM.
+  2. Runtime execution for the maintained Gemma 4 slice uses the explicit `gemma4` path and the
+     maintained text-only acceptance surface rather than broad multimodal or family claims.
   3. Maintained runtime evidence publishes a truthful quantized-path contract for the official
-     `Q4_K_M` fixture only.
+     `Q8_0` fixture only.
 **Plans**: TBD
 
-### Phase 36: Parity And Regression Proof
-**Goal**: The exact maintained Liquid slice is proven correct against the reference and does not
-break the existing maintained anchors.
-**Depends on**: Phase 35
-**Requirements**: PAR-02, VER-02
+### Phase 41: Reference, Parity, And Regression Proof
+**Goal**: The reference lane is Gemma 4-capable, the exact maintained text slice is proven
+correct against the reference, and the existing maintained anchors stay green.
+**Depends on**: Phase 40
+**Requirements**: REF-01, PAR-03, VER-03
 **Success Criteria** (what must be TRUE):
-  1. `tools/paritychecker --generation` proves EMEL against `llama.cpp` on the canonical Liquid
-     fixture using the same maintained conditioning contract from Phase 33.
-  2. Stored regression evidence covers the Liquid slice and the prior maintained Llama and Qwen
-     anchors.
-  3. Maintained parity evidence makes the exact fixture and contract auditable for reviewers.
+  1. The pinned `llama.cpp` reference lane used by `tools/paritychecker` and `tools/bench` is
+     upgraded or confirmed so the canonical Gemma 4 fixture can be loaded for maintained
+     comparison.
+  2. `tools/paritychecker --generation` proves EMEL against `llama.cpp` on the canonical Gemma 4
+     fixture using the same maintained text-only conditioning contract from Phase 38.
+  3. Stored regression evidence covers the Gemma 4 slice and the prior maintained Llama, Qwen, and
+     Liquid anchors.
 **Plans**: TBD
 
-### Phase 37: Benchmark And Docs Publication
-**Goal**: The repo publishes one benchmark/docs path for the same parity-backed maintained Liquid
-slice and nothing broader.
-**Depends on**: Phase 36
-**Requirements**: BENCH-08
+### Phase 42: Benchmark And Docs Publication
+**Goal**: The repo publishes one benchmark/docs path for the same parity-backed maintained Gemma 4
+text slice and nothing broader.
+**Depends on**: Phase 41
+**Requirements**: BENCH-09
 **Success Criteria** (what must be TRUE):
-  1. `tools/bench` compare output includes one maintained Liquid benchmark case for the official
-     `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` slice.
+  1. `tools/bench` compare output includes one maintained Gemma 4 benchmark case for the official
+     `gemma-4-e2b-it-Q8_0.gguf` text slice.
   2. Stored benchmark evidence and generated docs identify the exact fixture and maintained
-     conditioning contract used for the Liquid slice.
-  3. Published Liquid benchmark evidence stays aligned with the parity-backed maintained slice and
-     does not broaden into generic Liquid or sibling-quant claims.
+     text-only conditioning contract used for the Gemma 4 slice.
+  3. Published Gemma 4 benchmark evidence stays aligned with the parity-backed maintained slice and
+     does not broaden into `mmproj`, multimodal, or `F16` claims.
 **Plans**: TBD
 
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 33. Fixture, Metadata, And Contract Lock | 0/TBD | Not started | - |
-| 34. `lfm2` Model Contract Bring-Up | 0/TBD | Not started | - |
-| 35. Maintained Runtime Execution On ARM | 0/TBD | Not started | - |
-| 36. Parity And Regression Proof | 0/TBD | Not started | - |
-| 37. Benchmark And Docs Publication | 0/TBD | Not started | - |
+| 38. Fixture, Metadata, And Text-Only Contract Lock | 0/TBD | Not started | - |
+| 39. `gemma4` Model Contract Bring-Up | 0/TBD | Not started | - |
+| 40. Maintained Text Runtime Execution On ARM | 0/TBD | Not started | - |
+| 41. Reference, Parity, And Regression Proof | 0/TBD | Not started | - |
+| 42. Benchmark And Docs Publication | 0/TBD | Not started | - |
