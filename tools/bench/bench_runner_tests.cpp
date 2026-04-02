@@ -8,6 +8,8 @@
 
 #include <doctest/doctest.h>
 
+#include "../generation_fixture_registry.hpp"
+
 #if !defined(_WIN32)
 #include <sys/wait.h>
 #endif
@@ -139,6 +141,7 @@ process_capture run_generation_bench_compare_capture() {
 TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixtures") {
   const process_capture capture = run_generation_bench_compare_capture();
   CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.find("error:") == std::string::npos);
   CHECK(capture.stdout_text.find("# generation_architecture: lfm2") != std::string::npos);
   CHECK(capture.stdout_text.find("# generation_formatter_contract:") != std::string::npos);
   CHECK(capture.stdout_text.find("# generation_stage_probe: case="
@@ -148,10 +151,16 @@ TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixt
   CHECK(capture.stdout_text.find("emel_prefill_linear_probe_ns=") != std::string::npos);
   CHECK(capture.stdout_text.find("reference_prefill_attention_probe_ns=") !=
         std::string::npos);
-  CHECK(capture.stdout_text.find("generation/preloaded_request/"
-                                 "lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1") !=
-        std::string::npos);
-  CHECK(capture.stdout_text.find("generation/preloaded_request/"
-                                 "qwen3_0_6b_q8_0_prompt_hello_max_tokens_1") !=
-        std::string::npos);
+
+  for (const auto & fixture :
+       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+    const std::array<int, 4> max_tokens = {1, 10, 100, 1000};
+    for (const int tokens : max_tokens) {
+      const std::string case_name = "generation/preloaded_request/" +
+                                    std::string{fixture.slug} +
+                                    "_prompt_hello_max_tokens_" +
+                                    std::to_string(tokens);
+      CHECK(capture.stdout_text.find(case_name) != std::string::npos);
+    }
+  }
 }
