@@ -2580,6 +2580,10 @@ inline bool run_layer(native_backend & backend,
         packed_q8_0_input_path_supported(backend, block.attention_q) &&
         packed_q8_0_input_path_supported(backend, block.attention_k) &&
         packed_q8_0_input_path_supported(backend, block.attention_v);
+    const bool qkv_shared_q8 =
+        q8_input_path_supported(backend, block.attention_q) &&
+        q8_input_path_supported(backend, block.attention_k) &&
+        q8_input_path_supported(backend, block.attention_v);
     if (qkv_shared_packed_q8_0) {
       if (!prepare_packed_q8_0_input(backend, backend.norm) ||
           !matmul_vector_prepared_packed_q8_0_input(
@@ -2588,6 +2592,23 @@ inline bool run_layer(native_backend & backend,
               backend, block.attention_k, block.attention_k.cols, backend.k) ||
           !matmul_vector_prepared_packed_q8_0_input(
               backend, block.attention_v, block.attention_v.cols, backend.v)) {
+        return false;
+      }
+    } else if (qkv_shared_q8) {
+      const size_t block_count =
+          static_cast<size_t>(backend.n_embd) / static_cast<size_t>(quant::QK_K);
+      if (block_count == 0u || block_count > backend.q8_input_storage.size()) {
+        return false;
+      }
+      auto q8_input = std::span<emel::kernel::detail::quant::block_q8_k>(
+          backend.q8_input_storage.data(), block_count);
+      if (!quantize_vector_q8_k(backend.norm, q8_input) ||
+          !matmul_vector_q8_input(
+              backend, block.attention_q, q8_input, block.attention_q.cols, backend.q) ||
+          !matmul_vector_q8_input(
+              backend, block.attention_k, q8_input, block.attention_k.cols, backend.k) ||
+          !matmul_vector_q8_input(
+              backend, block.attention_v, q8_input, block.attention_v.cols, backend.v)) {
         return false;
       }
     } else if (!matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
@@ -2634,12 +2655,38 @@ inline bool run_layer(native_backend & backend,
   const bool gate_up_shared_packed_q8_0 =
       packed_q8_0_input_path_supported(backend, block.feed_forward_gate) &&
       packed_q8_0_input_path_supported(backend, block.feed_forward_up);
+  const bool gate_up_shared_q8 =
+      q8_input_path_supported(backend, block.feed_forward_gate) &&
+      q8_input_path_supported(backend, block.feed_forward_up);
   if (gate_up_shared_packed_q8_0) {
     if (!prepare_packed_q8_0_input(backend, backend.norm) ||
         !matmul_vector_prepared_packed_q8_0_input(
             backend, block.feed_forward_gate, block.feed_forward_gate.cols, backend.gate) ||
         !matmul_vector_prepared_packed_q8_0_input(
             backend, block.feed_forward_up, block.feed_forward_up.cols, backend.up)) {
+      return false;
+    }
+  } else if (gate_up_shared_q8) {
+    const size_t block_count =
+        static_cast<size_t>(backend.n_embd) / static_cast<size_t>(quant::QK_K);
+    if (block_count == 0u || block_count > backend.q8_input_storage.size()) {
+      return false;
+    }
+    auto q8_input = std::span<emel::kernel::detail::quant::block_q8_k>(
+        backend.q8_input_storage.data(), block_count);
+    if (!quantize_vector_q8_k(backend.norm, q8_input) ||
+        !matmul_vector_q8_input(
+            backend,
+            block.feed_forward_gate,
+            q8_input,
+            block.feed_forward_gate.cols,
+            backend.gate) ||
+        !matmul_vector_q8_input(
+            backend,
+            block.feed_forward_up,
+            q8_input,
+            block.feed_forward_up.cols,
+            backend.up)) {
       return false;
     }
   } else if (!matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||

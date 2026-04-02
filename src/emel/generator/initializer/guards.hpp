@@ -5,6 +5,7 @@
 #include "emel/generator/initializer/detail.hpp"
 #include "emel/graph/errors.hpp"
 #include "emel/memory/hybrid/errors.hpp"
+#include "emel/model/loader/errors.hpp"
 #include "emel/text/conditioner/errors.hpp"
 #include "emel/text/renderer/errors.hpp"
 
@@ -34,6 +35,22 @@ constexpr int32_t memory_code(const emel::memory::hybrid::error err) noexcept {
 
 constexpr int32_t graph_code(const emel::graph::error err) noexcept {
   return static_cast<int32_t>(emel::error::cast(err));
+}
+
+constexpr int32_t loader_code(const emel::model::loader::error err) noexcept {
+  return static_cast<int32_t>(emel::error::cast(err));
+}
+
+inline bool loader_invalid_code(const int32_t code) noexcept {
+  return code == loader_code(emel::model::loader::error::invalid_request) ||
+         code == loader_code(emel::model::loader::error::model_invalid);
+}
+
+inline bool loader_backend_code(const int32_t code) noexcept {
+  return code == loader_code(emel::model::loader::error::backend_error) ||
+         code == loader_code(emel::model::loader::error::internal_error) ||
+         code == loader_code(emel::model::loader::error::parse_failed) ||
+         code == loader_code(emel::model::loader::error::untracked);
 }
 
 inline bool conditioner_invalid_code(const int32_t code) noexcept {
@@ -82,6 +99,40 @@ inline bool graph_backend_code(const int32_t code) noexcept {
 }
 
 }  // namespace detail
+
+struct backend_already_ready {
+  bool operator()(const event::run &, const action::context & ctx) const noexcept {
+    return ctx.generator.compute.backend_ready;
+  }
+};
+
+struct backend_prepare_needed {
+  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
+    return !backend_already_ready{}(ev, ctx);
+  }
+};
+
+struct backend_prepare_ok {
+  bool operator()(const event::run & ev, const action::context &) const noexcept {
+    return detail::has_phase_success(ev);
+  }
+};
+
+struct backend_prepare_invalid_request {
+  bool operator()(const event::run & ev, const action::context &) const noexcept {
+    return !detail::has_phase_success(ev) && detail::loader_invalid_code(ev.ctx.phase_code);
+  }
+};
+
+struct backend_prepare_backend_error {
+  bool operator()(const event::run & ev, const action::context &) const noexcept {
+    const bool invalid = detail::loader_invalid_code(ev.ctx.phase_code);
+    return !detail::has_phase_success(ev) &&
+           (detail::phase_rejected_without_code(ev) ||
+            detail::loader_backend_code(ev.ctx.phase_code) ||
+            !invalid);
+  }
+};
 
 struct conditioner_bind_ok {
   bool operator()(const event::run & ev, const action::context &) const noexcept {

@@ -18,7 +18,13 @@ TEST_CASE("generator_initializer_sm_models_explicit_initialize_pipeline_states")
   using states = typename machine_t::states;
 
   CHECK(emel::detail::type_list_contains<
+        emel::generator::initializer::preparing_backend_decision,
+        states>::value);
+  CHECK(emel::detail::type_list_contains<
         emel::generator::initializer::binding_conditioner,
+        states>::value);
+  CHECK(emel::detail::type_list_contains<
+        emel::generator::initializer::binding_conditioner_decision,
         states>::value);
   CHECK(emel::detail::type_list_contains<
         emel::generator::initializer::reserving_graph_decision,

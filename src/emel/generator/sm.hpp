@@ -48,6 +48,16 @@ inline void dispatch_initialize_backend_error(const event::initialize & ev) noex
   }
 }
 
+inline void dispatch_initialize_invalid_request(const event::initialize & ev) noexcept {
+  const auto err = emel::error::cast(error::invalid_request);
+  if (ev.error_out != nullptr) {
+    *ev.error_out = err;
+  }
+  if (ev.on_error) {
+    ev.on_error(events::initialize_error{&ev, err});
+  }
+}
+
 inline bool dispatch_initializer_run(
     void * actor,
     const emel::generator::initializer::event::run & ev) noexcept {
@@ -783,16 +793,8 @@ struct sm : public emel::sm<model, action::context> {
     this->context_.conditioner = &conditioner_ref;
     this->context_.formatter_ctx = formatter_ctx;
     this->context_.format_prompt = format_prompt;
-    // Session scratch is sized once from the injected loaded model so initialize stays allocation-free.
+    // Session scratch is sized once from the injected loaded model before the initialize pipeline.
     detail::reserve_session_buffers(this->context_, model_ref);
-    this->context_.compute.backend_ready =
-        detail::prepare(this->context_.compute.backend, model_ref) ==
-        emel::error::cast(emel::model::loader::error::none);
-    if (this->context_.compute.backend_ready) {
-      this->context_.compute.model_topology = this->context_.compute.backend.topology;
-      this->context_.compute.prefill_plan = this->context_.compute.backend.prefill_plan;
-      this->context_.compute.decode_plan = this->context_.compute.backend.decode_plan;
-    }
   }
 
   sm(const sm &) = delete;
@@ -801,8 +803,8 @@ struct sm : public emel::sm<model, action::context> {
   sm & operator=(sm &&) = delete;
 
   bool process_event(const event::initialize & ev) {
-    if (!this->context_.compute.backend_ready) {
-      detail::dispatch_initialize_backend_error(ev);
+    if (this->context_.model == nullptr || this->context_.conditioner == nullptr) {
+      detail::dispatch_initialize_invalid_request(ev);
       return false;
     }
     event::initialize_ctx ctx{};
