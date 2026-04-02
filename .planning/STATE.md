@@ -1,11 +1,11 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.9
-milestone_name: Liquid LFM2.5-1.2B Thinking ARM Slice
-status: ready_for_phase_planning
-stopped_at: "Roadmap created for v1.9; ready for $gsd-discuss-phase 33"
-last_updated: "2026-03-31T20:31:08Z"
-last_activity: 2026-03-31
+milestone: v1.10
+milestone_name: Bonsai 1.7B 1-Bit Bring-Up
+status: roadmap_defined
+stopped_at: "Roadmap created for v1.10; Phase 38 is ready to plan"
+last_updated: "2026-04-02T00:00:00Z"
+last_activity: 2026-04-02
 progress:
   total_phases: 5
   completed_phases: 0
@@ -18,21 +18,21 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-31)
+See: .planning/PROJECT.md (updated 2026-04-02)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Phase 33 planning for fixture identity, executable metadata truth, and the
-maintained Liquid conditioning contract.
+**Current focus:** Planning Phase 38 fixture provenance and metadata truth for the maintained
+`Bonsai-1.7B.gguf` slice.
 
 ## Current Position
 
-Phase: 33
+Phase: 38 of 42 (Fixture Provenance And Metadata Truth)
 Plan: —
-Status: Roadmap created
-Last activity: 2026-03-31 — Rescoped v1.9 from the prior `Q8_0` anchor to one official Liquid
-`Q4_K_M` fixture, keeping the same five-phase shape but accepting the broader quant-runtime bring-up
-implied by the new maintained truth anchor
+Status: Ready to plan
+Last activity: 2026-04-02 — Replaced the active roadmap with the v1.10 Bonsai phase structure for
+fixture truth, conditioning contract, native `Q1_0_g128` runtime, parity/regression, and benchmark
+publication
 
 Progress: [----------] 0%
 
@@ -40,7 +40,7 @@ Progress: [----------] 0%
 
 **Current active milestone:**
 
-- Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
+- Milestone: v1.10 Bonsai 1.7B 1-Bit Bring-Up
 - Phases complete: 0/5
 - Plans complete: 0/0
 - Audit status: not run
@@ -54,7 +54,7 @@ Progress: [----------] 0%
 
 **Next action:**
 
-- Start Phase 33 with `$gsd-discuss-phase 33` or `$gsd-plan-phase 33`.
+- Plan Phase 38 from the frozen Bonsai fixture and GGUF metadata truth requirements.
 
 ## Accumulated Context
 
@@ -63,16 +63,13 @@ Progress: [----------] 0%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- v1.9 is fixed to one official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` maintained fixture.
-- The maintained Liquid slice will derive truth from GGUF/config metadata (`lfm2`, `128000`
-  context) rather than stale prose on the model card.
-- The maintained Liquid request surface is one structured chat-message contract with `tools=none`
-  and no thinking-history replay.
-- Roadmap coverage is fixed at five phases: 33 fixture/metadata/contract, 34 `lfm2` contract, 35
-  runtime, 36 parity/regression, 37 benchmark/docs.
-- The user explicitly reprioritized the milestone to the docs-recommended `Q4_K_M` quant instead
-  of the earlier `Q8_0` anchor.
-- Decode extraction and broader generator decomposition remain deferred on this branch.
+- v1.10 keeps one maintained fixture only: `tests/models/Bonsai-1.7B.gguf`.
+- Bonsai stays on the existing `qwen3` architecture path; the widening is the native
+  `Q1_0_g128` operand path, not a new model family.
+- The maintained Bonsai request surface is one explicit formatter contract with `tools=none`,
+  `enable_thinking=false`, and no raw fallback.
+- Prism's `llama.cpp` fork is the truthful parity/benchmark reference lane, and it stays confined
+  to tooling only.
 
 ### Pending Todos
 
@@ -83,18 +80,14 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Current runtime and tooling explicitly accept `llama` and `qwen3`; `lfm2` is new architecture
-  scope.
-- Switching the maintained anchor from `Q8_0` to `Q4_K_M` widens Phase 35 runtime risk relative to
-  the earlier research baseline.
-- The current supported formatter contract is Qwen-shaped and will need a Liquid-specific truth
-  surface.
-- Official Liquid prose and executable metadata disagree on context length, so docs and tests must
-  use metadata truth consistently.
-- Benchmark warning debt still exists outside the maintained Liquid scope and is not part of v1.9.
+- Native `Q1_0_g128` implementation shape is still the main technical risk for v1.10.
+- Prism-specific parity and benchmark truth need an explicit pinned reference commit during later
+  phase planning.
+- The embedded Bonsai template exposes broader tool/thinking branches that must remain explicitly
+  rejected on the maintained first slice.
 
 ## Session Continuity
 
-Last session: 2026-03-31T20:25:13Z
-Stopped at: Roadmap created for v1.9; ready for `$gsd-discuss-phase 33`
+Last session: 2026-04-02T00:00:00Z
+Stopped at: Roadmap created for v1.10; Phase 38 is ready to plan
 Resume file: None
