@@ -3,10 +3,10 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. The active planning scope is v1.9,
-which adds one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-GGUF` ARM slice on top of the
-repo's existing maintained Llama ARM and canonical Qwen anchors, all aligned with
-`docs/rules/sml.rules.md`.
+modeled as explicit actors instead of ad hoc control flow. The active planning scope is v2.0,
+which adds one truthful maintained Prism ML `Bonsai-1.7B.gguf` slice on top of the repo's existing
+maintained Llama ARM and canonical Qwen anchors, while preserving the engineering constraints in
+`docs/rules/sml.rules.md` and `AGENTS.md`.
 
 ## Core Value
 
@@ -17,24 +17,25 @@ before widening API surface or model scope.
 
 Shipped version: `v1.7`
 
-Status: Milestone v1.9 is defined and ready for phase planning on this branch. The shipped repo
-still reflects v1.7 plus the existing maintained Llama ARM and canonical Qwen acceptance surfaces.
+Status: Milestone v2.0 is being defined on this branch while v1.8 and v1.9 continue separately in
+flight. The shipped repo still reflects v1.7 plus the existing maintained Llama ARM and canonical
+Qwen acceptance surfaces.
 
 Release summary: `v1.7 Generator Prefill Submachine Decomposition` shipped on `2026-03-30` with
 `3` phases and `6` plans. Remaining open debt is decode-side generator decomposition plus the
 existing warning-only benchmark drift outside `generator/prefill`.
 
-## Current Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
+## Current Milestone: v2.0 Bonsai 1.7B 1-Bit Bring-Up
 
-**Goal:** Prove one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-GGUF` ARM slice through the
-existing EMEL generator, paritychecker, and benchmark workflow, with `Q4_K_M` as the maintained
-truth anchor and without broadening into generic Liquid-family support.
+**Goal:** Prove one truthful maintained Prism ML `Bonsai-1.7B.gguf` slice through the existing
+EMEL generator, paritychecker, and benchmark workflow, with the live Hugging Face artifact as the
+truth anchor and without broadening into generic 1-bit or custom-GGUF-family support.
 
 **Target features:**
-- One official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture with reproducible provenance under
-  `tests/models/`
-- One explicit Liquid request-conditioning contract derived from the official primary chat template
-- Explicit `lfm2` runtime bring-up on the maintained generator path
+- One official `Bonsai-1.7B.gguf` fixture with reproducible provenance under `tests/models/`
+- One explicit Bonsai request-conditioning contract derived from the shipped tokenizer/chat
+  metadata
+- Truthful EMEL model-loading and runtime support for the Bonsai 1-bit `Q1_0_g128` operand path
 - Maintained parity, regression protection, and benchmark publication for the same slice
 
 ## Latest Milestone: v1.7 Generator Prefill Submachine Decomposition
@@ -102,16 +103,18 @@ transitions instead of hidden action/detail control flow.
 
 ### Active
 
-- [ ] `FIX-02`: Document one official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` maintained fixture with
-  checksum, source, stable path, and download URL.
-- [ ] `COND-03`: Add one explicit Liquid request-conditioning contract derived from the primary
-  `tokenizer.chat_template`, with structured chat-message input, `tools=none`, and no implicit raw
-  fallback on the maintained slice.
-- [ ] `RUN-03`: Add truthful `lfm2` architecture/runtime support for one maintained Liquid Thinking
-  ARM slice through the shipped generator path.
-- [ ] `PAR-02`: Prove the maintained Liquid slice against `llama.cpp` on the same fixture and
-  conditioning contract.
-- [ ] `BENCH-08`: Publish one truthful Liquid benchmark compare/docs path for the same parity-
+- [ ] `FIX-03`: Document one official `Bonsai-1.7B.gguf` maintained fixture with checksum, source,
+  stable path, and direct Hugging Face download URL.
+- [ ] `META-02`: Record executable model truth for the Bonsai slice from live GGUF metadata and the
+  Hugging Face repository state, including the actual file name, architecture family, context
+  length, and 1-bit quant format.
+- [ ] `COND-04`: Add one explicit Bonsai request-conditioning contract derived from the maintained
+  tokenizer/chat metadata, with no silent fallback to an unrelated existing formatter surface.
+- [ ] `RUN-07`: Add truthful EMEL-owned runtime support for the maintained Bonsai slice on the
+  shipped generator path.
+- [ ] `PAR-03`: Prove the maintained Bonsai slice against the designated reference path on the same
+  fixture and conditioning contract.
+- [ ] `BENCH-09`: Publish one truthful Bonsai benchmark compare/docs path for the same parity-
   backed maintained slice.
 
 ### Out of Scope
@@ -119,10 +122,11 @@ transitions instead of hidden action/detail control flow.
 - Decode extraction or broader generator-family decomposition without an explicit milestone goal
 - Attention-family `sm_any` extraction before the remaining generator routing shape is clear
 - Broad repository cleanup unrelated to a milestone goal
-- Broad Liquid-family support beyond one maintained `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` slice
-- Sibling Liquid quantizations, including `Q4_0`, `Q5_K_M`, `Q6_K`, `Q8_0`, `BF16`, or `F16`, without explicit
+- Broad Prism/Bonsai-family support beyond one maintained `Bonsai-1.7B.gguf` slice
+- Alternate Bonsai export formats, sibling checkpoints, or future quant variants without explicit
   later-milestone approval
-- Tool use, function calling, or multi-turn thinking-history replay on the maintained Liquid path
+- Generic custom-GGUF or arbitrary third-party model support without an explicit milestone goal
+- Tool use, function calling, or multi-turn agent workflows on the maintained Bonsai path
 - Broad Qwen-family or multi-fixture support without an explicit maintained identity and milestone
   goal
 - Broad new public C API or CLI surface without explicit milestone approval
@@ -134,34 +138,37 @@ transitions instead of hidden action/detail control flow.
 
 ## Next Milestone Goals
 
-- Land one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` ARM slice.
-- Preserve maintained Llama/Qwen proof while Liquid support is added.
-- Keep the milestone narrow to one explicit `lfm2` fixture and one explicit conditioning contract.
-- Revisit decode extraction, broader generator decomposition, and benchmark-gate hardening only
-  after the Liquid slice is parity-backed and benchmarked.
+- Land one truthful maintained Prism ML `Bonsai-1.7B.gguf` slice.
+- Preserve maintained Llama/Qwen proof while Bonsai support is added.
+- Keep the milestone narrow to one explicit Bonsai fixture and one explicit conditioning contract.
+- Decide explicitly whether EMEL will support the Bonsai-specific `Q1_0_g128` path natively before
+  making parity or benchmark claims.
 
 ## Context
 
 This is a brownfield repository with an existing codebase map under `.planning/codebase/`. v1.7
 proved that generator decomposition can stay inside the `generator` domain and preserve explicit
 same-RTC event handoff instead of falling back to context phase flags or hidden helper routing. The
-new v1.9 scope is a different kind of widening: the repo currently treats `llama` and `qwen3` as
-its explicit maintained model architectures, while official Liquid sources identify the target
-fixture as `lfm2` with a hybrid block contract and a primary chat template that includes
-`keep_past_thinking`. The repo remains governed by `AGENTS.md` and `docs/rules/sml.rules.md`, so
-future work still needs to preserve same-RTC actor semantics, explicit error publication, bounded
-actions, and deliberate machine-structure changes.
+new v2.0 scope widens the maintained model surface in a different direction: the live Hugging Face
+repo `prism-ml/Bonsai-1.7B-gguf` was published on `2026-03-31`, exposes one file named
+`Bonsai-1.7B.gguf`, describes a Qwen3-1.7B-based dense architecture, and advertises a custom 1-bit
+`Q1_0_g128` GGUF weight format with support currently demonstrated through Prism's `llama.cpp`
+fork. The repo remains governed by `AGENTS.md` and `docs/rules/sml.rules.md`, so future work still
+needs to preserve same-RTC actor semantics, explicit error publication, bounded actions, and
+deliberate machine-structure changes.
 
 ## Constraints
 
 - **Architecture**: Follow `docs/rules/sml.rules.md` and the local machine conventions in
   `AGENTS.md` so runtime/model work preserves the RTC actor model and no-queue invariant.
-- **Explicit behavior modeling**: Any Liquid-specific orchestration changes must keep control flow
+- **Explicit behavior modeling**: Any Bonsai-specific orchestration changes must keep control flow
   on guards, states, typed events, and transitions rather than action/detail routing shortcuts.
-- **Truth anchor**: v1.9 is one official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture, not generic
-  Liquid-family or multi-quant support.
-- **Conditioning**: The maintained Liquid path must use one explicit structured chat-message
-  contract and must not fall back to raw prompting silently.
+- **Truth anchor**: v2.0 is one official `Bonsai-1.7B.gguf` fixture, not generic 1-bit or
+  third-party GGUF support.
+- **Conditioning**: The maintained Bonsai path must use one explicit structured chat-message
+  contract and must not fall back to raw prompting or an unrelated existing formatter silently.
+- **Runtime honesty**: The milestone must not claim Bonsai support unless EMEL either implements
+  the required `Q1_0_g128` path or explicitly proves an approved alternative with user sign-off.
 - **Acceptance boundary**: Maintained proof still lives on the shipped generator, paritychecker,
   benchmark, snapshot, and docs surfaces.
 - **Repository state**: This is an active brownfield codebase, so milestone work should minimize
@@ -176,10 +183,11 @@ actions, and deliberate machine-structure changes.
 | Keep prefill request-scoped data on typed runtime/internal events | This preserved explicit behavior modeling and avoided context phase flags | ✓ Good |
 | Defer decode extraction until the prefill pattern is proven | Decode also owns sampling, rendering, and loop control, so it was the riskier first cut | ✓ Good |
 | Defer `attention::any` / `sm_any` extraction until after prefill collapse | Attention mode is only one axis of the duplication and should not hide unresolved top-level routing | ⚠ Revisit |
-| Keep v1.9 fixed to one official Liquid Thinking GGUF slice | The repo needs one truthful maintained Liquid anchor before any broader family claims | — Pending |
-| Use GGUF/config metadata as the maintained truth source for Liquid | Official prose and executable metadata disagree on context length, so docs must follow executable truth | — Pending |
-| Start v1.9 with `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` | The user explicitly reprioritized the milestone around the docs-recommended quant, accepting that this broadens runtime scope beyond the prior `Q8_0` anchor | — Pending |
-| Keep the maintained Liquid contract on `tools=none` and no thinking-history replay | Tool use and `keep_past_thinking` widen the request surface beyond the first-slice milestone | — Pending |
+| Start v2.0 at a new major version while v1.8 and v1.9 continue in flight | The user wants Bonsai work tracked independently instead of rebasing the current in-flight milestones | — Pending |
+| Keep v2.0 fixed to one official `Bonsai-1.7B.gguf` slice | The repo needs one truthful maintained Bonsai anchor before any broader 1-bit or vendor claims | — Pending |
+| Use live Hugging Face repo state plus executable GGUF metadata as the maintained truth source for Bonsai | The model card README, quickstart snippets, and file tree already disagree on the published filename, so docs must follow executable truth | — Pending |
+| Treat `Q1_0_g128` as milestone-defining scope, not an incidental detail | Prism describes Bonsai support through a custom 1-bit operand path; the milestone is not honest if it ignores that kernel/runtime requirement | — Pending |
+| Keep the maintained Bonsai contract on one explicit formatter/request surface first | Multi-turn or tool-rich Bonsai workflows would widen the request boundary before the first maintained slice is proven | — Pending |
 
 ## Evolution
 
@@ -199,4 +207,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-31 after starting v1.9*
+*Last updated: 2026-04-02 after starting v2.0*

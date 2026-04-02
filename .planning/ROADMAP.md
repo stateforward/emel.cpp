@@ -2,106 +2,109 @@
 
 ## Overview
 
-v1.9 delivers one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` ARM slice
-through the existing generator, paritychecker, and benchmark workflow. The milestone stays narrow:
-one official fixture, one explicit Liquid conditioning contract, one explicit `lfm2` runtime
-path, then maintained parity and benchmark publication for that exact slice.
+v2.0 delivers one truthful maintained Prism ML `Bonsai-1.7B.gguf` slice through the existing EMEL
+generator, paritychecker, and benchmark workflow. The milestone stays narrow and honest to the
+research: freeze one maintained fixture, bind one explicit Bonsai conditioning contract, land the
+native `Q1_0_g128` runtime path on the existing `qwen3` lane, then prove parity/regression and
+publish one benchmark/docs path for that exact slice.
 
 ## Phases
 
 **Phase Numbering:**
 - Integer phases continue across milestones.
-- v1.9 starts at Phase 33 because v1.7 ended at Phase 32.
+- v2.0 starts at Phase 38 because the prior in-flight roadmap ended at Phase 37.
 
-- [ ] **Phase 33: Fixture, Metadata, And Contract Lock** - Lock the exact Liquid fixture,
-      executable metadata truth, and maintained conditioning contract.
-- [ ] **Phase 34: `lfm2` Model Contract Bring-Up** - Make EMEL truthfully recognize the canonical
-      Liquid slice as `lfm2` with an explicit maintained model contract.
-- [ ] **Phase 35: Maintained Runtime Execution On ARM** - Bring the shipped generator path up on
-      the canonical Liquid slice with a truthful `Q4_K_M` runtime contract.
-- [ ] **Phase 36: Parity And Regression Proof** - Prove the maintained Liquid slice against
-      `llama.cpp` and protect the prior maintained anchors.
-- [ ] **Phase 37: Benchmark And Docs Publication** - Publish one parity-backed Liquid benchmark
-      path and maintained docs for the same slice.
+- [ ] **Phase 38: Fixture Provenance And Metadata Truth** - Freeze the maintained Bonsai fixture,
+      executable GGUF truth, and exact file-versus-format naming.
+- [ ] **Phase 39: Bonsai Conditioning Contract** - Bind one explicit Bonsai formatter contract and
+      reject unsupported request shapes.
+- [ ] **Phase 40: Native `Q1_0_g128` Runtime Bring-Up** - Add truthful EMEL-owned runtime support
+      for the maintained Bonsai slice on the existing `qwen3` path.
+- [ ] **Phase 41: Parity And Regression Proof** - Prove the maintained Bonsai slice against the
+      Prism reference lane and protect prior maintained anchors.
+- [ ] **Phase 42: Benchmark And Publication** - Publish one truthful Bonsai benchmark/docs path
+      for the same parity-backed maintained slice.
 
 ## Phase Details
 
-### Phase 33: Fixture, Metadata, And Contract Lock
-**Goal**: The repo names one exact maintained Liquid fixture and one exact maintained request
-contract before runtime work starts.
-**Depends on**: Shipped Phase 32
-**Requirements**: FIX-02, META-01, COND-03
+### Phase 38: Fixture Provenance And Metadata Truth
+**Goal**: The repo freezes one maintained Bonsai artifact identity and one executable truth set
+before contract or runtime work starts.
+**Depends on**: Nothing (new milestone starts at continued numbering)
+**Requirements**: FIX-03, META-02, META-03
 **Success Criteria** (what must be TRUE):
-  1. The repo documents exactly one official maintained fixture at
-     `tests/models/LFM2.5-1.2B-Thinking-Q4_K_M.gguf` with checksum, source, stable path, and
-     download URL.
-  2. Maintained repo evidence records executable model truth for the slice from official
-     GGUF/config metadata, including `architecture=lfm2`, instead of stale prose-only metadata.
-  3. The maintained Liquid request path exposes one explicit structured chat-message contract with
-     `tools=none`, `add_generation_prompt=true`, and no implicit raw fallback.
+  1. Repo-visible fixture docs and registries name exactly one maintained file at
+     `tests/models/Bonsai-1.7B.gguf` with checksum, size, source repo, and direct download URL.
+  2. Maintained model-truth evidence records the Bonsai slice as `general.architecture=qwen3`
+     with the required GGUF metadata values from the executable artifact, not stale prose.
+  3. Operator-facing docs and publication surfaces distinguish the fixture filename
+     `Bonsai-1.7B.gguf` from the weight format `Q1_0_g128` and do not rely on the stale quickstart
+     filename.
 **Plans**: TBD
 
-### Phase 34: `lfm2` Model Contract Bring-Up
-**Goal**: EMEL-owned model-loading surfaces truthfully accept the canonical Liquid fixture as
-`lfm2` and expose its maintained topology contract.
-**Depends on**: Phase 33
-**Requirements**: RUN-03, RUN-05
+### Phase 39: Bonsai Conditioning Contract
+**Goal**: The maintained Bonsai slice exposes one explicit structured request contract before
+runtime and parity claims are made.
+**Depends on**: Phase 38
+**Requirements**: COND-04, COND-05, COND-06
 **Success Criteria** (what must be TRUE):
-  1. EMEL-owned model metadata/loading surfaces identify the maintained fixture as `lfm2` instead
-     of rejecting it or aliasing it to `llama` or `qwen3`.
-  2. The canonical Liquid slice's required metadata, tensor naming, and hybrid block contract are
-     represented explicitly in `src/emel` for the maintained fixture.
-  3. Repo-visible model contract evidence makes the maintained Liquid path auditable as a
-     dedicated `lfm2` architecture slice rather than a generic Llama-family claim.
+  1. The maintained Bonsai request path formats chat input from the embedded
+     `tokenizer.chat_template` using one explicit structured message contract.
+  2. Supported Bonsai requests are limited to `system`, `user`, and `assistant` messages with
+     `add_generation_prompt=true`, `tools=none`, and `enable_thinking=false`.
+  3. Unsupported Bonsai request shapes, including tool calls, tool responses, thinking replay,
+     named template variants, and raw-prompt fallback, fail explicitly on repo-visible surfaces.
 **Plans**: TBD
 
-### Phase 35: Maintained Runtime Execution On ARM
-**Goal**: The shipped generator path can initialize and generate on the canonical Liquid slice on
-ARM without widening beyond the maintained `Q4_K_M` truth anchor.
-**Depends on**: Phase 34
-**Requirements**: RUN-04, RUN-06
+### Phase 40: Native `Q1_0_g128` Runtime Bring-Up
+**Goal**: EMEL truthfully runs the maintained Bonsai slice on the shipped generator path using a
+native `Q1_0_g128` operand path on the existing `qwen3` architecture lane.
+**Depends on**: Phase 39
+**Requirements**: RUN-07, RUN-08, RUN-09
 **Success Criteria** (what must be TRUE):
-  1. The maintained generator path initializes the official
-     `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture and produces bounded generation on ARM.
-  2. Runtime execution for the maintained Liquid slice uses the explicit `lfm2` path and the
-     maintained `Q4_K_M` surface rather than broad sibling-quant or generic Liquid claims.
-  3. Maintained runtime evidence publishes a truthful quantized-path contract for the official
-     `Q4_K_M` fixture only.
+  1. EMEL-owned model loading and metadata surfaces accept `Bonsai-1.7B.gguf` as a `qwen3`
+     fixture instead of inventing a new `bonsai` or `prismml` execution family.
+  2. `src/emel` provides a native `Q1_0_g128` dtype/layout and hot-path execution path for the
+     maintained Bonsai tensors without a whole-tensor dequantize-to-f32 fallback.
+  3. The shipped generator path initializes and produces bounded generation on
+     `tests/models/Bonsai-1.7B.gguf` using the maintained Bonsai formatter contract and native
+     `Q1_0_g128` runtime path.
 **Plans**: TBD
 
-### Phase 36: Parity And Regression Proof
-**Goal**: The exact maintained Liquid slice is proven correct against the reference and does not
-break the existing maintained anchors.
-**Depends on**: Phase 35
-**Requirements**: PAR-02, VER-02
+### Phase 41: Parity And Regression Proof
+**Goal**: Correctness claims for the maintained Bonsai slice are proven against the truthful
+reference lane and do not break the prior maintained anchors.
+**Depends on**: Phase 40
+**Requirements**: PAR-03, VER-03
 **Success Criteria** (what must be TRUE):
-  1. `tools/paritychecker --generation` proves EMEL against `llama.cpp` on the canonical Liquid
-     fixture using the same maintained conditioning contract from Phase 33.
-  2. Stored regression evidence covers the Liquid slice and the prior maintained Llama and Qwen
-     anchors.
-  3. Maintained parity evidence makes the exact fixture and contract auditable for reviewers.
+  1. `tools/paritychecker --generation` proves EMEL against a pinned `PrismML-Eng/llama.cpp`
+     reference lane on `Bonsai-1.7B.gguf` using the same maintained formatter contract.
+  2. Regression coverage protects the maintained Bonsai slice and the prior maintained Llama and
+     Qwen anchors from fixture, formatter, architecture, or quant-path drift.
+  3. Repo-visible parity evidence makes the exact fixture, formatter contract, and Prism reference
+     identity auditable for reviewers.
 **Plans**: TBD
 
-### Phase 37: Benchmark And Docs Publication
-**Goal**: The repo publishes one benchmark/docs path for the same parity-backed maintained Liquid
-slice and nothing broader.
-**Depends on**: Phase 36
-**Requirements**: BENCH-08
+### Phase 42: Benchmark And Publication
+**Goal**: The repo publishes one truthful benchmark/docs path for the same parity-backed maintained
+Bonsai slice and nothing broader.
+**Depends on**: Phase 41
+**Requirements**: BENCH-09
 **Success Criteria** (what must be TRUE):
-  1. `tools/bench` compare output includes one maintained Liquid benchmark case for the official
-     `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` slice.
-  2. Stored benchmark evidence and generated docs identify the exact fixture and maintained
-     conditioning contract used for the Liquid slice.
-  3. Published Liquid benchmark evidence stays aligned with the parity-backed maintained slice and
-     does not broaden into generic Liquid or sibling-quant claims.
+  1. `tools/bench` compare output includes one maintained Bonsai benchmark case for
+     `tests/models/Bonsai-1.7B.gguf` aligned with the parity-backed formatter and runtime contract.
+  2. Stored benchmark evidence and generated docs identify the exact fixture, Bonsai contract, and
+     Prism reference lane used for the maintained slice.
+  3. Published Bonsai benchmark surfaces stay scoped to the single maintained fixture and do not
+     overclaim generic 1-bit support, tool calling, thinking replay, or raw fallback support.
 **Plans**: TBD
 
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 33. Fixture, Metadata, And Contract Lock | 0/TBD | Not started | - |
-| 34. `lfm2` Model Contract Bring-Up | 0/TBD | Not started | - |
-| 35. Maintained Runtime Execution On ARM | 0/TBD | Not started | - |
-| 36. Parity And Regression Proof | 0/TBD | Not started | - |
-| 37. Benchmark And Docs Publication | 0/TBD | Not started | - |
+| 38. Fixture Provenance And Metadata Truth | 0/TBD | Not started | - |
+| 39. Bonsai Conditioning Contract | 0/TBD | Not started | - |
+| 40. Native `Q1_0_g128` Runtime Bring-Up | 0/TBD | Not started | - |
+| 41. Parity And Regression Proof | 0/TBD | Not started | - |
+| 42. Benchmark And Publication | 0/TBD | Not started | - |

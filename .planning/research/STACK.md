@@ -1,7 +1,7 @@
 # Stack Research
 
-**Domain:** Brownfield C++ GGUF inference engine adding one maintained LiquidAI `LFM2.5-1.2B-Thinking-GGUF` ARM slice
-**Researched:** 2026-03-31
+**Domain:** Brownfield C++ GGUF inference engine adding one maintained Prism ML `Bonsai-1.7B.gguf` 1-bit slice
+**Researched:** 2026-04-02
 **Confidence:** HIGH
 
 ## Recommended Stack
@@ -10,188 +10,185 @@
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| `LiquidAI/LFM2.5-1.2B-Thinking-GGUF` | `lastModified=2026-03-30T12:55:23Z` | Official maintained GGUF source | This is the official GGUF distribution for the exact milestone target and explicitly points back to `LiquidAI/LFM2.5-1.2B-Thinking` as its `base_model`. |
-| `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` | current file in official GGUF repo | Single maintained ARM fixture | The user explicitly wants the milestone anchored on the docs-recommended `Q4_K_M` quant. This turns some additional quant-runtime work into part of the maintained acceptance boundary rather than a later expansion. |
-| `ggml-org/llama.cpp` reference pin | `ecbcb7ea9d3303097519723b264a8b5f1e977028` | Parity and benchmark reference | The repo's current pin already contains `LLM_ARCH_LFM2`, `Lfm2ForCausalLM` GGUF conversion support, and `tokenizer_pre == "lfm2"` handling. No reference dependency upgrade is required for this milestone. |
-| EMEL internal `lfm2` slice | new repo-local support | Native execution of Liquid hybrid blocks | The official GGUF metadata advertises `general.architecture=lfm2`, not `llama` or `qwen3`. A truthful maintained slice therefore needs a new internal architecture path rather than reusing existing llama/qwen assumptions. |
+| `prism-ml/Bonsai-1.7B-gguf` | `sha=c89c1b5578286827264c4217f40edee617f4f904` | Official maintained model source | This is the published Hugging Face repo for the exact milestone target. It exposes one GGUF sibling file, `Bonsai-1.7B.gguf`, and its API reports `gguf.architecture=qwen3`. |
+| `Bonsai-1.7B.gguf` | current published file, `248302272` bytes | Single maintained fixture | The repo tree and direct resolve URL agree on this filename even though the README quickstart still uses `Bonsai-1.7B-Q1_0_g128.gguf`. Use the live artifact, not stale prose, as truth. |
+| Existing EMEL GGUF loader | current repo | Container and metadata parsing | Bonsai is still a GGUF model. Do not add a Prism-specific container format or alternate model loader; extend the existing GGUF/tensor-type handling only where the new quant type demands it. |
+| Existing EMEL `qwen3` model topology | current repo + Bonsai-specific validation | Architecture/runtime contract | The published Bonsai artifact is not a new execution architecture. It is a `qwen3` dense model with a new weight encoding. Reuse the existing Qwen3 topology path instead of inventing a `bonsai` or `prismml` architecture family. |
+| Native EMEL `Q1_0_g128` operand path | new repo-local support | Truthful execution of Bonsai weights | The official Bonsai model card says embeddings, attention projections, MLP projections, and LM head are stored in GGUF `Q1_0_g128`. Supporting Bonsai honestly therefore requires a native EMEL tensor type, storage layout, and hot-path kernels for that operand class. |
+| `PrismML-Eng/llama.cpp` reference lane | default branch `prism`; pin exact commit for milestone | Parity and benchmark reference | The official Bonsai README points users to Prism's `llama.cpp` fork for `Q1_0_g128` kernels. Upstream `ggml-org/llama.cpp` does not advertise or expose `Q1_0_g128` in its README or `ggml-quants` sources, so it is not the truthful Bonsai reference today. |
 
 ### Supporting Libraries
 
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
-| Existing EMEL quantized runtime surfaces plus new `Q4_K_M` bring-up work | current repo + new repo-local support | Native quantized execution for the maintained fixture | The maintained fixture is now `Q4_K_M`, so v1.9 must truthfully include whatever extra quantized runtime support this path requires. |
-| Existing EMEL benchmark/parity FetchContent wiring to official `llama.cpp` | current repo | Reference execution and compare publication | Reuse as-is. Only add new Liquid fixture/case names and architecture acceptance. |
-| Existing EMEL tokenizer BPE pre-processing mapped through official `llama.cpp` pre-type | current repo | Tokenization compatibility | Reuse the current LLAMA3-equivalent pre-tokenizer path unless parity proves a mismatch. Official `llama.cpp` maps `tokenizer_pre == "lfm2"` onto its LLAMA3 pre-tokenizer branch. |
-| New Liquid-specific formatter binding in [`tools/generation_formatter_contract.hpp`](/Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/tools/generation_formatter_contract.hpp) | repo-local addition | Truthful prompt formatting for the maintained slice | Add one explicit binding for the official Liquid primary template subset: BOS `<|startoftext|>`, ChatML framing, `add_generation_prompt=true`, `tools=none`, `keep_past_thinking=false`. Do not widen into generic Jinja/template execution. |
+| Existing EMEL `qwen3` loader/runtime surfaces | current repo | Reuse Bonsai's architecture contract | Use for model metadata, tensor naming, block count, RoPE, RMSNorm, and tokenizer family handling because the artifact reports `general.architecture=qwen3`. |
+| New Bonsai formatter binding in `tools/generation_formatter_contract.hpp` | repo-local addition | Explicit request-conditioning contract | Use when the loaded artifact is the maintained Bonsai fixture. The published chat template is Qwen-like, but it is not identical to the repo's current supported Qwen contract matcher and includes an assistant `<think>` preamble on generation. |
+| Existing parity/bench FetchContent wiring retargeted to Prism fork | current repo + new pin | Truthful reference execution | Use in `tools/paritychecker` and `tools/bench` only. Keep EMEL runtime native; the fork is for comparison truth, not for product execution. |
+| `curl` + `shasum -a 256` or `sha256sum` | system tools, no new dependency | Download and provenance capture | Use for fixture fetch and checksum recording. This milestone does not require adding `huggingface_hub`, Python tooling, or a new asset downloader. |
 
 ### Development Tools
 
 | Tool | Purpose | Notes |
 |------|---------|-------|
-| [`tools/paritychecker`](/Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/tools/paritychecker/CMakeLists.txt) | Stored parity against official `llama.cpp` | Keep the existing workflow. Add one Liquid fixture slug/path and architecture acceptance only. |
-| [`tools/bench`](/Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/tools/bench/CMakeLists.txt) | Benchmark compare/docs publication | Keep the existing compare/docs pipeline. Add one Liquid maintained case family; do not change benchmark-gate policy. |
-| [`tests/models/README.md`](/Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/tests/models/README.md) | Fixture provenance ledger | Add the official Liquid repo URL, exact file name, license, download URL, size, and SHA256 after first download. |
+| `curl -I -L` | Pre-download provenance check | Use the official resolve URL to record `x-repo-commit`, `x-linked-size`, and the final served filename before first download. |
+| `curl -L` | Fixture download | Download the single maintained asset directly from Hugging Face into `tests/models/Bonsai-1.7B.gguf`. |
+| `shasum -a 256` / `sha256sum` | Post-download provenance | Record the actual local file checksum in `tests/models/README.md`. Treat the local SHA256 as the repo's checksum source of truth. |
+| Existing `FetchContent` reference wiring | Reference fork pinning | Retarget `tools/paritychecker` and `tools/bench` from upstream `ggml-org/llama.cpp` to `PrismML-Eng/llama.cpp`, then pin an exact commit before claiming parity or benchmark truth. |
 
-## Required Additions In EMEL
+## Required Additions
 
 | Integration Point | Change Needed | Why It Matters |
 |-------------------|---------------|----------------|
-| [`src/emel/model/data.cpp`](/Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/src/emel/model/data.cpp) | Add `lfm2` to supported execution architectures and define an `lfm2` tensor/metadata contract | Current code only accepts `llama` and `qwen3`. The official Liquid GGUF reports `architecture=lfm2`. |
-| `src/emel/model/...` and generator compute path | Add a dedicated `lfm2` execution view/runtime slice | LFM2 is a hybrid architecture with mixed conv and full-attention layers, `shortconv_l_cache=3`, tied embeddings, and an output norm tensor named `token_embd_norm`. That is not a llama/qwen drop-in. |
-| [`tools/generation_formatter_contract.hpp`](/Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/tools/generation_formatter_contract.hpp) | Add one Liquid formatter contract string and matcher | The current supported contract is Qwen-specific and requires markers such as `enable_thinking` that are not part of the Liquid template. |
-| `tools/paritychecker/parity_runner.cpp` | Add one official Liquid maintained fixture path/slug and `lfm2` architecture validation | This keeps parity truthful on one explicit asset instead of broadening to generic Liquid support. |
-| `tools/bench/generation_bench.cpp` and [`tools/bench/bench_cases.hpp`](/Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/tools/bench/bench_cases.hpp) | Add one Liquid benchmark case family using the same maintained fixture | This preserves the existing compare/docs workflow with one new case set instead of a new toolchain. |
-| [`tests/models/README.md`](/Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/liquid-ai/tests/models/README.md) | Record official model provenance for the maintained Liquid fixture | The milestone should have the same provenance discipline as Qwen and Llama. |
+| `src/emel/kernel/detail.hpp` | Add a native tensor dtype and block layout for `Q1_0_g128` | EMEL currently defines quant layouts for `q8_0`, `q2_k`, `q3_k`, `q4_k`, `q6_k`, and related prepared/packed variants. Bonsai needs a project-owned `Q1_0_g128` representation before any truthful runtime support exists. |
+| `src/emel/kernel/aarch64/actions.hpp` and associated kernel dispatch surfaces | Add native hot-path kernels for `Q1_0_g128` weights against EMEL's activation/input format | The milestone target is a maintained ARM/runtime slice. A Bonsai claim is not honest if EMEL falls back to whole-tensor dequantize-to-f32 in the hot path. |
+| `src/emel/generator/detail.hpp` | Add Bonsai quantized-route preparation, workspace sizing, and dispatch accounting | Existing generator quant routing is built around `q8_0`, `q4_k`, and `q6_k` families. Bonsai needs the same route-selection, packing/preparation, and audit coverage for `Q1_0_g128`. |
+| `src/emel/model/llama/detail.hpp` and parity audit reporting | Extend quantized-path auditing to classify Bonsai stages truthfully | The Bonsai README says 1-bit coverage includes token embeddings and LM head, not only inner projection weights. Audit output must reflect native support or explicit non-support stage by stage. |
+| `tools/generation_formatter_contract.hpp` | Add a Bonsai-specific supported contract matcher and formatter | The published Bonsai `tokenizer.chat_template` is not a drop-in match for the current supported Qwen contract markers. It needs its own explicit maintained contract rather than a silent fallback or generic template engine. |
+| `tools/generation_fixture_registry.hpp` | Add or replace the current publication fixture with `Bonsai-1.7B.gguf` | The milestone is one maintained Bonsai slice. The maintained fixture registry must point tools at the exact official file and slug. |
+| `tests/models/README.md` | Add Bonsai provenance entry with source, stable path, direct download URL, byte size, and SHA256 after download | The repo already treats `tests/models/README.md` as the fixture ledger. Bonsai should follow the same provenance contract as Qwen and LFM2. |
+| `tools/paritychecker/CMakeLists.txt`, `tools/bench/CMakeLists.txt`, `tools/paritychecker/reference_ref.txt`, `tools/bench/reference_ref.txt` | Retarget the reference lane to `PrismML-Eng/llama.cpp` and pin an exact ref | Upstream `ggml-org/llama.cpp` is not the truthful Bonsai comparison target while `Q1_0_g128` remains fork-only. |
+| `tools/paritychecker/parity_runner.cpp` and bench case selection | Keep Bonsai on the existing `qwen3` architecture path while switching the fixture and formatter contract | Bonsai should ride the existing Qwen3 architecture acceptance surface. The new work is the quant path and prompt contract, not a new architecture family. |
 
-## Model Provenance And Fixture Choice
+## Fixture Provenance Contract
 
-### Canonical maintained asset
-
-Use:
+Use this exact maintained identity:
 
 ```text
-Repo: LiquidAI/LFM2.5-1.2B-Thinking-GGUF
-File: LFM2.5-1.2B-Thinking-Q4_K_M.gguf
-Stable path: tests/models/LFM2.5-1.2B-Thinking-Q4_K_M.gguf
-Base model: LiquidAI/LFM2.5-1.2B-Thinking
-License: lfm1.0
+Repo: prism-ml/Bonsai-1.7B-gguf
+File: Bonsai-1.7B.gguf
+Stable path: tests/models/Bonsai-1.7B.gguf
+Download URL: https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/main/Bonsai-1.7B.gguf
+License: Apache-2.0
+Published repo commit at research time: c89c1b5578286827264c4217f40edee617f4f904
+Published file size at research time: 248302272 bytes
 ```
 
-Why this file:
+Why this matters:
 
-- It is an official LiquidAI GGUF artifact, not a third-party conversion.
-- The user explicitly wants the milestone anchored on the docs-recommended quant.
-- It keeps the repo honest about the exact operator-facing artifact users are likely to reach for first.
-- It makes any additional quant-runtime work part of the stated milestone instead of hidden follow-up debt.
+- The live repo publishes exactly one GGUF file, so there is no reason to widen the milestone into multi-fixture support.
+- The README quickstart examples use a stale filename. The resolve URL and file tree are the executable truth and should drive the maintained fixture path.
+- Hugging Face response headers already expose useful provenance before the download finishes, but the repo should still record a local SHA256 after the first download.
 
-Why not `Q4_0`, `Q5_K_M`, `Q6_K`, `Q8_0`, `BF16`, or `F16` as the maintained fixture:
+## Optional Additions
 
-- `Q4_0` is still out because it is a different quantized contract than the user-selected anchor.
-- `Q5_K_M`, `Q6_K`, `Q8_0`, `BF16`, and `F16` remain sibling variants that should not be implied by proving `Q4_K_M`.
+These may help, but they are not required for the milestone.
 
-## Architecture Metadata To Treat As Source Of Truth
-
-Use the official GGUF/config metadata, not the prose summary table on the model card, as the implementation source of truth.
-
-| Metadata | Official Value | Implementation Note |
-|----------|----------------|---------------------|
-| `general.architecture` | `lfm2` | New EMEL architecture path required. |
-| Context length | `128000` in official GGUF metadata and `max_position_embeddings=128000` in `config.json` | The model card prose also says `32,768`; treat that prose as stale and prefer GGUF/config metadata. |
-| Hidden size | `2048` | Required for runtime sizing. |
-| Layers | `16` | Matches the official Thinking card. |
-| Layer pattern | `10` conv-style layers and `6` full-attention layers via `layer_types` | This is the critical architectural difference from llama/qwen. |
-| Heads | `32` attention heads, `8` KV heads on attention layers | Official llama.cpp conversion sets per-layer KV heads to `0` for conv layers. |
-| Rope base | `1000000.0` | Must come from `lfm2.rope.freq_base`. |
-| FFN | `block_ff_dim=12288` with auto-adjusted exported feed-forward length | Do not assume llama/qwen FFN metadata naming. |
-| Short conv cache | `conv_L_cache=3` | Required for the recurrent/conv side of the hybrid model. |
-| Tied embedding | `true` | Output handling must allow the tied-output case. |
-| Output norm tensor | `token_embd_norm` naming in official llama.cpp tensor map | Current EMEL output-norm lookup assumes `output_norm.weight`; LFM2 needs an architecture-specific mapping. |
-
-## Tokenizer And Chat-Template Handling
-
-### What to support
-
-- Support the official primary Liquid chat template subset used by the maintained parity and benchmark surfaces:
-  - prepend BOS `<|startoftext|>`
-  - render ChatML-style messages with `<|im_start|>` / `<|im_end|>`
-  - require `add_generation_prompt=true`
-  - keep `tools=none`
-  - keep `keep_past_thinking=false`
-- Treat the formatter contract as model-specific and explicit, the same way the Qwen slice is explicit today.
-
-### What this means for the existing repo
-
-- The current formatter contract is not sufficient for Liquid because it is keyed to Qwen-specific markers and omits the BOS token.
-- The new formatter binding should stay narrow and support the maintained surface only: single-turn structured chat messages, no tools, no named templates, no generic template engine.
-- Do not add a new tokenizer regex/pre-tokenizer family just for this milestone. Official `llama.cpp` already maps `tokenizer_pre == "lfm2"` to its LLAMA3 pre-tokenizer branch.
+| Optional Item | Why Optional | When to Use |
+|---------------|--------------|-------------|
+| `hf` CLI / authenticated Hugging Face token flow | Direct `curl` works for the maintained asset already | Only add if CI or repeated large-file fetches start hitting rate limits or resume problems. |
+| Small provenance helper script around `curl -I -L` + checksum capture | Nice for operator ergonomics, not a runtime dependency | Only if the team wants to automate fixture ledger updates after the first manual proof. |
 
 ## Installation
 
 ```bash
-# Official maintained fixture
-curl -L \
-  https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF/resolve/main/LFM2.5-1.2B-Thinking-Q4_K_M.gguf \
-  -o tests/models/LFM2.5-1.2B-Thinking-Q4_K_M.gguf
+# Inspect remote provenance before download
+curl -I -L \
+  https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/main/Bonsai-1.7B.gguf
 
-# Record provenance after download
-shasum -a 256 tests/models/LFM2.5-1.2B-Thinking-Q4_K_M.gguf
+# Download the maintained fixture
+curl -L \
+  https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/main/Bonsai-1.7B.gguf \
+  -o tests/models/Bonsai-1.7B.gguf
+
+# Record the local checksum
+shasum -a 256 tests/models/Bonsai-1.7B.gguf
+
+# Linux spelling if preferred
+sha256sum tests/models/Bonsai-1.7B.gguf
 ```
 
-No new external C++ library should be added for this milestone.
+No new external C++ library should be added for this milestone. Keep the existing Zig-based build/toolchain and existing EMEL GGUF infrastructure.
 
 ## Alternatives Considered
 
 | Recommended | Alternative | When to Use Alternative |
 |-------------|-------------|-------------------------|
-| Official `Q4_K_M` Liquid fixture | Official `Q6_K` Liquid fixture | Only after the first maintained `lfm2` slice is proven and you want a second quantized acceptance surface. |
-| New explicit Liquid formatter binding | Generic Jinja/template execution against arbitrary `tokenizer.chat_template` | Only in a later milestone that explicitly broadens the conditioning surface beyond one maintained Liquid slice. |
-| Current pinned official `llama.cpp` reference | Bumping the reference pin | Only if implementation discovers a concrete LFM2 bug missing from `ecbcb7ea9d3303097519723b264a8b5f1e977028`. Current pin already has the needed `lfm2` support. |
+| `PrismML-Eng/llama.cpp` in `tools/` only | `ggml-org/llama.cpp` as Bonsai reference | Only after upstream officially lands `Q1_0_g128` support and the maintained Bonsai artifact runs there without Prism-specific patches. |
+| Existing EMEL `qwen3` architecture path | New `bonsai` or `prismml` model architecture family | Only if a future published Bonsai artifact stops reporting `general.architecture=qwen3`. |
+| Explicit Bonsai formatter contract | Generic Jinja/template execution against arbitrary `tokenizer.chat_template` | Only in a later milestone that explicitly widens conditioning beyond one maintained Bonsai slice. |
+| Native `Q1_0_g128` hot path | Whole-tensor dequantize-to-f32 fallback | Only with explicit user approval as an interim milestone, clearly labeled as interim and non-parity-complete. |
 
 ## What NOT to Use
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `LFM2.5-1.2B-Thinking-Q4_0.gguf` as the maintained slice | EMEL does not currently have a native `q4_0` hot path, so this would silently turn the milestone into new kernel work | `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` |
-| Generic Liquid-family support (`Base`, `Instruct`, `JP`, `VL`, `Audio`, `MoE`) | This milestone is about one truthful maintained Thinking GGUF ARM slice only | Support only `LiquidAI/LFM2.5-1.2B-Thinking-GGUF` |
-| Full tool-use support | The official template supports tools, but the maintained repo surface does not need them for parity/benchmark proof | Keep `tools=none` for this milestone |
-| Full multi-turn thinking-history support | The template has `keep_past_thinking`, but the maintained workflow is single-turn and does not need history replay logic | Keep `keep_past_thinking=false` only |
-| New MLX, ONNX, Transformers, or vLLM integration | Those are separate deployment stacks and add no value to the existing EMEL parity/benchmark acceptance surface | Reuse the current EMEL runtime plus official `llama.cpp` reference |
-| New benchmark tooling or policy | The current compare/docs workflow is already validated | Add one Liquid case family to the existing tooling |
+| `ggml-org/llama.cpp` as the maintained Bonsai reference today | Upstream README and `ggml-quants` sources do not expose `Q1_0_g128`, while Prism's official Bonsai docs explicitly point to Prism's fork | `PrismML-Eng/llama.cpp` in `tools/paritychecker` and `tools/bench` only |
+| A new `bonsai` or `prismml` execution architecture in EMEL | The published GGUF metadata says `general.architecture=qwen3` | Reuse the existing Qwen3 topology and loader path |
+| Generic 1-bit or arbitrary third-party GGUF support | That widens the milestone beyond one truthful maintained fixture | Support only the official `Bonsai-1.7B.gguf` slice |
+| Generic Jinja/template execution or tool-calling implementation | The published Bonsai template contains tools support, but the milestone acceptance surface does not require tools and should stay narrow | One explicit Bonsai formatter contract with `tools=none` |
+| MLX, Swift, Android, ONNX, vLLM, or Transformers integration | Those are separate deployment stacks and add no value to EMEL's current generator/parity/bench acceptance boundary | Existing EMEL runtime plus a Prism-fork reference lane |
+| Whole-tensor dequantize-to-f32 hot-path fallback | It breaks the milestone's performance and parity honesty contract | Native `Q1_0_g128` kernels or an explicitly approved interim milestone |
+| Broad new downloader/provenance framework | The maintained asset can be fetched and verified with existing shell tooling | Direct Hugging Face resolve URL plus checksum capture in `tests/models/README.md` |
 
 ## Stack Patterns by Variant
 
-**If the goal is the maintained milestone slice:**
+**If the loaded GGUF reports `general.architecture=qwen3`:**
 
-- Use the official `LiquidAI/LFM2.5-1.2B-Thinking-GGUF` repo.
-- Use `LFM2.5-1.2B-Thinking-Q4_K_M.gguf`.
-- Because this proves the new `lfm2` architecture without broadening quantization scope.
+- Reuse the existing EMEL Qwen3 architecture path.
+- Because the Bonsai artifact's novelty is the quant format, not a new model family.
 
-**If the loaded GGUF reports `general.architecture=lfm2`:**
+**If the loaded weights are `Q1_0_g128`:**
 
-- Route to a new `lfm2` architecture contract, not the existing llama/qwen paths.
-- Because official metadata says this model is a hybrid LFM2 family model with conv and full-attention layers.
+- Route to a new native Bonsai quantized operand path.
+- Because standard GGUF parsing is not enough; EMEL must understand the Prism-specific block layout and kernel contract.
 
-**If the prompt surface is parity/benchmark generation:**
+**If the task is parity or benchmark publication:**
 
-- Use one explicit Liquid formatter contract based on the official primary template subset.
-- Because the current Qwen formatter contract would be a false positive for Liquid.
+- Use `PrismML-Eng/llama.cpp` in `tools/` only.
+- Because the official Bonsai docs point to Prism's fork and upstream is not the truthful comparator yet.
+
+**If the task is prompt formatting:**
+
+- Use one explicit Bonsai contract derived from the published `tokenizer.chat_template`: structured chat messages, `add_generation_prompt=true`, `tools=none`, no named templates, and the published assistant `<think>` preamble.
+- Because the current repo's supported Qwen contract matcher is too narrow for the shipped Bonsai template.
+
+**If prose and executable artifact disagree:**
+
+- Trust Hugging Face repo tree, API metadata, and resolve headers.
+- Because the Bonsai README quickstart filename is stale relative to the actual published artifact.
 
 ## Version Compatibility
 
 | Package A | Compatible With | Notes |
 |-----------|-----------------|-------|
-| `LiquidAI/LFM2.5-1.2B-Thinking-GGUF` | `LiquidAI/LFM2.5-1.2B-Thinking` | Official GGUF repo declares the native Thinking model as `base_model`. |
-| `ggml-org/llama.cpp@ecbcb7ea9d3303097519723b264a8b5f1e977028` | Liquid `lfm2` GGUF | This pin already contains `LLM_ARCH_LFM2`, `Lfm2ForCausalLM`, and `tokenizer_pre == "lfm2"` handling. |
-| EMEL v1.9 maintained runtime work | Liquid `Q4_K_M` fixture | Required milestone target after user rescope. |
-| EMEL current pre-v1.9 native path | Liquid `Q8_0` fixture | No longer the maintained truth anchor for this milestone. |
+| `prism-ml/Bonsai-1.7B-gguf@c89c1b5578286827264c4217f40edee617f4f904` | EMEL `qwen3` path + new native `Q1_0_g128` runtime | The artifact already fits the repo's Qwen3 architecture seam once the quant path exists. |
+| `PrismML-Eng/llama.cpp@prism` | `Bonsai-1.7B.gguf` reference lane | Pin an exact commit before parity or benchmark claims. The repo's default branch is `prism`; the fork also exposes a `q1-cpu` branch, but the official Bonsai model card points to the fork generally, not that branch specifically. |
+| `ggml-org/llama.cpp@ecbcb7ea9d3303097519723b264a8b5f1e977028` | Existing maintained Llama/Qwen/LFM2 slices | Not sufficient for Bonsai `Q1_0_g128` reference truth as published on 2026-04-02. |
+| Direct Hugging Face resolve URL | `curl` + `shasum` provenance flow | Pre-download headers expose repo commit and byte size; post-download SHA256 should still be recorded locally. |
 
 ## Sources
 
-- https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF
-  - Verified official GGUF model identity, license family, and base-model linkage.
-- https://huggingface.co/api/models/LiquidAI/LFM2.5-1.2B-Thinking-GGUF
-  - Verified `lastModified`, `gguf.architecture=lfm2`, `gguf.context_length=128000`, official chat template, BOS/EOS, and official sibling file list.
-- https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking/raw/main/config.json
-  - Verified native architecture/config metadata: `model_type=lfm2`, `max_position_embeddings=128000`, `layer_types`, `conv_L_cache`, `rope_theta`, tied embeddings, head counts.
-- https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking/raw/main/README.md
-  - Verified official model family, Thinking variant identity, ChatML-like template description, tool-use description, and the stale `32,768` prose context claim that conflicts with config/GGUF metadata.
-- https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking/raw/main/tokenizer_config.json
-  - Verified special tokens: `<|startoftext|>`, `<|im_start|>`, `<|im_end|>`, `<|tool_call_start|>`, `<|tool_response_start|>`.
-- https://docs.liquid.ai/lfm/key-concepts/chat-template
-  - Verified official ChatML-like formatting and BOS usage.
-- https://docs.liquid.ai/lfm/key-concepts/tool-use
-  - Verified official tool-use token framing and that tools are optional for the template.
-- https://docs.liquid.ai/deployment/on-device/llama-cpp
-  - Verified official Liquid guidance that GGUF is the supported llama.cpp deployment format for LFM2.5.
-- https://raw.githubusercontent.com/ggml-org/llama.cpp/ecbcb7ea9d3303097519723b264a8b5f1e977028/src/llama-arch.cpp
-  - Verified the repo's current pin already knows `LLM_ARCH_LFM2`.
-- https://raw.githubusercontent.com/ggml-org/llama.cpp/ecbcb7ea9d3303097519723b264a8b5f1e977028/src/llama-vocab.cpp
-  - Verified the repo's current pin maps `tokenizer_pre == "lfm2"` onto its LLAMA3 pre-tokenizer path.
-- https://raw.githubusercontent.com/ggml-org/llama.cpp/ecbcb7ea9d3303097519723b264a8b5f1e977028/convert_hf_to_gguf.py
-  - Verified the repo's current pin already has `Lfm2ForCausalLM` GGUF conversion support and LFM2 GGUF parameter export.
-- https://raw.githubusercontent.com/ggml-org/llama.cpp/ecbcb7ea9d3303097519723b264a8b5f1e977028/gguf-py/gguf/constants.py
-  - Verified official LFM2 tensor families and naming, including `token_embd_norm` and `shortconv` tensors.
+- https://huggingface.co/prism-ml/Bonsai-1.7B-gguf
+  - Verified the official maintained GGUF repo, published file list, README claims, and official reference-fork guidance.
+- https://huggingface.co/api/models/prism-ml/Bonsai-1.7B-gguf
+  - Verified `lastModified`, `sha`, `gguf.architecture=qwen3`, `gguf.context_length=32768`, the published chat template, and the single GGUF sibling file.
+- https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/main/Bonsai-1.7B.gguf
+  - Verified the direct download URL, final served filename, repo commit header, and published byte size.
+- https://api.github.com/repos/PrismML-Eng/llama.cpp
+  - Verified this is a public fork of `ggml-org/llama.cpp` and that its default branch is `prism`.
+- https://raw.githubusercontent.com/PrismML-Eng/llama.cpp/prism/ggml/src/ggml.c
+  - Verified Prism's fork contains `Q1_0_g128` references.
+- https://raw.githubusercontent.com/PrismML-Eng/llama.cpp/prism/ggml/src/ggml-quants.c
+  - Verified Prism's fork defines `quantize_row_q1_0_g128_ref` and related `Q1_0_g128` logic.
+- https://raw.githubusercontent.com/PrismML-Eng/llama.cpp/prism/ggml/src/ggml-common.h
+  - Verified Prism's fork defines `QK1_0_g128` and `block_q1_0_g128`.
+- https://raw.githubusercontent.com/ggml-org/llama.cpp/master/README.md
+  - Verified upstream `llama.cpp` does not advertise `Q1_0_g128` support in its public README.
+- https://raw.githubusercontent.com/ggml-org/llama.cpp/master/ggml/src/ggml-quants.c
+- https://raw.githubusercontent.com/ggml-org/llama.cpp/master/ggml/src/ggml-quants.h
+  - Verified upstream `ggml-org/llama.cpp` does not expose `Q1_0_g128` in the inspected quant sources.
+- Local repo inspection:
+  - `src/emel/kernel/detail.hpp`
+  - `src/emel/kernel/aarch64/actions.hpp`
+  - `src/emel/generator/detail.hpp`
+  - `src/emel/model/llama/detail.hpp`
+  - `tools/generation_formatter_contract.hpp`
+  - `tools/generation_fixture_registry.hpp`
+  - `tools/paritychecker/CMakeLists.txt`
+  - `tools/bench/CMakeLists.txt`
+  - `tools/paritychecker/reference_ref.txt`
+  - `tests/models/README.md`
 
 ---
-*Stack research for: EMEL Liquid LFM2.5-1.2B-Thinking GGUF ARM slice*
-*Researched: 2026-03-31*
+*Stack research for: EMEL Bonsai-1.7B 1-bit GGUF bring-up*
+*Researched: 2026-04-02*

@@ -1,6 +1,6 @@
 # Requirements: EMEL
 
-**Defined:** 2026-03-31
+**Defined:** 2026-04-02
 **Core Value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
 
@@ -8,98 +8,112 @@ verification before widening API surface or model scope.
 
 ### Fixture And Metadata
 
-- [ ] **FIX-02**: The repo documents one official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture with
-  checksum, source, stable maintained path under `tests/models/`, and download URL.
-- [ ] **META-01**: The maintained Liquid slice records executable model truth from official
-  GGUF/config metadata, including `architecture=lfm2` and the official long-context setting,
-  instead of relying on stale prose-only metadata.
+- [ ] **FIX-03**: The repo documents one official maintained Bonsai fixture at
+  `tests/models/Bonsai-1.7B.gguf` with source repo, direct download URL, size `248302272` bytes,
+  and SHA256 `0ae245fc08236af7cb64caff164937e53a8d54af611b0f398cc992c0a5ba70c4`.
+- [ ] **META-02**: The maintained Bonsai slice records executable GGUF truth from the live
+  artifact, including `general.architecture=qwen3`, `tokenizer.ggml.model=gpt2`,
+  `tokenizer.ggml.pre=qwen2`, `qwen3.context_length=32768`, `qwen3.block_count=28`,
+  `qwen3.embedding_length=2048`, and `qwen3.attention.head_count/head_count_kv=16/8`.
+- [ ] **META-03**: Maintained docs, fixture registries, and publication surfaces distinguish the
+  actual fixture filename `Bonsai-1.7B.gguf` from the weight format `Q1_0_g128` and do not rely on
+  the stale quickstart filename `Bonsai-1.7B-Q1_0_g128.gguf`.
 
 ### Conditioning
 
-- [ ] **COND-03**: The maintained Liquid slice uses one explicit canonical request-conditioning
-  contract derived from the primary GGUF `tokenizer.chat_template`, with structured chat-message
-  input, `tools=none`, `add_generation_prompt=true`, and no implicit raw fallback.
+- [ ] **COND-04**: The maintained Bonsai slice uses one explicit structured chat-message contract
+  derived from the embedded `tokenizer.chat_template` in the official GGUF.
+- [ ] **COND-05**: The maintained Bonsai contract supports only the approved request surface for the
+  first slice: `system,user,assistant` messages, `add_generation_prompt=true`, `tools=none`, and
+  `enable_thinking=false`.
+- [ ] **COND-06**: Unsupported Bonsai request shapes, including tool calls, tool responses,
+  thinking replay/preservation, named template variants, and raw-prompt fallback, fail explicitly
+  instead of silently widening the maintained contract.
 
 ### Runtime Support
 
-- [ ] **RUN-03**: EMEL-owned `src/emel` runtime code truthfully accepts the canonical Liquid
-  fixture as `lfm2` instead of rejecting it or aliasing it to existing `llama`/`qwen3` paths.
-- [ ] **RUN-04**: EMEL can initialize and generate on the canonical Liquid fixture through the
-  maintained generator path in `src/emel`.
-- [ ] **RUN-05**: The maintained Liquid runtime explicitly handles the canonical slice's required
-  `lfm2` metadata, tensor names, and hybrid block contract instead of pretending broad
-  Llama-family compatibility.
-- [ ] **RUN-06**: The maintained Liquid runtime publishes a truthful quantized-path contract for
-  the chosen official fixture and does not claim sibling Liquid quant support that is not proven.
+- [ ] **RUN-07**: EMEL-owned model metadata/loading surfaces truthfully accept the maintained
+  Bonsai fixture on the existing `qwen3` architecture path without inventing a new `bonsai` or
+  `prismml` execution family.
+- [ ] **RUN-08**: EMEL-owned `src/emel` runtime code provides a native `Q1_0_g128` operand path for
+  the maintained Bonsai slice, including dtype/layout support and hot-path execution without a
+  whole-tensor dequantize-to-f32 fallback.
+- [ ] **RUN-09**: The shipped generator path initializes and generates on `Bonsai-1.7B.gguf` using
+  the maintained Bonsai formatter contract and the native `Q1_0_g128` runtime path.
 
 ### Verification
 
-- [ ] **PAR-02**: `tools/paritychecker --generation` proves EMEL against `llama.cpp` on the
-  canonical Liquid slice using the same fixture and conditioning contract.
-- [ ] **VER-02**: Regression tests cover the canonical Liquid slice and protect the prior
-  maintained Llama and Qwen anchors from accidental breakage while support is widened.
+- [ ] **PAR-03**: `tools/paritychecker --generation` proves EMEL against a pinned
+  `PrismML-Eng/llama.cpp` reference lane on the maintained Bonsai fixture using the same formatter
+  contract.
+- [ ] **VER-03**: Regression coverage protects the maintained Bonsai slice and the prior maintained
+  Llama and Qwen anchors from accidental fixture, formatter, architecture, or quant-path drift.
 
 ### Benchmarking
 
-- [ ] **BENCH-08**: `tools/bench` compare output, stored benchmark evidence, and generated docs
-  publish one truthful canonical Liquid benchmark path aligned with the parity-checked slice.
+- [ ] **BENCH-09**: `tools/bench` compare output, stored benchmark evidence, and generated docs
+  publish one truthful Bonsai benchmark path aligned with the same parity-backed fixture, formatter
+  contract, and Prism reference lane.
 
 ## v2 Requirements
 
-### Broader Liquid Coverage
+### Broader Bonsai Coverage
 
-- **MODEL-03**: Broaden beyond the canonical `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture to
-  additional Liquid checkpoints or sibling quantizations once the first slice is proven and
-  benchmarked.
+- **MODEL-04**: Broaden beyond `Bonsai-1.7B.gguf` to sibling Bonsai checkpoints or future official
+  variants after the first maintained slice is proven and benchmarked.
+- **MODEL-05**: Generalize `Q1_0_g128` support into broader custom 1-bit or third-party GGUF
+  compatibility only after the maintained Bonsai slice is stable and explicitly approved.
 
-### Prompt Richness
+### Richer Request Surfaces
 
-- **COND-04**: Add richer Liquid system-message, multi-turn thinking-history, or tool-calling
-  request surfaces only after the canonical maintained slice has an explicit and stable
-  conditioning contract.
+- **COND-07**: Add Bonsai tool calling / function calling support from the embedded template only
+  after the first maintained slice has a stable parity-backed request contract.
+- **COND-08**: Add Bonsai thinking preservation, replay, or richer assistant-history semantics only
+  after the first maintained slice is correct and benchmarked.
 
-### Performance
+### Reference And Performance
 
-- **GEN-04**: Optimize Liquid-specific runtime hot spots after the canonical Liquid slice is
-  correct, parity-backed, and benchmarked.
-
-### Benchmark Policy
-
-- **BENCH-07**: Revisit whether noisy benchmark drift should become a blocking repo gate once the
-  maintained compare surfaces are stable enough to justify it.
+- **REF-01**: Revisit whether upstream `ggml-org/llama.cpp` can replace Prism's fork as the
+  maintained comparator after upstream lands truthful Bonsai `Q1_0_g128` support.
+- **GEN-05**: Optimize Bonsai-specific runtime hot spots only after the maintained slice is correct,
+  parity-backed, and benchmarked.
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Broad Liquid-family or multi-model support | Keep v1.9 fixed to one maintained Liquid Thinking GGUF slice first. |
-| Sibling Liquid quantizations such as `Q4_0`, `Q5_K_M`, `Q6_K`, `Q8_0`, `BF16`, or `F16` | The first milestone needs one exact proven fixture, not a quant matrix. |
-| Tool use or function calling | Liquid documents tool use, but that widens request shape and API scope beyond the first maintained slice. |
-| Multi-turn thinking-history replay | The official template supports `keep_past_thinking`, but v1.9 should stay on one narrow maintained request contract. |
-| Raw prompt fallback on the maintained Liquid path | Maintained proof should follow one explicit structured contract, not silent raw formatting. |
-| Decode extraction or broader generator decomposition | That work is being pursued separately and is not part of this branch's milestone. |
-| Benchmark gate hardening | Warning-only benchmark debt is separate from proving the first Liquid slice. |
+| Generic "Bonsai support" or generic "1-bit GGUF support" | v2.0 is one exact maintained fixture, not a family claim. |
+| A new `bonsai` or `prismml` execution architecture | The live GGUF already reports `general.architecture=qwen3`; the widening is the quant path, not a new topology family. |
+| Tool calling / function calling | The embedded template supports tools, but first-slice proof should stay on `tools=none`. |
+| Thinking replay / preservation | The embedded template exposes `<think>` handling, but that widens formatter semantics beyond the first maintained slice. |
+| Raw prompt fallback on the maintained Bonsai path | Maintained proof should follow one explicit structured contract, not silent raw formatting. |
+| Sibling Bonsai checkpoints or additional official variants | The first milestone needs one exact proven artifact, not a matrix. |
+| MLX, Swift, Android, ONNX, vLLM, or Transformers integration | Those are separate deployment stacks and outside the current EMEL generator/parity/bench acceptance boundary. |
+| Broad new public API or CLI surfaces for Bonsai workflows | v2.0 is scoped to the existing maintained EMEL seams only. |
+| Whole-tensor dequantize-to-f32 or tool-only compute fallback in the shipped hot path | That would violate the repo's quantized-path and performance contract unless explicitly approved as interim. |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FIX-02 | Phase 33 | Pending |
-| META-01 | Phase 33 | Pending |
-| COND-03 | Phase 33 | Pending |
-| RUN-03 | Phase 34 | Pending |
-| RUN-04 | Phase 35 | Pending |
-| RUN-05 | Phase 34 | Pending |
-| RUN-06 | Phase 35 | Pending |
-| PAR-02 | Phase 36 | Pending |
-| VER-02 | Phase 36 | Pending |
-| BENCH-08 | Phase 37 | Pending |
+| FIX-03 | Phase 38 | Pending |
+| META-02 | Phase 38 | Pending |
+| META-03 | Phase 38 | Pending |
+| COND-04 | Phase 39 | Pending |
+| COND-05 | Phase 39 | Pending |
+| COND-06 | Phase 39 | Pending |
+| RUN-07 | Phase 40 | Pending |
+| RUN-08 | Phase 40 | Pending |
+| RUN-09 | Phase 40 | Pending |
+| PAR-03 | Phase 41 | Pending |
+| VER-03 | Phase 41 | Pending |
+| BENCH-09 | Phase 42 | Pending |
 
 **Coverage:**
-- v1 requirements: 10 total
-- Mapped to phases: 10
+- v1 requirements: 12 total
+- Mapped to phases: 12
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-03-31*
-*Last updated: 2026-03-31 after roadmap creation*
+*Requirements defined: 2026-04-02*
+*Last updated: 2026-04-02 after Bonsai milestone definition*
