@@ -648,30 +648,76 @@ void print_compare(const std::vector<bench::result> & emel_results,
         continue;
       }
       std::printf("# generation_stage_probe: case=%s emel_total_ns=%" PRIu64
+                  " emel_prefill_contract=%s"
+                  " emel_prompt_tokens=%d"
+                  " emel_prefill_step_size=%d"
                   " emel_conditioning_ns=%" PRIu64
                   " emel_prefill_ns=%" PRIu64
                   " emel_first_decode_ns=%" PRIu64
                   " emel_steady_decode_ns=%" PRIu64
                   " emel_unattributed_ns=%" PRIu64
+                  " emel_prefill_linear_probe_ns=%" PRIu64
+                  " emel_prefill_attention_probe_ns=%" PRIu64
+                  " emel_prefill_misc_probe_ns=%" PRIu64
+                  " emel_prefill_misc_attention_norm_ns=%" PRIu64
+                  " emel_prefill_misc_qk_norm_ns=%" PRIu64
+                  " emel_prefill_misc_rope_ns=%" PRIu64
+                  " emel_prefill_misc_kv_store_ns=%" PRIu64
+                  " emel_prefill_misc_ctx_copy_ns=%" PRIu64
+                  " emel_prefill_misc_shortconv_ns=%" PRIu64
+                  " emel_prefill_shortconv_in_proj_ns=%" PRIu64
+                  " emel_prefill_shortconv_in_proj_prepare_ns=%" PRIu64
+                  " emel_prefill_shortconv_conv_ns=%" PRIu64
+                  " emel_prefill_shortconv_state_shift_ns=%" PRIu64
+                  " emel_prefill_shortconv_out_proj_ns=%" PRIu64
+                  " emel_prefill_shortconv_out_proj_prepare_ns=%" PRIu64
+                  " emel_prefill_misc_ffn_norm_ns=%" PRIu64
+                  " emel_prefill_misc_silu_ns=%" PRIu64
                   " reference_total_ns=%" PRIu64
                   " reference_conditioning_ns=%" PRIu64
                   " reference_prefill_ns=%" PRIu64
                   " reference_first_decode_ns=%" PRIu64
                   " reference_steady_decode_ns=%" PRIu64
-                  " reference_unattributed_ns=%" PRIu64 "\n",
+                  " reference_unattributed_ns=%" PRIu64
+                  " reference_prefill_linear_probe_ns=%" PRIu64
+                  " reference_prefill_attention_probe_ns=%" PRIu64
+                  " reference_prefill_misc_probe_ns=%" PRIu64 "\n",
                   probe.name.c_str(),
                   probe.emel_total_ns,
+                  probe.emel_prefill_contract.c_str(),
+                  probe.emel_prompt_tokens,
+                  probe.emel_prefill_step_size,
                   probe.emel_conditioning_ns,
                   probe.emel_prefill_ns,
                   probe.emel_first_decode_ns,
                   probe.emel_steady_decode_ns,
                   probe.emel_unattributed_ns,
+                  probe.emel_prefill_linear_probe_ns,
+                  probe.emel_prefill_attention_probe_ns,
+                  probe.emel_prefill_misc_probe_ns,
+                  probe.emel_prefill_misc_attention_norm_ns,
+                  probe.emel_prefill_misc_qk_norm_ns,
+                  probe.emel_prefill_misc_rope_ns,
+                  probe.emel_prefill_misc_kv_store_ns,
+                  probe.emel_prefill_misc_ctx_copy_ns,
+                  probe.emel_prefill_misc_shortconv_ns,
+                  probe.emel_prefill_shortconv_in_proj_ns,
+                  probe.emel_prefill_shortconv_in_proj_prepare_ns,
+                  probe.emel_prefill_shortconv_conv_ns,
+                  probe.emel_prefill_shortconv_state_shift_ns,
+                  probe.emel_prefill_shortconv_out_proj_ns,
+                  probe.emel_prefill_shortconv_out_proj_prepare_ns,
+                  probe.emel_prefill_misc_ffn_norm_ns,
+                  probe.emel_prefill_misc_silu_ns,
                   probe.reference_total_ns,
                   probe.reference_conditioning_ns,
                   probe.reference_prefill_ns,
                   probe.reference_first_decode_ns,
                   probe.reference_steady_decode_ns,
-                  probe.reference_unattributed_ns);
+                  probe.reference_unattributed_ns,
+                  probe.reference_prefill_linear_probe_ns,
+                  probe.reference_prefill_attention_probe_ns,
+                  probe.reference_prefill_misc_probe_ns);
     }
   }
 

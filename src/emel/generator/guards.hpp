@@ -356,6 +356,30 @@ struct conditioning_backend_error {
   }
 };
 
+struct planning_uses_chunk4_prefill {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
+  }
+};
+
+struct planning_uses_scalar_prefill {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return !planning_uses_chunk4_prefill{}(ev, ctx);
+  }
+};
+
+struct conditioning_ok_with_chunk4_prefill {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return conditioning_ok{}(ev, ctx) && planning_uses_chunk4_prefill{}(ev, ctx);
+  }
+};
+
+struct conditioning_ok_with_scalar_prefill {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return conditioning_ok{}(ev, ctx) && planning_uses_scalar_prefill{}(ev, ctx);
+  }
+};
+
 struct planning_ok {
   bool operator()(const event::generate_run & ev, const action::context &) const noexcept {
     return detail::has_phase_success(ev) &&

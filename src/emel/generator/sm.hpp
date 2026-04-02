@@ -82,7 +82,8 @@ struct reset_sequence {};
 struct reset_sequence_decision {};
 struct conditioning {};
 struct conditioning_decision {};
-struct planning {};
+struct planning_chunk4 {};
+struct planning_scalar {};
 struct planning_decision {};
 struct sequence_allocating {};
 struct sequence_allocating_decision {};
@@ -261,9 +262,13 @@ struct model {
                  + sml::completion<event::generate_run>
                  / action::request_conditioning
 
-      , sml::state<planning> <= sml::state<conditioning_decision>
+      , sml::state<planning_chunk4> <= sml::state<conditioning_decision>
                  + sml::completion<event::generate_run>
-                 [ guard::conditioning_ok{} ]
+                 [ guard::conditioning_ok_with_chunk4_prefill{} ]
+
+      , sml::state<planning_scalar> <= sml::state<conditioning_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::conditioning_ok_with_scalar_prefill{} ]
 
       , sml::state<generate_ready_error_channel_decision> <= sml::state<conditioning_decision>
                  + sml::completion<event::generate_run>
@@ -277,8 +282,13 @@ struct model {
 
       //------------------------------------------------------------------------------//
       // Planning.
-      , sml::state<planning_decision> <= sml::state<planning> + sml::completion<event::generate_run>
-                 / action::request_planning
+      , sml::state<planning_decision> <= sml::state<planning_chunk4>
+                 + sml::completion<event::generate_run>
+                 / action::request_planning_chunk4
+
+      , sml::state<planning_decision> <= sml::state<planning_scalar>
+                 + sml::completion<event::generate_run>
+                 / action::request_planning_scalar
 
       , sml::state<sequence_allocating> <= sml::state<planning_decision>
                  + sml::completion<event::generate_run>
@@ -685,7 +695,9 @@ struct model {
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<conditioning_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-      , sml::state<ready> <= sml::state<planning> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<planning_chunk4> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<planning_scalar> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<planning_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected

@@ -48,18 +48,27 @@ struct benchmark_row {
 
 struct benchmark_generation_stage_probe {
   std::string name;
+  std::string emel_prefill_contract;
+  std::string emel_prompt_tokens;
+  std::string emel_prefill_step_size;
   std::string emel_total_ns;
   std::string emel_conditioning_ns;
   std::string emel_prefill_ns;
   std::string emel_first_decode_ns;
   std::string emel_steady_decode_ns;
   std::string emel_unattributed_ns;
+  std::string emel_prefill_linear_probe_ns;
+  std::string emel_prefill_attention_probe_ns;
+  std::string emel_prefill_misc_probe_ns;
   std::string reference_total_ns;
   std::string reference_conditioning_ns;
   std::string reference_prefill_ns;
   std::string reference_first_decode_ns;
   std::string reference_steady_decode_ns;
   std::string reference_unattributed_ns;
+  std::string reference_prefill_linear_probe_ns;
+  std::string reference_prefill_attention_probe_ns;
+  std::string reference_prefill_misc_probe_ns;
 };
 
 struct benchmark_snapshot {
@@ -673,18 +682,27 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
     if (const auto metadata = parse_inline_key_value_fields(line, "# generation_stage_probe: ");
         metadata.has_value()) {
       for (const char * field : {"case",
+                                 "emel_prefill_contract",
+                                 "emel_prompt_tokens",
+                                 "emel_prefill_step_size",
                                  "emel_total_ns",
                                  "emel_conditioning_ns",
                                  "emel_prefill_ns",
                                  "emel_first_decode_ns",
                                  "emel_steady_decode_ns",
                                  "emel_unattributed_ns",
+                                 "emel_prefill_linear_probe_ns",
+                                 "emel_prefill_attention_probe_ns",
+                                 "emel_prefill_misc_probe_ns",
                                  "reference_total_ns",
                                  "reference_conditioning_ns",
                                  "reference_prefill_ns",
                                  "reference_first_decode_ns",
                                  "reference_steady_decode_ns",
-                                 "reference_unattributed_ns"}) {
+                                 "reference_unattributed_ns",
+                                 "reference_prefill_linear_probe_ns",
+                                 "reference_prefill_attention_probe_ns",
+                                 "reference_prefill_misc_probe_ns"}) {
         if (!metadata->contains(field)) {
           std::fprintf(stderr,
                        "error: invalid # generation_stage_probe metadata in %s\n",
@@ -694,18 +712,27 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       }
       parsed.generation_stage_probes.push_back(benchmark_generation_stage_probe{
           .name = metadata->at("case"),
+          .emel_prefill_contract = metadata->at("emel_prefill_contract"),
+          .emel_prompt_tokens = metadata->at("emel_prompt_tokens"),
+          .emel_prefill_step_size = metadata->at("emel_prefill_step_size"),
           .emel_total_ns = metadata->at("emel_total_ns"),
           .emel_conditioning_ns = metadata->at("emel_conditioning_ns"),
           .emel_prefill_ns = metadata->at("emel_prefill_ns"),
           .emel_first_decode_ns = metadata->at("emel_first_decode_ns"),
           .emel_steady_decode_ns = metadata->at("emel_steady_decode_ns"),
           .emel_unattributed_ns = metadata->at("emel_unattributed_ns"),
+          .emel_prefill_linear_probe_ns = metadata->at("emel_prefill_linear_probe_ns"),
+          .emel_prefill_attention_probe_ns = metadata->at("emel_prefill_attention_probe_ns"),
+          .emel_prefill_misc_probe_ns = metadata->at("emel_prefill_misc_probe_ns"),
           .reference_total_ns = metadata->at("reference_total_ns"),
           .reference_conditioning_ns = metadata->at("reference_conditioning_ns"),
           .reference_prefill_ns = metadata->at("reference_prefill_ns"),
           .reference_first_decode_ns = metadata->at("reference_first_decode_ns"),
           .reference_steady_decode_ns = metadata->at("reference_steady_decode_ns"),
           .reference_unattributed_ns = metadata->at("reference_unattributed_ns"),
+          .reference_prefill_linear_probe_ns = metadata->at("reference_prefill_linear_probe_ns"),
+          .reference_prefill_attention_probe_ns = metadata->at("reference_prefill_attention_probe_ns"),
+          .reference_prefill_misc_probe_ns = metadata->at("reference_prefill_misc_probe_ns"),
       });
       continue;
     }
@@ -913,38 +940,56 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
 
   if (!snapshot.generation_stage_probes.empty()) {
     section += "## Generation Stage Probes\n\n";
-    section += "- These are single-run request probes that split full request latency into "
-               "conditioning, prefill, first decode, steady decode, and residual unattributed "
-               "overhead.\n";
+    section += "- These are single-run benchmark-local probes. Full-request totals are exact, "
+               "and the emitted EMEL prompt metadata records the resolved prefill contract, "
+               "prompt-token count, and planner step size used to interpret the split.\n";
     for (const auto & probe : snapshot.generation_stage_probes) {
       section += "- `generation_stage_probe: case=";
       section += probe.name;
+      section += " emel_prefill_contract=";
+      section += probe.emel_prefill_contract;
+      section += " emel_prompt_tokens=";
+      section += probe.emel_prompt_tokens;
+      section += " emel_prefill_step_size=";
+      section += probe.emel_prefill_step_size;
       section += " emel_total_ns=";
       section += probe.emel_total_ns;
       section += " emel_conditioning_ns=";
       section += probe.emel_conditioning_ns;
       section += " emel_prefill_ns=";
       section += probe.emel_prefill_ns;
-      section += " emel_first_decode_ns=";
-      section += probe.emel_first_decode_ns;
-      section += " emel_steady_decode_ns=";
-      section += probe.emel_steady_decode_ns;
-      section += " emel_unattributed_ns=";
-      section += probe.emel_unattributed_ns;
-      section += " reference_total_ns=";
-      section += probe.reference_total_ns;
-      section += " reference_conditioning_ns=";
-      section += probe.reference_conditioning_ns;
-      section += " reference_prefill_ns=";
+    section += " emel_first_decode_ns=";
+    section += probe.emel_first_decode_ns;
+    section += " emel_steady_decode_ns=";
+    section += probe.emel_steady_decode_ns;
+    section += " emel_unattributed_ns=";
+    section += probe.emel_unattributed_ns;
+    section += " emel_prefill_linear_probe_ns=";
+    section += probe.emel_prefill_linear_probe_ns;
+    section += " emel_prefill_attention_probe_ns=";
+    section += probe.emel_prefill_attention_probe_ns;
+    section += " emel_prefill_misc_probe_ns=";
+    section += probe.emel_prefill_misc_probe_ns;
+    section += " reference_total_ns=";
+    section += probe.reference_total_ns;
+    section += " reference_conditioning_ns=";
+    section += probe.reference_conditioning_ns;
+    section += " reference_prefill_ns=";
       section += probe.reference_prefill_ns;
-      section += " reference_first_decode_ns=";
-      section += probe.reference_first_decode_ns;
-      section += " reference_steady_decode_ns=";
-      section += probe.reference_steady_decode_ns;
-      section += " reference_unattributed_ns=";
-      section += probe.reference_unattributed_ns;
-      section += "`\n";
-    }
+    section += " reference_first_decode_ns=";
+    section += probe.reference_first_decode_ns;
+    section += " reference_steady_decode_ns=";
+    section += probe.reference_steady_decode_ns;
+    section += " reference_unattributed_ns=";
+    section += probe.reference_unattributed_ns;
+    section += " reference_prefill_linear_probe_ns=";
+    section += probe.reference_prefill_linear_probe_ns;
+    section += " reference_prefill_attention_probe_ns=";
+    section += probe.reference_prefill_attention_probe_ns;
+    section += " reference_prefill_misc_probe_ns=";
+    section += probe.reference_prefill_misc_probe_ns;
+    section += "`\n";
+  }
     section += "\n";
   }
 
