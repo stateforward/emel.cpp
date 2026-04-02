@@ -2067,3 +2067,71 @@ TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk8_batches_hybrid_q8
   CHECK(err == emel::generator::detail::k_error_invalid);
 #endif
 }
+
+TEST_CASE("generator_detail_run_kernel_flash_prefill_chunk8_batches_hybrid_q8_k_x8_gemm") {
+  auto fixture = std::make_unique<hybrid_chunk8_q8_runtime_fixture>();
+  REQUIRE(fixture->ready);
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+  int32_t err = -1;
+  REQUIRE(emel::generator::detail::bind_inputs(fixture->request, &err));
+  REQUIRE(emel::generator::detail::run_kernel_flash_prefill_chunk8_q8_k(
+      fixture->request, &err));
+  CHECK(err == emel::generator::detail::k_error_ok);
+  CHECK(fixture->backend.kv_cache_tokens == hybrid_chunk8_q8_runtime_fixture::k_prompt_tokens);
+  CHECK(fixture->backend.packed_q8_0_dispatch_calls == 0u);
+  CHECK(fixture->backend.flash_attention_dispatch_calls ==
+        hybrid_chunk8_q8_runtime_fixture::k_prompt_tokens);
+  CHECK(fixture->backend.kernel_dispatch_calls == 21u);
+  CHECK(std::all_of(
+      fixture->backend.bound_logits.begin(),
+      fixture->backend.bound_logits.end(),
+      [](const float value) { return value == 0.0f; }));
+#else
+  int32_t err = -1;
+  CHECK_FALSE(emel::generator::detail::run_kernel_flash_prefill_chunk8_q8_k(
+      fixture->request, &err));
+  CHECK(err == emel::generator::detail::k_error_invalid);
+#endif
+}
+
+TEST_CASE(
+    "generator_detail_run_kernel_nonflash_prefill_chunk8_preselected_argmax_rejects_without_direct_argmax_support") {
+  auto fixture = std::make_unique<hybrid_chunk8_q8_runtime_fixture>();
+  REQUIRE(fixture->ready);
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+  int32_t err = -1;
+  REQUIRE(emel::generator::detail::bind_inputs(fixture->request, &err));
+  CHECK_FALSE(emel::generator::detail::preselected_argmax_direct_supported(fixture->backend));
+  CHECK_FALSE(emel::generator::detail::run_kernel_nonflash_prefill_chunk8_preselected_argmax_q8_k(
+      fixture->request, &err));
+  CHECK(err == emel::generator::detail::k_error_invalid);
+#else
+  int32_t err = -1;
+  CHECK_FALSE(
+      emel::generator::detail::run_kernel_nonflash_prefill_chunk8_preselected_argmax_q8_k(
+          fixture->request, &err));
+  CHECK(err == emel::generator::detail::k_error_invalid);
+#endif
+}
+
+TEST_CASE(
+    "generator_detail_run_kernel_flash_prefill_chunk8_preselected_argmax_rejects_without_direct_argmax_support") {
+  auto fixture = std::make_unique<hybrid_chunk8_q8_runtime_fixture>();
+  REQUIRE(fixture->ready);
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+  int32_t err = -1;
+  REQUIRE(emel::generator::detail::bind_inputs(fixture->request, &err));
+  CHECK_FALSE(emel::generator::detail::preselected_argmax_direct_supported(fixture->backend));
+  CHECK_FALSE(emel::generator::detail::run_kernel_flash_prefill_chunk8_preselected_argmax_q8_k(
+      fixture->request, &err));
+  CHECK(err == emel::generator::detail::k_error_invalid);
+#else
+  int32_t err = -1;
+  CHECK_FALSE(emel::generator::detail::run_kernel_flash_prefill_chunk8_preselected_argmax_q8_k(
+      fixture->request, &err));
+  CHECK(err == emel::generator::detail::k_error_invalid);
+#endif
+}

@@ -1,7 +1,12 @@
 stateDiagram-v2
   direction TB
   [*] --> idle
-  idle --> binding_conditioner : run [always] / begin_initialize_
+  idle --> preparing_backend : run [always] / begin_initialize_
+  preparing_backend_decision --> binding_conditioner : completion_run_ [backend_already_ready_] / none
+  preparing_backend --> preparing_backend_decision : completion_run_ [backend_prepare_needed_] / request_backend_prepare_
+  preparing_backend_decision --> binding_conditioner : completion_run_ [backend_prepare_ok_] / accept_prepared_backend_
+  preparing_backend_decision --> idle : completion_run_ [backend_prepare_invalid_request_] / mark_invalid_request_
+  preparing_backend_decision --> idle : completion_run_ [backend_prepare_backend_error_] / mark_backend_error_
   binding_conditioner --> binding_conditioner_decision : completion_run_ [always] / request_conditioner_bind_
   binding_conditioner_decision --> initializing_renderer : completion_run_ [conditioner_bind_ok_] / none
   binding_conditioner_decision --> idle : completion_run_ [conditioner_bind_invalid_request_] / mark_invalid_request_
@@ -28,6 +33,8 @@ stateDiagram-v2
   configure_preselected_argmax_decision --> idle : completion_run_ [sampler_configured_] / none
   configure_preselected_argmax_decision --> idle : completion_run_ [sampler_config_failed_] / mark_backend_error_
   idle --> idle : _ [always] / on_unexpected_
+  preparing_backend --> idle : _ [always] / on_unexpected_
+  preparing_backend_decision --> idle : _ [always] / on_unexpected_
   binding_conditioner --> idle : _ [always] / on_unexpected_
   binding_conditioner_decision --> idle : _ [always] / on_unexpected_
   initializing_renderer --> idle : _ [always] / on_unexpected_

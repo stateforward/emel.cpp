@@ -26,10 +26,14 @@ stateDiagram-v2
   reset_sequence_decision --> generate_ready_error_channel_decision : completion_generate_run_ [reset_sequence_invalid_request_] / mark_invalid_request_
   reset_sequence_decision --> generate_ready_error_channel_decision : completion_generate_run_ [reset_sequence_backend_error_] / mark_backend_error_
   conditioning --> conditioning_decision : completion_generate_run_ [always] / request_conditioning_
-  conditioning_decision --> planning : completion_generate_run_ [conditioning_ok_] / none
+  conditioning_decision --> planning_chunk8 : completion_generate_run_ [conditioning_ok_with_chunk8_prefill_] / none
+  conditioning_decision --> planning_chunk4 : completion_generate_run_ [conditioning_ok_with_chunk4_prefill_] / none
+  conditioning_decision --> planning_scalar : completion_generate_run_ [conditioning_ok_with_scalar_prefill_] / none
   conditioning_decision --> generate_ready_error_channel_decision : completion_generate_run_ [conditioning_invalid_request_] / mark_invalid_request_
   conditioning_decision --> generate_ready_error_channel_decision : completion_generate_run_ [conditioning_backend_error_] / mark_backend_error_
-  planning --> planning_decision : completion_generate_run_ [always] / request_planning_
+  planning_chunk8 --> planning_decision : completion_generate_run_ [always] / request_planning_with_step_size_8__
+  planning_chunk4 --> planning_decision : completion_generate_run_ [always] / request_planning_with_step_size_4__
+  planning_scalar --> planning_decision : completion_generate_run_ [always] / request_planning_with_step_size_1__
   planning_decision --> sequence_allocating : completion_generate_run_ [planning_ok_] / none
   planning_decision --> generate_ready_error_channel_decision : completion_generate_run_ [planning_invalid_request_] / mark_invalid_request_
   planning_decision --> generate_ready_error_channel_decision : completion_generate_run_ [planning_backend_error_] / mark_backend_error_
@@ -118,7 +122,9 @@ stateDiagram-v2
   reset_sequence_decision --> ready : _ [always] / on_unexpected_
   conditioning --> ready : _ [always] / on_unexpected_
   conditioning_decision --> ready : _ [always] / on_unexpected_
-  planning --> ready : _ [always] / on_unexpected_
+  planning_chunk8 --> ready : _ [always] / on_unexpected_
+  planning_chunk4 --> ready : _ [always] / on_unexpected_
+  planning_scalar --> ready : _ [always] / on_unexpected_
   planning_decision --> ready : _ [always] / on_unexpected_
   sequence_allocating --> ready : _ [always] / on_unexpected_
   sequence_allocating_decision --> ready : _ [always] / on_unexpected_

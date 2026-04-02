@@ -7,6 +7,7 @@
 #include "emel/generator/actions.hpp"
 #include "emel/generator/guards.hpp"
 #include "emel/generator/initializer/guards.hpp"
+#include "emel/generator/prefill/actions.hpp"
 #include "emel/generator/prefill/guards.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/model/data.hpp"
@@ -786,4 +787,72 @@ TEST_CASE("generator prefill runtime guards model explicit flash and compute res
       prefill_run, prefill_context));
   CHECK(emel::generator::prefill::guard::nonflash_runtime_required{}(
       prefill_run, prefill_context));
+}
+
+TEST_CASE("generator prefill guards classify explicit chunk8 routes and contracts") {
+  chunk4_planning_backend_fixture fixture{};
+  callback_tracker tracker{};
+  emel::error::type error_out = emel::error::cast(emel::generator::error::none);
+  size_t output_length_out = 0;
+
+  auto generate = make_generate_request(&tracker, &error_out, output_length_out);
+  emel::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count = emel::generator::detail::k_prefill_q8_chunk8_rows;
+  emel::generator::event::generate_run generate_run{generate, generate_ctx};
+  emel::generator::prefill::action::context prefill_context{fixture.context};
+  emel::generator::prefill::event::run prefill_run{generate, generate_ctx};
+
+  generate_ctx.prefill_contract =
+      emel::generator::prefill_compute_contract::flash_materialized_chunk8_q8_k;
+  CHECK(emel::generator::guard::detail::prefill_contract_uses_materialized_logits(
+      generate_ctx.prefill_contract));
+  CHECK_FALSE(emel::generator::guard::detail::prefill_contract_uses_preselected_argmax(
+      generate_ctx.prefill_contract));
+  CHECK(emel::generator::guard::prefill_result_ok_with_materialized_logits_contract{}(
+      generate_run, fixture.context));
+
+  generate_ctx.prefill_contract =
+      emel::generator::prefill_compute_contract::flash_preselected_chunk8_q8_k;
+  CHECK_FALSE(emel::generator::guard::detail::prefill_contract_uses_materialized_logits(
+      generate_ctx.prefill_contract));
+  CHECK(emel::generator::guard::detail::prefill_contract_uses_preselected_argmax(
+      generate_ctx.prefill_contract));
+  CHECK(emel::generator::guard::prefill_result_ok_with_preselected_argmax_contract{}(
+      generate_run, fixture.context));
+
+  generate_ctx.prefill_contract =
+      emel::generator::prefill_compute_contract::nonflash_materialized_chunk8_q8_k;
+  CHECK(emel::generator::guard::detail::prefill_contract_uses_materialized_logits(
+      generate_ctx.prefill_contract));
+
+  generate_ctx.prefill_contract =
+      emel::generator::prefill_compute_contract::nonflash_preselected_chunk8_q8_k;
+  CHECK(emel::generator::guard::detail::prefill_contract_uses_preselected_argmax(
+      generate_ctx.prefill_contract));
+
+  if (host_supports_chunk8_prefill_q8_route()) {
+    prefill_context.generator.state.selection_mode =
+        emel::generator::selection_mode::sample_logits;
+    CHECK(emel::generator::prefill::guard::uses_materialized_logits_with_chunk8_q8_k{}(
+        prefill_run, prefill_context));
+    CHECK_FALSE(emel::generator::prefill::guard::uses_materialized_logits_with_chunk4_q8_k{}(
+        prefill_run, prefill_context));
+    CHECK_FALSE(emel::generator::prefill::guard::uses_materialized_logits_with_scalar{}(
+        prefill_run, prefill_context));
+
+    prefill_context.generator.state.selection_mode =
+        emel::generator::selection_mode::preselected_argmax;
+    if (emel::generator::detail::preselected_argmax_direct_supported(
+            prefill_context.generator.compute.backend)) {
+      CHECK(emel::generator::prefill::guard::uses_preselected_argmax_with_chunk8_q8_k{}(
+          prefill_run, prefill_context));
+      CHECK_FALSE(emel::generator::prefill::guard::uses_preselected_argmax_with_chunk4_q8_k{}(
+          prefill_run, prefill_context));
+      CHECK_FALSE(emel::generator::prefill::guard::uses_preselected_argmax_with_scalar{}(
+          prefill_run, prefill_context));
+    } else {
+      CHECK_FALSE(emel::generator::prefill::guard::uses_preselected_argmax_with_chunk8_q8_k{}(
+          prefill_run, prefill_context));
+    }
+  }
 }

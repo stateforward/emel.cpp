@@ -12,13 +12,21 @@ stateDiagram-v2
   snapshot_decision --> idle : completion_run_ [snapshot_backend_error_] / mark_backend_error_
   contract_runtime_decision --> contract_flash_decision : completion_run_ [flash_runtime_supported_] / none
   contract_runtime_decision --> contract_nonflash_decision : completion_run_ [nonflash_runtime_required_] / none
-  contract_flash_decision --> compute_result_decision : completion_run_ [uses_materialized_logits_with_chunk4_] / request_contract_flash_materialized_chunk4_
+  contract_flash_decision --> compute_result_decision : completion_run_ [uses_materialized_logits_with_chunk8_q8_k_] / request_contract_flash_materialized_chunk8_q8_k_
+  contract_flash_decision --> compute_result_decision : completion_run_ [uses_materialized_logits_with_chunk4_packed_q8_0_] / request_contract_flash_materialized_chunk4_packed_q8_0_
+  contract_flash_decision --> compute_result_decision : completion_run_ [uses_materialized_logits_with_chunk4_q8_k_] / request_contract_flash_materialized_chunk4_q8_k_
   contract_flash_decision --> compute_result_decision : completion_run_ [uses_materialized_logits_with_scalar_] / request_contract_flash_materialized_scalar_
-  contract_flash_decision --> compute_result_decision : completion_run_ [uses_preselected_argmax_with_chunk4_] / request_contract_flash_preselected_chunk4_
+  contract_flash_decision --> compute_result_decision : completion_run_ [uses_preselected_argmax_with_chunk8_q8_k_] / request_contract_flash_preselected_chunk8_q8_k_
+  contract_flash_decision --> compute_result_decision : completion_run_ [uses_preselected_argmax_with_chunk4_packed_q8_0_] / request_contract_flash_preselected_chunk4_packed_q8_0_
+  contract_flash_decision --> compute_result_decision : completion_run_ [uses_preselected_argmax_with_chunk4_q8_k_] / request_contract_flash_preselected_chunk4_q8_k_
   contract_flash_decision --> compute_result_decision : completion_run_ [uses_preselected_argmax_with_scalar_] / request_contract_flash_preselected_scalar_
-  contract_nonflash_decision --> compute_result_decision : completion_run_ [uses_materialized_logits_with_chunk4_] / request_contract_nonflash_materialized_chunk4_
+  contract_nonflash_decision --> compute_result_decision : completion_run_ [uses_materialized_logits_with_chunk8_q8_k_] / request_contract_nonflash_materialized_chunk8_q8_k_
+  contract_nonflash_decision --> compute_result_decision : completion_run_ [uses_materialized_logits_with_chunk4_packed_q8_0_] / request_contract_nonflash_materialized_chunk4_packed_q8_0_
+  contract_nonflash_decision --> compute_result_decision : completion_run_ [uses_materialized_logits_with_chunk4_q8_k_] / request_contract_nonflash_materialized_chunk4_q8_k_
   contract_nonflash_decision --> compute_result_decision : completion_run_ [uses_materialized_logits_with_scalar_] / request_contract_nonflash_materialized_scalar_
-  contract_nonflash_decision --> compute_result_decision : completion_run_ [uses_preselected_argmax_with_chunk4_] / request_contract_nonflash_preselected_chunk4_
+  contract_nonflash_decision --> compute_result_decision : completion_run_ [uses_preselected_argmax_with_chunk8_q8_k_] / request_contract_nonflash_preselected_chunk8_q8_k_
+  contract_nonflash_decision --> compute_result_decision : completion_run_ [uses_preselected_argmax_with_chunk4_packed_q8_0_] / request_contract_nonflash_preselected_chunk4_packed_q8_0_
+  contract_nonflash_decision --> compute_result_decision : completion_run_ [uses_preselected_argmax_with_chunk4_q8_k_] / request_contract_nonflash_preselected_chunk4_q8_k_
   contract_nonflash_decision --> compute_result_decision : completion_run_ [uses_preselected_argmax_with_scalar_] / request_contract_nonflash_preselected_scalar_
   compute_result_decision --> idle : completion_run_ [compute_ok_] / mark_prefill_cached_
   compute_result_decision --> idle : completion_run_ [compute_invalid_request_] / mark_invalid_request_
