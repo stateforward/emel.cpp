@@ -240,6 +240,23 @@ inline tensor_view make_q8_k_x4_rhs_src(const void * data,
   return out;
 }
 
+inline tensor_view make_q8_k_x8_rhs_src(const void * data,
+                                        const uint64_t rows,
+                                        const uint64_t cols) {
+  tensor_view out{};
+  const size_t row_bytes =
+      emel::kernel::detail::quantized_row_storage_bytes(
+          emel::kernel::detail::dtype_q8_k, cols);
+  out.data = data;
+  out.type = dtype::q8_k_x8;
+  out.ne = {rows, cols, 1u, 1u};
+  out.nb[0] = 1u;
+  out.nb[1] = row_bytes;
+  out.nb[2] = row_bytes * rows;
+  out.nb[3] = out.nb[2];
+  return out;
+}
+
 inline tensor_view make_q8_0_vector_src(const void * data, const uint64_t cols) {
   tensor_view out{};
   const size_t row_bytes =

@@ -2366,6 +2366,178 @@ inline void dot_q4_k_x8_q8_k_group_bl8_x4_neon(
 #endif
 }
 
+inline void dot_q4_k_x8_q8_k_group_bl8_x8_neon(
+    const ::emel::kernel::detail::quant::block_q4_kx8 * lhs,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs0,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs1,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs2,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs3,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs4,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs5,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs6,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs7,
+    const uint64_t block_count,
+    float * out0,
+    float * out1,
+    float * out2,
+    float * out3,
+    float * out4,
+    float * out5,
+    float * out6,
+    float * out7) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
+  dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs0, block_count, out0);
+  dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs1, block_count, out1);
+  dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs2, block_count, out2);
+  dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs3, block_count, out3);
+  dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs4, block_count, out4);
+  dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs5, block_count, out5);
+  dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs6, block_count, out6);
+  dot_q4_k_x8_q8_k_group_bl8_neon(lhs, rhs7, block_count, out7);
+#else
+  constexpr uint64_t col_pairs = ::emel::kernel::detail::quant::Q4_K_X8_ROWS / 2u;
+  constexpr uint64_t rhs_rows = ::emel::kernel::detail::quant::Q4_K_X8_ROWS;
+  const uint8x16_t m4b = vdupq_n_u8(0x0fu);
+  const std::array<const ::emel::kernel::detail::quant::block_q8_k *, rhs_rows> rhs_rows_ptrs{
+      rhs0, rhs1, rhs2, rhs3, rhs4, rhs5, rhs6, rhs7,
+  };
+  std::array<std::array<float32x4_t, ::emel::kernel::detail::quant::Q4_K_X8_ROWS / 4u>, rhs_rows>
+      acc_f32 = {};
+  for (auto & row_acc : acc_f32) {
+    for (auto & acc : row_acc) {
+      acc = vdupq_n_f32(0.0f);
+    }
+  }
+
+  for (uint64_t block = 0; block < block_count; ++block) {
+    const auto & q4_block = lhs[block];
+    const float32x4_t q4_d_0 =
+        vcvt_f32_f16(vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.d.data())));
+    const float32x4_t q4_d_1 =
+        vcvt_f32_f16(vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.d.data() + 4u)));
+    const float32x4_t q4_dmin_0 =
+        vcvt_f32_f16(vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.dmin.data())));
+    const float32x4_t q4_dmin_1 =
+        vcvt_f32_f16(vld1_f16(reinterpret_cast<const __fp16 *>(q4_block.dmin.data() + 4u)));
+
+    std::array<std::array<float32x4_t, 2u>, rhs_rows> sb_scale = {};
+    std::array<std::array<float32x4_t, 2u>, rhs_rows> sb_min = {};
+    std::array<std::array<int32x4_t, 2u>, rhs_rows> bias_acc = {};
+    alignas(16) std::array<std::array<int16_t, 8u>, rhs_rows> bsums_array = {};
+
+    for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+      const auto & q8_block = rhs_rows_ptrs[rhs_row][block];
+      const float32x4_t q8_d = vdupq_n_f32(q8_block.d);
+      sb_scale[rhs_row][0] = vmulq_f32(q4_d_0, q8_d);
+      sb_scale[rhs_row][1] = vmulq_f32(q4_d_1, q8_d);
+      sb_min[rhs_row][0] = vmulq_f32(q4_dmin_0, q8_d);
+      sb_min[rhs_row][1] = vmulq_f32(q4_dmin_1, q8_d);
+      bias_acc[rhs_row][0] = vdupq_n_s32(0);
+      bias_acc[rhs_row][1] = vdupq_n_s32(0);
+      const int16x8_t bsums = vpaddq_s16(
+          vld1q_s16(q8_block.bsums.data()),
+          vld1q_s16(q8_block.bsums.data() + 8u));
+      vst1q_s16(bsums_array[rhs_row].data(), bsums);
+    }
+
+    for (uint64_t sb = 0; sb < (::emel::kernel::detail::quant::QK_K / 64u); ++sb) {
+      std::array<int16x8_t, 2> q4sb_mins = {};
+      std::array<int16x8_t, 2> q4sb_scales = {};
+      for (uint64_t half = 0; half < 2u; ++half) {
+        const uint8_t * prepared =
+            q4_block.scales.data() +
+            ((sb * 2u + half) * ::emel::kernel::detail::quant::Q4_K_X8_ROWS * 2u);
+        q4sb_mins[half] = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(prepared)));
+        q4sb_scales[half] = vreinterpretq_s16_u16(
+            vmovl_u8(vld1_u8(prepared + ::emel::kernel::detail::quant::Q4_K_X8_ROWS)));
+      }
+
+      const uint8_t * q4_base =
+          q4_block.qs.data() + sb * ::emel::kernel::detail::quant::QK_K;
+      for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+        const int8_t * q8_base = rhs_rows_ptrs[rhs_row][block].qs.data() + sb * 64u;
+        std::array<int8x16_t, 8> q8_qs = {};
+        for (uint64_t i = 0; i < q8_qs.size(); ++i) {
+          q8_qs[i] = vreinterpretq_s8_s64(
+              vld1q_dup_s64(reinterpret_cast<const int64_t *>(q8_base + i * 8u)));
+        }
+
+        std::array<int32x4_t, col_pairs> acc_lo = {};
+        std::array<int32x4_t, col_pairs> acc_hi = {};
+        for (uint64_t pair = 0; pair < col_pairs; ++pair) {
+          acc_lo[pair] = vdupq_n_s32(0);
+          acc_hi[pair] = vdupq_n_s32(0);
+        }
+
+        for (uint64_t pair = 0; pair < col_pairs; ++pair) {
+          const uint8x16_t q4_qs_pair_0 = vld1q_u8(q4_base + 16u * pair);
+          const uint8x16_t q4_qs_pair_1 = vld1q_u8(q4_base + 16u * pair + 64u);
+          const uint8x16_t q4_qs_pair_2 = vld1q_u8(q4_base + 16u * pair + 128u);
+          const uint8x16_t q4_qs_pair_3 = vld1q_u8(q4_base + 16u * pair + 192u);
+
+          acc_lo[pair] = vdotq_s32(
+              acc_lo[pair], vreinterpretq_s8_u8(vandq_u8(q4_qs_pair_0, m4b)), q8_qs[0]);
+          acc_lo[pair] = vdotq_s32(
+              acc_lo[pair], vreinterpretq_s8_u8(vandq_u8(q4_qs_pair_1, m4b)), q8_qs[1]);
+          acc_lo[pair] = vdotq_s32(
+              acc_lo[pair], vreinterpretq_s8_u8(vandq_u8(q4_qs_pair_2, m4b)), q8_qs[2]);
+          acc_lo[pair] = vdotq_s32(
+              acc_lo[pair], vreinterpretq_s8_u8(vandq_u8(q4_qs_pair_3, m4b)), q8_qs[3]);
+
+          acc_hi[pair] = vdotq_s32(
+              acc_hi[pair], vreinterpretq_s8_u8(vshrq_n_u8(q4_qs_pair_0, 4)), q8_qs[4]);
+          acc_hi[pair] = vdotq_s32(
+              acc_hi[pair], vreinterpretq_s8_u8(vshrq_n_u8(q4_qs_pair_1, 4)), q8_qs[5]);
+          acc_hi[pair] = vdotq_s32(
+              acc_hi[pair], vreinterpretq_s8_u8(vshrq_n_u8(q4_qs_pair_2, 4)), q8_qs[6]);
+          acc_hi[pair] = vdotq_s32(
+              acc_hi[pair], vreinterpretq_s8_u8(vshrq_n_u8(q4_qs_pair_3, 4)), q8_qs[7]);
+        }
+
+        for (uint64_t i = 0, pair = 0; pair < col_pairs; i += 1u, pair += 2u) {
+          const int16x4_t group_scales_lo =
+              pair == 0u ? vget_low_s16(q4sb_scales[0]) : vget_high_s16(q4sb_scales[0]);
+          const int16x4_t group_scales_hi =
+              pair == 0u ? vget_low_s16(q4sb_scales[1]) : vget_high_s16(q4sb_scales[1]);
+          const float32x4_t sumf_0 = vcvtq_f32_s32(vmulq_s32(
+              vmovl_s16(group_scales_lo), vpaddq_s32(acc_lo[pair], acc_lo[pair + 1u])));
+          const float32x4_t sumf_1 = vcvtq_f32_s32(vmulq_s32(
+              vmovl_s16(group_scales_hi), vpaddq_s32(acc_hi[pair], acc_hi[pair + 1u])));
+          acc_f32[rhs_row][i] =
+              vfmaq_f32(acc_f32[rhs_row][i], sb_scale[rhs_row][i], sumf_0);
+          acc_f32[rhs_row][i] =
+              vfmaq_f32(acc_f32[rhs_row][i], sb_scale[rhs_row][i], sumf_1);
+        }
+
+        const int16x4_t bsums_vec_lo = vdup_n_s16(bsums_array[rhs_row][2u * sb + 0u]);
+        const int16x4_t bsums_vec_hi = vdup_n_s16(bsums_array[rhs_row][2u * sb + 1u]);
+        bias_acc[rhs_row][0] =
+            vmlal_s16(bias_acc[rhs_row][0], bsums_vec_lo, vget_low_s16(q4sb_mins[0]));
+        bias_acc[rhs_row][0] =
+            vmlal_s16(bias_acc[rhs_row][0], bsums_vec_hi, vget_low_s16(q4sb_mins[1]));
+        bias_acc[rhs_row][1] =
+            vmlal_s16(bias_acc[rhs_row][1], bsums_vec_lo, vget_high_s16(q4sb_mins[0]));
+        bias_acc[rhs_row][1] =
+            vmlal_s16(bias_acc[rhs_row][1], bsums_vec_hi, vget_high_s16(q4sb_mins[1]));
+      }
+    }
+
+    for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+      acc_f32[rhs_row][0] = vmlsq_f32(
+          acc_f32[rhs_row][0], vcvtq_f32_s32(bias_acc[rhs_row][0]), sb_min[rhs_row][0]);
+      acc_f32[rhs_row][1] = vmlsq_f32(
+          acc_f32[rhs_row][1], vcvtq_f32_s32(bias_acc[rhs_row][1]), sb_min[rhs_row][1]);
+    }
+  }
+
+  const std::array<float *, rhs_rows> out_rows{out0, out1, out2, out3, out4, out5, out6, out7};
+  for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+    vst1q_f32(out_rows[rhs_row], acc_f32[rhs_row][0]);
+    vst1q_f32(out_rows[rhs_row] + 4u, acc_f32[rhs_row][1]);
+  }
+#endif
+}
+
 inline float dot_q6_k_q8_k_block_neon(const ::emel::kernel::detail::quant::block_q6_k & lhs,
                                       const ::emel::kernel::detail::quant::block_q8_k & rhs)
     noexcept {
@@ -3281,6 +3453,128 @@ inline void dot_q6_k_x8_q8_k_group_prepared_i8mm_x4(
 #endif
 }
 
+inline void dot_q6_k_x8_q8_k_group_prepared_i8mm_x8(
+    const ::emel::kernel::detail::quant::block_q6_kx8_q8_prepared * lhs,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs0,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs1,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs2,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs3,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs4,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs5,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs6,
+    const ::emel::kernel::detail::quant::block_q8_k * rhs7,
+    const uint64_t block_count,
+    float * out0,
+    float * out1,
+    float * out2,
+    float * out3,
+    float * out4,
+    float * out5,
+    float * out6,
+    float * out7) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8))
+  dot_q6_k_x8_q8_k_group_prepared_neon(lhs, rhs0, block_count, out0);
+  dot_q6_k_x8_q8_k_group_prepared_neon(lhs, rhs1, block_count, out1);
+  dot_q6_k_x8_q8_k_group_prepared_neon(lhs, rhs2, block_count, out2);
+  dot_q6_k_x8_q8_k_group_prepared_neon(lhs, rhs3, block_count, out3);
+  dot_q6_k_x8_q8_k_group_prepared_neon(lhs, rhs4, block_count, out4);
+  dot_q6_k_x8_q8_k_group_prepared_neon(lhs, rhs5, block_count, out5);
+  dot_q6_k_x8_q8_k_group_prepared_neon(lhs, rhs6, block_count, out6);
+  dot_q6_k_x8_q8_k_group_prepared_neon(lhs, rhs7, block_count, out7);
+#else
+  constexpr uint64_t rhs_rows = ::emel::kernel::detail::quant::Q6_K_X8_ROWS;
+  const int32x4_t zero = vdupq_n_s32(0);
+  const std::array<const ::emel::kernel::detail::quant::block_q8_k *, rhs_rows> rhs_rows_ptrs{
+      rhs0, rhs1, rhs2, rhs3, rhs4, rhs5, rhs6, rhs7,
+  };
+  std::array<float32x4_t, rhs_rows> sums_0 = {};
+  std::array<float32x4_t, rhs_rows> sums_1 = {};
+  for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+    sums_0[rhs_row] = vdupq_n_f32(0.0f);
+    sums_1[rhs_row] = vdupq_n_f32(0.0f);
+  }
+
+  for (uint64_t block = 0; block < block_count; ++block) {
+    const auto & q6_block = lhs[block];
+    std::array<std::array<int32x4_t, ::emel::kernel::detail::quant::Q6_K_X8_ROWS / 2u>, rhs_rows>
+        acc_pairs = {};
+    for (auto & row_pairs : acc_pairs) {
+      for (auto & pair_acc : row_pairs) {
+        pair_acc = zero;
+      }
+    }
+
+    for (uint64_t scale = 0; scale < (::emel::kernel::detail::quant::QK_K / 16u); ++scale) {
+      std::array<int8x16_t, rhs_rows> q8_low_dup = {};
+      std::array<int8x16_t, rhs_rows> q8_high_dup = {};
+      for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+        const int8x16_t q8_values =
+            vld1q_s8(rhs_rows_ptrs[rhs_row][block].qs.data() + static_cast<size_t>(scale) * 16u);
+        q8_low_dup[rhs_row] =
+            vcombine_s8(vget_low_s8(q8_values), vget_low_s8(q8_values));
+        q8_high_dup[rhs_row] =
+            vcombine_s8(vget_high_s8(q8_values), vget_high_s8(q8_values));
+      }
+
+      for (uint64_t pair = 0; pair < (::emel::kernel::detail::quant::Q6_K_X8_ROWS / 2u);
+           ++pair) {
+        const uint64_t row0 = pair * 2u;
+        const uint64_t row1 = row0 + 1u;
+        const size_t pair_base =
+            static_cast<size_t>(scale) *
+                (::emel::kernel::detail::quant::Q6_K_X8_ROWS / 2u) * 32u +
+            pair * 32u;
+        const int8x16_t lhs_low = vld1q_s8(q6_block.qs.data() + pair_base);
+        const int8x16_t lhs_high = vld1q_s8(q6_block.qs.data() + pair_base + 16u);
+        const int8_t scale_row0 =
+            q6_block.scales[static_cast<size_t>(scale) *
+                                ::emel::kernel::detail::quant::Q6_K_X8_ROWS +
+                            row0];
+        const int8_t scale_row1 =
+            q6_block.scales[static_cast<size_t>(scale) *
+                                ::emel::kernel::detail::quant::Q6_K_X8_ROWS +
+                            row1];
+        const int32x4_t scale_pair = {
+            static_cast<int32_t>(scale_row0),
+            static_cast<int32_t>(scale_row0),
+            static_cast<int32_t>(scale_row1),
+            static_cast<int32_t>(scale_row1),
+        };
+
+        for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+          int32x4_t pair_dot = vmmlaq_s32(zero, lhs_low, q8_low_dup[rhs_row]);
+          pair_dot = vmmlaq_s32(pair_dot, lhs_high, q8_high_dup[rhs_row]);
+          acc_pairs[rhs_row][pair] = vmlaq_s32(acc_pairs[rhs_row][pair], pair_dot, scale_pair);
+        }
+      }
+    }
+
+    const float16x4_t q6_d_0_f16 = vreinterpret_f16_u16(vld1_u16(q6_block.d.data()));
+    const float16x4_t q6_d_1_f16 = vreinterpret_f16_u16(vld1_u16(q6_block.d.data() + 4));
+    const float32x4_t q6_d_0 = vcvt_f32_f16(q6_d_0_f16);
+    const float32x4_t q6_d_1 = vcvt_f32_f16(q6_d_1_f16);
+    for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+      const float32x4_t block_scale_0 =
+          vmulq_n_f32(q6_d_0, rhs_rows_ptrs[rhs_row][block].d);
+      const float32x4_t block_scale_1 =
+          vmulq_n_f32(q6_d_1, rhs_rows_ptrs[rhs_row][block].d);
+      const int32x4_t packed_acc_0 = vuzp1q_s32(acc_pairs[rhs_row][0], acc_pairs[rhs_row][1]);
+      const int32x4_t packed_acc_1 = vuzp1q_s32(acc_pairs[rhs_row][2], acc_pairs[rhs_row][3]);
+      sums_0[rhs_row] =
+          vfmaq_f32(sums_0[rhs_row], vcvtq_f32_s32(packed_acc_0), block_scale_0);
+      sums_1[rhs_row] =
+          vfmaq_f32(sums_1[rhs_row], vcvtq_f32_s32(packed_acc_1), block_scale_1);
+    }
+  }
+
+  const std::array<float *, rhs_rows> out_rows{out0, out1, out2, out3, out4, out5, out6, out7};
+  for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+    vst1q_f32(out_rows[rhs_row], sums_0[rhs_row]);
+    vst1q_f32(out_rows[rhs_row] + 4u, sums_1[rhs_row]);
+  }
+#endif
+}
+
 inline void reduce_q6_k_x8_q8_argmax_prepared_i8mm_group(
     const ::emel::kernel::detail::quant::block_q6_kx8_q8_argmax_prepared * lhs,
     const ::emel::kernel::detail::quant::block_q8_k * rhs,
@@ -3685,6 +3979,74 @@ inline void execute_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_unchecked
 #endif
 }
 
+inline void execute_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8_unchecked(
+    const event::op_mul_mat & request) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
+  (void) request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
+  const uint8_t * packed = static_cast<const uint8_t *>(request.src0.data);
+  const uint8_t * rhs_base = static_cast<const uint8_t *>(request.src1.data);
+  const size_t rhs_row_bytes = request.src1.nb[1];
+  const size_t group_bytes = request.src0.nb[1];
+  const uint64_t group_count = ::emel::kernel::detail::quant::packed_q4_k_x8_group_count(m);
+  float * dst = static_cast<float *>(request.dst.data);
+  const size_t dst_row_stride = request.dst.nb[0] / sizeof(float);
+  const std::array<const ::emel::kernel::detail::quant::block_q8_k *, 8> rhs_rows{
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 0u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 1u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 2u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 3u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 4u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 5u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 6u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 7u * rhs_row_bytes),
+  };
+  for (uint64_t group = 0; group < group_count; ++group) {
+    const auto * group_ptr =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q4_kx8 *>(
+            packed + group * group_bytes);
+    const uint64_t row_base = group * ::emel::kernel::detail::quant::Q4_K_X8_ROWS;
+    const uint64_t rows_in_group = std::min(
+        static_cast<uint64_t>(::emel::kernel::detail::quant::Q4_K_X8_ROWS), m - row_base);
+    std::array<std::array<float, ::emel::kernel::detail::quant::Q4_K_X8_ROWS>, 8> group_out = {};
+    dot_q4_k_x8_q8_k_group_bl8_x8_neon(
+        group_ptr,
+        rhs_rows[0],
+        rhs_rows[1],
+        rhs_rows[2],
+        rhs_rows[3],
+        rhs_rows[4],
+        rhs_rows[5],
+        rhs_rows[6],
+        rhs_rows[7],
+        block_count,
+        group_out[0].data(),
+        group_out[1].data(),
+        group_out[2].data(),
+        group_out[3].data(),
+        group_out[4].data(),
+        group_out[5].data(),
+        group_out[6].data(),
+        group_out[7].data());
+    for (uint64_t rhs_row = 0; rhs_row < rhs_rows.size(); ++rhs_row) {
+      store_batch_major_group_results(
+          group_out[rhs_row].data(), dst, dst_row_stride, rhs_row, row_base, rows_in_group);
+    }
+  }
+#endif
+}
+
 inline void execute_neon_mul_mat_q6_vector_packed_unchecked(
     const event::op_mul_mat & request) noexcept {
 #if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
@@ -3872,6 +4234,74 @@ inline void execute_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_unchec
                                     rows_in_group);
     store_batch_major_group_results(group_out3.data(), dst, dst_row_stride, 3u, row_base,
                                     rows_in_group);
+  }
+#endif
+}
+
+inline void execute_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_unchecked(
+    const event::op_mul_mat & request) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8))
+  (void) request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
+  const uint8_t * prepared = static_cast<const uint8_t *>(request.src0.data);
+  const uint8_t * rhs_base = static_cast<const uint8_t *>(request.src1.data);
+  const size_t rhs_row_bytes = request.src1.nb[1];
+  const size_t group_bytes = request.src0.nb[1];
+  const uint64_t group_count = ::emel::kernel::detail::quant::packed_q6_k_x8_group_count(m);
+  float * dst = static_cast<float *>(request.dst.data);
+  const size_t dst_row_stride = request.dst.nb[0] / sizeof(float);
+  const std::array<const ::emel::kernel::detail::quant::block_q8_k *, 8> rhs_rows{
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 0u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 1u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 2u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 3u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 4u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 5u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 6u * rhs_row_bytes),
+      reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+          rhs_base + 7u * rhs_row_bytes),
+  };
+  for (uint64_t group = 0; group < group_count; ++group) {
+    const auto * group_ptr =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q6_kx8_q8_prepared *>(
+            prepared + group * group_bytes);
+    const uint64_t row_base = group * ::emel::kernel::detail::quant::Q6_K_X8_ROWS;
+    const uint64_t rows_in_group = std::min(
+        static_cast<uint64_t>(::emel::kernel::detail::quant::Q6_K_X8_ROWS), m - row_base);
+    std::array<std::array<float, ::emel::kernel::detail::quant::Q6_K_X8_ROWS>, 8> group_out = {};
+    dot_q6_k_x8_q8_k_group_prepared_i8mm_x8(
+        group_ptr,
+        rhs_rows[0],
+        rhs_rows[1],
+        rhs_rows[2],
+        rhs_rows[3],
+        rhs_rows[4],
+        rhs_rows[5],
+        rhs_rows[6],
+        rhs_rows[7],
+        block_count,
+        group_out[0].data(),
+        group_out[1].data(),
+        group_out[2].data(),
+        group_out[3].data(),
+        group_out[4].data(),
+        group_out[5].data(),
+        group_out[6].data(),
+        group_out[7].data());
+    for (uint64_t rhs_row = 0; rhs_row < rhs_rows.size(); ++rhs_row) {
+      store_batch_major_group_results(
+          group_out[rhs_row].data(), dst, dst_row_stride, rhs_row, row_base, rows_in_group);
+    }
   }
 #endif
 }
@@ -4660,6 +5090,19 @@ struct exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x4_op_mul_mat {
   }
 };
 
+struct exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x8_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  context & ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::
+        execute_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8_unchecked(ev.request);
+    ++ctx.optimized_q4_dispatch_count;
+    ++ctx.optimized_q4_vector_dispatch_count;
+    ++ctx.optimized_q4_vector_packed_dispatch_count;
+    ++ctx.optimized_q4_vector_packed_q8_rhs_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
 struct exec_simd_q8_0_vector_op_mul_mat {
   void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
                   context & ctx) const noexcept {
@@ -4784,6 +5227,21 @@ struct exec_simd_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_op_mul_mat {
   }
 };
 
+struct exec_simd_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  context & ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::
+        execute_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_unchecked(ev.request);
+    ++ctx.optimized_q6_dispatch_count;
+    ++ctx.optimized_q6_vector_dispatch_count;
+    ++ctx.optimized_q6_vector_packed_dispatch_count;
+    ++ctx.optimized_q6_vector_packed_q8_rhs_dispatch_count;
+    ++ctx.optimized_q6_vector_prepared_q8_rhs_dispatch_count;
+    ++ctx.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
 struct exec_simd_q6_vector_prepared_q8_rhs_i8mm_op_mul_mat {
   void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
                   context & ctx) const noexcept {
@@ -4888,6 +5346,8 @@ using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4_t =
     detail::exec_simd_q4_vector_packed_q8_rhs_bl4_matrix_x4_op_mul_mat;
 using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_t =
     detail::exec_simd_q4_vector_packed_q8_rhs_bl8_op_mul_mat;
+using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8_t =
+    detail::exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x8_op_mul_mat;
 using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_t =
     detail::exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x4_op_mul_mat;
 using exec_simd_op_mul_mat_q8_0_packed_bl4_t = detail::exec_simd_q8_0_packed_bl4_op_mul_mat;
@@ -4902,6 +5362,8 @@ using exec_simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_t =
     detail::exec_simd_q6_vector_packed_q8_rhs_matrix_x4_op_mul_mat;
 using exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_t =
     detail::exec_simd_q6_vector_prepared_q8_rhs_i8mm_op_mul_mat;
+using exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_t =
+    detail::exec_simd_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_op_mul_mat;
 using exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_t =
     detail::exec_simd_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_op_mul_mat;
 using exec_simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs_t =
@@ -4969,6 +5431,8 @@ inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4_t
     exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4{};
 inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_t
     exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8{};
+inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8_t
+    exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8{};
 inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_t
     exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4{};
 inline constexpr exec_simd_op_mul_mat_q8_0_packed_bl4_t exec_simd_op_mul_mat_q8_0_packed_bl4{};
@@ -4983,6 +5447,8 @@ inline constexpr exec_simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_t
     exec_simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4{};
 inline constexpr exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_t
     exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm{};
+inline constexpr exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8_t
+    exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x8{};
 inline constexpr exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_t
     exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4{};
 inline constexpr exec_simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs_t

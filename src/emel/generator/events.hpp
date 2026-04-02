@@ -51,6 +51,10 @@ enum class prefill_compute_contract : uint8_t {
   flash_preselected_chunk4_q8_k = 10,
   nonflash_materialized_chunk4_q8_k = 11,
   nonflash_preselected_chunk4_q8_k = 12,
+  flash_materialized_chunk8_q8_k = 13,
+  flash_preselected_chunk8_q8_k = 14,
+  nonflash_materialized_chunk8_q8_k = 15,
+  nonflash_preselected_chunk8_q8_k = 16,
 };
 
 using tokenizer_bind_dispatch_fn =

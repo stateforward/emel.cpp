@@ -184,6 +184,11 @@ inline bool prefill_chunk4_q8_gemm_supported(
   return emel::generator::detail::prefill_chunk4_q8_gemm_backend_ready(backend);
 }
 
+inline bool prefill_chunk8_q8_k_supported(
+    const emel::generator::detail::native_backend & backend) noexcept {
+  return emel::generator::detail::prefill_chunk8_q8_k_backend_ready(backend);
+}
+
 inline bool prefill_chunk4_packed_q8_0_supported(
     const emel::generator::detail::native_backend & backend) noexcept {
   return emel::generator::detail::prefill_chunk4_backend_ready<
@@ -202,13 +207,21 @@ inline bool uses_prefill_chunk4_q8_gemm(const event::generate_run & ev,
       prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
 }
 
+inline bool uses_prefill_chunk8_q8_gemm(const event::generate_run & ev,
+                                        const action::context & ctx) noexcept {
+  return ev.ctx.prompt_token_count >= emel::generator::detail::k_prefill_q8_chunk8_rows &&
+      prefill_chunk8_q8_k_supported(ctx.compute.backend);
+}
+
 inline bool prefill_contract_uses_materialized_logits(
     const emel::generator::prefill_compute_contract contract) noexcept {
   return contract == emel::generator::prefill_compute_contract::flash_materialized_scalar ||
+         contract == emel::generator::prefill_compute_contract::flash_materialized_chunk8_q8_k ||
          contract ==
              emel::generator::prefill_compute_contract::flash_materialized_chunk4_packed_q8_0 ||
          contract == emel::generator::prefill_compute_contract::flash_materialized_chunk4_q8_k ||
          contract == emel::generator::prefill_compute_contract::nonflash_materialized_scalar ||
+         contract == emel::generator::prefill_compute_contract::nonflash_materialized_chunk8_q8_k ||
          contract == emel::generator::prefill_compute_contract::
                          nonflash_materialized_chunk4_packed_q8_0 ||
          contract == emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_q8_k;
@@ -217,10 +230,12 @@ inline bool prefill_contract_uses_materialized_logits(
 inline bool prefill_contract_uses_preselected_argmax(
     const emel::generator::prefill_compute_contract contract) noexcept {
   return contract == emel::generator::prefill_compute_contract::flash_preselected_scalar ||
+         contract == emel::generator::prefill_compute_contract::flash_preselected_chunk8_q8_k ||
          contract ==
              emel::generator::prefill_compute_contract::flash_preselected_chunk4_packed_q8_0 ||
          contract == emel::generator::prefill_compute_contract::flash_preselected_chunk4_q8_k ||
          contract == emel::generator::prefill_compute_contract::nonflash_preselected_scalar ||
+         contract == emel::generator::prefill_compute_contract::nonflash_preselected_chunk8_q8_k ||
          contract == emel::generator::prefill_compute_contract::
                          nonflash_preselected_chunk4_packed_q8_0 ||
          contract == emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_q8_k;
@@ -356,15 +371,29 @@ struct conditioning_backend_error {
   }
 };
 
+struct planning_uses_chunk8_prefill {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return detail::uses_prefill_chunk8_q8_gemm(ev, ctx);
+  }
+};
+
 struct planning_uses_chunk4_prefill {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
+    return !planning_uses_chunk8_prefill{}(ev, ctx) &&
+        detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
   }
 };
 
 struct planning_uses_scalar_prefill {
   bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
-    return !planning_uses_chunk4_prefill{}(ev, ctx);
+    return !planning_uses_chunk8_prefill{}(ev, ctx) &&
+        !planning_uses_chunk4_prefill{}(ev, ctx);
+  }
+};
+
+struct conditioning_ok_with_chunk8_prefill {
+  bool operator()(const event::generate_run & ev, const action::context & ctx) const noexcept {
+    return conditioning_ok{}(ev, ctx) && planning_uses_chunk8_prefill{}(ev, ctx);
   }
 };
 

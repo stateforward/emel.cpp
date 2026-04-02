@@ -370,11 +370,12 @@ struct chunk4_prefill_runtime_fixture {
   }
 };
 
-struct hybrid_chunk4_q8_runtime_fixture {
+template <int32_t prompt_tokens>
+struct hybrid_chunked_q8_runtime_fixture {
   static constexpr int32_t k_vocab = static_cast<int32_t>(QK_K);
   static constexpr int32_t k_embd = static_cast<int32_t>(QK_K);
   static constexpr int32_t k_ctx = 8;
-  static constexpr int32_t k_prompt_tokens = 4;
+  static constexpr int32_t k_prompt_tokens = prompt_tokens;
   static constexpr int32_t k_shortconv_kernel_size = 3;
 
   emel::model::data model = {};
@@ -399,15 +400,19 @@ struct hybrid_chunk4_q8_runtime_fixture {
   emel::model::llama::detail::execution_view execution = {};
   emel::model::llama::detail::topology topology = {};
   emel::model::llama::detail::step_plan plan = {};
-  std::array<int32_t, k_prompt_tokens> token_ids = {0, 1, 2, 3};
-  std::array<int32_t, k_prompt_tokens> positions = {0, 1, 2, 3};
+  std::array<int32_t, k_prompt_tokens> token_ids = {};
+  std::array<int32_t, k_prompt_tokens> positions = {};
   std::vector<float> logits = {};
   emel::generator::compute_io io = {};
   emel::graph::processor::event::execute request = {};
   bool ready = false;
 
-  hybrid_chunk4_q8_runtime_fixture() {
+  hybrid_chunked_q8_runtime_fixture() {
     std::memcpy(model.architecture_name.data(), "lfm2", 4u);
+    for (int32_t token = 0; token < k_prompt_tokens; ++token) {
+      token_ids[static_cast<size_t>(token)] = token;
+      positions[static_cast<size_t>(token)] = token;
+    }
     token_embedding_storage.resize(static_cast<size_t>(k_prompt_tokens * k_embd), 0.0f);
     for (int32_t token = 0; token < k_prompt_tokens; ++token) {
       token_embedding_storage[static_cast<size_t>(token) * static_cast<size_t>(k_embd) +
@@ -537,15 +542,29 @@ struct hybrid_chunk4_q8_runtime_fixture {
     backend.recurrent_shortconv_cache.resize(
         static_cast<size_t>(backend.n_layer * backend.shortconv_state_size * k_embd), 0.0f);
     backend.hidden_chunk4.resize(static_cast<size_t>(k_prompt_tokens * k_embd), 0.0f);
+    backend.hidden_chunk8.resize(static_cast<size_t>(k_prompt_tokens * k_embd), 0.0f);
     backend.norm_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.norm_chunk8.resize(backend.hidden_chunk8.size(), 0.0f);
     backend.q_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.q_chunk8.resize(backend.hidden_chunk8.size(), 0.0f);
     backend.k_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.k_chunk8.resize(backend.hidden_chunk8.size(), 0.0f);
     backend.v_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.v_chunk8.resize(backend.hidden_chunk8.size(), 0.0f);
     backend.attn_ctx_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.attn_ctx_chunk8.resize(backend.hidden_chunk8.size(), 0.0f);
     backend.projected_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.projected_chunk8.resize(backend.hidden_chunk8.size(), 0.0f);
     backend.gate_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.gate_chunk8.resize(backend.hidden_chunk8.size(), 0.0f);
     backend.up_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.up_chunk8.resize(backend.hidden_chunk8.size(), 0.0f);
     backend.ffn_hidden_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.ffn_hidden_chunk8.resize(backend.hidden_chunk8.size(), 0.0f);
+    backend.shortconv_bcx_chunk8.resize(
+        static_cast<size_t>(k_prompt_tokens * 3 * k_embd), 0.0f);
+    backend.shortconv_conv_out_chunk8.resize(
+        static_cast<size_t>(k_prompt_tokens * k_embd), 0.0f);
 
     logits.resize(static_cast<size_t>(k_vocab), -1.0f);
     topology.execution = &execution;
@@ -576,9 +595,13 @@ struct hybrid_chunk4_q8_runtime_fixture {
             static_cast<uint64_t>(k_embd),
             packed_shortconv_in_storage.data()) &&
         emel::generator::detail::prepare_q8_input_workspace(backend) &&
-        emel::generator::detail::prepare_q8_input_chunk4_workspace(backend);
+        emel::generator::detail::prepare_q8_input_chunk4_workspace(backend) &&
+        emel::generator::detail::prepare_q8_input_chunk8_workspace(backend);
   }
 };
+
+using hybrid_chunk4_q8_runtime_fixture = hybrid_chunked_q8_runtime_fixture<4>;
+using hybrid_chunk8_q8_runtime_fixture = hybrid_chunked_q8_runtime_fixture<8>;
 
 float round_fp16_value(const float value) {
   return emel::generator::detail::quant::fp16_to_fp32(
@@ -2015,6 +2038,31 @@ TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk4_batches_hybrid_q8
 #else
   int32_t err = -1;
   CHECK_FALSE(emel::generator::detail::run_kernel_nonflash_prefill_chunk4_q8_k(
+      fixture->request, &err));
+  CHECK(err == emel::generator::detail::k_error_invalid);
+#endif
+}
+
+TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk8_batches_hybrid_q8_k_x8_gemm") {
+  auto fixture = std::make_unique<hybrid_chunk8_q8_runtime_fixture>();
+  REQUIRE(fixture->ready);
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+  int32_t err = -1;
+  REQUIRE(emel::generator::detail::bind_inputs(fixture->request, &err));
+  REQUIRE(emel::generator::detail::run_kernel_nonflash_prefill_chunk8_q8_k(
+      fixture->request, &err));
+  CHECK(err == emel::generator::detail::k_error_ok);
+  CHECK(fixture->backend.kv_cache_tokens == hybrid_chunk8_q8_runtime_fixture::k_prompt_tokens);
+  CHECK(fixture->backend.packed_q8_0_dispatch_calls == 0u);
+  CHECK(fixture->backend.kernel_dispatch_calls == 13u);
+  CHECK(std::all_of(
+      fixture->backend.bound_logits.begin(),
+      fixture->backend.bound_logits.end(),
+      [](const float value) { return value == 0.0f; }));
+#else
+  int32_t err = -1;
+  CHECK_FALSE(emel::generator::detail::run_kernel_nonflash_prefill_chunk8_q8_k(
       fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
 #endif

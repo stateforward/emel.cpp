@@ -763,6 +763,7 @@ inline constexpr reject_uninitialized_generate reject_uninitialized_generate{};
 inline constexpr request_reset_sequence request_reset_sequence{};
 inline constexpr request_conditioning request_conditioning{};
 inline constexpr request_planning_with_step_size<1> request_planning_scalar{};
+inline constexpr request_planning_with_step_size<8> request_planning_chunk8{};
 inline constexpr request_planning_with_step_size<emel::generator::detail::k_prefill_q8_chunk_rows>
     request_planning_chunk4{};
 inline constexpr request_allocate_sequence request_allocate_sequence{};

@@ -82,6 +82,7 @@ struct reset_sequence {};
 struct reset_sequence_decision {};
 struct conditioning {};
 struct conditioning_decision {};
+struct planning_chunk8 {};
 struct planning_chunk4 {};
 struct planning_scalar {};
 struct planning_decision {};
@@ -262,6 +263,10 @@ struct model {
                  + sml::completion<event::generate_run>
                  / action::request_conditioning
 
+      , sml::state<planning_chunk8> <= sml::state<conditioning_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::conditioning_ok_with_chunk8_prefill{} ]
+
       , sml::state<planning_chunk4> <= sml::state<conditioning_decision>
                  + sml::completion<event::generate_run>
                  [ guard::conditioning_ok_with_chunk4_prefill{} ]
@@ -282,6 +287,10 @@ struct model {
 
       //------------------------------------------------------------------------------//
       // Planning.
+      , sml::state<planning_decision> <= sml::state<planning_chunk8>
+                 + sml::completion<event::generate_run>
+                 / action::request_planning_chunk8
+
       , sml::state<planning_decision> <= sml::state<planning_chunk4>
                  + sml::completion<event::generate_run>
                  / action::request_planning_chunk4
@@ -694,6 +703,8 @@ struct model {
       , sml::state<ready> <= sml::state<conditioning> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<conditioning_decision> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<planning_chunk8> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<planning_chunk4> + sml::unexpected_event<sml::_>
                  / action::on_unexpected

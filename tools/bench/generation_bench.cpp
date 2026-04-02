@@ -2174,6 +2174,14 @@ const char * prefill_contract_name(
       return "nonflash_materialized_chunk4_q8_k";
     case emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_q8_k:
       return "nonflash_preselected_chunk4_q8_k";
+    case emel::generator::prefill_compute_contract::flash_materialized_chunk8_q8_k:
+      return "flash_materialized_chunk8_q8_k";
+    case emel::generator::prefill_compute_contract::flash_preselected_chunk8_q8_k:
+      return "flash_preselected_chunk8_q8_k";
+    case emel::generator::prefill_compute_contract::nonflash_materialized_chunk8_q8_k:
+      return "nonflash_materialized_chunk8_q8_k";
+    case emel::generator::prefill_compute_contract::nonflash_preselected_chunk8_q8_k:
+      return "nonflash_preselected_chunk8_q8_k";
   }
   return "unknown";
 }
@@ -2231,13 +2239,15 @@ bool resolve_emel_prefill_plan_step(const emel::model::data & model_data,
   generate_context.prompt_token_count = prompt_token_count;
   const emel::generator::event::generate_run generate_run{request, generate_context};
 
+  const bool uses_chunk8 =
+      emel::generator::guard::planning_uses_chunk8_prefill{}(generate_run, generator_context);
   const bool uses_chunk4 =
       emel::generator::guard::planning_uses_chunk4_prefill{}(generate_run, generator_context);
-  const int32_t step_sizes[2] = {
-      1,
-      emel::generator::detail::k_prefill_q8_chunk_rows,
-  };
-  step_size_out = step_sizes[static_cast<size_t>(uses_chunk4)];
+  if (uses_chunk8) {
+    step_size_out = emel::generator::detail::k_prefill_q8_chunk8_rows;
+    return true;
+  }
+  step_size_out = uses_chunk4 ? emel::generator::detail::k_prefill_q8_chunk_rows : 1;
   return true;
 }
 
@@ -2316,6 +2326,12 @@ bool inspect_emel_prefill_contract(const emel::model::data & model_data,
 
   if (emel::generator::prefill::guard::flash_runtime_supported{}(
           prefill_run, prefill_context)) {
+    if (emel::generator::prefill::guard::uses_materialized_logits_with_chunk8_q8_k{}(
+            prefill_run, prefill_context)) {
+      contract_out =
+          emel::generator::prefill_compute_contract::flash_materialized_chunk8_q8_k;
+      return true;
+    }
     if (emel::generator::prefill::guard::uses_materialized_logits_with_chunk4_packed_q8_0{}(
             prefill_run, prefill_context)) {
       contract_out =
@@ -2339,6 +2355,11 @@ bool inspect_emel_prefill_contract(const emel::model::data & model_data,
           emel::generator::prefill_compute_contract::flash_preselected_chunk4_packed_q8_0;
       return true;
     }
+    if (emel::generator::prefill::guard::uses_preselected_argmax_with_chunk8_q8_k{}(
+            prefill_run, prefill_context)) {
+      contract_out = emel::generator::prefill_compute_contract::flash_preselected_chunk8_q8_k;
+      return true;
+    }
     if (emel::generator::prefill::guard::uses_preselected_argmax_with_chunk4_q8_k{}(
             prefill_run, prefill_context)) {
       contract_out = emel::generator::prefill_compute_contract::flash_preselected_chunk4_q8_k;
@@ -2352,6 +2373,11 @@ bool inspect_emel_prefill_contract(const emel::model::data & model_data,
     return false;
   }
 
+  if (emel::generator::prefill::guard::uses_materialized_logits_with_chunk8_q8_k{}(
+          prefill_run, prefill_context)) {
+    contract_out = emel::generator::prefill_compute_contract::nonflash_materialized_chunk8_q8_k;
+    return true;
+  }
   if (emel::generator::prefill::guard::uses_materialized_logits_with_chunk4_packed_q8_0{}(
           prefill_run, prefill_context)) {
     contract_out =
@@ -2372,6 +2398,11 @@ bool inspect_emel_prefill_contract(const emel::model::data & model_data,
           prefill_run, prefill_context)) {
     contract_out =
         emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_packed_q8_0;
+    return true;
+  }
+  if (emel::generator::prefill::guard::uses_preselected_argmax_with_chunk8_q8_k{}(
+          prefill_run, prefill_context)) {
+    contract_out = emel::generator::prefill_compute_contract::nonflash_preselected_chunk8_q8_k;
     return true;
   }
   if (emel::generator::prefill::guard::uses_preselected_argmax_with_chunk4_q8_k{}(
@@ -2999,6 +3030,316 @@ bool run_emel_runtime_layer_probe_chunk4(emel::generator::detail::native_backend
 }
 
 template <emel::generator::attention_mode mode>
+bool run_emel_runtime_layer_probe_chunk8(emel::generator::detail::native_backend & backend,
+                                         const int32_t layer_index,
+                                         const size_t token_base,
+                                         prefill_probe_breakdown & breakdown) {
+  auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  const int32_t q_dim = backend.n_head * backend.head_dim;
+  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const int32_t ffn_dim = block.feed_forward_gate.rows;
+
+  if (!measure_subprobe_bool(
+          breakdown.misc_ns,
+          breakdown.misc_attention_norm_ns,
+          [&]() {
+            return emel::generator::detail::rms_norm_chunk8(
+                backend.hidden_chunk8,
+                backend.n_embd,
+                block.attention_norm,
+                backend.rms_epsilon,
+                backend.norm_chunk8);
+          })) {
+    return false;
+  }
+  if (block.uses_attention) {
+    if (!measure_probe_bool(
+            breakdown.linear_ns,
+            [&]() {
+              return emel::generator::detail::prepare_q8_chunk8_input(
+                         backend, backend.norm_chunk8, backend.n_embd) &&
+                  emel::generator::detail::matmul_chunk8_q8_input(
+                             backend, block.attention_q, backend.n_embd, backend.q_chunk8) &&
+                  emel::generator::detail::matmul_chunk8_q8_input(
+                             backend, block.attention_k, backend.n_embd, backend.k_chunk8) &&
+                  emel::generator::detail::matmul_chunk8_q8_input(
+                             backend, block.attention_v, backend.n_embd, backend.v_chunk8);
+            })) {
+      return false;
+    }
+
+    const bool qk_norm_runtime = emel::generator::detail::requires_attention_qk_norm(backend, block);
+    for (int32_t row = 0; row < emel::generator::detail::k_prefill_q8_chunk8_rows; ++row) {
+      const int32_t position = backend.bound_positions[token_base + static_cast<size_t>(row)];
+      auto q_row = emel::generator::detail::chunk8_row_span<float>(
+          std::span<float>(backend.q_chunk8), row, q_dim);
+      auto k_row = emel::generator::detail::chunk8_row_span<float>(
+          std::span<float>(backend.k_chunk8), row, kv_dim);
+      const auto v_row = emel::generator::detail::chunk8_row_span<const float>(
+          std::span<const float>(backend.v_chunk8), row, kv_dim);
+
+      if (qk_norm_runtime &&
+          !measure_subprobe_bool(
+              breakdown.misc_ns,
+              breakdown.misc_qk_norm_ns,
+              [&]() {
+                return emel::generator::detail::apply_headwise_rms_norm(
+                           q_row,
+                           block.attention_q_norm,
+                           backend.n_head,
+                           backend.head_dim,
+                           backend.rms_epsilon) &&
+                    emel::generator::detail::apply_headwise_rms_norm(
+                           k_row,
+                           block.attention_k_norm,
+                           backend.n_head_kv,
+                           backend.head_dim_kv,
+                           backend.rms_epsilon);
+              })) {
+        return false;
+      }
+      measure_subprobe_void(
+          breakdown.misc_ns,
+          breakdown.misc_rope_ns,
+          [&]() {
+            emel::generator::detail::apply_rope(
+                q_row,
+                backend.n_head,
+                backend.head_dim,
+                backend.n_rot,
+                position,
+                backend.rope_freq_base);
+            emel::generator::detail::apply_rope(
+                k_row,
+                backend.n_head_kv,
+                backend.head_dim_kv,
+                backend.n_rot,
+                position,
+                backend.rope_freq_base);
+          });
+
+      if (!measure_subprobe_bool(
+              breakdown.misc_ns,
+              breakdown.misc_kv_store_ns,
+              [&]() {
+                return emel::generator::detail::store_attention_kv_cache(
+                    backend, layer_index, position, k_row, v_row);
+              }) ||
+          !measure_probe_bool(
+              breakdown.attention_ns,
+              [&]() {
+                return emel::generator::detail::run_attention_for_q_vector<mode>(
+                    backend, layer_index, position, q_row);
+              })) {
+        return false;
+      }
+
+      measure_subprobe_void(
+          breakdown.misc_ns,
+          breakdown.misc_ctx_copy_ns,
+          [&]() {
+            std::copy(
+                backend.attn_ctx.begin(),
+                backend.attn_ctx.end(),
+                emel::generator::detail::chunk8_row_span<float>(
+                    std::span<float>(backend.attn_ctx_chunk8), row, q_dim)
+                    .begin());
+            backend.kv_cache_tokens = position + 1;
+          });
+    }
+
+    if (!measure_probe_bool(
+            breakdown.linear_ns,
+            [&]() {
+              return emel::generator::detail::prepare_q8_chunk8_input(
+                         backend, backend.attn_ctx_chunk8, q_dim) &&
+                  emel::generator::detail::matmul_chunk8_q8_input(
+                             backend, block.attention_output, q_dim, backend.projected_chunk8) &&
+                  emel::generator::detail::add_chunk8_rows_in_place(
+                             backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd);
+            })) {
+      return false;
+    }
+  } else {
+    if (backend.shortconv_kernel_size <= 0 ||
+        backend.shortconv_state_size <= 0 ||
+        block.shortconv_in_proj.tensor == nullptr ||
+        block.shortconv_out_proj.tensor == nullptr ||
+        static_cast<size_t>(block.shortconv_in_proj.rows) !=
+            static_cast<size_t>(3 * backend.n_embd) ||
+        block.shortconv_in_proj.cols != backend.n_embd ||
+        static_cast<size_t>(block.shortconv_out_proj.rows) !=
+            static_cast<size_t>(backend.n_embd) ||
+        block.shortconv_out_proj.cols != backend.n_embd ||
+        block.shortconv_conv.size() !=
+            static_cast<size_t>(backend.shortconv_kernel_size) *
+                static_cast<size_t>(backend.n_embd) ||
+        backend.shortconv_bcx_chunk8.size() !=
+            static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
+                static_cast<size_t>(3 * backend.n_embd) ||
+        backend.shortconv_bx.size() != static_cast<size_t>(backend.n_embd) ||
+        backend.shortconv_conv_out_chunk8.size() != backend.hidden_chunk8.size()) {
+      return false;
+    }
+
+    if (!measure_subprobe_bool(
+            breakdown.linear_ns,
+            breakdown.shortconv_in_proj_prepare_ns,
+            [&]() {
+              return emel::generator::detail::prepare_q8_chunk8_input(
+                  backend, backend.norm_chunk8, backend.n_embd);
+            }) ||
+        !measure_subprobe_bool(
+            breakdown.linear_ns,
+            breakdown.shortconv_in_proj_ns,
+            [&]() {
+              return emel::generator::detail::matmul_chunk8_q8_input(
+                  backend,
+                  block.shortconv_in_proj,
+                  backend.n_embd,
+                  backend.shortconv_bcx_chunk8);
+            })) {
+      return false;
+    }
+
+    const size_t layer_offset = emel::generator::detail::shortconv_state_layer_offset(
+        backend, layer_index);
+    float * state = backend.recurrent_shortconv_cache.data() + layer_offset;
+    for (int32_t row = 0; row < emel::generator::detail::k_prefill_q8_chunk8_rows; ++row) {
+      const auto bcx_row = emel::generator::detail::chunk8_row_span<const float>(
+          std::span<const float>(backend.shortconv_bcx_chunk8), row, 3 * backend.n_embd);
+      auto conv_out_row = emel::generator::detail::chunk8_row_span<float>(
+          std::span<float>(backend.shortconv_conv_out_chunk8), row, backend.n_embd);
+      auto b = bcx_row.subspan(0u, static_cast<size_t>(backend.n_embd));
+      auto c = bcx_row.subspan(
+          static_cast<size_t>(backend.n_embd), static_cast<size_t>(backend.n_embd));
+      auto x = bcx_row.subspan(
+          static_cast<size_t>(2 * backend.n_embd), static_cast<size_t>(backend.n_embd));
+
+      measure_subprobe_void(
+          breakdown.misc_ns,
+          breakdown.shortconv_conv_ns,
+          [&]() {
+            for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+              const size_t dim = static_cast<size_t>(idx);
+              const float bx = b[dim] * x[dim];
+              backend.shortconv_bx[dim] = bx;
+
+              const float * kernel =
+                  block.shortconv_conv.data() +
+                  (dim * static_cast<size_t>(backend.shortconv_kernel_size));
+              float conv_sum = bx * kernel[static_cast<size_t>(backend.shortconv_state_size)];
+              for (int32_t tap = 0; tap < backend.shortconv_state_size; ++tap) {
+                conv_sum +=
+                    state[static_cast<size_t>(tap) * static_cast<size_t>(backend.n_embd) + dim] *
+                    kernel[static_cast<size_t>(tap)];
+              }
+
+              conv_out_row[dim] = c[dim] * conv_sum;
+            }
+          });
+
+      measure_subprobe_void(
+          breakdown.misc_ns,
+          breakdown.shortconv_state_shift_ns,
+          [&]() {
+            if (backend.shortconv_state_size > 1) {
+              const size_t move_count =
+                  static_cast<size_t>(backend.shortconv_state_size - 1) *
+                  static_cast<size_t>(backend.n_embd);
+              std::memmove(
+                  state,
+                  state + static_cast<size_t>(backend.n_embd),
+                  move_count * sizeof(float));
+            }
+            std::memcpy(
+                state + static_cast<size_t>(backend.shortconv_state_size - 1) *
+                            static_cast<size_t>(backend.n_embd),
+                backend.shortconv_bx.data(),
+                static_cast<size_t>(backend.n_embd) * sizeof(float));
+          });
+    }
+
+    if (!measure_subprobe_bool(
+            breakdown.linear_ns,
+            breakdown.shortconv_out_proj_prepare_ns,
+            [&]() {
+              return emel::generator::detail::prepare_q8_chunk8_input(
+                  backend, backend.shortconv_conv_out_chunk8, backend.n_embd);
+            }) ||
+        !measure_subprobe_bool(
+            breakdown.linear_ns,
+            breakdown.shortconv_out_proj_ns,
+            [&]() {
+              return emel::generator::detail::matmul_chunk8_q8_input(
+                         backend,
+                         block.shortconv_out_proj,
+                         backend.n_embd,
+                         backend.projected_chunk8) &&
+                  emel::generator::detail::add_chunk8_rows_in_place(
+                      backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd);
+            })) {
+      return false;
+    }
+
+    breakdown.misc_shortconv_ns =
+        breakdown.shortconv_conv_ns + breakdown.shortconv_state_shift_ns;
+  }
+
+  if (!measure_subprobe_bool(
+          breakdown.misc_ns,
+          breakdown.misc_ffn_norm_ns,
+          [&]() {
+            return emel::generator::detail::rms_norm_chunk8(
+                backend.hidden_chunk8,
+                backend.n_embd,
+                block.feed_forward_norm,
+                backend.rms_epsilon,
+                backend.norm_chunk8);
+          })) {
+    return false;
+  }
+
+  if (!measure_probe_bool(
+          breakdown.linear_ns,
+          [&]() {
+            return emel::generator::detail::prepare_q8_chunk8_input(
+                       backend, backend.norm_chunk8, backend.n_embd) &&
+                emel::generator::detail::matmul_chunk8_q8_input(
+                           backend, block.feed_forward_gate, backend.n_embd, backend.gate_chunk8) &&
+                emel::generator::detail::matmul_chunk8_q8_input(
+                           backend, block.feed_forward_up, backend.n_embd, backend.up_chunk8);
+          })) {
+    return false;
+  }
+
+  if (!measure_subprobe_bool(
+          breakdown.misc_ns,
+          breakdown.misc_silu_ns,
+          [&]() {
+            return emel::generator::detail::apply_silu_mul_chunk8(
+                backend.gate_chunk8, backend.up_chunk8, ffn_dim, backend.ffn_hidden_chunk8);
+          })) {
+    return false;
+  }
+
+  if (!measure_probe_bool(
+          breakdown.linear_ns,
+          [&]() {
+            return emel::generator::detail::prepare_q8_chunk8_input(
+                       backend, backend.ffn_hidden_chunk8, ffn_dim) &&
+                emel::generator::detail::matmul_chunk8_q8_input(
+                           backend, block.feed_forward_down, ffn_dim, backend.projected_chunk8) &&
+                emel::generator::detail::add_chunk8_rows_in_place(
+                           backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd);
+          })) {
+    return false;
+  }
+
+  return true;
+}
+
+template <emel::generator::attention_mode mode>
 bool run_emel_prefill_probe_scalar(emel::generator::detail::native_backend & backend,
                                    int32_t & selected_index,
                                    float & selected_score,
@@ -3128,6 +3469,96 @@ bool run_emel_prefill_probe_chunk4(emel::generator::detail::native_backend & bac
       });
 }
 
+template <emel::generator::attention_mode mode>
+bool run_emel_prefill_probe_chunk8(emel::generator::detail::native_backend & backend,
+                                   int32_t & selected_index,
+                                   float & selected_score,
+                                   prefill_probe_breakdown & breakdown) {
+  backend.kv_cache_tokens = 0;
+  measure_probe_void(
+      breakdown.misc_ns, [&]() { emel::generator::detail::reset_shortconv_cache(backend); });
+
+  const size_t token_count = static_cast<size_t>(backend.bound_token_count);
+  const size_t chunk_rows =
+      static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows);
+  const size_t chunk_limit = token_count - (token_count % chunk_rows);
+  if (chunk_limit == 0u) {
+    return false;
+  }
+
+  for (size_t token_base = 0; token_base < chunk_limit; token_base += chunk_rows) {
+    for (int32_t row = 0; row < emel::generator::detail::k_prefill_q8_chunk8_rows; ++row) {
+      const size_t token_index = token_base + static_cast<size_t>(row);
+      const int32_t token_id = backend.bound_tokens[token_index];
+      const int32_t position = backend.bound_positions[token_index];
+      if (token_id < 0 || token_id >= backend.token_embedding.rows ||
+          position < 0 || position >= backend.n_ctx) {
+        return false;
+      }
+      if (!measure_probe_bool(
+              breakdown.misc_ns,
+              [&]() {
+                return emel::generator::detail::copy_tensor_row(
+                    *backend.token_embedding.tensor,
+                    token_id,
+                    emel::generator::detail::chunk8_row_span<float>(
+                        std::span<float>(backend.hidden_chunk8), row, backend.n_embd));
+              })) {
+        return false;
+      }
+    }
+
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_emel_runtime_layer_probe_chunk8<mode>(backend, layer, token_base, breakdown)) {
+        return false;
+      }
+    }
+
+    std::copy(
+        emel::generator::detail::chunk8_row_span<const float>(
+            std::span<const float>(backend.hidden_chunk8),
+            emel::generator::detail::k_prefill_q8_chunk8_rows - 1,
+            backend.n_embd)
+            .begin(),
+        emel::generator::detail::chunk8_row_span<const float>(
+            std::span<const float>(backend.hidden_chunk8),
+            emel::generator::detail::k_prefill_q8_chunk8_rows - 1,
+            backend.n_embd)
+            .end(),
+        backend.hidden.begin());
+  }
+
+  for (size_t token_index = chunk_limit; token_index < token_count; ++token_index) {
+    const int32_t token_id = backend.bound_tokens[token_index];
+    const int32_t position = backend.bound_positions[token_index];
+    if (token_id < 0 || token_id >= backend.token_embedding.rows ||
+        position < 0 || position >= backend.n_ctx) {
+      return false;
+    }
+    if (!measure_probe_bool(
+            breakdown.misc_ns,
+            [&]() {
+              return emel::generator::detail::copy_tensor_row(
+                  *backend.token_embedding.tensor, token_id, backend.hidden);
+            })) {
+      return false;
+    }
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_emel_runtime_layer_probe_scalar<mode>(backend, layer, position, breakdown)) {
+        return false;
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+  }
+
+  return measure_probe_bool(
+      breakdown.linear_ns,
+      [&]() {
+        return emel::generator::detail::compute_logits_preselected_argmax(
+            backend, selected_index, selected_score);
+      });
+}
+
 bool measure_emel_prefill_probe(emel::generator::detail::native_backend & backend,
                                 const std::vector<int32_t> & prompt_tokens,
                                 const emel::generator::prefill_compute_contract contract,
@@ -3139,6 +3570,9 @@ bool measure_emel_prefill_probe(emel::generator::detail::native_backend & backen
 
   float selected_score = 0.0f;
   switch (contract) {
+    case emel::generator::prefill_compute_contract::flash_preselected_chunk8_q8_k:
+      return run_emel_prefill_probe_chunk8<emel::generator::attention_mode::flash>(
+          backend, selected_index_out, selected_score, breakdown_out);
     case emel::generator::prefill_compute_contract::flash_preselected_chunk4_packed_q8_0:
       return run_emel_prefill_probe_chunk4<
           emel::generator::attention_mode::flash,
@@ -3151,6 +3585,9 @@ bool measure_emel_prefill_probe(emel::generator::detail::native_backend & backen
           backend, selected_index_out, selected_score, breakdown_out);
     case emel::generator::prefill_compute_contract::flash_preselected_scalar:
       return run_emel_prefill_probe_scalar<emel::generator::attention_mode::flash>(
+          backend, selected_index_out, selected_score, breakdown_out);
+    case emel::generator::prefill_compute_contract::nonflash_preselected_chunk8_q8_k:
+      return run_emel_prefill_probe_chunk8<emel::generator::attention_mode::nonflash>(
           backend, selected_index_out, selected_score, breakdown_out);
     case emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_packed_q8_0:
       return run_emel_prefill_probe_chunk4<
@@ -3165,9 +3602,11 @@ bool measure_emel_prefill_probe(emel::generator::detail::native_backend & backen
     case emel::generator::prefill_compute_contract::nonflash_preselected_scalar:
       return run_emel_prefill_probe_scalar<emel::generator::attention_mode::nonflash>(
           backend, selected_index_out, selected_score, breakdown_out);
+    case emel::generator::prefill_compute_contract::flash_materialized_chunk8_q8_k:
     case emel::generator::prefill_compute_contract::flash_materialized_chunk4_packed_q8_0:
     case emel::generator::prefill_compute_contract::flash_materialized_chunk4_q8_k:
     case emel::generator::prefill_compute_contract::flash_materialized_scalar:
+    case emel::generator::prefill_compute_contract::nonflash_materialized_chunk8_q8_k:
     case emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_packed_q8_0:
     case emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_q8_k:
     case emel::generator::prefill_compute_contract::nonflash_materialized_scalar:

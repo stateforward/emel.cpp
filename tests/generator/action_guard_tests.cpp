@@ -90,6 +90,14 @@ constexpr bool host_supports_chunk4_prefill_q8_route() noexcept {
 #endif
 }
 
+constexpr bool host_supports_chunk8_prefill_q8_route() noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
+  return true;
+#else
+  return false;
+#endif
+}
+
 constexpr uint8_t chunk4_test_dtype() noexcept {
 #if defined(__ARM_FEATURE_MATMUL_INT8)
   return emel::kernel::detail::dtype_q4_k_x8_bl8;
@@ -132,16 +140,27 @@ struct chunk4_planning_backend_fixture {
 
     backend.q8_input_storage.resize(1u);
     backend.q8_input_chunk4_storage.resize(1u);
+    backend.q8_input_chunk8_storage.resize(2u);
     backend.hidden_chunk4.resize(16u);
+    backend.hidden_chunk8.resize(32u);
     backend.norm_chunk4.resize(16u);
+    backend.norm_chunk8.resize(32u);
     backend.projected_chunk4.resize(16u);
+    backend.projected_chunk8.resize(32u);
     backend.attn_ctx_chunk4.resize(4u);
+    backend.attn_ctx_chunk8.resize(8u);
     backend.q_chunk4.resize(4u);
+    backend.q_chunk8.resize(8u);
     backend.k_chunk4.resize(4u);
+    backend.k_chunk8.resize(8u);
     backend.v_chunk4.resize(4u);
+    backend.v_chunk8.resize(8u);
     backend.gate_chunk4.resize(16u);
+    backend.gate_chunk8.resize(32u);
     backend.up_chunk4.resize(16u);
+    backend.up_chunk8.resize(32u);
     backend.ffn_hidden_chunk4.resize(16u);
+    backend.ffn_hidden_chunk8.resize(32u);
   }
 };
 
@@ -350,7 +369,7 @@ TEST_CASE("generator planning guards select explicit chunk4 prefill routing") {
 
   auto generate = make_generate_request(&tracker, &error_out, output_length_out);
   emel::generator::event::generate_ctx generate_ctx{};
-  generate_ctx.prompt_token_count = 8;
+  generate_ctx.prompt_token_count = emel::generator::detail::k_prefill_q8_chunk_rows;
   emel::generator::event::generate_run generate_run{generate, generate_ctx};
 
   if (host_supports_chunk4_prefill_q8_route()) {
@@ -360,6 +379,34 @@ TEST_CASE("generator planning guards select explicit chunk4 prefill routing") {
   } else {
     CHECK_FALSE(
         emel::generator::guard::planning_uses_chunk4_prefill{}(generate_run, fixture.context));
+    CHECK(emel::generator::guard::planning_uses_scalar_prefill{}(generate_run, fixture.context));
+  }
+}
+
+TEST_CASE("generator planning guards select explicit chunk8 prefill routing") {
+  chunk4_planning_backend_fixture fixture{};
+  callback_tracker tracker{};
+  emel::error::type error_out = emel::error::cast(emel::generator::error::backend);
+  size_t output_length_out = 0;
+
+  auto generate = make_generate_request(&tracker, &error_out, output_length_out);
+  emel::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count = emel::generator::detail::k_prefill_q8_chunk8_rows;
+  emel::generator::event::generate_run generate_run{generate, generate_ctx};
+
+  if (host_supports_chunk8_prefill_q8_route()) {
+    CHECK(emel::generator::guard::planning_uses_chunk8_prefill{}(generate_run, fixture.context));
+    CHECK_FALSE(
+        emel::generator::guard::planning_uses_chunk4_prefill{}(generate_run, fixture.context));
+    CHECK_FALSE(
+        emel::generator::guard::planning_uses_scalar_prefill{}(generate_run, fixture.context));
+  } else if (host_supports_chunk4_prefill_q8_route()) {
+    CHECK_FALSE(
+        emel::generator::guard::planning_uses_chunk8_prefill{}(generate_run, fixture.context));
+    CHECK(emel::generator::guard::planning_uses_chunk4_prefill{}(generate_run, fixture.context));
+  } else {
+    CHECK_FALSE(
+        emel::generator::guard::planning_uses_chunk8_prefill{}(generate_run, fixture.context));
     CHECK(emel::generator::guard::planning_uses_scalar_prefill{}(generate_run, fixture.context));
   }
 }
@@ -383,6 +430,29 @@ TEST_CASE("generator request_planning_chunk4 batches prompt metadata explicitly"
   CHECK(generate_ctx.phase_accepted);
   CHECK(generate_ctx.phase_code == 0);
   CHECK(generate_ctx.prefill_step_size == emel::generator::detail::k_prefill_q8_chunk_rows);
+  CHECK(generate_ctx.plan_step_count == 2);
+  CHECK(generate_ctx.plan_outputs >= 0);
+}
+
+TEST_CASE("generator request_planning_chunk8 batches prompt metadata explicitly") {
+  emel::generator::action::context context{};
+  callback_tracker tracker{};
+  emel::error::type error_out = emel::error::cast(emel::generator::error::backend);
+  size_t output_length_out = 0;
+
+  auto generate = make_generate_request(&tracker, &error_out, output_length_out);
+  emel::generator::event::generate_ctx generate_ctx{};
+  generate_ctx.prompt_token_count = 16;
+  emel::generator::event::generate_run generate_run{generate, generate_ctx};
+  for (int32_t idx = 0; idx < generate_ctx.prompt_token_count; ++idx) {
+    context.buffers.prompt_tokens[static_cast<size_t>(idx)] = idx;
+  }
+
+  emel::generator::action::request_planning_chunk8(generate_run, context);
+
+  CHECK(generate_ctx.phase_accepted);
+  CHECK(generate_ctx.phase_code == 0);
+  CHECK(generate_ctx.prefill_step_size == emel::generator::detail::k_prefill_q8_chunk8_rows);
   CHECK(generate_ctx.plan_step_count == 2);
   CHECK(generate_ctx.plan_outputs >= 0);
 }

@@ -64,6 +64,13 @@ inline bool uses_prefill_chunk4_q8_gemm(const event::run & ev,
              ctx.generator.compute.backend);
 }
 
+inline bool uses_prefill_chunk8_q8_k_gemm(const event::run & ev,
+                                          const action::context & ctx) noexcept {
+  return ev.ctx.prompt_token_count >= emel::generator::detail::k_prefill_q8_chunk8_rows &&
+         emel::generator::guard::detail::prefill_chunk8_q8_k_supported(
+             ctx.generator.compute.backend);
+}
+
 inline bool uses_prefill_chunk4_packed_q8_0_gemm(const event::run & ev,
                                                  const action::context & ctx) noexcept {
   return ev.ctx.prompt_token_count >= emel::generator::detail::k_prefill_q8_chunk_rows &&
@@ -138,9 +145,17 @@ struct nonflash_runtime_required {
   }
 };
 
+struct uses_materialized_logits_with_chunk8_q8_k {
+  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
+    return !detail::uses_preselected_argmax_direct(ctx) &&
+           detail::uses_prefill_chunk8_q8_k_gemm(ev, ctx);
+  }
+};
+
 struct uses_materialized_logits_with_chunk4_packed_q8_0 {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return !detail::uses_preselected_argmax_direct(ctx) &&
+           !detail::uses_prefill_chunk8_q8_k_gemm(ev, ctx) &&
            detail::uses_prefill_chunk4_packed_q8_0_gemm(ev, ctx);
   }
 };
@@ -148,6 +163,7 @@ struct uses_materialized_logits_with_chunk4_packed_q8_0 {
 struct uses_materialized_logits_with_chunk4_q8_k {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return !detail::uses_preselected_argmax_direct(ctx) &&
+           !detail::uses_prefill_chunk8_q8_k_gemm(ev, ctx) &&
            detail::uses_prefill_chunk4_q8_k_gemm(ev, ctx);
   }
 };
@@ -155,13 +171,22 @@ struct uses_materialized_logits_with_chunk4_q8_k {
 struct uses_materialized_logits_with_scalar {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return !detail::uses_preselected_argmax_direct(ctx) &&
+           !detail::uses_prefill_chunk8_q8_k_gemm(ev, ctx) &&
            !detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
+  }
+};
+
+struct uses_preselected_argmax_with_chunk8_q8_k {
+  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
+    return detail::uses_preselected_argmax_direct(ctx) &&
+           detail::uses_prefill_chunk8_q8_k_gemm(ev, ctx);
   }
 };
 
 struct uses_preselected_argmax_with_chunk4_packed_q8_0 {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return detail::uses_preselected_argmax_direct(ctx) &&
+           !detail::uses_prefill_chunk8_q8_k_gemm(ev, ctx) &&
            detail::uses_prefill_chunk4_packed_q8_0_gemm(ev, ctx);
   }
 };
@@ -169,6 +194,7 @@ struct uses_preselected_argmax_with_chunk4_packed_q8_0 {
 struct uses_preselected_argmax_with_chunk4_q8_k {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return detail::uses_preselected_argmax_direct(ctx) &&
+           !detail::uses_prefill_chunk8_q8_k_gemm(ev, ctx) &&
            detail::uses_prefill_chunk4_q8_k_gemm(ev, ctx);
   }
 };
@@ -176,6 +202,7 @@ struct uses_preselected_argmax_with_chunk4_q8_k {
 struct uses_preselected_argmax_with_scalar {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return detail::uses_preselected_argmax_direct(ctx) &&
+           !detail::uses_prefill_chunk8_q8_k_gemm(ev, ctx) &&
            !detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
   }
 };
