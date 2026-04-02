@@ -134,6 +134,7 @@ TEST_CASE("encoder_detail_bpe_merge_and_errors") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = "he",
     .preprocessed = true,
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
@@ -152,6 +153,7 @@ TEST_CASE("encoder_detail_bpe_merge_and_errors") {
   CHECK(emel::text::encoders::detail::ensure_tables(ctx_fail));
 
   emel::text::encoders::event::encode ev_fail{
+    .vocab = *builder.vocab,
     .text = "he",
     .preprocessed = true,
     .token_ids = std::span<int32_t>(),
@@ -179,6 +181,7 @@ TEST_CASE("encoder_detail_bpe_buffer_overflow") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = text,
     .preprocessed = true,
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
@@ -228,6 +231,7 @@ TEST_CASE("encoder_detail_bpe_byte_push_overflow") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = "ab",
     .preprocessed = true,
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(0)),

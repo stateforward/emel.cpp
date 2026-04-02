@@ -185,26 +185,30 @@ Use `scripts/generate_docs.sh --check` in CI to validate generated artifacts.
 
 ## Embedded size
 
-Generated from `scripts/embedded_size.sh --snapshot-update` using final dead-stripped probe executables for a matched kernel workload.
+Generated from `scripts/embedded_size.sh --snapshot-update` using final dead-stripped Qwen3 E2E runner executables.
 
 - Snapshot: `snapshots/embedded_size/summary.txt`
 - Mode: `linked_executable`
-- Scope: `kernel_runtime`
-- Workload: `kernel_suite_v1`
+- Scope: `e2e_inference`
+- Workload: `qwen3_0_6b_prompt_hello_max_tokens_1`
 - Backend: `aarch64`
-- Reference ref: `ecbcb7ea9d3303097519723b264a8b5f1e977028`
+- Reference ref: `8710e5f9b9bd7246608808ccd3626bde8abf6ff9`
 - Toolchain: `/opt/homebrew/bin/zig`
 - Build type: `MinSizeRel`
 - Compile flags: `-ffunction-sections,-fdata-sections`
 - Link flags: `-Wl,-dead_strip`
+- Model fixture: `tests/models/Qwen3-0.6B-Q8_0.gguf`
+- Prompt: `hello`
+- Max tokens: `1`
+- Runtime smoke: `passed`
 
 | Executable | raw bytes | stripped bytes | section bytes |
 | --- | ---: | ---: | ---: |
-| `emel` | 368736 | 368736 | 214117 |
-| `llama.cpp/ggml reference` | 887848 | 765528 | 1211403 |
+| `emel` | 4073016 | 4073016 | 1323877 |
+| `llama.cpp/ggml reference` | 3334264 | 2795112 | 3094255 |
 
-- Ratio (`emel / reference`) raw: `0.415x`
-- Ratio (`emel / reference`) stripped: `0.482x`
-- Ratio (`emel / reference`) section: `0.177x`
+- Ratio (`emel / reference`) raw: `1.222x`
+- Ratio (`emel / reference`) stripped: `1.457x`
+- Ratio (`emel / reference`) section: `0.428x`
 
-This is a final linked executable estimate for a matched kernel workload, not a whole-product feature-parity claim. emel does not yet ship the full llama.cpp surface, and both binaries still include the platform runtime selected by the toolchain.
+This is a matched Qwen3-0.6B end-to-end runner size measurement for the maintained `hello` -> first-token path, not a whole-product feature-parity claim. Both binaries still include the platform runtime selected by the toolchain.

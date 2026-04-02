@@ -9707,13 +9707,13 @@ void dump_scalar_attention_debug(const generation_load_state & state,
                    "ffn_gate_scale=%d ffn_up_scale=%d ffn_down_scale=%d\n",
                    layer,
                    ref_layer.bo != nullptr ? 1 : 0,
-                   ref_layer.wo_scale != nullptr ? 1 : 0,
+                   ref_layer.wo_s != nullptr ? 1 : 0,
                    ref_layer.ffn_gate_b != nullptr ? 1 : 0,
                    ref_layer.ffn_up_b != nullptr ? 1 : 0,
                    ref_layer.ffn_down_b != nullptr ? 1 : 0,
-                   ref_layer.ffn_gate_scale != nullptr ? 1 : 0,
-                   ref_layer.ffn_up_scale != nullptr ? 1 : 0,
-                   ref_layer.ffn_down_scale != nullptr ? 1 : 0);
+                   ref_layer.ffn_gate_s != nullptr ? 1 : 0,
+                   ref_layer.ffn_up_s != nullptr ? 1 : 0,
+                   ref_layer.ffn_down_s != nullptr ? 1 : 0);
     }
   }
   const argmax_summary dispatch_summary =

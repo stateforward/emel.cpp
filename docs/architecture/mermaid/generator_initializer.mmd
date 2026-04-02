@@ -2,6 +2,7 @@ stateDiagram-v2
   direction TB
   [*] --> idle
   idle --> preparing_backend : run [always] / begin_initialize_
+  preparing_backend --> binding_conditioner : completion_run_ [backend_already_ready_] / none
   preparing_backend_decision --> binding_conditioner : completion_run_ [backend_already_ready_] / none
   preparing_backend --> preparing_backend_decision : completion_run_ [backend_prepare_needed_] / request_backend_prepare_
   preparing_backend_decision --> binding_conditioner : completion_run_ [backend_prepare_ok_] / accept_prepared_backend_

@@ -67,6 +67,7 @@ TEST_CASE("encoder_detail_wpm_empty_text") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = "",
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
@@ -90,6 +91,7 @@ TEST_CASE("encoder_wpm_encode_requires_prepared_tables") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = "hello",
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
@@ -146,6 +148,7 @@ TEST_CASE("encoder_detail_wpm_skips_unknown_without_unk") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = "unknown",
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
@@ -170,6 +173,7 @@ TEST_CASE("encoder_detail_wpm_prefix_overflow") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = text,
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
@@ -192,6 +196,7 @@ TEST_CASE("encoder_detail_wpm_push_overflow") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = "a",
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(0)),
     .token_count_out = &token_count,

@@ -314,6 +314,7 @@ TEST_CASE("encoder_detail_helpers") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = "hello",
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
@@ -384,6 +385,7 @@ TEST_CASE("encoder_encode_impl_variants") {
       int32_t token_count = 0;
       int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
       emel::text::encoders::event::encode ev{
+        .vocab = *builder.vocab,
         .text = text,
         .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
         .token_count_out = &token_count,
@@ -518,10 +520,13 @@ TEST_CASE("encoder_encode_impl_variants") {
 }
 
 TEST_CASE("encoder_detail_encode_direct_calls") {
+  vocab_builder base_builder{};
+  base_builder.set_model("unknown");
   std::array<int32_t, 32> out_tokens = {};
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *base_builder.vocab,
     .text = "hello world",
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
@@ -820,6 +825,7 @@ TEST_CASE("encoder_detail_empty_encode_variants") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = "",
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,
@@ -980,10 +986,13 @@ TEST_CASE("encoder_detail_lookup_token_full_probe") {
 }
 
 TEST_CASE("encoder_encode_branch_cases") {
+  vocab_builder base_builder{};
+  base_builder.set_model("unknown");
   std::array<int32_t, 8> out_tokens = {};
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *base_builder.vocab,
     .text = "hello",
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,

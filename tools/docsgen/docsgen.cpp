@@ -116,6 +116,10 @@ struct embedded_size_snapshot {
   std::string workload;
   std::string backend;
   std::string link_flags;
+  std::string model_fixture;
+  std::string prompt;
+  std::string max_tokens;
+  std::string runtime_smoke;
   std::string emel_raw_bytes;
   std::string emel_stripped_bytes;
   std::string emel_section_bytes;
@@ -859,7 +863,16 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
     }
     if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_measurement: ");
         metadata.has_value()) {
-      for (const char * field : {"mode", "scope", "workload", "backend", "link_flags"}) {
+      for (const char * field :
+           {"mode",
+            "scope",
+            "workload",
+            "backend",
+            "link_flags",
+            "model_fixture",
+            "prompt",
+            "max_tokens",
+            "runtime_smoke"}) {
         if (!metadata->contains(field)) {
           std::fprintf(stderr,
                        "error: invalid # embedded_size_measurement metadata in %s\n",
@@ -872,6 +885,10 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
       parsed.workload = metadata->at("workload");
       parsed.backend = metadata->at("backend");
       parsed.link_flags = metadata->at("link_flags");
+      parsed.model_fixture = metadata->at("model_fixture");
+      parsed.prompt = metadata->at("prompt");
+      parsed.max_tokens = metadata->at("max_tokens");
+      parsed.runtime_smoke = metadata->at("runtime_smoke");
       continue;
     }
     if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_emel: ");
@@ -924,7 +941,8 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
   if (parsed.reference_ref.empty() || parsed.toolchain.empty() || parsed.build_type.empty() ||
       parsed.compile_flags.empty() || parsed.measurement_mode.empty() ||
       parsed.measurement_scope.empty() || parsed.workload.empty() || parsed.backend.empty() ||
-      parsed.link_flags.empty() || parsed.emel_raw_bytes.empty() ||
+      parsed.link_flags.empty() || parsed.model_fixture.empty() || parsed.prompt.empty() ||
+      parsed.max_tokens.empty() || parsed.runtime_smoke.empty() || parsed.emel_raw_bytes.empty() ||
       parsed.emel_stripped_bytes.empty() || parsed.emel_section_bytes.empty() ||
       parsed.reference_raw_bytes.empty() || parsed.reference_stripped_bytes.empty() ||
       parsed.reference_section_bytes.empty() || parsed.ratio_raw.empty() ||
@@ -941,7 +959,7 @@ std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_pat
 std::string build_embedded_size_section(const embedded_size_snapshot & snapshot) {
   std::string section;
   section += "Generated from `scripts/embedded_size.sh --snapshot-update` using final "
-             "dead-stripped probe executables for a matched kernel workload.\n\n";
+             "dead-stripped Qwen3 E2E runner executables.\n\n";
   section += "- Snapshot: `snapshots/embedded_size/summary.txt`\n";
   section += "- Mode: `";
   section += snapshot.measurement_mode;
@@ -969,6 +987,18 @@ std::string build_embedded_size_section(const embedded_size_snapshot & snapshot)
   section += "`\n";
   section += "- Link flags: `";
   section += snapshot.link_flags;
+  section += "`\n";
+  section += "- Model fixture: `";
+  section += snapshot.model_fixture;
+  section += "`\n";
+  section += "- Prompt: `";
+  section += snapshot.prompt;
+  section += "`\n";
+  section += "- Max tokens: `";
+  section += snapshot.max_tokens;
+  section += "`\n";
+  section += "- Runtime smoke: `";
+  section += snapshot.runtime_smoke;
   section += "`\n\n";
   section += "| Executable | raw bytes | stripped bytes | section bytes |\n";
   section += "| --- | ---: | ---: | ---: |\n";
@@ -995,10 +1025,10 @@ std::string build_embedded_size_section(const embedded_size_snapshot & snapshot)
   section += "- Ratio (`emel / reference`) section: `";
   section += snapshot.ratio_section;
   section += "x`\n\n";
-  section += "This is a final linked executable estimate for a matched kernel workload, "
-             "not a whole-product feature-parity claim. emel does not yet ship the full "
-             "llama.cpp surface, and both binaries still include the platform runtime "
-             "selected by the toolchain.";
+  section += "This is a matched Qwen3-0.6B end-to-end runner size measurement for the "
+             "maintained `hello` -> first-token path, not a whole-product feature-parity "
+             "claim. Both binaries still include the platform runtime selected by the "
+             "toolchain.";
   return section;
 }
 

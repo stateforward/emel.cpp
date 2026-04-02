@@ -69,6 +69,7 @@ endif()
 
 add_library(emel STATIC
   src/emel/model/data.cpp
+  src/emel/text/unicode_data.cpp
 )
 
 target_link_libraries(emel
