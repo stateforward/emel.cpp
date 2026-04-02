@@ -38,6 +38,8 @@ std::int32_t generation_flash_evidence_emel_logits_calls() noexcept;
 std::int32_t generation_flash_evidence_reference_decode_calls() noexcept;
 std::int32_t generation_flash_evidence_reference_logits_calls() noexcept;
 std::string_view generation_architecture_contract() noexcept;
+std::size_t generation_stage_probe_count() noexcept;
+generation_stage_probe generation_stage_probe_at(std::size_t index) noexcept;
 
 }  // namespace emel::bench
 
@@ -640,6 +642,37 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 shared_q4_dispatch_calls,
                 optimized_q6_dispatch_calls,
                 shared_q6_dispatch_calls);
+    for (std::size_t idx = 0; idx < bench::generation_stage_probe_count(); ++idx) {
+      const auto probe = bench::generation_stage_probe_at(idx);
+      if (probe.name.empty()) {
+        continue;
+      }
+      std::printf("# generation_stage_probe: case=%s emel_total_ns=%" PRIu64
+                  " emel_conditioning_ns=%" PRIu64
+                  " emel_prefill_ns=%" PRIu64
+                  " emel_first_decode_ns=%" PRIu64
+                  " emel_steady_decode_ns=%" PRIu64
+                  " emel_unattributed_ns=%" PRIu64
+                  " reference_total_ns=%" PRIu64
+                  " reference_conditioning_ns=%" PRIu64
+                  " reference_prefill_ns=%" PRIu64
+                  " reference_first_decode_ns=%" PRIu64
+                  " reference_steady_decode_ns=%" PRIu64
+                  " reference_unattributed_ns=%" PRIu64 "\n",
+                  probe.name.c_str(),
+                  probe.emel_total_ns,
+                  probe.emel_conditioning_ns,
+                  probe.emel_prefill_ns,
+                  probe.emel_first_decode_ns,
+                  probe.emel_steady_decode_ns,
+                  probe.emel_unattributed_ns,
+                  probe.reference_total_ns,
+                  probe.reference_conditioning_ns,
+                  probe.reference_prefill_ns,
+                  probe.reference_first_decode_ns,
+                  probe.reference_steady_decode_ns,
+                  probe.reference_unattributed_ns);
+    }
   }
 
   const std::size_t count = std::min(emel_sorted.size(), ref_sorted.size());
@@ -727,17 +760,20 @@ int main(int argc, char ** argv) {
   }
 
   if (run_mode == mode::k_emel) {
+    bench::set_generation_lane_mode(bench::generation_lane_mode::emel);
     const auto results = run_benchmarks(cfg, default_test_cases(), false, true);
     print_snapshot(results, cfg);
     return 0;
   }
 
   if (run_mode == mode::k_reference) {
+    bench::set_generation_lane_mode(bench::generation_lane_mode::reference);
     const auto results = run_benchmarks(cfg, default_test_cases(), true, true);
     print_snapshot(results, cfg);
     return 0;
   }
 
+  bench::set_generation_lane_mode(bench::generation_lane_mode::compare);
   const auto emel_results = run_benchmarks(cfg, default_test_cases(), false, true);
   const auto ref_results = run_benchmarks(cfg, default_test_cases(), true, true);
   print_compare(emel_results, ref_results, cfg);

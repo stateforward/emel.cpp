@@ -46,8 +46,25 @@ struct benchmark_row {
   std::string ratio;
 };
 
+struct benchmark_generation_stage_probe {
+  std::string name;
+  std::string emel_total_ns;
+  std::string emel_conditioning_ns;
+  std::string emel_prefill_ns;
+  std::string emel_first_decode_ns;
+  std::string emel_steady_decode_ns;
+  std::string emel_unattributed_ns;
+  std::string reference_total_ns;
+  std::string reference_conditioning_ns;
+  std::string reference_prefill_ns;
+  std::string reference_first_decode_ns;
+  std::string reference_steady_decode_ns;
+  std::string reference_unattributed_ns;
+};
+
 struct benchmark_snapshot {
   std::vector<benchmark_row> rows;
+  std::vector<benchmark_generation_stage_probe> generation_stage_probes;
   std::string reference_source;
   std::string reference_ref;
   std::string benchmark_config;
@@ -653,6 +670,45 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       parsed.explicit_no_claim_stage_count = metadata->at("explicit_no_claim");
       continue;
     }
+    if (const auto metadata = parse_inline_key_value_fields(line, "# generation_stage_probe: ");
+        metadata.has_value()) {
+      for (const char * field : {"case",
+                                 "emel_total_ns",
+                                 "emel_conditioning_ns",
+                                 "emel_prefill_ns",
+                                 "emel_first_decode_ns",
+                                 "emel_steady_decode_ns",
+                                 "emel_unattributed_ns",
+                                 "reference_total_ns",
+                                 "reference_conditioning_ns",
+                                 "reference_prefill_ns",
+                                 "reference_first_decode_ns",
+                                 "reference_steady_decode_ns",
+                                 "reference_unattributed_ns"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # generation_stage_probe metadata in %s\n",
+                       paths.benchmarks_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.generation_stage_probes.push_back(benchmark_generation_stage_probe{
+          .name = metadata->at("case"),
+          .emel_total_ns = metadata->at("emel_total_ns"),
+          .emel_conditioning_ns = metadata->at("emel_conditioning_ns"),
+          .emel_prefill_ns = metadata->at("emel_prefill_ns"),
+          .emel_first_decode_ns = metadata->at("emel_first_decode_ns"),
+          .emel_steady_decode_ns = metadata->at("emel_steady_decode_ns"),
+          .emel_unattributed_ns = metadata->at("emel_unattributed_ns"),
+          .reference_total_ns = metadata->at("reference_total_ns"),
+          .reference_conditioning_ns = metadata->at("reference_conditioning_ns"),
+          .reference_prefill_ns = metadata->at("reference_prefill_ns"),
+          .reference_first_decode_ns = metadata->at("reference_first_decode_ns"),
+          .reference_steady_decode_ns = metadata->at("reference_steady_decode_ns"),
+          .reference_unattributed_ns = metadata->at("reference_unattributed_ns"),
+      });
+      continue;
+    }
     if (line.empty() || line[0] == '#') {
       continue;
     }
@@ -854,6 +910,43 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += " workload stayed on the approved runtime contract with explicit "
              "dense-f32-by-contract stages, native quantized dispatch on the maintained path, "
              "and no disallowed fallback or explicit no-claim branch on the supported path.\n\n";
+
+  if (!snapshot.generation_stage_probes.empty()) {
+    section += "## Generation Stage Probes\n\n";
+    section += "- These are single-run request probes that split full request latency into "
+               "conditioning, prefill, first decode, steady decode, and residual unattributed "
+               "overhead.\n";
+    for (const auto & probe : snapshot.generation_stage_probes) {
+      section += "- `generation_stage_probe: case=";
+      section += probe.name;
+      section += " emel_total_ns=";
+      section += probe.emel_total_ns;
+      section += " emel_conditioning_ns=";
+      section += probe.emel_conditioning_ns;
+      section += " emel_prefill_ns=";
+      section += probe.emel_prefill_ns;
+      section += " emel_first_decode_ns=";
+      section += probe.emel_first_decode_ns;
+      section += " emel_steady_decode_ns=";
+      section += probe.emel_steady_decode_ns;
+      section += " emel_unattributed_ns=";
+      section += probe.emel_unattributed_ns;
+      section += " reference_total_ns=";
+      section += probe.reference_total_ns;
+      section += " reference_conditioning_ns=";
+      section += probe.reference_conditioning_ns;
+      section += " reference_prefill_ns=";
+      section += probe.reference_prefill_ns;
+      section += " reference_first_decode_ns=";
+      section += probe.reference_first_decode_ns;
+      section += " reference_steady_decode_ns=";
+      section += probe.reference_steady_decode_ns;
+      section += " reference_unattributed_ns=";
+      section += probe.reference_unattributed_ns;
+      section += "`\n";
+    }
+    section += "\n";
+  }
 
   if (!fs::exists(paths.generation_pre_arm_flash_optimized_baseline)) {
     return section;

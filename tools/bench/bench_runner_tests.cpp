@@ -141,6 +141,10 @@ TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixt
   CHECK(capture.exit_code == 0);
   CHECK(capture.stdout_text.find("# generation_architecture: lfm2") != std::string::npos);
   CHECK(capture.stdout_text.find("# generation_formatter_contract:") != std::string::npos);
+  CHECK(capture.stdout_text.find("# generation_stage_probe: case="
+                                 "generation/preloaded_request/"
+                                 "lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1") !=
+        std::string::npos);
   CHECK(capture.stdout_text.find("generation/preloaded_request/"
                                  "lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1") !=
         std::string::npos);

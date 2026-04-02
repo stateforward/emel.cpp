@@ -10,6 +10,12 @@
 
 namespace emel::bench {
 
+enum class generation_lane_mode {
+  emel,
+  reference,
+  compare,
+};
+
 struct config {
   std::uint64_t iterations = 0;
   std::size_t runs = 0;
@@ -23,6 +29,25 @@ struct result {
   std::uint64_t iterations = 0;
   std::size_t runs = 0;
 };
+
+struct generation_stage_probe {
+  std::string name = {};
+  std::uint64_t emel_total_ns = 0;
+  std::uint64_t emel_conditioning_ns = 0;
+  std::uint64_t emel_prefill_ns = 0;
+  std::uint64_t emel_first_decode_ns = 0;
+  std::uint64_t emel_steady_decode_ns = 0;
+  std::uint64_t emel_unattributed_ns = 0;
+  std::uint64_t reference_total_ns = 0;
+  std::uint64_t reference_conditioning_ns = 0;
+  std::uint64_t reference_prefill_ns = 0;
+  std::uint64_t reference_first_decode_ns = 0;
+  std::uint64_t reference_steady_decode_ns = 0;
+  std::uint64_t reference_unattributed_ns = 0;
+};
+
+void set_generation_lane_mode(generation_lane_mode mode) noexcept;
+generation_lane_mode generation_lane_mode_current() noexcept;
 
 template <class fn_type>
 result measure_case(const char * name, const config & cfg, fn_type && fn) {

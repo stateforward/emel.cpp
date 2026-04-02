@@ -183,9 +183,28 @@ if(EMEL_ENABLE_TESTS)
       ${DOCTEST_INCLUDE_DIR}
   )
 
-  add_test(
-    NAME emel_tests
-    COMMAND emel_tests_bin
+  function(emel_add_doctest_shard shard_name shard_filter)
+    add_test(
+      NAME emel_tests_${shard_name}
+      COMMAND emel_tests_bin --no-breaks --source-file=${shard_filter}
+    )
+  endfunction()
+
+  emel_add_doctest_shard(
+    model_and_batch
+    "*tests/model/*,*tests/gguf/*,*tests/gbnf/*,*tests/batch/*"
+  )
+  emel_add_doctest_shard(
+    generator_and_runtime
+    "*tests/generator/*,*tests/logits/*,*tests/sm/*,*tests/token/*"
+  )
+  emel_add_doctest_shard(
+    text
+    "*tests/text/*"
+  )
+  emel_add_doctest_shard(
+    kernel_and_graph
+    "*tests/kernel/*,*tests/graph/*,*tests/memory/*,*tests/tensor/*"
   )
 
   add_test(

@@ -9,7 +9,8 @@ for tool in cmake ninja clang clang++; do
 done
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_DIR="$ROOT_DIR/build/fuzz"
+BUILD_DIR="${EMEL_FUZZ_BUILD_DIR:-$ROOT_DIR/build/fuzz}"
+FUZZ_CLEAN="${EMEL_FUZZ_CLEAN:-0}"
 
 detect_fuzzer_toolchain() {
   if [[ -n "${CC:-}" && -n "${CXX:-}" ]]; then
@@ -50,7 +51,9 @@ if [[ "$fuzz_cc" == "clang" ]]; then
   fi
 fi
 
-rm -rf "$BUILD_DIR"
+if [[ "$FUZZ_CLEAN" == "1" ]]; then
+  rm -rf "$BUILD_DIR"
+fi
 
 cmake -S "$ROOT_DIR" -B "$BUILD_DIR" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \

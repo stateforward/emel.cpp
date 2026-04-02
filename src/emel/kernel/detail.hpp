@@ -221,7 +221,7 @@ struct block_q6_k {
 struct block_q4_kx8 {
   std::array<uint16_t, Q4_K_X8_ROWS> d = {};
   std::array<uint16_t, Q4_K_X8_ROWS> dmin = {};
-  std::array<uint8_t, K_SCALE_SIZE * Q4_K_X8_ROWS> scales = {};
+  std::array<uint8_t, (QK_K / 32u) * Q4_K_X8_ROWS * 2u> scales = {};
   std::array<uint8_t, (QK_K / 2) * Q4_K_X8_ROWS> qs = {};
 };
 
@@ -257,7 +257,8 @@ static_assert(sizeof(block_q4_k) == 2 * sizeof(uint16_t) + K_SCALE_SIZE + (QK_K 
 static_assert(sizeof(block_q6_k) == sizeof(uint16_t) + (QK_K / 16) + (3 * QK_K / 4));
 static_assert(
     sizeof(block_q4_kx8) ==
-    sizeof(uint16_t) * (Q4_K_X8_ROWS * 2u) + K_SCALE_SIZE * Q4_K_X8_ROWS + (QK_K / 2) * Q4_K_X8_ROWS);
+    sizeof(uint16_t) * (Q4_K_X8_ROWS * 2u) + ((QK_K / 32u) * Q4_K_X8_ROWS * 2u) +
+        (QK_K / 2) * Q4_K_X8_ROWS);
 static_assert(
     sizeof(block_q6_kx8) ==
     sizeof(uint16_t) * Q6_K_X8_ROWS + (QK_K / 16) * Q6_K_X8_ROWS + (3 * QK_K / 4) * Q6_K_X8_ROWS);
@@ -645,49 +646,18 @@ inline block_q4_kx8 make_block_q4_k_x8(const block_q4_k * rows,
                 static_cast<size_t>(interleave_block_bytes));
   }
 
-  std::array<uint8_t, Q4_K_X8_ROWS> s = {};
-  std::array<uint8_t, Q4_K_X8_ROWS> m = {};
-  for (uint64_t i = 0; i < 4u; ++i) {
-    for (uint64_t row = 0; row < Q4_K_X8_ROWS; ++row) {
-      s[row] = rows[row].scales[i] & 63u;
-      m[row] = rows[row].scales[i + 4u] & 63u;
+  for (uint64_t sb = 0; sb < (QK_K / 64u); ++sb) {
+    for (uint64_t half = 0; half < 2u; ++half) {
+      const uint64_t scale_index = sb * 2u + half;
+      uint8_t * packed = out.scales.data() + (scale_index * Q4_K_X8_ROWS * 2u);
+      for (uint64_t row = 0; row < Q4_K_X8_ROWS; ++row) {
+        uint8_t scale = 0u;
+        uint8_t min = 0u;
+        get_scale_min_k4(static_cast<int>(scale_index), rows[row].scales.data(), &scale, &min);
+        packed[row] = min;
+        packed[row + Q4_K_X8_ROWS] = scale;
+      }
     }
-
-    out.scales[i * 12u + 0u] = static_cast<uint8_t>((s[0] & 63u) + ((s[4] & 48u) << 2u));
-    out.scales[i * 12u + 1u] = static_cast<uint8_t>((s[1] & 63u) + ((s[5] & 48u) << 2u));
-    out.scales[i * 12u + 2u] = static_cast<uint8_t>((s[2] & 63u) + ((s[6] & 48u) << 2u));
-    out.scales[i * 12u + 3u] = static_cast<uint8_t>((s[3] & 63u) + ((s[7] & 48u) << 2u));
-    out.scales[i * 12u + 4u] = static_cast<uint8_t>((m[0] & 63u) + ((m[4] & 48u) << 2u));
-    out.scales[i * 12u + 5u] = static_cast<uint8_t>((m[1] & 63u) + ((m[5] & 48u) << 2u));
-    out.scales[i * 12u + 6u] = static_cast<uint8_t>((m[2] & 63u) + ((m[6] & 48u) << 2u));
-    out.scales[i * 12u + 7u] = static_cast<uint8_t>((m[3] & 63u) + ((m[7] & 48u) << 2u));
-    out.scales[i * 12u + 8u] = static_cast<uint8_t>((s[4] & 15u) + ((m[4] & 15u) << 4u));
-    out.scales[i * 12u + 9u] = static_cast<uint8_t>((s[5] & 15u) + ((m[5] & 15u) << 4u));
-    out.scales[i * 12u + 10u] = static_cast<uint8_t>((s[6] & 15u) + ((m[6] & 15u) << 4u));
-    out.scales[i * 12u + 11u] = static_cast<uint8_t>((s[7] & 15u) + ((m[7] & 15u) << 4u));
-  }
-
-  for (uint64_t i = 0; i < 4u; ++i) {
-    for (uint64_t row = 0; row < Q4_K_X8_ROWS; ++row) {
-      s[row] = static_cast<uint8_t>(((rows[row].scales[i] & 192u) >> 2u) |
-                                    (rows[row].scales[i + 8u] & 15u));
-      m[row] = static_cast<uint8_t>(((rows[row].scales[i + 4u] & 192u) >> 2u) |
-                                    ((rows[row].scales[i + 8u] & 240u) >> 4u));
-    }
-
-    const uint64_t offset = i * 12u + 48u;
-    out.scales[offset + 0u] = static_cast<uint8_t>((s[0] & 63u) + ((s[4] & 48u) << 2u));
-    out.scales[offset + 1u] = static_cast<uint8_t>((s[1] & 63u) + ((s[5] & 48u) << 2u));
-    out.scales[offset + 2u] = static_cast<uint8_t>((s[2] & 63u) + ((s[6] & 48u) << 2u));
-    out.scales[offset + 3u] = static_cast<uint8_t>((s[3] & 63u) + ((s[7] & 48u) << 2u));
-    out.scales[offset + 4u] = static_cast<uint8_t>((m[0] & 63u) + ((m[4] & 48u) << 2u));
-    out.scales[offset + 5u] = static_cast<uint8_t>((m[1] & 63u) + ((m[5] & 48u) << 2u));
-    out.scales[offset + 6u] = static_cast<uint8_t>((m[2] & 63u) + ((m[6] & 48u) << 2u));
-    out.scales[offset + 7u] = static_cast<uint8_t>((m[3] & 63u) + ((m[7] & 48u) << 2u));
-    out.scales[offset + 8u] = static_cast<uint8_t>((s[4] & 15u) + ((m[4] & 15u) << 4u));
-    out.scales[offset + 9u] = static_cast<uint8_t>((s[5] & 15u) + ((m[5] & 15u) << 4u));
-    out.scales[offset + 10u] = static_cast<uint8_t>((s[6] & 15u) + ((m[6] & 15u) << 4u));
-    out.scales[offset + 11u] = static_cast<uint8_t>((s[7] & 15u) + ((m[7] & 15u) << 4u));
   }
 
   return out;

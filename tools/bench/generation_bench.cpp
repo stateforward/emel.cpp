@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -23,6 +24,7 @@
 #include "emel/gguf/loader/sm.hpp"
 #include "emel/generator/errors.hpp"
 #include "emel/generator/events.hpp"
+#include "emel/generator/detail.hpp"
 #include "emel/generator/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
 #include "emel/model/data.hpp"
@@ -35,6 +37,7 @@
 #include "emel/model/weight_loader/sm.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
+#include "emel/text/renderer/sm.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 
 #include "ggml.h"
@@ -385,6 +388,7 @@ struct emel_fixture {
 
 struct reference_fixture {
   llama_model_ptr model = {nullptr, llama_model_free};
+  llama_context_ptr context = {nullptr, llama_free};
   const llama_vocab * vocab = nullptr;
   int32_t vocab_size = 0;
   emel::tools::generation_formatter_contract::reference_formatter_info formatter = {};
@@ -443,6 +447,16 @@ struct prepared_generation_fixture {
   reference_fixture reference = {};
 };
 
+struct prepared_emel_generation_fixture {
+  const generation_fixture_spec * spec = nullptr;
+  emel_fixture emel = {};
+};
+
+struct prepared_reference_generation_fixture {
+  const generation_fixture_spec * spec = nullptr;
+  reference_fixture reference = {};
+};
+
 emel::model::detail::kv_binding kv_binding_from_fixture(const emel_fixture & fixture) {
   return emel::model::detail::kv_binding{
       .arena = std::span<const uint8_t>{fixture.kv_arena.data(), fixture.kv_arena.size()},
@@ -452,9 +466,12 @@ emel::model::detail::kv_binding kv_binding_from_fixture(const emel_fixture & fix
 }
 
 generation_flash_evidence_state g_generation_flash_evidence = {};
+std::vector<emel::bench::generation_stage_probe> g_generation_stage_probes = {};
 std::string g_generation_formatter_contract = {};
 std::string g_generation_architecture_contract = {};
 std::string_view g_generation_fixture_rel = {};
+emel::bench::generation_lane_mode g_generation_lane_mode =
+    emel::bench::generation_lane_mode::emel;
 
 uint32_t read_u32_le(const std::span<const uint8_t> bytes) {
   uint32_t value = 0u;
@@ -691,6 +708,7 @@ void reset_generation_seam(generation_seam_audit & seam) {
 
 void reset_generation_flash_evidence() {
   g_generation_flash_evidence = {};
+  g_generation_stage_probes.clear();
   g_generation_formatter_contract.clear();
   g_generation_architecture_contract.clear();
   g_generation_fixture_rel = {};
@@ -1588,6 +1606,13 @@ bool prepare_emel_fixture(emel_fixture & fixture, const std::string & model_path
 }
 
 llama_model_ptr load_reference_model(const std::string & model_path);
+llama_context_ptr make_reference_context(llama_model * model);
+bool run_reference_generate_preloaded(const reference_fixture & fixture,
+                                      const generation_case_spec & spec,
+                                      llama_context * ctx,
+                                      const std::vector<llama_token> & prompt_tokens,
+                                      generation_seam_audit & seam,
+                                      generation_result & result_out);
 
 bool prepare_reference_fixture(reference_fixture & fixture, const std::string & model_path) {
   fixture.model = load_reference_model(model_path);
@@ -1609,7 +1634,12 @@ bool prepare_reference_fixture(reference_fixture & fixture, const std::string & 
   }
 
   fixture.vocab_size = llama_vocab_n_tokens(fixture.vocab);
-  return fixture.vocab_size > 0;
+  if (fixture.vocab_size <= 0) {
+    return false;
+  }
+
+  fixture.context = make_reference_context(fixture.model.get());
+  return fixture.context != nullptr;
 }
 
 llama_model_ptr load_reference_model(const std::string & model_path) {
@@ -1840,12 +1870,8 @@ bool run_reference_generate(const reference_fixture & fixture,
                             const generation_case_spec & spec,
                             generation_seam_audit & seam,
                             generation_result & result_out) {
-  if (fixture.model == nullptr || fixture.vocab == nullptr || fixture.vocab_size <= 0) {
-    return false;
-  }
-
-  llama_context_ptr ctx = make_reference_context(fixture.model.get());
-  if (ctx == nullptr) {
+  if (fixture.model == nullptr || fixture.context == nullptr ||
+      fixture.vocab == nullptr || fixture.vocab_size <= 0) {
     return false;
   }
 
@@ -1854,35 +1880,8 @@ bool run_reference_generate(const reference_fixture & fixture,
     return false;
   }
 
-  result_out = {};
-  llama_batch prompt_batch =
-      llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()));
-  if (run_direct_reference_decode(seam, ctx.get(), prompt_batch) != 0) {
-    return false;
-  }
-
-  for (int32_t step = 0; step < spec.max_tokens; ++step) {
-    float * logits = read_direct_reference_logits(seam, ctx.get());
-    if (logits == nullptr) {
-      return false;
-    }
-
-    const llama_token selected = select_argmax_token_from_logits(logits, fixture.vocab_size);
-    result_out.tokens_generated += 1;
-    if (!append_reference_piece(fixture, seam, selected, result_out)) {
-      return false;
-    }
-    if (reference_vocab_is_eog(seam, fixture.vocab, selected)) {
-      break;
-    }
-
-    llama_token next_token = selected;
-    llama_batch decode_batch = llama_batch_get_one(&next_token, 1);
-    if (run_direct_reference_decode(seam, ctx.get(), decode_batch) != 0) {
-      return false;
-    }
-  }
-  return true;
+  return run_reference_generate_preloaded(
+      fixture, spec, fixture.context.get(), prompt_tokens, seam, result_out);
 }
 
 bool reset_reference_context(llama_context * ctx) {
@@ -1948,6 +1947,311 @@ bool run_reference_generate_preloaded(const reference_fixture & fixture,
   return true;
 }
 
+using steady_clock = std::chrono::steady_clock;
+
+std::uint64_t elapsed_ns(const steady_clock::time_point start,
+                         const steady_clock::time_point end) noexcept {
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count());
+}
+
+std::uint64_t saturating_remainder(const std::uint64_t total,
+                                   const std::uint64_t part0,
+                                   const std::uint64_t part1,
+                                   const std::uint64_t part2,
+                                   const std::uint64_t part3) noexcept {
+  const std::uint64_t measured = part0 + part1 + part2 + part3;
+  return measured >= total ? 0u : total - measured;
+}
+
+bool tokenize_conditioned_prompt(emel_session & session,
+                                 const generation_case_spec & spec,
+                                 std::vector<int32_t> & tokens_out) {
+  const int32_t token_capacity =
+      std::max<int32_t>(1024, static_cast<int32_t>(spec.prompt.size()) * 8 + 64);
+  tokens_out.assign(static_cast<size_t>(token_capacity), 0);
+
+  int32_t token_count = 0;
+  int32_t conditioned_error = 0;
+  std::array<emel::text::formatter::chat_message, 1> message_storage = {};
+  emel::text::conditioner::event::prepare prepare_ev{token_count, conditioned_error};
+  prepare_ev.messages =
+      emel::tools::generation_formatter_contract::single_user_messages(message_storage, spec.prompt);
+  prepare_ev.add_generation_prompt = true;
+  prepare_ev.enable_thinking = false;
+  prepare_ev.token_ids_out = tokens_out.data();
+  prepare_ev.token_capacity = token_capacity;
+  const bool accepted = session.conditioner.process_event(prepare_ev);
+  if (!accepted || conditioned_error != 0 || token_count <= 0 || token_count > token_capacity) {
+    return false;
+  }
+
+  tokens_out.resize(static_cast<size_t>(token_count));
+  return true;
+}
+
+bool initialize_emel_renderer(const emel::model::data & model_data,
+                              emel::text::renderer::sm & renderer) {
+  int32_t renderer_err = emel::error::cast(emel::text::renderer::error::none);
+  emel::text::renderer::event::initialize initialize_renderer_ev{model_data.vocab_data};
+  initialize_renderer_ev.strip_leading_space = false;
+  initialize_renderer_ev.stop_sequences = nullptr;
+  initialize_renderer_ev.stop_sequence_count = 0;
+  initialize_renderer_ev.error_out = &renderer_err;
+  return renderer.process_event(initialize_renderer_ev) &&
+         renderer_err == emel::error::cast(emel::text::renderer::error::none);
+}
+
+bool append_rendered_token(emel::text::renderer::sm & renderer,
+                           const int32_t token_id,
+                           generation_result & result_out) {
+  if (result_out.output_length > result_out.output.size()) {
+    return false;
+  }
+
+  size_t appended_length = 0;
+  emel::text::renderer::sequence_status status =
+      emel::text::renderer::sequence_status::running;
+  int32_t render_err = emel::error::cast(emel::text::renderer::error::none);
+  emel::text::renderer::event::render render_ev = {};
+  render_ev.token_id = token_id;
+  render_ev.sequence_id = 0;
+  render_ev.emit_special = false;
+  render_ev.output = result_out.output.data() + result_out.output_length;
+  render_ev.output_capacity = result_out.output.size() - result_out.output_length;
+  render_ev.output_length_out = &appended_length;
+  render_ev.status_out = &status;
+  render_ev.error_out = &render_err;
+  if (!renderer.process_event(render_ev) ||
+      render_err != emel::error::cast(emel::text::renderer::error::none)) {
+    return false;
+  }
+
+  result_out.output_length += appended_length;
+  return true;
+}
+
+bool flush_rendered_output(emel::text::renderer::sm & renderer,
+                           generation_result & result_out) {
+  if (result_out.output_length > result_out.output.size()) {
+    return false;
+  }
+
+  size_t flush_length = 0;
+  emel::text::renderer::sequence_status status =
+      emel::text::renderer::sequence_status::running;
+  int32_t flush_err = emel::error::cast(emel::text::renderer::error::none);
+  emel::text::renderer::event::flush flush_ev = {};
+  flush_ev.sequence_id = 0;
+  flush_ev.output = result_out.output.data() + result_out.output_length;
+  flush_ev.output_capacity = result_out.output.size() - result_out.output_length;
+  flush_ev.output_length_out = &flush_length;
+  flush_ev.status_out = &status;
+  flush_ev.error_out = &flush_err;
+  if (!renderer.process_event(flush_ev) ||
+      flush_err != emel::error::cast(emel::text::renderer::error::none)) {
+    return false;
+  }
+
+  result_out.output_length += flush_length;
+  return true;
+}
+
+bool emel_token_is_stop(const emel::model::data::vocab & vocab, const int32_t token_id) {
+  return token_id == vocab.eos_id || token_id == vocab.eot_id;
+}
+
+bool run_emel_runtime_layer(emel::generator::detail::native_backend & backend,
+                            const int32_t layer_index,
+                            const int32_t position) {
+  return emel::generator::detail::flash_attention_supported(backend, position)
+      ? emel::generator::detail::run_layer_flash(backend, layer_index, position)
+      : emel::generator::detail::run_layer_nonflash(backend, layer_index, position);
+}
+
+bool measure_emel_stage_probe(emel_session & session,
+                              const generation_case_spec & spec,
+                              emel::bench::generation_stage_probe & probe_out) {
+  auto total_start = steady_clock::now();
+  generation_result total_result = {};
+  if (!run_emel_generate(session, spec, total_result)) {
+    return false;
+  }
+  probe_out.emel_total_ns = elapsed_ns(total_start, steady_clock::now());
+
+  std::vector<int32_t> prompt_tokens;
+  const auto conditioning_start = steady_clock::now();
+  if (!tokenize_conditioned_prompt(session, spec, prompt_tokens) || prompt_tokens.empty()) {
+    return false;
+  }
+  probe_out.emel_conditioning_ns = elapsed_ns(conditioning_start, steady_clock::now());
+
+  emel::generator::detail::native_backend backend = {};
+  if (emel::generator::detail::prepare(backend, session.model_data) !=
+      emel::error::cast(emel::model::loader::error::none)) {
+    return false;
+  }
+
+  emel::text::renderer::sm renderer = {};
+  if (!initialize_emel_renderer(session.model_data, renderer)) {
+    return false;
+  }
+
+  generation_result result_out = {};
+  const auto prefill_start = steady_clock::now();
+  for (size_t token_index = 0; token_index < prompt_tokens.size(); ++token_index) {
+    const int32_t token_id = prompt_tokens[token_index];
+    const int32_t position = static_cast<int32_t>(token_index);
+    if (!emel::generator::detail::copy_tensor_row(
+            *backend.token_embedding.tensor, token_id, backend.hidden)) {
+      return false;
+    }
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_emel_runtime_layer(backend, layer, position)) {
+        return false;
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+  }
+  if (!emel::generator::detail::compute_logits(backend)) {
+    return false;
+  }
+  probe_out.emel_prefill_ns = elapsed_ns(prefill_start, steady_clock::now());
+
+  for (int32_t step = 0; step < spec.max_tokens; ++step) {
+    const int32_t selected_token =
+        static_cast<int32_t>(select_argmax_token_from_logits(
+            backend.bound_logits.data(), backend.n_vocab));
+    result_out.tokens_generated += 1;
+    if (!append_rendered_token(renderer, selected_token, result_out)) {
+      return false;
+    }
+    if (emel_token_is_stop(session.model_data.vocab_data, selected_token)) {
+      break;
+    }
+
+    const auto decode_start = steady_clock::now();
+    const int32_t position =
+        static_cast<int32_t>(prompt_tokens.size()) + result_out.tokens_generated - 1;
+    if (!emel::generator::detail::copy_tensor_row(
+            *backend.token_embedding.tensor, selected_token, backend.hidden)) {
+      return false;
+    }
+    for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+      if (!run_emel_runtime_layer(backend, layer, position)) {
+        return false;
+      }
+    }
+    backend.kv_cache_tokens = position + 1;
+    if (!emel::generator::detail::compute_logits(backend)) {
+      return false;
+    }
+    const auto decode_ns = elapsed_ns(decode_start, steady_clock::now());
+    if (step == 0) {
+      probe_out.emel_first_decode_ns = decode_ns;
+    } else {
+      probe_out.emel_steady_decode_ns += decode_ns;
+    }
+  }
+
+  if (!flush_rendered_output(renderer, result_out)) {
+    return false;
+  }
+
+  probe_out.emel_unattributed_ns =
+      saturating_remainder(probe_out.emel_total_ns,
+                           probe_out.emel_conditioning_ns,
+                           probe_out.emel_prefill_ns,
+                           probe_out.emel_first_decode_ns,
+                           probe_out.emel_steady_decode_ns);
+  return true;
+}
+
+bool measure_reference_stage_probe(const reference_fixture & fixture,
+                                   const generation_case_spec & spec,
+                                   emel::bench::generation_stage_probe & probe_out) {
+  generation_seam_audit total_seam = {};
+  auto total_start = steady_clock::now();
+  generation_result total_result = {};
+  if (!run_reference_generate(fixture, spec, total_seam, total_result)) {
+    return false;
+  }
+  probe_out.reference_total_ns = elapsed_ns(total_start, steady_clock::now());
+
+  generation_seam_audit seam = {};
+  std::vector<llama_token> prompt_tokens;
+  const auto conditioning_start = steady_clock::now();
+  if (!tokenize_reference_prompt(fixture, spec, seam, prompt_tokens) || prompt_tokens.empty()) {
+    return false;
+  }
+  probe_out.reference_conditioning_ns = elapsed_ns(conditioning_start, steady_clock::now());
+
+  if (fixture.context == nullptr) {
+    return false;
+  }
+  llama_context * ctx = fixture.context.get();
+  if (!reset_reference_context(ctx)) {
+    return false;
+  }
+
+  generation_result result_out = {};
+  const auto prefill_start = steady_clock::now();
+  llama_batch prompt_batch =
+      llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()));
+  if (run_direct_reference_decode(seam, ctx, prompt_batch) != 0) {
+    return false;
+  }
+  probe_out.reference_prefill_ns = elapsed_ns(prefill_start, steady_clock::now());
+
+  for (int32_t step = 0; step < spec.max_tokens; ++step) {
+    float * logits = read_direct_reference_logits(seam, ctx);
+    if (logits == nullptr) {
+      return false;
+    }
+
+    const llama_token selected =
+        select_argmax_token_from_logits(logits, fixture.vocab_size);
+    result_out.tokens_generated += 1;
+    if (!append_reference_piece(fixture, seam, selected, result_out)) {
+      return false;
+    }
+    if (reference_vocab_is_eog(seam, fixture.vocab, selected)) {
+      break;
+    }
+
+    const auto decode_start = steady_clock::now();
+    llama_token next_token = selected;
+    llama_batch decode_batch = llama_batch_get_one(&next_token, 1);
+    if (run_direct_reference_decode(seam, ctx, decode_batch) != 0) {
+      return false;
+    }
+    const auto decode_ns = elapsed_ns(decode_start, steady_clock::now());
+    if (step == 0) {
+      probe_out.reference_first_decode_ns = decode_ns;
+    } else {
+      probe_out.reference_steady_decode_ns += decode_ns;
+    }
+  }
+
+  probe_out.reference_unattributed_ns =
+      saturating_remainder(probe_out.reference_total_ns,
+                           probe_out.reference_conditioning_ns,
+                           probe_out.reference_prefill_ns,
+                           probe_out.reference_first_decode_ns,
+                           probe_out.reference_steady_decode_ns);
+  return true;
+}
+
+bool capture_generation_stage_probe(emel_session & session,
+                                    const reference_fixture & fixture,
+                                    const generation_case_spec & spec) {
+  emel::bench::generation_stage_probe probe = {};
+  probe.name = std::string(spec.name);
+  return measure_emel_stage_probe(session, spec, probe) &&
+      measure_reference_stage_probe(fixture, spec, probe) &&
+      (g_generation_stage_probes.push_back(std::move(probe)), true);
+}
+
 emel::bench::config generation_case_config(const emel::bench::config & cfg) {
   emel::bench::config case_cfg = cfg;
   case_cfg.iterations = read_env_u64("EMEL_BENCH_GENERATION_ITERS", 1u);
@@ -1957,44 +2261,109 @@ emel::bench::config generation_case_config(const emel::bench::config & cfg) {
   return case_cfg;
 }
 
-const std::vector<prepared_generation_fixture> & maintained_generation_fixtures() {
-  static const std::vector<prepared_generation_fixture> fixtures = [] {
-    ensure_llama_backend_ready();
+void prepare_emel_generation_fixture(const generation_fixture_spec & spec,
+                                     prepared_emel_generation_fixture & prepared_fixture) {
+  prepared_fixture.spec = &spec;
+  g_generation_fixture_rel = spec.fixture->fixture_rel;
 
-    std::vector<prepared_generation_fixture> prepared_fixtures(k_generation_fixtures.size());
+  const std::string model_path = resolve_generation_model_path(spec.fixture->fixture_rel);
+  if (!prepare_emel_fixture(prepared_fixture.emel, model_path)) {
+    fail_bench_setup("prepare_emel_fixture", model_path.c_str());
+  }
+
+  if (!emel::model::detail::load_vocab_from_gguf(
+          kv_binding_from_fixture(prepared_fixture.emel),
+          prepared_fixture.emel.model_data.vocab_data)) {
+    fail_bench_setup("load_vocab_from_gguf", model_path.c_str());
+  }
+  prepared_fixture.emel.model_data.params.n_vocab =
+      static_cast<int32_t>(prepared_fixture.emel.model_data.vocab_data.n_tokens);
+}
+
+void prepare_reference_generation_fixture(const generation_fixture_spec & spec,
+                                          prepared_reference_generation_fixture & prepared_fixture) {
+  ensure_llama_backend_ready();
+
+  prepared_fixture.spec = &spec;
+  g_generation_fixture_rel = spec.fixture->fixture_rel;
+
+  const std::string model_path = resolve_generation_model_path(spec.fixture->fixture_rel);
+  if (!prepare_reference_fixture(prepared_fixture.reference, model_path)) {
+    fail_bench_setup("prepare_reference_fixture", model_path.c_str());
+  }
+}
+
+void prepare_compare_generation_fixture(const generation_fixture_spec & spec,
+                                        prepared_generation_fixture & prepared_fixture) {
+  prepared_fixture.spec = &spec;
+  g_generation_fixture_rel = spec.fixture->fixture_rel;
+
+  const std::string model_path = resolve_generation_model_path(spec.fixture->fixture_rel);
+  if (!prepare_emel_fixture(prepared_fixture.emel, model_path)) {
+    fail_bench_setup("prepare_emel_fixture", model_path.c_str());
+  }
+  if (!emel::model::detail::load_vocab_from_gguf(
+          kv_binding_from_fixture(prepared_fixture.emel),
+          prepared_fixture.emel.model_data.vocab_data)) {
+    fail_bench_setup("load_vocab_from_gguf", model_path.c_str());
+  }
+  prepared_fixture.emel.model_data.params.n_vocab =
+      static_cast<int32_t>(prepared_fixture.emel.model_data.vocab_data.n_tokens);
+
+  ensure_llama_backend_ready();
+  if (!prepare_reference_fixture(prepared_fixture.reference, model_path)) {
+    fail_bench_setup("prepare_reference_fixture", model_path.c_str());
+  }
+}
+
+const std::vector<prepared_emel_generation_fixture> & maintained_emel_generation_fixtures() {
+  static const std::vector<prepared_emel_generation_fixture> fixtures = [] {
+    std::vector<prepared_emel_generation_fixture> prepared_fixtures(k_generation_fixtures.size());
     for (size_t fixture_index = 0u; fixture_index < k_generation_fixtures.size(); ++fixture_index) {
-      const generation_fixture_spec & spec = k_generation_fixtures[fixture_index];
-      prepared_generation_fixture & prepared_fixture = prepared_fixtures[fixture_index];
-      prepared_fixture.spec = &spec;
-      g_generation_fixture_rel = spec.fixture->fixture_rel;
-
-      const std::string model_path = resolve_generation_model_path(spec.fixture->fixture_rel);
-      if (!prepare_emel_fixture(prepared_fixture.emel, model_path)) {
-        fail_bench_setup("prepare_emel_fixture", model_path.c_str());
-      }
-
-      if (!prepare_reference_fixture(prepared_fixture.reference, model_path)) {
-        fail_bench_setup("prepare_reference_fixture", model_path.c_str());
-      }
-
-      if (!emel::model::detail::load_vocab_from_gguf(
-              kv_binding_from_fixture(prepared_fixture.emel),
-              prepared_fixture.emel.model_data.vocab_data)) {
-        fail_bench_setup("load_vocab_from_gguf", model_path.c_str());
-      }
-      prepared_fixture.emel.model_data.params.n_vocab =
-          static_cast<int32_t>(prepared_fixture.emel.model_data.vocab_data.n_tokens);
+      prepare_emel_generation_fixture(
+          k_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
     }
-
     return prepared_fixtures;
   }();
+  return fixtures;
+}
 
+const std::vector<prepared_reference_generation_fixture> & maintained_reference_generation_fixtures() {
+  static const std::vector<prepared_reference_generation_fixture> fixtures = [] {
+    std::vector<prepared_reference_generation_fixture> prepared_fixtures(
+        k_generation_fixtures.size());
+    for (size_t fixture_index = 0u; fixture_index < k_generation_fixtures.size(); ++fixture_index) {
+      prepare_reference_generation_fixture(
+          k_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
+    }
+    return prepared_fixtures;
+  }();
+  return fixtures;
+}
+
+const std::vector<prepared_generation_fixture> & maintained_compare_generation_fixtures() {
+  static const std::vector<prepared_generation_fixture> fixtures = [] {
+    std::vector<prepared_generation_fixture> prepared_fixtures(k_generation_fixtures.size());
+    for (size_t fixture_index = 0u; fixture_index < k_generation_fixtures.size(); ++fixture_index) {
+      prepare_compare_generation_fixture(
+          k_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
+    }
+    return prepared_fixtures;
+  }();
   return fixtures;
 }
 
 }  // namespace
 
 namespace emel::bench {
+
+void set_generation_lane_mode(const generation_lane_mode mode) noexcept {
+  g_generation_lane_mode = mode;
+}
+
+generation_lane_mode generation_lane_mode_current() noexcept {
+  return g_generation_lane_mode;
+}
 
 std::string_view generation_formatter_contract() noexcept {
   return g_generation_formatter_contract;
@@ -2092,15 +2461,207 @@ std::int32_t generation_flash_evidence_reference_logits_calls() noexcept {
   return g_generation_flash_evidence.seam.direct_reference_logits_calls;
 }
 
+std::size_t generation_stage_probe_count() noexcept {
+  return g_generation_stage_probes.size();
+}
+
+generation_stage_probe generation_stage_probe_at(const std::size_t index) noexcept {
+  return index < g_generation_stage_probes.size()
+      ? g_generation_stage_probes[index]
+      : generation_stage_probe{};
+}
+
 void append_emel_generation_cases(std::vector<result> & results, const config & cfg) {
-  const auto & fixtures = maintained_generation_fixtures();
+  const bool compare_lane = generation_lane_mode_current() == generation_lane_mode::compare;
   const config case_cfg = generation_case_config(cfg);
 
   reset_generation_flash_evidence();
-  for (const prepared_generation_fixture & prepared_fixture : fixtures) {
+  if (compare_lane) {
+    const auto & fixtures = maintained_compare_generation_fixtures();
+    for (size_t fixture_index = 0u; fixture_index < fixtures.size(); ++fixture_index) {
+      const prepared_generation_fixture & prepared_fixture = fixtures[fixture_index];
+      const generation_fixture_spec * spec = prepared_fixture.spec;
+      const emel_fixture & fixture = prepared_fixture.emel;
+      g_generation_fixture_rel = spec->fixture->fixture_rel;
+      for (const generation_case_spec & generation_case : spec->cases) {
+        volatile std::size_t sink = 0u;
+        generation_seam_audit seam = {};
+        std::uint64_t flash_dispatch_calls = 0u;
+        std::uint64_t optimized_flash_dispatch_calls = 0u;
+        std::uint64_t shared_flash_dispatch_calls = 0u;
+        std::uint32_t native_quantized_stage_count = 0u;
+        std::uint32_t approved_dense_f32_stage_count = 0u;
+        std::uint32_t disallowed_fallback_stage_count = 0u;
+        std::uint32_t explicit_no_claim_stage_count = 0u;
+        std::uint64_t native_q8_0_dispatch_calls = 0u;
+        std::uint64_t packed_q8_0_dispatch_calls = 0u;
+        std::uint64_t optimized_q2_dispatch_calls = 0u;
+        std::uint64_t shared_q2_dispatch_calls = 0u;
+        std::uint64_t optimized_q3_dispatch_calls = 0u;
+        std::uint64_t shared_q3_dispatch_calls = 0u;
+        std::uint64_t optimized_q4_dispatch_calls = 0u;
+        std::uint64_t shared_q4_dispatch_calls = 0u;
+        std::uint64_t optimized_q6_dispatch_calls = 0u;
+        std::uint64_t shared_q6_dispatch_calls = 0u;
+        auto session = std::make_unique<emel_session>();
+        prepare_emel_session(fixture, *session);
+        if (!initialize_emel_session(*session, generation_case)) {
+          fail_bench_setup("initialize_emel_session", generation_case.name.data());
+        }
+
+        auto fn = [&]() {
+          reset_generation_seam(session->seam);
+          const std::uint64_t flash_dispatch_calls_before =
+              session->generator->generation_flash_attention_dispatch_calls();
+          const std::uint64_t optimized_flash_dispatch_calls_before =
+              session->generator->generation_optimized_flash_dispatch_calls();
+          const std::uint64_t shared_flash_dispatch_calls_before =
+              session->generator->generation_shared_flash_dispatch_calls();
+          native_quantized_stage_count =
+              session->generator->generation_native_quantized_stage_count();
+          approved_dense_f32_stage_count =
+              session->generator->generation_approved_dense_f32_stage_count();
+          disallowed_fallback_stage_count =
+              session->generator->generation_disallowed_fallback_stage_count();
+          explicit_no_claim_stage_count =
+              session->generator->generation_explicit_no_claim_stage_count();
+          const std::uint64_t native_q8_0_dispatch_calls_before =
+              session->generator->generation_native_q8_0_dispatch_calls();
+          const std::uint64_t packed_q8_0_dispatch_calls_before =
+              session->generator->generation_packed_q8_0_dispatch_calls();
+          const std::uint64_t optimized_q2_dispatch_calls_before =
+              session->generator->generation_optimized_q2_dispatch_calls();
+          const std::uint64_t shared_q2_dispatch_calls_before =
+              session->generator->generation_shared_q2_dispatch_calls();
+          const std::uint64_t optimized_q3_dispatch_calls_before =
+              session->generator->generation_optimized_q3_dispatch_calls();
+          const std::uint64_t shared_q3_dispatch_calls_before =
+              session->generator->generation_shared_q3_dispatch_calls();
+          const std::uint64_t optimized_q4_dispatch_calls_before =
+              session->generator->generation_optimized_q4_dispatch_calls();
+          const std::uint64_t shared_q4_dispatch_calls_before =
+              session->generator->generation_shared_q4_dispatch_calls();
+          const std::uint64_t optimized_q6_dispatch_calls_before =
+              session->generator->generation_optimized_q6_dispatch_calls();
+          const std::uint64_t shared_q6_dispatch_calls_before =
+              session->generator->generation_shared_q6_dispatch_calls();
+
+          generation_result generated{};
+          if (!run_emel_generate(*session, generation_case, generated)) {
+            fail_bench_setup("run_emel_generate", generation_case.name.data());
+          }
+          const std::uint64_t flash_dispatch_calls_after =
+              session->generator->generation_flash_attention_dispatch_calls();
+          const std::uint64_t optimized_flash_dispatch_calls_after =
+              session->generator->generation_optimized_flash_dispatch_calls();
+          const std::uint64_t shared_flash_dispatch_calls_after =
+              session->generator->generation_shared_flash_dispatch_calls();
+          const std::uint64_t native_q8_0_dispatch_calls_after =
+              session->generator->generation_native_q8_0_dispatch_calls();
+          const std::uint64_t packed_q8_0_dispatch_calls_after =
+              session->generator->generation_packed_q8_0_dispatch_calls();
+          const std::uint64_t optimized_q2_dispatch_calls_after =
+              session->generator->generation_optimized_q2_dispatch_calls();
+          const std::uint64_t shared_q2_dispatch_calls_after =
+              session->generator->generation_shared_q2_dispatch_calls();
+          const std::uint64_t optimized_q3_dispatch_calls_after =
+              session->generator->generation_optimized_q3_dispatch_calls();
+          const std::uint64_t shared_q3_dispatch_calls_after =
+              session->generator->generation_shared_q3_dispatch_calls();
+          const std::uint64_t optimized_q4_dispatch_calls_after =
+              session->generator->generation_optimized_q4_dispatch_calls();
+          const std::uint64_t shared_q4_dispatch_calls_after =
+              session->generator->generation_shared_q4_dispatch_calls();
+          const std::uint64_t optimized_q6_dispatch_calls_after =
+              session->generator->generation_optimized_q6_dispatch_calls();
+          const std::uint64_t shared_q6_dispatch_calls_after =
+              session->generator->generation_shared_q6_dispatch_calls();
+          seam = session->seam;
+          flash_dispatch_calls = flash_dispatch_calls_after - flash_dispatch_calls_before;
+          optimized_flash_dispatch_calls =
+              optimized_flash_dispatch_calls_after - optimized_flash_dispatch_calls_before;
+          shared_flash_dispatch_calls =
+              shared_flash_dispatch_calls_after - shared_flash_dispatch_calls_before;
+          native_q8_0_dispatch_calls =
+              native_q8_0_dispatch_calls_after - native_q8_0_dispatch_calls_before;
+          packed_q8_0_dispatch_calls =
+              packed_q8_0_dispatch_calls_after - packed_q8_0_dispatch_calls_before;
+          optimized_q2_dispatch_calls =
+              optimized_q2_dispatch_calls_after - optimized_q2_dispatch_calls_before;
+          shared_q2_dispatch_calls =
+              shared_q2_dispatch_calls_after - shared_q2_dispatch_calls_before;
+          optimized_q3_dispatch_calls =
+              optimized_q3_dispatch_calls_after - optimized_q3_dispatch_calls_before;
+          shared_q3_dispatch_calls =
+              shared_q3_dispatch_calls_after - shared_q3_dispatch_calls_before;
+          optimized_q4_dispatch_calls =
+              optimized_q4_dispatch_calls_after - optimized_q4_dispatch_calls_before;
+          shared_q4_dispatch_calls =
+              shared_q4_dispatch_calls_after - shared_q4_dispatch_calls_before;
+          optimized_q6_dispatch_calls =
+              optimized_q6_dispatch_calls_after - optimized_q6_dispatch_calls_before;
+          shared_q6_dispatch_calls =
+              shared_q6_dispatch_calls_after - shared_q6_dispatch_calls_before;
+          sink ^= generated.output_length;
+        };
+
+        results.push_back(measure_case(generation_case.name.data(), case_cfg, fn));
+        if (spec->fixture->current_publication &&
+            generation_case.name == k_generation_case_name) {
+          g_generation_architecture_contract.assign(
+              emel::model::architecture_name_view(session->model_data));
+          g_generation_formatter_contract.assign(session->formatter_binding.contract);
+          g_generation_flash_evidence.ready = true;
+          g_generation_flash_evidence.flash_dispatch_calls = flash_dispatch_calls;
+          g_generation_flash_evidence.optimized_flash_dispatch_calls =
+              optimized_flash_dispatch_calls;
+          g_generation_flash_evidence.shared_flash_dispatch_calls = shared_flash_dispatch_calls;
+          g_generation_flash_evidence.native_quantized_stage_count =
+              native_quantized_stage_count;
+          g_generation_flash_evidence.approved_dense_f32_stage_count =
+              approved_dense_f32_stage_count;
+          g_generation_flash_evidence.disallowed_fallback_stage_count =
+              disallowed_fallback_stage_count;
+          g_generation_flash_evidence.explicit_no_claim_stage_count =
+              explicit_no_claim_stage_count;
+          g_generation_flash_evidence.native_q8_0_dispatch_calls =
+              native_q8_0_dispatch_calls;
+          g_generation_flash_evidence.packed_q8_0_dispatch_calls =
+              packed_q8_0_dispatch_calls;
+          g_generation_flash_evidence.optimized_q2_dispatch_calls =
+              optimized_q2_dispatch_calls;
+          g_generation_flash_evidence.shared_q2_dispatch_calls = shared_q2_dispatch_calls;
+          g_generation_flash_evidence.optimized_q3_dispatch_calls =
+              optimized_q3_dispatch_calls;
+          g_generation_flash_evidence.shared_q3_dispatch_calls = shared_q3_dispatch_calls;
+          g_generation_flash_evidence.optimized_q4_dispatch_calls =
+              optimized_q4_dispatch_calls;
+          g_generation_flash_evidence.shared_q4_dispatch_calls = shared_q4_dispatch_calls;
+          g_generation_flash_evidence.optimized_q6_dispatch_calls =
+              optimized_q6_dispatch_calls;
+          g_generation_flash_evidence.shared_q6_dispatch_calls = shared_q6_dispatch_calls;
+          g_generation_flash_evidence.seam = seam;
+        }
+        if (generation_seam_audit_enabled()) {
+          print_generation_seam_audit("emel", seam);
+          verify_emel_generation_seam(seam);
+        }
+        if (spec->fixture->current_publication &&
+            !capture_generation_stage_probe(*session, prepared_fixture.reference, generation_case)) {
+          fail_bench_setup("capture_generation_stage_probe", generation_case.name.data());
+        }
+        static_cast<void>(sink);
+      }
+    }
+    return;
+  }
+
+  const auto & fixtures = maintained_emel_generation_fixtures();
+  for (const prepared_emel_generation_fixture & prepared_fixture : fixtures) {
+    const generation_fixture_spec * spec = prepared_fixture.spec;
     const emel_fixture & fixture = prepared_fixture.emel;
-    g_generation_fixture_rel = prepared_fixture.spec->fixture->fixture_rel;
-    for (const generation_case_spec & generation_case : prepared_fixture.spec->cases) {
+    g_generation_fixture_rel = spec->fixture->fixture_rel;
+    for (const generation_case_spec & generation_case : spec->cases) {
       volatile std::size_t sink = 0u;
       generation_seam_audit seam = {};
       std::uint64_t flash_dispatch_calls = 0u;
@@ -2223,7 +2784,7 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
       };
 
       results.push_back(measure_case(generation_case.name.data(), case_cfg, fn));
-      if (prepared_fixture.spec->fixture->current_publication &&
+      if (spec->fixture->current_publication &&
           generation_case.name == k_generation_case_name) {
         g_generation_architecture_contract.assign(
             emel::model::architecture_name_view(session->model_data));
@@ -2269,13 +2830,46 @@ void append_emel_generation_cases(std::vector<result> & results, const config & 
 }
 
 void append_reference_generation_cases(std::vector<result> & results, const config & cfg) {
-  const auto & fixtures = maintained_generation_fixtures();
+  const bool compare_lane = generation_lane_mode_current() == generation_lane_mode::compare;
   const config case_cfg = generation_case_config(cfg);
 
-  for (const prepared_generation_fixture & prepared_fixture : fixtures) {
+  if (compare_lane) {
+    const auto & fixtures = maintained_compare_generation_fixtures();
+    for (const prepared_generation_fixture & prepared_fixture : fixtures) {
+      const generation_fixture_spec * spec = prepared_fixture.spec;
+      const reference_fixture & fixture = prepared_fixture.reference;
+      g_generation_fixture_rel = spec->fixture->fixture_rel;
+      for (const generation_case_spec & generation_case : spec->cases) {
+        volatile std::size_t sink = 0u;
+        generation_seam_audit seam = {};
+        auto fn = [&]() {
+          reset_generation_seam(seam);
+          generation_result generated{};
+          // Keep the reference path honest with EMEL's timed generate request:
+          // formatting and tokenization stay inside the measured lambda here too.
+          if (!run_reference_generate(fixture, generation_case, seam, generated)) {
+            fail_bench_setup("run_reference_generate", generation_case.name.data());
+          }
+          sink ^= generated.output_length;
+        };
+
+        results.push_back(measure_case(generation_case.name.data(), case_cfg, fn));
+        if (generation_seam_audit_enabled()) {
+          print_generation_seam_audit("reference", seam);
+          verify_reference_generation_seam(seam);
+        }
+        static_cast<void>(sink);
+      }
+    }
+    return;
+  }
+
+  const auto & fixtures = maintained_reference_generation_fixtures();
+  for (const prepared_reference_generation_fixture & prepared_fixture : fixtures) {
+    const generation_fixture_spec * spec = prepared_fixture.spec;
     const reference_fixture & fixture = prepared_fixture.reference;
-    g_generation_fixture_rel = prepared_fixture.spec->fixture->fixture_rel;
-    for (const generation_case_spec & generation_case : prepared_fixture.spec->cases) {
+    g_generation_fixture_rel = spec->fixture->fixture_rel;
+    for (const generation_case_spec & generation_case : spec->cases) {
       volatile std::size_t sink = 0u;
       generation_seam_audit seam = {};
       auto fn = [&]() {

@@ -1795,34 +1795,6 @@ inline void dot_q4_k_q8_k_2rows_neon(const ::emel::kernel::detail::quant::block_
 #endif
 }
 
-inline void decode_q4_k_x8_6bit_scales(const uint8_t * scales_in,
-                                       int16_t * out_mins,
-                                       int8_t * out_scales) noexcept {
-#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
-  (void) scales_in;
-  std::fill(out_mins, out_mins + 8, static_cast<int16_t>(0));
-  std::fill(out_scales, out_scales + 8, static_cast<int8_t>(0));
-#else
-  constexpr uint32_t kmask1 = 0x3f3f3f3fu;
-  constexpr uint32_t kmask2 = 0x0f0f0f0fu;
-  constexpr uint32_t kmask3 = 0x03030303u;
-  uint32_t packed_words[3] = {};
-  std::memcpy(packed_words, scales_in, ::emel::kernel::detail::quant::K_SCALE_SIZE);
-
-  const uint32_t mins_0_3 = packed_words[1] & kmask1;
-  const uint32_t mins_4_7 =
-      ((packed_words[2] >> 4u) & kmask2) | (((packed_words[1] >> 6u) & kmask3) << 4u);
-  const uint32x2_t mins_u32 = {mins_0_3, mins_4_7};
-  vst1q_s16(out_mins, vreinterpretq_s16_u16(vmovl_u8(vreinterpret_u8_u32(mins_u32))));
-
-  uint32_t scales_u32[2] = {};
-  scales_u32[0] = packed_words[0] & kmask1;
-  scales_u32[1] =
-      (packed_words[2] & kmask2) | (((packed_words[0] >> 6u) & kmask3) << 4u);
-  std::memcpy(out_scales, scales_u32, 8u);
-#endif
-}
-
 inline void dot_q4_k_x8_q8_k_group_bl4_neon(
     const ::emel::kernel::detail::quant::block_q4_kx8 * lhs,
     const ::emel::kernel::detail::quant::block_q8_k * rhs,
@@ -1871,12 +1843,12 @@ inline void dot_q4_k_x8_q8_k_group_bl4_neon(
       std::array<int16x8_t, 2> q4sb_mins = {};
       std::array<int16x8_t, 2> q4sb_scales = {};
       for (uint64_t half = 0; half < 2u; ++half) {
-        const uint64_t offset = sb * 24u + half * 12u;
-        std::array<int16_t, 8> mins = {};
-        std::array<int8_t, 8> scales = {};
-        decode_q4_k_x8_6bit_scales(q4_block.scales.data() + offset, mins.data(), scales.data());
-        q4sb_mins[half] = vld1q_s16(mins.data());
-        q4sb_scales[half] = vmovl_s8(vld1_s8(scales.data()));
+        const uint8_t * prepared =
+            q4_block.scales.data() +
+            ((sb * 2u + half) * ::emel::kernel::detail::quant::Q4_K_X8_ROWS * 2u);
+        q4sb_mins[half] = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(prepared)));
+        q4sb_scales[half] =
+            vreinterpretq_s16_u16(vmovl_u8(vld1_u8(prepared + ::emel::kernel::detail::quant::Q4_K_X8_ROWS)));
       }
 
       std::array<int8x16_t, 4> q8_qs = {};
@@ -2015,12 +1987,12 @@ inline void dot_q4_k_x8_q8_k_group_bl8_neon(
       std::array<int16x8_t, 2> q4sb_mins = {};
       std::array<int16x8_t, 2> q4sb_scales = {};
       for (uint64_t half = 0; half < 2u; ++half) {
-        const uint64_t offset = sb * 24u + half * 12u;
-        std::array<int16_t, 8> mins = {};
-        std::array<int8_t, 8> scales = {};
-        decode_q4_k_x8_6bit_scales(q4_block.scales.data() + offset, mins.data(), scales.data());
-        q4sb_mins[half] = vld1q_s16(mins.data());
-        q4sb_scales[half] = vmovl_s8(vld1_s8(scales.data()));
+        const uint8_t * prepared =
+            q4_block.scales.data() +
+            ((sb * 2u + half) * ::emel::kernel::detail::quant::Q4_K_X8_ROWS * 2u);
+        q4sb_mins[half] = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(prepared)));
+        q4sb_scales[half] =
+            vreinterpretq_s16_u16(vmovl_u8(vld1_u8(prepared + ::emel::kernel::detail::quant::Q4_K_X8_ROWS)));
       }
 
       const uint8_t * q4_base =
@@ -2829,8 +2801,9 @@ inline void dot_q6_k_x8_q8_k_group_prepared_i8mm(
   (void) block_count;
   std::fill(out, out + ::emel::kernel::detail::quant::Q6_K_X8_ROWS, 0.0f);
 #else
-  std::array<float, ::emel::kernel::detail::quant::Q6_K_X8_ROWS> sums = {};
   const int32x4_t zero = vdupq_n_s32(0);
+  float32x4_t sums_0 = vdupq_n_f32(0.0f);
+  float32x4_t sums_1 = vdupq_n_f32(0.0f);
 
   for (uint64_t block = 0; block < block_count; ++block) {
     const auto & q6_block = lhs[block];
@@ -2883,33 +2856,14 @@ inline void dot_q6_k_x8_q8_k_group_prepared_i8mm(
     const float16x4_t q6_d_1_f16 = vreinterpret_f16_u16(vld1_u16(q6_block.d.data() + 4));
     const float32x4_t block_scale_0 = vmulq_n_f32(vcvt_f32_f16(q6_d_0_f16), q8_d);
     const float32x4_t block_scale_1 = vmulq_n_f32(vcvt_f32_f16(q6_d_1_f16), q8_d);
-    const int32x4_t packed_acc_0 = {
-        vgetq_lane_s32(acc_pairs[0], 0),
-        vgetq_lane_s32(acc_pairs[0], 2),
-        vgetq_lane_s32(acc_pairs[1], 0),
-        vgetq_lane_s32(acc_pairs[1], 2),
-    };
-    const int32x4_t packed_acc_1 = {
-        vgetq_lane_s32(acc_pairs[2], 0),
-        vgetq_lane_s32(acc_pairs[2], 2),
-        vgetq_lane_s32(acc_pairs[3], 0),
-        vgetq_lane_s32(acc_pairs[3], 2),
-    };
-    const float32x4_t scaled_0 = vmulq_f32(vcvtq_f32_s32(packed_acc_0), block_scale_0);
-    const float32x4_t scaled_1 = vmulq_f32(vcvtq_f32_s32(packed_acc_1), block_scale_1);
-    float scaled_0_array[4];
-    float scaled_1_array[4];
-    vst1q_f32(scaled_0_array, scaled_0);
-    vst1q_f32(scaled_1_array, scaled_1);
-    for (size_t row = 0; row < 4u; ++row) {
-      sums[row] += scaled_0_array[row];
-      sums[row + 4u] += scaled_1_array[row];
-    }
+    const int32x4_t packed_acc_0 = vuzp1q_s32(acc_pairs[0], acc_pairs[1]);
+    const int32x4_t packed_acc_1 = vuzp1q_s32(acc_pairs[2], acc_pairs[3]);
+    sums_0 = vfmaq_f32(sums_0, vcvtq_f32_s32(packed_acc_0), block_scale_0);
+    sums_1 = vfmaq_f32(sums_1, vcvtq_f32_s32(packed_acc_1), block_scale_1);
   }
 
-  for (size_t row = 0; row < sums.size(); ++row) {
-    out[row] = sums[row];
-  }
+  vst1q_f32(out, sums_0);
+  vst1q_f32(out + 4u, sums_1);
 #endif
 }
 
@@ -2983,18 +2937,8 @@ inline void reduce_q6_k_x8_q8_argmax_prepared_i8mm_group(
     const float32x4_t block_scale_0 = vmulq_n_f32(vld1q_f32(q6_block.d.data()), q8_block.d);
     const float32x4_t block_scale_1 =
         vmulq_n_f32(vld1q_f32(q6_block.d.data() + 4u), q8_block.d);
-    const int32x4_t packed_acc_0 = {
-        vgetq_lane_s32(acc_pairs[0], 0),
-        vgetq_lane_s32(acc_pairs[0], 2),
-        vgetq_lane_s32(acc_pairs[1], 0),
-        vgetq_lane_s32(acc_pairs[1], 2),
-    };
-    const int32x4_t packed_acc_1 = {
-        vgetq_lane_s32(acc_pairs[2], 0),
-        vgetq_lane_s32(acc_pairs[2], 2),
-        vgetq_lane_s32(acc_pairs[3], 0),
-        vgetq_lane_s32(acc_pairs[3], 2),
-    };
+    const int32x4_t packed_acc_0 = vuzp1q_s32(acc_pairs[0], acc_pairs[1]);
+    const int32x4_t packed_acc_1 = vuzp1q_s32(acc_pairs[2], acc_pairs[3]);
     sums_0 = vaddq_f32(sums_0, vmulq_f32(vcvtq_f32_s32(packed_acc_0), block_scale_0));
     sums_1 = vaddq_f32(sums_1, vmulq_f32(vcvtq_f32_s32(packed_acc_1), block_scale_1));
   }
