@@ -3,11 +3,11 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Liquid LFM2.5-1.2B Thinking ARM Slice
 status: ready_for_phase_planning
-stopped_at: "Roadmap created for v1.9; ready for $gsd-discuss-phase 33"
-last_updated: "2026-03-31T20:31:08Z"
-last_activity: 2026-03-31
+stopped_at: "Gap-closure phases 38-40 added from milestone audit; ready for $gsd-plan-phase 38"
+last_updated: "2026-04-02T17:12:32Z"
+last_activity: 2026-04-02
 progress:
-  total_phases: 5
+  total_phases: 8
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -22,17 +22,16 @@ See: .planning/PROJECT.md (updated 2026-03-31)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Phase 33 planning for fixture identity, executable metadata truth, and the
-maintained Liquid conditioning contract.
+**Current focus:** Gap-closure planning for reconstructed v1.9 verification, validation, and
+milestone bookkeeping.
 
 ## Current Position
 
-Phase: 33
+Phase: 38
 Plan: —
-Status: Roadmap created
-Last activity: 2026-03-31 — Rescoped v1.9 from the prior `Q8_0` anchor to one official Liquid
-`Q4_K_M` fixture, keeping the same five-phase shape but accepting the broader quant-runtime bring-up
-implied by the new maintained truth anchor
+Status: Gap phases added
+Last activity: 2026-04-02 — Audited v1.9 as implemented-but-unverified, then added phases 38-40 to
+reconstruct missing closeout artifacts, validation coverage, and milestone bookkeeping
 
 Progress: [----------] 0%
 
@@ -41,7 +40,7 @@ Progress: [----------] 0%
 **Current active milestone:**
 
 - Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
-- Phases complete: 0/5
+- Phases complete: 0/8
 - Plans complete: 0/0
 - Audit status: not run
 
@@ -54,7 +53,7 @@ Progress: [----------] 0%
 
 **Next action:**
 
-- Start Phase 33 with `$gsd-discuss-phase 33` or `$gsd-plan-phase 33`.
+- Start Phase 38 with `$gsd-plan-phase 38`.
 
 ## Accumulated Context
 

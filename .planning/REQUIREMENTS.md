@@ -84,16 +84,16 @@ verification before widening API surface or model scope.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FIX-02 | Phase 33 | Pending |
-| META-01 | Phase 33 | Pending |
-| COND-03 | Phase 33 | Pending |
-| RUN-03 | Phase 34 | Pending |
-| RUN-04 | Phase 35 | Pending |
-| RUN-05 | Phase 34 | Pending |
-| RUN-06 | Phase 35 | Pending |
-| PAR-02 | Phase 36 | Pending |
-| VER-02 | Phase 36 | Pending |
-| BENCH-08 | Phase 37 | Pending |
+| FIX-02 | Phase 38 | Pending |
+| META-01 | Phase 38 | Pending |
+| COND-03 | Phase 38 | Pending |
+| RUN-03 | Phase 38 | Pending |
+| RUN-04 | Phase 38 | Pending |
+| RUN-05 | Phase 38 | Pending |
+| RUN-06 | Phase 38 | Pending |
+| PAR-02 | Phase 39 | Pending |
+| VER-02 | Phase 39 | Pending |
+| BENCH-08 | Phase 39 | Pending |
 
 **Coverage:**
 - v1 requirements: 10 total

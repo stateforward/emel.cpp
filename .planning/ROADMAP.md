@@ -23,6 +23,14 @@ path, then maintained parity and benchmark publication for that exact slice.
       `llama.cpp` and protect the prior maintained anchors.
 - [ ] **Phase 37: Benchmark And Docs Publication** - Publish one parity-backed Liquid benchmark
       path and maintained docs for the same slice.
+- [ ] **Phase 38: Reconstruct Fixture, Contract, And Runtime Closeout** - Rebuild the missing
+      summary/verification trail for original phases 33-35 and bind the delivered Liquid fixture,
+      contract, and runtime evidence back into formal milestone proof.
+- [ ] **Phase 39: Reconstruct Parity, Regression, And Benchmark Closeout** - Rebuild the missing
+      summary/verification trail for original phases 36-37 and formally close the maintained
+      Liquid parity, regression, and benchmark publication surfaces.
+- [ ] **Phase 40: Validate v1.9 And Repair Milestone Bookkeeping** - Add missing validation and
+      planning-state closeout so the milestone can pass audit and archive cleanly.
 
 ## Phase Details
 
@@ -96,6 +104,59 @@ slice and nothing broader.
      does not broaden into generic Liquid or sibling-quant claims.
 **Plans**: TBD
 
+### Phase 38: Reconstruct Fixture, Contract, And Runtime Closeout
+**Goal**: Reconstruct the formal closeout artifacts for original phases 33-35 so the delivered
+Liquid fixture, conditioning contract, `lfm2` model contract, and maintained runtime proof become
+auditable milestone evidence.
+**Depends on**: Phase 37
+**Requirements**: FIX-02, META-01, COND-03, RUN-03, RUN-04, RUN-05, RUN-06
+**Gap Closure**: Closes orphaned requirements and missing cross-phase handoff artifacts from the
+milestone audit for original phases 33-35.
+**Success Criteria** (what must be TRUE):
+  1. Original phase directories 33-35 contain reconstructed `SUMMARY.md` and `VERIFICATION.md`
+     artifacts that point at the delivered repo evidence instead of leaving the milestone
+     unverified.
+  2. Traceability for fixture provenance, metadata truth, conditioning contract, `lfm2` model
+     contract, and maintained runtime evidence is updated so the audit no longer classifies those
+     requirements as orphaned.
+  3. Phase-resolution ambiguity around the current v1.9 phase lineage is documented and handled
+     well enough for follow-on workflow steps to target the intended Liquid phase set.
+**Plans**: TBD
+
+### Phase 39: Reconstruct Parity, Regression, And Benchmark Closeout
+**Goal**: Reconstruct the formal closeout artifacts for original phases 36-37 so maintained
+Liquid parity, preserved maintained anchors, and published benchmark/docs evidence are formally
+verified.
+**Depends on**: Phase 38
+**Requirements**: PAR-02, VER-02, BENCH-08
+**Gap Closure**: Closes orphaned requirements and missing end-to-end proof artifacts from the
+milestone audit for original phases 36-37.
+**Success Criteria** (what must be TRUE):
+  1. Original phase directories 36-37 contain reconstructed `SUMMARY.md` and `VERIFICATION.md`
+     artifacts that tie parity, regression protection, and benchmark publication to the delivered
+     repo evidence.
+  2. Maintained Liquid parity baselines, additive maintained Qwen/Llama protection, and published
+     Liquid benchmark/docs evidence are all referenced by formal milestone closeout artifacts.
+  3. The milestone audit can trace parity-backed publication from original phases 33-37 without
+     treating the maintained Liquid flow as unverified.
+**Plans**: TBD
+
+### Phase 40: Validate v1.9 And Repair Milestone Bookkeeping
+**Goal**: Add missing Nyquist validation and planning-state updates so v1.9 can pass audit and be
+completed without stale milestone metadata.
+**Depends on**: Phase 39
+**Requirements**: None (gap-closure phase)
+**Gap Closure**: Closes missing VALIDATION coverage and blocked milestone-closeout flow from the
+audit.
+**Success Criteria** (what must be TRUE):
+  1. The reconstructed v1.9 phase set has the validation coverage required for the milestone audit
+     to stop reporting missing Nyquist artifacts.
+  2. `.planning/STATE.md`, `.planning/ROADMAP.md`, and `.planning/REQUIREMENTS.md` reflect the
+     real milestone status instead of the stale pre-planning state.
+  3. `$gsd-audit-milestone` passes or narrows to non-blocking tech debt, enabling clean milestone
+     completion.
+**Plans**: TBD
+
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
@@ -105,3 +166,6 @@ slice and nothing broader.
 | 35. Maintained Runtime Execution On ARM | 0/TBD | Not started | - |
 | 36. Parity And Regression Proof | 0/TBD | Not started | - |
 | 37. Benchmark And Docs Publication | 0/TBD | Not started | - |
+| 38. Reconstruct Fixture, Contract, And Runtime Closeout | 0/TBD | Not started | - |
+| 39. Reconstruct Parity, Regression, And Benchmark Closeout | 0/TBD | Not started | - |
+| 40. Validate v1.9 And Repair Milestone Bookkeeping | 0/TBD | Not started | - |
