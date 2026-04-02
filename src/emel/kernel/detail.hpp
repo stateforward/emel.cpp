@@ -147,6 +147,7 @@ inline constexpr uint8_t dtype_q4_0 = 2;
 inline constexpr uint8_t dtype_q8_0 = 8;
 inline constexpr uint8_t dtype_q2_k = 10;
 inline constexpr uint8_t dtype_q3_k = 11;
+inline constexpr uint8_t dtype_q4_k = 12;
 inline constexpr uint8_t dtype_q6_k = 14;
 inline constexpr uint8_t dtype_q8_k = 15;
 inline constexpr uint8_t dtype_q6_k_x8 = 36;
@@ -154,6 +155,10 @@ inline constexpr uint8_t dtype_q6_k_x8_q8_prepared = 37;
 inline constexpr uint8_t dtype_q6_k_x8_q8_argmax_prepared = 38;
 inline constexpr uint8_t dtype_q8_0_x4_bl4 = 39;
 inline constexpr uint8_t dtype_q8_0_x4_bl8 = 40;
+inline constexpr uint8_t dtype_q4_k_x8_bl4 = 41;
+inline constexpr uint8_t dtype_q4_k_x8_bl8 = 42;
+inline constexpr uint8_t dtype_q8_k_x4 = 43;
+inline constexpr uint8_t dtype_q8_k_x8 = 44;
 inline constexpr uint64_t flash_attn_workspace_token_capacity = 4096u;
 
 struct flash_attn_workspace {
@@ -170,8 +175,10 @@ namespace quant {
 
 constexpr uint64_t QK8_0 = 32u;
 constexpr uint64_t QK_K = 256u;
+constexpr uint64_t K_SCALE_SIZE = 12u;
 constexpr uint64_t MAX_Q8_K_BLOCKS = 128u;
 constexpr uint64_t MAX_Q8_0_BLOCKS = MAX_Q8_K_BLOCKS * (QK_K / QK8_0);
+constexpr uint64_t Q4_K_X8_ROWS = 8u;
 constexpr uint64_t Q6_K_X8_ROWS = 8u;
 constexpr uint64_t Q8_0_X4_ROWS = 4u;
 
@@ -199,11 +206,25 @@ struct block_q3_k {
   uint16_t d = 0;
 };
 
+struct block_q4_k {
+  uint16_t d = 0;
+  uint16_t dmin = 0;
+  std::array<uint8_t, K_SCALE_SIZE> scales = {};
+  std::array<uint8_t, QK_K / 2> qs = {};
+};
+
 struct block_q6_k {
   std::array<uint8_t, QK_K / 2> ql = {};
   std::array<uint8_t, QK_K / 4> qh = {};
   std::array<int8_t, QK_K / 16> scales = {};
   uint16_t d = 0;
+};
+
+struct block_q4_kx8 {
+  std::array<uint16_t, Q4_K_X8_ROWS> d = {};
+  std::array<uint16_t, Q4_K_X8_ROWS> dmin = {};
+  std::array<uint8_t, (QK_K / 32u) * Q4_K_X8_ROWS * 2u> scales = {};
+  std::array<uint8_t, (QK_K / 2) * Q4_K_X8_ROWS> qs = {};
 };
 
 struct block_q6_kx8 {
@@ -234,7 +255,12 @@ struct block_q8_k {
 static_assert(sizeof(block_q8_0) == sizeof(uint16_t) + QK8_0);
 static_assert(sizeof(block_q2_k) == 2 * sizeof(uint16_t) + (QK_K / 16) + (QK_K / 4));
 static_assert(sizeof(block_q3_k) == sizeof(uint16_t) + (QK_K / 4) + (QK_K / 8) + 12);
+static_assert(sizeof(block_q4_k) == 2 * sizeof(uint16_t) + K_SCALE_SIZE + (QK_K / 2));
 static_assert(sizeof(block_q6_k) == sizeof(uint16_t) + (QK_K / 16) + (3 * QK_K / 4));
+static_assert(
+    sizeof(block_q4_kx8) ==
+    sizeof(uint16_t) * (Q4_K_X8_ROWS * 2u) + ((QK_K / 32u) * Q4_K_X8_ROWS * 2u) +
+        (QK_K / 2) * Q4_K_X8_ROWS);
 static_assert(
     sizeof(block_q6_kx8) ==
     sizeof(uint16_t) * Q6_K_X8_ROWS + (QK_K / 16) * Q6_K_X8_ROWS + (3 * QK_K / 4) * Q6_K_X8_ROWS);
@@ -381,6 +407,50 @@ inline void dequantize_row_q3_k(const block_q3_k * x, float * y, const int64_t k
   }
 }
 
+inline void get_scale_min_k4(const int j,
+                             const uint8_t * q,
+                             uint8_t * d,
+                             uint8_t * m) noexcept {
+  if (j < 4) {
+    *d = q[j] & 63u;
+    *m = q[j + 4] & 63u;
+    return;
+  }
+
+  *d = static_cast<uint8_t>((q[j + 4] & 0x0fu) | ((q[j - 4] >> 6u) << 4u));
+  *m = static_cast<uint8_t>((q[j + 4] >> 4u) | ((q[j - 0] >> 6u) << 4u));
+}
+
+inline void dequantize_row_q4_k(const block_q4_k * x, float * y, const int64_t k) noexcept {
+  const int64_t nb = k / static_cast<int64_t>(QK_K);
+
+  for (int64_t i = 0; i < nb; ++i) {
+    const uint8_t * q = x[i].qs.data();
+    const float d = fp16_to_fp32(x[i].d);
+    const float min = fp16_to_fp32(x[i].dmin);
+
+    int is = 0;
+    for (int j = 0; j < static_cast<int>(QK_K); j += 64) {
+      uint8_t sc = 0u;
+      uint8_t m = 0u;
+      get_scale_min_k4(is + 0, x[i].scales.data(), &sc, &m);
+      const float d0 = d * static_cast<float>(sc);
+      const float m0 = min * static_cast<float>(m);
+      get_scale_min_k4(is + 1, x[i].scales.data(), &sc, &m);
+      const float d1 = d * static_cast<float>(sc);
+      const float m1 = min * static_cast<float>(m);
+      for (int l = 0; l < 32; ++l) {
+        *y++ = d0 * static_cast<float>(q[l] & 0x0fu) - m0;
+      }
+      for (int l = 0; l < 32; ++l) {
+        *y++ = d1 * static_cast<float>(q[l] >> 4u) - m1;
+      }
+      q += 32;
+      is += 2;
+    }
+  }
+}
+
 inline void dequantize_row_q6_k(const block_q6_k * x, float * y, const int64_t k) noexcept {
   const int64_t nb = k / static_cast<int64_t>(QK_K);
 
@@ -503,12 +573,24 @@ inline void quantize_row_q8_k_strided(const float * x,
   }
 }
 
+inline constexpr uint64_t packed_q4_k_x8_group_count(const uint64_t rows) noexcept {
+  return (rows + Q4_K_X8_ROWS - 1u) / Q4_K_X8_ROWS;
+}
+
 inline constexpr uint64_t packed_q6_k_x8_group_count(const uint64_t rows) noexcept {
   return (rows + Q6_K_X8_ROWS - 1u) / Q6_K_X8_ROWS;
 }
 
 inline constexpr uint64_t packed_q8_0_x4_group_count(const uint64_t rows) noexcept {
   return (rows + Q8_0_X4_ROWS - 1u) / Q8_0_X4_ROWS;
+}
+
+inline size_t packed_q4_k_x8_group_storage_bytes(const uint64_t cols) noexcept {
+  if ((cols % QK_K) != 0u) {
+    return 0u;
+  }
+  const uint64_t block_count = cols / QK_K;
+  return static_cast<size_t>(block_count) * sizeof(block_q4_kx8);
 }
 
 inline size_t packed_q6_k_x8_group_storage_bytes(const uint64_t cols) noexcept {
@@ -541,6 +623,54 @@ inline size_t argmax_prepared_q6_k_x8_q8_group_storage_bytes(const uint64_t cols
   }
   const uint64_t block_count = cols / QK_K;
   return static_cast<size_t>(block_count) * sizeof(block_q6_kx8_q8_argmax_prepared);
+}
+
+inline block_q4_kx8 make_block_q4_k_x8(const block_q4_k * rows,
+                                       const uint64_t interleave_block_bytes) noexcept {
+  block_q4_kx8 out = {};
+  if (interleave_block_bytes == 0u || (interleave_block_bytes != 4u && interleave_block_bytes != 8u) ||
+      ((QK_K / 2u) % interleave_block_bytes) != 0u) {
+    return out;
+  }
+
+  for (uint64_t row = 0; row < Q4_K_X8_ROWS; ++row) {
+    out.d[row] = rows[row].d;
+    out.dmin[row] = rows[row].dmin;
+  }
+
+  const uint64_t end = (QK_K * 4u) / interleave_block_bytes;
+  for (uint64_t i = 0; i < end; ++i) {
+    const uint64_t src_row = i % Q4_K_X8_ROWS;
+    const uint64_t src_offset = (i / Q4_K_X8_ROWS) * interleave_block_bytes;
+    const uint64_t dst_offset = i * interleave_block_bytes;
+    std::memcpy(out.qs.data() + dst_offset,
+                rows[src_row].qs.data() + src_offset,
+                static_cast<size_t>(interleave_block_bytes));
+  }
+
+  for (uint64_t sb = 0; sb < (QK_K / 64u); ++sb) {
+    for (uint64_t half = 0; half < 2u; ++half) {
+      const uint64_t scale_index = sb * 2u + half;
+      uint8_t * packed = out.scales.data() + (scale_index * Q4_K_X8_ROWS * 2u);
+      for (uint64_t row = 0; row < Q4_K_X8_ROWS; ++row) {
+        uint8_t scale = 0u;
+        uint8_t min = 0u;
+        get_scale_min_k4(static_cast<int>(scale_index), rows[row].scales.data(), &scale, &min);
+        packed[row] = min;
+        packed[row + Q4_K_X8_ROWS] = scale;
+      }
+    }
+  }
+
+  return out;
+}
+
+inline block_q4_kx8 make_block_q4_k_x8_bl4(const block_q4_k * rows) noexcept {
+  return make_block_q4_k_x8(rows, 4u);
+}
+
+inline block_q4_kx8 make_block_q4_k_x8_bl8(const block_q4_k * rows) noexcept {
+  return make_block_q4_k_x8(rows, 8u);
 }
 
 inline block_q6_kx8 make_block_q6_k_x8(const block_q6_k * rows) noexcept {
@@ -803,6 +933,53 @@ inline bool pack_q8_0_rows_x4_bl8(const block_q8_0 * src,
   return pack_q8_0_rows_x4(src, rows, cols, dst, 8u);
 }
 
+inline bool pack_q4_k_rows_x8(const block_q4_k * src,
+                              const uint64_t rows,
+                              const uint64_t cols,
+                              void * dst,
+                              const uint64_t interleave_block_bytes) noexcept {
+  if (src == nullptr || dst == nullptr) {
+    return false;
+  }
+  if ((cols % QK_K) != 0u ||
+      (interleave_block_bytes != 4u && interleave_block_bytes != 8u)) {
+    return false;
+  }
+
+  const uint64_t block_count = cols / QK_K;
+  const uint64_t group_count = packed_q4_k_x8_group_count(rows);
+  auto * dst_blocks = static_cast<block_q4_kx8 *>(dst);
+  for (uint64_t group = 0; group < group_count; ++group) {
+    const uint64_t row_base = group * Q4_K_X8_ROWS;
+    for (uint64_t block = 0; block < block_count; ++block) {
+      std::array<block_q4_k, Q4_K_X8_ROWS> group_rows = {};
+      for (uint64_t row = 0; row < Q4_K_X8_ROWS; ++row) {
+        const uint64_t logical_row = row_base + row;
+        if (logical_row < rows) {
+          group_rows[row] = src[logical_row * block_count + block];
+        }
+      }
+      dst_blocks[group * block_count + block] =
+          make_block_q4_k_x8(group_rows.data(), interleave_block_bytes);
+    }
+  }
+  return true;
+}
+
+inline bool pack_q4_k_rows_x8_bl4(const block_q4_k * src,
+                                  const uint64_t rows,
+                                  const uint64_t cols,
+                                  void * dst) noexcept {
+  return pack_q4_k_rows_x8(src, rows, cols, dst, 4u);
+}
+
+inline bool pack_q4_k_rows_x8_bl8(const block_q4_k * src,
+                                  const uint64_t rows,
+                                  const uint64_t cols,
+                                  void * dst) noexcept {
+  return pack_q4_k_rows_x8(src, rows, cols, dst, 8u);
+}
+
 inline bool pack_q6_k_rows_x8_q8_prepared(const block_q6_k * src,
                                           const uint64_t rows,
                                           const uint64_t cols,
@@ -890,7 +1067,7 @@ inline bool is_q8_0_dtype(const uint8_t code) noexcept {
 }
 
 inline bool is_quantized_k_dtype(const uint8_t code) noexcept {
-  return code == dtype_q2_k || code == dtype_q3_k || code == dtype_q6_k;
+  return code == dtype_q2_k || code == dtype_q3_k || code == dtype_q4_k || code == dtype_q6_k;
 }
 
 inline bool is_native_quantized_dtype(const uint8_t code) noexcept {
@@ -921,6 +1098,14 @@ inline bool is_rhs_q8_k_dtype(const uint8_t code) noexcept {
   return code == dtype_q8_k;
 }
 
+inline bool is_rhs_q8_k_x4_dtype(const uint8_t code) noexcept {
+  return code == dtype_q8_k_x4;
+}
+
+inline bool is_rhs_q8_k_x8_dtype(const uint8_t code) noexcept {
+  return code == dtype_q8_k_x8;
+}
+
 inline bool is_rhs_q8_0_dtype(const uint8_t code) noexcept {
   return code == dtype_q8_0;
 }
@@ -937,6 +1122,18 @@ inline bool is_packed_q8_0_vector_dtype(const uint8_t code) noexcept {
   return is_packed_q8_0_vector_bl4_dtype(code) || is_packed_q8_0_vector_bl8_dtype(code);
 }
 
+inline bool is_packed_q4_vector_bl4_dtype(const uint8_t code) noexcept {
+  return code == dtype_q4_k_x8_bl4;
+}
+
+inline bool is_packed_q4_vector_bl8_dtype(const uint8_t code) noexcept {
+  return code == dtype_q4_k_x8_bl8;
+}
+
+inline bool is_packed_q4_vector_dtype(const uint8_t code) noexcept {
+  return is_packed_q4_vector_bl4_dtype(code) || is_packed_q4_vector_bl8_dtype(code);
+}
+
 inline bool is_packed_q6_vector_dtype(const uint8_t code) noexcept {
   return code == dtype_q6_k_x8;
 }
@@ -951,7 +1148,9 @@ inline bool is_argmax_prepared_q6_vector_q8_rhs_dtype(const uint8_t code) noexce
 
 inline bool is_supported_dtype(const uint8_t code) noexcept {
   return code == dtype_f32 || code == dtype_f16 || is_native_quantized_dtype(code) ||
-      is_rhs_q8_k_dtype(code) || is_packed_q8_0_vector_dtype(code) ||
+      is_rhs_q8_k_dtype(code) || is_rhs_q8_k_x4_dtype(code) || is_rhs_q8_k_x8_dtype(code) ||
+      is_packed_q8_0_vector_dtype(code) ||
+      is_packed_q4_vector_dtype(code) ||
       is_packed_q6_vector_dtype(code) ||
       is_prepared_q6_vector_q8_rhs_dtype(code) ||
       is_argmax_prepared_q6_vector_q8_rhs_dtype(code);
@@ -973,10 +1172,19 @@ inline size_t dtype_size_bytes(const uint8_t code) noexcept {
   if (code == dtype_q3_k) {
     return sizeof(quant::block_q3_k) / quant::QK_K;
   }
+  if (code == dtype_q4_k) {
+    return sizeof(quant::block_q4_k) / quant::QK_K;
+  }
   if (code == dtype_q6_k) {
     return sizeof(quant::block_q6_k) / quant::QK_K;
   }
   if (code == dtype_q8_k) {
+    return sizeof(quant::block_q8_k) / quant::QK_K;
+  }
+  if (code == dtype_q8_k_x4) {
+    return sizeof(quant::block_q8_k) / quant::QK_K;
+  }
+  if (code == dtype_q8_k_x8) {
     return sizeof(quant::block_q8_k) / quant::QK_K;
   }
   return 0u;
@@ -1000,11 +1208,23 @@ inline size_t quantized_row_storage_bytes(const uint8_t code, const uint64_t col
   if (code == dtype_q3_k) {
     return static_cast<size_t>(block_count) * sizeof(quant::block_q3_k);
   }
+  if (code == dtype_q4_k) {
+    return static_cast<size_t>(block_count) * sizeof(quant::block_q4_k);
+  }
   if (code == dtype_q6_k) {
     return static_cast<size_t>(block_count) * sizeof(quant::block_q6_k);
   }
   if (code == dtype_q8_k) {
     return static_cast<size_t>(block_count) * sizeof(quant::block_q8_k);
+  }
+  if (code == dtype_q8_k_x4) {
+    return static_cast<size_t>(block_count) * sizeof(quant::block_q8_k);
+  }
+  if (code == dtype_q8_k_x8) {
+    return static_cast<size_t>(block_count) * sizeof(quant::block_q8_k);
+  }
+  if (code == dtype_q4_k_x8_bl4 || code == dtype_q4_k_x8_bl8) {
+    return quant::packed_q4_k_x8_group_storage_bytes(cols);
   }
   if (code == dtype_q6_k_x8_q8_prepared) {
     return quant::prepared_q6_k_x8_q8_group_storage_bytes(cols);
@@ -1116,6 +1336,22 @@ inline bool has_required_src0(const request_type & request) noexcept {
       const uint64_t rows = request.src0.ne[1];
       const uint64_t group_count = quant::packed_q8_0_x4_group_count(rows);
       const size_t group_bytes = quant::packed_q8_0_x4_group_storage_bytes(cols);
+      return request.src0.data != nullptr &&
+             cols != 0u &&
+             rows != 0u &&
+             group_bytes != 0u &&
+             request.src0.ne[2] == 1u &&
+             request.src0.ne[3] == 1u &&
+             request.src0.nb[0] == 1u &&
+             request.src0.nb[1] == group_bytes &&
+             request.src0.nb[2] == group_bytes * group_count &&
+             request.src0.nb[3] == request.src0.nb[2];
+    }
+    if (is_packed_q4_vector_dtype(src0_type)) {
+      const uint64_t cols = request.src0.ne[0];
+      const uint64_t rows = request.src0.ne[1];
+      const uint64_t group_count = quant::packed_q4_k_x8_group_count(rows);
+      const size_t group_bytes = quant::packed_q4_k_x8_group_storage_bytes(cols);
       return request.src0.data != nullptr &&
              cols != 0u &&
              rows != 0u &&
@@ -2014,6 +2250,105 @@ inline float dot_q3_k_q8_k_row_scalar(const quant::block_q3_k * lhs,
   return sumf;
 }
 
+inline float dot_q4_k_q8_k_block_scalar(const quant::block_q4_k & lhs,
+                                        const quant::block_q8_k & rhs) noexcept {
+  constexpr uint32_t kmask1 = 0x3f3f3f3fu;
+  constexpr uint32_t kmask2 = 0x0f0f0f0fu;
+  constexpr uint32_t kmask3 = 0x03030303u;
+
+  alignas(64) int8_t aux8[quant::QK_K] = {};
+  int16_t aux16[8] = {};
+  int32_t aux32[8] = {};
+  uint32_t auxs[4] = {};
+
+  const uint8_t * scales = reinterpret_cast<const uint8_t *>(auxs);
+  const uint8_t * mins = reinterpret_cast<const uint8_t *>(auxs + 2);
+
+  const uint8_t * q4 = lhs.qs.data();
+  const int8_t * q8 = rhs.qs.data();
+  int8_t * a = aux8;
+  for (uint64_t block = 0; block < (quant::QK_K / 64u); ++block) {
+    for (uint64_t lane = 0; lane < 32u; ++lane) {
+      a[lane] = static_cast<int8_t>(q4[lane] & 0x0fu);
+    }
+    a += 32;
+    for (uint64_t lane = 0; lane < 32u; ++lane) {
+      a[lane] = static_cast<int8_t>(q4[lane] >> 4u);
+    }
+    a += 32;
+    q4 += 32;
+  }
+
+  std::memcpy(auxs, lhs.scales.data(), lhs.scales.size());
+  auxs[3] = ((auxs[2] >> 4u) & kmask2) | (((auxs[1] >> 6u) & kmask3) << 4u);
+  const uint32_t aux = auxs[1] & kmask1;
+  auxs[1] = (auxs[2] & kmask2) | (((auxs[0] >> 6u) & kmask3) << 4u);
+  auxs[2] = aux;
+  auxs[0] &= kmask1;
+
+  int32_t min_sum = 0;
+  for (uint64_t group = 0; group < (quant::QK_K / 16u); ++group) {
+    min_sum += static_cast<int32_t>(rhs.bsums[group]) * static_cast<int32_t>(mins[group / 2u]);
+  }
+
+  std::memset(aux32, 0, sizeof(aux32));
+  a = aux8;
+  int scale_index = 0;
+  for (uint64_t group = 0; group < (quant::QK_K / 32u); ++group) {
+    const int32_t scale = scales[scale_index++];
+    for (uint64_t lane = 0; lane < 8u; ++lane) {
+      aux16[lane] = static_cast<int16_t>(q8[lane] * a[lane]);
+    }
+    for (uint64_t lane = 0; lane < 8u; ++lane) {
+      aux32[lane] += scale * static_cast<int32_t>(aux16[lane]);
+    }
+    q8 += 8;
+    a += 8;
+    for (uint64_t lane = 0; lane < 8u; ++lane) {
+      aux16[lane] = static_cast<int16_t>(q8[lane] * a[lane]);
+    }
+    for (uint64_t lane = 0; lane < 8u; ++lane) {
+      aux32[lane] += scale * static_cast<int32_t>(aux16[lane]);
+    }
+    q8 += 8;
+    a += 8;
+    for (uint64_t lane = 0; lane < 8u; ++lane) {
+      aux16[lane] = static_cast<int16_t>(q8[lane] * a[lane]);
+    }
+    for (uint64_t lane = 0; lane < 8u; ++lane) {
+      aux32[lane] += scale * static_cast<int32_t>(aux16[lane]);
+    }
+    q8 += 8;
+    a += 8;
+    for (uint64_t lane = 0; lane < 8u; ++lane) {
+      aux16[lane] = static_cast<int16_t>(q8[lane] * a[lane]);
+    }
+    for (uint64_t lane = 0; lane < 8u; ++lane) {
+      aux32[lane] += scale * static_cast<int32_t>(aux16[lane]);
+    }
+    q8 += 8;
+    a += 8;
+  }
+
+  const float d = quant::fp16_to_fp32(lhs.d) * rhs.d;
+  const float dmin = quant::fp16_to_fp32(lhs.dmin) * rhs.d;
+  float sum = -dmin * static_cast<float>(min_sum);
+  for (int32_t lane : aux32) {
+    sum += d * static_cast<float>(lane);
+  }
+  return sum;
+}
+
+inline float dot_q4_k_q8_k_row_scalar(const quant::block_q4_k * lhs,
+                                      const quant::block_q8_k * rhs,
+                                      const uint64_t block_count) noexcept {
+  float sum = 0.0f;
+  for (uint64_t block = 0; block < block_count; ++block) {
+    sum += dot_q4_k_q8_k_block_scalar(lhs[block], rhs[block]);
+  }
+  return sum;
+}
+
 inline float dot_q6_k_q8_k_block_scalar(const quant::block_q6_k & lhs,
                                         const quant::block_q8_k & rhs) noexcept {
   alignas(64) int8_t dequant[quant::QK_K] = {};
@@ -2267,6 +2602,9 @@ inline bool run_mul_mat(const request_type & request) noexcept {
         } else if (src0_type == dtype_q3_k) {
           c_dense[i * n + j] = dot_q3_k_q8_k_row_scalar(
               reinterpret_cast<const quant::block_q3_k *>(row_ptr), q8_blocks.data(), block_count);
+        } else if (src0_type == dtype_q4_k) {
+          c_dense[i * n + j] = dot_q4_k_q8_k_row_scalar(
+              reinterpret_cast<const quant::block_q4_k *>(row_ptr), q8_blocks.data(), block_count);
         } else {
           c_dense[i * n + j] = dot_q6_k_q8_k_row_scalar(
               reinterpret_cast<const quant::block_q6_k *>(row_ptr), q8_blocks.data(), block_count);
@@ -2428,6 +2766,9 @@ inline bool run_mul_mat_argmax(const request_type & request) noexcept {
       } else if (src0_type == dtype_q3_k) {
         value = dot_q3_k_q8_k_row_scalar(
             reinterpret_cast<const quant::block_q3_k *>(row_ptr), q8_blocks.data(), block_count);
+      } else if (src0_type == dtype_q4_k) {
+        value = dot_q4_k_q8_k_row_scalar(
+            reinterpret_cast<const quant::block_q4_k *>(row_ptr), q8_blocks.data(), block_count);
       } else {
         value = dot_q6_k_q8_k_row_scalar(
             reinterpret_cast<const quant::block_q6_k *>(row_ptr), q8_blocks.data(), block_count);

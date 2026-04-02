@@ -19,6 +19,7 @@ struct tensor_view {
 
 struct block_view {
   int32_t index = -1;
+  bool uses_attention = true;
   tensor_view attention_norm = {};
   tensor_view attention_q = {};
   tensor_view attention_k = {};
@@ -26,6 +27,9 @@ struct block_view {
   tensor_view attention_q_norm = {};
   tensor_view attention_k_norm = {};
   tensor_view attention_output = {};
+  tensor_view shortconv_conv = {};
+  tensor_view shortconv_in_proj = {};
+  tensor_view shortconv_out_proj = {};
   tensor_view feed_forward_norm = {};
   tensor_view feed_forward_gate = {};
   tensor_view feed_forward_down = {};

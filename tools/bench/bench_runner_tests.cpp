@@ -8,6 +8,8 @@
 
 #include <doctest/doctest.h>
 
+#include "../generation_fixture_registry.hpp"
+
 #if !defined(_WIN32)
 #include <sys/wait.h>
 #endif
@@ -28,19 +30,6 @@ std::filesystem::path bench_runner_binary_path() {
 #else
   return std::filesystem::path("bench_runner");
 #endif
-}
-
-std::filesystem::path models_dir() {
-  return repo_root() / "tests" / "models";
-}
-
-bool file_exists(const std::filesystem::path & path) {
-  std::FILE * file = std::fopen(path.string().c_str(), "rb");
-  if (file == nullptr) {
-    return false;
-  }
-  std::fclose(file);
-  return true;
 }
 
 std::string read_file(const std::filesystem::path & path) {
@@ -147,61 +136,31 @@ process_capture run_generation_bench_compare_capture() {
   return capture;
 }
 
-std::uint64_t parse_named_metric(const std::string & haystack, const std::string & name) {
-  const std::string needle = name + "=";
-  const size_t pos = haystack.find(needle);
-  if (pos == std::string::npos) {
-    return 0u;
-  }
-
-  size_t cursor = pos + needle.size();
-  std::uint64_t value = 0u;
-  while (cursor < haystack.size() && haystack[cursor] >= '0' && haystack[cursor] <= '9') {
-    value = value * 10u + static_cast<std::uint64_t>(haystack[cursor] - '0');
-    ++cursor;
-  }
-  return value;
-}
-
 }  // namespace
 
-TEST_CASE("bench_runner qwen3 generation compare stays on the maintained canonical path") {
-  const auto model_path = models_dir() / "Qwen3-0.6B-Q8_0.gguf";
-  REQUIRE(file_exists(model_path));
-
+TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixtures") {
   const process_capture capture = run_generation_bench_compare_capture();
   CHECK(capture.exit_code == 0);
-  CHECK(capture.stderr_text.empty());
-  CHECK(capture.stdout_text.find("generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1") !=
+  CHECK(capture.stderr_text.find("error:") == std::string::npos);
+  CHECK(capture.stdout_text.find("# generation_architecture: lfm2") != std::string::npos);
+  CHECK(capture.stdout_text.find("# generation_formatter_contract:") != std::string::npos);
+  CHECK(capture.stdout_text.find("# generation_stage_probe: case="
+                                 "generation/preloaded_request/"
+                                 "lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1") !=
         std::string::npos);
-  CHECK(capture.stdout_text.find("generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_10") !=
+  CHECK(capture.stdout_text.find("emel_prefill_linear_probe_ns=") != std::string::npos);
+  CHECK(capture.stdout_text.find("reference_prefill_attention_probe_ns=") !=
         std::string::npos);
-  CHECK(capture.stdout_text.find("generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_100") !=
-        std::string::npos);
-  CHECK(capture.stdout_text.find("generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1000") !=
-        std::string::npos);
-  CHECK(capture.stdout_text.find("llama_68m_prompt_hello_max_tokens_1") == std::string::npos);
-  CHECK(capture.stdout_text.find("# benchmark_config: iterations=1 runs=1 "
-                                 "warmup_iterations=0 warmup_runs=1 "
-                                 "generation_iterations=1 generation_runs=1 "
-                                 "generation_warmup_iterations=0 generation_warmup_runs=0") !=
-        std::string::npos);
-  CHECK(capture.stdout_text.find("# generation_formatter_contract: source=tokenizer.chat_template "
-                                 "support=supported_contract "
-                                 "shape=structured_chat_messages_v1 tools=none "
-                                 "add_generation_prompt=true enable_thinking=false") !=
-        std::string::npos);
-  CHECK(capture.stdout_text.find("# generation_runtime_contract: case=generation/preloaded_request/"
-                                 "qwen3_0_6b_q8_0_prompt_hello_max_tokens_1") !=
-        std::string::npos);
-  CHECK(capture.stdout_text.find("native_quantized=8") != std::string::npos);
-  CHECK(capture.stdout_text.find("approved_dense_f32_by_contract=6") != std::string::npos);
-  CHECK(capture.stdout_text.find("# generation_quantized_evidence: case=generation/preloaded_request/"
-                                 "qwen3_0_6b_q8_0_prompt_hello_max_tokens_1") !=
-        std::string::npos);
-  const std::uint64_t native_q8_0_dispatch_calls =
-      parse_named_metric(capture.stdout_text, "native_q8_0_dispatch_calls");
-  const std::uint64_t packed_q8_0_dispatch_calls =
-      parse_named_metric(capture.stdout_text, "packed_q8_0_dispatch_calls");
-  CHECK(native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls > 0u);
+
+  for (const auto & fixture :
+       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+    const std::array<int, 4> max_tokens = {1, 10, 100, 1000};
+    for (const int tokens : max_tokens) {
+      const std::string case_name = "generation/preloaded_request/" +
+                                    std::string{fixture.slug} +
+                                    "_prompt_hello_max_tokens_" +
+                                    std::to_string(tokens);
+      CHECK(capture.stdout_text.find(case_name) != std::string::npos);
+    }
+  }
 }

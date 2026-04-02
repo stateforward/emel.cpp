@@ -46,11 +46,38 @@ struct benchmark_row {
   std::string ratio;
 };
 
+struct benchmark_generation_stage_probe {
+  std::string name;
+  std::string emel_prefill_contract;
+  std::string emel_prompt_tokens;
+  std::string emel_prefill_step_size;
+  std::string emel_total_ns;
+  std::string emel_conditioning_ns;
+  std::string emel_prefill_ns;
+  std::string emel_first_decode_ns;
+  std::string emel_steady_decode_ns;
+  std::string emel_unattributed_ns;
+  std::string emel_prefill_linear_probe_ns;
+  std::string emel_prefill_attention_probe_ns;
+  std::string emel_prefill_misc_probe_ns;
+  std::string reference_total_ns;
+  std::string reference_conditioning_ns;
+  std::string reference_prefill_ns;
+  std::string reference_first_decode_ns;
+  std::string reference_steady_decode_ns;
+  std::string reference_unattributed_ns;
+  std::string reference_prefill_linear_probe_ns;
+  std::string reference_prefill_attention_probe_ns;
+  std::string reference_prefill_misc_probe_ns;
+};
+
 struct benchmark_snapshot {
   std::vector<benchmark_row> rows;
+  std::vector<benchmark_generation_stage_probe> generation_stage_probes;
   std::string reference_source;
   std::string reference_ref;
   std::string benchmark_config;
+  std::string architecture_contract;
   std::string formatter_contract;
   std::string flash_case;
   std::string flash_dispatch_calls;
@@ -72,6 +99,8 @@ struct benchmark_snapshot {
   std::string shared_q2_dispatch_calls;
   std::string optimized_q3_dispatch_calls;
   std::string shared_q3_dispatch_calls;
+  std::string optimized_q4_dispatch_calls;
+  std::string shared_q4_dispatch_calls;
   std::string optimized_q6_dispatch_calls;
   std::string shared_q6_dispatch_calls;
 };
@@ -515,6 +544,7 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
   const std::regex line_re(
       R"(^([^ ]+) emel\.cpp ([0-9.]+) ns/op, llama\.cpp ([0-9.]+) ns/op, ratio=([0-9.]+)x$)");
   constexpr std::string_view k_benchmark_config_prefix = "# benchmark_config: ";
+  constexpr std::string_view k_generation_architecture_prefix = "# generation_architecture: ";
   constexpr std::string_view k_generation_formatter_contract_prefix =
       "# generation_formatter_contract: ";
 
@@ -523,6 +553,10 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
     std::smatch match;
     if (line.rfind(k_benchmark_config_prefix.data(), 0u) == 0u) {
       parsed.benchmark_config = line.substr(k_benchmark_config_prefix.size());
+      continue;
+    }
+    if (line.rfind(k_generation_architecture_prefix.data(), 0u) == 0u) {
+      parsed.architecture_contract = line.substr(k_generation_architecture_prefix.size());
       continue;
     }
     if (line.rfind(k_generation_formatter_contract_prefix.data(), 0u) == 0u) {
@@ -605,6 +639,14 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
           metadata->contains("shared_q3_dispatch_calls")
               ? metadata->at("shared_q3_dispatch_calls")
               : "0";
+      parsed.optimized_q4_dispatch_calls =
+          metadata->contains("optimized_q4_dispatch_calls")
+              ? metadata->at("optimized_q4_dispatch_calls")
+              : "0";
+      parsed.shared_q4_dispatch_calls =
+          metadata->contains("shared_q4_dispatch_calls")
+              ? metadata->at("shared_q4_dispatch_calls")
+              : "0";
       parsed.optimized_q6_dispatch_calls =
           metadata->contains("optimized_q6_dispatch_calls")
               ? metadata->at("optimized_q6_dispatch_calls")
@@ -635,6 +677,63 @@ std::optional<benchmark_snapshot> parse_benchmarks_snapshot(const doc_paths & pa
       parsed.approved_dense_f32_stage_count = metadata->at("approved_dense_f32_by_contract");
       parsed.disallowed_fallback_stage_count = metadata->at("disallowed_fallback");
       parsed.explicit_no_claim_stage_count = metadata->at("explicit_no_claim");
+      continue;
+    }
+    if (const auto metadata = parse_inline_key_value_fields(line, "# generation_stage_probe: ");
+        metadata.has_value()) {
+      for (const char * field : {"case",
+                                 "emel_prefill_contract",
+                                 "emel_prompt_tokens",
+                                 "emel_prefill_step_size",
+                                 "emel_total_ns",
+                                 "emel_conditioning_ns",
+                                 "emel_prefill_ns",
+                                 "emel_first_decode_ns",
+                                 "emel_steady_decode_ns",
+                                 "emel_unattributed_ns",
+                                 "emel_prefill_linear_probe_ns",
+                                 "emel_prefill_attention_probe_ns",
+                                 "emel_prefill_misc_probe_ns",
+                                 "reference_total_ns",
+                                 "reference_conditioning_ns",
+                                 "reference_prefill_ns",
+                                 "reference_first_decode_ns",
+                                 "reference_steady_decode_ns",
+                                 "reference_unattributed_ns",
+                                 "reference_prefill_linear_probe_ns",
+                                 "reference_prefill_attention_probe_ns",
+                                 "reference_prefill_misc_probe_ns"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # generation_stage_probe metadata in %s\n",
+                       paths.benchmarks_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.generation_stage_probes.push_back(benchmark_generation_stage_probe{
+          .name = metadata->at("case"),
+          .emel_prefill_contract = metadata->at("emel_prefill_contract"),
+          .emel_prompt_tokens = metadata->at("emel_prompt_tokens"),
+          .emel_prefill_step_size = metadata->at("emel_prefill_step_size"),
+          .emel_total_ns = metadata->at("emel_total_ns"),
+          .emel_conditioning_ns = metadata->at("emel_conditioning_ns"),
+          .emel_prefill_ns = metadata->at("emel_prefill_ns"),
+          .emel_first_decode_ns = metadata->at("emel_first_decode_ns"),
+          .emel_steady_decode_ns = metadata->at("emel_steady_decode_ns"),
+          .emel_unattributed_ns = metadata->at("emel_unattributed_ns"),
+          .emel_prefill_linear_probe_ns = metadata->at("emel_prefill_linear_probe_ns"),
+          .emel_prefill_attention_probe_ns = metadata->at("emel_prefill_attention_probe_ns"),
+          .emel_prefill_misc_probe_ns = metadata->at("emel_prefill_misc_probe_ns"),
+          .reference_total_ns = metadata->at("reference_total_ns"),
+          .reference_conditioning_ns = metadata->at("reference_conditioning_ns"),
+          .reference_prefill_ns = metadata->at("reference_prefill_ns"),
+          .reference_first_decode_ns = metadata->at("reference_first_decode_ns"),
+          .reference_steady_decode_ns = metadata->at("reference_steady_decode_ns"),
+          .reference_unattributed_ns = metadata->at("reference_unattributed_ns"),
+          .reference_prefill_linear_probe_ns = metadata->at("reference_prefill_linear_probe_ns"),
+          .reference_prefill_attention_probe_ns = metadata->at("reference_prefill_attention_probe_ns"),
+          .reference_prefill_misc_probe_ns = metadata->at("reference_prefill_misc_probe_ns"),
+      });
       continue;
     }
     if (line.empty() || line[0] == '#') {
@@ -760,6 +859,11 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += " ref=";
   section += snapshot.reference_ref;
   section += "`\n";
+  if (!snapshot.architecture_contract.empty()) {
+    section += "- `generation_architecture: ";
+    section += snapshot.architecture_contract;
+    section += "`\n";
+  }
   section += "- `generation_formatter_contract: ";
   section += snapshot.formatter_contract;
   section += "`\n";
@@ -789,6 +893,9 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += " ns/op, ratio=";
   section += current->ratio;
   section += "x`\n\n";
+  section += "- The compare table below keeps additive generation rows for all maintained "
+             "supported fixtures; this evidence block stays tied to the current maintained "
+             "publication case.\n\n";
   section += "## Current Quantized Evidence\n\n";
   section += "- Source snapshot: `snapshots/bench/benchmarks_compare.txt`\n";
   section += "- `generation_runtime_contract: case=";
@@ -816,15 +923,75 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   section += snapshot.optimized_q3_dispatch_calls;
   section += " shared_q3_dispatch_calls=";
   section += snapshot.shared_q3_dispatch_calls;
+  section += " optimized_q4_dispatch_calls=";
+  section += snapshot.optimized_q4_dispatch_calls;
+  section += " shared_q4_dispatch_calls=";
+  section += snapshot.shared_q4_dispatch_calls;
   section += " optimized_q6_dispatch_calls=";
   section += snapshot.optimized_q6_dispatch_calls;
   section += " shared_q6_dispatch_calls=";
   section += snapshot.shared_q6_dispatch_calls;
   section += "`\n\n";
-  section += "- Contract summary: the maintained canonical Qwen3 workload stayed on the approved "
-             "runtime contract with native q8_0 projection and output dispatch, explicit "
-             "dense-f32-by-contract token embedding and per-head Q/K RMS norm vectors, and no "
-             "disallowed fallback or explicit no-claim branch on the supported path.\n\n";
+  section += "- Contract summary: the maintained canonical ";
+  section += snapshot.architecture_contract == "lfm2" ? "Liquid" : "generation";
+  section += " workload stayed on the approved runtime contract with explicit "
+             "dense-f32-by-contract stages, native quantized dispatch on the maintained path, "
+             "and no disallowed fallback or explicit no-claim branch on the supported path.\n\n";
+
+  if (!snapshot.generation_stage_probes.empty()) {
+    section += "## Generation Stage Probes\n\n";
+    section += "- These are single-run benchmark-local probes. Full-request totals are exact, "
+               "and the emitted EMEL prompt metadata records the resolved prefill contract, "
+               "prompt-token count, and planner step size used to interpret the split.\n";
+    for (const auto & probe : snapshot.generation_stage_probes) {
+      section += "- `generation_stage_probe: case=";
+      section += probe.name;
+      section += " emel_prefill_contract=";
+      section += probe.emel_prefill_contract;
+      section += " emel_prompt_tokens=";
+      section += probe.emel_prompt_tokens;
+      section += " emel_prefill_step_size=";
+      section += probe.emel_prefill_step_size;
+      section += " emel_total_ns=";
+      section += probe.emel_total_ns;
+      section += " emel_conditioning_ns=";
+      section += probe.emel_conditioning_ns;
+      section += " emel_prefill_ns=";
+      section += probe.emel_prefill_ns;
+    section += " emel_first_decode_ns=";
+    section += probe.emel_first_decode_ns;
+    section += " emel_steady_decode_ns=";
+    section += probe.emel_steady_decode_ns;
+    section += " emel_unattributed_ns=";
+    section += probe.emel_unattributed_ns;
+    section += " emel_prefill_linear_probe_ns=";
+    section += probe.emel_prefill_linear_probe_ns;
+    section += " emel_prefill_attention_probe_ns=";
+    section += probe.emel_prefill_attention_probe_ns;
+    section += " emel_prefill_misc_probe_ns=";
+    section += probe.emel_prefill_misc_probe_ns;
+    section += " reference_total_ns=";
+    section += probe.reference_total_ns;
+    section += " reference_conditioning_ns=";
+    section += probe.reference_conditioning_ns;
+    section += " reference_prefill_ns=";
+      section += probe.reference_prefill_ns;
+    section += " reference_first_decode_ns=";
+    section += probe.reference_first_decode_ns;
+    section += " reference_steady_decode_ns=";
+    section += probe.reference_steady_decode_ns;
+    section += " reference_unattributed_ns=";
+    section += probe.reference_unattributed_ns;
+    section += " reference_prefill_linear_probe_ns=";
+    section += probe.reference_prefill_linear_probe_ns;
+    section += " reference_prefill_attention_probe_ns=";
+    section += probe.reference_prefill_attention_probe_ns;
+    section += " reference_prefill_misc_probe_ns=";
+    section += probe.reference_prefill_misc_probe_ns;
+    section += "`\n";
+  }
+    section += "\n";
+  }
 
   if (!fs::exists(paths.generation_pre_arm_flash_optimized_baseline)) {
     return section;
@@ -877,8 +1044,8 @@ std::optional<std::string> build_flash_publication_section(const doc_paths & pat
   const benchmark_row * current_baseline_case = find_benchmark_row(snapshot, baseline_case);
   if (current_baseline_case == nullptr) {
     section += "- Note: this preserved ARM flash baseline remains tied to the archived Llama "
-               "canonical slice and is not directly compared against the current canonical "
-               "Qwen3 publication because the benchmark case identity changed explicitly.\n";
+               "canonical slice and is not directly compared against the current maintained "
+               "publication because the benchmark case identity changed explicitly.\n";
     return section;
   }
 

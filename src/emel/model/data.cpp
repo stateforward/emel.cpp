@@ -14,12 +14,25 @@ namespace {
 
 constexpr std::string_view k_llama_architecture = "llama";
 constexpr std::string_view k_qwen3_architecture = "qwen3";
+constexpr std::string_view k_lfm2_architecture = "lfm2";
 constexpr std::string_view k_token_embedding_name = "token_embd.weight";
 constexpr std::string_view k_output_norm_name = "output_norm.weight";
+constexpr std::string_view k_lfm2_output_norm_name = "token_embd_norm.weight";
 constexpr std::string_view k_output_name = "output.weight";
 constexpr uint32_t k_qwen3_extra_block_tensor_count = 2u;
+constexpr uint32_t k_lfm2_attention_block_tensor_count = 11u;
+constexpr uint32_t k_lfm2_conv_block_tensor_count = 8u;
+constexpr int32_t k_lfm2_block_count = 16;
+constexpr int32_t k_lfm2_context_length = 128000;
+constexpr int32_t k_lfm2_embedding_length = 2048;
+constexpr int32_t k_lfm2_head_count = 32;
+constexpr int32_t k_lfm2_head_count_kv = 8;
+constexpr int32_t k_lfm2_vocab_size = 65536;
+constexpr int32_t k_lfm2_shortconv_l_cache = 3;
+constexpr float k_lfm2_rope_freq_base = 1000000.0f;
+constexpr std::array<int32_t, 6> k_lfm2_attention_layers = {2, 5, 8, 10, 12, 14};
 
-bool is_supported_execution_architecture(const std::string_view architecture) noexcept {
+bool is_execution_architecture_supported(const std::string_view architecture) noexcept {
   return architecture == k_llama_architecture || architecture == k_qwen3_architecture;
 }
 
@@ -27,7 +40,28 @@ bool uses_qwen3_block_contract(const std::string_view architecture) noexcept {
   return architecture == k_qwen3_architecture;
 }
 
+bool uses_lfm2_block_contract(const std::string_view architecture) noexcept {
+  return architecture == k_lfm2_architecture;
+}
+
+bool uses_tied_output_contract(const std::string_view architecture) noexcept {
+  return architecture == k_qwen3_architecture || architecture == k_lfm2_architecture;
+}
+
+bool is_lfm2_attention_layer(const int32_t block_index) noexcept {
+  for (const int32_t candidate : k_lfm2_attention_layers) {
+    if (candidate == block_index) {
+      return true;
+    }
+  }
+  return false;
+}
+
 uint32_t block_tensor_count_for_architecture(const std::string_view architecture) noexcept {
+  if (uses_lfm2_block_contract(architecture)) {
+    return 0u;
+  }
+
   return uses_qwen3_block_contract(architecture)
              ? llama::detail::k_block_tensor_count + k_qwen3_extra_block_tensor_count
              : llama::detail::k_block_tensor_count;
@@ -79,12 +113,23 @@ bool assign_output_view(const data & model_data,
     return true;
   }
 
-  if (!uses_qwen3_block_contract(architecture) || token_embedding.tensor == nullptr) {
+  if (!uses_tied_output_contract(architecture) || token_embedding.tensor == nullptr) {
     return false;
   }
 
   output_out = token_embedding;
   return true;
+}
+
+bool assign_output_norm_view(const data & model_data,
+                             const std::string_view architecture,
+                             llama::detail::tensor_view & output_norm_out) noexcept {
+  if (assign_tensor_view(model_data, k_output_norm_name, output_norm_out)) {
+    return true;
+  }
+
+  return uses_lfm2_block_contract(architecture) &&
+         assign_tensor_view(model_data, k_lfm2_output_norm_name, output_norm_out);
 }
 
 bool make_block_tensor_name(const int32_t block_index,
@@ -147,29 +192,47 @@ bool is_qwen3_only_stage(const llama::detail::quantized_stage_family family) noe
          family == llama::detail::quantized_stage_family::attention_k_norm;
 }
 
-llama::detail::quantized_contract_kind classify_contract(
+bool is_lfm2_attention_only_stage(const llama::detail::quantized_stage_family family) noexcept {
+  switch (family) {
+    case llama::detail::quantized_stage_family::attention_q:
+    case llama::detail::quantized_stage_family::attention_k:
+    case llama::detail::quantized_stage_family::attention_v:
+    case llama::detail::quantized_stage_family::attention_q_norm:
+    case llama::detail::quantized_stage_family::attention_k_norm:
+    case llama::detail::quantized_stage_family::attention_output:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool stage_applies_to_block(const llama::detail::block_view & block,
+                            const llama::detail::quantized_stage_family family) noexcept {
+  return !is_lfm2_attention_only_stage(family) || block.uses_attention;
+}
+
+llama::detail::quantized_contract_kind classify_stage_contract(
     const llama::detail::quantized_stage_family family,
-    const int32_t tensor_type,
-    const bool consistent_across_layers) noexcept {
-  if (!consistent_across_layers) {
-    return llama::detail::quantized_contract_kind::explicit_no_claim;
+    const bool saw_applicable_tensor,
+    const bool all_supported_quantized,
+    const bool all_vector_approved,
+    const bool any_f32) noexcept {
+  if (!saw_applicable_tensor) {
+    return llama::detail::quantized_contract_kind::not_applicable;
   }
 
   if (is_vector_dequant_stage(family)) {
-    return is_f32_type(tensor_type)
+    return all_vector_approved
                ? llama::detail::quantized_contract_kind::approved_dense_f32_by_contract
-               : is_supported_quantized_type(tensor_type)
-                     ? llama::detail::quantized_contract_kind::approved_dense_f32_by_contract
-                     : llama::detail::quantized_contract_kind::explicit_no_claim;
+               : llama::detail::quantized_contract_kind::explicit_no_claim;
   }
 
-  if (is_supported_quantized_type(tensor_type)) {
+  if (all_supported_quantized) {
     return llama::detail::quantized_contract_kind::native_quantized;
   }
 
-  return is_f32_type(tensor_type)
-             ? llama::detail::quantized_contract_kind::disallowed_fallback
-               : llama::detail::quantized_contract_kind::explicit_no_claim;
+  return any_f32 ? llama::detail::quantized_contract_kind::disallowed_fallback
+                 : llama::detail::quantized_contract_kind::explicit_no_claim;
 }
 
 const data::tensor_record * stage_tensor(const llama::detail::execution_view & execution,
@@ -185,17 +248,17 @@ const data::tensor_record * stage_tensor(const llama::detail::execution_view & e
     case llama::detail::quantized_stage_family::attention_norm:
       return block != nullptr ? block->attention_norm.tensor : nullptr;
     case llama::detail::quantized_stage_family::attention_q:
-      return block != nullptr ? block->attention_q.tensor : nullptr;
+      return block != nullptr && block->uses_attention ? block->attention_q.tensor : nullptr;
     case llama::detail::quantized_stage_family::attention_k:
-      return block != nullptr ? block->attention_k.tensor : nullptr;
+      return block != nullptr && block->uses_attention ? block->attention_k.tensor : nullptr;
     case llama::detail::quantized_stage_family::attention_v:
-      return block != nullptr ? block->attention_v.tensor : nullptr;
+      return block != nullptr && block->uses_attention ? block->attention_v.tensor : nullptr;
     case llama::detail::quantized_stage_family::attention_q_norm:
-      return block != nullptr ? block->attention_q_norm.tensor : nullptr;
+      return block != nullptr && block->uses_attention ? block->attention_q_norm.tensor : nullptr;
     case llama::detail::quantized_stage_family::attention_k_norm:
-      return block != nullptr ? block->attention_k_norm.tensor : nullptr;
+      return block != nullptr && block->uses_attention ? block->attention_k_norm.tensor : nullptr;
     case llama::detail::quantized_stage_family::attention_output:
-      return block != nullptr ? block->attention_output.tensor : nullptr;
+      return block != nullptr && block->uses_attention ? block->attention_output.tensor : nullptr;
     case llama::detail::quantized_stage_family::feed_forward_norm:
       return block != nullptr ? block->feed_forward_norm.tensor : nullptr;
     case llama::detail::quantized_stage_family::feed_forward_gate:
@@ -206,6 +269,92 @@ const data::tensor_record * stage_tensor(const llama::detail::execution_view & e
       return block != nullptr ? block->feed_forward_up.tensor : nullptr;
   }
   return nullptr;
+}
+
+bool has_tensor_named(const data & model_data, const std::string_view name) noexcept {
+  return find_tensor_by_name(model_data, name) != nullptr;
+}
+
+bool append_block_tensor_name(const int32_t block_index,
+                              const std::string_view suffix,
+                              std::array<char, 64> & buffer,
+                              std::string_view & name_out) noexcept {
+  return make_block_tensor_name(block_index, suffix, buffer, name_out);
+}
+
+bool require_block_tensor(const data & model_data,
+                          const int32_t block_index,
+                          const std::string_view suffix) noexcept {
+  std::array<char, 64> buffer = {};
+  std::string_view name = {};
+  return append_block_tensor_name(block_index, suffix, buffer, name) &&
+         has_tensor_named(model_data, name);
+}
+
+bool reject_block_tensor(const data & model_data,
+                         const int32_t block_index,
+                         const std::string_view suffix) noexcept {
+  std::array<char, 64> buffer = {};
+  std::string_view name = {};
+  return !append_block_tensor_name(block_index, suffix, buffer, name) ||
+         !has_tensor_named(model_data, name);
+}
+
+emel::error::type validate_lfm2_execution_contract_impl(const data & model_data) noexcept {
+  const bool metadata_ok =
+      model_data.n_layers == k_lfm2_block_count &&
+      model_data.params.n_layer == k_lfm2_block_count &&
+      model_data.params.n_ctx == k_lfm2_context_length &&
+      model_data.params.n_embd == k_lfm2_embedding_length &&
+      model_data.params.n_head == k_lfm2_head_count &&
+      model_data.params.n_head_kv == k_lfm2_head_count_kv &&
+      model_data.params.n_vocab == k_lfm2_vocab_size &&
+      model_data.params.shortconv_l_cache == k_lfm2_shortconv_l_cache &&
+      model_data.params.rope_freq_base == k_lfm2_rope_freq_base;
+  if (!metadata_ok ||
+      !has_tensor_named(model_data, k_token_embedding_name) ||
+      !has_tensor_named(model_data, k_lfm2_output_norm_name)) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  for (int32_t block_index = 0; block_index < k_lfm2_block_count; ++block_index) {
+    const bool common_ok =
+        require_block_tensor(model_data, block_index, "attn_norm.weight") &&
+        require_block_tensor(model_data, block_index, "ffn_norm.weight") &&
+        require_block_tensor(model_data, block_index, "ffn_gate.weight") &&
+        require_block_tensor(model_data, block_index, "ffn_down.weight") &&
+        require_block_tensor(model_data, block_index, "ffn_up.weight");
+    if (!common_ok) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+
+    const bool attention_layer = is_lfm2_attention_layer(block_index);
+    const bool hybrid_ok =
+        attention_layer
+            ? require_block_tensor(model_data, block_index, "attn_q.weight") &&
+                  require_block_tensor(model_data, block_index, "attn_k.weight") &&
+                  require_block_tensor(model_data, block_index, "attn_v.weight") &&
+                  require_block_tensor(model_data, block_index, "attn_q_norm.weight") &&
+                  require_block_tensor(model_data, block_index, "attn_k_norm.weight") &&
+                  require_block_tensor(model_data, block_index, "attn_output.weight") &&
+                  reject_block_tensor(model_data, block_index, "shortconv.conv.weight") &&
+                  reject_block_tensor(model_data, block_index, "shortconv.in_proj.weight") &&
+                  reject_block_tensor(model_data, block_index, "shortconv.out_proj.weight")
+            : require_block_tensor(model_data, block_index, "shortconv.conv.weight") &&
+                  require_block_tensor(model_data, block_index, "shortconv.in_proj.weight") &&
+                  require_block_tensor(model_data, block_index, "shortconv.out_proj.weight") &&
+                  reject_block_tensor(model_data, block_index, "attn_q.weight") &&
+                  reject_block_tensor(model_data, block_index, "attn_k.weight") &&
+                  reject_block_tensor(model_data, block_index, "attn_v.weight") &&
+                  reject_block_tensor(model_data, block_index, "attn_q_norm.weight") &&
+                  reject_block_tensor(model_data, block_index, "attn_k_norm.weight") &&
+                  reject_block_tensor(model_data, block_index, "attn_output.weight");
+    if (!hybrid_ok) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+  }
+
+  return emel::error::cast(emel::model::loader::error::none);
 }
 
 }  // namespace
@@ -256,6 +405,28 @@ std::string_view architecture_name_view(const data & model_data) noexcept {
   }
 
   return std::string_view{model_data.architecture_name.data(), length};
+}
+
+bool is_supported_execution_architecture(const std::string_view architecture) noexcept {
+  return is_execution_architecture_supported(architecture) || uses_lfm2_block_contract(architecture);
+}
+
+bool is_lfm2_execution_architecture(const std::string_view architecture) noexcept {
+  return uses_lfm2_block_contract(architecture);
+}
+
+emel::error::type validate_execution_contract(const data & model_data) noexcept {
+  const auto architecture = architecture_name_view(model_data);
+  if (!is_supported_execution_architecture(architecture)) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  if (uses_lfm2_block_contract(architecture)) {
+    return validate_lfm2_execution_contract_impl(model_data);
+  }
+
+  llama::detail::execution_view view = {};
+  return llama::detail::build_execution_view(model_data, view);
 }
 
 namespace llama::detail {
@@ -318,6 +489,8 @@ std::string_view tensor_type_name(const int32_t tensor_type) noexcept {
       return "q2_k";
     case emel::kernel::event::dtype::q3_k:
       return "q3_k";
+    case emel::kernel::event::dtype::q4_k:
+      return "q4_k";
     case emel::kernel::event::dtype::q6_k:
       return "q6_k";
     default:
@@ -349,19 +522,33 @@ emel::error::type lookup_block_view(const execution_view & execution,
            assign_tensor_view(*execution.model, name, tensor_out);
   };
 
-  const bool ok = bind("attn_norm.weight", block_out.attention_norm) &&
-                  bind("attn_q.weight", block_out.attention_q) &&
-                  bind("attn_k.weight", block_out.attention_k) &&
-                  bind("attn_v.weight", block_out.attention_v) &&
-                  (!uses_qwen3_block_contract(architecture) ||
-                   bind("attn_q_norm.weight", block_out.attention_q_norm)) &&
-                  (!uses_qwen3_block_contract(architecture) ||
-                   bind("attn_k_norm.weight", block_out.attention_k_norm)) &&
-                  bind("attn_output.weight", block_out.attention_output) &&
-                  bind("ffn_norm.weight", block_out.feed_forward_norm) &&
-                  bind("ffn_gate.weight", block_out.feed_forward_gate) &&
-                  bind("ffn_down.weight", block_out.feed_forward_down) &&
-                  bind("ffn_up.weight", block_out.feed_forward_up);
+  const bool common_ok =
+      bind("attn_norm.weight", block_out.attention_norm) &&
+      bind("ffn_norm.weight", block_out.feed_forward_norm) &&
+      bind("ffn_gate.weight", block_out.feed_forward_gate) &&
+      bind("ffn_down.weight", block_out.feed_forward_down) &&
+      bind("ffn_up.weight", block_out.feed_forward_up);
+  if (!common_ok) {
+    block_out = {};
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  block_out.uses_attention =
+      !uses_lfm2_block_contract(architecture) || is_lfm2_attention_layer(block_index);
+  const bool ok = block_out.uses_attention
+      ? bind("attn_q.weight", block_out.attention_q) &&
+            bind("attn_k.weight", block_out.attention_k) &&
+            bind("attn_v.weight", block_out.attention_v) &&
+            ((!uses_qwen3_block_contract(architecture) &&
+              !uses_lfm2_block_contract(architecture)) ||
+             bind("attn_q_norm.weight", block_out.attention_q_norm)) &&
+            ((!uses_qwen3_block_contract(architecture) &&
+              !uses_lfm2_block_contract(architecture)) ||
+             bind("attn_k_norm.weight", block_out.attention_k_norm)) &&
+            bind("attn_output.weight", block_out.attention_output)
+      : bind("shortconv.conv.weight", block_out.shortconv_conv) &&
+            bind("shortconv.in_proj.weight", block_out.shortconv_in_proj) &&
+            bind("shortconv.out_proj.weight", block_out.shortconv_out_proj);
   if (!ok) {
     block_out = {};
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -390,7 +577,7 @@ emel::error::type build_execution_view(const emel::model::data & model_data,
   view.block_count = model_data.n_layers;
 
   if (!assign_tensor_view(model_data, k_token_embedding_name, view.token_embedding) ||
-      !assign_tensor_view(model_data, k_output_norm_name, view.output_norm) ||
+      !assign_output_norm_view(model_data, architecture, view.output_norm) ||
       !assign_output_view(model_data, architecture, view.token_embedding, view.output)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
@@ -418,10 +605,19 @@ emel::error::type build_topology(const execution_view & execution,
 
   topology_out.execution = &execution;
   const auto architecture = architecture_name_view(*execution.model);
-  topology_out.tensor_count =
-      k_global_tensor_count +
-      (static_cast<uint32_t>(execution.block_count) *
-       block_tensor_count_for_architecture(architecture));
+  if (uses_lfm2_block_contract(architecture)) {
+    uint32_t tensor_count = k_global_tensor_count;
+    for (int32_t block_index = 0; block_index < execution.block_count; ++block_index) {
+      tensor_count += is_lfm2_attention_layer(block_index) ? k_lfm2_attention_block_tensor_count
+                                                           : k_lfm2_conv_block_tensor_count;
+    }
+    topology_out.tensor_count = tensor_count;
+  } else {
+    topology_out.tensor_count =
+        k_global_tensor_count +
+        (static_cast<uint32_t>(execution.block_count) *
+         block_tensor_count_for_architecture(architecture));
+  }
   topology_out.node_count = topology_out.tensor_count;
   topology_out.bytes_per_tensor = sizeof(float);
   topology_out.workspace_capacity_bytes =
@@ -467,7 +663,8 @@ quantized_path_audit build_quantized_path_audit(const execution_view & execution
     quantized_stage_audit stage{};
     stage.family = family;
 
-    if (!uses_qwen3_block_contract(architecture) && is_qwen3_only_stage(family)) {
+    if (!uses_qwen3_block_contract(architecture) && !uses_lfm2_block_contract(architecture) &&
+        is_qwen3_only_stage(family)) {
       stage.tensor_type = -1;
       stage.contract = quantized_contract_kind::not_applicable;
       audit.stages[idx] = stage;
@@ -479,7 +676,12 @@ quantized_path_audit build_quantized_path_audit(const execution_view & execution
         family == quantized_stage_family::output) {
       const auto * tensor = stage_tensor(execution, nullptr, family);
       stage.tensor_type = tensor != nullptr ? tensor->type : -1;
-      stage.contract = classify_contract(family, stage.tensor_type, true);
+      stage.contract = classify_stage_contract(
+          family,
+          tensor != nullptr,
+          is_supported_quantized_type(stage.tensor_type),
+          is_supported_quantized_type(stage.tensor_type) || is_f32_type(stage.tensor_type),
+          is_f32_type(stage.tensor_type));
       audit.stages[idx] = stage;
       continue;
     }
@@ -487,6 +689,10 @@ quantized_path_audit build_quantized_path_audit(const execution_view & execution
     bool first = true;
     int32_t first_type = -1;
     bool consistent = execution.block_count > 0;
+    bool saw_applicable_tensor = false;
+    bool all_supported_quantized = true;
+    bool all_vector_approved = true;
+    bool any_f32 = false;
     for (int32_t block_index = 0; block_index < execution.block_count; ++block_index) {
       block_view block{};
       if (lookup_block_view(execution, block_index, block) !=
@@ -496,19 +702,30 @@ quantized_path_audit build_quantized_path_audit(const execution_view & execution
         break;
       }
 
+      if (!stage_applies_to_block(block, family)) {
+        continue;
+      }
+
       const auto * tensor = stage_tensor(execution, &block, family);
       const int32_t tensor_type = tensor != nullptr ? tensor->type : -1;
+      const bool supported_quantized = is_supported_quantized_type(tensor_type);
+      const bool f32_type = is_f32_type(tensor_type);
       if (first) {
         first_type = tensor_type;
         first = false;
       } else if (tensor_type != first_type) {
         consistent = false;
       }
+      saw_applicable_tensor = true;
+      all_supported_quantized = all_supported_quantized && supported_quantized;
+      all_vector_approved = all_vector_approved && (supported_quantized || f32_type);
+      any_f32 = any_f32 || f32_type;
     }
 
     stage.tensor_type = first_type;
-    stage.consistent_across_layers = consistent;
-    stage.contract = classify_contract(family, stage.tensor_type, consistent);
+    stage.consistent_across_layers = consistent && saw_applicable_tensor;
+    stage.contract = classify_stage_contract(
+        family, saw_applicable_tensor, all_supported_quantized, all_vector_approved, any_f32);
     audit.stages[idx] = stage;
   }
 

@@ -10,6 +10,12 @@
 
 namespace emel::bench {
 
+enum class generation_lane_mode {
+  emel,
+  reference,
+  compare,
+};
+
 struct config {
   std::uint64_t iterations = 0;
   std::size_t runs = 0;
@@ -23,6 +29,48 @@ struct result {
   std::uint64_t iterations = 0;
   std::size_t runs = 0;
 };
+
+struct generation_stage_probe {
+  std::string name = {};
+  std::string emel_prefill_contract = {};
+  int32_t emel_prompt_tokens = 0;
+  int32_t emel_prefill_step_size = 0;
+  std::uint64_t emel_total_ns = 0;
+  std::uint64_t emel_conditioning_ns = 0;
+  std::uint64_t emel_prefill_ns = 0;
+  std::uint64_t emel_first_decode_ns = 0;
+  std::uint64_t emel_steady_decode_ns = 0;
+  std::uint64_t emel_unattributed_ns = 0;
+  std::uint64_t emel_prefill_linear_probe_ns = 0;
+  std::uint64_t emel_prefill_attention_probe_ns = 0;
+  std::uint64_t emel_prefill_misc_probe_ns = 0;
+  std::uint64_t emel_prefill_misc_attention_norm_ns = 0;
+  std::uint64_t emel_prefill_misc_qk_norm_ns = 0;
+  std::uint64_t emel_prefill_misc_rope_ns = 0;
+  std::uint64_t emel_prefill_misc_kv_store_ns = 0;
+  std::uint64_t emel_prefill_misc_ctx_copy_ns = 0;
+  std::uint64_t emel_prefill_misc_shortconv_ns = 0;
+  std::uint64_t emel_prefill_shortconv_in_proj_ns = 0;
+  std::uint64_t emel_prefill_shortconv_in_proj_prepare_ns = 0;
+  std::uint64_t emel_prefill_shortconv_conv_ns = 0;
+  std::uint64_t emel_prefill_shortconv_state_shift_ns = 0;
+  std::uint64_t emel_prefill_shortconv_out_proj_ns = 0;
+  std::uint64_t emel_prefill_shortconv_out_proj_prepare_ns = 0;
+  std::uint64_t emel_prefill_misc_ffn_norm_ns = 0;
+  std::uint64_t emel_prefill_misc_silu_ns = 0;
+  std::uint64_t reference_total_ns = 0;
+  std::uint64_t reference_conditioning_ns = 0;
+  std::uint64_t reference_prefill_ns = 0;
+  std::uint64_t reference_first_decode_ns = 0;
+  std::uint64_t reference_steady_decode_ns = 0;
+  std::uint64_t reference_unattributed_ns = 0;
+  std::uint64_t reference_prefill_linear_probe_ns = 0;
+  std::uint64_t reference_prefill_attention_probe_ns = 0;
+  std::uint64_t reference_prefill_misc_probe_ns = 0;
+};
+
+void set_generation_lane_mode(generation_lane_mode mode) noexcept;
+generation_lane_mode generation_lane_mode_current() noexcept;
 
 template <class fn_type>
 result measure_case(const char * name, const config & cfg, fn_type && fn) {

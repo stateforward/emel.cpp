@@ -1,6 +1,7 @@
 #include <array>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include <doctest/doctest.h>
 
@@ -139,6 +140,58 @@ TEST_CASE("tokenizer_bpe_split_llama3_branches") {
       text, vocab, scratch, view);
   CHECK(ok);
   CHECK(view.count > 0);
+}
+
+TEST_CASE("tokenizer_bpe_split_llama3_matches_unicode_reference_for_whitespace_and_newlines") {
+  const std::string text =
+      "  leading space\nmiddle\twith\ttabs\ntrailing space \n\nmultiple   spaces\n";
+  const auto cpts = emel::text::unicode_cpts_from_utf8(text);
+  const std::vector<size_t> offsets_in = {cpts.size()};
+  const std::vector<size_t> expected =
+      emel::text::unicode_regex_split_custom_llama3(text, offsets_in);
+
+  std::array<size_t, emel::text::tokenizer::bpe::detail::k_max_bpe_words> offsets_out = {};
+  size_t out_count = 0;
+  const bool ok = emel::text::tokenizer::bpe::detail::split_llama3(cpts.data(),
+                                                                    cpts.size(),
+                                                                    offsets_in.data(),
+                                                                    offsets_in.size(),
+                                                                    offsets_out.data(),
+                                                                    offsets_out.size(),
+                                                                    out_count);
+
+  CHECK(ok);
+  REQUIRE(out_count == expected.size());
+  for (size_t idx = 0; idx < out_count; ++idx) {
+    CHECK(offsets_out[idx] == expected[idx]);
+  }
+}
+
+TEST_CASE("tokenizer_bpe_split_llama3_matches_unicode_reference_for_unicode_symbols") {
+  const std::string text =
+      "caf\xC3\xA9 na\xC3\xAFve "
+      "\xE3\x81\x93\xE3\x82\x93\xE3\x81\xAB\xE3\x81\xA1\xE3\x81\xAF"
+      "\xE4\xB8\x96\xE7\x95\x8C \xF0\x9F\x98\x80\n";
+  const auto cpts = emel::text::unicode_cpts_from_utf8(text);
+  const std::vector<size_t> offsets_in = {cpts.size()};
+  const std::vector<size_t> expected =
+      emel::text::unicode_regex_split_custom_llama3(text, offsets_in);
+
+  std::array<size_t, emel::text::tokenizer::bpe::detail::k_max_bpe_words> offsets_out = {};
+  size_t out_count = 0;
+  const bool ok = emel::text::tokenizer::bpe::detail::split_llama3(cpts.data(),
+                                                                    cpts.size(),
+                                                                    offsets_in.data(),
+                                                                    offsets_in.size(),
+                                                                    offsets_out.data(),
+                                                                    offsets_out.size(),
+                                                                    out_count);
+
+  CHECK(ok);
+  REQUIRE(out_count == expected.size());
+  for (size_t idx = 0; idx < out_count; ++idx) {
+    CHECK(offsets_out[idx] == expected[idx]);
+  }
 }
 
 TEST_CASE("tokenizer_bpe_split_fallback_multi_regex") {

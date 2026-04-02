@@ -48,6 +48,16 @@ inline void dispatch_initialize_backend_error(const event::initialize & ev) noex
   }
 }
 
+inline void dispatch_initialize_invalid_request(const event::initialize & ev) noexcept {
+  const auto err = emel::error::cast(error::invalid_request);
+  if (ev.error_out != nullptr) {
+    *ev.error_out = err;
+  }
+  if (ev.on_error) {
+    ev.on_error(events::initialize_error{&ev, err});
+  }
+}
+
 inline bool dispatch_initializer_run(
     void * actor,
     const emel::generator::initializer::event::run & ev) noexcept {
@@ -72,7 +82,9 @@ struct reset_sequence {};
 struct reset_sequence_decision {};
 struct conditioning {};
 struct conditioning_decision {};
-struct planning {};
+struct planning_chunk8 {};
+struct planning_chunk4 {};
+struct planning_scalar {};
 struct planning_decision {};
 struct sequence_allocating {};
 struct sequence_allocating_decision {};
@@ -251,9 +263,17 @@ struct model {
                  + sml::completion<event::generate_run>
                  / action::request_conditioning
 
-      , sml::state<planning> <= sml::state<conditioning_decision>
+      , sml::state<planning_chunk8> <= sml::state<conditioning_decision>
                  + sml::completion<event::generate_run>
-                 [ guard::conditioning_ok{} ]
+                 [ guard::conditioning_ok_with_chunk8_prefill{} ]
+
+      , sml::state<planning_chunk4> <= sml::state<conditioning_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::conditioning_ok_with_chunk4_prefill{} ]
+
+      , sml::state<planning_scalar> <= sml::state<conditioning_decision>
+                 + sml::completion<event::generate_run>
+                 [ guard::conditioning_ok_with_scalar_prefill{} ]
 
       , sml::state<generate_ready_error_channel_decision> <= sml::state<conditioning_decision>
                  + sml::completion<event::generate_run>
@@ -267,8 +287,17 @@ struct model {
 
       //------------------------------------------------------------------------------//
       // Planning.
-      , sml::state<planning_decision> <= sml::state<planning> + sml::completion<event::generate_run>
-                 / action::request_planning
+      , sml::state<planning_decision> <= sml::state<planning_chunk8>
+                 + sml::completion<event::generate_run>
+                 / action::request_planning_chunk8
+
+      , sml::state<planning_decision> <= sml::state<planning_chunk4>
+                 + sml::completion<event::generate_run>
+                 / action::request_planning_chunk4
+
+      , sml::state<planning_decision> <= sml::state<planning_scalar>
+                 + sml::completion<event::generate_run>
+                 / action::request_planning_scalar
 
       , sml::state<sequence_allocating> <= sml::state<planning_decision>
                  + sml::completion<event::generate_run>
@@ -675,7 +704,11 @@ struct model {
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<conditioning_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
-      , sml::state<ready> <= sml::state<planning> + sml::unexpected_event<sml::_>
+      , sml::state<ready> <= sml::state<planning_chunk8> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<planning_chunk4> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<ready> <= sml::state<planning_scalar> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<ready> <= sml::state<planning_decision> + sml::unexpected_event<sml::_>
                  / action::on_unexpected
@@ -783,16 +816,8 @@ struct sm : public emel::sm<model, action::context> {
     this->context_.conditioner = &conditioner_ref;
     this->context_.formatter_ctx = formatter_ctx;
     this->context_.format_prompt = format_prompt;
-    // Session scratch is sized once from the injected loaded model so initialize stays allocation-free.
+    // Session scratch is sized once from the injected loaded model before the initialize pipeline.
     detail::reserve_session_buffers(this->context_, model_ref);
-    this->context_.compute.backend_ready =
-        detail::prepare(this->context_.compute.backend, model_ref) ==
-        emel::error::cast(emel::model::loader::error::none);
-    if (this->context_.compute.backend_ready) {
-      this->context_.compute.model_topology = this->context_.compute.backend.topology;
-      this->context_.compute.prefill_plan = this->context_.compute.backend.prefill_plan;
-      this->context_.compute.decode_plan = this->context_.compute.backend.decode_plan;
-    }
   }
 
   sm(const sm &) = delete;
@@ -801,8 +826,8 @@ struct sm : public emel::sm<model, action::context> {
   sm & operator=(sm &&) = delete;
 
   bool process_event(const event::initialize & ev) {
-    if (!this->context_.compute.backend_ready) {
-      detail::dispatch_initialize_backend_error(ev);
+    if (this->context_.model == nullptr || this->context_.conditioner == nullptr) {
+      detail::dispatch_initialize_invalid_request(ev);
       return false;
     }
     event::initialize_ctx ctx{};
@@ -860,6 +885,27 @@ struct sm : public emel::sm<model, action::context> {
 
   uint64_t generation_shared_q3_dispatch_calls() const noexcept {
     return this->context_.compute.backend.kernel.shared_q3_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q4_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q4_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q4_vector_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q4_vector_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q4_vector_packed_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.optimized_q4_vector_packed_dispatch_count();
+  }
+
+  uint64_t generation_optimized_q4_vector_packed_q8_rhs_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel
+        .optimized_q4_vector_packed_q8_rhs_dispatch_count();
+  }
+
+  uint64_t generation_shared_q4_dispatch_calls() const noexcept {
+    return this->context_.compute.backend.kernel.shared_q4_dispatch_count();
   }
 
   uint64_t generation_optimized_q6_dispatch_calls() const noexcept {

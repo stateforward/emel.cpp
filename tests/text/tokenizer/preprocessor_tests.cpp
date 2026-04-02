@@ -182,6 +182,24 @@ TEST_CASE("tokenizer_preprocessor_build_special_tokens_overflow") {
                                                                           vocab));
 }
 
+TEST_CASE("tokenizer_preprocessor_build_special_tokens_accepts_liquid_scale_special_set") {
+  static emel::model::data::vocab vocab = {};
+  std::memset(&vocab, 0, sizeof(vocab));
+  constexpr uint32_t k_liquid_special_count = 509;
+  vocab.n_tokens = k_liquid_special_count;
+  for (uint32_t i = 0; i < vocab.n_tokens; ++i) {
+    vocab.entries[i].text_offset = i;
+    vocab.entries[i].text_length = 1;
+    vocab.entries[i].type = 3;
+    vocab.token_storage[i] = static_cast<char>('A' + (i % 26u));
+  }
+
+  emel::text::tokenizer::preprocessor::special_token_cache cache = {};
+  CHECK(emel::text::tokenizer::preprocessor::detail::build_special_tokens(cache,
+                                                                    vocab));
+  CHECK(cache.count == k_liquid_special_count);
+}
+
 TEST_CASE("tokenizer_preprocessor_partition_with_specials_invalid_args") {
   auto & vocab = make_bpe_vocab();
   emel::text::tokenizer::preprocessor::special_token_cache cache = {};

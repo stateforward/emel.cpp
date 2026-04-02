@@ -204,7 +204,8 @@ struct request_conditioning {
   }
 };
 
-struct request_planning {
+template <int32_t step_size>
+struct request_planning_with_step_size {
   void operator()(const event::generate_run & ev, context & ctx) const noexcept {
     ev.ctx.phase_code = static_cast<int32_t>(emel::error::cast(emel::batch::planner::error::none));
     ev.ctx.prefill_step_size = 0;
@@ -220,7 +221,7 @@ struct request_planning {
     emel::batch::planner::event::request request{
       .token_ids = ctx.buffers.prompt_tokens.data(),
       .n_tokens = ev.ctx.prompt_token_count,
-      .n_steps = 1,
+      .n_steps = step_size,
       .mode = emel::batch::planner::event::plan_mode::simple,
       // Simple single-sequence prompt planning does not need per-token sequence metadata.
       .seq_masks = nullptr,
@@ -761,7 +762,10 @@ inline constexpr reject_invalid_generate reject_invalid_generate{};
 inline constexpr reject_uninitialized_generate reject_uninitialized_generate{};
 inline constexpr request_reset_sequence request_reset_sequence{};
 inline constexpr request_conditioning request_conditioning{};
-inline constexpr request_planning request_planning{};
+inline constexpr request_planning_with_step_size<1> request_planning_scalar{};
+inline constexpr request_planning_with_step_size<8> request_planning_chunk8{};
+inline constexpr request_planning_with_step_size<emel::generator::detail::k_prefill_q8_chunk_rows>
+    request_planning_chunk4{};
 inline constexpr request_allocate_sequence request_allocate_sequence{};
 inline constexpr request_initializer request_initializer{};
 inline constexpr request_prefill request_prefill{};

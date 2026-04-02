@@ -12,8 +12,9 @@ performance characterization for each machine.
   - `// benchmark: ready` means a benchmark **is required** and will be enforced by gates.
 - benchmarks are only required for machines marked `ready`.
 - benchmarks are enforced via a snapshot diff with a **30% regression tolerance in quality gates during rearchitecture**.
-- reference comparison is pinned to a specific upstream commit in
-  `tools/bench/reference_ref.txt` for reproducibility.
+- reference comparison tracks the latest upstream `llama.cpp` ref by default.
+- the default tracked upstream ref lives in `tools/bench/reference_ref.txt` and currently points at
+  the moving `master` branch.
 
 ## benchmark harness
 
@@ -21,14 +22,16 @@ we use a single benchmark harness that lives in `tools/bench/bench_main.cpp` and
 links EMEL with the reference allocator implementation for apples-to-apples
 comparisons.
 - output format is deterministic and diff-friendly:
-  - `machine_path ns_per_op=123.4 iter=100000 runs=5`
+  - `machine_path ns_per_op=123.4 iter=1000 runs=3`
   - `machine_path` matches the `src/emel/<path>/sm.hpp` path without the prefix and suffix.
 - optional warmup controls (shared by EMEL + reference benches):
-  - `EMEL_BENCH_WARMUP_ITERS` (default: min(`EMEL_BENCH_ITERS`, 1000))
+- `EMEL_BENCH_WARMUP_ITERS` (default: min(`EMEL_BENCH_ITERS`, 100))
   - `EMEL_BENCH_WARMUP_RUNS` (default: 1)
 - toolchain defaults to zig (`zig cc` / `zig c++`) for determinism. use
   `scripts/bench.sh --system` if you explicitly want system compilers.
-- reference commit can be overridden via `BENCH_REF_OVERRIDE` if needed.
+- compare builds record the resolved upstream SHA in their output so each run still tells you which
+  `llama.cpp` revision you actually measured.
+- `BENCH_REF_OVERRIDE` can still pin a branch, tag, or SHA when you explicitly need it.
 
 ## external reference compare (optional)
 
@@ -44,8 +47,9 @@ the compare mode expects exact case-name matches and prints `ratio` values for q
 run it via `scripts/bench.sh --compare`.
 when updating the comparison snapshot used by documentation, run:
 `scripts/bench.sh --compare-update`.
-the stored compare snapshot also records `# benchmark_config: ...`, so any publication-time env
-overrides are explicit in the artifact instead of staying implicit in local shell state.
+the stored compare snapshot also records `# benchmark_config: ...` and the resolved upstream SHA,
+so any publication-time env overrides and fetched `llama.cpp` revision are explicit in the artifact
+instead of staying implicit in local shell state.
 
 ## canonical generation compare workflow
 
@@ -62,9 +66,9 @@ EMEL_BENCH_WARMUP_RUNS=0 \
 scripts/bench.sh --compare
 ```
 
-the stable generation case name is:
+the current maintained publication case name is:
 
-`generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1`
+`generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1`
 
 to isolate that row from the normal compare output:
 
@@ -74,12 +78,18 @@ EMEL_BENCH_RUNS=1 \
 EMEL_BENCH_WARMUP_ITERS=0 \
 EMEL_BENCH_WARMUP_RUNS=0 \
 scripts/bench.sh --compare | \
-rg '^generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1 .* ratio='
+rg '^generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 .* ratio='
 ```
 
-the canonical workload is fixed to the checked-in qwen3-0.6b q8_0 fixture, prompt `hello`, and
-`max_tokens=1`. fixture loading and one-time setup stay outside the timed loop; this case measures
-preloaded request latency.
+the current maintained evidence workload is fixed to the checked-in Liquid
+`LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture, prompt `hello`, and `max_tokens=1`. fixture loading
+and one-time setup stay outside the timed loop; this case measures preloaded request latency.
+
+the generation compare suite is additive across maintained supported fixtures. the current set
+includes both:
+
+- `generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1`
+- `generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1`
 
 ## phase 13 flash-evidence publication workflow
 
@@ -92,7 +102,7 @@ the BENCH-03 approval gate is the canonical short case:
 `generation/preloaded_request/llama_68m_prompt_hello_max_tokens_1`
 
 this phase-13 artifact is historical and stays tied to the archived llama canonical slice. it is
-not the live maintained generation identity for the current qwen3 benchmark publication.
+not the live maintained generation identity for the current Liquid benchmark publication.
 
 before any checked-in snapshot refresh, compare the preserved non-flash artifact
 `snapshots/bench/generation_pre_flash_baseline.txt` against the current compare snapshot with:
@@ -126,7 +136,7 @@ as permission to refresh checked-in snapshot or generated benchmark evidence fil
 compare mode prints one row per matched case:
 
 ```text
-generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1 emel.cpp 21368041.000 ns/op, llama.cpp 6660042.000 ns/op, ratio=3.208x
+generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1 emel.cpp 550019417.000 ns/op, llama.cpp 481248875.000 ns/op, ratio=1.143x
 ```
 
 - `emel.cpp` is the measured EMEL-side time for the canonical generation case.

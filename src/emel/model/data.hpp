@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include "emel/error/error.hpp"
+
 namespace emel::model {
 
 struct data {
@@ -498,5 +500,8 @@ std::string_view tensor_name_view(const data & model_data,
                                   const data::tensor_record & tensor) noexcept;
 bool try_parse_block_index(std::string_view name, int32_t & block_index_out) noexcept;
 std::string_view architecture_name_view(const data & model_data) noexcept;
+bool is_supported_execution_architecture(std::string_view architecture) noexcept;
+bool is_lfm2_execution_architecture(std::string_view architecture) noexcept;
+emel::error::type validate_execution_contract(const data & model_data) noexcept;
 
 }  // namespace emel::model

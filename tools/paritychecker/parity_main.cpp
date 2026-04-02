@@ -3,6 +3,7 @@
 #include <string>
 #include <string_view>
 
+#include "../generation_fixture_registry.hpp"
 #include "parity_runner.hpp"
 
 namespace {
@@ -19,10 +20,13 @@ void print_usage(const char * exe) {
                "  --gbnf mode compares GBNF parser parity and ignores --model\n"
                "  --kernel mode compares kernel parity and ignores --model\n"
                "  --jinja mode compares jinja parser/formatter parity and ignores --model\n"
-               "  --generation mode requires --model tests/models/Qwen3-0.6B-Q8_0.gguf "
-               "and prompt text; it compares against maintained baseline artifacts under "
-               "snapshots/parity/\n",
+               "  --generation mode requires --model one maintained fixture under tests/models/ "
+               "and prompt text; maintained baselines are append-only under snapshots/parity/\n",
                exe);
+  for (const auto & fixture :
+       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+    std::fprintf(stderr, "    - %s\n", fixture.fixture_rel.data());
+  }
 }
 
 bool parse_positive_i32(std::string_view text, int32_t & out) {

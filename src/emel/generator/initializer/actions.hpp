@@ -39,6 +39,28 @@ struct begin_initialize {
   }
 };
 
+struct request_backend_prepare {
+  void operator()(const event::run & ev, context & ctx) const noexcept {
+    auto & generator = ctx.generator;
+    generator.compute.backend_ready = false;
+    ev.ctx.phase_code = static_cast<int32_t>(
+        emel::generator::detail::prepare(generator.compute.backend, *generator.model));
+    ev.ctx.phase_accepted =
+        ev.ctx.phase_code ==
+        static_cast<int32_t>(emel::error::cast(emel::model::loader::error::none));
+  }
+};
+
+struct accept_prepared_backend {
+  void operator()(const event::run &, context & ctx) const noexcept {
+    auto & generator = ctx.generator;
+    generator.compute.model_topology = generator.compute.backend.topology;
+    generator.compute.prefill_plan = generator.compute.backend.prefill_plan;
+    generator.compute.decode_plan = generator.compute.backend.decode_plan;
+    generator.compute.backend_ready = true;
+  }
+};
+
 struct request_conditioner_bind {
   void operator()(const event::run & ev, context & ctx) const noexcept {
     auto & generator = ctx.generator;
@@ -165,6 +187,8 @@ struct on_unexpected {
 };
 
 inline constexpr begin_initialize begin_initialize{};
+inline constexpr request_backend_prepare request_backend_prepare{};
+inline constexpr accept_prepared_backend accept_prepared_backend{};
 inline constexpr request_conditioner_bind request_conditioner_bind{};
 inline constexpr request_renderer_initialize request_renderer_initialize{};
 inline constexpr request_memory_reserve request_memory_reserve{};

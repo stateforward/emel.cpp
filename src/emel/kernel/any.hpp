@@ -121,6 +121,66 @@ class any {
     return count;
   }
 
+  uint64_t optimized_q4_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q4_dispatch_count(); }) {
+        count = sm.optimized_q4_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_q4_vector_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q4_vector_dispatch_count(); }) {
+        count = sm.optimized_q4_vector_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_q4_vector_packed_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q4_vector_packed_dispatch_count(); }) {
+        count = sm.optimized_q4_vector_packed_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t optimized_q4_vector_packed_q8_rhs_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.optimized_q4_vector_packed_q8_rhs_dispatch_count(); }) {
+        count = sm.optimized_q4_vector_packed_q8_rhs_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
+  uint64_t shared_q4_dispatch_count() const noexcept {
+    uint64_t count = 0u;
+    core_.visit([&](const auto & sm) {
+      if constexpr (requires { sm.shared_q4_dispatch_count(); }) {
+        count = sm.shared_q4_dispatch_count();
+      } else {
+        count = 0u;
+      }
+    });
+    return count;
+  }
+
   uint64_t optimized_q6_dispatch_count() const noexcept {
     uint64_t count = 0u;
     core_.visit([&](const auto & sm) {

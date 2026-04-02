@@ -1,6 +1,7 @@
 #include "parity_runner.hpp"
 #include "tokenizer_parity.hpp"
 #include "../generation_formatter_contract.hpp"
+#include "../generation_fixture_registry.hpp"
 
 #include <algorithm>
 #include <array>
@@ -36,6 +37,7 @@
 #include "emel/kernel/x86_64/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
 #include "emel/model/data.hpp"
+#include "emel/model/detail.hpp"
 #include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
@@ -107,8 +109,6 @@ namespace {
 
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_internal = 3;
-constexpr const char * k_generation_fixture_name = "Qwen3-0.6B-Q8_0.gguf";
-constexpr const char * k_generation_fixture_slug = "qwen3_0_6b_q8_0";
 constexpr size_t k_generation_output_capacity = 65536u;
 constexpr size_t k_generation_token_trace_capacity = 4096u;
 constexpr std::string_view k_generation_baseline_source = "maintained_generation_baseline";
@@ -132,6 +132,8 @@ constexpr std::string_view k_reference_impl_ref =
 using llama_model_ptr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
 using llama_context_ptr = std::unique_ptr<llama_context, decltype(&llama_free)>;
 namespace kernel_quant = emel::kernel::detail::quant;
+using maintained_generation_fixture =
+    emel::tools::generation_fixture_registry::maintained_fixture;
 
 bool file_exists(const std::string & path) {
   std::FILE * file = std::fopen(path.c_str(), "rb");
@@ -142,12 +144,13 @@ bool file_exists(const std::string & path) {
   return true;
 }
 
-std::filesystem::path expected_generation_fixture_path() {
+std::filesystem::path expected_generation_fixture_path(
+    const maintained_generation_fixture & fixture) {
 #ifdef PARITYCHECKER_REPO_ROOT
   const std::filesystem::path root = PARITYCHECKER_REPO_ROOT;
-  return root / "tests" / "models" / k_generation_fixture_name;
+  return root / fixture.fixture_rel;
 #else
-  return std::filesystem::path("tests") / "models" / k_generation_fixture_name;
+  return std::filesystem::path(fixture.fixture_rel);
 #endif
 }
 
@@ -160,12 +163,36 @@ std::filesystem::path normalize_fixture_path(const std::filesystem::path & path)
   return absolute_path.lexically_normal();
 }
 
-bool is_expected_generation_fixture(const std::string & model_path) {
-  const std::filesystem::path expected_path =
-      normalize_fixture_path(expected_generation_fixture_path());
+const maintained_generation_fixture * find_generation_fixture(const std::string & model_path) {
   const std::filesystem::path provided_path =
       normalize_fixture_path(std::filesystem::path(model_path));
-  return !expected_path.empty() && !provided_path.empty() && expected_path == provided_path;
+  if (provided_path.empty()) {
+    return nullptr;
+  }
+
+  for (const auto & fixture :
+       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+    const std::filesystem::path expected_path =
+        normalize_fixture_path(expected_generation_fixture_path(fixture));
+    if (!expected_path.empty() && expected_path == provided_path) {
+      return &fixture;
+    }
+  }
+  return nullptr;
+}
+
+std::string maintained_generation_fixture_list() {
+  std::string list = {};
+  bool first = true;
+  for (const auto & fixture :
+       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+    if (!first) {
+      list += ", ";
+    }
+    first = false;
+    list += fixture.fixture_rel;
+  }
+  return list;
 }
 
 struct parser_done_capture {
@@ -521,310 +548,6 @@ void copy_name(std::array<char, k_array_size> & dst, const std::string_view valu
   }
 }
 
-template <size_t k_array_size>
-void set_token_flag(std::array<uint8_t, k_array_size> & flags, const uint32_t token_id) {
-  const uint32_t byte_index = token_id >> 3u;
-  if (byte_index >= k_array_size) {
-    return;
-  }
-  const uint8_t bit = static_cast<uint8_t>(1u << (token_id & 7u));
-  flags[byte_index] = static_cast<uint8_t>(flags[byte_index] | bit);
-}
-
-bool attr_has(const llama_token_attr attr, const llama_token_attr flag) {
-  const uint32_t attr_bits = static_cast<uint32_t>(attr);
-  const uint32_t flag_bits = static_cast<uint32_t>(flag);
-  return (attr_bits & flag_bits) != 0u;
-}
-
-int32_t token_type_from_attr(const llama_token_attr attr) {
-  if (attr_has(attr, LLAMA_TOKEN_ATTR_UNKNOWN)) {
-    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_UNKNOWN);
-  }
-  if (attr_has(attr, LLAMA_TOKEN_ATTR_CONTROL)) {
-    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_CONTROL);
-  }
-  if (attr_has(attr, LLAMA_TOKEN_ATTR_USER_DEFINED)) {
-    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_USER_DEFINED);
-  }
-  if (attr_has(attr, LLAMA_TOKEN_ATTR_UNUSED)) {
-    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_UNUSED);
-  }
-  if (attr_has(attr, LLAMA_TOKEN_ATTR_BYTE)) {
-    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_BYTE);
-  }
-  if (attr_has(attr, LLAMA_TOKEN_ATTR_NORMAL)) {
-    return static_cast<int32_t>(LLAMA_TOKEN_TYPE_NORMAL);
-  }
-  return static_cast<int32_t>(LLAMA_TOKEN_TYPE_UNDEFINED);
-}
-
-emel::model::data::tokenizer_model to_emel_tokenizer_model(
-    const enum llama_vocab_type type) {
-  using tokenizer_model = emel::model::data::tokenizer_model;
-
-  switch (type) {
-    case LLAMA_VOCAB_TYPE_NONE:
-      return tokenizer_model::NONE;
-    case LLAMA_VOCAB_TYPE_SPM:
-      return tokenizer_model::SPM;
-    case LLAMA_VOCAB_TYPE_BPE:
-      return tokenizer_model::BPE;
-    case LLAMA_VOCAB_TYPE_WPM:
-      return tokenizer_model::WPM;
-    case LLAMA_VOCAB_TYPE_UGM:
-      return tokenizer_model::UGM;
-    case LLAMA_VOCAB_TYPE_RWKV:
-      return tokenizer_model::RWKV;
-    case LLAMA_VOCAB_TYPE_PLAMO2:
-      return tokenizer_model::PLAMO2;
-    default:
-      return tokenizer_model::UNKNOWN;
-  }
-}
-
-emel::model::data::tokenizer_pre to_emel_tokenizer_pre(
-    const llama_vocab_pre_type type) {
-  using tokenizer_pre = emel::model::data::tokenizer_pre;
-
-  switch (type) {
-    case LLAMA_VOCAB_PRE_TYPE_DEFAULT:
-      return tokenizer_pre::DEFAULT;
-    case LLAMA_VOCAB_PRE_TYPE_LLAMA3:
-      return tokenizer_pre::LLAMA3;
-    case LLAMA_VOCAB_PRE_TYPE_JAIS2:
-      return tokenizer_pre::JAIS2;
-    case LLAMA_VOCAB_PRE_TYPE_DBRX:
-      return tokenizer_pre::DBRX;
-    case LLAMA_VOCAB_PRE_TYPE_SMAUG:
-      return tokenizer_pre::SMAUG;
-    case LLAMA_VOCAB_PRE_TYPE_DEEPSEEK_LLM:
-      return tokenizer_pre::DEEPSEEK_LLM;
-    case LLAMA_VOCAB_PRE_TYPE_DEEPSEEK_CODER:
-      return tokenizer_pre::DEEPSEEK_CODER;
-    case LLAMA_VOCAB_PRE_TYPE_DEEPSEEK3_LLM:
-      return tokenizer_pre::DEEPSEEK3_LLM;
-    case LLAMA_VOCAB_PRE_TYPE_YOUTU:
-      return tokenizer_pre::YOUTU;
-    case LLAMA_VOCAB_PRE_TYPE_FALCON:
-      return tokenizer_pre::FALCON;
-    case LLAMA_VOCAB_PRE_TYPE_MPT:
-      return tokenizer_pre::MPT;
-    case LLAMA_VOCAB_PRE_TYPE_STARCODER:
-      return tokenizer_pre::STARCODER;
-    case LLAMA_VOCAB_PRE_TYPE_GPT2:
-      return tokenizer_pre::GPT2;
-    case LLAMA_VOCAB_PRE_TYPE_JAIS:
-      return tokenizer_pre::JAIS;
-    case LLAMA_VOCAB_PRE_TYPE_REFACT:
-      return tokenizer_pre::REFACT;
-    case LLAMA_VOCAB_PRE_TYPE_COMMAND_R:
-      return tokenizer_pre::COMMAND_R;
-    case LLAMA_VOCAB_PRE_TYPE_QWEN2:
-      return tokenizer_pre::QWEN2;
-    case LLAMA_VOCAB_PRE_TYPE_QWEN35:
-      return tokenizer_pre::QWEN35;
-    case LLAMA_VOCAB_PRE_TYPE_STABLELM2:
-      return tokenizer_pre::STABLELM2;
-    case LLAMA_VOCAB_PRE_TYPE_OLMO:
-      return tokenizer_pre::OLMO;
-    case LLAMA_VOCAB_PRE_TYPE_PORO:
-      return tokenizer_pre::PORO;
-    case LLAMA_VOCAB_PRE_TYPE_CHATGLM4:
-      return tokenizer_pre::CHATGLM4;
-    case LLAMA_VOCAB_PRE_TYPE_VIKING:
-      return tokenizer_pre::VIKING;
-    case LLAMA_VOCAB_PRE_TYPE_TEKKEN:
-      return tokenizer_pre::TEKKEN;
-    case LLAMA_VOCAB_PRE_TYPE_SMOLLM:
-      return tokenizer_pre::SMOLLM;
-    case LLAMA_VOCAB_PRE_TYPE_CODESHELL:
-      return tokenizer_pre::CODESHELL;
-    case LLAMA_VOCAB_PRE_TYPE_BLOOM:
-      return tokenizer_pre::BLOOM;
-    case LLAMA_VOCAB_PRE_TYPE_GPT3_FINNISH:
-      return tokenizer_pre::GPT3_FINNISH;
-    case LLAMA_VOCAB_PRE_TYPE_EXAONE:
-      return tokenizer_pre::EXAONE;
-    case LLAMA_VOCAB_PRE_TYPE_EXAONE_MOE:
-      return tokenizer_pre::EXAONE_MOE;
-    case LLAMA_VOCAB_PRE_TYPE_CHAMELEON:
-      return tokenizer_pre::CHAMELEON;
-    case LLAMA_VOCAB_PRE_TYPE_MINERVA:
-      return tokenizer_pre::MINERVA;
-    case LLAMA_VOCAB_PRE_TYPE_GPT4O:
-      return tokenizer_pre::GPT4O;
-    case LLAMA_VOCAB_PRE_TYPE_TINY_AYA:
-      return tokenizer_pre::TINY_AYA;
-    case LLAMA_VOCAB_PRE_TYPE_SUPERBPE:
-      return tokenizer_pre::SUPERBPE;
-    case LLAMA_VOCAB_PRE_TYPE_TRILLION:
-      return tokenizer_pre::TRILLION;
-    case LLAMA_VOCAB_PRE_TYPE_GRANITE_DOCLING:
-      return tokenizer_pre::GRANITE_DOCLING;
-    case LLAMA_VOCAB_PRE_TYPE_BAILINGMOE:
-      return tokenizer_pre::BAILINGMOE;
-    case LLAMA_VOCAB_PRE_TYPE_SEED_CODER:
-      return tokenizer_pre::SEED_CODER;
-    case LLAMA_VOCAB_PRE_TYPE_HUNYUAN:
-      return tokenizer_pre::HUNYUAN;
-    case LLAMA_VOCAB_PRE_TYPE_HUNYUAN_DENSE:
-      return tokenizer_pre::HUNYUAN_DENSE;
-    case LLAMA_VOCAB_PRE_TYPE_JOYAI_LLM:
-      return tokenizer_pre::JOYAI_LLM;
-    case LLAMA_VOCAB_PRE_TYPE_KIMI_K2:
-      return tokenizer_pre::KIMI_K2;
-    case LLAMA_VOCAB_PRE_TYPE_GROK_2:
-      return tokenizer_pre::GROK_2;
-    case LLAMA_VOCAB_PRE_TYPE_AFMOE:
-      return tokenizer_pre::AFMOE;
-    case LLAMA_VOCAB_PRE_TYPE_MINIMAX_M2:
-      return tokenizer_pre::MINIMAX_M2;
-    case LLAMA_VOCAB_PRE_TYPE_SOLAR_OPEN:
-      return tokenizer_pre::SOLAR_OPEN;
-    case LLAMA_VOCAB_PRE_TYPE_CHATGLM3:
-    case LLAMA_VOCAB_PRE_TYPE_LLAMA4:
-    case LLAMA_VOCAB_PRE_TYPE_PIXTRAL:
-      return tokenizer_pre::UNKNOWN;
-    default:
-      return tokenizer_pre::UNKNOWN;
-  }
-}
-
-bool load_emel_vocab_from_llama(const llama_vocab & src, emel::model::data::vocab & dst) {
-  dst = {};
-  dst.tokenizer_model_id = to_emel_tokenizer_model(src.get_type());
-  dst.tokenizer_pre_id = to_emel_tokenizer_pre(src.get_pre_type());
-  copy_name(dst.tokenizer_model_name, src.get_tokenizer_model());
-  copy_name(dst.tokenizer_pre_name, src.get_tokenizer_pre());
-
-  const uint32_t token_count = src.n_tokens();
-  if (token_count > emel::model::data::k_max_vocab_tokens) {
-    std::fprintf(stderr,
-                 "vocab token count exceeds emel capacity: %u > %d\n",
-                 token_count,
-                 emel::model::data::k_max_vocab_tokens);
-    return false;
-  }
-  dst.n_tokens = token_count;
-  dst.n_token_types = src.n_token_types();
-
-  uint32_t token_bytes_used = 0;
-  for (uint32_t token_id = 0; token_id < token_count; ++token_id) {
-    const llama_token llama_id = static_cast<llama_token>(token_id);
-    const auto & token = src.get_token_data(llama_id);
-    const uint32_t token_len = static_cast<uint32_t>(token.text.size());
-    if (token_bytes_used + token_len > emel::model::data::k_max_vocab_bytes) {
-      std::fprintf(stderr,
-                   "token storage exceeds emel capacity at token %u (%u + %u > %d)\n",
-                   token_id,
-                   token_bytes_used,
-                   token_len,
-                   emel::model::data::k_max_vocab_bytes);
-      return false;
-    }
-
-    if (token_len > 0) {
-      std::memcpy(dst.token_storage.data() + token_bytes_used,
-                  token.text.data(),
-                  token_len);
-    }
-
-    emel::model::data::vocab_entry & entry = dst.entries[token_id];
-    entry.text_offset = token_bytes_used;
-    entry.text_length = token_len;
-    entry.score = token.score;
-    entry.type = token_type_from_attr(token.attr);
-    token_bytes_used += token_len;
-
-    if (attr_has(token.attr, LLAMA_TOKEN_ATTR_LSTRIP)) {
-      set_token_flag(dst.lstrip_flags, token_id);
-    }
-    if (attr_has(token.attr, LLAMA_TOKEN_ATTR_RSTRIP)) {
-      set_token_flag(dst.rstrip_flags, token_id);
-    }
-  }
-  dst.token_bytes_used = token_bytes_used;
-
-  const std::vector<std::string> merges = src.get_bpe_merges();
-  if (merges.size() > emel::model::data::k_max_merges) {
-    std::fprintf(stderr,
-                 "merge count exceeds emel capacity: %zu > %d\n",
-                 merges.size(),
-                 emel::model::data::k_max_merges);
-    return false;
-  }
-
-  uint32_t merge_bytes_used = 0;
-  for (size_t i = 0; i < merges.size(); ++i) {
-    const std::string & merge = merges[i];
-    const uint32_t merge_len = static_cast<uint32_t>(merge.size());
-    if (merge_bytes_used + merge_len > emel::model::data::k_max_merge_bytes) {
-      std::fprintf(stderr,
-                   "merge storage exceeds emel capacity at merge %zu (%u + %u > %d)\n",
-                   i,
-                   merge_bytes_used,
-                   merge_len,
-                   emel::model::data::k_max_merge_bytes);
-      return false;
-    }
-    if (merge_len > 0) {
-      std::memcpy(dst.merge_storage.data() + merge_bytes_used,
-                  merge.data(),
-                  merge_len);
-    }
-    dst.merge_offsets[i] = merge_bytes_used;
-    dst.merge_lengths[i] = merge_len;
-    merge_bytes_used += merge_len;
-  }
-  dst.n_merges = static_cast<uint32_t>(merges.size());
-  dst.merge_bytes_used = merge_bytes_used;
-
-  const std::vector<char> precompiled_charsmap = src.get_precompiled_charsmap();
-  if (precompiled_charsmap.size() > emel::model::data::k_max_precompiled_charsmap_bytes) {
-    std::fprintf(stderr,
-                 "precompiled charsmap exceeds emel capacity: %zu > %d\n",
-                 precompiled_charsmap.size(),
-                 emel::model::data::k_max_precompiled_charsmap_bytes);
-    return false;
-  }
-  if (!precompiled_charsmap.empty()) {
-    std::memcpy(dst.precompiled_charsmap.data(),
-                precompiled_charsmap.data(),
-                precompiled_charsmap.size());
-  }
-  dst.precompiled_charsmap_size = static_cast<uint32_t>(precompiled_charsmap.size());
-
-  dst.bos_id = src.token_bos();
-  dst.eos_id = src.token_eos();
-  dst.eot_id = src.token_eot();
-  dst.eom_id = src.token_eom();
-  dst.unk_id = src.token_unk();
-  dst.sep_id = src.token_sep();
-  dst.pad_id = src.token_pad();
-  dst.mask_id = src.token_mask();
-  dst.prefix_id = src.token_prefix();
-  dst.suffix_id = src.token_suffix();
-  dst.middle_id = src.token_middle();
-  dst.fim_pre_id = src.token_fim_pre();
-  dst.fim_suf_id = src.token_fim_suf();
-  dst.fim_mid_id = src.token_fim_mid();
-  dst.fim_pad_id = src.token_fim_pad();
-  dst.fim_rep_id = src.token_fim_rep();
-  dst.fim_sep_id = src.token_fim_sep();
-
-  dst.add_bos = src.get_add_bos();
-  dst.add_eos = src.get_add_eos();
-  dst.add_sep = src.get_add_sep();
-  dst.add_space_prefix = src.get_add_space_prefix();
-  dst.ignore_merges = src.get_ignore_merges();
-  dst.remove_extra_whitespaces = src.get_remove_extra_whitespaces();
-  dst.escape_whitespaces = src.get_escape_whitespaces();
-  dst.treat_whitespace_as_suffix = src.get_treat_whitespace_as_suffix();
-
-  return true;
-}
-
 struct gguf_capture {
   bool probe_done = false;
   bool probe_error = false;
@@ -937,10 +660,11 @@ std::string generation_prompt_slug(std::string_view text) {
 }
 
 std::filesystem::path default_generation_baseline_path(
+    const maintained_generation_fixture & fixture,
     const emel::paritychecker::parity_options & opts) {
   const std::string prompt_slug = generation_prompt_slug(opts.text);
   return generation_baseline_directory_path() /
-      ("generation_" + std::string(k_generation_fixture_slug) + "_prompt_" + prompt_slug +
+      ("generation_" + std::string(fixture.slug) + "_prompt_" + prompt_slug +
        "_max_tokens_" + std::to_string(opts.max_tokens) + ".txt");
 }
 
@@ -1097,6 +821,7 @@ bool parse_csv_values(std::string_view text,
 }
 
 bool write_generation_baseline_file(const std::filesystem::path & path,
+                                    const maintained_generation_fixture & fixture,
                                     const emel::paritychecker::parity_options & opts,
                                     const generation_result & result) {
   const std::filesystem::path parent = path.parent_path();
@@ -1121,7 +846,7 @@ bool write_generation_baseline_file(const std::filesystem::path & path,
                k_generation_baseline_format.data());
   std::fprintf(file, "contract=%.*s\n", static_cast<int>(k_generation_baseline_contract.size()),
                k_generation_baseline_contract.data());
-  std::fprintf(file, "fixture=%s\n", k_generation_fixture_name);
+  std::fprintf(file, "fixture=%s\n", fixture.name.data());
   std::fprintf(file, "prompt_hex=%s\n", prompt_hex.c_str());
   std::fprintf(file, "max_tokens=%d\n", opts.max_tokens);
   std::fprintf(file, "tokens_generated=%d\n", result.tokens_generated);
@@ -1235,7 +960,7 @@ bool load_generation_baseline_file(const std::filesystem::path & path,
     std::memcpy(record_out.result.output.data(), output_bytes.data(), output_bytes.size());
   }
 
-  return record_out.fixture_name == k_generation_fixture_name;
+  return true;
 }
 
 struct generation_attribution_bucket {
@@ -1278,12 +1003,11 @@ bool run_compute_logits_preselected_argmax_with_attribution(
     int32_t & selected_index,
     float & selected_score);
 
-struct initialize_backend {
+struct reference_backend {
   llama_model_ptr model = {nullptr, llama_model_free};
   const llama_vocab * vocab = nullptr;
   int32_t vocab_size = 0;
-  int32_t fallback_token_id = 0;
-  emel::tools::generation_formatter_contract::formatter_binding formatter_binding = {};
+  emel::tools::generation_formatter_contract::reference_formatter_info formatter = {};
   int32_t emel_reference_decode_calls = 0;
   int32_t emel_reference_logits_calls = 0;
   int32_t direct_reference_decode_calls = 0;
@@ -1453,6 +1177,9 @@ emel::error::type sampler_select_argmax(generation_load_state & state,
                                         int32_t & candidate_count,
                                         int32_t & selected_token_out);
 
+emel::error::type run_emel_parse_model(void * owner,
+                                       const emel::model::loader::event::load & req);
+
 struct generation_load_state {
   std::unique_ptr<emel::model::data> model_data = std::make_unique<emel::model::data>();
   std::vector<uint8_t> file_bytes = {};
@@ -1462,7 +1189,7 @@ struct generation_load_state {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
   std::unique_ptr<emel::generator::sm> generator = {};
-  initialize_backend backend = {};
+  reference_backend reference = {};
   generation_trace * emel_trace = nullptr;
   std::array<emel::logits::sampler::fn, 1> samplers = {};
   std::vector<uint8_t> kv_arena = {};
@@ -1480,6 +1207,14 @@ struct generation_load_state {
       : samplers{emel::logits::sampler::fn::from<generation_load_state, sampler_select_argmax>(
             this)} {}
 };
+
+emel::model::detail::kv_binding kv_binding_from_state(const generation_load_state & state) {
+  return emel::model::detail::kv_binding{
+      .arena = std::span<const uint8_t>{state.kv_arena.data(), state.kv_arena.size()},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{state.kv_entries.data(),
+                                                               state.kv_entries.size()},
+  };
+}
 
 quantized_contract_summary runtime_quantized_contract_summary(
     const generation_load_state & state) {
@@ -1638,6 +1373,84 @@ emel::error::type map_weight_loader_error(const emel::error::type err) {
     default:
       return emel::error::cast(model_error::untracked);
   }
+}
+
+void reset_gguf_capture(generation_load_state & state);
+void on_probe_done(void * owner, const emel::gguf::loader::events::probe_done & ev);
+void on_probe_error(void * owner, const emel::gguf::loader::events::probe_error & ev);
+void on_bind_done(void * owner, const emel::gguf::loader::events::bind_done & ev);
+void on_bind_error(void * owner, const emel::gguf::loader::events::bind_error & ev);
+void on_parse_done(void * owner, const emel::gguf::loader::events::parse_done & ev);
+void on_parse_error(void * owner, const emel::gguf::loader::events::parse_error & ev);
+
+emel::error::type parse_gguf_kv_storage(generation_load_state & state,
+                                        const std::span<const uint8_t> file_image,
+                                        emel::model::data & model_data,
+                                        uint32_t & tensor_count_out) {
+  reset_gguf_capture(state);
+  const emel::gguf::loader::event::probe_done_fn probe_done_cb{&state, on_probe_done};
+  const emel::gguf::loader::event::probe_error_fn probe_error_cb{&state, on_probe_error};
+  emel::gguf::loader::requirements requirements = {};
+  const emel::gguf::loader::event::probe probe_ev{
+    file_image,
+    requirements,
+    probe_done_cb,
+    probe_error_cb,
+  };
+
+  if (!state.gguf_loader.process_event(probe_ev) ||
+      !state.gguf.probe_done ||
+      state.gguf.probe_error) {
+    return map_gguf_error(state.gguf.err);
+  }
+
+  if (requirements.tensor_count > static_cast<uint32_t>(emel::model::data::k_max_tensors)) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+
+  const uint64_t arena_bytes =
+      emel::gguf::loader::detail::required_kv_arena_bytes(requirements);
+  if (arena_bytes == std::numeric_limits<uint64_t>::max()) {
+    return emel::error::cast(emel::model::loader::error::backend_error);
+  }
+
+  state.kv_arena.resize(static_cast<size_t>(arena_bytes));
+  state.kv_entries.resize(requirements.kv_count);
+
+  reset_gguf_capture(state);
+  const emel::gguf::loader::event::bind_done_fn bind_done_cb{&state, on_bind_done};
+  const emel::gguf::loader::event::bind_error_fn bind_error_cb{&state, on_bind_error};
+  const emel::gguf::loader::event::bind_storage bind_ev{
+    std::span<uint8_t>{state.kv_arena},
+    std::span<emel::gguf::loader::kv_entry>{state.kv_entries},
+    std::span<emel::model::data::tensor_record>{model_data.tensors.data(), requirements.tensor_count},
+    bind_done_cb,
+    bind_error_cb,
+  };
+
+  if (!state.gguf_loader.process_event(bind_ev) ||
+      !state.gguf.bind_done ||
+      state.gguf.bind_error) {
+    return map_gguf_error(state.gguf.err);
+  }
+
+  reset_gguf_capture(state);
+  const emel::gguf::loader::event::parse_done_fn parse_done_cb{&state, on_parse_done};
+  const emel::gguf::loader::event::parse_error_fn parse_error_cb{&state, on_parse_error};
+  const emel::gguf::loader::event::parse parse_ev{
+    file_image,
+    parse_done_cb,
+    parse_error_cb,
+  };
+
+  if (!state.gguf_loader.process_event(parse_ev) ||
+      !state.gguf.parse_done ||
+      state.gguf.parse_error) {
+    return map_gguf_error(state.gguf.err);
+  }
+
+  tensor_count_out = requirements.tensor_count;
+  return emel::error::cast(emel::model::loader::error::none);
 }
 
 void reset_gguf_capture(generation_load_state & state) {
@@ -1806,7 +1619,7 @@ bool tokenizer_tokenize_dispatch(
   return static_cast<emel::text::tokenizer::sm *>(tokenizer_sm)->process_event(ev);
 }
 
-void reset_reference_decode_seam(initialize_backend & backend) {
+void reset_reference_decode_seam(reference_backend & backend) {
   backend.emel_reference_decode_calls = 0;
   backend.emel_reference_logits_calls = 0;
   backend.direct_reference_decode_calls = 0;
@@ -1894,36 +1707,8 @@ bool is_printable_ascii_token(const std::string_view piece) {
   return true;
 }
 
-int32_t find_generation_fallback_token_id(const emel::model::data::vocab & vocab) {
-  constexpr std::array<std::string_view, 4> k_preferred_tokens = {
-      "hello",
-      "world",
-      "Hello",
-      "!",
-  };
-
-  for (const std::string_view preferred : k_preferred_tokens) {
-    for (uint32_t token_id = 0; token_id < vocab.n_tokens; ++token_id) {
-      if (vocab_token_view(vocab, static_cast<int32_t>(token_id)) == preferred) {
-        return static_cast<int32_t>(token_id);
-      }
-    }
-  }
-
-  const int32_t normal_type = static_cast<int32_t>(LLAMA_TOKEN_TYPE_NORMAL);
-  for (uint32_t token_id = 0; token_id < vocab.n_tokens; ++token_id) {
-    const auto & entry = vocab.entries[token_id];
-    const std::string_view piece = vocab_token_view(vocab, static_cast<int32_t>(token_id));
-    if (entry.type == normal_type && is_printable_ascii_token(piece)) {
-      return static_cast<int32_t>(token_id);
-    }
-  }
-
-  return vocab.eos_id >= 0 ? vocab.eos_id : 0;
-}
-
-bool load_generation_vocab_from_llama(const std::string & model_path,
-                                      generation_load_state & state) {
+bool load_generation_reference_backend(const std::string & model_path,
+                                       generation_load_state & state) {
   llama_model_params model_params = llama_model_default_params();
   model_params.check_tensors = false;
   model_params.n_gpu_layers = 0;
@@ -1940,19 +1725,45 @@ bool load_generation_vocab_from_llama(const std::string & model_path,
     return false;
   }
 
-  if (!load_emel_vocab_from_llama(*vocab_ptr, state.model_data->vocab_data)) {
+  if (!emel::model::detail::load_vocab_from_gguf(
+          kv_binding_from_state(state),
+          state.model_data->vocab_data)) {
     return false;
   }
 
   state.model_data->params.n_vocab =
       static_cast<int32_t>(state.model_data->vocab_data.n_tokens);
-  state.backend.fallback_token_id =
-      find_generation_fallback_token_id(state.model_data->vocab_data);
-  state.backend.vocab = vocab_ptr;
-  state.backend.vocab_size = llama_vocab_n_tokens(vocab_ptr);
+  state.reference.vocab = vocab_ptr;
+  state.reference.vocab_size = llama_vocab_n_tokens(vocab_ptr);
+  state.reference.formatter =
+      emel::tools::generation_formatter_contract::resolve_reference_formatter_info(model.get());
+  if (!emel::tools::generation_formatter_contract::reference_binding_supported(
+          state.reference.formatter)) {
+    return false;
+  }
 
-  state.backend.model = std::move(model);
+  state.reference.model = std::move(model);
   return true;
+}
+
+bool load_emel_vocab_from_gguf_file(const std::string & model_path,
+                                    emel::model::data::vocab & vocab_out) {
+  generation_load_state state{};
+  if (!read_file_bytes(model_path, state.file_bytes) || state.file_bytes.empty()) {
+    return false;
+  }
+
+  uint32_t tensor_count = 0u;
+  const emel::error::type parse_err = parse_gguf_kv_storage(
+      state,
+      std::span<const uint8_t>{state.file_bytes.data(), state.file_bytes.size()},
+      *state.model_data,
+      tensor_count);
+  if (parse_err != emel::error::cast(emel::model::loader::error::none)) {
+    return false;
+  }
+
+  return emel::model::detail::load_vocab_from_gguf(kv_binding_from_state(state), vocab_out);
 }
 
 emel::error::type run_emel_initialize_generator(
@@ -2081,7 +1892,7 @@ argmax_summary select_argmax_from_logits(const float * logits, const int32_t voc
   return summary;
 }
 
-bool tokenize_reference_prompt(const initialize_backend & backend,
+bool tokenize_reference_prompt(const reference_backend & backend,
                                const emel::paritychecker::parity_options & opts,
                                std::vector<llama_token> & tokens_out) {
   if (backend.vocab == nullptr) {
@@ -2089,8 +1900,8 @@ bool tokenize_reference_prompt(const initialize_backend & backend,
   }
 
   std::string formatted_prompt = {};
-  if (!emel::tools::generation_formatter_contract::format_single_user_prompt(
-          backend.formatter_binding, opts.text, formatted_prompt)) {
+  if (!emel::tools::generation_formatter_contract::format_reference_single_user_prompt(
+          backend.formatter, opts.text, formatted_prompt)) {
     return false;
   }
 
@@ -2151,19 +1962,19 @@ bool tokenize_conditioned_prompt(generation_load_state & state,
   return true;
 }
 
-int32_t run_direct_reference_decode(initialize_backend & backend,
+int32_t run_direct_reference_decode(reference_backend & backend,
                                     llama_context * ctx,
                                     const llama_batch batch) {
   backend.direct_reference_decode_calls += 1;
   return llama_decode(ctx, batch);
 }
 
-float * read_direct_reference_logits(initialize_backend & backend, llama_context * ctx) {
+float * read_direct_reference_logits(reference_backend & backend, llama_context * ctx) {
   backend.direct_reference_logits_calls += 1;
   return llama_get_logits_ith(ctx, -1);
 }
 
-bool append_reference_piece(const initialize_backend & backend,
+bool append_reference_piece(const reference_backend & backend,
                             const llama_token token,
                             generation_result & result_out) {
   if (backend.vocab == nullptr || result_out.output_length >= result_out.output.size()) {
@@ -2260,7 +2071,23 @@ bool flush_rendered_output(emel::text::renderer::sm & renderer,
   return true;
 }
 
-llama_context_ptr make_reference_context(initialize_backend & backend) {
+bool initialize_emel_renderer(const emel::model::data & model_data,
+                              emel::text::renderer::sm & renderer) {
+  int32_t renderer_err = emel::error::cast(emel::text::renderer::error::none);
+  emel::text::renderer::event::initialize initialize_renderer_ev{model_data.vocab_data};
+  initialize_renderer_ev.strip_leading_space = false;
+  initialize_renderer_ev.stop_sequences = nullptr;
+  initialize_renderer_ev.stop_sequence_count = 0;
+  initialize_renderer_ev.error_out = &renderer_err;
+  return renderer.process_event(initialize_renderer_ev) &&
+         renderer_err == emel::error::cast(emel::text::renderer::error::none);
+}
+
+bool emel_token_is_stop(const emel::model::data::vocab & vocab, const int32_t token_id) {
+  return token_id == vocab.eos_id || token_id == vocab.eot_id;
+}
+
+llama_context_ptr make_reference_context(reference_backend & backend) {
   llama_context_params context_params = llama_context_default_params();
   context_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
   context_params.n_ctx = 0;
@@ -2278,7 +2105,7 @@ llama_context_ptr make_reference_context(initialize_backend & backend) {
   };
 }
 
-emel::error::type run_reference_generate(initialize_backend & backend,
+emel::error::type run_reference_generate(reference_backend & backend,
                                          const emel::paritychecker::parity_options & opts,
                                          generation_result & result_out) {
   if (backend.model == nullptr || backend.vocab == nullptr || backend.vocab_size <= 0) {
@@ -2521,30 +2348,35 @@ inline float read_debug_value(std::span<const uint16_t> values, const size_t idx
 }
 
 emel::error::type run_custom_native_generate(
-    const initialize_backend & backend_ref,
-    const emel::model::data & model_data,
+    generation_load_state & state,
     const emel::paritychecker::parity_options & opts,
     const native_layer_runner run_layer_fn,
     generation_result & result_out) {
-  if (backend_ref.vocab == nullptr || backend_ref.vocab_size <= 0 || run_layer_fn == nullptr) {
+  if (state.model_data == nullptr || run_layer_fn == nullptr) {
     return emel::error::cast(emel::generator::error::invalid_request);
   }
 
-  std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(backend_ref, opts, prompt_tokens) || prompt_tokens.empty()) {
+  std::vector<int32_t> prompt_tokens;
+  if (!tokenize_conditioned_prompt(state, opts, prompt_tokens) || prompt_tokens.empty()) {
     return emel::error::cast(emel::generator::error::invalid_request);
   }
 
   emel::generator::detail::native_backend backend = {};
-  if (emel::generator::detail::prepare(backend, model_data) !=
+  if (emel::generator::detail::prepare(backend, *state.model_data) !=
       emel::error::cast(emel::model::loader::error::none)) {
     return emel::error::cast(emel::generator::error::backend);
   }
 
+  emel::text::renderer::sm renderer = {};
+  if (!initialize_emel_renderer(*state.model_data, renderer)) {
+    return emel::error::cast(emel::generator::error::backend);
+  }
+
   result_out = {};
+  result_out.trace_available = false;
 
   for (size_t token_index = 0; token_index < prompt_tokens.size(); ++token_index) {
-    const int32_t token_id = static_cast<int32_t>(prompt_tokens[token_index]);
+    const int32_t token_id = prompt_tokens[token_index];
     const int32_t position = static_cast<int32_t>(token_index);
     if (!emel::generator::detail::copy_tensor_row(*backend.token_embedding.tensor, token_id, backend.hidden)) {
       return emel::error::cast(emel::generator::error::backend);
@@ -2564,14 +2396,13 @@ emel::error::type run_custom_native_generate(
   for (int32_t step = 0; step < opts.max_tokens; ++step) {
     const argmax_summary summary =
         select_argmax_from_logits(backend.bound_logits.data(), backend.n_vocab);
-    const llama_token selected = static_cast<llama_token>(summary.selected_token);
     append_trace_token(
         result_out.trace, summary.selected_token, summary.best_score, summary.second_best_score);
     result_out.tokens_generated += 1;
-    if (!append_reference_piece(backend_ref, selected, result_out)) {
+    if (!append_rendered_token(renderer, summary.selected_token, result_out)) {
       return emel::error::cast(emel::generator::error::backend);
     }
-    if (llama_vocab_is_eog(backend_ref.vocab, selected)) {
+    if (emel_token_is_stop(state.model_data->vocab_data, summary.selected_token)) {
       break;
     }
 
@@ -2590,6 +2421,10 @@ emel::error::type run_custom_native_generate(
     if (!emel::generator::detail::compute_logits(backend)) {
       return emel::error::cast(emel::generator::error::backend);
     }
+  }
+
+  if (!flush_rendered_output(renderer, result_out)) {
+    return emel::error::cast(emel::generator::error::backend);
   }
 
   return emel::error::cast(emel::generator::error::none);
@@ -2736,11 +2571,7 @@ emel::error::type run_attributed_native_generate(generation_load_state & state,
                                                  generation_result & result_out,
                                                  generation_attribution & attribution_out,
                                                  const emel::kernel::kernel_kind kernel_kind) {
-  const initialize_backend & backend_ref = state.backend;
   if (state.model_data == nullptr) {
-    return emel::error::cast(emel::generator::error::invalid_request);
-  }
-  if (backend_ref.vocab == nullptr || backend_ref.vocab_size <= 0) {
     return emel::error::cast(emel::generator::error::invalid_request);
   }
 
@@ -2758,14 +2589,7 @@ emel::error::type run_attributed_native_generate(generation_load_state & state,
   backend.kernel.set_kind(backend.kernel_kind);
 
   emel::text::renderer::sm renderer = {};
-  int32_t renderer_err = emel::error::cast(emel::text::renderer::error::none);
-  emel::text::renderer::event::initialize initialize_renderer_ev{state.model_data->vocab_data};
-  initialize_renderer_ev.strip_leading_space = false;
-  initialize_renderer_ev.stop_sequences = nullptr;
-  initialize_renderer_ev.stop_sequence_count = 0;
-  initialize_renderer_ev.error_out = &renderer_err;
-  if (!renderer.process_event(initialize_renderer_ev) ||
-      renderer_err != emel::error::cast(emel::text::renderer::error::none)) {
+  if (!initialize_emel_renderer(*state.model_data, renderer)) {
     return emel::error::cast(emel::generator::error::backend);
   }
 
@@ -2811,7 +2635,7 @@ emel::error::type run_attributed_native_generate(generation_load_state & state,
         })) {
       return emel::error::cast(emel::generator::error::backend);
     }
-    if (llama_vocab_is_eog(backend_ref.vocab, selected)) {
+    if (emel_token_is_stop(state.model_data->vocab_data, selected_token)) {
       attribution_out.decode_ns += elapsed_ns(decode_begin, attribution_clock::now());
       break;
     }
@@ -2875,20 +2699,22 @@ bool run_compute_logits_with_attribution(
   }
 
   const bool packed_q8_logits_path =
-      !backend.logits_input_q8_storage.empty() &&
-      backend.output.tensor != nullptr &&
-      static_cast<uint8_t>(backend.output.tensor->type) ==
-          emel::kernel::detail::dtype_q6_k_x8_q8_prepared;
+      emel::generator::detail::q8_input_path_supported(backend, backend.output);
   if (packed_q8_logits_path) {
+    const size_t block_count =
+        static_cast<size_t>(backend.n_embd) /
+        static_cast<size_t>(emel::generator::detail::quant::QK_K);
+    auto q8_input = std::span<emel::kernel::detail::quant::block_q8_k>(
+        backend.q8_input_storage.data(), block_count);
     return time_bucket_bool(attribution.logits_q8_prepare, [&] {
              return emel::generator::detail::quantize_vector_q8_k(
-                 backend.norm, backend.logits_input_q8_storage);
+                 backend.norm, q8_input);
            }) &&
         time_bucket_bool(attribution.logits_matmul, [&] {
           return emel::generator::detail::matmul_vector_q8_input(
               backend,
               backend.output,
-              backend.logits_input_q8_storage,
+              q8_input,
               backend.n_embd,
               backend.bound_logits);
         });
@@ -2915,26 +2741,25 @@ bool run_compute_logits_preselected_argmax_with_attribution(
   const emel::generator::detail::tensor_matrix & output_matrix =
       backend.output_argmax.tensor != nullptr ? backend.output_argmax : backend.output;
   const bool packed_q8_logits_path =
-      !backend.logits_input_q8_storage.empty() &&
-      output_matrix.tensor != nullptr &&
-      (static_cast<uint8_t>(output_matrix.tensor->type) == emel::kernel::detail::dtype_q6_k_x8 ||
-       static_cast<uint8_t>(output_matrix.tensor->type) ==
-           emel::kernel::detail::dtype_q6_k_x8_q8_argmax_prepared ||
-       static_cast<uint8_t>(output_matrix.tensor->type) ==
-           emel::kernel::detail::dtype_q6_k_x8_q8_prepared);
+      emel::generator::detail::q8_input_argmax_path_supported(backend, output_matrix);
   const bool direct_argmax_path =
       packed_q8_logits_path &&
       emel::generator::detail::preselected_argmax_direct_supported(backend);
   if (direct_argmax_path) {
+    const size_t block_count =
+        static_cast<size_t>(backend.n_embd) /
+        static_cast<size_t>(emel::generator::detail::quant::QK_K);
+    auto q8_input = std::span<emel::kernel::detail::quant::block_q8_k>(
+        backend.q8_input_storage.data(), block_count);
     return time_bucket_bool(attribution.logits_q8_prepare, [&] {
              return emel::generator::detail::quantize_vector_q8_k(
-                 backend.norm, backend.logits_input_q8_storage);
+                 backend.norm, q8_input);
            }) &&
         time_bucket_bool(attribution.logits_matmul, [&] {
           return emel::generator::detail::matmul_vector_q8_input_argmax(
               backend,
               output_matrix,
-              backend.logits_input_q8_storage,
+              q8_input,
               backend.n_embd,
               selected_index,
               selected_score);
@@ -4667,7 +4492,7 @@ bool run_layer_with_scalar_attention_reference_cache(
 
 bool run_prefill_with_scalar_attention_reference_cache(
     emel::generator::detail::native_backend & backend,
-    initialize_backend & reference_backend,
+    reference_backend & reference_backend,
     std::span<const int32_t> prefix_tokens,
     const bool inject_key_cache,
     const bool inject_value_cache) {
@@ -8166,7 +7991,7 @@ void dump_prompt0_reference_attn_out_ffn_debug(
   std::vector<float> expected_reference_attn_ctx = {};
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx != nullptr &&
       run_reference_prefix_decode(reference_ctx.get(),
                                   std::span<const llama_token>(prompt_tokens.data(), 1u),
@@ -8343,7 +8168,7 @@ void dump_generation_selected_step_stage_debug(
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "generation_debug.gen_step: tokenize failed\n");
     return;
   }
@@ -8359,7 +8184,7 @@ void dump_generation_selected_step_stage_debug(
   }
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr ||
       !run_reference_prefix_decode(
           reference_ctx.get(), prompt_tokens, std::span<const int32_t>(generated_prefix))) {
@@ -8983,7 +8808,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     return;
   }
 
@@ -9727,16 +9552,16 @@ void dump_scalar_attention_debug(const generation_load_state & state,
       !run_prefill_with_scalar_attention_matmul_mode(
           q6_reference_backend, prefix_tokens, reference_q6_only) ||
       !run_prefill_with_scalar_attention_reference_cache(
-          reference_key_cache_backend, const_cast<initialize_backend &>(state.backend), prefix_tokens, true, false) ||
+          reference_key_cache_backend, const_cast<reference_backend &>(state.reference), prefix_tokens, true, false) ||
       !run_prefill_with_scalar_attention_reference_cache(
           reference_value_cache_backend,
-          const_cast<initialize_backend &>(state.backend),
+          const_cast<reference_backend &>(state.reference),
           prefix_tokens,
           false,
           true) ||
       !run_prefill_with_scalar_attention_reference_cache(
           reference_kv_cache_backend,
-          const_cast<initialize_backend &>(state.backend),
+          const_cast<reference_backend &>(state.reference),
           prefix_tokens,
           true,
           true) ||
@@ -9873,22 +9698,22 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   const int32_t emel_token = emel_result.trace.token_ids[static_cast<size_t>(token_mismatch_index)];
   const int32_t reference_token =
       reference_result.trace.token_ids[static_cast<size_t>(token_mismatch_index)];
-  if (state.backend.model != nullptr && state.backend.model->layers.size() >= 2) {
+  if (state.reference.model != nullptr && state.reference.model->layers.size() >= 2) {
     for (int32_t layer = 0; layer < 2; ++layer) {
-      const auto & ref_layer = state.backend.model->layers[static_cast<size_t>(layer)];
+      const auto & ref_layer = state.reference.model->layers[static_cast<size_t>(layer)];
       std::fprintf(stdout,
-                   "generation_debug.reference.layer%d.transforms: bo=%d wo_s=%d "
+                   "generation_debug.reference.layer%d.transforms: bo=%d wo_scale=%d "
                    "ffn_gate_b=%d ffn_up_b=%d ffn_down_b=%d "
-                   "ffn_gate_s=%d ffn_up_s=%d ffn_down_s=%d\n",
+                   "ffn_gate_scale=%d ffn_up_scale=%d ffn_down_scale=%d\n",
                    layer,
                    ref_layer.bo != nullptr ? 1 : 0,
-                   ref_layer.wo_s != nullptr ? 1 : 0,
+                   ref_layer.wo_scale != nullptr ? 1 : 0,
                    ref_layer.ffn_gate_b != nullptr ? 1 : 0,
                    ref_layer.ffn_up_b != nullptr ? 1 : 0,
                    ref_layer.ffn_down_b != nullptr ? 1 : 0,
-                   ref_layer.ffn_gate_s != nullptr ? 1 : 0,
-                   ref_layer.ffn_up_s != nullptr ? 1 : 0,
-                   ref_layer.ffn_down_s != nullptr ? 1 : 0);
+                   ref_layer.ffn_gate_scale != nullptr ? 1 : 0,
+                   ref_layer.ffn_up_scale != nullptr ? 1 : 0,
+                   ref_layer.ffn_down_scale != nullptr ? 1 : 0);
     }
   }
   const argmax_summary dispatch_summary =
@@ -10276,7 +10101,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
   const auto dump_alt_generation = [&](const char * label, const native_layer_runner run_layer_fn) {
     generation_result alt_result = {};
     const emel::error::type alt_err = run_custom_native_generate(
-        state.backend, *state.model_data, opts, run_layer_fn, alt_result);
+        const_cast<generation_load_state &>(state), opts, run_layer_fn, alt_result);
     if (alt_err == emel::error::cast(emel::generator::error::none)) {
       std::fprintf(stdout,
                    "generation_debug.alt.%s: match=%d token_mismatch=%d "
@@ -10323,7 +10148,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
       "generation_debug.flash.output_exact", output_exact_backend, emel_token, reference_token);
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr) {
     std::fprintf(stdout, "generation_debug.reference: unable to create reference context\n");
     return;
@@ -10373,7 +10198,7 @@ void dump_scalar_attention_debug(const generation_load_state & state,
                reference_logits[reference_token]);
 }
 
-std::string_view token_piece_view(const initialize_backend & backend, const int32_t token_id) {
+std::string_view token_piece_view(const reference_backend & backend, const int32_t token_id) {
   if (backend.vocab == nullptr || token_id < 0) {
     return {};
   }
@@ -10396,7 +10221,7 @@ void dump_generation_result(const char * label, const generation_result & result
 }
 
 void dump_generation_trace_window(const char * label,
-                                  const initialize_backend & backend,
+                                  const reference_backend & backend,
                                   const generation_result & result,
                                   const int32_t center_index) {
   const int32_t start = std::max(0, center_index - 2);
@@ -10918,8 +10743,8 @@ bool capture_reference_graph_for_tokens(const generation_load_state & state,
   context_params.cb_eval = capture_reference_eval_tensor;
   context_params.cb_eval_user_data = &graph_capture;
   llama_context_ptr ctx = llama_context_ptr{
-      state.backend.model != nullptr
-          ? llama_init_from_model(state.backend.model.get(), context_params)
+      state.reference.model != nullptr
+          ? llama_init_from_model(state.reference.model.get(), context_params)
           : nullptr,
       llama_free,
   };
@@ -10979,8 +10804,8 @@ bool capture_reference_graph_for_generation_prefix(const generation_load_state &
   context_params.cb_eval = capture_reference_eval_tensor;
   context_params.cb_eval_user_data = &graph_capture;
   llama_context_ptr ctx = llama_context_ptr{
-      state.backend.model != nullptr
-          ? llama_init_from_model(state.backend.model.get(), context_params)
+      state.reference.model != nullptr
+          ? llama_init_from_model(state.reference.model.get(), context_params)
           : nullptr,
       llama_free,
   };
@@ -10995,7 +10820,7 @@ bool capture_reference_graph(const generation_load_state & state,
                              const emel::paritychecker::parity_options & opts,
                              reference_graph_capture & graph_capture) {
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     return false;
   }
   return capture_reference_graph_for_tokens(state, prompt_tokens, graph_capture);
@@ -11942,8 +11767,8 @@ void dump_logits_compare(const generation_load_state & state,
   context_params.cb_eval = capture_reference_eval_tensor;
   context_params.cb_eval_user_data = &graph_capture;
   llama_context_ptr ctx = llama_context_ptr{
-      state.backend.model != nullptr
-          ? llama_init_from_model(state.backend.model.get(), context_params)
+      state.reference.model != nullptr
+          ? llama_init_from_model(state.reference.model.get(), context_params)
           : nullptr,
       llama_free,
   };
@@ -11953,7 +11778,7 @@ void dump_logits_compare(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "tensor_compare.logits: tokenize failed\n");
     return;
   }
@@ -11996,7 +11821,7 @@ void dump_logits_compare(const generation_load_state & state,
   int32_t reference_best = 0;
   float emel_best_score = emel_logits[0];
   float reference_best_score = reference_logits[0];
-  for (int32_t idx = 0; idx < state.backend.vocab_size; ++idx) {
+  for (int32_t idx = 0; idx < state.reference.vocab_size; ++idx) {
     const float emel_score = emel_logits[static_cast<size_t>(idx)];
     const float reference_score = reference_logits[idx];
     const float diff = std::fabs(emel_score - reference_score);
@@ -12036,7 +11861,7 @@ void dump_generation_tensor_compare(generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "tensor_compare: tokenize failed\n");
     return;
   }
@@ -12363,7 +12188,7 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.state: tokenize failed\n");
     return;
   }
@@ -12632,7 +12457,7 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
       [&](const char * label, const native_layer_runner run_layer_fn) {
         generation_result alt_result = {};
         const emel::error::type alt_err = run_custom_native_generate(
-            state.backend, *state.model_data, opts, run_layer_fn, alt_result);
+            const_cast<generation_load_state &>(state), opts, run_layer_fn, alt_result);
         if (alt_err == emel::error::cast(emel::generator::error::none)) {
           std::fprintf(stdout,
                        "generation_debug.mode_full.%s: match=%d token_mismatch=%d "
@@ -12692,7 +12517,7 @@ void dump_generation_prefix_state_debug(const generation_load_state & state,
   dump_full_generation_mode("reference_q236", run_layer_with_reference_q236_scalar_attention);
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr ||
       !run_reference_prefix_decode(reference_ctx.get(), prompt_tokens, generated_prefix)) {
     std::fprintf(stdout, "generation_debug.state: reference decode replay failed\n");
@@ -13581,7 +13406,7 @@ void dump_generation_prefix_timeline_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.timeline: tokenize failed\n");
     return;
   }
@@ -13635,7 +13460,7 @@ void dump_generation_prefix_timeline_debug(const generation_load_state & state,
   };
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr) {
     std::fprintf(stdout, "generation_debug.timeline: reference context failed\n");
     return;
@@ -13983,7 +13808,7 @@ void dump_generation_q23_timeline_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.q23_timeline: tokenize failed\n");
     return;
   }
@@ -14073,7 +13898,7 @@ void dump_generation_reference_q_timeline_debug(const generation_load_state & st
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.qref_timeline: tokenize failed\n");
     return;
   }
@@ -14234,12 +14059,12 @@ void dump_generation_q23_stage_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "generation_debug.q23_stage: tokenize failed\n");
     return;
   }
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr) {
     std::fprintf(stdout, "generation_debug.q23_stage: reference context failed\n");
     return;
@@ -14615,7 +14440,7 @@ void dump_generation_reference_q_stage_debug(const generation_load_state & state
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "generation_debug.qref_stage: tokenize failed\n");
     return;
   }
@@ -15374,7 +15199,7 @@ void dump_generation_gen0_attention_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "generation_debug.gen0: tokenize failed\n");
     return;
   }
@@ -15398,7 +15223,7 @@ void dump_generation_gen0_attention_debug(const generation_load_state & state,
   }
 
   llama_context_ptr reference_ctx =
-      make_reference_context(const_cast<initialize_backend &>(state.backend));
+      make_reference_context(const_cast<reference_backend &>(state.reference));
   if (reference_ctx == nullptr ||
       !run_reference_prefix_decode(reference_ctx.get(), prompt_tokens, generated_prefix)) {
     std::fprintf(stdout, "generation_debug.gen0: reference decode replay failed\n");
@@ -15587,7 +15412,7 @@ void dump_generation_target_attention_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens) || prompt_tokens.empty()) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens) || prompt_tokens.empty()) {
     std::fprintf(stdout, "generation_debug.target: tokenize failed\n");
     return;
   }
@@ -15619,7 +15444,7 @@ void dump_generation_target_attention_debug(const generation_load_state & state,
     }
 
     llama_context_ptr reference_ctx =
-        make_reference_context(const_cast<initialize_backend &>(state.backend));
+        make_reference_context(const_cast<reference_backend &>(state.reference));
     if (reference_ctx == nullptr ||
         !run_reference_prefix_decode(reference_ctx.get(), prompt_tokens, generated_prefix)) {
       std::fprintf(stdout, "generation_debug.target: reference decode replay failed\n");
@@ -15775,7 +15600,7 @@ void dump_generation_residual_l2_debug(const generation_load_state & state,
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.residual_l2: tokenize failed\n");
     return;
   }
@@ -15938,7 +15763,7 @@ void dump_generation_live_backend_prefix_debug(const generation_load_state & sta
   }
 
   std::vector<llama_token> prompt_tokens;
-  if (!tokenize_reference_prompt(state.backend, opts, prompt_tokens)) {
+  if (!tokenize_reference_prompt(state.reference, opts, prompt_tokens)) {
     std::fprintf(stdout, "generation_debug.live: tokenize failed\n");
     return;
   }
@@ -16429,10 +16254,10 @@ void dump_reference_decode_seam(const generation_load_state & state) {
   std::fprintf(stdout,
                "reference_decode_seams: emel_decode_calls=%d emel_logits_calls=%d "
                "reference_decode_calls=%d reference_logits_calls=%d\n",
-               state.backend.emel_reference_decode_calls,
-               state.backend.emel_reference_logits_calls,
-               state.backend.direct_reference_decode_calls,
-               state.backend.direct_reference_logits_calls);
+               state.reference.emel_reference_decode_calls,
+               state.reference.emel_reference_logits_calls,
+               state.reference.direct_reference_decode_calls,
+               state.reference.direct_reference_logits_calls);
   std::fprintf(stdout,
                "kernel_dispatch: kind=%s calls=%" PRIu64 "\n",
                kernel_kind_name(kernel_kind),
@@ -16535,8 +16360,8 @@ void dump_generation_failure_surface(generation_load_state & state,
                    emel_result->trace.top_score_gaps[static_cast<size_t>(token_mismatch_index)],
                    reference_result->trace.token_ids[static_cast<size_t>(token_mismatch_index)],
                    reference_result->trace.top_score_gaps[static_cast<size_t>(token_mismatch_index)]);
-      dump_generation_trace_window("emel", state.backend, *emel_result, token_mismatch_index);
-      dump_generation_trace_window("reference", state.backend, *reference_result, token_mismatch_index);
+      dump_generation_trace_window("emel", state.reference, *emel_result, token_mismatch_index);
+      dump_generation_trace_window("reference", state.reference, *reference_result, token_mismatch_index);
     }
     dump_generation_live_backend_prefix_debug(state, opts, *emel_result, *reference_result);
     dump_generation_gen0_attention_debug(state, opts, *emel_result, *reference_result);
@@ -16681,6 +16506,88 @@ bool decode_string_array_count(const generation_load_state & state,
   return true;
 }
 
+bool decode_integer_array_first_nonzero(const generation_load_state & state,
+                                        const emel::gguf::loader::kv_entry & entry,
+                                        int32_t & value_out) {
+  const std::span<const uint8_t> bytes = kv_value_view(state, entry);
+  namespace constants = emel::gguf::loader::detail::constants;
+
+  if (entry.value_type != constants::gguf_type_array ||
+      bytes.size() < sizeof(uint32_t) + sizeof(uint64_t)) {
+    return false;
+  }
+
+  const uint32_t element_type = read_u32_le(bytes.first(sizeof(uint32_t)));
+  const uint64_t count = read_u64_le(bytes.subspan(sizeof(uint32_t), sizeof(uint64_t)));
+  const std::span<const uint8_t> payload =
+      bytes.subspan(sizeof(uint32_t) + sizeof(uint64_t));
+
+  size_t element_size = 0u;
+  switch (element_type) {
+    case constants::gguf_type_uint8:
+    case constants::gguf_type_int8:
+      element_size = 1u;
+      break;
+    case constants::gguf_type_uint16:
+    case constants::gguf_type_int16:
+      element_size = 2u;
+      break;
+    case constants::gguf_type_uint32:
+    case constants::gguf_type_int32:
+      element_size = 4u;
+      break;
+    case constants::gguf_type_uint64:
+    case constants::gguf_type_int64:
+      element_size = 8u;
+      break;
+    default:
+      return false;
+  }
+
+  if (count == 0u || payload.size() != count * element_size) {
+    return false;
+  }
+
+  for (uint64_t index = 0u; index < count; ++index) {
+    const std::span<const uint8_t> element =
+        payload.subspan(static_cast<size_t>(index * element_size), element_size);
+    uint64_t raw_value = 0u;
+    switch (element_type) {
+      case constants::gguf_type_uint8:
+        raw_value = element[0];
+        break;
+      case constants::gguf_type_int8:
+        raw_value = static_cast<uint64_t>(static_cast<int8_t>(element[0]));
+        break;
+      case constants::gguf_type_uint16:
+      case constants::gguf_type_int16:
+        raw_value = static_cast<uint64_t>(element[0]) |
+                    (static_cast<uint64_t>(element[1]) << 8u);
+        break;
+      case constants::gguf_type_uint32:
+      case constants::gguf_type_int32:
+        raw_value = read_u32_le(element);
+        break;
+      case constants::gguf_type_uint64:
+      case constants::gguf_type_int64:
+        raw_value = read_u64_le(element);
+        break;
+      default:
+        return false;
+    }
+
+    if (raw_value == 0u ||
+        raw_value > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+      continue;
+    }
+
+    value_out = static_cast<int32_t>(raw_value);
+    return true;
+  }
+
+  return false;
+}
+
 bool decode_float_value(const generation_load_state & state,
                         const emel::gguf::loader::kv_entry & entry,
                         float & value_out) {
@@ -16804,7 +16711,8 @@ emel::error::type populate_model_metadata(const generation_load_state & state,
   copy_name(model_data.architecture_name, architecture);
   const bool is_llama = architecture == "llama";
   const bool is_qwen3 = architecture == "qwen3";
-  if (!is_llama && !is_qwen3) {
+  const bool is_lfm2 = emel::model::is_lfm2_execution_architecture(architecture);
+  if (!is_llama && !is_qwen3 && !is_lfm2) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
@@ -16911,6 +16819,34 @@ emel::error::type populate_model_metadata(const generation_load_state & state,
     }
   }
 
+  if (is_lfm2) {
+    int32_t lfm2_head_count_kv = 0;
+    if (!assign_i32("lfm2.context_length", model_data.params.n_ctx) ||
+        !assign_i32("lfm2.embedding_length", model_data.params.n_embd) ||
+        !assign_i32("lfm2.feed_forward_length", model_data.params.n_ff) ||
+        !assign_i32("lfm2.attention.head_count", model_data.params.n_head) ||
+        !assign_i32("lfm2.block_count", model_data.params.n_layer) ||
+        !assign_i32("lfm2.vocab_size", model_data.params.n_vocab) ||
+        !assign_i32("lfm2.shortconv.l_cache", model_data.params.shortconv_l_cache) ||
+        !assign_f32(
+            "lfm2.attention.layer_norm_rms_epsilon",
+            model_data.params.attention_layer_norm_rms_epsilon) ||
+        !assign_f32("lfm2.rope.freq_base", model_data.params.rope_freq_base)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+
+    const auto * head_count_kv_entry = find_kv_entry(state, "lfm2.attention.head_count_kv");
+    if (head_count_kv_entry == nullptr ||
+        !decode_integer_array_first_nonzero(state, *head_count_kv_entry, lfm2_head_count_kv)) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
+
+    model_data.params.n_head_kv = lfm2_head_count_kv;
+    if (model_data.params.n_embd_out == 0) {
+      model_data.params.n_embd_out = model_data.params.n_embd;
+    }
+  }
+
   const auto * tokens_entry = find_kv_entry(state, "tokenizer.tokens");
   if (tokens_entry != nullptr) {
     uint32_t token_count = 0u;
@@ -16947,7 +16883,6 @@ void resolve_generation_formatter_binding(generation_load_state & state) {
       .support = emel::tools::generation_formatter_contract::support_kind::unsupported_template,
       .contract = emel::tools::generation_formatter_contract::k_unsupported_template_contract,
     };
-    state.backend.formatter_binding = state.formatter_binding;
     return;
   }
 
@@ -16964,13 +16899,23 @@ void resolve_generation_formatter_binding(generation_load_state & state) {
       emel::tools::generation_formatter_contract::resolve_primary_template_binding(
           primary_template,
           named_template_count);
-  state.backend.formatter_binding = state.formatter_binding;
 }
 
 void print_generation_formatter_contract(FILE * stream,
-                                         const generation_load_state & state) {
+                                         const generation_load_state & state,
+                                         const maintained_generation_fixture & fixture) {
   if (stream == nullptr || state.formatter_binding.contract.empty()) {
     return;
+  }
+  std::fprintf(stream, "fixture_path=%s\n", fixture.fixture_rel.data());
+  const std::string_view architecture =
+      state.model_data != nullptr ? emel::model::architecture_name_view(*state.model_data)
+                                  : std::string_view{};
+  if (!architecture.empty()) {
+    std::fprintf(stream,
+                 "architecture_contract=%.*s\n",
+                 static_cast<int>(architecture.size()),
+                 architecture.data());
   }
   std::fprintf(stream,
                "formatter_contract=%.*s\n",
@@ -16991,70 +16936,14 @@ emel::error::type run_emel_parse_model(void * owner,
     static_cast<size_t>(req.file_size),
   };
 
-  reset_gguf_capture(state);
-  const emel::gguf::loader::event::probe_done_fn probe_done_cb{&state, on_probe_done};
-  const emel::gguf::loader::event::probe_error_fn probe_error_cb{&state, on_probe_error};
-  emel::gguf::loader::requirements requirements = {};
-  const emel::gguf::loader::event::probe probe_ev{
-    file_image,
-    requirements,
-    probe_done_cb,
-    probe_error_cb,
-  };
-
-  if (!state.gguf_loader.process_event(probe_ev) ||
-      !state.gguf.probe_done ||
-      state.gguf.probe_error) {
-    return map_gguf_error(state.gguf.err);
+  uint32_t tensor_count = 0u;
+  const emel::error::type parse_err =
+      parse_gguf_kv_storage(state, file_image, req.model_data, tensor_count);
+  if (parse_err != emel::error::cast(emel::model::loader::error::none)) {
+    return parse_err;
   }
 
-  if (requirements.tensor_count > static_cast<uint32_t>(emel::model::data::k_max_tensors)) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
-
-  const uint64_t arena_bytes =
-      emel::gguf::loader::detail::required_kv_arena_bytes(requirements);
-  if (arena_bytes == std::numeric_limits<uint64_t>::max()) {
-    return emel::error::cast(emel::model::loader::error::backend_error);
-  }
-
-  state.kv_arena.resize(static_cast<size_t>(arena_bytes));
-  state.kv_entries.resize(requirements.kv_count);
-
-  reset_gguf_capture(state);
-  const emel::gguf::loader::event::bind_done_fn bind_done_cb{&state, on_bind_done};
-  const emel::gguf::loader::event::bind_error_fn bind_error_cb{&state, on_bind_error};
-  const emel::gguf::loader::event::bind_storage bind_ev{
-    std::span<uint8_t>{state.kv_arena},
-    std::span<emel::gguf::loader::kv_entry>{state.kv_entries},
-    std::span<emel::model::data::tensor_record>{req.model_data.tensors.data(),
-                                                requirements.tensor_count},
-    bind_done_cb,
-    bind_error_cb,
-  };
-
-  if (!state.gguf_loader.process_event(bind_ev) ||
-      !state.gguf.bind_done ||
-      state.gguf.bind_error) {
-    return map_gguf_error(state.gguf.err);
-  }
-
-  reset_gguf_capture(state);
-  const emel::gguf::loader::event::parse_done_fn parse_done_cb{&state, on_parse_done};
-  const emel::gguf::loader::event::parse_error_fn parse_error_cb{&state, on_parse_error};
-  const emel::gguf::loader::event::parse parse_ev{
-    file_image,
-    parse_done_cb,
-    parse_error_cb,
-  };
-
-  if (!state.gguf_loader.process_event(parse_ev) ||
-      !state.gguf.parse_done ||
-      state.gguf.parse_error) {
-    return map_gguf_error(state.gguf.err);
-  }
-
-  req.model_data.n_tensors = requirements.tensor_count;
+  req.model_data.n_tensors = tensor_count;
   if (!copy_tensor_names(file_image, req.model_data)) {
     return emel::error::cast(emel::model::loader::error::backend_error);
   }
@@ -17174,10 +17063,7 @@ emel::error::type run_emel_validate_structure(void *,
 emel::error::type run_emel_validate_architecture(
     void *,
     const emel::model::loader::event::load & req) {
-  const std::string_view architecture = emel::model::architecture_name_view(req.model_data);
-  return (architecture == "llama" || architecture == "qwen3")
-             ? emel::error::cast(emel::model::loader::error::none)
-             : emel::error::cast(emel::model::loader::error::model_invalid);
+  return emel::model::validate_execution_contract(req.model_data);
 }
 
 constexpr double k_f32_rtol = 1e-5;
@@ -18487,8 +18373,8 @@ int run_tokenizer_parity(const emel::paritychecker::parity_options & opts) {
   }
 
   auto emel_vocab = std::make_unique<emel::model::data::vocab>();
-  if (!load_emel_vocab_from_llama(*llama_vocab_ptr, *emel_vocab)) {
-    std::fprintf(stderr, "failed to map llama vocab into emel layout\n");
+  if (!load_emel_vocab_from_gguf_file(opts.model_path, *emel_vocab)) {
+    std::fprintf(stderr, "failed to load emel vocab from gguf metadata\n");
     return 1;
   }
 
@@ -18632,11 +18518,12 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     std::fprintf(stderr, "generation load failed: missing model file %s\n", opts.model_path.c_str());
     return 1;
   }
-  if (!is_expected_generation_fixture(opts.model_path)) {
-    const std::filesystem::path expected_path = expected_generation_fixture_path();
+  const maintained_generation_fixture * fixture = find_generation_fixture(opts.model_path);
+  if (fixture == nullptr) {
+    const std::string supported_fixtures = maintained_generation_fixture_list();
     std::fprintf(stderr,
-                 "generation requires canonical fixture %s, got %s\n",
-                 expected_path.string().c_str(),
+                 "generation requires maintained fixture path (%s), got %s\n",
+                 supported_fixtures.c_str(),
                  opts.model_path.c_str());
     return 1;
   }
@@ -18662,13 +18549,13 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
 
   if (!state.model_loader.process_event(request) || !state.load.done || state.load.error) {
     resolve_generation_formatter_binding(state);
-    print_generation_formatter_contract(stderr, state);
+    print_generation_formatter_contract(stderr, state, *fixture);
     const emel::error::type err = state.load.error
                                       ? state.load.err
                                       : emel::error::cast(emel::model::loader::error::internal_error);
     std::fprintf(stderr,
                  "generation load failed (fixture=%s err=%s)\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  model_loader_error_name(err));
     return 1;
   }
@@ -18676,26 +18563,26 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   resolve_generation_formatter_binding(state);
   if (!emel::tools::generation_formatter_contract::binding_supported(
           state.formatter_binding)) {
-    print_generation_formatter_contract(stderr, state);
+    print_generation_formatter_contract(stderr, state, *fixture);
     std::fprintf(stderr,
                  "generation load failed (fixture=%s err=%s)\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  model_loader_error_name(
                      emel::error::cast(emel::model::loader::error::model_invalid)));
     return 1;
   }
 
-  if (!load_generation_vocab_from_llama(opts.model_path, state)) {
-    print_generation_formatter_contract(stderr, state);
+  if (!load_generation_reference_backend(opts.model_path, state)) {
+    print_generation_formatter_contract(stderr, state, *fixture);
     std::fprintf(stderr,
                  "generation vocab load failed (fixture=%s)\n",
-                 k_generation_fixture_name);
+                 fixture->name.data());
     return 1;
   }
 
   const emel::error::type initialize_err = run_emel_initialize_generator(state, opts);
   if (initialize_err != emel::error::cast(emel::generator::error::none)) {
-    print_generation_formatter_contract(stderr, state);
+    print_generation_formatter_contract(stderr, state, *fixture);
     int32_t output_weight_count = 0;
     int32_t q_norm_count = 0;
     int32_t k_norm_count = 0;
@@ -18748,12 +18635,12 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     }
     std::fprintf(stderr,
                  "generation initialize failed (fixture=%s err=%s)\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  generator_error_name(initialize_err));
     return 1;
   }
 
-  reset_reference_decode_seam(state.backend);
+  reset_reference_decode_seam(state.reference);
   generation_result emel_result{};
   const emel::error::type generation_err =
       run_emel_generate(state,
@@ -18762,10 +18649,10 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                         emel_result.output_length,
                         emel_result.trace);
   if (generation_err != emel::error::cast(emel::generator::error::none)) {
-    print_generation_formatter_contract(stderr, state);
+    print_generation_formatter_contract(stderr, state, *fixture);
     std::fprintf(stderr,
                  "generation error (fixture=%s err=%s generated_tokens=%d output_bytes=%zu)\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  generator_error_name(generation_err),
                  state.generation.tokens_generated,
                  state.generation.output_length);
@@ -18809,7 +18696,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  "flash_dispatch_calls=%" PRIu64
                  " optimized_flash_dispatch_calls=%" PRIu64
                  " shared_flash_dispatch_calls=%" PRIu64 ")\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  kernel_kind_name(generation_kernel_kind),
                  flash_dispatch_calls,
                  optimized_flash_dispatch_calls,
@@ -18823,7 +18710,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  "generation non-arm flash attribution failed (fixture=%s kernel_kind=%s "
                  "optimized_flash_dispatch_calls=%" PRIu64
                  " shared_flash_dispatch_calls=%" PRIu64 ")\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  kernel_kind_name(generation_kernel_kind),
                  optimized_flash_dispatch_calls,
                  shared_flash_dispatch_calls);
@@ -18832,16 +18719,16 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   }
   if (optimized_q2_dispatch_calls != 0u || shared_q2_dispatch_calls != 0u ||
       optimized_q3_dispatch_calls != 0u || shared_q3_dispatch_calls != 0u ||
-      optimized_q6_dispatch_calls != 0u || shared_q6_dispatch_calls != 0u) {
+      shared_q6_dispatch_calls != 0u) {
     std::fprintf(stderr,
-                 "generation quantized legacy-dispatch proof failed (fixture=%s kernel_kind=%s "
+                 "generation quantized dispatch proof failed (fixture=%s kernel_kind=%s "
                  "optimized_q2_dispatch_calls=%" PRIu64
                  " shared_q2_dispatch_calls=%" PRIu64
                  " optimized_q3_dispatch_calls=%" PRIu64
                  " shared_q3_dispatch_calls=%" PRIu64
                  " optimized_q6_dispatch_calls=%" PRIu64
                  " shared_q6_dispatch_calls=%" PRIu64 ")\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  kernel_kind_name(generation_kernel_kind),
                  optimized_q2_dispatch_calls,
                  shared_q2_dispatch_calls,
@@ -18852,23 +18739,11 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
-  if (native_q8_0_dispatch_calls == 0u && packed_q8_0_dispatch_calls == 0u) {
-    std::fprintf(stderr,
-                 "generation q8_0 dispatch proof failed (fixture=%s kernel_kind=%s "
-                 "native_q8_0_dispatch_calls=%" PRIu64
-                 " packed_q8_0_dispatch_calls=%" PRIu64 ")\n",
-                 k_generation_fixture_name,
-                 kernel_kind_name(generation_kernel_kind),
-                 native_q8_0_dispatch_calls,
-                 packed_q8_0_dispatch_calls);
-    dump_generation_failure_surface(state, &emel_result, nullptr, opts);
-    return 1;
-  }
   if (runtime_contract.disallowed_fallback != 0u || runtime_contract.explicit_no_claim != 0u) {
     std::fprintf(stderr,
                  "generation quantized contract failed (fixture=%s native_quantized=%u "
                  "approved_dense_f32_by_contract=%u disallowed_fallback=%u explicit_no_claim=%u)\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  runtime_contract.native_quantized,
                  runtime_contract.approved_dense_f32_by_contract,
                  runtime_contract.disallowed_fallback,
@@ -18889,7 +18764,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                    "runtime_disallowed_fallback=%u runtime_explicit_no_claim=%u "
                    "audit_native_quantized=%u audit_approved_dense_f32_by_contract=%u "
                    "audit_disallowed_fallback=%u audit_explicit_no_claim=%u)\n",
-                   k_generation_fixture_name,
+                   fixture->name.data(),
                    runtime_contract.native_quantized,
                    runtime_contract.approved_dense_f32_by_contract,
                    runtime_contract.disallowed_fallback,
@@ -18904,13 +18779,13 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   }
 
   const std::filesystem::path baseline_path = opts.write_generation_baseline_path.empty()
-      ? default_generation_baseline_path(opts)
+      ? default_generation_baseline_path(*fixture, opts)
       : std::filesystem::path(opts.write_generation_baseline_path);
   if (!opts.write_generation_baseline_path.empty()) {
-    if (!write_generation_baseline_file(baseline_path, opts, emel_result)) {
+    if (!write_generation_baseline_file(baseline_path, *fixture, opts, emel_result)) {
       std::fprintf(stderr,
                    "generation baseline write failed (fixture=%s baseline=%s)\n",
-                   k_generation_fixture_name,
+                   fixture->name.data(),
                    baseline_path.string().c_str());
       dump_generation_failure_surface(state, &emel_result, nullptr, opts);
       return 1;
@@ -18919,7 +18794,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     std::fprintf(stdout,
                  "generation baseline written (fixture=%s baseline=%s contract=%.*s "
                  "prompt_bytes=%zu max_tokens=%d generated_tokens=%d output_bytes=%zu)\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  baseline_path.string().c_str(),
                  static_cast<int>(k_generation_baseline_contract.size()),
                  k_generation_baseline_contract.data(),
@@ -18927,7 +18802,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  opts.max_tokens,
                  emel_result.tokens_generated,
                  emel_result.output_length);
-    print_generation_formatter_contract(stdout, state);
+    print_generation_formatter_contract(stdout, state, *fixture);
     std::fprintf(stdout,
                  "reference_impl: source=%.*s contract=%.*s baseline=%s\n",
                  static_cast<int>(k_generation_baseline_source.size()),
@@ -18943,18 +18818,18 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
   if (!load_generation_baseline_file(baseline_path, baseline_record)) {
     std::fprintf(stderr,
                  "generation baseline load failed (fixture=%s baseline=%s)\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  baseline_path.string().c_str());
     dump_generation_failure_surface(state, &emel_result, nullptr, opts);
     return 1;
   }
-  if (baseline_record.fixture_name != k_generation_fixture_name ||
+  if (baseline_record.fixture_name != fixture->name ||
       baseline_record.prompt != opts.text ||
       baseline_record.max_tokens != opts.max_tokens) {
     std::fprintf(stderr,
                  "generation baseline contract mismatch (fixture=%s baseline=%s "
                  "baseline_fixture=%s baseline_prompt_bytes=%zu baseline_max_tokens=%d)\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  baseline_path.string().c_str(),
                  baseline_record.fixture_name.c_str(),
                  baseline_record.prompt.size(),
@@ -18969,7 +18844,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     std::fprintf(stderr,
                  "generation parity mismatch (fixture=%s emel_tokens=%d reference_tokens=%d "
                  "emel_bytes=%zu reference_bytes=%zu first_mismatch=%zu)\n",
-                 k_generation_fixture_name,
+                 fixture->name.data(),
                  emel_result.tokens_generated,
                  reference_result.tokens_generated,
                  emel_result.output_length,
@@ -18984,7 +18859,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                "output_bytes=%zu flash_dispatch_calls=%" PRIu64
                " optimized_flash_dispatch_calls=%" PRIu64
                " shared_flash_dispatch_calls=%" PRIu64 " text=%.*s)\n",
-               k_generation_fixture_name,
+               fixture->name.data(),
                opts.text.size(),
                opts.max_tokens,
                emel_result.tokens_generated,
@@ -18994,7 +18869,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                shared_flash_dispatch_calls,
                static_cast<int>(emel_result.output_length),
                emel_result.output.data());
-  print_generation_formatter_contract(stdout, state);
+  print_generation_formatter_contract(stdout, state, *fixture);
   std::fprintf(stdout,
                "reference_impl: source=%.*s contract=%.*s baseline=%s\n",
                static_cast<int>(k_generation_baseline_source.size()),
@@ -19015,7 +18890,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     if (attribution_err != emel::error::cast(emel::generator::error::none)) {
       std::fprintf(stderr,
                    "generation attribution failed (fixture=%s err=%s)\n",
-                   k_generation_fixture_name,
+                   fixture->name.data(),
                    generator_error_name(attribution_err));
       return 1;
     }
@@ -19042,7 +18917,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                    "reference_tokens=%d first_mismatch=%zu first_token_mismatch=%d "
                    "attributed_token=%d reference_token=%d "
                    "attributed_output_bytes=%zu reference_output_bytes=%zu)\n",
-                   k_generation_fixture_name,
+                   fixture->name.data(),
                    attributed_result.tokens_generated,
                    reference_result.tokens_generated,
                    mismatch_offset,

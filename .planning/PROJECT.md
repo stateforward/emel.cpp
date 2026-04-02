@@ -3,10 +3,10 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. Shipped v1.7 added an explicit
-generator-domain `prefill` machine; v1.8 now focuses on splitting the cold generator initialize
-path into an explicit `initializer` machine while preserving the repo's truthful maintained Llama
-ARM and canonical Qwen anchors under `docs/rules/sml.rules.md`.
+modeled as explicit actors instead of ad hoc control flow. The active planning scope is v1.9,
+which adds one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-GGUF` ARM slice on top of the
+repo's existing maintained Llama ARM and canonical Qwen anchors, all aligned with
+`docs/rules/sml.rules.md`.
 
 ## Core Value
 
@@ -17,34 +17,32 @@ before widening API surface or model scope.
 
 Shipped version: `v1.7`
 
-Status: Starting `v1.8`. The repo is between implementation phases after shipping
-`generator/prefill`, and the next milestone is scoped to cold-path initializer decomposition
-rather than another hot decode split.
+Status: Milestone v1.9 is defined and ready for phase planning on this branch. The shipped repo
+still reflects v1.7 plus the existing maintained Llama ARM and canonical Qwen acceptance surfaces.
 
 Release summary: `v1.7 Generator Prefill Submachine Decomposition` shipped on `2026-03-30` with
-`3` phases and `6` plans. The next active goal is to extract `generator/initializer` without
-broadening into decode actor work or benchmark-gate policy.
+`3` phases and `6` plans. Remaining open debt is decode-side generator decomposition plus the
+existing warning-only benchmark drift outside `generator/prefill`.
 
-## Current Milestone: v1.8 Generator Initializer Submachine
+## Current Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
 
-**Goal:** Extract the generator's initialize pipeline into an explicit generator-owned
-`initializer` machine while preserving RTC/no-queue semantics, typed request-scoped handoff, and
-maintained proof surfaces.
+**Goal:** Prove one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-GGUF` ARM slice through the
+existing EMEL generator, paritychecker, and benchmark workflow, with `Q4_K_M` as the maintained
+truth anchor and without broadening into generic Liquid-family support.
 
 **Target features:**
-- explicit `src/emel/generator/initializer` machine for conditioner binding, renderer init,
-  memory/graph reserve, and sampling configuration
-- parent generator delegation of `initialize_run` through typed events and explicit outcomes
-  rather than duplicated top-level init orchestration
-- smaller top-level generator initialize/publication surface with maintained Llama/Qwen proof
-  unchanged
+- One official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture with reproducible provenance under
+  `tests/models/`
+- One explicit Liquid request-conditioning contract derived from the official primary chat template
+- Explicit `lfm2` runtime bring-up on the maintained generator path
+- Maintained parity, regression protection, and benchmark publication for the same slice
 
 ## Latest Milestone: v1.7 Generator Prefill Submachine Decomposition
 
 <details>
 <summary>Shipped on 2026-03-30</summary>
 
-**Goal:** Decompose the generator's prefill orchestration into a smaller explicit machine inside
+**Goal:** Decompose the generator’s prefill orchestration into a smaller explicit machine inside
 the `generator` domain while keeping request-scoped behavior modeled via typed events, guards, and
 transitions instead of hidden action/detail control flow.
 
@@ -104,63 +102,66 @@ transitions instead of hidden action/detail control flow.
 
 ### Active
 
-- [ ] `INIT-01`: Extract generator initialization orchestration into explicit
-      `src/emel/generator/initializer`.
-- [ ] `INIT-02`: Keep initialize request-scoped orchestration data on typed runtime/internal
-      events instead of generator context phase fields.
-- [ ] `INIT-03`: Keep initializer routing explicit through guards, states, and transitions with no
-      hidden helper branching.
-- [ ] `ARCH-02`: Shrink the top-level generator initialize/publication surface after the
-      initializer split.
-- [ ] `VERIFY-02`: Preserve maintained generator, paritychecker, benchmark, and quality-gate proof
-      across the initializer boundary.
+- [ ] `FIX-02`: Document one official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` maintained fixture with
+  checksum, source, stable path, and download URL.
+- [ ] `COND-03`: Add one explicit Liquid request-conditioning contract derived from the primary
+  `tokenizer.chat_template`, with structured chat-message input, `tools=none`, and no implicit raw
+  fallback on the maintained slice.
+- [ ] `RUN-03`: Add truthful `lfm2` architecture/runtime support for one maintained Liquid Thinking
+  ARM slice through the shipped generator path.
+- [ ] `PAR-02`: Prove the maintained Liquid slice against `llama.cpp` on the same fixture and
+  conditioning contract.
+- [ ] `BENCH-08`: Publish one truthful Liquid benchmark compare/docs path for the same parity-
+  backed maintained slice.
 
 ### Out of Scope
 
-- Decode submachine extraction in v1.8 because the previous decode split attempt regressed
-  hot-path performance and this milestone is intentionally cold-path only.
-- Internal request-flow or `preprocessor` machine splits in v1.8 because the user chose one new
-  machine, `generator/initializer`, for this slice.
-- Attention-family `sm_any` extraction before the initializer boundary is landed and proven.
-- Broader Qwen-family, richer request-surface, or benchmark-gate-policy work without explicit
-  milestone approval.
-- Separate session/runtime actor redesign as part of Issue `#41`.
-- Hidden control-flow shortcuts in actions or detail helpers.
+- Decode extraction or broader generator-family decomposition without an explicit milestone goal
+- Attention-family `sm_any` extraction before the remaining generator routing shape is clear
+- Broad repository cleanup unrelated to a milestone goal
+- Broad Liquid-family support beyond one maintained `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` slice
+- Sibling Liquid quantizations, including `Q4_0`, `Q5_K_M`, `Q6_K`, `Q8_0`, `BF16`, or `F16`, without explicit
+  later-milestone approval
+- Tool use, function calling, or multi-turn thinking-history replay on the maintained Liquid path
+- Broad Qwen-family or multi-fixture support without an explicit maintained identity and milestone
+  goal
+- Broad new public C API or CLI surface without explicit milestone approval
+- Non-ARM backend kernel specialization until a milestone explicitly broadens beyond the current
+  maintained truth anchors
+- Whole-program actor or orchestration rewrites unrelated to a milestone acceptance surface
+- Dequantize-to-f32 or tool-only compute fallbacks in the shipped canonical hot path without
+  explicit milestone approval
 
-## Future Milestone Candidates
+## Next Milestone Goals
 
-- Revisit decode decomposition only if the next step can reduce top-level duplication without
-  paying another per-token child-dispatch cost.
-- Revisit attention-family decomposition such as `flash` vs `nonflash` through `sm_any` only after
-  the remaining generator routing shape is clearer.
-- Preserve maintained Llama/Qwen proof while any further generator decomposition lands.
-- Revisit benchmark drift policy only after generator decomposition and maintained compare surfaces
-  are stable enough to justify a stricter gate.
+- Land one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` ARM slice.
+- Preserve maintained Llama/Qwen proof while Liquid support is added.
+- Keep the milestone narrow to one explicit `lfm2` fixture and one explicit conditioning contract.
+- Revisit decode extraction, broader generator decomposition, and benchmark-gate hardening only
+  after the Liquid slice is parity-backed and benchmarked.
 
 ## Context
 
 This is a brownfield repository with an existing codebase map under `.planning/codebase/`. v1.7
 proved that generator decomposition can stay inside the `generator` domain and preserve explicit
-same-RTC event handoff instead of falling back to context phase flags or hidden helper routing.
-The next attempt to split decode was discussed but rejected for this milestone because decode lives
-on the per-token hot path and prior decomposition work regressed performance; v1.8 therefore
-targets the cold initialize path instead. The repo already has explicit actor seams for `graph`,
-`memory`, `logits::sampler`, and backend-family selection through `sm_any`; the remaining accepted
-generator question for this milestone is how to split `initialize_run` cleanly without weakening
-the modeled-behavior contract. The repo remains governed by `AGENTS.md` and
-`docs/rules/sml.rules.md`, so future work still needs to preserve same-RTC actor semantics,
-explicit error publication, bounded actions, and deliberate machine-structure changes.
+same-RTC event handoff instead of falling back to context phase flags or hidden helper routing. The
+new v1.9 scope is a different kind of widening: the repo currently treats `llama` and `qwen3` as
+its explicit maintained model architectures, while official Liquid sources identify the target
+fixture as `lfm2` with a hybrid block contract and a primary chat template that includes
+`keep_past_thinking`. The repo remains governed by `AGENTS.md` and `docs/rules/sml.rules.md`, so
+future work still needs to preserve same-RTC actor semantics, explicit error publication, bounded
+actions, and deliberate machine-structure changes.
 
 ## Constraints
 
 - **Architecture**: Follow `docs/rules/sml.rules.md` and the local machine conventions in
-  `AGENTS.md` so generator work preserves the RTC actor model and no-queue invariant.
-- **Explicit behavior modeling**: Further generator decomposition must keep control flow on guards,
-  states, typed events, and transitions rather than action/detail routing shortcuts.
-- **Performance**: Keep the per-token decode loop on the parent generator in this milestone; do
-  not reintroduce a decode child-dispatch cost without benchmark-backed approval.
-- **Domain boundary**: Request orchestration belongs to `generator`; leaf compute still belongs to
-  `graph` and sampling to `logits::sampler`.
+  `AGENTS.md` so runtime/model work preserves the RTC actor model and no-queue invariant.
+- **Explicit behavior modeling**: Any Liquid-specific orchestration changes must keep control flow
+  on guards, states, typed events, and transitions rather than action/detail routing shortcuts.
+- **Truth anchor**: v1.9 is one official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture, not generic
+  Liquid-family or multi-quant support.
+- **Conditioning**: The maintained Liquid path must use one explicit structured chat-message
+  contract and must not fall back to raw prompting silently.
 - **Acceptance boundary**: Maintained proof still lives on the shipped generator, paritychecker,
   benchmark, snapshot, and docs surfaces.
 - **Repository state**: This is an active brownfield codebase, so milestone work should minimize
@@ -175,8 +176,10 @@ explicit error publication, bounded actions, and deliberate machine-structure ch
 | Keep prefill request-scoped data on typed runtime/internal events | This preserved explicit behavior modeling and avoided context phase flags | ✓ Good |
 | Defer decode extraction until the prefill pattern is proven | Decode also owns sampling, rendering, and loop control, so it was the riskier first cut | ✓ Good |
 | Defer `attention::any` / `sm_any` extraction until after prefill collapse | Attention mode is only one axis of the duplication and should not hide unresolved top-level routing | ⚠ Revisit |
-| Start v1.8 with `generator/initializer` instead of `generator/decode` | Decode decomposition touched the hot per-token loop and previously regressed performance, while initializer is cold-path and semantically clear | — Pending |
-| Keep v1.8 to one new machine only | The user explicitly rejected a broader multi-machine slice such as `generate_setup` or `preprocessor` | — Pending |
+| Keep v1.9 fixed to one official Liquid Thinking GGUF slice | The repo needs one truthful maintained Liquid anchor before any broader family claims | — Pending |
+| Use GGUF/config metadata as the maintained truth source for Liquid | Official prose and executable metadata disagree on context length, so docs must follow executable truth | — Pending |
+| Start v1.9 with `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` | The user explicitly reprioritized the milestone around the docs-recommended quant, accepting that this broadens runtime scope beyond the prior `Q8_0` anchor | — Pending |
+| Keep the maintained Liquid contract on `tools=none` and no thinking-history replay | Tool use and `keep_past_thinking` widen the request surface beyond the first-slice milestone | — Pending |
 
 ## Evolution
 
@@ -196,4 +199,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-31 after starting v1.8*
+*Last updated: 2026-03-31 after starting v1.9*

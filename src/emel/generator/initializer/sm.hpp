@@ -7,6 +7,8 @@
 namespace emel::generator::initializer {
 
 struct idle {};
+struct preparing_backend {};
+struct preparing_backend_decision {};
 struct binding_conditioner {};
 struct binding_conditioner_decision {};
 struct initializing_renderer {};
@@ -28,8 +30,36 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
-        sml::state<binding_conditioner> <= *sml::state<idle> + sml::event<event::run>
+        sml::state<preparing_backend> <= *sml::state<idle> + sml::event<event::run>
                  / action::begin_initialize
+
+      , sml::state<binding_conditioner> <= sml::state<preparing_backend>
+                 + sml::completion<event::run>
+                 [ guard::backend_already_ready{} ]
+
+      , sml::state<binding_conditioner> <= sml::state<preparing_backend_decision>
+                 + sml::completion<event::run>
+                 [ guard::backend_already_ready{} ]
+
+      , sml::state<preparing_backend_decision> <= sml::state<preparing_backend>
+                 + sml::completion<event::run>
+                 [ guard::backend_prepare_needed{} ]
+                 / action::request_backend_prepare
+
+      , sml::state<binding_conditioner> <= sml::state<preparing_backend_decision>
+                 + sml::completion<event::run>
+                 [ guard::backend_prepare_ok{} ]
+                 / action::accept_prepared_backend
+
+      , sml::state<idle> <= sml::state<preparing_backend_decision>
+                 + sml::completion<event::run>
+                 [ guard::backend_prepare_invalid_request{} ]
+                 / action::mark_invalid_request
+
+      , sml::state<idle> <= sml::state<preparing_backend_decision>
+                 + sml::completion<event::run>
+                 [ guard::backend_prepare_backend_error{} ]
+                 / action::mark_backend_error
 
       , sml::state<binding_conditioner_decision> <= sml::state<binding_conditioner>
                  + sml::completion<event::run>
@@ -143,6 +173,11 @@ struct model {
 
       //------------------------------------------------------------------------------//
       , sml::state<idle> <= sml::state<idle> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<idle> <= sml::state<preparing_backend> + sml::unexpected_event<sml::_>
+                 / action::on_unexpected
+      , sml::state<idle> <= sml::state<preparing_backend_decision>
+                 + sml::unexpected_event<sml::_>
                  / action::on_unexpected
       , sml::state<idle> <= sml::state<binding_conditioner> + sml::unexpected_event<sml::_>
                  / action::on_unexpected

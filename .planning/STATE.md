@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.8
-milestone_name: Generator Initializer Submachine
-status: execution_complete
-stopped_at: "v1.8 phases 33-34 executed; ready for $gsd-complete-milestone"
-last_updated: "2026-04-01T03:05:00Z"
+milestone: v1.9
+milestone_name: Liquid LFM2.5-1.2B Thinking ARM Slice
+status: ready_for_phase_planning
+stopped_at: "Roadmap created for v1.9; ready for $gsd-discuss-phase 33"
+last_updated: "2026-03-31T20:31:08Z"
 last_activity: 2026-03-31
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
-  percent: 100
+  total_phases: 5
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -20,19 +20,30 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-03-31)
 
-**Core value:** Prove real end-to-end behavior with explicit SML orchestration and
-parity-oriented verification before widening API surface or model scope.
-**Current focus:** Close out v1.8 after the `generator/initializer` extraction and proof run.
+**Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
+verification before widening API surface or model scope.
+**Current focus:** Phase 33 planning for fixture identity, executable metadata truth, and the
+maintained Liquid conditioning contract.
 
 ## Current Position
 
-Phase: 34 complete
-Plan: 34-02
-Status: Milestone execution complete; ready for archive/audit
-Last activity: 2026-03-31 — Phases 33 and 34 completed for the `generator/initializer` submachine
-Progress: [██████████] 100%
+Phase: 33
+Plan: —
+Status: Roadmap created
+Last activity: 2026-03-31 — Rescoped v1.9 from the prior `Q8_0` anchor to one official Liquid
+`Q4_K_M` fixture, keeping the same five-phase shape but accepting the broader quant-runtime bring-up
+implied by the new maintained truth anchor
+
+Progress: [----------] 0%
 
 ## Performance Metrics
+
+**Current active milestone:**
+
+- Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
+- Phases complete: 0/5
+- Plans complete: 0/0
+- Audit status: not run
 
 **Last shipped milestone:**
 
@@ -41,16 +52,9 @@ Progress: [██████████] 100%
 - Plans complete: 6/6
 - Audit status: not run
 
-**Previous shipped milestone:**
-
-- Milestone: v1.6 Qwen3-0.6B Parity And Benchmark
-- Phases complete: 5/5
-- Plans complete: 12/12
-- Audit status: tech_debt
-
 **Next action:**
 
-- Archive/close the milestone with `$gsd-complete-milestone`.
+- Start Phase 33 with `$gsd-discuss-phase 33` or `$gsd-plan-phase 33`.
 
 ## Accumulated Context
 
@@ -59,41 +63,38 @@ Progress: [██████████] 100%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- v1.6 stayed narrow to one canonical `Qwen3-0.6B-Q8_0.gguf` maintained slice.
-- The maintained Qwen formatter contract comes from the primary GGUF
-  `tokenizer.chat_template`, with structured chat-message input and no implicit raw fallback.
-- Phase `26.1` inserted before Phase `27` so native `q8_0` runtime support landed in `src/emel`
-  before truthful Qwen generator bring-up resumed.
-- The prior Llama anchor remains protected while the canonical Qwen parity and benchmark surfaces
-  are maintained alongside it.
-- v1.7 started with `generator/prefill` as the first decomposition cut rather than forcing a full
-  generator split or separate session actor redesign.
-- v1.8 starts with `generator/initializer` instead of a decode child machine because decode lives
-  on the hot per-token path and prior decode decomposition attempts regressed performance.
-- v1.8 stays narrow to one new machine; broader `generate_setup` / `preprocessor` decomposition is
-  deferred.
-- The parent generator now owns one explicit initialize seam
-  (`initializing -> initializer_result_decision`) while `src/emel/generator/initializer` owns the
-  initialize pipeline states.
+- v1.9 is fixed to one official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` maintained fixture.
+- The maintained Liquid slice will derive truth from GGUF/config metadata (`lfm2`, `128000`
+  context) rather than stale prose on the model card.
+- The maintained Liquid request surface is one structured chat-message contract with `tools=none`
+  and no thinking-history replay.
+- Roadmap coverage is fixed at five phases: 33 fixture/metadata/contract, 34 `lfm2` contract, 35
+  runtime, 36 parity/regression, 37 benchmark/docs.
+- The user explicitly reprioritized the milestone to the docs-recommended `Q4_K_M` quant instead
+  of the earlier `Q8_0` anchor.
+- Decode extraction and broader generator decomposition remain deferred on this branch.
 
 ### Pending Todos
 
-- None.
+- 2026-04-02 — Move eager quant prepack into generator initializer
+- 2026-04-02 — Reuse q8 RHS across LFM2.5 prefill matmuls
+- 2026-04-02 — Optimize LFM2.5 q4 prefill kernel
+- 2026-04-02 — Optimize LFM2.5 q6 prefill kernel
 
 ### Blockers/Concerns
 
-- Non-blocking benchmark warning debt remains in `batch/planner_simple`, `memory/hybrid_full`,
-  `kernel/aarch64/op_log`, `logits/sampler_raw/vocab_32000`, and `kernel/aarch64/op_soft_max`.
-- Decode extraction and any attention-family `sm_any` work remain deferred until a later milestone.
-- The next generator decomposition step after initializer is still open and should be benchmark-led
-  if decode is reconsidered.
-- Warning-only benchmark debt still exists outside `generator/prefill`; v1.8 does not harden the
-  broader repo gate.
-- `scripts/quality_gates.sh` still reports an ignored broad benchmark snapshot warning in
-  `text/jinja/formatter_long`, but it did not fail the gate and is outside the initializer slice.
+- Current runtime and tooling explicitly accept `llama` and `qwen3`; `lfm2` is new architecture
+  scope.
+- Switching the maintained anchor from `Q8_0` to `Q4_K_M` widens Phase 35 runtime risk relative to
+  the earlier research baseline.
+- The current supported formatter contract is Qwen-shaped and will need a Liquid-specific truth
+  surface.
+- Official Liquid prose and executable metadata disagree on context length, so docs and tests must
+  use metadata truth consistently.
+- Benchmark warning debt still exists outside the maintained Liquid scope and is not part of v1.9.
 
 ## Session Continuity
 
-Last session: 2026-04-01T03:05:00Z
-Stopped at: v1.8 phases 33-34 executed; ready for `$gsd-complete-milestone`
+Last session: 2026-03-31T20:25:13Z
+Stopped at: Roadmap created for v1.9; ready for `$gsd-discuss-phase 33`
 Resume file: None

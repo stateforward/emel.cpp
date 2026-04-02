@@ -63,6 +63,10 @@ enum class dtype : uint8_t {
   q6_k_x8_q8_argmax_prepared = 38,
   q8_0_x4_bl4 = 39,
   q8_0_x4_bl8 = 40,
+  q4_k_x8_bl4 = 41,
+  q4_k_x8_bl8 = 42,
+  q8_k_x4 = 43,
+  q8_k_x8 = 44,
   unknown = 255,
 };
 
