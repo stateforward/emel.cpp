@@ -50,3 +50,30 @@ TEST_CASE("generator_initializer_sm_uses_explicit_internal_run_completion") {
 
   CHECK(has_run_completion);
 }
+
+TEST_CASE("generator_initializer_sm_routes_backend_ready_run_completion_directly") {
+  using machine_t = boost::sml::sm<emel::generator::initializer::model>;
+  using transitions = typename machine_t::transitions;
+
+  bool has_backend_ready_transition = false;
+
+  for_each_type(transitions{}, [&]<class transition_t>() {
+    using src_state = typename transition_t::src_state;
+    using dst_state = typename transition_t::dst_state;
+    using event = typename transition_t::event;
+
+    const std::string src_name = emel::docs::detail::shorten_type_name(
+        emel::docs::detail::raw_type_name<src_state>());
+    const std::string dst_name = emel::docs::detail::shorten_type_name(
+        emel::docs::detail::raw_type_name<dst_state>());
+    const std::string event_name = emel::docs::detail::table_event_name<event>();
+
+    if (src_name == "preparing_backend" &&
+        dst_name == "binding_conditioner" &&
+        event_name == "completion<run>") {
+      has_backend_ready_transition = true;
+    }
+  });
+
+  CHECK(has_backend_ready_transition);
+}

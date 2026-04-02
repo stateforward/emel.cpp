@@ -337,9 +337,9 @@ emel::error::type validate_lfm2_execution_contract_impl(const data & model_data)
                   require_block_tensor(model_data, block_index, "attn_q_norm.weight") &&
                   require_block_tensor(model_data, block_index, "attn_k_norm.weight") &&
                   require_block_tensor(model_data, block_index, "attn_output.weight") &&
-                  reject_block_tensor(model_data, block_index, "shortconv.conv") &&
-                  reject_block_tensor(model_data, block_index, "shortconv.in_proj") &&
-                  reject_block_tensor(model_data, block_index, "shortconv.out_proj")
+                  reject_block_tensor(model_data, block_index, "shortconv.conv.weight") &&
+                  reject_block_tensor(model_data, block_index, "shortconv.in_proj.weight") &&
+                  reject_block_tensor(model_data, block_index, "shortconv.out_proj.weight")
             : require_block_tensor(model_data, block_index, "shortconv.conv.weight") &&
                   require_block_tensor(model_data, block_index, "shortconv.in_proj.weight") &&
                   require_block_tensor(model_data, block_index, "shortconv.out_proj.weight") &&

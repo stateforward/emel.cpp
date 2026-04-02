@@ -718,6 +718,16 @@ TEST_CASE("model_execution_contract_rejects_lfm2_with_noncanonical_hybrid_block_
         emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
+TEST_CASE("model_execution_contract_rejects_lfm2_attention_block_with_shortconv_weights") {
+  auto model = std::make_unique<emel::model::data>();
+  build_lfm2_model(*model, true, false);
+  append_tensor_name(*model, model->tensors[model->n_tensors], "blk.2.shortconv.conv.weight");
+  ++model->n_tensors;
+
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+}
+
 TEST_CASE("model_detail_loads_gguf_vocab_metadata_without_llama_bootstrap") {
   std::vector<uint8_t> arena = {};
   std::vector<emel::gguf::loader::kv_entry> entries = {};

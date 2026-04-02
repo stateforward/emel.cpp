@@ -33,6 +33,10 @@ struct model {
         sml::state<preparing_backend> <= *sml::state<idle> + sml::event<event::run>
                  / action::begin_initialize
 
+      , sml::state<binding_conditioner> <= sml::state<preparing_backend>
+                 + sml::completion<event::run>
+                 [ guard::backend_already_ready{} ]
+
       , sml::state<binding_conditioner> <= sml::state<preparing_backend_decision>
                  + sml::completion<event::run>
                  [ guard::backend_already_ready{} ]
