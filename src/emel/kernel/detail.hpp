@@ -157,6 +157,7 @@ inline constexpr uint8_t dtype_q8_0_x4_bl4 = 39;
 inline constexpr uint8_t dtype_q8_0_x4_bl8 = 40;
 inline constexpr uint8_t dtype_q4_k_x8_bl4 = 41;
 inline constexpr uint8_t dtype_q4_k_x8_bl8 = 42;
+inline constexpr uint8_t dtype_q8_k_x4 = 43;
 inline constexpr uint64_t flash_attn_workspace_token_capacity = 4096u;
 
 struct flash_attn_workspace {
@@ -1096,6 +1097,10 @@ inline bool is_rhs_q8_k_dtype(const uint8_t code) noexcept {
   return code == dtype_q8_k;
 }
 
+inline bool is_rhs_q8_k_x4_dtype(const uint8_t code) noexcept {
+  return code == dtype_q8_k_x4;
+}
+
 inline bool is_rhs_q8_0_dtype(const uint8_t code) noexcept {
   return code == dtype_q8_0;
 }
@@ -1138,7 +1143,8 @@ inline bool is_argmax_prepared_q6_vector_q8_rhs_dtype(const uint8_t code) noexce
 
 inline bool is_supported_dtype(const uint8_t code) noexcept {
   return code == dtype_f32 || code == dtype_f16 || is_native_quantized_dtype(code) ||
-      is_rhs_q8_k_dtype(code) || is_packed_q8_0_vector_dtype(code) ||
+      is_rhs_q8_k_dtype(code) || is_rhs_q8_k_x4_dtype(code) ||
+      is_packed_q8_0_vector_dtype(code) ||
       is_packed_q4_vector_dtype(code) ||
       is_packed_q6_vector_dtype(code) ||
       is_prepared_q6_vector_q8_rhs_dtype(code) ||
@@ -1170,6 +1176,9 @@ inline size_t dtype_size_bytes(const uint8_t code) noexcept {
   if (code == dtype_q8_k) {
     return sizeof(quant::block_q8_k) / quant::QK_K;
   }
+  if (code == dtype_q8_k_x4) {
+    return sizeof(quant::block_q8_k) / quant::QK_K;
+  }
   return 0u;
 }
 
@@ -1198,6 +1207,9 @@ inline size_t quantized_row_storage_bytes(const uint8_t code, const uint64_t col
     return static_cast<size_t>(block_count) * sizeof(quant::block_q6_k);
   }
   if (code == dtype_q8_k) {
+    return static_cast<size_t>(block_count) * sizeof(quant::block_q8_k);
+  }
+  if (code == dtype_q8_k_x4) {
     return static_cast<size_t>(block_count) * sizeof(quant::block_q8_k);
   }
   if (code == dtype_q4_k_x8_bl4 || code == dtype_q4_k_x8_bl8) {

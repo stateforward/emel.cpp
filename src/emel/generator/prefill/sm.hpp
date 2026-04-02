@@ -65,8 +65,13 @@ struct model {
 
       , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
                  + sml::completion<event::run>
-                 [ guard::uses_materialized_logits_with_chunk4{} ]
-                 / action::request_contract_flash_materialized_chunk4
+                 [ guard::uses_materialized_logits_with_chunk4_packed_q8_0{} ]
+                 / action::request_contract_flash_materialized_chunk4_packed_q8_0
+
+      , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
+                 + sml::completion<event::run>
+                 [ guard::uses_materialized_logits_with_chunk4_q8_k{} ]
+                 / action::request_contract_flash_materialized_chunk4_q8_k
 
       , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
                  + sml::completion<event::run>
@@ -75,8 +80,13 @@ struct model {
 
       , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
                  + sml::completion<event::run>
-                 [ guard::uses_preselected_argmax_with_chunk4{} ]
-                 / action::request_contract_flash_preselected_chunk4
+                 [ guard::uses_preselected_argmax_with_chunk4_packed_q8_0{} ]
+                 / action::request_contract_flash_preselected_chunk4_packed_q8_0
+
+      , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
+                 + sml::completion<event::run>
+                 [ guard::uses_preselected_argmax_with_chunk4_q8_k{} ]
+                 / action::request_contract_flash_preselected_chunk4_q8_k
 
       , sml::state<compute_result_decision> <= sml::state<contract_flash_decision>
                  + sml::completion<event::run>
@@ -85,8 +95,13 @@ struct model {
 
       , sml::state<compute_result_decision> <= sml::state<contract_nonflash_decision>
                  + sml::completion<event::run>
-                 [ guard::uses_materialized_logits_with_chunk4{} ]
-                 / action::request_contract_nonflash_materialized_chunk4
+                 [ guard::uses_materialized_logits_with_chunk4_packed_q8_0{} ]
+                 / action::request_contract_nonflash_materialized_chunk4_packed_q8_0
+
+      , sml::state<compute_result_decision> <= sml::state<contract_nonflash_decision>
+                 + sml::completion<event::run>
+                 [ guard::uses_materialized_logits_with_chunk4_q8_k{} ]
+                 / action::request_contract_nonflash_materialized_chunk4_q8_k
 
       , sml::state<compute_result_decision> <= sml::state<contract_nonflash_decision>
                  + sml::completion<event::run>
@@ -95,8 +110,13 @@ struct model {
 
       , sml::state<compute_result_decision> <= sml::state<contract_nonflash_decision>
                  + sml::completion<event::run>
-                 [ guard::uses_preselected_argmax_with_chunk4{} ]
-                 / action::request_contract_nonflash_preselected_chunk4
+                 [ guard::uses_preselected_argmax_with_chunk4_packed_q8_0{} ]
+                 / action::request_contract_nonflash_preselected_chunk4_packed_q8_0
+
+      , sml::state<compute_result_decision> <= sml::state<contract_nonflash_decision>
+                 + sml::completion<event::run>
+                 [ guard::uses_preselected_argmax_with_chunk4_q8_k{} ]
+                 / action::request_contract_nonflash_preselected_chunk4_q8_k
 
       , sml::state<compute_result_decision> <= sml::state<contract_nonflash_decision>
                  + sml::completion<event::run>

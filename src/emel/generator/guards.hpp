@@ -179,26 +179,51 @@ inline bool uses_preselected_argmax_direct(const action::context & ctx) noexcept
       emel::generator::detail::preselected_argmax_direct_supported(ctx.compute.backend);
 }
 
+inline bool prefill_chunk4_q8_gemm_supported(
+    const emel::generator::detail::native_backend & backend) noexcept {
+  return emel::generator::detail::prefill_chunk4_q8_gemm_backend_ready(backend);
+}
+
+inline bool prefill_chunk4_packed_q8_0_supported(
+    const emel::generator::detail::native_backend & backend) noexcept {
+  return emel::generator::detail::prefill_chunk4_backend_ready<
+      emel::generator::detail::chunk4_rhs_route::packed_q8_0>(backend);
+}
+
+inline bool prefill_chunk4_q8_k_supported(
+    const emel::generator::detail::native_backend & backend) noexcept {
+  return emel::generator::detail::prefill_chunk4_backend_ready<
+      emel::generator::detail::chunk4_rhs_route::q8_k>(backend);
+}
+
 inline bool uses_prefill_chunk4_q8_gemm(const event::generate_run & ev,
                                         const action::context & ctx) noexcept {
   return ev.ctx.prompt_token_count >= emel::generator::detail::k_prefill_q8_chunk_rows &&
-      emel::generator::detail::prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
+      prefill_chunk4_q8_gemm_supported(ctx.compute.backend);
 }
 
 inline bool prefill_contract_uses_materialized_logits(
     const emel::generator::prefill_compute_contract contract) noexcept {
   return contract == emel::generator::prefill_compute_contract::flash_materialized_scalar ||
-         contract == emel::generator::prefill_compute_contract::flash_materialized_chunk4 ||
+         contract ==
+             emel::generator::prefill_compute_contract::flash_materialized_chunk4_packed_q8_0 ||
+         contract == emel::generator::prefill_compute_contract::flash_materialized_chunk4_q8_k ||
          contract == emel::generator::prefill_compute_contract::nonflash_materialized_scalar ||
-         contract == emel::generator::prefill_compute_contract::nonflash_materialized_chunk4;
+         contract == emel::generator::prefill_compute_contract::
+                         nonflash_materialized_chunk4_packed_q8_0 ||
+         contract == emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_q8_k;
 }
 
 inline bool prefill_contract_uses_preselected_argmax(
     const emel::generator::prefill_compute_contract contract) noexcept {
   return contract == emel::generator::prefill_compute_contract::flash_preselected_scalar ||
-         contract == emel::generator::prefill_compute_contract::flash_preselected_chunk4 ||
+         contract ==
+             emel::generator::prefill_compute_contract::flash_preselected_chunk4_packed_q8_0 ||
+         contract == emel::generator::prefill_compute_contract::flash_preselected_chunk4_q8_k ||
          contract == emel::generator::prefill_compute_contract::nonflash_preselected_scalar ||
-         contract == emel::generator::prefill_compute_contract::nonflash_preselected_chunk4;
+         contract == emel::generator::prefill_compute_contract::
+                         nonflash_preselected_chunk4_packed_q8_0 ||
+         contract == emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_q8_k;
 }
 
 }  // namespace detail

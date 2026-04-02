@@ -65,6 +65,7 @@ enum class dtype : uint8_t {
   q8_0_x4_bl8 = 40,
   q4_k_x8_bl4 = 41,
   q4_k_x8_bl8 = 42,
+  q8_k_x4 = 43,
   unknown = 255,
 };
 

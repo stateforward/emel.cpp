@@ -2,6 +2,7 @@
 
 #include "emel/generator/context.hpp"
 #include "emel/generator/detail.hpp"
+#include "emel/generator/guards.hpp"
 #include "emel/generator/prefill/context.hpp"
 #include "emel/generator/prefill/detail.hpp"
 #include "emel/graph/errors.hpp"
@@ -59,7 +60,21 @@ inline bool uses_preselected_argmax_direct(const action::context & ctx) noexcept
 inline bool uses_prefill_chunk4_q8_gemm(const event::run & ev,
                                         const action::context & ctx) noexcept {
   return ev.ctx.prompt_token_count >= emel::generator::detail::k_prefill_q8_chunk_rows &&
-         emel::generator::detail::prefill_chunk4_q8_gemm_supported(
+         emel::generator::guard::detail::prefill_chunk4_q8_gemm_supported(
+             ctx.generator.compute.backend);
+}
+
+inline bool uses_prefill_chunk4_packed_q8_0_gemm(const event::run & ev,
+                                                 const action::context & ctx) noexcept {
+  return ev.ctx.prompt_token_count >= emel::generator::detail::k_prefill_q8_chunk_rows &&
+         emel::generator::guard::detail::prefill_chunk4_packed_q8_0_supported(
+             ctx.generator.compute.backend);
+}
+
+inline bool uses_prefill_chunk4_q8_k_gemm(const event::run & ev,
+                                          const action::context & ctx) noexcept {
+  return ev.ctx.prompt_token_count >= emel::generator::detail::k_prefill_q8_chunk_rows &&
+         emel::generator::guard::detail::prefill_chunk4_q8_k_supported(
              ctx.generator.compute.backend);
 }
 
@@ -123,27 +138,45 @@ struct nonflash_runtime_required {
   }
 };
 
-struct uses_materialized_logits_with_chunk4 {
+struct uses_materialized_logits_with_chunk4_packed_q8_0 {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return !detail::uses_preselected_argmax_direct(ctx) && detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
+    return !detail::uses_preselected_argmax_direct(ctx) &&
+           detail::uses_prefill_chunk4_packed_q8_0_gemm(ev, ctx);
+  }
+};
+
+struct uses_materialized_logits_with_chunk4_q8_k {
+  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
+    return !detail::uses_preselected_argmax_direct(ctx) &&
+           detail::uses_prefill_chunk4_q8_k_gemm(ev, ctx);
   }
 };
 
 struct uses_materialized_logits_with_scalar {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return !detail::uses_preselected_argmax_direct(ctx) && !detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
+    return !detail::uses_preselected_argmax_direct(ctx) &&
+           !detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
   }
 };
 
-struct uses_preselected_argmax_with_chunk4 {
+struct uses_preselected_argmax_with_chunk4_packed_q8_0 {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return detail::uses_preselected_argmax_direct(ctx) && detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
+    return detail::uses_preselected_argmax_direct(ctx) &&
+           detail::uses_prefill_chunk4_packed_q8_0_gemm(ev, ctx);
+  }
+};
+
+struct uses_preselected_argmax_with_chunk4_q8_k {
+  bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
+    return detail::uses_preselected_argmax_direct(ctx) &&
+           detail::uses_prefill_chunk4_q8_k_gemm(ev, ctx);
   }
 };
 
 struct uses_preselected_argmax_with_scalar {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return detail::uses_preselected_argmax_direct(ctx) && !detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
+    return detail::uses_preselected_argmax_direct(ctx) &&
+           !detail::uses_prefill_chunk4_q8_gemm(ev, ctx);
   }
 };
 

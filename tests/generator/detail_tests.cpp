@@ -7,6 +7,7 @@
 #include <doctest/doctest.h>
 
 #include "emel/generator/detail.hpp"
+#include "emel/generator/guards.hpp"
 #include "../kernel/test_helpers.hpp"
 
 namespace {
@@ -366,6 +367,216 @@ struct chunk4_prefill_runtime_fixture {
             packed_storage.data()) &&
         emel::generator::detail::prepare_packed_q8_0_input_workspace(backend) &&
         emel::generator::detail::prepare_packed_q8_0_chunk4_input_workspace(backend);
+  }
+};
+
+struct hybrid_chunk4_q8_runtime_fixture {
+  static constexpr int32_t k_vocab = static_cast<int32_t>(QK_K);
+  static constexpr int32_t k_embd = static_cast<int32_t>(QK_K);
+  static constexpr int32_t k_ctx = 8;
+  static constexpr int32_t k_prompt_tokens = 4;
+  static constexpr int32_t k_shortconv_kernel_size = 3;
+
+  emel::model::data model = {};
+  emel::generator::detail::native_backend backend = {};
+  std::vector<float> token_embedding_storage = {};
+  std::vector<float> output_argmax_storage = {};
+  std::vector<float> output_norm_storage = {};
+  std::vector<float> attention_norm_storage = {};
+  std::vector<float> ffn_norm_storage = {};
+  std::vector<float> attention_q_norm_storage = {};
+  std::vector<float> attention_k_norm_storage = {};
+  std::vector<float> shortconv_conv_storage = {};
+  std::vector<block_q4_k> square_rows = {};
+  std::vector<block_q4_k> shortconv_in_rows = {};
+  std::vector<uint8_t> packed_square_storage = {};
+  std::vector<uint8_t> packed_shortconv_in_storage = {};
+  emel::model::data::tensor_record token_embedding_tensor = {};
+  emel::model::data::tensor_record packed_square_tensor = {};
+  emel::model::data::tensor_record packed_shortconv_in_tensor = {};
+  emel::model::data::tensor_record output_argmax_tensor = {};
+
+  emel::model::llama::detail::execution_view execution = {};
+  emel::model::llama::detail::topology topology = {};
+  emel::model::llama::detail::step_plan plan = {};
+  std::array<int32_t, k_prompt_tokens> token_ids = {0, 1, 2, 3};
+  std::array<int32_t, k_prompt_tokens> positions = {0, 1, 2, 3};
+  std::vector<float> logits = {};
+  emel::generator::compute_io io = {};
+  emel::graph::processor::event::execute request = {};
+  bool ready = false;
+
+  hybrid_chunk4_q8_runtime_fixture() {
+    std::memcpy(model.architecture_name.data(), "lfm2", 4u);
+    token_embedding_storage.resize(static_cast<size_t>(k_prompt_tokens * k_embd), 0.0f);
+    for (int32_t token = 0; token < k_prompt_tokens; ++token) {
+      token_embedding_storage[static_cast<size_t>(token) * static_cast<size_t>(k_embd) +
+                              static_cast<size_t>(token)] = 1.0f;
+    }
+    output_argmax_storage.resize(static_cast<size_t>(k_vocab * k_embd), 0.0f);
+    output_norm_storage.assign(static_cast<size_t>(k_embd), 1.0f);
+    attention_norm_storage.assign(static_cast<size_t>(k_embd), 1.0f);
+    ffn_norm_storage.assign(static_cast<size_t>(k_embd), 1.0f);
+    attention_q_norm_storage.assign(static_cast<size_t>(k_embd), 1.0f);
+    attention_k_norm_storage.assign(static_cast<size_t>(k_embd), 1.0f);
+    shortconv_conv_storage.assign(
+        static_cast<size_t>(k_shortconv_kernel_size) * static_cast<size_t>(k_embd), 0.0f);
+
+    const size_t block_count = static_cast<size_t>(k_embd / static_cast<int32_t>(QK_K));
+    square_rows.resize(static_cast<size_t>(k_embd) * block_count);
+    shortconv_in_rows.resize(static_cast<size_t>(3 * k_embd) * block_count);
+    packed_square_storage.resize(
+        sizeof(emel::kernel::detail::quant::block_q4_kx8) *
+        emel::kernel::detail::quant::packed_q4_k_x8_group_count(static_cast<uint64_t>(k_embd)) *
+        block_count);
+    packed_shortconv_in_storage.resize(
+        sizeof(emel::kernel::detail::quant::block_q4_kx8) *
+        emel::kernel::detail::quant::packed_q4_k_x8_group_count(static_cast<uint64_t>(3 * k_embd)) *
+        block_count);
+
+    token_embedding_tensor = make_tensor_record(
+        token_embedding_storage.data(), emel::kernel::detail::dtype_f32, k_embd, k_prompt_tokens);
+    packed_square_tensor = make_tensor_record(
+        packed_square_storage.data(), emel::kernel::detail::dtype_q4_k_x8_bl8, k_embd, k_embd);
+    packed_shortconv_in_tensor = make_tensor_record(
+        packed_shortconv_in_storage.data(),
+        emel::kernel::detail::dtype_q4_k_x8_bl8,
+        k_embd,
+        3 * k_embd);
+    output_argmax_tensor = make_tensor_record(
+        output_argmax_storage.data(), emel::kernel::detail::dtype_f32, k_embd, k_vocab);
+
+    backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+    backend.model = &model;
+    backend.n_vocab = k_vocab;
+    backend.n_embd = k_embd;
+    backend.n_head = 1;
+    backend.n_head_kv = 1;
+    backend.n_layer = 2;
+    backend.n_ctx = k_ctx;
+    backend.n_rot = k_embd;
+    backend.head_dim = k_embd;
+    backend.head_dim_kv = k_embd;
+    backend.n_rep = 1;
+    backend.shortconv_kernel_size = k_shortconv_kernel_size;
+    backend.shortconv_state_size = k_shortconv_kernel_size - 1;
+    backend.rms_epsilon = 1.0e-5f;
+    backend.rope_freq_base = 10000.0f;
+
+    backend.token_embedding.tensor = &token_embedding_tensor;
+    backend.token_embedding.rows = k_prompt_tokens;
+    backend.token_embedding.cols = k_embd;
+    backend.output_norm = output_norm_storage;
+    backend.output.tensor = &packed_square_tensor;
+    backend.output.rows = k_vocab;
+    backend.output.cols = k_embd;
+    backend.output_argmax.tensor = &output_argmax_tensor;
+    backend.output_argmax.rows = k_vocab;
+    backend.output_argmax.cols = k_embd;
+
+    backend.blocks.resize(2u);
+    auto & shortconv_block = backend.blocks[0];
+    shortconv_block.uses_attention = false;
+    shortconv_block.attention_norm = attention_norm_storage;
+    shortconv_block.shortconv_conv = shortconv_conv_storage;
+    shortconv_block.shortconv_in_proj.tensor = &packed_shortconv_in_tensor;
+    shortconv_block.shortconv_in_proj.rows = 3 * k_embd;
+    shortconv_block.shortconv_in_proj.cols = k_embd;
+    shortconv_block.shortconv_out_proj.tensor = &packed_square_tensor;
+    shortconv_block.shortconv_out_proj.rows = k_embd;
+    shortconv_block.shortconv_out_proj.cols = k_embd;
+    shortconv_block.feed_forward_norm = ffn_norm_storage;
+    shortconv_block.feed_forward_gate.tensor = &packed_square_tensor;
+    shortconv_block.feed_forward_gate.rows = k_embd;
+    shortconv_block.feed_forward_gate.cols = k_embd;
+    shortconv_block.feed_forward_down = shortconv_block.feed_forward_gate;
+    shortconv_block.feed_forward_up = shortconv_block.feed_forward_gate;
+
+    auto & attention_block = backend.blocks[1];
+    attention_block.attention_norm = attention_norm_storage;
+    attention_block.attention_q.tensor = &packed_square_tensor;
+    attention_block.attention_q.rows = k_embd;
+    attention_block.attention_q.cols = k_embd;
+    attention_block.attention_k = attention_block.attention_q;
+    attention_block.attention_v = attention_block.attention_q;
+    attention_block.attention_output = attention_block.attention_q;
+    attention_block.attention_q_norm = attention_q_norm_storage;
+    attention_block.attention_k_norm = attention_k_norm_storage;
+    attention_block.feed_forward_norm = ffn_norm_storage;
+    attention_block.feed_forward_gate = shortconv_block.feed_forward_gate;
+    attention_block.feed_forward_down = shortconv_block.feed_forward_gate;
+    attention_block.feed_forward_up = shortconv_block.feed_forward_gate;
+
+    backend.bound_tokens.resize(k_prompt_tokens);
+    backend.bound_positions.resize(k_prompt_tokens);
+    backend.bound_logits.resize(static_cast<size_t>(k_vocab), -1.0f);
+    backend.hidden.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.norm.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.shortconv_bcx.resize(static_cast<size_t>(3 * k_embd), 0.0f);
+    backend.shortconv_bx.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.shortconv_conv_out.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.shortconv_bcx_chunk4.resize(static_cast<size_t>(k_prompt_tokens * 3 * k_embd), 0.0f);
+    backend.shortconv_conv_out_chunk4.resize(static_cast<size_t>(k_prompt_tokens * k_embd), 0.0f);
+    backend.q.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.q_attn.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.k.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.v.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.attn_scores.resize(static_cast<size_t>(k_ctx), 0.0f);
+    backend.attn_probs.resize(static_cast<size_t>(k_ctx), 0.0f);
+    backend.attn_probs_rounded.resize(static_cast<size_t>(k_ctx), 0.0f);
+    backend.attn_value_column.resize(static_cast<size_t>(k_ctx), 0.0f);
+    backend.attn_ctx.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.projected.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.gate.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.up.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.ffn_hidden.resize(static_cast<size_t>(k_embd), 0.0f);
+    backend.key_cache.resize(static_cast<size_t>(backend.n_layer * k_ctx * k_embd), 0u);
+    backend.value_cache.resize(static_cast<size_t>(backend.n_layer * k_ctx * k_embd), 0u);
+    backend.flash_key_cache.resize(static_cast<size_t>(backend.n_layer * k_ctx * k_embd), 0u);
+    backend.flash_value_cache.resize(static_cast<size_t>(backend.n_layer * k_ctx * k_embd), 0u);
+    backend.recurrent_shortconv_cache.resize(
+        static_cast<size_t>(backend.n_layer * backend.shortconv_state_size * k_embd), 0.0f);
+    backend.hidden_chunk4.resize(static_cast<size_t>(k_prompt_tokens * k_embd), 0.0f);
+    backend.norm_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.q_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.k_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.v_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.attn_ctx_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.projected_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.gate_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.up_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+    backend.ffn_hidden_chunk4.resize(backend.hidden_chunk4.size(), 0.0f);
+
+    logits.resize(static_cast<size_t>(k_vocab), -1.0f);
+    topology.execution = &execution;
+    plan.graph = &topology;
+    plan.kind = emel::model::llama::detail::step_kind::prefill;
+    plan.expected_outputs = 1;
+    io.backend_ctx = &backend;
+    io.token_ids = token_ids.data();
+    io.token_count = k_prompt_tokens;
+    io.logits = logits.data();
+    io.logits_capacity = k_vocab;
+    request.step_plan = &plan;
+    request.expected_outputs = plan.expected_outputs;
+    request.compute_ctx = &io;
+    request.positions = positions.data();
+    request.positions_count = k_prompt_tokens;
+    request.kv_tokens = 0;
+
+    ready =
+        emel::kernel::detail::quant::pack_q4_k_rows_x8_bl8(
+            square_rows.data(),
+            static_cast<uint64_t>(k_embd),
+            static_cast<uint64_t>(k_embd),
+            packed_square_storage.data()) &&
+        emel::kernel::detail::quant::pack_q4_k_rows_x8_bl8(
+            shortconv_in_rows.data(),
+            static_cast<uint64_t>(3 * k_embd),
+            static_cast<uint64_t>(k_embd),
+            packed_shortconv_in_storage.data()) &&
+        emel::generator::detail::prepare_q8_input_workspace(backend) &&
+        emel::generator::detail::prepare_q8_input_chunk4_workspace(backend);
   }
 };
 
@@ -1140,17 +1351,37 @@ TEST_CASE("generator_detail_prefill_chunk4_q8_gemm_support_is_explicit") {
   backend.ffn_hidden_chunk4.resize(16u);
 
 #if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
-  CHECK(emel::generator::detail::prefill_chunk4_q8_gemm_supported(backend));
+  CHECK(emel::generator::guard::detail::prefill_chunk4_q8_gemm_supported(backend));
   backend.k_chunk4.clear();
-  CHECK_FALSE(emel::generator::detail::prefill_chunk4_q8_gemm_supported(backend));
+  CHECK_FALSE(emel::generator::guard::detail::prefill_chunk4_q8_gemm_supported(backend));
   backend.k_chunk4.resize(16u);
   backend.v_chunk4.clear();
-  CHECK_FALSE(emel::generator::detail::prefill_chunk4_q8_gemm_supported(backend));
+  CHECK_FALSE(emel::generator::guard::detail::prefill_chunk4_q8_gemm_supported(backend));
   backend.v_chunk4.resize(16u);
   backend.up_chunk4.clear();
-  CHECK_FALSE(emel::generator::detail::prefill_chunk4_q8_gemm_supported(backend));
+  CHECK_FALSE(emel::generator::guard::detail::prefill_chunk4_q8_gemm_supported(backend));
 #else
-  CHECK_FALSE(emel::generator::detail::prefill_chunk4_q8_gemm_supported(backend));
+  CHECK_FALSE(emel::generator::guard::detail::prefill_chunk4_q8_gemm_supported(backend));
+#endif
+}
+
+TEST_CASE("generator_detail_prefill_chunk4_q8_gemm_support_accepts_hybrid_q8_k_x4_paths") {
+  auto fixture = std::make_unique<hybrid_chunk4_q8_runtime_fixture>();
+  REQUIRE(fixture->ready);
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+  CHECK(emel::generator::guard::detail::prefill_chunk4_q8_gemm_supported(fixture->backend));
+  fixture->backend.q8_input_chunk4_storage.clear();
+  CHECK_FALSE(emel::generator::guard::detail::prefill_chunk4_q8_gemm_supported(
+      fixture->backend));
+  fixture->backend.q8_input_chunk4_storage.resize(
+      fixture->backend.q8_input_storage.size() * static_cast<size_t>(4u));
+  fixture->backend.shortconv_bcx_chunk4.clear();
+  CHECK_FALSE(emel::generator::guard::detail::prefill_chunk4_q8_gemm_supported(
+      fixture->backend));
+#else
+  CHECK_FALSE(emel::generator::guard::detail::prefill_chunk4_q8_gemm_supported(
+      fixture->backend));
 #endif
 }
 
@@ -1693,7 +1924,8 @@ TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk4_batches_explicit_
 #if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
   int32_t err = -1;
   REQUIRE(emel::generator::detail::bind_inputs(fixture->request, &err));
-  REQUIRE(emel::generator::detail::run_kernel_nonflash_prefill_chunk4(fixture->request, &err));
+  REQUIRE(emel::generator::detail::run_kernel_nonflash_prefill_chunk4_packed_q8_0(
+      fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_ok);
   CHECK(fixture->backend.kv_cache_tokens == chunk4_prefill_runtime_fixture::k_prompt_tokens);
   CHECK(fixture->backend.packed_q8_0_dispatch_calls == 8u);
@@ -1704,7 +1936,8 @@ TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk4_batches_explicit_
       [](const float value) { return value == 0.0f; }));
 #else
   int32_t err = -1;
-  CHECK_FALSE(emel::generator::detail::run_kernel_nonflash_prefill_chunk4(fixture->request, &err));
+  CHECK_FALSE(emel::generator::detail::run_kernel_nonflash_prefill_chunk4_packed_q8_0(
+      fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
 #endif
 }
@@ -1717,7 +1950,8 @@ TEST_CASE(
 #if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
   int32_t err = -1;
   REQUIRE(emel::generator::detail::bind_inputs(fixture->request, &err));
-  REQUIRE(emel::generator::detail::run_kernel_nonflash_prefill_chunk4_preselected_argmax(
+  REQUIRE(
+      emel::generator::detail::run_kernel_nonflash_prefill_chunk4_preselected_argmax_packed_q8_0(
       fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_ok);
   CHECK(fixture->backend.kv_cache_tokens == chunk4_prefill_runtime_fixture::k_prompt_tokens);
@@ -1727,8 +1961,9 @@ TEST_CASE(
   CHECK(fixture->selected_score == doctest::Approx(0.0f));
 #else
   int32_t err = -1;
-  CHECK_FALSE(emel::generator::detail::run_kernel_nonflash_prefill_chunk4_preselected_argmax(
-      fixture->request, &err));
+  CHECK_FALSE(
+      emel::generator::detail::run_kernel_nonflash_prefill_chunk4_preselected_argmax_packed_q8_0(
+          fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
 #endif
 }
@@ -1740,7 +1975,8 @@ TEST_CASE("generator_detail_run_kernel_flash_prefill_chunk4_batches_explicit_q8_
 #if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8)
   int32_t err = -1;
   REQUIRE(emel::generator::detail::bind_inputs(fixture->request, &err));
-  REQUIRE(emel::generator::detail::run_kernel_flash_prefill_chunk4(fixture->request, &err));
+  REQUIRE(emel::generator::detail::run_kernel_flash_prefill_chunk4_packed_q8_0(
+      fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_ok);
   CHECK(fixture->backend.kv_cache_tokens == chunk4_prefill_runtime_fixture::k_prompt_tokens);
   CHECK(fixture->backend.packed_q8_0_dispatch_calls == 8u);
@@ -1753,7 +1989,33 @@ TEST_CASE("generator_detail_run_kernel_flash_prefill_chunk4_batches_explicit_q8_
       [](const float value) { return value == 0.0f; }));
 #else
   int32_t err = -1;
-  CHECK_FALSE(emel::generator::detail::run_kernel_flash_prefill_chunk4(fixture->request, &err));
+  CHECK_FALSE(emel::generator::detail::run_kernel_flash_prefill_chunk4_packed_q8_0(
+      fixture->request, &err));
+  CHECK(err == emel::generator::detail::k_error_invalid);
+#endif
+}
+
+TEST_CASE("generator_detail_run_kernel_nonflash_prefill_chunk4_batches_hybrid_q8_k_x4_gemm") {
+  auto fixture = std::make_unique<hybrid_chunk4_q8_runtime_fixture>();
+  REQUIRE(fixture->ready);
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+  int32_t err = -1;
+  REQUIRE(emel::generator::detail::bind_inputs(fixture->request, &err));
+  REQUIRE(emel::generator::detail::run_kernel_nonflash_prefill_chunk4_q8_k(
+      fixture->request, &err));
+  CHECK(err == emel::generator::detail::k_error_ok);
+  CHECK(fixture->backend.kv_cache_tokens == hybrid_chunk4_q8_runtime_fixture::k_prompt_tokens);
+  CHECK(fixture->backend.packed_q8_0_dispatch_calls == 0u);
+  CHECK(fixture->backend.kernel_dispatch_calls == 13u);
+  CHECK(std::all_of(
+      fixture->backend.bound_logits.begin(),
+      fixture->backend.bound_logits.end(),
+      [](const float value) { return value == 0.0f; }));
+#else
+  int32_t err = -1;
+  CHECK_FALSE(emel::generator::detail::run_kernel_nonflash_prefill_chunk4_q8_k(
+      fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
 #endif
 }

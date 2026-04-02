@@ -88,6 +88,7 @@ struct native_backend {
   emel::model::data::tensor_record output_argmax_prepared_tensor = {};
   std::vector<uint8_t> output_argmax_prepared_storage = {};
   std::vector<emel::kernel::detail::quant::block_q8_k> q8_input_storage = {};
+  std::vector<emel::kernel::detail::quant::block_q8_k> q8_input_chunk4_storage = {};
   std::vector<emel::kernel::detail::quant::block_q8_0> packed_q8_0_input_storage = {};
   std::vector<emel::kernel::detail::quant::block_q8_0> packed_q8_0_chunk4_rows = {};
   std::vector<uint8_t> packed_q8_0_chunk4_input_storage = {};
@@ -147,6 +148,8 @@ struct native_backend {
   std::vector<float> shortconv_bcx = {};
   std::vector<float> shortconv_bx = {};
   std::vector<float> shortconv_conv_out = {};
+  std::vector<float> shortconv_bcx_chunk4 = {};
+  std::vector<float> shortconv_conv_out_chunk4 = {};
   std::vector<float> q = {};
   std::vector<float> q_attn = {};
   std::vector<float> q_chunk4 = {};
@@ -177,6 +180,11 @@ namespace {
 
 using tensor_record = emel::model::data::tensor_record;
 using step_kind = emel::model::llama::detail::step_kind;
+
+enum class chunk4_rhs_route : uint8_t {
+  packed_q8_0 = 0,
+  q8_k = 1,
+};
 using step_plan = emel::model::llama::detail::step_plan;
 
 constexpr int32_t k_error_ok = 0;
@@ -236,6 +244,28 @@ inline emel::kernel::event::tensor_view make_q8_k_vector_view(
   tensor.nb[1] = row_bytes;
   tensor.nb[2] = row_bytes;
   tensor.nb[3] = row_bytes;
+  return tensor;
+}
+
+inline emel::kernel::event::tensor_view make_q8_k_rhs_chunk4_view(
+    const emel::kernel::detail::quant::block_q8_k * data,
+    const uint64_t cols) noexcept {
+  emel::kernel::event::tensor_view tensor{};
+  const size_t row_bytes =
+      emel::kernel::detail::quantized_row_storage_bytes(
+          emel::kernel::detail::dtype_q8_k, cols);
+  tensor.data = data;
+  tensor.type = emel::kernel::event::dtype::q8_k_x4;
+  tensor.ne = {
+      static_cast<uint64_t>(k_prefill_q8_chunk_rows),
+      cols,
+      1u,
+      1u,
+  };
+  tensor.nb[0] = 1u;
+  tensor.nb[1] = row_bytes;
+  tensor.nb[2] = row_bytes * static_cast<uint64_t>(k_prefill_q8_chunk_rows);
+  tensor.nb[3] = tensor.nb[2];
   return tensor;
 }
 
@@ -452,26 +482,65 @@ inline bool packed_q8_0_chunk4_input_path_supported(const native_backend & backe
 }
 
 inline bool is_lfm2_runtime(const native_backend & backend) noexcept;
+inline bool q8_input_path_supported(const native_backend & backend,
+                                    const tensor_matrix & matrix) noexcept;
 
-inline bool prefill_chunk4_q8_gemm_supported(const native_backend & backend) noexcept {
-  if (backend.blocks.empty() || backend.n_layer <= 0 || is_lfm2_runtime(backend)) {
+inline bool q8_input_chunk4_path_supported(const native_backend & backend,
+                                           const tensor_matrix & matrix) noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON)
+  if (backend.kernel_kind != emel::kernel::kernel_kind::aarch64 ||
+      backend.q8_input_chunk4_storage.empty()) {
+    return false;
+  }
+  return q8_input_path_supported(backend, matrix);
+#else
+  (void) backend;
+  (void) matrix;
+  return false;
+#endif
+}
+
+template <chunk4_rhs_route route>
+inline bool chunk4_matmul_backend_ready(const native_backend & backend,
+                                        const tensor_matrix & matrix) noexcept {
+  if constexpr (route == chunk4_rhs_route::packed_q8_0) {
+    return packed_q8_0_chunk4_input_path_supported(backend, matrix);
+  } else {
+    return q8_input_chunk4_path_supported(backend, matrix);
+  }
+}
+
+template <chunk4_rhs_route route>
+inline bool prefill_chunk4_backend_ready(const native_backend & backend) noexcept {
+  if (backend.blocks.empty() || backend.n_layer <= 0) {
     return false;
   }
 
   for (const auto & block : backend.blocks) {
-    if (!block.uses_attention ||
-        !packed_q8_0_chunk4_input_path_supported(backend, block.attention_q) ||
-        !packed_q8_0_chunk4_input_path_supported(backend, block.attention_k) ||
-        !packed_q8_0_chunk4_input_path_supported(backend, block.attention_v) ||
-        !packed_q8_0_chunk4_input_path_supported(backend, block.attention_output) ||
-        !packed_q8_0_chunk4_input_path_supported(backend, block.feed_forward_gate) ||
-        !packed_q8_0_chunk4_input_path_supported(backend, block.feed_forward_down) ||
-        !packed_q8_0_chunk4_input_path_supported(backend, block.feed_forward_up)) {
+    const bool residual_ok = block.uses_attention
+        ? chunk4_matmul_backend_ready<route>(backend, block.attention_q) &&
+              chunk4_matmul_backend_ready<route>(backend, block.attention_k) &&
+              chunk4_matmul_backend_ready<route>(backend, block.attention_v) &&
+              chunk4_matmul_backend_ready<route>(backend, block.attention_output)
+        : backend.shortconv_kernel_size > 1 &&
+              chunk4_matmul_backend_ready<route>(backend, block.shortconv_in_proj) &&
+              chunk4_matmul_backend_ready<route>(backend, block.shortconv_out_proj) &&
+              !block.shortconv_conv.empty();
+    if (!residual_ok ||
+        !chunk4_matmul_backend_ready<route>(backend, block.feed_forward_gate) ||
+        !chunk4_matmul_backend_ready<route>(backend, block.feed_forward_down) ||
+        !chunk4_matmul_backend_ready<route>(backend, block.feed_forward_up)) {
       return false;
     }
   }
 
-  return backend.hidden_chunk4.size() ==
+  const bool shortconv_ok = backend.shortconv_state_size == 0 ||
+      (backend.shortconv_bcx_chunk4.size() ==
+           static_cast<size_t>(k_prefill_q8_chunk_rows) *
+               static_cast<size_t>(3 * backend.n_embd) &&
+       backend.shortconv_conv_out_chunk4.size() == backend.hidden_chunk4.size());
+  return shortconv_ok &&
+      backend.hidden_chunk4.size() ==
           static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(backend.n_embd) &&
       backend.norm_chunk4.size() == backend.hidden_chunk4.size() &&
       backend.projected_chunk4.size() == backend.hidden_chunk4.size() &&
@@ -488,6 +557,11 @@ inline bool prefill_chunk4_q8_gemm_supported(const native_backend & backend) noe
               static_cast<size_t>(backend.blocks.front().feed_forward_gate.rows) &&
       backend.up_chunk4.size() == backend.gate_chunk4.size() &&
       backend.ffn_hidden_chunk4.size() == backend.gate_chunk4.size();
+}
+
+inline bool prefill_chunk4_q8_gemm_backend_ready(const native_backend & backend) noexcept {
+  return prefill_chunk4_backend_ready<chunk4_rhs_route::packed_q8_0>(backend) ||
+      prefill_chunk4_backend_ready<chunk4_rhs_route::q8_k>(backend);
 }
 
 inline bool q8_input_workspace_candidate(const tensor_matrix & matrix) noexcept {
@@ -1264,6 +1338,40 @@ inline bool prepare_q8_input_workspace(native_backend & backend) noexcept {
   return true;
 }
 
+inline bool prepare_q8_input_chunk4_workspace(native_backend & backend) noexcept {
+  backend.q8_input_chunk4_storage.clear();
+
+  size_t max_block_count = 0u;
+  if (!update_q8_input_requirement(backend.output, max_block_count) ||
+      !update_q8_input_requirement(backend.output_argmax, max_block_count)) {
+    return false;
+  }
+
+  for (const auto & block : backend.blocks) {
+    const bool residual_ok = block.uses_attention
+        ? update_q8_input_requirement(block.attention_q, max_block_count) &&
+              update_q8_input_requirement(block.attention_k, max_block_count) &&
+              update_q8_input_requirement(block.attention_v, max_block_count) &&
+              update_q8_input_requirement(block.attention_output, max_block_count)
+        : update_q8_input_requirement(block.shortconv_in_proj, max_block_count) &&
+              update_q8_input_requirement(block.shortconv_out_proj, max_block_count);
+    if (!residual_ok ||
+        !update_q8_input_requirement(block.feed_forward_gate, max_block_count) ||
+        !update_q8_input_requirement(block.feed_forward_down, max_block_count) ||
+        !update_q8_input_requirement(block.feed_forward_up, max_block_count)) {
+      return false;
+    }
+  }
+
+  if (max_block_count == 0u) {
+    return true;
+  }
+
+  backend.q8_input_chunk4_storage.resize(
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * max_block_count);
+  return true;
+}
+
 inline bool update_packed_q8_0_input_requirement(const tensor_matrix & matrix,
                                                  size_t & max_block_count) noexcept {
   if (matrix.tensor == nullptr ||
@@ -1674,6 +1782,15 @@ inline bool matmul_chunk4_prepared_packed_q8_0_input(
     const int32_t input_cols,
     std::span<float> output) noexcept;
 
+inline bool prepare_q8_chunk4_input(native_backend & backend,
+                                    std::span<const float> input,
+                                    const int32_t input_cols) noexcept;
+
+inline bool matmul_chunk4_q8_input(native_backend & backend,
+                                   const tensor_matrix & matrix,
+                                   const int32_t input_cols,
+                                   std::span<float> output) noexcept;
+
 inline bool quantize_vector_q8_k(
     std::span<const float> input,
     std::span<emel::kernel::detail::quant::block_q8_k> output) noexcept;
@@ -1910,6 +2027,41 @@ inline bool prepare_packed_q8_0_chunk4_input(native_backend & backend,
       backend.packed_q8_0_chunk4_input_storage.data());
 }
 
+inline bool prepare_q8_chunk4_input(native_backend & backend,
+                                    std::span<const float> input,
+                                    const int32_t input_cols) noexcept {
+  const size_t expected_size =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(input_cols);
+  if (backend.q8_input_chunk4_storage.empty() ||
+      input_cols <= 0 ||
+      input.size() != expected_size ||
+      (static_cast<size_t>(input_cols) % quant::QK_K) != 0u) {
+    return false;
+  }
+
+  const size_t block_count = static_cast<size_t>(input_cols) / quant::QK_K;
+  const size_t required_blocks =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * block_count;
+  if (required_blocks > backend.q8_input_chunk4_storage.size()) {
+    return false;
+  }
+
+  for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
+    if (!quantize_vector_q8_k(
+            input.subspan(
+                static_cast<size_t>(row) * static_cast<size_t>(input_cols),
+                static_cast<size_t>(input_cols)),
+            std::span<emel::kernel::detail::quant::block_q8_k>(
+                backend.q8_input_chunk4_storage.data() +
+                    static_cast<size_t>(row) * block_count,
+                block_count))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 inline bool matmul_vector_prepared_packed_q8_0_input(
     native_backend & backend,
     const tensor_matrix & matrix,
@@ -1966,6 +2118,93 @@ inline bool matmul_chunk4_prepared_packed_q8_0_input(
   backend.kernel_dispatch_calls += 1;
   backend.packed_q8_0_dispatch_calls += static_cast<uint64_t>(ok);
   return ok;
+}
+
+inline bool matmul_chunk4_q8_input(native_backend & backend,
+                                   const tensor_matrix & matrix,
+                                   const int32_t input_cols,
+                                   std::span<float> output) noexcept {
+  const size_t expected_size =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(matrix.rows);
+  if (!q8_input_chunk4_path_supported(backend, matrix) ||
+      input_cols <= 0 ||
+      input_cols != matrix.cols ||
+      output.size() != expected_size) {
+    return false;
+  }
+
+  const size_t block_count = static_cast<size_t>(input_cols) / quant::QK_K;
+  const size_t required_blocks =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * block_count;
+  if (required_blocks > backend.q8_input_chunk4_storage.size()) {
+    return false;
+  }
+
+  emel::kernel::event::op_mul_mat ev{
+      .src0 = make_src_view(matrix),
+      .src1 = make_q8_k_rhs_chunk4_view(backend.q8_input_chunk4_storage.data(),
+                                        static_cast<uint64_t>(input_cols)),
+      .dst = make_batch_major_dst_view(
+          output.data(),
+          static_cast<uint64_t>(k_prefill_q8_chunk_rows),
+          static_cast<uint64_t>(matrix.rows)),
+      .nth = 1,
+  };
+  backend.kernel.set_kind(backend.kernel_kind);
+  const bool ok = backend.kernel.process_event(ev);
+  backend.kernel_dispatch_calls += 1;
+  return ok;
+}
+
+template <chunk4_rhs_route route>
+inline bool prepare_chunk4_rhs(native_backend & backend,
+                               std::span<const float> input,
+                               const int32_t input_cols) noexcept {
+  if constexpr (route == chunk4_rhs_route::packed_q8_0) {
+    return prepare_packed_q8_0_chunk4_input(backend, input, input_cols);
+  } else {
+    return prepare_q8_chunk4_input(backend, input, input_cols);
+  }
+}
+
+template <chunk4_rhs_route route>
+inline bool matmul_chunk4_prepared(native_backend & backend,
+                                   const tensor_matrix & matrix,
+                                   const int32_t input_cols,
+                                   std::span<float> output) noexcept {
+  if constexpr (route == chunk4_rhs_route::packed_q8_0) {
+    return matmul_chunk4_prepared_packed_q8_0_input(backend, matrix, input_cols, output);
+  } else {
+    return matmul_chunk4_q8_input(backend, matrix, input_cols, output);
+  }
+}
+
+inline bool matmul_chunk4(native_backend & backend,
+                          const tensor_matrix & matrix,
+                          std::span<const float> input,
+                          const int32_t input_cols,
+                          std::span<float> output) noexcept {
+  const size_t expected_input =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(input_cols);
+  const size_t expected_output =
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(matrix.rows);
+  if (input_cols <= 0 ||
+      input.size() != expected_input ||
+      output.size() != expected_output) {
+    return false;
+  }
+
+  if (packed_q8_0_chunk4_input_path_supported(backend, matrix)) {
+    return prepare_packed_q8_0_chunk4_input(backend, input, input_cols) &&
+        matmul_chunk4_prepared_packed_q8_0_input(backend, matrix, input_cols, output);
+  }
+
+  if (q8_input_chunk4_path_supported(backend, matrix)) {
+    return prepare_q8_chunk4_input(backend, input, input_cols) &&
+        matmul_chunk4_q8_input(backend, matrix, input_cols, output);
+  }
+
+  return false;
 }
 
 inline bool matmul_vector_q8_input_argmax(
@@ -2566,6 +2805,97 @@ inline bool run_shortconv_block(native_backend & backend,
   return true;
 }
 
+inline bool run_shortconv_block_chunk4(native_backend & backend,
+                                       const block_weights & block,
+                                       const int32_t layer_index) noexcept {
+  if (backend.shortconv_kernel_size <= 0 ||
+      backend.shortconv_state_size <= 0 ||
+      block.shortconv_in_proj.tensor == nullptr ||
+      block.shortconv_out_proj.tensor == nullptr ||
+      static_cast<size_t>(block.shortconv_in_proj.rows) !=
+          static_cast<size_t>(3 * backend.n_embd) ||
+      block.shortconv_in_proj.cols != backend.n_embd ||
+      static_cast<size_t>(block.shortconv_out_proj.rows) !=
+          static_cast<size_t>(backend.n_embd) ||
+      block.shortconv_out_proj.cols != backend.n_embd ||
+      block.shortconv_conv.size() !=
+          static_cast<size_t>(backend.shortconv_kernel_size) *
+              static_cast<size_t>(backend.n_embd) ||
+      backend.shortconv_bcx_chunk4.size() !=
+          static_cast<size_t>(k_prefill_q8_chunk_rows) *
+              static_cast<size_t>(3 * backend.n_embd) ||
+      backend.shortconv_bx.size() != static_cast<size_t>(backend.n_embd) ||
+      backend.shortconv_conv_out_chunk4.size() != backend.hidden_chunk4.size()) {
+    return false;
+  }
+
+  if (!matmul_chunk4(
+          backend,
+          block.shortconv_in_proj,
+          backend.norm_chunk4,
+          backend.n_embd,
+          backend.shortconv_bcx_chunk4)) {
+    return false;
+  }
+
+  const size_t layer_offset = shortconv_state_layer_offset(backend, layer_index);
+  float * state = backend.recurrent_shortconv_cache.data() + layer_offset;
+  for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
+    const auto bcx_row = chunk4_row_span<const float>(
+        std::span<const float>(backend.shortconv_bcx_chunk4), row, 3 * backend.n_embd);
+    auto conv_out_row = chunk4_row_span<float>(
+        std::span<float>(backend.shortconv_conv_out_chunk4), row, backend.n_embd);
+    auto b = bcx_row.subspan(0u, static_cast<size_t>(backend.n_embd));
+    auto c = bcx_row.subspan(
+        static_cast<size_t>(backend.n_embd), static_cast<size_t>(backend.n_embd));
+    auto x = bcx_row.subspan(
+        static_cast<size_t>(2 * backend.n_embd), static_cast<size_t>(backend.n_embd));
+
+    for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+      const size_t dim = static_cast<size_t>(idx);
+      const float bx = b[dim] * x[dim];
+      backend.shortconv_bx[dim] = bx;
+
+      const float * kernel =
+          block.shortconv_conv.data() + (dim * static_cast<size_t>(backend.shortconv_kernel_size));
+      float conv_sum = bx * kernel[static_cast<size_t>(backend.shortconv_state_size)];
+      for (int32_t tap = 0; tap < backend.shortconv_state_size; ++tap) {
+        conv_sum += state[static_cast<size_t>(tap) * static_cast<size_t>(backend.n_embd) + dim] *
+                    kernel[static_cast<size_t>(tap)];
+      }
+
+      conv_out_row[dim] = c[dim] * conv_sum;
+    }
+
+    if (backend.shortconv_state_size > 1) {
+      const size_t move_count =
+          static_cast<size_t>(backend.shortconv_state_size - 1) *
+          static_cast<size_t>(backend.n_embd);
+      std::memmove(
+          state,
+          state + static_cast<size_t>(backend.n_embd),
+          move_count * sizeof(float));
+    }
+    std::memcpy(
+        state + static_cast<size_t>(backend.shortconv_state_size - 1) *
+                    static_cast<size_t>(backend.n_embd),
+        backend.shortconv_bx.data(),
+        static_cast<size_t>(backend.n_embd) * sizeof(float));
+  }
+
+  if (!matmul_chunk4(
+          backend,
+          block.shortconv_out_proj,
+          backend.shortconv_conv_out_chunk4,
+          backend.n_embd,
+          backend.projected_chunk4) ||
+      !add_chunk4_rows_in_place(backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd)) {
+    return false;
+  }
+
+  return true;
+}
+
 template <emel::generator::attention_mode mode>
 inline bool run_layer(native_backend & backend,
                       const int32_t layer_index,
@@ -2809,7 +3139,93 @@ inline bool run_prefill_scalar_tokens(native_backend & backend,
   return true;
 }
 
-template <emel::generator::attention_mode mode>
+template <chunk4_rhs_route route>
+inline bool run_shortconv_block_chunk4(native_backend & backend,
+                                       const block_weights & block,
+                                       const int32_t layer_index) noexcept {
+  if (backend.shortconv_kernel_size <= 0 ||
+      backend.shortconv_state_size <= 0 ||
+      block.shortconv_in_proj.tensor == nullptr ||
+      block.shortconv_out_proj.tensor == nullptr ||
+      static_cast<size_t>(block.shortconv_in_proj.rows) !=
+          static_cast<size_t>(3 * backend.n_embd) ||
+      block.shortconv_in_proj.cols != backend.n_embd ||
+      static_cast<size_t>(block.shortconv_out_proj.rows) !=
+          static_cast<size_t>(backend.n_embd) ||
+      block.shortconv_out_proj.cols != backend.n_embd ||
+      block.shortconv_conv.size() !=
+          static_cast<size_t>(backend.shortconv_kernel_size) *
+              static_cast<size_t>(backend.n_embd) ||
+      backend.shortconv_bcx_chunk4.size() !=
+          static_cast<size_t>(k_prefill_q8_chunk_rows) *
+              static_cast<size_t>(3 * backend.n_embd) ||
+      backend.shortconv_bx.size() != static_cast<size_t>(backend.n_embd) ||
+      backend.shortconv_conv_out_chunk4.size() != backend.hidden_chunk4.size()) {
+    return false;
+  }
+
+  if (!prepare_chunk4_rhs<route>(backend, backend.norm_chunk4, backend.n_embd) ||
+      !matmul_chunk4_prepared<route>(
+          backend, block.shortconv_in_proj, backend.n_embd, backend.shortconv_bcx_chunk4)) {
+    return false;
+  }
+
+  const size_t layer_offset = shortconv_state_layer_offset(backend, layer_index);
+  float * state = backend.recurrent_shortconv_cache.data() + layer_offset;
+  for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
+    const auto bcx_row = chunk4_row_span<const float>(
+        std::span<const float>(backend.shortconv_bcx_chunk4), row, 3 * backend.n_embd);
+    auto conv_out_row = chunk4_row_span<float>(
+        std::span<float>(backend.shortconv_conv_out_chunk4), row, backend.n_embd);
+    auto b = bcx_row.subspan(0u, static_cast<size_t>(backend.n_embd));
+    auto c = bcx_row.subspan(
+        static_cast<size_t>(backend.n_embd), static_cast<size_t>(backend.n_embd));
+    auto x = bcx_row.subspan(
+        static_cast<size_t>(2 * backend.n_embd), static_cast<size_t>(backend.n_embd));
+
+    for (int32_t idx = 0; idx < backend.n_embd; ++idx) {
+      const size_t dim = static_cast<size_t>(idx);
+      const float bx = b[dim] * x[dim];
+      backend.shortconv_bx[dim] = bx;
+
+      const float * kernel =
+          block.shortconv_conv.data() + (dim * static_cast<size_t>(backend.shortconv_kernel_size));
+      float conv_sum = bx * kernel[static_cast<size_t>(backend.shortconv_state_size)];
+      for (int32_t tap = 0; tap < backend.shortconv_state_size; ++tap) {
+        conv_sum += state[static_cast<size_t>(tap) * static_cast<size_t>(backend.n_embd) + dim] *
+                    kernel[static_cast<size_t>(tap)];
+      }
+
+      conv_out_row[dim] = c[dim] * conv_sum;
+    }
+
+    if (backend.shortconv_state_size > 1) {
+      const size_t move_count =
+          static_cast<size_t>(backend.shortconv_state_size - 1) *
+          static_cast<size_t>(backend.n_embd);
+      std::memmove(
+          state,
+          state + static_cast<size_t>(backend.n_embd),
+          move_count * sizeof(float));
+    }
+    std::memcpy(
+        state + static_cast<size_t>(backend.shortconv_state_size - 1) *
+                    static_cast<size_t>(backend.n_embd),
+        backend.shortconv_bx.data(),
+        static_cast<size_t>(backend.n_embd) * sizeof(float));
+  }
+
+  if (!prepare_chunk4_rhs<route>(backend, backend.shortconv_conv_out_chunk4, backend.n_embd) ||
+      !matmul_chunk4_prepared<route>(
+          backend, block.shortconv_out_proj, backend.n_embd, backend.projected_chunk4) ||
+      !add_chunk4_rows_in_place(backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd)) {
+    return false;
+  }
+
+  return true;
+}
+
+template <emel::generator::attention_mode mode, chunk4_rhs_route route>
 inline bool run_layer_chunk4(native_backend & backend,
                              const int32_t layer_index,
                              const size_t token_base) noexcept {
@@ -2823,94 +3239,103 @@ inline bool run_layer_chunk4(native_backend & backend,
           backend.n_embd,
           block.attention_norm,
           backend.rms_epsilon,
-          backend.norm_chunk4) ||
-      !prepare_packed_q8_0_chunk4_input(backend, backend.norm_chunk4, backend.n_embd) ||
-      !matmul_chunk4_prepared_packed_q8_0_input(
-          backend, block.attention_q, block.attention_q.cols, backend.q_chunk4) ||
-      !matmul_chunk4_prepared_packed_q8_0_input(
-          backend, block.attention_k, block.attention_k.cols, backend.k_chunk4) ||
-      !matmul_chunk4_prepared_packed_q8_0_input(
-          backend, block.attention_v, block.attention_v.cols, backend.v_chunk4)) {
+          backend.norm_chunk4)) {
     return false;
   }
 
-  const bool qwen3_runtime = is_qwen3_runtime(backend);
-  for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
-    const int32_t position = backend.bound_positions[token_base + static_cast<size_t>(row)];
-    auto q_row = chunk4_row_span<float>(std::span<float>(backend.q_chunk4), row, q_dim);
-    auto k_row = chunk4_row_span<float>(std::span<float>(backend.k_chunk4), row, kv_dim);
-    const auto v_row = chunk4_row_span<const float>(
-        std::span<const float>(backend.v_chunk4), row, kv_dim);
-
-    if (qwen3_runtime &&
-        (!apply_headwise_rms_norm(
-             q_row,
-             block.attention_q_norm,
-             backend.n_head,
-             backend.head_dim,
-             backend.rms_epsilon) ||
-         !apply_headwise_rms_norm(
-             k_row,
-             block.attention_k_norm,
-             backend.n_head_kv,
-             backend.head_dim_kv,
-             backend.rms_epsilon))) {
+  if (block.uses_attention) {
+    if (!prepare_chunk4_rhs<route>(backend, backend.norm_chunk4, backend.n_embd) ||
+        !matmul_chunk4_prepared<route>(
+            backend, block.attention_q, backend.n_embd, backend.q_chunk4) ||
+        !matmul_chunk4_prepared<route>(
+            backend, block.attention_k, backend.n_embd, backend.k_chunk4) ||
+        !matmul_chunk4_prepared<route>(
+            backend, block.attention_v, backend.n_embd, backend.v_chunk4)) {
       return false;
     }
 
-    apply_rope(
-        q_row, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
-    apply_rope(k_row,
+    const bool qk_norm_runtime = requires_attention_qk_norm(backend, block);
+    for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
+      const int32_t position = backend.bound_positions[token_base + static_cast<size_t>(row)];
+      auto q_row = chunk4_row_span<float>(std::span<float>(backend.q_chunk4), row, q_dim);
+      auto k_row = chunk4_row_span<float>(std::span<float>(backend.k_chunk4), row, kv_dim);
+      const auto v_row = chunk4_row_span<const float>(
+          std::span<const float>(backend.v_chunk4), row, kv_dim);
+
+      if (qk_norm_runtime &&
+          (!apply_headwise_rms_norm(
+               q_row,
+               block.attention_q_norm,
+               backend.n_head,
+               backend.head_dim,
+               backend.rms_epsilon) ||
+           !apply_headwise_rms_norm(
+               k_row,
+               block.attention_k_norm,
                backend.n_head_kv,
                backend.head_dim_kv,
-               backend.n_rot,
-               position,
-               backend.rope_freq_base);
+               backend.rms_epsilon))) {
+        return false;
+      }
 
-    if (!store_attention_kv_cache(backend, layer_index, position, k_row, v_row) ||
-        !run_attention_for_q_vector<mode>(backend, layer_index, position, q_row)) {
-      return false;
+      apply_rope(q_row,
+                 backend.n_head,
+                 backend.head_dim,
+                 backend.n_rot,
+                 position,
+                 backend.rope_freq_base);
+      apply_rope(k_row,
+                 backend.n_head_kv,
+                 backend.head_dim_kv,
+                 backend.n_rot,
+                 position,
+                 backend.rope_freq_base);
+
+      if (!store_attention_kv_cache(backend, layer_index, position, k_row, v_row) ||
+          !run_attention_for_q_vector<mode>(backend, layer_index, position, q_row)) {
+        return false;
+      }
+
+      std::copy(
+          backend.attn_ctx.begin(),
+          backend.attn_ctx.end(),
+          chunk4_row_span<float>(std::span<float>(backend.attn_ctx_chunk4), row, q_dim).begin());
+      backend.kv_cache_tokens = position + 1;
     }
 
-    std::copy(
-        backend.attn_ctx.begin(),
-        backend.attn_ctx.end(),
-        chunk4_row_span<float>(std::span<float>(backend.attn_ctx_chunk4), row, q_dim).begin());
-    backend.kv_cache_tokens = position + 1;
+    if (!prepare_chunk4_rhs<route>(backend, backend.attn_ctx_chunk4, q_dim) ||
+        !matmul_chunk4_prepared<route>(
+            backend, block.attention_output, q_dim, backend.projected_chunk4) ||
+        !add_chunk4_rows_in_place(
+            backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd)) {
+      return false;
+    }
+  } else if (!run_shortconv_block_chunk4<route>(backend, block, layer_index)) {
+    return false;
   }
 
-  if (!prepare_packed_q8_0_chunk4_input(backend, backend.attn_ctx_chunk4, q_dim) ||
-      !matmul_chunk4_prepared_packed_q8_0_input(
-          backend,
-          block.attention_output,
-          block.attention_output.cols,
-          backend.projected_chunk4) ||
-      !add_chunk4_rows_in_place(backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd) ||
-      !rms_norm_chunk4(
+  if (!rms_norm_chunk4(
           backend.hidden_chunk4,
           backend.n_embd,
           block.feed_forward_norm,
           backend.rms_epsilon,
-          backend.norm_chunk4) ||
-      !prepare_packed_q8_0_chunk4_input(backend, backend.norm_chunk4, backend.n_embd) ||
-      !matmul_chunk4_prepared_packed_q8_0_input(
-          backend,
-          block.feed_forward_gate,
-          block.feed_forward_gate.cols,
-          backend.gate_chunk4) ||
-      !matmul_chunk4_prepared_packed_q8_0_input(
-          backend,
-          block.feed_forward_up,
-          block.feed_forward_up.cols,
-          backend.up_chunk4) ||
-      !apply_silu_mul_chunk4(
+          backend.norm_chunk4)) {
+    return false;
+  }
+
+  if (!prepare_chunk4_rhs<route>(backend, backend.norm_chunk4, backend.n_embd) ||
+      !matmul_chunk4_prepared<route>(
+          backend, block.feed_forward_gate, backend.n_embd, backend.gate_chunk4) ||
+      !matmul_chunk4_prepared<route>(
+          backend, block.feed_forward_up, backend.n_embd, backend.up_chunk4)) {
+    return false;
+  }
+
+  if (!apply_silu_mul_chunk4(
           backend.gate_chunk4, backend.up_chunk4, ffn_dim, backend.ffn_hidden_chunk4) ||
-      !prepare_packed_q8_0_chunk4_input(backend, backend.ffn_hidden_chunk4, ffn_dim) ||
-      !matmul_chunk4_prepared_packed_q8_0_input(
-          backend,
-          block.feed_forward_down,
-          block.feed_forward_down.cols,
-          backend.projected_chunk4) ||
+      !prepare_chunk4_rhs<route>(backend, backend.ffn_hidden_chunk4, ffn_dim) ||
+      !matmul_chunk4_prepared<route>(
+          backend, block.feed_forward_down, ffn_dim, backend.projected_chunk4) ||
       !add_chunk4_rows_in_place(backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd)) {
     return false;
   }
@@ -2918,7 +3343,7 @@ inline bool run_layer_chunk4(native_backend & backend,
   return true;
 }
 
-template <emel::generator::attention_mode mode>
+template <emel::generator::attention_mode mode, chunk4_rhs_route route>
 inline bool run_prefill_chunk4_tokens(native_backend & backend,
                                       const size_t token_limit) noexcept {
   for (size_t token_base = 0; token_base < token_limit;
@@ -2941,7 +3366,7 @@ inline bool run_prefill_chunk4_tokens(native_backend & backend,
     }
 
     for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-      if (!run_layer_chunk4<mode>(backend, layer, token_base)) {
+      if (!run_layer_chunk4<mode, route>(backend, layer, token_base)) {
         return false;
       }
     }
@@ -2976,7 +3401,7 @@ inline bool run_prefill(native_backend & backend) noexcept {
   return compute_logits(backend);
 }
 
-template <emel::generator::attention_mode mode>
+template <emel::generator::attention_mode mode, chunk4_rhs_route route>
 inline bool run_prefill_chunk4(native_backend & backend) noexcept {
   backend.kv_cache_tokens = 0;
   reset_shortconv_cache(backend);
@@ -2985,7 +3410,7 @@ inline bool run_prefill_chunk4(native_backend & backend) noexcept {
   const size_t chunk_limit =
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk_rows));
   if (chunk_limit == 0u ||
-      !run_prefill_chunk4_tokens<mode>(backend, chunk_limit) ||
+      !run_prefill_chunk4_tokens<mode, route>(backend, chunk_limit) ||
       !run_prefill_scalar_tokens<mode>(backend, chunk_limit, token_count)) {
     return false;
   }
@@ -3015,7 +3440,7 @@ inline bool run_prefill_preselected_argmax(native_backend & backend,
   return compute_logits_preselected_argmax(backend, selected_index, selected_score);
 }
 
-template <emel::generator::attention_mode mode>
+template <emel::generator::attention_mode mode, chunk4_rhs_route route>
 inline bool run_prefill_chunk4_preselected_argmax(native_backend & backend,
                                                   int32_t & selected_index,
                                                   float & selected_score) noexcept {
@@ -3026,7 +3451,7 @@ inline bool run_prefill_chunk4_preselected_argmax(native_backend & backend,
   const size_t chunk_limit =
       token_count - (token_count % static_cast<size_t>(k_prefill_q8_chunk_rows));
   if (chunk_limit == 0u ||
-      !run_prefill_chunk4_tokens<mode>(backend, chunk_limit) ||
+      !run_prefill_chunk4_tokens<mode, route>(backend, chunk_limit) ||
       !run_prefill_scalar_tokens<mode>(backend, chunk_limit, token_count)) {
     return false;
   }
@@ -3225,6 +3650,7 @@ inline emel::error::type prepare(native_backend & backend,
 
   if (!prepare_block_native_matrices(backend) ||
       !prepare_q8_input_workspace(backend) ||
+      !prepare_q8_input_chunk4_workspace(backend) ||
       !prepare_packed_q8_0_input_workspace(backend) ||
       !prepare_packed_q8_0_chunk4_input_workspace(backend)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -3338,6 +3764,10 @@ inline emel::error::type prepare(native_backend & backend,
   backend.shortconv_bcx.resize(static_cast<size_t>(3 * backend.n_embd));
   backend.shortconv_bx.resize(static_cast<size_t>(backend.n_embd));
   backend.shortconv_conv_out.resize(static_cast<size_t>(backend.n_embd));
+  backend.shortconv_bcx_chunk4.resize(
+      static_cast<size_t>(k_prefill_q8_chunk_rows) *
+      static_cast<size_t>(3 * backend.n_embd));
+  backend.shortconv_conv_out_chunk4.resize(backend.hidden_chunk4.size());
   backend.q.resize(static_cast<size_t>(q_dim));
   backend.q_attn.resize(static_cast<size_t>(q_dim));
   backend.q_chunk4.resize(
@@ -3516,7 +3946,7 @@ inline bool run_kernel_nonflash(const emel::graph::processor::event::execute & r
   return run_kernel_mode<emel::generator::attention_mode::nonflash>(request, err_out);
 }
 
-template <emel::generator::attention_mode mode>
+template <emel::generator::attention_mode mode, chunk4_rhs_route route>
 inline bool run_kernel_prefill_chunk4_mode(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
@@ -3526,31 +3956,53 @@ inline bool run_kernel_prefill_chunk4_mode(
   if (plan == nullptr || plan->kind != step_kind::prefill ||
       !check_backend(backend, err_out) || !backend->bound_ready ||
       backend->bound_token_count < k_prefill_q8_chunk_rows ||
-      !prefill_chunk4_q8_gemm_supported(*backend)) {
+      !prefill_chunk4_backend_ready<route>(*backend)) {
     if (err_out != nullptr) {
       *err_out = k_error_invalid;
     }
     return false;
   }
 
-  const bool ok = run_prefill_chunk4<mode>(*backend);
+  const bool ok = run_prefill_chunk4<mode, route>(*backend);
   if (err_out != nullptr) {
     *err_out = ok ? k_error_ok : k_error_invalid;
   }
   return ok;
 }
 
-inline bool run_kernel_flash_prefill_chunk4(
+inline bool run_kernel_flash_prefill_chunk4_packed_q8_0(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
-  return run_kernel_prefill_chunk4_mode<emel::generator::attention_mode::flash>(
+  return run_kernel_prefill_chunk4_mode<
+      emel::generator::attention_mode::flash,
+      chunk4_rhs_route::packed_q8_0>(
       request, err_out);
 }
 
-inline bool run_kernel_nonflash_prefill_chunk4(
+inline bool run_kernel_nonflash_prefill_chunk4_packed_q8_0(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
-  return run_kernel_prefill_chunk4_mode<emel::generator::attention_mode::nonflash>(
+  return run_kernel_prefill_chunk4_mode<
+      emel::generator::attention_mode::nonflash,
+      chunk4_rhs_route::packed_q8_0>(
+      request, err_out);
+}
+
+inline bool run_kernel_flash_prefill_chunk4_q8_k(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_mode<
+      emel::generator::attention_mode::flash,
+      chunk4_rhs_route::q8_k>(
+      request, err_out);
+}
+
+inline bool run_kernel_nonflash_prefill_chunk4_q8_k(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_mode<
+      emel::generator::attention_mode::nonflash,
+      chunk4_rhs_route::q8_k>(
       request, err_out);
 }
 
@@ -3568,7 +4020,7 @@ inline bool run_kernel_nonflash_preselected_argmax(
       request, err_out);
 }
 
-template <emel::generator::attention_mode mode>
+template <emel::generator::attention_mode mode, chunk4_rhs_route route>
 inline bool run_kernel_prefill_chunk4_preselected_argmax_mode(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
@@ -3578,7 +4030,7 @@ inline bool run_kernel_prefill_chunk4_preselected_argmax_mode(
   if (plan == nullptr || plan->kind != step_kind::prefill ||
       !check_backend(backend, err_out) || !backend->bound_ready ||
       backend->bound_token_count < k_prefill_q8_chunk_rows ||
-      !prefill_chunk4_q8_gemm_supported(*backend) ||
+      !prefill_chunk4_backend_ready<route>(*backend) ||
       io == nullptr || io->selected_token_out == nullptr || io->selected_score_out == nullptr) {
     if (err_out != nullptr) {
       *err_out = k_error_invalid;
@@ -3586,7 +4038,7 @@ inline bool run_kernel_prefill_chunk4_preselected_argmax_mode(
     return false;
   }
 
-  const bool ok = run_prefill_chunk4_preselected_argmax<mode>(
+  const bool ok = run_prefill_chunk4_preselected_argmax<mode, route>(
       *backend, *io->selected_token_out, *io->selected_score_out);
   if (err_out != nullptr) {
     *err_out = ok ? k_error_ok : k_error_invalid;
@@ -3594,18 +4046,36 @@ inline bool run_kernel_prefill_chunk4_preselected_argmax_mode(
   return ok;
 }
 
-inline bool run_kernel_flash_prefill_chunk4_preselected_argmax(
+inline bool run_kernel_flash_prefill_chunk4_preselected_argmax_packed_q8_0(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
   return run_kernel_prefill_chunk4_preselected_argmax_mode<
-      emel::generator::attention_mode::flash>(request, err_out);
+      emel::generator::attention_mode::flash,
+      chunk4_rhs_route::packed_q8_0>(request, err_out);
 }
 
-inline bool run_kernel_nonflash_prefill_chunk4_preselected_argmax(
+inline bool run_kernel_nonflash_prefill_chunk4_preselected_argmax_packed_q8_0(
     const emel::graph::processor::event::execute & request,
     int32_t * err_out) noexcept {
   return run_kernel_prefill_chunk4_preselected_argmax_mode<
-      emel::generator::attention_mode::nonflash>(request, err_out);
+      emel::generator::attention_mode::nonflash,
+      chunk4_rhs_route::packed_q8_0>(request, err_out);
+}
+
+inline bool run_kernel_flash_prefill_chunk4_preselected_argmax_q8_k(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_preselected_argmax_mode<
+      emel::generator::attention_mode::flash,
+      chunk4_rhs_route::q8_k>(request, err_out);
+}
+
+inline bool run_kernel_nonflash_prefill_chunk4_preselected_argmax_q8_k(
+    const emel::graph::processor::event::execute & request,
+    int32_t * err_out) noexcept {
+  return run_kernel_prefill_chunk4_preselected_argmax_mode<
+      emel::generator::attention_mode::nonflash,
+      chunk4_rhs_route::q8_k>(request, err_out);
 }
 
 inline bool extract_outputs(const emel::graph::processor::event::execute & request,

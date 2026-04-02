@@ -40,13 +40,17 @@ enum class selection_mode : uint8_t {
 enum class prefill_compute_contract : uint8_t {
   none = 0,
   flash_materialized_scalar = 1,
-  flash_materialized_chunk4 = 2,
+  flash_materialized_chunk4_packed_q8_0 = 2,
   flash_preselected_scalar = 3,
-  flash_preselected_chunk4 = 4,
+  flash_preselected_chunk4_packed_q8_0 = 4,
   nonflash_materialized_scalar = 5,
-  nonflash_materialized_chunk4 = 6,
+  nonflash_materialized_chunk4_packed_q8_0 = 6,
   nonflash_preselected_scalar = 7,
-  nonflash_preselected_chunk4 = 8,
+  nonflash_preselected_chunk4_packed_q8_0 = 8,
+  flash_materialized_chunk4_q8_k = 9,
+  flash_preselected_chunk4_q8_k = 10,
+  nonflash_materialized_chunk4_q8_k = 11,
+  nonflash_preselected_chunk4_q8_k = 12,
 };
 
 using tokenizer_bind_dispatch_fn =

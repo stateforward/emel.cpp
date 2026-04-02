@@ -99,11 +99,19 @@ struct request_contract_flash_materialized_scalar {
   }
 };
 
-struct request_contract_flash_materialized_chunk4 {
+struct request_contract_flash_materialized_chunk4_packed_q8_0 {
   void operator()(const event::run & ev, context & ctx) const noexcept {
     detail::request_compute_contract<
-        emel::generator::prefill_compute_contract::flash_materialized_chunk4,
-        emel::generator::detail::run_kernel_flash_prefill_chunk4>(ev, ctx);
+        emel::generator::prefill_compute_contract::flash_materialized_chunk4_packed_q8_0,
+        emel::generator::detail::run_kernel_flash_prefill_chunk4_packed_q8_0>(ev, ctx);
+  }
+};
+
+struct request_contract_flash_materialized_chunk4_q8_k {
+  void operator()(const event::run & ev, context & ctx) const noexcept {
+    detail::request_compute_contract<
+        emel::generator::prefill_compute_contract::flash_materialized_chunk4_q8_k,
+        emel::generator::detail::run_kernel_flash_prefill_chunk4_q8_k>(ev, ctx);
   }
 };
 
@@ -115,11 +123,21 @@ struct request_contract_flash_preselected_scalar {
   }
 };
 
-struct request_contract_flash_preselected_chunk4 {
+struct request_contract_flash_preselected_chunk4_packed_q8_0 {
   void operator()(const event::run & ev, context & ctx) const noexcept {
     detail::request_compute_contract_preselected_argmax<
-        emel::generator::prefill_compute_contract::flash_preselected_chunk4,
-        emel::generator::detail::run_kernel_flash_prefill_chunk4_preselected_argmax>(ev, ctx);
+        emel::generator::prefill_compute_contract::flash_preselected_chunk4_packed_q8_0,
+        emel::generator::detail::run_kernel_flash_prefill_chunk4_preselected_argmax_packed_q8_0>(
+        ev, ctx);
+  }
+};
+
+struct request_contract_flash_preselected_chunk4_q8_k {
+  void operator()(const event::run & ev, context & ctx) const noexcept {
+    detail::request_compute_contract_preselected_argmax<
+        emel::generator::prefill_compute_contract::flash_preselected_chunk4_q8_k,
+        emel::generator::detail::run_kernel_flash_prefill_chunk4_preselected_argmax_q8_k>(
+        ev, ctx);
   }
 };
 
@@ -131,11 +149,19 @@ struct request_contract_nonflash_materialized_scalar {
   }
 };
 
-struct request_contract_nonflash_materialized_chunk4 {
+struct request_contract_nonflash_materialized_chunk4_packed_q8_0 {
   void operator()(const event::run & ev, context & ctx) const noexcept {
     detail::request_compute_contract<
-        emel::generator::prefill_compute_contract::nonflash_materialized_chunk4,
-        emel::generator::detail::run_kernel_nonflash_prefill_chunk4>(ev, ctx);
+        emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_packed_q8_0,
+        emel::generator::detail::run_kernel_nonflash_prefill_chunk4_packed_q8_0>(ev, ctx);
+  }
+};
+
+struct request_contract_nonflash_materialized_chunk4_q8_k {
+  void operator()(const event::run & ev, context & ctx) const noexcept {
+    detail::request_compute_contract<
+        emel::generator::prefill_compute_contract::nonflash_materialized_chunk4_q8_k,
+        emel::generator::detail::run_kernel_nonflash_prefill_chunk4_q8_k>(ev, ctx);
   }
 };
 
@@ -147,11 +173,21 @@ struct request_contract_nonflash_preselected_scalar {
   }
 };
 
-struct request_contract_nonflash_preselected_chunk4 {
+struct request_contract_nonflash_preselected_chunk4_packed_q8_0 {
   void operator()(const event::run & ev, context & ctx) const noexcept {
     detail::request_compute_contract_preselected_argmax<
-        emel::generator::prefill_compute_contract::nonflash_preselected_chunk4,
-        emel::generator::detail::run_kernel_nonflash_prefill_chunk4_preselected_argmax>(ev, ctx);
+        emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_packed_q8_0,
+        emel::generator::detail::run_kernel_nonflash_prefill_chunk4_preselected_argmax_packed_q8_0>(
+        ev, ctx);
+  }
+};
+
+struct request_contract_nonflash_preselected_chunk4_q8_k {
+  void operator()(const event::run & ev, context & ctx) const noexcept {
+    detail::request_compute_contract_preselected_argmax<
+        emel::generator::prefill_compute_contract::nonflash_preselected_chunk4_q8_k,
+        emel::generator::detail::run_kernel_nonflash_prefill_chunk4_preselected_argmax_q8_k>(
+        ev, ctx);
   }
 };
 
@@ -159,20 +195,28 @@ inline constexpr request_slots request_slots{};
 inline constexpr request_memory_snapshot request_memory_snapshot{};
 inline constexpr request_contract_flash_materialized_scalar
     request_contract_flash_materialized_scalar{};
-inline constexpr request_contract_flash_materialized_chunk4
-    request_contract_flash_materialized_chunk4{};
+inline constexpr request_contract_flash_materialized_chunk4_packed_q8_0
+    request_contract_flash_materialized_chunk4_packed_q8_0{};
+inline constexpr request_contract_flash_materialized_chunk4_q8_k
+    request_contract_flash_materialized_chunk4_q8_k{};
 inline constexpr request_contract_flash_preselected_scalar
     request_contract_flash_preselected_scalar{};
-inline constexpr request_contract_flash_preselected_chunk4
-    request_contract_flash_preselected_chunk4{};
+inline constexpr request_contract_flash_preselected_chunk4_packed_q8_0
+    request_contract_flash_preselected_chunk4_packed_q8_0{};
+inline constexpr request_contract_flash_preselected_chunk4_q8_k
+    request_contract_flash_preselected_chunk4_q8_k{};
 inline constexpr request_contract_nonflash_materialized_scalar
     request_contract_nonflash_materialized_scalar{};
-inline constexpr request_contract_nonflash_materialized_chunk4
-    request_contract_nonflash_materialized_chunk4{};
+inline constexpr request_contract_nonflash_materialized_chunk4_packed_q8_0
+    request_contract_nonflash_materialized_chunk4_packed_q8_0{};
+inline constexpr request_contract_nonflash_materialized_chunk4_q8_k
+    request_contract_nonflash_materialized_chunk4_q8_k{};
 inline constexpr request_contract_nonflash_preselected_scalar
     request_contract_nonflash_preselected_scalar{};
-inline constexpr request_contract_nonflash_preselected_chunk4
-    request_contract_nonflash_preselected_chunk4{};
+inline constexpr request_contract_nonflash_preselected_chunk4_packed_q8_0
+    request_contract_nonflash_preselected_chunk4_packed_q8_0{};
+inline constexpr request_contract_nonflash_preselected_chunk4_q8_k
+    request_contract_nonflash_preselected_chunk4_q8_k{};
 inline constexpr mark_prefill_cached mark_prefill_cached{};
 inline constexpr mark_invalid_request mark_invalid_request{};
 inline constexpr mark_backend_error mark_backend_error{};

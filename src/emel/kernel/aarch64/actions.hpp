@@ -486,6 +486,52 @@ inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_request(
       is_dense_contiguous(request.dst);
 }
 
+inline bool can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
+    const event::op_mul_mat & request,
+    const uint8_t packed_dtype) noexcept {
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t rhs_rows = request.src1.ne[0];
+  const uint64_t group_count = ::emel::kernel::detail::quant::packed_q4_k_x8_group_count(m);
+  const size_t group_bytes =
+      ::emel::kernel::detail::quant::packed_q4_k_x8_group_storage_bytes(k);
+  const size_t rhs_row_bytes =
+      ::emel::kernel::detail::quantized_row_storage_bytes(
+          ::emel::kernel::detail::dtype_q8_k, k);
+  const size_t dst_row_bytes = sizeof(float) * m;
+  return k != 0u &&
+      m != 0u &&
+      rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
+      request.src1.ne[1] == k &&
+      request.dst.ne[0] == rhs_rows &&
+      request.dst.ne[1] == m &&
+      request.src0.ne[2] == 1u &&
+      request.src0.ne[3] == 1u &&
+      request.src1.ne[2] == 1u &&
+      request.src1.ne[3] == 1u &&
+      request.dst.ne[2] == 1u &&
+      request.dst.ne[3] == 1u &&
+      ::emel::kernel::detail::dtype_code(request.src0.type) == packed_dtype &&
+      ::emel::kernel::detail::dtype_code(request.src1.type) ==
+          ::emel::kernel::detail::dtype_q8_k_x4 &&
+      ::emel::kernel::detail::dtype_code(request.dst.type) ==
+          ::emel::kernel::detail::dtype_f32 &&
+      request.src0.nb[0] == 1u &&
+      group_bytes != 0u &&
+      request.src0.nb[1] == group_bytes &&
+      request.src0.nb[2] == group_bytes * group_count &&
+      request.src0.nb[3] == request.src0.nb[2] &&
+      request.src1.nb[0] == 1u &&
+      rhs_row_bytes != 0u &&
+      request.src1.nb[1] == rhs_row_bytes &&
+      request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
+      request.src1.nb[3] == request.src1.nb[2] &&
+      request.dst.nb[0] == dst_row_bytes &&
+      request.dst.nb[1] == sizeof(float) &&
+      request.dst.nb[2] == dst_row_bytes * rhs_rows &&
+      request.dst.nb[3] == request.dst.nb[2];
+}
+
 inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_request(
     const event::op_mul_mat & request) noexcept {
   const uint64_t k = request.src0.ne[0];
@@ -525,6 +571,51 @@ inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_request(
       request.src1.nb[2] == rhs_row_bytes &&
       request.src1.nb[3] == rhs_row_bytes &&
       is_dense_contiguous(request.dst);
+}
+
+inline bool can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
+    const event::op_mul_mat & request,
+    const uint8_t packed_dtype,
+    const size_t group_bytes) noexcept {
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t rhs_rows = request.src1.ne[0];
+  const uint64_t group_count = ::emel::kernel::detail::quant::packed_q6_k_x8_group_count(m);
+  const size_t rhs_row_bytes =
+      ::emel::kernel::detail::quantized_row_storage_bytes(
+          ::emel::kernel::detail::dtype_q8_k, k);
+  const size_t dst_row_bytes = sizeof(float) * m;
+  return k != 0u &&
+      m != 0u &&
+      rhs_rows == ::emel::kernel::detail::quant::Q8_0_X4_ROWS &&
+      request.src1.ne[1] == k &&
+      request.dst.ne[0] == rhs_rows &&
+      request.dst.ne[1] == m &&
+      request.src0.ne[2] == 1u &&
+      request.src0.ne[3] == 1u &&
+      request.src1.ne[2] == 1u &&
+      request.src1.ne[3] == 1u &&
+      request.dst.ne[2] == 1u &&
+      request.dst.ne[3] == 1u &&
+      ::emel::kernel::detail::dtype_code(request.src0.type) == packed_dtype &&
+      ::emel::kernel::detail::dtype_code(request.src1.type) ==
+          ::emel::kernel::detail::dtype_q8_k_x4 &&
+      ::emel::kernel::detail::dtype_code(request.dst.type) ==
+          ::emel::kernel::detail::dtype_f32 &&
+      request.src0.nb[0] == 1u &&
+      group_bytes != 0u &&
+      request.src0.nb[1] == group_bytes &&
+      request.src0.nb[2] == group_bytes * group_count &&
+      request.src0.nb[3] == request.src0.nb[2] &&
+      request.src1.nb[0] == 1u &&
+      rhs_row_bytes != 0u &&
+      request.src1.nb[1] == rhs_row_bytes &&
+      request.src1.nb[2] == rhs_row_bytes * rhs_rows &&
+      request.src1.nb[3] == request.src1.nb[2] &&
+      request.dst.nb[0] == dst_row_bytes &&
+      request.dst.nb[1] == sizeof(float) &&
+      request.dst.nb[2] == dst_row_bytes * rhs_rows &&
+      request.dst.nb[3] == request.dst.nb[2];
 }
 
 inline bool can_run_neon_mul_mat_q6_vector_prepared_q8_rhs_request(
@@ -593,11 +684,40 @@ inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8(
           request, ::emel::kernel::detail::dtype_q4_k_x8_bl8);
 }
 
+inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4(
+    const event::op_mul_mat & request,
+    const bool neon_available) noexcept {
+  return neon_available &&
+      neon_q4_vector_packed_supported() &&
+      can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
+          request, ::emel::kernel::detail::dtype_q4_k_x8_bl4);
+}
+
+inline bool can_use_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4(
+    const event::op_mul_mat & request,
+    const bool neon_available) noexcept {
+  return neon_available &&
+      neon_q4_vector_packed_supported() &&
+      can_run_neon_mul_mat_q4_vector_packed_q8_rhs_matrix_x4_request(
+          request, ::emel::kernel::detail::dtype_q4_k_x8_bl8);
+}
+
 inline bool can_use_neon_mul_mat_q6_vector_packed_q8_rhs(const event::op_mul_mat & request,
                                                          const bool neon_available) noexcept {
   return neon_available &&
       neon_q6_vector_packed_supported() &&
       can_run_neon_mul_mat_q6_vector_packed_q8_rhs_request(request);
+}
+
+inline bool can_use_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4(
+    const event::op_mul_mat & request,
+    const bool neon_available) noexcept {
+  return neon_available &&
+      neon_q6_vector_packed_supported() &&
+      can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
+          request,
+          ::emel::kernel::detail::dtype_q6_k_x8,
+          ::emel::kernel::detail::quant::packed_q6_k_x8_group_storage_bytes(request.src0.ne[0]));
 }
 
 inline bool can_use_neon_mul_mat_q6_vector_prepared_q8_rhs(const event::op_mul_mat & request,
@@ -619,6 +739,18 @@ inline bool can_use_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm(
   return neon_available &&
       neon_q6_vector_prepared_q8_rhs_i8mm_supported() &&
       can_run_neon_mul_mat_q6_vector_prepared_q8_rhs_request(request);
+}
+
+inline bool can_use_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4(
+    const event::op_mul_mat & request,
+    const bool neon_available) noexcept {
+  return neon_available &&
+      neon_q6_vector_prepared_q8_rhs_i8mm_supported() &&
+      can_run_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_request(
+          request,
+          ::emel::kernel::detail::dtype_q6_k_x8_q8_prepared,
+          ::emel::kernel::detail::quant::prepared_q6_k_x8_q8_group_storage_bytes(
+              request.src0.ne[0]));
 }
 
 inline bool can_run_neon_mul_mat_argmax_q6_vector_prepared_q8_rhs_request(
@@ -3136,6 +3268,54 @@ inline void execute_neon_mul_mat_q4_vector_packed_q8_rhs_bl4_unchecked(
 #endif
 }
 
+inline void store_batch_major_group_results(const float * group_out,
+                                            float * dst,
+                                            const size_t dst_row_stride,
+                                            const uint64_t rhs_row,
+                                            const uint64_t row_base,
+                                            const uint64_t rows_in_group) noexcept {
+  float * dst_row = dst + rhs_row * dst_row_stride + row_base;
+  for (uint64_t row = 0; row < rows_in_group; ++row) {
+    dst_row[row] = group_out[row];
+  }
+}
+
+inline void execute_neon_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4_unchecked(
+    const event::op_mul_mat & request) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
+  (void) request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t rhs_rows = request.src1.ne[0];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
+  const uint8_t * packed = static_cast<const uint8_t *>(request.src0.data);
+  const uint8_t * rhs_base = static_cast<const uint8_t *>(request.src1.data);
+  const size_t rhs_row_bytes = request.src1.nb[1];
+  const size_t group_bytes = request.src0.nb[1];
+  const uint64_t group_count = ::emel::kernel::detail::quant::packed_q4_k_x8_group_count(m);
+  float * dst = static_cast<float *>(request.dst.data);
+  const size_t dst_row_stride = request.dst.nb[0] / sizeof(float);
+  for (uint64_t group = 0; group < group_count; ++group) {
+    const auto * group_ptr =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q4_kx8 *>(
+            packed + group * group_bytes);
+    const uint64_t row_base = group * ::emel::kernel::detail::quant::Q4_K_X8_ROWS;
+    const uint64_t rows_in_group = std::min(
+        static_cast<uint64_t>(::emel::kernel::detail::quant::Q4_K_X8_ROWS), m - row_base);
+    for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+      const auto * q8_blocks =
+          reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+              rhs_base + rhs_row * rhs_row_bytes);
+      std::array<float, ::emel::kernel::detail::quant::Q4_K_X8_ROWS> group_out = {};
+      dot_q4_k_x8_q8_k_group_bl4_neon(group_ptr, q8_blocks, block_count, group_out.data());
+      store_batch_major_group_results(group_out.data(), dst, dst_row_stride, rhs_row, row_base,
+                                      rows_in_group);
+    }
+  }
+#endif
+}
+
 inline void execute_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_unchecked(
     const event::op_mul_mat & request) noexcept {
 #if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
@@ -3161,6 +3341,42 @@ inline void execute_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_unchecked(
         static_cast<uint64_t>(::emel::kernel::detail::quant::Q4_K_X8_ROWS), m - row_base);
     for (uint64_t row = 0; row < rows_in_group; ++row) {
       dst[row_base + row] = group_out[row];
+    }
+  }
+#endif
+}
+
+inline void execute_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_unchecked(
+    const event::op_mul_mat & request) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
+  (void) request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t rhs_rows = request.src1.ne[0];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
+  const uint8_t * packed = static_cast<const uint8_t *>(request.src0.data);
+  const uint8_t * rhs_base = static_cast<const uint8_t *>(request.src1.data);
+  const size_t rhs_row_bytes = request.src1.nb[1];
+  const size_t group_bytes = request.src0.nb[1];
+  const uint64_t group_count = ::emel::kernel::detail::quant::packed_q4_k_x8_group_count(m);
+  float * dst = static_cast<float *>(request.dst.data);
+  const size_t dst_row_stride = request.dst.nb[0] / sizeof(float);
+  for (uint64_t group = 0; group < group_count; ++group) {
+    const auto * group_ptr =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q4_kx8 *>(
+            packed + group * group_bytes);
+    const uint64_t row_base = group * ::emel::kernel::detail::quant::Q4_K_X8_ROWS;
+    const uint64_t rows_in_group = std::min(
+        static_cast<uint64_t>(::emel::kernel::detail::quant::Q4_K_X8_ROWS), m - row_base);
+    for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+      const auto * q8_blocks =
+          reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+              rhs_base + rhs_row * rhs_row_bytes);
+      std::array<float, ::emel::kernel::detail::quant::Q4_K_X8_ROWS> group_out = {};
+      dot_q4_k_x8_q8_k_group_bl8_neon(group_ptr, q8_blocks, block_count, group_out.data());
+      store_batch_major_group_results(group_out.data(), dst, dst_row_stride, rhs_row, row_base,
+                                      rows_in_group);
     }
   }
 #endif
@@ -3234,6 +3450,42 @@ inline void execute_neon_mul_mat_q6_vector_packed_q8_rhs_unchecked(
 #endif
 }
 
+inline void execute_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_unchecked(
+    const event::op_mul_mat & request) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
+  (void) request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t rhs_rows = request.src1.ne[0];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
+  const uint8_t * packed = static_cast<const uint8_t *>(request.src0.data);
+  const uint8_t * rhs_base = static_cast<const uint8_t *>(request.src1.data);
+  const size_t rhs_row_bytes = request.src1.nb[1];
+  const size_t group_bytes = request.src0.nb[1];
+  const uint64_t group_count = ::emel::kernel::detail::quant::packed_q6_k_x8_group_count(m);
+  float * dst = static_cast<float *>(request.dst.data);
+  const size_t dst_row_stride = request.dst.nb[0] / sizeof(float);
+  for (uint64_t group = 0; group < group_count; ++group) {
+    const auto * group_ptr =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q6_kx8 *>(
+            packed + group * group_bytes);
+    const uint64_t row_base = group * ::emel::kernel::detail::quant::Q6_K_X8_ROWS;
+    const uint64_t rows_in_group = std::min(
+        static_cast<uint64_t>(::emel::kernel::detail::quant::Q6_K_X8_ROWS), m - row_base);
+    for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+      const auto * q8_blocks =
+          reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+              rhs_base + rhs_row * rhs_row_bytes);
+      std::array<float, ::emel::kernel::detail::quant::Q6_K_X8_ROWS> group_out = {};
+      dot_q6_k_x8_q8_k_group_neon(group_ptr, q8_blocks, block_count, group_out.data());
+      store_batch_major_group_results(group_out.data(), dst, dst_row_stride, rhs_row, row_base,
+                                      rows_in_group);
+    }
+  }
+#endif
+}
+
 inline void execute_neon_mul_mat_q6_vector_prepared_q8_rhs_unchecked(
     const event::op_mul_mat & request) noexcept {
 #if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD))
@@ -3259,6 +3511,42 @@ inline void execute_neon_mul_mat_q6_vector_prepared_q8_rhs_unchecked(
         static_cast<uint64_t>(::emel::kernel::detail::quant::Q6_K_X8_ROWS), m - row_base);
     for (uint64_t row = 0; row < rows_in_group; ++row) {
       dst[row_base + row] = group_out[row];
+    }
+  }
+#endif
+}
+
+inline void execute_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_unchecked(
+    const event::op_mul_mat & request) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_MATMUL_INT8))
+  (void) request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t rhs_rows = request.src1.ne[0];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK_K;
+  const uint8_t * prepared = static_cast<const uint8_t *>(request.src0.data);
+  const uint8_t * rhs_base = static_cast<const uint8_t *>(request.src1.data);
+  const size_t rhs_row_bytes = request.src1.nb[1];
+  const size_t group_bytes = request.src0.nb[1];
+  const uint64_t group_count = ::emel::kernel::detail::quant::packed_q6_k_x8_group_count(m);
+  float * dst = static_cast<float *>(request.dst.data);
+  const size_t dst_row_stride = request.dst.nb[0] / sizeof(float);
+  for (uint64_t group = 0; group < group_count; ++group) {
+    const auto * group_ptr =
+        reinterpret_cast<const ::emel::kernel::detail::quant::block_q6_kx8_q8_prepared *>(
+            prepared + group * group_bytes);
+    const uint64_t row_base = group * ::emel::kernel::detail::quant::Q6_K_X8_ROWS;
+    const uint64_t rows_in_group = std::min(
+        static_cast<uint64_t>(::emel::kernel::detail::quant::Q6_K_X8_ROWS), m - row_base);
+    for (uint64_t rhs_row = 0; rhs_row < rhs_rows; ++rhs_row) {
+      const auto * q8_blocks =
+          reinterpret_cast<const ::emel::kernel::detail::quant::block_q8_k *>(
+              rhs_base + rhs_row * rhs_row_bytes);
+      std::array<float, ::emel::kernel::detail::quant::Q6_K_X8_ROWS> group_out = {};
+      dot_q6_k_x8_q8_k_group_prepared_i8mm(group_ptr, q8_blocks, block_count, group_out.data());
+      store_batch_major_group_results(group_out.data(), dst, dst_row_stride, rhs_row, row_base,
+                                      rows_in_group);
     }
   }
 #endif
@@ -4009,11 +4297,37 @@ struct exec_simd_q4_vector_packed_q8_rhs_bl4_op_mul_mat {
   }
 };
 
+struct exec_simd_q4_vector_packed_q8_rhs_bl4_matrix_x4_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  context & ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::
+        execute_neon_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4_unchecked(ev.request);
+    ++ctx.optimized_q4_dispatch_count;
+    ++ctx.optimized_q4_vector_dispatch_count;
+    ++ctx.optimized_q4_vector_packed_dispatch_count;
+    ++ctx.optimized_q4_vector_packed_q8_rhs_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
 struct exec_simd_q4_vector_packed_q8_rhs_bl8_op_mul_mat {
   void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
                   context & ctx) const noexcept {
     ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_unchecked(
         ev.request);
+    ++ctx.optimized_q4_dispatch_count;
+    ++ctx.optimized_q4_vector_dispatch_count;
+    ++ctx.optimized_q4_vector_packed_dispatch_count;
+    ++ctx.optimized_q4_vector_packed_q8_rhs_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
+struct exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x4_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  context & ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::
+        execute_neon_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_unchecked(ev.request);
     ++ctx.optimized_q4_dispatch_count;
     ++ctx.optimized_q4_vector_dispatch_count;
     ++ctx.optimized_q4_vector_packed_dispatch_count;
@@ -4104,6 +4418,19 @@ struct exec_simd_q6_vector_packed_q8_rhs_op_mul_mat {
   }
 };
 
+struct exec_simd_q6_vector_packed_q8_rhs_matrix_x4_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  context & ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::
+        execute_neon_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_unchecked(ev.request);
+    ++ctx.optimized_q6_dispatch_count;
+    ++ctx.optimized_q6_vector_dispatch_count;
+    ++ctx.optimized_q6_vector_packed_dispatch_count;
+    ++ctx.optimized_q6_vector_packed_q8_rhs_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
 struct exec_simd_q6_vector_prepared_q8_rhs_op_mul_mat {
   void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
                   context & ctx) const noexcept {
@@ -4114,6 +4441,21 @@ struct exec_simd_q6_vector_prepared_q8_rhs_op_mul_mat {
     ++ctx.optimized_q6_vector_packed_dispatch_count;
     ++ctx.optimized_q6_vector_packed_q8_rhs_dispatch_count;
     ++ctx.optimized_q6_vector_prepared_q8_rhs_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
+struct exec_simd_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  context & ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::
+        execute_neon_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_unchecked(ev.request);
+    ++ctx.optimized_q6_dispatch_count;
+    ++ctx.optimized_q6_vector_dispatch_count;
+    ++ctx.optimized_q6_vector_packed_dispatch_count;
+    ++ctx.optimized_q6_vector_packed_q8_rhs_dispatch_count;
+    ++ctx.optimized_q6_vector_prepared_q8_rhs_dispatch_count;
+    ++ctx.optimized_q6_vector_prepared_q8_rhs_i8mm_dispatch_count;
     detail::mark_done(ev, ctx);
   }
 };
@@ -4218,8 +4560,12 @@ using exec_simd_op_sqr_t = detail::exec_simd_op<::emel::kernel::aarch64::event::
 using exec_simd_op_sqrt_t = detail::exec_simd_op<::emel::kernel::aarch64::event::dispatch_op_sqrt>;
 using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_t =
     detail::exec_simd_q4_vector_packed_q8_rhs_bl4_op_mul_mat;
+using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4_t =
+    detail::exec_simd_q4_vector_packed_q8_rhs_bl4_matrix_x4_op_mul_mat;
 using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_t =
     detail::exec_simd_q4_vector_packed_q8_rhs_bl8_op_mul_mat;
+using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_t =
+    detail::exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x4_op_mul_mat;
 using exec_simd_op_mul_mat_q8_0_packed_bl4_t = detail::exec_simd_q8_0_packed_bl4_op_mul_mat;
 using exec_simd_op_mul_mat_q8_0_packed_bl8_full_groups_t =
     detail::exec_simd_q8_0_packed_bl8_full_groups_op_mul_mat;
@@ -4228,8 +4574,12 @@ using exec_simd_op_mul_mat_q8_0_packed_bl8_matrix_x4_t =
 using exec_simd_op_mul_mat_q8_0_packed_bl8_t = detail::exec_simd_q8_0_packed_bl8_op_mul_mat;
 using exec_simd_op_mul_mat_q8_0_vector_t = detail::exec_simd_q8_0_vector_op_mul_mat;
 using exec_simd_op_mul_mat_q6_vector_packed_t = detail::exec_simd_q6_vector_packed_op_mul_mat;
+using exec_simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_t =
+    detail::exec_simd_q6_vector_packed_q8_rhs_matrix_x4_op_mul_mat;
 using exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_t =
     detail::exec_simd_q6_vector_prepared_q8_rhs_i8mm_op_mul_mat;
+using exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_t =
+    detail::exec_simd_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_op_mul_mat;
 using exec_simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs_t =
     detail::exec_simd_q6_vector_packed_q8_rhs_op_mul_mat_argmax;
 using exec_simd_op_mul_mat_argmax_q6_vector_prepared_q8_rhs_i8mm_t =
@@ -4291,8 +4641,12 @@ inline constexpr exec_simd_op_sqr_t exec_simd_op_sqr{};
 inline constexpr exec_simd_op_sqrt_t exec_simd_op_sqrt{};
 inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_t
     exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4{};
+inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4_t
+    exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl4_matrix_x4{};
 inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_t
     exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8{};
+inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_t
+    exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4{};
 inline constexpr exec_simd_op_mul_mat_q8_0_packed_bl4_t exec_simd_op_mul_mat_q8_0_packed_bl4{};
 inline constexpr exec_simd_op_mul_mat_q8_0_packed_bl8_full_groups_t
     exec_simd_op_mul_mat_q8_0_packed_bl8_full_groups{};
@@ -4301,8 +4655,12 @@ inline constexpr exec_simd_op_mul_mat_q8_0_packed_bl8_matrix_x4_t
 inline constexpr exec_simd_op_mul_mat_q8_0_packed_bl8_t exec_simd_op_mul_mat_q8_0_packed_bl8{};
 inline constexpr exec_simd_op_mul_mat_q8_0_vector_t exec_simd_op_mul_mat_q8_0_vector{};
 inline constexpr exec_simd_op_mul_mat_q6_vector_packed_t exec_simd_op_mul_mat_q6_vector_packed{};
+inline constexpr exec_simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4_t
+    exec_simd_op_mul_mat_q6_vector_packed_q8_rhs_matrix_x4{};
 inline constexpr exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_t
     exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm{};
+inline constexpr exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4_t
+    exec_simd_op_mul_mat_q6_vector_prepared_q8_rhs_i8mm_matrix_x4{};
 inline constexpr exec_simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs_t
     exec_simd_op_mul_mat_argmax_q6_vector_packed_q8_rhs{};
 inline constexpr exec_simd_op_mul_mat_argmax_q6_vector_prepared_q8_rhs_i8mm_t
