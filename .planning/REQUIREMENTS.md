@@ -82,14 +82,14 @@ verification before widening API surface or model scope.
 
 | Feature | Reason |
 |---------|--------|
-| Generic "Bonsai support" or generic "1-bit GGUF support" | v2.0 is one exact maintained fixture, not a family claim. |
+| Generic "Bonsai support" or generic "1-bit GGUF support" | v1.10 is one exact maintained fixture, not a family claim. |
 | A new `bonsai` or `prismml` execution architecture | The live GGUF already reports `general.architecture=qwen3`; the widening is the quant path, not a new topology family. |
 | Tool calling / function calling | The embedded template supports tools, but first-slice proof should stay on `tools=none`. |
 | Thinking replay / preservation | The embedded template exposes `<think>` handling, but that widens formatter semantics beyond the first maintained slice. |
 | Raw prompt fallback on the maintained Bonsai path | Maintained proof should follow one explicit structured contract, not silent raw formatting. |
 | Sibling Bonsai checkpoints or additional official variants | The first milestone needs one exact proven artifact, not a matrix. |
 | MLX, Swift, Android, ONNX, vLLM, or Transformers integration | Those are separate deployment stacks and outside the current EMEL generator/parity/bench acceptance boundary. |
-| Broad new public API or CLI surfaces for Bonsai workflows | v2.0 is scoped to the existing maintained EMEL seams only. |
+| Broad new public API or CLI surfaces for Bonsai workflows | v1.10 is scoped to the existing maintained EMEL seams only. |
 | Whole-tensor dequantize-to-f32 or tool-only compute fallback in the shipped hot path | That would violate the repo's quantized-path and performance contract unless explicitly approved as interim. |
 
 ## Traceability

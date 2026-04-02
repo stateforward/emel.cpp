@@ -2,7 +2,7 @@
 
 ## Overview
 
-v2.0 delivers one truthful maintained Prism ML `Bonsai-1.7B.gguf` slice through the existing EMEL
+v1.10 delivers one truthful maintained Prism ML `Bonsai-1.7B.gguf` slice through the existing EMEL
 generator, paritychecker, and benchmark workflow. The milestone stays narrow and honest to the
 research: freeze one maintained fixture, bind one explicit Bonsai conditioning contract, land the
 native `Q1_0_g128` runtime path on the existing `qwen3` lane, then prove parity/regression and
@@ -12,7 +12,7 @@ publish one benchmark/docs path for that exact slice.
 
 **Phase Numbering:**
 - Integer phases continue across milestones.
-- v2.0 starts at Phase 38 because the prior in-flight roadmap ended at Phase 37.
+- v1.10 starts at Phase 38 because the prior in-flight roadmap ended at Phase 37.
 
 - [ ] **Phase 38: Fixture Provenance And Metadata Truth** - Freeze the maintained Bonsai fixture,
       executable GGUF truth, and exact file-versus-format naming.

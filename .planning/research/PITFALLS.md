@@ -380,5 +380,5 @@ Phase 5: Benchmark Publication
 - /Users/gabrielwillen/.superset/worktrees/emel.cpp/feat/bonsai/.planning/codebase/TESTING.md
 
 ---
-*Pitfalls research for: EMEL v2.0 Bonsai 1.7B 1-bit bring-up*
+*Pitfalls research for: EMEL v1.10 Bonsai 1.7B 1-bit bring-up*
 *Researched: 2026-04-02*

@@ -3,7 +3,7 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. The active planning scope is v2.0,
+modeled as explicit actors instead of ad hoc control flow. The active planning scope is v1.10,
 which adds one truthful maintained Prism ML `Bonsai-1.7B.gguf` slice on top of the repo's existing
 maintained Llama ARM and canonical Qwen anchors, while preserving the engineering constraints in
 `docs/rules/sml.rules.md` and `AGENTS.md`.
@@ -17,7 +17,7 @@ before widening API surface or model scope.
 
 Shipped version: `v1.7`
 
-Status: Milestone v2.0 is being defined on this branch while v1.8 and v1.9 continue separately in
+Status: Milestone v1.10 is being defined on this branch while v1.8 and v1.9 continue separately in
 flight. The shipped repo still reflects v1.7 plus the existing maintained Llama ARM and canonical
 Qwen acceptance surfaces.
 
@@ -25,7 +25,7 @@ Release summary: `v1.7 Generator Prefill Submachine Decomposition` shipped on `2
 `3` phases and `6` plans. Remaining open debt is decode-side generator decomposition plus the
 existing warning-only benchmark drift outside `generator/prefill`.
 
-## Current Milestone: v2.0 Bonsai 1.7B 1-Bit Bring-Up
+## Current Milestone: v1.10 Bonsai 1.7B 1-Bit Bring-Up
 
 **Goal:** Prove one truthful maintained Prism ML `Bonsai-1.7B.gguf` slice through the existing
 EMEL generator, paritychecker, and benchmark workflow, with the live Hugging Face artifact as the
@@ -149,7 +149,7 @@ transitions instead of hidden action/detail control flow.
 This is a brownfield repository with an existing codebase map under `.planning/codebase/`. v1.7
 proved that generator decomposition can stay inside the `generator` domain and preserve explicit
 same-RTC event handoff instead of falling back to context phase flags or hidden helper routing. The
-new v2.0 scope widens the maintained model surface in a different direction: the live Hugging Face
+new v1.10 scope widens the maintained model surface in a different direction: the live Hugging Face
 repo `prism-ml/Bonsai-1.7B-gguf` was published on `2026-03-31`, exposes one file named
 `Bonsai-1.7B.gguf`, describes a Qwen3-1.7B-based dense architecture, and advertises a custom 1-bit
 `Q1_0_g128` GGUF weight format with support currently demonstrated through Prism's `llama.cpp`
@@ -163,7 +163,7 @@ deliberate machine-structure changes.
   `AGENTS.md` so runtime/model work preserves the RTC actor model and no-queue invariant.
 - **Explicit behavior modeling**: Any Bonsai-specific orchestration changes must keep control flow
   on guards, states, typed events, and transitions rather than action/detail routing shortcuts.
-- **Truth anchor**: v2.0 is one official `Bonsai-1.7B.gguf` fixture, not generic 1-bit or
+- **Truth anchor**: v1.10 is one official `Bonsai-1.7B.gguf` fixture, not generic 1-bit or
   third-party GGUF support.
 - **Conditioning**: The maintained Bonsai path must use one explicit structured chat-message
   contract and must not fall back to raw prompting or an unrelated existing formatter silently.
@@ -183,8 +183,8 @@ deliberate machine-structure changes.
 | Keep prefill request-scoped data on typed runtime/internal events | This preserved explicit behavior modeling and avoided context phase flags | ✓ Good |
 | Defer decode extraction until the prefill pattern is proven | Decode also owns sampling, rendering, and loop control, so it was the riskier first cut | ✓ Good |
 | Defer `attention::any` / `sm_any` extraction until after prefill collapse | Attention mode is only one axis of the duplication and should not hide unresolved top-level routing | ⚠ Revisit |
-| Start v2.0 at a new major version while v1.8 and v1.9 continue in flight | The user wants Bonsai work tracked independently instead of rebasing the current in-flight milestones | — Pending |
-| Keep v2.0 fixed to one official `Bonsai-1.7B.gguf` slice | The repo needs one truthful maintained Bonsai anchor before any broader 1-bit or vendor claims | — Pending |
+| Start Bonsai as v1.10 while v1.8 and v1.9 continue in flight | The user wants Bonsai tracked as the next minor milestone rather than a major-version reset | — Pending |
+| Keep v1.10 fixed to one official `Bonsai-1.7B.gguf` slice | The repo needs one truthful maintained Bonsai anchor before any broader 1-bit or vendor claims | — Pending |
 | Use live Hugging Face repo state plus executable GGUF metadata as the maintained truth source for Bonsai | The model card README, quickstart snippets, and file tree already disagree on the published filename, so docs must follow executable truth | — Pending |
 | Treat `Q1_0_g128` as milestone-defining scope, not an incidental detail | Prism describes Bonsai support through a custom 1-bit operand path; the milestone is not honest if it ignores that kernel/runtime requirement | — Pending |
 | Keep the maintained Bonsai contract on one explicit formatter/request surface first | Multi-turn or tool-rich Bonsai workflows would widen the request boundary before the first maintained slice is proven | — Pending |
@@ -207,4 +207,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-02 after starting v2.0*
+*Last updated: 2026-04-02 after starting v1.10*

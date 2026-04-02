@@ -36,11 +36,11 @@ strictly required to call the first maintained slice complete.
 
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| Generic "Bonsai support" or generic "1-bit GGUF support" | It sounds more impressive to say EMEL supports Bonsai or 1-bit models broadly | The live truth source is one file, one family member, and one custom quant path. Broad wording would imply support for sibling sizes, other 1-bit formats, or third-party exports that the milestone does not prove | Keep v2.0 fixed to one maintained `Bonsai-1.7B.gguf` slice only |
+| Generic "Bonsai support" or generic "1-bit GGUF support" | It sounds more impressive to say EMEL supports Bonsai or 1-bit models broadly | The live truth source is one file, one family member, and one custom quant path. Broad wording would imply support for sibling sizes, other 1-bit formats, or third-party exports that the milestone does not prove | Keep v1.10 fixed to one maintained `Bonsai-1.7B.gguf` slice only |
 | Full embedded-template coverage on day one | The GGUF template visibly supports tools, tool responses, assistant history, and think tags, so implementing "everything in the template" is tempting | That turns a single-slice runtime bring-up into a request-surface expansion milestone and makes parity harder to interpret | Support one narrow structured subset first: `system,user,assistant`, `tools=none`, `enable_thinking=false`; reject the rest explicitly |
 | Raw prompt fallback or silent reuse of an unrelated existing formatter | It looks like the fastest path to getting tokens out | It breaks the milestone's "derived from live Bonsai metadata" requirement and can mask real template incompatibilities | Bind Bonsai to one explicit formatter contract sourced from its embedded chat template |
 | Claiming stock upstream `llama.cpp` compatibility | Upstream `llama.cpp` is the familiar default reference for GGUF operators | Prism's own demo README states the required Bonsai kernels are not yet in upstream `llama.cpp` or MLX, so claiming generic upstream compatibility would be false today | Tie reference and operator expectations to Prism's `llama.cpp` fork until upstream support actually exists |
-| New Bonsai-specific server, OpenAI, tool-use, or agent workflow surfaces in the first slice | The upstream demo shows `llama-server`, browser UI, and tool-aware template branches, so expanding EMEL's API looks adjacent | This widens repo scope far beyond the existing maintained generator/parity/bench acceptance surface | Keep v2.0 on the existing EMEL seams only; defer server/API/tool workflow work to later milestones |
+| New Bonsai-specific server, OpenAI, tool-use, or agent workflow surfaces in the first slice | The upstream demo shows `llama-server`, browser UI, and tool-aware template branches, so expanding EMEL's API looks adjacent | This widens repo scope far beyond the existing maintained generator/parity/bench acceptance surface | Keep v1.10 on the existing EMEL seams only; defer server/API/tool workflow work to later milestones |
 | Publishing benchmark or marketing claims before native `Q1_0_g128` and parity are real | Throughput numbers are easy to demo | Speed claims without the correct operand path and the exact same formatter contract are not truthful support | Land runtime truth and parity first, then publish one benchmark row for the same slice |
 
 ## Feature Dependencies
@@ -78,7 +78,7 @@ strictly required to call the first maintained slice complete.
 
 ## MVP Definition
 
-### Launch With (v2.0)
+### Launch With (v1.10)
 
 These are the features that belong in the Bonsai milestone itself.
 
@@ -179,5 +179,5 @@ These are the features that belong in the Bonsai milestone itself.
 - `tests/models/README.md`
 
 ---
-*Feature research for: EMEL v2.0 Bonsai `Bonsai-1.7B.gguf` maintained slice*
+*Feature research for: EMEL v1.10 Bonsai `Bonsai-1.7B.gguf` maintained slice*
 *Researched: 2026-04-02*

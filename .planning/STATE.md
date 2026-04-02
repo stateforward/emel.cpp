@@ -1,9 +1,9 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
+milestone: v1.10
 milestone_name: Bonsai 1.7B 1-Bit Bring-Up
 status: roadmap_defined
-stopped_at: "Roadmap created; Phase 38 is ready to plan"
+stopped_at: "Roadmap created for v1.10; Phase 38 is ready to plan"
 last_updated: "2026-04-02T00:00:00Z"
 last_activity: 2026-04-02
 progress:
@@ -30,7 +30,7 @@ verification before widening API surface or model scope.
 Phase: 38 of 42 (Fixture Provenance And Metadata Truth)
 Plan: —
 Status: Ready to plan
-Last activity: 2026-04-02 — Replaced the active roadmap with the v2.0 Bonsai phase structure for
+Last activity: 2026-04-02 — Replaced the active roadmap with the v1.10 Bonsai phase structure for
 fixture truth, conditioning contract, native `Q1_0_g128` runtime, parity/regression, and benchmark
 publication
 
@@ -40,7 +40,7 @@ Progress: [----------] 0%
 
 **Current active milestone:**
 
-- Milestone: v2.0 Bonsai 1.7B 1-Bit Bring-Up
+- Milestone: v1.10 Bonsai 1.7B 1-Bit Bring-Up
 - Phases complete: 0/5
 - Plans complete: 0/0
 - Audit status: not run
@@ -63,7 +63,7 @@ Progress: [----------] 0%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- v2.0 keeps one maintained fixture only: `tests/models/Bonsai-1.7B.gguf`.
+- v1.10 keeps one maintained fixture only: `tests/models/Bonsai-1.7B.gguf`.
 - Bonsai stays on the existing `qwen3` architecture path; the widening is the native
   `Q1_0_g128` operand path, not a new model family.
 - The maintained Bonsai request surface is one explicit formatter contract with `tools=none`,
@@ -80,7 +80,7 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Native `Q1_0_g128` implementation shape is still the main technical risk for v2.0.
+- Native `Q1_0_g128` implementation shape is still the main technical risk for v1.10.
 - Prism-specific parity and benchmark truth need an explicit pinned reference commit during later
   phase planning.
 - The embedded Bonsai template exposes broader tool/thinking branches that must remain explicitly
@@ -89,5 +89,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-04-02T00:00:00Z
-Stopped at: Roadmap created; Phase 38 is ready to plan
+Stopped at: Roadmap created for v1.10; Phase 38 is ready to plan
 Resume file: None

@@ -11,7 +11,7 @@ The Bonsai milestone is narrower and more concrete than the current Liquid plann
 live Hugging Face artifact is one file, `Bonsai-1.7B.gguf`, and direct GGUF inspection confirms it
 is a `qwen3` model with `Q1_0_g128` tensors, `32768` context, `28` blocks, and an embedded
 chat-template that includes tool and thinking branches. That means EMEL does not need a new model
-family for v2.0, but it does need a new native quantized operand path and a Bonsai-specific
+family for v1.10, but it does need a new native quantized operand path and a Bonsai-specific
 formatter contract.
 
 The recommended approach is: freeze the exact fixture and metadata first, bind one narrow Bonsai
