@@ -132,9 +132,57 @@ constexpr generation_fixture_spec k_lfm2_generation_fixture = {
     },
 };
 
-constexpr std::array<generation_fixture_spec, 2> k_generation_fixtures = {
+constexpr generation_case_spec k_gemma4_short_generation_case = {
+    .name = "generation/preloaded_request/gemma_4_e2b_it_q8_0_prompt_hello_max_tokens_1",
+    .prompt = "hello",
+    .max_tokens = 1,
+};
+
+constexpr generation_case_spec k_gemma4_generation_10_case = {
+    .name = "generation/preloaded_request/gemma_4_e2b_it_q8_0_prompt_hello_max_tokens_10",
+    .prompt = "hello",
+    .max_tokens = 10,
+};
+
+constexpr generation_case_spec k_gemma4_generation_100_case = {
+    .name = "generation/preloaded_request/gemma_4_e2b_it_q8_0_prompt_hello_max_tokens_100",
+    .prompt = "hello",
+    .max_tokens = 100,
+};
+
+constexpr generation_case_spec k_gemma4_generation_1000_case = {
+    .name = "generation/preloaded_request/gemma_4_e2b_it_q8_0_prompt_hello_max_tokens_1000",
+    .prompt = "hello",
+    .max_tokens = 1000,
+};
+
+constexpr emel::tools::generation_fixture_registry::maintained_fixture
+    k_gemma4_emel_generation_fixture = {
+        .name = "gemma-4-e2b-it-Q8_0.gguf",
+        .slug = "gemma_4_e2b_it_q8_0",
+        .fixture_rel = "tests/models/gemma-4-e2b-it-Q8_0.gguf",
+        .current_publication = false,
+    };
+
+constexpr generation_fixture_spec k_gemma4_generation_fixture = {
+    .fixture = &k_gemma4_emel_generation_fixture,
+    .cases = {
+        k_gemma4_short_generation_case,
+        k_gemma4_generation_10_case,
+        k_gemma4_generation_100_case,
+        k_gemma4_generation_1000_case,
+    },
+};
+
+constexpr std::array<generation_fixture_spec, 2> k_compare_generation_fixtures = {
     k_qwen3_generation_fixture,
     k_lfm2_generation_fixture,
+};
+
+constexpr std::array<generation_fixture_spec, 3> k_emel_generation_fixtures = {
+    k_qwen3_generation_fixture,
+    k_lfm2_generation_fixture,
+    k_gemma4_generation_fixture,
 };
 
 using llama_model_ptr = std::unique_ptr<llama_model, decltype(&llama_model_free)>;
@@ -480,6 +528,26 @@ struct prepared_reference_generation_fixture {
   reference_fixture reference = {};
 };
 
+std::string_view model_loader_error_name(const emel::error::type err) noexcept {
+  switch (static_cast<emel::model::loader::error>(err)) {
+    case emel::model::loader::error::none:
+      return "none";
+    case emel::model::loader::error::invalid_request:
+      return "invalid_request";
+    case emel::model::loader::error::parse_failed:
+      return "parse_failed";
+    case emel::model::loader::error::backend_error:
+      return "backend_error";
+    case emel::model::loader::error::model_invalid:
+      return "model_invalid";
+    case emel::model::loader::error::internal_error:
+      return "internal_error";
+    case emel::model::loader::error::untracked:
+      return "untracked";
+  }
+  return "unknown";
+}
+
 emel::model::detail::kv_binding kv_binding_from_fixture(const emel_fixture & fixture) {
   return emel::model::detail::kv_binding{
       .arena = std::span<const uint8_t>{fixture.kv_arena.data(), fixture.kv_arena.size()},
@@ -769,6 +837,18 @@ void verify_emel_generation_seam(const generation_seam_audit & seam) {
       seam.direct_reference_tokenize_calls != 0 || seam.direct_reference_vocab_calls != 0) {
     fail_bench_setup("generation seam audit", "EMEL benchmark path touched reference decode seam");
   }
+}
+
+std::string_view generator_error_name(const emel::error::type err) noexcept {
+  switch (static_cast<emel::generator::error>(err)) {
+    case emel::generator::error::none:
+      return "none";
+    case emel::generator::error::invalid_request:
+      return "invalid_request";
+    case emel::generator::error::backend:
+      return "backend";
+  }
+  return "unknown";
 }
 
 void verify_reference_generation_seam(const generation_seam_audit & seam) {
@@ -1242,170 +1322,9 @@ bool try_parse_block_index(const std::string_view name, int32_t & block_index_ou
 
 emel::error::type populate_model_metadata(const emel_fixture & fixture,
                                           emel::model::data & model_data) {
-  const auto * architecture_entry = find_kv_entry(fixture, "general.architecture");
-  if (architecture_entry == nullptr) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
-
-  std::string_view architecture = {};
-  if (!decode_string_value(fixture, *architecture_entry, architecture) ||
-      architecture.size() >= model_data.architecture_name.size()) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
-  copy_name(model_data.architecture_name, architecture);
-  const bool is_llama = architecture == "llama";
-  const bool is_qwen3 = architecture == "qwen3";
-  const bool is_lfm2 = emel::model::is_lfm2_execution_architecture(architecture);
-  if (!is_llama && !is_qwen3 && !is_lfm2) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
-
-  const auto assign_i32 = [&](const std::string_view key, int32_t & field) {
-    const auto * entry = find_kv_entry(fixture, key);
-    if (entry == nullptr) {
-      return true;
-    }
-
-    uint64_t value = 0u;
-    if (!decode_integer_value(fixture, *entry, value) ||
-        value > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
-      return false;
-    }
-
-    field = static_cast<int32_t>(value);
-    return true;
-  };
-
-  const auto assign_f32 = [&](const std::string_view key, float & field) {
-    const auto * entry = find_kv_entry(fixture, key);
-    if (entry == nullptr) {
-      return true;
-    }
-
-    float value = 0.0f;
-    if (!decode_float_value(fixture, *entry, value)) {
-      return false;
-    }
-
-    field = value;
-    return true;
-  };
-
-  const auto assign_bool = [&](const std::string_view key, bool & field) {
-    const auto * entry = find_kv_entry(fixture, key);
-    if (entry == nullptr) {
-      return true;
-    }
-
-    bool value = false;
-    if (!decode_bool_value(fixture, *entry, value)) {
-      return false;
-    }
-
-    field = value;
-    return true;
-  };
-
-  if (is_llama) {
-    if (!assign_i32("llama.context_length", model_data.params.n_ctx) ||
-        !assign_i32("llama.embedding_length", model_data.params.n_embd) ||
-        !assign_i32("llama.embedding_length_out", model_data.params.n_embd_out) ||
-        !assign_i32("llama.feed_forward_length", model_data.params.n_ff) ||
-        !assign_i32("llama.attention.head_count", model_data.params.n_head) ||
-        !assign_i32("llama.attention.head_count_kv", model_data.params.n_head_kv) ||
-        !assign_i32("llama.rope.dimension_count", model_data.params.n_rot) ||
-        !assign_i32("llama.block_count", model_data.params.n_layer) ||
-        !assign_i32("llama.vocab_size", model_data.params.n_vocab) ||
-        !assign_f32("llama.attention.layer_norm_epsilon",
-                    model_data.params.attention_layer_norm_epsilon) ||
-        !assign_f32("llama.attention.layer_norm_rms_epsilon",
-                    model_data.params.attention_layer_norm_rms_epsilon) ||
-        !assign_f32("llama.attention.clamp_kqv", model_data.params.attention_clamp_kqv) ||
-        !assign_f32("llama.attn_logit_softcapping", model_data.params.attn_logit_softcapping) ||
-        !assign_f32("llama.final_logit_softcapping",
-                    model_data.params.final_logit_softcapping) ||
-        !assign_f32("llama.residual_scale", model_data.params.residual_scale) ||
-        !assign_f32("llama.embedding_scale", model_data.params.embedding_scale) ||
-        !assign_f32("llama.rope.freq_base", model_data.params.rope_freq_base) ||
-        !assign_f32("llama.rope.freq_base_swa", model_data.params.rope_freq_base_swa) ||
-        !assign_bool("llama.use_parallel_residual",
-                     model_data.params.use_parallel_residual)) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-  }
-
-  if (is_qwen3) {
-    int32_t qwen3_key_length = 0;
-    int32_t qwen3_value_length = 0;
-    if (!assign_i32("qwen3.context_length", model_data.params.n_ctx) ||
-        !assign_i32("qwen3.embedding_length", model_data.params.n_embd) ||
-        !assign_i32("qwen3.feed_forward_length", model_data.params.n_ff) ||
-        !assign_i32("qwen3.attention.head_count", model_data.params.n_head) ||
-        !assign_i32("qwen3.attention.head_count_kv", model_data.params.n_head_kv) ||
-        !assign_i32("qwen3.attention.key_length", qwen3_key_length) ||
-        !assign_i32("qwen3.attention.value_length", qwen3_value_length) ||
-        !assign_i32("qwen3.block_count", model_data.params.n_layer) ||
-        !assign_f32("qwen3.attention.layer_norm_rms_epsilon",
-                    model_data.params.attention_layer_norm_rms_epsilon) ||
-        !assign_f32("qwen3.rope.freq_base", model_data.params.rope_freq_base)) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-
-    model_data.params.attention_key_length = qwen3_key_length;
-    model_data.params.attention_value_length = qwen3_value_length;
-    if (model_data.params.n_embd_out == 0) {
-      model_data.params.n_embd_out = model_data.params.n_embd;
-    }
-    if (model_data.params.n_rot == 0) {
-      model_data.params.n_rot = qwen3_key_length;
-    }
-    if (qwen3_key_length <= 0 || qwen3_value_length <= 0) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-  }
-
-  if (is_lfm2) {
-    int32_t lfm2_head_count_kv = 0;
-    if (!assign_i32("lfm2.context_length", model_data.params.n_ctx) ||
-        !assign_i32("lfm2.embedding_length", model_data.params.n_embd) ||
-        !assign_i32("lfm2.feed_forward_length", model_data.params.n_ff) ||
-        !assign_i32("lfm2.attention.head_count", model_data.params.n_head) ||
-        !assign_i32("lfm2.block_count", model_data.params.n_layer) ||
-        !assign_i32("lfm2.vocab_size", model_data.params.n_vocab) ||
-        !assign_i32("lfm2.shortconv.l_cache", model_data.params.shortconv_l_cache) ||
-        !assign_f32(
-            "lfm2.attention.layer_norm_rms_epsilon",
-            model_data.params.attention_layer_norm_rms_epsilon) ||
-        !assign_f32("lfm2.rope.freq_base", model_data.params.rope_freq_base)) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-
-    const auto * head_count_kv_entry = find_kv_entry(fixture, "lfm2.attention.head_count_kv");
-    if (head_count_kv_entry == nullptr ||
-        !decode_integer_array_first_nonzero(fixture, *head_count_kv_entry, lfm2_head_count_kv)) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-
-    model_data.params.n_head_kv = lfm2_head_count_kv;
-    if (model_data.params.n_embd_out == 0) {
-      model_data.params.n_embd_out = model_data.params.n_embd;
-    }
-  }
-
-  const auto * tokens_entry = find_kv_entry(fixture, "tokenizer.tokens");
-  if (tokens_entry != nullptr) {
-    uint32_t token_count = 0u;
-    if (!decode_string_array_count(fixture, *tokens_entry, token_count) ||
-        token_count > static_cast<uint32_t>(emel::model::data::k_max_vocab_tokens)) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-    model_data.vocab_data.n_tokens = token_count;
-    if (model_data.params.n_vocab == 0) {
-      model_data.params.n_vocab = static_cast<int32_t>(token_count);
-    }
-  }
-
-  return emel::error::cast(emel::model::loader::error::none);
+  return emel::model::detail::load_hparams_from_gguf(kv_binding_from_fixture(fixture), model_data)
+             ? emel::error::cast(emel::model::loader::error::none)
+             : emel::error::cast(emel::model::loader::error::model_invalid);
 }
 
 std::string_view architecture_name_view(const emel::model::data & model_data) {
@@ -1778,6 +1697,23 @@ bool initialize_emel_session(emel_session & session, const generation_case_spec 
   request.on_error = {&session, on_initialize_error};
 
   const bool accepted = session.generator->process_event(request);
+  if ((!accepted || !session.initialize.done || session.initialize.error ||
+       error_out != emel::error::cast(emel::generator::error::none)) &&
+      std::getenv("EMEL_DEBUG_GENERATION_BENCH") != nullptr) {
+    std::fprintf(stderr,
+                 "initialize_emel_session debug accepted=%d done=%d error=%d callback_err=%s "
+                 "event_err=%s arch=%.*s formatter=%.*s case=%s\n",
+                 accepted ? 1 : 0,
+                 session.initialize.done ? 1 : 0,
+                 session.initialize.error ? 1 : 0,
+                 generator_error_name(session.initialize.err).data(),
+                 generator_error_name(error_out).data(),
+                 static_cast<int>(emel::model::architecture_name_view(session.model_data).size()),
+                 emel::model::architecture_name_view(session.model_data).data(),
+                 static_cast<int>(session.formatter_binding.contract.size()),
+                 session.formatter_binding.contract.data(),
+                 spec.name.data());
+  }
   return accepted && session.initialize.done && !session.initialize.error &&
          error_out == emel::error::cast(emel::generator::error::none);
 }
@@ -1806,6 +1742,23 @@ bool run_emel_generate(emel_session & session,
   request.on_done = {&session, on_generation_done};
   request.on_error = {&session, on_generation_error};
   const bool accepted = session.generator->process_event(request);
+  if ((!accepted || !session.generation.done || session.generation.error ||
+       error_out != emel::error::cast(emel::generator::error::none)) &&
+      std::getenv("EMEL_DEBUG_GENERATION_BENCH") != nullptr) {
+    std::fprintf(stderr,
+                 "run_emel_generate debug accepted=%d done=%d error=%d callback_err=%s "
+                 "event_err=%s arch=%.*s formatter=%.*s case=%s\n",
+                 accepted ? 1 : 0,
+                 session.generation.done ? 1 : 0,
+                 session.generation.error ? 1 : 0,
+                 generator_error_name(session.generation.err).data(),
+                 generator_error_name(error_out).data(),
+                 static_cast<int>(emel::model::architecture_name_view(session.model_data).size()),
+                 emel::model::architecture_name_view(session.model_data).data(),
+                 static_cast<int>(session.formatter_binding.contract.size()),
+                 session.formatter_binding.contract.data(),
+                 spec.name.data());
+  }
   if (!accepted || !session.generation.done || session.generation.error ||
       error_out != emel::error::cast(emel::generator::error::none)) {
     return false;
@@ -2144,6 +2097,15 @@ bool tokenize_conditioned_prompt(emel_session & session,
   tokens_out.resize(static_cast<size_t>(token_count));
   return true;
 }
+
+const char * prefill_contract_name(
+    emel::generator::prefill_compute_contract contract) noexcept;
+bool inspect_emel_prefill_plan(const emel::model::data & model_data,
+                               const std::vector<int32_t> & prompt_tokens,
+                               int32_t & step_size_out);
+bool inspect_emel_prefill_contract(const emel::model::data & model_data,
+                                   int32_t prompt_token_count,
+                                   emel::generator::prefill_compute_contract & contract_out);
 
 const char * prefill_contract_name(
     const emel::generator::prefill_compute_contract contract) noexcept {
@@ -2491,6 +2453,11 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
                                          const int32_t position,
                                          prefill_probe_breakdown & breakdown) {
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  auto q = std::span<float>(backend.q.data(), static_cast<size_t>(block.attention_q_dim));
+  auto k = std::span<float>(backend.k.data(), static_cast<size_t>(block.attention_kv_dim));
+  auto v = std::span<float>(backend.v.data(), static_cast<size_t>(block.attention_kv_dim));
+  auto attn_ctx =
+      std::span<float>(backend.attn_ctx.data(), static_cast<size_t>(block.attention_q_dim));
   if (!measure_probe_bool(
           breakdown.misc_ns,
           [&]() {
@@ -2515,11 +2482,11 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
               [&]() {
                 return emel::generator::detail::prepare_packed_q8_0_input(backend, backend.norm) &&
                     emel::generator::detail::matmul_vector_prepared_packed_q8_0_input(
-                               backend, block.attention_q, block.attention_q.cols, backend.q) &&
+                               backend, block.attention_q, block.attention_q.cols, q) &&
                     emel::generator::detail::matmul_vector_prepared_packed_q8_0_input(
-                               backend, block.attention_k, block.attention_k.cols, backend.k) &&
+                               backend, block.attention_k, block.attention_k.cols, k) &&
                     emel::generator::detail::matmul_vector_prepared_packed_q8_0_input(
-                               backend, block.attention_v, block.attention_v.cols, backend.v);
+                               backend, block.attention_v, block.attention_v.cols, v);
               })) {
         return false;
       }
@@ -2537,11 +2504,11 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
               [&]() {
                 return emel::generator::detail::quantize_vector_q8_k(backend.norm, q8_input) &&
                     emel::generator::detail::matmul_vector_q8_input(
-                               backend, block.attention_q, q8_input, block.attention_q.cols, backend.q) &&
+                               backend, block.attention_q, q8_input, block.attention_q.cols, q) &&
                     emel::generator::detail::matmul_vector_q8_input(
-                               backend, block.attention_k, q8_input, block.attention_k.cols, backend.k) &&
+                               backend, block.attention_k, q8_input, block.attention_k.cols, k) &&
                     emel::generator::detail::matmul_vector_q8_input(
-                               backend, block.attention_v, q8_input, block.attention_v.cols, backend.v);
+                               backend, block.attention_v, q8_input, block.attention_v.cols, v);
               })) {
         return false;
       }
@@ -2549,11 +2516,11 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
                    breakdown.linear_ns,
                    [&]() {
                      return emel::generator::detail::matmul_vector(
-                                backend, block.attention_q, backend.norm, backend.q) &&
+                                backend, block.attention_q, backend.norm, q) &&
                          emel::generator::detail::matmul_vector(
-                                backend, block.attention_k, backend.norm, backend.k) &&
+                                backend, block.attention_k, backend.norm, k) &&
                          emel::generator::detail::matmul_vector(
-                                backend, block.attention_v, backend.norm, backend.v);
+                                backend, block.attention_v, backend.norm, v);
                    })) {
       return false;
     }
@@ -2569,19 +2536,19 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
         breakdown.misc_ns,
         [&]() {
           emel::generator::detail::apply_rope(
-              backend.q,
+              q,
               backend.n_head,
-              backend.head_dim,
-              backend.n_rot,
+              block.attention_head_dim,
+              block.attention_rope_dim,
               position,
-              backend.rope_freq_base);
+              block.attention_rope_freq_base);
           emel::generator::detail::apply_rope(
-              backend.k,
+              k,
               backend.n_head_kv,
-              backend.head_dim_kv,
-              backend.n_rot,
+              block.attention_head_dim_kv,
+              block.attention_rope_dim,
               position,
-              backend.rope_freq_base);
+              block.attention_rope_freq_base);
         });
 
     if (!measure_probe_bool(
@@ -2589,19 +2556,23 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
             [&]() {
               return emel::generator::detail::store_attention_kv_cache(
                   backend,
+                  block,
                   layer_index,
                   position,
-                  std::span<const float>(backend.k.data(), backend.k.size()),
-                  std::span<const float>(backend.v.data(), backend.v.size()));
+                  std::span<const float>(k.data(), k.size()),
+                  std::span<const float>(v.data(), v.size()));
             }) ||
         !measure_probe_bool(
             breakdown.attention_ns,
-            [&]() { return emel::generator::detail::run_attention<mode>(backend, layer_index, position); }) ||
+            [&]() {
+              return emel::generator::detail::run_attention<mode>(
+                  backend, block, layer_index, position);
+            }) ||
         !measure_probe_bool(
             breakdown.linear_ns,
             [&]() {
               return emel::generator::detail::matmul_vector(
-                  backend, block.attention_output, backend.attn_ctx, backend.projected);
+                  backend, block.attention_output, attn_ctx, backend.projected);
             })) {
       return false;
     }
@@ -2631,6 +2602,10 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
     return false;
   }
 
+  const int32_t ffn_dim = block.feed_forward_gate.rows;
+  auto gate = std::span<float>(backend.gate.data(), static_cast<size_t>(ffn_dim));
+  auto up = std::span<float>(backend.up.data(), static_cast<size_t>(ffn_dim));
+  auto ffn_hidden = std::span<float>(backend.ffn_hidden.data(), static_cast<size_t>(ffn_dim));
   const bool gate_up_shared_packed_q8_0 =
       emel::generator::detail::packed_q8_0_input_path_supported(backend, block.feed_forward_gate) &&
       emel::generator::detail::packed_q8_0_input_path_supported(backend, block.feed_forward_up);
@@ -2646,9 +2621,9 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
                              backend,
                              block.feed_forward_gate,
                              block.feed_forward_gate.cols,
-                             backend.gate) &&
+                             gate) &&
                   emel::generator::detail::matmul_vector_prepared_packed_q8_0_input(
-                             backend, block.feed_forward_up, block.feed_forward_up.cols, backend.up);
+                             backend, block.feed_forward_up, block.feed_forward_up.cols, up);
             })) {
       return false;
     }
@@ -2670,13 +2645,13 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
                              block.feed_forward_gate,
                              q8_input,
                              block.feed_forward_gate.cols,
-                             backend.gate) &&
+                             gate) &&
                   emel::generator::detail::matmul_vector_q8_input(
                              backend,
                              block.feed_forward_up,
                              q8_input,
                              block.feed_forward_up.cols,
-                             backend.up);
+                             up);
             })) {
       return false;
     }
@@ -2684,9 +2659,9 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
                  breakdown.linear_ns,
                  [&]() {
                    return emel::generator::detail::matmul_vector(
-                              backend, block.feed_forward_gate, backend.norm, backend.gate) &&
+                              backend, block.feed_forward_gate, backend.norm, gate) &&
                        emel::generator::detail::matmul_vector(
-                              backend, block.feed_forward_up, backend.norm, backend.up);
+                              backend, block.feed_forward_up, backend.norm, up);
                  })) {
     return false;
   }
@@ -2694,9 +2669,8 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
   measure_probe_void(
       breakdown.misc_ns,
       [&]() {
-        for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
-          backend.ffn_hidden[idx] =
-              emel::generator::detail::silu(backend.gate[idx]) * backend.up[idx];
+        for (size_t idx = 0; idx < gate.size(); ++idx) {
+          ffn_hidden[idx] = emel::generator::detail::silu(gate[idx]) * up[idx];
         }
       });
 
@@ -2704,7 +2678,7 @@ bool run_emel_runtime_layer_probe_scalar(emel::generator::detail::native_backend
           breakdown.linear_ns,
           [&]() {
             return emel::generator::detail::matmul_vector(
-                backend, block.feed_forward_down, backend.ffn_hidden, backend.projected);
+                backend, block.feed_forward_down, ffn_hidden, backend.projected);
           })) {
     return false;
   }
@@ -2725,8 +2699,8 @@ bool run_emel_runtime_layer_probe_chunk4(emel::generator::detail::native_backend
                                          const size_t token_base,
                                          prefill_probe_breakdown & breakdown) {
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
-  const int32_t q_dim = backend.n_head * backend.head_dim;
-  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const int32_t q_dim = block.attention_q_dim;
+  const int32_t kv_dim = block.attention_kv_dim;
   const int32_t ffn_dim = block.feed_forward_gate.rows;
 
   if (!measure_subprobe_bool(
@@ -2777,13 +2751,13 @@ bool run_emel_runtime_layer_probe_chunk4(emel::generator::detail::native_backend
                            q_row,
                            block.attention_q_norm,
                            backend.n_head,
-                           backend.head_dim,
+                           block.attention_head_dim,
                            backend.rms_epsilon) &&
                     emel::generator::detail::apply_headwise_rms_norm(
                            k_row,
                            block.attention_k_norm,
                            backend.n_head_kv,
-                           backend.head_dim_kv,
+                           block.attention_head_dim_kv,
                            backend.rms_epsilon);
               })) {
         return false;
@@ -2795,17 +2769,17 @@ bool run_emel_runtime_layer_probe_chunk4(emel::generator::detail::native_backend
             emel::generator::detail::apply_rope(
                 q_row,
                 backend.n_head,
-                backend.head_dim,
-                backend.n_rot,
+                block.attention_head_dim,
+                block.attention_rope_dim,
                 position,
-                backend.rope_freq_base);
+                block.attention_rope_freq_base);
             emel::generator::detail::apply_rope(
                 k_row,
                 backend.n_head_kv,
-                backend.head_dim_kv,
-                backend.n_rot,
+                block.attention_head_dim_kv,
+                block.attention_rope_dim,
                 position,
-                backend.rope_freq_base);
+                block.attention_rope_freq_base);
           });
 
       if (!measure_subprobe_bool(
@@ -2813,13 +2787,13 @@ bool run_emel_runtime_layer_probe_chunk4(emel::generator::detail::native_backend
               breakdown.misc_kv_store_ns,
               [&]() {
                 return emel::generator::detail::store_attention_kv_cache(
-                    backend, layer_index, position, k_row, v_row);
+                    backend, block, layer_index, position, k_row, v_row);
               }) ||
           !measure_probe_bool(
               breakdown.attention_ns,
               [&]() {
                 return emel::generator::detail::run_attention_for_q_vector<mode>(
-                    backend, layer_index, position, q_row);
+                    backend, block, layer_index, position, q_row);
               })) {
         return false;
       }
@@ -2830,7 +2804,7 @@ bool run_emel_runtime_layer_probe_chunk4(emel::generator::detail::native_backend
           [&]() {
             std::copy(
                 backend.attn_ctx.begin(),
-                backend.attn_ctx.end(),
+                backend.attn_ctx.begin() + q_dim,
                 emel::generator::detail::chunk4_row_span<float>(
                     std::span<float>(backend.attn_ctx_chunk4), row, q_dim)
                     .begin());
@@ -2993,12 +2967,20 @@ bool run_emel_runtime_layer_probe_chunk4(emel::generator::detail::native_backend
   if (!measure_probe_bool(
           breakdown.linear_ns,
           [&]() {
+            auto gate_chunk =
+                std::span<float>(backend.gate_chunk4.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
+                                     static_cast<size_t>(ffn_dim));
+            auto up_chunk =
+                std::span<float>(backend.up_chunk4.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
+                                     static_cast<size_t>(ffn_dim));
             return emel::generator::detail::prepare_chunk4_rhs<route>(
                        backend, backend.norm_chunk4, backend.n_embd) &&
                 emel::generator::detail::matmul_chunk4_prepared<route>(
-                           backend, block.feed_forward_gate, backend.n_embd, backend.gate_chunk4) &&
+                           backend, block.feed_forward_gate, backend.n_embd, gate_chunk) &&
                 emel::generator::detail::matmul_chunk4_prepared<route>(
-                           backend, block.feed_forward_up, backend.n_embd, backend.up_chunk4);
+                           backend, block.feed_forward_up, backend.n_embd, up_chunk);
           })) {
     return false;
   }
@@ -3007,8 +2989,20 @@ bool run_emel_runtime_layer_probe_chunk4(emel::generator::detail::native_backend
           breakdown.misc_ns,
           breakdown.misc_silu_ns,
           [&]() {
+            auto gate_chunk =
+                std::span<float>(backend.gate_chunk4.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
+                                     static_cast<size_t>(ffn_dim));
+            auto up_chunk =
+                std::span<float>(backend.up_chunk4.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
+                                     static_cast<size_t>(ffn_dim));
+            auto ffn_hidden_chunk =
+                std::span<float>(backend.ffn_hidden_chunk4.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
+                                     static_cast<size_t>(ffn_dim));
             return emel::generator::detail::apply_silu_mul_chunk4(
-                backend.gate_chunk4, backend.up_chunk4, ffn_dim, backend.ffn_hidden_chunk4);
+                gate_chunk, up_chunk, ffn_dim, ffn_hidden_chunk);
           })) {
     return false;
   }
@@ -3016,8 +3010,12 @@ bool run_emel_runtime_layer_probe_chunk4(emel::generator::detail::native_backend
   if (!measure_probe_bool(
           breakdown.linear_ns,
           [&]() {
+            auto ffn_hidden_chunk =
+                std::span<float>(backend.ffn_hidden_chunk4.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk_rows) *
+                                     static_cast<size_t>(ffn_dim));
             return emel::generator::detail::prepare_chunk4_rhs<route>(
-                       backend, backend.ffn_hidden_chunk4, ffn_dim) &&
+                       backend, ffn_hidden_chunk, ffn_dim) &&
                 emel::generator::detail::matmul_chunk4_prepared<route>(
                            backend, block.feed_forward_down, ffn_dim, backend.projected_chunk4) &&
                 emel::generator::detail::add_chunk4_rows_in_place(
@@ -3035,8 +3033,8 @@ bool run_emel_runtime_layer_probe_chunk8(emel::generator::detail::native_backend
                                          const size_t token_base,
                                          prefill_probe_breakdown & breakdown) {
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
-  const int32_t q_dim = backend.n_head * backend.head_dim;
-  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const int32_t q_dim = block.attention_q_dim;
+  const int32_t kv_dim = block.attention_kv_dim;
   const int32_t ffn_dim = block.feed_forward_gate.rows;
 
   if (!measure_subprobe_bool(
@@ -3087,13 +3085,13 @@ bool run_emel_runtime_layer_probe_chunk8(emel::generator::detail::native_backend
                            q_row,
                            block.attention_q_norm,
                            backend.n_head,
-                           backend.head_dim,
+                           block.attention_head_dim,
                            backend.rms_epsilon) &&
                     emel::generator::detail::apply_headwise_rms_norm(
                            k_row,
                            block.attention_k_norm,
                            backend.n_head_kv,
-                           backend.head_dim_kv,
+                           block.attention_head_dim_kv,
                            backend.rms_epsilon);
               })) {
         return false;
@@ -3105,17 +3103,17 @@ bool run_emel_runtime_layer_probe_chunk8(emel::generator::detail::native_backend
             emel::generator::detail::apply_rope(
                 q_row,
                 backend.n_head,
-                backend.head_dim,
-                backend.n_rot,
+                block.attention_head_dim,
+                block.attention_rope_dim,
                 position,
-                backend.rope_freq_base);
+                block.attention_rope_freq_base);
             emel::generator::detail::apply_rope(
                 k_row,
                 backend.n_head_kv,
-                backend.head_dim_kv,
-                backend.n_rot,
+                block.attention_head_dim_kv,
+                block.attention_rope_dim,
                 position,
-                backend.rope_freq_base);
+                block.attention_rope_freq_base);
           });
 
       if (!measure_subprobe_bool(
@@ -3123,13 +3121,13 @@ bool run_emel_runtime_layer_probe_chunk8(emel::generator::detail::native_backend
               breakdown.misc_kv_store_ns,
               [&]() {
                 return emel::generator::detail::store_attention_kv_cache(
-                    backend, layer_index, position, k_row, v_row);
+                    backend, block, layer_index, position, k_row, v_row);
               }) ||
           !measure_probe_bool(
               breakdown.attention_ns,
               [&]() {
                 return emel::generator::detail::run_attention_for_q_vector<mode>(
-                    backend, layer_index, position, q_row);
+                    backend, block, layer_index, position, q_row);
               })) {
         return false;
       }
@@ -3140,7 +3138,7 @@ bool run_emel_runtime_layer_probe_chunk8(emel::generator::detail::native_backend
           [&]() {
             std::copy(
                 backend.attn_ctx.begin(),
-                backend.attn_ctx.end(),
+                backend.attn_ctx.begin() + q_dim,
                 emel::generator::detail::chunk8_row_span<float>(
                     std::span<float>(backend.attn_ctx_chunk8), row, q_dim)
                     .begin());
@@ -3303,12 +3301,20 @@ bool run_emel_runtime_layer_probe_chunk8(emel::generator::detail::native_backend
   if (!measure_probe_bool(
           breakdown.linear_ns,
           [&]() {
+            auto gate_chunk =
+                std::span<float>(backend.gate_chunk8.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
+                                     static_cast<size_t>(ffn_dim));
+            auto up_chunk =
+                std::span<float>(backend.up_chunk8.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
+                                     static_cast<size_t>(ffn_dim));
             return emel::generator::detail::prepare_q8_chunk8_input(
                        backend, backend.norm_chunk8, backend.n_embd) &&
                 emel::generator::detail::matmul_chunk8_q8_input(
-                           backend, block.feed_forward_gate, backend.n_embd, backend.gate_chunk8) &&
+                           backend, block.feed_forward_gate, backend.n_embd, gate_chunk) &&
                 emel::generator::detail::matmul_chunk8_q8_input(
-                           backend, block.feed_forward_up, backend.n_embd, backend.up_chunk8);
+                           backend, block.feed_forward_up, backend.n_embd, up_chunk);
           })) {
     return false;
   }
@@ -3317,8 +3323,20 @@ bool run_emel_runtime_layer_probe_chunk8(emel::generator::detail::native_backend
           breakdown.misc_ns,
           breakdown.misc_silu_ns,
           [&]() {
+            auto gate_chunk =
+                std::span<float>(backend.gate_chunk8.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
+                                     static_cast<size_t>(ffn_dim));
+            auto up_chunk =
+                std::span<float>(backend.up_chunk8.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
+                                     static_cast<size_t>(ffn_dim));
+            auto ffn_hidden_chunk =
+                std::span<float>(backend.ffn_hidden_chunk8.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
+                                     static_cast<size_t>(ffn_dim));
             return emel::generator::detail::apply_silu_mul_chunk8(
-                backend.gate_chunk8, backend.up_chunk8, ffn_dim, backend.ffn_hidden_chunk8);
+                gate_chunk, up_chunk, ffn_dim, ffn_hidden_chunk);
           })) {
     return false;
   }
@@ -3326,8 +3344,12 @@ bool run_emel_runtime_layer_probe_chunk8(emel::generator::detail::native_backend
   if (!measure_probe_bool(
           breakdown.linear_ns,
           [&]() {
+            auto ffn_hidden_chunk =
+                std::span<float>(backend.ffn_hidden_chunk8.data(),
+                                 static_cast<size_t>(emel::generator::detail::k_prefill_q8_chunk8_rows) *
+                                     static_cast<size_t>(ffn_dim));
             return emel::generator::detail::prepare_q8_chunk8_input(
-                       backend, backend.ffn_hidden_chunk8, ffn_dim) &&
+                       backend, ffn_hidden_chunk, ffn_dim) &&
                 emel::generator::detail::matmul_chunk8_q8_input(
                            backend, block.feed_forward_down, ffn_dim, backend.projected_chunk8) &&
                 emel::generator::detail::add_chunk8_rows_in_place(
@@ -3888,6 +3910,15 @@ void prepare_emel_generation_fixture(const generation_fixture_spec & spec,
 
   const std::string model_path = resolve_generation_model_path(spec.fixture->fixture_rel);
   if (!prepare_emel_fixture(prepared_fixture.emel, model_path)) {
+    if (prepared_fixture.emel.load.error) {
+      fail_bench_setup("prepare_emel_fixture",
+                       model_loader_error_name(prepared_fixture.emel.load.err).data());
+    }
+    if (!prepared_fixture.emel.formatter_binding.contract.empty()) {
+      g_generation_formatter_contract.assign(prepared_fixture.emel.formatter_binding.contract);
+      fail_bench_setup("prepare_emel_fixture",
+                       prepared_fixture.emel.formatter_binding.contract.data());
+    }
     fail_bench_setup("prepare_emel_fixture", model_path.c_str());
   }
 
@@ -3920,6 +3951,15 @@ void prepare_compare_generation_fixture(const generation_fixture_spec & spec,
 
   const std::string model_path = resolve_generation_model_path(spec.fixture->fixture_rel);
   if (!prepare_emel_fixture(prepared_fixture.emel, model_path)) {
+    if (prepared_fixture.emel.load.error) {
+      fail_bench_setup("prepare_emel_fixture",
+                       model_loader_error_name(prepared_fixture.emel.load.err).data());
+    }
+    if (!prepared_fixture.emel.formatter_binding.contract.empty()) {
+      g_generation_formatter_contract.assign(prepared_fixture.emel.formatter_binding.contract);
+      fail_bench_setup("prepare_emel_fixture",
+                       prepared_fixture.emel.formatter_binding.contract.data());
+    }
     fail_bench_setup("prepare_emel_fixture", model_path.c_str());
   }
   if (!emel::model::detail::load_vocab_from_gguf(
@@ -3938,10 +3978,11 @@ void prepare_compare_generation_fixture(const generation_fixture_spec & spec,
 
 const std::vector<prepared_emel_generation_fixture> & maintained_emel_generation_fixtures() {
   static const std::vector<prepared_emel_generation_fixture> fixtures = [] {
-    std::vector<prepared_emel_generation_fixture> prepared_fixtures(k_generation_fixtures.size());
-    for (size_t fixture_index = 0u; fixture_index < k_generation_fixtures.size(); ++fixture_index) {
+    std::vector<prepared_emel_generation_fixture> prepared_fixtures(k_emel_generation_fixtures.size());
+    for (size_t fixture_index = 0u; fixture_index < k_emel_generation_fixtures.size();
+         ++fixture_index) {
       prepare_emel_generation_fixture(
-          k_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
+          k_emel_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
     }
     return prepared_fixtures;
   }();
@@ -3951,10 +3992,11 @@ const std::vector<prepared_emel_generation_fixture> & maintained_emel_generation
 const std::vector<prepared_reference_generation_fixture> & maintained_reference_generation_fixtures() {
   static const std::vector<prepared_reference_generation_fixture> fixtures = [] {
     std::vector<prepared_reference_generation_fixture> prepared_fixtures(
-        k_generation_fixtures.size());
-    for (size_t fixture_index = 0u; fixture_index < k_generation_fixtures.size(); ++fixture_index) {
+        k_compare_generation_fixtures.size());
+    for (size_t fixture_index = 0u; fixture_index < k_compare_generation_fixtures.size();
+         ++fixture_index) {
       prepare_reference_generation_fixture(
-          k_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
+          k_compare_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
     }
     return prepared_fixtures;
   }();
@@ -3963,10 +4005,11 @@ const std::vector<prepared_reference_generation_fixture> & maintained_reference_
 
 const std::vector<prepared_generation_fixture> & maintained_compare_generation_fixtures() {
   static const std::vector<prepared_generation_fixture> fixtures = [] {
-    std::vector<prepared_generation_fixture> prepared_fixtures(k_generation_fixtures.size());
-    for (size_t fixture_index = 0u; fixture_index < k_generation_fixtures.size(); ++fixture_index) {
+    std::vector<prepared_generation_fixture> prepared_fixtures(k_compare_generation_fixtures.size());
+    for (size_t fixture_index = 0u; fixture_index < k_compare_generation_fixtures.size();
+         ++fixture_index) {
       prepare_compare_generation_fixture(
-          k_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
+          k_compare_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
     }
     return prepared_fixtures;
   }();

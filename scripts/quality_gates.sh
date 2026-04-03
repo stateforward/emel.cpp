@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TIMING_FILE="$ROOT_DIR/snapshots/quality_gates/timing.txt"
-QUALITY_GATES_TIMEOUT="${EMEL_QUALITY_GATES_TIMEOUT:-1200s}"
+QUALITY_GATES_TIMEOUT="${EMEL_QUALITY_GATES_TIMEOUT:-1800s}"
 
 if [[ -z "${EMEL_QUALITY_GATES_INNER:-}" ]]; then
   timeout_cmd=()
@@ -72,7 +72,9 @@ run_step_allow_fail() {
 }
 
 run_step build_with_zig "$ROOT_DIR/scripts/build_with_zig.sh"
-run_step test_with_coverage "$ROOT_DIR/scripts/test_with_coverage.sh"
+run_step test_with_coverage env \
+  EMEL_COVERAGE_CLEAN=1 \
+  "$ROOT_DIR/scripts/test_with_coverage.sh"
 run_step paritychecker "$ROOT_DIR/scripts/paritychecker.sh"
 # Temporarily disabled (SML UBSAN issue under asan_ubsan).
 # TODO: re-enable once stateforward/sml.cpp fix lands.

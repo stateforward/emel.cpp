@@ -1,18 +1,18 @@
 stateDiagram-v2
   direction TB
-  [*] --> ready
-  ready --> capture_tensor_view_request_decision : capture_tensor_view_runtime [always] / begin_capture_tensor_view_
-  capture_tensor_view_request_decision --> capture_tensor_view_exec : completion_capture_tensor_view_runtime_ [capture_tensor_view_request_valid_] / none
-  capture_tensor_view_request_decision --> errored : completion_capture_tensor_view_runtime_ [capture_tensor_view_request_invalid_] / mark_invalid_request_
-  capture_tensor_view_exec --> capture_tensor_view_result_decision : completion_capture_tensor_view_runtime_ [always] / exec_capture_tensor_view_
-  capture_tensor_view_result_decision --> done : completion_capture_tensor_view_runtime_ [operation_succeeded_] / none
-  capture_tensor_view_result_decision --> errored : completion_capture_tensor_view_runtime_ [operation_failed_with_error_] / mark_error_from_operation_
-  capture_tensor_view_result_decision --> errored : completion_capture_tensor_view_runtime_ [operation_failed_without_error_] / mark_internal_error_
-  done --> ready : completion_capture_tensor_view_runtime_ [always] / publish_done_
-  errored --> ready : completion_capture_tensor_view_runtime_ [always] / publish_error_
-  ready --> ready : _ [always] / on_unexpected_
-  capture_tensor_view_request_decision --> ready : _ [always] / on_unexpected_
-  capture_tensor_view_exec --> ready : _ [always] / on_unexpected_
-  capture_tensor_view_result_decision --> ready : _ [always] / on_unexpected_
-  done --> ready : _ [always] / on_unexpected_
-  errored --> ready : _ [always] / on_unexpected_
+  [*] --> ready_docsgen_tensor_view_policy_
+  ready_docsgen_tensor_view_policy_ --> capture_tensor_view_request_decision_docsgen_tensor_view_policy_ : capture_tensor_view_runtime_docsgen_tensor_view_policy_ [always] / begin_capture_tensor_view_
+  capture_tensor_view_request_decision_docsgen_tensor_view_policy_ --> capture_tensor_view_exec_docsgen_tensor_view_policy_ : completion_capture_tensor_view_runtime_docsgen_tensor_view_policy__ [capture_tensor_view_request_valid_] / none
+  capture_tensor_view_request_decision_docsgen_tensor_view_policy_ --> errored_docsgen_tensor_view_policy_ : completion_capture_tensor_view_runtime_docsgen_tensor_view_policy__ [capture_tensor_view_request_invalid_] / mark_invalid_request_
+  capture_tensor_view_exec_docsgen_tensor_view_policy_ --> capture_tensor_view_result_decision_docsgen_tensor_view_policy_ : completion_capture_tensor_view_runtime_docsgen_tensor_view_policy__ [always] / exec_capture_tensor_view_
+  capture_tensor_view_result_decision_docsgen_tensor_view_policy_ --> done_docsgen_tensor_view_policy_ : completion_capture_tensor_view_runtime_docsgen_tensor_view_policy__ [operation_succeeded_] / none
+  capture_tensor_view_result_decision_docsgen_tensor_view_policy_ --> errored_docsgen_tensor_view_policy_ : completion_capture_tensor_view_runtime_docsgen_tensor_view_policy__ [operation_failed_with_error_] / mark_error_from_operation_
+  capture_tensor_view_result_decision_docsgen_tensor_view_policy_ --> errored_docsgen_tensor_view_policy_ : completion_capture_tensor_view_runtime_docsgen_tensor_view_policy__ [operation_failed_without_error_] / mark_internal_error_
+  done_docsgen_tensor_view_policy_ --> ready_docsgen_tensor_view_policy_ : completion_capture_tensor_view_runtime_docsgen_tensor_view_policy__ [always] / publish_done_
+  errored_docsgen_tensor_view_policy_ --> ready_docsgen_tensor_view_policy_ : completion_capture_tensor_view_runtime_docsgen_tensor_view_policy__ [always] / publish_error_
+  ready_docsgen_tensor_view_policy_ --> ready_docsgen_tensor_view_policy_ : _ [always] / on_unexpected_
+  capture_tensor_view_request_decision_docsgen_tensor_view_policy_ --> ready_docsgen_tensor_view_policy_ : _ [always] / on_unexpected_
+  capture_tensor_view_exec_docsgen_tensor_view_policy_ --> ready_docsgen_tensor_view_policy_ : _ [always] / on_unexpected_
+  capture_tensor_view_result_decision_docsgen_tensor_view_policy_ --> ready_docsgen_tensor_view_policy_ : _ [always] / on_unexpected_
+  done_docsgen_tensor_view_policy_ --> ready_docsgen_tensor_view_policy_ : _ [always] / on_unexpected_
+  errored_docsgen_tensor_view_policy_ --> ready_docsgen_tensor_view_policy_ : _ [always] / on_unexpected_

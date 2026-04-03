@@ -3,12 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "emel/tensor/context.hpp"
-#include "emel/tensor/detail.hpp"
-#include "emel/tensor/errors.hpp"
-#include "emel/tensor/events.hpp"
+#include "emel/graph/tensor/context.hpp"
+#include "emel/graph/tensor/detail.hpp"
+#include "emel/graph/tensor/errors.hpp"
+#include "emel/graph/tensor/events.hpp"
 
-namespace emel::tensor::action {
+namespace emel::graph::tensor::action {
 
 struct begin_reserve_tensor {
   void operator()(const detail::reserve_tensor_runtime & ev, context &) const noexcept {
@@ -172,4 +172,4 @@ inline constexpr publish_done publish_done{};
 inline constexpr publish_error publish_error{};
 inline constexpr on_unexpected on_unexpected{};
 
-}  // namespace emel::tensor::action
+}  // namespace emel::graph::tensor::action

@@ -1,5 +1,20 @@
 # Test Models
 
+## gemma-4-e2b-it-Q8_0.gguf
+- Source: `https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF`
+- File: `gemma-4-e2b-it-Q8_0.gguf`
+- Stable maintained path: `tests/models/gemma-4-e2b-it-Q8_0.gguf`
+- License: Apache-2.0
+- Size: `4967490208` bytes (`4.6G`)
+- SHA256: `12d878964d21f1779dea15abeee048855151b27089fe98b32c628f85740933f3`
+- Download URL: `https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-e2b-it-Q8_0.gguf`
+- Executable metadata truth: treat official GGUF/config metadata as authoritative for this
+  maintained slice, including `general.architecture=gemma4`, context length `131072`, and the
+  upstream text-layer schedule.
+- Official sibling files: `gemma-4-e2b-it-f16.gguf` and `mmproj-gemma-4-e2b-it-f16.gguf`.
+  Their presence is source truth for the upstream release, not proof of maintained multimodal
+  support in this repo.
+
 ## Qwen3-0.6B-Q8_0.gguf
 - Source: `https://huggingface.co/Qwen/Qwen3-0.6B-GGUF`
 - File: `Qwen3-0.6B-Q8_0.gguf`

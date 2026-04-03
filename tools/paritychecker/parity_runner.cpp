@@ -36,9 +36,9 @@
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
+#include "emel/model/builder/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
-#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
 #include "emel/model/loader/sm.hpp"
@@ -104,6 +104,59 @@ void dequantize_row_q2_K(const void * x, float * y, int64_t k);
 void dequantize_row_q3_K(const void * x, float * y, int64_t k);
 void dequantize_row_q6_K(const void * x, float * y, int64_t k);
 }
+
+namespace emel::generator::detail {
+
+inline const block_weights & parity_block(const native_backend & backend,
+                                          const int32_t layer) noexcept {
+  return backend.blocks[static_cast<size_t>(layer)];
+}
+
+inline size_t layer_cache_offset(const native_backend & backend,
+                                 const int32_t layer,
+                                 const int32_t position,
+                                 const int32_t) noexcept {
+  return layer_cache_offset(backend, parity_block(backend, layer), layer, position);
+}
+
+inline size_t flash_layer_cache_head_position_offset(const native_backend & backend,
+                                                     const int32_t layer,
+                                                     const int32_t kv_head,
+                                                     const int32_t position,
+                                                     const int32_t) noexcept {
+  return flash_layer_cache_head_position_offset(
+      backend, parity_block(backend, layer), layer, kv_head, position);
+}
+
+inline bool compute_attention(native_backend & backend,
+                              const int32_t layer,
+                              const int32_t position_limit,
+                              const std::span<const float> q_vector) noexcept {
+  const auto & block = parity_block(backend, layer);
+  if (q_vector.size() < static_cast<size_t>(block.attention_q_dim)) {
+    return false;
+  }
+  return compute_attention(backend,
+                           block,
+                           layer,
+                           position_limit,
+                           q_vector.first(static_cast<size_t>(block.attention_q_dim)));
+}
+
+inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
+    const native_backend & backend,
+    const int32_t layer,
+    const int32_t position) noexcept {
+  return make_flash_attn_request(backend, parity_block(backend, layer), layer, position);
+}
+
+inline bool dispatch_flash_attention(native_backend & backend,
+                                     const int32_t layer,
+                                     const int32_t position) noexcept {
+  return dispatch_flash_attention(backend, parity_block(backend, layer), layer, position);
+}
+
+}  // namespace emel::generator::detail
 
 namespace {
 
@@ -311,18 +364,18 @@ bool on_jinja_render_error(void * owner,
 }
 
 quantized_contract_summary build_quantized_contract_summary(
-    const emel::model::llama::detail::quantized_path_audit & audit) {
+    const emel::model::builder::detail::quantized_path_audit & audit) {
   quantized_contract_summary summary{};
   for (const auto & stage : audit.stages) {
     summary.native_quantized += static_cast<uint32_t>(
-        stage.contract == emel::model::llama::detail::quantized_contract_kind::native_quantized);
+        stage.contract == emel::model::builder::detail::quantized_contract_kind::native_quantized);
     summary.approved_dense_f32_by_contract += static_cast<uint32_t>(
         stage.contract ==
-        emel::model::llama::detail::quantized_contract_kind::approved_dense_f32_by_contract);
+        emel::model::builder::detail::quantized_contract_kind::approved_dense_f32_by_contract);
     summary.disallowed_fallback += static_cast<uint32_t>(
-        stage.contract == emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
+        stage.contract == emel::model::builder::detail::quantized_contract_kind::disallowed_fallback);
     summary.explicit_no_claim += static_cast<uint32_t>(
-        stage.contract == emel::model::llama::detail::quantized_contract_kind::explicit_no_claim);
+        stage.contract == emel::model::builder::detail::quantized_contract_kind::explicit_no_claim);
   }
   return summary;
 }
@@ -9707,13 +9760,13 @@ void dump_scalar_attention_debug(const generation_load_state & state,
                    "ffn_gate_scale=%d ffn_up_scale=%d ffn_down_scale=%d\n",
                    layer,
                    ref_layer.bo != nullptr ? 1 : 0,
-                   ref_layer.wo_s != nullptr ? 1 : 0,
+                   ref_layer.wo_scale != nullptr ? 1 : 0,
                    ref_layer.ffn_gate_b != nullptr ? 1 : 0,
                    ref_layer.ffn_up_b != nullptr ? 1 : 0,
                    ref_layer.ffn_down_b != nullptr ? 1 : 0,
-                   ref_layer.ffn_gate_s != nullptr ? 1 : 0,
-                   ref_layer.ffn_up_s != nullptr ? 1 : 0,
-                   ref_layer.ffn_down_s != nullptr ? 1 : 0);
+                   ref_layer.ffn_gate_scale != nullptr ? 1 : 0,
+                   ref_layer.ffn_up_scale != nullptr ? 1 : 0,
+                   ref_layer.ffn_down_scale != nullptr ? 1 : 0);
     }
   }
   const argmax_summary dispatch_summary =
@@ -11942,8 +11995,8 @@ void dump_generation_tensor_compare(generation_load_state & state,
       "tensor_compare.token_embedding",
       *backend.token_embedding.tensor,
       prompt_tokens.front());
-  emel::model::llama::detail::block_view block_view = {};
-  if (emel::model::llama::detail::lookup_block_view(backend.execution, 0, block_view) ==
+  emel::model::builder::detail::block_view block_view = {};
+  if (emel::model::builder::detail::lookup_block_view(backend.build.execution, 0, block_view) ==
       emel::error::cast(emel::model::loader::error::none)) {
     dump_vector_compare(
         "tensor_compare.layer0.attn_norm",
@@ -11954,7 +12007,7 @@ void dump_generation_tensor_compare(generation_load_state & state,
         *block_view.feed_forward_norm.tensor,
         backend.blocks[0].feed_forward_norm);
   }
-  if (emel::model::llama::detail::lookup_block_view(backend.execution, 1, block_view) ==
+  if (emel::model::builder::detail::lookup_block_view(backend.build.execution, 1, block_view) ==
       emel::error::cast(emel::model::loader::error::none)) {
     dump_vector_compare(
         "tensor_compare.layer1.attn_norm",
@@ -11965,7 +12018,10 @@ void dump_generation_tensor_compare(generation_load_state & state,
         *block_view.feed_forward_norm.tensor,
         backend.blocks[1].feed_forward_norm);
   }
-  dump_vector_compare("tensor_compare.output_norm", *backend.execution.output_norm.tensor, backend.output_norm);
+  dump_vector_compare(
+      "tensor_compare.output_norm",
+      *backend.build.execution.output_norm.tensor,
+      backend.output_norm);
 
   reference_graph_capture graph_capture = {};
   const bool have_reference_graph = capture_reference_graph(state, opts, graph_capture);
@@ -16293,11 +16349,13 @@ void dump_reference_decode_seam(const generation_load_state & state) {
                runtime_contract.disallowed_fallback,
                runtime_contract.explicit_no_claim);
 
-  emel::model::llama::detail::execution_view execution{};
-  if (emel::model::llama::detail::build_execution_view(*state.model_data, execution) ==
-      emel::error::cast(emel::model::loader::error::none)) {
-    const auto audit = emel::model::llama::detail::build_quantized_path_audit(execution);
-    const auto audit_contract = build_quantized_contract_summary(audit);
+  emel::model::builder::detail::artifact build_artifact{};
+  emel::error::type build_err = emel::error::cast(emel::model::builder::error::none);
+  emel::model::builder::event::build build_request{*state.model_data, build_artifact};
+  build_request.error_out = &build_err;
+  emel::model::builder::sm builder;
+  if (builder.process_event(build_request)) {
+    const auto audit_contract = build_quantized_contract_summary(build_artifact.quantized_audit);
 
     std::fprintf(stdout,
                  "quantized_stage_inventory: native_quantized=%u "
@@ -16306,13 +16364,14 @@ void dump_reference_decode_seam(const generation_load_state & state) {
                  audit_contract.approved_dense_f32_by_contract,
                  audit_contract.disallowed_fallback,
                  audit_contract.explicit_no_claim);
-    for (const auto & stage : audit.stages) {
-      const auto stage_name = emel::model::llama::detail::quantized_stage_family_name(stage.family);
-      const auto tensor_name = emel::model::llama::detail::tensor_type_name(stage.tensor_type);
+    for (const auto & stage : build_artifact.quantized_audit.stages) {
+      const auto stage_name =
+          emel::model::builder::detail::quantized_stage_family_name(stage.family);
+      const auto tensor_name = emel::model::builder::detail::tensor_type_name(stage.tensor_type);
       const auto contract_name =
-          emel::model::llama::detail::quantized_contract_kind_name(stage.contract);
+          emel::model::builder::detail::quantized_contract_kind_name(stage.contract);
       const uint32_t supported =
-          stage.contract == emel::model::llama::detail::quantized_contract_kind::explicit_no_claim
+          stage.contract == emel::model::builder::detail::quantized_contract_kind::explicit_no_claim
               ? 0u
               : 1u;
       std::fprintf(stdout,
@@ -16698,169 +16757,9 @@ bool try_parse_block_index(const std::string_view name, int32_t & block_index_ou
 
 emel::error::type populate_model_metadata(const generation_load_state & state,
                                           emel::model::data & model_data) {
-  const auto * architecture_entry = find_kv_entry(state, "general.architecture");
-  if (architecture_entry == nullptr) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
-
-  std::string_view architecture = {};
-  if (!decode_string_value(state, *architecture_entry, architecture) ||
-      architecture.size() >= model_data.architecture_name.size()) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
-  copy_name(model_data.architecture_name, architecture);
-  const bool is_llama = architecture == "llama";
-  const bool is_qwen3 = architecture == "qwen3";
-  const bool is_lfm2 = emel::model::is_lfm2_execution_architecture(architecture);
-  if (!is_llama && !is_qwen3 && !is_lfm2) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
-
-  const auto assign_i32 = [&](const std::string_view key, int32_t & field) {
-    const auto * entry = find_kv_entry(state, key);
-    if (entry == nullptr) {
-      return true;
-    }
-
-    uint64_t value = 0u;
-    if (!decode_integer_value(state, *entry, value) ||
-        value > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
-      return false;
-    }
-
-    field = static_cast<int32_t>(value);
-    return true;
-  };
-
-  const auto assign_f32 = [&](const std::string_view key, float & field) {
-    const auto * entry = find_kv_entry(state, key);
-    if (entry == nullptr) {
-      return true;
-    }
-
-    float value = 0.0f;
-    if (!decode_float_value(state, *entry, value)) {
-      return false;
-    }
-
-    field = value;
-    return true;
-  };
-
-  const auto assign_bool = [&](const std::string_view key, bool & field) {
-    const auto * entry = find_kv_entry(state, key);
-    if (entry == nullptr) {
-      return true;
-    }
-
-    bool value = false;
-    if (!decode_bool_value(state, *entry, value)) {
-      return false;
-    }
-
-    field = value;
-    return true;
-  };
-
-  if (is_llama) {
-    if (!assign_i32("llama.context_length", model_data.params.n_ctx) ||
-        !assign_i32("llama.embedding_length", model_data.params.n_embd) ||
-        !assign_i32("llama.embedding_length_out", model_data.params.n_embd_out) ||
-        !assign_i32("llama.feed_forward_length", model_data.params.n_ff) ||
-        !assign_i32("llama.attention.head_count", model_data.params.n_head) ||
-        !assign_i32("llama.attention.head_count_kv", model_data.params.n_head_kv) ||
-        !assign_i32("llama.rope.dimension_count", model_data.params.n_rot) ||
-        !assign_i32("llama.block_count", model_data.params.n_layer) ||
-        !assign_i32("llama.vocab_size", model_data.params.n_vocab) ||
-        !assign_f32("llama.attention.layer_norm_epsilon", model_data.params.attention_layer_norm_epsilon) ||
-        !assign_f32(
-            "llama.attention.layer_norm_rms_epsilon",
-            model_data.params.attention_layer_norm_rms_epsilon) ||
-        !assign_f32("llama.attention.clamp_kqv", model_data.params.attention_clamp_kqv) ||
-        !assign_f32("llama.attn_logit_softcapping", model_data.params.attn_logit_softcapping) ||
-        !assign_f32("llama.final_logit_softcapping", model_data.params.final_logit_softcapping) ||
-        !assign_f32("llama.residual_scale", model_data.params.residual_scale) ||
-        !assign_f32("llama.embedding_scale", model_data.params.embedding_scale) ||
-        !assign_f32("llama.rope.freq_base", model_data.params.rope_freq_base) ||
-        !assign_f32("llama.rope.freq_base_swa", model_data.params.rope_freq_base_swa) ||
-        !assign_bool("llama.use_parallel_residual", model_data.params.use_parallel_residual)) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-  }
-
-  if (is_qwen3) {
-    int32_t qwen3_key_length = 0;
-    int32_t qwen3_value_length = 0;
-    if (!assign_i32("qwen3.context_length", model_data.params.n_ctx) ||
-        !assign_i32("qwen3.embedding_length", model_data.params.n_embd) ||
-        !assign_i32("qwen3.feed_forward_length", model_data.params.n_ff) ||
-        !assign_i32("qwen3.attention.head_count", model_data.params.n_head) ||
-        !assign_i32("qwen3.attention.head_count_kv", model_data.params.n_head_kv) ||
-        !assign_i32("qwen3.attention.key_length", qwen3_key_length) ||
-        !assign_i32("qwen3.attention.value_length", qwen3_value_length) ||
-        !assign_i32("qwen3.block_count", model_data.params.n_layer) ||
-        !assign_f32(
-            "qwen3.attention.layer_norm_rms_epsilon",
-            model_data.params.attention_layer_norm_rms_epsilon) ||
-        !assign_f32("qwen3.rope.freq_base", model_data.params.rope_freq_base)) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-
-    model_data.params.attention_key_length = qwen3_key_length;
-    model_data.params.attention_value_length = qwen3_value_length;
-    if (model_data.params.n_embd_out == 0) {
-      model_data.params.n_embd_out = model_data.params.n_embd;
-    }
-    if (model_data.params.n_rot == 0) {
-      model_data.params.n_rot = qwen3_key_length;
-    }
-    if (qwen3_key_length <= 0 || qwen3_value_length <= 0) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-  }
-
-  if (is_lfm2) {
-    int32_t lfm2_head_count_kv = 0;
-    if (!assign_i32("lfm2.context_length", model_data.params.n_ctx) ||
-        !assign_i32("lfm2.embedding_length", model_data.params.n_embd) ||
-        !assign_i32("lfm2.feed_forward_length", model_data.params.n_ff) ||
-        !assign_i32("lfm2.attention.head_count", model_data.params.n_head) ||
-        !assign_i32("lfm2.block_count", model_data.params.n_layer) ||
-        !assign_i32("lfm2.vocab_size", model_data.params.n_vocab) ||
-        !assign_i32("lfm2.shortconv.l_cache", model_data.params.shortconv_l_cache) ||
-        !assign_f32(
-            "lfm2.attention.layer_norm_rms_epsilon",
-            model_data.params.attention_layer_norm_rms_epsilon) ||
-        !assign_f32("lfm2.rope.freq_base", model_data.params.rope_freq_base)) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-
-    const auto * head_count_kv_entry = find_kv_entry(state, "lfm2.attention.head_count_kv");
-    if (head_count_kv_entry == nullptr ||
-        !decode_integer_array_first_nonzero(state, *head_count_kv_entry, lfm2_head_count_kv)) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-
-    model_data.params.n_head_kv = lfm2_head_count_kv;
-    if (model_data.params.n_embd_out == 0) {
-      model_data.params.n_embd_out = model_data.params.n_embd;
-    }
-  }
-
-  const auto * tokens_entry = find_kv_entry(state, "tokenizer.tokens");
-  if (tokens_entry != nullptr) {
-    uint32_t token_count = 0u;
-    if (!decode_string_array_count(state, *tokens_entry, token_count) ||
-        token_count > static_cast<uint32_t>(emel::model::data::k_max_vocab_tokens)) {
-      return emel::error::cast(emel::model::loader::error::model_invalid);
-    }
-    model_data.vocab_data.n_tokens = token_count;
-    if (model_data.params.n_vocab == 0) {
-      model_data.params.n_vocab = static_cast<int32_t>(token_count);
-    }
-  }
-
-  return emel::error::cast(emel::model::loader::error::none);
+  return emel::model::detail::load_hparams_from_gguf(kv_binding_from_state(state), model_data)
+             ? emel::error::cast(emel::model::loader::error::none)
+             : emel::error::cast(emel::model::loader::error::model_invalid);
 }
 
 std::string_view architecture_name_view(const emel::model::data & model_data) {
@@ -18606,11 +18505,14 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  output_weight_count,
                  q_norm_count,
                  k_norm_count);
-    emel::model::llama::detail::execution_view debug_execution{};
-    if (emel::model::llama::detail::build_execution_view(*state.model_data, debug_execution) ==
-        emel::error::cast(emel::model::loader::error::none)) {
-      emel::model::llama::detail::block_view debug_block{};
-      if (emel::model::llama::detail::lookup_block_view(debug_execution, 0, debug_block) ==
+    emel::model::builder::detail::artifact debug_artifact{};
+    emel::error::type debug_err = emel::error::cast(emel::model::builder::error::none);
+    emel::model::builder::event::build debug_request{*state.model_data, debug_artifact};
+    debug_request.error_out = &debug_err;
+    emel::model::builder::sm debug_builder;
+    if (debug_builder.process_event(debug_request)) {
+      emel::model::builder::detail::block_view debug_block{};
+      if (emel::model::builder::detail::lookup_block_view(debug_artifact.execution, 0, debug_block) ==
           emel::error::cast(emel::model::loader::error::none)) {
         const auto print_tensor_shape = [&](const char * label,
                                             const emel::model::data::tensor_record * tensor) {
@@ -18631,7 +18533,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
         print_tensor_shape("attn_k", debug_block.attention_k.tensor);
         print_tensor_shape("attn_q_norm", debug_block.attention_q_norm.tensor);
         print_tensor_shape("attn_k_norm", debug_block.attention_k_norm.tensor);
-        print_tensor_shape("output", debug_execution.output.tensor);
+        print_tensor_shape("output", debug_artifact.execution.output.tensor);
       }
     } else {
       std::fprintf(stderr, "generation initialize debug build_execution_view failed\n");
@@ -18755,11 +18657,13 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     return 1;
   }
 
-  emel::model::llama::detail::execution_view execution{};
-  if (emel::model::llama::detail::build_execution_view(*state.model_data, execution) ==
-      emel::error::cast(emel::model::loader::error::none)) {
-    const auto audit = emel::model::llama::detail::build_quantized_path_audit(execution);
-    const auto audit_contract = build_quantized_contract_summary(audit);
+  emel::model::builder::detail::artifact audit_artifact{};
+  emel::error::type audit_err = emel::error::cast(emel::model::builder::error::none);
+  emel::model::builder::event::build audit_request{*state.model_data, audit_artifact};
+  audit_request.error_out = &audit_err;
+  emel::model::builder::sm audit_builder;
+  if (audit_builder.process_event(audit_request)) {
+    const auto audit_contract = build_quantized_contract_summary(audit_artifact.quantized_audit);
     if (!quantized_contract_matches(runtime_contract, audit_contract)) {
       std::fprintf(stderr,
                    "generation quantized attribution mismatch (fixture=%s "

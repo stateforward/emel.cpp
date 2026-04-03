@@ -6,8 +6,8 @@
 #include "emel/graph/context.hpp"
 #include "emel/graph/errors.hpp"
 #include "emel/graph/events.hpp"
-#include "emel/tensor/errors.hpp"
-#include "emel/tensor/events.hpp"
+#include "emel/graph/tensor/errors.hpp"
+#include "emel/graph/tensor/events.hpp"
 
 namespace emel::graph::action {
 

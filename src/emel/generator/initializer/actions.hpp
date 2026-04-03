@@ -54,9 +54,6 @@ struct request_backend_prepare {
 struct accept_prepared_backend {
   void operator()(const event::run &, context & ctx) const noexcept {
     auto & generator = ctx.generator;
-    generator.compute.model_topology = generator.compute.backend.topology;
-    generator.compute.prefill_plan = generator.compute.backend.prefill_plan;
-    generator.compute.decode_plan = generator.compute.backend.decode_plan;
     generator.compute.backend_ready = true;
   }
 };
@@ -122,13 +119,13 @@ struct request_graph_reserve {
             emel::generator::event::initialize_ctx,
             emel::generator::action::capture_graph_reserve_error>(&ev.ctx);
     emel::graph::event::reserve reserve_ev{
-      .model_topology = &generator.compute.model_topology,
+      .model_topology = &generator.compute.backend.build.topology,
       .output_out = &generator.state.graph_reservation,
       .lifecycle = lifecycle,
-      .max_node_count = generator.compute.model_topology.node_count,
-      .max_tensor_count = generator.compute.model_topology.tensor_count,
-      .bytes_per_tensor = generator.compute.model_topology.bytes_per_tensor,
-      .workspace_capacity_bytes = generator.compute.model_topology.workspace_capacity_bytes,
+      .max_node_count = generator.compute.backend.build.topology.node_count,
+      .max_tensor_count = generator.compute.backend.build.topology.tensor_count,
+      .bytes_per_tensor = generator.compute.backend.build.topology.bytes_per_tensor,
+      .workspace_capacity_bytes = generator.compute.backend.build.topology.workspace_capacity_bytes,
       .dispatch_done = on_done,
       .dispatch_error = on_error,
     };

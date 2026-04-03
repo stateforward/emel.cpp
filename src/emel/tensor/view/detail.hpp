@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #include "emel/error/error.hpp"
 #include "emel/tensor/view/errors.hpp"
@@ -29,8 +31,10 @@ struct runtime_status {
   bool accepted = false;
 };
 
+template <class policy>
 struct capture_tensor_view_runtime {
-  const event::capture_tensor_view & request;
+  using policy_type = policy;
+  const event::capture_tensor_view<policy> & request;
   runtime_status & ctx;
   int32_t & error_code_out;
 };

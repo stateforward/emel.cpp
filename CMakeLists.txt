@@ -68,8 +68,15 @@ if(NOT EMEL_AARCH64_HOST_CXX_FLAG STREQUAL "")
 endif()
 
 add_library(emel STATIC
+  src/emel/model/architecture/detail.cpp
+  src/emel/model/detail.cpp
   src/emel/model/data.cpp
   src/emel/text/unicode_data.cpp
+  src/emel/model/builder/detail.cpp
+  src/emel/model/llama/detail.cpp
+  src/emel/model/qwen3/detail.cpp
+  src/emel/model/lfm2/detail.cpp
+  src/emel/model/gemma4/detail.cpp
 )
 
 target_link_libraries(emel
@@ -89,7 +96,7 @@ if(EMEL_ENABLE_TESTS)
 
   set(EMEL_TEST_SOURCES
     tests/doctest_main.cpp
-    tests/model/detail_tests.cpp
+    tests/model/builder/lifecycle_tests.cpp
     tests/model/loader/lifecycle_tests.cpp
     tests/model/weight_loader/lifecycle_tests.cpp
     tests/gbnf/lexer_tests.cpp
@@ -131,7 +138,8 @@ if(EMEL_ENABLE_TESTS)
     tests/memory/kv/lifecycle_tests.cpp
     tests/memory/recurrent/lifecycle_tests.cpp
     tests/memory/hybrid/lifecycle_tests.cpp
-    tests/tensor/lifecycle_tests.cpp
+    tests/graph/tensor/lifecycle_tests.cpp
+    tests/model/tensor/lifecycle_tests.cpp
     tests/tensor/view/lifecycle_tests.cpp
   )
 
@@ -161,6 +169,8 @@ if(EMEL_ENABLE_TESTS)
     tests/text/tokenizer/preprocessor_fallback_tests.cpp
     tests/text/tokenizer/bpe_regex_tests.cpp
     tests/text/tokenizer/bpe_split_tests.cpp
+    tests/text/tokenizer/tokenizer_metadata_tests.cpp
+    tests/text/tokenizer/preprocessor_metadata_tests.cpp
     tests/text/tokenizer/tokenizer_tests.cpp
     tests/text/tokenizer/tokenizer_parity_tests.cpp
     tests/text/tokenizer/tokenizer_action_guard_tests.cpp

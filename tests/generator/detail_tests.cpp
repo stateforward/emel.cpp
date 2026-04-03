@@ -10,6 +10,10 @@
 #include "emel/generator/guards.hpp"
 #include "../kernel/test_helpers.hpp"
 
+namespace emel::model::llama {
+namespace detail = ::emel::model::builder::detail;
+}
+
 namespace {
 
 using emel::generator::detail::quant::QK_K;
@@ -79,9 +83,9 @@ emel::model::data::tensor_record make_tensor_record(void * data,
 
 struct runtime_request_fixture {
   emel::model::data model = {};
-  emel::model::llama::detail::execution_view execution = {};
-  emel::model::llama::detail::topology topology = {};
-  emel::model::llama::detail::step_plan plan = {};
+  emel::model::builder::detail::execution_view execution = {};
+  emel::model::builder::detail::topology topology = {};
+  emel::model::builder::detail::step_plan plan = {};
   emel::generator::detail::native_backend backend = {};
   std::array<int32_t, 1> token_ids = {0};
   std::array<int32_t, 1> positions = {0};
@@ -92,8 +96,8 @@ struct runtime_request_fixture {
   emel::graph::processor::event::execute request = {};
 
   explicit runtime_request_fixture(
-      const emel::model::llama::detail::step_kind kind =
-          emel::model::llama::detail::step_kind::prefill) {
+      const emel::model::builder::detail::step_kind kind =
+          emel::model::builder::detail::step_kind::prefill) {
     topology.execution = &execution;
     plan.graph = &topology;
     plan.kind = kind;
@@ -211,6 +215,96 @@ struct qwen3_runtime_fixture {
   }
 };
 
+struct gemma4_runtime_fixture {
+  emel::model::data model = {};
+  std::vector<std::vector<float>> tensor_storage = {};
+
+  gemma4_runtime_fixture() {
+    tensor_storage.reserve(13);
+    model.params.n_vocab = 2;
+    model.params.n_embd = 4;
+    model.params.n_embd_out = 4;
+    model.params.n_ff = 4;
+    model.params.n_head = 2;
+    model.params.n_head_kv = 1;
+    model.params.n_ctx = 8;
+    model.params.n_rot = 2;
+    model.params.n_layer = 1;
+    model.params.attention_key_length = 2;
+    model.params.attention_value_length = 2;
+    model.params.attention_shared_kv_layers = 1;
+    model.params.attention_layer_norm_rms_epsilon = 1.0e-6f;
+    model.params.rope_freq_base = 10000.0f;
+    model.params.tie_word_embeddings = true;
+    model.n_layers = 1;
+    model.weights_data = model.tensors.data();
+    model.weights_size = 1u;
+    std::memcpy(model.architecture_name.data(), "gemma4", 6u);
+
+    uint32_t tensor_index = 0u;
+    const auto add_name = [&](emel::model::data::tensor_record & tensor,
+                              const std::string_view name) {
+      tensor.name_offset = model.name_bytes_used;
+      tensor.name_length = static_cast<uint32_t>(name.size());
+      std::memcpy(model.name_storage.data() + model.name_bytes_used, name.data(), name.size());
+      model.name_bytes_used += static_cast<uint32_t>(name.size());
+    };
+    const auto add_vector = [&](const std::string_view name, const std::vector<float> & values) {
+      auto & tensor = model.tensors[tensor_index++];
+      add_name(tensor, name);
+      tensor_storage.push_back(values);
+      tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+      tensor.n_dims = 1;
+      tensor.dims[0] = static_cast<uint64_t>(values.size());
+      tensor.data = tensor_storage.back().data();
+      tensor.data_size = static_cast<uint64_t>(values.size() * sizeof(float));
+    };
+    const auto add_matrix = [&](const std::string_view name,
+                                const int32_t rows,
+                                const int32_t cols,
+                                const std::vector<float> & values) {
+      auto & tensor = model.tensors[tensor_index++];
+      add_name(tensor, name);
+      tensor_storage.push_back(values);
+      tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+      tensor.n_dims = 2;
+      tensor.dims[0] = static_cast<uint64_t>(cols);
+      tensor.dims[1] = static_cast<uint64_t>(rows);
+      tensor.data = tensor_storage.back().data();
+      tensor.data_size = static_cast<uint64_t>(values.size() * sizeof(float));
+    };
+
+    const std::vector<float> q_identity = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+    const std::vector<float> kv_identity = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+    };
+
+    add_matrix("token_embd.weight", 2, 4, {
+        1.0f, 2.0f, 3.0f, 4.0f,
+        0.0f, 0.0f, 0.0f, 0.0f,
+    });
+    add_vector("output_norm.weight", {1.0f, 1.0f, 1.0f, 1.0f});
+    add_vector("blk.0.attn_norm.weight", {1.0f, 1.0f, 1.0f, 1.0f});
+    add_matrix("blk.0.attn_q.weight", 4, 4, q_identity);
+    add_matrix("blk.0.attn_k.weight", 2, 4, kv_identity);
+    add_matrix("blk.0.attn_v.weight", 2, 4, kv_identity);
+    add_vector("blk.0.attn_q_norm.weight", {2.0f, 0.5f});
+    add_vector("blk.0.attn_k_norm.weight", {1.5f, 0.25f});
+    add_matrix("blk.0.attn_output.weight", 4, 4, std::vector<float>(16, 0.0f));
+    add_vector("blk.0.ffn_norm.weight", {1.0f, 1.0f, 1.0f, 1.0f});
+    add_matrix("blk.0.ffn_gate.weight", 4, 4, std::vector<float>(16, 0.0f));
+    add_matrix("blk.0.ffn_down.weight", 4, 4, std::vector<float>(16, 0.0f));
+    add_matrix("blk.0.ffn_up.weight", 4, 4, std::vector<float>(16, 0.0f));
+    model.n_tensors = tensor_index;
+  }
+};
+
 struct chunk4_prefill_runtime_fixture {
   static constexpr int32_t k_vocab = static_cast<int32_t>(QK8_0);
   static constexpr int32_t k_embd = static_cast<int32_t>(QK8_0);
@@ -230,9 +324,9 @@ struct chunk4_prefill_runtime_fixture {
   emel::model::data::tensor_record packed_tensor = {};
   emel::model::data::tensor_record output_argmax_tensor = {};
 
-  emel::model::llama::detail::execution_view execution = {};
-  emel::model::llama::detail::topology topology = {};
-  emel::model::llama::detail::step_plan plan = {};
+  emel::model::builder::detail::execution_view execution = {};
+  emel::model::builder::detail::topology topology = {};
+  emel::model::builder::detail::step_plan plan = {};
   std::array<int32_t, k_prompt_tokens> token_ids = {0, 1, 2, 3};
   std::array<int32_t, k_prompt_tokens> positions = {0, 1, 2, 3};
   std::vector<float> logits = {};
@@ -343,7 +437,7 @@ struct chunk4_prefill_runtime_fixture {
     logits.resize(static_cast<size_t>(k_vocab), -1.0f);
     topology.execution = &execution;
     plan.graph = &topology;
-    plan.kind = emel::model::llama::detail::step_kind::prefill;
+    plan.kind = emel::model::builder::detail::step_kind::prefill;
     plan.expected_outputs = 1;
     io.backend_ctx = &backend;
     io.token_ids = token_ids.data();
@@ -397,9 +491,9 @@ struct hybrid_chunked_q8_runtime_fixture {
   emel::model::data::tensor_record packed_shortconv_in_tensor = {};
   emel::model::data::tensor_record output_argmax_tensor = {};
 
-  emel::model::llama::detail::execution_view execution = {};
-  emel::model::llama::detail::topology topology = {};
-  emel::model::llama::detail::step_plan plan = {};
+  emel::model::builder::detail::execution_view execution = {};
+  emel::model::builder::detail::topology topology = {};
+  emel::model::builder::detail::step_plan plan = {};
   std::array<int32_t, k_prompt_tokens> token_ids = {};
   std::array<int32_t, k_prompt_tokens> positions = {};
   std::vector<float> logits = {};
@@ -569,7 +663,7 @@ struct hybrid_chunked_q8_runtime_fixture {
     logits.resize(static_cast<size_t>(k_vocab), -1.0f);
     topology.execution = &execution;
     plan.graph = &topology;
-    plan.kind = emel::model::llama::detail::step_kind::prefill;
+    plan.kind = emel::model::builder::detail::step_kind::prefill;
     plan.expected_outputs = 1;
     io.backend_ctx = &backend;
     io.token_ids = token_ids.data();
@@ -667,8 +761,8 @@ std::vector<float> flash_attention_online_reference(
     const int32_t position,
     const std::span<const float> q_vector) {
   const int32_t head_count = backend.n_head;
-  const int32_t head_dim = backend.head_dim;
-  const int32_t kv_head_dim = backend.head_dim_kv;
+  const auto & block = backend.blocks[static_cast<size_t>(layer_index)];
+  const int32_t head_dim = block.attention_head_dim;
   const uint64_t kv_tokens = static_cast<uint64_t>(position + 1);
   const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
 
@@ -684,7 +778,7 @@ std::vector<float> flash_attention_online_reference(
 
     for (uint64_t token = 0; token < kv_tokens; ++token) {
       const size_t src_offset = emel::generator::detail::flash_layer_cache_head_position_offset(
-          backend, layer_index, kv_head, static_cast<int32_t>(token), kv_head_dim);
+          backend, block, layer_index, kv_head, static_cast<int32_t>(token));
       const size_t dst_offset = static_cast<size_t>(token) * static_cast<size_t>(head_dim);
       for (int32_t dim = 0; dim < head_dim; ++dim) {
         const size_t dim_offset = static_cast<size_t>(dim);
@@ -1639,84 +1733,85 @@ TEST_CASE("generator_detail_request_and_backend_validators_reject_invalid_inputs
 }
 
 TEST_CASE("generator_detail_runtime_wrappers_validate_requests_explicitly") {
-  runtime_request_fixture fixture{};
+  auto fixture = std::make_unique<runtime_request_fixture>();
   int32_t err = -1;
   bool reused = true;
 
-  CHECK(emel::generator::detail::validate(fixture.request, &err));
+  CHECK(emel::generator::detail::validate(fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_ok);
 
-  fixture.request.expected_outputs = 2;
-  CHECK_FALSE(emel::generator::detail::validate(fixture.request, &err));
+  fixture->request.expected_outputs = 2;
+  CHECK_FALSE(emel::generator::detail::validate(fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
-  fixture.request.expected_outputs = fixture.plan.expected_outputs;
+  fixture->request.expected_outputs = fixture->plan.expected_outputs;
 
-  CHECK(emel::generator::detail::validate_preselected_argmax(fixture.request, &err));
+  CHECK(emel::generator::detail::validate_preselected_argmax(fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_ok);
 
-  fixture.io.selected_score_out = nullptr;
-  CHECK_FALSE(emel::generator::detail::validate_preselected_argmax(fixture.request, &err));
+  fixture->io.selected_score_out = nullptr;
+  CHECK_FALSE(emel::generator::detail::validate_preselected_argmax(fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
-  fixture.io.selected_score_out = &fixture.selected_score;
+  fixture->io.selected_score_out = &fixture->selected_score;
 
-  CHECK(emel::generator::detail::prepare_graph(fixture.request, &reused, &err));
+  CHECK(emel::generator::detail::prepare_graph(fixture->request, &reused, &err));
   CHECK_FALSE(reused);
   CHECK(err == emel::generator::detail::k_error_ok);
 
-  CHECK(emel::generator::detail::alloc_graph(fixture.request, &err));
+  CHECK(emel::generator::detail::alloc_graph(fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_ok);
 
-  fixture.request.compute_ctx = nullptr;
-  CHECK_FALSE(emel::generator::detail::bind_inputs(fixture.request, &err));
+  fixture->request.compute_ctx = nullptr;
+  CHECK_FALSE(emel::generator::detail::bind_inputs(fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
 }
 
 TEST_CASE("generator_detail_runtime_wrappers_bind_run_and_extract_explicitly") {
-  runtime_request_fixture fixture{};
+  auto fixture = std::make_unique<runtime_request_fixture>();
   int32_t err = -1;
   int32_t outputs = 0;
 
-  CHECK(emel::generator::detail::bind_inputs(fixture.request, &err));
+  CHECK(emel::generator::detail::bind_inputs(fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_ok);
-  CHECK(fixture.backend.bound_ready);
-  CHECK(fixture.backend.bound_token_count == 1);
-  CHECK(fixture.backend.bound_position_count == 1);
+  CHECK(fixture->backend.bound_ready);
+  CHECK(fixture->backend.bound_token_count == 1);
+  CHECK(fixture->backend.bound_position_count == 1);
 
-  fixture.backend.bound_ready = false;
-  CHECK_FALSE(emel::generator::detail::run_kernel_nonflash(fixture.request, &err));
+  fixture->backend.bound_ready = false;
+  CHECK_FALSE(emel::generator::detail::run_kernel_nonflash(fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
   CHECK_FALSE(emel::generator::detail::run_kernel_nonflash_preselected_argmax(
-      fixture.request, &err));
+      fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
 
-  fixture.backend.bound_ready = true;
-  CHECK_FALSE(emel::generator::detail::run_kernel_nonflash(fixture.request, &err));
+  fixture->backend.bound_ready = true;
+  CHECK_FALSE(emel::generator::detail::run_kernel_nonflash(fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
   CHECK_FALSE(emel::generator::detail::run_kernel_nonflash_preselected_argmax(
-      fixture.request, &err));
+      fixture->request, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
 
-  CHECK(emel::generator::detail::extract_outputs(fixture.request, &outputs, &err));
+  CHECK(emel::generator::detail::extract_outputs(fixture->request, &outputs, &err));
   CHECK(outputs == 1);
   CHECK(err == emel::generator::detail::k_error_ok);
-  CHECK(fixture.logits[0] == doctest::Approx(0.25f));
-  CHECK(fixture.logits[1] == doctest::Approx(0.5f));
-  CHECK(fixture.logits[2] == doctest::Approx(0.75f));
-  CHECK(fixture.logits[3] == doctest::Approx(1.0f));
-  CHECK(fixture.logits[4] == doctest::Approx(-1.0f));
-  CHECK(fixture.logits[5] == doctest::Approx(-1.0f));
+  CHECK(fixture->logits[0] == doctest::Approx(0.25f));
+  CHECK(fixture->logits[1] == doctest::Approx(0.5f));
+  CHECK(fixture->logits[2] == doctest::Approx(0.75f));
+  CHECK(fixture->logits[3] == doctest::Approx(1.0f));
+  CHECK(fixture->logits[4] == doctest::Approx(-1.0f));
+  CHECK(fixture->logits[5] == doctest::Approx(-1.0f));
 
-  fixture.io.logits = nullptr;
-  CHECK_FALSE(emel::generator::detail::extract_outputs(fixture.request, &outputs, &err));
+  fixture->io.logits = nullptr;
+  CHECK_FALSE(emel::generator::detail::extract_outputs(fixture->request, &outputs, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
-  fixture.io.logits = fixture.logits.data();
+  fixture->io.logits = fixture->logits.data();
 
-  CHECK(emel::generator::detail::extract_preselected_argmax(fixture.request, &outputs, &err));
+  CHECK(emel::generator::detail::extract_preselected_argmax(fixture->request, &outputs, &err));
   CHECK(outputs == 1);
   CHECK(err == emel::generator::detail::k_error_ok);
 
-  fixture.io.selected_score_out = nullptr;
-  CHECK_FALSE(emel::generator::detail::extract_preselected_argmax(fixture.request, &outputs, &err));
+  fixture->io.selected_score_out = nullptr;
+  CHECK_FALSE(emel::generator::detail::extract_preselected_argmax(
+      fixture->request, &outputs, &err));
   CHECK(err == emel::generator::detail::k_error_invalid);
 }
 
@@ -1724,9 +1819,17 @@ TEST_CASE("generator_detail_builds_flash_request_over_head_major_kv_cache") {
   emel::generator::detail::native_backend backend{};
   backend.n_head = 2;
   backend.n_head_kv = 2;
+  backend.n_layer = 1;
   backend.head_dim = 2;
   backend.head_dim_kv = 2;
   backend.n_ctx = 2;
+  backend.blocks.resize(1u);
+  backend.blocks.front().attention_q_dim = 4;
+  backend.blocks.front().attention_kv_dim = 4;
+  backend.blocks.front().attention_head_dim = 2;
+  backend.blocks.front().attention_head_dim_kv = 2;
+  backend.layer_cache_offsets = {0u};
+  backend.flash_layer_cache_offsets = {0u};
   backend.q = {1.0f, 0.1f, 0.2f, 1.0f};
   backend.q_attn = {9.0f, 9.0f, 9.0f, 9.0f};
   backend.flash_key_cache = {
@@ -1739,7 +1842,8 @@ TEST_CASE("generator_detail_builds_flash_request_over_head_major_kv_cache") {
   };
   backend.attn_ctx.resize(4);
 
-  const auto request = emel::generator::detail::make_flash_attn_request(backend, 0, 1);
+  const auto request =
+      emel::generator::detail::make_flash_attn_request(backend, backend.blocks.front(), 0, 1);
   float scale = 0.0f;
   uint32_t total_tokens = 0u;
   std::memcpy(&scale, request.op_params.data(), sizeof(scale));
@@ -1767,11 +1871,19 @@ TEST_CASE("generator_detail_flash_dispatch_matches_online_softmax_reference_on_s
   emel::generator::detail::native_backend backend{};
   backend.n_head = 12;
   backend.n_head_kv = 12;
+  backend.n_layer = 1;
   backend.n_rep = 1;
   backend.head_dim = 64;
   backend.head_dim_kv = 64;
   backend.n_ctx = 256;
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+  backend.blocks.resize(1u);
+  backend.blocks.front().attention_q_dim = 768;
+  backend.blocks.front().attention_kv_dim = 768;
+  backend.blocks.front().attention_head_dim = 64;
+  backend.blocks.front().attention_head_dim_kv = 64;
+  backend.layer_cache_offsets = {0u};
+  backend.flash_layer_cache_offsets = {0u};
 
   const size_t n_embd =
       static_cast<size_t>(backend.n_head) * static_cast<size_t>(backend.head_dim);
@@ -1799,7 +1911,7 @@ TEST_CASE("generator_detail_flash_dispatch_matches_online_softmax_reference_on_s
     for (int32_t head = 0; head < backend.n_head_kv; ++head) {
       for (int32_t dim = 0; dim < backend.head_dim_kv; ++dim) {
         const size_t offset = emel::generator::detail::flash_layer_cache_head_position_offset(
-            backend, 0, head, token, backend.head_dim_kv) + static_cast<size_t>(dim);
+            backend, backend.blocks.front(), 0, head, token) + static_cast<size_t>(dim);
         const double base =
             static_cast<double>((token + 1) * (head + 3) * (dim + 5));
         backend.flash_key_cache[offset] = emel::generator::detail::quant::fp32_to_fp16(
@@ -1813,7 +1925,8 @@ TEST_CASE("generator_detail_flash_dispatch_matches_online_softmax_reference_on_s
   std::vector<float> flash_ctx(backend.attn_ctx.size(), 0.0f);
   std::vector<float> expected_ctx(backend.attn_ctx.size(), 0.0f);
   backend.attn_ctx = flash_ctx;
-  REQUIRE(emel::generator::detail::dispatch_flash_attention(backend, 0, position));
+  REQUIRE(emel::generator::detail::dispatch_flash_attention(
+      backend, backend.blocks.front(), 0, position));
   flash_ctx = backend.attn_ctx;
   expected_ctx = flash_attention_online_reference(backend, 0, position, backend.q);
 
@@ -1826,11 +1939,19 @@ TEST_CASE("generator_detail_flash_dispatch_matches_online_softmax_reference_acro
   emel::generator::detail::native_backend backend{};
   backend.n_head = 12;
   backend.n_head_kv = 12;
+  backend.n_layer = 1;
   backend.n_rep = 1;
   backend.head_dim = 64;
   backend.head_dim_kv = 64;
   backend.n_ctx = 1024;
   backend.kernel_kind = emel::kernel::kernel_kind::aarch64;
+  backend.blocks.resize(1u);
+  backend.blocks.front().attention_q_dim = 768;
+  backend.blocks.front().attention_kv_dim = 768;
+  backend.blocks.front().attention_head_dim = 64;
+  backend.blocks.front().attention_head_dim_kv = 64;
+  backend.layer_cache_offsets = {0u};
+  backend.flash_layer_cache_offsets = {0u};
 
   const size_t n_embd =
       static_cast<size_t>(backend.n_head) * static_cast<size_t>(backend.head_dim);
@@ -1863,7 +1984,7 @@ TEST_CASE("generator_detail_flash_dispatch_matches_online_softmax_reference_acro
     for (int32_t head = 0; head < backend.n_head_kv; ++head) {
       for (int32_t dim = 0; dim < backend.head_dim_kv; ++dim) {
         const size_t offset = emel::generator::detail::flash_layer_cache_head_position_offset(
-            backend, 0, head, position, backend.head_dim_kv) + static_cast<size_t>(dim);
+            backend, backend.blocks.front(), 0, head, position) + static_cast<size_t>(dim);
         const double kv_base =
             static_cast<double>((position + 1) * (head + 3) * (dim + 5));
         backend.flash_key_cache[offset] = emel::generator::detail::quant::fp32_to_fp16(
@@ -1876,7 +1997,8 @@ TEST_CASE("generator_detail_flash_dispatch_matches_online_softmax_reference_acro
     std::vector<float> flash_ctx(backend.attn_ctx.size(), 0.0f);
     std::vector<float> expected_ctx(backend.attn_ctx.size(), 0.0f);
     backend.attn_ctx = flash_ctx;
-    REQUIRE(emel::generator::detail::dispatch_flash_attention(backend, 0, position));
+    REQUIRE(emel::generator::detail::dispatch_flash_attention(
+        backend, backend.blocks.front(), 0, position));
     flash_ctx = backend.attn_ctx;
     expected_ctx = flash_attention_online_reference(backend, 0, position, backend.q);
 
@@ -1928,7 +2050,7 @@ TEST_CASE("generator_detail_qwen3_generator_applies_per_head_qk_norm_before_rope
 
   REQUIRE(emel::generator::detail::run_layer_nonflash(*backend, 0, 1));
   const size_t cache_offset = emel::generator::detail::layer_cache_offset(
-      *backend, 0, 1, backend->n_head_kv * backend->head_dim_kv);
+      *backend, backend->blocks[0], 0, 1);
 
   for (size_t idx = 0; idx < expected_q.size(); ++idx) {
     CHECK(backend->q[idx] == doctest::Approx(expected_q[idx]).epsilon(1.0e-5));
@@ -1937,6 +2059,84 @@ TEST_CASE("generator_detail_qwen3_generator_applies_per_head_qk_norm_before_rope
     CHECK(backend->k[idx] == doctest::Approx(expected_k[idx]).epsilon(1.0e-5));
     CHECK(emel::generator::detail::quant::fp16_to_fp32(backend->key_cache[cache_offset + idx]) ==
           doctest::Approx(round_fp16_value(expected_k[idx])).epsilon(1.0e-5));
+  }
+}
+
+TEST_CASE("generator_detail_gemma4_generator_applies_per_head_qk_norm_before_rope") {
+  auto fixture = std::make_unique<gemma4_runtime_fixture>();
+  auto backend = std::make_unique<emel::generator::detail::native_backend>();
+  REQUIRE(emel::generator::detail::prepare(*backend, fixture->model) ==
+          emel::error::cast(emel::model::loader::error::none));
+  REQUIRE(emel::generator::detail::copy_tensor_row(
+      *backend->token_embedding.tensor, 0, backend->hidden));
+
+  std::array<float, 4> hidden_after_input_norm = {};
+  REQUIRE(emel::generator::detail::rms_norm(
+      backend->hidden,
+      backend->blocks[0].attention_norm,
+      backend->rms_epsilon,
+      std::span<float>(hidden_after_input_norm.data(), hidden_after_input_norm.size())));
+
+  std::array<float, 4> expected_q = hidden_after_input_norm;
+  std::array<float, 2> expected_k = {hidden_after_input_norm[0], hidden_after_input_norm[1]};
+  constexpr std::array<float, 2> q_norm = {2.0f, 0.5f};
+  constexpr std::array<float, 2> k_norm = {1.5f, 0.25f};
+  apply_qwen3_headwise_rms_norm(expected_q, q_norm, 2, 2, backend->rms_epsilon);
+  apply_qwen3_headwise_rms_norm(expected_k, k_norm, 1, 2, backend->rms_epsilon);
+  apply_rope_reference(expected_q, 2, 2, 2, 1, backend->rope_freq_base);
+  apply_rope_reference(expected_k, 1, 2, 2, 1, backend->rope_freq_base);
+
+  REQUIRE(emel::generator::detail::run_layer_nonflash(*backend, 0, 1));
+  const size_t cache_offset = emel::generator::detail::layer_cache_offset(
+      *backend, backend->blocks[0], 0, 1);
+
+  for (size_t idx = 0; idx < expected_q.size(); ++idx) {
+    CHECK(backend->q[idx] == doctest::Approx(expected_q[idx]).epsilon(1.0e-5));
+    CHECK(backend->q_attn[idx] ==
+          doctest::Approx(round_fp16_value(expected_q[idx])).epsilon(1.0e-5));
+  }
+  for (size_t idx = 0; idx < expected_k.size(); ++idx) {
+    CHECK(backend->k[idx] == doctest::Approx(expected_k[idx]).epsilon(1.0e-5));
+    CHECK(emel::generator::detail::quant::fp16_to_fp32(backend->key_cache[cache_offset + idx]) ==
+          doctest::Approx(round_fp16_value(expected_k[idx])).epsilon(1.0e-5));
+  }
+}
+
+TEST_CASE("generator_detail_gemma4_shared_kv_layer_rms_norms_value_branch_before_cache") {
+  auto fixture = std::make_unique<gemma4_runtime_fixture>();
+  auto backend = std::make_unique<emel::generator::detail::native_backend>();
+  REQUIRE(emel::generator::detail::prepare(*backend, fixture->model) ==
+          emel::error::cast(emel::model::loader::error::none));
+
+  backend->n_layer = 16;
+  backend->blocks.resize(16u, backend->blocks.front());
+  backend->blocks[15].attention_v = backend->blocks[15].attention_k;
+  backend->layer_cache_offsets.resize(16u, 0u);
+  backend->flash_layer_cache_offsets.resize(16u, 0u);
+
+  REQUIRE(emel::generator::detail::copy_tensor_row(
+      *backend->token_embedding.tensor, 0, backend->hidden));
+
+  std::array<float, 4> hidden_after_input_norm = {};
+  REQUIRE(emel::generator::detail::rms_norm(
+      backend->hidden,
+      backend->blocks[15].attention_norm,
+      backend->rms_epsilon,
+      std::span<float>(hidden_after_input_norm.data(), hidden_after_input_norm.size())));
+
+  std::array<float, 2> expected_v = {hidden_after_input_norm[0], hidden_after_input_norm[1]};
+  const float v_square_sum = expected_v[0] * expected_v[0] + expected_v[1] * expected_v[1];
+  const float v_scale = 1.0f / std::sqrt(v_square_sum / 2.0f + backend->rms_epsilon);
+  expected_v[0] *= v_scale;
+  expected_v[1] *= v_scale;
+
+  REQUIRE(emel::generator::detail::run_layer_nonflash(*backend, 15, 0));
+  const size_t cache_offset = emel::generator::detail::layer_cache_offset(
+      *backend, backend->blocks[15], 15, 0);
+
+  for (size_t idx = 0; idx < expected_v.size(); ++idx) {
+    CHECK(emel::generator::detail::quant::fp16_to_fp32(backend->value_cache[cache_offset + idx]) ==
+          doctest::Approx(round_fp16_value(expected_v[idx])).epsilon(1.0e-5));
   }
 }
 

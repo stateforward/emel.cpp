@@ -16,7 +16,7 @@ struct data {
   static constexpr int32_t k_max_vocab_bytes = 8 * 1024 * 1024;
   static constexpr int32_t k_max_tokenizer_model = 64;
   static constexpr int32_t k_max_tokenizer_pre = 64;
-  static constexpr int32_t k_max_merges = 400000;
+  static constexpr int32_t k_max_merges = 600000;
   static constexpr int32_t k_max_merge_bytes = 8 * 1024 * 1024;
   static constexpr int32_t k_max_precompiled_charsmap_bytes = 1024 * 1024;
   static constexpr int32_t k_max_split_files = 128;
@@ -133,6 +133,7 @@ struct data {
     float expert_group_scale = 0.0f;
     int32_t experts_per_group = 0;
     int32_t moe_every_n_layers = 0;
+    bool tie_word_embeddings = false;
     int32_t nextn_predict_layers = 0;
     int32_t n_deepstack_layers = 0;
     int32_t pooling_type = 0;
@@ -168,6 +169,8 @@ struct data {
     float attention_clamp_kqv = 0.0f;
     int32_t attention_key_length = 0;
     int32_t attention_value_length = 0;
+    int32_t attention_key_length_swa = 0;
+    int32_t attention_value_length_swa = 0;
     float attention_layer_norm_epsilon = 0.0f;
     float attention_layer_norm_rms_epsilon = 0.0f;
     float attention_group_norm_epsilon = 0.0f;
@@ -196,6 +199,7 @@ struct data {
     int32_t attention_shared_kv_layers = 0;
     float rope_freq_base = 0.0f;
     float rope_freq_base_swa = 0.0f;
+    int32_t n_rot_swa = 0;
     float rope_scale_linear = 0.0f;
     int32_t rope_dimension_sections_count = 0;
     std::array<int32_t, k_max_rope_dimension_sections> rope_dimension_sections = {};
@@ -502,6 +506,7 @@ bool try_parse_block_index(std::string_view name, int32_t & block_index_out) noe
 std::string_view architecture_name_view(const data & model_data) noexcept;
 bool is_supported_execution_architecture(std::string_view architecture) noexcept;
 bool is_lfm2_execution_architecture(std::string_view architecture) noexcept;
+bool is_gemma4_execution_architecture(std::string_view architecture) noexcept;
 emel::error::type validate_execution_contract(const data & model_data) noexcept;
 
 }  // namespace emel::model

@@ -6,11 +6,14 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <doctest/doctest.h>
+
+#include "llama.h"
 
 #include "../generation_formatter_contract.hpp"
 #include "../generation_fixture_registry.hpp"
@@ -75,6 +78,28 @@ bool file_exists(const std::filesystem::path & path) {
   return true;
 }
 
+struct llama_backend_guard {
+  llama_backend_guard() {
+    llama_backend_init();
+  }
+
+  ~llama_backend_guard() {
+    llama_backend_free();
+  }
+};
+
+bool reference_tokenizer_lane_supported(const std::filesystem::path & model_path) {
+  llama_backend_guard backend_guard{};
+  llama_model_params model_params = llama_model_default_params();
+  model_params.vocab_only = true;
+  model_params.check_tensors = false;
+
+  std::unique_ptr<llama_model, decltype(&llama_model_free)> model(
+      llama_model_load_from_file(model_path.string().c_str(), model_params),
+      llama_model_free);
+  return model != nullptr && llama_model_get_vocab(model.get()) != nullptr;
+}
+
 std::filesystem::path maintained_generation_fixture_path(
     const emel::tools::generation_fixture_registry::maintained_fixture & fixture) {
 #ifdef PARITYCHECKER_REPO_ROOT
@@ -110,6 +135,9 @@ std::vector<std::string> discover_models() {
     // The canonical Qwen generation fixture is covered by dedicated maintained-generation tests,
     // not the generic tiny-model tokenizer parity sweep.
     if (path.filename() == "Qwen3-0.6B-Q8_0.gguf") {
+      continue;
+    }
+    if (!reference_tokenizer_lane_supported(path)) {
       continue;
     }
     models.push_back(path.string());
@@ -709,6 +737,26 @@ TEST_CASE("generation formatter contract classifier models supported and unsuppo
       supported_qwen, "hello", formatted_qwen_prompt));
   CHECK(formatted_qwen_prompt ==
         "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n");
+
+  std::string supported_gemma4_template = {};
+  for (const std::string_view marker :
+       emel::tools::generation_formatter_contract::k_supported_gemma4_primary_template_markers) {
+    supported_gemma4_template.append(marker);
+    supported_gemma4_template.push_back('\n');
+  }
+
+  const auto supported_gemma4 =
+      emel::tools::generation_formatter_contract::resolve_primary_template_binding(
+          supported_gemma4_template, 0u);
+  CHECK(emel::tools::generation_formatter_contract::binding_supported(supported_gemma4));
+  CHECK(supported_gemma4.contract ==
+        emel::tools::generation_formatter_contract::k_supported_gemma4_contract);
+
+  std::string formatted_gemma4_prompt = {};
+  CHECK(emel::tools::generation_formatter_contract::format_single_user_prompt(
+      supported_gemma4, "hello", formatted_gemma4_prompt));
+  CHECK(formatted_gemma4_prompt ==
+        "<bos><|turn>user\nhello<turn|>\n<|turn>model\n");
 
   const auto unsupported =
       emel::tools::generation_formatter_contract::resolve_primary_template_binding(

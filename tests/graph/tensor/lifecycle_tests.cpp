@@ -3,13 +3,13 @@
 #include <doctest/doctest.h>
 
 #include "emel/emel.h"
-#include "emel/tensor/events.hpp"
-#include "emel/tensor/sm.hpp"
+#include "emel/graph/tensor/events.hpp"
+#include "emel/graph/tensor/sm.hpp"
 
 namespace {
 
-using tensor_sm = emel::tensor::sm;
-using namespace emel::tensor;
+using tensor_sm = emel::graph::tensor::sm;
+using namespace emel::graph::tensor;
 
 void * fake_buffer(const uintptr_t value) {
   return reinterpret_cast<void *>(value);
@@ -17,9 +17,9 @@ void * fake_buffer(const uintptr_t value) {
 
 }  // namespace
 
-TEST_CASE("tensor_lifecycle_compute_publish_release_cycle") {
+TEST_CASE("graph_tensor_lifecycle_compute_publish_release_cycle") {
   tensor_sm machine{};
-  int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::error::none));
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::none));
 
   REQUIRE(machine.process_event(event::reserve_tensor{
     .tensor_id = 7,
@@ -29,7 +29,7 @@ TEST_CASE("tensor_lifecycle_compute_publish_release_cycle") {
     .is_leaf = false,
     .error_out = &err,
   }));
-  REQUIRE(err == static_cast<int32_t>(emel::error::cast(emel::tensor::error::none)));
+  REQUIRE(err == static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::none)));
 
   event::tensor_state state{};
   REQUIRE(machine.process_event(event::capture_tensor_state{
@@ -79,9 +79,9 @@ TEST_CASE("tensor_lifecycle_compute_publish_release_cycle") {
   CHECK(state.live_refs == 0u);
 }
 
-TEST_CASE("tensor_lifecycle_leaf_reset_and_release_are_noops") {
+TEST_CASE("graph_tensor_lifecycle_leaf_reset_and_release_are_noops") {
   tensor_sm machine{};
-  int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::error::none));
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::none));
 
   REQUIRE(machine.process_event(event::reserve_tensor{
     .tensor_id = 3,
@@ -122,7 +122,7 @@ TEST_CASE("tensor_lifecycle_leaf_reset_and_release_are_noops") {
     .tensor_id = 3,
     .error_out = &err,
   }));
-  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::error::internal_error)));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::internal_error)));
   REQUIRE(machine.process_event(event::capture_tensor_state{
     .tensor_id = 3,
     .state_out = &state,
@@ -131,9 +131,9 @@ TEST_CASE("tensor_lifecycle_leaf_reset_and_release_are_noops") {
   CHECK(state.lifecycle_state == event::lifecycle::internal_error);
 }
 
-TEST_CASE("tensor_lifecycle_invalid_request_and_invalid_transition") {
+TEST_CASE("graph_tensor_lifecycle_invalid_request_and_invalid_transition") {
   tensor_sm machine{};
-  int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::error::none));
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::none));
 
   CHECK_FALSE(machine.process_event(event::reserve_tensor{
     .tensor_id = 0,
@@ -142,7 +142,7 @@ TEST_CASE("tensor_lifecycle_invalid_request_and_invalid_transition") {
     .consumer_refs = 1,
     .error_out = &err,
   }));
-  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::error::invalid_request)));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::invalid_request)));
 
   REQUIRE(machine.process_event(event::reserve_tensor{
     .tensor_id = 0,
@@ -156,25 +156,25 @@ TEST_CASE("tensor_lifecycle_invalid_request_and_invalid_transition") {
     .tensor_id = -1,
     .error_out = &err,
   }));
-  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::error::invalid_request)));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::invalid_request)));
 
   CHECK_FALSE(machine.process_event(event::capture_tensor_state{
     .tensor_id = 0,
     .state_out = nullptr,
     .error_out = &err,
   }));
-  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::error::invalid_request)));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::invalid_request)));
 
   CHECK_FALSE(machine.process_event(event::reset_tensor_epoch{
     .tensor_id = 1,
     .error_out = &err,
   }));
-  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::error::internal_error)));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::internal_error)));
 }
 
-TEST_CASE("tensor_lifecycle_reset_epoch_transitions_filled_to_empty") {
+TEST_CASE("graph_tensor_lifecycle_reset_epoch_transitions_filled_to_empty") {
   tensor_sm machine{};
-  int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::error::none));
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::none));
 
   REQUIRE(machine.process_event(event::reserve_tensor{
     .tensor_id = 11,
@@ -204,9 +204,9 @@ TEST_CASE("tensor_lifecycle_reset_epoch_transitions_filled_to_empty") {
   CHECK(state.seed_refs == 1u);
 }
 
-TEST_CASE("tensor_lifecycle_unexpected_event_keeps_machine_dispatchable") {
+TEST_CASE("graph_tensor_lifecycle_unexpected_event_keeps_machine_dispatchable") {
   tensor_sm machine{};
-  int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::error::none));
+  int32_t err = static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::none));
 
   CHECK(machine.process_event(events::publish_filled_tensor_done{}));
 
@@ -217,5 +217,5 @@ TEST_CASE("tensor_lifecycle_unexpected_event_keeps_machine_dispatchable") {
     .consumer_refs = 1,
     .error_out = &err,
   }));
-  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::tensor::error::none)));
+  CHECK(err == static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::none)));
 }

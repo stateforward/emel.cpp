@@ -8,9 +8,9 @@
 #include "emel/graph/processor/detail.hpp"
 #include "emel/graph/processor/errors.hpp"
 #include "emel/graph/processor/events.hpp"
-#include "emel/tensor/errors.hpp"
-#include "emel/tensor/events.hpp"
-#include "emel/tensor/sm.hpp"
+#include "emel/graph/tensor/errors.hpp"
+#include "emel/graph/tensor/events.hpp"
+#include "emel/graph/tensor/sm.hpp"
 
 namespace emel::graph::processor::action {
 

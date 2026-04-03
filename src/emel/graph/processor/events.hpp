@@ -13,9 +13,9 @@
 #include "emel/graph/processor/validate_step/events.hpp"
 #include "emel/memory/view.hpp"
 
-namespace emel::tensor {
+namespace emel::graph::tensor {
 struct sm;
-}  // namespace emel::tensor
+}  // namespace emel::graph::tensor
 
 namespace emel::graph::processor::events {
 
@@ -70,7 +70,7 @@ struct execute {
   const void * step_plan = nullptr;
   execution_output * output_out = nullptr;
   const lifecycle_manifest * lifecycle = nullptr;
-  emel::tensor::sm * tensor_machine = nullptr;
+  emel::graph::tensor::sm * tensor_machine = nullptr;
   int32_t step_index = 0;
   int32_t step_size = 0;
   int32_t kv_tokens = 0;

@@ -17,10 +17,11 @@
 #include "emel/graph/events.hpp"
 #include "emel/graph/guards.hpp"
 #include "emel/graph/sm.hpp"
-#include "emel/model/llama/detail.hpp"
+#include "emel/model/builder/detail.hpp"
+#include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
-#include "emel/tensor/errors.hpp"
-#include "emel/tensor/events.hpp"
+#include "emel/graph/tensor/errors.hpp"
+#include "emel/graph/tensor/events.hpp"
 
 void * operator new(const std::size_t size) {
   if (emel::test::allocation::g_track_allocations.load(std::memory_order_relaxed)) {
@@ -326,12 +327,12 @@ TEST_CASE("graph_machine_reserve_then_compute_success_path") {
   REQUIRE_FALSE(reserve_cb.error_called);
   CHECK(reserve_output.lifecycle == &lifecycle.reserve);
 
-  emel::tensor::event::tensor_state tensor_state{};
-  emel::error::type tensor_err = emel::error::cast(emel::tensor::error::none);
+  emel::graph::tensor::event::tensor_state tensor_state{};
+  emel::error::type tensor_err = emel::error::cast(emel::graph::tensor::error::none);
   REQUIRE(machine.try_capture_tensor(0, tensor_state, tensor_err));
-  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::leaf_filled);
+  CHECK(tensor_state.lifecycle_state == emel::graph::tensor::event::lifecycle::leaf_filled);
   REQUIRE(machine.try_capture_tensor(1, tensor_state, tensor_err));
-  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::empty);
+  CHECK(tensor_state.lifecycle_state == emel::graph::tensor::event::lifecycle::empty);
 
   emel::graph::event::compute_output compute_output{};
   compute_callbacks compute_cb{};
@@ -370,7 +371,7 @@ TEST_CASE("graph_machine_reserve_then_compute_success_path") {
   CHECK(compute_output.graph_reused == 1u);
   CHECK(compute_output.lifecycle == &lifecycle.compute);
   REQUIRE(machine.try_capture_tensor(1, tensor_state, tensor_err));
-  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::empty);
+  CHECK(tensor_state.lifecycle_state == emel::graph::tensor::event::lifecycle::empty);
 }
 
 TEST_CASE("graph_machine_blocks_kernel_until_required_tensors_are_filled") {
@@ -465,10 +466,10 @@ TEST_CASE("graph_machine_blocks_reuse_until_release_is_recorded") {
   REQUIRE(first_cb.done_called);
   CHECK(g_kernel_calls == 1);
 
-  emel::tensor::event::tensor_state tensor_state{};
-  emel::error::type tensor_err = emel::error::cast(emel::tensor::error::none);
+  emel::graph::tensor::event::tensor_state tensor_state{};
+  emel::error::type tensor_err = emel::error::cast(emel::graph::tensor::error::none);
   REQUIRE(machine.try_capture_tensor(1, tensor_state, tensor_err));
-  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::filled);
+  CHECK(tensor_state.lifecycle_state == emel::graph::tensor::event::lifecycle::filled);
 
   emel::graph::event::compute_output second_output{};
   compute_callbacks second_cb{};
@@ -702,15 +703,15 @@ TEST_CASE("graph_machine_accepts_canonical_descriptor_handles") {
   build_canonical_model(*model, 2);
   lifecycle_fixture lifecycle{};
 
-  emel::model::llama::detail::execution_view execution = {};
-  REQUIRE(emel::model::llama::detail::build_execution_view(*model, execution) ==
+  emel::model::builder::detail::execution_view execution = {};
+  REQUIRE(emel::model::builder::detail::build_execution_view(*model, execution) ==
           emel::error::cast(emel::model::loader::error::none));
-  emel::model::llama::detail::topology topology = {};
-  REQUIRE(emel::model::llama::detail::build_topology(execution, topology) ==
+  emel::model::builder::detail::topology topology = {};
+  REQUIRE(emel::model::builder::detail::build_topology(execution, topology) ==
           emel::error::cast(emel::model::loader::error::none));
-  emel::model::llama::detail::step_plan prefill = {};
-  emel::model::llama::detail::step_plan decode = {};
-  REQUIRE(emel::model::llama::detail::build_step_plans(topology, prefill, decode) ==
+  emel::model::builder::detail::step_plan prefill = {};
+  emel::model::builder::detail::step_plan decode = {};
+  REQUIRE(emel::model::builder::detail::build_step_plans(topology, prefill, decode) ==
           emel::error::cast(emel::model::loader::error::none));
 
   emel::graph::sm machine{};

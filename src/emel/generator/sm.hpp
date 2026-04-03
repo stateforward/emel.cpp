@@ -11,7 +11,7 @@
 #include "emel/generator/prefill/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/sm.hpp"
-#include "emel/tensor/events.hpp"
+#include "emel/graph/tensor/events.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
 
@@ -963,26 +963,26 @@ struct sm : public emel::sm<model, action::context> {
   uint32_t generation_native_quantized_stage_count() const noexcept {
     return detail::quantized_contract_stage_count(
         this->context_.compute.backend,
-        emel::model::llama::detail::quantized_contract_kind::native_quantized);
+        emel::model::builder::detail::quantized_contract_kind::native_quantized);
   }
 
   uint32_t generation_approved_dense_f32_stage_count() const noexcept {
     return detail::quantized_contract_stage_count(
         this->context_.compute.backend,
-        emel::model::llama::detail::quantized_contract_kind::
+        emel::model::builder::detail::quantized_contract_kind::
             approved_dense_f32_by_contract);
   }
 
   uint32_t generation_disallowed_fallback_stage_count() const noexcept {
     return detail::quantized_contract_stage_count(
         this->context_.compute.backend,
-        emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
+        emel::model::builder::detail::quantized_contract_kind::disallowed_fallback);
   }
 
   uint32_t generation_explicit_no_claim_stage_count() const noexcept {
     return detail::quantized_contract_stage_count(
         this->context_.compute.backend,
-        emel::model::llama::detail::quantized_contract_kind::explicit_no_claim);
+        emel::model::builder::detail::quantized_contract_kind::explicit_no_claim);
   }
 
   const emel::graph::event::reserve_output & graph_reservation() const noexcept {
@@ -990,7 +990,7 @@ struct sm : public emel::sm<model, action::context> {
   }
 
   bool try_capture_graph_tensor(const int32_t tensor_id,
-                                emel::tensor::event::tensor_state & state_out,
+                                emel::graph::tensor::event::tensor_state & state_out,
                                 emel::error::type & err_out) noexcept {
     return this->context_.graph.try_capture_tensor(tensor_id, state_out, err_out);
   }

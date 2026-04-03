@@ -1,6 +1,5 @@
 #pragma once
 
-#include "emel/tensor/detail.hpp"
 #include "emel/tensor/view/context.hpp"
 #include "emel/tensor/view/detail.hpp"
 #include "emel/tensor/view/errors.hpp"
@@ -8,17 +7,20 @@
 namespace emel::tensor::view::guard {
 
 struct capture_tensor_view_request_valid {
-  bool operator()(const detail::capture_tensor_view_runtime & ev, const action::context &) const noexcept {
-    return ev.request.tensor_machine != nullptr &&
-           ev.request.state_out != nullptr &&
-           ev.request.tensor_id >= 0 &&
-           ev.request.tensor_id < tensor::detail::max_tensors;
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type & ev, const action::context &) const noexcept {
+    const auto & runtime_ev = detail::unwrap_runtime_event(ev);
+    using policy = typename std::remove_cvref_t<decltype(runtime_ev)>::policy_type;
+    return runtime_ev.request.tensor_machine != nullptr &&
+           runtime_ev.request.state_out != nullptr &&
+           runtime_ev.request.tensor_id >= 0 &&
+           runtime_ev.request.tensor_id < policy::max_tensors;
   }
 };
 
 struct capture_tensor_view_request_invalid {
-  bool operator()(const detail::capture_tensor_view_runtime & ev,
-                  const action::context & ctx) const noexcept {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type & ev, const action::context & ctx) const noexcept {
     return !capture_tensor_view_request_valid{}(ev, ctx);
   }
 };
