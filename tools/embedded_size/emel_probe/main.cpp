@@ -1243,7 +1243,8 @@ bool run_emel_generate(emel_session & session, generation_result & result_out) {
 
 int main(int argc, char ** argv) {
   if (argc != 2) {
-    return 0;
+    std::fprintf(stderr, "Usage: %s <model_path>\n", argc > 0 ? argv[0] : "emel_probe");
+    return 1;
   }
 
 #ifndef NDEBUG

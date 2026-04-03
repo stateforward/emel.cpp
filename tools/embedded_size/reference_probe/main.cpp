@@ -253,7 +253,8 @@ bool run_reference_generate(llama_model * model,
 
 int main(int argc, char ** argv) {
   if (argc != 2) {
-    return 0;
+    std::fprintf(stderr, "Usage: %s <model_path>\n", argc > 0 ? argv[0] : "reference_probe");
+    return 1;
   }
 
   llama_backend_init();
