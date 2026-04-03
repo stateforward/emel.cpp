@@ -1,171 +1,20 @@
-# Roadmap: EMEL
+# Roadmap
 
-## Overview
+## Archived Milestones
 
-v1.9 delivers one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` ARM slice
-through the existing generator, paritychecker, and benchmark workflow. The milestone stays narrow:
-one official fixture, one explicit Liquid conditioning contract, one explicit `lfm2` runtime
-path, then maintained parity and benchmark publication for that exact slice.
+- [x] [v1.0: EMEL Llama-68M Generation Slice](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.0-ROADMAP.md) - shipped 2026-03-08 with 7 phases and 15 plans; proved one canonical Llama-68M generation parity slice in `tools/paritychecker/`.
+- [x] [v1.1: EMEL Llama-68M Generation Benchmark](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.1-ROADMAP.md) - shipped 2026-03-11 with 4 phases and 10 plans; added one truthful canonical Llama-68M generation benchmark in `tools/bench`, native EMEL decode benchmarking, compare output, and snapshot/docs integration.
+- [x] [v1.2: Flash Attention](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.2-ROADMAP.md) - shipped 2026-03-22 with 5 phases and 13 plans; added an EMEL-owned flash-attention path to the canonical Llama-68M slice, hard-cut runtime tensor lifecycle through `emel::tensor::sm`, and published maintained benchmark evidence over a preserved pre-flash baseline.
+- [x] [v1.3: ARM Flash Optimizations](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.3-ROADMAP.md) - shipped 2026-03-22 with 3 phases and 7 plans; delivered optimized AArch64 flash execution, maintained runtime/parity attribution, and preserved-baseline benchmark publication for the canonical ARM Llama-68M slice.
+- [x] [v1.4: Full Vectorized Quantized Kernels](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.4-ROADMAP.md) - shipped 2026-03-25 with 5 phases and 11 plans; delivered EMEL-owned vectorized q2/q3/q6 kernels, full maintained `1/10/100/1000` parity proof, and quantized benchmark attribution on the canonical ARM slice.
+- [x] [v1.5: Full ARM Quantized Path](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.5-ROADMAP.md) - shipped 2026-03-27 with 5 phases and 10 plans; closed the maintained ARM quantized-path contract and restored canonical flash publication.
+- [x] [v1.6: Qwen3-0.6B Parity And Benchmark](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.6-ROADMAP.md) - shipped 2026-03-30 with 5 phases and 12 plans; brought one canonical Qwen3 slice up through the maintained generator, parity, and benchmark surfaces.
+- [x] [v1.7: Generator Prefill Submachine Decomposition](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.7-ROADMAP.md) - shipped 2026-03-30 with 3 phases and 6 plans; extracted generator-owned prefill orchestration while preserving maintained proof.
+- [x] [v1.8: Truthful Qwen3 E2E Embedded Size](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.8-ROADMAP.md) - shipped 2026-04-02 with 6 phases and 8 plans; published one truthful maintained Qwen3 executable-size comparison with smoke proof and generated README evidence.
+- [x] [v1.9: Liquid LFM2.5-1.2B Thinking ARM Slice](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.9-ROADMAP.md) - shipped 2026-04-02 with 8 phases and 9 plans; delivered one maintained Liquid `lfm2` ARM slice with explicit runtime support, additive parity coverage, benchmark publication, and audit-backed archive proof.
 
-## Phases
+## Current Milestone
 
-**Phase Numbering:**
-- Integer phases continue across milestones.
-- v1.9 starts at Phase 33 because v1.7 ended at Phase 32.
+No active milestone.
 
-- [x] **Phase 33: Fixture, Metadata, And Contract Lock** - Lock the exact Liquid fixture,
-      executable metadata truth, and maintained conditioning contract.
-- [x] **Phase 34: `lfm2` Model Contract Bring-Up** - Make EMEL truthfully recognize the canonical
-      Liquid slice as `lfm2` with an explicit maintained model contract.
-- [x] **Phase 35: Maintained Runtime Execution On ARM** - Bring the shipped generator path up on
-      the canonical Liquid slice with a truthful `Q4_K_M` runtime contract.
-- [x] **Phase 36: Parity And Regression Proof** - Prove the maintained Liquid slice against
-      `llama.cpp` and protect the prior maintained anchors.
-- [x] **Phase 37: Benchmark And Docs Publication** - Publish one parity-backed Liquid benchmark
-      path and maintained docs for the same slice.
-- [x] **Phase 38: Reconstruct Fixture, Contract, And Runtime Closeout** - Rebuild the missing
-      summary/verification trail for original phases 33-35 and bind the delivered Liquid fixture,
-      contract, and runtime evidence back into formal milestone proof.
-- [x] **Phase 39: Reconstruct Parity, Regression, And Benchmark Closeout** - Rebuild the missing
-      summary/verification trail for original phases 36-37 and formally close the maintained
-      Liquid parity, regression, and benchmark publication surfaces.
-- [x] **Phase 40: Validate v1.9 And Repair Milestone Bookkeeping** - Add missing validation and
-      planning-state closeout so the milestone can pass audit and archive cleanly.
-
-## Phase Details
-
-### Phase 33: Fixture, Metadata, And Contract Lock
-**Goal**: The repo names one exact maintained Liquid fixture and one exact maintained request
-contract before runtime work starts.
-**Depends on**: Shipped Phase 32
-**Requirements**: FIX-02, META-01, COND-03
-**Success Criteria** (what must be TRUE):
-  1. The repo documents exactly one official maintained fixture at
-     `tests/models/LFM2.5-1.2B-Thinking-Q4_K_M.gguf` with checksum, source, stable path, and
-     download URL.
-  2. Maintained repo evidence records executable model truth for the slice from official
-     GGUF/config metadata, including `architecture=lfm2`, instead of stale prose-only metadata.
-  3. The maintained Liquid request path exposes one explicit structured chat-message contract with
-     `tools=none`, `add_generation_prompt=true`, and no implicit raw fallback.
-**Plans**: TBD
-
-### Phase 34: `lfm2` Model Contract Bring-Up
-**Goal**: EMEL-owned model-loading surfaces truthfully accept the canonical Liquid fixture as
-`lfm2` and expose its maintained topology contract.
-**Depends on**: Phase 33
-**Requirements**: RUN-03, RUN-05
-**Success Criteria** (what must be TRUE):
-  1. EMEL-owned model metadata/loading surfaces identify the maintained fixture as `lfm2` instead
-     of rejecting it or aliasing it to `llama` or `qwen3`.
-  2. The canonical Liquid slice's required metadata, tensor naming, and hybrid block contract are
-     represented explicitly in `src/emel` for the maintained fixture.
-  3. Repo-visible model contract evidence makes the maintained Liquid path auditable as a
-     dedicated `lfm2` architecture slice rather than a generic Llama-family claim.
-**Plans**: TBD
-
-### Phase 35: Maintained Runtime Execution On ARM
-**Goal**: The shipped generator path can initialize and generate on the canonical Liquid slice on
-ARM without widening beyond the maintained `Q4_K_M` truth anchor.
-**Depends on**: Phase 34
-**Requirements**: RUN-04, RUN-06
-**Success Criteria** (what must be TRUE):
-  1. The maintained generator path initializes the official
-     `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture and produces bounded generation on ARM.
-  2. Runtime execution for the maintained Liquid slice uses the explicit `lfm2` path and the
-     maintained `Q4_K_M` surface rather than broad sibling-quant or generic Liquid claims.
-  3. Maintained runtime evidence publishes a truthful quantized-path contract for the official
-     `Q4_K_M` fixture only.
-**Plans**: TBD
-
-### Phase 36: Parity And Regression Proof
-**Goal**: The exact maintained Liquid slice is proven correct against the reference and does not
-break the existing maintained anchors.
-**Depends on**: Phase 35
-**Requirements**: PAR-02, VER-02
-**Success Criteria** (what must be TRUE):
-  1. `tools/paritychecker --generation` proves EMEL against `llama.cpp` on the canonical Liquid
-     fixture using the same maintained conditioning contract from Phase 33.
-  2. Stored regression evidence covers the Liquid slice and the prior maintained Llama and Qwen
-     anchors.
-  3. Maintained parity evidence makes the exact fixture and contract auditable for reviewers.
-**Plans**: TBD
-
-### Phase 37: Benchmark And Docs Publication
-**Goal**: The repo publishes one benchmark/docs path for the same parity-backed maintained Liquid
-slice and nothing broader.
-**Depends on**: Phase 36
-**Requirements**: BENCH-08
-**Success Criteria** (what must be TRUE):
-  1. `tools/bench` compare output includes one maintained Liquid benchmark case for the official
-     `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` slice.
-  2. Stored benchmark evidence and generated docs identify the exact fixture and maintained
-     conditioning contract used for the Liquid slice.
-  3. Published Liquid benchmark evidence stays aligned with the parity-backed maintained slice and
-     does not broaden into generic Liquid or sibling-quant claims.
-**Plans**: TBD
-
-### Phase 38: Reconstruct Fixture, Contract, And Runtime Closeout
-**Goal**: Reconstruct the formal closeout artifacts for original phases 33-35 so the delivered
-Liquid fixture, conditioning contract, `lfm2` model contract, and maintained runtime proof become
-auditable milestone evidence.
-**Depends on**: Phase 37
-**Requirements**: FIX-02, META-01, COND-03, RUN-03, RUN-04, RUN-05, RUN-06
-**Gap Closure**: Closes orphaned requirements and missing cross-phase handoff artifacts from the
-milestone audit for original phases 33-35.
-**Success Criteria** (what must be TRUE):
-  1. Original phase directories 33-35 contain reconstructed `SUMMARY.md` and `VERIFICATION.md`
-     artifacts that point at the delivered repo evidence instead of leaving the milestone
-     unverified.
-  2. Traceability for fixture provenance, metadata truth, conditioning contract, `lfm2` model
-     contract, and maintained runtime evidence is updated so the audit no longer classifies those
-     requirements as orphaned.
-  3. Phase-resolution ambiguity around the current v1.9 phase lineage is documented and handled
-     well enough for follow-on workflow steps to target the intended Liquid phase set.
-**Plans**: TBD
-
-### Phase 39: Reconstruct Parity, Regression, And Benchmark Closeout
-**Goal**: Reconstruct the formal closeout artifacts for original phases 36-37 so maintained
-Liquid parity, preserved maintained anchors, and published benchmark/docs evidence are formally
-verified.
-**Depends on**: Phase 38
-**Requirements**: PAR-02, VER-02, BENCH-08
-**Gap Closure**: Closes orphaned requirements and missing end-to-end proof artifacts from the
-milestone audit for original phases 36-37.
-**Success Criteria** (what must be TRUE):
-  1. Original phase directories 36-37 contain reconstructed `SUMMARY.md` and `VERIFICATION.md`
-     artifacts that tie parity, regression protection, and benchmark publication to the delivered
-     repo evidence.
-  2. Maintained Liquid parity baselines, additive maintained Qwen/Llama protection, and published
-     Liquid benchmark/docs evidence are all referenced by formal milestone closeout artifacts.
-  3. The milestone audit can trace parity-backed publication from original phases 33-37 without
-     treating the maintained Liquid flow as unverified.
-**Plans**: TBD
-
-### Phase 40: Validate v1.9 And Repair Milestone Bookkeeping
-**Goal**: Add missing Nyquist validation and planning-state updates so v1.9 can pass audit and be
-completed without stale milestone metadata.
-**Depends on**: Phase 39
-**Requirements**: None (gap-closure phase)
-**Gap Closure**: Closes missing VALIDATION coverage and blocked milestone-closeout flow from the
-audit.
-**Success Criteria** (what must be TRUE):
-  1. The reconstructed v1.9 phase set has the validation coverage required for the milestone audit
-     to stop reporting missing Nyquist artifacts.
-  2. `.planning/STATE.md`, `.planning/ROADMAP.md`, and `.planning/REQUIREMENTS.md` reflect the
-     real milestone status instead of the stale pre-planning state.
-  3. `$gsd-audit-milestone` passes or narrows to non-blocking tech debt, enabling clean milestone
-     completion.
-**Plans**: TBD
-
-## Progress
-
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 33. Fixture, Metadata, And Contract Lock | 1/1 | Complete | 2026-04-02 |
-| 34. `lfm2` Model Contract Bring-Up | 1/1 | Complete | 2026-04-02 |
-| 35. Maintained Runtime Execution On ARM | 1/1 | Complete | 2026-04-02 |
-| 36. Parity And Regression Proof | 1/1 | Complete | 2026-04-02 |
-| 37. Benchmark And Docs Publication | 1/1 | Complete | 2026-04-02 |
-| 38. Reconstruct Fixture, Contract, And Runtime Closeout | 1/1 | Complete | 2026-04-02 |
-| 39. Reconstruct Parity, Regression, And Benchmark Closeout | 1/1 | Complete | 2026-04-02 |
-| 40. Validate v1.9 And Repair Milestone Bookkeeping | 1/1 | Complete | 2026-04-02 |
+Start the next milestone with `$gsd-new-milestone`.

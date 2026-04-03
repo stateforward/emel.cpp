@@ -17,6 +17,32 @@
 - Reconstructed missing closeout artifacts and validation coverage so the milestone could pass
   audit and archive cleanly.
 
+**What's next:** Start the next milestone. The likely follow-on work is broader Liquid coverage,
+richer Liquid request support, or Liquid performance work on top of the shipped maintained slice.
+
+---
+
+## v1.8 Truthful Qwen3 E2E Embedded Size (Shipped: 2026-04-02)
+
+**Delivered:** EMEL now publishes one truthful maintained Qwen3-0.6B end-to-end executable-size
+comparison between an EMEL-owned runner and a matched `llama.cpp` reference executable, backed by
+runtime smoke proof and generated README evidence.
+
+**Phases completed:** 6 phases, 8 plans, 0 tasks
+
+**Key accomplishments:**
+
+- Locked one exact maintained workload boundary on `tests/models/Qwen3-0.6B-Q8_0.gguf`,
+  structured `hello`, and first-token generation.
+- Corrected the EMEL probe into a truthful final executable measurement and removed redundant
+  fallback-vocab bloat that had inflated the binary to 56 MB.
+- Kept the published comparator set narrow to EMEL and one matched `llama.cpp` reference
+  executable with shared smoke proof.
+- Refreshed the stored snapshot and generated README to publish the corrected executable-size
+  values: `4,073,016` raw bytes for EMEL versus `3,334,264` for the reference row.
+- Backfilled the missing v1.8 proof chain and closed the milestone with a passing `8/8`
+  requirement audit.
+
 ---
 
 ## v1.7 Generator Prefill Submachine Decomposition (Shipped: 2026-03-30)

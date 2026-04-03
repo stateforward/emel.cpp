@@ -3,10 +3,9 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. The active planning scope is v1.9,
-which adds one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-GGUF` ARM slice on top of the
-repo's existing maintained Llama ARM and canonical Qwen anchors, all aligned with
-`docs/rules/sml.rules.md`.
+modeled as explicit actors instead of ad hoc control flow. The latest shipped surfaces now include
+the truthful maintained Qwen3 executable-size publication from v1.8 and the maintained Liquid
+LFM2 ARM slice from v1.9, all aligned with `docs/rules/sml.rules.md`.
 
 ## Core Value
 
@@ -15,15 +14,15 @@ before widening API surface or model scope.
 
 ## Current State
 
-Shipped version: `v1.7`
+Shipped version: `v1.9`
 
-Status: Milestone v1.9 is complete on this branch. The shipped repo now includes one maintained
-Liquid `lfm2` ARM slice alongside the existing maintained Llama ARM and canonical Qwen surfaces.
+Status: Milestones `v1.8` and `v1.9` are both shipped and archived on this branch. There is no
+active milestone yet.
 
 Release summary: `v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice` shipped on `2026-04-02` with `8`
-phases after gap-closure reconstruction. Remaining open debt is broader Liquid coverage, richer
-Liquid prompting, further Liquid prefill optimization, and the existing warning-only benchmark
-drift outside the maintained Liquid slice.
+phases after gap-closure reconstruction. The immediately previous `v1.8 Truthful Qwen3 E2E
+Embedded Size` milestone also shipped on `2026-04-02` and its artifacts are now merged into this
+branch’s planning history.
 
 ## Latest Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
 
@@ -38,26 +37,26 @@ truth anchor and without broadening into generic Liquid-family support.
 - Explicit `lfm2` runtime bring-up on the maintained generator path
 - Maintained parity, regression protection, and benchmark publication for the same slice
 
-## Latest Milestone: v1.7 Generator Prefill Submachine Decomposition
+## Previous Milestone: v1.8 Truthful Qwen3 E2E Embedded Size
 
 <details>
-<summary>Shipped on 2026-03-30</summary>
+<summary>Shipped on 2026-04-02</summary>
 
-**Goal:** Decompose the generator’s prefill orchestration into a smaller explicit machine inside
-the `generator` domain while keeping request-scoped behavior modeled via typed events, guards, and
-transitions instead of hidden action/detail control flow.
+**Goal:** Publish one truthful maintained executable-size comparison for the canonical
+`Qwen3-0.6B-Q8_0.gguf` slice using final end-to-end runner executables, explicit smoke proof, and
+generated README docs without weakening the workload boundary or claiming whole-product parity.
 
 **Delivered:**
-- Collapsed the repeated top-level prefill routing matrix into explicit request-scoped prefill
-  compute contracts.
-- Extracted `src/emel/generator/prefill` as the first generator-owned orchestration submachine for
-  prefill slots, snapshot, compute dispatch, and handoff.
-- Kept prefill request-scoped orchestration data on typed runtime/internal events instead of
-  generator context flags or phase fields.
-- Materially shrank the top-level generator surface and published split `generator_prefill`
-  architecture docs.
-- Re-proved maintained generator, paritychecker, and compare behavior on the extracted prefill
-  boundary while carrying forward the existing warning-only benchmark policy.
+- Locked one maintained workload boundary on `tests/models/Qwen3-0.6B-Q8_0.gguf`,
+  structured `hello`, and `max_tokens=1`.
+- Corrected the EMEL probe into a truthful final-executable measurement and removed redundant
+  fallback-vocab bloat that had inflated the binary into the 56 MB range.
+- Kept the published comparator set narrow to EMEL and one matched `llama.cpp` reference
+  executable with shared `runtime_smoke=passed` proof.
+- Refreshed `snapshots/embedded_size/summary.txt` and the generated `README.md` so the published
+  result reports `4,073,016` raw bytes for EMEL versus `3,334,264` for the reference row.
+- Backfilled the missing proof chain and closed the milestone with a passing `8/8` requirements
+  audit.
 
 </details>
 
@@ -100,6 +99,12 @@ transitions instead of hidden action/detail control flow.
   `generator_prefill` architecture.
 - ✓ v1.7 preserved maintained generator, paritychecker, and compare proof; unrelated broad
   benchmark snapshot regressions outside `generator/prefill` were explicitly waived for closeout.
+- ✓ v1.8 published one truthful maintained Qwen3 executable-size comparison on final linked
+  executables for the canonical `hello` -> first-token path.
+- ✓ v1.8 kept the published EMEL row EMEL-owned end to end, with no `llama.cpp` bootstrap for the
+  maintained probe path.
+- ✓ v1.8 refreshed the stored embedded-size snapshot and generated README evidence to the corrected
+  EMEL/reference executable numbers and closed with a passing `8/8` milestone audit.
 - ✓ v1.9 documented one official maintained `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture and bound
   the maintained Liquid path to explicit executable metadata truth plus one explicit structured
   chat contract.
@@ -121,6 +126,8 @@ transitions instead of hidden action/detail control flow.
   parity-backed, and benchmarked.
 - [ ] `BENCH-07`: Revisit whether noisy benchmark drift should remain warning-only once the
   maintained compare surfaces are stable enough to justify a harder gate.
+- [ ] Decide later whether executable-size evidence should stay publication-only or grow into a
+  broader measurement harness that also covers bundle size or gate policy.
 
 ### Out of Scope
 

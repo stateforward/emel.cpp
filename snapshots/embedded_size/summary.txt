@@ -1,0 +1,5 @@
+# embedded_size_config: reference_ref=8710e5f9b9bd7246608808ccd3626bde8abf6ff9 toolchain=/opt/homebrew/bin/zig build_type=MinSizeRel compile_flags=-ffunction-sections,-fdata-sections
+# embedded_size_measurement: mode=linked_executable scope=e2e_inference workload=qwen3_0_6b_prompt_hello_max_tokens_1 backend=aarch64 link_flags=-Wl,-dead_strip model_fixture=tests/models/Qwen3-0.6B-Q8_0.gguf prompt=hello max_tokens=1 runtime_smoke=passed
+# embedded_size_emel: raw_bytes=4073016 stripped_bytes=4073016 section_bytes=1323877 binary=build/embedded_size/emel_probe_build/emel_qwen3_e2e_probe
+# embedded_size_reference: raw_bytes=3334264 stripped_bytes=2795112 section_bytes=3094255 binary=build/embedded_size/reference_probe_build/reference_qwen3_e2e_probe
+# embedded_size_ratio: raw=1.222 stripped=1.457 section=0.428

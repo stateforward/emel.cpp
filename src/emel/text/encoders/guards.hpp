@@ -8,9 +8,6 @@ namespace emel::text::encoders::guard {
 struct valid_encode {
   bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
     (void)ctx;
-    if (&ev.request.vocab == &event::default_encode_vocab()) {
-      return false;
-    }
     if (ev.request.token_ids.empty()) {
       return false;
     }

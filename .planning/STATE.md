@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Liquid LFM2.5-1.2B Thinking ARM Slice
-status: completed
-stopped_at: v1.9 milestone completed and archived
-last_updated: "2026-04-02T17:46:31.483Z"
+status: ready_for_new_milestone
+stopped_at: "v1.9 archived after merging the shipped v1.8 milestone artifacts; ready for $gsd-new-milestone"
+last_updated: "2026-04-02T23:45:00Z"
 last_activity: 2026-04-02
 progress:
   total_phases: 8
@@ -22,28 +22,21 @@ See: .planning/PROJECT.md (updated 2026-04-02)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Await next milestone definition after v1.9 archive.
+**Current focus:** Await next milestone definition after v1.8/v1.9 archive.
 
 ## Current Position
 
 Phase: —
 Plan: —
-Status: Milestone archived
-Last activity: 2026-04-02 — Completed and archived v1.9 after reconstructing missing closeout
-artifacts, adding validation coverage, rerunning the full repo gate, and passing milestone audit
+Status: Milestones archived
+Last activity: 2026-04-02 — Merged the shipped v1.8 milestone artifacts from main into the branch
+planning history after archiving v1.9
 
 Progress: [##########] 100%
 
 ## Performance Metrics
 
-**Current active milestone:**
-
-- Milestone: None
-- Phases complete: 0/0
-- Plans complete: 0/0
-- Audit status: n/a
-
-**Last shipped milestone:**
+**Latest shipped milestone:**
 
 - Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
 - Phases complete: 8/8
@@ -64,7 +57,8 @@ Recent decisions affecting current work:
 - v1.9 is fixed to one official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` maintained fixture.
 - The maintained Liquid slice will derive truth from GGUF/config metadata (`lfm2`, `128000`
   context) rather than stale prose on the model card.
-
+- The just-merged v1.8 milestone fixed the maintained executable-size claim to final linked
+  executables on the canonical Qwen3 slice.
 - The maintained Liquid request surface is one structured chat-message contract with `tools=none`
   and no thinking-history replay.
 
@@ -82,6 +76,8 @@ Recent decisions affecting current work:
 - 2026-04-02 — Reuse q8 RHS across LFM2.5 prefill matmuls
 - 2026-04-02 — Optimize LFM2.5 q4 prefill kernel
 - 2026-04-02 — Optimize LFM2.5 q6 prefill kernel
+- Decide whether the next milestone prioritizes broader Liquid work or a broader executable-size
+  publication surface.
 
 ### Blockers/Concerns
 
@@ -102,5 +98,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-04-02T17:46:31Z
-Stopped at: v1.9 milestone completed and archived
+Stopped at: v1.9 archived; v1.8 archive merged from main; ready for `$gsd-new-milestone`
 Resume file: None

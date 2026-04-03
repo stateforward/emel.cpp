@@ -40,6 +40,7 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = "\xEF\xBB\xBF" "a",
     .token_ids = std::span<int32_t>(out_tokens.data(), static_cast<size_t>(static_cast<int32_t>(out_tokens.size()))),
     .token_count_out = &token_count,
@@ -77,4 +78,3 @@ TEST_CASE("encoder_detail_plamo2_bom_and_missing_bytes") {
                                                    *incomplete_builder.vocab);
   CHECK(invalid.error == emel::text::encoders::error::to_emel(emel::text::encoders::error::code::model_invalid));
 }
-
