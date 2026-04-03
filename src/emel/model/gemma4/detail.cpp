@@ -197,8 +197,25 @@ emel::error::type validate_builder_contract(const emel::model::data & model_data
   return validate_contract(model_data, false);
 }
 
+emel::error::type validate_data(const emel::model::data & model_data) noexcept {
+  return validate_builder_contract(model_data);
+}
+
 emel::error::type validate_execution_contract(const emel::model::data & model_data) noexcept {
   return validate_contract(model_data, true);
+}
+
+emel::error::type build_view(const emel::model::data & model_data,
+                             emel::model::builder::detail::view & view_out) noexcept {
+  using block_contract_kind = emel::model::builder::detail::block_contract_kind;
+  const emel::model::builder::detail::view_contract contract{
+      .block_contract = block_contract_kind::gemma4,
+      .ties_output = true,
+      .uses_qk_norm = true,
+      .output_norm_name = k_output_norm_name,
+      .shared_kv_layer_begin = k_block_count - k_shared_kv_layers,
+  };
+  return emel::model::builder::detail::build_view_for_contract(model_data, contract, view_out);
 }
 
 }  // namespace emel::model::gemma4::detail

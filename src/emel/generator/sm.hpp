@@ -11,7 +11,7 @@
 #include "emel/generator/prefill/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/sm.hpp"
-#include "emel/tensor/events.hpp"
+#include "emel/graph/tensor/events.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
 
@@ -990,7 +990,7 @@ struct sm : public emel::sm<model, action::context> {
   }
 
   bool try_capture_graph_tensor(const int32_t tensor_id,
-                                emel::tensor::event::tensor_state & state_out,
+                                emel::graph::tensor::event::tensor_state & state_out,
                                 emel::error::type & err_out) noexcept {
     return this->context_.graph.try_capture_tensor(tensor_id, state_out, err_out);
   }

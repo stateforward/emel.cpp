@@ -7,15 +7,14 @@
 #include <limits>
 #include <span>
 
-#include "emel/model/gemma4/detail.hpp"
-#include "emel/model/lfm2/detail.hpp"
-#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
-#include "emel/model/qwen3/detail.hpp"
+#include "emel/text/tokenizer/detail.hpp"
+#include "emel/text/tokenizer/preprocessor/detail.hpp"
 
 namespace emel::model::detail {
 
 bool load_hparams_from_gguf(const kv_binding & binding,
+                            const emel::model::architectures available_architectures,
                             emel::model::data & model_out) noexcept {
   model_out.params = {};
 
@@ -31,14 +30,14 @@ bool load_hparams_from_gguf(const kv_binding & binding,
   }
   copy_name(model_out.architecture_name, architecture_name);
 
+  const auto * architecture =
+      emel::model::resolve_architecture(architecture_name, available_architectures);
+  if (architecture == nullptr || architecture->load_hparams == nullptr) {
+    return false;
+  }
+
   const hparam_loader loader{binding};
-  const bool ok =
-      (architecture_name == "llama" && emel::model::llama::detail::load_hparams(loader, model_out)) ||
-      (architecture_name == "qwen3" && emel::model::qwen3::detail::load_hparams(loader, model_out)) ||
-      (architecture_name == "lfm2" && emel::model::lfm2::detail::load_hparams(loader, model_out)) ||
-      (architecture_name == "gemma4" &&
-       emel::model::gemma4::detail::load_hparams(loader, model_out));
-  if (!ok) {
+  if (!architecture->load_hparams(loader, model_out)) {
     return false;
   }
 
@@ -59,249 +58,8 @@ bool load_hparams_from_gguf(const kv_binding & binding,
   return true;
 }
 
-emel::model::data::tokenizer_model tokenizer_model_from_name(const std::string_view name) noexcept {
-  using tokenizer_model = emel::model::data::tokenizer_model;
-
-  if (name == "none" || name == "no_vocab") {
-    return tokenizer_model::NONE;
-  }
-  if (name == "llama") {
-    return tokenizer_model::SPM;
-  }
-  if (name == "gemma4") {
-    return tokenizer_model::SPM;
-  }
-  if (name == "gpt2") {
-    return tokenizer_model::BPE;
-  }
-  if (name == "bert") {
-    return tokenizer_model::WPM;
-  }
-  if (name == "t5") {
-    return tokenizer_model::UGM;
-  }
-  if (name == "rwkv") {
-    return tokenizer_model::RWKV;
-  }
-  if (name == "plamo2") {
-    return tokenizer_model::PLAMO2;
-  }
-  return tokenizer_model::UNKNOWN;
-}
-
-emel::model::data::tokenizer_pre tokenizer_pre_profile_from_name(
-    const std::string_view name) noexcept {
-  using tokenizer_pre = emel::model::data::tokenizer_pre;
-
-  if (name.empty() || name == "default") {
-    return tokenizer_pre::DEFAULT;
-  }
-  if (name == "llama3" || name == "llama-v3" || name == "llama-bpe" ||
-      name == "falcon3" || name == "falcon-h1" || name == "pixtral" ||
-      name == "midm-2.0" || name == "lfm2" || name == "jina-v5-nano") {
-    return tokenizer_pre::LLAMA3;
-  }
-  if (name == "jais2") {
-    return tokenizer_pre::JAIS2;
-  }
-  if (name == "dbrx") {
-    return tokenizer_pre::DBRX;
-  }
-  if (name == "smaug") {
-    return tokenizer_pre::SMAUG;
-  }
-  if (name == "deepseek-llm") {
-    return tokenizer_pre::DEEPSEEK_LLM;
-  }
-  if (name == "deepseek-coder") {
-    return tokenizer_pre::DEEPSEEK_CODER;
-  }
-  if (name == "deepseek-v3") {
-    return tokenizer_pre::DEEPSEEK3_LLM;
-  }
-  if (name == "youtu") {
-    return tokenizer_pre::YOUTU;
-  }
-  if (name == "falcon") {
-    return tokenizer_pre::FALCON;
-  }
-  if (name == "mpt") {
-    return tokenizer_pre::MPT;
-  }
-  if (name == "starcoder") {
-    return tokenizer_pre::STARCODER;
-  }
-  if (name == "gpt2" || name == "gpt-2") {
-    return tokenizer_pre::GPT2;
-  }
-  if (name == "jais") {
-    return tokenizer_pre::JAIS;
-  }
-  if (name == "refact") {
-    return tokenizer_pre::REFACT;
-  }
-  if (name == "command-r") {
-    return tokenizer_pre::COMMAND_R;
-  }
-  if (name == "qwen2") {
-    return tokenizer_pre::QWEN2;
-  }
-  if (name == "qwen2.5" || name == "qwen35") {
-    return tokenizer_pre::QWEN35;
-  }
-  if (name == "stablelm2") {
-    return tokenizer_pre::STABLELM2;
-  }
-  if (name == "olmo") {
-    return tokenizer_pre::OLMO;
-  }
-  if (name == "poro") {
-    return tokenizer_pre::PORO;
-  }
-  if (name == "chatglm4") {
-    return tokenizer_pre::CHATGLM4;
-  }
-  if (name == "viking") {
-    return tokenizer_pre::VIKING;
-  }
-  if (name == "tekken") {
-    return tokenizer_pre::TEKKEN;
-  }
-  if (name == "smollm") {
-    return tokenizer_pre::SMOLLM;
-  }
-  if (name == "codeshell") {
-    return tokenizer_pre::CODESHELL;
-  }
-  if (name == "bloom") {
-    return tokenizer_pre::BLOOM;
-  }
-  if (name == "gpt3-finnish") {
-    return tokenizer_pre::GPT3_FINNISH;
-  }
-  if (name == "exaone") {
-    return tokenizer_pre::EXAONE;
-  }
-  if (name == "exaone4") {
-    return tokenizer_pre::EXAONE4;
-  }
-  if (name == "exaone-moe") {
-    return tokenizer_pre::EXAONE_MOE;
-  }
-  if (name == "chameleon") {
-    return tokenizer_pre::CHAMELEON;
-  }
-  if (name == "minerva") {
-    return tokenizer_pre::MINERVA;
-  }
-  if (name == "megrez") {
-    return tokenizer_pre::MEGREZ;
-  }
-  if (name == "gpt4o" || name == "gpt-4o") {
-    return tokenizer_pre::GPT4O;
-  }
-  if (name == "tiny-aya") {
-    return tokenizer_pre::TINY_AYA;
-  }
-  if (name == "superbpe") {
-    return tokenizer_pre::SUPERBPE;
-  }
-  if (name == "trillion") {
-    return tokenizer_pre::TRILLION;
-  }
-  if (name == "granite-docling") {
-    return tokenizer_pre::GRANITE_DOCLING;
-  }
-  if (name == "bailingmoe") {
-    return tokenizer_pre::BAILINGMOE;
-  }
-  if (name == "seed-coder") {
-    return tokenizer_pre::SEED_CODER;
-  }
-  if (name == "hunyuan") {
-    return tokenizer_pre::HUNYUAN;
-  }
-  if (name == "hunyuan-dense") {
-    return tokenizer_pre::HUNYUAN_DENSE;
-  }
-  if (name == "joyai-llm") {
-    return tokenizer_pre::JOYAI_LLM;
-  }
-  if (name == "kimi-k2") {
-    return tokenizer_pre::KIMI_K2;
-  }
-  if (name == "grok-2") {
-    return tokenizer_pre::GROK_2;
-  }
-  if (name == "afmoe") {
-    return tokenizer_pre::AFMOE;
-  }
-  if (name == "minimax-m2") {
-    return tokenizer_pre::MINIMAX_M2;
-  }
-  if (name == "solar-open") {
-    return tokenizer_pre::SOLAR_OPEN;
-  }
-  return tokenizer_pre::UNKNOWN;
-}
-
-void apply_tokenizer_model_defaults(const std::string_view name,
-                                    emel::model::data::vocab & vocab) noexcept {
-  if (name == "llama") {
-    vocab.bos_id = 1;
-    vocab.eos_id = 2;
-    vocab.unk_id = 0;
-    vocab.add_bos = true;
-    vocab.add_space_prefix = true;
-    vocab.escape_whitespaces = true;
-    return;
-  }
-
-  if (name == "bert") {
-    vocab.bos_id = 101;
-    vocab.unk_id = 100;
-    vocab.sep_id = 102;
-    vocab.pad_id = 0;
-    vocab.mask_id = 103;
-    vocab.add_bos = true;
-    vocab.add_sep = true;
-    return;
-  }
-
-  if (name == "gpt2") {
-    vocab.bos_id = 11;
-    vocab.eos_id = 11;
-    return;
-  }
-
-  if (name == "t5") {
-    vocab.eos_id = 1;
-    vocab.unk_id = 2;
-    vocab.pad_id = 0;
-    return;
-  }
-
-  if (name == "plamo2") {
-    vocab.bos_id = 1;
-    vocab.eos_id = 2;
-    vocab.unk_id = 0;
-    vocab.pad_id = 3;
-  }
-}
-
-void apply_tokenizer_pre_defaults(const std::string_view name,
-                                  emel::model::data::vocab & vocab) noexcept {
-  if (name == "llama3" || name == "llama-v3" || name == "llama-bpe" ||
-      name == "falcon3" || name == "falcon-h1" || name == "pixtral" ||
-      name == "midm-2.0" || name == "lfm2" || name == "jina-v5-nano") {
-    vocab.ignore_merges = true;
-    vocab.add_bos = true;
-    return;
-  }
-
-  if (name == "youtu") {
-    vocab.ignore_merges = true;
-  }
+bool load_hparams_from_gguf(const kv_binding & binding, emel::model::data & model_out) noexcept {
+  return load_hparams_from_gguf(binding, emel::model::default_architecture_span(), model_out);
 }
 
 void mark_special_token_type(emel::model::data::vocab & vocab,
@@ -347,12 +105,15 @@ bool load_vocab_from_gguf(const kv_binding & binding,
     return fail("decode_tokenizer_pre");
   }
 
-  vocab_out.tokenizer_model_id = tokenizer_model_from_name(tokenizer_model_name);
-  vocab_out.tokenizer_pre_id = tokenizer_pre_profile_from_name(tokenizer_pre_name);
+  vocab_out.tokenizer_model_id =
+      emel::text::tokenizer::detail::tokenizer_model_from_name(tokenizer_model_name);
+  vocab_out.tokenizer_pre_id = emel::text::tokenizer::preprocessor::detail::
+      tokenizer_pre_profile_from_name(tokenizer_pre_name);
   copy_name(vocab_out.tokenizer_model_name, tokenizer_model_name);
   copy_name(vocab_out.tokenizer_pre_name, tokenizer_pre_name);
-  apply_tokenizer_model_defaults(tokenizer_model_name, vocab_out);
-  apply_tokenizer_pre_defaults(tokenizer_pre_name, vocab_out);
+  emel::text::tokenizer::detail::apply_tokenizer_model_defaults(tokenizer_model_name, vocab_out);
+  emel::text::tokenizer::preprocessor::detail::apply_tokenizer_pre_defaults(
+      tokenizer_pre_name, vocab_out);
 
   if (const auto * type_count_entry = find_kv_entry_any(
           binding,

@@ -2,12 +2,12 @@
 
 #include <cstddef>
 
-#include "emel/tensor/context.hpp"
-#include "emel/tensor/detail.hpp"
-#include "emel/tensor/errors.hpp"
-#include "emel/tensor/events.hpp"
+#include "emel/graph/tensor/context.hpp"
+#include "emel/graph/tensor/detail.hpp"
+#include "emel/graph/tensor/errors.hpp"
+#include "emel/graph/tensor/events.hpp"
 
-namespace emel::tensor::guard {
+namespace emel::graph::tensor::guard {
 
 namespace detail {
 
@@ -144,4 +144,4 @@ struct capture_operation_not_dispatched {
   }
 };
 
-}  // namespace emel::tensor::guard
+}  // namespace emel::graph::tensor::guard

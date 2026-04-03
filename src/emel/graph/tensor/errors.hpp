@@ -2,7 +2,7 @@
 
 #include "emel/error/error.hpp"
 
-namespace emel::tensor {
+namespace emel::graph::tensor {
 
 enum class error : emel::error::type {
   none = 0u,
@@ -13,4 +13,4 @@ enum class error : emel::error::type {
   untracked = (1u << 4),
 };
 
-}  // namespace emel::tensor
+}  // namespace emel::graph::tensor

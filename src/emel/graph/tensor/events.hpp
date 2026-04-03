@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace emel::tensor::event {
+namespace emel::graph::tensor::event {
 
 enum class lifecycle : uint8_t {
   unallocated = 0u,
@@ -51,9 +51,9 @@ struct capture_tensor_state {
   int32_t * error_out = nullptr;
 };
 
-}  // namespace emel::tensor::event
+}  // namespace emel::graph::tensor::event
 
-namespace emel::tensor::events {
+namespace emel::graph::tensor::events {
 
 struct reserve_tensor_done {
   const event::reserve_tensor * request = nullptr;
@@ -95,4 +95,4 @@ struct capture_tensor_state_error {
   const event::capture_tensor_state * request = nullptr;
 };
 
-}  // namespace emel::tensor::events
+}  // namespace emel::graph::tensor::events

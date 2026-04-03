@@ -2,7 +2,9 @@
 
 #include <array>
 #include <cstddef>
+#include <string_view>
 
+#include "emel/model/data.hpp"
 #include "emel/text/tokenizer/errors.hpp"
 
 namespace emel::text::tokenizer::detail {
@@ -69,6 +71,79 @@ inline void dispatch_result_callback(
                const error_event_type &) noexcept;
   const std::array<dispatch_fn_type, 2> dispatchers = {on_error, on_done};
   dispatchers[static_cast<size_t>(ok)](request, done_ev, error_ev);
+}
+
+inline emel::model::data::tokenizer_model
+tokenizer_model_from_name(const std::string_view name) noexcept {
+  using tokenizer_model = emel::model::data::tokenizer_model;
+
+  if (name == "none" || name == "no_vocab") {
+    return tokenizer_model::NONE;
+  }
+  if (name == "llama" || name == "gemma4") {
+    return tokenizer_model::SPM;
+  }
+  if (name == "gpt2") {
+    return tokenizer_model::BPE;
+  }
+  if (name == "bert") {
+    return tokenizer_model::WPM;
+  }
+  if (name == "t5") {
+    return tokenizer_model::UGM;
+  }
+  if (name == "rwkv") {
+    return tokenizer_model::RWKV;
+  }
+  if (name == "plamo2") {
+    return tokenizer_model::PLAMO2;
+  }
+  return tokenizer_model::UNKNOWN;
+}
+
+inline void apply_tokenizer_model_defaults(
+    const std::string_view name,
+    emel::model::data::vocab & vocab) noexcept {
+  if (name == "llama") {
+    vocab.bos_id = 1;
+    vocab.eos_id = 2;
+    vocab.unk_id = 0;
+    vocab.add_bos = true;
+    vocab.add_space_prefix = true;
+    vocab.escape_whitespaces = true;
+    return;
+  }
+
+  if (name == "bert") {
+    vocab.bos_id = 101;
+    vocab.unk_id = 100;
+    vocab.sep_id = 102;
+    vocab.pad_id = 0;
+    vocab.mask_id = 103;
+    vocab.add_bos = true;
+    vocab.add_sep = true;
+    return;
+  }
+
+  if (name == "gpt2") {
+    vocab.bos_id = 11;
+    vocab.eos_id = 11;
+    return;
+  }
+
+  if (name == "t5") {
+    vocab.eos_id = 1;
+    vocab.unk_id = 2;
+    vocab.pad_id = 0;
+    return;
+  }
+
+  if (name == "plamo2") {
+    vocab.bos_id = 1;
+    vocab.eos_id = 2;
+    vocab.unk_id = 0;
+    vocab.pad_id = 3;
+  }
 }
 
 } // namespace emel::text::tokenizer::detail

@@ -1,5 +1,7 @@
 #include "emel/model/qwen3/detail.hpp"
 
+#include "emel/model/builder/detail.hpp"
+
 namespace emel::model::qwen3::detail {
 
 bool load_hparams(const emel::model::detail::hparam_loader & loader,
@@ -29,6 +31,23 @@ bool load_hparams(const emel::model::detail::hparam_loader & loader,
   }
 
   return key_length > 0 && value_length > 0;
+}
+
+emel::error::type validate_data(const emel::model::data & model_data) noexcept {
+  return emel::model::builder::detail::validate_shared_execution_contract(model_data);
+}
+
+emel::error::type build_view(const emel::model::data & model_data,
+                             emel::model::builder::detail::view & view_out) noexcept {
+  using block_contract_kind = emel::model::builder::detail::block_contract_kind;
+  const emel::model::builder::detail::view_contract contract{
+      .block_contract = block_contract_kind::qwen3,
+      .ties_output = true,
+      .uses_qk_norm = true,
+      .output_norm_name = "output_norm.weight",
+      .shared_kv_layer_begin = -1,
+  };
+  return emel::model::builder::detail::build_view_for_contract(model_data, contract, view_out);
 }
 
 }  // namespace emel::model::qwen3::detail

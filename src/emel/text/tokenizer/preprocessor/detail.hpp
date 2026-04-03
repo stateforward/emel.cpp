@@ -72,6 +72,178 @@ inline preprocessor::error select_error(const bool ok,
   return preprocessor::select_result_error(ok, runtime_error);
 }
 
+inline emel::model::data::tokenizer_pre tokenizer_pre_profile_from_name(
+    const std::string_view name) noexcept {
+  using tokenizer_pre = emel::model::data::tokenizer_pre;
+
+  if (name.empty() || name == "default") {
+    return tokenizer_pre::DEFAULT;
+  }
+  if (name == "llama3" || name == "llama-v3" || name == "llama-bpe" ||
+      name == "falcon3" || name == "falcon-h1" || name == "pixtral" ||
+      name == "midm-2.0" || name == "lfm2" || name == "jina-v5-nano") {
+    return tokenizer_pre::LLAMA3;
+  }
+  if (name == "jais2") {
+    return tokenizer_pre::JAIS2;
+  }
+  if (name == "dbrx") {
+    return tokenizer_pre::DBRX;
+  }
+  if (name == "smaug") {
+    return tokenizer_pre::SMAUG;
+  }
+  if (name == "deepseek-llm") {
+    return tokenizer_pre::DEEPSEEK_LLM;
+  }
+  if (name == "deepseek-coder") {
+    return tokenizer_pre::DEEPSEEK_CODER;
+  }
+  if (name == "deepseek-v3") {
+    return tokenizer_pre::DEEPSEEK3_LLM;
+  }
+  if (name == "youtu") {
+    return tokenizer_pre::YOUTU;
+  }
+  if (name == "falcon") {
+    return tokenizer_pre::FALCON;
+  }
+  if (name == "mpt") {
+    return tokenizer_pre::MPT;
+  }
+  if (name == "starcoder") {
+    return tokenizer_pre::STARCODER;
+  }
+  if (name == "gpt2" || name == "gpt-2") {
+    return tokenizer_pre::GPT2;
+  }
+  if (name == "jais") {
+    return tokenizer_pre::JAIS;
+  }
+  if (name == "refact") {
+    return tokenizer_pre::REFACT;
+  }
+  if (name == "command-r") {
+    return tokenizer_pre::COMMAND_R;
+  }
+  if (name == "qwen2") {
+    return tokenizer_pre::QWEN2;
+  }
+  if (name == "qwen2.5" || name == "qwen35") {
+    return tokenizer_pre::QWEN35;
+  }
+  if (name == "stablelm2") {
+    return tokenizer_pre::STABLELM2;
+  }
+  if (name == "olmo") {
+    return tokenizer_pre::OLMO;
+  }
+  if (name == "poro") {
+    return tokenizer_pre::PORO;
+  }
+  if (name == "chatglm4") {
+    return tokenizer_pre::CHATGLM4;
+  }
+  if (name == "viking") {
+    return tokenizer_pre::VIKING;
+  }
+  if (name == "tekken") {
+    return tokenizer_pre::TEKKEN;
+  }
+  if (name == "smollm") {
+    return tokenizer_pre::SMOLLM;
+  }
+  if (name == "codeshell") {
+    return tokenizer_pre::CODESHELL;
+  }
+  if (name == "bloom") {
+    return tokenizer_pre::BLOOM;
+  }
+  if (name == "gpt3-finnish") {
+    return tokenizer_pre::GPT3_FINNISH;
+  }
+  if (name == "exaone") {
+    return tokenizer_pre::EXAONE;
+  }
+  if (name == "exaone4") {
+    return tokenizer_pre::EXAONE4;
+  }
+  if (name == "exaone-moe") {
+    return tokenizer_pre::EXAONE_MOE;
+  }
+  if (name == "chameleon") {
+    return tokenizer_pre::CHAMELEON;
+  }
+  if (name == "minerva") {
+    return tokenizer_pre::MINERVA;
+  }
+  if (name == "megrez") {
+    return tokenizer_pre::MEGREZ;
+  }
+  if (name == "gpt4o" || name == "gpt-4o") {
+    return tokenizer_pre::GPT4O;
+  }
+  if (name == "tiny-aya") {
+    return tokenizer_pre::TINY_AYA;
+  }
+  if (name == "superbpe") {
+    return tokenizer_pre::SUPERBPE;
+  }
+  if (name == "trillion") {
+    return tokenizer_pre::TRILLION;
+  }
+  if (name == "granite-docling") {
+    return tokenizer_pre::GRANITE_DOCLING;
+  }
+  if (name == "bailingmoe") {
+    return tokenizer_pre::BAILINGMOE;
+  }
+  if (name == "seed-coder") {
+    return tokenizer_pre::SEED_CODER;
+  }
+  if (name == "hunyuan") {
+    return tokenizer_pre::HUNYUAN;
+  }
+  if (name == "hunyuan-dense") {
+    return tokenizer_pre::HUNYUAN_DENSE;
+  }
+  if (name == "joyai-llm") {
+    return tokenizer_pre::JOYAI_LLM;
+  }
+  if (name == "kimi-k2") {
+    return tokenizer_pre::KIMI_K2;
+  }
+  if (name == "grok-2") {
+    return tokenizer_pre::GROK_2;
+  }
+  if (name == "afmoe") {
+    return tokenizer_pre::AFMOE;
+  }
+  if (name == "minimax-m2") {
+    return tokenizer_pre::MINIMAX_M2;
+  }
+  if (name == "solar-open") {
+    return tokenizer_pre::SOLAR_OPEN;
+  }
+  return tokenizer_pre::UNKNOWN;
+}
+
+inline void apply_tokenizer_pre_defaults(
+    const std::string_view name,
+    emel::model::data::vocab & vocab) noexcept {
+  if (name == "llama3" || name == "llama-v3" || name == "llama-bpe" ||
+      name == "falcon3" || name == "falcon-h1" || name == "pixtral" ||
+      name == "midm-2.0" || name == "lfm2" || name == "jina-v5-nano") {
+    vocab.ignore_merges = true;
+    vocab.add_bos = true;
+    return;
+  }
+
+  if (name == "youtu") {
+    vocab.ignore_merges = true;
+  }
+}
+
 template <class request_type, class done_event_type, class error_event_type>
 inline void dispatch_result_callback(
     const bool ok, const request_type & request, const done_event_type & done_ev,

@@ -4,7 +4,7 @@
 
 #include "emel/graph/assembler/sm.hpp"
 #include "emel/graph/processor/sm.hpp"
-#include "emel/tensor/sm.hpp"
+#include "emel/graph/tensor/sm.hpp"
 
 namespace emel::graph::action {
 

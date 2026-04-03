@@ -2,13 +2,13 @@
 // benchmark: designed
 
 #include "emel/sm.hpp"
-#include "emel/tensor/actions.hpp"
-#include "emel/tensor/context.hpp"
-#include "emel/tensor/errors.hpp"
-#include "emel/tensor/events.hpp"
-#include "emel/tensor/guards.hpp"
+#include "emel/graph/tensor/actions.hpp"
+#include "emel/graph/tensor/context.hpp"
+#include "emel/graph/tensor/errors.hpp"
+#include "emel/graph/tensor/events.hpp"
+#include "emel/graph/tensor/guards.hpp"
 
-namespace emel::tensor {
+namespace emel::graph::tensor {
 
 struct ready {};
 
@@ -297,4 +297,4 @@ struct sm : public emel::sm<model, action::context> {
 
 using Tensor = sm;
 
-}  // namespace emel::tensor
+}  // namespace emel::graph::tensor

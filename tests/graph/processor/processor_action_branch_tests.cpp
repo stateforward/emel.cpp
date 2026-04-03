@@ -21,9 +21,9 @@
 #include "emel/graph/processor/sm.hpp"
 #include "emel/graph/processor/validate_step/actions.hpp"
 #include "emel/graph/processor/validate_step/guards.hpp"
-#include "emel/tensor/errors.hpp"
-#include "emel/tensor/events.hpp"
-#include "emel/tensor/sm.hpp"
+#include "emel/graph/tensor/errors.hpp"
+#include "emel/graph/tensor/events.hpp"
+#include "emel/graph/tensor/sm.hpp"
 
 namespace {
 
@@ -33,7 +33,7 @@ using processor_error = emel::graph::processor::error;
 struct lifecycle_fixture {
   int32_t leaf_tensor = 11;
   int32_t compute_tensor = 29;
-  emel::tensor::sm tensor_machine{};
+  emel::graph::tensor::sm tensor_machine{};
   std::array<emel::graph::processor::event::lifecycle_tensor_binding, 2> tensors{{
       {
           .tensor_id = 0,
@@ -68,8 +68,8 @@ struct lifecycle_fixture {
   };
 
   lifecycle_fixture() {
-    int32_t err = static_cast<int32_t>(emel::error::cast(emel::tensor::error::none));
-    REQUIRE(tensor_machine.process_event(emel::tensor::event::reserve_tensor{
+    int32_t err = static_cast<int32_t>(emel::error::cast(emel::graph::tensor::error::none));
+    REQUIRE(tensor_machine.process_event(emel::graph::tensor::event::reserve_tensor{
       .tensor_id = tensors[0].tensor_id,
       .buffer = tensors[0].buffer,
       .buffer_bytes = tensors[0].buffer_bytes,
@@ -77,7 +77,7 @@ struct lifecycle_fixture {
       .is_leaf = tensors[0].is_leaf,
       .error_out = &err,
     }));
-    REQUIRE(tensor_machine.process_event(emel::tensor::event::reserve_tensor{
+    REQUIRE(tensor_machine.process_event(emel::graph::tensor::event::reserve_tensor{
       .tensor_id = tensors[1].tensor_id,
       .buffer = tensors[1].buffer,
       .buffer_bytes = tensors[1].buffer_bytes,

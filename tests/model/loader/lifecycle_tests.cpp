@@ -703,6 +703,36 @@ TEST_CASE("model_llama_detail_builds_execution_view_for_canonical_tensor_set") {
   CHECK(block.feed_forward_up.name == "blk.1.ffn_up.weight");
 }
 
+TEST_CASE("model_data_tensor_name_view_rejects_out_of_bounds_storage_range") {
+  auto model = std::make_unique<emel::model::data>();
+  emel::model::data::tensor_record tensor = {};
+  tensor.name_offset = static_cast<uint32_t>(model->name_storage.size() - 1u);
+  tensor.name_length = 4u;
+
+  CHECK(emel::model::tensor_name_view(*model, tensor).empty());
+}
+
+TEST_CASE("model_data_try_parse_block_index_accepts_canonical_block_name") {
+  int32_t block_index = -1;
+
+  CHECK(emel::model::try_parse_block_index("blk.12.attn_q.weight", block_index));
+  CHECK(block_index == 12);
+}
+
+TEST_CASE("model_data_try_parse_block_index_rejects_names_without_block_prefix") {
+  int32_t block_index = -1;
+
+  CHECK_FALSE(emel::model::try_parse_block_index("layer.12.attn_q.weight", block_index));
+}
+
+TEST_CASE("model_data_try_parse_block_index_rejects_prefix_without_digits") {
+  int32_t block_index = -1;
+
+  CHECK_FALSE(emel::model::try_parse_block_index("blk.", block_index));
+  CHECK_FALSE(emel::model::try_parse_block_index("blk.attn_q.weight", block_index));
+  CHECK_FALSE(emel::model::try_parse_block_index("blk.12attn_q.weight", block_index));
+}
+
 TEST_CASE("model_llama_detail_rejects_missing_required_tensor") {
   auto model = std::make_unique<emel::model::data>();
   build_canonical_model(*model, 1);
@@ -776,6 +806,23 @@ TEST_CASE("model_llama_detail_builds_qwen3_execution_view_with_tied_output_fallb
   CHECK(err == emel::error::cast(emel::model::loader::error::none));
   CHECK(view.model == model.get());
   CHECK(view.output.name == "token_embd.weight");
+}
+
+TEST_CASE("model_execution_contract_accepts_canonical_llama_contract") {
+  auto model = std::make_unique<emel::model::data>();
+  build_canonical_model(*model, 1);
+
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+}
+
+TEST_CASE("model_execution_contract_rejects_unsupported_architecture") {
+  auto model = std::make_unique<emel::model::data>();
+  build_canonical_model(*model, 1);
+  copy_name(model->architecture_name, "unsupported");
+
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
 }
 
 TEST_CASE("model_execution_contract_accepts_canonical_lfm2_hybrid_contract") {

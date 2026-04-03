@@ -8,10 +8,10 @@
 #include <boost/sml/utility/sm_pool.hpp>
 
 #include "emel/error/error.hpp"
-#include "emel/tensor/errors.hpp"
-#include "emel/tensor/events.hpp"
+#include "emel/graph/tensor/errors.hpp"
+#include "emel/graph/tensor/events.hpp"
 
-namespace emel::tensor::detail {
+namespace emel::graph::tensor::detail {
 
 inline constexpr int32_t max_tensors = 65536;
 
@@ -356,4 +356,4 @@ struct tensor_router_model {
 
 using tensor_pool = boost::sml::utility::sm_pool<tensor_storage, tensor_router_model>;
 
-}  // namespace emel::tensor::detail
+}  // namespace emel::graph::tensor::detail

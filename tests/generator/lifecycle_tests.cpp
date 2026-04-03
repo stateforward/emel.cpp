@@ -21,8 +21,8 @@
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
-#include "emel/tensor/errors.hpp"
-#include "emel/tensor/events.hpp"
+#include "emel/graph/tensor/errors.hpp"
+#include "emel/graph/tensor/events.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 
@@ -974,14 +974,14 @@ TEST_CASE("generator_initialize_reserves_lifecycle_managed_graph_tensors") {
   REQUIRE(reservation.lifecycle != nullptr);
   REQUIRE(reservation.lifecycle->tensor_count > 1);
 
-  emel::tensor::event::tensor_state tensor_state{};
-  emel::error::type tensor_err = emel::error::cast(emel::tensor::error::none);
+  emel::graph::tensor::event::tensor_state tensor_state{};
+  emel::error::type tensor_err = emel::error::cast(emel::graph::tensor::error::none);
   REQUIRE(fixture->generator->try_capture_graph_tensor(0, tensor_state, tensor_err));
-  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::leaf_filled);
+  CHECK(tensor_state.lifecycle_state == emel::graph::tensor::event::lifecycle::leaf_filled);
 
   const int32_t runtime_tensor_id = reservation.lifecycle->tensor_count - 1;
   REQUIRE(fixture->generator->try_capture_graph_tensor(runtime_tensor_id, tensor_state, tensor_err));
-  CHECK(tensor_state.lifecycle_state == emel::tensor::event::lifecycle::empty);
+  CHECK(tensor_state.lifecycle_state == emel::graph::tensor::event::lifecycle::empty);
 }
 
 TEST_CASE("generator_rejects_generate_before_initialize") {

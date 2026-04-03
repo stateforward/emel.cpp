@@ -1,6 +1,9 @@
 #include "emel/model/data.hpp"
 
-#include "emel/model/builder/sm.hpp"
+#include "emel/model/architecture/detail.hpp"
+#include "emel/model/gemma4/detail.hpp"
+#include "emel/model/lfm2/detail.hpp"
+#include "emel/model/loader/errors.hpp"
 
 namespace emel::model {
 
@@ -53,26 +56,26 @@ std::string_view architecture_name_view(const data & model_data) noexcept {
 }
 
 bool is_supported_execution_architecture(const std::string_view architecture) noexcept {
-  return architecture == "llama" || architecture == "qwen3" ||
-         architecture == "lfm2" || architecture == "gemma4";
+  return emel::model::resolve_architecture(
+             architecture, emel::model::default_architecture_span()) != nullptr;
 }
 
 bool is_lfm2_execution_architecture(const std::string_view architecture) noexcept {
-  return architecture == "lfm2";
+  return emel::model::lfm2::detail::is_execution_architecture(architecture);
 }
 
 bool is_gemma4_execution_architecture(const std::string_view architecture) noexcept {
-  return architecture == "gemma4";
+  return emel::model::gemma4::detail::is_execution_architecture(architecture);
 }
 
 emel::error::type validate_execution_contract(const data & model_data) noexcept {
-  emel::model::builder::detail::artifact artifact = {};
-  emel::error::type err = emel::error::cast(emel::model::builder::error::none);
-  emel::model::builder::event::build request{model_data, artifact};
-  request.error_out = &err;
-  emel::model::builder::sm builder;
-  (void)builder.process_event(request);
-  return err;
+  const auto architecture = emel::model::architecture_name_view(model_data);
+  const auto * resolved = emel::model::resolve_architecture(
+      architecture, emel::model::default_architecture_span());
+  if (resolved == nullptr || resolved->validate_data == nullptr) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+  return resolved->validate_data(model_data);
 }
 
 }  // namespace emel::model
