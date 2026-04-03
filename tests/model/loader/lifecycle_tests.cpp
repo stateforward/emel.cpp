@@ -408,6 +408,19 @@ void append_kv_u32(std::vector<uint8_t> & arena,
                   std::span<const uint8_t>{encoded});
 }
 
+void append_kv_i32(std::vector<uint8_t> & arena,
+                   std::vector<emel::gguf::loader::kv_entry> & entries,
+                   const std::string_view key,
+                   const int32_t value) {
+  std::vector<uint8_t> encoded = {};
+  append_scalar<int32_t>(encoded, value);
+  append_kv_entry(arena,
+                  entries,
+                  key,
+                  emel::gguf::loader::detail::constants::gguf_type_int32,
+                  std::span<const uint8_t>{encoded});
+}
+
 void append_kv_f32(std::vector<uint8_t> & arena,
                    std::vector<emel::gguf::loader::kv_entry> & entries,
                    const std::string_view key,
@@ -1386,6 +1399,36 @@ TEST_CASE("model_detail_preserves_negative_vocab_sentinels_when_gguf_omits_optio
   CHECK(vocab->unk_id == -1);
   CHECK(vocab->sep_id == -1);
   CHECK(vocab->pad_id == -1);
+}
+
+TEST_CASE("model_detail_preserves_negative_vocab_sentinels_when_gguf_uses_signed_optional_ids") {
+  std::vector<uint8_t> arena = {};
+  std::vector<emel::gguf::loader::kv_entry> entries = {};
+
+  const std::array<std::string_view, 2> tokens = {"<s>", "hello"};
+  const std::array<uint32_t, 2> token_types = {3u, 1u};
+
+  append_kv_string(arena, entries, "tokenizer.ggml.model", "rwkv");
+  append_kv_string_array(
+      arena, entries, "tokenizer.ggml.tokens", std::span<const std::string_view>{tokens});
+  append_kv_u32_array(
+      arena, entries, "tokenizer.ggml.token_type", std::span<const uint32_t>{token_types});
+  append_kv_u32(arena, entries, "tokenizer.ggml.bos_token_id", 0u);
+  append_kv_u32(arena, entries, "tokenizer.ggml.eos_token_id", 0u);
+  append_kv_i32(arena, entries, "tokenizer.ggml.padding_token_id", -1);
+  append_kv_i32(arena, entries, "tokenizer.ggml.prefix_token_id", -1);
+  append_kv_i32(arena, entries, "tokenizer.ggml.fim_pre_token_id", -1);
+
+  auto vocab = std::make_unique<emel::model::data::vocab>();
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{entries},
+  };
+
+  REQUIRE(emel::model::detail::load_vocab_from_gguf(binding, *vocab));
+  CHECK(vocab->pad_id == -1);
+  CHECK(vocab->prefix_id == -1);
+  CHECK(vocab->fim_pre_id == -1);
 }
 
 TEST_CASE("model_detail_loads_gemma4_vocab_metadata_with_large_merge_table") {

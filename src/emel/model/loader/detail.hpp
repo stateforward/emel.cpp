@@ -149,6 +149,71 @@ inline bool decode_integer_value(const kv_binding & binding,
   }
 }
 
+inline bool decode_signed_integer_value(const kv_binding & binding,
+                                        const emel::gguf::loader::kv_entry & entry,
+                                        int64_t & value_out) noexcept {
+  const std::span<const uint8_t> bytes = kv_value_view(binding, entry);
+  namespace constants = emel::gguf::loader::detail::constants;
+
+  switch (entry.value_type) {
+    case constants::gguf_type_uint8:
+      if (bytes.size() != 1u) {
+        return false;
+      }
+      value_out = bytes[0];
+      return true;
+    case constants::gguf_type_int8:
+      if (bytes.size() != 1u) {
+        return false;
+      }
+      value_out = static_cast<int8_t>(bytes[0]);
+      return true;
+    case constants::gguf_type_uint16:
+      if (bytes.size() != sizeof(uint16_t)) {
+        return false;
+      }
+      value_out = static_cast<int64_t>(static_cast<uint16_t>(bytes[0]) |
+                                       (static_cast<uint16_t>(bytes[1]) << 8u));
+      return true;
+    case constants::gguf_type_int16:
+      if (bytes.size() != sizeof(int16_t)) {
+        return false;
+      }
+      value_out = static_cast<int16_t>(static_cast<uint16_t>(bytes[0]) |
+                                       (static_cast<uint16_t>(bytes[1]) << 8u));
+      return true;
+    case constants::gguf_type_uint32:
+      if (bytes.size() != sizeof(uint32_t)) {
+        return false;
+      }
+      value_out = static_cast<int64_t>(read_u32_le(bytes));
+      return true;
+    case constants::gguf_type_int32:
+      if (bytes.size() != sizeof(int32_t)) {
+        return false;
+      }
+      value_out = static_cast<int32_t>(read_u32_le(bytes));
+      return true;
+    case constants::gguf_type_uint64:
+      if (bytes.size() != sizeof(uint64_t)) {
+        return false;
+      }
+      if (read_u64_le(bytes) > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        return false;
+      }
+      value_out = static_cast<int64_t>(read_u64_le(bytes));
+      return true;
+    case constants::gguf_type_int64:
+      if (bytes.size() != sizeof(int64_t)) {
+        return false;
+      }
+      value_out = static_cast<int64_t>(read_u64_le(bytes));
+      return true;
+    default:
+      return false;
+  }
+}
+
 inline bool decode_bool_value(const kv_binding & binding,
                               const emel::gguf::loader::kv_entry & entry,
                               bool & value_out) noexcept {

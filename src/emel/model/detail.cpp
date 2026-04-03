@@ -276,9 +276,10 @@ bool load_vocab_from_gguf(const kv_binding & binding,
       return true;
     }
 
-    uint64_t value = 0u;
-    if (!decode_integer_value(binding, *entry, value) ||
-        value > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+    int64_t value = 0;
+    if (!decode_signed_integer_value(binding, *entry, value) ||
+        value < static_cast<int64_t>(std::numeric_limits<int32_t>::min()) ||
+        value > static_cast<int64_t>(std::numeric_limits<int32_t>::max())) {
       return false;
     }
 

@@ -78,7 +78,18 @@ bool file_exists(const std::filesystem::path & path) {
   return true;
 }
 
+struct llama_backend_guard {
+  llama_backend_guard() {
+    llama_backend_init();
+  }
+
+  ~llama_backend_guard() {
+    llama_backend_free();
+  }
+};
+
 bool reference_tokenizer_lane_supported(const std::filesystem::path & model_path) {
+  llama_backend_guard backend_guard{};
   llama_model_params model_params = llama_model_default_params();
   model_params.vocab_only = true;
   model_params.check_tensors = false;
