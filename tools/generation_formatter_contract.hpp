@@ -30,6 +30,11 @@ inline constexpr std::string_view k_supported_qwen_contract =
     "source=tokenizer.chat_template support=supported_contract "
     "shape=structured_chat_messages_v1 roles=system,user,assistant tools=none "
     "add_generation_prompt=true enable_thinking=false bos=none";
+inline constexpr std::string_view k_supported_gemma4_contract =
+    "source=tokenizer.chat_template support=supported_contract "
+    "shape=structured_chat_messages_v1 roles=system,user tools=none media=none "
+    "add_generation_prompt=true enable_thinking=false assistant_history=none "
+    "bos=<bos>";
 
 inline constexpr std::string_view k_no_template_contract =
     "source=tokenizer.chat_template support=no_template "
@@ -67,6 +72,19 @@ inline constexpr std::array<std::string_view, 9> k_supported_qwen_primary_templa
     "tool_response",
 };
 
+inline constexpr std::array<std::string_view, 10> k_supported_gemma4_primary_template_markers = {
+    "{{ bos_token }}",
+    "'<|turn>system\\n'",
+    "'<|turn>' + role + '\\n'",
+    "'<|turn>model\\n'",
+    "'<turn|>\\n'",
+    "message['role'] == 'assistant'",
+    "message['tool_calls']",
+    "message['tool_responses']",
+    "item['type'] == 'image'",
+    "add_generation_prompt",
+};
+
 struct formatter_binding {
   void * formatter_ctx = nullptr;
   emel::text::formatter::format_fn format_prompt =
@@ -87,9 +105,15 @@ inline constexpr std::string_view k_im_start = "<|im_start|>";
 inline constexpr std::string_view k_im_end = "<|im_end|>\n";
 inline constexpr std::string_view k_assistant_generation_prefix =
     "<|im_start|>assistant\n";
+inline constexpr std::string_view k_gemma4_bos = "<bos>";
+inline constexpr std::string_view k_gemma4_turn_start = "<|turn>";
+inline constexpr std::string_view k_gemma4_turn_end = "<turn|>\n";
+inline constexpr std::string_view k_gemma4_model_generation_prefix =
+    "<|turn>model\n";
 inline constexpr std::string_view k_message_separator = "\n";
 inline int k_supported_formatter_sentinel = 0;
 inline int k_supported_qwen_formatter_sentinel = 0;
+inline int k_supported_gemma4_formatter_sentinel = 0;
 
 inline bool qwen_role_supported(const std::string_view role) noexcept {
   return role == "system" || role == "user" || role == "assistant";
@@ -270,6 +294,83 @@ inline bool format_supported_contract(void *,
   return true;
 }
 
+inline bool format_supported_gemma4_contract(
+    void *,
+    const emel::text::formatter::format_request & request,
+    int32_t * error_out) noexcept {
+  if (error_out != nullptr) {
+    *error_out = emel::text::formatter::error_code(
+        emel::text::formatter::error::none);
+  }
+  if (request.output_length_out != nullptr) {
+    *request.output_length_out = 0u;
+  }
+  if ((request.output == nullptr && request.output_capacity > 0u) ||
+      !messages_supported(request.messages) ||
+      !request.add_generation_prompt ||
+      request.enable_thinking) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
+
+  size_t output_length = 0u;
+  if (!append_bytes(k_gemma4_bos, request.output, request.output_capacity, output_length)) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
+
+  for (const auto & message : request.messages) {
+    if (!append_bytes(k_gemma4_turn_start,
+                      request.output,
+                      request.output_capacity,
+                      output_length) ||
+        !append_bytes(message.role,
+                      request.output,
+                      request.output_capacity,
+                      output_length) ||
+        !append_bytes(k_message_separator,
+                      request.output,
+                      request.output_capacity,
+                      output_length) ||
+        !append_bytes(message.content,
+                      request.output,
+                      request.output_capacity,
+                      output_length) ||
+        !append_bytes(k_gemma4_turn_end,
+                      request.output,
+                      request.output_capacity,
+                      output_length)) {
+      if (error_out != nullptr) {
+        *error_out = emel::text::formatter::error_code(
+            emel::text::formatter::error::invalid_request);
+      }
+      return false;
+    }
+  }
+
+  if (!append_bytes(k_gemma4_model_generation_prefix,
+                    request.output,
+                    request.output_capacity,
+                    output_length)) {
+    if (error_out != nullptr) {
+      *error_out = emel::text::formatter::error_code(
+          emel::text::formatter::error::invalid_request);
+    }
+    return false;
+  }
+
+  if (request.output_length_out != nullptr) {
+    *request.output_length_out = output_length;
+  }
+  return true;
+}
+
 inline bool template_matches_supported_contract(
     const std::string_view primary_template) noexcept {
   for (const std::string_view marker : k_supported_primary_template_markers) {
@@ -283,6 +384,16 @@ inline bool template_matches_supported_contract(
 inline bool template_matches_supported_qwen_contract(
     const std::string_view primary_template) noexcept {
   for (const std::string_view marker : k_supported_qwen_primary_template_markers) {
+    if (primary_template.find(marker) == std::string_view::npos) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool template_matches_supported_gemma4_contract(
+    const std::string_view primary_template) noexcept {
+  for (const std::string_view marker : k_supported_gemma4_primary_template_markers) {
     if (primary_template.find(marker) == std::string_view::npos) {
       return false;
     }
@@ -318,6 +429,14 @@ inline formatter_binding resolve_primary_template_binding(
         .format_prompt = format_supported_qwen_contract,
         .support = support_kind::supported_contract,
         .contract = k_supported_qwen_contract,
+    };
+  }
+  if (template_matches_supported_gemma4_contract(primary_template)) {
+    return formatter_binding{
+        .formatter_ctx = &k_supported_gemma4_formatter_sentinel,
+        .format_prompt = format_supported_gemma4_contract,
+        .support = support_kind::supported_contract,
+        .contract = k_supported_gemma4_contract,
     };
   }
   return formatter_binding{
@@ -393,6 +512,12 @@ inline reference_formatter_info resolve_reference_formatter_info(
     return formatter;
   }
 
+  if (template_matches_supported_gemma4_contract(formatter.primary_template)) {
+    formatter.support = support_kind::supported_contract;
+    formatter.contract = k_supported_gemma4_contract;
+    return formatter;
+  }
+
   formatter.support = support_kind::unsupported_template;
   formatter.contract = k_unsupported_template_contract;
   return formatter;
@@ -416,12 +541,22 @@ inline size_t formatted_capacity_upper_bound(
   if (binding.contract == k_supported_contract || binding.contract == k_no_template_contract) {
     capacity += k_bos.size();
   }
+  if (binding.contract == k_supported_gemma4_contract) {
+    capacity += k_gemma4_bos.size();
+  }
   for (const auto & message : messages) {
-    capacity += k_im_start.size() + message.role.size() + k_message_separator.size() +
-        message.content.size() + k_im_end.size();
+    if (binding.contract == k_supported_gemma4_contract) {
+      capacity += k_gemma4_turn_start.size() + message.role.size() + k_message_separator.size() +
+          message.content.size() + k_gemma4_turn_end.size();
+    } else {
+      capacity += k_im_start.size() + message.role.size() + k_message_separator.size() +
+          message.content.size() + k_im_end.size();
+    }
   }
   if (add_generation_prompt) {
-    capacity += k_assistant_generation_prefix.size();
+    capacity += binding.contract == k_supported_gemma4_contract
+                    ? k_gemma4_model_generation_prefix.size()
+                    : k_assistant_generation_prefix.size();
   }
   return capacity;
 }

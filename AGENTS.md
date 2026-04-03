@@ -92,8 +92,9 @@ NEVER use macros in models.
 ALWAYS keep canonical machine types in component namespaces as `emel::<component>::sm`.
 ALWAYS provide additive top-level PascalCase aliases (e.g. `emel::Model`).
 ALWAYS map directory layout to namespaces.
-NEVER add files other than `any.hpp`, `context.hpp`, `actions.hpp`,
-`guards.hpp`, `errors.hpp`, `sm.hpp`, or `detail.hpp`.
+ALWAYS keep component files limited to the canonical bases `any`, `context`,
+`actions`, `guards`, `errors`, `events`, `sm`, or `detail`, with either `.hpp` or `.cpp`
+extensions as needed.
 ALWAYS structure machine docs and code namespaces using the pattern
 `<domain>/<component>/<type>` for variant families (for example
 `memory/coordinator/kv`, `text/tokenizer/preprocessor/bpe`).

@@ -137,6 +137,7 @@ TEST_CASE("model_detail_maps_tokenizer_model_names") {
   constexpr auto cases = std::to_array<model_case>({
       {"no_vocab", tokenizer_model::NONE},
       {"llama", tokenizer_model::SPM},
+      {"gemma4", tokenizer_model::SPM},
       {"gpt2", tokenizer_model::BPE},
       {"bert", tokenizer_model::WPM},
       {"t5", tokenizer_model::UGM},

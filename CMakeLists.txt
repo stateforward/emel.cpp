@@ -68,8 +68,14 @@ if(NOT EMEL_AARCH64_HOST_CXX_FLAG STREQUAL "")
 endif()
 
 add_library(emel STATIC
+  src/emel/model/detail.cpp
   src/emel/model/data.cpp
   src/emel/text/unicode_data.cpp
+  src/emel/model/builder/detail.cpp
+  src/emel/model/llama/detail.cpp
+  src/emel/model/qwen3/detail.cpp
+  src/emel/model/lfm2/detail.cpp
+  src/emel/model/gemma4/detail.cpp
 )
 
 target_link_libraries(emel
@@ -90,6 +96,7 @@ if(EMEL_ENABLE_TESTS)
   set(EMEL_TEST_SOURCES
     tests/doctest_main.cpp
     tests/model/detail_tests.cpp
+    tests/model/builder/lifecycle_tests.cpp
     tests/model/loader/lifecycle_tests.cpp
     tests/model/weight_loader/lifecycle_tests.cpp
     tests/gbnf/lexer_tests.cpp

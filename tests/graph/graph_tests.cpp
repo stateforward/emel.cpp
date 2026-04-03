@@ -17,7 +17,8 @@
 #include "emel/graph/events.hpp"
 #include "emel/graph/guards.hpp"
 #include "emel/graph/sm.hpp"
-#include "emel/model/llama/detail.hpp"
+#include "emel/model/builder/detail.hpp"
+#include "emel/model/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/tensor/errors.hpp"
 #include "emel/tensor/events.hpp"
@@ -702,15 +703,15 @@ TEST_CASE("graph_machine_accepts_canonical_descriptor_handles") {
   build_canonical_model(*model, 2);
   lifecycle_fixture lifecycle{};
 
-  emel::model::llama::detail::execution_view execution = {};
-  REQUIRE(emel::model::llama::detail::build_execution_view(*model, execution) ==
+  emel::model::builder::detail::execution_view execution = {};
+  REQUIRE(emel::model::builder::detail::build_execution_view(*model, execution) ==
           emel::error::cast(emel::model::loader::error::none));
-  emel::model::llama::detail::topology topology = {};
-  REQUIRE(emel::model::llama::detail::build_topology(execution, topology) ==
+  emel::model::builder::detail::topology topology = {};
+  REQUIRE(emel::model::builder::detail::build_topology(execution, topology) ==
           emel::error::cast(emel::model::loader::error::none));
-  emel::model::llama::detail::step_plan prefill = {};
-  emel::model::llama::detail::step_plan decode = {};
-  REQUIRE(emel::model::llama::detail::build_step_plans(topology, prefill, decode) ==
+  emel::model::builder::detail::step_plan prefill = {};
+  emel::model::builder::detail::step_plan decode = {};
+  REQUIRE(emel::model::builder::detail::build_step_plans(topology, prefill, decode) ==
           emel::error::cast(emel::model::loader::error::none));
 
   emel::graph::sm machine{};

@@ -17,8 +17,8 @@
 #include "emel/generator/events.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/sm.hpp"
+#include "emel/model/builder/sm.hpp"
 #include "emel/model/data.hpp"
-#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 
 namespace emel::generator::detail {
@@ -36,6 +36,12 @@ struct packed_matrix_binding {
 
 struct block_weights {
   bool uses_attention = true;
+  int32_t attention_q_dim = 0;
+  int32_t attention_kv_dim = 0;
+  int32_t attention_head_dim = 0;
+  int32_t attention_head_dim_kv = 0;
+  int32_t attention_rope_dim = 0;
+  float attention_rope_freq_base = 10000.0f;
   std::vector<float> attention_norm = {};
   tensor_matrix attention_q = {};
   packed_matrix_binding attention_q_packed = {};
@@ -63,10 +69,7 @@ struct block_weights {
 
 struct native_backend {
   const emel::model::data * model = nullptr;
-  emel::model::llama::detail::execution_view execution = {};
-  emel::model::llama::detail::topology topology = {};
-  emel::model::llama::detail::step_plan prefill_plan = {};
-  emel::model::llama::detail::step_plan decode_plan = {};
+  emel::model::builder::detail::artifact build = {};
   emel::kernel::sm kernel = {};
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
   uint64_t kernel_dispatch_calls = 0;
@@ -93,7 +96,6 @@ struct native_backend {
   std::vector<emel::kernel::detail::quant::block_q8_0> packed_q8_0_input_storage = {};
   std::vector<emel::kernel::detail::quant::block_q8_0> packed_q8_0_chunk4_rows = {};
   std::vector<uint8_t> packed_q8_0_chunk4_input_storage = {};
-  emel::model::llama::detail::quantized_path_audit quantized_audit = {};
   std::vector<block_weights> blocks = {};
 
   int32_t n_vocab = 0;
@@ -105,6 +107,9 @@ struct native_backend {
   int32_t n_rot = 0;
   int32_t head_dim = 0;
   int32_t head_dim_kv = 0;
+  int32_t max_q_dim = 0;
+  int32_t max_kv_dim = 0;
+  int32_t max_ffn_dim = 0;
   int32_t n_rep = 0;
   int32_t shortconv_kernel_size = 0;
   int32_t shortconv_state_size = 0;
@@ -115,6 +120,8 @@ struct native_backend {
   std::vector<uint16_t> value_cache = {};
   std::vector<uint16_t> flash_key_cache = {};
   std::vector<uint16_t> flash_value_cache = {};
+  std::vector<size_t> layer_cache_offsets = {};
+  std::vector<size_t> flash_layer_cache_offsets = {};
   std::vector<float> recurrent_shortconv_cache = {};
   int32_t kv_cache_tokens = 0;
 
@@ -192,13 +199,13 @@ namespace quant = emel::kernel::detail::quant;
 namespace {
 
 using tensor_record = emel::model::data::tensor_record;
-using step_kind = emel::model::llama::detail::step_kind;
+using step_kind = emel::model::builder::detail::step_kind;
 
 enum class chunk4_rhs_route : uint8_t {
   packed_q8_0 = 0,
   q8_k = 1,
 };
-using step_plan = emel::model::llama::detail::step_plan;
+using step_plan = emel::model::builder::detail::step_plan;
 
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_invalid = 1;
@@ -555,6 +562,22 @@ inline bool q8_input_chunk8_path_supported(const native_backend & backend,
 #endif
 }
 
+inline int32_t effective_attention_q_dim(const native_backend & backend,
+                                         const block_weights & block) noexcept;
+inline int32_t effective_attention_kv_dim(const native_backend & backend,
+                                          const block_weights & block) noexcept;
+inline int32_t effective_attention_head_dim(const native_backend & backend,
+                                            const block_weights & block) noexcept;
+inline int32_t effective_attention_head_dim_kv(const native_backend & backend,
+                                               const block_weights & block) noexcept;
+inline int32_t effective_attention_rope_dim(const native_backend & backend,
+                                            const block_weights & block) noexcept;
+inline float effective_attention_rope_freq_base(const native_backend & backend,
+                                                const block_weights & block) noexcept;
+inline int32_t effective_max_q_dim(const native_backend & backend) noexcept;
+inline int32_t effective_max_kv_dim(const native_backend & backend) noexcept;
+inline int32_t effective_max_ffn_dim(const native_backend & backend) noexcept;
+
 template <chunk4_rhs_route route>
 inline bool chunk4_matmul_backend_ready(const native_backend & backend,
                                         const tensor_matrix & matrix) noexcept {
@@ -567,6 +590,9 @@ inline bool chunk4_matmul_backend_ready(const native_backend & backend,
 
 template <chunk4_rhs_route route>
 inline bool prefill_chunk4_backend_ready(const native_backend & backend) noexcept {
+  const int32_t max_q_dim = effective_max_q_dim(backend);
+  const int32_t max_kv_dim = effective_max_kv_dim(backend);
+  const int32_t max_ffn_dim = effective_max_ffn_dim(backend);
   if (backend.blocks.empty() || backend.n_layer <= 0) {
     return false;
   }
@@ -601,15 +627,15 @@ inline bool prefill_chunk4_backend_ready(const native_backend & backend) noexcep
       backend.projected_chunk4.size() == backend.hidden_chunk4.size() &&
       backend.attn_ctx_chunk4.size() ==
           static_cast<size_t>(k_prefill_q8_chunk_rows) *
-              static_cast<size_t>(backend.n_head * backend.head_dim) &&
+              static_cast<size_t>(max_q_dim) &&
       backend.q_chunk4.size() == backend.attn_ctx_chunk4.size() &&
       backend.k_chunk4.size() ==
           static_cast<size_t>(k_prefill_q8_chunk_rows) *
-              static_cast<size_t>(backend.n_head_kv * backend.head_dim_kv) &&
+              static_cast<size_t>(max_kv_dim) &&
       backend.v_chunk4.size() == backend.k_chunk4.size() &&
       backend.gate_chunk4.size() ==
           static_cast<size_t>(k_prefill_q8_chunk_rows) *
-              static_cast<size_t>(backend.blocks.front().feed_forward_gate.rows) &&
+              static_cast<size_t>(max_ffn_dim) &&
       backend.up_chunk4.size() == backend.gate_chunk4.size() &&
       backend.ffn_hidden_chunk4.size() == backend.gate_chunk4.size();
 }
@@ -620,6 +646,9 @@ inline bool prefill_chunk4_q8_gemm_backend_ready(const native_backend & backend)
 }
 
 inline bool prefill_chunk8_q8_k_backend_ready(const native_backend & backend) noexcept {
+  const int32_t max_q_dim = effective_max_q_dim(backend);
+  const int32_t max_kv_dim = effective_max_kv_dim(backend);
+  const int32_t max_ffn_dim = effective_max_ffn_dim(backend);
   if (backend.blocks.empty() || backend.n_layer <= 0) {
     return false;
   }
@@ -654,15 +683,15 @@ inline bool prefill_chunk8_q8_k_backend_ready(const native_backend & backend) no
       backend.projected_chunk8.size() == backend.hidden_chunk8.size() &&
       backend.attn_ctx_chunk8.size() ==
           static_cast<size_t>(k_prefill_q8_chunk8_rows) *
-              static_cast<size_t>(backend.n_head * backend.head_dim) &&
+              static_cast<size_t>(max_q_dim) &&
       backend.q_chunk8.size() == backend.attn_ctx_chunk8.size() &&
       backend.k_chunk8.size() ==
           static_cast<size_t>(k_prefill_q8_chunk8_rows) *
-              static_cast<size_t>(backend.n_head_kv * backend.head_dim_kv) &&
+              static_cast<size_t>(max_kv_dim) &&
       backend.v_chunk8.size() == backend.k_chunk8.size() &&
       backend.gate_chunk8.size() ==
           static_cast<size_t>(k_prefill_q8_chunk8_rows) *
-              static_cast<size_t>(backend.blocks.front().feed_forward_gate.rows) &&
+              static_cast<size_t>(max_ffn_dim) &&
       backend.up_chunk8.size() == backend.gate_chunk8.size() &&
       backend.ffn_hidden_chunk8.size() == backend.gate_chunk8.size();
 }
@@ -867,13 +896,112 @@ inline bool is_qwen3_runtime(const native_backend & backend) noexcept {
   return backend.model != nullptr && emel::model::architecture_name_view(*backend.model) == "qwen3";
 }
 
+inline bool is_gemma4_runtime(const native_backend & backend) noexcept {
+  return backend.model != nullptr && emel::model::architecture_name_view(*backend.model) == "gemma4";
+}
+
+inline bool is_gemma4_sliding_attention_layer(const native_backend & backend,
+                                              const int32_t layer_index) noexcept {
+  return is_gemma4_runtime(backend) &&
+         layer_index >= 0 &&
+         static_cast<uint32_t>(layer_index) <
+             backend.model->params.attention_sliding_window_pattern_count &&
+         backend.model->params.attention_sliding_window_pattern_flags[
+             static_cast<size_t>(layer_index)] != 0u;
+}
+
+inline bool is_gemma4_shared_kv_layer(const native_backend & backend,
+                                      const int32_t layer_index) noexcept {
+  return is_gemma4_runtime(backend) &&
+      layer_index >= 0 &&
+      backend.model != nullptr &&
+      backend.model->params.attention_shared_kv_layers > 0 &&
+      layer_index >= (backend.n_layer - backend.model->params.attention_shared_kv_layers) &&
+      layer_index < backend.n_layer;
+}
+
 inline bool is_lfm2_runtime(const native_backend & backend) noexcept {
   return backend.model != nullptr && emel::model::architecture_name_view(*backend.model) == "lfm2";
 }
 
 inline bool requires_attention_qk_norm(const native_backend & backend,
                                        const block_weights & block) noexcept {
-  return block.uses_attention && (is_qwen3_runtime(backend) || is_lfm2_runtime(backend));
+  return block.uses_attention &&
+      (is_qwen3_runtime(backend) || is_gemma4_runtime(backend) || is_lfm2_runtime(backend));
+}
+
+inline int32_t effective_attention_q_dim(const native_backend & backend,
+                                         const block_weights & block) noexcept {
+  if (block.attention_q_dim > 0) {
+    return block.attention_q_dim;
+  }
+  if (block.attention_q.rows > 0) {
+    return block.attention_q.rows;
+  }
+  return backend.n_head > 0 ? backend.n_head * backend.head_dim : 0;
+}
+
+inline int32_t effective_attention_kv_dim(const native_backend & backend,
+                                          const block_weights & block) noexcept {
+  if (block.attention_kv_dim > 0) {
+    return block.attention_kv_dim;
+  }
+  if (block.attention_k.rows > 0) {
+    return block.attention_k.rows;
+  }
+  return backend.n_head_kv > 0 ? backend.n_head_kv * backend.head_dim_kv : 0;
+}
+
+inline int32_t effective_attention_head_dim(const native_backend & backend,
+                                            const block_weights & block) noexcept {
+  if (block.attention_head_dim > 0) {
+    return block.attention_head_dim;
+  }
+  if (block.attention_q.rows > 0 && backend.n_head > 0) {
+    return block.attention_q.rows / backend.n_head;
+  }
+  return backend.head_dim;
+}
+
+inline int32_t effective_attention_head_dim_kv(const native_backend & backend,
+                                               const block_weights & block) noexcept {
+  if (block.attention_head_dim_kv > 0) {
+    return block.attention_head_dim_kv;
+  }
+  if (block.attention_k.rows > 0 && backend.n_head_kv > 0) {
+    return block.attention_k.rows / backend.n_head_kv;
+  }
+  return backend.head_dim_kv;
+}
+
+inline int32_t effective_attention_rope_dim(const native_backend & backend,
+                                            const block_weights & block) noexcept {
+  if (block.attention_rope_dim > 0) {
+    return block.attention_rope_dim;
+  }
+  return backend.n_rot;
+}
+
+inline float effective_attention_rope_freq_base(const native_backend & backend,
+                                                const block_weights & block) noexcept {
+  if (block.attention_rope_dim > 0) {
+    return block.attention_rope_freq_base;
+  }
+  return backend.rope_freq_base > 0.0f ? backend.rope_freq_base : block.attention_rope_freq_base;
+}
+
+inline int32_t effective_max_q_dim(const native_backend & backend) noexcept {
+  return backend.max_q_dim > 0 ? backend.max_q_dim : backend.n_head * backend.head_dim;
+}
+
+inline int32_t effective_max_kv_dim(const native_backend & backend) noexcept {
+  return backend.max_kv_dim > 0 ? backend.max_kv_dim : backend.n_head_kv * backend.head_dim_kv;
+}
+
+inline int32_t effective_max_ffn_dim(const native_backend & backend) noexcept {
+  return backend.max_ffn_dim > 0
+      ? backend.max_ffn_dim
+      : (backend.blocks.empty() ? 0 : backend.blocks.front().feed_forward_gate.rows);
 }
 
 inline const block_weights * first_attention_block(const native_backend & backend) noexcept {
@@ -899,7 +1027,7 @@ inline void reset_shortconv_cache(native_backend & backend) noexcept {
 }
 
 inline const tensor_record * select_output_projection_tensor(
-    const emel::model::llama::detail::execution_view & execution) noexcept {
+    const emel::model::builder::detail::execution_view & execution) noexcept {
   if (execution.output.tensor != nullptr) {
     return execution.output.tensor;
   }
@@ -913,7 +1041,7 @@ inline const tensor_record * select_output_projection_tensor(
 }
 
 inline bool bind_output_projection(native_backend & backend) noexcept {
-  const auto * tensor = select_output_projection_tensor(backend.execution);
+  const auto * tensor = select_output_projection_tensor(backend.build.execution);
   return tensor != nullptr && bind_tensor_rows(*tensor, backend.output_native);
 }
 
@@ -949,17 +1077,54 @@ inline bool apply_headwise_rms_norm(std::span<float> vector,
   return true;
 }
 
+inline bool apply_rms_norm_in_place(std::span<float> vector, const float epsilon) noexcept {
+  if (vector.empty()) {
+    return false;
+  }
+
+  double square_sum = 0.0;
+  for (const float value : vector) {
+    square_sum += static_cast<double>(value * value);
+  }
+
+  const float mean = static_cast<float>(square_sum / static_cast<double>(vector.size()));
+  const float scale = 1.0f / std::sqrt(mean + epsilon);
+  for (float & value : vector) {
+    value *= scale;
+  }
+
+  return true;
+}
+
 inline bool apply_attention_qk_norm(native_backend & backend,
                                     const block_weights & block) noexcept {
+  auto q = std::span<float>(
+      backend.q.data(), static_cast<size_t>(effective_attention_q_dim(backend, block)));
+  auto k = std::span<float>(
+      backend.k.data(), static_cast<size_t>(effective_attention_kv_dim(backend, block)));
   return apply_headwise_rms_norm(
-             backend.q, block.attention_q_norm, backend.n_head, backend.head_dim, backend.rms_epsilon) &&
+             q,
+             block.attention_q_norm,
+             backend.n_head,
+             effective_attention_head_dim(backend, block),
+             backend.rms_epsilon) &&
       apply_headwise_rms_norm(
-             backend.k, block.attention_k_norm, backend.n_head_kv, backend.head_dim_kv, backend.rms_epsilon);
+             k,
+             block.attention_k_norm,
+             backend.n_head_kv,
+             effective_attention_head_dim_kv(backend, block),
+             backend.rms_epsilon);
 }
 
 inline bool apply_qwen3_attention_qk_norm(native_backend & backend,
                                           const block_weights & block) noexcept {
   return apply_attention_qk_norm(backend, block);
+}
+
+inline bool requires_attention_v_norm(const native_backend & backend,
+                                      const int32_t layer_index,
+                                      const block_weights & block) noexcept {
+  return block.uses_attention && is_gemma4_shared_kv_layer(backend, layer_index);
 }
 
 inline void reset_output_logits(native_backend & backend) noexcept {
@@ -2669,40 +2834,48 @@ inline float silu(const float value) noexcept {
 }
 
 inline size_t layer_cache_offset(const native_backend & backend,
+                                 const block_weights & block,
                                  const int32_t layer,
-                                 const int32_t position,
-                                 const int32_t kv_dim) noexcept {
-  return ((static_cast<size_t>(layer) * static_cast<size_t>(backend.n_ctx)) +
-          static_cast<size_t>(position)) *
-         static_cast<size_t>(kv_dim);
+                                 const int32_t position) noexcept {
+  if (backend.layer_cache_offsets.size() != static_cast<size_t>(backend.n_layer)) {
+    return ((static_cast<size_t>(layer) * static_cast<size_t>(backend.n_ctx)) +
+            static_cast<size_t>(position)) *
+        static_cast<size_t>(effective_attention_kv_dim(backend, block));
+  }
+  return backend.layer_cache_offsets[static_cast<size_t>(layer)] +
+         (static_cast<size_t>(position) *
+          static_cast<size_t>(effective_attention_kv_dim(backend, block)));
 }
 
 inline size_t flash_layer_cache_layer_offset(const native_backend & backend,
-                                             const int32_t layer,
-                                             const int32_t kv_head_dim) noexcept {
-  return static_cast<size_t>(layer) *
-      static_cast<size_t>(backend.n_head_kv) *
-      static_cast<size_t>(backend.n_ctx) *
-      static_cast<size_t>(kv_head_dim);
+                                             const int32_t layer) noexcept {
+  if (backend.flash_layer_cache_offsets.size() != static_cast<size_t>(backend.n_layer)) {
+    return static_cast<size_t>(layer) *
+        static_cast<size_t>(backend.n_head_kv) *
+        static_cast<size_t>(backend.n_ctx) *
+        static_cast<size_t>(backend.head_dim_kv);
+  }
+  return backend.flash_layer_cache_offsets[static_cast<size_t>(layer)];
 }
 
 inline size_t flash_layer_cache_head_offset(const native_backend & backend,
+                                            const block_weights & block,
                                             const int32_t layer,
-                                            const int32_t kv_head,
-                                            const int32_t kv_head_dim) noexcept {
-  return flash_layer_cache_layer_offset(backend, layer, kv_head_dim) +
+                                            const int32_t kv_head) noexcept {
+  return flash_layer_cache_layer_offset(backend, layer) +
       static_cast<size_t>(kv_head) *
       static_cast<size_t>(backend.n_ctx) *
-      static_cast<size_t>(kv_head_dim);
+      static_cast<size_t>(effective_attention_head_dim_kv(backend, block));
 }
 
 inline size_t flash_layer_cache_head_position_offset(const native_backend & backend,
+                                                     const block_weights & block,
                                                      const int32_t layer,
                                                      const int32_t kv_head,
-                                                     const int32_t position,
-                                                     const int32_t kv_head_dim) noexcept {
-  return flash_layer_cache_head_offset(backend, layer, kv_head, kv_head_dim) +
-      static_cast<size_t>(position) * static_cast<size_t>(kv_head_dim);
+                                                     const int32_t position) noexcept {
+  return flash_layer_cache_head_offset(backend, block, layer, kv_head) +
+      static_cast<size_t>(position) *
+      static_cast<size_t>(effective_attention_head_dim_kv(backend, block));
 }
 
 inline void store_fp16_rounded_cache(std::span<const float> src, uint16_t * dst) noexcept {
@@ -2808,15 +2981,14 @@ inline void fill_masked_softmax_probs_ggml(std::span<const float> scores,
 }
 
 inline bool compute_attention(native_backend & backend,
+                              const block_weights & block,
                               const int32_t layer_index,
                               const int32_t position_limit,
                               const std::span<const float> q_vector) noexcept {
   const int32_t head_count = backend.n_head;
-  const int32_t kv_head_count = backend.n_head_kv;
-  const int32_t head_dim = backend.head_dim;
-  const int32_t kv_head_dim = backend.head_dim_kv;
-  const int32_t q_dim = head_count * head_dim;
-  const int32_t kv_dim = kv_head_count * kv_head_dim;
+  const int32_t head_dim = effective_attention_head_dim(backend, block);
+  const int32_t kv_head_dim = effective_attention_head_dim_kv(backend, block);
+  const int32_t q_dim = effective_attention_q_dim(backend, block);
   const float inv_scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
   const int32_t attn_width = backend.n_ctx;
 
@@ -2838,7 +3010,7 @@ inline bool compute_attention(native_backend & backend,
 
     for (int32_t position = 0; position < position_limit; ++position) {
       const size_t cache_offset =
-          layer_cache_offset(backend, layer_index, position, kv_dim) + kv_offset;
+          layer_cache_offset(backend, block, layer_index, position) + kv_offset;
       const float score = emel::kernel::detail::dot_product_f32_f16_scores(
           q_vector.data() + static_cast<std::ptrdiff_t>(q_offset),
           backend.key_cache.data() + static_cast<std::ptrdiff_t>(cache_offset),
@@ -2860,7 +3032,7 @@ inline bool compute_attention(native_backend & backend,
       const size_t cache_offset = q_offset + static_cast<size_t>(dim);
       for (int32_t position = 0; position < position_limit; ++position) {
         const size_t value_offset =
-            layer_cache_offset(backend, layer_index, position, kv_dim) + kv_offset;
+            layer_cache_offset(backend, block, layer_index, position) + kv_offset;
         backend.attn_value_column[static_cast<size_t>(position)] =
             quant::fp16_to_fp32(
                 backend.value_cache[value_offset + static_cast<size_t>(dim)]);
@@ -2880,21 +3052,31 @@ inline bool compute_attention(native_backend & backend,
 
 inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
     const native_backend & backend,
+    const block_weights & block,
     const int32_t layer_index,
     const int32_t position) noexcept {
   emel::kernel::event::op_flash_attn_ext request{};
   const uint64_t kv_tokens = static_cast<uint64_t>(position + 1);
-  const uint64_t head_dim = static_cast<uint64_t>(backend.head_dim);
+  const uint64_t head_dim = static_cast<uint64_t>(effective_attention_head_dim(backend, block));
   const uint64_t head_count = static_cast<uint64_t>(backend.n_head);
-  const uint64_t kv_head_dim = static_cast<uint64_t>(backend.head_dim_kv);
+  const uint64_t kv_head_dim =
+      static_cast<uint64_t>(effective_attention_head_dim_kv(backend, block));
   const uint64_t kv_head_count = static_cast<uint64_t>(backend.n_head_kv);
-  const size_t layer_offset = flash_layer_cache_layer_offset(
-      backend, layer_index, backend.head_dim_kv);
-  const float scale = 1.0f / std::sqrt(static_cast<float>(backend.head_dim));
+  const size_t layer_offset = flash_layer_cache_layer_offset(backend, layer_index);
+  const float scale =
+      1.0f / std::sqrt(static_cast<float>(effective_attention_head_dim(backend, block)));
+  const auto q_dim = static_cast<size_t>(effective_attention_q_dim(backend, block));
   const uint32_t masked_total_tokens = static_cast<uint32_t>(backend.n_ctx);
+  const float * q_data = backend.q.size() >= q_dim ? backend.q.data()
+                                                   : (backend.q_attn.size() >= q_dim
+                                                          ? backend.q_attn.data()
+                                                          : nullptr);
+  auto attn_ctx =
+      std::span<float>(const_cast<float *>(backend.attn_ctx.data()),
+                       q_dim);
 
   request.src0 = make_src_view_3d(
-      const_cast<float *>(backend.q.data()),
+      const_cast<float *>(q_data),
       emel::kernel::event::dtype::f32,
       head_dim,
       1u,
@@ -2916,7 +3098,7 @@ inline emel::kernel::event::op_flash_attn_ext make_flash_attn_request(
       sizeof(uint16_t) * kv_head_dim,
       sizeof(uint16_t) * static_cast<uint64_t>(backend.n_ctx) * kv_head_dim);
   request.dst = make_dst_view_3d(
-      const_cast<float *>(backend.attn_ctx.data()), head_dim, 1u, head_count);
+      attn_ctx.data(), head_dim, 1u, head_count);
   request.nth = 1;
   std::memcpy(request.op_params.data(), &scale, sizeof(scale));
   std::memcpy(request.op_params.data() + sizeof(scale),
@@ -2931,14 +3113,25 @@ inline bool flash_attention_supported(const native_backend & backend,
   if (backend.n_layer <= 0 || position < 0 || position >= backend.n_ctx) {
     return false;
   }
+  block_weights fallback_block{};
+  const block_weights * attention_block = first_attention_block(backend);
+  if (attention_block == nullptr) {
+    fallback_block.uses_attention = true;
+    fallback_block.attention_q_dim = backend.n_head * backend.head_dim;
+    fallback_block.attention_kv_dim = backend.n_head_kv * backend.head_dim_kv;
+    fallback_block.attention_head_dim = backend.head_dim;
+    fallback_block.attention_head_dim_kv = backend.head_dim_kv;
+    attention_block = &fallback_block;
+  }
   return emel::kernel::detail::can_run_flash_attn_ext(
-      make_flash_attn_request(backend, 0, position));
+      make_flash_attn_request(backend, *attention_block, 0, position));
 }
 
 inline bool dispatch_flash_attention(native_backend & backend,
+                                     const block_weights & block,
                                      const int32_t layer_index,
                                      const int32_t position) noexcept {
-  const auto request = make_flash_attn_request(backend, layer_index, position);
+  const auto request = make_flash_attn_request(backend, block, layer_index, position);
   backend.kernel.set_kind(backend.kernel_kind);
   const bool ok = backend.kernel.process_event(request);
   ++backend.kernel_dispatch_calls;
@@ -2947,32 +3140,36 @@ inline bool dispatch_flash_attention(native_backend & backend,
 }
 
 inline bool store_attention_kv_cache(native_backend & backend,
+                                     const block_weights & block,
                                      const int32_t layer_index,
                                      const int32_t position,
                                      std::span<const float> k_vector,
                                      std::span<const float> v_vector) noexcept {
-  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const int32_t effective_kv_dim = effective_attention_kv_dim(backend, block);
   if (position < 0 ||
       position >= backend.n_ctx ||
-      k_vector.size() != static_cast<size_t>(kv_dim) ||
-      v_vector.size() != static_cast<size_t>(kv_dim)) {
+      k_vector.size() != static_cast<size_t>(effective_kv_dim) ||
+      v_vector.size() != static_cast<size_t>(effective_kv_dim)) {
     return false;
   }
 
-  const size_t cache_offset = layer_cache_offset(backend, layer_index, position, kv_dim);
+  const size_t cache_offset = layer_cache_offset(backend, block, layer_index, position);
   store_fp16_rounded_cache(k_vector, backend.key_cache.data() + cache_offset);
   store_fp16_rounded_cache(v_vector, backend.value_cache.data() + cache_offset);
 
   for (int32_t kv_head = 0; kv_head < backend.n_head_kv; ++kv_head) {
     const size_t src_offset =
-        static_cast<size_t>(kv_head) * static_cast<size_t>(backend.head_dim_kv);
+        static_cast<size_t>(kv_head) *
+        static_cast<size_t>(effective_attention_head_dim_kv(backend, block));
     const size_t flash_cache_offset = flash_layer_cache_head_position_offset(
-        backend, layer_index, kv_head, position, backend.head_dim_kv);
+        backend, block, layer_index, kv_head, position);
     store_fp16_rounded_cache(
-        k_vector.subspan(src_offset, static_cast<size_t>(backend.head_dim_kv)),
+        k_vector.subspan(
+            src_offset, static_cast<size_t>(effective_attention_head_dim_kv(backend, block))),
         backend.flash_key_cache.data() + flash_cache_offset);
     store_fp16_rounded_cache(
-        v_vector.subspan(src_offset, static_cast<size_t>(backend.head_dim_kv)),
+        v_vector.subspan(
+            src_offset, static_cast<size_t>(effective_attention_head_dim_kv(backend, block))),
         backend.flash_value_cache.data() + flash_cache_offset);
   }
 
@@ -2981,29 +3178,39 @@ inline bool store_attention_kv_cache(native_backend & backend,
 
 template <emel::generator::attention_mode mode>
 inline bool run_attention_for_q_vector(native_backend & backend,
+                                       const block_weights & block,
                                        const int32_t layer_index,
                                        const int32_t position,
                                        std::span<const float> q_vector) noexcept {
   if constexpr (mode == emel::generator::attention_mode::flash) {
-    if (q_vector.size() != backend.q.size()) {
+    auto q = std::span<float>(backend.q.data(), q_vector.size());
+    if (q_vector.size() != static_cast<size_t>(effective_attention_q_dim(backend, block))) {
       return false;
     }
-    std::copy(q_vector.begin(), q_vector.end(), backend.q.begin());
-    return dispatch_flash_attention(backend, layer_index, position);
+    std::copy(q_vector.begin(), q_vector.end(), q.begin());
+    return dispatch_flash_attention(backend, block, layer_index, position);
   } else {
-    if (q_vector.size() != backend.q_attn.size()) {
+    auto q_attn = std::span<float>(backend.q_attn.data(), q_vector.size());
+    if (q_vector.size() != static_cast<size_t>(effective_attention_q_dim(backend, block))) {
       return false;
     }
-    round_q_for_nonflash(q_vector, backend.q_attn);
-    return compute_attention(backend, layer_index, position + 1, backend.q_attn);
+    round_q_for_nonflash(q_vector, q_attn);
+    return compute_attention(backend, block, layer_index, position + 1, q_attn);
   }
 }
 
 template <emel::generator::attention_mode mode>
 inline bool run_attention(native_backend & backend,
+                          const block_weights & block,
                           const int32_t layer_index,
                           const int32_t position) noexcept {
-  return run_attention_for_q_vector<mode>(backend, layer_index, position, backend.q);
+  return run_attention_for_q_vector<mode>(
+      backend,
+      block,
+      layer_index,
+      position,
+      std::span<const float>(
+          backend.q.data(), static_cast<size_t>(effective_attention_q_dim(backend, block))));
 }
 
 inline bool run_shortconv_block(native_backend & backend,
@@ -3187,6 +3394,13 @@ inline bool run_layer(native_backend & backend,
   }
 
   if (block.uses_attention) {
+    const int32_t q_dim = effective_attention_q_dim(backend, block);
+    const int32_t kv_dim = effective_attention_kv_dim(backend, block);
+    auto q = std::span<float>(backend.q.data(), static_cast<size_t>(q_dim));
+    auto k = std::span<float>(backend.k.data(), static_cast<size_t>(kv_dim));
+    auto v = std::span<float>(backend.v.data(), static_cast<size_t>(kv_dim));
+    auto attn_ctx =
+        std::span<const float>(backend.attn_ctx.data(), static_cast<size_t>(q_dim));
     const bool qkv_shared_packed_q8_0 =
         packed_q8_0_input_path_supported(backend, block.attention_q) &&
         packed_q8_0_input_path_supported(backend, block.attention_k) &&
@@ -3198,11 +3412,11 @@ inline bool run_layer(native_backend & backend,
     if (qkv_shared_packed_q8_0) {
       if (!prepare_packed_q8_0_input(backend, backend.norm) ||
           !matmul_vector_prepared_packed_q8_0_input(
-              backend, block.attention_q, block.attention_q.cols, backend.q) ||
+              backend, block.attention_q, block.attention_q.cols, q) ||
           !matmul_vector_prepared_packed_q8_0_input(
-              backend, block.attention_k, block.attention_k.cols, backend.k) ||
+              backend, block.attention_k, block.attention_k.cols, k) ||
           !matmul_vector_prepared_packed_q8_0_input(
-              backend, block.attention_v, block.attention_v.cols, backend.v)) {
+              backend, block.attention_v, block.attention_v.cols, v)) {
         return false;
       }
     } else if (qkv_shared_q8) {
@@ -3215,16 +3429,16 @@ inline bool run_layer(native_backend & backend,
           backend.q8_input_storage.data(), block_count);
       if (!quantize_vector_q8_k(backend.norm, q8_input) ||
           !matmul_vector_q8_input(
-              backend, block.attention_q, q8_input, block.attention_q.cols, backend.q) ||
+              backend, block.attention_q, q8_input, block.attention_q.cols, q) ||
           !matmul_vector_q8_input(
-              backend, block.attention_k, q8_input, block.attention_k.cols, backend.k) ||
+              backend, block.attention_k, q8_input, block.attention_k.cols, k) ||
           !matmul_vector_q8_input(
-              backend, block.attention_v, q8_input, block.attention_v.cols, backend.v)) {
+              backend, block.attention_v, q8_input, block.attention_v.cols, v)) {
         return false;
       }
-    } else if (!matmul_vector(backend, block.attention_q, backend.norm, backend.q) ||
-               !matmul_vector(backend, block.attention_k, backend.norm, backend.k) ||
-               !matmul_vector(backend, block.attention_v, backend.norm, backend.v)) {
+    } else if (!matmul_vector(backend, block.attention_q, backend.norm, q) ||
+               !matmul_vector(backend, block.attention_k, backend.norm, k) ||
+               !matmul_vector(backend, block.attention_v, backend.norm, v)) {
       return false;
     }
 
@@ -3232,23 +3446,32 @@ inline bool run_layer(native_backend & backend,
         !apply_attention_qk_norm(backend, block)) {
       return false;
     }
+    if (requires_attention_v_norm(backend, layer_index, block) &&
+        !apply_rms_norm_in_place(v, backend.rms_epsilon)) {
+      return false;
+    }
 
-    apply_rope(
-        backend.q, backend.n_head, backend.head_dim, backend.n_rot, position, backend.rope_freq_base);
-    apply_rope(backend.k,
-               backend.n_head_kv,
-               backend.head_dim_kv,
-               backend.n_rot,
+    apply_rope(q,
+               backend.n_head,
+               effective_attention_head_dim(backend, block),
+               effective_attention_rope_dim(backend, block),
                position,
-               backend.rope_freq_base);
+               effective_attention_rope_freq_base(backend, block));
+    apply_rope(k,
+               backend.n_head_kv,
+               effective_attention_head_dim_kv(backend, block),
+               effective_attention_rope_dim(backend, block),
+               position,
+               effective_attention_rope_freq_base(backend, block));
     if (!store_attention_kv_cache(
             backend,
+            block,
             layer_index,
             position,
-            std::span<const float>(backend.k.data(), backend.k.size()),
-            std::span<const float>(backend.v.data(), backend.v.size())) ||
-        !run_attention<mode>(backend, layer_index, position) ||
-        !matmul_vector(backend, block.attention_output, backend.attn_ctx, backend.projected)) {
+            k,
+            v) ||
+        !run_attention<mode>(backend, block, layer_index, position) ||
+        !matmul_vector(backend, block.attention_output, attn_ctx, backend.projected)) {
       return false;
     }
 
@@ -3263,6 +3486,10 @@ inline bool run_layer(native_backend & backend,
     return false;
   }
 
+  const int32_t ffn_dim = block.feed_forward_gate.rows;
+  auto gate = std::span<float>(backend.gate.data(), static_cast<size_t>(ffn_dim));
+  auto up = std::span<float>(backend.up.data(), static_cast<size_t>(ffn_dim));
+  auto ffn_hidden = std::span<float>(backend.ffn_hidden.data(), static_cast<size_t>(ffn_dim));
   const bool gate_up_shared_packed_q8_0 =
       packed_q8_0_input_path_supported(backend, block.feed_forward_gate) &&
       packed_q8_0_input_path_supported(backend, block.feed_forward_up);
@@ -3272,9 +3499,9 @@ inline bool run_layer(native_backend & backend,
   if (gate_up_shared_packed_q8_0) {
     if (!prepare_packed_q8_0_input(backend, backend.norm) ||
         !matmul_vector_prepared_packed_q8_0_input(
-            backend, block.feed_forward_gate, block.feed_forward_gate.cols, backend.gate) ||
+            backend, block.feed_forward_gate, block.feed_forward_gate.cols, gate) ||
         !matmul_vector_prepared_packed_q8_0_input(
-            backend, block.feed_forward_up, block.feed_forward_up.cols, backend.up)) {
+            backend, block.feed_forward_up, block.feed_forward_up.cols, up)) {
       return false;
     }
   } else if (gate_up_shared_q8) {
@@ -3291,25 +3518,25 @@ inline bool run_layer(native_backend & backend,
             block.feed_forward_gate,
             q8_input,
             block.feed_forward_gate.cols,
-            backend.gate) ||
+            gate) ||
         !matmul_vector_q8_input(
             backend,
             block.feed_forward_up,
             q8_input,
             block.feed_forward_up.cols,
-            backend.up)) {
+            up)) {
       return false;
     }
-  } else if (!matmul_vector(backend, block.feed_forward_gate, backend.norm, backend.gate) ||
-             !matmul_vector(backend, block.feed_forward_up, backend.norm, backend.up)) {
+  } else if (!matmul_vector(backend, block.feed_forward_gate, backend.norm, gate) ||
+             !matmul_vector(backend, block.feed_forward_up, backend.norm, up)) {
     return false;
   }
 
-  for (size_t idx = 0; idx < backend.gate.size(); ++idx) {
-    backend.ffn_hidden[idx] = silu(backend.gate[idx]) * backend.up[idx];
+  for (size_t idx = 0; idx < gate.size(); ++idx) {
+    ffn_hidden[idx] = silu(gate[idx]) * up[idx];
   }
 
-  if (!matmul_vector(backend, block.feed_forward_down, backend.ffn_hidden, backend.projected)) {
+  if (!matmul_vector(backend, block.feed_forward_down, ffn_hidden, backend.projected)) {
     return false;
   }
 
@@ -3596,9 +3823,21 @@ inline bool run_layer_chunk4(native_backend & backend,
                              const int32_t layer_index,
                              const size_t token_base) noexcept {
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
-  const int32_t q_dim = backend.n_head * backend.head_dim;
-  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const int32_t q_dim = effective_attention_q_dim(backend, block);
+  const int32_t kv_dim = effective_attention_kv_dim(backend, block);
   const int32_t ffn_dim = block.feed_forward_gate.rows;
+  auto q_chunk =
+      std::span<float>(backend.q_chunk4.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(q_dim));
+  auto k_chunk =
+      std::span<float>(backend.k_chunk4.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(kv_dim));
+  auto v_chunk =
+      std::span<float>(backend.v_chunk4.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(kv_dim));
+  auto attn_ctx_chunk =
+      std::span<float>(backend.attn_ctx_chunk4.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(q_dim));
 
   if (!rms_norm_chunk4(
           backend.hidden_chunk4,
@@ -3612,64 +3851,68 @@ inline bool run_layer_chunk4(native_backend & backend,
   if (block.uses_attention) {
     if (!prepare_chunk4_rhs<route>(backend, backend.norm_chunk4, backend.n_embd) ||
         !matmul_chunk4_prepared<route>(
-            backend, block.attention_q, backend.n_embd, backend.q_chunk4) ||
+            backend, block.attention_q, backend.n_embd, q_chunk) ||
         !matmul_chunk4_prepared<route>(
-            backend, block.attention_k, backend.n_embd, backend.k_chunk4) ||
+            backend, block.attention_k, backend.n_embd, k_chunk) ||
         !matmul_chunk4_prepared<route>(
-            backend, block.attention_v, backend.n_embd, backend.v_chunk4)) {
+            backend, block.attention_v, backend.n_embd, v_chunk)) {
       return false;
     }
 
     const bool qk_norm_runtime = requires_attention_qk_norm(backend, block);
+    const bool v_norm_runtime = requires_attention_v_norm(backend, layer_index, block);
     for (int32_t row = 0; row < k_prefill_q8_chunk_rows; ++row) {
       const int32_t position = backend.bound_positions[token_base + static_cast<size_t>(row)];
-      auto q_row = chunk4_row_span<float>(std::span<float>(backend.q_chunk4), row, q_dim);
-      auto k_row = chunk4_row_span<float>(std::span<float>(backend.k_chunk4), row, kv_dim);
-      const auto v_row = chunk4_row_span<const float>(
-          std::span<const float>(backend.v_chunk4), row, kv_dim);
+      auto q_row = chunk4_row_span<float>(q_chunk, row, q_dim);
+      auto k_row = chunk4_row_span<float>(k_chunk, row, kv_dim);
+      auto v_row = chunk4_row_span<float>(v_chunk, row, kv_dim);
 
       if (qk_norm_runtime &&
           (!apply_headwise_rms_norm(
                q_row,
                block.attention_q_norm,
                backend.n_head,
-               backend.head_dim,
+               effective_attention_head_dim(backend, block),
                backend.rms_epsilon) ||
            !apply_headwise_rms_norm(
                k_row,
                block.attention_k_norm,
                backend.n_head_kv,
-               backend.head_dim_kv,
+               effective_attention_head_dim_kv(backend, block),
                backend.rms_epsilon))) {
+        return false;
+      }
+      if (v_norm_runtime &&
+          !apply_rms_norm_in_place(v_row, backend.rms_epsilon)) {
         return false;
       }
 
       apply_rope(q_row,
                  backend.n_head,
-                 backend.head_dim,
-                 backend.n_rot,
+                 effective_attention_head_dim(backend, block),
+                 effective_attention_rope_dim(backend, block),
                  position,
-                 backend.rope_freq_base);
+                 effective_attention_rope_freq_base(backend, block));
       apply_rope(k_row,
                  backend.n_head_kv,
-                 backend.head_dim_kv,
-                 backend.n_rot,
+                 effective_attention_head_dim_kv(backend, block),
+                 effective_attention_rope_dim(backend, block),
                  position,
-                 backend.rope_freq_base);
+                 effective_attention_rope_freq_base(backend, block));
 
-      if (!store_attention_kv_cache(backend, layer_index, position, k_row, v_row) ||
-          !run_attention_for_q_vector<mode>(backend, layer_index, position, q_row)) {
+      if (!store_attention_kv_cache(backend, block, layer_index, position, k_row, v_row) ||
+          !run_attention_for_q_vector<mode>(backend, block, layer_index, position, q_row)) {
         return false;
       }
 
       std::copy(
           backend.attn_ctx.begin(),
-          backend.attn_ctx.end(),
-          chunk4_row_span<float>(std::span<float>(backend.attn_ctx_chunk4), row, q_dim).begin());
+          backend.attn_ctx.begin() + q_dim,
+          chunk4_row_span<float>(attn_ctx_chunk, row, q_dim).begin());
       backend.kv_cache_tokens = position + 1;
     }
 
-    if (!prepare_chunk4_rhs<route>(backend, backend.attn_ctx_chunk4, q_dim) ||
+    if (!prepare_chunk4_rhs<route>(backend, attn_ctx_chunk, q_dim) ||
         !matmul_chunk4_prepared<route>(
             backend, block.attention_output, q_dim, backend.projected_chunk4) ||
         !add_chunk4_rows_in_place(
@@ -3689,17 +3932,26 @@ inline bool run_layer_chunk4(native_backend & backend,
     return false;
   }
 
+  auto gate_chunk =
+      std::span<float>(backend.gate_chunk4.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(ffn_dim));
+  auto up_chunk =
+      std::span<float>(backend.up_chunk4.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(ffn_dim));
+  auto ffn_hidden_chunk =
+      std::span<float>(backend.ffn_hidden_chunk4.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(ffn_dim));
   if (!prepare_chunk4_rhs<route>(backend, backend.norm_chunk4, backend.n_embd) ||
       !matmul_chunk4_prepared<route>(
-          backend, block.feed_forward_gate, backend.n_embd, backend.gate_chunk4) ||
+          backend, block.feed_forward_gate, backend.n_embd, gate_chunk) ||
       !matmul_chunk4_prepared<route>(
-          backend, block.feed_forward_up, backend.n_embd, backend.up_chunk4)) {
+          backend, block.feed_forward_up, backend.n_embd, up_chunk)) {
     return false;
   }
 
   if (!apply_silu_mul_chunk4(
-          backend.gate_chunk4, backend.up_chunk4, ffn_dim, backend.ffn_hidden_chunk4) ||
-      !prepare_chunk4_rhs<route>(backend, backend.ffn_hidden_chunk4, ffn_dim) ||
+          gate_chunk, up_chunk, ffn_dim, ffn_hidden_chunk) ||
+      !prepare_chunk4_rhs<route>(backend, ffn_hidden_chunk, ffn_dim) ||
       !matmul_chunk4_prepared<route>(
           backend, block.feed_forward_down, ffn_dim, backend.projected_chunk4) ||
       !add_chunk4_rows_in_place(backend.hidden_chunk4, backend.projected_chunk4, backend.n_embd)) {
@@ -3714,9 +3966,21 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
                                   const int32_t layer_index,
                                   const size_t token_base) noexcept {
   auto & block = backend.blocks[static_cast<size_t>(layer_index)];
-  const int32_t q_dim = backend.n_head * backend.head_dim;
-  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  const int32_t q_dim = effective_attention_q_dim(backend, block);
+  const int32_t kv_dim = effective_attention_kv_dim(backend, block);
   const int32_t ffn_dim = block.feed_forward_gate.rows;
+  auto q_chunk =
+      std::span<float>(backend.q_chunk8.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(q_dim));
+  auto k_chunk =
+      std::span<float>(backend.k_chunk8.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(kv_dim));
+  auto v_chunk =
+      std::span<float>(backend.v_chunk8.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(kv_dim));
+  auto attn_ctx_chunk =
+      std::span<float>(backend.attn_ctx_chunk8.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(q_dim));
 
   if (!rms_norm_chunk8(
           backend.hidden_chunk8,
@@ -3729,62 +3993,66 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
 
   if (block.uses_attention) {
     if (!prepare_q8_chunk8_input(backend, backend.norm_chunk8, backend.n_embd) ||
-        !matmul_chunk8_q8_input(backend, block.attention_q, backend.n_embd, backend.q_chunk8) ||
-        !matmul_chunk8_q8_input(backend, block.attention_k, backend.n_embd, backend.k_chunk8) ||
-        !matmul_chunk8_q8_input(backend, block.attention_v, backend.n_embd, backend.v_chunk8)) {
+        !matmul_chunk8_q8_input(backend, block.attention_q, backend.n_embd, q_chunk) ||
+        !matmul_chunk8_q8_input(backend, block.attention_k, backend.n_embd, k_chunk) ||
+        !matmul_chunk8_q8_input(backend, block.attention_v, backend.n_embd, v_chunk)) {
       return false;
     }
 
     const bool qk_norm_runtime = requires_attention_qk_norm(backend, block);
+    const bool v_norm_runtime = requires_attention_v_norm(backend, layer_index, block);
     for (int32_t row = 0; row < k_prefill_q8_chunk8_rows; ++row) {
       const int32_t position = backend.bound_positions[token_base + static_cast<size_t>(row)];
-      auto q_row = chunk8_row_span<float>(std::span<float>(backend.q_chunk8), row, q_dim);
-      auto k_row = chunk8_row_span<float>(std::span<float>(backend.k_chunk8), row, kv_dim);
-      const auto v_row = chunk8_row_span<const float>(
-          std::span<const float>(backend.v_chunk8), row, kv_dim);
+      auto q_row = chunk8_row_span<float>(q_chunk, row, q_dim);
+      auto k_row = chunk8_row_span<float>(k_chunk, row, kv_dim);
+      auto v_row = chunk8_row_span<float>(v_chunk, row, kv_dim);
 
       if (qk_norm_runtime &&
           (!apply_headwise_rms_norm(
                q_row,
                block.attention_q_norm,
                backend.n_head,
-               backend.head_dim,
+               effective_attention_head_dim(backend, block),
                backend.rms_epsilon) ||
            !apply_headwise_rms_norm(
                k_row,
                block.attention_k_norm,
                backend.n_head_kv,
-               backend.head_dim_kv,
+               effective_attention_head_dim_kv(backend, block),
                backend.rms_epsilon))) {
+        return false;
+      }
+      if (v_norm_runtime &&
+          !apply_rms_norm_in_place(v_row, backend.rms_epsilon)) {
         return false;
       }
 
       apply_rope(q_row,
                  backend.n_head,
-                 backend.head_dim,
-                 backend.n_rot,
+                 effective_attention_head_dim(backend, block),
+                 effective_attention_rope_dim(backend, block),
                  position,
-                 backend.rope_freq_base);
+                 effective_attention_rope_freq_base(backend, block));
       apply_rope(k_row,
                  backend.n_head_kv,
-                 backend.head_dim_kv,
-                 backend.n_rot,
+                 effective_attention_head_dim_kv(backend, block),
+                 effective_attention_rope_dim(backend, block),
                  position,
-                 backend.rope_freq_base);
+                 effective_attention_rope_freq_base(backend, block));
 
-      if (!store_attention_kv_cache(backend, layer_index, position, k_row, v_row) ||
-          !run_attention_for_q_vector<mode>(backend, layer_index, position, q_row)) {
+      if (!store_attention_kv_cache(backend, block, layer_index, position, k_row, v_row) ||
+          !run_attention_for_q_vector<mode>(backend, block, layer_index, position, q_row)) {
         return false;
       }
 
       std::copy(
           backend.attn_ctx.begin(),
-          backend.attn_ctx.end(),
-          chunk8_row_span<float>(std::span<float>(backend.attn_ctx_chunk8), row, q_dim).begin());
+          backend.attn_ctx.begin() + q_dim,
+          chunk8_row_span<float>(attn_ctx_chunk, row, q_dim).begin());
       backend.kv_cache_tokens = position + 1;
     }
 
-    if (!prepare_q8_chunk8_input(backend, backend.attn_ctx_chunk8, q_dim) ||
+    if (!prepare_q8_chunk8_input(backend, attn_ctx_chunk, q_dim) ||
         !matmul_chunk8_q8_input(
             backend, block.attention_output, q_dim, backend.projected_chunk8) ||
         !add_chunk8_rows_in_place(backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd)) {
@@ -3803,17 +4071,26 @@ inline bool run_layer_chunk8_q8_k(native_backend & backend,
     return false;
   }
 
+  auto gate_chunk =
+      std::span<float>(backend.gate_chunk8.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(ffn_dim));
+  auto up_chunk =
+      std::span<float>(backend.up_chunk8.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(ffn_dim));
+  auto ffn_hidden_chunk =
+      std::span<float>(backend.ffn_hidden_chunk8.data(),
+                       static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(ffn_dim));
   if (!prepare_q8_chunk8_input(backend, backend.norm_chunk8, backend.n_embd) ||
       !matmul_chunk8_q8_input(
-          backend, block.feed_forward_gate, backend.n_embd, backend.gate_chunk8) ||
+          backend, block.feed_forward_gate, backend.n_embd, gate_chunk) ||
       !matmul_chunk8_q8_input(
-          backend, block.feed_forward_up, backend.n_embd, backend.up_chunk8)) {
+          backend, block.feed_forward_up, backend.n_embd, up_chunk)) {
     return false;
   }
 
   if (!apply_silu_mul_chunk8(
-          backend.gate_chunk8, backend.up_chunk8, ffn_dim, backend.ffn_hidden_chunk8) ||
-      !prepare_q8_chunk8_input(backend, backend.ffn_hidden_chunk8, ffn_dim) ||
+          gate_chunk, up_chunk, ffn_dim, ffn_hidden_chunk) ||
+      !prepare_q8_chunk8_input(backend, ffn_hidden_chunk, ffn_dim) ||
       !matmul_chunk8_q8_input(
           backend, block.feed_forward_down, ffn_dim, backend.projected_chunk8) ||
       !add_chunk8_rows_in_place(backend.hidden_chunk8, backend.projected_chunk8, backend.n_embd)) {
@@ -4095,25 +4372,20 @@ inline emel::error::type prepare(native_backend & backend,
   backend.kernel_kind = detect_host_kernel_kind();
   backend.kernel.set_kind(backend.kernel_kind);
 
-  if (emel::model::llama::detail::build_execution_view(model_data, backend.execution) !=
-          emel::error::cast(emel::model::loader::error::none) ||
-      emel::model::llama::detail::build_topology(backend.execution, backend.topology) !=
-          emel::error::cast(emel::model::loader::error::none) ||
-      emel::model::llama::detail::build_step_plans(
-          backend.topology, backend.prefill_plan, backend.decode_plan) !=
-          emel::error::cast(emel::model::loader::error::none)) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
+  emel::error::type build_err = emel::error::cast(emel::model::builder::error::none);
+  emel::model::builder::event::build build_request{model_data, backend.build};
+  build_request.error_out = &build_err;
+  emel::model::builder::sm builder;
+  if (!builder.process_event(build_request)) {
+    return build_err;
   }
-
-  backend.quantized_audit =
-      emel::model::llama::detail::build_quantized_path_audit(backend.execution);
   backend.model = &model_data;
   backend.n_vocab = model_data.params.n_vocab;
   backend.n_embd = model_data.params.n_embd;
   backend.n_head = model_data.params.n_head;
   backend.n_head_kv =
       model_data.params.n_head_kv > 0 ? model_data.params.n_head_kv : model_data.params.n_head;
-  backend.n_layer = backend.execution.block_count;
+  backend.n_layer = backend.build.execution.block_count;
   backend.n_ctx = model_data.params.n_ctx;
   backend.n_rot = model_data.params.n_rot > 0 ? model_data.params.n_rot : 0;
   backend.rms_epsilon = model_data.params.attention_layer_norm_rms_epsilon > 0.0f
@@ -4133,8 +4405,8 @@ inline emel::error::type prepare(native_backend & backend,
   }
 
   backend.head_dim = backend.n_embd / backend.n_head;
-  if (!bind_tensor_rows(*backend.execution.token_embedding.tensor, backend.token_embedding) ||
-      !dequantize_tensor_vector(*backend.execution.output_norm.tensor, backend.output_norm) ||
+  if (!bind_tensor_rows(*backend.build.execution.token_embedding.tensor, backend.token_embedding) ||
+      !dequantize_tensor_vector(*backend.build.execution.output_norm.tensor, backend.output_norm) ||
       !bind_output_projection(backend) ||
       !prepare_output_logits(backend)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -4151,8 +4423,8 @@ inline emel::error::type prepare(native_backend & backend,
   backend.blocks.resize(static_cast<size_t>(backend.n_layer));
   const bool lfm2_runtime = is_lfm2_runtime(backend);
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    emel::model::llama::detail::block_view block = {};
-    if (emel::model::llama::detail::lookup_block_view(backend.execution, layer, block) !=
+    emel::model::builder::detail::block_view block = {};
+    if (emel::model::builder::detail::lookup_block_view(backend.build.execution, layer, block) !=
         emel::error::cast(emel::model::loader::error::none)) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
@@ -4219,61 +4491,95 @@ inline emel::error::type prepare(native_backend & backend,
   }
 
   const int32_t declared_key_length = model_data.params.attention_key_length;
+  const int32_t declared_key_length_swa = model_data.params.attention_key_length_swa;
   const int32_t declared_value_length = model_data.params.attention_value_length;
+  const int32_t declared_value_length_swa = model_data.params.attention_value_length_swa;
   const block_weights * attention_block = first_attention_block(backend);
-  backend.head_dim = declared_key_length > 0 ? declared_key_length : backend.n_embd / backend.n_head;
   if (attention_block == nullptr) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
-  backend.head_dim_kv =
-      declared_key_length > 0 ? declared_key_length : attention_block->attention_k.rows / backend.n_head_kv;
   backend.n_rep = backend.n_head / backend.n_head_kv;
   backend.shortconv_kernel_size = model_data.params.shortconv_l_cache;
   backend.shortconv_state_size =
       backend.shortconv_kernel_size > 0 ? backend.shortconv_kernel_size - 1 : 0;
-  const int32_t q_dim = backend.n_head * backend.head_dim;
-  const int32_t kv_dim = backend.n_head_kv * backend.head_dim_kv;
+  backend.max_q_dim = 0;
+  backend.max_kv_dim = 0;
+  backend.max_ffn_dim = 0;
+  backend.layer_cache_offsets.resize(static_cast<size_t>(backend.n_layer));
+  backend.flash_layer_cache_offsets.resize(static_cast<size_t>(backend.n_layer));
+  size_t cache_offset = 0u;
+  size_t flash_cache_offset = 0u;
 
-  if (backend.head_dim_kv <= 0 ||
-      backend.head_dim <= 0 ||
-      backend.n_rep <= 0 ||
-      (declared_value_length > 0 && declared_value_length != backend.head_dim_kv) ||
-      attention_block->attention_q.cols != backend.n_embd ||
-      attention_block->attention_q.rows != q_dim ||
-      attention_block->attention_k.cols != backend.n_embd ||
-      attention_block->attention_k.rows != kv_dim ||
-      attention_block->attention_v.cols != backend.n_embd ||
-      attention_block->attention_v.rows != kv_dim ||
-      attention_block->attention_output.cols != q_dim ||
-      attention_block->attention_output.rows != backend.n_embd ||
-      static_cast<int32_t>(attention_block->attention_norm.size()) != backend.n_embd ||
-      static_cast<int32_t>(attention_block->feed_forward_norm.size()) != backend.n_embd ||
-      attention_block->feed_forward_gate.cols != backend.n_embd ||
-      attention_block->feed_forward_up.cols != backend.n_embd ||
-      attention_block->feed_forward_down.rows != backend.n_embd) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
-
-  for (const auto & block : backend.blocks) {
+  for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
+    auto & block = backend.blocks[static_cast<size_t>(layer)];
     if (static_cast<int32_t>(block.attention_norm.size()) != backend.n_embd ||
         static_cast<int32_t>(block.feed_forward_norm.size()) != backend.n_embd ||
+        block.feed_forward_gate.rows <= 0 ||
         block.feed_forward_gate.cols != backend.n_embd ||
+        block.feed_forward_up.rows != block.feed_forward_gate.rows ||
         block.feed_forward_up.cols != backend.n_embd ||
-        block.feed_forward_down.rows != backend.n_embd) {
+        block.feed_forward_down.rows != backend.n_embd ||
+        block.feed_forward_down.cols != block.feed_forward_gate.rows) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
 
+    backend.max_ffn_dim = std::max(backend.max_ffn_dim, block.feed_forward_gate.rows);
+
     if (block.uses_attention) {
+      block.attention_q_dim = block.attention_q.rows;
+      block.attention_kv_dim = block.attention_k.rows;
       if (block.attention_q.cols != backend.n_embd ||
-          block.attention_q.rows != q_dim ||
+          block.attention_q.rows <= 0 ||
+          (block.attention_q.rows % backend.n_head) != 0 ||
           block.attention_k.cols != backend.n_embd ||
-          block.attention_k.rows != kv_dim ||
+          block.attention_k.rows <= 0 ||
+          (block.attention_k.rows % backend.n_head_kv) != 0 ||
           block.attention_v.cols != backend.n_embd ||
-          block.attention_v.rows != kv_dim ||
-          block.attention_output.cols != q_dim ||
+          block.attention_v.rows != block.attention_k.rows ||
+          block.attention_output.cols != block.attention_q.rows ||
           block.attention_output.rows != backend.n_embd) {
         return emel::error::cast(emel::model::loader::error::model_invalid);
       }
+
+      block.attention_head_dim = block.attention_q.rows / backend.n_head;
+      block.attention_head_dim_kv = block.attention_k.rows / backend.n_head_kv;
+      const bool gemma4_sliding_attention = is_gemma4_sliding_attention_layer(backend, layer);
+      const int32_t expected_key_length =
+          gemma4_sliding_attention && declared_key_length_swa > 0 ? declared_key_length_swa
+                                                                  : declared_key_length;
+      const int32_t expected_value_length =
+          gemma4_sliding_attention && declared_value_length_swa > 0 ? declared_value_length_swa
+                                                                    : declared_value_length;
+      const int32_t expected_rope_dim =
+          gemma4_sliding_attention && model_data.params.n_rot_swa > 0 ? model_data.params.n_rot_swa
+                                                                      : model_data.params.n_rot;
+      block.attention_rope_dim =
+          expected_rope_dim > 0 ? expected_rope_dim : block.attention_head_dim;
+      block.attention_rope_freq_base =
+          gemma4_sliding_attention && model_data.params.rope_freq_base_swa > 0.0f
+              ? model_data.params.rope_freq_base_swa
+              : backend.rope_freq_base;
+      const bool qk_norm_required = requires_attention_qk_norm(backend, block);
+      if (block.attention_head_dim <= 0 ||
+          block.attention_head_dim_kv <= 0 ||
+          (expected_key_length > 0 && block.attention_head_dim != expected_key_length) ||
+          (expected_value_length > 0 && block.attention_head_dim_kv != expected_value_length) ||
+          (qk_norm_required &&
+           static_cast<int32_t>(block.attention_q_norm.size()) != block.attention_head_dim) ||
+          (qk_norm_required &&
+           static_cast<int32_t>(block.attention_k_norm.size()) != block.attention_head_dim_kv)) {
+        return emel::error::cast(emel::model::loader::error::model_invalid);
+      }
+
+      backend.max_q_dim = std::max(backend.max_q_dim, block.attention_q_dim);
+      backend.max_kv_dim = std::max(backend.max_kv_dim, block.attention_kv_dim);
+      backend.layer_cache_offsets[static_cast<size_t>(layer)] = cache_offset;
+      cache_offset += static_cast<size_t>(backend.n_ctx) *
+                      static_cast<size_t>(block.attention_kv_dim);
+      backend.flash_layer_cache_offsets[static_cast<size_t>(layer)] = flash_cache_offset;
+      flash_cache_offset += static_cast<size_t>(backend.n_head_kv) *
+                            static_cast<size_t>(backend.n_ctx) *
+                            static_cast<size_t>(block.attention_head_dim_kv);
       continue;
     }
 
@@ -4289,28 +4595,19 @@ inline emel::error::type prepare(native_backend & backend,
     }
   }
 
-  if (is_qwen3_runtime(backend) || is_lfm2_runtime(backend)) {
-    for (const auto & block : backend.blocks) {
-      if (block.uses_attention &&
-          (static_cast<int32_t>(block.attention_q_norm.size()) != backend.head_dim ||
-           static_cast<int32_t>(block.attention_k_norm.size()) != backend.head_dim_kv)) {
-        return emel::error::cast(emel::model::loader::error::model_invalid);
-      }
-    }
+  backend.head_dim = backend.max_q_dim > 0 ? backend.max_q_dim / backend.n_head : 0;
+  backend.head_dim_kv = backend.max_kv_dim > 0 ? backend.max_kv_dim / backend.n_head_kv : 0;
+  if (backend.max_q_dim <= 0 || backend.max_kv_dim <= 0 || backend.n_rep <= 0) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
+  }
+  if (backend.max_ffn_dim <= 0) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
-  backend.key_cache.resize(static_cast<size_t>(backend.n_layer) *
-                           static_cast<size_t>(backend.n_ctx) *
-                           static_cast<size_t>(kv_dim));
-  backend.value_cache.resize(static_cast<size_t>(backend.n_layer) *
-                             static_cast<size_t>(backend.n_ctx) *
-                             static_cast<size_t>(kv_dim));
-  backend.flash_key_cache.resize(static_cast<size_t>(backend.n_layer) *
-                                 static_cast<size_t>(backend.n_ctx) *
-                                 static_cast<size_t>(kv_dim));
-  backend.flash_value_cache.resize(static_cast<size_t>(backend.n_layer) *
-                                   static_cast<size_t>(backend.n_ctx) *
-                                   static_cast<size_t>(kv_dim));
+  backend.key_cache.resize(cache_offset);
+  backend.value_cache.resize(cache_offset);
+  backend.flash_key_cache.resize(flash_cache_offset);
+  backend.flash_value_cache.resize(flash_cache_offset);
   backend.recurrent_shortconv_cache.resize(
       static_cast<size_t>(backend.n_layer) *
       static_cast<size_t>(backend.shortconv_state_size) *
@@ -4337,45 +4634,45 @@ inline emel::error::type prepare(native_backend & backend,
       static_cast<size_t>(k_prefill_q8_chunk8_rows) *
       static_cast<size_t>(3 * backend.n_embd));
   backend.shortconv_conv_out_chunk8.resize(backend.hidden_chunk8.size());
-  backend.q.resize(static_cast<size_t>(q_dim));
-  backend.q_attn.resize(static_cast<size_t>(q_dim));
+  backend.q.resize(static_cast<size_t>(backend.max_q_dim));
+  backend.q_attn.resize(static_cast<size_t>(backend.max_q_dim));
   backend.q_chunk4.resize(
-      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(q_dim));
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(backend.max_q_dim));
   backend.q_chunk8.resize(
-      static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(q_dim));
-  backend.k.resize(static_cast<size_t>(kv_dim));
+      static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(backend.max_q_dim));
+  backend.k.resize(static_cast<size_t>(backend.max_kv_dim));
   backend.k_chunk4.resize(
-      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(kv_dim));
+      static_cast<size_t>(k_prefill_q8_chunk_rows) * static_cast<size_t>(backend.max_kv_dim));
   backend.k_chunk8.resize(
-      static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(kv_dim));
-  backend.v.resize(static_cast<size_t>(kv_dim));
+      static_cast<size_t>(k_prefill_q8_chunk8_rows) * static_cast<size_t>(backend.max_kv_dim));
+  backend.v.resize(static_cast<size_t>(backend.max_kv_dim));
   backend.v_chunk4.resize(backend.k_chunk4.size());
   backend.v_chunk8.resize(backend.k_chunk8.size());
   backend.attn_scores.resize(static_cast<size_t>(backend.n_ctx));
   backend.attn_probs.resize(static_cast<size_t>(backend.n_ctx));
   backend.attn_probs_rounded.resize(static_cast<size_t>(backend.n_ctx));
   backend.attn_value_column.resize(static_cast<size_t>(backend.n_ctx));
-  backend.attn_ctx.resize(static_cast<size_t>(q_dim));
+  backend.attn_ctx.resize(static_cast<size_t>(backend.max_q_dim));
   backend.attn_ctx_chunk4.resize(backend.q_chunk4.size());
   backend.attn_ctx_chunk8.resize(backend.q_chunk8.size());
   backend.projected.resize(static_cast<size_t>(backend.n_embd));
   backend.projected_chunk4.resize(backend.hidden_chunk4.size());
   backend.projected_chunk8.resize(backend.hidden_chunk8.size());
-  backend.gate.resize(static_cast<size_t>(attention_block->feed_forward_gate.rows));
+  backend.gate.resize(static_cast<size_t>(backend.max_ffn_dim));
   backend.gate_chunk4.resize(
       static_cast<size_t>(k_prefill_q8_chunk_rows) *
-      static_cast<size_t>(attention_block->feed_forward_gate.rows));
+      static_cast<size_t>(backend.max_ffn_dim));
   backend.gate_chunk8.resize(
       static_cast<size_t>(k_prefill_q8_chunk8_rows) *
-      static_cast<size_t>(attention_block->feed_forward_gate.rows));
-  backend.up.resize(static_cast<size_t>(attention_block->feed_forward_up.rows));
+      static_cast<size_t>(backend.max_ffn_dim));
+  backend.up.resize(static_cast<size_t>(backend.max_ffn_dim));
   backend.up_chunk4.resize(
       static_cast<size_t>(k_prefill_q8_chunk_rows) *
-      static_cast<size_t>(attention_block->feed_forward_up.rows));
+      static_cast<size_t>(backend.max_ffn_dim));
   backend.up_chunk8.resize(
       static_cast<size_t>(k_prefill_q8_chunk8_rows) *
-      static_cast<size_t>(attention_block->feed_forward_up.rows));
-  backend.ffn_hidden.resize(static_cast<size_t>(attention_block->feed_forward_gate.rows));
+      static_cast<size_t>(backend.max_ffn_dim));
+  backend.ffn_hidden.resize(static_cast<size_t>(backend.max_ffn_dim));
   backend.ffn_hidden_chunk4.resize(backend.gate_chunk4.size());
   backend.ffn_hidden_chunk8.resize(backend.gate_chunk8.size());
   build_lifecycle(backend);
@@ -4385,9 +4682,9 @@ inline emel::error::type prepare(native_backend & backend,
 
 inline uint32_t quantized_contract_stage_count(
     const native_backend & backend,
-    const emel::model::llama::detail::quantized_contract_kind kind) noexcept {
+    const emel::model::builder::detail::quantized_contract_kind kind) noexcept {
   uint32_t count = 0u;
-  for (const auto & stage : backend.quantized_audit.stages) {
+  for (const auto & stage : backend.build.quantized_audit.stages) {
     count += static_cast<uint32_t>(stage.contract == kind);
   }
   return count;

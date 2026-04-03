@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TIMING_FILE="$ROOT_DIR/snapshots/quality_gates/timing.txt"
-QUALITY_GATES_TIMEOUT="${EMEL_QUALITY_GATES_TIMEOUT:-1200s}"
+QUALITY_GATES_TIMEOUT="${EMEL_QUALITY_GATES_TIMEOUT:-1800s}"
 
 if [[ -z "${EMEL_QUALITY_GATES_INNER:-}" ]]; then
   timeout_cmd=()

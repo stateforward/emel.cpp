@@ -54,9 +54,6 @@ using initializer_dispatch_fn = bool(void * initializer_sm,
 
 struct graph_binding {
   emel::generator::detail::native_backend backend = {};
-  emel::model::llama::detail::topology model_topology = {};
-  emel::model::llama::detail::step_plan prefill_plan = {};
-  emel::model::llama::detail::step_plan decode_plan = {};
   bool backend_ready = false;
 };
 
