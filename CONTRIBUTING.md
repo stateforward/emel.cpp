@@ -14,9 +14,6 @@ the repo's engineering bar.
 if AI helped shape the change, say so. if you wrote it by hand and it still clears the rules,
 tests, and review bar, that is acceptable too.
 
-we are deliberately building a public counter-example to the tired claim that AI cannot write real
-production systems code. that does not require pretending humans are banned from contributing.
-
 AI-written code is acceptable here. human-written code is acceptable here. what gets merged is the
 code that is explicit, auditable, deterministic, and aligned with the project rules.
 
