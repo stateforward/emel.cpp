@@ -1,5 +1,20 @@
 # Test Models
 
+## Bonsai-1.7B.gguf
+- Source: `https://huggingface.co/prism-ml/Bonsai-1.7B-gguf`
+- File: `Bonsai-1.7B.gguf`
+- Stable maintained path: `tests/models/Bonsai-1.7B.gguf`
+- Size: `248302272` bytes (`237M`)
+- SHA256: `0ae245fc08236af7cb64caff164937e53a8d54af611b0f398cc992c0a5ba70c4`
+- Download URL: `https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/main/Bonsai-1.7B.gguf`
+- Executable metadata truth: treat GGUF metadata as authoritative for this maintained slice,
+  including `general.architecture=qwen3`, `tokenizer.ggml.model=gpt2`,
+  `tokenizer.ggml.pre=qwen2`, `qwen3.context_length=32768`, `qwen3.block_count=28`,
+  `qwen3.embedding_length=2048`, and `qwen3.attention.head_count/head_count_kv=16/8`.
+- File-versus-format note: the maintained filename is `Bonsai-1.7B.gguf`; `Q1_0_g128` is the
+  embedded weight format, not part of the filename. Do not use the stale quickstart filename
+  `Bonsai-1.7B-Q1_0_g128.gguf`.
+
 ## Qwen3-0.6B-Q8_0.gguf
 - Source: `https://huggingface.co/Qwen/Qwen3-0.6B-GGUF`
 - File: `Qwen3-0.6B-Q8_0.gguf`

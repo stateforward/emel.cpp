@@ -33,6 +33,7 @@ struct begin_bind {
     ctx.dispatch_tokenizer_tokenize = ev.request.dispatch_tokenizer_tokenize;
     ctx.formatter_ctx = ev.request.formatter_ctx;
     ctx.format_prompt = ev.request.format_prompt;
+    ctx.formatter_contract = ev.request.formatter_contract;
     ctx.add_special_default = ev.request.add_special;
     ctx.parse_special_default = ev.request.parse_special;
     ctx.is_bound = false;

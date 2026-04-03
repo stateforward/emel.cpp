@@ -179,8 +179,7 @@ bool is_f32_type(const int32_t tensor_type) noexcept {
 }
 
 bool is_vector_dequant_stage(const llama::detail::quantized_stage_family family) noexcept {
-  return family == llama::detail::quantized_stage_family::token_embedding ||
-         family == llama::detail::quantized_stage_family::output_norm ||
+  return family == llama::detail::quantized_stage_family::output_norm ||
          family == llama::detail::quantized_stage_family::attention_norm ||
          family == llama::detail::quantized_stage_family::attention_q_norm ||
          family == llama::detail::quantized_stage_family::attention_k_norm ||
@@ -485,6 +484,8 @@ std::string_view tensor_type_name(const int32_t tensor_type) noexcept {
   switch (static_cast<emel::kernel::event::dtype>(tensor_type)) {
     case emel::kernel::event::dtype::f32:
       return "f32";
+    case emel::kernel::event::dtype::q1_0_g128:
+      return "q1_0_g128";
     case emel::kernel::event::dtype::q2_k:
       return "q2_k";
     case emel::kernel::event::dtype::q3_k:

@@ -9,6 +9,31 @@
 namespace {
 
 using emel::paritychecker::parity_options;
+using emel::tools::generation_fixture_registry::maintained_fixture;
+
+constexpr std::string_view k_current_reference_repository =
+#ifdef PARITYCHECKER_REFERENCE_REPOSITORY
+    PARITYCHECKER_REFERENCE_REPOSITORY;
+#else
+    "unknown";
+#endif
+
+constexpr std::string_view k_current_reference_ref =
+#ifdef PARITYCHECKER_REFERENCE_REF
+    PARITYCHECKER_REFERENCE_REF;
+#else
+    {};
+#endif
+
+bool fixture_matches_current_reference_lane(const maintained_fixture & fixture) {
+  if (fixture.reference_repository != k_current_reference_repository) {
+    return false;
+  }
+  if (!fixture.reference_ref.empty() && fixture.reference_ref != k_current_reference_ref) {
+    return false;
+  }
+  return true;
+}
 
 void print_usage(const char * exe) {
   std::fprintf(stderr,
@@ -21,11 +46,20 @@ void print_usage(const char * exe) {
                "  --kernel mode compares kernel parity and ignores --model\n"
                "  --jinja mode compares jinja parser/formatter parity and ignores --model\n"
                "  --generation mode requires --model one maintained fixture under tests/models/ "
-               "and prompt text; maintained baselines are append-only under snapshots/parity/\n",
+               "for the current compiled reference lane and prompt text; maintained baselines "
+               "are append-only under snapshots/parity/\n",
                exe);
+  std::fprintf(stderr,
+               "  current reference lane: repo=%.*s ref=%.*s\n",
+               static_cast<int>(k_current_reference_repository.size()),
+               k_current_reference_repository.data(),
+               static_cast<int>(k_current_reference_ref.size()),
+               k_current_reference_ref.data());
   for (const auto & fixture :
-       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
-    std::fprintf(stderr, "    - %s\n", fixture.fixture_rel.data());
+       emel::tools::generation_fixture_registry::k_supported_generation_parity_fixtures) {
+    if (fixture_matches_current_reference_lane(fixture)) {
+      std::fprintf(stderr, "    - %s\n", fixture.fixture_rel.data());
+    }
   }
 }
 

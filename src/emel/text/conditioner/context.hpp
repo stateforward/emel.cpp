@@ -27,6 +27,8 @@ struct context {
   void * formatter_ctx = nullptr;
   emel::text::formatter::format_fn format_prompt =
       emel::text::formatter::format_raw;
+  emel::text::formatter::contract_kind formatter_contract =
+      emel::text::formatter::contract_kind::raw;
   bool add_special_default = true;
   bool parse_special_default = false;
   bool is_bound = false;

@@ -30,6 +30,10 @@ inline constexpr std::string_view k_supported_qwen_contract =
     "source=tokenizer.chat_template support=supported_contract "
     "shape=structured_chat_messages_v1 roles=system,user,assistant tools=none "
     "add_generation_prompt=true enable_thinking=false bos=none";
+inline constexpr std::string_view k_supported_qwen_tool_contract =
+    "source=tokenizer.chat_template support=supported_contract "
+    "shape=structured_chat_messages_v1 roles=system,user,assistant tools=tool_xml "
+    "add_generation_prompt=true enable_thinking=false bos=none";
 
 inline constexpr std::string_view k_no_template_contract =
     "source=tokenizer.chat_template support=no_template "
@@ -66,6 +70,20 @@ inline constexpr std::array<std::string_view, 9> k_supported_qwen_primary_templa
     "<tool_call>",
     "tool_response",
 };
+inline constexpr std::array<std::string_view, 12> k_supported_qwen_tool_markers = {
+    "{%- if tools %}",
+    "<|im_start|>",
+    "<|im_end|>",
+    "messages[0].role == 'system'",
+    "ns.multi_step_tool",
+    "(message.role == \"user\")",
+    "{%- elif message.role == \"assistant\" %}",
+    "message.tool_calls",
+    "message.role == \"tool\"",
+    "<tool_call>",
+    "tool_response",
+    "<|im_start|>assistant\\n<think>\\n\\n</think>\\n\\n",
+};
 
 struct formatter_binding {
   void * formatter_ctx = nullptr;
@@ -73,6 +91,7 @@ struct formatter_binding {
       emel::text::formatter::format_raw;
   support_kind support = support_kind::no_template;
   std::string_view contract = k_no_template_contract;
+  std::string_view assistant_generation_prefix = {};
 };
 
 struct reference_formatter_info {
@@ -153,7 +172,16 @@ inline bool append_bytes(const std::string_view bytes,
 
 inline bool format_supported_qwen_contract(void *,
                                            const emel::text::formatter::format_request & request,
-                                           int32_t * error_out) noexcept {
+                                           int32_t * error_out) noexcept;
+inline bool format_supported_qwen_tool_contract(
+    void *,
+    const emel::text::formatter::format_request & request,
+    int32_t * error_out) noexcept;
+
+inline bool format_tool_supported_qwen_contract_with_generation_prefix(
+    const emel::text::formatter::format_request & request,
+    const std::string_view generation_prefix,
+    int32_t * error_out) noexcept {
   if (error_out != nullptr) {
     *error_out = emel::text::formatter::error_code(
         emel::text::formatter::error::none);
@@ -162,7 +190,7 @@ inline bool format_supported_qwen_contract(void *,
     *request.output_length_out = 0u;
   }
   if ((request.output == nullptr && request.output_capacity > 0u) ||
-      !qwen_messages_supported(request.messages) ||
+      !emel::tools::generation_formatter_contract::qwen_messages_supported(request.messages) ||
       !request.add_generation_prompt ||
       request.enable_thinking) {
     if (error_out != nullptr) {
@@ -190,7 +218,7 @@ inline bool format_supported_qwen_contract(void *,
     }
   }
 
-  if (!append_bytes(k_assistant_generation_prefix,
+  if (!append_bytes(generation_prefix,
                     request.output,
                     request.output_capacity,
                     output_length)) {
@@ -207,6 +235,21 @@ inline bool format_supported_qwen_contract(void *,
   return true;
 }
 
+inline bool format_supported_qwen_contract(void *,
+                                           const emel::text::formatter::format_request & request,
+                                           int32_t * error_out) noexcept {
+  return format_tool_supported_qwen_contract_with_generation_prefix(
+      request, k_assistant_generation_prefix, error_out);
+}
+
+inline bool format_supported_qwen_tool_contract(
+    void *,
+    const emel::text::formatter::format_request & request,
+    int32_t * error_out) noexcept {
+  return format_tool_supported_qwen_contract_with_generation_prefix(
+      request, k_assistant_generation_prefix, error_out);
+}
+
 inline bool format_supported_contract(void *,
                                       const emel::text::formatter::format_request & request,
                                       int32_t * error_out) noexcept {
@@ -218,7 +261,7 @@ inline bool format_supported_contract(void *,
     *request.output_length_out = 0u;
   }
   if ((request.output == nullptr && request.output_capacity > 0u) ||
-      !messages_supported(request.messages) ||
+      !emel::tools::generation_formatter_contract::messages_supported(request.messages) ||
       !request.add_generation_prompt ||
       request.enable_thinking) {
     if (error_out != nullptr) {
@@ -290,19 +333,22 @@ inline bool template_matches_supported_qwen_contract(
   return true;
 }
 
+inline bool template_matches_supported_qwen_tool_contract(
+    const std::string_view primary_template) noexcept {
+  for (const std::string_view marker : k_supported_qwen_tool_markers) {
+    if (primary_template.find(marker) == std::string_view::npos) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline formatter_binding resolve_primary_template_binding(
     const std::string_view primary_template,
     const uint32_t named_template_count) noexcept {
+  static_cast<void>(named_template_count);
   if (primary_template.empty()) {
     return formatter_binding{};
-  }
-  if (named_template_count != 0u) {
-    return formatter_binding{
-        .formatter_ctx = nullptr,
-        .format_prompt = emel::text::formatter::format_raw,
-        .support = support_kind::unsupported_template,
-        .contract = k_unsupported_template_contract,
-    };
   }
   if (template_matches_supported_contract(primary_template)) {
     return formatter_binding{
@@ -310,6 +356,16 @@ inline formatter_binding resolve_primary_template_binding(
         .format_prompt = format_supported_contract,
         .support = support_kind::supported_contract,
         .contract = k_supported_contract,
+        .assistant_generation_prefix = k_assistant_generation_prefix,
+    };
+  }
+  if (template_matches_supported_qwen_tool_contract(primary_template)) {
+    return formatter_binding{
+        .formatter_ctx = &k_supported_qwen_formatter_sentinel,
+        .format_prompt = format_supported_qwen_tool_contract,
+        .support = support_kind::supported_contract,
+        .contract = k_supported_qwen_tool_contract,
+        .assistant_generation_prefix = k_assistant_generation_prefix,
     };
   }
   if (template_matches_supported_qwen_contract(primary_template)) {
@@ -318,6 +374,7 @@ inline formatter_binding resolve_primary_template_binding(
         .format_prompt = format_supported_qwen_contract,
         .support = support_kind::supported_contract,
         .contract = k_supported_qwen_contract,
+        .assistant_generation_prefix = k_assistant_generation_prefix,
     };
   }
   return formatter_binding{
@@ -325,6 +382,7 @@ inline formatter_binding resolve_primary_template_binding(
       .format_prompt = emel::text::formatter::format_raw,
       .support = support_kind::unsupported_template,
       .contract = k_unsupported_template_contract,
+      .assistant_generation_prefix = k_assistant_generation_prefix,
   };
 }
 
@@ -375,12 +433,6 @@ inline reference_formatter_info resolve_reference_formatter_info(
   }
 
   formatter.primary_template = primary_template;
-  if (formatter.named_template_count != 0u) {
-    formatter.support = support_kind::unsupported_template;
-    formatter.contract = k_unsupported_template_contract;
-    return formatter;
-  }
-
   if (template_matches_supported_contract(formatter.primary_template)) {
     formatter.support = support_kind::supported_contract;
     formatter.contract = k_supported_contract;
@@ -390,6 +442,12 @@ inline reference_formatter_info resolve_reference_formatter_info(
   if (template_matches_supported_qwen_contract(formatter.primary_template)) {
     formatter.support = support_kind::supported_contract;
     formatter.contract = k_supported_qwen_contract;
+    return formatter;
+  }
+
+  if (template_matches_supported_qwen_tool_contract(formatter.primary_template)) {
+    formatter.support = support_kind::supported_contract;
+    formatter.contract = k_supported_qwen_tool_contract;
     return formatter;
   }
 
@@ -421,7 +479,7 @@ inline size_t formatted_capacity_upper_bound(
         message.content.size() + k_im_end.size();
   }
   if (add_generation_prompt) {
-    capacity += k_assistant_generation_prefix.size();
+    capacity += binding.assistant_generation_prefix.size();
   }
   return capacity;
 }

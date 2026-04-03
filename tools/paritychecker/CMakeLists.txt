@@ -8,7 +8,17 @@ if(NOT EMEL_ROOT)
   get_filename_component(EMEL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 endif()
 
-set(REF_IMPL_REPOSITORY "https://github.com/ggml-org/llama.cpp.git" CACHE STRING "")
+set(REF_IMPL_REPOSITORY "" CACHE STRING "")
+if(REF_IMPL_REPOSITORY STREQUAL "")
+  set(REF_IMPL_REPOSITORY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/reference_repo.txt")
+  if(EXISTS "${REF_IMPL_REPOSITORY_FILE}")
+    file(READ "${REF_IMPL_REPOSITORY_FILE}" REF_IMPL_REPOSITORY_CONTENT)
+    string(STRIP "${REF_IMPL_REPOSITORY_CONTENT}" REF_IMPL_REPOSITORY_CONTENT)
+    set(REF_IMPL_REPOSITORY "${REF_IMPL_REPOSITORY_CONTENT}" CACHE STRING "" FORCE)
+  else()
+    set(REF_IMPL_REPOSITORY "https://github.com/ggml-org/llama.cpp.git" CACHE STRING "" FORCE)
+  endif()
+endif()
 set(REF_IMPL_REF "" CACHE STRING "")
 if(REF_IMPL_REF STREQUAL "")
   set(REF_IMPL_REF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/reference_ref.txt")
@@ -23,6 +33,7 @@ endif()
 
 include(FetchContent)
 set(PARITYCHECKER_REFERENCE_SOURCE "cmake_fetch")
+set(PARITYCHECKER_REFERENCE_REPOSITORY_VALUE "${REF_IMPL_REPOSITORY}")
 set(PARITYCHECKER_REFERENCE_REF_VALUE "${REF_IMPL_REF}")
 FetchContent_Declare(
   reference_impl
@@ -143,6 +154,7 @@ target_include_directories(paritychecker
     ${EMEL_ROOT}/include
     ${reference_impl_SOURCE_DIR}/src
     ${reference_impl_SOURCE_DIR}/common
+    ${reference_impl_SOURCE_DIR}/vendor
     ${reference_impl_SOURCE_DIR}/ggml/include
     ${reference_impl_SOURCE_DIR}/include
 )
@@ -151,6 +163,7 @@ target_compile_definitions(paritychecker
   PRIVATE
     PARITYCHECKER_REPO_ROOT=\"${EMEL_ROOT}\"
     PARITYCHECKER_REFERENCE_SOURCE=\"${PARITYCHECKER_REFERENCE_SOURCE}\"
+    PARITYCHECKER_REFERENCE_REPOSITORY=\"${PARITYCHECKER_REFERENCE_REPOSITORY_VALUE}\"
     PARITYCHECKER_REFERENCE_REF=\"${PARITYCHECKER_REFERENCE_REF_VALUE}\"
 )
 
@@ -192,6 +205,7 @@ target_include_directories(paritychecker_tests
     ${EMEL_ROOT}/include
     ${reference_impl_SOURCE_DIR}/src
     ${reference_impl_SOURCE_DIR}/common
+    ${reference_impl_SOURCE_DIR}/vendor
     ${reference_impl_SOURCE_DIR}/ggml/include
     ${reference_impl_SOURCE_DIR}/include
     ${DOCTEST_INCLUDE_DIR}
@@ -202,6 +216,7 @@ target_compile_definitions(paritychecker_tests
     PARITYCHECKER_REPO_ROOT=\"${EMEL_ROOT}\"
     PARITYCHECKER_BINARY_PATH=\"$<TARGET_FILE:paritychecker>\"
     PARITYCHECKER_REFERENCE_SOURCE=\"${PARITYCHECKER_REFERENCE_SOURCE}\"
+    PARITYCHECKER_REFERENCE_REPOSITORY=\"${PARITYCHECKER_REFERENCE_REPOSITORY_VALUE}\"
     PARITYCHECKER_REFERENCE_REF=\"${PARITYCHECKER_REFERENCE_REF_VALUE}\"
 )
 

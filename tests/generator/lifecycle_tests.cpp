@@ -127,6 +127,7 @@ constexpr void for_each_type(boost::sml::aux::type_list<Ts...>, fn && visitor) {
 struct prepared_model {
   emel::model::data data = {};
   std::vector<std::vector<float>> tensor_storage = {};
+  std::vector<std::vector<uint8_t>> byte_storage = {};
   int32_t hello_id = -1;
   int32_t world_id = -1;
 };
@@ -591,6 +592,112 @@ void build_qwen3_prepared_model(prepared_model & prepared) {
   prepared.data.n_tensors = tensor_index;
 }
 
+void encode_q1_0_g128_row(std::span<uint8_t> row_bytes,
+                          const float scale,
+                          const bool positive_bits) {
+  CHECK(row_bytes.size() == 18u);
+  const uint16_t fp16 = emel::kernel::detail::quant::fp32_to_fp16(scale);
+  row_bytes[0] = static_cast<uint8_t>(fp16 & 0xffu);
+  row_bytes[1] = static_cast<uint8_t>(fp16 >> 8u);
+  std::fill(row_bytes.begin() + 2, row_bytes.end(), positive_bits ? 0xffu : 0x00u);
+}
+
+void build_qwen3_q1_0_g128_logits_prepared_model(prepared_model & prepared) {
+  constexpr int32_t k_embd = 128;
+  constexpr int32_t k_vocab = 2;
+
+  prepared.tensor_storage.reserve(13);
+  prepared.byte_storage.reserve(1);
+  prepared.data.vocab_data.tokenizer_model_id = emel::model::data::tokenizer_model::BPE;
+  prepared.data.vocab_data.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
+  prepared.data.vocab_data.ignore_merges = true;
+  prepared.hello_id = add_token(prepared.data.vocab_data, "hello");
+  prepared.world_id = add_token(prepared.data.vocab_data, "world");
+  prepared.data.params.n_vocab = static_cast<int32_t>(prepared.data.vocab_data.n_tokens);
+  prepared.data.params.n_embd = k_embd;
+  prepared.data.params.n_head = 1;
+  prepared.data.params.n_head_kv = 1;
+  prepared.data.params.n_ctx = 8;
+  prepared.data.params.n_rot = k_embd;
+  prepared.data.params.attention_key_length = k_embd;
+  prepared.data.params.attention_value_length = k_embd;
+  prepared.data.params.n_layer = 1;
+  prepared.data.n_layers = 1;
+  prepared.data.weights_data = prepared.data.tensors.data();
+  prepared.data.weights_size = 1u;
+  std::memcpy(prepared.data.architecture_name.data(), "qwen3", 5u);
+
+  uint32_t tensor_index = 0u;
+  const auto add_name = [&](emel::model::data::tensor_record & tensor,
+                            const std::string_view name) {
+    tensor.name_offset = prepared.data.name_bytes_used;
+    tensor.name_length = static_cast<uint32_t>(name.size());
+    std::memcpy(prepared.data.name_storage.data() + prepared.data.name_bytes_used,
+                name.data(),
+                name.size());
+    prepared.data.name_bytes_used += static_cast<uint32_t>(name.size());
+  };
+  const auto add_vector = [&](const std::string_view name, const std::vector<float> & values) {
+    auto & tensor = prepared.data.tensors[tensor_index++];
+    add_name(tensor, name);
+    prepared.tensor_storage.push_back(values);
+    tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+    tensor.n_dims = 1;
+    tensor.dims[0] = static_cast<int64_t>(values.size());
+    tensor.data = prepared.tensor_storage.back().data();
+    tensor.data_size = static_cast<uint64_t>(values.size() * sizeof(float));
+  };
+  const auto add_matrix = [&](const std::string_view name,
+                              const int32_t rows,
+                              const int32_t cols,
+                              const std::vector<float> & values) {
+    auto & tensor = prepared.data.tensors[tensor_index++];
+    add_name(tensor, name);
+    prepared.tensor_storage.push_back(values);
+    tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::f32);
+    tensor.n_dims = 2;
+    tensor.dims[0] = cols;
+    tensor.dims[1] = rows;
+    tensor.data = prepared.tensor_storage.back().data();
+    tensor.data_size = static_cast<uint64_t>(values.size() * sizeof(float));
+  };
+  const auto add_q1_matrix = [&](const std::string_view name,
+                                 const int32_t rows,
+                                 const int32_t cols,
+                                 const float scale,
+                                 const bool first_row_positive,
+                                 const bool second_row_positive) {
+    auto & tensor = prepared.data.tensors[tensor_index++];
+    add_name(tensor, name);
+    prepared.byte_storage.push_back(std::vector<uint8_t>(static_cast<size_t>(rows) * 18u, 0u));
+    auto & bytes = prepared.byte_storage.back();
+    encode_q1_0_g128_row(std::span<uint8_t>{bytes.data(), 18u}, scale, first_row_positive);
+    encode_q1_0_g128_row(std::span<uint8_t>{bytes.data() + 18u, 18u}, scale, second_row_positive);
+    tensor.type = static_cast<int32_t>(emel::kernel::event::dtype::q1_0_g128);
+    tensor.n_dims = 2;
+    tensor.dims[0] = cols;
+    tensor.dims[1] = rows;
+    tensor.data = bytes.data();
+    tensor.data_size = static_cast<uint64_t>(bytes.size());
+  };
+
+  add_matrix("token_embd.weight", k_vocab, k_embd, std::vector<float>(static_cast<size_t>(k_vocab * k_embd), 1.0f));
+  add_vector("output_norm.weight", std::vector<float>(static_cast<size_t>(k_embd), 1.0f));
+  add_q1_matrix("output.weight", k_vocab, k_embd, 1.0f, true, false);
+  add_vector("blk.0.attn_norm.weight", std::vector<float>(static_cast<size_t>(k_embd), 1.0f));
+  add_matrix("blk.0.attn_q.weight", k_embd, k_embd, std::vector<float>(static_cast<size_t>(k_embd * k_embd), 0.0f));
+  add_matrix("blk.0.attn_k.weight", k_embd, k_embd, std::vector<float>(static_cast<size_t>(k_embd * k_embd), 0.0f));
+  add_matrix("blk.0.attn_v.weight", k_embd, k_embd, std::vector<float>(static_cast<size_t>(k_embd * k_embd), 0.0f));
+  add_vector("blk.0.attn_q_norm.weight", std::vector<float>(static_cast<size_t>(k_embd), 1.0f));
+  add_vector("blk.0.attn_k_norm.weight", std::vector<float>(static_cast<size_t>(k_embd), 1.0f));
+  add_matrix("blk.0.attn_output.weight", k_embd, k_embd, std::vector<float>(static_cast<size_t>(k_embd * k_embd), 0.0f));
+  add_vector("blk.0.ffn_norm.weight", std::vector<float>(static_cast<size_t>(k_embd), 1.0f));
+  add_matrix("blk.0.ffn_gate.weight", k_embd, k_embd, std::vector<float>(static_cast<size_t>(k_embd * k_embd), 0.0f));
+  add_matrix("blk.0.ffn_down.weight", k_embd, k_embd, std::vector<float>(static_cast<size_t>(k_embd * k_embd), 0.0f));
+  add_matrix("blk.0.ffn_up.weight", k_embd, k_embd, std::vector<float>(static_cast<size_t>(k_embd * k_embd), 0.0f));
+  prepared.data.n_tensors = tensor_index;
+}
+
 emel::model::data & stabilize_model(prepared_model & prepared) {
   prepared.data.weights_data = prepared.data.tensors.data();
   return prepared.data;
@@ -690,6 +797,7 @@ struct generator_fixture {
     flash_kv_width_mismatch,
     quantized_contract,
     qwen3_canonical,
+    qwen3_q1_0_g128_logits,
   };
 
   explicit generator_fixture(
@@ -703,6 +811,8 @@ struct generator_fixture {
       apply_quantized_contract_tensor_types(prepared);
     } else if (variant == model_variant::qwen3_canonical) {
       build_qwen3_prepared_model(prepared);
+    } else if (variant == model_variant::qwen3_q1_0_g128_logits) {
+      build_qwen3_q1_0_g128_logits_prepared_model(prepared);
     } else {
       build_prepared_model(prepared);
     }
@@ -964,6 +1074,39 @@ TEST_CASE("generator_qwen3_generator_initializes_and_generates_one_token") {
   CHECK(output_length > 0u);
 }
 
+TEST_CASE("generator_qwen3_q1_0_g128_logits_generator_initializes_and_generates_one_token") {
+  auto fixture = std::make_unique<generator_fixture>(
+      generator_fixture::model_variant::qwen3_q1_0_g128_logits);
+  callback_tracker initialize_tracker{};
+  emel::error::type initialize_error = emel::error::cast(emel::generator::error::backend);
+  const auto initialize_request = fixture->make_initialize(initialize_tracker, &initialize_error);
+
+  REQUIRE(fixture->generator->process_event(initialize_request));
+  REQUIRE(initialize_tracker.initialize_done_called);
+  REQUIRE_FALSE(initialize_tracker.initialize_error_called);
+  REQUIRE(initialize_error == emel::error::cast(emel::generator::error::none));
+  CHECK(fixture->generator->generation_native_quantized_stage_count() >= 1u);
+
+  callback_tracker generate_tracker{};
+  std::array<char, 32> output = {};
+  size_t output_length = 0u;
+  emel::error::type generate_error = emel::error::cast(emel::generator::error::backend);
+  const auto generate_request =
+      fixture->make_generate(generate_tracker, output.data(), output.size(), output_length,
+                             &generate_error);
+
+  CHECK(fixture->generator->process_event(generate_request));
+  CHECK(fixture->generator->is(boost::sml::state<emel::generator::ready>));
+  CHECK_FALSE(generate_tracker.generate_error_called);
+  CHECK(generate_tracker.generate_done_called);
+  CHECK(generate_tracker.tokens_generated == 1);
+  CHECK(generate_error == emel::error::cast(emel::generator::error::none));
+  CHECK(output_length > 0u);
+  if (host_is_aarch64()) {
+    CHECK(fixture->generator->generation_native_q8_0_dispatch_calls() > 0u);
+  }
+}
+
 TEST_CASE("generator_generate_f32_fixture_does_not_claim_quantized_optimized_dispatch") {
   auto fixture = std::make_unique<generator_fixture>();
   callback_tracker initialize_tracker{};
@@ -1032,8 +1175,7 @@ TEST_CASE("generator_quantized_path_audit_classifies_canonical_stage_families") 
       audit, emel::model::llama::detail::quantized_stage_family::feed_forward_norm);
 
   CHECK(token_embedding.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
-            approved_dense_f32_by_contract);
+        emel::model::llama::detail::quantized_contract_kind::native_quantized);
   CHECK(output_norm.contract ==
         emel::model::llama::detail::quantized_contract_kind::
             approved_dense_f32_by_contract);
@@ -1137,8 +1279,7 @@ TEST_CASE("generator_quantized_path_audit_marks_nonvector_f32_stage_disallowed_f
       audit, emel::model::llama::detail::quantized_stage_family::attention_q);
 
   CHECK(token_embedding.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
-            approved_dense_f32_by_contract);
+        emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
   CHECK(output.contract ==
         emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
   CHECK(attention_q.contract ==
@@ -1193,8 +1334,7 @@ TEST_CASE("generator_lfm2_quantized_path_audit_accepts_hybrid_native_quantized_m
       audit, emel::model::llama::detail::quantized_stage_family::feed_forward_down);
 
   CHECK(token_embedding.contract ==
-        emel::model::llama::detail::quantized_contract_kind::
-            approved_dense_f32_by_contract);
+        emel::model::llama::detail::quantized_contract_kind::native_quantized);
   CHECK(attention_q.contract ==
         emel::model::llama::detail::quantized_contract_kind::native_quantized);
   CHECK(attention_q.consistent_across_layers);
@@ -1215,8 +1355,8 @@ TEST_CASE("generator_initialize_quantized_contract_fixture_reports_zero_disallow
 
   REQUIRE(fixture->generator->process_event(initialize));
   CHECK(error == emel::error::cast(emel::generator::error::none));
-  CHECK(fixture->generator->generation_native_quantized_stage_count() == 8u);
-  CHECK(fixture->generator->generation_approved_dense_f32_stage_count() == 4u);
+  CHECK(fixture->generator->generation_native_quantized_stage_count() == 9u);
+  CHECK(fixture->generator->generation_approved_dense_f32_stage_count() == 3u);
   CHECK(fixture->generator->generation_disallowed_fallback_stage_count() == 0u);
   CHECK(fixture->generator->generation_explicit_no_claim_stage_count() == 0u);
 }
@@ -1243,8 +1383,8 @@ TEST_CASE("generator_generate_quantized_contract_fixture_preserves_zero_disallow
   CHECK_FALSE(generate_tracker.generate_error_called);
   CHECK(generate_tracker.generate_done_called);
   CHECK(generate_error == emel::error::cast(emel::generator::error::none));
-  CHECK(fixture->generator->generation_native_quantized_stage_count() == 8u);
-  CHECK(fixture->generator->generation_approved_dense_f32_stage_count() == 4u);
+  CHECK(fixture->generator->generation_native_quantized_stage_count() == 9u);
+  CHECK(fixture->generator->generation_approved_dense_f32_stage_count() == 3u);
   CHECK(fixture->generator->generation_disallowed_fallback_stage_count() == 0u);
   CHECK(fixture->generator->generation_explicit_no_claim_stage_count() == 0u);
   if (host_is_aarch64()) {

@@ -8,43 +8,110 @@ SNAPSHOT=false
 COMPARE=false
 COMPARE_UPDATE=false
 UPDATE=false
+IMPLEMENTATION=false
 USE_ZIG=true
 MODE_FLAG=""
 SUITE_FILTER=""
 COMBINED=false
 
+IMPLEMENTATION_MODEL="${EMEL_BENCH_MODEL:-}"
+IMPLEMENTATION_CASE_SET="${EMEL_BENCH_IMPLEMENTATION_CASE_SET:-smoke}"
+IMPLEMENTATION_ITERS="${EMEL_BENCH_IMPLEMENTATION_ITERS:-1}"
+IMPLEMENTATION_RUNS="${EMEL_BENCH_IMPLEMENTATION_RUNS:-1}"
+IMPLEMENTATION_WARMUP_ITERS="${EMEL_BENCH_IMPLEMENTATION_WARMUP_ITERS:-0}"
+IMPLEMENTATION_WARMUP_RUNS="${EMEL_BENCH_IMPLEMENTATION_WARMUP_RUNS:-0}"
+IMPLEMENTATION_GENERATION_ITERS="${EMEL_BENCH_IMPLEMENTATION_GENERATION_ITERS:-1}"
+IMPLEMENTATION_GENERATION_RUNS="${EMEL_BENCH_IMPLEMENTATION_GENERATION_RUNS:-1}"
+IMPLEMENTATION_GENERATION_WARMUP_ITERS="${EMEL_BENCH_IMPLEMENTATION_GENERATION_WARMUP_ITERS:-0}"
+IMPLEMENTATION_GENERATION_WARMUP_RUNS="${EMEL_BENCH_IMPLEMENTATION_GENERATION_WARMUP_RUNS:-0}"
+
 usage() {
   cat <<'USAGE'
-usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [--zig|--system] [--llama-only|--emel-only] [--generation-only|--suite=<name>]
+usage: scripts/bench.sh [--implementation --model <path>]
+                        [--snapshot] [--compare] [--compare-update] [--update]
+                        [--zig|--system] [--llama-only|--emel-only]
+                        [--generation-only|--suite=<name>]
 
-  --snapshot   run EMEL benchmark snapshot gate
-  --compare    build and run reference comparison
-  --compare-update update reference comparison snapshot
-  --update     update snapshot baseline (requires --snapshot)
-  --zig        use zig cc/zig c++ as the toolchain (default)
-  --system     use system cc/c++
-  --llama-only run only the reference benchmarks
-  --emel-only  run only the EMEL benchmarks
+  --implementation run a fast maintained generation compare for one fixture lane
+  --model           maintained fixture path for implementation mode
+  --snapshot        run EMEL benchmark snapshot gate
+  --compare         build and run reference comparison
+  --compare-update  update reference comparison snapshot
+  --update          update snapshot baseline (requires --snapshot)
+  --zig             use zig cc/zig c++ as the toolchain (default)
+  --system          use system cc/c++
+  --llama-only      run only the reference benchmarks
+  --emel-only       run only the EMEL benchmarks
   --generation-only run only the generation benchmark suite
-  --suite=...  run only the named benchmark suite
+  --suite=...       run only the named benchmark suite
+
+environment:
+  EMEL_BENCH_MODEL=tests/models/Bonsai-1.7B.gguf
+  EMEL_BENCH_IMPLEMENTATION_CASE_SET=smoke|full
 USAGE
 }
 
-for arg in "$@"; do
-  case "$arg" in
-    --snapshot) SNAPSHOT=true ;;
-    --compare) COMPARE=true ;;
-    --compare-update) COMPARE=true; COMPARE_UPDATE=true ;;
-    --update) UPDATE=true ;;
-    --zig) USE_ZIG=true ;;
-    --system) USE_ZIG=false ;;
-    --llama-only) MODE_FLAG="--mode=reference" ;;
-    --emel-only) MODE_FLAG="--mode=emel" ;;
-    --generation-only) SUITE_FILTER="generation" ;;
-    --suite=*) SUITE_FILTER="${arg#--suite=}" ;;
-    -h|--help) usage; exit 0 ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --implementation)
+      IMPLEMENTATION=true
+      shift
+      ;;
+    --snapshot)
+      SNAPSHOT=true
+      shift
+      ;;
+    --compare)
+      COMPARE=true
+      shift
+      ;;
+    --compare-update)
+      COMPARE=true
+      COMPARE_UPDATE=true
+      shift
+      ;;
+    --update)
+      UPDATE=true
+      shift
+      ;;
+    --zig)
+      USE_ZIG=true
+      shift
+      ;;
+    --system)
+      USE_ZIG=false
+      shift
+      ;;
+    --model)
+      if [[ $# -lt 2 ]]; then
+        echo "error: --model requires a path" >&2
+        exit 1
+      fi
+      IMPLEMENTATION_MODEL="$2"
+      shift 2
+      ;;
+    --llama-only)
+      MODE_FLAG="--mode=reference"
+      shift
+      ;;
+    --emel-only)
+      MODE_FLAG="--mode=emel"
+      shift
+      ;;
+    --generation-only)
+      SUITE_FILTER="generation"
+      shift
+      ;;
+    --suite=*)
+      SUITE_FILTER="${1#--suite=}"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     *)
-      echo "error: unknown argument '$arg'" >&2
+      echo "error: unknown argument '$1'" >&2
       usage
       exit 1
       ;;
@@ -52,6 +119,11 @@ for arg in "$@"; do
 done
 
 ref_file="$TOOLS_DIR/reference_ref.txt"
+repo_file="$TOOLS_DIR/reference_repo.txt"
+repo_value="${REF_IMPL_REPOSITORY:-}"
+if [[ -z "$repo_value" && -f "$repo_file" ]]; then
+  repo_value="$(head -n 1 "$repo_file" | tr -d '[:space:]')"
+fi
 ref_value=""
 if [[ -f "$ref_file" ]]; then
   ref_value="$(head -n 1 "$ref_file" | tr -d '[:space:]')"
@@ -63,7 +135,124 @@ if [[ -z "$ref_value" ]]; then
   ref_value="master"
 fi
 
-if ! $SNAPSHOT && ! $COMPARE; then
+explicit_ref_repository="${REF_IMPL_REPOSITORY:-}"
+explicit_ref_value="${REF_IMPL_REF:-${BENCH_REF_OVERRIDE:-}}"
+
+trim_file_value() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    return 1
+  fi
+  head -n 1 "$path" | tr -d '[:space:]'
+}
+
+fixture_records() {
+  awk '
+    /inline constexpr maintained_fixture k_.*_generation_fixture = {/ {
+      in_fixture = 1
+      fixture_name = ""
+      fixture_slug = ""
+      fixture_rel = ""
+      reference_engine = ""
+      reference_repository = ""
+      reference_ref = ""
+      next
+    }
+    in_fixture && /\.name = "/ {
+      if (match($0, /"([^"]+)"/)) {
+        fixture_name = substr($0, RSTART + 1, RLENGTH - 2)
+      }
+      next
+    }
+    in_fixture && /\.slug = "/ {
+      if (match($0, /"([^"]+)"/)) {
+        fixture_slug = substr($0, RSTART + 1, RLENGTH - 2)
+      }
+      next
+    }
+    in_fixture && /\.fixture_rel = "/ {
+      if (match($0, /"([^"]+)"/)) {
+        fixture_rel = substr($0, RSTART + 1, RLENGTH - 2)
+      }
+      next
+    }
+    in_fixture && /\.reference_engine = "/ {
+      if (match($0, /"([^"]+)"/)) {
+        reference_engine = substr($0, RSTART + 1, RLENGTH - 2)
+      }
+      next
+    }
+    in_fixture && /\.reference_repository = "/ {
+      if (match($0, /"([^"]+)"/)) {
+        reference_repository = substr($0, RSTART + 1, RLENGTH - 2)
+      }
+      next
+    }
+    in_fixture && /\.reference_ref = / {
+      if (match($0, /"([^"]*)"/)) {
+        reference_ref = substr($0, RSTART + 1, RLENGTH - 2)
+      }
+      next
+    }
+    in_fixture && /^};/ {
+      if (fixture_rel != "" && reference_engine != "" && reference_repository != "") {
+        print fixture_name "|" fixture_slug "|" fixture_rel "|" reference_engine "|" \
+              reference_repository "|" reference_ref
+      }
+      in_fixture = 0
+    }
+  ' "$ROOT_DIR/tools/generation_fixture_registry.hpp"
+}
+
+canonicalize_path() {
+  local raw_path="$1"
+  local abs_path="$raw_path"
+  if [[ "$abs_path" != /* ]]; then
+    abs_path="$ROOT_DIR/$abs_path"
+  fi
+  local abs_dir
+  abs_dir="$(cd "$(dirname "$abs_path")" && pwd)"
+  printf '%s/%s\n' "$abs_dir" "$(basename "$abs_path")"
+}
+
+resolve_implementation_lane() {
+  local model_path="$1"
+
+  if [[ -n "$explicit_ref_repository" || -n "$explicit_ref_value" ]]; then
+    effective_ref_repository="$explicit_ref_repository"
+    effective_ref_value="$explicit_ref_value"
+    effective_ref_engine="llama.cpp"
+    if [[ -z "$effective_ref_repository" ]]; then
+      effective_ref_repository="$repo_value"
+    fi
+    if [[ -z "$effective_ref_value" ]]; then
+      effective_ref_value="$ref_value"
+    fi
+    return 0
+  fi
+
+  local canonical_model
+  canonical_model="$(canonicalize_path "$model_path")"
+  while IFS='|' read -r fixture_name fixture_slug fixture_rel fixture_engine fixture_repository fixture_ref; do
+    local canonical_fixture
+    canonical_fixture="$(canonicalize_path "$fixture_rel")"
+    if [[ "$canonical_fixture" != "$canonical_model" ]]; then
+      continue
+    fi
+    effective_ref_engine="$fixture_engine"
+    effective_ref_repository="$fixture_repository"
+    effective_ref_value="$fixture_ref"
+    if [[ -z "$effective_ref_value" ]]; then
+      effective_ref_value="$ref_value"
+    fi
+    return 0
+  done < <(fixture_records)
+
+  echo "error: --model must be a maintained generation fixture from tools/generation_fixture_registry.hpp" >&2
+  return 1
+}
+
+if ! $SNAPSHOT && ! $COMPARE && ! $IMPLEMENTATION; then
   COMPARE=true
 fi
 
@@ -80,6 +269,19 @@ if $COMBINED && [[ -n "$MODE_FLAG" ]]; then
   echo "error: --llama-only/--emel-only cannot be used with --snapshot and --compare together" >&2
   exit 1
 fi
+
+require_common_tools() {
+  for tool in cmake ninja git; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "error: required tool missing: $tool" >&2
+      exit 1
+    fi
+  done
+  if $USE_ZIG && ! command -v zig >/dev/null 2>&1; then
+    echo "error: zig not found (use --system to use system compilers)" >&2
+    exit 1
+  fi
+}
 
 prepare_toolchain() {
   bench_cc="${BENCH_CC:-cc}"
@@ -112,10 +314,15 @@ run_bench_runner() {
 
 configure_bench_build() {
   local build_dir="$1"
+  local bench_repo_value="$2"
+  local bench_ref_value="$3"
 
   cmake_args=(-S "$TOOLS_DIR" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
               -DEMEL_ENABLE_TESTS=OFF
-              -DREF_IMPL_REF="$ref_value")
+              -DREF_IMPL_REF="$bench_ref_value")
+  if [[ -n "$bench_repo_value" ]]; then
+    cmake_args+=("-DREF_IMPL_REPOSITORY=$bench_repo_value")
+  fi
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
@@ -137,22 +344,52 @@ configure_bench_build() {
   cmake --build "$build_dir" --parallel --target bench_runner >&2
 }
 
-if $COMBINED; then
-  for tool in cmake ninja git; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-      echo "error: required tool missing: $tool" >&2
-      exit 1
-    fi
-  done
-  if $USE_ZIG && ! command -v zig >/dev/null 2>&1; then
-    echo "error: zig not found (use --system to use system compilers)" >&2
+if $IMPLEMENTATION; then
+  require_common_tools
+  if [[ -z "$IMPLEMENTATION_MODEL" ]]; then
+    echo "error: --implementation requires --model <path>" >&2
+    exit 1
+  fi
+  if [[ "$IMPLEMENTATION_CASE_SET" != "smoke" && "$IMPLEMENTATION_CASE_SET" != "full" ]]; then
+    echo "error: EMEL_BENCH_IMPLEMENTATION_CASE_SET must be smoke or full" >&2
     exit 1
   fi
 
   prepare_toolchain
+  resolve_implementation_lane "$IMPLEMENTATION_MODEL"
+  if [[ "$effective_ref_engine" != "llama.cpp" ]]; then
+    echo "error: unsupported benchmark reference engine '$effective_ref_engine'" >&2
+    exit 1
+  fi
+
+  implementation_build_dir="${BENCH_IMPLEMENTATION_BUILD_DIR:-$ROOT_DIR/build/bench_${USE_ZIG:+zig}_implementation}"
+  if ! $USE_ZIG; then
+    implementation_build_dir="${BENCH_IMPLEMENTATION_BUILD_DIR:-$ROOT_DIR/build/bench_system_implementation}"
+  fi
+  configure_bench_build "$implementation_build_dir" "$effective_ref_repository" "$effective_ref_value"
+
+  echo "implementation bench: engine=$effective_ref_engine repo=$effective_ref_repository ref=$effective_ref_value model=$IMPLEMENTATION_MODEL" >&2
+  EMEL_BENCH_SUITE=generation \
+  EMEL_BENCH_GENERATION_MODEL="$IMPLEMENTATION_MODEL" \
+  EMEL_BENCH_GENERATION_CASE_SET="$IMPLEMENTATION_CASE_SET" \
+  EMEL_BENCH_ITERS="$IMPLEMENTATION_ITERS" \
+  EMEL_BENCH_RUNS="$IMPLEMENTATION_RUNS" \
+  EMEL_BENCH_WARMUP_ITERS="$IMPLEMENTATION_WARMUP_ITERS" \
+  EMEL_BENCH_WARMUP_RUNS="$IMPLEMENTATION_WARMUP_RUNS" \
+  EMEL_BENCH_GENERATION_ITERS="$IMPLEMENTATION_GENERATION_ITERS" \
+  EMEL_BENCH_GENERATION_RUNS="$IMPLEMENTATION_GENERATION_RUNS" \
+  EMEL_BENCH_GENERATION_WARMUP_ITERS="$IMPLEMENTATION_GENERATION_WARMUP_ITERS" \
+  EMEL_BENCH_GENERATION_WARMUP_RUNS="$IMPLEMENTATION_GENERATION_WARMUP_RUNS" \
+    "$implementation_build_dir/bench_runner" --mode=compare
+  exit 0
+fi
+
+if $COMBINED; then
+  require_common_tools
+  prepare_toolchain
 
   build_dir="${BENCH_COMPARE_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
-  configure_bench_build "$build_dir"
+  configure_bench_build "$build_dir" "$repo_value" "$ref_value"
 
   compare_output="$(mktemp)"
   run_bench_runner "$build_dir" --mode=compare > "$compare_output"
@@ -310,16 +547,7 @@ if $SNAPSHOT; then
   CURRENT="$(mktemp)"
   trap 'rm -f "$CURRENT"' EXIT
 
-  for tool in cmake ninja git; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-      echo "error: required tool missing: $tool" >&2
-      exit 1
-    fi
-  done
-  if $USE_ZIG && ! command -v zig >/dev/null 2>&1; then
-    echo "error: zig not found (use --system to use system compilers)" >&2
-    exit 1
-  fi
+  require_common_tools
 
   base_ref="${BENCH_BASE_REF:-origin/main}"
   if ! git -C "$ROOT_DIR" rev-parse --verify "$base_ref" >/dev/null 2>&1; then
@@ -353,47 +581,9 @@ if $SNAPSHOT; then
     fi
   done
 
+  prepare_toolchain
   build_dir="${BENCH_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
-  bench_cc="${BENCH_CC:-cc}"
-  bench_cxx="${BENCH_CXX:-c++}"
-  bench_c_flags=""
-  bench_cxx_flags=""
-  bench_cc_arg=""
-  bench_cxx_arg=""
-  bench_asm_arg=""
-  if $USE_ZIG; then
-    bench_cc="$(command -v zig)"
-    bench_cxx="$bench_cc"
-    bench_cc_arg="cc"
-    bench_cxx_arg="c++"
-    bench_asm_arg="cc"
-    bench_c_flags="-fno-sanitize=undefined"
-    bench_cxx_flags="-fno-sanitize=undefined"
-  fi
-
-  cmake_args=(-S "$TOOLS_DIR" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
-              -DEMEL_ENABLE_TESTS=OFF
-              -DREF_IMPL_REF="$ref_value")
-  cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
-  cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
-  cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
-  if [[ -n "$bench_cc_arg" ]]; then
-    cmake_args+=("-DCMAKE_C_COMPILER_ARG1=$bench_cc_arg")
-    cmake_args+=("-DCMAKE_ASM_COMPILER_ARG1=$bench_cc_arg")
-  fi
-  if [[ -n "$bench_cxx_arg" ]]; then
-    cmake_args+=("-DCMAKE_CXX_COMPILER_ARG1=$bench_cxx_arg")
-  fi
-  if [[ -n "$bench_c_flags" ]]; then
-    cmake_args+=("-DCMAKE_C_FLAGS=$bench_c_flags")
-  fi
-  if [[ -n "$bench_cxx_flags" ]]; then
-    cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
-  fi
-
-  cmake "${cmake_args[@]}"
-
-  cmake --build "$build_dir" --parallel --target bench_runner
+  configure_bench_build "$build_dir" "$repo_value" "$ref_value"
 
   run_bench_runner "$build_dir" --mode=emel > "$CURRENT"
 
@@ -484,57 +674,12 @@ if $SNAPSHOT; then
 fi
 
 if $COMPARE; then
-  for tool in cmake ninja git; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-      echo "error: required tool missing: $tool" >&2
-      exit 1
-    fi
-  done
-  if $USE_ZIG && ! command -v zig >/dev/null 2>&1; then
-    echo "error: zig not found (use --system to use system compilers)" >&2
-    exit 1
-  fi
+  require_common_tools
+  prepare_toolchain
 
   compare_build_dir="${BENCH_COMPARE_BUILD_DIR:-$ROOT_DIR/build/bench_tools_ninja}"
-  bench_cc="${BENCH_CC:-cc}"
-  bench_cxx="${BENCH_CXX:-c++}"
-  bench_c_flags=""
-  bench_cxx_flags=""
-  bench_cc_arg=""
-  bench_cxx_arg=""
-  bench_asm_arg=""
-  if $USE_ZIG; then
-    bench_cc="$(command -v zig)"
-    bench_cxx="$bench_cc"
-    bench_cc_arg="cc"
-    bench_cxx_arg="c++"
-    bench_asm_arg="cc"
-    bench_c_flags="-fno-sanitize=undefined"
-    bench_cxx_flags="-fno-sanitize=undefined"
-  fi
+  configure_bench_build "$compare_build_dir" "$repo_value" "$ref_value"
 
-  cmake_args=(-S "$TOOLS_DIR" -B "$compare_build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
-              -DEMEL_ENABLE_TESTS=OFF
-              -DREF_IMPL_REF="$ref_value")
-  cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
-  cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
-  cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
-  if [[ -n "$bench_cc_arg" ]]; then
-    cmake_args+=("-DCMAKE_C_COMPILER_ARG1=$bench_cc_arg")
-    cmake_args+=("-DCMAKE_ASM_COMPILER_ARG1=$bench_cc_arg")
-  fi
-  if [[ -n "$bench_cxx_arg" ]]; then
-    cmake_args+=("-DCMAKE_CXX_COMPILER_ARG1=$bench_cxx_arg")
-  fi
-  if [[ -n "$bench_c_flags" ]]; then
-    cmake_args+=("-DCMAKE_C_FLAGS=$bench_c_flags")
-  fi
-  if [[ -n "$bench_cxx_flags" ]]; then
-    cmake_args+=("-DCMAKE_CXX_FLAGS=$bench_cxx_flags")
-  fi
-
-  cmake "${cmake_args[@]}" >&2
-  cmake --build "$compare_build_dir" --parallel --target bench_runner >&2
   if $COMPARE_UPDATE; then
     compare_baseline="$ROOT_DIR/snapshots/bench/benchmarks_compare.txt"
     {

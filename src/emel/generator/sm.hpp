@@ -806,6 +806,8 @@ struct sm : public emel::sm<model, action::context> {
      emel::text::formatter::format_fn format_prompt =
          emel::text::formatter::format_raw)
       : base_type() {
+    const auto formatter_binding =
+        emel::text::formatter::resolve_model_binding(model_ref, formatter_ctx, format_prompt);
     initializer_actor_.emplace(emel::generator::initializer::action::context{this->context_});
     this->context_.initializer_actor = &initializer_actor_.value();
     this->context_.dispatch_initializer = detail::dispatch_initializer_run;
@@ -814,8 +816,9 @@ struct sm : public emel::sm<model, action::context> {
     this->context_.dispatch_prefill = detail::dispatch_prefill_run;
     this->context_.model = &model_ref;
     this->context_.conditioner = &conditioner_ref;
-    this->context_.formatter_ctx = formatter_ctx;
-    this->context_.format_prompt = format_prompt;
+    this->context_.formatter_ctx = formatter_binding.formatter_ctx;
+    this->context_.format_prompt = formatter_binding.format_prompt;
+    this->context_.formatter_contract = formatter_binding.contract;
     // Session scratch is sized once from the injected loaded model before the initialize pipeline.
     detail::reserve_session_buffers(this->context_, model_ref);
   }

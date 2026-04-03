@@ -57,6 +57,7 @@ using emel::kernel::test::make_flash_attn_ext_event;
 using emel::kernel::test::make_packed_q6_k_x8_src;
 using emel::kernel::test::make_prepared_q6_k_x8_q8_src;
 using emel::kernel::test::make_quantized_src;
+using emel::kernel::test::make_q8_0_vector_src;
 using emel::kernel::test::make_q8_k_vector_src;
 using emel::kernel::test::make_smoke_op_event;
 using emel::kernel::test::make_src;
@@ -94,6 +95,16 @@ void check_backend_op_paths(machine_type & machine,
 
   CHECK(machine.process_event(op_soft_max_ok));
   CHECK_FALSE(machine.process_event(op_soft_max_invalid));
+}
+
+void encode_q1_0_g128_row(std::span<uint8_t> row_bytes,
+                          const float scale,
+                          const bool positive_bits) {
+  REQUIRE(row_bytes.size() == 18u);
+  const uint16_t fp16 = emel::kernel::detail::quant::fp32_to_fp16(scale);
+  row_bytes[0] = static_cast<uint8_t>(fp16 & 0xffu);
+  row_bytes[1] = static_cast<uint8_t>(fp16 >> 8u);
+  std::fill(row_bytes.begin() + 2, row_bytes.end(), positive_bits ? 0xffu : 0x00u);
 }
 
 }  // namespace
@@ -294,6 +305,194 @@ TEST_CASE("kernel_mul_mat_argmax_accepts_q8_0_weights") {
   CHECK(best_index == 0);
   CHECK(best_score ==
         doctest::Approx(q8_0_unit * q8_0_unit * static_cast<float>(QK8_0)).epsilon(1.0e-6f));
+}
+
+TEST_CASE("kernel_mul_mat_accepts_q1_0_g128_weights") {
+  constexpr uint64_t q1_cols = 128u;
+
+  std::array<float, q1_cols> input = {};
+  input.fill(1.0f);
+  std::array<uint8_t, 36> q1_rows = {};
+  encode_q1_0_g128_row(std::span<uint8_t>{q1_rows.data(), 18u}, 1.0f, true);
+  encode_q1_0_g128_row(std::span<uint8_t>{q1_rows.data() + 18u, 18u}, 1.0f, false);
+  std::array<float, 2> out = {};
+
+  emel::kernel::event::tensor_view src0{};
+  src0.data = q1_rows.data();
+  src0.type = static_cast<dtype>(41u);
+  src0.ne = {q1_cols, 2u, 1u, 1u};
+  src0.nb = {1u, 18u, 36u, 36u};
+
+  kernel_sm machine{};
+  const emel::kernel::event::op_mul_mat q1_ev{
+      .src0 = src0,
+      .src1 = make_src(input.data(), dtype::f32, 1u, q1_cols),
+      .dst = make_dst(out.data(), dtype::f32, 1u, 2u),
+      .nth = 1,
+  };
+
+  CHECK(machine.process_event(q1_ev));
+  CHECK(out[0] == doctest::Approx(128.0f).epsilon(1.0e-4f));
+  CHECK(out[1] == doctest::Approx(-128.0f).epsilon(1.0e-4f));
+}
+
+TEST_CASE("kernel_mul_mat_argmax_accepts_q1_0_g128_weights") {
+  constexpr uint64_t q1_cols = 128u;
+
+  std::array<float, q1_cols> input = {};
+  input.fill(1.0f);
+  std::array<uint8_t, 36> q1_rows = {};
+  encode_q1_0_g128_row(std::span<uint8_t>{q1_rows.data(), 18u}, 1.0f, true);
+  encode_q1_0_g128_row(std::span<uint8_t>{q1_rows.data() + 18u, 18u}, 0.5f, false);
+  float best_score = 0.0f;
+  int32_t best_index = -1;
+
+  emel::kernel::event::tensor_view src0{};
+  src0.data = q1_rows.data();
+  src0.type = static_cast<dtype>(41u);
+  src0.ne = {q1_cols, 2u, 1u, 1u};
+  src0.nb = {1u, 18u, 36u, 36u};
+
+  kernel_sm machine{};
+  const emel::kernel::event::op_mul_mat_argmax q1_ev{
+      .src0 = src0,
+      .src1 = make_src(input.data(), dtype::f32, 1u, q1_cols),
+      .dst = make_dst(&best_score, dtype::f32, 1u, 1u),
+      .nth = 1,
+      .index_out = &best_index,
+  };
+
+  CHECK(machine.process_event(q1_ev));
+  CHECK(best_index == 0);
+  CHECK(best_score == doctest::Approx(128.0f).epsilon(1.0e-4f));
+}
+
+TEST_CASE("kernel_mul_mat_accepts_q8_0_rhs_for_q8_0_weights") {
+  constexpr uint64_t q8_cols = emel::kernel::detail::quant::QK8_0;
+
+  std::array<emel::kernel::detail::quant::block_q8_0, 2> q8_rows = {};
+  for (auto &row : q8_rows) {
+    row.d = emel::kernel::detail::quant::fp32_to_fp16(1.0f);
+  }
+  q8_rows[0].qs.fill(4);
+  q8_rows[1].qs.fill(-2);
+
+  std::array<emel::kernel::detail::quant::block_q8_0, 1> q8_input = {};
+  q8_input[0].d = emel::kernel::detail::quant::fp32_to_fp16(1.0f);
+  q8_input[0].qs.fill(1);
+
+  std::array<float, 2> out = {};
+  kernel_sm machine{};
+  const emel::kernel::event::op_mul_mat q8_ev{
+      .src0 = make_quantized_src(q8_rows.data(), dtype::q8_0, q8_cols, 2u),
+      .src1 = make_q8_0_vector_src(q8_input.data(), q8_cols),
+      .dst = make_dst(out.data(), dtype::f32, 1u, 2u),
+      .nth = 1,
+  };
+
+  CHECK(machine.process_event(q8_ev));
+  CHECK(out[0] == doctest::Approx(128.0f).epsilon(1.0e-4f));
+  CHECK(out[1] == doctest::Approx(-64.0f).epsilon(1.0e-4f));
+}
+
+TEST_CASE("kernel_mul_mat_argmax_accepts_q8_0_rhs_for_q8_0_weights") {
+  constexpr uint64_t q8_cols = emel::kernel::detail::quant::QK8_0;
+
+  std::array<emel::kernel::detail::quant::block_q8_0, 2> q8_rows = {};
+  for (auto &row : q8_rows) {
+    row.d = emel::kernel::detail::quant::fp32_to_fp16(1.0f);
+  }
+  q8_rows[0].qs.fill(4);
+  q8_rows[1].qs.fill(-2);
+
+  std::array<emel::kernel::detail::quant::block_q8_0, 1> q8_input = {};
+  q8_input[0].d = emel::kernel::detail::quant::fp32_to_fp16(1.0f);
+  q8_input[0].qs.fill(1);
+
+  float best_score = 0.0f;
+  int32_t best_index = -1;
+  kernel_sm machine{};
+  const emel::kernel::event::op_mul_mat_argmax q8_ev{
+      .src0 = make_quantized_src(q8_rows.data(), dtype::q8_0, q8_cols, 2u),
+      .src1 = make_q8_0_vector_src(q8_input.data(), q8_cols),
+      .dst = make_dst(&best_score, dtype::f32, 1u, 1u),
+      .nth = 1,
+      .index_out = &best_index,
+  };
+
+  CHECK(machine.process_event(q8_ev));
+  CHECK(best_index == 0);
+  CHECK(best_score == doctest::Approx(128.0f).epsilon(1.0e-4f));
+}
+
+TEST_CASE("kernel_mul_mat_accepts_q8_0_rhs_for_q1_0_g128_weights") {
+  constexpr uint64_t q1_cols = 128u;
+
+  std::array<uint8_t, 36> q1_rows = {};
+  encode_q1_0_g128_row(std::span<uint8_t>{q1_rows.data(), 18u}, 1.0f, true);
+  encode_q1_0_g128_row(std::span<uint8_t>{q1_rows.data() + 18u, 18u}, 1.0f,
+                       false);
+
+  std::array<emel::kernel::detail::quant::block_q8_0, 4> q8_input = {};
+  for (auto &block : q8_input) {
+    block.d = emel::kernel::detail::quant::fp32_to_fp16(1.0f);
+    block.qs.fill(1);
+  }
+
+  std::array<float, 2> out = {};
+  emel::kernel::event::tensor_view src0{};
+  src0.data = q1_rows.data();
+  src0.type = static_cast<dtype>(41u);
+  src0.ne = {q1_cols, 2u, 1u, 1u};
+  src0.nb = {1u, 18u, 36u, 36u};
+
+  kernel_sm machine{};
+  const emel::kernel::event::op_mul_mat q1_ev{
+      .src0 = src0,
+      .src1 = make_q8_0_vector_src(q8_input.data(), q1_cols),
+      .dst = make_dst(out.data(), dtype::f32, 1u, 2u),
+      .nth = 1,
+  };
+
+  CHECK(machine.process_event(q1_ev));
+  CHECK(out[0] == doctest::Approx(128.0f).epsilon(1.0e-4f));
+  CHECK(out[1] == doctest::Approx(-128.0f).epsilon(1.0e-4f));
+}
+
+TEST_CASE("kernel_mul_mat_argmax_accepts_q8_0_rhs_for_q1_0_g128_weights") {
+  constexpr uint64_t q1_cols = 128u;
+
+  std::array<uint8_t, 36> q1_rows = {};
+  encode_q1_0_g128_row(std::span<uint8_t>{q1_rows.data(), 18u}, 1.0f, true);
+  encode_q1_0_g128_row(std::span<uint8_t>{q1_rows.data() + 18u, 18u}, 0.5f,
+                       false);
+
+  std::array<emel::kernel::detail::quant::block_q8_0, 4> q8_input = {};
+  for (auto &block : q8_input) {
+    block.d = emel::kernel::detail::quant::fp32_to_fp16(1.0f);
+    block.qs.fill(1);
+  }
+
+  float best_score = 0.0f;
+  int32_t best_index = -1;
+  emel::kernel::event::tensor_view src0{};
+  src0.data = q1_rows.data();
+  src0.type = static_cast<dtype>(41u);
+  src0.ne = {q1_cols, 2u, 1u, 1u};
+  src0.nb = {1u, 18u, 36u, 36u};
+
+  kernel_sm machine{};
+  const emel::kernel::event::op_mul_mat_argmax q1_ev{
+      .src0 = src0,
+      .src1 = make_q8_0_vector_src(q8_input.data(), q1_cols),
+      .dst = make_dst(&best_score, dtype::f32, 1u, 1u),
+      .nth = 1,
+      .index_out = &best_index,
+  };
+
+  CHECK(machine.process_event(q1_ev));
+  CHECK(best_index == 0);
+  CHECK(best_score == doctest::Approx(128.0f).epsilon(1.0e-4f));
 }
 
 TEST_CASE("kernel_mul_mat_rejects_packed_q6_q8_requests_without_explicit_simd_route") {

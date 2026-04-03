@@ -72,7 +72,7 @@ struct process_capture {
   std::string stderr_text = {};
 };
 
-process_capture run_generation_bench_compare_capture() {
+process_capture run_generation_bench_compare_capture(const std::string &extra_env = {}) {
   const std::filesystem::path tmp_dir =
       std::filesystem::temp_directory_path() / "emel-bench-runner-tests";
   std::filesystem::create_directories(tmp_dir);
@@ -90,6 +90,10 @@ process_capture run_generation_bench_compare_capture() {
   command += "set EMEL_BENCH_GENERATION_RUNS=1 && ";
   command += "set EMEL_BENCH_GENERATION_WARMUP_ITERS=0 && ";
   command += "set EMEL_BENCH_GENERATION_WARMUP_RUNS=0 && ";
+  if (!extra_env.empty()) {
+    command += extra_env;
+    command += " && ";
+  }
   command += quote_arg_windows(bench_runner_binary_path().string());
   command += " --mode=compare > ";
   command += quote_arg_windows(stdout_path.string());
@@ -106,6 +110,10 @@ process_capture run_generation_bench_compare_capture() {
   command += "EMEL_BENCH_GENERATION_RUNS=1 ";
   command += "EMEL_BENCH_GENERATION_WARMUP_ITERS=0 ";
   command += "EMEL_BENCH_GENERATION_WARMUP_RUNS=0 ";
+  if (!extra_env.empty()) {
+    command += extra_env;
+    command += " ";
+  }
   command += quote_arg_posix(bench_runner_binary_path().string());
   command += " --mode=compare > ";
   command += quote_arg_posix(stdout_path.string());
@@ -151,9 +159,12 @@ TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixt
   CHECK(capture.stdout_text.find("emel_prefill_linear_probe_ns=") != std::string::npos);
   CHECK(capture.stdout_text.find("reference_prefill_attention_probe_ns=") !=
         std::string::npos);
+  CHECK(capture.stdout_text.find("# reference_impl: source=") != std::string::npos);
+  CHECK(capture.stdout_text.find(" repo=") != std::string::npos);
+  CHECK(capture.stdout_text.find(" ref=") != std::string::npos);
 
   for (const auto & fixture :
-       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+       emel::tools::generation_fixture_registry::k_supported_generation_bench_fixtures) {
     const std::array<int, 4> max_tokens = {1, 10, 100, 1000};
     for (const int tokens : max_tokens) {
       const std::string case_name = "generation/preloaded_request/" +
@@ -163,4 +174,24 @@ TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixt
       CHECK(capture.stdout_text.find(case_name) != std::string::npos);
     }
   }
+}
+
+TEST_CASE("bench_runner generation compare can select one maintained fixture by model") {
+  const process_capture capture = run_generation_bench_compare_capture(
+      "EMEL_BENCH_GENERATION_MODEL=tests/models/Qwen3-0.6B-Q8_0.gguf "
+      "EMEL_BENCH_GENERATION_CASE_SET=smoke");
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.find("error:") == std::string::npos);
+  CHECK(capture.stdout_text.find(
+            "generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_1") !=
+        std::string::npos);
+  CHECK(capture.stdout_text.find(
+            "generation/preloaded_request/qwen3_0_6b_q8_0_prompt_hello_max_tokens_10") ==
+        std::string::npos);
+  CHECK(capture.stdout_text.find(
+            "generation/preloaded_request/lfm2_5_1_2b_thinking_q4_k_m_prompt_hello_max_tokens_1") ==
+        std::string::npos);
+  CHECK(capture.stdout_text.find(
+            "generation/preloaded_request/bonsai_1_7b_prompt_hello_max_tokens_1") ==
+        std::string::npos);
 }

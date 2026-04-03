@@ -397,6 +397,81 @@ TEST_CASE("conditioner_structured_messages_use_injected_formatter_function") {
   CHECK(tokens[1] == 1);
 }
 
+TEST_CASE("conditioner_supported_qwen_contract_rejects_unsupported_request_shapes") {
+  auto &vocab = make_bpe_vocab();
+  emel::text::tokenizer::sm tokenizer{};
+  emel::text::conditioner::sm conditioner{};
+
+  fixed_formatter_ctx formatter_ctx{};
+  formatter_ctx.text = "hello";
+  formatter_ctx.expected_role = "user";
+  formatter_ctx.expected_content = "hello";
+  formatter_ctx.expected_message_count = 1u;
+  formatter_ctx.expected_add_generation_prompt = true;
+  formatter_ctx.expected_enable_thinking = false;
+
+  int32_t bind_err = conditioner_code(emel::text::conditioner::error::none);
+  emel::text::conditioner::event::bind bind_ev{vocab};
+  bind_ev.preprocessor_variant =
+      emel::text::tokenizer::preprocessor::preprocessor_kind::bpe;
+  bind_ev.encoder_variant = emel::text::encoders::encoder_kind::bpe;
+  bind_ev.tokenizer_sm = &tokenizer;
+  bind_ev.dispatch_tokenizer_bind = tokenizer_bind_dispatch;
+  bind_ev.dispatch_tokenizer_tokenize = tokenizer_tokenize_dispatch;
+  bind_ev.formatter_ctx = &formatter_ctx;
+  bind_ev.format_prompt = format_fixed;
+  bind_ev.formatter_contract =
+      emel::text::formatter::contract_kind::supported_qwen_contract;
+  bind_ev.add_special = false;
+  bind_ev.parse_special = false;
+  bind_ev.error_out = &bind_err;
+
+  REQUIRE(conditioner.process_event(bind_ev));
+  REQUIRE(bind_err == conditioner_code(emel::text::conditioner::error::none));
+
+  std::array<int32_t, 4> tokens = {};
+  int32_t token_count = 0;
+  int32_t prepare_err = conditioner_code(emel::text::conditioner::error::none);
+  emel::text::conditioner::event::prepare prepare_ev{token_count, prepare_err};
+  const std::array tool_messages = {
+      emel::text::formatter::chat_message{.role = "tool", .content = "call"},
+  };
+  prepare_ev.messages = tool_messages;
+  prepare_ev.add_generation_prompt = true;
+  prepare_ev.enable_thinking = false;
+  prepare_ev.use_bind_defaults = false;
+  prepare_ev.add_special = false;
+  prepare_ev.parse_special = false;
+  prepare_ev.token_ids_out = tokens.data();
+  prepare_ev.token_capacity = static_cast<int32_t>(tokens.size());
+
+  CHECK_FALSE(conditioner.process_event(prepare_ev));
+  CHECK(prepare_err ==
+        conditioner_code(emel::text::conditioner::error::invalid_argument));
+  CHECK(token_count == 0);
+
+  const std::array user_messages = {
+      emel::text::formatter::chat_message{.role = "user", .content = "hello"},
+  };
+  prepare_ev.messages = user_messages;
+  prepare_ev.add_generation_prompt = false;
+  prepare_err = conditioner_code(emel::text::conditioner::error::none);
+  token_count = 0;
+
+  CHECK_FALSE(conditioner.process_event(prepare_ev));
+  CHECK(prepare_err ==
+        conditioner_code(emel::text::conditioner::error::invalid_argument));
+  CHECK(token_count == 0);
+
+  prepare_ev.add_generation_prompt = true;
+  prepare_ev.enable_thinking = true;
+  prepare_err = conditioner_code(emel::text::conditioner::error::none);
+
+  CHECK_FALSE(conditioner.process_event(prepare_ev));
+  CHECK(prepare_err ==
+        conditioner_code(emel::text::conditioner::error::invalid_argument));
+}
+
 TEST_CASE("conditioner_action_and_guard_error_paths") {
   using conditioner_error = emel::text::conditioner::error;
 

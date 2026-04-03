@@ -73,6 +73,7 @@ struct request_conditioner_bind {
     bind_ev.dispatch_tokenizer_tokenize = generator.conditioning.dispatch_tokenize;
     bind_ev.formatter_ctx = generator.formatter_ctx;
     bind_ev.format_prompt = generator.format_prompt;
+    bind_ev.formatter_contract = generator.formatter_contract;
     bind_ev.add_special = generator.conditioning.add_special;
     bind_ev.parse_special = generator.conditioning.parse_special;
     bind_ev.error_out = &ev.ctx.phase_code;

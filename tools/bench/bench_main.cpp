@@ -38,6 +38,7 @@ std::int32_t generation_flash_evidence_emel_logits_calls() noexcept;
 std::int32_t generation_flash_evidence_reference_decode_calls() noexcept;
 std::int32_t generation_flash_evidence_reference_logits_calls() noexcept;
 std::string_view generation_architecture_contract() noexcept;
+std::string_view generation_evidence_case_name() noexcept;
 std::size_t generation_stage_probe_count() noexcept;
 generation_stage_probe generation_stage_probe_at(std::size_t index) noexcept;
 
@@ -69,6 +70,13 @@ constexpr bool k_host_is_aarch64 =
 constexpr std::string_view k_bench_reference_source =
 #ifdef BENCH_REFERENCE_SOURCE
   BENCH_REFERENCE_SOURCE;
+#else
+  "unknown";
+#endif
+
+constexpr std::string_view k_bench_reference_repository =
+#ifdef BENCH_REFERENCE_REPOSITORY
+  BENCH_REFERENCE_REPOSITORY;
 #else
   "unknown";
 #endif
@@ -376,14 +384,6 @@ void print_compare(const std::vector<bench::result> & emel_results,
     std::exit(1);
   }
 
-  const auto generation_emel = std::find_if(
-    emel_sorted.begin(), emel_sorted.end(), [](const bench::result & entry) {
-      return entry.name == bench::k_generation_case_name;
-    });
-  const auto generation_ref = std::find_if(
-    ref_sorted.begin(), ref_sorted.end(), [](const bench::result & entry) {
-      return entry.name == bench::k_generation_case_name;
-    });
   const bool any_generation_emel =
       std::any_of(emel_sorted.begin(), emel_sorted.end(), [](const bench::result & entry) {
         return is_generation_case_name(entry.name);
@@ -396,31 +396,7 @@ void print_compare(const std::vector<bench::result> & emel_results,
     std::fprintf(stderr, "error: generation suite mismatch between emel and reference\n");
     std::exit(1);
   }
-  const bool generation_present = generation_emel != emel_sorted.end() ||
-      generation_ref != ref_sorted.end();
-  if ((any_generation_emel || any_generation_ref) && !generation_present) {
-    std::fprintf(stderr,
-                 "error: missing current maintained generation case %.*s\n",
-                 static_cast<int>(bench::k_generation_case_name.size()),
-                 bench::k_generation_case_name.data());
-    std::exit(1);
-  }
-  if ((generation_emel == emel_sorted.end()) != (generation_ref == ref_sorted.end())) {
-    std::fprintf(stderr, "error: generation case mismatch between emel and reference\n");
-    std::exit(1);
-  }
-  if (generation_present && generation_emel == emel_sorted.end()) {
-    std::fprintf(stderr, "error: missing emel generation case %.*s\n",
-                 static_cast<int>(bench::k_generation_case_name.size()),
-                 bench::k_generation_case_name.data());
-    std::exit(1);
-  }
-  if (generation_present && generation_ref == ref_sorted.end()) {
-    std::fprintf(stderr, "error: missing reference generation case %.*s\n",
-                 static_cast<int>(bench::k_generation_case_name.size()),
-                 bench::k_generation_case_name.data());
-    std::exit(1);
-  }
+  const bool generation_present = any_generation_emel || any_generation_ref;
 
   if (emel_sorted.size() != ref_sorted.size()) {
     std::fprintf(stderr, "error: case count mismatch emel=%zu reference=%zu\n",
@@ -429,15 +405,18 @@ void print_compare(const std::vector<bench::result> & emel_results,
     std::exit(1);
   }
 
-  std::printf("# reference_impl: source=%.*s ref=%.*s\n",
+  std::printf("# reference_impl: source=%.*s repo=%.*s ref=%.*s\n",
               static_cast<int>(k_bench_reference_source.size()),
               k_bench_reference_source.data(),
+              static_cast<int>(k_bench_reference_repository.size()),
+              k_bench_reference_repository.data(),
               static_cast<int>(k_bench_reference_ref.size()),
               k_bench_reference_ref.data());
   print_benchmark_config(cfg);
   if (generation_present) {
     const std::string_view formatter_contract = bench::generation_formatter_contract();
     const std::string_view architecture_contract = bench::generation_architecture_contract();
+    const std::string_view evidence_case_name = bench::generation_evidence_case_name();
     if (!architecture_contract.empty()) {
       std::printf("# generation_architecture: %.*s\n",
                   static_cast<int>(architecture_contract.size()),
@@ -456,6 +435,7 @@ void print_compare(const std::vector<bench::result> & emel_results,
       std::exit(1);
     }
 
+    const std::string_view evidence_case_name = bench::generation_evidence_case_name();
     const auto flash_dispatch_calls = bench::generation_flash_evidence_dispatch_calls();
     const auto optimized_flash_dispatch_calls =
         bench::generation_flash_evidence_optimized_dispatch_calls();
@@ -552,11 +532,9 @@ void print_compare(const std::vector<bench::result> & emel_results,
         optimized_q4_dispatch_calls == 0 || shared_q4_dispatch_calls != 0 ||
         optimized_q6_dispatch_calls == 0 || shared_q6_dispatch_calls != 0;
     const bool invalid_default_quantized_evidence =
-        (native_q8_0_dispatch_calls + packed_q8_0_dispatch_calls) == 0 ||
-        optimized_q2_dispatch_calls != 0 || shared_q2_dispatch_calls != 0 ||
-        optimized_q3_dispatch_calls != 0 || shared_q3_dispatch_calls != 0 ||
-        optimized_q4_dispatch_calls != 0 || shared_q4_dispatch_calls != 0 ||
-        optimized_q6_dispatch_calls != 0 || shared_q6_dispatch_calls != 0;
+        native_quantized_stage_count == 0 ||
+        disallowed_fallback_stage_count != 0 ||
+        explicit_no_claim_stage_count != 0;
     if ((is_lfm2_generation && invalid_lfm2_quantized_evidence) ||
         (!is_lfm2_generation && invalid_default_quantized_evidence)) {
       std::fprintf(stderr,
@@ -582,7 +560,7 @@ void print_compare(const std::vector<bench::result> & emel_results,
                    shared_q6_dispatch_calls);
       std::exit(1);
     }
-    if (native_quantized_stage_count != 8u || approved_dense_f32_stage_count != 6u ||
+    if (native_quantized_stage_count != 9u || approved_dense_f32_stage_count != 5u ||
         disallowed_fallback_stage_count != 0u || explicit_no_claim_stage_count != 0u) {
       std::fprintf(stderr,
                    "error: invalid generation runtime contract native_quantized=%" PRIu32
@@ -601,8 +579,8 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 " shared_flash_dispatch_calls=%" PRIu64
                 " emel_decode_calls=%d emel_logits_calls=%d reference_decode_calls=%d "
                 "reference_logits_calls=%d\n",
-                static_cast<int>(bench::k_generation_case_name.size()),
-                bench::k_generation_case_name.data(),
+                static_cast<int>(evidence_case_name.size()),
+                evidence_case_name.data(),
                 flash_dispatch_calls,
                 optimized_flash_dispatch_calls,
                 shared_flash_dispatch_calls,
@@ -614,8 +592,8 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 " approved_dense_f32_by_contract=%" PRIu32
                 " disallowed_fallback=%" PRIu32
                 " explicit_no_claim=%" PRIu32 "\n",
-                static_cast<int>(bench::k_generation_case_name.size()),
-                bench::k_generation_case_name.data(),
+                static_cast<int>(evidence_case_name.size()),
+                evidence_case_name.data(),
                 native_quantized_stage_count,
                 approved_dense_f32_stage_count,
                 disallowed_fallback_stage_count,
@@ -630,8 +608,8 @@ void print_compare(const std::vector<bench::result> & emel_results,
                 " shared_q4_dispatch_calls=%" PRIu64
                 " optimized_q6_dispatch_calls=%" PRIu64
                 " shared_q6_dispatch_calls=%" PRIu64 "\n",
-                static_cast<int>(bench::k_generation_case_name.size()),
-                bench::k_generation_case_name.data(),
+                static_cast<int>(evidence_case_name.size()),
+                evidence_case_name.data(),
                 native_q8_0_dispatch_calls,
                 packed_q8_0_dispatch_calls,
                 optimized_q2_dispatch_calls,

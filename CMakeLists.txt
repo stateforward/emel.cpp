@@ -89,6 +89,7 @@ if(EMEL_ENABLE_TESTS)
   set(EMEL_TEST_SOURCES
     tests/doctest_main.cpp
     tests/model/detail_tests.cpp
+    tests/model/fixture_registry_tests.cpp
     tests/model/loader/lifecycle_tests.cpp
     tests/model/weight_loader/lifecycle_tests.cpp
     tests/gbnf/lexer_tests.cpp

@@ -6,12 +6,17 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <cmath>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <doctest/doctest.h>
+#include <ggml.h>
 
+#include "../../tests/kernel/test_helpers.hpp"
+#include "emel/generator/detail.hpp"
+#include "emel/kernel/detail.hpp"
 #include "../generation_formatter_contract.hpp"
 #include "../generation_fixture_registry.hpp"
 
@@ -20,6 +25,160 @@
 #endif
 
 namespace {
+
+struct ggml_case_context {
+  std::vector<uint8_t> arena = {};
+  ggml_context * ctx = nullptr;
+
+  explicit ggml_case_context(const size_t arena_bytes = 64u * 1024u * 1024u)
+      : arena(arena_bytes) {
+    ggml_init_params params{};
+    params.mem_size = arena.size();
+    params.mem_buffer = arena.data();
+    params.no_alloc = false;
+    ctx = ggml_init(params);
+  }
+
+  ~ggml_case_context() {
+    if (ctx != nullptr) {
+      ggml_free(ctx);
+    }
+  }
+};
+
+bool compute_graph(ggml_case_context & c, ggml_tensor * out) {
+  ggml_cgraph * graph = ggml_new_graph(c.ctx);
+  if (graph == nullptr || out == nullptr) {
+    return false;
+  }
+  ggml_build_forward_expand(graph, out);
+  return ggml_graph_compute_with_ctx(c.ctx, graph, 1) == GGML_STATUS_SUCCESS;
+}
+
+bool run_ggml_flash_attn_ext_masked_case_local(std::span<const float> q_data,
+                                               std::span<const uint16_t> k_data,
+                                               std::span<const uint16_t> v_data,
+                                               const int64_t head_dim,
+                                               const int64_t kv_tokens,
+                                               const int64_t active_kv_tokens,
+                                               const int64_t head_count,
+                                               const int64_t kv_head_count,
+                                               const float scale,
+                                               std::vector<float> & out) {
+  const size_t q_size = static_cast<size_t>(head_dim * head_count);
+  const size_t kv_size = static_cast<size_t>(head_dim * kv_tokens * kv_head_count);
+  if (q_data.size() != q_size || k_data.size() != kv_size || v_data.size() != kv_size ||
+      head_dim <= 0 || kv_tokens <= 0 || active_kv_tokens <= 0 || active_kv_tokens > kv_tokens ||
+      head_count <= 0 || kv_head_count <= 0) {
+    return false;
+  }
+
+  ggml_case_context c{};
+  ggml_tensor * q_backing = ggml_new_tensor_1d(c.ctx, GGML_TYPE_F32, static_cast<int64_t>(q_size));
+  ggml_tensor * q = q_backing == nullptr
+      ? nullptr
+      : ggml_view_3d(c.ctx,
+                     q_backing,
+                     head_dim,
+                     1,
+                     head_count,
+                     sizeof(float) * static_cast<size_t>(head_dim),
+                     sizeof(float) * static_cast<size_t>(head_dim),
+                     0);
+
+  ggml_tensor * k_backing =
+      ggml_new_tensor_1d(c.ctx, GGML_TYPE_F16, static_cast<int64_t>(kv_size));
+  ggml_tensor * k = k_backing == nullptr
+      ? nullptr
+      : ggml_view_3d(c.ctx,
+                     k_backing,
+                     head_dim,
+                     kv_tokens,
+                     kv_head_count,
+                     sizeof(ggml_fp16_t) *
+                         static_cast<size_t>(head_dim * kv_head_count),
+                     sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
+                     0);
+
+  ggml_tensor * v_backing =
+      ggml_new_tensor_1d(c.ctx, GGML_TYPE_F16, static_cast<int64_t>(kv_size));
+  ggml_tensor * v = v_backing == nullptr
+      ? nullptr
+      : ggml_view_3d(c.ctx,
+                     v_backing,
+                     head_dim,
+                     kv_tokens,
+                     kv_head_count,
+                     sizeof(ggml_fp16_t) *
+                         static_cast<size_t>(head_dim * kv_head_count),
+                     sizeof(ggml_fp16_t) * static_cast<size_t>(head_dim),
+                     0);
+
+  ggml_tensor * mask = ggml_new_tensor_2d(c.ctx, GGML_TYPE_F16, kv_tokens, 1);
+  if (q == nullptr || k == nullptr || v == nullptr || mask == nullptr) {
+    return false;
+  }
+
+  std::memcpy(ggml_get_data(q_backing), q_data.data(), q_size * sizeof(float));
+  std::memcpy(ggml_get_data(k_backing), k_data.data(), k_data.size_bytes());
+  std::memcpy(ggml_get_data(v_backing), v_data.data(), v_data.size_bytes());
+
+  auto * mask_data = reinterpret_cast<ggml_fp16_t *>(ggml_get_data(mask));
+  for (int64_t token = 0; token < kv_tokens; ++token) {
+    const float value = token < active_kv_tokens ? 0.0f : -INFINITY;
+    mask_data[token] = ggml_fp32_to_fp16(value);
+  }
+
+  ggml_tensor * out_tensor =
+      ggml_flash_attn_ext(c.ctx, q, k, v, mask, scale, 0.0f, 0.0f);
+  if (out_tensor == nullptr) {
+    return false;
+  }
+  ggml_flash_attn_ext_set_prec(out_tensor, GGML_PREC_F32);
+  if (!compute_graph(c, out_tensor)) {
+    return false;
+  }
+
+  const float * out_data = ggml_get_data_f32(out_tensor);
+  out.assign(out_data, out_data + q_size);
+  return true;
+}
+
+using emel::tools::generation_fixture_registry::maintained_fixture;
+
+constexpr std::string_view k_current_reference_repository =
+#ifdef PARITYCHECKER_REFERENCE_REPOSITORY
+    PARITYCHECKER_REFERENCE_REPOSITORY;
+#else
+    "unknown";
+#endif
+
+constexpr std::string_view k_current_reference_ref =
+#ifdef PARITYCHECKER_REFERENCE_REF
+    PARITYCHECKER_REFERENCE_REF;
+#else
+    {};
+#endif
+
+bool fixture_matches_current_reference_lane(const maintained_fixture & fixture) {
+  if (fixture.reference_repository != k_current_reference_repository) {
+    return false;
+  }
+  if (!fixture.reference_ref.empty() && fixture.reference_ref != k_current_reference_ref) {
+    return false;
+  }
+  return true;
+}
+
+bool fixture_uses_append_only_baseline(const maintained_fixture & fixture) {
+  return fixture.generation_parity_contract ==
+         emel::tools::generation_fixture_registry::k_generation_parity_contract_append_only_baseline;
+}
+
+bool fixture_uses_live_reference_generation(const maintained_fixture & fixture) {
+  return fixture.generation_parity_contract ==
+         emel::tools::generation_fixture_registry::k_generation_parity_contract_live_reference_generation;
+}
 
 std::filesystem::path models_dir() {
 #ifdef PARITYCHECKER_REPO_ROOT
@@ -107,9 +266,10 @@ std::vector<std::string> discover_models() {
     if (path.extension() != ".gguf") {
       continue;
     }
-    // The canonical Qwen generation fixture is covered by dedicated maintained-generation tests,
-    // not the generic tiny-model tokenizer parity sweep.
-    if (path.filename() == "Qwen3-0.6B-Q8_0.gguf") {
+    // Maintained generation fixtures are covered by dedicated generation-path tests, not the
+    // generic tiny-model tokenizer parity sweep.
+    if (path.filename() == "Qwen3-0.6B-Q8_0.gguf" ||
+        path.filename() == "Bonsai-1.7B.gguf") {
       continue;
     }
     models.push_back(path.string());
@@ -181,6 +341,97 @@ std::vector<parity_case> base_cases() {
     {"unicode", texts / "unicode.txt", true, false},
     {"long", texts / "long.txt", false, false},
   };
+}
+
+TEST_CASE("paritychecker flash attention matches ggml masked flash on grouped-query head-major cache") {
+  using emel::kernel::test::within_flash_online_f16_tolerance;
+
+  emel::generator::detail::native_backend backend{};
+  backend.n_head = 16;
+  backend.n_head_kv = 4;
+  backend.n_rep = backend.n_head / backend.n_head_kv;
+  backend.head_dim = 64;
+  backend.head_dim_kv = 64;
+  backend.n_ctx = 32768;
+
+  const int32_t position = 22;
+  const int32_t active_kv_tokens = position + 1;
+  const size_t q_size =
+      static_cast<size_t>(backend.n_head) * static_cast<size_t>(backend.head_dim);
+  const size_t kv_storage_size =
+      static_cast<size_t>(backend.n_head_kv) *
+      static_cast<size_t>(backend.n_ctx) *
+      static_cast<size_t>(backend.head_dim_kv);
+
+  backend.q.resize(q_size);
+  backend.attn_ctx.resize(q_size);
+  backend.flash_key_cache.resize(kv_storage_size);
+  backend.flash_value_cache.resize(kv_storage_size);
+
+  for (size_t idx = 0; idx < backend.q.size(); ++idx) {
+    const double base = static_cast<double>((idx + 1u) * 7u);
+    backend.q[idx] = static_cast<float>(std::sin(base * 0.0078125));
+  }
+
+  for (int32_t token = 0; token < active_kv_tokens; ++token) {
+    for (int32_t kv_head = 0; kv_head < backend.n_head_kv; ++kv_head) {
+      for (int32_t dim = 0; dim < backend.head_dim_kv; ++dim) {
+        const size_t offset = emel::generator::detail::flash_layer_cache_head_position_offset(
+            backend, 0, kv_head, token, backend.head_dim_kv) + static_cast<size_t>(dim);
+        const double base =
+            static_cast<double>((token + 1) * (kv_head + 5) * (dim + 11));
+        backend.flash_key_cache[offset] = emel::generator::detail::quant::fp32_to_fp16(
+            static_cast<float>(std::cos(base * 0.001953125)));
+        backend.flash_value_cache[offset] = emel::generator::detail::quant::fp32_to_fp16(
+            static_cast<float>(std::sin(base * 0.0029296875)));
+      }
+    }
+  }
+
+  const auto request = emel::generator::detail::make_flash_attn_request(backend, 0, position);
+  emel::kernel::detail::flash_attn_workspace workspace = {};
+  REQUIRE(emel::kernel::detail::run_flash_attn_ext_with_workspace(request, workspace));
+
+  std::vector<uint16_t> ggml_key_cache(
+      static_cast<size_t>(backend.n_ctx) *
+          static_cast<size_t>(backend.n_head_kv) *
+          static_cast<size_t>(backend.head_dim_kv),
+      0u);
+  std::vector<uint16_t> ggml_value_cache(ggml_key_cache.size(), 0u);
+  for (int32_t token = 0; token < active_kv_tokens; ++token) {
+    for (int32_t kv_head = 0; kv_head < backend.n_head_kv; ++kv_head) {
+      const size_t dst_offset =
+          (static_cast<size_t>(token) * static_cast<size_t>(backend.n_head_kv) +
+           static_cast<size_t>(kv_head)) *
+          static_cast<size_t>(backend.head_dim_kv);
+      const size_t src_offset = emel::generator::detail::flash_layer_cache_head_position_offset(
+          backend, 0, kv_head, token, backend.head_dim_kv);
+      std::copy_n(backend.flash_key_cache.data() + src_offset,
+                  static_cast<size_t>(backend.head_dim_kv),
+                  ggml_key_cache.data() + dst_offset);
+      std::copy_n(backend.flash_value_cache.data() + src_offset,
+                  static_cast<size_t>(backend.head_dim_kv),
+                  ggml_value_cache.data() + dst_offset);
+    }
+  }
+
+  std::vector<float> ggml_ctx = {};
+  REQUIRE(run_ggml_flash_attn_ext_masked_case_local(
+      std::span<const float>(backend.q.data(), backend.q.size()),
+      std::span<const uint16_t>(ggml_key_cache.data(), ggml_key_cache.size()),
+      std::span<const uint16_t>(ggml_value_cache.data(), ggml_value_cache.size()),
+      backend.head_dim,
+      backend.n_ctx,
+      active_kv_tokens,
+      backend.n_head,
+      backend.n_head_kv,
+      1.0f / std::sqrt(static_cast<float>(backend.head_dim)),
+      ggml_ctx));
+  REQUIRE(ggml_ctx.size() == backend.attn_ctx.size());
+
+  for (size_t idx = 0; idx < backend.attn_ctx.size(); ++idx) {
+    CHECK(within_flash_online_f16_tolerance(backend.attn_ctx[idx], ggml_ctx[idx]));
+  }
 }
 
 std::filesystem::path paritychecker_binary_path() {
@@ -561,10 +812,10 @@ void check_generation_quantized_stage_audit(const process_capture & capture) {
   CHECK(capture.stdout_text.find("approved_dense_f32_by_contract") != std::string::npos);
   CHECK(parse_named_metric_on_line(capture.stdout_text,
                                    "quantized_runtime_contract:",
-                                   "native_quantized") == 8);
+                                   "native_quantized") == 9);
   CHECK(parse_named_metric_on_line(capture.stdout_text,
                                    "quantized_runtime_contract:",
-                                   "approved_dense_f32_by_contract") == 6);
+                                   "approved_dense_f32_by_contract") == 5);
   CHECK(parse_named_metric_on_line(capture.stdout_text,
                                    "quantized_runtime_contract:",
                                    "disallowed_fallback") == 0);
@@ -573,10 +824,10 @@ void check_generation_quantized_stage_audit(const process_capture & capture) {
                                    "explicit_no_claim") == 0);
   CHECK(parse_named_metric_on_line(capture.stdout_text,
                                    "quantized_stage_inventory:",
-                                   "native_quantized") == 8);
+                                   "native_quantized") == 9);
   CHECK(parse_named_metric_on_line(capture.stdout_text,
                                    "quantized_stage_inventory:",
-                                   "approved_dense_f32_by_contract") == 6);
+                                   "approved_dense_f32_by_contract") == 5);
   CHECK(parse_named_metric_on_line(capture.stdout_text,
                                    "quantized_stage_inventory:",
                                    "disallowed_fallback") == 0);
@@ -640,12 +891,13 @@ TEST_CASE("paritychecker help describes the maintained generation fixture contra
   CHECK(capture.stdout_text.empty());
   CHECK(capture.stderr_text.find("--generation mode requires --model one maintained fixture") !=
         std::string::npos);
+  CHECK(capture.stderr_text.find("current reference lane: repo=") != std::string::npos);
   for (const auto & fixture :
-       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
-    CHECK(capture.stderr_text.find(std::string(fixture.fixture_rel)) != std::string::npos);
+       emel::tools::generation_fixture_registry::k_supported_generation_parity_fixtures) {
+    if (fixture_matches_current_reference_lane(fixture)) {
+      CHECK(capture.stderr_text.find(std::string(fixture.fixture_rel)) != std::string::npos);
+    }
   }
-  CHECK(capture.stderr_text.find("snapshots/parity/") != std::string::npos);
-  CHECK(capture.stderr_text.find("append-only") != std::string::npos);
 }
 
 TEST_CASE("paritychecker generation reports a deterministic missing-model failure") {
@@ -709,6 +961,27 @@ TEST_CASE("generation formatter contract classifier models supported and unsuppo
   CHECK(formatted_qwen_prompt ==
         "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n");
 
+  std::string supported_qwen_tool_template = {};
+  for (const std::string_view marker :
+       emel::tools::generation_formatter_contract::k_supported_qwen_tool_markers) {
+    supported_qwen_tool_template.append(marker);
+    supported_qwen_tool_template.push_back('\n');
+  }
+
+  const auto supported_qwen_tool =
+      emel::tools::generation_formatter_contract::resolve_primary_template_binding(
+          supported_qwen_tool_template, 0u);
+  CHECK(emel::tools::generation_formatter_contract::binding_supported(
+      supported_qwen_tool));
+  CHECK(supported_qwen_tool.contract ==
+        emel::tools::generation_formatter_contract::k_supported_qwen_tool_contract);
+
+  std::string formatted_qwen_tool_prompt = {};
+  CHECK(emel::tools::generation_formatter_contract::format_single_user_prompt(
+      supported_qwen_tool, "hello", formatted_qwen_tool_prompt));
+  CHECK(formatted_qwen_tool_prompt ==
+        "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n");
+
   const auto unsupported =
       emel::tools::generation_formatter_contract::resolve_primary_template_binding(
           "{{ unsupported }}", 0u);
@@ -719,14 +992,18 @@ TEST_CASE("generation formatter contract classifier models supported and unsuppo
   const auto named_variant =
       emel::tools::generation_formatter_contract::resolve_primary_template_binding(
           supported_template, 1u);
-  CHECK_FALSE(emel::tools::generation_formatter_contract::binding_supported(named_variant));
+  CHECK(emel::tools::generation_formatter_contract::binding_supported(named_variant));
   CHECK(named_variant.contract ==
-        emel::tools::generation_formatter_contract::k_unsupported_template_contract);
+        emel::tools::generation_formatter_contract::k_supported_contract);
 }
 
 TEST_CASE("paritychecker generation keeps append-only maintained baselines for supported fixtures") {
   for (const auto & fixture :
-       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+       emel::tools::generation_fixture_registry::k_supported_generation_parity_fixtures) {
+    if (!fixture_matches_current_reference_lane(fixture) ||
+        !fixture_uses_append_only_baseline(fixture)) {
+      continue;
+    }
     INFO("fixture: " << fixture.name);
     for (const int32_t max_tokens : {1, 10, 100, 1000}) {
       const std::filesystem::path baseline_path =
@@ -737,9 +1014,13 @@ TEST_CASE("paritychecker generation keeps append-only maintained baselines for s
   }
 }
 
-TEST_CASE("paritychecker matches maintained generation baselines across supported fixtures") {
+TEST_CASE("paritychecker matches maintained generation baselines across baseline fixtures") {
   for (const auto & fixture :
-       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+       emel::tools::generation_fixture_registry::k_supported_generation_parity_fixtures) {
+    if (!fixture_matches_current_reference_lane(fixture) ||
+        !fixture_uses_append_only_baseline(fixture)) {
+      continue;
+    }
     const std::filesystem::path model_path = maintained_generation_fixture_path(fixture);
     INFO("fixture: " << fixture.name);
     REQUIRE(file_exists(model_path));
@@ -753,12 +1034,48 @@ TEST_CASE("paritychecker matches maintained generation baselines across supporte
           std::string::npos);
     CHECK(capture.stdout_text.find("formatter_contract=") != std::string::npos);
     CHECK(capture.stdout_text.find("reference_impl:") != std::string::npos);
+    CHECK(capture.stdout_text.find("repo=") != std::string::npos);
+    CHECK(capture.stdout_text.find("ref=") != std::string::npos);
+    CHECK(capture.stdout_text.find("contract=generation_online_f16_final_normalize_v1") !=
+          std::string::npos);
+    CHECK(capture.stdout_text.find("baseline=") !=
+          std::string::npos);
+  }
+}
+
+TEST_CASE("paritychecker matches maintained live reference generation across live fixtures") {
+  for (const auto & fixture :
+       emel::tools::generation_fixture_registry::k_supported_generation_parity_fixtures) {
+    if (!fixture_matches_current_reference_lane(fixture) ||
+        !fixture_uses_live_reference_generation(fixture)) {
+      continue;
+    }
+    const std::filesystem::path model_path = maintained_generation_fixture_path(fixture);
+    INFO("fixture: " << fixture.name);
+    REQUIRE(file_exists(model_path));
+
+    const process_capture capture = run_generation_paritychecker_capture(model_path, "hello");
+
+    CHECK(capture.exit_code == 0);
+    CHECK(capture.stderr_text.empty());
+    CHECK(capture.stdout_text.find("generation parity ok") != std::string::npos);
+    CHECK(capture.stdout_text.find(std::string("fixture=") + std::string(fixture.name)) !=
+          std::string::npos);
+    CHECK(capture.stdout_text.find("formatter_contract=") != std::string::npos);
+    CHECK(capture.stdout_text.find("reference_impl:") != std::string::npos);
+    CHECK(capture.stdout_text.find("repo=") != std::string::npos);
+    CHECK(capture.stdout_text.find("ref=") != std::string::npos);
+    CHECK(capture.stdout_text.find("contract=live_reference_generation") !=
+          std::string::npos);
   }
 }
 
 TEST_CASE("paritychecker maintained generation fixtures reject same-basename files outside tests/models") {
   for (const auto & fixture :
-       emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+       emel::tools::generation_fixture_registry::k_supported_generation_parity_fixtures) {
+    if (!fixture_matches_current_reference_lane(fixture)) {
+      continue;
+    }
     const std::filesystem::path impostor_model_path =
         make_temp_fixture_path("paritychecker-fixture", std::string(fixture.name));
     {

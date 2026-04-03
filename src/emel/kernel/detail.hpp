@@ -12,6 +12,41 @@
 #include <arm_neon.h>
 #endif
 
+#if defined(__ARM_NEON)
+#define EMEL_B1(c, s, n) 0x##n##c, 0x##n##s
+#define EMEL_B2(c, s, n) EMEL_B1(c, s, n##c), EMEL_B1(c, s, n##s)
+#define EMEL_B3(c, s, n) EMEL_B2(c, s, n##c), EMEL_B2(c, s, n##s)
+#define EMEL_B4(c, s, n) EMEL_B3(c, s, n##c), EMEL_B3(c, s, n##s)
+#define EMEL_B5(c, s, n) EMEL_B4(c, s, n##c), EMEL_B4(c, s, n##s)
+#define EMEL_B6(c, s, n) EMEL_B5(c, s, n##c), EMEL_B5(c, s, n##s)
+#define EMEL_B7(c, s, n) EMEL_B6(c, s, n##c), EMEL_B6(c, s, n##s)
+#define EMEL_B8(c, s) EMEL_B7(c, s, c), EMEL_B7(c, s, s)
+inline constexpr uint64_t k_table_b2b_0[1 << 8] = {EMEL_B8(00, 10)};
+
+inline constexpr std::array<uint64_t, 1u << 8u> make_q1_sign_table() noexcept {
+  std::array<uint64_t, 1u << 8u> table{};
+  for (size_t value = 0; value < table.size(); ++value) {
+    uint64_t packed = 0u;
+    for (size_t bit = 0; bit < 8u; ++bit) {
+      const uint64_t sign = ((value >> bit) & 1u) != 0u ? 0x01u : 0xffu;
+      packed |= sign << (bit * 8u);
+    }
+    table[value] = packed;
+  }
+  return table;
+}
+
+inline constexpr auto k_table_q1_sign = make_q1_sign_table();
+#undef EMEL_B1
+#undef EMEL_B2
+#undef EMEL_B3
+#undef EMEL_B4
+#undef EMEL_B5
+#undef EMEL_B6
+#undef EMEL_B7
+#undef EMEL_B8
+#endif
+
 // Keep this list aligned with `tmp/llama.cpp/ggml/include/ggml.h` (`enum ggml_op`),
 // excluding sentinel entries (`NONE`, `COUNT`).
 #define EMEL_KERNEL_OP_EVENT_LIST(X) \
@@ -150,15 +185,16 @@ inline constexpr uint8_t dtype_q3_k = 11;
 inline constexpr uint8_t dtype_q4_k = 12;
 inline constexpr uint8_t dtype_q6_k = 14;
 inline constexpr uint8_t dtype_q8_k = 15;
-inline constexpr uint8_t dtype_q6_k_x8 = 36;
-inline constexpr uint8_t dtype_q6_k_x8_q8_prepared = 37;
-inline constexpr uint8_t dtype_q6_k_x8_q8_argmax_prepared = 38;
-inline constexpr uint8_t dtype_q8_0_x4_bl4 = 39;
-inline constexpr uint8_t dtype_q8_0_x4_bl8 = 40;
-inline constexpr uint8_t dtype_q4_k_x8_bl4 = 41;
-inline constexpr uint8_t dtype_q4_k_x8_bl8 = 42;
-inline constexpr uint8_t dtype_q8_k_x4 = 43;
-inline constexpr uint8_t dtype_q8_k_x8 = 44;
+inline constexpr uint8_t dtype_q1_0_g128 = 41;
+inline constexpr uint8_t dtype_q6_k_x8 = 128;
+inline constexpr uint8_t dtype_q6_k_x8_q8_prepared = 129;
+inline constexpr uint8_t dtype_q6_k_x8_q8_argmax_prepared = 130;
+inline constexpr uint8_t dtype_q8_0_x4_bl4 = 131;
+inline constexpr uint8_t dtype_q8_0_x4_bl8 = 132;
+inline constexpr uint8_t dtype_q4_k_x8_bl4 = 133;
+inline constexpr uint8_t dtype_q4_k_x8_bl8 = 134;
+inline constexpr uint8_t dtype_q8_k_x4 = 135;
+inline constexpr uint8_t dtype_q8_k_x8 = 136;
 inline constexpr uint64_t flash_attn_workspace_token_capacity = 4096u;
 
 struct flash_attn_workspace {
@@ -174,10 +210,12 @@ struct flash_attn_workspace {
 namespace quant {
 
 constexpr uint64_t QK8_0 = 32u;
+constexpr uint64_t QK1_0_G128 = 128u;
 constexpr uint64_t QK_K = 256u;
 constexpr uint64_t K_SCALE_SIZE = 12u;
 constexpr uint64_t MAX_Q8_K_BLOCKS = 128u;
 constexpr uint64_t MAX_Q8_0_BLOCKS = MAX_Q8_K_BLOCKS * (QK_K / QK8_0);
+constexpr uint64_t MAX_Q1_0_G128_BLOCKS = MAX_Q8_0_BLOCKS / (QK1_0_G128 / QK8_0);
 constexpr uint64_t Q4_K_X8_ROWS = 8u;
 constexpr uint64_t Q6_K_X8_ROWS = 8u;
 constexpr uint64_t Q8_0_X4_ROWS = 4u;
@@ -185,6 +223,11 @@ constexpr uint64_t Q8_0_X4_ROWS = 4u;
 struct block_q8_0 {
   uint16_t d = 0;
   std::array<int8_t, QK8_0> qs = {};
+};
+
+struct block_q1_0_g128 {
+  uint16_t d = 0;
+  std::array<uint8_t, QK1_0_G128 / 8u> qs = {};
 };
 
 struct block_q8_0x4 {
@@ -253,6 +296,7 @@ struct block_q8_k {
 };
 
 static_assert(sizeof(block_q8_0) == sizeof(uint16_t) + QK8_0);
+static_assert(sizeof(block_q1_0_g128) == sizeof(uint16_t) + QK1_0_G128 / 8u);
 static_assert(sizeof(block_q2_k) == 2 * sizeof(uint16_t) + (QK_K / 16) + (QK_K / 4));
 static_assert(sizeof(block_q3_k) == sizeof(uint16_t) + (QK_K / 4) + (QK_K / 8) + 12);
 static_assert(sizeof(block_q4_k) == 2 * sizeof(uint16_t) + K_SCALE_SIZE + (QK_K / 2));
@@ -356,6 +400,24 @@ inline void dequantize_row_q2_k(const block_q2_k * x, float * y, const int64_t k
         shift += 2;
       }
       q += 32;
+    }
+  }
+}
+
+inline void dequantize_row_q1_0_g128(const block_q1_0_g128 * x,
+                                     float * y,
+                                     const int64_t k) noexcept {
+  const int64_t nb = k / static_cast<int64_t>(QK1_0_G128);
+
+  for (int64_t i = 0; i < nb; ++i) {
+    const float d = fp16_to_fp32(x[i].d);
+    const float neg_d = -d;
+
+    for (int64_t j = 0; j < static_cast<int64_t>(QK1_0_G128); ++j) {
+      const size_t byte_index = static_cast<size_t>(j / 8);
+      const int bit_offset = static_cast<int>(j % 8);
+      const uint8_t bit = (x[i].qs[byte_index] >> bit_offset) & 1u;
+      y[i * static_cast<int64_t>(QK1_0_G128) + j] = bit != 0u ? d : neg_d;
     }
   }
 }
@@ -1066,17 +1128,24 @@ inline bool is_q8_0_dtype(const uint8_t code) noexcept {
   return code == dtype_q8_0;
 }
 
+inline bool is_q1_0_g128_dtype(const uint8_t code) noexcept {
+  return code == dtype_q1_0_g128;
+}
+
 inline bool is_quantized_k_dtype(const uint8_t code) noexcept {
   return code == dtype_q2_k || code == dtype_q3_k || code == dtype_q4_k || code == dtype_q6_k;
 }
 
 inline bool is_native_quantized_dtype(const uint8_t code) noexcept {
-  return is_q8_0_dtype(code) || is_quantized_k_dtype(code);
+  return is_q8_0_dtype(code) || is_q1_0_g128_dtype(code) || is_quantized_k_dtype(code);
 }
 
 inline uint64_t quantized_block_size(const uint8_t code) noexcept {
   if (is_q8_0_dtype(code)) {
     return quant::QK8_0;
+  }
+  if (is_q1_0_g128_dtype(code)) {
+    return quant::QK1_0_G128;
   }
   if (is_quantized_k_dtype(code)) {
     return quant::QK_K;
@@ -1087,6 +1156,9 @@ inline uint64_t quantized_block_size(const uint8_t code) noexcept {
 inline uint64_t max_quantized_block_count(const uint8_t code) noexcept {
   if (is_q8_0_dtype(code)) {
     return quant::MAX_Q8_0_BLOCKS;
+  }
+  if (is_q1_0_g128_dtype(code)) {
+    return quant::MAX_Q1_0_G128_BLOCKS;
   }
   if (is_quantized_k_dtype(code)) {
     return quant::MAX_Q8_K_BLOCKS;
@@ -1166,6 +1238,9 @@ inline size_t dtype_size_bytes(const uint8_t code) noexcept {
   if (code == dtype_q8_0) {
     return sizeof(quant::block_q8_0) / quant::QK8_0;
   }
+  if (code == dtype_q1_0_g128) {
+    return sizeof(quant::block_q1_0_g128) / quant::QK1_0_G128;
+  }
   if (code == dtype_q2_k) {
     return sizeof(quant::block_q2_k) / quant::QK_K;
   }
@@ -1197,6 +1272,13 @@ inline size_t quantized_row_storage_bytes(const uint8_t code, const uint64_t col
     }
     const uint64_t block_count = cols / quant::QK8_0;
     return static_cast<size_t>(block_count) * sizeof(quant::block_q8_0);
+  }
+  if (code == dtype_q1_0_g128) {
+    if ((cols % quant::QK1_0_G128) != 0u) {
+      return 0u;
+    }
+    const uint64_t block_count = cols / quant::QK1_0_G128;
+    return static_cast<size_t>(block_count) * sizeof(quant::block_q1_0_g128);
   }
   if ((cols % quant::QK_K) != 0u) {
     return 0u;
@@ -2486,6 +2568,256 @@ inline float dot_q8_0_q8_0_row_scalar(const quant::block_q8_0 * lhs,
   return sumf;
 }
 
+inline float dot_q1_0_g128_q8_0_row_scalar(const quant::block_q1_0_g128 * lhs,
+                                           const quant::block_q8_0 * rhs,
+                                           const uint64_t block_count) noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+  float32x4_t sumv = vdupq_n_f32(0.0f);
+
+  for (uint64_t i = 0; i < block_count; ++i) {
+    const float d0 = quant::fp16_to_fp32(lhs[i].d);
+
+    for (uint64_t chunk = 0; chunk < (quant::QK1_0_G128 / quant::QK8_0); ++chunk) {
+      const quant::block_q8_0 * yb = &rhs[i * 4u + chunk];
+      const float d1 = quant::fp16_to_fp32(yb->d);
+      const uint8_t * bits = &lhs[i].qs[chunk * 4u];
+
+      const int8x16_t y0 = vld1q_s8(yb->qs.data());
+      const int8x16_t y1 = vld1q_s8(yb->qs.data() + 16u);
+
+      const uint8x8_t e0 = vcreate_u8(k_table_b2b_0[bits[0]]);
+      const uint8x8_t e1 = vcreate_u8(k_table_b2b_0[bits[1]]);
+      const uint8x8_t e2 = vcreate_u8(k_table_b2b_0[bits[2]]);
+      const uint8x8_t e3 = vcreate_u8(k_table_b2b_0[bits[3]]);
+
+      const int8x8_t one = vdup_n_s8(1);
+      int8x8_t s0 = vreinterpret_s8_u8(vshr_n_u8(e0, 4));
+      int8x8_t s1 = vreinterpret_s8_u8(vshr_n_u8(e1, 4));
+      int8x8_t s2 = vreinterpret_s8_u8(vshr_n_u8(e2, 4));
+      int8x8_t s3 = vreinterpret_s8_u8(vshr_n_u8(e3, 4));
+      s0 = vsub_s8(vadd_s8(s0, s0), one);
+      s1 = vsub_s8(vadd_s8(s1, s1), one);
+      s2 = vsub_s8(vadd_s8(s2, s2), one);
+      s3 = vsub_s8(vadd_s8(s3, s3), one);
+
+      const int8x16_t signs0 = vcombine_s8(s0, s1);
+      const int8x16_t signs1 = vcombine_s8(s2, s3);
+
+      const int32x4_t zero = vdupq_n_s32(0);
+      int32x4_t dot = vdotq_s32(zero, signs0, y0);
+      dot = vdotq_s32(dot, signs1, y1);
+      sumv = vmlaq_n_f32(sumv, vcvtq_f32_s32(dot), d0 * d1);
+    }
+  }
+
+  return vaddvq_f32(sumv);
+#else
+  float sumf = 0.0f;
+
+  for (uint64_t i = 0; i < block_count; ++i) {
+    const float d0 = quant::fp16_to_fp32(lhs[i].d);
+    float sumi = 0.0f;
+
+    for (uint64_t chunk = 0; chunk < (quant::QK1_0_G128 / quant::QK8_0); ++chunk) {
+      const float d1 = quant::fp16_to_fp32(rhs[i * 4u + chunk].d);
+      int sumi_block = 0;
+
+      for (uint64_t j = 0; j < quant::QK8_0; ++j) {
+        const uint64_t bit_index = chunk * quant::QK8_0 + j;
+        const size_t byte_index = static_cast<size_t>(bit_index / 8u);
+        const int bit_offset = static_cast<int>(bit_index % 8u);
+        const int xi = ((lhs[i].qs[byte_index] >> bit_offset) & 1u) != 0u ? 1 : -1;
+        sumi_block += xi * rhs[i * 4u + chunk].qs[static_cast<size_t>(j)];
+      }
+
+      sumi += d1 * static_cast<float>(sumi_block);
+    }
+
+    sumf += d0 * sumi;
+  }
+
+  return sumf;
+#endif
+}
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+struct q1_sign_pair {
+  int8x16_t signs0;
+  int8x16_t signs1;
+};
+
+inline q1_sign_pair load_q1_0_g128_sign_pair(const uint8_t * bits) noexcept {
+  const int8x8_t s0 = vreinterpret_s8_u64(vcreate_u64(k_table_q1_sign[bits[0]]));
+  const int8x8_t s1 = vreinterpret_s8_u64(vcreate_u64(k_table_q1_sign[bits[1]]));
+  const int8x8_t s2 = vreinterpret_s8_u64(vcreate_u64(k_table_q1_sign[bits[2]]));
+  const int8x8_t s3 = vreinterpret_s8_u64(vcreate_u64(k_table_q1_sign[bits[3]]));
+  return q1_sign_pair{
+    .signs0 = vcombine_s8(s0, s1),
+    .signs1 = vcombine_s8(s2, s3),
+  };
+}
+#endif
+
+inline void dot_q1_0_g128_q8_0_4rows_neon(
+    const quant::block_q1_0_g128 * row0,
+    const quant::block_q1_0_g128 * row1,
+    const quant::block_q1_0_g128 * row2,
+    const quant::block_q1_0_g128 * row3,
+    const quant::block_q8_0 * rhs,
+    const uint64_t block_count,
+    float * out) noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+  float32x4_t sumv0 = vdupq_n_f32(0.0f);
+  float32x4_t sumv1 = vdupq_n_f32(0.0f);
+  float32x4_t sumv2 = vdupq_n_f32(0.0f);
+  float32x4_t sumv3 = vdupq_n_f32(0.0f);
+  const int32x4_t zero = vdupq_n_s32(0);
+
+  for (uint64_t i = 0; i < block_count; ++i) {
+    const float d0_row0 = quant::fp16_to_fp32(row0[i].d);
+    const float d0_row1 = quant::fp16_to_fp32(row1[i].d);
+    const float d0_row2 = quant::fp16_to_fp32(row2[i].d);
+    const float d0_row3 = quant::fp16_to_fp32(row3[i].d);
+
+    for (uint64_t chunk = 0; chunk < (quant::QK1_0_G128 / quant::QK8_0); ++chunk) {
+      const quant::block_q8_0 * yb = &rhs[i * 4u + chunk];
+      const float d1 = quant::fp16_to_fp32(yb->d);
+      const int8x16_t y0 = vld1q_s8(yb->qs.data());
+      const int8x16_t y1 = vld1q_s8(yb->qs.data() + 16u);
+
+      const uint8_t * bits_row0 = &row0[i].qs[chunk * 4u];
+      const uint8_t * bits_row1 = &row1[i].qs[chunk * 4u];
+      const uint8_t * bits_row2 = &row2[i].qs[chunk * 4u];
+      const uint8_t * bits_row3 = &row3[i].qs[chunk * 4u];
+      const q1_sign_pair row0_signs = load_q1_0_g128_sign_pair(bits_row0);
+      const q1_sign_pair row1_signs = load_q1_0_g128_sign_pair(bits_row1);
+      const q1_sign_pair row2_signs = load_q1_0_g128_sign_pair(bits_row2);
+      const q1_sign_pair row3_signs = load_q1_0_g128_sign_pair(bits_row3);
+
+      int32x4_t row0_dot = vdotq_s32(zero, row0_signs.signs0, y0);
+      row0_dot = vdotq_s32(row0_dot, row0_signs.signs1, y1);
+      int32x4_t row1_dot = vdotq_s32(zero, row1_signs.signs0, y0);
+      row1_dot = vdotq_s32(row1_dot, row1_signs.signs1, y1);
+      int32x4_t row2_dot = vdotq_s32(zero, row2_signs.signs0, y0);
+      row2_dot = vdotq_s32(row2_dot, row2_signs.signs1, y1);
+      int32x4_t row3_dot = vdotq_s32(zero, row3_signs.signs0, y0);
+      row3_dot = vdotq_s32(row3_dot, row3_signs.signs1, y1);
+
+      sumv0 = vmlaq_n_f32(sumv0, vcvtq_f32_s32(row0_dot), d0_row0 * d1);
+      sumv1 = vmlaq_n_f32(sumv1, vcvtq_f32_s32(row1_dot), d0_row1 * d1);
+      sumv2 = vmlaq_n_f32(sumv2, vcvtq_f32_s32(row2_dot), d0_row2 * d1);
+      sumv3 = vmlaq_n_f32(sumv3, vcvtq_f32_s32(row3_dot), d0_row3 * d1);
+    }
+  }
+
+  out[0] = vaddvq_f32(sumv0);
+  out[1] = vaddvq_f32(sumv1);
+  out[2] = vaddvq_f32(sumv2);
+  out[3] = vaddvq_f32(sumv3);
+#else
+  out[0] = dot_q1_0_g128_q8_0_row_scalar(row0, rhs, block_count);
+  out[1] = dot_q1_0_g128_q8_0_row_scalar(row1, rhs, block_count);
+  out[2] = dot_q1_0_g128_q8_0_row_scalar(row2, rhs, block_count);
+  out[3] = dot_q1_0_g128_q8_0_row_scalar(row3, rhs, block_count);
+#endif
+}
+
+inline void dot_q1_0_g128_q8_0_8rows_neon(
+    const quant::block_q1_0_g128 * row0,
+    const quant::block_q1_0_g128 * row1,
+    const quant::block_q1_0_g128 * row2,
+    const quant::block_q1_0_g128 * row3,
+    const quant::block_q1_0_g128 * row4,
+    const quant::block_q1_0_g128 * row5,
+    const quant::block_q1_0_g128 * row6,
+    const quant::block_q1_0_g128 * row7,
+    const quant::block_q8_0 * rhs,
+    const uint64_t block_count,
+    float * out) noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+  float32x4_t sumv0 = vdupq_n_f32(0.0f);
+  float32x4_t sumv1 = vdupq_n_f32(0.0f);
+  float32x4_t sumv2 = vdupq_n_f32(0.0f);
+  float32x4_t sumv3 = vdupq_n_f32(0.0f);
+  float32x4_t sumv4 = vdupq_n_f32(0.0f);
+  float32x4_t sumv5 = vdupq_n_f32(0.0f);
+  float32x4_t sumv6 = vdupq_n_f32(0.0f);
+  float32x4_t sumv7 = vdupq_n_f32(0.0f);
+  const int32x4_t zero = vdupq_n_s32(0);
+
+  for (uint64_t i = 0; i < block_count; ++i) {
+    const float d0_row0 = quant::fp16_to_fp32(row0[i].d);
+    const float d0_row1 = quant::fp16_to_fp32(row1[i].d);
+    const float d0_row2 = quant::fp16_to_fp32(row2[i].d);
+    const float d0_row3 = quant::fp16_to_fp32(row3[i].d);
+    const float d0_row4 = quant::fp16_to_fp32(row4[i].d);
+    const float d0_row5 = quant::fp16_to_fp32(row5[i].d);
+    const float d0_row6 = quant::fp16_to_fp32(row6[i].d);
+    const float d0_row7 = quant::fp16_to_fp32(row7[i].d);
+
+    for (uint64_t chunk = 0; chunk < (quant::QK1_0_G128 / quant::QK8_0); ++chunk) {
+      const quant::block_q8_0 * yb = &rhs[i * 4u + chunk];
+      const float d1 = quant::fp16_to_fp32(yb->d);
+      const int8x16_t y0 = vld1q_s8(yb->qs.data());
+      const int8x16_t y1 = vld1q_s8(yb->qs.data() + 16u);
+
+      const q1_sign_pair row0_signs = load_q1_0_g128_sign_pair(&row0[i].qs[chunk * 4u]);
+      const q1_sign_pair row1_signs = load_q1_0_g128_sign_pair(&row1[i].qs[chunk * 4u]);
+      const q1_sign_pair row2_signs = load_q1_0_g128_sign_pair(&row2[i].qs[chunk * 4u]);
+      const q1_sign_pair row3_signs = load_q1_0_g128_sign_pair(&row3[i].qs[chunk * 4u]);
+      const q1_sign_pair row4_signs = load_q1_0_g128_sign_pair(&row4[i].qs[chunk * 4u]);
+      const q1_sign_pair row5_signs = load_q1_0_g128_sign_pair(&row5[i].qs[chunk * 4u]);
+      const q1_sign_pair row6_signs = load_q1_0_g128_sign_pair(&row6[i].qs[chunk * 4u]);
+      const q1_sign_pair row7_signs = load_q1_0_g128_sign_pair(&row7[i].qs[chunk * 4u]);
+
+      int32x4_t row0_dot = vdotq_s32(zero, row0_signs.signs0, y0);
+      row0_dot = vdotq_s32(row0_dot, row0_signs.signs1, y1);
+      int32x4_t row1_dot = vdotq_s32(zero, row1_signs.signs0, y0);
+      row1_dot = vdotq_s32(row1_dot, row1_signs.signs1, y1);
+      int32x4_t row2_dot = vdotq_s32(zero, row2_signs.signs0, y0);
+      row2_dot = vdotq_s32(row2_dot, row2_signs.signs1, y1);
+      int32x4_t row3_dot = vdotq_s32(zero, row3_signs.signs0, y0);
+      row3_dot = vdotq_s32(row3_dot, row3_signs.signs1, y1);
+      int32x4_t row4_dot = vdotq_s32(zero, row4_signs.signs0, y0);
+      row4_dot = vdotq_s32(row4_dot, row4_signs.signs1, y1);
+      int32x4_t row5_dot = vdotq_s32(zero, row5_signs.signs0, y0);
+      row5_dot = vdotq_s32(row5_dot, row5_signs.signs1, y1);
+      int32x4_t row6_dot = vdotq_s32(zero, row6_signs.signs0, y0);
+      row6_dot = vdotq_s32(row6_dot, row6_signs.signs1, y1);
+      int32x4_t row7_dot = vdotq_s32(zero, row7_signs.signs0, y0);
+      row7_dot = vdotq_s32(row7_dot, row7_signs.signs1, y1);
+
+      sumv0 = vmlaq_n_f32(sumv0, vcvtq_f32_s32(row0_dot), d0_row0 * d1);
+      sumv1 = vmlaq_n_f32(sumv1, vcvtq_f32_s32(row1_dot), d0_row1 * d1);
+      sumv2 = vmlaq_n_f32(sumv2, vcvtq_f32_s32(row2_dot), d0_row2 * d1);
+      sumv3 = vmlaq_n_f32(sumv3, vcvtq_f32_s32(row3_dot), d0_row3 * d1);
+      sumv4 = vmlaq_n_f32(sumv4, vcvtq_f32_s32(row4_dot), d0_row4 * d1);
+      sumv5 = vmlaq_n_f32(sumv5, vcvtq_f32_s32(row5_dot), d0_row5 * d1);
+      sumv6 = vmlaq_n_f32(sumv6, vcvtq_f32_s32(row6_dot), d0_row6 * d1);
+      sumv7 = vmlaq_n_f32(sumv7, vcvtq_f32_s32(row7_dot), d0_row7 * d1);
+    }
+  }
+
+  out[0] = vaddvq_f32(sumv0);
+  out[1] = vaddvq_f32(sumv1);
+  out[2] = vaddvq_f32(sumv2);
+  out[3] = vaddvq_f32(sumv3);
+  out[4] = vaddvq_f32(sumv4);
+  out[5] = vaddvq_f32(sumv5);
+  out[6] = vaddvq_f32(sumv6);
+  out[7] = vaddvq_f32(sumv7);
+#else
+  out[0] = dot_q1_0_g128_q8_0_row_scalar(row0, rhs, block_count);
+  out[1] = dot_q1_0_g128_q8_0_row_scalar(row1, rhs, block_count);
+  out[2] = dot_q1_0_g128_q8_0_row_scalar(row2, rhs, block_count);
+  out[3] = dot_q1_0_g128_q8_0_row_scalar(row3, rhs, block_count);
+  out[4] = dot_q1_0_g128_q8_0_row_scalar(row4, rhs, block_count);
+  out[5] = dot_q1_0_g128_q8_0_row_scalar(row5, rhs, block_count);
+  out[6] = dot_q1_0_g128_q8_0_row_scalar(row6, rhs, block_count);
+  out[7] = dot_q1_0_g128_q8_0_row_scalar(row7, rhs, block_count);
+#endif
+}
+
 inline constexpr uint8_t unary_subop_abs = 0u;
 inline constexpr uint8_t unary_subop_neg = 2u;
 inline constexpr uint8_t unary_subop_relu = 6u;
@@ -2543,11 +2875,12 @@ inline bool run_mul_mat(const request_type & request) noexcept {
       request.dst.ne[2] != 1 || request.dst.ne[3] != 1;
   const bool valid = !(has_empty_dim || shape_mismatch || invalid_rank);
   const uint8_t src0_type = dtype_code(request.src0.type);
+  const uint8_t src1_type = dtype_code(request.src1.type);
   const bool q8_0_src0 = is_q8_0_dtype(src0_type);
+  const bool q1_0_g128_src0 = is_q1_0_g128_dtype(src0_type);
   const bool quantized_src0 = is_quantized_k_dtype(src0_type);
 
   if (valid && q8_0_src0) {
-    const auto * b_dense = static_cast<const float *>(request.src1.data);
     auto * c_dense = static_cast<float *>(request.dst.data);
     const auto * a_base = static_cast<const uint8_t *>(request.src0.data);
     const size_t row_bytes = request.src0.nb[1];
@@ -2561,14 +2894,62 @@ inline bool run_mul_mat(const request_type & request) noexcept {
       for (uint64_t i = 0; i < m; ++i) {
         c_dense[i * n + j] = 0.0f;
       }
-      for (uint64_t block = 0; block < block_count; ++block) {
-        quant::quantize_row_q8_0_strided(
-            b_dense + block * quant::QK8_0 * n + j, n, &q8_blocks[block], quant::QK8_0);
+      if (src1_type == dtype_q8_0) {
+        std::memcpy(q8_blocks.data(),
+                    static_cast<const uint8_t *>(request.src1.data) +
+                        j * block_count * sizeof(quant::block_q8_0),
+                    block_count * sizeof(quant::block_q8_0));
+      } else {
+        const auto * b_dense = static_cast<const float *>(request.src1.data);
+        for (uint64_t block = 0; block < block_count; ++block) {
+          quant::quantize_row_q8_0_strided(
+              b_dense + block * quant::QK8_0 * n + j, n, &q8_blocks[block],
+              quant::QK8_0);
+        }
       }
       for (uint64_t i = 0; i < m; ++i) {
         const uint8_t * row_ptr = a_base + i * row_bytes;
         c_dense[i * n + j] = dot_q8_0_q8_0_row_scalar(
-            reinterpret_cast<const quant::block_q8_0 *>(row_ptr), q8_blocks.data(), block_count);
+            reinterpret_cast<const quant::block_q8_0 *>(row_ptr),
+            q8_blocks.data(), block_count);
+      }
+    }
+
+    return true;
+  }
+
+  if (valid && q1_0_g128_src0) {
+    auto * c_dense = static_cast<float *>(request.dst.data);
+    const auto * a_base = static_cast<const uint8_t *>(request.src0.data);
+    const size_t row_bytes = request.src0.nb[1];
+    const uint64_t block_count = k / quant::QK1_0_G128;
+    std::array<quant::block_q8_0, quant::MAX_Q8_0_BLOCKS> q8_blocks = {};
+    if ((block_count * 4u) > q8_blocks.size()) {
+      return false;
+    }
+
+    for (uint64_t j = 0; j < n; ++j) {
+      for (uint64_t i = 0; i < m; ++i) {
+        c_dense[i * n + j] = 0.0f;
+      }
+      if (src1_type == dtype_q8_0) {
+        std::memcpy(q8_blocks.data(),
+                    static_cast<const uint8_t *>(request.src1.data) +
+                        j * block_count * 4u * sizeof(quant::block_q8_0),
+                    block_count * 4u * sizeof(quant::block_q8_0));
+      } else {
+        const auto * b_dense = static_cast<const float *>(request.src1.data);
+        for (uint64_t block = 0; block < block_count; ++block) {
+          quant::quantize_row_q8_0_strided(
+              b_dense + block * quant::QK1_0_G128 * n + j, n,
+              q8_blocks.data() + block * 4u, quant::QK1_0_G128);
+        }
+      }
+      for (uint64_t i = 0; i < m; ++i) {
+        const uint8_t * row_ptr = a_base + i * row_bytes;
+        c_dense[i * n + j] = dot_q1_0_g128_q8_0_row_scalar(
+            reinterpret_cast<const quant::block_q1_0_g128 *>(row_ptr),
+            q8_blocks.data(), block_count);
       }
     }
 
@@ -2687,10 +3068,26 @@ inline bool can_run_mul_mat_argmax(const request_type & request) noexcept {
       request.src0.nb[1] == quantized_row_storage_bytes(src0_type, k) &&
       request.src0.nb[2] == request.src0.nb[1] * m &&
       request.src0.nb[3] == request.src0.nb[2];
+  const bool quantized_q8_0_rhs_path =
+      (is_q8_0_dtype(src0_type) || is_q1_0_g128_dtype(src0_type)) &&
+      src1_type == dtype_q8_0 &&
+      dst_type == dtype_f32 &&
+      quant_block_size != 0u &&
+      (k % quant_block_size) == 0u &&
+      (k / quant_block_size) <= quant_block_count_limit &&
+      request.src1.nb[0] == 1u &&
+      request.src1.nb[1] == quantized_row_storage_bytes(src1_type, k) &&
+      request.src1.nb[2] == request.src1.nb[1] &&
+      request.src1.nb[3] == request.src1.nb[2] &&
+      is_dense_contiguous(request.dst) &&
+      request.src0.nb[0] == 1u &&
+      request.src0.nb[1] == quantized_row_storage_bytes(src0_type, k) &&
+      request.src0.nb[2] == request.src0.nb[1] * m &&
+      request.src0.nb[3] == request.src0.nb[2];
   return !has_empty_dim &&
       request.index_out != nullptr &&
       valid_shape &&
-      (f32_path || quantized_path);
+      (f32_path || quantized_path || quantized_q8_0_rhs_path);
 }
 
 template <class request_type>
@@ -2703,6 +3100,7 @@ inline bool run_mul_mat_argmax(const request_type & request) noexcept {
   }
 
   const uint8_t src0_type = dtype_code(request.src0.type);
+  const uint8_t src1_type = dtype_code(request.src1.type);
   const float * b_dense = static_cast<const float *>(request.src1.data);
   float * best_value_out = static_cast<float *>(request.dst.data);
   int32_t best_index = 0;
@@ -2733,11 +3131,44 @@ inline bool run_mul_mat_argmax(const request_type & request) noexcept {
     if (block_count > q8_blocks.size()) {
       return false;
     }
-    quant::quantize_row_q8_0_strided(b_dense, 1u, q8_blocks.data(), static_cast<int64_t>(k));
+    if (src1_type == dtype_q8_0) {
+      std::memcpy(q8_blocks.data(), request.src1.data,
+                  block_count * sizeof(quant::block_q8_0));
+    } else {
+      quant::quantize_row_q8_0_strided(b_dense, 1u, q8_blocks.data(), static_cast<int64_t>(k));
+    }
     for (uint64_t row = 0; row < m; ++row) {
       const uint8_t * row_ptr = a_base + row * row_bytes;
       const float value = dot_q8_0_q8_0_row_scalar(
           reinterpret_cast<const quant::block_q8_0 *>(row_ptr), q8_blocks.data(), block_count);
+      if (value > best_value || row == 0u) {
+        best_value = value;
+        best_index = static_cast<int32_t>(row);
+      }
+    }
+    *best_value_out = best_value;
+    *request.index_out = best_index;
+    return true;
+  }
+
+  if (is_q1_0_g128_dtype(src0_type)) {
+    const auto * a_base = static_cast<const uint8_t *>(request.src0.data);
+    const size_t row_bytes = request.src0.nb[1];
+    const uint64_t block_count = k / quant::QK1_0_G128;
+    std::array<quant::block_q8_0, quant::MAX_Q8_0_BLOCKS> q8_blocks = {};
+    if ((block_count * 4u) > q8_blocks.size()) {
+      return false;
+    }
+    if (src1_type == dtype_q8_0) {
+      std::memcpy(q8_blocks.data(), request.src1.data,
+                  block_count * 4u * sizeof(quant::block_q8_0));
+    } else {
+      quant::quantize_row_q8_0_strided(b_dense, 1u, q8_blocks.data(), static_cast<int64_t>(k));
+    }
+    for (uint64_t row = 0; row < m; ++row) {
+      const uint8_t * row_ptr = a_base + row * row_bytes;
+      const float value = dot_q1_0_g128_q8_0_row_scalar(
+          reinterpret_cast<const quant::block_q1_0_g128 *>(row_ptr), q8_blocks.data(), block_count);
       if (value > best_value || row == 0u) {
         best_value = value;
         best_index = static_cast<int32_t>(row);
@@ -2886,7 +3317,24 @@ inline bool can_run_mul_mat(const request_type & request) noexcept {
       request.src0.nb[1] == quantized_row_storage_bytes(src0_type, k) &&
       request.src0.nb[2] == request.src0.nb[1] * m &&
       request.src0.nb[3] == request.src0.nb[2];
-  return !has_empty_dim && valid_shape && (f32_path || quantized_path);
+  const bool quantized_q8_0_rhs_path =
+      (is_q8_0_dtype(src0_type) || is_q1_0_g128_dtype(src0_type)) &&
+      src1_type == dtype_q8_0 &&
+      dst_type == dtype_f32 &&
+      quant_block_size != 0u &&
+      (k % quant_block_size) == 0u &&
+      (k / quant_block_size) <= quant_block_count_limit &&
+      request.src1.nb[0] == 1u &&
+      request.src1.nb[1] == quantized_row_storage_bytes(src1_type, k) &&
+      request.src1.nb[2] == request.src1.nb[1] &&
+      request.src1.nb[3] == request.src1.nb[2] &&
+      is_dense_contiguous(request.dst) &&
+      request.src0.nb[0] == 1u &&
+      request.src0.nb[1] == quantized_row_storage_bytes(src0_type, k) &&
+      request.src0.nb[2] == request.src0.nb[1] * m &&
+      request.src0.nb[3] == request.src0.nb[2];
+  return !has_empty_dim && valid_shape &&
+         (f32_path || quantized_path || quantized_q8_0_rhs_path);
 }
 
 template <class request_type>

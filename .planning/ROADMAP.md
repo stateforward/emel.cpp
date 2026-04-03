@@ -5,8 +5,9 @@
 v1.10 delivers one truthful maintained Prism ML `Bonsai-1.7B.gguf` slice through the existing EMEL
 generator, paritychecker, and benchmark workflow. The milestone stays narrow and honest to the
 research: freeze one maintained fixture, bind one explicit Bonsai conditioning contract, land the
-native `Q1_0_g128` runtime path on the existing `qwen3` lane, then prove parity/regression and
-publish one benchmark/docs path for that exact slice.
+native `Q1_0_g128` runtime path on the existing `qwen3` lane, close the missing Qwen-family RoPE
+domain semantics, prove parity/regression, close the remaining full-quantized performance gap,
+then publish one benchmark/docs path for that exact slice.
 
 ## Phases
 
@@ -14,14 +15,18 @@ publish one benchmark/docs path for that exact slice.
 - Integer phases continue across milestones.
 - v1.10 starts at Phase 38 because the prior in-flight roadmap ended at Phase 37.
 
-- [ ] **Phase 38: Fixture Provenance And Metadata Truth** - Freeze the maintained Bonsai fixture,
+- [x] **Phase 38: Fixture Provenance And Metadata Truth** - Freeze the maintained Bonsai fixture,
       executable GGUF truth, and exact file-versus-format naming.
-- [ ] **Phase 39: Bonsai Conditioning Contract** - Bind one explicit Bonsai formatter contract and
+- [x] **Phase 39: Bonsai Conditioning Contract** - Bind one explicit Bonsai formatter contract and
       reject unsupported request shapes.
-- [ ] **Phase 40: Native `Q1_0_g128` Runtime Bring-Up** - Add truthful EMEL-owned runtime support
+- [x] **Phase 40: Native `Q1_0_g128` Runtime Bring-Up** - Add truthful EMEL-owned runtime support
       for the maintained Bonsai slice on the existing `qwen3` path.
-- [ ] **Phase 41: Parity And Regression Proof** - Prove the maintained Bonsai slice against the
+- [x] **Phase 40.1: Qwen-Family RoPE Domain Bring-Up** - Add explicit Qwen-family rotary
+      semantics, including rope type and YaRN scaling metadata, on the existing `qwen3` path.
+- [x] **Phase 41: Parity And Regression Proof** - Prove the maintained Bonsai slice against the
       Prism reference lane and protect prior maintained anchors.
+- [ ] **Phase 41.1: full quantized as discussed to close the 3.17x gap** - Close the remaining
+      full-quantized performance gap before benchmark publication.
 - [ ] **Phase 42: Benchmark And Publication** - Publish one truthful Bonsai benchmark/docs path
       for the same parity-backed maintained slice.
 
@@ -40,7 +45,7 @@ before contract or runtime work starts.
   3. Operator-facing docs and publication surfaces distinguish the fixture filename
      `Bonsai-1.7B.gguf` from the weight format `Q1_0_g128` and do not rely on the stale quickstart
      filename.
-**Plans**: TBD
+**Plans**: 40-01
 
 ### Phase 39: Bonsai Conditioning Contract
 **Goal**: The maintained Bonsai slice exposes one explicit structured request contract before
@@ -54,7 +59,7 @@ runtime and parity claims are made.
      `add_generation_prompt=true`, `tools=none`, and `enable_thinking=false`.
   3. Unsupported Bonsai request shapes, including tool calls, tool responses, thinking replay,
      named template variants, and raw-prompt fallback, fail explicitly on repo-visible surfaces.
-**Plans**: TBD
+**Plans**: 39-01
 
 ### Phase 40: Native `Q1_0_g128` Runtime Bring-Up
 **Goal**: EMEL truthfully runs the maintained Bonsai slice on the shipped generator path using a
@@ -69,12 +74,29 @@ native `Q1_0_g128` operand path on the existing `qwen3` architecture lane.
   3. The shipped generator path initializes and produces bounded generation on
      `tests/models/Bonsai-1.7B.gguf` using the maintained Bonsai formatter contract and native
      `Q1_0_g128` runtime path.
-**Plans**: TBD
+**Plans**: 40-01
+
+### Phase 40.1: Qwen-Family RoPE Domain Bring-Up
+**Goal**: EMEL closes the remaining Qwen-family rotary-position domain gap so the maintained
+Bonsai slice reaches parity through explicit runtime semantics rather than model-specific hacks.
+**Depends on**: Phase 40
+**Requirements**: RUN-10
+**Success Criteria** (what must be TRUE):
+  1. EMEL-owned model metadata/loading surfaces publish the Qwen-family rope inputs needed by the
+     maintained Bonsai slice, including rope scaling type, scaling factor or effective frequency
+     scale, and original YaRN context length, without adding a `bonsai`-only behavior lane.
+  2. `src/emel` applies the correct Qwen-family RoPE domain semantics on the shipped generator
+     path, including the Qwen/NEOX pair layout and YaRN-aware scaling behavior as explicit runtime
+     domain support.
+  3. Focused parity evidence shows the maintained Bonsai decode path no longer diverges at the
+     first generated-token Q/K RoPE boundary and Phase 41 parity work is unblocked on the real
+     reference lane.
+**Plans**: 40.1-01
 
 ### Phase 41: Parity And Regression Proof
 **Goal**: Correctness claims for the maintained Bonsai slice are proven against the truthful
 reference lane and do not break the prior maintained anchors.
-**Depends on**: Phase 40
+**Depends on**: Phase 40.1
 **Requirements**: PAR-03, VER-03
 **Success Criteria** (what must be TRUE):
   1. `tools/paritychecker --generation` proves EMEL against a pinned `PrismML-Eng/llama.cpp`
@@ -85,10 +107,26 @@ reference lane and do not break the prior maintained anchors.
      identity auditable for reviewers.
 **Plans**: TBD
 
+### Phase 41.1: Full Quantized Performance Closure
+**Goal**: Close the remaining maintained Bonsai performance gap by making the shipped
+`Q1_0_g128` operand path and quantized token-embedding entry path materially more native and
+truthful before benchmark publication.
+**Depends on:** Phase 41
+**Requirements**: RUN-11, PERF-01
+**Success Criteria** (what must be TRUE):
+  1. The shipped generator path no longer reports the maintained Bonsai token-embedding stage as
+     `approved_dense_f32_by_contract` when the stored tensor itself is quantized.
+  2. `src/emel` provides an optimized native `Q1_0_g128 x q8` hot path for the maintained Bonsai
+     decode/prefill workload on the existing runtime lane instead of relying on the current scalar
+     dot-product implementation.
+  3. The isolated Bonsai implementation bench shows a materially improved EMEL-vs-Prism ratio while
+     parity and the full quality gate remain green.
+**Plans**: 41.1-01
+
 ### Phase 42: Benchmark And Publication
 **Goal**: The repo publishes one truthful benchmark/docs path for the same parity-backed maintained
 Bonsai slice and nothing broader.
-**Depends on**: Phase 41
+**Depends on**: Phase 41.1
 **Requirements**: BENCH-09
 **Success Criteria** (what must be TRUE):
   1. `tools/bench` compare output includes one maintained Bonsai benchmark case for
@@ -103,8 +141,10 @@ Bonsai slice and nothing broader.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 38. Fixture Provenance And Metadata Truth | 0/TBD | Not started | - |
-| 39. Bonsai Conditioning Contract | 0/TBD | Not started | - |
-| 40. Native `Q1_0_g128` Runtime Bring-Up | 0/TBD | Not started | - |
-| 41. Parity And Regression Proof | 0/TBD | Not started | - |
+| 38. Fixture Provenance And Metadata Truth | 1/1 | Complete | 2026-04-02 |
+| 39. Bonsai Conditioning Contract | 1/1 | Complete | 2026-04-02 |
+| 40. Native `Q1_0_g128` Runtime Bring-Up | 1/1 | Complete | 2026-04-02 |
+| 40.1. Qwen-Family RoPE Domain Bring-Up | 1/1 | Complete | 2026-04-02 |
+| 41. Parity And Regression Proof | 1/1 | Complete | 2026-04-03 |
+| 41.1. full quantized as discussed to close the 3.17x gap | 1/1 | Complete | 2026-04-03 |
 | 42. Benchmark And Publication | 0/TBD | Not started | - |

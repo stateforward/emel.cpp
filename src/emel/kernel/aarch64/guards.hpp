@@ -152,6 +152,17 @@ struct simd_op_mul_mat_q8_0_vector {
   }
 };
 
+struct simd_op_mul_mat_q1_0_g128_vector_q8_rhs {
+  bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  const action::context & ctx) const noexcept {
+    if (!::emel::kernel::detail::validate_dispatch_request(ev.request)) {
+      return false;
+    }
+    return ::emel::kernel::aarch64::detail::can_use_neon_mul_mat_q1_0_g128_vector_q8_rhs(
+        ev.request, ctx.neon_available);
+  }
+};
+
 struct simd_op_mul_mat_q8_0_packed_bl8 {
   bool operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
                   const action::context & ctx) const noexcept {

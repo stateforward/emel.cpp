@@ -40,6 +40,8 @@ struct bind {
   void * formatter_ctx = nullptr;
   emel::text::formatter::format_fn format_prompt =
       emel::text::formatter::format_raw;
+  emel::text::formatter::contract_kind formatter_contract =
+      emel::text::formatter::contract_kind::raw;
   bool add_special = true;
   bool parse_special = false;
   int32_t * error_out = nullptr;

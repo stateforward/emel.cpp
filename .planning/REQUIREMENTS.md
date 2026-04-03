@@ -8,49 +8,57 @@ verification before widening API surface or model scope.
 
 ### Fixture And Metadata
 
-- [ ] **FIX-03**: The repo documents one official maintained Bonsai fixture at
+- [x] **FIX-03**: The repo documents one official maintained Bonsai fixture at
   `tests/models/Bonsai-1.7B.gguf` with source repo, direct download URL, size `248302272` bytes,
   and SHA256 `0ae245fc08236af7cb64caff164937e53a8d54af611b0f398cc992c0a5ba70c4`.
-- [ ] **META-02**: The maintained Bonsai slice records executable GGUF truth from the live
+- [x] **META-02**: The maintained Bonsai slice records executable GGUF truth from the live
   artifact, including `general.architecture=qwen3`, `tokenizer.ggml.model=gpt2`,
   `tokenizer.ggml.pre=qwen2`, `qwen3.context_length=32768`, `qwen3.block_count=28`,
   `qwen3.embedding_length=2048`, and `qwen3.attention.head_count/head_count_kv=16/8`.
-- [ ] **META-03**: Maintained docs, fixture registries, and publication surfaces distinguish the
+- [x] **META-03**: Maintained docs, fixture registries, and publication surfaces distinguish the
   actual fixture filename `Bonsai-1.7B.gguf` from the weight format `Q1_0_g128` and do not rely on
   the stale quickstart filename `Bonsai-1.7B-Q1_0_g128.gguf`.
 
 ### Conditioning
 
-- [ ] **COND-04**: The maintained Bonsai slice uses one explicit structured chat-message contract
+- [x] **COND-04**: The maintained Bonsai slice uses one explicit structured chat-message contract
   derived from the embedded `tokenizer.chat_template` in the official GGUF.
-- [ ] **COND-05**: The maintained Bonsai contract supports only the approved request surface for the
+- [x] **COND-05**: The maintained Bonsai contract supports only the approved request surface for the
   first slice: `system,user,assistant` messages, `add_generation_prompt=true`, `tools=none`, and
   `enable_thinking=false`.
-- [ ] **COND-06**: Unsupported Bonsai request shapes, including tool calls, tool responses,
+- [x] **COND-06**: Unsupported Bonsai request shapes, including tool calls, tool responses,
   thinking replay/preservation, named template variants, and raw-prompt fallback, fail explicitly
   instead of silently widening the maintained contract.
 
 ### Runtime Support
 
-- [ ] **RUN-07**: EMEL-owned model metadata/loading surfaces truthfully accept the maintained
+- [x] **RUN-07**: EMEL-owned model metadata/loading surfaces truthfully accept the maintained
   Bonsai fixture on the existing `qwen3` architecture path without inventing a new `bonsai` or
   `prismml` execution family.
-- [ ] **RUN-08**: EMEL-owned `src/emel` runtime code provides a native `Q1_0_g128` operand path for
+- [x] **RUN-08**: EMEL-owned `src/emel` runtime code provides a native `Q1_0_g128` operand path for
   the maintained Bonsai slice, including dtype/layout support and hot-path execution without a
   whole-tensor dequantize-to-f32 fallback.
-- [ ] **RUN-09**: The shipped generator path initializes and generates on `Bonsai-1.7B.gguf` using
+- [x] **RUN-09**: The shipped generator path initializes and generates on `Bonsai-1.7B.gguf` using
   the maintained Bonsai formatter contract and the native `Q1_0_g128` runtime path.
+- [x] **RUN-10**: EMEL-owned model metadata and generator runtime expose an explicit Qwen-family
+  RoPE domain, including rope type and YaRN scaling semantics needed by the maintained Bonsai
+  slice, without adding a Bonsai-only behavior lane.
+- [x] **RUN-11**: The shipped generator path consumes quantized Bonsai token embeddings through a
+  native runtime operand path and no longer classifies that stage as
+  `approved_dense_f32_by_contract` on the maintained slice.
 
 ### Verification
 
-- [ ] **PAR-03**: `tools/paritychecker --generation` proves EMEL against a pinned
+- [x] **PAR-03**: `tools/paritychecker --generation` proves EMEL against a pinned
   `PrismML-Eng/llama.cpp` reference lane on the maintained Bonsai fixture using the same formatter
   contract.
-- [ ] **VER-03**: Regression coverage protects the maintained Bonsai slice and the prior maintained
+- [x] **VER-03**: Regression coverage protects the maintained Bonsai slice and the prior maintained
   Llama and Qwen anchors from accidental fixture, formatter, architecture, or quant-path drift.
 
 ### Benchmarking
 
+- [x] **PERF-01**: EMEL materially reduces the maintained Bonsai implementation-mode benchmark gap
+  against the pinned Prism lane before benchmark publication.
 - [ ] **BENCH-09**: `tools/bench` compare output, stored benchmark evidence, and generated docs
   publish one truthful Bonsai benchmark path aligned with the same parity-backed fixture, formatter
   contract, and Prism reference lane.
@@ -96,24 +104,27 @@ verification before widening API surface or model scope.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FIX-03 | Phase 38 | Pending |
-| META-02 | Phase 38 | Pending |
-| META-03 | Phase 38 | Pending |
-| COND-04 | Phase 39 | Pending |
-| COND-05 | Phase 39 | Pending |
-| COND-06 | Phase 39 | Pending |
-| RUN-07 | Phase 40 | Pending |
-| RUN-08 | Phase 40 | Pending |
-| RUN-09 | Phase 40 | Pending |
-| PAR-03 | Phase 41 | Pending |
-| VER-03 | Phase 41 | Pending |
+| FIX-03 | Phase 38 | Complete |
+| META-02 | Phase 38 | Complete |
+| META-03 | Phase 38 | Complete |
+| COND-04 | Phase 39 | Complete |
+| COND-05 | Phase 39 | Complete |
+| COND-06 | Phase 39 | Complete |
+| RUN-07 | Phase 40 | Complete |
+| RUN-08 | Phase 40 | Complete |
+| RUN-09 | Phase 40 | Complete |
+| RUN-10 | Phase 40.1 | Complete |
+| PAR-03 | Phase 41 | Complete |
+| VER-03 | Phase 41 | Complete |
+| RUN-11 | Phase 41.1 | Complete |
+| PERF-01 | Phase 41.1 | Complete |
 | BENCH-09 | Phase 42 | Pending |
 
 **Coverage:**
-- v1 requirements: 12 total
-- Mapped to phases: 12
+- v1 requirements: 15 total
+- Mapped to phases: 15
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-02*
-*Last updated: 2026-04-02 after Bonsai milestone definition*
+*Last updated: 2026-04-03 after completing Phase 41.1 full-quantized performance closure*

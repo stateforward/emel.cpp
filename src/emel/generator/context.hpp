@@ -103,6 +103,8 @@ struct context {
   void * formatter_ctx = nullptr;
   emel::text::formatter::format_fn format_prompt =
       emel::text::formatter::format_raw;
+  emel::text::formatter::contract_kind formatter_contract =
+      emel::text::formatter::contract_kind::raw;
 
   emel::text::renderer::sm renderer = {};
   emel::batch::planner::sm planner = {};

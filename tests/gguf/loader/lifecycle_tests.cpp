@@ -520,6 +520,24 @@ TEST_CASE("gguf loader probe sizes the pinned llama fixture") {
   CHECK(req.max_value_bytes > 0u);
 }
 
+TEST_CASE("gguf loader probe accepts the maintained Bonsai q1_0_g128 fixture") {
+  const std::filesystem::path fixture =
+      std::filesystem::path{__FILE__}.parent_path().parent_path().parent_path() /
+      "models/Bonsai-1.7B.gguf";
+  REQUIRE(std::filesystem::exists(fixture));
+
+  const std::vector<uint8_t> file_bytes = read_test_model(fixture);
+  emel::gguf::loader::requirements req = {};
+  const emel::error::type err =
+      emel::gguf::loader::detail::probe_requirements(std::span<const uint8_t>{file_bytes}, req);
+
+  REQUIRE(err == emel::error::cast(emel::gguf::loader::error::none));
+  CHECK(req.tensor_count == 310u);
+  CHECK(req.kv_count > 0u);
+  CHECK(req.max_key_bytes > 0u);
+  CHECK(req.max_value_bytes > 0u);
+}
+
 TEST_CASE("gguf loader explicit error guard classification") {
   emel::gguf::loader::action::context ctx = {};
   const emel::gguf::loader::event::probe_done_fn probe_done_cb =

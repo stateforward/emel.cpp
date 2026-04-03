@@ -78,6 +78,7 @@ inline constexpr ggml_type_layout ggml_layout(const uint32_t type) noexcept {
     case 30u: return {1u, 2u};      // BF16
     case 34u: return {256u, 54u};   // TQ1_0
     case 35u: return {256u, 66u};   // TQ2_0
+    case 41u: return {128u, 18u};   // Q1_0_g128
     case 39u: return {32u, 17u};    // MXFP4
     default: return {};
   }

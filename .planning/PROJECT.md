@@ -100,14 +100,15 @@ transitions instead of hidden action/detail control flow.
   `generator_prefill` architecture.
 - ✓ v1.7 preserved maintained generator, paritychecker, and compare proof; unrelated broad
   benchmark snapshot regressions outside `generator/prefill` were explicitly waived for closeout.
+- ✓ Phase 38 froze one maintained `Bonsai-1.7B.gguf` fixture identity in repo-visible docs and
+  registries.
+- ✓ Phase 38 recorded executable Bonsai GGUF truth as `general.architecture=qwen3` plus the
+  maintained tokenizer/topology fields from the live artifact.
+- ✓ Phase 38 split all maintained fixtures from generation-supported fixtures so Bonsai is visible
+  but not overclaimed on pre-runtime parity and bench surfaces.
 
 ### Active
 
-- [ ] `FIX-03`: Document one official `Bonsai-1.7B.gguf` maintained fixture with checksum, source,
-  stable path, and direct Hugging Face download URL.
-- [ ] `META-02`: Record executable model truth for the Bonsai slice from live GGUF metadata and the
-  Hugging Face repository state, including the actual file name, architecture family, context
-  length, and 1-bit quant format.
 - [ ] `COND-04`: Add one explicit Bonsai request-conditioning contract derived from the maintained
   tokenizer/chat metadata, with no silent fallback to an unrelated existing formatter surface.
 - [ ] `RUN-07`: Add truthful EMEL-owned runtime support for the maintained Bonsai slice on the
@@ -188,6 +189,7 @@ deliberate machine-structure changes.
 | Use live Hugging Face repo state plus executable GGUF metadata as the maintained truth source for Bonsai | The model card README, quickstart snippets, and file tree already disagree on the published filename, so docs must follow executable truth | — Pending |
 | Treat `Q1_0_g128` as milestone-defining scope, not an incidental detail | Prism describes Bonsai support through a custom 1-bit operand path; the milestone is not honest if it ignores that kernel/runtime requirement | — Pending |
 | Keep the maintained Bonsai contract on one explicit formatter/request surface first | Multi-turn or tool-rich Bonsai workflows would widen the request boundary before the first maintained slice is proven | — Pending |
+| Split full maintained fixture identity from generation-supported tooling identity | Bonsai must be repo-visible in Phase 38 without pretending parity or bench support exists before Phases 39 and 40 | ✓ Good |
 
 ## Evolution
 
@@ -207,4 +209,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-02 after starting v1.10*
+*Last updated: 2026-04-02 after Phase 38 fixture truth closeout*

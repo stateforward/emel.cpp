@@ -28,7 +28,9 @@ struct valid_bind {
     if (ev.request.tokenizer_sm == nullptr ||
         ev.request.dispatch_tokenizer_bind == nullptr ||
         ev.request.dispatch_tokenizer_tokenize == nullptr ||
-        ev.request.format_prompt == nullptr) {
+        ev.request.format_prompt == nullptr ||
+        ev.request.formatter_contract ==
+            emel::text::formatter::contract_kind::unsupported_template) {
       return false;
     }
 
@@ -194,6 +196,11 @@ struct valid_prepare {
            ctx.tokenizer_sm != nullptr &&
            ctx.dispatch_tokenizer_tokenize != nullptr &&
            ctx.format_prompt != nullptr &&
+           emel::text::formatter::request_matches_contract(
+               ctx.formatter_contract,
+               ev.request.messages,
+               ev.request.add_generation_prompt,
+               ev.request.enable_thinking) &&
            ev.request.token_ids_out != nullptr &&
            ev.request.token_capacity > 0 && ev.ctx.formatted != nullptr &&
            ev.ctx.formatted_capacity > 0;
