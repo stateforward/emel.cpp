@@ -35,11 +35,6 @@ inline size_t select_size(const bool choose_true, const size_t true_value,
   return (false_value & ~mask) | (true_value & mask);
 }
 
-inline const emel::model::data::vocab &empty_vocab() noexcept {
-  static const emel::model::data::vocab vocab{};
-  return vocab;
-}
-
 constexpr uint32_t k_fnv_offset = 2166136261u;
 constexpr uint32_t k_fnv_prime = 16777619u;
 
@@ -186,10 +181,7 @@ inline int32_t
 bpe_lookup_token(const emel::text::encoders::bpe::action::context &ctx,
                  const std::string_view text) noexcept {
   const bool has_vocab = ctx.vocab != nullptr;
-  const emel::model::data::vocab *vocab_candidates[2] = {&empty_vocab(),
-                                                         ctx.vocab};
-  const emel::model::data::vocab &vocab =
-      *vocab_candidates[static_cast<size_t>(has_vocab)];
+  const emel::model::data::vocab * vocab = ctx.vocab;
   const bool active = has_vocab && !text.empty();
   bool done = !active;
   int32_t resolved = k_token_null;
@@ -204,7 +196,7 @@ bpe_lookup_token(const emel::text::encoders::bpe::action::context &ctx,
     const bool empty_slot = slot_hash == 0u;
     const bool hash_match = slot_hash == hash;
     const int32_t id = ctx.token_to_id.values[slot];
-    const bool exact = hash_match && bpe_token_text(vocab, id) == text;
+    const bool exact = hash_match && bpe_token_text(*vocab, id) == text;
 
     resolved = select_i32(exact, id, resolved);
     done = done || empty_slot || exact;

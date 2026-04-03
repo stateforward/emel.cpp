@@ -136,6 +136,34 @@ process_capture run_generation_bench_compare_capture() {
   return capture;
 }
 
+std::uint64_t parse_named_metric(const std::string & haystack, const std::string & name) {
+  const std::string needle = name + "=";
+  const size_t pos = haystack.find(needle);
+  if (pos == std::string::npos) {
+    return 0u;
+  }
+
+  size_t cursor = pos + needle.size();
+  std::uint64_t value = 0u;
+  while (cursor < haystack.size() && haystack[cursor] >= '0' && haystack[cursor] <= '9') {
+    value = value * 10u + static_cast<std::uint64_t>(haystack[cursor] - '0');
+    ++cursor;
+  }
+  return value;
+}
+
+std::string find_line_with_prefix(const std::string & haystack, const std::string & prefix) {
+  const size_t pos = haystack.find(prefix);
+  if (pos == std::string::npos) {
+    return {};
+  }
+
+  const size_t line_end = haystack.find('\n', pos);
+  if (line_end == std::string::npos) {
+    return haystack.substr(pos);
+  }
+  return haystack.substr(pos, line_end - pos);
+}
 }  // namespace
 
 TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixtures") {
@@ -163,4 +191,10 @@ TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixt
       CHECK(capture.stdout_text.find(case_name) != std::string::npos);
     }
   }
+  const std::string binary_size_line =
+      find_line_with_prefix(capture.stdout_text, "# binary_size_compare:");
+  CHECK_FALSE(binary_size_line.empty());
+  CHECK(binary_size_line.find("status=ok") != std::string::npos);
+  CHECK(parse_named_metric(binary_size_line, "emel_bytes") > 0u);
+  CHECK(parse_named_metric(binary_size_line, "llama_bytes") > 0u);
 }

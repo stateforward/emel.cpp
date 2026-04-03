@@ -16,13 +16,8 @@ struct encoding_error;
 
 namespace emel::text::encoders::event {
 
-inline const emel::model::data::vocab & default_encode_vocab() noexcept {
-  static const emel::model::data::vocab vocab{};
-  return vocab;
-}
-
 struct encode {
-  const emel::model::data::vocab & vocab = default_encode_vocab();
+  const emel::model::data::vocab & vocab;
   std::string_view text = {};
   bool preprocessed = false;
   std::span<int32_t> token_ids = {};

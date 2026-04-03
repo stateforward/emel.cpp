@@ -33,6 +33,7 @@ struct doc_paths {
   fs::path mermaid_dir;
   fs::path benchmarks_md;
   fs::path benchmarks_snapshot;
+  fs::path embedded_size_snapshot;
   fs::path generation_pre_arm_flash_optimized_baseline;
   fs::path benchmarks_template;
   fs::path readme_template;
@@ -103,6 +104,31 @@ struct benchmark_snapshot {
   std::string shared_q4_dispatch_calls;
   std::string optimized_q6_dispatch_calls;
   std::string shared_q6_dispatch_calls;
+};
+
+struct embedded_size_snapshot {
+  std::string reference_ref;
+  std::string toolchain;
+  std::string build_type;
+  std::string compile_flags;
+  std::string measurement_mode;
+  std::string measurement_scope;
+  std::string workload;
+  std::string backend;
+  std::string link_flags;
+  std::string model_fixture;
+  std::string prompt;
+  std::string max_tokens;
+  std::string runtime_smoke;
+  std::string emel_raw_bytes;
+  std::string emel_stripped_bytes;
+  std::string emel_section_bytes;
+  std::string reference_raw_bytes;
+  std::string reference_stripped_bytes;
+  std::string reference_section_bytes;
+  std::string ratio_raw;
+  std::string ratio_stripped;
+  std::string ratio_section;
 };
 
 struct machine_spec {
@@ -808,6 +834,204 @@ std::optional<std::string> build_benchmarks_table(const benchmark_snapshot & sna
   return table;
 }
 
+std::optional<embedded_size_snapshot> parse_embedded_size_snapshot(const doc_paths & paths) {
+  const std::string snapshot = read_file(paths.embedded_size_snapshot);
+  if (snapshot.empty()) {
+    std::fprintf(stderr, "error: unable to read %s\n",
+                 paths.embedded_size_snapshot.string().c_str());
+    return std::nullopt;
+  }
+
+  embedded_size_snapshot parsed;
+  std::istringstream input(snapshot);
+  for (std::string line; std::getline(input, line);) {
+    if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_config: ");
+        metadata.has_value()) {
+      for (const char * field : {"reference_ref", "toolchain", "build_type", "compile_flags"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # embedded_size_config metadata in %s\n",
+                       paths.embedded_size_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.reference_ref = metadata->at("reference_ref");
+      parsed.toolchain = metadata->at("toolchain");
+      parsed.build_type = metadata->at("build_type");
+      parsed.compile_flags = metadata->at("compile_flags");
+      continue;
+    }
+    if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_measurement: ");
+        metadata.has_value()) {
+      for (const char * field :
+           {"mode",
+            "scope",
+            "workload",
+            "backend",
+            "link_flags",
+            "model_fixture",
+            "prompt",
+            "max_tokens",
+            "runtime_smoke"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # embedded_size_measurement metadata in %s\n",
+                       paths.embedded_size_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.measurement_mode = metadata->at("mode");
+      parsed.measurement_scope = metadata->at("scope");
+      parsed.workload = metadata->at("workload");
+      parsed.backend = metadata->at("backend");
+      parsed.link_flags = metadata->at("link_flags");
+      parsed.model_fixture = metadata->at("model_fixture");
+      parsed.prompt = metadata->at("prompt");
+      parsed.max_tokens = metadata->at("max_tokens");
+      parsed.runtime_smoke = metadata->at("runtime_smoke");
+      continue;
+    }
+    if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_emel: ");
+        metadata.has_value()) {
+      for (const char * field : {"raw_bytes", "stripped_bytes", "section_bytes"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # embedded_size_emel metadata in %s\n",
+                       paths.embedded_size_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.emel_raw_bytes = metadata->at("raw_bytes");
+      parsed.emel_stripped_bytes = metadata->at("stripped_bytes");
+      parsed.emel_section_bytes = metadata->at("section_bytes");
+      continue;
+    }
+    if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_reference: ");
+        metadata.has_value()) {
+      for (const char * field : {"raw_bytes", "stripped_bytes", "section_bytes"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # embedded_size_reference metadata in %s\n",
+                       paths.embedded_size_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.reference_raw_bytes = metadata->at("raw_bytes");
+      parsed.reference_stripped_bytes = metadata->at("stripped_bytes");
+      parsed.reference_section_bytes = metadata->at("section_bytes");
+      continue;
+    }
+    if (const auto metadata = parse_inline_key_value_fields(line, "# embedded_size_ratio: ");
+        metadata.has_value()) {
+      for (const char * field : {"raw", "stripped", "section"}) {
+        if (!metadata->contains(field)) {
+          std::fprintf(stderr,
+                       "error: invalid # embedded_size_ratio metadata in %s\n",
+                       paths.embedded_size_snapshot.string().c_str());
+          return std::nullopt;
+        }
+      }
+      parsed.ratio_raw = metadata->at("raw");
+      parsed.ratio_stripped = metadata->at("stripped");
+      parsed.ratio_section = metadata->at("section");
+      continue;
+    }
+  }
+
+  if (parsed.reference_ref.empty() || parsed.toolchain.empty() || parsed.build_type.empty() ||
+      parsed.compile_flags.empty() || parsed.measurement_mode.empty() ||
+      parsed.measurement_scope.empty() || parsed.workload.empty() || parsed.backend.empty() ||
+      parsed.link_flags.empty() || parsed.model_fixture.empty() || parsed.prompt.empty() ||
+      parsed.max_tokens.empty() || parsed.runtime_smoke.empty() || parsed.emel_raw_bytes.empty() ||
+      parsed.emel_stripped_bytes.empty() || parsed.emel_section_bytes.empty() ||
+      parsed.reference_raw_bytes.empty() || parsed.reference_stripped_bytes.empty() ||
+      parsed.reference_section_bytes.empty() || parsed.ratio_raw.empty() ||
+      parsed.ratio_stripped.empty() || parsed.ratio_section.empty()) {
+    std::fprintf(stderr,
+                 "error: incomplete embedded size snapshot in %s\n",
+                 paths.embedded_size_snapshot.string().c_str());
+    return std::nullopt;
+  }
+
+  return parsed;
+}
+
+std::string build_embedded_size_section(const embedded_size_snapshot & snapshot) {
+  std::string section;
+  section += "Generated from `scripts/embedded_size.sh --snapshot-update` using final "
+             "dead-stripped Qwen3 E2E runner executables.\n\n";
+  section += "- Snapshot: `snapshots/embedded_size/summary.txt`\n";
+  section += "- Mode: `";
+  section += snapshot.measurement_mode;
+  section += "`\n";
+  section += "- Scope: `";
+  section += snapshot.measurement_scope;
+  section += "`\n";
+  section += "- Workload: `";
+  section += snapshot.workload;
+  section += "`\n";
+  section += "- Backend: `";
+  section += snapshot.backend;
+  section += "`\n";
+  section += "- Reference ref: `";
+  section += snapshot.reference_ref;
+  section += "`\n";
+  section += "- Toolchain: `";
+  section += snapshot.toolchain;
+  section += "`\n";
+  section += "- Build type: `";
+  section += snapshot.build_type;
+  section += "`\n";
+  section += "- Compile flags: `";
+  section += snapshot.compile_flags;
+  section += "`\n";
+  section += "- Link flags: `";
+  section += snapshot.link_flags;
+  section += "`\n";
+  section += "- Model fixture: `";
+  section += snapshot.model_fixture;
+  section += "`\n";
+  section += "- Prompt: `";
+  section += snapshot.prompt;
+  section += "`\n";
+  section += "- Max tokens: `";
+  section += snapshot.max_tokens;
+  section += "`\n";
+  section += "- Runtime smoke: `";
+  section += snapshot.runtime_smoke;
+  section += "`\n\n";
+  section += "| Executable | raw bytes | stripped bytes | section bytes |\n";
+  section += "| --- | ---: | ---: | ---: |\n";
+  section += "| `emel` | ";
+  section += snapshot.emel_raw_bytes;
+  section += " | ";
+  section += snapshot.emel_stripped_bytes;
+  section += " | ";
+  section += snapshot.emel_section_bytes;
+  section += " |\n";
+  section += "| `llama.cpp/ggml reference` | ";
+  section += snapshot.reference_raw_bytes;
+  section += " | ";
+  section += snapshot.reference_stripped_bytes;
+  section += " | ";
+  section += snapshot.reference_section_bytes;
+  section += " |\n\n";
+  section += "- Ratio (`emel / reference`) raw: `";
+  section += snapshot.ratio_raw;
+  section += "x`\n";
+  section += "- Ratio (`emel / reference`) stripped: `";
+  section += snapshot.ratio_stripped;
+  section += "x`\n";
+  section += "- Ratio (`emel / reference`) section: `";
+  section += snapshot.ratio_section;
+  section += "x`\n\n";
+  section += "This is a matched Qwen3-0.6B end-to-end runner size measurement for the "
+             "maintained `hello` -> first-token path, not a whole-product feature-parity "
+             "claim. Both binaries still include the platform runtime selected by the "
+             "toolchain.";
+  return section;
+}
+
 const benchmark_row * find_benchmark_row(const benchmark_snapshot & snapshot,
                                          const std::string & name) {
   for (const auto & row : snapshot.rows) {
@@ -1104,6 +1328,7 @@ int main(int argc, char ** argv) {
   paths.mermaid_dir = paths.architecture_dir / "mermaid";
   paths.benchmarks_md = paths.docs_dir / "benchmarks.md";
   paths.benchmarks_snapshot = paths.root / "snapshots/bench/benchmarks_compare.txt";
+  paths.embedded_size_snapshot = paths.root / "snapshots/embedded_size/summary.txt";
   paths.generation_pre_arm_flash_optimized_baseline =
       paths.root / "snapshots/bench/generation_pre_arm_flash_optimized_baseline.txt";
   paths.benchmarks_template = paths.docs_dir / "templates/benchmarks.md.j2";
@@ -1135,6 +1360,10 @@ int main(int argc, char ** argv) {
   if (!benchmarks_snapshot.has_value()) {
     return 1;
   }
+  const auto embedded_size_snapshot = parse_embedded_size_snapshot(paths);
+  if (!embedded_size_snapshot.has_value()) {
+    return 1;
+  }
   const auto benchmarks_table = build_benchmarks_table(*benchmarks_snapshot);
   if (!benchmarks_table.has_value()) {
     return 1;
@@ -1158,7 +1387,9 @@ int main(int argc, char ** argv) {
 
   const auto readme_doc = render_template(
       paths.readme_template,
-      {template_var{"docs_toc", docs_toc}});
+      {template_var{"docs_toc", docs_toc},
+       template_var{"embedded_size_section",
+                    build_embedded_size_section(*embedded_size_snapshot)}});
   if (!readme_doc.has_value()) {
     return 1;
   }

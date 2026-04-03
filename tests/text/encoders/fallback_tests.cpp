@@ -38,6 +38,7 @@ TEST_CASE("encoder_fallback_encode_requires_prepared_tables") {
   int32_t token_count = 0;
   int32_t err = emel::text::encoders::error::to_emel(emel::text::encoders::error::code::ok);
   emel::text::encoders::event::encode ev{
+    .vocab = *builder.vocab,
     .text = "x",
     .token_ids = std::span<int32_t>(tokens.data(), static_cast<size_t>(static_cast<int32_t>(tokens.size()))),
     .token_count_out = &token_count,

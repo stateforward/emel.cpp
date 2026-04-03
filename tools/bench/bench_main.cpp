@@ -5,8 +5,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <string_view>
+#include <filesystem>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "bench_cases.hpp"
@@ -79,6 +81,70 @@ constexpr std::string_view k_bench_reference_ref =
 #else
   "unknown";
 #endif
+
+constexpr std::string_view k_bench_emel_artifact_path =
+#ifdef EMEL_BENCH_EMEL_ARTIFACT_PATH
+  EMEL_BENCH_EMEL_ARTIFACT_PATH;
+#else
+  "";
+#endif
+
+constexpr std::string_view k_bench_llama_artifact_path =
+#ifdef EMEL_BENCH_LLAMA_ARTIFACT_PATH
+  EMEL_BENCH_LLAMA_ARTIFACT_PATH;
+#else
+  "";
+#endif
+
+struct artifact_size {
+  std::string target = {};
+  std::uintmax_t bytes = 0u;
+  bool available = false;
+};
+
+artifact_size read_artifact_size(const std::string_view raw_path) {
+  artifact_size result{};
+  if (raw_path.empty()) {
+    result.target = "unknown";
+    return result;
+  }
+
+  const std::filesystem::path path(raw_path);
+  result.target = path.filename().string();
+  if (result.target.empty()) {
+    result.target = path.string();
+  }
+
+  std::error_code ec;
+  result.bytes = std::filesystem::file_size(path, ec);
+  result.available = !ec;
+  if (!result.available) {
+    result.bytes = 0u;
+  }
+  return result;
+}
+
+void print_binary_size_compare_metadata() {
+  const artifact_size emel_size = read_artifact_size(k_bench_emel_artifact_path);
+  const artifact_size llama_size = read_artifact_size(k_bench_llama_artifact_path);
+
+  if (!emel_size.available || !llama_size.available || llama_size.bytes == 0u) {
+    std::printf("# binary_size_compare: status=unavailable emel_target=%s llama_target=%s\n",
+                emel_size.target.c_str(),
+                llama_size.target.c_str());
+    return;
+  }
+
+  const double ratio =
+      static_cast<double>(emel_size.bytes) / static_cast<double>(llama_size.bytes);
+  std::printf("# binary_size_compare: status=ok emel_target=%s emel_bytes=%" PRIuMAX
+              " llama_target=%s llama_bytes=%" PRIuMAX " ratio=%.3fx\n",
+              emel_size.target.c_str(),
+              static_cast<uintmax_t>(emel_size.bytes),
+              llama_size.target.c_str(),
+              static_cast<uintmax_t>(llama_size.bytes),
+              ratio);
+}
 
 bool is_generation_case_name(const std::string & name) {
   return name.rfind("generation/preloaded_request/", 0u) == 0u;
@@ -435,6 +501,7 @@ void print_compare(const std::vector<bench::result> & emel_results,
               static_cast<int>(k_bench_reference_ref.size()),
               k_bench_reference_ref.data());
   print_benchmark_config(cfg);
+  print_binary_size_compare_metadata();
   if (generation_present) {
     const std::string_view formatter_contract = bench::generation_formatter_contract();
     const std::string_view architecture_contract = bench::generation_architecture_contract();
