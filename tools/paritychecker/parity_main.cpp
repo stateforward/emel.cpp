@@ -25,7 +25,10 @@ void print_usage(const char * exe) {
                exe);
   for (const auto & fixture :
        emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
-    std::fprintf(stderr, "    - %s\n", fixture.fixture_rel.data());
+    std::fprintf(stderr,
+                 "    - %.*s\n",
+                 static_cast<int>(fixture.fixture_rel.size()),
+                 fixture.fixture_rel.data());
   }
 }
 

@@ -16907,7 +16907,10 @@ void print_generation_formatter_contract(FILE * stream,
   if (stream == nullptr || state.formatter_binding.contract.empty()) {
     return;
   }
-  std::fprintf(stream, "fixture_path=%s\n", fixture.fixture_rel.data());
+  std::fprintf(stream,
+               "fixture_path=%.*s\n",
+               static_cast<int>(fixture.fixture_rel.size()),
+               fixture.fixture_rel.data());
   const std::string_view architecture =
       state.model_data != nullptr ? emel::model::architecture_name_view(*state.model_data)
                                   : std::string_view{};

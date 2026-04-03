@@ -1,9 +1,14 @@
 #include "doctest/doctest.h"
 
 #include <array>
+#include <cstring>
 #include <memory>
+#include <span>
 #include <string_view>
+#include <type_traits>
+#include <vector>
 
+#include "emel/gguf/loader/detail.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
 
@@ -23,6 +28,108 @@ struct pre_case {
   bool ignore_merges = false;
   bool add_bos = false;
 };
+
+void append_kv_entry(std::vector<uint8_t> & arena,
+                     std::vector<emel::gguf::loader::kv_entry> & entries,
+                     const std::string_view key,
+                     const uint32_t value_type,
+                     const std::span<const uint8_t> value_bytes) {
+  const uint32_t key_offset = static_cast<uint32_t>(arena.size());
+  arena.insert(arena.end(), key.begin(), key.end());
+
+  const uint32_t value_offset = static_cast<uint32_t>(arena.size());
+  arena.insert(arena.end(), value_bytes.begin(), value_bytes.end());
+
+  emel::gguf::loader::kv_entry entry = {};
+  entry.key_offset = key_offset;
+  entry.key_length = static_cast<uint32_t>(key.size());
+  entry.value_type = value_type;
+  entry.value_offset = value_offset;
+  entry.value_length = static_cast<uint32_t>(value_bytes.size());
+  entries.push_back(entry);
+}
+
+template <class value_type>
+void append_scalar(std::vector<uint8_t> & bytes, const value_type value) {
+  using unsigned_type = std::make_unsigned_t<value_type>;
+  const unsigned_type raw = static_cast<unsigned_type>(value);
+  for (size_t i = 0u; i < sizeof(value_type); ++i) {
+    bytes.push_back(static_cast<uint8_t>((raw >> (i * 8u)) & 0xffu));
+  }
+}
+
+void append_string_bytes(std::vector<uint8_t> & bytes, const std::string_view value) {
+  append_scalar<uint64_t>(bytes, static_cast<uint64_t>(value.size()));
+  bytes.insert(bytes.end(), value.begin(), value.end());
+}
+
+void append_kv_string(std::vector<uint8_t> & arena,
+                      std::vector<emel::gguf::loader::kv_entry> & entries,
+                      const std::string_view key,
+                      const std::string_view value) {
+  std::vector<uint8_t> encoded = {};
+  append_string_bytes(encoded, value);
+  append_kv_entry(arena,
+                  entries,
+                  key,
+                  emel::gguf::loader::detail::constants::gguf_type_string,
+                  std::span<const uint8_t>{encoded});
+}
+
+void append_kv_i32(std::vector<uint8_t> & arena,
+                   std::vector<emel::gguf::loader::kv_entry> & entries,
+                   const std::string_view key,
+                   const int32_t value) {
+  std::array<uint8_t, sizeof(int32_t)> bytes = {};
+  std::memcpy(bytes.data(), &value, sizeof(value));
+  append_kv_entry(arena,
+                  entries,
+                  key,
+                  emel::gguf::loader::detail::constants::gguf_type_int32,
+                  bytes);
+}
+
+void append_kv_u32(std::vector<uint8_t> & arena,
+                   std::vector<emel::gguf::loader::kv_entry> & entries,
+                   const std::string_view key,
+                   const uint32_t value) {
+  std::array<uint8_t, sizeof(uint32_t)> bytes = {};
+  std::memcpy(bytes.data(), &value, sizeof(value));
+  append_kv_entry(arena,
+                  entries,
+                  key,
+                  emel::gguf::loader::detail::constants::gguf_type_uint32,
+                  bytes);
+}
+
+void append_kv_bool(std::vector<uint8_t> & arena,
+                    std::vector<emel::gguf::loader::kv_entry> & entries,
+                    const std::string_view key,
+                    const bool value) {
+  const uint8_t byte = value ? 1u : 0u;
+  append_kv_entry(arena,
+                  entries,
+                  key,
+                  emel::gguf::loader::detail::constants::gguf_type_bool,
+                  std::span<const uint8_t>(&byte, 1u));
+}
+
+void append_kv_string_array(std::vector<uint8_t> & arena,
+                            std::vector<emel::gguf::loader::kv_entry> & entries,
+                            const std::string_view key,
+                            const std::span<const std::string_view> values) {
+  std::vector<uint8_t> bytes = {};
+  append_scalar<uint32_t>(bytes, emel::gguf::loader::detail::constants::gguf_type_string);
+  append_scalar<uint64_t>(bytes, static_cast<uint64_t>(values.size()));
+  for (const std::string_view value : values) {
+    append_string_bytes(bytes, value);
+  }
+  append_kv_entry(arena,
+                  entries,
+                  key,
+                  emel::gguf::loader::detail::constants::gguf_type_array,
+                  bytes);
+}
 
 }  // namespace
 
@@ -159,4 +266,34 @@ TEST_CASE("model_detail_maps_tokenizer_pre_profiles") {
   CHECK(emel::model::detail::tokenizer_pre_profile_from_name("") == tokenizer_pre::DEFAULT);
   CHECK(emel::model::detail::tokenizer_pre_profile_from_name("unknown-pre") ==
         tokenizer_pre::UNKNOWN);
+}
+
+TEST_CASE("model_detail_load_vocab_preserves_signed_optional_token_ids") {
+  std::vector<uint8_t> arena = {};
+  std::vector<emel::gguf::loader::kv_entry> entries = {};
+  constexpr std::array<std::string_view, 2> tokens = {"<bos>", "<eos>"};
+
+  append_kv_string(arena, entries, "tokenizer.model", "gpt2");
+  append_kv_string(arena, entries, "tokenizer.pre", "gpt-2");
+  append_kv_string_array(arena, entries, "tokenizer.tokens", tokens);
+  append_kv_u32(arena, entries, "tokenizer.bos_token_id", 0u);
+  append_kv_u32(arena, entries, "tokenizer.eos_token_id", 1u);
+  append_kv_i32(arena, entries, "tokenizer.prefix_token_id", -1);
+  append_kv_i32(arena, entries, "tokenizer.suffix_token_id", -1);
+  append_kv_i32(arena, entries, "tokenizer.middle_token_id", -1);
+  append_kv_i32(arena, entries, "tokenizer.fim_pre_token_id", -1);
+  append_kv_bool(arena, entries, "tokenizer.add_bos_token", false);
+  append_kv_bool(arena, entries, "tokenizer.add_eos_token", false);
+
+  const emel::model::detail::kv_binding binding{
+    .arena = std::span<const uint8_t>{arena},
+    .entries = std::span<const emel::gguf::loader::kv_entry>{entries},
+  };
+
+  auto vocab = std::make_unique<emel::model::data::vocab>();
+  CHECK(emel::model::detail::load_vocab_from_gguf(binding, *vocab));
+  CHECK(vocab->prefix_id == -1);
+  CHECK(vocab->suffix_id == -1);
+  CHECK(vocab->middle_id == -1);
+  CHECK(vocab->fim_pre_id == -1);
 }

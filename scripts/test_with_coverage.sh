@@ -47,7 +47,7 @@ fi
 if [[ -z "$cpu_count" || "$cpu_count" -lt 1 ]]; then
   cpu_count=2
 fi
-ctest_jobs="$cpu_count"
+ctest_jobs=1
 
 find "$COVERAGE_BUILD_DIR" -name '*.gcda' -delete
 find "$COVERAGE_BUILD_DIR" -maxdepth 1 -type d -name 'profiles*' -exec rm -rf {} +

@@ -646,6 +646,7 @@ TEST_CASE("paritychecker help describes the maintained generation fixture contra
   }
   CHECK(capture.stderr_text.find("snapshots/parity/") != std::string::npos);
   CHECK(capture.stderr_text.find("append-only") != std::string::npos);
+  CHECK(capture.stderr_text.find("error:") == std::string::npos);
 }
 
 TEST_CASE("paritychecker generation reports a deterministic missing-model failure") {
