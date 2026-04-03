@@ -3,9 +3,9 @@
 ## What This Is
 
 EMEL is a deterministic C++ inference engine built around Boost.SML orchestration, with behavior
-modeled as explicit actors instead of ad hoc control flow. The latest shipped surface now includes
-one truthful maintained Qwen3 end-to-end executable-size publication alongside the existing Llama,
-Qwen, parity, benchmark, and generated-doc proof surfaces.
+modeled as explicit actors instead of ad hoc control flow. The latest shipped surfaces now include
+the truthful maintained Qwen3 executable-size publication from v1.8 and the maintained Liquid
+LFM2 ARM slice from v1.9, all aligned with `docs/rules/sml.rules.md`.
 
 ## Core Value
 
@@ -14,17 +14,30 @@ before widening API surface or model scope.
 
 ## Current State
 
-Shipped version: `v1.8`
+Shipped version: `v1.9`
 
-Status: `v1.8 Truthful Qwen3 E2E Embedded Size` shipped on `2026-04-02`. There is no active
-milestone yet; the planning surface is ready for the next milestone definition.
+Status: Milestones `v1.8` and `v1.9` are both shipped and archived on this branch. There is no
+active milestone yet.
 
-Release summary: v1.8 closed the earlier quick binary-size experiment into a truthful maintained
-publication: one canonical `Qwen3-0.6B-Q8_0.gguf` `hello` -> first-token executable-size
-comparison between an EMEL-owned runner and one matched `llama.cpp` reference executable, with
-runtime smoke proof, generated README publication, and a passing `8/8` milestone audit.
+Release summary: `v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice` shipped on `2026-04-02` with `8`
+phases after gap-closure reconstruction. The immediately previous `v1.8 Truthful Qwen3 E2E
+Embedded Size` milestone also shipped on `2026-04-02` and its artifacts are now merged into this
+branch’s planning history.
 
-## Latest Milestone: v1.8 Truthful Qwen3 E2E Embedded Size
+## Latest Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
+
+**Goal:** Prove one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-GGUF` ARM slice through the
+existing EMEL generator, paritychecker, and benchmark workflow, with `Q4_K_M` as the maintained
+truth anchor and without broadening into generic Liquid-family support.
+
+**Target features:**
+- One official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture with reproducible provenance under
+  `tests/models/`
+- One explicit Liquid request-conditioning contract derived from the official primary chat template
+- Explicit `lfm2` runtime bring-up on the maintained generator path
+- Maintained parity, regression protection, and benchmark publication for the same slice
+
+## Previous Milestone: v1.8 Truthful Qwen3 E2E Embedded Size
 
 <details>
 <summary>Shipped on 2026-04-02</summary>
@@ -41,7 +54,7 @@ generated README docs without weakening the workload boundary or claiming whole-
 - Kept the published comparator set narrow to EMEL and one matched `llama.cpp` reference
   executable with shared `runtime_smoke=passed` proof.
 - Refreshed `snapshots/embedded_size/summary.txt` and the generated `README.md` so the published
-  result now reports `4,073,016` raw bytes for EMEL versus `3,334,264` for the reference row.
+  result reports `4,073,016` raw bytes for EMEL versus `3,334,264` for the reference row.
 - Backfilled the missing proof chain and closed the milestone with a passing `8/8` requirements
   audit.
 
@@ -92,69 +105,97 @@ generated README docs without weakening the workload boundary or claiming whole-
   maintained probe path.
 - ✓ v1.8 refreshed the stored embedded-size snapshot and generated README evidence to the corrected
   EMEL/reference executable numbers and closed with a passing `8/8` milestone audit.
+- ✓ v1.9 documented one official maintained `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture and bound
+  the maintained Liquid path to explicit executable metadata truth plus one explicit structured
+  chat contract.
+- ✓ v1.9 added explicit `lfm2` model/runtime support for one maintained Liquid ARM slice through
+  the shipped generator path.
+- ✓ v1.9 proved maintained Liquid parity against `llama.cpp`, preserved additive maintained Qwen
+  coverage, and published one truthful Liquid benchmark/docs path aligned with the parity-backed
+  slice.
+- ✓ v1.9 repaired its missing closeout artifacts, validation layer, and milestone bookkeeping so
+  the milestone could pass audit and archive cleanly.
 
 ### Active
 
-- [ ] Define the next milestone and decide whether to resume the deferred Liquid work immediately.
-- [ ] Decide whether executable-size evidence should stay publication-only or grow into a broader
-  measurement harness that also covers bundle size or gate policy.
-- [ ] Decide whether executable-size optimization belongs in the next milestone now that the
-  truthful baseline is published.
+- [ ] `MODEL-03`: Broaden beyond the canonical `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture to
+  additional Liquid checkpoints or sibling quantizations after the first slice is proven.
+- [ ] `COND-04`: Add richer Liquid system-message, multi-turn thinking-history, or tool-calling
+  request surfaces after the canonical maintained slice has a stable contract.
+- [ ] `GEN-04`: Optimize Liquid-specific runtime hot spots now that the canonical slice is correct,
+  parity-backed, and benchmarked.
+- [ ] `BENCH-07`: Revisit whether noisy benchmark drift should remain warning-only once the
+  maintained compare surfaces are stable enough to justify a harder gate.
+- [ ] Decide later whether executable-size evidence should stay publication-only or grow into a
+  broader measurement harness that also covers bundle size or gate policy.
 
 ### Out of Scope
 
-- Whole-product feature-parity size claims across EMEL and `llama.cpp` without a matched
-  executable boundary
-- Static-library or shared-library artifact size comparisons as the primary published metric
-- Deployable bundle size including model, tokenizer, or ancillary asset payloads until a dedicated
-  post-v1.8 milestone explicitly claims that surface
-- Additional comparator runtimes or alternate model formats without a new milestone that widens the
-  claim deliberately
-- Blocking quality-gate enforcement for size regressions before the executable-size surface proves
-  stable and trustworthy
+- Decode extraction or broader generator-family decomposition without an explicit milestone goal
+- Attention-family `sm_any` extraction before the remaining generator routing shape is clear
+- Broad repository cleanup unrelated to a milestone goal
+- Broad Liquid-family support beyond one maintained `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` slice
+- Sibling Liquid quantizations, including `Q4_0`, `Q5_K_M`, `Q6_K`, `Q8_0`, `BF16`, or `F16`, without explicit
+  later-milestone approval
+- Tool use, function calling, or multi-turn thinking-history replay on the maintained Liquid path
+- Broad Qwen-family or multi-fixture support without an explicit maintained identity and milestone
+  goal
+- Broad new public C API or CLI surface without explicit milestone approval
+- Non-ARM backend kernel specialization until a milestone explicitly broadens beyond the current
+  maintained truth anchors
+- Whole-program actor or orchestration rewrites unrelated to a milestone acceptance surface
+- Dequantize-to-f32 or tool-only compute fallbacks in the shipped canonical hot path without
+  explicit milestone approval
 
 ## Next Milestone Goals
 
-- Resume the deferred Liquid milestone if it is still the highest-leverage product/runtime goal.
-- Revisit deployable bundle-size publication only after executable-only measurement remains stable.
-- Decide later whether size regressions belong in a blocking gate once the maintained size surface
-  has enough signal.
-- Broaden beyond the canonical Qwen3 slice only through an explicit new milestone.
+- Broaden Liquid support beyond the first maintained `Q4_K_M` truth anchor only when the next
+  milestone explicitly approves it.
+- Improve Liquid prompting breadth and runtime performance without weakening the actor-model and
+  maintained-proof constraints.
+- Revisit benchmark-gate hardening only after the latest-reference compare lane is stable enough to
+  stop producing warning-only drift.
 
 ## Context
 
-This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The v1.8 work started as quick task `260401-ejm`, but it had to expand into a milestone once the
-user required final executables instead of library artifacts and true end-to-end Qwen3 inference
-instead of kernel-only slices. The repo also had to eliminate a reference-assisted vocab bootstrap
-before the EMEL size claim was honest. That truth boundary is now closed, but the size publication
-surface is still intentionally non-blocking and narrowly scoped.
+This is a brownfield repository with an existing codebase map under `.planning/codebase/`. v1.7
+proved that generator decomposition can stay inside the `generator` domain and preserve explicit
+same-RTC event handoff instead of falling back to context phase flags or hidden helper routing. The
+new v1.9 scope is a different kind of widening: the repo currently treats `llama` and `qwen3` as
+its explicit maintained model architectures, while official Liquid sources identify the target
+fixture as `lfm2` with a hybrid block contract and a primary chat template that includes
+`keep_past_thinking`. The repo remains governed by `AGENTS.md` and `docs/rules/sml.rules.md`, so
+future work still needs to preserve same-RTC actor semantics, explicit error publication, bounded
+actions, and deliberate machine-structure changes.
 
 ## Constraints
 
-- **Architecture**: Follow `docs/rules/sml.rules.md` and `AGENTS.md` so runtime changes keep the
-  RTC actor model, explicit events, and no-queue invariant intact.
-- **Truth boundary**: Published executable-size claims must stay on final linked executables for
-  the maintained `Qwen3-0.6B-Q8_0.gguf` `hello` -> first-token slice unless a new milestone widens
-  that scope explicitly.
-- **Native EMEL path**: Maintained EMEL proof surfaces must not bootstrap vocab, tokenizer, or
-  generation behavior through `llama.cpp` or `ggml`.
-- **Comparator policy**: The published executable-size comparison remains limited to EMEL and one
-  matched `llama.cpp` reference executable until a future milestone deliberately broadens it.
-- **Publication**: The README embedded-size section must stay generated from
-  `snapshots/embedded_size/summary.txt`, not hand-edited.
+- **Architecture**: Follow `docs/rules/sml.rules.md` and the local machine conventions in
+  `AGENTS.md` so runtime/model work preserves the RTC actor model and no-queue invariant.
+- **Explicit behavior modeling**: Any Liquid-specific orchestration changes must keep control flow
+  on guards, states, typed events, and transitions rather than action/detail routing shortcuts.
+- **Truth anchor**: v1.9 is one official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture, not generic
+  Liquid-family or multi-quant support.
+- **Conditioning**: The maintained Liquid path must use one explicit structured chat-message
+  contract and must not fall back to raw prompting silently.
+- **Acceptance boundary**: Maintained proof still lives on the shipped generator, paritychecker,
+  benchmark, snapshot, and docs surfaces.
+- **Repository state**: This is an active brownfield codebase, so milestone work should minimize
+  unrelated churn and leave non-milestone artifacts alone.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Replace the quick task with milestone v1.8 | The claim depended on multiple repo surfaces, truthful E2E boundaries, and roadmap-level scope control | ✓ Good |
-| Measure final linked executables instead of libraries | Bare-metal relevance comes from shipped binaries, not archive artifacts | ✓ Good |
-| Lock v1.8 to the canonical Qwen3 `hello` -> first-token path | The repo already had a maintained Qwen fixture and formatter contract, which kept the claim narrow and auditable | ✓ Good |
-| Require EMEL-owned vocab/tokenizer/model loading in the published EMEL probe | A truthful EMEL size claim could not depend on `llama.cpp` bootstrap paths | ✓ Good |
-| Keep v1.8 comparator scope to EMEL and one matched `llama.cpp` reference | Narrower scope avoided comparator churn and kept the publication claim auditable | ✓ Good |
-| Keep executable-size publication non-blocking through v1.8 closeout | The new signal is still too immature to treat as a hard gate | ✓ Good |
-| Defer the earlier Liquid plan until after the size-claim boundary closed | The executable-size milestone had to settle before broadening back into new model-family runtime work | ✓ Good |
+| Start decomposition with `generator/prefill` instead of splitting the whole generator at once | Prefill was the clearest request-phase boundary and the largest current duplication source | ✓ Good |
+| Collapse the prefill compute-routing matrix before broader extraction | File movement alone would have just relocated the cartesian product instead of reducing it | ✓ Good |
+| Keep prefill request-scoped data on typed runtime/internal events | This preserved explicit behavior modeling and avoided context phase flags | ✓ Good |
+| Defer decode extraction until the prefill pattern is proven | Decode also owns sampling, rendering, and loop control, so it was the riskier first cut | ✓ Good |
+| Defer `attention::any` / `sm_any` extraction until after prefill collapse | Attention mode is only one axis of the duplication and should not hide unresolved top-level routing | ⚠ Revisit |
+| Keep v1.9 fixed to one official Liquid Thinking GGUF slice | The repo needs one truthful maintained Liquid anchor before any broader family claims | ✓ Good |
+| Use GGUF/config metadata as the maintained truth source for Liquid | Official prose and executable metadata disagree on context length, so docs must follow executable truth | ✓ Good |
+| Start v1.9 with `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` | The user explicitly reprioritized the milestone around the docs-recommended quant, accepting that this broadens runtime scope beyond the prior `Q8_0` anchor | ✓ Good |
+| Keep the maintained Liquid contract on `tools=none` and no thinking-history replay | Tool use and `keep_past_thinking` widen the request surface beyond the first-slice milestone | ✓ Good |
 
 ## Evolution
 
@@ -174,4 +215,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-02 after shipping v1.8*
+*Last updated: 2026-04-02 after completing v1.9*

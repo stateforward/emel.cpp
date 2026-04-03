@@ -11,6 +11,7 @@
 - [x] [v1.6: Qwen3-0.6B Parity And Benchmark](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.6-ROADMAP.md) - shipped 2026-03-30 with 5 phases and 12 plans; brought one canonical Qwen3 slice up through the maintained generator, parity, and benchmark surfaces.
 - [x] [v1.7: Generator Prefill Submachine Decomposition](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.7-ROADMAP.md) - shipped 2026-03-30 with 3 phases and 6 plans; extracted generator-owned prefill orchestration while preserving maintained proof.
 - [x] [v1.8: Truthful Qwen3 E2E Embedded Size](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.8-ROADMAP.md) - shipped 2026-04-02 with 6 phases and 8 plans; published one truthful maintained Qwen3 executable-size comparison with smoke proof and generated README evidence.
+- [x] [v1.9: Liquid LFM2.5-1.2B Thinking ARM Slice](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.9-ROADMAP.md) - shipped 2026-04-02 with 8 phases and 9 plans; delivered one maintained Liquid `lfm2` ARM slice with explicit runtime support, additive parity coverage, benchmark publication, and audit-backed archive proof.
 
 ## Current Milestone
 
