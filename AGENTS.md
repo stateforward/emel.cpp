@@ -25,19 +25,18 @@ NEVER copy event payload into context just to bridge internal phases.
 ALWAYS keep guards pure predicates of `(event, context)` with no side effects.
 ALWAYS keep actions bounded and non-blocking during dispatch.
 ALWAYS keep hot-path actions allocation-free.
-One-time construction or initialization actions that are not on a hot path MAY
-pay a heap allocation tax when necessary.
+ALWAYS keep any allowed one-time construction or initialization heap
+allocation before any `process_event(...)` dispatch.
+NEVER perform dynamic allocation during dispatch, including in guards,
+actions, entry/exit handlers, or anonymous/completion progress.
 ALWAYS model runtime behavior choice as explicit guards or explicit choice
 states/transitions.
 NEVER hide runtime behavior selection in `actions`, state machine member
 functions, or functions called from them.
-Plain branching for validation, null checks, bounds checks, and data-plane
-failure handling is allowed in `actions` and helper functions.
-Behavior-selection branching such as route fallback, mode selection,
-block-kind dispatch, optional-feature path choice, or any early exit that
-changes actor behavior, success/error outcome, or which path runs next is
-hidden control flow and must be modeled with guards and explicit
-states/transitions instead.
+NEVER put runtime branching statements (`if`, `else if`, `switch`, `?:`) in
+actions, state machine member functions, or functions called from them.
+NEVER put validation-path branching in actions or in functions called from
+actions; model validation outcomes with guards and explicit transitions.
 NEVER emulate runtime branching with loop constructs in actions, detail helpers,
 state machine member methods, or functions called from them.
 NEVER use single-pass loop patterns such as
@@ -119,12 +118,14 @@ ALWAYS treat `guards.hpp` as the home for runtime predicates that decide which
 transition or behavior path is taken.
 ALWAYS treat `actions.hpp` as the home for bounded execution of an already-chosen
 behavior path.
-ALWAYS prefix state-machine state symbols with `state_`.
-ALWAYS prefix state-machine event symbols with `event_`.
-ALWAYS prefix behavior-selection guard symbols with `guard_`.
-ALWAYS prefix transition effect symbols with `effect_`.
-ALWAYS prefix state entry action symbols with `enter_`.
-ALWAYS prefix state exit action symbols with `exit_`.
+ALWAYS use `state_`, `event_`, `guard_`, `effect_`, `enter_`, and `exit_`
+prefixes for newly introduced state-machine symbols in new or modified code.
+ALWAYS treat "symbols" here as transition-table aliases and helper identifiers
+such as local state/event aliases, guard/effect functors or functions, and
+entry/exit action names.
+NEVER rename existing repository state or event type names solely to satisfy
+this convention; apply it forward to new symbols you introduce or when
+touching code already being refactored.
 ALWAYS treat `detail.hpp` and `detail.cpp` as the home for shared hidden private
 non-control-flow helpers only.
 ONLY put a helper in `detail.hpp` or `detail.cpp` when it is used more than once.
@@ -138,9 +139,10 @@ Those decisions belong only in `guard_*` predicates and `sm.hpp` transitions.
 NEVER put runtime support probing, route fallback, block-kind selection, or
 other behavior-selection control flow in `detail.hpp` or `detail.cpp`; model it
 in `guards.hpp` and `sm.hpp`.
-Plain branching for data validation, invariant checks, null checks, bounds
-checks, and data-plane failure handling is allowed in `detail.hpp` and
-`detail.cpp`.
+ALWAYS keep `detail.hpp` and `detail.cpp` helpers non-routing and
+non-orchestrating.
+ALWAYS keep detail helpers called from actions or state machine member methods
+limited to compile-time conditionals and data-plane iteration.
 Compile-time conditionals and data-plane iteration are allowed in `detail.hpp`
 and `detail.cpp`.
 Shared non-control-flow helpers in `detail.hpp` or `detail.cpp` MUST use
@@ -166,12 +168,12 @@ ALWAYS define machine outcome events in the `events` namespace with explicit
 `_done` and `_error` suffixes.
 INTERNAL-only `_done`/`_error` events MAY carry mutable payload references when
 they are not publicly exposed outside the component boundary.
-Prefer references over pointers for required event fields, especially when the
-payload is large, expensive to copy, or read on a hot path.
-Required fields that are small and cheap to copy MAY be value types.
-NEVER model required event fields as nullable pointers.
+ALWAYS use references for required event fields.
+NEVER model ordinary required event fields as pointers.
 ONLY use event payload pointers for optional/nullable fields or C ABI boundary
 types that cannot use references.
+ONLY allow optional `_done`/`_error` request back-pointers used only for
+same-RTC correlation to be nullable pointers under the optional-field rule.
 NEVER use `cmd_*`-prefixed event names.
 ALWAYS model failures via explicit error states and `_error` events.
 NEVER add synthetic fault-injection knobs to production events or actions.
