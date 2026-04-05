@@ -114,3 +114,9 @@ struct sm : public emel::sm<model, action::context> {
 using Planner = sm;
 
 }  // namespace emel::batch::planner
+
+namespace emel {
+
+using BatchPlanner = batch::planner::Planner;
+
+}  // namespace emel

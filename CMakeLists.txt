@@ -132,6 +132,7 @@ if(EMEL_ENABLE_TESTS)
     tests/batch/planner/modes/sequential_actions_tests.cpp
     tests/batch/planner/planner_additional_tests.cpp
     tests/batch/planner/planner_action_branch_tests.cpp
+    tests/batch/planner/planner_surface_tests.cpp
     tests/batch/planner/planner_sm_transition_tests.cpp
     tests/batch/planner/planner_sm_flow_tests.cpp
     tests/token/batcher/lifecycle_tests.cpp
