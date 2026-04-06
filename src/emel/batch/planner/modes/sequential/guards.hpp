@@ -1,11 +1,12 @@
 #pragma once
 
-#include "emel/batch/planner/context.hpp"
 #include "emel/batch/planner/guards.hpp"
+#include "emel/batch/planner/modes/sequential/context.hpp"
+#include "emel/batch/planner/modes/sequential/events.hpp"
 
 namespace emel::batch::planner::modes::sequential::guard {
 
-inline int32_t minimum_step_count(const emel::batch::planner::event::request_runtime & ev) noexcept {
+inline int32_t compute_minimum_step_count(const event::plan_runtime & ev) noexcept {
   const int32_t step_size = ev.ctx.effective_step_size;
   if (step_size <= 0) {
     return 0;
@@ -15,47 +16,47 @@ inline int32_t minimum_step_count(const emel::batch::planner::event::request_run
   return full_chunks + has_remainder;
 }
 
-inline constexpr auto has_valid_step_size =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context &) noexcept {
+inline constexpr auto guard_has_valid_step_size =
+    [](const event::plan_runtime & ev,
+       const context &) noexcept {
       return ev.ctx.effective_step_size > 0;
     };
 
-inline constexpr auto has_invalid_step_size =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context & ctx) noexcept {
-      return !has_valid_step_size(ev, ctx);
+inline constexpr auto guard_has_invalid_step_size =
+    [](const event::plan_runtime & ev,
+       const context & ctx) noexcept {
+      return !guard_has_valid_step_size(ev, ctx);
     };
 
-inline constexpr auto exceeds_step_capacity =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context &) noexcept {
-      return minimum_step_count(ev) > emel::batch::planner::action::MAX_PLAN_STEPS;
+inline constexpr auto guard_exceeds_step_capacity =
+    [](const event::plan_runtime & ev,
+       const context &) noexcept {
+      return compute_minimum_step_count(ev) > emel::batch::planner::action::MAX_PLAN_STEPS;
     };
 
-inline constexpr auto exceeds_index_capacity =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context &) noexcept {
+inline constexpr auto guard_exceeds_index_capacity =
+    [](const event::plan_runtime & ev,
+       const context &) noexcept {
       return ev.request.n_tokens > emel::batch::planner::action::MAX_PLAN_STEPS;
     };
 
-inline constexpr auto sequential_plan_capacity_ok =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context & ctx) noexcept {
-      return has_valid_step_size(ev, ctx) &&
-             !exceeds_step_capacity(ev, ctx) &&
-             !exceeds_index_capacity(ev, ctx);
+inline constexpr auto guard_sequential_plan_capacity_ok =
+    [](const event::plan_runtime & ev,
+       const context & ctx) noexcept {
+      return guard_has_valid_step_size(ev, ctx) &&
+             !guard_exceeds_step_capacity(ev, ctx) &&
+             !guard_exceeds_index_capacity(ev, ctx);
     };
 
-inline constexpr auto planning_succeeded =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context &) noexcept {
-      return emel::batch::planner::guard::planning_succeeded_impl(ev);
+inline constexpr auto guard_planning_succeeded =
+    [](const event::plan_runtime & ev,
+       const context &) noexcept {
+      return emel::batch::planner::guard::guard_has_complete_plan(ev);
     };
 
-inline constexpr auto planning_failed = [](const emel::batch::planner::event::request_runtime & ev,
-                                           const emel::batch::planner::action::context &) noexcept {
-  return !emel::batch::planner::guard::planning_succeeded_impl(ev);
+inline constexpr auto guard_planning_failed = [](const event::plan_runtime & ev,
+                                           const context &) noexcept {
+  return !emel::batch::planner::guard::guard_has_complete_plan(ev);
 };
 
 }  // namespace emel::batch::planner::modes::sequential::guard

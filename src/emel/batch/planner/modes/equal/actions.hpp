@@ -4,13 +4,16 @@
 #include <array>
 #include <cstdint>
 
-#include "emel/batch/planner/modes/detail.hpp"
+#include "emel/batch/planner/modes/equal/context.hpp"
+#include "emel/batch/planner/modes/equal/detail.hpp"
+#include "emel/batch/planner/modes/equal/events.hpp"
 
 namespace emel::batch::planner::modes::equal::action {
 
 using context = emel::batch::planner::action::context;
 
-inline void create_plan_impl(const event::request_runtime & ev) noexcept {
+inline constexpr auto effect_plan_equal_batches =
+    [](const event::plan_runtime & ev, context &) noexcept {
   if (ev.ctx.effective_step_size <= 0) {
     detail::fail_plan(ev, error::invalid_step_size);
     return;
@@ -120,9 +123,10 @@ inline void create_plan_impl(const event::request_runtime & ev) noexcept {
   }
 
   detail::finalize_token_offsets(ev.ctx);
-}
+};
 
-inline void create_plan_primary_fast_path_impl(const event::request_runtime & ev) noexcept {
+inline constexpr auto effect_plan_equal_primary_batches =
+    [](const event::plan_runtime & ev, context &) noexcept {
   if (ev.ctx.effective_step_size <= 0) {
     detail::fail_plan(ev, error::invalid_step_size);
     return;
@@ -243,48 +247,35 @@ inline void create_plan_primary_fast_path_impl(const event::request_runtime & ev
   }
 
   detail::finalize_token_offsets(ev.ctx);
-}
-
-inline constexpr auto create_plan = [](const event::request_runtime & ev, context &) noexcept {
-  create_plan_impl(ev);
 };
 
-inline constexpr auto create_plan_primary_fast_path = [](const event::request_runtime & ev,
-                                                         context &) noexcept {
-  create_plan_primary_fast_path_impl(ev);
-};
-
-inline constexpr auto create_plan_general = [](const event::request_runtime & ev,
-                                               context &) noexcept {
-  create_plan_impl(ev);
-};
-
-inline constexpr auto mark_invalid_step_size = [](const event::request_runtime & ev,
-                                                  context &) noexcept {
+inline constexpr auto effect_reject_invalid_step_size =
+    [](const event::plan_runtime & ev, context &) noexcept {
   detail::fail_plan(ev, error::invalid_step_size);
 };
 
-inline constexpr auto mark_invalid_sequence_id = [](const event::request_runtime & ev,
-                                                    context &) noexcept {
+inline constexpr auto effect_reject_invalid_sequence_id =
+    [](const event::plan_runtime & ev, context &) noexcept {
   detail::fail_plan(ev, error::invalid_sequence_id);
 };
 
-inline constexpr auto mark_planning_progress_stalled = [](const event::request_runtime & ev,
-                                                          context &) noexcept {
+inline constexpr auto effect_reject_planning_progress_stalled =
+    [](const event::plan_runtime & ev, context &) noexcept {
   detail::fail_plan(ev, error::planning_progress_stalled);
 };
 
-inline constexpr auto mark_output_steps_full = [](const event::request_runtime & ev,
-                                                  context &) noexcept {
+inline constexpr auto effect_reject_output_steps_full =
+    [](const event::plan_runtime & ev, context &) noexcept {
   detail::fail_plan(ev, error::output_steps_full);
 };
 
-inline constexpr auto mark_output_indices_full = [](const event::request_runtime & ev,
-                                                    context &) noexcept {
+inline constexpr auto effect_reject_output_indices_full =
+    [](const event::plan_runtime & ev, context &) noexcept {
   detail::fail_plan(ev, error::output_indices_full);
 };
 
-inline constexpr auto prepare_steps = [](const event::request_runtime & ev, context &) noexcept {
+inline constexpr auto effect_begin_planning = [](const event::plan_runtime & ev,
+                                                 context &) noexcept {
   detail::prepare_plan(ev);
 };
 

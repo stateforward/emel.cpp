@@ -12,14 +12,10 @@
 #include "emel/error/error.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
-#include "emel/model/builder/detail.hpp"
 #include "emel/model/detail.hpp"
+#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/sm.hpp"
-
-namespace emel::model::llama {
-namespace detail = ::emel::model::builder::detail;
-}
 
 namespace {
 

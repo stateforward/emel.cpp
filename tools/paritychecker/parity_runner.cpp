@@ -36,9 +36,9 @@
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/x86_64/sm.hpp"
 #include "emel/logits/sampler/events.hpp"
-#include "emel/model/builder/sm.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
+#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/events.hpp"
 #include "emel/model/loader/sm.hpp"
@@ -364,20 +364,61 @@ bool on_jinja_render_error(void * owner,
 }
 
 quantized_contract_summary build_quantized_contract_summary(
-    const emel::model::builder::detail::quantized_path_audit & audit) {
+    const emel::model::llama::detail::quantized_path_audit & audit) {
   quantized_contract_summary summary{};
   for (const auto & stage : audit.stages) {
     summary.native_quantized += static_cast<uint32_t>(
-        stage.contract == emel::model::builder::detail::quantized_contract_kind::native_quantized);
+        stage.contract == emel::model::llama::detail::quantized_contract_kind::native_quantized);
     summary.approved_dense_f32_by_contract += static_cast<uint32_t>(
         stage.contract ==
-        emel::model::builder::detail::quantized_contract_kind::approved_dense_f32_by_contract);
+        emel::model::llama::detail::quantized_contract_kind::approved_dense_f32_by_contract);
     summary.disallowed_fallback += static_cast<uint32_t>(
-        stage.contract == emel::model::builder::detail::quantized_contract_kind::disallowed_fallback);
+        stage.contract == emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
     summary.explicit_no_claim += static_cast<uint32_t>(
-        stage.contract == emel::model::builder::detail::quantized_contract_kind::explicit_no_claim);
+        stage.contract == emel::model::llama::detail::quantized_contract_kind::explicit_no_claim);
   }
   return summary;
+}
+
+bool build_execution_surface(const emel::model::data & model_data,
+                            emel::model::llama::detail::execution_view & execution_out) {
+  return emel::model::llama::detail::build_execution_view(model_data, execution_out) ==
+         emel::error::cast(emel::model::loader::error::none);
+}
+
+bool build_execution_audit(const emel::model::data & model_data,
+                           emel::model::llama::detail::quantized_path_audit & audit_out) {
+  emel::model::llama::detail::execution_view execution{};
+  if (!build_execution_surface(model_data, execution)) {
+    return false;
+  }
+
+  audit_out = emel::model::llama::detail::build_quantized_path_audit(execution);
+  return true;
+}
+
+bool build_execution_audit(const emel::model::data & model_data,
+                           emel::model::llama::detail::execution_view & execution_out,
+                           emel::model::llama::detail::quantized_path_audit & audit_out) {
+  if (!build_execution_surface(model_data, execution_out)) {
+    return false;
+  }
+
+  audit_out = emel::model::llama::detail::build_quantized_path_audit(execution_out);
+  return true;
+}
+
+bool build_execution_surface_with_audit(
+    const emel::model::data & model_data,
+    emel::model::llama::detail::execution_view & execution_out,
+    emel::model::llama::detail::quantized_path_audit & audit_out) {
+  if (emel::model::llama::detail::build_execution_view(model_data, execution_out) !=
+      emel::error::cast(emel::model::loader::error::none)) {
+    return false;
+  }
+
+  audit_out = emel::model::llama::detail::build_quantized_path_audit(execution_out);
+  return true;
 }
 
 bool run_emel_jinja_parse(std::string_view template_text,
@@ -9755,18 +9796,18 @@ void dump_scalar_attention_debug(const generation_load_state & state,
     for (int32_t layer = 0; layer < 2; ++layer) {
       const auto & ref_layer = state.reference.model->layers[static_cast<size_t>(layer)];
       std::fprintf(stdout,
-                   "generation_debug.reference.layer%d.transforms: bo=%d wo_scale=%d "
+                   "generation_debug.reference.layer%d.transforms: bo=%d wo_s=%d "
                    "ffn_gate_b=%d ffn_up_b=%d ffn_down_b=%d "
-                   "ffn_gate_scale=%d ffn_up_scale=%d ffn_down_scale=%d\n",
+                   "ffn_gate_s=%d ffn_up_s=%d ffn_down_s=%d\n",
                    layer,
                    ref_layer.bo != nullptr ? 1 : 0,
-                   ref_layer.wo_scale != nullptr ? 1 : 0,
+                   ref_layer.wo_s != nullptr ? 1 : 0,
                    ref_layer.ffn_gate_b != nullptr ? 1 : 0,
                    ref_layer.ffn_up_b != nullptr ? 1 : 0,
                    ref_layer.ffn_down_b != nullptr ? 1 : 0,
-                   ref_layer.ffn_gate_scale != nullptr ? 1 : 0,
-                   ref_layer.ffn_up_scale != nullptr ? 1 : 0,
-                   ref_layer.ffn_down_scale != nullptr ? 1 : 0);
+                   ref_layer.ffn_gate_s != nullptr ? 1 : 0,
+                   ref_layer.ffn_up_s != nullptr ? 1 : 0,
+                   ref_layer.ffn_down_s != nullptr ? 1 : 0);
     }
   }
   const argmax_summary dispatch_summary =
@@ -11995,8 +12036,8 @@ void dump_generation_tensor_compare(generation_load_state & state,
       "tensor_compare.token_embedding",
       *backend.token_embedding.tensor,
       prompt_tokens.front());
-  emel::model::builder::detail::block_view block_view = {};
-  if (emel::model::builder::detail::lookup_block_view(backend.build.execution, 0, block_view) ==
+  emel::model::llama::detail::block_view block_view = {};
+  if (emel::model::llama::detail::lookup_block_view(backend.execution, 0, block_view) ==
       emel::error::cast(emel::model::loader::error::none)) {
     dump_vector_compare(
         "tensor_compare.layer0.attn_norm",
@@ -12007,7 +12048,7 @@ void dump_generation_tensor_compare(generation_load_state & state,
         *block_view.feed_forward_norm.tensor,
         backend.blocks[0].feed_forward_norm);
   }
-  if (emel::model::builder::detail::lookup_block_view(backend.build.execution, 1, block_view) ==
+  if (emel::model::llama::detail::lookup_block_view(backend.execution, 1, block_view) ==
       emel::error::cast(emel::model::loader::error::none)) {
     dump_vector_compare(
         "tensor_compare.layer1.attn_norm",
@@ -12020,7 +12061,7 @@ void dump_generation_tensor_compare(generation_load_state & state,
   }
   dump_vector_compare(
       "tensor_compare.output_norm",
-      *backend.build.execution.output_norm.tensor,
+      *backend.execution.output_norm.tensor,
       backend.output_norm);
 
   reference_graph_capture graph_capture = {};
@@ -16349,13 +16390,9 @@ void dump_reference_decode_seam(const generation_load_state & state) {
                runtime_contract.disallowed_fallback,
                runtime_contract.explicit_no_claim);
 
-  emel::model::builder::detail::artifact build_artifact{};
-  emel::error::type build_err = emel::error::cast(emel::model::builder::error::none);
-  emel::model::builder::event::build build_request{*state.model_data, build_artifact};
-  build_request.error_out = &build_err;
-  emel::model::builder::sm builder;
-  if (builder.process_event(build_request)) {
-    const auto audit_contract = build_quantized_contract_summary(build_artifact.quantized_audit);
+  emel::model::llama::detail::quantized_path_audit build_audit{};
+  if (build_execution_audit(*state.model_data, build_audit)) {
+    const auto audit_contract = build_quantized_contract_summary(build_audit);
 
     std::fprintf(stdout,
                  "quantized_stage_inventory: native_quantized=%u "
@@ -16364,14 +16401,14 @@ void dump_reference_decode_seam(const generation_load_state & state) {
                  audit_contract.approved_dense_f32_by_contract,
                  audit_contract.disallowed_fallback,
                  audit_contract.explicit_no_claim);
-    for (const auto & stage : build_artifact.quantized_audit.stages) {
+    for (const auto & stage : build_audit.stages) {
       const auto stage_name =
-          emel::model::builder::detail::quantized_stage_family_name(stage.family);
-      const auto tensor_name = emel::model::builder::detail::tensor_type_name(stage.tensor_type);
+          emel::model::llama::detail::quantized_stage_family_name(stage.family);
+      const auto tensor_name = emel::model::llama::detail::tensor_type_name(stage.tensor_type);
       const auto contract_name =
-          emel::model::builder::detail::quantized_contract_kind_name(stage.contract);
+          emel::model::llama::detail::quantized_contract_kind_name(stage.contract);
       const uint32_t supported =
-          stage.contract == emel::model::builder::detail::quantized_contract_kind::explicit_no_claim
+          stage.contract == emel::model::llama::detail::quantized_contract_kind::explicit_no_claim
               ? 0u
               : 1u;
       std::fprintf(stdout,
@@ -18505,14 +18542,11 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
                  output_weight_count,
                  q_norm_count,
                  k_norm_count);
-    emel::model::builder::detail::artifact debug_artifact{};
-    emel::error::type debug_err = emel::error::cast(emel::model::builder::error::none);
-    emel::model::builder::event::build debug_request{*state.model_data, debug_artifact};
-    debug_request.error_out = &debug_err;
-    emel::model::builder::sm debug_builder;
-    if (debug_builder.process_event(debug_request)) {
-      emel::model::builder::detail::block_view debug_block{};
-      if (emel::model::builder::detail::lookup_block_view(debug_artifact.execution, 0, debug_block) ==
+    emel::model::llama::detail::execution_view debug_execution{};
+    emel::model::llama::detail::quantized_path_audit debug_audit{};
+    if (build_execution_surface_with_audit(*state.model_data, debug_execution, debug_audit)) {
+      emel::model::llama::detail::block_view debug_block{};
+      if (emel::model::llama::detail::lookup_block_view(debug_execution, 0, debug_block) ==
           emel::error::cast(emel::model::loader::error::none)) {
         const auto print_tensor_shape = [&](const char * label,
                                             const emel::model::data::tensor_record * tensor) {
@@ -18533,7 +18567,7 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
         print_tensor_shape("attn_k", debug_block.attention_k.tensor);
         print_tensor_shape("attn_q_norm", debug_block.attention_q_norm.tensor);
         print_tensor_shape("attn_k_norm", debug_block.attention_k_norm.tensor);
-        print_tensor_shape("output", debug_artifact.execution.output.tensor);
+        print_tensor_shape("output", debug_execution.output.tensor);
       }
     } else {
       std::fprintf(stderr, "generation initialize debug build_execution_view failed\n");
@@ -18657,13 +18691,9 @@ int run_generation_harness_contract(const emel::paritychecker::parity_options & 
     return 1;
   }
 
-  emel::model::builder::detail::artifact audit_artifact{};
-  emel::error::type audit_err = emel::error::cast(emel::model::builder::error::none);
-  emel::model::builder::event::build audit_request{*state.model_data, audit_artifact};
-  audit_request.error_out = &audit_err;
-  emel::model::builder::sm audit_builder;
-  if (audit_builder.process_event(audit_request)) {
-    const auto audit_contract = build_quantized_contract_summary(audit_artifact.quantized_audit);
+  emel::model::llama::detail::quantized_path_audit audit_view{};
+  if (build_execution_audit(*state.model_data, audit_view)) {
+    const auto audit_contract = build_quantized_contract_summary(audit_view);
     if (!quantized_contract_matches(runtime_contract, audit_contract)) {
       std::fprintf(stderr,
                    "generation quantized attribution mismatch (fixture=%s "

@@ -8,11 +8,8 @@
 
 #include "emel/generator/detail.hpp"
 #include "emel/generator/guards.hpp"
+#include "emel/model/llama/detail.hpp"
 #include "../kernel/test_helpers.hpp"
-
-namespace emel::model::llama {
-namespace detail = ::emel::model::builder::detail;
-}
 
 namespace {
 
@@ -83,9 +80,9 @@ emel::model::data::tensor_record make_tensor_record(void * data,
 
 struct runtime_request_fixture {
   emel::model::data model = {};
-  emel::model::builder::detail::execution_view execution = {};
-  emel::model::builder::detail::topology topology = {};
-  emel::model::builder::detail::step_plan plan = {};
+  emel::model::llama::detail::execution_view execution = {};
+  emel::model::llama::detail::topology topology = {};
+  emel::model::llama::detail::step_plan plan = {};
   emel::generator::detail::native_backend backend = {};
   std::array<int32_t, 1> token_ids = {0};
   std::array<int32_t, 1> positions = {0};
@@ -96,8 +93,8 @@ struct runtime_request_fixture {
   emel::graph::processor::event::execute request = {};
 
   explicit runtime_request_fixture(
-      const emel::model::builder::detail::step_kind kind =
-          emel::model::builder::detail::step_kind::prefill) {
+      const emel::model::llama::detail::step_kind kind =
+          emel::model::llama::detail::step_kind::prefill) {
     topology.execution = &execution;
     plan.graph = &topology;
     plan.kind = kind;
@@ -324,9 +321,9 @@ struct chunk4_prefill_runtime_fixture {
   emel::model::data::tensor_record packed_tensor = {};
   emel::model::data::tensor_record output_argmax_tensor = {};
 
-  emel::model::builder::detail::execution_view execution = {};
-  emel::model::builder::detail::topology topology = {};
-  emel::model::builder::detail::step_plan plan = {};
+  emel::model::llama::detail::execution_view execution = {};
+  emel::model::llama::detail::topology topology = {};
+  emel::model::llama::detail::step_plan plan = {};
   std::array<int32_t, k_prompt_tokens> token_ids = {0, 1, 2, 3};
   std::array<int32_t, k_prompt_tokens> positions = {0, 1, 2, 3};
   std::vector<float> logits = {};
@@ -437,7 +434,7 @@ struct chunk4_prefill_runtime_fixture {
     logits.resize(static_cast<size_t>(k_vocab), -1.0f);
     topology.execution = &execution;
     plan.graph = &topology;
-    plan.kind = emel::model::builder::detail::step_kind::prefill;
+    plan.kind = emel::model::llama::detail::step_kind::prefill;
     plan.expected_outputs = 1;
     io.backend_ctx = &backend;
     io.token_ids = token_ids.data();
@@ -491,9 +488,9 @@ struct hybrid_chunked_q8_runtime_fixture {
   emel::model::data::tensor_record packed_shortconv_in_tensor = {};
   emel::model::data::tensor_record output_argmax_tensor = {};
 
-  emel::model::builder::detail::execution_view execution = {};
-  emel::model::builder::detail::topology topology = {};
-  emel::model::builder::detail::step_plan plan = {};
+  emel::model::llama::detail::execution_view execution = {};
+  emel::model::llama::detail::topology topology = {};
+  emel::model::llama::detail::step_plan plan = {};
   std::array<int32_t, k_prompt_tokens> token_ids = {};
   std::array<int32_t, k_prompt_tokens> positions = {};
   std::vector<float> logits = {};
@@ -663,7 +660,7 @@ struct hybrid_chunked_q8_runtime_fixture {
     logits.resize(static_cast<size_t>(k_vocab), -1.0f);
     topology.execution = &execution;
     plan.graph = &topology;
-    plan.kind = emel::model::builder::detail::step_kind::prefill;
+    plan.kind = emel::model::llama::detail::step_kind::prefill;
     plan.expected_outputs = 1;
     io.backend_ctx = &backend;
     io.token_ids = token_ids.data();

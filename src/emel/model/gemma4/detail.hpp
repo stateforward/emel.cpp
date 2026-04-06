@@ -1,6 +1,7 @@
 #pragma once
 
-#include "emel/model/builder/detail.hpp"
+#include <string_view>
+
 #include "emel/model/loader/detail.hpp"
 
 namespace emel::model::gemma4::detail {
@@ -15,8 +16,5 @@ emel::error::type validate_data(const emel::model::data & model_data) noexcept;
 emel::error::type validate_builder_contract(const emel::model::data & model_data) noexcept;
 
 emel::error::type validate_execution_contract(const emel::model::data & model_data) noexcept;
-
-emel::error::type build_view(const emel::model::data & model_data,
-                             emel::model::builder::detail::view & view_out) noexcept;
 
 }  // namespace emel::model::gemma4::detail

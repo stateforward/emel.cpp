@@ -3,7 +3,7 @@
 #include <doctest/doctest.h>
 
 #include "emel/batch/planner/actions.hpp"
-#include "emel/batch/planner/modes/detail.hpp"
+#include "emel/batch/planner/detail.hpp"
 
 namespace {
 
@@ -31,13 +31,13 @@ inline emel::callback<void(const emel::batch::planner::events::plan_error &)> ma
 
 }  // namespace
 
-TEST_CASE("batch_planner_modes_detail_sequence_mask_normalization_variants") {
+TEST_CASE("batch_planner_detail_sequence_mask_normalization_variants") {
   done_capture done{};
   error_capture error{};
   std::array<uint64_t, 3> seq_masks = {{7U, 1U, 2U}};
   std::array<int32_t, 3> seq_primary_ids = {{2, 1, 5}};
 
-  emel::batch::planner::event::request request{
+  emel::batch::planner::event::plan_request request{
     .n_tokens = 3,
     .seq_masks = seq_masks.data(),
     .seq_primary_ids = nullptr,
@@ -46,37 +46,37 @@ TEST_CASE("batch_planner_modes_detail_sequence_mask_normalization_variants") {
     .on_error = make_error(&error),
   };
 
-  CHECK(emel::batch::planner::modes::detail::normalized_seq_mask(request, 0)[0] == 7U);
-  CHECK(emel::batch::planner::modes::detail::normalized_seq_mask(request, 1)[0] == 1U);
-  CHECK(emel::batch::planner::modes::detail::normalized_seq_mask(request, 2)[0] == 2U);
+  CHECK(emel::batch::planner::detail::normalized_seq_mask(request, 0)[0] == 7U);
+  CHECK(emel::batch::planner::detail::normalized_seq_mask(request, 1)[0] == 1U);
+  CHECK(emel::batch::planner::detail::normalized_seq_mask(request, 2)[0] == 2U);
 
   request.seq_masks = nullptr;
   request.seq_primary_ids = seq_primary_ids.data();
 
-  CHECK(emel::batch::planner::modes::detail::normalized_seq_mask(request, 0)[0] ==
+  CHECK(emel::batch::planner::detail::normalized_seq_mask(request, 0)[0] ==
         (uint64_t{1} << 2));
-  CHECK(emel::batch::planner::modes::detail::normalized_seq_mask(request, 1)[0] ==
+  CHECK(emel::batch::planner::detail::normalized_seq_mask(request, 1)[0] ==
         (uint64_t{1} << 1));
-  CHECK(emel::batch::planner::modes::detail::normalized_seq_mask(request, 2)[0] ==
+  CHECK(emel::batch::planner::detail::normalized_seq_mask(request, 2)[0] ==
         (uint64_t{1} << 5));
 }
 
-TEST_CASE("batch_planner_modes_detail_push_step_size_limits") {
-  emel::batch::planner::event::request_ctx ctx{};
+TEST_CASE("batch_planner_detail_push_step_size_limits") {
+  emel::batch::planner::event::plan_scratch ctx{};
 
-  CHECK_FALSE(emel::batch::planner::modes::detail::push_step_size(ctx, 0));
+  CHECK_FALSE(emel::batch::planner::detail::push_step_size(ctx, 0));
 
   ctx.step_count = emel::batch::planner::action::MAX_PLAN_STEPS;
-  CHECK_FALSE(emel::batch::planner::modes::detail::push_step_size(ctx, 1));
+  CHECK_FALSE(emel::batch::planner::detail::push_step_size(ctx, 1));
 }
 
-TEST_CASE("batch_planner_modes_detail_mask_helpers_cover_edges") {
-  using emel::batch::planner::modes::detail::mask_any_set;
-  using emel::batch::planner::modes::detail::mask_equal;
-  using emel::batch::planner::modes::detail::mask_has_multiple_bits;
-  using emel::batch::planner::modes::detail::mask_is_subset;
-  using emel::batch::planner::modes::detail::mask_overlaps;
-  using emel::batch::planner::modes::detail::seq_mask_t;
+TEST_CASE("batch_planner_detail_mask_helpers_cover_edges") {
+  using emel::batch::planner::detail::mask_any_set;
+  using emel::batch::planner::detail::mask_equal;
+  using emel::batch::planner::detail::mask_has_multiple_bits;
+  using emel::batch::planner::detail::mask_is_subset;
+  using emel::batch::planner::detail::mask_overlaps;
+  using emel::batch::planner::detail::seq_mask_t;
 
   seq_mask_t none = {};
   CHECK_FALSE(mask_any_set(none));
@@ -105,34 +105,34 @@ TEST_CASE("batch_planner_modes_detail_mask_helpers_cover_edges") {
   }
 }
 
-TEST_CASE("batch_planner_modes_detail_count_total_outputs_variants") {
+TEST_CASE("batch_planner_detail_count_total_outputs_variants") {
   done_capture done{};
   error_capture error{};
   std::array<int8_t, 3> output_mask = {{1, 0, 1}};
 
-  emel::batch::planner::event::request request{
+  emel::batch::planner::event::plan_request request{
     .n_tokens = 3,
     .output_all = true,
     .on_done = make_done(&done),
     .on_error = make_error(&error),
   };
-  CHECK(emel::batch::planner::modes::detail::count_total_outputs(request) == 3);
+  CHECK(emel::batch::planner::detail::count_total_outputs(request) == 3);
 
   request.output_all = false;
   request.output_mask = nullptr;
-  CHECK(emel::batch::planner::modes::detail::count_total_outputs(request) == 1);
+  CHECK(emel::batch::planner::detail::count_total_outputs(request) == 1);
 
   request.output_mask = output_mask.data();
   request.output_mask_count = static_cast<int32_t>(output_mask.size());
-  CHECK(emel::batch::planner::modes::detail::count_total_outputs(request) == 2);
+  CHECK(emel::batch::planner::detail::count_total_outputs(request) == 2);
 }
 
-TEST_CASE("batch_planner_modes_detail_reject_overflow_helpers") {
-  emel::batch::planner::event::request_ctx ctx{};
+TEST_CASE("batch_planner_detail_reject_overflow_helpers") {
+  emel::batch::planner::event::plan_scratch ctx{};
 
   ctx.token_indices_count = emel::batch::planner::action::MAX_PLAN_STEPS;
-  CHECK_FALSE(emel::batch::planner::modes::detail::append_token_index(ctx, 0));
+  CHECK_FALSE(emel::batch::planner::detail::append_token_index(ctx, 0));
 
   ctx.step_count = emel::batch::planner::action::MAX_PLAN_STEPS;
-  CHECK_FALSE(emel::batch::planner::modes::detail::begin_step(ctx));
+  CHECK_FALSE(emel::batch::planner::detail::begin_step(ctx));
 }

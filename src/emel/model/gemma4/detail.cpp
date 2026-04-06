@@ -4,6 +4,7 @@
 #include <span>
 
 #include "emel/model/detail.hpp"
+#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 
 namespace emel::model::gemma4::detail {
@@ -141,8 +142,8 @@ emel::error::type validate_contract(const emel::model::data & model_data,
             model_data.params.rope_freq_base > 0.0f &&
             model_data.params.tie_word_embeddings;
   if (!metadata_ok ||
-      !emel::model::builder::detail::has_tensor_named(model_data, k_token_embedding_name) ||
-      !emel::model::builder::detail::has_tensor_named(model_data, k_output_norm_name)) {
+      !emel::model::llama::detail::has_tensor_named(model_data, k_token_embedding_name) ||
+      !emel::model::llama::detail::has_tensor_named(model_data, k_output_norm_name)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 
@@ -157,32 +158,32 @@ emel::error::type validate_contract(const emel::model::data & model_data,
 
   for (int32_t block_index = 0; block_index < model_data.n_layers; ++block_index) {
     const bool common_ok =
-        emel::model::builder::detail::require_block_tensor(
+        emel::model::llama::detail::require_block_tensor(
             model_data, block_index, "attn_norm.weight") &&
-        emel::model::builder::detail::require_block_tensor(
+        emel::model::llama::detail::require_block_tensor(
             model_data, block_index, "attn_q.weight") &&
-        emel::model::builder::detail::require_block_tensor(
+        emel::model::llama::detail::require_block_tensor(
             model_data, block_index, "attn_k.weight") &&
-        emel::model::builder::detail::require_block_tensor(
+        emel::model::llama::detail::require_block_tensor(
             model_data, block_index, "attn_q_norm.weight") &&
-        emel::model::builder::detail::require_block_tensor(
+        emel::model::llama::detail::require_block_tensor(
             model_data, block_index, "attn_k_norm.weight") &&
-        emel::model::builder::detail::require_block_tensor(
+        emel::model::llama::detail::require_block_tensor(
             model_data, block_index, "attn_output.weight") &&
-        emel::model::builder::detail::require_block_tensor(
+        emel::model::llama::detail::require_block_tensor(
             model_data, block_index, "ffn_norm.weight") &&
-        emel::model::builder::detail::require_block_tensor(
+        emel::model::llama::detail::require_block_tensor(
             model_data, block_index, "ffn_gate.weight") &&
-        emel::model::builder::detail::require_block_tensor(
+        emel::model::llama::detail::require_block_tensor(
             model_data, block_index, "ffn_down.weight") &&
-        emel::model::builder::detail::require_block_tensor(
+        emel::model::llama::detail::require_block_tensor(
             model_data, block_index, "ffn_up.weight");
     if (!common_ok) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
 
     if (!is_shared_kv_layer(block_index) &&
-        !emel::model::builder::detail::require_block_tensor(
+        !emel::model::llama::detail::require_block_tensor(
             model_data, block_index, "attn_v.weight")) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
@@ -203,19 +204,6 @@ emel::error::type validate_data(const emel::model::data & model_data) noexcept {
 
 emel::error::type validate_execution_contract(const emel::model::data & model_data) noexcept {
   return validate_contract(model_data, true);
-}
-
-emel::error::type build_view(const emel::model::data & model_data,
-                             emel::model::builder::detail::view & view_out) noexcept {
-  using block_contract_kind = emel::model::builder::detail::block_contract_kind;
-  const emel::model::builder::detail::view_contract contract{
-      .block_contract = block_contract_kind::gemma4,
-      .ties_output = true,
-      .uses_qk_norm = true,
-      .output_norm_name = k_output_norm_name,
-      .shared_kv_layer_begin = k_block_count - k_shared_kv_layers,
-  };
-  return emel::model::builder::detail::build_view_for_contract(model_data, contract, view_out);
 }
 
 }  // namespace emel::model::gemma4::detail

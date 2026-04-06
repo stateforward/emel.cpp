@@ -2234,7 +2234,7 @@ bool inspect_emel_prefill_plan(const emel::model::data & model_data,
       emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
           bench_plan_capture,
           capture_bench_plan_error>(&capture);
-  emel::batch::planner::event::request request{
+  emel::batch::planner::event::plan_request request{
     .token_ids = prompt_tokens.data(),
     .n_tokens = static_cast<int32_t>(prompt_tokens.size()),
     .n_steps = resolved_step_size,

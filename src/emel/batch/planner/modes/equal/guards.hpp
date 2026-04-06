@@ -3,56 +3,57 @@
 #include <algorithm>
 #include <array>
 
-#include "emel/batch/planner/context.hpp"
 #include "emel/batch/planner/guards.hpp"
-#include "emel/batch/planner/modes/detail.hpp"
+#include "emel/batch/planner/modes/equal/context.hpp"
+#include "emel/batch/planner/modes/equal/detail.hpp"
+#include "emel/batch/planner/modes/equal/events.hpp"
 
 namespace emel::batch::planner::modes::equal::guard {
 
-inline constexpr auto mode_is_primary_fast_path =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context &) noexcept {
+inline constexpr auto guard_mode_is_primary_fast_path =
+    [](const event::plan_runtime & ev,
+       const context &) noexcept {
       return ev.request.seq_masks == nullptr && ev.request.seq_primary_ids != nullptr;
     };
 
-inline constexpr auto mode_is_general_path =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context & ctx) noexcept {
-      return !mode_is_primary_fast_path(ev, ctx);
+inline constexpr auto guard_mode_is_general_path =
+    [](const event::plan_runtime & ev,
+       const context & ctx) noexcept {
+      return !guard_mode_is_primary_fast_path(ev, ctx);
     };
 
-inline constexpr auto has_valid_step_size =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context &) noexcept {
+inline constexpr auto guard_has_valid_step_size =
+    [](const event::plan_runtime & ev,
+       const context &) noexcept {
       return ev.ctx.effective_step_size > 0;
     };
 
-inline constexpr auto has_invalid_step_size =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context & ctx) noexcept {
-      return !has_valid_step_size(ev, ctx);
+inline constexpr auto guard_has_invalid_step_size =
+    [](const event::plan_runtime & ev,
+       const context & ctx) noexcept {
+      return !guard_has_valid_step_size(ev, ctx);
     };
 
-inline constexpr auto fast_path_has_primary_ids =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context &) noexcept {
+inline constexpr auto guard_fast_path_has_primary_ids =
+    [](const event::plan_runtime & ev,
+       const context &) noexcept {
       return ev.request.seq_primary_ids != nullptr;
     };
 
-inline constexpr auto fast_path_missing_primary_ids =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context & ctx) noexcept {
-      return !fast_path_has_primary_ids(ev, ctx);
+inline constexpr auto guard_fast_path_missing_primary_ids =
+    [](const event::plan_runtime & ev,
+       const context & ctx) noexcept {
+      return !guard_fast_path_has_primary_ids(ev, ctx);
     };
 
-inline int32_t available_step_slots(const emel::batch::planner::event::request_runtime & ev) noexcept {
+inline int32_t compute_available_step_slots(const event::plan_runtime & ev) noexcept {
   if (ev.ctx.step_count < 0 || ev.ctx.step_count > emel::batch::planner::action::MAX_PLAN_STEPS) {
     return 0;
   }
   return emel::batch::planner::action::MAX_PLAN_STEPS - ev.ctx.step_count;
 }
 
-inline int32_t available_index_slots(const emel::batch::planner::event::request_runtime & ev) noexcept {
+inline int32_t compute_available_index_slots(const event::plan_runtime & ev) noexcept {
   if (ev.ctx.token_indices_count < 0 ||
       ev.ctx.token_indices_count > emel::batch::planner::action::MAX_PLAN_STEPS) {
     return 0;
@@ -60,32 +61,31 @@ inline int32_t available_index_slots(const emel::batch::planner::event::request_
   return emel::batch::planner::action::MAX_PLAN_STEPS - ev.ctx.token_indices_count;
 }
 
-inline constexpr auto has_step_capacity =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context &) noexcept {
-      return available_step_slots(ev) > 0;
+inline constexpr auto guard_has_step_capacity =
+    [](const event::plan_runtime & ev,
+       const context &) noexcept {
+      return compute_available_step_slots(ev) > 0;
     };
 
-inline constexpr auto lacks_step_capacity =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context & ctx) noexcept {
-      return !has_step_capacity(ev, ctx);
+inline constexpr auto guard_lacks_step_capacity =
+    [](const event::plan_runtime & ev,
+       const context & ctx) noexcept {
+      return !guard_has_step_capacity(ev, ctx);
     };
 
-inline constexpr auto has_index_capacity =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context &) noexcept {
-      return ev.request.n_tokens <= available_index_slots(ev);
+inline constexpr auto guard_has_index_capacity =
+    [](const event::plan_runtime & ev,
+       const context &) noexcept {
+      return ev.request.n_tokens <= compute_available_index_slots(ev);
     };
 
-inline constexpr auto lacks_index_capacity =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context & ctx) noexcept {
-      return !has_index_capacity(ev, ctx);
+inline constexpr auto guard_lacks_index_capacity =
+    [](const event::plan_runtime & ev,
+       const context & ctx) noexcept {
+      return !guard_has_index_capacity(ev, ctx);
     };
 
-inline bool fast_path_primary_ids_valid_impl(
-    const emel::batch::planner::event::request_runtime & ev) noexcept {
+inline bool guard_fast_path_primary_ids_valid_impl(const event::plan_runtime & ev) noexcept {
   if (ev.request.seq_primary_ids == nullptr) {
     return false;
   }
@@ -105,46 +105,46 @@ inline bool fast_path_primary_ids_valid_impl(
   return true;
 }
 
-inline constexpr auto fast_path_primary_ids_valid =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context &) noexcept {
-      return fast_path_primary_ids_valid_impl(ev);
+inline constexpr auto guard_fast_path_primary_ids_valid =
+    [](const event::plan_runtime & ev,
+       const context &) noexcept {
+      return guard_fast_path_primary_ids_valid_impl(ev);
     };
 
-inline constexpr auto fast_path_primary_ids_invalid =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context & ctx) noexcept {
-      return !fast_path_primary_ids_valid(ev, ctx);
+inline constexpr auto guard_fast_path_primary_ids_invalid =
+    [](const event::plan_runtime & ev,
+       const context & ctx) noexcept {
+      return !guard_fast_path_primary_ids_valid(ev, ctx);
     };
 
-inline constexpr auto fast_path_input_valid =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context & ctx) noexcept {
-      return has_valid_step_size(ev, ctx) &&
-             fast_path_has_primary_ids(ev, ctx) &&
-             fast_path_primary_ids_valid(ev, ctx);
+inline constexpr auto guard_fast_path_input_valid =
+    [](const event::plan_runtime & ev,
+       const context & ctx) noexcept {
+      return guard_has_valid_step_size(ev, ctx) &&
+             guard_fast_path_has_primary_ids(ev, ctx) &&
+             guard_fast_path_primary_ids_valid(ev, ctx);
     };
 
-inline constexpr auto general_input_valid =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context & ctx) noexcept {
-      return has_valid_step_size(ev, ctx);
+inline constexpr auto guard_general_input_valid =
+    [](const event::plan_runtime & ev,
+       const context & ctx) noexcept {
+      return guard_has_valid_step_size(ev, ctx);
     };
 
-inline constexpr auto storage_capacity_valid =
-    [](const emel::batch::planner::event::request_runtime & ev,
-       const emel::batch::planner::action::context & ctx) noexcept {
-      return has_step_capacity(ev, ctx) && has_index_capacity(ev, ctx);
+inline constexpr auto guard_storage_capacity_valid =
+    [](const event::plan_runtime & ev,
+       const context & ctx) noexcept {
+      return guard_has_step_capacity(ev, ctx) && guard_has_index_capacity(ev, ctx);
     };
 
-inline constexpr auto planning_succeeded = [](const emel::batch::planner::event::request_runtime & ev,
-                                              const emel::batch::planner::action::context &) noexcept {
-  return emel::batch::planner::guard::planning_succeeded_impl(ev);
+inline constexpr auto guard_planning_succeeded = [](const event::plan_runtime & ev,
+                                              const context &) noexcept {
+  return emel::batch::planner::guard::guard_has_complete_plan(ev);
 };
 
-inline constexpr auto planning_failed = [](const emel::batch::planner::event::request_runtime & ev,
-                                           const emel::batch::planner::action::context &) noexcept {
-  return !emel::batch::planner::guard::planning_succeeded_impl(ev);
+inline constexpr auto guard_planning_failed = [](const event::plan_runtime & ev,
+                                           const context &) noexcept {
+  return !emel::batch::planner::guard::guard_has_complete_plan(ev);
 };
 
 }  // namespace emel::batch::planner::modes::equal::guard

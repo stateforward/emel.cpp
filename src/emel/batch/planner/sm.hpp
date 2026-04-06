@@ -4,20 +4,20 @@
 #include "emel/batch/planner/context.hpp"
 #include "emel/batch/planner/events.hpp"
 #include "emel/batch/planner/guards.hpp"
-#include "emel/batch/planner/modes/equal/sm.hpp"
-#include "emel/batch/planner/modes/sequential/sm.hpp"
-#include "emel/batch/planner/modes/simple/sm.hpp"
 #include "emel/sm.hpp"
 
 namespace emel::batch::planner {
 
-struct initialized {};
-struct validate_decision {};
-struct normalizing_batch {};
-struct mode_decision {};
-struct publishing {};
-struct done {};
-struct invalid_request {};
+struct state_idle {};
+struct state_input_validation {};
+struct state_step_normalization {};
+struct state_mode_selection {};
+struct state_simple_planning {};
+struct state_equal_planning {};
+struct state_sequential_planning {};
+struct state_result_publish {};
+struct state_completed {};
+struct state_request_rejected {};
 
 struct model {
   auto operator()() const {
@@ -25,74 +25,98 @@ struct model {
     // clang-format off
     return sml::make_transition_table(
       //------------------------------------------------------------------------------//
-        sml::state<validate_decision> <= *sml::state<initialized> + sml::event<event::request_runtime>
-          / action::begin_plan
-      , sml::state<normalizing_batch> <= sml::state<validate_decision>
-          + sml::completion<event::request_runtime> [ guard::inputs_are_valid ]
-      , sml::state<invalid_request> <= sml::state<validate_decision>
-          + sml::completion<event::request_runtime> [ guard::inputs_are_invalid ]
-          / action::mark_invalid_request
+        sml::state<state_input_validation> <= *sml::state<state_idle>
+          + sml::event<event::plan_runtime>
+          / action::effect_begin_planning
+      , sml::state<state_step_normalization> <= sml::state<state_input_validation>
+          + sml::completion<event::plan_runtime> [ guard::guard_inputs_valid ]
+      , sml::state<state_request_rejected> <= sml::state<state_input_validation>
+          + sml::completion<event::plan_runtime> [ guard::guard_inputs_invalid ]
+          / action::effect_reject_invalid_request
       //------------------------------------------------------------------------------//
-      , sml::state<mode_decision> <= sml::state<normalizing_batch>
-          + sml::completion<event::request_runtime> / action::normalize_batch
+      , sml::state<state_mode_selection> <= sml::state<state_step_normalization>
+          + sml::completion<event::plan_runtime> / action::effect_normalize_step_size
       //------------------------------------------------------------------------------//
-      , sml::state<modes::simple::model> <= sml::state<mode_decision>
-          + sml::completion<event::request_runtime> [ guard::mode_is_simple ]
-      , sml::state<modes::equal::model> <= sml::state<mode_decision>
-          + sml::completion<event::request_runtime> [ guard::mode_is_equal ]
-      , sml::state<modes::sequential::model> <= sml::state<mode_decision>
-          + sml::completion<event::request_runtime> [ guard::mode_is_seq ]
-      , sml::state<invalid_request> <= sml::state<mode_decision>
-          + sml::completion<event::request_runtime> [ guard::mode_is_invalid ]
-          / action::mark_invalid_mode
+      , sml::state<state_simple_planning> <= sml::state<state_mode_selection>
+          + sml::completion<event::plan_runtime> [ guard::guard_mode_is_simple ]
+          / action::effect_plan_simple_mode
+      , sml::state<state_equal_planning> <= sml::state<state_mode_selection>
+          + sml::completion<event::plan_runtime> [ guard::guard_mode_is_equal ]
+          / action::effect_plan_equal_mode
+      , sml::state<state_sequential_planning> <= sml::state<state_mode_selection>
+          + sml::completion<event::plan_runtime> [ guard::guard_mode_is_sequential ]
+          / action::effect_plan_sequential_mode
+      , sml::state<state_request_rejected> <= sml::state<state_mode_selection>
+          + sml::completion<event::plan_runtime> [ guard::guard_mode_is_invalid ]
+          / action::effect_reject_invalid_mode
       //------------------------------------------------------------------------------//
-      , sml::state<publishing> <= sml::state<modes::simple::model>
-          + sml::completion<event::request_runtime> [ guard::planning_succeeded ] / action::publish
-      , sml::state<done> <= sml::state<modes::simple::model>
-          + sml::completion<event::request_runtime> [ guard::planning_failed_with_error ]
-          / action::dispatch_plan_failed_with_ctx_error
-      , sml::state<done> <= sml::state<modes::simple::model>
-          + sml::completion<event::request_runtime> [ guard::planning_failed_without_error ]
-          / action::dispatch_plan_failed_internal
-      , sml::state<publishing> <= sml::state<modes::equal::model>
-          + sml::completion<event::request_runtime> [ guard::planning_succeeded ] / action::publish
-      , sml::state<done> <= sml::state<modes::equal::model>
-          + sml::completion<event::request_runtime> [ guard::planning_failed_with_error ]
-          / action::dispatch_plan_failed_with_ctx_error
-      , sml::state<done> <= sml::state<modes::equal::model>
-          + sml::completion<event::request_runtime> [ guard::planning_failed_without_error ]
-          / action::dispatch_plan_failed_internal
-      , sml::state<publishing> <= sml::state<modes::sequential::model>
-          + sml::completion<event::request_runtime> [ guard::planning_succeeded ] / action::publish
-      , sml::state<done> <= sml::state<modes::sequential::model>
-          + sml::completion<event::request_runtime> [ guard::planning_failed_with_error ]
-          / action::dispatch_plan_failed_with_ctx_error
-      , sml::state<done> <= sml::state<modes::sequential::model>
-          + sml::completion<event::request_runtime> [ guard::planning_failed_without_error ]
-          / action::dispatch_plan_failed_internal
+      , sml::state<state_result_publish> <= sml::state<state_simple_planning>
+          + sml::completion<event::plan_runtime> [ guard::guard_planning_succeeded ]
+          / action::effect_publish_result
+      , sml::state<state_completed> <= sml::state<state_simple_planning>
+          + sml::completion<event::plan_runtime> [ guard::guard_planning_failed_with_error ]
+          / action::effect_emit_planning_error
+      , sml::state<state_completed> <= sml::state<state_simple_planning>
+          + sml::completion<event::plan_runtime> [ guard::guard_planning_failed_without_error ]
+          / action::effect_emit_internal_planning_error
+      , sml::state<state_result_publish> <= sml::state<state_equal_planning>
+          + sml::completion<event::plan_runtime> [ guard::guard_planning_succeeded ]
+          / action::effect_publish_result
+      , sml::state<state_completed> <= sml::state<state_equal_planning>
+          + sml::completion<event::plan_runtime> [ guard::guard_planning_failed_with_error ]
+          / action::effect_emit_planning_error
+      , sml::state<state_completed> <= sml::state<state_equal_planning>
+          + sml::completion<event::plan_runtime> [ guard::guard_planning_failed_without_error ]
+          / action::effect_emit_internal_planning_error
+      , sml::state<state_result_publish> <= sml::state<state_sequential_planning>
+          + sml::completion<event::plan_runtime> [ guard::guard_planning_succeeded ]
+          / action::effect_publish_result
+      , sml::state<state_completed> <= sml::state<state_sequential_planning>
+          + sml::completion<event::plan_runtime> [ guard::guard_planning_failed_with_error ]
+          / action::effect_emit_planning_error
+      , sml::state<state_completed> <= sml::state<state_sequential_planning>
+          + sml::completion<event::plan_runtime> [ guard::guard_planning_failed_without_error ]
+          / action::effect_emit_internal_planning_error
       //------------------------------------------------------------------------------//
-      , sml::state<done> <= sml::state<publishing>
-          + sml::completion<event::request_runtime> / action::dispatch_done
+      , sml::state<state_completed> <= sml::state<state_result_publish>
+          + sml::completion<event::plan_runtime> / action::effect_emit_plan_done
       //------------------------------------------------------------------------------//
-      , sml::state<validate_decision> <= sml::state<done> + sml::event<event::request_runtime>
-          / action::begin_plan
-      , sml::state<validate_decision> <= sml::state<invalid_request>
-          + sml::event<event::request_runtime> / action::begin_plan
+      , sml::state<state_input_validation> <= sml::state<state_completed>
+          + sml::event<event::plan_runtime>
+          / action::effect_begin_planning
+      , sml::state<state_input_validation> <= sml::state<state_request_rejected>
+          + sml::event<event::plan_runtime> / action::effect_begin_planning
       //------------------------------------------------------------------------------//
-      , sml::state<initialized> <= sml::state<initialized> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<initialized> <= sml::state<validate_decision> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<initialized> <= sml::state<normalizing_batch> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<initialized> <= sml::state<mode_decision> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<initialized> <= sml::state<publishing> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<initialized> <= sml::state<done> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
-      , sml::state<initialized> <= sml::state<invalid_request> + sml::unexpected_event<sml::_>
-          / action::on_unexpected
+      , sml::state<state_idle> <= sml::state<state_idle>
+          + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected_event
+      , sml::state<state_idle> <= sml::state<state_input_validation>
+          + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected_event
+      , sml::state<state_idle> <= sml::state<state_step_normalization>
+          + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected_event
+      , sml::state<state_idle> <= sml::state<state_mode_selection>
+          + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected_event
+      , sml::state<state_idle> <= sml::state<state_simple_planning>
+          + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected_event
+      , sml::state<state_idle> <= sml::state<state_equal_planning>
+          + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected_event
+      , sml::state<state_idle> <= sml::state<state_sequential_planning>
+          + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected_event
+      , sml::state<state_idle> <= sml::state<state_result_publish>
+          + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected_event
+      , sml::state<state_idle> <= sml::state<state_completed>
+          + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected_event
+      , sml::state<state_idle> <= sml::state<state_request_rejected>
+          + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected_event
     );
     // clang-format on
   }
@@ -103,9 +127,9 @@ struct sm : public emel::sm<model, action::context> {
   using base_type::is;
   using base_type::visit_current_states;
 
-  bool process_event(const event::request & ev) {
-    event::request_ctx ctx{};
-    event::request_runtime runtime{ev, ctx};
+  bool process_event(const event::plan_request & ev) {
+    event::plan_scratch ctx{};
+    event::plan_runtime runtime{ev, ctx};
     const bool accepted = base_type::process_event(runtime);
     return accepted && ctx.err == emel::error::cast(error::none);
   }
