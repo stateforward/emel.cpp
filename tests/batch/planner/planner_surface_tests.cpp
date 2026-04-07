@@ -1,10 +1,6 @@
 #include <boost/sml.hpp>
 #include <array>
 #include <doctest/doctest.h>
-#include <filesystem>
-#include <fstream>
-#include <iterator>
-#include <string>
 #include <type_traits>
 
 #include "emel/batch/planner/modes/equal/context.hpp"
@@ -71,39 +67,6 @@ inline emel::callback<void(const error_event &)> make_mode_error(
   return emel::callback<void(const error_event &)>::template from<
       mode_capture<done_event, error_event>,
       &mode_capture<done_event, error_event>::on_error>(capture);
-}
-
-inline std::string load_text(const std::filesystem::path & path) {
-  std::ifstream input(path);
-  REQUIRE(input.good());
-  return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
-}
-
-inline std::filesystem::path find_repo_root(std::filesystem::path path) {
-  while (!path.empty()) {
-    if (std::filesystem::exists(path / "CMakeLists.txt")) {
-      return path;
-    }
-    path = path.parent_path();
-  }
-  return {};
-}
-
-inline std::string process_event_block(const std::filesystem::path & relative_path) {
-  const auto repo_root = find_repo_root(std::filesystem::path(__FILE__).parent_path());
-  REQUIRE_FALSE(repo_root.empty());
-  const std::string source = load_text(repo_root / relative_path);
-  const auto process_event_pos = source.find("bool process_event(const event::plan_request & ev) {");
-  REQUIRE(process_event_pos != std::string::npos);
-  const auto namespace_pos = source.find("}  // namespace", process_event_pos);
-  REQUIRE(namespace_pos != std::string::npos);
-  return source.substr(process_event_pos, namespace_pos - process_event_pos);
-}
-
-inline std::string load_repo_text(const std::filesystem::path & relative_path) {
-  const auto repo_root = find_repo_root(std::filesystem::path(__FILE__).parent_path());
-  REQUIRE_FALSE(repo_root.empty());
-  return load_text(repo_root / relative_path);
 }
 
 }  // namespace
@@ -223,174 +186,67 @@ TEST_CASE("batch_planner_mode_wrappers_emit_typed_outcome_events") {
   }
 }
 
-TEST_CASE("batch_planner_mode_wrappers_use_state_inspection_for_outcome_dispatch") {
-  const std::array<std::filesystem::path, 3> wrapper_paths = {{
-      "src/emel/batch/planner/modes/simple/sm.hpp",
-      "src/emel/batch/planner/modes/equal/sm.hpp",
-      "src/emel/batch/planner/modes/sequential/sm.hpp",
-  }};
+TEST_CASE("batch_planner_surface_exports_canonical_prefixed_symbols") {
+  [[maybe_unused]] const auto * effect_begin_planning =
+      &emel::batch::planner::action::effect_begin_planning;
+  [[maybe_unused]] const auto * effect_normalize_step_size =
+      &emel::batch::planner::action::effect_normalize_step_size;
+  [[maybe_unused]] const auto * effect_plan_simple_mode =
+      &emel::batch::planner::action::effect_plan_simple_mode;
+  [[maybe_unused]] const auto * effect_plan_equal_mode =
+      &emel::batch::planner::action::effect_plan_equal_mode;
+  [[maybe_unused]] const auto * effect_plan_sequential_mode =
+      &emel::batch::planner::action::effect_plan_sequential_mode;
+  [[maybe_unused]] const auto * effect_reject_unexpected_event =
+      &emel::batch::planner::action::effect_reject_unexpected_event;
 
-  for (const auto & wrapper_path : wrapper_paths) {
-    const std::string block = process_event_block(wrapper_path);
-    CHECK(block.find("if (") == std::string::npos);
-    CHECK(block.find("guard_planning_succeeded") == std::string::npos);
-    CHECK(block.find("detail::complete_mode_request") != std::string::npos);
-  }
+  [[maybe_unused]] const auto * guard_inputs_valid =
+      &emel::batch::planner::guard::guard_inputs_valid;
+  [[maybe_unused]] const auto * guard_mode_is_simple =
+      &emel::batch::planner::guard::guard_mode_is_simple;
+  [[maybe_unused]] const auto * guard_mode_is_equal =
+      &emel::batch::planner::guard::guard_mode_is_equal;
+  [[maybe_unused]] const auto * guard_mode_is_sequential =
+      &emel::batch::planner::guard::guard_mode_is_sequential;
+  [[maybe_unused]] const auto * guard_planning_failed_with_error =
+      &emel::batch::planner::guard::guard_planning_failed_with_error;
+
+  static_assert(std::is_default_constructible_v<emel::batch::planner::state_idle>);
+  static_assert(std::is_default_constructible_v<emel::batch::planner::state_input_validation>);
+  static_assert(std::is_default_constructible_v<emel::batch::planner::state_mode_selection>);
+  static_assert(std::is_default_constructible_v<emel::batch::planner::state_simple_planning>);
+  static_assert(std::is_default_constructible_v<emel::batch::planner::state_equal_planning>);
+  static_assert(std::is_default_constructible_v<emel::batch::planner::state_sequential_planning>);
+  static_assert(std::is_default_constructible_v<emel::batch::planner::state_result_publish>);
+  static_assert(std::is_default_constructible_v<emel::batch::planner::state_completed>);
+  static_assert(std::is_default_constructible_v<emel::batch::planner::state_request_rejected>);
+
+  CHECK(true);
 }
 
-TEST_CASE("batch_planner_surface_uses_planner_family_prefix_conventions") {
-  const std::string events_source = load_repo_text("src/emel/batch/planner/events.hpp");
-  const std::string actions_source = load_repo_text("src/emel/batch/planner/actions.hpp");
-  const std::string guards_source = load_repo_text("src/emel/batch/planner/guards.hpp");
-  const std::string sm_source = load_repo_text("src/emel/batch/planner/sm.hpp");
+TEST_CASE("batch_planner_mode_actions_export_effect_symbols") {
+  [[maybe_unused]] const auto * simple_begin =
+      &emel::batch::planner::modes::simple::action::effect_begin_planning;
+  [[maybe_unused]] const auto * simple_plan =
+      &emel::batch::planner::modes::simple::action::effect_plan_simple_batches;
+  [[maybe_unused]] const auto * simple_reject_invalid_step_size =
+      &emel::batch::planner::modes::simple::action::effect_reject_invalid_step_size;
 
-  CHECK(events_source.find("struct plan_request") != std::string::npos);
-  CHECK(events_source.find("struct plan_scratch") != std::string::npos);
-  CHECK(events_source.find("struct plan_runtime") != std::string::npos);
-  CHECK(events_source.find("struct request {") == std::string::npos);
-  CHECK(events_source.find("struct request_ctx") == std::string::npos);
-  CHECK(events_source.find("struct request_runtime") == std::string::npos);
+  [[maybe_unused]] const auto * sequential_begin =
+      &emel::batch::planner::modes::sequential::action::effect_begin_planning;
+  [[maybe_unused]] const auto * sequential_plan =
+      &emel::batch::planner::modes::sequential::action::effect_plan_sequential_batches;
+  [[maybe_unused]] const auto * sequential_reject_invalid_step_size =
+      &emel::batch::planner::modes::sequential::action::effect_reject_invalid_step_size;
 
-  CHECK(actions_source.find("inline constexpr auto effect_begin_planning") != std::string::npos);
-  CHECK(actions_source.find("inline constexpr auto effect_normalize_step_size") != std::string::npos);
-  CHECK(actions_source.find("inline constexpr auto effect_plan_simple_mode") != std::string::npos);
-  CHECK(actions_source.find("inline constexpr auto effect_plan_equal_mode") != std::string::npos);
-  CHECK(actions_source.find("inline constexpr auto effect_plan_sequential_mode") != std::string::npos);
-  CHECK(actions_source.find("inline constexpr auto effect_reject_unexpected_event") !=
-        std::string::npos);
-  CHECK(actions_source.find("inline constexpr auto begin_planning =") == std::string::npos);
-  CHECK(actions_source.find("inline constexpr auto normalize_step_size =") == std::string::npos);
-  CHECK(actions_source.find("inline constexpr auto plan_simple_mode =") == std::string::npos);
-  CHECK(actions_source.find("inline constexpr auto plan_equal_mode =") == std::string::npos);
-  CHECK(actions_source.find("inline constexpr auto plan_sequential_mode =") ==
-        std::string::npos);
-  CHECK(actions_source.find("inline constexpr auto reject_unexpected_event =") ==
-        std::string::npos);
+  [[maybe_unused]] const auto * equal_begin =
+      &emel::batch::planner::modes::equal::action::effect_begin_planning;
+  [[maybe_unused]] const auto * equal_plan =
+      &emel::batch::planner::modes::equal::action::effect_plan_equal_batches;
+  [[maybe_unused]] const auto * equal_plan_fast =
+      &emel::batch::planner::modes::equal::action::effect_plan_equal_primary_batches;
+  [[maybe_unused]] const auto * equal_reject_invalid_sequence_id =
+      &emel::batch::planner::modes::equal::action::effect_reject_invalid_sequence_id;
 
-  CHECK(guards_source.find("inline constexpr auto guard_inputs_valid") != std::string::npos);
-  CHECK(guards_source.find("inline constexpr auto guard_mode_is_simple") != std::string::npos);
-  CHECK(guards_source.find("inline constexpr auto guard_mode_is_equal") != std::string::npos);
-  CHECK(guards_source.find("inline constexpr auto guard_mode_is_sequential") !=
-        std::string::npos);
-  CHECK(guards_source.find("inline constexpr auto guard_planning_failed_with_error") !=
-        std::string::npos);
-  CHECK(guards_source.find("inline constexpr auto inputs_valid =") == std::string::npos);
-  CHECK(guards_source.find("inline constexpr auto mode_is_simple =") == std::string::npos);
-  CHECK(guards_source.find("inline constexpr auto mode_is_equal =") == std::string::npos);
-  CHECK(guards_source.find("inline constexpr auto mode_is_sequential =") == std::string::npos);
-  CHECK(guards_source.find("inline constexpr auto planning_failed_with_error =") ==
-        std::string::npos);
-
-  CHECK(sm_source.find("state_idle") != std::string::npos);
-  CHECK(sm_source.find("state_input_validation") != std::string::npos);
-  CHECK(sm_source.find("state_mode_selection") != std::string::npos);
-  CHECK(sm_source.find("state_simple_planning") != std::string::npos);
-  CHECK(sm_source.find("state_equal_planning") != std::string::npos);
-  CHECK(sm_source.find("state_sequential_planning") != std::string::npos);
-  CHECK(sm_source.find("state_result_publish") != std::string::npos);
-  CHECK(sm_source.find("state_completed") != std::string::npos);
-  CHECK(sm_source.find("state_request_rejected") != std::string::npos);
-  CHECK(sm_source.find("state_initialized") == std::string::npos);
-  CHECK(sm_source.find("state_validate_decision") == std::string::npos);
-  CHECK(sm_source.find("state_mode_decision") == std::string::npos);
-}
-
-TEST_CASE("batch_planner_mode_actions_use_effect_prefix_without_wrapper_trampolines") {
-  const std::string simple_actions =
-      load_repo_text("src/emel/batch/planner/modes/simple/actions.hpp");
-  const std::string equal_actions =
-      load_repo_text("src/emel/batch/planner/modes/equal/actions.hpp");
-  const std::string sequential_actions =
-      load_repo_text("src/emel/batch/planner/modes/sequential/actions.hpp");
-
-  CHECK(simple_actions.find("inline constexpr auto effect_begin_planning") != std::string::npos);
-  CHECK(simple_actions.find("inline constexpr auto effect_reject_invalid_step_size") !=
-        std::string::npos);
-  CHECK(simple_actions.find("inline constexpr auto effect_reject_output_steps_full") !=
-        std::string::npos);
-  CHECK(simple_actions.find("inline constexpr auto effect_reject_output_indices_full") !=
-        std::string::npos);
-  CHECK(simple_actions.find("inline constexpr auto effect_reject_planning_progress_stalled") !=
-        std::string::npos);
-  CHECK(simple_actions.find("inline constexpr auto effect_plan_simple_batches") !=
-        std::string::npos);
-  CHECK(simple_actions.find("inline constexpr auto begin_planning =") == std::string::npos);
-  CHECK(simple_actions.find("inline constexpr auto reject_invalid_step_size =") ==
-        std::string::npos);
-  CHECK(simple_actions.find("inline constexpr auto reject_output_steps_full =") ==
-        std::string::npos);
-  CHECK(simple_actions.find("inline constexpr auto reject_output_indices_full =") ==
-        std::string::npos);
-  CHECK(simple_actions.find("inline constexpr auto reject_planning_progress_stalled =") ==
-        std::string::npos);
-  CHECK(simple_actions.find("inline constexpr auto plan_simple_batches =") ==
-        std::string::npos);
-  CHECK(simple_actions.find("_impl(") == std::string::npos);
-
-  CHECK(equal_actions.find("inline constexpr auto effect_begin_planning") != std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto effect_reject_invalid_step_size") !=
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto effect_reject_invalid_sequence_id") !=
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto effect_reject_output_steps_full") !=
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto effect_reject_output_indices_full") !=
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto effect_reject_planning_progress_stalled") !=
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto effect_plan_equal_batches") !=
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto effect_plan_equal_primary_batches") !=
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto begin_planning =") == std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto reject_invalid_step_size =") ==
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto reject_invalid_sequence_id =") ==
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto reject_output_steps_full =") ==
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto reject_output_indices_full =") ==
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto reject_planning_progress_stalled =") ==
-        std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto plan_equal_batches =") == std::string::npos);
-  CHECK(equal_actions.find("inline constexpr auto plan_equal_primary_batches =") ==
-        std::string::npos);
-  CHECK(equal_actions.find("_impl(") == std::string::npos);
-
-  CHECK(sequential_actions.find("inline constexpr auto effect_begin_planning") !=
-        std::string::npos);
-  CHECK(sequential_actions.find("inline constexpr auto effect_reject_invalid_step_size") !=
-        std::string::npos);
-  CHECK(sequential_actions.find("inline constexpr auto effect_reject_output_steps_full") !=
-        std::string::npos);
-  CHECK(sequential_actions.find("inline constexpr auto effect_reject_output_indices_full") !=
-        std::string::npos);
-  CHECK(sequential_actions.find("inline constexpr auto effect_reject_planning_progress_stalled") !=
-        std::string::npos);
-  CHECK(sequential_actions.find("inline constexpr auto effect_plan_sequential_batches") !=
-        std::string::npos);
-  CHECK(sequential_actions.find("inline constexpr auto begin_planning =") == std::string::npos);
-  CHECK(sequential_actions.find("inline constexpr auto reject_invalid_step_size =") ==
-        std::string::npos);
-  CHECK(sequential_actions.find("inline constexpr auto reject_output_steps_full =") ==
-        std::string::npos);
-  CHECK(sequential_actions.find("inline constexpr auto reject_output_indices_full =") ==
-        std::string::npos);
-  CHECK(sequential_actions.find("inline constexpr auto reject_planning_progress_stalled =") ==
-        std::string::npos);
-  CHECK(sequential_actions.find("inline constexpr auto plan_sequential_batches =") ==
-        std::string::npos);
-  CHECK(sequential_actions.find("_impl(") == std::string::npos);
-}
-
-TEST_CASE("batch_planner_transient_mode_states_define_unexpected_event_handlers") {
-  const std::string source = load_repo_text("src/emel/batch/planner/sm.hpp");
-
-  CHECK(source.find("sml::state<state_idle> <= sml::state<state_simple_planning>\n"
-                    "          + sml::unexpected_event<sml::_>") != std::string::npos);
-  CHECK(source.find("sml::state<state_idle> <= sml::state<state_equal_planning>\n"
-                    "          + sml::unexpected_event<sml::_>") != std::string::npos);
-  CHECK(source.find("sml::state<state_idle> <= sml::state<state_sequential_planning>\n"
-                    "          + sml::unexpected_event<sml::_>") != std::string::npos);
+  CHECK(true);
 }

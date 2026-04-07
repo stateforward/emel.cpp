@@ -534,9 +534,7 @@ emel::error::type build_execution_view(const emel::model::data & model_data,
       model_data.n_tensors == 0u ||
       model_data.n_layers <= 0 ||
       model_data.params.n_embd <= 0 ||
-      model_data.params.n_ctx <= 0 ||
-      model_data.weights_data == nullptr ||
-      model_data.weights_size == 0u) {
+      model_data.params.n_ctx <= 0) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
   }
 

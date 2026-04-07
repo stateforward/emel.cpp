@@ -712,6 +712,22 @@ TEST_CASE("model_llama_detail_builds_execution_view_for_canonical_tensor_set") {
   CHECK(block.feed_forward_up.name == "blk.1.ffn_up.weight");
 }
 
+TEST_CASE("model_llama_detail_builds_execution_view_without_contiguous_weights_blob") {
+  auto model = std::make_unique<emel::model::data>();
+  build_canonical_model(*model, 2);
+  model->weights_data = nullptr;
+  model->weights_size = 0u;
+
+  emel::model::llama::detail::execution_view view = {};
+  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+
+  CHECK(err == emel::error::cast(emel::model::loader::error::none));
+  CHECK(view.model == model.get());
+  CHECK(view.block_count == 2);
+  CHECK(view.token_embedding.tensor != nullptr);
+  CHECK(view.output.tensor != nullptr);
+}
+
 TEST_CASE("model_data_tensor_name_view_rejects_out_of_bounds_storage_range") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::data::tensor_record tensor = {};
