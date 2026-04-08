@@ -22,7 +22,7 @@ struct plan_request {
   const emel::callback<void(const events::plan_error &)> & on_error;
 };
 
-using plan_runtime = planner_event::plan_runtime;
+using plan_runtime = plan_request;
 
 }  // namespace event
 

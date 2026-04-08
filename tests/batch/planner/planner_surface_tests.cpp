@@ -186,6 +186,120 @@ TEST_CASE("batch_planner_mode_wrappers_emit_typed_outcome_events") {
   }
 }
 
+TEST_CASE("batch_planner_mode_wrappers_do_not_reuse_stale_outcomes_after_completion") {
+  planner_done_capture planner_done{};
+  planner_error_capture planner_error{};
+  std::array<int32_t, 4> tokens = {{1, 2, 3, 4}};
+  const emel::batch::planner::event::plan_request request{
+    .token_ids = tokens.data(),
+    .n_tokens = static_cast<int32_t>(tokens.size()),
+    .n_steps = 2,
+    .mode = emel::batch::planner::event::plan_mode::simple,
+    .output_all = true,
+    .on_done = make_planner_done(&planner_done),
+    .on_error = make_planner_error(&planner_error),
+  };
+  const emel::error::type internal_error =
+      emel::error::cast(emel::batch::planner::error::internal_error);
+
+  SUBCASE("simple") {
+    emel::batch::planner::event::plan_scratch first_ctx{};
+    first_ctx.effective_step_size = 2;
+    mode_capture<emel::batch::planner::modes::simple::events::plan_done,
+                 emel::batch::planner::modes::simple::events::plan_error>
+        first{};
+    emel::batch::planner::modes::simple::sm mode{};
+    CHECK(mode.process_event(emel::batch::planner::modes::simple::event::plan_request{
+      .request = request,
+      .ctx = first_ctx,
+      .on_done = make_mode_done(&first),
+      .on_error = make_mode_error(&first),
+    }));
+    CHECK(first.done_called);
+    CHECK_FALSE(first.error_called);
+
+    emel::batch::planner::event::plan_scratch second_ctx{};
+    second_ctx.effective_step_size = 2;
+    mode_capture<emel::batch::planner::modes::simple::events::plan_done,
+                 emel::batch::planner::modes::simple::events::plan_error>
+        second{};
+    CHECK_FALSE(mode.process_event(emel::batch::planner::modes::simple::event::plan_request{
+      .request = request,
+      .ctx = second_ctx,
+      .on_done = make_mode_done(&second),
+      .on_error = make_mode_error(&second),
+    }));
+    CHECK_FALSE(second.done_called);
+    CHECK(second.error_called);
+    CHECK(second.err == internal_error);
+  }
+
+  SUBCASE("equal") {
+    emel::batch::planner::event::plan_scratch first_ctx{};
+    first_ctx.effective_step_size = 2;
+    mode_capture<emel::batch::planner::modes::equal::events::plan_done,
+                 emel::batch::planner::modes::equal::events::plan_error>
+        first{};
+    emel::batch::planner::modes::equal::sm mode{};
+    CHECK(mode.process_event(emel::batch::planner::modes::equal::event::plan_request{
+      .request = request,
+      .ctx = first_ctx,
+      .on_done = make_mode_done(&first),
+      .on_error = make_mode_error(&first),
+    }));
+    CHECK(first.done_called);
+    CHECK_FALSE(first.error_called);
+
+    emel::batch::planner::event::plan_scratch second_ctx{};
+    second_ctx.effective_step_size = 2;
+    mode_capture<emel::batch::planner::modes::equal::events::plan_done,
+                 emel::batch::planner::modes::equal::events::plan_error>
+        second{};
+    CHECK_FALSE(mode.process_event(emel::batch::planner::modes::equal::event::plan_request{
+      .request = request,
+      .ctx = second_ctx,
+      .on_done = make_mode_done(&second),
+      .on_error = make_mode_error(&second),
+    }));
+    CHECK_FALSE(second.done_called);
+    CHECK(second.error_called);
+    CHECK(second.err == internal_error);
+  }
+
+  SUBCASE("sequential") {
+    emel::batch::planner::event::plan_scratch first_ctx{};
+    first_ctx.effective_step_size = 2;
+    mode_capture<emel::batch::planner::modes::sequential::events::plan_done,
+                 emel::batch::planner::modes::sequential::events::plan_error>
+        first{};
+    emel::batch::planner::modes::sequential::sm mode{};
+    CHECK(mode.process_event(emel::batch::planner::modes::sequential::event::plan_request{
+      .request = request,
+      .ctx = first_ctx,
+      .on_done = make_mode_done(&first),
+      .on_error = make_mode_error(&first),
+    }));
+    CHECK(first.done_called);
+    CHECK_FALSE(first.error_called);
+
+    emel::batch::planner::event::plan_scratch second_ctx{};
+    second_ctx.effective_step_size = 2;
+    mode_capture<emel::batch::planner::modes::sequential::events::plan_done,
+                 emel::batch::planner::modes::sequential::events::plan_error>
+        second{};
+    CHECK_FALSE(mode.process_event(
+        emel::batch::planner::modes::sequential::event::plan_request{
+          .request = request,
+          .ctx = second_ctx,
+          .on_done = make_mode_done(&second),
+          .on_error = make_mode_error(&second),
+        }));
+    CHECK_FALSE(second.done_called);
+    CHECK(second.error_called);
+    CHECK(second.err == internal_error);
+  }
+}
+
 TEST_CASE("batch_planner_surface_exports_canonical_prefixed_symbols") {
   [[maybe_unused]] const auto * effect_begin_planning =
       &emel::batch::planner::action::effect_begin_planning;

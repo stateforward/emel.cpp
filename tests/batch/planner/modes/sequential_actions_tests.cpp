@@ -29,13 +29,59 @@ inline emel::callback<void(const emel::batch::planner::events::plan_error &)> ma
       &error_capture::on_error>(capture);
 }
 
-inline emel::batch::planner::event::plan_runtime make_runtime(
-    const emel::batch::planner::event::plan_request & request,
-    emel::batch::planner::event::plan_scratch & request_ctx) {
-  return emel::batch::planner::event::plan_runtime{
-    .request = request,
-    .ctx = request_ctx,
-  };
+struct mode_done_capture {
+  void on_done(const emel::batch::planner::modes::sequential::events::plan_done &) noexcept {}
+};
+
+struct mode_error_capture {
+  void on_error(const emel::batch::planner::modes::sequential::events::plan_error &) noexcept {}
+};
+
+inline emel::callback<void(const emel::batch::planner::modes::sequential::events::plan_done &)>
+make_mode_done(mode_done_capture * capture) {
+  return emel::callback<void(const emel::batch::planner::modes::sequential::events::plan_done &)>::from<
+      mode_done_capture,
+      &mode_done_capture::on_done>(capture);
+}
+
+inline emel::callback<void(const emel::batch::planner::modes::sequential::events::plan_error &)>
+make_mode_error(mode_error_capture * capture) {
+  return emel::callback<void(const emel::batch::planner::modes::sequential::events::plan_error &)>::from<
+      mode_error_capture,
+      &mode_error_capture::on_error>(capture);
+}
+
+struct runtime_bundle {
+  emel::callback<void(const emel::batch::planner::modes::sequential::events::plan_done &)> on_done;
+  emel::callback<void(const emel::batch::planner::modes::sequential::events::plan_error &)> on_error;
+  emel::batch::planner::modes::sequential::event::plan_runtime runtime;
+  mode_done_capture mode_done = {};
+  mode_error_capture mode_error = {};
+
+  runtime_bundle(const emel::batch::planner::event::plan_request & request,
+                 emel::batch::planner::event::plan_scratch & request_ctx,
+                 done_capture *,
+                 error_capture *)
+      : on_done(make_mode_done(&mode_done)),
+        on_error(make_mode_error(&mode_error)),
+        runtime{
+            .request = request,
+            .ctx = request_ctx,
+            .on_done = on_done,
+            .on_error = on_error,
+        } {
+  }
+
+  operator const emel::batch::planner::modes::sequential::event::plan_runtime &() const noexcept {
+    return runtime;
+  }
+};
+
+inline runtime_bundle make_runtime(const emel::batch::planner::event::plan_request & request,
+                                   emel::batch::planner::event::plan_scratch & request_ctx,
+                                   done_capture * done,
+                                   error_capture * error) {
+  return runtime_bundle{request, request_ctx, done, error};
 }
 
 }  // namespace
@@ -58,7 +104,7 @@ TEST_CASE("batch_planner_modes_sequential_create_plan_with_masks") {
   };
   request_ctx.effective_step_size = 3;
 
-  auto runtime = make_runtime(request, request_ctx);
+  auto runtime = make_runtime(request, request_ctx, &done, &error);
   emel::batch::planner::modes::sequential::action::effect_begin_planning(runtime, planner_ctx);
   REQUIRE(emel::batch::planner::modes::sequential::guard::guard_sequential_plan_capacity_ok(runtime,
                                                                                        planner_ctx));
@@ -86,7 +132,7 @@ TEST_CASE("batch_planner_modes_sequential_create_plan_without_masks_failure") {
   };
   request_ctx.effective_step_size = 0;
 
-  auto runtime = make_runtime(request, request_ctx);
+  auto runtime = make_runtime(request, request_ctx, &done, &error);
   emel::batch::planner::modes::sequential::action::effect_begin_planning(runtime, planner_ctx);
   REQUIRE(emel::batch::planner::modes::sequential::guard::guard_has_invalid_step_size(runtime,
                                                                                  planner_ctx));
@@ -113,7 +159,7 @@ TEST_CASE("batch_planner_modes_sequential_marks_progress_stalled") {
     .on_error = make_error(&error),
   };
 
-  auto runtime = make_runtime(request, request_ctx);
+  auto runtime = make_runtime(request, request_ctx, &done, &error);
   emel::batch::planner::modes::sequential::action::effect_begin_planning(runtime, planner_ctx);
   emel::batch::planner::modes::sequential::action::effect_reject_planning_progress_stalled(
       runtime, planner_ctx);

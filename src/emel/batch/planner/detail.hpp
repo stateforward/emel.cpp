@@ -1,12 +1,9 @@
 #pragma once
 
-#include <boost/sml.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <type_traits>
 
 #include "emel/batch/planner/events.hpp"
 
@@ -22,7 +19,8 @@ inline bool mask_equal(const seq_mask_t & lhs, const seq_mask_t & rhs) noexcept;
 inline bool mask_is_subset(const seq_mask_t & superset, const seq_mask_t & subset) noexcept;
 inline bool mask_has_multiple_bits(const seq_mask_t & mask) noexcept;
 inline void finalize_token_offsets(plan_scratch & ctx) noexcept;
-inline void fail_plan(const event::plan_runtime & ev, const error code) noexcept;
+template <class runtime_event>
+inline void fail_plan(const runtime_event & ev, const error code) noexcept;
 
 inline int32_t select_i32(const bool choose_true,
                           const int32_t true_value,
@@ -91,20 +89,23 @@ inline void add_error_if(emel::error::type & mask,
   mask = select_error(condition, next, mask);
 }
 
-inline void fail_noop(const event::plan_runtime &, const error) noexcept {
+template <class runtime_event>
+inline void fail_noop(const runtime_event &, const error) noexcept {
 }
 
-inline void fail_apply(const event::plan_runtime & ev, const error code) noexcept {
+template <class runtime_event>
+inline void fail_apply(const runtime_event & ev, const error code) noexcept {
   fail_plan(ev, code);
 }
 
+template <class runtime_event>
 inline void fail_if(const bool condition,
                     bool & failed,
-                    const event::plan_runtime & ev,
+                    const runtime_event & ev,
                     const error code) noexcept {
-  using fail_handler = void (*)(const event::plan_runtime &, error) noexcept;
+  using fail_handler = void (*)(const runtime_event &, error) noexcept;
   const bool trigger = condition && !failed;
-  const std::array<fail_handler, 2> handlers = {&fail_noop, &fail_apply};
+  const std::array<fail_handler, 2> handlers = {&fail_noop<runtime_event>, &fail_apply<runtime_event>};
   handlers[static_cast<size_t>(trigger)](ev, code);
   failed = failed || trigger;
 }
@@ -346,53 +347,16 @@ inline void clear_plan(plan_scratch & ctx) noexcept {
   ctx.step_token_offsets.fill(0);
 }
 
-inline void fail_plan(const event::plan_runtime & ev, const error code) noexcept {
+template <class runtime_event>
+inline void fail_plan(const runtime_event & ev, const error code) noexcept {
   ev.ctx.err = emel::error::set(ev.ctx.err, code);
   clear_plan(ev.ctx);
 }
 
-inline void prepare_plan(const event::plan_runtime & ev) noexcept {
+template <class runtime_event>
+inline void prepare_plan(const runtime_event & ev) noexcept {
   clear_plan(ev.ctx);
   ev.ctx.total_outputs = count_total_outputs(ev.request);
-}
-
-template <class request_event, class done_state, class failed_state, class done_event,
-          class error_event>
-struct mode_outcome_notifier {
-  const request_event & request;
-
-  template <class state>
-  void operator()(boost::sml::aux::string<state>) const noexcept {
-    if constexpr (std::is_same_v<state, done_state>) {
-      request.on_done(done_event{
-        .request = request,
-      });
-    } else if constexpr (std::is_same_v<state, failed_state>) {
-      request.on_error(error_event{
-        .request = request,
-        .err = request.ctx.err,
-      });
-    } else {
-      request.on_error(error_event{
-        .request = request,
-        .err = emel::error::cast(error::internal_error),
-      });
-    }
-  }
-};
-
-template <class machine, class request_event, class done_state, class failed_state,
-          class done_event, class error_event>
-inline bool complete_mode_request(machine & mode_machine, const request_event & request) {
-  const event::plan_runtime runtime{request.request, request.ctx};
-  const bool accepted = mode_machine.process_event(runtime);
-  mode_machine.visit_current_states(
-      mode_outcome_notifier<request_event,
-                            done_state,
-                            failed_state,
-                            done_event,
-                            error_event>{request});
-  return accepted && mode_machine.is(boost::sml::state<done_state>);
 }
 
 }  // namespace emel::batch::planner::detail

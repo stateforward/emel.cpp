@@ -5,7 +5,8 @@
 
 namespace emel::batch::planner::guard {
 
-inline bool guard_has_complete_plan(const event::plan_runtime & ev) noexcept {
+template <class runtime_event>
+inline bool guard_has_complete_plan(const runtime_event & ev) noexcept {
   if (ev.ctx.err != emel::error::cast(error::none)) {
     return false;
   }

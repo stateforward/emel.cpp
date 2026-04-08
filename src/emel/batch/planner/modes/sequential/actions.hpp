@@ -1,5 +1,6 @@
 #pragma once
 
+#include "emel/batch/planner/modes/actions.hpp"
 #include "emel/batch/planner/modes/sequential/context.hpp"
 #include "emel/batch/planner/modes/sequential/detail.hpp"
 #include "emel/batch/planner/modes/sequential/events.hpp"
@@ -7,6 +8,24 @@
 namespace emel::batch::planner::modes::sequential::action {
 
 using context = emel::batch::planner::action::context;
+
+inline constexpr auto effect_emit_plan_done = [](const event::plan_runtime & ev,
+                                                 context &) noexcept {
+  modes::action::emit_plan_done<events::plan_done>(ev);
+};
+
+inline constexpr auto effect_emit_plan_error = [](const event::plan_runtime & ev,
+                                                  context &) noexcept {
+  modes::action::emit_plan_error<events::plan_error>(
+      ev, modes::action::resolve_plan_error(ev));
+};
+
+inline constexpr auto effect_emit_internal_plan_error = [](const auto & ev) noexcept {
+  if constexpr (requires { ev.on_error; }) {
+    modes::action::emit_plan_error<events::plan_error>(
+        ev, emel::error::cast(error::internal_error));
+  }
+};
 
 inline constexpr auto effect_plan_sequential_batches =
     [](const event::plan_runtime & ev, context &) noexcept {
@@ -79,23 +98,27 @@ inline constexpr auto effect_begin_planning = [](const event::plan_runtime & ev,
 };
 
 inline constexpr auto effect_reject_invalid_step_size =
-    [](const event::plan_runtime & ev, context &) noexcept {
+    [](const event::plan_runtime & ev, context & ctx) noexcept {
   detail::fail_plan(ev, error::invalid_step_size);
+  effect_emit_plan_error(ev, ctx);
 };
 
 inline constexpr auto effect_reject_output_steps_full =
-    [](const event::plan_runtime & ev, context &) noexcept {
+    [](const event::plan_runtime & ev, context & ctx) noexcept {
   detail::fail_plan(ev, error::output_steps_full);
+  effect_emit_plan_error(ev, ctx);
 };
 
 inline constexpr auto effect_reject_output_indices_full =
-    [](const event::plan_runtime & ev, context &) noexcept {
+    [](const event::plan_runtime & ev, context & ctx) noexcept {
   detail::fail_plan(ev, error::output_indices_full);
+  effect_emit_plan_error(ev, ctx);
 };
 
 inline constexpr auto effect_reject_planning_progress_stalled =
-    [](const event::plan_runtime & ev, context &) noexcept {
+    [](const event::plan_runtime & ev, context & ctx) noexcept {
   detail::fail_plan(ev, error::planning_progress_stalled);
+  effect_emit_plan_error(ev, ctx);
 };
 
 }  // namespace emel::batch::planner::modes::sequential::action

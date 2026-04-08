@@ -30,13 +30,59 @@ inline emel::callback<void(const emel::batch::planner::events::plan_error &)> ma
       &error_capture::on_error>(capture);
 }
 
-inline emel::batch::planner::event::plan_runtime make_runtime(
-    const emel::batch::planner::event::plan_request & request,
-    emel::batch::planner::event::plan_scratch & request_ctx) {
-  return emel::batch::planner::event::plan_runtime{
-    .request = request,
-    .ctx = request_ctx,
-  };
+struct mode_done_capture {
+  void on_done(const emel::batch::planner::modes::simple::events::plan_done &) noexcept {}
+};
+
+struct mode_error_capture {
+  void on_error(const emel::batch::planner::modes::simple::events::plan_error &) noexcept {}
+};
+
+inline emel::callback<void(const emel::batch::planner::modes::simple::events::plan_done &)>
+make_mode_done(mode_done_capture * capture) {
+  return emel::callback<void(const emel::batch::planner::modes::simple::events::plan_done &)>::from<
+      mode_done_capture,
+      &mode_done_capture::on_done>(capture);
+}
+
+inline emel::callback<void(const emel::batch::planner::modes::simple::events::plan_error &)>
+make_mode_error(mode_error_capture * capture) {
+  return emel::callback<void(const emel::batch::planner::modes::simple::events::plan_error &)>::from<
+      mode_error_capture,
+      &mode_error_capture::on_error>(capture);
+}
+
+struct runtime_bundle {
+  emel::callback<void(const emel::batch::planner::modes::simple::events::plan_done &)> on_done;
+  emel::callback<void(const emel::batch::planner::modes::simple::events::plan_error &)> on_error;
+  emel::batch::planner::modes::simple::event::plan_runtime runtime;
+  mode_done_capture mode_done = {};
+  mode_error_capture mode_error = {};
+
+  runtime_bundle(const emel::batch::planner::event::plan_request & request,
+                 emel::batch::planner::event::plan_scratch & request_ctx,
+                 done_capture *,
+                 error_capture *)
+      : on_done(make_mode_done(&mode_done)),
+        on_error(make_mode_error(&mode_error)),
+        runtime{
+            .request = request,
+            .ctx = request_ctx,
+            .on_done = on_done,
+            .on_error = on_error,
+        } {
+  }
+
+  operator const emel::batch::planner::modes::simple::event::plan_runtime &() const noexcept {
+    return runtime;
+  }
+};
+
+inline runtime_bundle make_runtime(const emel::batch::planner::event::plan_request & request,
+                                   emel::batch::planner::event::plan_scratch & request_ctx,
+                                   done_capture * done,
+                                   error_capture * error) {
+  return runtime_bundle{request, request_ctx, done, error};
 }
 
 }  // namespace
@@ -57,7 +103,7 @@ TEST_CASE("batch_planner_modes_simple_create_plan_success") {
   };
   request_ctx.effective_step_size = 2;
 
-  const auto runtime = make_runtime(request, request_ctx);
+  const auto runtime = make_runtime(request, request_ctx, &done, &error);
   emel::batch::planner::modes::simple::action::effect_begin_planning(runtime, planner_ctx);
   CHECK(emel::batch::planner::modes::simple::guard::guard_simple_plan_capacity_ok(runtime, planner_ctx));
   emel::batch::planner::modes::simple::action::effect_plan_simple_batches(runtime, planner_ctx);
@@ -84,7 +130,7 @@ TEST_CASE("batch_planner_modes_simple_create_plan_fails_on_index_overflow") {
   };
   request_ctx.effective_step_size = static_cast<int32_t>(tokens.size());
 
-  const auto runtime = make_runtime(request, request_ctx);
+  const auto runtime = make_runtime(request, request_ctx, &done, &error);
   emel::batch::planner::modes::simple::action::effect_begin_planning(runtime, planner_ctx);
   CHECK(emel::batch::planner::modes::simple::guard::guard_exceeds_index_capacity(runtime, planner_ctx));
   emel::batch::planner::modes::simple::action::effect_reject_output_indices_full(runtime,
@@ -112,7 +158,7 @@ TEST_CASE("batch_planner_modes_simple_create_plan_fails_on_step_overflow") {
   };
   request_ctx.effective_step_size = 1;
 
-  const auto runtime = make_runtime(request, request_ctx);
+  const auto runtime = make_runtime(request, request_ctx, &done, &error);
   emel::batch::planner::modes::simple::action::effect_begin_planning(runtime, planner_ctx);
   CHECK(emel::batch::planner::modes::simple::guard::guard_exceeds_step_capacity(runtime, planner_ctx));
   emel::batch::planner::modes::simple::action::effect_reject_output_steps_full(runtime,
@@ -138,7 +184,7 @@ TEST_CASE("batch_planner_modes_simple_create_plan_failure_resets_outputs") {
   };
   request_ctx.effective_step_size = 0;
 
-  const auto runtime = make_runtime(request, request_ctx);
+  const auto runtime = make_runtime(request, request_ctx, &done, &error);
   emel::batch::planner::modes::simple::action::effect_begin_planning(runtime, planner_ctx);
   CHECK(emel::batch::planner::modes::simple::guard::guard_has_invalid_step_size(runtime, planner_ctx));
   emel::batch::planner::modes::simple::action::effect_reject_invalid_step_size(runtime,
@@ -163,7 +209,7 @@ TEST_CASE("batch_planner_modes_simple_marks_progress_stalled") {
     .on_error = make_error(&error),
   };
 
-  const auto runtime = make_runtime(request, request_ctx);
+  const auto runtime = make_runtime(request, request_ctx, &done, &error);
   emel::batch::planner::modes::simple::action::effect_begin_planning(runtime, planner_ctx);
   emel::batch::planner::modes::simple::action::effect_reject_planning_progress_stalled(
       runtime, planner_ctx);

@@ -2,22 +2,22 @@ stateDiagram-v2
   direction TB
   [*] --> state_idle
   state_idle --> state_input_validation : plan_runtime [always] / lambda_actions_55_47
-  state_input_validation --> state_step_normalization : completion_plan_runtime_ [lambda_guards_24_44] / none
-  state_input_validation --> state_request_rejected : completion_plan_runtime_ [lambda_guards_29_46] / lambda_actions_97_55
+  state_input_validation --> state_step_normalization : completion_plan_runtime_ [lambda_guards_25_44] / none
+  state_input_validation --> state_request_rejected : completion_plan_runtime_ [lambda_guards_30_46] / lambda_actions_97_55
   state_step_normalization --> state_mode_selection : completion_plan_runtime_ [always] / lambda_actions_67_52
-  state_mode_selection --> state_simple_planning : completion_plan_runtime_ [lambda_guards_34_46] / lambda_actions_121_49
-  state_mode_selection --> state_equal_planning : completion_plan_runtime_ [lambda_guards_39_45] / lambda_actions_129_48
-  state_mode_selection --> state_sequential_planning : completion_plan_runtime_ [lambda_guards_44_50] / lambda_actions_137_53
-  state_mode_selection --> state_request_rejected : completion_plan_runtime_ [lambda_guards_50_47] / lambda_actions_104_52
-  state_simple_planning --> state_result_publish : completion_plan_runtime_ [lambda_guards_56_50] / lambda_actions_80_47
-  state_simple_planning --> state_completed : completion_plan_runtime_ [lambda_guards_77_5] / lambda_actions_111_52
-  state_simple_planning --> state_completed : completion_plan_runtime_ [lambda_guards_82_5] / lambda_actions_117_5
-  state_equal_planning --> state_result_publish : completion_plan_runtime_ [lambda_guards_56_50] / lambda_actions_80_47
-  state_equal_planning --> state_completed : completion_plan_runtime_ [lambda_guards_77_5] / lambda_actions_111_52
-  state_equal_planning --> state_completed : completion_plan_runtime_ [lambda_guards_82_5] / lambda_actions_117_5
-  state_sequential_planning --> state_result_publish : completion_plan_runtime_ [lambda_guards_56_50] / lambda_actions_80_47
-  state_sequential_planning --> state_completed : completion_plan_runtime_ [lambda_guards_77_5] / lambda_actions_111_52
-  state_sequential_planning --> state_completed : completion_plan_runtime_ [lambda_guards_82_5] / lambda_actions_117_5
+  state_mode_selection --> state_simple_planning : completion_plan_runtime_ [lambda_guards_35_46] / lambda_actions_121_49
+  state_mode_selection --> state_equal_planning : completion_plan_runtime_ [lambda_guards_40_45] / lambda_actions_129_48
+  state_mode_selection --> state_sequential_planning : completion_plan_runtime_ [lambda_guards_45_50] / lambda_actions_137_53
+  state_mode_selection --> state_request_rejected : completion_plan_runtime_ [lambda_guards_51_47] / lambda_actions_104_52
+  state_simple_planning --> state_result_publish : completion_plan_runtime_ [lambda_guards_57_50] / lambda_actions_80_47
+  state_simple_planning --> state_completed : completion_plan_runtime_ [lambda_guards_78_5] / lambda_actions_111_52
+  state_simple_planning --> state_completed : completion_plan_runtime_ [lambda_guards_83_5] / lambda_actions_117_5
+  state_equal_planning --> state_result_publish : completion_plan_runtime_ [lambda_guards_57_50] / lambda_actions_80_47
+  state_equal_planning --> state_completed : completion_plan_runtime_ [lambda_guards_78_5] / lambda_actions_111_52
+  state_equal_planning --> state_completed : completion_plan_runtime_ [lambda_guards_83_5] / lambda_actions_117_5
+  state_sequential_planning --> state_result_publish : completion_plan_runtime_ [lambda_guards_57_50] / lambda_actions_80_47
+  state_sequential_planning --> state_completed : completion_plan_runtime_ [lambda_guards_78_5] / lambda_actions_111_52
+  state_sequential_planning --> state_completed : completion_plan_runtime_ [lambda_guards_83_5] / lambda_actions_117_5
   state_result_publish --> state_completed : completion_plan_runtime_ [always] / lambda_actions_83_47
   state_completed --> state_input_validation : plan_runtime [always] / lambda_actions_55_47
   state_request_rejected --> state_input_validation : plan_runtime [always] / lambda_actions_55_47
