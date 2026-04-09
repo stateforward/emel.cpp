@@ -4,7 +4,6 @@
 #include <boost/sml.hpp>
 
 #include "emel/sm.hpp"
-#include "emel/batch/planner/detail.hpp"
 #include "emel/batch/planner/modes/sequential/actions.hpp"
 #include "emel/batch/planner/modes/sequential/events.hpp"
 #include "emel/batch/planner/modes/sequential/guards.hpp"
@@ -55,21 +54,29 @@ struct model {
           / action::effect_reject_planning_progress_stalled
       //------------------------------------------------------------------------------//
       , sml::state<state_planning_failed> <= sml::state<state_planning_done>
-          + sml::unexpected_event<sml::_> / action::effect_reject_unexpected_event
+          + sml::unexpected_event<sml::_>
+          / action::effect_emit_internal_plan_error
       , sml::state<state_planning_failed> <= sml::state<state_planning_failed>
-          + sml::unexpected_event<sml::_> / action::effect_reject_unexpected_event
+          + sml::unexpected_event<sml::_>
+          / action::effect_emit_internal_plan_error
       , sml::state<state_planning_failed> <= sml::state<state_preparing>
-          + sml::unexpected_event<sml::_> / action::effect_reject_unexpected_event
+          + sml::unexpected_event<sml::_>
+          / action::effect_emit_internal_plan_error
       , sml::state<state_planning_failed> <= sml::state<state_planning>
-          + sml::unexpected_event<sml::_> / action::effect_reject_unexpected_event
+          + sml::unexpected_event<sml::_>
+          / action::effect_emit_internal_plan_error
       , sml::state<state_planning_failed> <= sml::state<state_planning_input_decision>
-          + sml::unexpected_event<sml::_> / action::effect_reject_unexpected_event
+          + sml::unexpected_event<sml::_>
+          / action::effect_emit_internal_plan_error
       , sml::state<state_planning_failed> <= sml::state<state_planning_capacity_decision>
-          + sml::unexpected_event<sml::_> / action::effect_reject_unexpected_event
+          + sml::unexpected_event<sml::_>
+          / action::effect_emit_internal_plan_error
       , sml::state<state_planning_failed> <= sml::state<state_planning_execute>
-          + sml::unexpected_event<sml::_> / action::effect_reject_unexpected_event
+          + sml::unexpected_event<sml::_>
+          / action::effect_emit_internal_plan_error
       , sml::state<state_planning_failed> <= sml::state<state_planning_result_decision>
-          + sml::unexpected_event<sml::_> / action::effect_reject_unexpected_event
+          + sml::unexpected_event<sml::_>
+          / action::effect_emit_internal_plan_error
     );
     // clang-format on
   }
@@ -79,10 +86,11 @@ struct sm : emel::sm<model, context> {
   using base_type = emel::sm<model, context>;
   using model_type = model;
   using base_type::is;
-  using base_type::process_event;
+  using base_type::visit_current_states;
 
   bool process_event(const event::plan_request & ev) {
-    return static_cast<base_type &>(*this).process_event(ev);
+    const bool accepted = base_type::process_event(ev);
+    return accepted && this->is(boost::sml::state<state_planning_done>);
   }
 };
 

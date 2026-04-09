@@ -23,11 +23,20 @@ ALWAYS implement bulk numeric iteration in allocation-free action/detail kernels
 within a single transition per phase.
 NEVER copy event payload into context just to bridge internal phases.
 ALWAYS keep guards pure predicates of `(event, context)` with no side effects.
-ALWAYS keep actions bounded, non-blocking, and allocation-free during dispatch.
-NEVER put runtime branching statements (`if`, `else if`, `switch`, `?:`) in
-actions or in functions called from actions.
-ALWAYS model all runtime control flow as explicit guards or explicit choice
+ALWAYS keep actions bounded and non-blocking during dispatch.
+ALWAYS keep hot-path actions allocation-free.
+ALWAYS keep any allowed one-time construction or initialization heap
+allocation before any `process_event(...)` dispatch.
+NEVER perform dynamic allocation during dispatch, including in guards,
+actions, entry/exit handlers, or anonymous/completion progress.
+ALWAYS model runtime behavior choice as explicit guards or explicit choice
 states/transitions.
+NEVER hide runtime behavior selection in `actions`, state machine member
+functions, or functions called from them.
+NEVER put runtime branching statements (`if`, `else if`, `switch`, `?:`) in
+actions, state machine member functions, or functions called from them.
+NEVER put validation-path branching in actions or in functions called from
+actions; model validation outcomes with guards and explicit transitions.
 NEVER emulate runtime branching with loop constructs in actions, detail helpers,
 state machine member methods, or functions called from them.
 NEVER use single-pass loop patterns such as
@@ -38,12 +47,13 @@ NEVER use runtime-indexed handler/candidate arrays (including function-pointer
 tables) as a substitute for explicit guards/states/transitions.
 ALWAYS use loops in actions/detail only for data-plane iteration with monotonic
 progress and bounded work.
-ONLY compile-time conditionals (`if constexpr`, `#if`) are allowed inside
-actions, state machine member methods, or functions called from actions.
+Compile-time conditionals (`if constexpr`, `#if`) are allowed inside actions,
+state machine member methods, or functions called from actions.
 NEVER perform I/O waits, mutex waits, or sleeps inside guards/actions.
 ALWAYS inject time via event payloads; NEVER read wall-clock time in guards or
 actions.
-ALWAYS keep publicly exposed events immutable and small; prefer trivially copyable payloads.
+ALWAYS keep publicly exposed events immutable and small; prefer trivially
+copyable payloads when copies are cheap and not on a hot path.
 INTERNAL-only events that are not publicly exposed MAY use mutable
 pointers/references for synchronous same-RTC handoff.
 NEVER expose mutable internal-event payload via public API types.
@@ -101,6 +111,55 @@ ALWAYS structure machine docs and code namespaces using the pattern
 ALWAYS colocate machine definition, data, guards, actions, and events within the
 same component directory.
 NEVER place orchestration logic in data-only files.
+ALWAYS put runtime behavior choice in `sm.hpp` transitions using guards from
+`guards.hpp`.
+NEVER put runtime behavior choice in `actions.hpp`, `detail.hpp`, or `detail.cpp`.
+ALWAYS treat `guards.hpp` as the home for runtime predicates that decide which
+transition or behavior path is taken.
+ALWAYS treat `actions.hpp` as the home for bounded execution of an already-chosen
+behavior path.
+ALWAYS use `state_`, `event_`, `guard_`, `effect_`, `enter_`, and `exit_`
+prefixes for newly introduced state-machine symbols in new or modified code.
+ALWAYS treat "symbols" here as transition-table aliases and helper identifiers
+such as local state/event aliases, guard/effect functors or functions, and
+entry/exit action names.
+NEVER rename existing repository state or event type names solely to satisfy
+this convention; apply it forward to new symbols you introduce or when
+touching code already being refactored.
+ALWAYS treat `detail.hpp` and `detail.cpp` as the home for shared hidden private
+non-control-flow helpers only.
+ONLY put a helper in `detail.hpp` or `detail.cpp` when it is used more than once.
+If logic is used by only one owning function or one actor, inline it into that
+owner. A helper used only once belongs in the owning `guards.hpp` or
+`actions.hpp`, not in `detail.hpp` or `detail.cpp`.
+Helpers called from `effect_*`, `enter_*`, `exit_*`, or detail code MUST NOT
+choose behavior, route fallback, mode selection, success/error outcome, or
+which path runs next.
+Those decisions belong only in `guard_*` predicates and `sm.hpp` transitions.
+NEVER put runtime support probing, route fallback, block-kind selection, or
+other behavior-selection control flow in `detail.hpp` or `detail.cpp`; model it
+in `guards.hpp` and `sm.hpp`.
+ALWAYS keep `detail.hpp` and `detail.cpp` helpers non-routing and
+non-orchestrating.
+ALWAYS keep detail helpers called from actions or state machine member methods
+limited to compile-time conditionals and data-plane iteration.
+Compile-time conditionals and data-plane iteration are allowed in `detail.hpp`
+and `detail.cpp`.
+ALWAYS treat "what happens next" as orchestration behavior for `detail.hpp` and
+`detail.cpp` review.
+Helper output includes return values, out-parameters, reference mutation,
+pointer mutation, callback selection, and written context fields.
+NEVER use any `detail.hpp` or `detail.cpp` helper output to decide what happens
+next.
+If a helper affects which guard passes, which action runs, which callback
+fires, which event/state/error path is taken, or whether a dispatch is
+accepted, rejected, done, or failed, that helper MUST live in `guards.hpp`,
+`actions.hpp`, or `sm.hpp`, not in `detail.hpp` or `detail.cpp`.
+Shared non-control-flow helpers in `detail.hpp` or `detail.cpp` MUST use
+truthful non-routing verb prefixes such as `compute_`, `validate_`, `bind_`,
+`scan_`, `append_`, or `reset_`. Use `compute_` only for data-plane or numeric
+work, never as a generic prefix for all helpers. NEVER use routing or
+selection verbs for non-guard helpers.
 ALWAYS give each machine its own `process_event` wrapper and context ownership.
 SHARE behavior via `actions.hpp`/`detail.hpp` helpers or `sm_any`, not inheritance.
 ALWAYS keep child-machine data owned by the parent-machine data when composing
@@ -120,9 +179,11 @@ ALWAYS define machine outcome events in the `events` namespace with explicit
 INTERNAL-only `_done`/`_error` events MAY carry mutable payload references when
 they are not publicly exposed outside the component boundary.
 ALWAYS use references for required event fields.
-NEVER model required event fields as pointers.
+NEVER model ordinary required event fields as pointers.
 ONLY use event payload pointers for optional/nullable fields or C ABI boundary
 types that cannot use references.
+ONLY allow optional `_done`/`_error` request back-pointers used only for
+same-RTC correlation to be nullable pointers under the optional-field rule.
 NEVER use `cmd_*`-prefixed event names.
 ALWAYS model failures via explicit error states and `_error` events.
 NEVER add synthetic fault-injection knobs to production events or actions.
@@ -169,7 +230,8 @@ NEVER use dynamic dispatch in inference hot paths unless explicitly justified.
 ALWAYS prefer compile-time polymorphism in hot paths.
 NEVER allocate in inference or sampling hot paths.
 NEVER use heap allocation by default.
-ALWAYS allow one-time heap allocation only at construction or initialization.
+ALWAYS allow one-time heap allocation during construction, initialization, or
+other non-hot-path setup work when necessary.
 ALWAYS reuse unavoidable heap allocations.
 ALWAYS document rationale for unavoidable heap allocation in code.
 ALWAYS keep telemetry non-blocking and optional.
@@ -250,6 +312,9 @@ or cache objects with the EMEL side in benchmark or parity harnesses.
 ALWAYS keep benchmark and parity harnesses split into two clearly separated
 lanes: an EMEL-owned lane using only EMEL-owned code for the EMEL result, and a
 reference lane using llama.cpp/ggml only for the comparison result.
+NEVER let parity harnesses or benchmarks reach into actor `actions.hpp`,
+`detail.hpp`, or `detail.cpp` helpers directly; drive them through the owning
+state machines via `process_event(...)` and public event interfaces only.
 NEVER use `llama_` or `ggml_` prefixes in identifiers, symbols, files, or APIs
 outside `tools/bench` or `tools/paritychecker`.
 ALWAYS use `emel_` or `EMEL_` prefixes for project-owned identifiers, symbols,

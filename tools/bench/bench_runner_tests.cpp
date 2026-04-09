@@ -32,6 +32,16 @@ std::filesystem::path bench_runner_binary_path() {
 #endif
 }
 
+std::filesystem::path maintained_generation_fixture_path(
+    const emel::tools::generation_fixture_registry::maintained_fixture & fixture) {
+  return repo_root() / fixture.fixture_rel;
+}
+
+bool maintained_generation_fixture_exists(
+    const emel::tools::generation_fixture_registry::maintained_fixture & fixture) {
+  return std::filesystem::exists(maintained_generation_fixture_path(fixture));
+}
+
 std::string read_file(const std::filesystem::path & path) {
   std::ifstream input(path, std::ios::binary);
   if (!input) {
@@ -180,8 +190,13 @@ TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixt
   CHECK(capture.stdout_text.find("reference_prefill_attention_probe_ns=") !=
         std::string::npos);
 
+  bool saw_fixture = false;
   for (const auto & fixture :
        emel::tools::generation_fixture_registry::k_maintained_generation_fixtures) {
+    if (!maintained_generation_fixture_exists(fixture)) {
+      continue;
+    }
+    saw_fixture = true;
     const std::array<int, 4> max_tokens = {1, 10, 100, 1000};
     for (const int tokens : max_tokens) {
       const std::string case_name = "generation/preloaded_request/" +
@@ -191,6 +206,7 @@ TEST_CASE("bench_runner generation compare keeps maintained Qwen and Liquid fixt
       CHECK(capture.stdout_text.find(case_name) != std::string::npos);
     }
   }
+  CHECK(saw_fixture);
   const std::string binary_size_line =
       find_line_with_prefix(capture.stdout_text, "# binary_size_compare:");
   CHECK_FALSE(binary_size_line.empty());

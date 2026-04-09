@@ -89,20 +89,23 @@ inline void add_error_if(emel::error::type & mask,
   mask = select_error(condition, next, mask);
 }
 
-inline void fail_noop(const event::plan_runtime &, const error) noexcept {
+template <class runtime_event>
+inline void fail_noop(const runtime_event &, const error) noexcept {
 }
 
-inline void fail_apply(const event::plan_runtime & ev, const error code) noexcept {
+template <class runtime_event>
+inline void fail_apply(const runtime_event & ev, const error code) noexcept {
   fail_plan(ev, code);
 }
 
+template <class runtime_event>
 inline void fail_if(const bool condition,
                     bool & failed,
-                    const event::plan_runtime & ev,
+                    const runtime_event & ev,
                     const error code) noexcept {
-  using fail_handler = void (*)(const event::plan_runtime &, error) noexcept;
+  using fail_handler = void (*)(const runtime_event &, error) noexcept;
   const bool trigger = condition && !failed;
-  const std::array<fail_handler, 2> handlers = {&fail_noop, &fail_apply};
+  const std::array<fail_handler, 2> handlers = {&fail_noop<runtime_event>, &fail_apply<runtime_event>};
   handlers[static_cast<size_t>(trigger)](ev, code);
   failed = failed || trigger;
 }
@@ -354,21 +357,6 @@ template <class runtime_event>
 inline void prepare_plan(const runtime_event & ev) noexcept {
   clear_plan(ev.ctx);
   ev.ctx.total_outputs = count_total_outputs(ev.request);
-}
-
-template <class done_event, class request_event>
-inline void notify_mode_done(const request_event & request) noexcept {
-  request.on_done(done_event{
-    .request = request,
-  });
-}
-
-template <class error_event, class request_event>
-inline void notify_mode_error(const request_event & request, const emel::error::type err) noexcept {
-  request.on_error(error_event{
-    .request = request,
-    .err = err,
-  });
 }
 
 }  // namespace emel::batch::planner::detail
