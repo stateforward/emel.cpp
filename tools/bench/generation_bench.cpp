@@ -228,6 +228,26 @@ std::string resolve_generation_model_path(const std::string_view fixture_rel) {
   return (bench_root_path() / fixture_rel).string();
 }
 
+std::filesystem::path generation_fixture_path(
+    const emel::tools::generation_fixture_registry::maintained_fixture & fixture) {
+  return bench_root_path() / fixture.fixture_rel;
+}
+
+bool generation_fixture_exists(
+    const emel::tools::generation_fixture_registry::maintained_fixture & fixture) {
+  return std::filesystem::exists(generation_fixture_path(fixture));
+}
+
+void report_missing_generation_fixture(
+    const emel::tools::generation_fixture_registry::maintained_fixture & fixture) {
+  std::fprintf(stderr,
+               "warning: skipping missing generation fixture %.*s (%.*s)\n",
+               static_cast<int>(fixture.name.size()),
+               fixture.name.data(),
+               static_cast<int>(fixture.fixture_rel.size()),
+               fixture.fixture_rel.data());
+}
+
 extern std::string g_generation_formatter_contract;
 extern std::string g_generation_architecture_contract;
 extern std::string_view g_generation_fixture_rel;
@@ -2234,7 +2254,7 @@ bool inspect_emel_prefill_plan(const emel::model::data & model_data,
       emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
           bench_plan_capture,
           capture_bench_plan_error>(&capture);
-  emel::batch::planner::event::request request{
+  emel::batch::planner::event::plan_request request{
     .token_ids = prompt_tokens.data(),
     .n_tokens = static_cast<int32_t>(prompt_tokens.size()),
     .n_steps = resolved_step_size,
@@ -3978,11 +3998,17 @@ void prepare_compare_generation_fixture(const generation_fixture_spec & spec,
 
 const std::vector<prepared_emel_generation_fixture> & maintained_emel_generation_fixtures() {
   static const std::vector<prepared_emel_generation_fixture> fixtures = [] {
-    std::vector<prepared_emel_generation_fixture> prepared_fixtures(k_emel_generation_fixtures.size());
+    std::vector<prepared_emel_generation_fixture> prepared_fixtures = {};
+    prepared_fixtures.reserve(k_emel_generation_fixtures.size());
     for (size_t fixture_index = 0u; fixture_index < k_emel_generation_fixtures.size();
          ++fixture_index) {
-      prepare_emel_generation_fixture(
-          k_emel_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
+      const generation_fixture_spec & spec = k_emel_generation_fixtures[fixture_index];
+      if (!generation_fixture_exists(*spec.fixture)) {
+        report_missing_generation_fixture(*spec.fixture);
+        continue;
+      }
+      prepared_fixtures.emplace_back();
+      prepare_emel_generation_fixture(spec, prepared_fixtures.back());
     }
     return prepared_fixtures;
   }();
@@ -3991,12 +4017,17 @@ const std::vector<prepared_emel_generation_fixture> & maintained_emel_generation
 
 const std::vector<prepared_reference_generation_fixture> & maintained_reference_generation_fixtures() {
   static const std::vector<prepared_reference_generation_fixture> fixtures = [] {
-    std::vector<prepared_reference_generation_fixture> prepared_fixtures(
-        k_compare_generation_fixtures.size());
+    std::vector<prepared_reference_generation_fixture> prepared_fixtures = {};
+    prepared_fixtures.reserve(k_compare_generation_fixtures.size());
     for (size_t fixture_index = 0u; fixture_index < k_compare_generation_fixtures.size();
          ++fixture_index) {
-      prepare_reference_generation_fixture(
-          k_compare_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
+      const generation_fixture_spec & spec = k_compare_generation_fixtures[fixture_index];
+      if (!generation_fixture_exists(*spec.fixture)) {
+        report_missing_generation_fixture(*spec.fixture);
+        continue;
+      }
+      prepared_fixtures.emplace_back();
+      prepare_reference_generation_fixture(spec, prepared_fixtures.back());
     }
     return prepared_fixtures;
   }();
@@ -4005,11 +4036,17 @@ const std::vector<prepared_reference_generation_fixture> & maintained_reference_
 
 const std::vector<prepared_generation_fixture> & maintained_compare_generation_fixtures() {
   static const std::vector<prepared_generation_fixture> fixtures = [] {
-    std::vector<prepared_generation_fixture> prepared_fixtures(k_compare_generation_fixtures.size());
+    std::vector<prepared_generation_fixture> prepared_fixtures = {};
+    prepared_fixtures.reserve(k_compare_generation_fixtures.size());
     for (size_t fixture_index = 0u; fixture_index < k_compare_generation_fixtures.size();
          ++fixture_index) {
-      prepare_compare_generation_fixture(
-          k_compare_generation_fixtures[fixture_index], prepared_fixtures[fixture_index]);
+      const generation_fixture_spec & spec = k_compare_generation_fixtures[fixture_index];
+      if (!generation_fixture_exists(*spec.fixture)) {
+        report_missing_generation_fixture(*spec.fixture);
+        continue;
+      }
+      prepared_fixtures.emplace_back();
+      prepare_compare_generation_fixture(spec, prepared_fixtures.back());
     }
     return prepared_fixtures;
   }();

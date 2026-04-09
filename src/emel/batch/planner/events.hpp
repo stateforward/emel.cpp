@@ -21,7 +21,7 @@ enum class plan_mode : int32_t {
   seq = sequential,
 };
 
-struct request {
+struct plan_request {
   const int32_t * token_ids = nullptr;
   int32_t n_tokens = 0;
   int32_t n_steps = 0;
@@ -41,7 +41,7 @@ struct request {
   const emel::callback<void(const events::plan_error &)> & on_error;
 };
 
-struct request_ctx {
+struct plan_scratch {
   emel::error::type err = emel::error::cast(error::none);
   int32_t effective_step_size = 0;
   std::array<int32_t, action::MAX_PLAN_STEPS> step_sizes = {};
@@ -52,9 +52,9 @@ struct request_ctx {
   int32_t token_indices_count = 0;
 };
 
-struct request_runtime {
-  const request & request;
-  request_ctx & ctx;
+struct plan_runtime {
+  const plan_request & request;
+  plan_scratch & ctx;
 };
 
 }  // namespace emel::batch::planner::event
@@ -62,7 +62,7 @@ struct request_runtime {
 namespace emel::batch::planner::events {
 
 struct plan_done {
-  const event::request * request = nullptr;
+  const event::plan_request * request = nullptr;
   const int32_t * step_sizes = nullptr;
   int32_t step_count = 0;
   int32_t total_outputs = 0;
@@ -74,7 +74,7 @@ struct plan_done {
 
 struct plan_error {
   emel::error::type err = emel::error::type{};
-  const event::request * request = nullptr;
+  const event::plan_request * request = nullptr;
 };
 
 }  // namespace emel::batch::planner::events

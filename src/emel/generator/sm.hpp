@@ -963,26 +963,26 @@ struct sm : public emel::sm<model, action::context> {
   uint32_t generation_native_quantized_stage_count() const noexcept {
     return detail::quantized_contract_stage_count(
         this->context_.compute.backend,
-        emel::model::builder::detail::quantized_contract_kind::native_quantized);
+        emel::model::llama::detail::quantized_contract_kind::native_quantized);
   }
 
   uint32_t generation_approved_dense_f32_stage_count() const noexcept {
     return detail::quantized_contract_stage_count(
         this->context_.compute.backend,
-        emel::model::builder::detail::quantized_contract_kind::
+        emel::model::llama::detail::quantized_contract_kind::
             approved_dense_f32_by_contract);
   }
 
   uint32_t generation_disallowed_fallback_stage_count() const noexcept {
     return detail::quantized_contract_stage_count(
         this->context_.compute.backend,
-        emel::model::builder::detail::quantized_contract_kind::disallowed_fallback);
+        emel::model::llama::detail::quantized_contract_kind::disallowed_fallback);
   }
 
   uint32_t generation_explicit_no_claim_stage_count() const noexcept {
     return detail::quantized_contract_stage_count(
         this->context_.compute.backend,
-        emel::model::builder::detail::quantized_contract_kind::explicit_no_claim);
+        emel::model::llama::detail::quantized_contract_kind::explicit_no_claim);
   }
 
   const emel::graph::event::reserve_output & graph_reservation() const noexcept {

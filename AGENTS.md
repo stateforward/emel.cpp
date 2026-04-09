@@ -145,6 +145,16 @@ ALWAYS keep detail helpers called from actions or state machine member methods
 limited to compile-time conditionals and data-plane iteration.
 Compile-time conditionals and data-plane iteration are allowed in `detail.hpp`
 and `detail.cpp`.
+ALWAYS treat "what happens next" as orchestration behavior for `detail.hpp` and
+`detail.cpp` review.
+Helper output includes return values, out-parameters, reference mutation,
+pointer mutation, callback selection, and written context fields.
+NEVER use any `detail.hpp` or `detail.cpp` helper output to decide what happens
+next.
+If a helper affects which guard passes, which action runs, which callback
+fires, which event/state/error path is taken, or whether a dispatch is
+accepted, rejected, done, or failed, that helper MUST live in `guards.hpp`,
+`actions.hpp`, or `sm.hpp`, not in `detail.hpp` or `detail.cpp`.
 Shared non-control-flow helpers in `detail.hpp` or `detail.cpp` MUST use
 truthful non-routing verb prefixes such as `compute_`, `validate_`, `bind_`,
 `scan_`, `append_`, or `reset_`. Use `compute_` only for data-plane or numeric

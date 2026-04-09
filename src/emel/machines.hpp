@@ -18,7 +18,6 @@
 
 namespace emel {
 
-using BatchSplitter = emel::batch::planner::sm;
 using ComputeExecutor = emel::graph::processor::sm;
 using Conditioner = emel::text::conditioner::sm;
 using Detokenizer = emel::text::detokenizer::sm;

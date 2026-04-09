@@ -72,7 +72,6 @@ add_library(emel STATIC
   src/emel/model/detail.cpp
   src/emel/model/data.cpp
   src/emel/text/unicode_data.cpp
-  src/emel/model/builder/detail.cpp
   src/emel/model/llama/detail.cpp
   src/emel/model/qwen3/detail.cpp
   src/emel/model/lfm2/detail.cpp
@@ -96,7 +95,6 @@ if(EMEL_ENABLE_TESTS)
 
   set(EMEL_TEST_SOURCES
     tests/doctest_main.cpp
-    tests/model/builder/lifecycle_tests.cpp
     tests/model/loader/lifecycle_tests.cpp
     tests/model/weight_loader/lifecycle_tests.cpp
     tests/gbnf/lexer_tests.cpp
@@ -126,12 +124,13 @@ if(EMEL_ENABLE_TESTS)
     # Keep them out of gate builds during the hard cutover.
     tests/batch/planner/planner_tests.cpp
     tests/batch/planner/planner_actions_tests.cpp
-    tests/batch/planner/modes/detail_tests.cpp
+    tests/batch/planner/planner_detail_tests.cpp
     tests/batch/planner/modes/simple_actions_tests.cpp
     tests/batch/planner/modes/equal_actions_tests.cpp
     tests/batch/planner/modes/sequential_actions_tests.cpp
     tests/batch/planner/planner_additional_tests.cpp
     tests/batch/planner/planner_action_branch_tests.cpp
+    tests/batch/planner/planner_surface_tests.cpp
     tests/batch/planner/planner_sm_transition_tests.cpp
     tests/batch/planner/planner_sm_flow_tests.cpp
     tests/token/batcher/lifecycle_tests.cpp

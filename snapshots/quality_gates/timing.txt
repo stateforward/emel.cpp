@@ -1,8 +1,8 @@
 # quality_gates timing (seconds)
-build_with_zig 1
-test_with_coverage 372
-paritychecker 89
-fuzz_smoke 49
-bench_snapshot 557
-generate_docs 180
-total 1248
+build_with_zig 0
+test_with_coverage 412
+paritychecker 77
+fuzz_smoke 45
+bench_snapshot 535
+generate_docs 170
+total 1239

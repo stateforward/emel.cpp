@@ -119,13 +119,13 @@ struct request_graph_reserve {
             emel::generator::event::initialize_ctx,
             emel::generator::action::capture_graph_reserve_error>(&ev.ctx);
     emel::graph::event::reserve reserve_ev{
-      .model_topology = &generator.compute.backend.build.topology,
+      .model_topology = &generator.compute.backend.topology,
       .output_out = &generator.state.graph_reservation,
       .lifecycle = lifecycle,
-      .max_node_count = generator.compute.backend.build.topology.node_count,
-      .max_tensor_count = generator.compute.backend.build.topology.tensor_count,
-      .bytes_per_tensor = generator.compute.backend.build.topology.bytes_per_tensor,
-      .workspace_capacity_bytes = generator.compute.backend.build.topology.workspace_capacity_bytes,
+      .max_node_count = generator.compute.backend.topology.node_count,
+      .max_tensor_count = generator.compute.backend.topology.tensor_count,
+      .bytes_per_tensor = generator.compute.backend.topology.bytes_per_tensor,
+      .workspace_capacity_bytes = generator.compute.backend.topology.workspace_capacity_bytes,
       .dispatch_done = on_done,
       .dispatch_error = on_error,
     };

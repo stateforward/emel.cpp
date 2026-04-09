@@ -1,40 +1,38 @@
 stateDiagram-v2
   direction TB
-  [*] --> preparing
-  preparing --> planning : completion_request_runtime_ [always] / lambda_actions_287_39
-  planning --> planning_mode_decision : completion_request_runtime_ [always] / none
-  planning_mode_decision --> planning_fast_input_decision : completion_request_runtime_ [lambda_guards_13_5] / none
-  planning_mode_decision --> planning_general_input_decision : completion_request_runtime_ [lambda_guards_19_5] / none
-  planning_general_input_decision --> planning_general_capacity_decision : completion_request_runtime_ [lambda_guards_129_5] / none
-  planning_general_input_decision --> planning_failed : completion_request_runtime_ [lambda_guards_31_5] / lambda_actions_262_48
-  planning_general_capacity_decision --> planning_failed : completion_request_runtime_ [lambda_guards_70_5] / lambda_actions_277_48
-  planning_general_capacity_decision --> planning_failed : completion_request_runtime_ [lambda_guards_82_5] / lambda_actions_282_50
-  planning_general_capacity_decision --> planning_general_execute : completion_request_runtime_ [lambda_guards_135_5] / none
-  planning_general_execute --> planning_general_result_decision : completion_request_runtime_ [always] / lambda_actions_257_45
-  planning_fast_input_decision --> planning_failed : completion_request_runtime_ [lambda_guards_31_5] / lambda_actions_262_48
-  planning_fast_input_decision --> planning_failed : completion_request_runtime_ [lambda_guards_43_5] / lambda_actions_267_50
-  planning_fast_input_decision --> planning_failed : completion_request_runtime_ [lambda_guards_115_5] / lambda_actions_267_50
-  planning_fast_input_decision --> planning_fast_capacity_decision : completion_request_runtime_ [lambda_guards_121_5] / none
-  planning_fast_capacity_decision --> planning_failed : completion_request_runtime_ [lambda_guards_70_5] / lambda_actions_277_48
-  planning_fast_capacity_decision --> planning_failed : completion_request_runtime_ [lambda_guards_82_5] / lambda_actions_282_50
-  planning_fast_capacity_decision --> planning_fast_execute : completion_request_runtime_ [lambda_guards_135_5] / none
-  planning_fast_execute --> planning_fast_result_decision : completion_request_runtime_ [always] / lambda_actions_252_55
-  planning_general_result_decision --> planning_done : completion_request_runtime_ [lambda_guards_140_44] / none
-  planning_general_result_decision --> planning_failed : completion_request_runtime_ [lambda_guards_145_41] / lambda_actions_272_56
-  planning_fast_result_decision --> planning_done : completion_request_runtime_ [lambda_guards_140_44] / none
-  planning_fast_result_decision --> planning_failed : completion_request_runtime_ [lambda_guards_145_41] / lambda_actions_272_56
-  planning_done --> terminate : [always] / none
-  planning_failed --> terminate : [always] / none
-  preparing --> planning_failed : _ [always] / none
-  planning --> planning_failed : _ [always] / none
-  planning_mode_decision --> planning_failed : _ [always] / none
-  planning_fast_input_decision --> planning_failed : _ [always] / none
-  planning_fast_capacity_decision --> planning_failed : _ [always] / none
-  planning_fast_execute --> planning_failed : _ [always] / none
-  planning_general_input_decision --> planning_failed : _ [always] / none
-  planning_general_capacity_decision --> planning_failed : _ [always] / none
-  planning_general_execute --> planning_failed : _ [always] / none
-  planning_general_result_decision --> planning_failed : _ [always] / none
-  planning_fast_result_decision --> planning_failed : _ [always] / none
-  planning_done --> planning_failed : _ [always] / none
-  planning_failed --> planning_failed : _ [always] / none
+  [*] --> state_preparing
+  state_preparing --> state_planning : plan_request [always] / lambda_actions_301_47
+  state_planning --> state_planning_mode_decision : completion_plan_request_ [always] / none
+  state_planning_mode_decision --> state_planning_fast_input_decision : completion_plan_request_ [lambda_guards_14_5] / none
+  state_planning_mode_decision --> state_planning_general_input_decision : completion_plan_request_ [lambda_guards_20_5] / none
+  state_planning_general_input_decision --> state_planning_general_capacity_decision : completion_plan_request_ [lambda_guards_129_5] / none
+  state_planning_general_input_decision --> state_planning_failed : completion_plan_request_ [lambda_guards_32_5] / lambda_actions_272_5
+  state_planning_general_capacity_decision --> state_planning_failed : completion_plan_request_ [lambda_guards_71_5] / lambda_actions_290_5
+  state_planning_general_capacity_decision --> state_planning_failed : completion_plan_request_ [lambda_guards_83_5] / lambda_actions_296_5
+  state_planning_general_capacity_decision --> state_planning_general_execute : completion_plan_request_ [lambda_guards_135_5] / none
+  state_planning_general_execute --> state_planning_general_result_decision : completion_plan_request_ [always] / lambda_actions_35_5
+  state_planning_fast_input_decision --> state_planning_failed : completion_plan_request_ [lambda_guards_32_5] / lambda_actions_272_5
+  state_planning_fast_input_decision --> state_planning_failed : completion_plan_request_ [lambda_guards_44_5] / lambda_actions_278_5
+  state_planning_fast_input_decision --> state_planning_failed : completion_plan_request_ [lambda_guards_115_5] / lambda_actions_278_5
+  state_planning_fast_input_decision --> state_planning_fast_capacity_decision : completion_plan_request_ [lambda_guards_121_5] / none
+  state_planning_fast_capacity_decision --> state_planning_failed : completion_plan_request_ [lambda_guards_71_5] / lambda_actions_290_5
+  state_planning_fast_capacity_decision --> state_planning_failed : completion_plan_request_ [lambda_guards_83_5] / lambda_actions_296_5
+  state_planning_fast_capacity_decision --> state_planning_fast_execute : completion_plan_request_ [lambda_guards_135_5] / none
+  state_planning_fast_execute --> state_planning_fast_result_decision : completion_plan_request_ [always] / lambda_actions_148_5
+  state_planning_general_result_decision --> state_planning_done : completion_plan_request_ [lambda_guards_140_50] / lambda_actions_16_47
+  state_planning_general_result_decision --> state_planning_failed : completion_plan_request_ [lambda_guards_145_47] / lambda_actions_284_5
+  state_planning_fast_result_decision --> state_planning_done : completion_plan_request_ [lambda_guards_140_50] / lambda_actions_16_47
+  state_planning_fast_result_decision --> state_planning_failed : completion_plan_request_ [lambda_guards_145_47] / lambda_actions_284_5
+  state_preparing --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning_mode_decision --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning_fast_input_decision --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning_fast_capacity_decision --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning_fast_execute --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning_general_input_decision --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning_general_capacity_decision --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning_general_execute --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning_general_result_decision --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning_fast_result_decision --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning_done --> state_planning_failed : _ [always] / lambda_actions_27_57
+  state_planning_failed --> state_planning_failed : _ [always] / lambda_actions_27_57
