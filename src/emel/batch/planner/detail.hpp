@@ -7,19 +7,20 @@
 
 #include "emel/batch/planner/events.hpp"
 
-namespace emel::batch::planner::modes::detail {
+namespace emel::batch::planner::detail {
 
 using seq_mask_t = std::array<uint64_t, action::SEQ_WORDS>;
-using request_ctx = event::request_ctx;
+using plan_scratch = event::plan_scratch;
 
-inline seq_mask_t normalized_seq_mask(const event::request & ev, const int32_t idx) noexcept;
+inline seq_mask_t normalized_seq_mask(const event::plan_request & ev, const int32_t idx) noexcept;
 inline bool mask_any_set(const seq_mask_t & mask) noexcept;
 inline bool mask_overlaps(const seq_mask_t & lhs, const seq_mask_t & rhs) noexcept;
 inline bool mask_equal(const seq_mask_t & lhs, const seq_mask_t & rhs) noexcept;
 inline bool mask_is_subset(const seq_mask_t & superset, const seq_mask_t & subset) noexcept;
 inline bool mask_has_multiple_bits(const seq_mask_t & mask) noexcept;
-inline void finalize_token_offsets(request_ctx & ctx) noexcept;
-inline void fail_plan(const event::request_runtime & ev, const error code) noexcept;
+inline void finalize_token_offsets(plan_scratch & ctx) noexcept;
+template <class runtime_event>
+inline void fail_plan(const runtime_event & ev, const error code) noexcept;
 
 inline int32_t select_i32(const bool choose_true,
                           const int32_t true_value,
@@ -88,33 +89,33 @@ inline void add_error_if(emel::error::type & mask,
   mask = select_error(condition, next, mask);
 }
 
-inline void fail_noop(const event::request_runtime &, const error) noexcept {
+inline void fail_noop(const event::plan_runtime &, const error) noexcept {
 }
 
-inline void fail_apply(const event::request_runtime & ev, const error code) noexcept {
+inline void fail_apply(const event::plan_runtime & ev, const error code) noexcept {
   fail_plan(ev, code);
 }
 
 inline void fail_if(const bool condition,
                     bool & failed,
-                    const event::request_runtime & ev,
+                    const event::plan_runtime & ev,
                     const error code) noexcept {
-  using fail_handler = void (*)(const event::request_runtime &, error) noexcept;
+  using fail_handler = void (*)(const event::plan_runtime &, error) noexcept;
   const bool trigger = condition && !failed;
   const std::array<fail_handler, 2> handlers = {&fail_noop, &fail_apply};
   handlers[static_cast<size_t>(trigger)](ev, code);
   failed = failed || trigger;
 }
 
-inline void finalize_offsets_noop(request_ctx &) noexcept {
+inline void finalize_offsets_noop(plan_scratch &) noexcept {
 }
 
-inline void finalize_offsets_apply(request_ctx & ctx) noexcept {
+inline void finalize_offsets_apply(plan_scratch & ctx) noexcept {
   finalize_token_offsets(ctx);
 }
 
-inline void finalize_offsets_if_success(request_ctx & ctx, const bool failed) noexcept {
-  using finalize_handler = void (*)(request_ctx &) noexcept;
+inline void finalize_offsets_if_success(plan_scratch & ctx, const bool failed) noexcept {
+  using finalize_handler = void (*)(plan_scratch &) noexcept;
   const std::array<finalize_handler, 2> handlers = {
       &finalize_offsets_noop,
       &finalize_offsets_apply,
@@ -122,7 +123,7 @@ inline void finalize_offsets_if_success(request_ctx & ctx, const bool failed) no
   handlers[static_cast<size_t>(!failed)](ctx);
 }
 
-inline emel::error::type collect_input_errors(const event::request & ev) noexcept {
+inline emel::error::type collect_input_errors(const event::plan_request & ev) noexcept {
   emel::error::type mask = emel::error::type{};
 
   add_error_if(mask, ev.token_ids == nullptr, error::invalid_token_data);
@@ -179,11 +180,11 @@ inline emel::error::type collect_input_errors(const event::request & ev) noexcep
   return mask;
 }
 
-inline bool has_input_errors(const event::request & ev) noexcept {
+inline bool has_input_errors(const event::plan_request & ev) noexcept {
   return collect_input_errors(ev) != emel::error::type{};
 }
 
-inline seq_mask_t normalized_seq_mask(const event::request & ev, const int32_t idx) noexcept {
+inline seq_mask_t normalized_seq_mask(const event::plan_request & ev, const int32_t idx) noexcept {
   seq_mask_t mask = {};
 
   const bool valid_words = ev.seq_mask_words > 0 && ev.seq_mask_words <= action::SEQ_WORDS;
@@ -272,7 +273,7 @@ inline bool mask_has_multiple_bits(const seq_mask_t & mask) noexcept {
   return multiple;
 }
 
-inline int32_t count_total_outputs(const event::request & ev) noexcept {
+inline int32_t count_total_outputs(const event::plan_request & ev) noexcept {
   const bool has_output_mask = ev.output_mask != nullptr;
   const int8_t output_mask_sink = 0;
   const std::array<const int8_t *, 2> output_mask_ptrs = {&output_mask_sink, ev.output_mask};
@@ -290,7 +291,7 @@ inline int32_t count_total_outputs(const event::request & ev) noexcept {
   return select_i32(ev.output_all, ev.n_tokens, non_all_total);
 }
 
-inline bool append_token_index(request_ctx & ctx, const int32_t idx) noexcept {
+inline bool append_token_index(plan_scratch & ctx, const int32_t idx) noexcept {
   const bool has_space = ctx.token_indices_count < action::MAX_PLAN_STEPS;
   const int32_t write_index = select_i32(has_space, ctx.token_indices_count, 0);
   ctx.step_token_indices[static_cast<size_t>(write_index)] =
@@ -301,7 +302,7 @@ inline bool append_token_index(request_ctx & ctx, const int32_t idx) noexcept {
   return has_space;
 }
 
-inline bool begin_step(request_ctx & ctx) noexcept {
+inline bool begin_step(plan_scratch & ctx) noexcept {
   const bool has_space = ctx.step_count < action::MAX_PLAN_STEPS;
   const int32_t write_index = select_i32(has_space, ctx.step_count, 0);
   ctx.step_token_offsets[static_cast<size_t>(write_index)] =
@@ -311,7 +312,7 @@ inline bool begin_step(request_ctx & ctx) noexcept {
   return has_space;
 }
 
-inline void finalize_token_offsets(request_ctx & ctx) noexcept {
+inline void finalize_token_offsets(plan_scratch & ctx) noexcept {
   const bool valid_index = ctx.step_count >= 0 && ctx.step_count <= action::MAX_PLAN_STEPS;
   const int32_t write_index = select_i32(valid_index, ctx.step_count, 0);
   ctx.step_token_offsets[static_cast<size_t>(write_index)] =
@@ -320,7 +321,7 @@ inline void finalize_token_offsets(request_ctx & ctx) noexcept {
                  ctx.step_token_offsets[static_cast<size_t>(write_index)]);
 }
 
-inline bool push_step_size(request_ctx & ctx, const int32_t size) noexcept {
+inline bool push_step_size(plan_scratch & ctx, const int32_t size) noexcept {
   const bool valid_size = size > 0;
   const bool has_space = ctx.step_count < action::MAX_PLAN_STEPS;
   const bool can_push = valid_size && has_space;
@@ -334,7 +335,7 @@ inline bool push_step_size(request_ctx & ctx, const int32_t size) noexcept {
   return can_push;
 }
 
-inline void clear_plan(request_ctx & ctx) noexcept {
+inline void clear_plan(plan_scratch & ctx) noexcept {
   ctx.step_sizes.fill(0);
   ctx.step_count = 0;
   ctx.total_outputs = 0;
@@ -343,14 +344,31 @@ inline void clear_plan(request_ctx & ctx) noexcept {
   ctx.step_token_offsets.fill(0);
 }
 
-inline void fail_plan(const event::request_runtime & ev, const error code) noexcept {
+template <class runtime_event>
+inline void fail_plan(const runtime_event & ev, const error code) noexcept {
   ev.ctx.err = emel::error::set(ev.ctx.err, code);
   clear_plan(ev.ctx);
 }
 
-inline void prepare_plan(const event::request_runtime & ev) noexcept {
+template <class runtime_event>
+inline void prepare_plan(const runtime_event & ev) noexcept {
   clear_plan(ev.ctx);
   ev.ctx.total_outputs = count_total_outputs(ev.request);
 }
 
-}  // namespace emel::batch::planner::modes::detail
+template <class done_event, class request_event>
+inline void notify_mode_done(const request_event & request) noexcept {
+  request.on_done(done_event{
+    .request = request,
+  });
+}
+
+template <class error_event, class request_event>
+inline void notify_mode_error(const request_event & request, const emel::error::type err) noexcept {
+  request.on_error(error_event{
+    .request = request,
+    .err = err,
+  });
+}
+
+}  // namespace emel::batch::planner::detail

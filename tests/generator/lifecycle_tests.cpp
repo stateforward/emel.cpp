@@ -20,15 +20,12 @@
 #include "emel/kernel/events.hpp"
 #include "emel/model/data.hpp"
 #include "emel/model/detail.hpp"
+#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/graph/tensor/errors.hpp"
 #include "emel/graph/tensor/events.hpp"
 #include "emel/text/formatter/format.hpp"
 #include "emel/text/tokenizer/sm.hpp"
-
-namespace emel::model::llama {
-namespace detail = ::emel::model::builder::detail;
-}
 
 namespace {
 
@@ -782,9 +779,9 @@ emel::model::data::tensor_record * find_tensor(prepared_model & prepared,
   return nullptr;
 }
 
-const emel::model::builder::detail::quantized_stage_audit & find_stage_audit(
-    const emel::model::builder::detail::quantized_path_audit & audit,
-    const emel::model::builder::detail::quantized_stage_family family) {
+const emel::model::llama::detail::quantized_stage_audit & find_stage_audit(
+    const emel::model::llama::detail::quantized_path_audit & audit,
+    const emel::model::llama::detail::quantized_stage_family family) {
   for (const auto & stage : audit.stages) {
     if (stage.family == family) {
       return stage;

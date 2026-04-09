@@ -5,7 +5,6 @@
 #include <string_view>
 
 #include "emel/error/error.hpp"
-#include "emel/model/builder/detail.hpp"
 #include "emel/model/loader/detail.hpp"
 
 namespace emel::model {
@@ -15,8 +14,6 @@ struct architecture {
   bool (*load_hparams)(const emel::model::detail::hparam_loader &,
                        emel::model::data &) noexcept = nullptr;
   emel::error::type (*validate_data)(const emel::model::data &) noexcept = nullptr;
-  emel::error::type (*build_view)(const emel::model::data &,
-                                  emel::model::builder::detail::view &) noexcept = nullptr;
 };
 
 using architectures = std::span<const architecture>;

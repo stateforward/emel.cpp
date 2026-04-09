@@ -144,7 +144,6 @@ environments, while Zig remains the default for day-to-day builds.
 - [`docs/architecture/memory_hybrid.md`](docs/architecture/memory_hybrid.md)
 - [`docs/architecture/memory_kv.md`](docs/architecture/memory_kv.md)
 - [`docs/architecture/memory_recurrent.md`](docs/architecture/memory_recurrent.md)
-- [`docs/architecture/model_builder.md`](docs/architecture/model_builder.md)
 - [`docs/architecture/model_loader.md`](docs/architecture/model_loader.md)
 - [`docs/architecture/model_tensor.md`](docs/architecture/model_tensor.md)
 - [`docs/architecture/model_weight_loader.md`](docs/architecture/model_weight_loader.md)

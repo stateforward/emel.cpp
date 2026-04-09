@@ -59,7 +59,7 @@ TEST_CASE("batch_planner_rejects_invalid_token_counts") {
   emel::batch::planner::sm machine{};
   plan_capture capture{};
 
-  CHECK_FALSE(machine.process_event(emel::batch::planner::event::request{
+  CHECK_FALSE(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = nullptr,
       .n_tokens = 0,
       .n_steps = 2,
@@ -80,7 +80,7 @@ TEST_CASE("batch_planner_equal_mode_with_seq_masks") {
   std::array<int32_t, 4> primary_ids = {{0, 0, 1, 1}};
   plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 2,
@@ -106,7 +106,7 @@ TEST_CASE("batch_planner_seq_mode_with_seq_masks") {
   std::array<int32_t, 4> primary_ids = {{0, 0, 1, 1}};
   plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 2,
@@ -132,7 +132,7 @@ TEST_CASE("batch_planner_equal_mode_rejects_coupled_sequences_when_sequential") 
   std::array<int32_t, 2> primary_ids = {{0, 1}};
   plan_capture capture{};
 
-  CHECK_FALSE(machine.process_event(emel::batch::planner::event::request{
+  CHECK_FALSE(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 2,
@@ -157,7 +157,7 @@ TEST_CASE("batch_planner_supports_multiword_sequence_masks") {
   std::array<uint64_t, 4> masks = {{0U, 1U, 0U, 2U}};
   plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 2,
@@ -179,7 +179,7 @@ TEST_CASE("batch_planner_rejects_unknown_mode") {
   std::array<int32_t, 2> tokens = {{1, 2}};
   plan_capture capture{};
 
-  CHECK_FALSE(machine.process_event(emel::batch::planner::event::request{
+  CHECK_FALSE(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 2,

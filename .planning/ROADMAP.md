@@ -26,16 +26,21 @@ benchmark or optimization claims.
 - Integer phases continue from prior milestone history.
 - v1.10 starts at Phase 40 because the previous highest completed phase was 39.
 
-- [ ] **Phase 40: Planner Surface Cutover** - Canonicalize the top-level planner path, naming, and
+- [x] **Phase 40: Planner Surface Cutover** - Canonicalize the top-level planner path, naming, and (completed 2026-04-05)
       planner-owned orchestration surface.
-- [ ] **Phase 41: Planner Mode Surface Cutover** - Canonicalize the `simple`, `sequential`, and
+- [x] **Phase 41: Planner Mode Surface Cutover** - Canonicalize the `simple`, `sequential`, and (completed 2026-04-05)
       `equal` child machine paths and allowed file bases.
-- [ ] **Phase 42: Planner Event Boundaries** - Hard-cut planner and mode handoff to explicit typed
+- [x] **Phase 42: Planner Event Boundaries** - Hard-cut planner and mode handoff to explicit typed (completed 2026-04-05)
       machine dispatch and contract-aligned event naming.
-- [ ] **Phase 43: Planner Rule Compliance** - Bring the planner family into destination-first
+- [x] **Phase 43: Planner Rule Compliance** - Bring the planner family into destination-first (completed 2026-04-05)
       transition and persistent-state compliance.
-- [ ] **Phase 44: Behavior Preservation Proof** - Prove the cutover preserves maintained batching
-      behavior on the current x86 validation host.
+- [x] **Phase 44: Behavior Preservation Proof** - Prove the cutover preserves maintained batching (completed 2026-04-05)
+      behavior on the current arm64 validation host.
+- [x] **Phase 45: Planner Audit Closeout** - Close the first audit-closeout tranche by (completed 2026-04-05)
+      backfilling Phase 40 proof artifacts and removing the planner-wrapper rule warning.
+- [x] **Phase 46: Planner Transient Unexpected-Event Closure** - Close the remaining non-blocking (completed 2026-04-05)
+      transient-state unexpected-event audit finding without widening scope beyond the planner
+      family.
 
 ## Phase Details
 
@@ -94,25 +99,80 @@ persistent state ownership.
 **Plans**: TBD
 
 ### Phase 44: Behavior Preservation Proof
-**Goal**: The hard cutover lands with behavior-preservation proof on the current x86 development
+**Goal**: The hard cutover lands with behavior-preservation proof on the current arm64 development
 host.
 **Depends on**: Phase 43
 **Requirements**: PROOF-01, PROOF-02
 **Success Criteria** (what must be TRUE):
   1. Focused planner-family tests fail if maintained batching behavior changes during the structural
      cutover.
-  2. Required validation passes on x86 for this milestone without ARM publication, ARM optimization
+  2. Required validation passes on the current arm64 host for this milestone without ARM
+     publication, ARM optimization
      claims, or widened benchmark scope.
   3. Milestone evidence shows planner behavior preserved after the naming and rule cutover rather
      than relying on file moves alone.
+**Plans**: TBD
+
+### Phase 45: Planner Audit Closeout
+**Goal**: Close the v1.10 milestone audit gaps without widening scope beyond the planner family.
+**Depends on**: Phase 44
+**Requirements**: PLAN-01, PLAN-02, PLAN-03, RULE-01
+**Gap Closure**: Closes the Phase 40 verification-orphan gap and the planner-wrapper
+                 runtime-branch finding from audit closeout. Leaves FINDING-01 for dedicated
+                 follow-on closure.
+**Success Criteria** (what must be TRUE):
+  1. Phase 40 has formal verification evidence and summary metadata that explicitly prove
+     PLAN-01, PLAN-02, and PLAN-03 rather than leaving those requirements orphaned.
+  2. Planner mode `sm::process_event` wrappers no longer use runtime branching in member methods
+     to choose done versus error outcomes.
+  3. The milestone can be re-audited with only any explicitly deferred snapshot-consent work
+     remaining.
+**Plans**: TBD
+
+### Phase 46: Planner Transient Unexpected-Event Closure
+**Goal**: Close the remaining transient-state unexpected-event audit note in the planner family
+without widening milestone scope.
+**Depends on**: Phase 45
+**Requirements**: None (audit finding only)
+**Gap Closure**: Closes FINDING-01 from `.planning/v1.10-MILESTONE-AUDIT.md`.
+**Success Criteria** (what must be TRUE):
+  1. `state_simple_mode`, `state_equal_mode`, and `state_sequential_mode` have explicit
+     contract-aligned handling for unexpected external events, or a planner-owned implementation
+     makes the approved transient-state exemption explicit and uniform.
+  2. The closure stays inside `src/emel/batch/planner` and focused planner-family proof surfaces,
+     with no widened snapshot, generator, or broad repository cleanup scope.
+  3. A follow-up milestone audit no longer reports FINDING-01 under `gaps.integration`.
 **Plans**: TBD
 
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 40. Planner Surface Cutover | 0/1 | Blocked | - |
-| 41. Planner Mode Surface Cutover | 0/TBD | Not started | - |
-| 42. Planner Event Boundaries | 0/TBD | Not started | - |
-| 43. Planner Rule Compliance | 0/TBD | Not started | - |
-| 44. Behavior Preservation Proof | 0/TBD | Not started | - |
+| 40. Planner Surface Cutover | 1/1 | Complete    | 2026-04-05 |
+| 41. Planner Mode Surface Cutover | 1/1 | Complete    | 2026-04-05 |
+| 42. Planner Event Boundaries | 1/1 | Complete    | 2026-04-05 |
+| 43. Planner Rule Compliance | 1/1 | Complete    | 2026-04-05 |
+| 44. Behavior Preservation Proof | 1/1 | Complete    | 2026-04-05 |
+| 45. Planner Audit Closeout | 1/1 | Complete    | 2026-04-05 |
+| 46. Planner Transient Unexpected-Event Closure | 1/1 | Complete    | 2026-04-05 |
+| 46.1 Rename planner-family wrapper names to remove ambiguity and wrapper indirection | 1/1 | Complete    | 2026-04-05 |
+
+### Phase 46.1: Rename planner-family wrapper names to remove ambiguity and wrapper indirection (INSERTED)
+
+**Goal:** Replace the planner family's remaining wrapper-era names with direct planner-owned event,
+state, and callable names, including the child-mode action surfaces.
+**Requirements**: None (user-inserted rename closeout)
+**Depends on:** Phase 46
+**Success Criteria** (what must be TRUE):
+  1. The top-level planner trigger/runtime surface uses direct names like `plan_request`,
+     `plan_scratch`, and `plan_runtime`, and maintained direct callers build on those names.
+  2. The planner graph and callable surface use descriptive planner-owned names instead of
+     wrapper-era `effect_*`, `guard_*`, ambiguous decision-state naming, and mode-action
+     trampolines.
+  3. Planner-family surface proof fails if the old wrapper-era names reappear in the planner
+     family, including the mode action headers.
+**Plans:** 1 plan
+
+Plans:
+- [x] 46.1-01 - Rename the planner-family surface in place, remove child-mode action trampolines,
+      and lock it with planner-family regression proof.

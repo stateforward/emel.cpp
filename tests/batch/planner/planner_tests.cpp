@@ -56,7 +56,7 @@ inline emel::callback<void(const emel::batch::planner::events::plan_error &)> ma
 
 TEST_CASE("batch_planner_starts_initialized") {
   emel::batch::planner::sm machine{};
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::initialized>));
+  CHECK(machine.is(boost::sml::state<emel::batch::planner::state_idle>));
 }
 
 TEST_CASE("batch_planner_splits_tokens_into_steps") {
@@ -64,7 +64,7 @@ TEST_CASE("batch_planner_splits_tokens_into_steps") {
   std::array<int32_t, 5> tokens = {{1, 2, 3, 4, 5}};
   plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 2,
@@ -88,7 +88,7 @@ TEST_CASE("batch_planner_equal_mode_fills_single_sequence_steps") {
   std::array<int32_t, 10> tokens = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}};
   plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 4,
@@ -111,7 +111,7 @@ TEST_CASE("batch_planner_seq_mode_uses_sequential_chunking") {
   std::array<int32_t, 7> tokens = {{1, 2, 3, 4, 5, 6, 7}};
   plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 3,
@@ -133,7 +133,7 @@ TEST_CASE("batch_planner_sequential_mode_aliases_seq") {
   std::array<int32_t, 7> tokens = {{1, 2, 3, 4, 5, 6, 7}};
   plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 3,
@@ -157,7 +157,7 @@ TEST_CASE("batch_planner_equal_mode_supports_sequence_masks") {
   std::array<int32_t, 6> seq_primary_ids = {{0, 1, 0, 1, 0, 1}};
   plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 4,
@@ -185,7 +185,7 @@ TEST_CASE("batch_planner_seq_mode_supports_sequence_masks") {
   std::array<uint64_t, 4> seq_masks = {{3U, 1U, 2U, 1U}};
   plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 3,
@@ -210,7 +210,7 @@ TEST_CASE("batch_planner_counts_outputs_with_output_mask") {
   std::array<int8_t, 4> outputs = {{1, 0, 1, 0}};
   plan_capture capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 2,
@@ -229,7 +229,7 @@ TEST_CASE("batch_planner_reports_invalid_arguments") {
   emel::batch::planner::sm machine{};
   plan_capture capture{};
 
-  CHECK_FALSE(machine.process_event(emel::batch::planner::event::request{
+  CHECK_FALSE(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = nullptr,
       .n_tokens = 4,
       .n_steps = 2,
@@ -244,7 +244,7 @@ TEST_CASE("batch_planner_reports_invalid_arguments") {
 
   std::array<int32_t, 3> tokens = {{1, 2, 3}};
   plan_capture mode_capture{};
-  CHECK_FALSE(machine.process_event(emel::batch::planner::event::request{
+  CHECK_FALSE(machine.process_event(emel::batch::planner::event::plan_request{
       .token_ids = tokens.data(),
       .n_tokens = static_cast<int32_t>(tokens.size()),
       .n_steps = 1,

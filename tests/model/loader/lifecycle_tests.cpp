@@ -12,14 +12,10 @@
 #include "emel/error/error.hpp"
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
-#include "emel/model/builder/detail.hpp"
 #include "emel/model/detail.hpp"
+#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/sm.hpp"
-
-namespace emel::model::llama {
-namespace detail = ::emel::model::builder::detail;
-}
 
 namespace {
 
@@ -714,6 +710,22 @@ TEST_CASE("model_llama_detail_builds_execution_view_for_canonical_tensor_set") {
   CHECK(block.index == 1);
   CHECK(block.attention_norm.name == "blk.1.attn_norm.weight");
   CHECK(block.feed_forward_up.name == "blk.1.ffn_up.weight");
+}
+
+TEST_CASE("model_llama_detail_builds_execution_view_without_contiguous_weights_blob") {
+  auto model = std::make_unique<emel::model::data>();
+  build_canonical_model(*model, 2);
+  model->weights_data = nullptr;
+  model->weights_size = 0u;
+
+  emel::model::llama::detail::execution_view view = {};
+  const auto err = emel::model::llama::detail::build_execution_view(*model, view);
+
+  CHECK(err == emel::error::cast(emel::model::loader::error::none));
+  CHECK(view.model == model.get());
+  CHECK(view.block_count == 2);
+  CHECK(view.token_embedding.tensor != nullptr);
+  CHECK(view.output.tensor != nullptr);
 }
 
 TEST_CASE("model_data_tensor_name_view_rejects_out_of_bounds_storage_range") {

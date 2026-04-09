@@ -218,7 +218,7 @@ struct request_planning_with_step_size {
         emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
             event::generate_ctx,
             capture_plan_error>(&ev.ctx);
-    emel::batch::planner::event::request request{
+    emel::batch::planner::event::plan_request request{
       .token_ids = ctx.buffers.prompt_tokens.data(),
       .n_tokens = ev.ctx.prompt_token_count,
       .n_steps = step_size,
@@ -297,8 +297,8 @@ inline void request_phase_compute(const event::generate_run & ev, context & ctx)
   emel::graph::event::compute compute_ev{
     .node_count_hint = ctx.state.graph_reservation.node_count,
     .tensor_count_hint = ctx.state.graph_reservation.tensor_count,
-    .bytes_per_tensor = ctx.compute.backend.build.topology.bytes_per_tensor,
-    .workspace_capacity_bytes = ctx.compute.backend.build.topology.workspace_capacity_bytes,
+    .bytes_per_tensor = ctx.compute.backend.topology.bytes_per_tensor,
+    .workspace_capacity_bytes = ctx.compute.backend.topology.workspace_capacity_bytes,
     .memory_sm = &ctx.memory,
     .memory_view = &ctx.state.memory_snapshot,
     .compute_ctx = &ev.ctx.io,
@@ -320,7 +320,7 @@ inline void request_phase_compute(const event::generate_run & ev, context & ctx)
     for (int32_t idx = 0; idx < ev.ctx.prompt_token_count; ++idx) {
       ctx.buffers.positions[static_cast<size_t>(idx)] = idx;
     }
-    compute_ev.step_plan = &ctx.compute.backend.build.prefill_plan;
+    compute_ev.step_plan = &ctx.compute.backend.prefill_plan;
     compute_ev.output_out = &ev.ctx.graph_output;
     compute_ev.lifecycle = emel::generator::detail::phase_lifecycle(
         ctx.compute.backend,
@@ -330,7 +330,7 @@ inline void request_phase_compute(const event::generate_run & ev, context & ctx)
         ctx.limits.prompt_capacity,
         ctx.buffers.logits.get(),
         ctx.buffers.vocab_size,
-        ctx.compute.backend.build.prefill_plan.kind);
+        ctx.compute.backend.prefill_plan.kind);
     ev.ctx.io.token_ids = ctx.buffers.prompt_tokens.data();
     ev.ctx.io.token_count = ev.ctx.prompt_token_count;
     compute_ev.step_index = 0;
@@ -342,7 +342,7 @@ inline void request_phase_compute(const event::generate_run & ev, context & ctx)
   } else {
     ctx.buffers.prompt_tokens[0] = ev.ctx.selected_token;
     ctx.buffers.positions[0] = ev.ctx.kv_tokens;
-    compute_ev.step_plan = &ctx.compute.backend.build.decode_plan;
+    compute_ev.step_plan = &ctx.compute.backend.decode_plan;
     compute_ev.output_out = &ev.ctx.graph_output;
     compute_ev.lifecycle = emel::generator::detail::phase_lifecycle(
         ctx.compute.backend,
@@ -352,7 +352,7 @@ inline void request_phase_compute(const event::generate_run & ev, context & ctx)
         ctx.limits.prompt_capacity,
         ctx.buffers.logits.get(),
         ctx.buffers.vocab_size,
-        ctx.compute.backend.build.decode_plan.kind);
+        ctx.compute.backend.decode_plan.kind);
     ev.ctx.io.token_ids = ctx.buffers.prompt_tokens.data();
     ev.ctx.io.token_count = 1;
     compute_ev.step_index = 0;
@@ -386,8 +386,8 @@ inline void request_phase_compute_preselected_argmax(const event::generate_run &
   emel::graph::event::compute compute_ev{
     .node_count_hint = ctx.state.graph_reservation.node_count,
     .tensor_count_hint = ctx.state.graph_reservation.tensor_count,
-    .bytes_per_tensor = ctx.compute.backend.build.topology.bytes_per_tensor,
-    .workspace_capacity_bytes = ctx.compute.backend.build.topology.workspace_capacity_bytes,
+    .bytes_per_tensor = ctx.compute.backend.topology.bytes_per_tensor,
+    .workspace_capacity_bytes = ctx.compute.backend.topology.workspace_capacity_bytes,
     .memory_sm = &ctx.memory,
     .memory_view = &ctx.state.memory_snapshot,
     .compute_ctx = &ev.ctx.io,
@@ -409,7 +409,7 @@ inline void request_phase_compute_preselected_argmax(const event::generate_run &
     for (int32_t idx = 0; idx < ev.ctx.prompt_token_count; ++idx) {
       ctx.buffers.positions[static_cast<size_t>(idx)] = idx;
     }
-    compute_ev.step_plan = &ctx.compute.backend.build.prefill_plan;
+    compute_ev.step_plan = &ctx.compute.backend.prefill_plan;
     compute_ev.output_out = &ev.ctx.graph_output;
     compute_ev.lifecycle = emel::generator::detail::phase_lifecycle(
         ctx.compute.backend,
@@ -419,7 +419,7 @@ inline void request_phase_compute_preselected_argmax(const event::generate_run &
         ctx.limits.prompt_capacity,
         ctx.buffers.logits.get(),
         ctx.buffers.vocab_size,
-        ctx.compute.backend.build.prefill_plan.kind);
+        ctx.compute.backend.prefill_plan.kind);
     ev.ctx.io.token_ids = ctx.buffers.prompt_tokens.data();
     ev.ctx.io.token_count = ev.ctx.prompt_token_count;
     compute_ev.step_index = 0;
@@ -431,7 +431,7 @@ inline void request_phase_compute_preselected_argmax(const event::generate_run &
   } else {
     ctx.buffers.prompt_tokens[0] = ev.ctx.selected_token;
     ctx.buffers.positions[0] = ev.ctx.kv_tokens;
-    compute_ev.step_plan = &ctx.compute.backend.build.decode_plan;
+    compute_ev.step_plan = &ctx.compute.backend.decode_plan;
     compute_ev.output_out = &ev.ctx.graph_output;
     compute_ev.lifecycle = emel::generator::detail::phase_lifecycle(
         ctx.compute.backend,
@@ -441,7 +441,7 @@ inline void request_phase_compute_preselected_argmax(const event::generate_run &
         ctx.limits.prompt_capacity,
         ctx.buffers.logits.get(),
         ctx.buffers.vocab_size,
-        ctx.compute.backend.build.decode_plan.kind);
+        ctx.compute.backend.decode_plan.kind);
     ev.ctx.io.token_ids = ctx.buffers.prompt_tokens.data();
     ev.ctx.io.token_count = 1;
     compute_ev.step_index = 0;

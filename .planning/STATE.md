@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Planner Family AGENTS Hard Cutover
-status: blocked
-stopped_at: "Phase 40 execution changed the planner surface, but full verification is blocked by missing model/builder sources still referenced throughout the repo and in CMake"
-last_updated: "2026-04-04T19:18:00Z"
-last_activity: 2026-04-04
+status: in_progress
+stopped_at: Phase 46.1 corrected and complete; v1.10 ready for completion with benchmark-warning tech debt
+last_updated: "2026-04-06T03:49:41Z"
+last_activity: 2026-04-05
 progress:
-  total_phases: 5
-  completed_phases: 0
-  total_plans: 1
-  completed_plans: 0
-  percent: 0
+  total_phases: 8
+  completed_phases: 8
+  total_plans: 8
+  completed_plans: 8
+  percent: 100
 ---
 
 # Project State
@@ -22,18 +22,25 @@ See: .planning/PROJECT.md (updated 2026-04-04)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Resolve the Phase 40 verification blocker, then finish validating the planner
-surface cutover.
+**Current focus:** Milestone closeout — v1.10 is implementation-complete and ready for completion
 
 ## Current Position
 
-Phase: 40 of 44 (Planner Surface Cutover)
-Plan: 0 of 1 in current phase
-Status: Blocked on verification
-Last activity: 2026-04-04 - Applied the Phase 40 planner alias cutover and added a focused planner
-surface test, then hit a repo-level verification blocker.
+Phase: 46.1
+Plan: 01
+Status: Complete; milestone ready for completion
+Last activity: 2026-04-05
+Phase 46 closed FINDING-01 by adding explicit top-level planner `unexpected_event` handling for
+the three transient mode execution states and locking the fix in with a focused planner surface
+regression test. Follow-on cleanup also removed the duplicate `BatchPlanner` alias from
+`src/emel/machines.hpp` and refreshed the lint snapshot baseline with explicit user consent. Phase
+46.1 then renamed the planner's remaining wrapper-era surface in place: public/internal events now
+read as `plan_request`, `plan_scratch`, and `plan_runtime`; top-level states were renamed to
+describe graph intent; top-level actions and mode actions now use canonical `effect_*` names;
+top-level predicates now use canonical `guard_*` names; and the planner surface tests now fail if
+the old wrapper-era names or temporary bare verb names reappear.
 
-Progress: [----------] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -46,10 +53,9 @@ Progress: [----------] 0%
 
 **Current milestone shape:**
 
-- Phases planned: 5 (40-44)
+- Phases planned: 8 (40-46.1)
 - Requirements mapped: 11/11
-- Next action: `Restore the verification toolchain/build graph, rerun quality gates, then decide
-  whether Phase 40 can be marked complete`
+- Next action: `/gsd-complete-milestone`
 
 ## Accumulated Context
 
@@ -61,9 +67,16 @@ Recent decisions affecting current work:
 - v1.10 is scoped only to `src/emel/batch/planner` and `src/emel/batch/planner/modes/`.
 - Generator child machines, broad repository cleanup, and ARM benchmark publication stay out of
   scope for this milestone.
+
 - Structural cutover is not accepted without focused proof that maintained batching behavior still
-  holds on the current x86 host.
+  holds on the current validation host.
+
 - Phase numbering continues from prior milestone history, so v1.10 starts at Phase 40.
+
+### Roadmap Evolution
+
+- Phase 46.1 inserted after Phase 46: Rename planner-family wrapper names to remove ambiguity and
+  wrapper indirection (URGENT)
 
 ### Pending Todos
 
@@ -76,18 +89,22 @@ Recent decisions affecting current work:
 
 - Planner-family cutover must preserve batching behavior while changing naming, file placement, and
   rule compliance.
-- Validation for this milestone must stay truthful to the current x86 environment and avoid ARM
-  publication claims.
+
+- Validation for this milestone must stay truthful to the current arm64 environment and avoid ARM
+  benchmark publication claims.
+
 - Scope creep into generator families or repo-wide cleanup would invalidate the milestone boundary.
-- `scripts/quality_gates.sh` now reaches CMake configure, but the build graph is broken because
-  missing model-builder sources are still referenced by the repo.
-- The concrete missing paths surfaced by the gate are
-  `src/emel/model/builder/detail.cpp` and `tests/model/builder/lifecycle_tests.cpp`, while many
-  live includes still reference the absent `src/emel/model/builder/` subtree.
+- Milestone proof now reflects the actual current arm64 validation host.
+- The milestone audit is refreshed; the closed FINDING-01, lint snapshot drift, and duplicate
+  planner alias are no longer open items.
+- Phase 46.1 is complete and closes the user-inserted rename gap by replacing the remaining
+  wrapper-era planner-family surface names in place, including the child-mode action trampolines,
+  instead of layering more aliases on top.
+- Non-blocking benchmark snapshot warnings remain listed tech debt, but phase execution is now
+  complete and milestone lifecycle can resume.
 
 ## Session Continuity
 
 Last session: 2026-04-04T18:24:13Z
-Stopped at: Phase 40 code changes applied, but verification is blocked by repo-wide missing
-model-builder sources outside the planner cutover diff
+Stopped at: Phase 46.1 corrected and complete; v1.10 ready for completion with benchmark-warning tech debt
 Resume file: None

@@ -158,7 +158,7 @@ bool collect_emel_plan(emel::batch::planner::event::plan_mode mode,
       emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
           &planner_error>();
 
-  emel::batch::planner::event::request request = {
+  emel::batch::planner::event::plan_request request = {
     .token_ids = inputs.tokens.data(),
     .n_tokens = k_plan_token_count,
     .n_steps = k_plan_ubatch,
@@ -354,7 +354,7 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
         emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
             &planner_error>();
 
-    emel::batch::planner::event::request request = {
+    emel::batch::planner::event::plan_request request = {
       .token_ids = inputs.tokens.data(),
       .n_tokens = k_plan_token_count,
       .n_steps = k_plan_ubatch,
@@ -386,7 +386,7 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
         emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
             &planner_error>();
 
-    emel::batch::planner::event::request request = {
+    emel::batch::planner::event::plan_request request = {
       .token_ids = inputs.tokens.data(),
       .n_tokens = k_plan_token_count,
       .n_steps = k_plan_ubatch,
@@ -418,7 +418,7 @@ void append_emel_batch_planner_cases(std::vector<result> & results, const config
         emel::callback<void(const emel::batch::planner::events::plan_error &)>::from<
             &planner_error>();
 
-    emel::batch::planner::event::request request = {
+    emel::batch::planner::event::plan_request request = {
       .token_ids = inputs.tokens.data(),
       .n_tokens = k_plan_token_count,
       .n_steps = k_plan_ubatch,

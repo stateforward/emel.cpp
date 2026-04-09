@@ -60,7 +60,7 @@ TEST_CASE("batch_planner_sm_recover_after_error") {
   emel::batch::planner::sm machine{};
   plan_capture error_capture{};
 
-  CHECK_FALSE(machine.process_event(emel::batch::planner::event::request{
+  CHECK_FALSE(machine.process_event(emel::batch::planner::event::plan_request{
     .token_ids = nullptr,
     .n_tokens = 0,
     .n_steps = 1,
@@ -72,12 +72,12 @@ TEST_CASE("batch_planner_sm_recover_after_error") {
   CHECK(error_capture.err == emel::error::set(
       emel::error::cast(emel::batch::planner::error::invalid_request),
       emel::batch::planner::error::invalid_token_data));
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::invalid_request>));
+  CHECK(machine.is(boost::sml::state<emel::batch::planner::state_request_rejected>));
 
   std::array<int32_t, 3> tokens = {{1, 2, 3}};
   plan_capture ok_capture{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_steps = 2,
@@ -87,7 +87,7 @@ TEST_CASE("batch_planner_sm_recover_after_error") {
   }));
 
   CHECK(ok_capture.done_called);
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::done>));
+  CHECK(machine.is(boost::sml::state<emel::batch::planner::state_completed>));
 }
 
 TEST_CASE("batch_planner_sm_accepts_consecutive_splits") {
@@ -96,7 +96,7 @@ TEST_CASE("batch_planner_sm_accepts_consecutive_splits") {
   plan_capture first{};
   plan_capture second{};
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_steps = 2,
@@ -106,7 +106,7 @@ TEST_CASE("batch_planner_sm_accepts_consecutive_splits") {
   }));
   CHECK(first.done_called);
 
-  CHECK(machine.process_event(emel::batch::planner::event::request{
+  CHECK(machine.process_event(emel::batch::planner::event::plan_request{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_steps = 1,
@@ -121,7 +121,7 @@ TEST_CASE("batch_planner_sm_template_dispatch_keeps_done_callback_behavior") {
   emel::batch::planner::sm machine{};
   std::array<int32_t, 3> tokens = {{1, 2, 3}};
   plan_capture capture{};
-  const emel::batch::planner::event::request request{
+  const emel::batch::planner::event::plan_request request{
     .token_ids = tokens.data(),
     .n_tokens = static_cast<int32_t>(tokens.size()),
     .n_steps = 2,
@@ -133,5 +133,5 @@ TEST_CASE("batch_planner_sm_template_dispatch_keeps_done_callback_behavior") {
   CHECK(machine.process_event(request));
   CHECK(capture.done_called);
   CHECK_FALSE(capture.error_called);
-  CHECK(machine.is(boost::sml::state<emel::batch::planner::done>));
+  CHECK(machine.is(boost::sml::state<emel::batch::planner::state_completed>));
 }

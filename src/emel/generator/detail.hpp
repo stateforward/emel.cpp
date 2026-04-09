@@ -17,8 +17,8 @@
 #include "emel/generator/events.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/kernel/sm.hpp"
-#include "emel/model/builder/sm.hpp"
 #include "emel/model/data.hpp"
+#include "emel/model/llama/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 
 namespace emel::generator::detail {
@@ -69,7 +69,10 @@ struct block_weights {
 
 struct native_backend {
   const emel::model::data * model = nullptr;
-  emel::model::builder::detail::artifact build = {};
+  emel::model::llama::detail::execution_view execution = {};
+  emel::model::llama::detail::topology topology = {};
+  emel::model::llama::detail::step_plan prefill_plan = {};
+  emel::model::llama::detail::step_plan decode_plan = {};
   emel::kernel::sm kernel = {};
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
   uint64_t kernel_dispatch_calls = 0;
@@ -96,6 +99,7 @@ struct native_backend {
   std::vector<emel::kernel::detail::quant::block_q8_0> packed_q8_0_input_storage = {};
   std::vector<emel::kernel::detail::quant::block_q8_0> packed_q8_0_chunk4_rows = {};
   std::vector<uint8_t> packed_q8_0_chunk4_input_storage = {};
+  emel::model::llama::detail::quantized_path_audit quantized_audit = {};
   std::vector<block_weights> blocks = {};
 
   int32_t n_vocab = 0;
@@ -199,13 +203,13 @@ namespace quant = emel::kernel::detail::quant;
 namespace {
 
 using tensor_record = emel::model::data::tensor_record;
-using step_kind = emel::model::builder::detail::step_kind;
+using step_kind = emel::model::llama::detail::step_kind;
 
 enum class chunk4_rhs_route : uint8_t {
   packed_q8_0 = 0,
   q8_k = 1,
 };
-using step_plan = emel::model::builder::detail::step_plan;
+using step_plan = emel::model::llama::detail::step_plan;
 
 constexpr int32_t k_error_ok = 0;
 constexpr int32_t k_error_invalid = 1;
@@ -1027,7 +1031,7 @@ inline void reset_shortconv_cache(native_backend & backend) noexcept {
 }
 
 inline const tensor_record * select_output_projection_tensor(
-    const emel::model::builder::detail::execution_view & execution) noexcept {
+    const emel::model::llama::detail::execution_view & execution) noexcept {
   if (execution.output.tensor != nullptr) {
     return execution.output.tensor;
   }
@@ -1041,7 +1045,7 @@ inline const tensor_record * select_output_projection_tensor(
 }
 
 inline bool bind_output_projection(native_backend & backend) noexcept {
-  const auto * tensor = select_output_projection_tensor(backend.build.execution);
+  const auto * tensor = select_output_projection_tensor(backend.execution);
   return tensor != nullptr && bind_tensor_rows(*tensor, backend.output_native);
 }
 
@@ -4372,20 +4376,25 @@ inline emel::error::type prepare(native_backend & backend,
   backend.kernel_kind = detect_host_kernel_kind();
   backend.kernel.set_kind(backend.kernel_kind);
 
-  emel::error::type build_err = emel::error::cast(emel::model::builder::error::none);
-  emel::model::builder::event::build build_request{model_data, backend.build};
-  build_request.error_out = &build_err;
-  emel::model::builder::sm builder;
-  if (!builder.process_event(build_request)) {
-    return build_err;
+  if (emel::model::llama::detail::build_execution_view(model_data, backend.execution) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::model::llama::detail::build_topology(backend.execution, backend.topology) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      emel::model::llama::detail::build_step_plans(
+          backend.topology, backend.prefill_plan, backend.decode_plan) !=
+          emel::error::cast(emel::model::loader::error::none)) {
+    return emel::error::cast(emel::model::loader::error::model_invalid);
   }
+
+  backend.quantized_audit =
+      emel::model::llama::detail::build_quantized_path_audit(backend.execution);
   backend.model = &model_data;
   backend.n_vocab = model_data.params.n_vocab;
   backend.n_embd = model_data.params.n_embd;
   backend.n_head = model_data.params.n_head;
   backend.n_head_kv =
       model_data.params.n_head_kv > 0 ? model_data.params.n_head_kv : model_data.params.n_head;
-  backend.n_layer = backend.build.execution.block_count;
+  backend.n_layer = backend.execution.block_count;
   backend.n_ctx = model_data.params.n_ctx;
   backend.n_rot = model_data.params.n_rot > 0 ? model_data.params.n_rot : 0;
   backend.rms_epsilon = model_data.params.attention_layer_norm_rms_epsilon > 0.0f
@@ -4405,8 +4414,8 @@ inline emel::error::type prepare(native_backend & backend,
   }
 
   backend.head_dim = backend.n_embd / backend.n_head;
-  if (!bind_tensor_rows(*backend.build.execution.token_embedding.tensor, backend.token_embedding) ||
-      !dequantize_tensor_vector(*backend.build.execution.output_norm.tensor, backend.output_norm) ||
+  if (!bind_tensor_rows(*backend.execution.token_embedding.tensor, backend.token_embedding) ||
+      !dequantize_tensor_vector(*backend.execution.output_norm.tensor, backend.output_norm) ||
       !bind_output_projection(backend) ||
       !prepare_output_logits(backend)) {
     return emel::error::cast(emel::model::loader::error::model_invalid);
@@ -4423,8 +4432,8 @@ inline emel::error::type prepare(native_backend & backend,
   backend.blocks.resize(static_cast<size_t>(backend.n_layer));
   const bool lfm2_runtime = is_lfm2_runtime(backend);
   for (int32_t layer = 0; layer < backend.n_layer; ++layer) {
-    emel::model::builder::detail::block_view block = {};
-    if (emel::model::builder::detail::lookup_block_view(backend.build.execution, layer, block) !=
+    emel::model::llama::detail::block_view block = {};
+    if (emel::model::llama::detail::lookup_block_view(backend.execution, layer, block) !=
         emel::error::cast(emel::model::loader::error::none)) {
       return emel::error::cast(emel::model::loader::error::model_invalid);
     }
@@ -4682,9 +4691,9 @@ inline emel::error::type prepare(native_backend & backend,
 
 inline uint32_t quantized_contract_stage_count(
     const native_backend & backend,
-    const emel::model::builder::detail::quantized_contract_kind kind) noexcept {
+    const emel::model::llama::detail::quantized_contract_kind kind) noexcept {
   uint32_t count = 0u;
-  for (const auto & stage : backend.build.quantized_audit.stages) {
+  for (const auto & stage : backend.quantized_audit.stages) {
     count += static_cast<uint32_t>(stage.contract == kind);
   }
   return count;
