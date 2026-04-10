@@ -14,17 +14,33 @@ before widening API surface or model scope.
 
 ## Current State
 
-Shipped version: `v1.9`
+Active milestone: `v1.10`
 
-Status: Milestones `v1.8` and `v1.9` are both shipped and archived on this branch. There is no
-active milestone yet.
+Status: `v1.10` is now active for a planner-family hard cutover that brings the batch planner and
+its child mode submachines into explicit alignment with `AGENTS.md` naming conventions and machine
+rules.
 
 Release summary: `v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice` shipped on `2026-04-02` with `8`
-phases after gap-closure reconstruction. The immediately previous `v1.8 Truthful Qwen3 E2E
-Embedded Size` milestone also shipped on `2026-04-02` and its artifacts are now merged into this
-branch’s planning history.
+phases after gap-closure reconstruction. `v1.10` shifts focus from maintained model-slice
+publication back to planner-family architecture conformance.
 
-## Latest Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
+## Current Milestone: v1.10 Planner Family AGENTS Hard Cutover
+
+**Goal:** Hard-cut `src/emel/batch/planner` and its child planner-mode submachines over to the
+`AGENTS.md` naming, layout, and SML orchestration contract without broadening the change into
+unrelated machine families.
+
+**Target features:**
+- Rename and reorganize the planner-family files, namespaces, aliases, and public type names so
+  they follow the component/file-base conventions in `AGENTS.md`.
+- Bring planner and planner-mode state machines into explicit rule compliance for destination-first
+  transition layout, event naming, context ownership, and same-RTC internal handoff semantics.
+- Preserve planner behavior with focused proof so the hard cutover does not silently change the
+  maintained batching contract.
+- Keep the milestone bounded to `src/emel/batch/planner` and its child mode submachines rather
+  than widening into generator child machines or broader repository cleanup.
+
+## Previous Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
 
 **Goal:** Prove one truthful maintained LiquidAI `LFM2.5-1.2B-Thinking-GGUF` ARM slice through the
 existing EMEL generator, paritychecker, and benchmark workflow, with `Q4_K_M` as the maintained
@@ -118,16 +134,12 @@ generated README docs without weakening the workload boundary or claiming whole-
 
 ### Active
 
-- [ ] `MODEL-03`: Broaden beyond the canonical `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture to
-  additional Liquid checkpoints or sibling quantizations after the first slice is proven.
-- [ ] `COND-04`: Add richer Liquid system-message, multi-turn thinking-history, or tool-calling
-  request surfaces after the canonical maintained slice has a stable contract.
-- [ ] `GEN-04`: Optimize Liquid-specific runtime hot spots now that the canonical slice is correct,
-  parity-backed, and benchmarked.
-- [ ] `BENCH-07`: Revisit whether noisy benchmark drift should remain warning-only once the
-  maintained compare surfaces are stable enough to justify a harder gate.
-- [ ] Decide later whether executable-size evidence should stay publication-only or grow into a
-  broader measurement harness that also covers bundle size or gate policy.
+- [ ] Cut over `src/emel/batch/planner` to the `AGENTS.md` naming and file-layout contract.
+- [ ] Cut over planner-mode child machines in `src/emel/batch/planner/modes/` to the same
+  contract without introducing hidden control flow or context phase flags.
+- [ ] Preserve the maintained batching behavior with explicit proof after the structural cutover.
+- [ ] Leave generator child machines, broad repository cleanup, and non-planner family refactors
+  out of this milestone unless a later milestone explicitly approves them.
 
 ### Out of Scope
 
@@ -149,37 +161,30 @@ generated README docs without weakening the workload boundary or claiming whole-
 
 ## Next Milestone Goals
 
-- Broaden Liquid support beyond the first maintained `Q4_K_M` truth anchor only when the next
-  milestone explicitly approves it.
-- Improve Liquid prompting breadth and runtime performance without weakening the actor-model and
-  maintained-proof constraints.
-- Revisit benchmark-gate hardening only after the latest-reference compare lane is stable enough to
-  stop producing warning-only drift.
+- After the planner-family hard cutover lands, decide whether the next milestone should continue
+  architecture-contract cleanup into other machine families or return to maintained runtime/model
+  scope.
+- Revisit the queued Liquid runtime and benchmark hardening todos once the planner-family structure
+  is aligned with the stricter `AGENTS.md` contract.
 
 ## Context
 
-This is a brownfield repository with an existing codebase map under `.planning/codebase/`. v1.7
-proved that generator decomposition can stay inside the `generator` domain and preserve explicit
-same-RTC event handoff instead of falling back to context phase flags or hidden helper routing. The
-new v1.9 scope is a different kind of widening: the repo currently treats `llama` and `qwen3` as
-its explicit maintained model architectures, while official Liquid sources identify the target
-fixture as `lfm2` with a hybrid block contract and a primary chat template that includes
-`keep_past_thinking`. The repo remains governed by `AGENTS.md` and `docs/rules/sml.rules.md`, so
-future work still needs to preserve same-RTC actor semantics, explicit error publication, bounded
-actions, and deliberate machine-structure changes.
+This is a brownfield repository with an existing codebase map under `.planning/codebase/`. The repo
+remains governed by `AGENTS.md` and `docs/rules/sml.rules.md`, and the user has now explicitly
+requested a planner-family hard cutover to those conventions. The planner domain already exists as
+`src/emel/batch/planner` with child mode submachines under `modes/`; the current milestone is to
+make that family the contract-aligned reference without broadening into unrelated machine families.
 
 ## Constraints
 
 - **Architecture**: Follow `docs/rules/sml.rules.md` and the local machine conventions in
-  `AGENTS.md` so runtime/model work preserves the RTC actor model and no-queue invariant.
-- **Explicit behavior modeling**: Any Liquid-specific orchestration changes must keep control flow
-  on guards, states, typed events, and transitions rather than action/detail routing shortcuts.
-- **Truth anchor**: v1.9 is one official `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture, not generic
-  Liquid-family or multi-quant support.
-- **Conditioning**: The maintained Liquid path must use one explicit structured chat-message
-  contract and must not fall back to raw prompting silently.
-- **Acceptance boundary**: Maintained proof still lives on the shipped generator, paritychecker,
-  benchmark, snapshot, and docs surfaces.
+  `AGENTS.md` so planner work preserves the RTC actor model and no-queue invariant.
+- **Scope boundary**: This milestone is limited to `src/emel/batch/planner` and its child mode
+  submachines, not generator child machines or whole-repo cleanup.
+- **Explicit behavior modeling**: The cutover must keep runtime control flow in guards, states,
+  typed events, and transitions rather than action/detail routing shortcuts.
+- **Proof boundary**: Structural renames or file moves are not sufficient by themselves; behavior
+  preservation needs focused proof before the milestone can close.
 - **Repository state**: This is an active brownfield codebase, so milestone work should minimize
   unrelated churn and leave non-milestone artifacts alone.
 
@@ -196,6 +201,8 @@ actions, and deliberate machine-structure changes.
 | Use GGUF/config metadata as the maintained truth source for Liquid | Official prose and executable metadata disagree on context length, so docs must follow executable truth | ✓ Good |
 | Start v1.9 with `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` | The user explicitly reprioritized the milestone around the docs-recommended quant, accepting that this broadens runtime scope beyond the prior `Q8_0` anchor | ✓ Good |
 | Keep the maintained Liquid contract on `tools=none` and no thinking-history replay | Tool use and `keep_past_thinking` widen the request surface beyond the first-slice milestone | ✓ Good |
+| Scope v1.10 to the planner family only | The user asked for planner and planner-submachine compliance, not a broader machine-family rewrite | — Pending |
+| Treat structural cutover as incomplete without proof preservation | AGENTS compliance changes must not silently break the maintained batching contract | — Pending |
 
 ## Evolution
 
@@ -215,4 +222,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-02 after completing v1.9*
+*Last updated: 2026-04-04 after starting v1.10*
