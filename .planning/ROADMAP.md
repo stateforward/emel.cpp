@@ -12,8 +12,91 @@
 - [x] [v1.7: Generator Prefill Submachine Decomposition](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.7-ROADMAP.md) - shipped 2026-03-30 with 3 phases and 6 plans; extracted generator-owned prefill orchestration while preserving maintained proof.
 - [x] [v1.8: Truthful Qwen3 E2E Embedded Size](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.8-ROADMAP.md) - shipped 2026-04-02 with 6 phases and 8 plans; published one truthful maintained Qwen3 executable-size comparison on the canonical first-token workload.
 - [x] [v1.9: Liquid LFM2.5-1.2B Thinking ARM Slice](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.9-ROADMAP.md) - shipped 2026-04-02 with 8 phases and 9 plans; brought one maintained Liquid slice up through the generator, paritychecker, and benchmark workflow.
-- [x] [v1.11: TE-75M GGUF Trimodal Embedding Runtime](/Users/gabrielwillen/VSCode/stateforward/emel/emel.cpp/.planning/milestones/v1.11-ROADMAP.md) - shipped 2026-04-14 with 7 phases and 7 plans; added one truthful maintained TE-75M `omniembed` slice with repo-owned text/image/audio embedding lanes, one shared normalized contract, and upstream-golden proof.
 
 ## Current Milestone
 
-No active milestone. Start the next one with `/gsd-new-milestone`.
+### v1.11 TE-75M GGUF Trimodal Embedding Runtime (Reopened For Audit Gap Closure)
+
+This milestone was reopened on 2026-04-14 after the milestone audit found one partial runtime seam
+and missing structured closeout evidence for requirements previously marked complete. The closure
+work stays inside the shipped TE-75M `omniembed` slice: no new modality scope, no public API
+expansion, and no broader model-family claims.
+
+## Phases
+
+**Phase Numbering:**
+- `v1.11` originally ran from Phase `47` through Phase `53`.
+- Gap-closure work continues from the next free phase number, so the reopen starts at Phase `54`.
+
+- [x] **Phase 47: TE Truth Anchor** - Pin the maintained TE fixture, provenance, and narrow proof inputs.
+- [x] **Phase 48: Omniembed Model Contract** - Add truthful `omniembed` GGUF/model acceptance and execution bindings.
+- [x] **Phase 49: Text Embedding Lane** - Bring up the maintained TE text path with normalized and truncatable embeddings.
+- [x] **Phase 50: Vision Embedding Lane** - Add the maintained in-memory image path and TE vision encoder runtime.
+- [x] **Phase 51: Audio Embedding Lane** - Add the maintained in-memory audio path and TE audio encoder runtime.
+- [x] **Phase 52: Shared Embedding Session** - Unify modality output, truncation, and deterministic request/error contracts.
+- [x] **Phase 53: TE Proof And Regression** - Add golden-baseline verification and tiny cross-modal smoke protection.
+- [ ] **Phase 54: Omniembed Execution Contract Runtime Cutover** - Cut the live embedding runtime over to the explicit Phase 48 execution-contract seam.
+- [ ] **Phase 55: Embedding Lane Traceability Backfill** - Restore structured requirement traceability for the text, vision, audio, and shared-session closure phases.
+- [ ] **Phase 56: Proof And Nyquist Closeout** - Backfill proof traceability and Nyquist validation so `v1.11` can re-audit cleanly.
+
+## Phase Details
+
+### Phase 54: Omniembed Execution Contract Runtime Cutover
+**Goal**: Make the live TE embedding runtime consume the explicit `omniembed` execution contract
+instead of rebinding directly from raw model metadata and tensor names.
+**Depends on**: Phase 53
+**Requirements**: MOD-02, EMB-01
+**Gap Closure**: Closes the `MOD-02` audit gap and the `48 -> 49/50/51` integration seam flagged
+by the milestone audit.
+**Success Criteria** (what must be TRUE):
+  1. The live embedding runtime consumes the Phase 48 `execution_contract` as its enforcement seam
+     for the maintained text, image, and audio bindings.
+  2. Loader/runtime validation rejects drift between the `omniembed` contract and the embedding
+     runtime before requests reach modality execution.
+  3. Shared-session behavior still returns one consistent normalized embedding contract across
+     modalities after the cutover.
+**Plans**: 54-01
+
+### Phase 55: Embedding Lane Traceability Backfill
+**Goal**: Rebuild the structured closeout evidence for the text, image, audio, and shared-session
+requirements that the milestone audit marked orphaned.
+**Depends on**: Phase 54
+**Requirements**: TXT-01, TXT-02, VIS-01, VIS-02, AUD-01, AUD-02, EMB-02
+**Gap Closure**: Closes the orphaned requirement gaps from phases `49` through `52`.
+**Success Criteria** (what must be TRUE):
+  1. Phases `49`, `50`, `51`, and `52` expose `requirements-completed` frontmatter that the audit
+     workflow can extract directly.
+  2. The corresponding `VERIFICATION.md` artifacts contain explicit requirement coverage sections
+     for each mapped REQ-ID.
+  3. A re-audit can trace each text, vision, audio, and shared-session requirement across
+     `REQUIREMENTS.md`, `SUMMARY.md`, and `VERIFICATION.md` without orphan detection.
+**Plans**: 55-01
+
+### Phase 56: Proof And Nyquist Closeout
+**Goal**: Complete the final proof traceability and validation artifacts required for a clean
+`v1.11` re-audit and milestone closeout.
+**Depends on**: Phase 55
+**Requirements**: PRF-01, PRF-02
+**Gap Closure**: Closes the orphaned proof requirements from Phase `53` and the missing Nyquist
+validation coverage across phases `47` through `53`.
+**Success Criteria** (what must be TRUE):
+  1. Phase `53` exposes structured proof requirement coverage and `requirements-completed`
+     frontmatter for `PRF-01` and `PRF-02`.
+  2. Phases `47` through `53` all have audit-visible Nyquist validation artifacts.
+  3. `v1.11` re-audits without orphaned requirements or missing-validation findings.
+**Plans**: 56-01
+
+## Progress
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 47. TE Truth Anchor | 1/1 | Complete | 2026-04-13 |
+| 48. Omniembed Model Contract | 1/1 | Complete | 2026-04-14 |
+| 49. Text Embedding Lane | 1/1 | Complete | 2026-04-14 |
+| 50. Vision Embedding Lane | 1/1 | Complete | 2026-04-14 |
+| 51. Audio Embedding Lane | 1/1 | Complete | 2026-04-14 |
+| 52. Shared Embedding Session | 1/1 | Complete | 2026-04-14 |
+| 53. TE Proof And Regression | 1/1 | Complete | 2026-04-14 |
+| 54. Omniembed Execution Contract Runtime Cutover | 0/1 | Pending | - |
+| 55. Embedding Lane Traceability Backfill | 0/1 | Pending | - |
+| 56. Proof And Nyquist Closeout | 0/1 | Pending | - |

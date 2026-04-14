@@ -1,0 +1,112 @@
+# Requirements: EMEL
+
+**Defined:** 2026-04-13  
+**Reopened:** 2026-04-14 after the `v1.11` milestone audit found closeout traceability and
+runtime-integration gaps.
+
+**Core Value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
+verification before widening API surface or model scope.
+
+## v1 Requirements
+
+### Fixture Identity
+
+- [x] **FIX-01**: Maintainer can locate one official maintained TE fixture at
+  `tests/models/TE-75M-q8_0.gguf` with recorded provenance, download URL, license, size, and
+  checksum.
+- [x] **FIX-02**: The maintained TE workflow rejects other TE quant files or unapproved sibling
+  artifacts rather than implying broad TE support.
+
+### Model Contract
+
+- [x] **MOD-01**: EMEL recognizes `gguf.architecture=omniembed` and validates the required TE
+  text, image, audio, and projection tensor families explicitly.
+- [ ] **MOD-02**: EMEL builds a TE execution contract for `omniembed` without aliasing the model
+  to an existing LLM generation path.
+
+### Text Embedding
+
+- [ ] **TXT-01**: Operator can submit text input on the maintained TE path and receive a normalized
+  1280-dimensional embedding.
+- [ ] **TXT-02**: Operator can request supported Matryoshka truncation for text embeddings at
+  `768`, `512`, `256`, or `128` dimensions, with renormalization after truncation.
+
+### Vision Embedding
+
+- [ ] **VIS-01**: Operator can submit one documented in-memory image payload on the maintained TE
+  path and receive a normalized 1280-dimensional embedding.
+- [ ] **VIS-02**: Invalid image payload shape or preprocessing contract is rejected explicitly on
+  the maintained TE path.
+
+### Audio Embedding
+
+- [ ] **AUD-01**: Operator can submit one documented in-memory audio payload on the maintained TE
+  path and receive a normalized 1280-dimensional embedding.
+- [ ] **AUD-02**: Invalid audio payload shape or preprocessing contract is rejected explicitly on
+  the maintained TE path.
+
+### Shared Embedding Contract
+
+- [ ] **EMB-01**: Text, image, and audio lanes all return one consistent embedding result contract
+  with shared normalization and explicit modality-aware errors.
+- [ ] **EMB-02**: The first maintained TE slice stays synchronous, bounded, and limited to one
+  modality per request.
+
+### Proof
+
+- [ ] **PRF-01**: Maintained tests compare EMEL outputs against stored upstream TE golden
+  embeddings for canonical text, image, and audio fixtures.
+- [ ] **PRF-02**: Maintained smoke tests prove the shared-space contract on a tiny canonical
+  cross-modal triplet set.
+
+## v2 Requirements
+
+### Follow-On Scope
+
+- **QNT-01**: EMEL supports `TE-75M-q5_0.gguf` as an additional maintained TE slice with separate
+  runtime proof.
+- **IO-01**: EMEL accepts common image/audio file formats and performs required decode or resample
+  steps before TE inference.
+- **API-01**: EMEL exposes a stable public C or CLI embedding API for the TE slice.
+- **BCH-01**: EMEL supports small bounded same-modality embedding batches on the TE path.
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| `TE-75M-q5_0.gguf` in the first maintained milestone | Keep `v1.11` pinned to one truthful quant/runtime slice |
+| Generic image/audio file decoding and transcoding | Separate product surface from proving one maintained embedding lane |
+| Vector search, ANN index management, reranking, or retrieval serving | TE enables retrieval, but this milestone is only about embedding extraction |
+| Multimodal generation, captioning, transcription, or chat claims | TE-75M is a feature-extraction model, not the next maintained generation slice |
+| Broad `omniembed` or arbitrary embedding-model support | The milestone is fixed to one maintained TE-75M slice |
+| Public multimedia C ABI or CLI commitments | Prove the runtime first, then decide whether a public API milestone is justified |
+
+## Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| FIX-01 | Phase 47 | Complete |
+| FIX-02 | Phase 47 | Complete |
+| MOD-01 | Phase 48 | Complete |
+| MOD-02 | Phase 54 | Pending |
+| TXT-01 | Phase 55 | Pending |
+| TXT-02 | Phase 55 | Pending |
+| VIS-01 | Phase 55 | Pending |
+| VIS-02 | Phase 55 | Pending |
+| AUD-01 | Phase 55 | Pending |
+| AUD-02 | Phase 55 | Pending |
+| EMB-01 | Phase 54 | Pending |
+| EMB-02 | Phase 55 | Pending |
+| PRF-01 | Phase 56 | Pending |
+| PRF-02 | Phase 56 | Pending |
+
+**Coverage:**
+- v1 requirements: 14 total
+- Mapped to phases: 14
+- Complete: 3
+- Pending: 11
+- Unmapped: 0
+
+---
+*Requirements defined: 2026-04-13*  
+*Reopened: 2026-04-14 for v1.11 audit gap closure*
