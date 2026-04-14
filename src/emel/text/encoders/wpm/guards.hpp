@@ -108,10 +108,12 @@ struct text_non_empty {
 
 struct prefix_buffer_capacity_within_limit {
   bool operator()(const event::encode_runtime & ev, const action::context & ctx) const noexcept {
-    constexpr size_t k_wpm_prefix_len = 3u;
-    const bool has_prefix_capacity = ctx.scratch.buffer.size() >= k_wpm_prefix_len;
+    constexpr size_t k_wpm_max_prefix_len = 3u;
+    const bool has_prefix_capacity =
+        ctx.scratch.buffer_alt.size() >= k_wpm_max_prefix_len;
     const size_t max_word_bytes =
-      ctx.scratch.buffer.size() - (k_wpm_prefix_len * static_cast<size_t>(has_prefix_capacity));
+      ctx.scratch.buffer_alt.size() -
+      (k_wpm_max_prefix_len * static_cast<size_t>(has_prefix_capacity));
     return has_prefix_capacity && ev.request.text.size() <= max_word_bytes;
   }
 };

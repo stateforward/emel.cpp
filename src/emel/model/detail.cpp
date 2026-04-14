@@ -84,7 +84,10 @@ bool load_vocab_from_gguf(const kv_binding & binding,
     return false;
   };
 
-  vocab_out = {};
+  // Avoid materializing a large temporary vocabulary aggregate on the stack here while
+  // preserving the struct's negative-sentinel/default member initializers.
+  static const emel::model::data::vocab k_default_vocab = {};
+  vocab_out = k_default_vocab;
 
   const auto * model_entry =
       find_kv_entry_any(binding, {"tokenizer.model", "tokenizer.ggml.model"});

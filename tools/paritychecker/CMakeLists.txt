@@ -127,6 +127,7 @@ add_executable(paritychecker
   ${reference_impl_SOURCE_DIR}/common/jinja/value.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/string.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
+  ${reference_impl_SOURCE_DIR}/common/unicode.cpp
 )
 
 target_link_libraries(paritychecker
@@ -141,8 +142,8 @@ target_include_directories(paritychecker
   PRIVATE
     ${EMEL_ROOT}/src
     ${EMEL_ROOT}/include
-    ${reference_impl_SOURCE_DIR}/src
     ${reference_impl_SOURCE_DIR}/common
+    ${reference_impl_SOURCE_DIR}/src
     ${reference_impl_SOURCE_DIR}/ggml/include
     ${reference_impl_SOURCE_DIR}/include
 )
@@ -176,6 +177,7 @@ add_executable(paritychecker_tests
   ${reference_impl_SOURCE_DIR}/common/jinja/value.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/string.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
+  ${reference_impl_SOURCE_DIR}/common/unicode.cpp
 )
 
 target_link_libraries(paritychecker_tests
@@ -190,8 +192,8 @@ target_include_directories(paritychecker_tests
   PRIVATE
     ${EMEL_ROOT}/src
     ${EMEL_ROOT}/include
-    ${reference_impl_SOURCE_DIR}/src
     ${reference_impl_SOURCE_DIR}/common
+    ${reference_impl_SOURCE_DIR}/src
     ${reference_impl_SOURCE_DIR}/ggml/include
     ${reference_impl_SOURCE_DIR}/include
     ${DOCTEST_INCLUDE_DIR}

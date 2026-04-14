@@ -1,6 +1,7 @@
 #pragma once
 
 #include "emel/batch/planner/sm.hpp"
+#include "emel/embeddings/generator/sm.hpp"
 #include "emel/graph/processor/sm.hpp"
 #include "emel/text/encoders/any.hpp"
 #include "emel/text/encoders/sm.hpp"
@@ -21,6 +22,7 @@ namespace emel {
 using ComputeExecutor = emel::graph::processor::sm;
 using Conditioner = emel::text::conditioner::sm;
 using Detokenizer = emel::text::detokenizer::sm;
+using EmbeddingsGenerator = emel::embeddings::generator::sm;
 using EncoderAny = emel::text::encoders::any;
 using EncoderBpe = emel::text::encoders::bpe::sm;
 using EncoderSpm = emel::text::encoders::spm::sm;

@@ -167,6 +167,7 @@ set(BENCH_RUNNER_SOURCES
   ${reference_impl_SOURCE_DIR}/common/jinja/value.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/string.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
+  ${reference_impl_SOURCE_DIR}/common/unicode.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_cases.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/kernel/bench_common.hpp
@@ -200,8 +201,8 @@ target_include_directories(bench_runner
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${EMEL_ROOT}/src
     ${EMEL_ROOT}/include
-    ${reference_impl_SOURCE_DIR}/src
     ${reference_impl_SOURCE_DIR}/common
+    ${reference_impl_SOURCE_DIR}/src
     ${reference_impl_SOURCE_DIR}/ggml/include
     ${reference_impl_SOURCE_DIR}/include
     ${NLOHMANN_JSON_INCLUDE_DIR}

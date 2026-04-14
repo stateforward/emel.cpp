@@ -36,6 +36,15 @@ inline probe_status probe_status_from_flags(const bool backend_ok, const bool va
   return status_lut[static_cast<size_t>(backend_ok)][static_cast<size_t>(valid)];
 }
 
+inline int32_t select_next_position(const int32_t pos,
+                                    const int32_t current,
+                                    const int32_t advance) noexcept {
+  const int64_t next = static_cast<int64_t>(pos) + 1;
+  const int64_t selected = static_cast<int64_t>(advance) * next +
+                           static_cast<int64_t>(1 - advance) * static_cast<int64_t>(current);
+  return static_cast<int32_t>(selected);
+}
+
 inline bool has_seq_masks_input(const event::batch & req) noexcept {
   return req.seq_masks != nullptr && req.seq_masks_count >= req.n_tokens;
 }
@@ -411,7 +420,7 @@ inline probe_status seeded_generation_probe(
     const int32_t advance = static_cast<int32_t>(valid);
     for_each_mask_seq_id(mask, mask_words, [&](const int32_t seq_id) noexcept {
       const int32_t current = next_pos[seq_id];
-      next_pos[seq_id] = advance * (pos + 1) + (1 - advance) * current;
+      next_pos[seq_id] = select_next_position(pos, current, advance);
       return true;
     });
   }
@@ -446,7 +455,7 @@ inline bool unseeded_generation_probe(const event::batch_runtime & ev) noexcept 
       seeded[seq_id] = static_cast<uint8_t>(
           seeded[seq_id] | static_cast<uint8_t>(advance));
       const int32_t current = next_pos[seq_id];
-      next_pos[seq_id] = advance * (pos + 1) + (1 - advance) * current;
+      next_pos[seq_id] = select_next_position(pos, current, advance);
       return true;
     });
   }

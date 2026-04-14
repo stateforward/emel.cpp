@@ -25,6 +25,7 @@ struct data {
   static constexpr int32_t k_max_metadata_list = 256;
   static constexpr int32_t k_max_metadata_entities = 64;
   static constexpr int32_t k_max_metadata_arrays = 512;
+  static constexpr int32_t k_max_matryoshka_dims = 16;
   static constexpr int32_t k_max_rope_dimension_sections = 32;
   static constexpr int32_t k_max_xielu_values = 256;
   static constexpr int32_t k_max_clip_image_stats = 16;
@@ -225,6 +226,8 @@ struct data {
     int32_t convnext_embd = 0;
     int32_t convnext_block_count = 0;
     int32_t shortconv_l_cache = 0;
+    uint32_t matryoshka_dimension_count = 0;
+    std::array<int32_t, k_max_matryoshka_dims> matryoshka_dimensions = {};
   };
 
   struct vocab_entry {
@@ -404,6 +407,7 @@ struct data {
     };
 
     struct clip_vision {
+      string_view encoder_name = {};
       string_view projector_type = {};
       int32_t image_size = 0;
       int32_t image_min_pixels = 0;
@@ -431,7 +435,12 @@ struct data {
     };
 
     struct clip_audio {
+      string_view encoder_name = {};
       string_view projector_type = {};
+      int32_t sample_rate = 0;
+      int32_t n_fft = 0;
+      int32_t win_length = 0;
+      int32_t hop_size = 0;
       int32_t num_mel_bins = 0;
       int32_t embedding_length = 0;
       int32_t feed_forward_length = 0;
@@ -439,6 +448,12 @@ struct data {
       int32_t block_count = 0;
       int32_t attention_head_count = 0;
       float attention_layer_norm_epsilon = 0.0f;
+      float low_frequency = 0.0f;
+      float high_frequency = 0.0f;
+      float preemphasis_coefficient = 0.0f;
+      float log_offset = 0.0f;
+      float normalize_bias = 0.0f;
+      float normalize_scale = 0.0f;
       int32_t projector_stack_factor = 0;
     };
 
@@ -502,11 +517,15 @@ struct data {
 
 std::string_view tensor_name_view(const data & model_data,
                                   const data::tensor_record & tensor) noexcept;
+std::string_view metadata_string_view(
+    const data::metadata & metadata,
+    const data::metadata::string_view & value) noexcept;
 bool try_parse_block_index(std::string_view name, int32_t & block_index_out) noexcept;
 std::string_view architecture_name_view(const data & model_data) noexcept;
 bool is_supported_execution_architecture(std::string_view architecture) noexcept;
 bool is_lfm2_execution_architecture(std::string_view architecture) noexcept;
 bool is_gemma4_execution_architecture(std::string_view architecture) noexcept;
+bool is_omniembed_execution_architecture(std::string_view architecture) noexcept;
 emel::error::type validate_execution_contract(const data & model_data) noexcept;
 
 }  // namespace emel::model

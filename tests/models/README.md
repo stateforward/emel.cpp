@@ -1,5 +1,28 @@
 # Test Models
 
+## TE-75M-q8_0.gguf
+- Source: `https://huggingface.co/augmem/TE-75M-GGUF`
+- File: `TE-75M-q8_0.gguf`
+- Stable maintained path: `tests/models/TE-75M-q8_0.gguf`
+- License: Apache-2.0
+- Size: `119710336` bytes (`114M`)
+- SHA256: `955b5c847cc95c94ff14a27667d9aca039983448fd8cefe4f2804d3bfae621ae`
+- Download URL: `https://huggingface.co/augmem/TE-75M-GGUF/resolve/main/TE-75M-q8_0.gguf`
+- Executable metadata truth: treat current Hugging Face GGUF/model metadata as authoritative for
+  this maintained slice, including `gguf.architecture=omniembed`, shared embedding width `1280`,
+  supported Matryoshka truncation `1280/768/512/256/128`, and the current upstream component
+  families `LEAF-IR`, `MobileNetV4-Medium`, and `EfficientAT mn20_as`.
+- Maintained tokenizer asset: `tests/models/mdbr-leaf-ir-vocab.txt`
+  Source: `https://huggingface.co/MongoDB/mdbr-leaf-ir`
+  Download URL: `https://huggingface.co/MongoDB/mdbr-leaf-ir/resolve/main/vocab.txt`
+  Size: `231508` bytes
+  SHA256: `07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3`
+  Runtime use: supplies the MiniLM/BERT WordPiece vocabulary for the maintained TE text-lane
+  proof because the GGUF slice does not embed tokenizer vocab metadata.
+- Official sibling files: `TE-75M-q5_0.gguf`.
+  Its presence is source truth for the upstream release, not proof of maintained support in this
+  repo.
+
 ## gemma-4-e2b-it-Q8_0.gguf
 - Source: `https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF`
 - File: `gemma-4-e2b-it-Q8_0.gguf`

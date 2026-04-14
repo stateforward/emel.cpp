@@ -76,6 +76,7 @@ add_library(emel STATIC
   src/emel/model/qwen3/detail.cpp
   src/emel/model/lfm2/detail.cpp
   src/emel/model/gemma4/detail.cpp
+  src/emel/model/omniembed/detail.cpp
 )
 
 target_link_libraries(emel
@@ -95,6 +96,7 @@ if(EMEL_ENABLE_TESTS)
 
   set(EMEL_TEST_SOURCES
     tests/doctest_main.cpp
+    tests/model/fixture_manifest_tests.cpp
     tests/model/loader/lifecycle_tests.cpp
     tests/model/weight_loader/lifecycle_tests.cpp
     tests/gbnf/lexer_tests.cpp
@@ -105,6 +107,11 @@ if(EMEL_ENABLE_TESTS)
     tests/generator/detail_tests.cpp
     tests/generator/initializer/lifecycle_tests.cpp
     tests/generator/prefill/lifecycle_tests.cpp
+    tests/embeddings/text_embedding_lane_tests.cpp
+    tests/embeddings/vision_embedding_lane_tests.cpp
+    tests/embeddings/audio_embedding_lane_tests.cpp
+    tests/embeddings/shared_embedding_session_tests.cpp
+    tests/embeddings/te_proof_and_regression_tests.cpp
     tests/logits/validator/validator_tests.cpp
     tests/logits/sampler/pipeline_tests.cpp
     tests/sm/callback_tests.cpp
@@ -206,7 +213,7 @@ if(EMEL_ENABLE_TESTS)
   )
   emel_add_doctest_shard(
     generator_and_runtime
-    "*tests/generator/*,*tests/logits/*,*tests/sm/*,*tests/token/*"
+    "*tests/generator/*,*tests/embeddings/*,*tests/logits/*,*tests/sm/*,*tests/token/*"
   )
   emel_add_doctest_shard(
     text

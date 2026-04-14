@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.10
-milestone_name: Planner Family AGENTS Hard Cutover
-status: in_progress
-stopped_at: Phase 46.1 corrected and complete; v1.10 ready for completion with benchmark-warning tech debt
-last_updated: "2026-04-06T03:49:41Z"
-last_activity: 2026-04-05
+milestone: v1.11
+milestone_name: TE-75M GGUF Trimodal Embedding Runtime
+status: completed
+stopped_at: v1.11 archived; no active milestone is open
+last_updated: "2026-04-14T21:28:34Z"
+last_activity: 2026-04-14
 progress:
-  total_phases: 8
-  completed_phases: 8
-  total_plans: 8
-  completed_plans: 8
+  total_phases: 7
+  completed_phases: 7
+  total_plans: 7
+  completed_plans: 7
   percent: 100
 ---
 
@@ -18,27 +18,20 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-04)
+See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** Milestone closeout — v1.10 is implementation-complete and ready for completion
+**Current focus:** No active milestone. Start the next milestone with `/gsd-new-milestone` or
+close out the remaining `v1.10` archive debt.
 
 ## Current Position
 
-Phase: 46.1
-Plan: 01
-Status: Complete; milestone ready for completion
-Last activity: 2026-04-05
-Phase 46 closed FINDING-01 by adding explicit top-level planner `unexpected_event` handling for
-the three transient mode execution states and locking the fix in with a focused planner surface
-regression test. Follow-on cleanup also removed the duplicate `BatchPlanner` alias from
-`src/emel/machines.hpp` and refreshed the lint snapshot baseline with explicit user consent. Phase
-46.1 then renamed the planner's remaining wrapper-era surface in place: public/internal events now
-read as `plan_request`, `plan_scratch`, and `plan_runtime`; top-level states were renamed to
-describe graph intent; top-level actions and mode actions now use canonical `effect_*` names;
-top-level predicates now use canonical `guard_*` names; and the planner surface tests now fail if
-the old wrapper-era names or temporary bare verb names reappear.
+Phase: 53. TE Proof And Regression
+Plan: 53-01
+Status: Complete and archived. No new milestone has started yet.
+Last activity: 2026-04-14 — archived `v1.11` roadmap, requirements, and audit artifacts after
+green TE proof, paritychecker, and repo-wide quality gates.
 
 Progress: [██████████] 100%
 
@@ -46,16 +39,17 @@ Progress: [██████████] 100%
 
 **Latest shipped milestone:**
 
-- Milestone: v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice
-- Phases complete: 8/8
-- Plans complete: 9/9
-- Audit status: passed
+- Milestone: v1.11 TE-75M GGUF Trimodal Embedding Runtime
+- Phases complete: 7/7
+- Plans complete: 7/7
+- Audit status: tech_debt accepted at closeout
 
-**Current milestone shape:**
+**Current planning shape:**
 
-- Phases planned: 8 (40-46.1)
-- Requirements mapped: 11/11
-- Next action: `/gsd-complete-milestone`
+- Active milestone: none
+- Latest archived milestone: `v1.11`
+- Next action: Run `/gsd-new-milestone` for the next scoped deliverable, or archive the pending
+  `v1.10` milestone bookkeeping.
 
 ## Accumulated Context
 
@@ -64,19 +58,45 @@ Progress: [██████████] 100%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- v1.10 is scoped only to `src/emel/batch/planner` and `src/emel/batch/planner/modes/`.
-- Generator child machines, broad repository cleanup, and ARM benchmark publication stay out of
-  scope for this milestone.
-
-- Structural cutover is not accepted without focused proof that maintained batching behavior still
-  holds on the current validation host.
-
-- Phase numbering continues from prior milestone history, so v1.10 starts at Phase 40.
+- `v1.11` is pinned to `tests/models/TE-75M-q8_0.gguf` for the first maintained TE slice.
+- TE support will land as explicit `omniembed` model-family work rather than an alias of the
+  existing LLM runtime paths.
+- `omniembed` model acceptance now validates modality-family prefixes and shared embedding
+  metadata through its own architecture family rather than through the decoder contract.
+- Phase 49 now proves the maintained TE text lane end to end through a repo-owned
+  `embeddings/generator` actor rather than through generation-only runtime surfaces.
+- Phase 49 vendors the upstream `mdbr-leaf-ir` WordPiece vocab as maintained tokenizer truth for
+  TE tests because the pinned GGUF fixture omits tokenizer metadata.
+- Phase 50 derives the maintained image preprocessing contract from the declared
+  `mobilenetv4_conv_medium.e180_r384_in12k` encoder family instead of inventing CLIP-style GGUF
+  preprocessing metadata.
+- Phase 50 keeps the image lane on one documented in-memory RGBA contract and runs the real
+  `image_encoder.*` tower plus shared projection head natively in `src/`.
+- Phase 51 keeps the audio lane on one documented mono `float32` PCM contract, derives the
+  EfficientAT `mn20_as` frontend from the declared encoder family, and runs the real
+  `audio_encoder.features.*` tower plus shared projection head natively in `src/`.
+- Phase 52 keeps the shared contract proof on the existing `embeddings/generator` actor and
+  validates uniform normalization, truncation, and invalid-dimension rejection across text, image,
+  and audio.
+- Phase 53 keeps the TE proof on stored upstream goldens and tiny canonical smoke checks while the
+  WPM encoder remains compatible with both the maintained TE vocab and the existing BERT GGUF
+  parity fixture.
+- The first milestone stops at synchronous text/image/audio embedding extraction and one shared
+  output contract.
+- Proof for TE will use stored upstream golden embeddings and tiny cross-modal smoke checks rather
+  than the current generation-parity path.
+- Phase 47 defines the canonical proof anchors as deterministic in-memory payload contracts:
+  `red-square` for text/image and `pure-tone-440hz` for text/audio.
+- Phase numbering continues from prior milestone history, so `v1.11` starts at Phase 47.
+- The locked directory direction is `text/tokenizers/...`, `text/encoders/...`,
+  `vision/encoders/...`, `audio/encoders/...`, and `embeddings/generator/...`.
+- `*/forward/...` is not a required milestone domain; it becomes justified only when a modality
+  has more than one top-level contract reusing the same hidden-state execution path.
 
 ### Roadmap Evolution
 
-- Phase 46.1 inserted after Phase 46: Rename planner-family wrapper names to remove ambiguity and
-  wrapper indirection (URGENT)
+- `v1.10` remains ready for closeout; `v1.11` planning continues from the next free phase number
+  without deleting prior phase history.
 
 ### Pending Todos
 
@@ -87,24 +107,15 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Planner-family cutover must preserve batching behavior while changing naming, file placement, and
-  rule compliance.
-
-- Validation for this milestone must stay truthful to the current arm64 environment and avoid ARM
-  benchmark publication claims.
-
-- Scope creep into generator families or repo-wide cleanup would invalidate the milestone boundary.
-- Milestone proof now reflects the actual current arm64 validation host.
-- The milestone audit is refreshed; the closed FINDING-01, lint snapshot drift, and duplicate
-  planner alias are no longer open items.
-- Phase 46.1 is complete and closes the user-inserted rename gap by replacing the remaining
-  wrapper-era planner-family surface names in place, including the child-mode action trampolines,
-  instead of layering more aliases on top.
-- Non-blocking benchmark snapshot warnings remain listed tech debt, but phase execution is now
-  complete and milestone lifecycle can resume.
+- `v1.11` is archived, but `v1.10` still needs formal archival.
+- The gate script still tolerates benchmark snapshot regressions as warnings, so any published
+  performance claims should use a deliberate benchmark-review step rather than the raw gate tail.
+- `v1.10` still needs formal closeout and archival after its implementation-complete planner work.
+- `scripts/quality_gates.sh` is green after Phase 53, including coverage threshold enforcement;
+  bench snapshot regressions remain tolerated warnings under the gate script.
 
 ## Session Continuity
 
-Last session: 2026-04-04T18:24:13Z
-Stopped at: Phase 46.1 corrected and complete; v1.10 ready for completion with benchmark-warning tech debt
+Last session: 2026-04-14T21:28:34Z
+Stopped at: v1.11 archived; no active milestone is open
 Resume file: None

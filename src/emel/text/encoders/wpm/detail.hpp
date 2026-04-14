@@ -293,16 +293,47 @@ inline std::vector<std::string> wpm_preprocess(const std::string_view text) {
   return words;
 }
 
-inline constexpr size_t k_wpm_prefix_len = 3u;
-inline constexpr char k_wpm_prefix[] = "\xE2\x96\x81";
+inline constexpr size_t k_wpm_continuation_prefix_len = 2u;
+inline constexpr char k_wpm_continuation_prefix[] = "##";
+inline constexpr size_t k_wpm_word_start_prefix_len = 3u;
+inline constexpr char k_wpm_word_start_prefix[] = "\xE2\x96\x81";
 
 inline void wpm_copy_word_none(emel::text::encoders::action::context &,
                                const std::string &) noexcept {}
 
 inline void wpm_copy_word_some(emel::text::encoders::action::context &ctx,
                                const std::string &word) noexcept {
-  std::memcpy(ctx.scratch.buffer.data(), k_wpm_prefix, k_wpm_prefix_len);
-  std::memcpy(ctx.scratch.buffer.data() + k_wpm_prefix_len, word.data(), word.size());
+  std::memcpy(ctx.scratch.buffer.data(), word.data(), word.size());
+}
+
+inline void wpm_copy_continuation_piece_none(
+    emel::text::encoders::action::context &,
+    const std::string_view) noexcept {}
+
+inline void wpm_copy_continuation_piece_some(
+    emel::text::encoders::action::context &ctx,
+    const std::string_view piece) noexcept {
+  std::memcpy(ctx.scratch.buffer_alt.data(),
+              k_wpm_continuation_prefix,
+              k_wpm_continuation_prefix_len);
+  std::memcpy(ctx.scratch.buffer_alt.data() + k_wpm_continuation_prefix_len,
+              piece.data(),
+              piece.size());
+}
+
+inline void wpm_copy_word_start_piece_none(
+    emel::text::encoders::action::context &,
+    const std::string_view) noexcept {}
+
+inline void wpm_copy_word_start_piece_some(
+    emel::text::encoders::action::context &ctx,
+    const std::string_view piece) noexcept {
+  std::memcpy(ctx.scratch.buffer_alt.data(),
+              k_wpm_word_start_prefix,
+              k_wpm_word_start_prefix_len);
+  std::memcpy(ctx.scratch.buffer_alt.data() + k_wpm_word_start_prefix_len,
+              piece.data(),
+              piece.size());
 }
 
 inline void wpm_push_candidate_none(const event::encode &,
@@ -358,7 +389,7 @@ inline bool encode_wpm_process_word_some(const event::encode &ev,
                                          encode_result &result) {
   const int32_t word_token_start = count;
   const size_t word_len = word.size();
-  const bool has_capacity = k_wpm_prefix_len + word_len <= ctx.scratch.buffer.size();
+  const bool has_capacity = word_len <= ctx.scratch.buffer.size();
   using copy_handler_t = void (*)(emel::text::encoders::action::context &,
                                   const std::string &) noexcept;
   const copy_handler_t copy_handlers[2] = {
@@ -369,7 +400,7 @@ inline bool encode_wpm_process_word_some(const event::encode &ev,
 
   result.error = select_i32(!has_capacity, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), result.error);
   bool ok = has_capacity;
-  const size_t word_view_len = select_size(has_capacity, k_wpm_prefix_len + word_len, 0u);
+  const size_t word_view_len = select_size(has_capacity, word_len, 0u);
   const std::string_view word_view(ctx.scratch.buffer.data(), word_view_len);
   const int32_t n = static_cast<int32_t>(word_view.size());
   int32_t cursor = 0;
@@ -379,40 +410,95 @@ inline bool encode_wpm_process_word_some(const event::encode &ev,
     const int32_t i = select_i32(step_active, cursor, 0);
     bool found = false;
     int32_t matched_end = i;
-    const int32_t end = select_i32(step_active, std::min(n, i + ctx.max_token_len + 1), i);
+    const bool continuation = step_active && i > 0;
+    const int32_t prefix_len = select_i32(
+      continuation,
+      static_cast<int32_t>(k_wpm_continuation_prefix_len),
+      0);
+    const int32_t max_piece_len = std::max(1, ctx.max_token_len - prefix_len);
+    const int32_t end = select_i32(step_active, std::min(n, i + max_piece_len), i);
     bool scan_active = step_active;
     for (int32_t j = end; j > i; --j) {
       const bool scan_step_active = scan_active;
-      const std::string_view piece = word_view.substr(
-        static_cast<size_t>(i),
-        static_cast<size_t>(j - i));
-      using lookup_handler_t = int32_t (*)(const emel::text::encoders::action::context &,
-                                           const emel::model::data::vocab &,
-                                           const std::string_view) noexcept;
-      const lookup_handler_t lookup_handlers[2] = {
-          wpm_lookup_candidate_none,
-          wpm_lookup_candidate_some,
-      };
-      const int32_t token =
-          lookup_handlers[static_cast<size_t>(scan_step_active)](ctx, vocab, piece);
-      const bool hit = token != k_token_null;
-      bool pushed = true;
-      using push_handler_t = void (*)(const event::encode &,
-                                      int32_t,
-                                      int32_t &,
-                                      bool &) noexcept;
-      const push_handler_t push_handlers[2] = {
-          wpm_push_candidate_none,
-          wpm_push_candidate_some,
-      };
-      push_handlers[static_cast<size_t>(scan_step_active && hit)](ev, token, count, pushed);
-      const bool found_step = scan_step_active && hit;
-      const bool push_fail = found_step && !pushed;
-      result.error = select_i32(push_fail, emel::text::encoders::error::to_emel(emel::text::encoders::error::code::invalid_argument), result.error);
-      ok = ok && !push_fail;
-      found = found || found_step;
-      matched_end = select_i32(found_step, j, matched_end);
-      scan_active = scan_active && !push_fail && !found_step;
+      const size_t piece_offset = static_cast<size_t>(select_i32(scan_step_active, i, 0));
+      const size_t piece_size = static_cast<size_t>(select_i32(
+        scan_step_active,
+        j - i,
+        0));
+      const std::string_view raw_piece(word_view.data() + piece_offset, piece_size);
+      const bool continuation_piece = scan_step_active && i > 0;
+
+      for (int32_t candidate_index = 0; candidate_index < 2; ++candidate_index) {
+        const bool candidate_scan_active = scan_active;
+        const bool prefixed_candidate =
+            candidate_scan_active && candidate_index == 0;
+        const size_t prefix_len = select_size(
+            continuation_piece,
+            k_wpm_continuation_prefix_len,
+            k_wpm_word_start_prefix_len);
+        const size_t candidate_size =
+            piece_size + (prefix_len * static_cast<size_t>(prefixed_candidate));
+        const bool candidate_fits =
+            !prefixed_candidate || candidate_size <= ctx.scratch.buffer_alt.size();
+
+        using prefixed_handler_t = void (*)(emel::text::encoders::action::context &,
+                                            const std::string_view) noexcept;
+        const prefixed_handler_t prefixed_handlers[2][2] = {
+            {
+                wpm_copy_word_start_piece_none,
+                wpm_copy_word_start_piece_some,
+            },
+            {
+                wpm_copy_continuation_piece_none,
+                wpm_copy_continuation_piece_some,
+            },
+        };
+        prefixed_handlers[static_cast<size_t>(continuation_piece)]
+                         [static_cast<size_t>(prefixed_candidate && candidate_fits)](
+                             ctx, raw_piece);
+
+        const char *candidate_bases[2] = {raw_piece.data(), ctx.scratch.buffer_alt.data()};
+        const char *candidate_data =
+            candidate_bases[static_cast<size_t>(prefixed_candidate)];
+        const size_t safe_candidate_size = select_size(candidate_fits, candidate_size, 0u);
+        const std::string_view piece(candidate_data, safe_candidate_size);
+
+        using lookup_handler_t = int32_t (*)(const emel::text::encoders::action::context &,
+                                             const emel::model::data::vocab &,
+                                             const std::string_view) noexcept;
+        const lookup_handler_t lookup_handlers[2] = {
+            wpm_lookup_candidate_none,
+            wpm_lookup_candidate_some,
+        };
+        const int32_t token =
+            lookup_handlers[static_cast<size_t>(candidate_scan_active && candidate_fits)](
+                ctx, vocab, piece);
+        const bool hit = token != k_token_null;
+
+        bool pushed = true;
+        using push_handler_t = void (*)(const event::encode &,
+                                        int32_t,
+                                        int32_t &,
+                                        bool &) noexcept;
+        const push_handler_t push_handlers[2] = {
+            wpm_push_candidate_none,
+            wpm_push_candidate_some,
+        };
+        push_handlers[static_cast<size_t>(candidate_scan_active && hit)](
+            ev, token, count, pushed);
+
+        const bool found_step = candidate_scan_active && hit;
+        const bool push_fail = found_step && !pushed;
+        result.error = select_i32(
+            push_fail,
+            emel::text::encoders::error::to_emel(
+                emel::text::encoders::error::code::invalid_argument),
+            result.error);
+        ok = ok && !push_fail;
+        found = found || found_step;
+        matched_end = select_i32(found_step, j, matched_end);
+        scan_active = scan_active && !push_fail && !found_step;
+      }
     }
 
     const bool advance_cursor = step_active && found;

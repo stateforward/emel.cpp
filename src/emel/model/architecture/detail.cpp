@@ -3,11 +3,12 @@
 #include "emel/model/gemma4/detail.hpp"
 #include "emel/model/lfm2/detail.hpp"
 #include "emel/model/llama/detail.hpp"
+#include "emel/model/omniembed/detail.hpp"
 #include "emel/model/qwen3/detail.hpp"
 
 namespace emel::model {
 
-const std::array<architecture, 4> default_architectures = {{
+const std::array<architecture, 5> default_architectures = {{
     {
         .name = "llama",
         .load_hparams = &emel::model::llama::detail::load_hparams,
@@ -27,6 +28,11 @@ const std::array<architecture, 4> default_architectures = {{
         .name = "gemma4",
         .load_hparams = &emel::model::gemma4::detail::load_hparams,
         .validate_data = &emel::model::gemma4::detail::validate_execution_contract,
+    },
+    {
+        .name = "omniembed",
+        .load_hparams = &emel::model::omniembed::detail::load_hparams,
+        .validate_data = &emel::model::omniembed::detail::validate_execution_contract,
     },
 }};
 

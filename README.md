@@ -97,6 +97,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`docs/architecture/batch_planner_modes_sequential.md`](docs/architecture/batch_planner_modes_sequential.md)
 - [`docs/architecture/batch_planner_modes_simple.md`](docs/architecture/batch_planner_modes_simple.md)
 - [`docs/architecture/batch_planner.md`](docs/architecture/batch_planner.md)
+- [`docs/architecture/embeddings_generator.md`](docs/architecture/embeddings_generator.md)
 - [`docs/architecture/gbnf_rule_parser_definition_parser.md`](docs/architecture/gbnf_rule_parser_definition_parser.md)
 - [`docs/architecture/gbnf_rule_parser_expression_parser.md`](docs/architecture/gbnf_rule_parser_expression_parser.md)
 - [`docs/architecture/gbnf_rule_parser_lexer.md`](docs/architecture/gbnf_rule_parser_lexer.md)

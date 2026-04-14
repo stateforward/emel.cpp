@@ -14,6 +14,7 @@
 #include "emel/kernel/events.hpp"
 #include "emel/model/detail.hpp"
 #include "emel/model/llama/detail.hpp"
+#include "emel/model/omniembed/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 #include "emel/model/loader/sm.hpp"
 
@@ -98,6 +99,18 @@ void copy_name(std::array<char, emel::model::data::k_max_architecture_name> & de
   for (size_t i = 0; i < count; ++i) {
     dest[i] = value[i];
   }
+}
+
+void copy_metadata_string(emel::model::data::metadata & metadata,
+                          emel::model::data::metadata::string_view & field,
+                          const std::string_view value) {
+  field = {};
+  REQUIRE(metadata.blob_bytes_used + value.size() <= metadata.blob.size());
+  const auto offset = static_cast<size_t>(metadata.blob_bytes_used);
+  std::memcpy(metadata.blob.data() + offset, value.data(), value.size());
+  field.offset = metadata.blob_bytes_used;
+  field.length = static_cast<uint32_t>(value.size());
+  metadata.blob_bytes_used += static_cast<uint32_t>(value.size());
 }
 
 void append_tensor_name(emel::model::data & model, emel::model::data::tensor_record & tensor,
@@ -336,6 +349,61 @@ void build_gemma4_model(emel::model::data & model, const bool include_output_wei
   model.n_tensors = tensor_index;
 }
 
+void build_omniembed_model(emel::model::data & model, const bool include_audio_projection) {
+  std::memset(&model, 0, sizeof(model));
+  copy_name(model.architecture_name, "omniembed");
+  model.params.n_embd = 1280;
+  model.params.n_embd_out = 1280;
+  model.params.matryoshka_dimension_count = 4u;
+  model.params.matryoshka_dimensions[0] = 768;
+  model.params.matryoshka_dimensions[1] = 512;
+  model.params.matryoshka_dimensions[2] = 256;
+  model.params.matryoshka_dimensions[3] = 128;
+  model.meta.clip_data.has_vision_encoder = true;
+  model.meta.clip_data.has_audio_encoder = true;
+  model.meta.clip_vision_data.embedding_length = 640;
+  model.meta.clip_vision_data.projection_dim = 1280;
+  model.meta.clip_vision_data.image_size = 384;
+  model.meta.clip_vision_data.preproc_image_size = 384;
+  model.meta.clip_audio_data.embedding_length = 768;
+  model.meta.clip_audio_data.projection_dim = 1280;
+  model.meta.clip_audio_data.sample_rate = 32000;
+  model.meta.clip_audio_data.n_fft = 1024;
+  model.meta.clip_audio_data.win_length = 800;
+  model.meta.clip_audio_data.hop_size = 320;
+  model.meta.clip_audio_data.num_mel_bins = 128;
+  model.meta.clip_audio_data.low_frequency = 0.0f;
+  model.meta.clip_audio_data.high_frequency = 15000.0f;
+  model.meta.clip_audio_data.preemphasis_coefficient = 0.97f;
+  model.meta.clip_audio_data.log_offset = 1.0e-5f;
+  model.meta.clip_audio_data.normalize_bias = 4.5f;
+  model.meta.clip_audio_data.normalize_scale = 5.0f;
+  copy_metadata_string(model.meta,
+                       model.meta.clip_vision_data.encoder_name,
+                       "mobilenetv4_conv_medium.e180_r384_in12k");
+  copy_metadata_string(
+      model.meta, model.meta.clip_audio_data.encoder_name, "efficientat_mn20_as");
+  model.weights_data = model.tensors.data();
+  model.weights_size = 4096u;
+
+  uint32_t tensor_index = 0u;
+  const auto add = [&](const std::string_view name) {
+    append_tensor_name(model, model.tensors[tensor_index], name);
+    ++tensor_index;
+  };
+
+  add("text_encoder.backbone.weight");
+  add("text_projection.project.weight");
+  add("image_encoder.stem.weight");
+  add("image_projection.project.weight");
+  add("audio_encoder.stem.weight");
+  if (include_audio_projection) {
+    add("audio_projection.project.weight");
+  }
+
+  model.n_tensors = tensor_index;
+}
+
 template <class value_type>
 void append_scalar(std::vector<uint8_t> & bytes, const value_type value) {
   using unsigned_type = std::make_unsigned_t<value_type>;
@@ -469,6 +537,25 @@ void append_kv_u32_array(std::vector<uint8_t> & arena,
   append_scalar<uint64_t>(encoded, static_cast<uint64_t>(values.size()));
   for (const uint32_t value : values) {
     append_scalar<uint32_t>(encoded, value);
+  }
+  append_kv_entry(arena,
+                  entries,
+                  key,
+                  emel::gguf::loader::detail::constants::gguf_type_array,
+                  std::span<const uint8_t>{encoded});
+}
+
+template <class value_type>
+void append_kv_scalar_array(std::vector<uint8_t> & arena,
+                            std::vector<emel::gguf::loader::kv_entry> & entries,
+                            const std::string_view key,
+                            const uint32_t element_type,
+                            const std::span<const value_type> values) {
+  std::vector<uint8_t> encoded = {};
+  append_scalar<uint32_t>(encoded, element_type);
+  append_scalar<uint64_t>(encoded, static_cast<uint64_t>(values.size()));
+  for (const value_type value : values) {
+    append_scalar<value_type>(encoded, value);
   }
   append_kv_entry(arena,
                   entries,
@@ -1143,6 +1230,214 @@ TEST_CASE("model_detail_loads_lfm2_hparams_from_gguf_binding") {
   CHECK(model->params.tie_word_embeddings);
   CHECK(model->params.attention_layer_norm_rms_epsilon == doctest::Approx(1e-6f));
   CHECK(model->params.rope_freq_base == doctest::Approx(1000000.0f));
+}
+
+TEST_CASE("model_detail_loads_omniembed_hparams_from_gguf_binding") {
+  std::vector<uint8_t> arena = {};
+  std::vector<emel::gguf::loader::kv_entry> entries = {};
+  auto model = std::make_unique<emel::model::data>();
+  const std::array<std::string_view, 3> tokens = {"[PAD]", "hello", "[SEP]"};
+  const std::array<uint32_t, 4> matryoshka_dims = {768u, 512u, 256u, 128u};
+
+  append_kv_string(arena, entries, "general.architecture", "omniembed");
+  append_kv_u32(arena, entries, "omniembed.embed_dim", 1280u);
+  append_kv_string(
+      arena,
+      entries,
+      "omniembed.image_encoder_name",
+      "mobilenetv4_conv_medium.e180_r384_in12k");
+  append_kv_u32(arena, entries, "omniembed.image_encoder_dim", 1280u);
+  append_kv_string(arena, entries, "omniembed.audio_encoder_name", "efficientat_mn20_as");
+  append_kv_u32(arena, entries, "omniembed.audio_encoder_dim", 1920u);
+  append_kv_u32_array(
+      arena, entries, "omniembed.matryoshka_dims", std::span<const uint32_t>{matryoshka_dims});
+  append_kv_string_array(
+      arena, entries, "tokenizer.tokens", std::span<const std::string_view>{tokens});
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{entries},
+  };
+
+  REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
+  CHECK(emel::model::architecture_name_view(*model) == "omniembed");
+  CHECK(emel::model::is_supported_execution_architecture("omniembed"));
+  CHECK(emel::model::is_omniembed_execution_architecture("omniembed"));
+  CHECK(model->params.n_embd == 1280);
+  CHECK(model->params.n_embd_out == 1280);
+  CHECK(model->params.matryoshka_dimension_count == 4u);
+  CHECK(model->params.matryoshka_dimensions[0] == 768);
+  CHECK(model->params.matryoshka_dimensions[3] == 128);
+  CHECK(model->meta.clip_data.has_vision_encoder);
+  CHECK(model->meta.clip_data.has_audio_encoder);
+  CHECK(emel::model::metadata_string_view(model->meta, model->meta.clip_vision_data.encoder_name) ==
+        "mobilenetv4_conv_medium.e180_r384_in12k");
+  CHECK(model->meta.clip_vision_data.embedding_length == 1280);
+  CHECK(model->meta.clip_vision_data.projection_dim == 1280);
+  CHECK(model->meta.clip_vision_data.image_size == 384);
+  CHECK(model->meta.clip_vision_data.preproc_image_size == 384);
+  CHECK(model->meta.clip_vision_data.image_mean_count == 3u);
+  CHECK(model->meta.clip_vision_data.image_std_count == 3u);
+  CHECK(model->meta.clip_vision_data.image_mean[0] == doctest::Approx(0.485f));
+  CHECK(model->meta.clip_vision_data.image_std[2] == doctest::Approx(0.225f));
+  CHECK(emel::model::metadata_string_view(model->meta, model->meta.clip_audio_data.encoder_name) ==
+        "efficientat_mn20_as");
+  CHECK(model->meta.clip_audio_data.embedding_length == 1920);
+  CHECK(model->meta.clip_audio_data.projection_dim == 1280);
+  CHECK(model->meta.clip_audio_data.sample_rate == 32000);
+  CHECK(model->meta.clip_audio_data.n_fft == 1024);
+  CHECK(model->meta.clip_audio_data.win_length == 800);
+  CHECK(model->meta.clip_audio_data.hop_size == 320);
+  CHECK(model->meta.clip_audio_data.num_mel_bins == 128);
+  CHECK(model->meta.clip_audio_data.high_frequency == doctest::Approx(15000.0f));
+  CHECK(model->meta.clip_audio_data.preemphasis_coefficient == doctest::Approx(0.97f));
+  CHECK(model->meta.clip_audio_data.log_offset == doctest::Approx(1.0e-5f));
+  CHECK(model->meta.clip_audio_data.normalize_bias == doctest::Approx(4.5f));
+  CHECK(model->meta.clip_audio_data.normalize_scale == doctest::Approx(5.0f));
+  CHECK(model->vocab_data.n_tokens == 3u);
+}
+
+TEST_CASE("model_detail_loads_omniembed_hparams_from_i16_matryoshka_binding") {
+  std::vector<uint8_t> arena = {};
+  std::vector<emel::gguf::loader::kv_entry> entries = {};
+  auto model = std::make_unique<emel::model::data>();
+  const std::array<int16_t, 4> matryoshka_dims = {768, 512, 256, 128};
+
+  append_kv_string(arena, entries, "general.architecture", "omniembed");
+  append_kv_u32(arena, entries, "omniembed.embed_dim", 1280u);
+  append_kv_u32(arena, entries, "omniembed.image_encoder_dim", 640u);
+  append_kv_u32(arena, entries, "omniembed.audio_encoder_dim", 768u);
+  append_kv_scalar_array(
+      arena,
+      entries,
+      "omniembed.matryoshka_dims",
+      emel::gguf::loader::detail::constants::gguf_type_int16,
+      std::span<const int16_t>{matryoshka_dims});
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{entries},
+  };
+
+  REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
+  CHECK(model->params.matryoshka_dimension_count == 4u);
+  CHECK(model->params.matryoshka_dimensions[0] == 768);
+  CHECK(model->params.matryoshka_dimensions[3] == 128);
+}
+
+TEST_CASE("model_detail_loads_omniembed_hparams_from_i64_matryoshka_binding") {
+  std::vector<uint8_t> arena = {};
+  std::vector<emel::gguf::loader::kv_entry> entries = {};
+  auto model = std::make_unique<emel::model::data>();
+  const std::array<int64_t, 3> matryoshka_dims = {1024, 512, 256};
+
+  append_kv_string(arena, entries, "general.architecture", "omniembed");
+  append_kv_u32(arena, entries, "omniembed.embed_dim", 1280u);
+  append_kv_u32(arena, entries, "omniembed.image_encoder_dim", 640u);
+  append_kv_u32(arena, entries, "omniembed.audio_encoder_dim", 768u);
+  append_kv_scalar_array(
+      arena,
+      entries,
+      "omniembed.matryoshka_dims",
+      emel::gguf::loader::detail::constants::gguf_type_int64,
+      std::span<const int64_t>{matryoshka_dims});
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{entries},
+  };
+
+  REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
+  CHECK(model->params.matryoshka_dimension_count == 3u);
+  CHECK(model->params.matryoshka_dimensions[0] == 1024);
+  CHECK(model->params.matryoshka_dimensions[2] == 256);
+}
+
+TEST_CASE("model_detail_loads_omniembed_hparams_without_matryoshka_array") {
+  std::vector<uint8_t> arena = {};
+  std::vector<emel::gguf::loader::kv_entry> entries = {};
+  auto model = std::make_unique<emel::model::data>();
+
+  append_kv_string(arena, entries, "general.architecture", "omniembed");
+  append_kv_u32(arena, entries, "omniembed.embed_dim", 1280u);
+  append_kv_u32(arena, entries, "omniembed.image_encoder_dim", 640u);
+  append_kv_u32(arena, entries, "omniembed.audio_encoder_dim", 768u);
+
+  const emel::model::detail::kv_binding binding{
+      .arena = std::span<const uint8_t>{arena},
+      .entries = std::span<const emel::gguf::loader::kv_entry>{entries},
+  };
+
+  REQUIRE(emel::model::detail::load_hparams_from_gguf(binding, *model));
+  CHECK(model->params.matryoshka_dimension_count == 0u);
+}
+
+TEST_CASE("model_omniembed_detail_builds_multimodal_execution_contract") {
+  auto model = std::make_unique<emel::model::data>();
+  build_omniembed_model(*model, true);
+
+  emel::model::omniembed::detail::execution_contract contract = {};
+  REQUIRE(emel::model::omniembed::detail::build_execution_contract(*model, contract) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(contract.embedding_length == 1280);
+  CHECK(contract.image_encoder_length == 640);
+  CHECK(contract.audio_encoder_length == 768);
+  CHECK(contract.matryoshka_dimension_count == 4u);
+  CHECK(contract.matryoshka_dimensions[1] == 512);
+  CHECK(contract.text_encoder.tensor_count == 1u);
+  CHECK(contract.text_projection.tensor_count == 1u);
+  CHECK(contract.image_encoder.tensor_count == 1u);
+  CHECK(contract.image_projection.tensor_count == 1u);
+  CHECK(contract.audio_encoder.tensor_count == 1u);
+  CHECK(contract.audio_projection.tensor_count == 1u);
+  CHECK(contract.text_encoder.first.name == "text_encoder.backbone.weight");
+  CHECK(contract.audio_projection.first.name == "audio_projection.project.weight");
+  CHECK(emel::model::omniembed::detail::validate_data(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+  CHECK(emel::model::omniembed::detail::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::none));
+}
+
+TEST_CASE("model_execution_contract_rejects_omniembed_without_audio_projection_family") {
+  auto model = std::make_unique<emel::model::data>();
+  build_omniembed_model(*model, false);
+
+  emel::model::omniembed::detail::execution_contract contract = {};
+  CHECK(emel::model::omniembed::detail::build_execution_contract(*model, contract) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(emel::model::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+}
+
+TEST_CASE("model_execution_contract_rejects_omniembed_with_invalid_matryoshka_shape") {
+  auto model = std::make_unique<emel::model::data>();
+  build_omniembed_model(*model, true);
+  model->params.matryoshka_dimensions[1] = 1536;
+
+  CHECK(emel::model::omniembed::detail::validate_data(*model) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+  CHECK(emel::model::omniembed::detail::validate_execution_contract(*model) ==
+        emel::error::cast(emel::model::loader::error::model_invalid));
+}
+
+TEST_CASE("model_omniembed_detail_ignores_unusable_family_tensor_storage") {
+  auto model = std::make_unique<emel::model::data>();
+  build_omniembed_model(*model, true);
+
+  auto & unusable = model->tensors[model->n_tensors];
+  append_tensor_name(*model, unusable, "text_encoder.unusable.weight");
+  unusable.n_dims = 1;
+  unusable.dims[0] = 0;
+  unusable.data = &unusable;
+  unusable.data_size = 8u;
+  ++model->n_tensors;
+
+  emel::model::omniembed::detail::execution_contract contract = {};
+  REQUIRE(emel::model::omniembed::detail::build_execution_contract(*model, contract) ==
+          emel::error::cast(emel::model::loader::error::none));
+  CHECK(contract.text_encoder.tensor_count == 1u);
 }
 
 TEST_CASE("model_execution_contract_accepts_canonical_gemma4_shared_kv_contract") {

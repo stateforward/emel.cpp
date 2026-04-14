@@ -1,237 +1,186 @@
 # Feature Research
 
-**Domain:** Single maintained `LiquidAI/LFM2.5-1.2B-Thinking-GGUF` ARM slice on EMEL's existing
-generation, parity, and benchmark surfaces
-**Researched:** 2026-03-31
-**Confidence:** HIGH
+**Domain:** First maintained `augmem/TE-75M-GGUF` trimodal embedding slice for EMEL
+**Researched:** 2026-04-13
+**Confidence:** MEDIUM
 
-## Feature Landscape
+## Milestone Recommendation
 
-### Table Stakes (Users Expect These)
+The first TE-75M milestone should establish one truthful maintained embedding vertical slice, not a
+general multimodal platform. EMEL is currently generation-oriented, its existing `text/encoders`
+cluster explicitly excludes multimodal model encoders, and there is no existing `vision`, `audio`,
+or embedding-domain actor family in `src/emel/`.
 
-Features EMEL needs if it claims one truthful maintained Liquid Thinking slice.
+Recommendation: pin **one** official GGUF file first, and make it
+`TE-75M-q8_0.gguf`. This is an inference from two facts: Hugging Face positions `q8_0` as the
+minimal-quality-loss quant, and EMEL already has visible `q8_0` kernel/test surface while `q5_0`
+support is not visibly implemented beyond dtype/loader recognition. Starting with `q5_0` would
+turn the first maintained slice into a broader quant-runtime milestone immediately.
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| One documented official Liquid GGUF fixture with provenance | EMEL already treats one stable `tests/models/` artifact as the truth anchor for each maintained slice | LOW | Lock one exact official filename, stable path, SHA256, and download URL before any runtime work. The maintained anchor is now `LFM2.5-1.2B-Thinking-Q4_K_M.gguf`, because the user explicitly reprioritized the milestone to that docs-recommended quant. |
-| One explicit conditioning contract derived from Liquid's official chat format | The official model card says LFM2.5 uses a ChatML-like format, not free-form raw prompting, and separately documents tool use | MEDIUM | Keep the maintained path on one structured chat-message contract, `add_generation_prompt=true`, `tools=none`, and a fixed thinking-mode choice. Do not allow implicit raw fallback on the maintained slice. |
-| Explicit `lfm2` runtime bring-up on the maintained generator path | LiquidAI publishes this GGUF as architecture `lfm2`, and the native model card describes a hybrid 16-layer topology, not a Llama/Qwen clone | HIGH | v1.9 is not done if EMEL aliases `lfm2` to an existing family. The milestone needs truthful model acceptance, loading, and generation for this exact architecture. |
-| Quantized runtime contract proof for the chosen fixture only | A maintained ARM slice implies the shipped runtime can actually execute the pinned official artifact | HIGH | Publish native-vs-approved contract evidence for the chosen file. Do not imply support for sibling official quants just because they exist in the repo on Hugging Face. |
-| Maintained parity proof against `llama.cpp` using the same fixture and conditioning | EMEL's correctness claims live on `tools/paritychecker --generation`, not on ad hoc manual runs | HIGH | Match the existing maintained pattern: same GGUF file, same prompt contract, and the usual stored decode-length coverage such as `1/10/100/1000` plus `--dump` and `--attribution`. |
-| Regression protection for existing maintained anchors while Liquid lands | Brownfield widenings are expected to preserve the shipped Llama and canonical Qwen proof, not trade one truth anchor for another | MEDIUM | Coverage should catch fixture drift, conditioning drift, architecture misclassification, and accidental regressions on the prior maintained slices. |
-| Benchmark compare/docs publication for the exact parity-backed Liquid slice | EMEL already publishes benchmark evidence only when it maps to a maintained, correctness-backed slice | MEDIUM | Add one Liquid row to the existing compare/docs flow after parity is green. Keep fixture naming, contract naming, and attribution readable in published output. |
+## Table Stakes
 
-### Differentiators (Competitive Advantage)
+These are the operator-facing feature categories that belong in the first maintained TE-75M
+milestone.
 
-Helpful additions that make the Liquid bring-up more trustworthy and easier to operate, but are not
-strictly required to call v1.9 complete.
+| Category | Why It Belongs In v1 | Proof / Testing Implication | Likely Dependencies |
+|----------|-----------------------|-----------------------------|---------------------|
+| **Pinned maintained TE fixture** | EMEL’s maintained model pattern starts with one exact official artifact under `tests/models/`. TE-75M support is not truthful until the repo names one canonical file, URL, and checksum. | Add one `tests/models/README.md` entry and loader/integration coverage that rejects drifted or wrong fixtures. | Official Hugging Face artifact, stable local path, checksum, documented provenance. |
+| **Explicit `omniembed` model acceptance** | Hugging Face API reports `gguf.architecture=\"omniembed\"`; EMEL does not currently support that family. Operators need truthful accept/reject behavior, not silent aliasing to LLM paths. | Loader tests should verify architecture detection, required tensor families, projection-head presence, and explicit rejection of unsupported TE siblings or malformed GGUFs. | New model-family loader/validation rules; TE-specific execution views; fixture metadata. |
+| **Text embedding request path** | First maintained support must let operators submit text and receive a TE shared-space embedding. Reusing only the existing generator/text stack is insufficient because TE is an embedding model, not a decoder. | New machine flow tests and golden-vector tests for text inputs; explicit unexpected-event/error-path coverage. | Narrow text request contract, TE text encoder actor, TE text projection path, shared embedding output contract. |
+| **Image embedding request path** | TE-75M is marketed as trimodal. If image input is missing, the maintained claim is incomplete. The first slice should accept one documented in-memory image contract rather than broad file-format decoding. | Flow tests for valid/invalid image requests plus golden-vector tests on a tiny maintained image set. | Vision preprocessing contract, vision encoder state machine, image projection path, maintained image fixtures. |
+| **Audio embedding request path** | The milestone needs real audio support, not text-image only support under a trimodal name. The first slice should accept one documented in-memory audio contract and keep broad media ingestion out of scope. | Flow tests for valid/invalid audio requests plus golden-vector tests on a tiny maintained audio set. | Audio preprocessing contract, audio encoder state machine, audio projection path, maintained audio fixtures. |
+| **Shared embedding output contract** | Operators need one consistent result shape regardless of modality: L2-normalized shared-space vectors plus the advertised Matryoshka truncation options. This is core product behavior, not optional polish. | Verify full 1280-d output, valid truncation to `768/512/256/128`, renormalization after truncation, and explicit rejection of unsupported dimensions. | Per-modality encode paths, projection-head correctness, output buffer contract. |
+| **Deterministic error and capability reporting** | First maintained support must tell operators what is unsupported: wrong modality payload shape, unsupported dimension, wrong model file, and unsupported quant. Silent fallback would be misleading. | Negative tests should cover bad requests, unsupported quant/file choices, and unexpected-event handling. | Stable request schema, explicit error codes/events, narrow supported surface. |
+| **Maintained proof surface for trimodal embeddings** | EMEL cannot call the milestone “maintained” on ad hoc manual runs. Operators need repeatable evidence that the three modality lanes land in the same usable space. | Add golden embeddings from the official upstream model lane, cross-modal smoke checks on tiny canonical triplets, and regression tests that run in `emel_tests`. | Fixture provenance, canonical text/image/audio examples, golden-baseline generation workflow. |
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| Published formatter-contract metadata on parity and benchmark outputs | Makes every maintained claim auditable: reviewers can see the slice was run with the intended structured contract instead of a silent raw-text shortcut | LOW | Reuse the existing `generation_formatter_contract` publication seam and make the Liquid row explicit about `tools=none` and the chosen thinking-mode setting. |
-| Explicit negative proof for unsupported Liquid asks | Truthfulness improves when the repo proves what it rejects, not only what it accepts | MEDIUM | Add failure coverage for wrong Liquid fixture paths, unsupported Liquid family members, unsupported quantizations, or unsupported template variants instead of silently broadening acceptance. |
-| Stable three-anchor compare readability | Once Liquid joins Llama and Qwen, operators need publication rows that stay easy to distinguish and review over time | LOW | Use family/variant/fixture-specific slugs so docs and stored compare output do not blur the maintained anchors together. |
-| Documented fixture-choice rationale | Liquid's docs generally recommend `Q4_K_M`, and the user wants that as the maintained truth anchor | LOW | Recording why v1.9 picked `Q4_K_M` makes the broadened quant-runtime scope explicit instead of accidental. |
+## Differentiators That Matter
 
-### Anti-Features (Commonly Requested, Often Problematic)
+These are valuable follow-ons that materially improve operator trust and usability, but they are
+not required to call the first TE-75M slice complete.
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| Broad "Liquid support" in v1.9 | It sounds stronger to say the repo supports Liquid generally | `LFM2.5-1.2B-Thinking`, `Instruct`, `Base`, `JP`, `VL`, `Audio`, and larger families are not the same acceptance surface, topology, or prompt contract | Keep v1.9 fixed to one maintained `LFM2.5-1.2B-Thinking-GGUF` slice only |
-| All official GGUF quantizations for the first milestone | The official GGUF repo exposes `Q4_0`, `Q4_K_M`, `Q5_K_M`, `Q6_K`, `Q8_0`, `BF16`, and `F16`, so broad coverage is tempting | EMEL does not automatically inherit support for every official quant. Claiming the whole ladder would turn one slice bring-up into a quant-matrix milestone | Pin one exact official file first. v1.9 now names `Q4_K_M`; all other quants stay out of scope until separately proven |
-| Tool use or function calling as part of v1.9 | The official model card documents tool use, so it feels close at hand | Tool schemas, tool-role replay, assistant call serialization, and any new CLI/API request surfaces are separate product work from first-slice truth | Keep the maintained contract at `tools=none`; defer tool use to a later milestone after the slice is already parity-backed |
-| Raw prompt fallback or broad prompt-control knobs on the maintained path | Reusing a raw text lane or open-ended prompt controls looks like the fastest way to get output | The official model card points to a ChatML-like template, and broadening prompt controls makes parity and benchmark results harder to interpret | Keep one fixed structured chat-message contract and reject unsupported request shapes explicitly |
-| Benchmark publication before parity and regression are green | Bench output is visible and easy to demo | It creates speed claims for a slice whose correctness or contract is still unresolved | Land parity and regression protection first, then publish benchmark evidence for the same slice |
-| Aliasing `lfm2` to an existing architecture for speed | It reduces apparent bring-up work | The official model is explicitly `lfm2` and described as a hybrid architecture, so aliasing would create false readiness | Add explicit `lfm2` runtime handling or keep the architecture unsupported until it is real |
+| Feature | Value | Proof / Testing Implication | Depends On |
+|---------|-------|-----------------------------|------------|
+| **Tiny cross-modal retrieval smoke tool** | Makes the shared-space claim auditable by showing a known text/image/audio triplet ranks together without requiring a vector database. | Add a small deterministic smoke corpus and nearest-neighbor expectation tests. | All three modality lanes, golden baselines, shared embedding contract. |
+| **Small-batch encode support** | Improves real operator throughput for ingestion jobs without forcing a full mixed-modality scheduler in v1. | Add bounded-work tests and batch-shape coverage; keep the first version same-modality only. | Stable single-item encode flow, output buffer contract, capacity/error rules. |
+| **Published dimension-vs-cost guidance** | TE-75M’s Matryoshka surface is more useful when operators can see when `1280` vs `256` is worth using. | Add benchmark/docs publication for the maintained fixture and dimensions only after correctness is stable. | Shared embedding contract, maintained benchmark harness. |
+| **Second official quant after launch** | Once the q8_0 truth anchor is stable, supporting `q5_0` becomes a real product expansion rather than speculative breadth. | Needs separate runtime proof and explicit negative/positive quant tests. | Stable q8_0 launch, additional quant-runtime implementation, new maintained fixture decision. |
+
+## Anti-Features And Explicit Deferments
+
+These should be kept out of the first maintained milestone.
+
+| Deferred Surface | Why Defer | What To Do Instead In v1 |
+|------------------|-----------|---------------------------|
+| **Broad quant-matrix support (`q5_0` plus `q8_0`)** | The first milestone should prove one truthful slice. `q5_0` is a different runtime surface and is not visibly covered by today’s kernel implementation. | Launch with `TE-75M-q8_0.gguf` only and reject other quants explicitly. |
+| **Generic media file decoding/transcoding** | JPEG/PNG/WAV/MP3 decode, resampling, channel mixing, and metadata handling are a separate product surface from inference. They also widen determinism and test scope immediately. | Accept one narrow in-memory image contract and one narrow in-memory audio contract. |
+| **Vector index / ANN search / reranking inside EMEL** | TE-75M enables retrieval, but index management is not the inference engine’s first maintained obligation. | Stop at embedding extraction plus optional smoke-level similarity proof. |
+| **Multimodal chat, captioning, transcription, or generation claims** | TE-75M is a feature-extraction model, and EMEL’s current maintained story is generation-oriented. Mixing those product surfaces would muddy the milestone. | Keep the milestone strictly about embeddings. |
+| **Raw encoder hidden-state exposure** | Operators primarily need final shared-space embeddings. Exposing intermediate text/image/audio features broadens API and test surface with little first-milestone value. | Return final normalized embeddings only. |
+| **Mixed-modality scheduling and streaming** | Streaming ingestion and heterogeneous batch planning are useful later, but they are not required to prove one synchronous trimodal slice. | Keep first requests synchronous and bounded, one modality per request. |
+| **Public C ABI / CLI expansion as part of the first slice** | EMEL’s public C surface is currently minimal. A stable public multimedia API is a separate commitment from proving internal maintained support. | Land the milestone first on the existing repo/testing/tool seams, then decide if a public API milestone is warranted. |
+| **Performance publication before correctness proof** | Benchmark numbers without trustworthy embeddings would create a false “supported” story. | Add docs/bench publication only after golden-vector and smoke-proof coverage is green. |
 
 ## Feature Dependencies
 
 ```text
-[One official Liquid fixture with provenance]
-    └──requires──> [Stable maintained path and checksum]
+[Pinned TE-75M-q8_0 fixture]
+    └──requires──> [Provenance + checksum + stable tests/models path]
 
-[One explicit Liquid conditioning contract]
-    ├──requires──> [One official Liquid fixture with provenance]
-    └──requires──> [Official GGUF chat-template inspection]
+[Explicit omniembed model acceptance]
+    └──requires──> [Pinned TE-75M-q8_0 fixture]
 
-[Explicit lfm2 runtime bring-up]
-    ├──requires──> [One official Liquid fixture with provenance]
-    └──requires──> [Architecture-specific execution/load support]
+[Text embedding path]
+    ├──requires──> [Explicit omniembed model acceptance]
+    └──requires──> [TE text encoder + text projection]
 
-[Quantized runtime contract proof]
-    ├──requires──> [Explicit lfm2 runtime bring-up]
-    └──requires──> [Chosen official quantized fixture]
+[Image embedding path]
+    ├──requires──> [Explicit omniembed model acceptance]
+    └──requires──> [Vision preprocessing contract + vision encoder + image projection]
 
-[Maintained parity proof]
-    ├──requires──> [One explicit Liquid conditioning contract]
-    ├──requires──> [Explicit lfm2 runtime bring-up]
-    └──requires──> [Quantized runtime contract proof]
+[Audio embedding path]
+    ├──requires──> [Explicit omniembed model acceptance]
+    └──requires──> [Audio preprocessing contract + audio encoder + audio projection]
 
-[Regression protection]
-    ├──requires──> [Maintained parity proof]
-    └──requires──> [Existing Llama and Qwen maintained tests]
+[Shared embedding output contract]
+    ├──requires──> [Text embedding path]
+    ├──requires──> [Image embedding path]
+    └──requires──> [Audio embedding path]
 
-[Benchmark compare/docs publication]
-    ├──requires──> [Maintained parity proof]
-    └──requires──> [Regression protection]
+[Maintained trimodal proof surface]
+    ├──requires──> [Shared embedding output contract]
+    └──requires──> [Golden baselines from official upstream TE model]
 
-[Tool use / function calling]
-    ──conflicts──> [Narrow first-slice maintained contract]
+[Cross-modal retrieval smoke tool]
+    └──requires──> [Maintained trimodal proof surface]
 
-[Broad Liquid-family claims]
-    ──conflicts──> [Single maintained truth anchor]
+[Second quant support]
+    ──conflicts-with──> [Narrow first-slice q8_0 scope]
+
+[Generic media file decode]
+    ──conflicts-with──> [Narrow deterministic in-memory modality contracts]
 ```
 
-### Dependency Notes
+## MVP Recommendation
 
-- **Fixture selection comes first:** the exact official file determines both runtime scope and what
-  parity/benchmark claims are honest. This is the most important v1.9 scoping decision.
-- **Conditioning must be shared across EMEL and `llama.cpp`:** parity is only meaningful if both
-  sides see the same structured request and generation prompt behavior.
-- **Parity depends on real runtime support:** benchmark publication is downstream of truthful model
-  acceptance and execution, not a substitute for it.
-- **Regression protection is part of the feature, not optional polish:** in this repo, a new
-  maintained slice is incomplete if it can silently break prior maintained anchors.
-- **Tool use conflicts with first-slice clarity:** once tools enter the contract, request shape,
-  output interpretation, and docs scope all expand at once.
+Prioritize these categories for the first maintained TE milestone:
 
-## MVP Definition
+1. **Pinned q8_0 truth anchor**
+   - `TE-75M-q8_0.gguf` only
+   - documented provenance and checksum
+   - explicit rejection of other TE files for now
 
-### Launch With (v1)
+2. **Three synchronous modality lanes**
+   - text -> shared embedding
+   - image -> shared embedding
+   - audio -> shared embedding
+   - one narrow request contract per modality, in memory only
 
-These are the features that belong in v1.9 itself.
+3. **One shared output contract**
+   - normalized embedding output
+   - supported truncation to `1280/768/512/256/128`
+   - deterministic errors for unsupported dimensions and invalid payloads
 
-- [ ] One official `tests/models/LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture is documented with
-      source, checksum, stable maintained path, and download URL
-      Essential because the milestone needs one reproducible truth anchor. The user explicitly
-      approved `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` as the maintained variant.
-- [ ] One explicit structured chat-message conditioning contract is documented and used in both
-      EMEL and `llama.cpp`
-      Essential because the official model card defines a ChatML-like format and a separate tool-use
-      surface; v1.9 should choose one narrow maintained contract.
-- [ ] EMEL truthfully accepts, loads, and generates on that exact official fixture through the
-      maintained generator path
-      Essential because this milestone is runtime bring-up, not model-catalog paperwork.
-- [ ] The maintained path publishes quantized-contract evidence for that exact fixture without false
-      support claims for sibling official quants
-      Essential because one ARM slice must mean the shipped runtime contract is real.
-- [ ] `tools/paritychecker --generation` proves EMEL against `llama.cpp` for that slice using the
-      same fixture and conditioning contract
-      Essential because paritychecker is the repo's maintained correctness gate.
-- [ ] Regression tests keep the shipped Llama ARM and canonical Qwen slices green while Liquid is
-      added
-      Essential because the repo already has multiple maintained anchors.
-- [ ] `tools/bench` compare output and generated docs publish the same Liquid slice after parity is
-      real
-      Essential because EMEL's benchmark claims must stay tied to maintained proof.
+4. **Maintained proof, not just bring-up**
+   - golden-vector baselines from the official TE upstream lane
+   - tiny cross-modal smoke expectations
+   - regression coverage in `emel_tests`
 
-### Add After Validation (v1.x)
+## Testing And Proof Notes
 
-- [ ] A second official Liquid artifact on the same family
-      Add only after the first slice is stable. Good follow-up examples: `Q6_K` or `Q8_0` after a
-      truthful `Q4_K_M` launch, chosen as explicit follow-on runtime scope.
-- [ ] Richer multi-turn or system-message coverage on the same template
-      Add after the single-message maintained contract is stable and publication stays readable.
-- [ ] Stronger benchmark drift policy for the Liquid row
-      Add once the three-anchor compare surface is stable enough to justify a stricter gate.
+- **Do not assume the existing `llama.cpp` parity lane applies.**
+  I did not find `omniembed` in EMEL, and I did not find an obvious `omniembed` code-search hit in
+  `ggml-org/llama.cpp`. Treat TE proof as needing a new baseline source unless later research proves
+  a reference runtime exists.
+- **Golden vectors are table stakes here.**
+  The cleanest proof surface is to generate a tiny canonical set of text/image/audio embeddings from
+  the official `augmem/TE-75M` upstream lane and check EMEL against those stored baselines.
+- **Cross-modal smoke should be tiny and deterministic.**
+  Use a few canonical triplets, not a benchmark dataset import. The goal is proof of shared-space
+  behavior, not productized retrieval evaluation.
+- **Test naming should mirror new domains.**
+  Likely domains are `tests/embedding/`, `tests/vision/`, and `tests/audio/`, with one file per
+  machine or behavior, aligned with `AGENTS.md`.
+- **Quality gates still apply.**
+  The milestone should fit the existing `emel_tests` and `scripts/quality_gates.sh` workflow even
+  if TE-specific proof replaces the usual generation parity pattern.
 
-### Future Consideration (v2+)
+## Requirement-Shaped Categories
 
-- [ ] Other Liquid model families such as `Instruct`, `Base`, `JP`, `VL`, `Audio`, or larger
-      checkpoints
-      Defer because each widens acceptance, topology, and docs scope.
-- [ ] Tool use or function-calling request/response support
-      Defer because it is a distinct conditioning and API-surface milestone.
-- [ ] Broader official GGUF quant matrix support
-      Defer because each added quant changes the runtime truth contract and publication story.
-- [ ] New public CLI or C API surfaces shaped around Liquid-specific requests
-      Defer because v1.9 should stay on the existing maintained generator, parity, and benchmark
-      seams.
+These are the categories most ready to become requirement sections or REQ IDs.
 
-## Feature Prioritization Matrix
-
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| One official Liquid fixture with provenance | HIGH | LOW | P1 |
-| One explicit Liquid conditioning contract | HIGH | MEDIUM | P1 |
-| Explicit `lfm2` runtime bring-up | HIGH | HIGH | P1 |
-| Quantized runtime contract proof for the chosen fixture | HIGH | HIGH | P1 |
-| Maintained parity proof against `llama.cpp` | HIGH | HIGH | P1 |
-| Regression protection for Llama, Qwen, and Liquid anchors | HIGH | MEDIUM | P1 |
-| Benchmark compare/docs publication for the same slice | HIGH | MEDIUM | P1 |
-| Formatter-contract metadata publication | MEDIUM | LOW | P2 |
-| Negative proof for unsupported Liquid surfaces | MEDIUM | MEDIUM | P2 |
-| Stable three-anchor compare readability | MEDIUM | LOW | P2 |
-| Second Liquid fixture on the same family | MEDIUM | HIGH | P3 |
-| Tool use / function calling | LOW | HIGH | P3 |
-| Broad Liquid-family rollout | LOW | HIGH | P3 |
-| Full official GGUF quant matrix | LOW | HIGH | P3 |
-
-**Priority key:**
-- P1: Must have for launch
-- P2: Should have, add when possible
-- P3: Nice to have, future consideration
-
-## Repo Surface Analysis
-
-| Feature | Existing EMEL Surface | Current State | v1.9 Approach |
-|---------|------------------------|---------------|----------------|
-| Official fixture provenance | `tests/models/README.md` | Maintained fixture pattern already exists for Llama and Qwen | Add one LiquidAI-authored Thinking GGUF entry and make that path the only maintained Liquid truth anchor |
-| Conditioning contract | `tools/generation_formatter_contract.hpp` | Current maintained path already prefers structured chat messages and publishes formatter-contract metadata | Reuse that seam with one Liquid-approved contract only; reject unsupported template variants instead of silently widening |
-| Architecture gate | `src/emel/model/data.cpp` and model execution/load code | Current explicit maintained architectures are narrower than "all GGUF text models" | Add explicit `lfm2` handling; do not alias it to Llama or Qwen |
-| Quantized runtime truth | `src/emel/kernel/*`, `src/emel/model/data.cpp`, generator attribution | EMEL already owns native `Q6_K` and `Q8_0` hot-path work; it does not visibly own the full official Liquid quant ladder | Pick the first Liquid fixture to match the runtime surface, or make any extra quant support an explicit requirement |
-| Parity acceptance | `tools/paritychecker --generation` | Maintained proof already exists for one official Qwen slice and prior Llama anchor | Extend the maintained surface additively to one Liquid slice without broadening the public request surface |
-| Benchmark publication | `tools/bench`, compare output, docs generation | Existing flow already publishes maintained slices with formatter metadata | Add one Liquid row only after parity and regression are real |
-
-## Milestone Scope Guidance
-
-### Belongs In v1.9
-
-- One official Liquid Thinking GGUF fixture, pinned up front
-- One narrow structured conditioning contract
-- Explicit `lfm2` runtime bring-up for that fixture
-- Quantized-runtime truth for that fixture only
-- Maintained parity against `llama.cpp`
-- Regression protection across all maintained anchors
-- Benchmark compare/docs publication for the same slice
-
-### Defer To Later Milestones
-
-- A second official Liquid quant or sibling model
-- Richer multi-turn/system/tool conditioning
-- Benchmark policy hardening beyond the existing compare surface
-- Performance optimization work beyond what is required for the first truthful slice
-
-### Explicitly Out Of Scope
-
-- Broad Liquid-family claims
-- Tool use or function-calling support
-- Unsupported request surfaces or raw fallback on the maintained path
-- Full official GGUF quant-matrix support
-- New public CLI or C API shaped around Liquid-specific workflows
+- **Fixture Identity And Provenance**
+- **TE Model Acceptance And Validation**
+- **Text Embedding Request Surface**
+- **Image Embedding Request Surface**
+- **Audio Embedding Request Surface**
+- **Shared Embedding Output And Truncation**
+- **Capability Rejection And Error Reporting**
+- **Golden Baselines And Trimodal Regression Proof**
 
 ## Sources
 
-### Official LiquidAI Sources
+### Official Sources
 
-- https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking
-- https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF
-- https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF/tree/main
-- https://docs.liquid.ai/deployment/on-device/llama-cpp
+- https://huggingface.co/augmem/TE-75M-GGUF
+- https://huggingface.co/augmem/TE-75M
+- https://huggingface.co/augmem/TE-75M-GGUF/raw/main/README.md
+- https://huggingface.co/augmem/TE-75M/raw/main/README.md
+- https://huggingface.co/api/models/augmem/TE-75M-GGUF
+- https://huggingface.co/api/models/augmem/TE-75M
 
 ### Repo Sources
 
 - `.planning/PROJECT.md`
-- `.planning/milestones/v1.6-REQUIREMENTS.md`
-- `.planning/milestones/v1.7-REQUIREMENTS.md`
+- `.planning/codebase/ARCHITECTURE.md`
+- `.planning/codebase/INTEGRATIONS.md`
+- `.planning/codebase/TESTING.md`
+- `src/emel/text/encoders/sm.hpp`
+- `src/emel/text/encoders/any.hpp`
 - `tests/models/README.md`
-- `tools/generation_formatter_contract.hpp`
-- `tools/paritychecker/parity_main.cpp`
-- `tools/paritychecker/parity_runner.cpp`
-- `tools/bench/generation_bench.cpp`
-- `src/emel/model/data.cpp`
-- `src/emel/text/formatter/sm.hpp`
+- `src/emel/kernel/events.hpp`
+- `tests/kernel/lifecycle_tests.cpp`
+- `src/emel/kernel/aarch64/sm.hpp`
 
 ---
-*Feature research for: EMEL v1.9 Liquid LFM2.5-1.2B-Thinking GGUF ARM slice*
-*Researched: 2026-03-31*
+*Feature research for: first maintained TE-75M GGUF trimodal embedding support in EMEL*
+*Researched: 2026-04-13*
