@@ -42,6 +42,10 @@ TEST_CASE("maintained TE fixture is documented in tests/models README") {
   check_contains(content, "231508");
   check_contains(content, "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3");
   check_contains(content, "TE-75M-q5_0.gguf");
+  check_contains(content, "tests/models/TE-75M-q5_0.gguf");
+  check_contains(content, "https://huggingface.co/augmem/TE-75M-GGUF/resolve/main/TE-75M-q5_0.gguf");
+  check_contains(content, "111149248");
+  check_contains(content, "c63eb0db4fe4364e05d732063b45adb1dddfa206ba53886ed6d9b1b6fe1f9b73");
 }
 
 TEST_CASE("TE proof corpus is defined with narrow pairwise anchors") {
@@ -76,6 +80,16 @@ TEST_CASE("maintained TE fixture matches locked local size when present") {
   }
 
   CHECK(std::filesystem::file_size(fixture_path) == 119710336ULL);
+}
+
+TEST_CASE("maintained TE q5 fixture matches locked local size when present") {
+  const auto fixture_path = repo_root() / "tests" / "models" / "TE-75M-q5_0.gguf";
+  if (!std::filesystem::exists(fixture_path)) {
+    MESSAGE("skipping local TE q5 fixture size check because the maintained q5 fixture is not present");
+    return;
+  }
+
+  CHECK(std::filesystem::file_size(fixture_path) == 111149248ULL);
 }
 
 TEST_CASE("maintained TE tokenizer vocab matches locked local size") {

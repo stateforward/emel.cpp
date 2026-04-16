@@ -8,6 +8,7 @@
 #include "emel/kernel/detail.hpp"
 #include "emel/kernel/events.hpp"
 #include "emel/model/data.hpp"
+#include "emel/model/omniembed/detail.hpp"
 #include "emel/text/conditioner/sm.hpp"
 #include "emel/text/formatter/format.hpp"
 
@@ -15,13 +16,33 @@ namespace emel::embeddings::generator::action {
 
 inline constexpr int32_t k_max_text_layers = 16;
 
+enum class text_route_kind : uint8_t {
+  none = 0u,
+  omniembed_bert_text = 1u,
+};
+
+enum class image_route_kind : uint8_t {
+  none = 0u,
+  omniembed_mobilenetv4_medium = 1u,
+};
+
+enum class audio_route_kind : uint8_t {
+  none = 0u,
+  omniembed_efficientat_mn20_as = 1u,
+};
+
 struct matrix_view {
   const emel::model::data::tensor_record * tensor = nullptr;
   const void * data = nullptr;
+  std::unique_ptr<float[]> expanded_f32 = {};
+  std::unique_ptr<float[]> transposed_f32 = {};
+  std::unique_ptr<float[]> packed_rhs_f32 = {};
   uint8_t dtype = static_cast<uint8_t>(emel::kernel::event::dtype::unknown);
   int32_t rows = 0;
   int32_t cols = 0;
+  int32_t packed_rhs_cols = 0;
   size_t row_bytes = 0u;
+  size_t transposed_row_bytes = 0u;
 };
 
 struct vector_view {
@@ -35,12 +56,22 @@ struct batch_norm_view {
   vector_view bias = {};
   vector_view running_mean = {};
   vector_view running_var = {};
+  std::unique_ptr<float[]> scale_storage = {};
+  std::unique_ptr<float[]> shift_storage = {};
+  const float * scale = nullptr;
+  const float * shift = nullptr;
   int32_t channels = 0;
 };
 
 struct conv2d_view {
   const emel::model::data::tensor_record * tensor = nullptr;
   const uint16_t * data = nullptr;
+  const float * data_f32 = nullptr;
+  std::unique_ptr<float[]> expanded_f32 = {};
+  const float * kernel_major_f32 = nullptr;
+  std::unique_ptr<float[]> kernel_major_storage = {};
+  const float * depthwise_kernel_major_f32 = nullptr;
+  std::unique_ptr<float[]> depthwise_kernel_major_storage = {};
   int32_t kernel_w = 0;
   int32_t kernel_h = 0;
   int32_t input_channels = 0;
@@ -161,6 +192,7 @@ struct audio_inverted_residual_runtime {
 
 struct text_runtime {
   bool ready = false;
+  text_route_kind route_kind = text_route_kind::none;
   int32_t layer_count = 0;
   int32_t max_positions = 0;
   int32_t hidden_size = 0;
@@ -190,6 +222,7 @@ struct image_runtime {
   inline static constexpr int32_t k_max_blocks = 21;
 
   bool ready = false;
+  image_route_kind route_kind = image_route_kind::none;
   int32_t input_size = 0;
   int32_t embedding_size = 0;
   int32_t feature_buffer_elements = 0;
@@ -208,6 +241,7 @@ struct audio_runtime {
   inline static constexpr int32_t k_max_blocks = 15;
 
   bool ready = false;
+  audio_route_kind route_kind = audio_route_kind::none;
   int32_t input_sample_rate = 0;
   int32_t input_sample_count = 0;
   int32_t resampled_sample_rate = 0;
@@ -236,6 +270,11 @@ struct audio_runtime {
   projection_runtime projection = {};
   std::unique_ptr<float[]> mel_filters = {};
   std::unique_ptr<float[]> fft_window = {};
+  std::unique_ptr<float[]> fft_twiddle_cos = {};
+  std::unique_ptr<float[]> fft_twiddle_sin = {};
+  std::unique_ptr<int32_t[]> fft_bit_reverse = {};
+  std::unique_ptr<int32_t[]> mel_bin_start = {};
+  std::unique_ptr<int32_t[]> mel_bin_end = {};
 };
 
 struct scratch_buffers {
@@ -279,6 +318,7 @@ struct context {
   void * formatter_ctx = nullptr;
   emel::text::formatter::format_fn format_prompt =
       emel::text::formatter::format_raw;
+  emel::model::omniembed::detail::execution_contract execution_contract = {};
 
   text_runtime text = {};
   image_runtime image = {};

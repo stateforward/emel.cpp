@@ -3,7 +3,7 @@ phase: 49-text-embedding-lane
 plan: 01
 status: complete
 completed: 2026-04-14
-requirements:
+requirements-completed:
   - TXT-01
   - TXT-02
 ---

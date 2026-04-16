@@ -482,10 +482,15 @@ inline bool execute_avx2_mul_mat(const event::op_mul_mat & request) noexcept {
         }
       }
 
-      const float preserve_existing = static_cast<float>(!first_depth_block);
+      const uint32_t keep_existing_mask =
+          static_cast<uint32_t>(-static_cast<int32_t>(!first_depth_block));
       for (uint64_t j = j_vec_end; j < j_end; ++j) {
         for (uint64_t i = 0; i < m; ++i) {
-          float acc = c[i * n + j] * preserve_existing;
+          uint32_t acc_bits = 0u;
+          std::memcpy(&acc_bits, c + i * n + j, sizeof(acc_bits));
+          acc_bits &= keep_existing_mask;
+          float acc = 0.0f;
+          std::memcpy(&acc, &acc_bits, sizeof(acc));
           for (uint64_t kk = 0; kk < depth; ++kk) {
             acc += a[i * k + pb + kk] * b[(pb + kk) * n + j];
           }

@@ -111,6 +111,7 @@ if(EMEL_ENABLE_TESTS)
     tests/embeddings/vision_embedding_lane_tests.cpp
     tests/embeddings/audio_embedding_lane_tests.cpp
     tests/embeddings/shared_embedding_session_tests.cpp
+    tests/embeddings/generator_action_guard_tests.cpp
     tests/embeddings/te_proof_and_regression_tests.cpp
     tests/logits/validator/validator_tests.cpp
     tests/logits/sampler/pipeline_tests.cpp
@@ -213,7 +214,11 @@ if(EMEL_ENABLE_TESTS)
   )
   emel_add_doctest_shard(
     generator_and_runtime
-    "*tests/generator/*,*tests/embeddings/*,*tests/logits/*,*tests/sm/*,*tests/token/*"
+    "*tests/generator/*,*tests/embeddings/*,*tests/logits/*,*tests/token/*"
+  )
+  emel_add_doctest_shard(
+    sm
+    "*tests/sm/*"
   )
   emel_add_doctest_shard(
     text

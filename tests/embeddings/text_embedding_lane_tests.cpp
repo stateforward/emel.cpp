@@ -1,6 +1,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 
 #include <boost/sml.hpp>
 #include "doctest/doctest.h"
@@ -249,6 +250,55 @@ TEST_CASE("embeddings text lane returns normalized TE embeddings when fixture pr
             static_cast<size_t>(pure_tone_dimension)}) > 1.0e-5f);
 }
 
+TEST_CASE("embeddings generator initializes with TE q5 fixture when present") {
+  const auto q5_fixture_path =
+      te_fixture::repo_root() / "tests" / "models" / "TE-75M-q5_0.gguf";
+  if (!std::filesystem::exists(q5_fixture_path) || !std::filesystem::exists(te_fixture::te_vocab_path())) {
+    MESSAGE("skipping TE q5 initialize test because maintained q5 assets are not present");
+    return;
+  }
+
+  const auto fixture = te_fixture::load_te_fixture(q5_fixture_path);
+  REQUIRE(emel::model::architecture_name_view(*fixture.model) == "omniembed");
+
+  emel::text::tokenizer::sm tokenizer{};
+  emel::text::conditioner::sm conditioner{};
+  emel::embeddings::generator::sm embedding_generator{
+    *fixture.model,
+    conditioner,
+    nullptr,
+    emel::text::formatter::format_raw,
+  };
+
+  emel::error::type initialize_error =
+      emel::error::cast(emel::embeddings::generator::error::none);
+  emel::embeddings::generator::event::initialize initialize{
+    &tokenizer,
+    tokenizer_bind_dispatch,
+    tokenizer_tokenize_dispatch,
+  };
+  initialize.preprocessor_variant =
+      emel::text::tokenizer::preprocessor::preprocessor_kind::wpm;
+  initialize.encoder_variant = emel::text::encoders::encoder_kind::wpm;
+  initialize.add_special = true;
+  initialize.parse_special = false;
+  initialize.error_out = &initialize_error;
+
+  REQUIRE(embedding_generator.process_event(initialize));
+  CHECK(initialize_error == emel::error::cast(emel::embeddings::generator::error::none));
+  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_idle>));
+}
+
+TEST_CASE("maintained TE fixture selector approves q8 and q5 only") {
+  const auto q8_path = te_fixture::repo_root() / "tests" / "models" / "TE-75M-q8_0.gguf";
+  const auto q5_path = te_fixture::repo_root() / "tests" / "models" / "TE-75M-q5_0.gguf";
+  const auto q4_path = te_fixture::repo_root() / "tests" / "models" / "TE-75M-q4_0.gguf";
+
+  CHECK(te_fixture::is_approved_te_fixture_path(q8_path));
+  CHECK(te_fixture::is_approved_te_fixture_path(q5_path));
+  CHECK_FALSE(te_fixture::is_approved_te_fixture_path(q4_path));
+}
+
 TEST_CASE("embeddings text lane supports TE matryoshka truncation when fixture present") {
   if (!te_assets_present()) {
     MESSAGE("skipping TE truncation test because maintained assets are not present");
@@ -359,6 +409,8 @@ TEST_CASE("embeddings generator helper paths cover tensor binding callbacks and 
   CHECK(matrix_view.cols == 3);
   CHECK(embedding_detail::dense_row_bytes(emel::kernel::detail::dtype_f32, 3) == 3u * sizeof(float));
   CHECK(embedding_detail::dense_row_bytes(emel::kernel::detail::dtype_f16, 3) == 3u * sizeof(uint16_t));
+  CHECK(embedding_detail::dense_row_bytes(emel::kernel::detail::dtype_q5_0, 32) ==
+        sizeof(emel::kernel::detail::quant::block_q5_0));
   CHECK_FALSE(embedding_detail::bind_matrix(matrix_tensor, 3, 3, matrix_view));
 
   std::array<char, 256> name_buffer = {};
@@ -463,10 +515,14 @@ TEST_CASE("embeddings generator helper paths cover tensor binding callbacks and 
 TEST_CASE("embeddings generator numeric helpers handle valid and invalid inputs") {
   using emel::kernel::detail::dtype_f16;
   using emel::kernel::detail::dtype_f32;
+  using emel::kernel::detail::dtype_q5_0;
   using emel::kernel::detail::dtype_q8_0;
+  using emel::kernel::detail::quant::QK5_0;
   using emel::kernel::detail::quant::QK8_0;
+  using emel::kernel::detail::quant::block_q5_0;
   using emel::kernel::detail::quant::block_q8_0;
   using emel::kernel::detail::quant::fp32_to_fp16;
+  using emel::kernel::detail::quant::quantize_row_q5_0_ref;
   using emel::kernel::detail::quant::quantize_row_q8_0_strided;
 
   std::array<float, 3> input = {{1.0f, 1.0f, 1.0f}};
@@ -525,10 +581,30 @@ TEST_CASE("embeddings generator numeric helpers handle valid and invalid inputs"
   CHECK(q8_output[0] == doctest::Approx(static_cast<float>(QK8_0)).epsilon(1.0e-1f));
   CHECK(embedding_detail::matmul(q8_matrix, q8_row, q8_scratch, q8_output));
   std::array<float, QK8_0> dequantized = {};
-  CHECK(embedding_detail::copy_q8_embedding_row(q8_matrix, 0, dequantized));
+  CHECK(embedding_detail::copy_embedding_row(q8_matrix, 0, dequantized));
   CHECK(dequantized[0] == doctest::Approx(1.0f).epsilon(2.0e-1f));
-  CHECK_FALSE(embedding_detail::copy_q8_embedding_row(
+  CHECK_FALSE(embedding_detail::copy_embedding_row(
       q8_matrix, 1, dequantized));
+
+  std::array<float, QK5_0> q5_row = {};
+  q5_row.fill(1.0f);
+  std::array<block_q5_0, 1> q5_row_storage = {};
+  quantize_row_q5_0_ref(q5_row.data(), q5_row_storage.data(), QK5_0);
+  embedding_action::matrix_view q5_matrix = {
+    .data = q5_row_storage.data(),
+    .dtype = dtype_q5_0,
+    .rows = 1,
+    .cols = QK5_0,
+    .row_bytes = sizeof(block_q5_0),
+  };
+  std::array<float, 1> q5_output = {};
+  CHECK(embedding_detail::matmul_q5_0(q5_matrix, q5_row, q8_scratch, q5_output));
+  CHECK(q5_output[0] == doctest::Approx(static_cast<float>(QK5_0)).epsilon(3.0e-1f));
+  CHECK(embedding_detail::matmul(q5_matrix, q5_row, q8_scratch, q5_output));
+  std::array<float, QK5_0> q5_dequantized = {};
+  CHECK(embedding_detail::copy_embedding_row(q5_matrix, 0, q5_dequantized));
+  CHECK(q5_dequantized[0] == doctest::Approx(1.0f).epsilon(2.0e-1f));
+  CHECK_FALSE(embedding_detail::copy_embedding_row(q5_matrix, 1, q5_dequantized));
 
   std::array<float, 2> bias_data = {{0.5f, -0.5f}};
   embedding_action::vector_view bias_view = {

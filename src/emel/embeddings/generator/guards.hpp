@@ -15,8 +15,6 @@ struct guard_valid_initialize {
         ctx.conditioner != nullptr &&
         ev.request.tokenizer_sm != nullptr &&
         ctx.format_prompt != nullptr &&
-        ctx.text.ready &&
-        ctx.scratch.ready &&
         detail::is_valid_preprocessor(ev.request.preprocessor_variant) &&
         detail::is_valid_encoder(ev.request.encoder_variant);
   }
@@ -32,9 +30,12 @@ struct guard_invalid_initialize {
 
 struct guard_initialize_success {
   template <class runtime_event_type>
-  bool operator()(const runtime_event_type & runtime_ev) const noexcept {
+  bool operator()(const runtime_event_type & runtime_ev,
+                  const action::context & ctx) const noexcept {
     const auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    return ev.ctx.bind_accepted &&
+    return ctx.text.ready &&
+        ctx.scratch.ready &&
+        ev.ctx.bind_accepted &&
         ev.ctx.bind_err_code ==
             detail::conditioner_error_code(emel::text::conditioner::error::none) &&
         ev.ctx.err == detail::to_error(error::none);
@@ -43,19 +44,22 @@ struct guard_initialize_success {
 
 struct guard_initialize_model_invalid {
   template <class runtime_event_type>
-  bool operator()(const runtime_event_type & runtime_ev) const noexcept {
+  bool operator()(const runtime_event_type & runtime_ev,
+                  const action::context & ctx) const noexcept {
     const auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    return ev.ctx.bind_err_code ==
+    return !ctx.text.ready ||
+        ev.ctx.bind_err_code ==
         detail::conditioner_error_code(emel::text::conditioner::error::model_invalid);
   }
 };
 
 struct guard_initialize_backend_error {
   template <class runtime_event_type>
-  bool operator()(const runtime_event_type & runtime_ev) const noexcept {
+  bool operator()(const runtime_event_type & runtime_ev,
+                  const action::context & ctx) const noexcept {
     const auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    return !guard_initialize_success{}(runtime_ev) &&
-        !guard_initialize_model_invalid{}(runtime_ev) &&
+    return !guard_initialize_success{}(runtime_ev, ctx) &&
+        !guard_initialize_model_invalid{}(runtime_ev, ctx) &&
         ev.ctx.err == detail::to_error(error::none);
   }
 };
@@ -204,6 +208,138 @@ struct guard_invalid_embed_audio {
   }
 };
 
+struct guard_text_route_bert {
+  bool operator()(const event::embed_text_run &,
+                  const action::context & ctx) const noexcept {
+    return ctx.text.route_kind == action::text_route_kind::omniembed_bert_text;
+  }
+};
+
+struct guard_text_route_unsupported {
+  bool operator()(const event::embed_text_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return !guard_text_route_bert{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_text_encode_bert_ready {
+  bool operator()(const event::embed_text_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    return guard_text_route_bert{}(runtime_ev, ctx) &&
+        ctx.text.ready &&
+        ctx.scratch.ready &&
+        ev.ctx.token_count > 0 &&
+        ev.ctx.token_count <= ctx.text.max_positions;
+  }
+};
+
+struct guard_text_encode_bert_unready {
+  bool operator()(const event::embed_text_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return guard_text_route_bert{}(runtime_ev, ctx) &&
+        !guard_text_encode_bert_ready{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_image_route_mobilenetv4 {
+  bool operator()(const event::embed_image_run &,
+                  const action::context & ctx) const noexcept {
+    return ctx.image.route_kind == action::image_route_kind::omniembed_mobilenetv4_medium;
+  }
+};
+
+struct guard_image_route_unsupported {
+  bool operator()(const event::embed_image_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return !guard_image_route_mobilenetv4{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_image_prepare_mobilenetv4_ready {
+  bool operator()(const event::embed_image_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return guard_image_route_mobilenetv4{}(runtime_ev, ctx) &&
+        ctx.model != nullptr &&
+        ctx.image.ready &&
+        ctx.scratch.ready;
+  }
+};
+
+struct guard_image_prepare_mobilenetv4_unready {
+  bool operator()(const event::embed_image_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return guard_image_route_mobilenetv4{}(runtime_ev, ctx) &&
+        !guard_image_prepare_mobilenetv4_ready{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_image_encode_mobilenetv4_ready {
+  bool operator()(const event::embed_image_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return guard_image_route_mobilenetv4{}(runtime_ev, ctx) &&
+        ctx.image.ready &&
+        ctx.scratch.ready;
+  }
+};
+
+struct guard_image_encode_mobilenetv4_unready {
+  bool operator()(const event::embed_image_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return guard_image_route_mobilenetv4{}(runtime_ev, ctx) &&
+        !guard_image_encode_mobilenetv4_ready{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_audio_route_efficientat {
+  bool operator()(const event::embed_audio_run &,
+                  const action::context & ctx) const noexcept {
+    return ctx.audio.route_kind == action::audio_route_kind::omniembed_efficientat_mn20_as;
+  }
+};
+
+struct guard_audio_route_unsupported {
+  bool operator()(const event::embed_audio_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return !guard_audio_route_efficientat{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_audio_prepare_efficientat_ready {
+  bool operator()(const event::embed_audio_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return guard_audio_route_efficientat{}(runtime_ev, ctx) &&
+        ctx.model != nullptr &&
+        ctx.audio.ready &&
+        ctx.scratch.ready;
+  }
+};
+
+struct guard_audio_prepare_efficientat_unready {
+  bool operator()(const event::embed_audio_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return guard_audio_route_efficientat{}(runtime_ev, ctx) &&
+        !guard_audio_prepare_efficientat_ready{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_audio_encode_efficientat_ready {
+  bool operator()(const event::embed_audio_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return guard_audio_route_efficientat{}(runtime_ev, ctx) &&
+        ctx.audio.ready &&
+        ctx.scratch.ready;
+  }
+};
+
+struct guard_audio_encode_efficientat_unready {
+  bool operator()(const event::embed_audio_run & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return guard_audio_route_efficientat{}(runtime_ev, ctx) &&
+        !guard_audio_encode_efficientat_ready{}(runtime_ev, ctx);
+  }
+};
+
 struct guard_prepare_success {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type & runtime_ev) const noexcept {
@@ -245,51 +381,12 @@ struct guard_prepare_backend_error {
   }
 };
 
-struct guard_image_prepare_success {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type & runtime_ev) const noexcept {
-    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    return ev.ctx.prepared && ev.ctx.err == detail::to_error(error::none);
-  }
-};
-
-struct guard_image_prepare_backend_error {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type & runtime_ev) const noexcept {
-    return !guard_image_prepare_success{}(runtime_ev);
-  }
-};
-
-struct guard_audio_prepare_success {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type & runtime_ev) const noexcept {
-    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    return ev.ctx.prepared && ev.ctx.err == detail::to_error(error::none);
-  }
-};
-
-struct guard_audio_prepare_backend_error {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type & runtime_ev) const noexcept {
-    return !guard_audio_prepare_success{}(runtime_ev);
-  }
-};
-
-struct guard_embedding_failed {
-  template <class runtime_event_type>
-  bool operator()(const runtime_event_type & runtime_ev) const noexcept {
-    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    return ev.ctx.err != detail::to_error(error::none);
-  }
-};
-
 struct guard_embedding_succeeded_full {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type & runtime_ev,
                   const action::context & ctx) const noexcept {
     const auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    return !guard_embedding_failed{}(runtime_ev) &&
-        detail::requested_output_dimension(ev.request, ctx) == detail::shared_embedding_size(ctx);
+    return detail::requested_output_dimension(ev.request, ctx) == detail::shared_embedding_size(ctx);
   }
 };
 
@@ -299,8 +396,7 @@ struct guard_embedding_succeeded_truncate {
                   const action::context & ctx) const noexcept {
     const auto & ev = detail::unwrap_runtime_event(runtime_ev);
     const int32_t requested = detail::requested_output_dimension(ev.request, ctx);
-    return !guard_embedding_failed{}(runtime_ev) &&
-        requested > 0 &&
+    return requested > 0 &&
         requested < detail::shared_embedding_size(ctx);
   }
 };

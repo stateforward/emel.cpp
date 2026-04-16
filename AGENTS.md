@@ -33,6 +33,13 @@ ALWAYS model runtime behavior choice as explicit guards or explicit choice
 states/transitions.
 NEVER hide runtime behavior selection in `actions`, state machine member
 functions, or functions called from them.
+Treat "runtime behavior selection" semantically, not syntactically.
+It includes any helper-local branching, table lookup, flag dispatch, dtype
+dispatch, backend dispatch, modality dispatch, model-family dispatch,
+fallback selection, block-kind selection, activation-mode selection,
+skip/residual selection, buffer-lane selection, callback/error-channel
+selection, or other runtime choice that changes which algorithm, path,
+variant, or externally observable behavior executes.
 NEVER put runtime branching statements (`if`, `else if`, `switch`, `?:`) in
 actions, state machine member functions, or functions called from them.
 NEVER put validation-path branching in actions or in functions called from
@@ -136,6 +143,11 @@ Helpers called from `effect_*`, `enter_*`, `exit_*`, or detail code MUST NOT
 choose behavior, route fallback, mode selection, success/error outcome, or
 which path runs next.
 Those decisions belong only in `guard_*` predicates and `sm.hpp` transitions.
+If a helper inspects runtime dtype, backend support, architecture/model name,
+tensor layout, modality kind, block flags (for example `has_skip`,
+`has_expand`, `has_dw_mid`, `has_se`), activation kind, or scratch-buffer
+lane/destination to choose which computation or behavior runs, that helper is
+choosing behavior and MUST NOT live in `detail.hpp` or `detail.cpp`.
 NEVER put runtime support probing, route fallback, block-kind selection, or
 other behavior-selection control flow in `detail.hpp` or `detail.cpp`; model it
 in `guards.hpp` and `sm.hpp`.
@@ -145,6 +157,10 @@ ALWAYS keep detail helpers called from actions or state machine member methods
 limited to compile-time conditionals and data-plane iteration.
 Compile-time conditionals and data-plane iteration are allowed in `detail.hpp`
 and `detail.cpp`.
+Data-plane branching inside `detail.hpp` / `detail.cpp` is allowed only for the
+already-chosen algorithm's local numeric work, bounds handling, padding,
+clamping, or monotonic loop progress. It is NOT allowed to select the
+algorithm, path, variant, or behavior family itself.
 ALWAYS treat "what happens next" as orchestration behavior for `detail.hpp` and
 `detail.cpp` review.
 Helper output includes return values, out-parameters, reference mutation,
@@ -155,6 +171,10 @@ If a helper affects which guard passes, which action runs, which callback
 fires, which event/state/error path is taken, or whether a dispatch is
 accepted, rejected, done, or failed, that helper MUST live in `guards.hpp`,
 `actions.hpp`, or `sm.hpp`, not in `detail.hpp` or `detail.cpp`.
+Superficial cleanup does NOT satisfy these rules. Removing `if` statements from
+`actions.hpp` while moving the same runtime choice into `detail.hpp`, helper
+return values, helper-selected buffer lanes, or helper-selected variants is
+still a rule violation.
 Shared non-control-flow helpers in `detail.hpp` or `detail.cpp` MUST use
 truthful non-routing verb prefixes such as `compute_`, `validate_`, `bind_`,
 `scan_`, `append_`, or `reset_`. Use `compute_` only for data-plane or numeric
@@ -168,7 +188,31 @@ ALWAYS communicate between machines through events and explicit interfaces only.
 NEVER call another machine's actions, guards, or functions directly.
 NEVER mutate another machine's context directly.
 ALWAYS dispatch cross-machine events only via `machine->process_event(...)`.
-ALWAYS ask the user before changing state machine structure.
+ALWAYS make state-machine structure changes directly when they are required for
+correctness, rule compliance, performance, or to make runtime control flow
+explicit.
+ALWAYS document structural changes in the corresponding plan, summary, or
+verification artifacts when those artifacts exist.
+NEVER broaden public API, product scope, or milestone claims accidentally when
+changing state-machine structure.
+If a structural change would intentionally alter externally visible semantics
+beyond the already-declared contract, document that semantic change explicitly
+instead of treating it as a hidden compliance repair.
+ALWAYS keep operator arithmetic, lowering, packing, quant/dequant, and
+backend-specific numeric work in the owning kernel layer (`src/emel/kernel/**`
+or a component-local kernel module when that component explicitly owns
+execution).
+ALWAYS keep higher layers limited to orchestration, metadata shaping, buffer
+binding, and dispatch into kernels.
+NEVER add ad hoc operator implementations, backend-specialized loops, lowering
+code, or packing helpers throughout generators, planners, loaders, graph
+orchestration, wrappers, tests, or tools just to bridge a missing kernel path.
+If existing code contains ad hoc compute outside kernel ownership, ALWAYS
+migrate that work into the owning kernel surface instead of extending the ad hoc
+path.
+ALWAYS make plans land new or changed ops in kernel-owned files first;
+non-kernel plan tasks may only wire, dispatch, validate, benchmark, or prove
+those kernels.
 NEVER duplicate code if it's used more than once; put it somewhere it can be shared.
 
 ## events, outcomes, and errors

@@ -24,10 +24,12 @@ namespace te_fixture = emel::tests::embeddings::te_fixture;
 
 using te_fixture::cached_te_fixture;
 using te_fixture::initialize_embedding_generator;
+using te_fixture::load_te_fixture;
 using te_fixture::make_rgba_square;
 using te_fixture::make_sine_wave;
 using te_fixture::read_text_file;
 using te_fixture::te_assets_present;
+using te_fixture::repo_root;
 using te_fixture::te_prompt_path;
 
 inline constexpr int32_t k_audio_sample_rate = 16000;
@@ -37,6 +39,7 @@ inline constexpr int32_t k_embedding_dimension = 1280;
 inline constexpr float k_text_golden_floor = 0.995f;
 inline constexpr float k_image_golden_floor = 0.93f;
 inline constexpr float k_audio_golden_floor = 0.985f;
+inline constexpr float k_text_q5_golden_floor = 0.99f;
 
 struct canonical_embeddings {
   std::array<float, k_embedding_dimension> text_red = {};
@@ -80,12 +83,12 @@ inline float cosine_similarity(const std::span<const float> lhs,
   return sum;
 }
 
-inline canonical_embeddings compute_canonical_embeddings() {
-  const auto & fixture = cached_te_fixture();
+inline canonical_embeddings compute_canonical_embeddings_for_model(
+    const emel::model::data & model) {
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
   emel::embeddings::generator::sm embedding_generator{
-    *fixture.model,
+    model,
     conditioner,
     nullptr,
     emel::text::formatter::format_raw,
@@ -166,6 +169,11 @@ inline canonical_embeddings compute_canonical_embeddings() {
   return outputs;
 }
 
+inline canonical_embeddings compute_canonical_embeddings() {
+  const auto & fixture = cached_te_fixture();
+  return compute_canonical_embeddings_for_model(*fixture.model);
+}
+
 inline const canonical_embeddings & cached_canonical_embeddings() {
   static const canonical_embeddings outputs = compute_canonical_embeddings();
   return outputs;
@@ -215,4 +223,25 @@ TEST_CASE("TE proof preserves canonical cross-modal smoke relations") {
   CHECK(tone_audio > 0.10f);
   CHECK(std::fabs(text_image - golden_text_image) <= 0.05f);
   CHECK(std::fabs(tone_audio - golden_tone_audio) <= 0.05f);
+}
+
+TEST_CASE("TE q5 proof compares EMEL outputs against stored upstream goldens") {
+  const auto q5_fixture_path = repo_root() / "tests" / "models" / "TE-75M-q5_0.gguf";
+  if (!std::filesystem::exists(q5_fixture_path) || !std::filesystem::exists(te_fixture::te_vocab_path()) ||
+      !te_goldens_present()) {
+    MESSAGE("skipping TE q5 golden proof test because maintained q5 assets or golden vectors are missing");
+    return;
+  }
+
+  const auto fixture = load_te_fixture(q5_fixture_path);
+  const auto outputs = compute_canonical_embeddings_for_model(*fixture.model);
+  const auto golden_text_red = read_golden_vector(te_golden_path("red-square.text.1280.txt"));
+  const auto golden_text_tone = read_golden_vector(te_golden_path("pure-tone-440hz.text.1280.txt"));
+  const auto golden_image_red = read_golden_vector(te_golden_path("red-square.image.1280.txt"));
+  const auto golden_audio_tone = read_golden_vector(te_golden_path("pure-tone-440hz.audio.1280.txt"));
+
+  CHECK(cosine_similarity(outputs.text_red, golden_text_red) >= k_text_q5_golden_floor);
+  CHECK(cosine_similarity(outputs.text_tone, golden_text_tone) >= k_text_q5_golden_floor);
+  CHECK(cosine_similarity(outputs.image_red, golden_image_red) >= k_image_golden_floor);
+  CHECK(cosine_similarity(outputs.audio_tone, golden_audio_tone) >= k_audio_golden_floor);
 }

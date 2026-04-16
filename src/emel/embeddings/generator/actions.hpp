@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstring>
+
 #include "emel/embeddings/generator/context.hpp"
 #include "emel/embeddings/generator/detail.hpp"
 #include "emel/embeddings/generator/events.hpp"
@@ -120,6 +122,7 @@ struct effect_begin_embed_text {
     ev.ctx.token_count = 0;
     ev.ctx.output_dimension = 0;
     ev.request.output_dimension_out = 0;
+    detail::begin_benchmark_stages(ev);
   }
 };
 
@@ -129,9 +132,9 @@ struct effect_begin_embed_image {
                   context &) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
     ev.ctx.err = detail::to_error(error::none);
-    ev.ctx.prepared = false;
     ev.ctx.output_dimension = 0;
     ev.request.output_dimension_out = 0;
+    detail::begin_benchmark_stages(ev);
   }
 };
 
@@ -141,9 +144,9 @@ struct effect_begin_embed_audio {
                   context &) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
     ev.ctx.err = detail::to_error(error::none);
-    ev.ctx.prepared = false;
     ev.ctx.output_dimension = 0;
     ev.request.output_dimension_out = 0;
+    detail::begin_benchmark_stages(ev);
   }
 };
 
@@ -198,31 +201,27 @@ struct effect_dispatch_condition_text {
     ev.ctx.prepare_accepted = ctx.conditioner->process_event(prepare_ev);
     ev.ctx.prepare_err_code = err;
     ev.ctx.token_count = token_count;
+    detail::finish_benchmark_prepare(ev);
   }
 };
 
-struct effect_prepare_image_input {
+struct effect_prepare_image_input_mobilenetv4 {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & runtime_ev,
                   context & ctx) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    ev.ctx.prepared =
-        detail::prepare_image_input(ctx, ev.request.rgba, ev.request.width, ev.request.height);
-    if (!ev.ctx.prepared) {
-      detail::set_error(ev, error::backend);
-    }
+    (void) detail::prepare_image_input(ctx, ev.request.rgba, ev.request.width, ev.request.height);
+    detail::finish_benchmark_prepare(ev);
   }
 };
 
-struct effect_prepare_audio_input {
+struct effect_prepare_audio_input_efficientat {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & runtime_ev,
                   context & ctx) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    ev.ctx.prepared = detail::prepare_audio_input(ctx, ev.request.pcm, ev.request.sample_rate);
-    if (!ev.ctx.prepared) {
-      detail::set_error(ev, error::backend);
-    }
+    (void) detail::prepare_audio_input(ctx, ev.request.pcm, ev.request.sample_rate);
+    detail::finish_benchmark_prepare(ev);
   }
 };
 
@@ -256,36 +255,33 @@ struct effect_set_embed_backend_error {
   }
 };
 
-struct effect_run_text_embedding {
+struct effect_run_text_embedding_bert {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & runtime_ev,
                   context & ctx) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    if (!detail::run_text_embedding(ctx, ev.ctx.token_count)) {
-      detail::set_error(ev, error::backend);
-    }
+    (void) detail::run_text_embedding(ctx, ev.ctx.token_count);
+    detail::finish_benchmark_encode(ev);
   }
 };
 
-struct effect_run_image_embedding {
+struct effect_run_image_embedding_mobilenetv4 {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & runtime_ev,
                   context & ctx) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    if (!detail::run_image_embedding(ctx)) {
-      detail::set_error(ev, error::backend);
-    }
+    (void) detail::run_image_embedding(ctx);
+    detail::finish_benchmark_encode(ev);
   }
 };
 
-struct effect_run_audio_embedding {
+struct effect_run_audio_embedding_efficientat {
   template <class runtime_event_type>
   void operator()(const runtime_event_type & runtime_ev,
                   context & ctx) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    if (!detail::run_audio_embedding(ctx)) {
-      detail::set_error(ev, error::backend);
-    }
+    (void) detail::run_audio_embedding(ctx);
+    detail::finish_benchmark_encode(ev);
   }
 };
 
@@ -295,14 +291,13 @@ struct effect_publish_full_embedding {
                   context & ctx) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
     const int32_t dimension = detail::shared_embedding_size(ctx);
-    if (!detail::publish_embedding(ctx, dimension, ev.request.output)) {
-      ev.ctx.output_dimension = 0;
-      detail::set_error(ev, error::backend);
-      return;
-    }
+    std::memcpy(ev.request.output.data(),
+                ctx.scratch.full_embedding.get(),
+                static_cast<size_t>(dimension) * sizeof(float));
     ev.ctx.output_dimension = dimension;
     ev.request.output_dimension_out = dimension;
     detail::write_embed_error_out(ev);
+    detail::finish_benchmark_publish(ev);
   }
 };
 
@@ -311,16 +306,16 @@ struct effect_publish_truncated_embedding {
   void operator()(const runtime_event_type & runtime_ev,
                   context & ctx) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    const int32_t dimension =
-        detail::requested_output_dimension(ev.request, ctx);
-    if (!detail::publish_embedding(ctx, dimension, ev.request.output)) {
-      ev.ctx.output_dimension = 0;
-      detail::set_error(ev, error::backend);
-      return;
-    }
+    const int32_t dimension = detail::requested_output_dimension(ev.request, ctx);
+    std::memcpy(ev.request.output.data(),
+                ctx.scratch.full_embedding.get(),
+                static_cast<size_t>(dimension) * sizeof(float));
+    auto truncated = ev.request.output.first(static_cast<size_t>(dimension));
+    (void) detail::l2_normalize(truncated);
     ev.ctx.output_dimension = dimension;
     ev.request.output_dimension_out = dimension;
     detail::write_embed_error_out(ev);
+    detail::finish_benchmark_publish(ev);
   }
 };
 
@@ -371,14 +366,14 @@ inline constexpr effect_reject_embed_text effect_reject_embed_text{};
 inline constexpr effect_reject_embed_image effect_reject_embed_image{};
 inline constexpr effect_reject_embed_audio effect_reject_embed_audio{};
 inline constexpr effect_dispatch_condition_text effect_dispatch_condition_text{};
-inline constexpr effect_prepare_image_input effect_prepare_image_input{};
-inline constexpr effect_prepare_audio_input effect_prepare_audio_input{};
+inline constexpr effect_prepare_image_input_mobilenetv4 effect_prepare_image_input_mobilenetv4{};
+inline constexpr effect_prepare_audio_input_efficientat effect_prepare_audio_input_efficientat{};
 inline constexpr effect_set_embed_invalid_request effect_set_embed_invalid_request{};
 inline constexpr effect_set_embed_model_invalid effect_set_embed_model_invalid{};
 inline constexpr effect_set_embed_backend_error effect_set_embed_backend_error{};
-inline constexpr effect_run_text_embedding effect_run_text_embedding{};
-inline constexpr effect_run_image_embedding effect_run_image_embedding{};
-inline constexpr effect_run_audio_embedding effect_run_audio_embedding{};
+inline constexpr effect_run_text_embedding_bert effect_run_text_embedding_bert{};
+inline constexpr effect_run_image_embedding_mobilenetv4 effect_run_image_embedding_mobilenetv4{};
+inline constexpr effect_run_audio_embedding_efficientat effect_run_audio_embedding_efficientat{};
 inline constexpr effect_publish_full_embedding effect_publish_full_embedding{};
 inline constexpr effect_publish_truncated_embedding effect_publish_truncated_embedding{};
 inline constexpr effect_write_embed_error_out effect_write_embed_error_out{};

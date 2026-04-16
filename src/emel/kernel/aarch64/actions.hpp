@@ -22,6 +22,32 @@ namespace emel::kernel::aarch64::detail {
 
 namespace event = ::emel::kernel::event;
 
+struct emel_image_pointwise_f32_request {
+  const float * input = nullptr;
+  const float * packed_rhs = nullptr;
+  const float * batch_norm_scale = nullptr;
+  const float * batch_norm_shift = nullptr;
+  float * output = nullptr;
+  int32_t pixel_count = 0;
+  int32_t input_channels = 0;
+  int32_t output_channels = 0;
+  int32_t packed_rhs_cols = 0;
+};
+
+struct emel_image_depthwise_f32_request {
+  const float * input = nullptr;
+  const float * kernel_major = nullptr;
+  float * output = nullptr;
+  int32_t input_spatial = 0;
+  int32_t output_spatial = 0;
+  int32_t output_channels = 0;
+  int32_t kernel_h = 0;
+  int32_t kernel_w = 0;
+  int32_t stride = 0;
+  int32_t pad_h = 0;
+  int32_t pad_w = 0;
+};
+
 inline bool detect_neon() noexcept {
 #if defined(__aarch64__) || defined(__ARM_NEON)
   return true;
@@ -119,6 +145,636 @@ inline void execute_neon_unary_relu(const float * src, float * dst, const uint64
 #endif
 }
 
+template <bool fuse_batch_norm, bool apply_relu>
+inline bool execute_neon_image_pointwise_f32(
+    const emel_image_pointwise_f32_request & request) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void) request;
+  return false;
+#else
+  if (request.input == nullptr ||
+      request.packed_rhs == nullptr ||
+      request.output == nullptr ||
+      request.pixel_count <= 0 ||
+      request.input_channels <= 0 ||
+      request.output_channels <= 0 ||
+      request.packed_rhs_cols != request.output_channels) {
+    return false;
+  }
+  if constexpr (fuse_batch_norm) {
+    if (request.batch_norm_scale == nullptr || request.batch_norm_shift == nullptr) {
+      return false;
+    }
+  }
+
+  constexpr int32_t k_row_block = 8;
+  constexpr int32_t k_col_vec = 4;
+  constexpr int32_t k_col_pair = 8;
+  constexpr int32_t k_col_block = 64;
+  constexpr int32_t k_depth_block = 256;
+  const int32_t n = request.output_channels;
+  const int32_t k = request.input_channels;
+  const float * a = request.input;
+  float * c = request.output;
+  const float32x4_t zero = vdupq_n_f32(0.0f);
+
+  for (int32_t panel_col = 0; panel_col < n; panel_col += k_col_block) {
+    const int32_t panel_cols = std::min(k_col_block, n - panel_col);
+    const int32_t vec_pair_cols = (panel_cols / k_col_pair) * k_col_pair;
+    const int32_t vec_cols = (panel_cols / k_col_vec) * k_col_vec;
+    const float * panel =
+        request.packed_rhs + static_cast<size_t>(panel_col) * static_cast<size_t>(k);
+
+    for (int32_t depth_base = 0; depth_base < k; depth_base += k_depth_block) {
+      const int32_t depth = std::min(k_depth_block, k - depth_base);
+      const bool first_depth_block = (depth_base == 0);
+      const bool last_depth_block = (depth_base + depth == k);
+
+      for (int32_t local_col = 0; local_col < vec_pair_cols; local_col += k_col_pair) {
+        int32_t pixel_index = 0;
+        for (; pixel_index + k_row_block <= request.pixel_count; pixel_index += k_row_block) {
+          float * out0 = c + static_cast<size_t>(pixel_index + 0) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out1 = c + static_cast<size_t>(pixel_index + 1) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out2 = c + static_cast<size_t>(pixel_index + 2) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out3 = c + static_cast<size_t>(pixel_index + 3) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out4 = c + static_cast<size_t>(pixel_index + 4) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out5 = c + static_cast<size_t>(pixel_index + 5) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out6 = c + static_cast<size_t>(pixel_index + 6) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out7 = c + static_cast<size_t>(pixel_index + 7) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+
+          float32x4_t acc00 = zero;
+          float32x4_t acc01 = zero;
+          float32x4_t acc10 = zero;
+          float32x4_t acc11 = zero;
+          float32x4_t acc20 = zero;
+          float32x4_t acc21 = zero;
+          float32x4_t acc30 = zero;
+          float32x4_t acc31 = zero;
+          float32x4_t acc40 = zero;
+          float32x4_t acc41 = zero;
+          float32x4_t acc50 = zero;
+          float32x4_t acc51 = zero;
+          float32x4_t acc60 = zero;
+          float32x4_t acc61 = zero;
+          float32x4_t acc70 = zero;
+          float32x4_t acc71 = zero;
+          if (!first_depth_block) {
+            acc00 = vld1q_f32(out0);
+            acc01 = vld1q_f32(out0 + 4);
+            acc10 = vld1q_f32(out1);
+            acc11 = vld1q_f32(out1 + 4);
+            acc20 = vld1q_f32(out2);
+            acc21 = vld1q_f32(out2 + 4);
+            acc30 = vld1q_f32(out3);
+            acc31 = vld1q_f32(out3 + 4);
+            acc40 = vld1q_f32(out4);
+            acc41 = vld1q_f32(out4 + 4);
+            acc50 = vld1q_f32(out5);
+            acc51 = vld1q_f32(out5 + 4);
+            acc60 = vld1q_f32(out6);
+            acc61 = vld1q_f32(out6 + 4);
+            acc70 = vld1q_f32(out7);
+            acc71 = vld1q_f32(out7 + 4);
+          }
+
+          const float * row0 =
+              a + static_cast<size_t>(pixel_index + 0) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row1 =
+              a + static_cast<size_t>(pixel_index + 1) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row2 =
+              a + static_cast<size_t>(pixel_index + 2) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row3 =
+              a + static_cast<size_t>(pixel_index + 3) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row4 =
+              a + static_cast<size_t>(pixel_index + 4) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row5 =
+              a + static_cast<size_t>(pixel_index + 5) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row6 =
+              a + static_cast<size_t>(pixel_index + 6) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row7 =
+              a + static_cast<size_t>(pixel_index + 7) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * weights =
+              panel + static_cast<size_t>(depth_base) * static_cast<size_t>(panel_cols) +
+              static_cast<size_t>(local_col);
+
+          int32_t depth_offset = 0;
+          for (; depth_offset + 2 <= depth; depth_offset += 2) {
+            const float32x4_t weights00 = vld1q_f32(weights);
+            const float32x4_t weights01 = vld1q_f32(weights + 4);
+            const float32x4_t weights10 = vld1q_f32(weights + panel_cols);
+            const float32x4_t weights11 = vld1q_f32(weights + panel_cols + 4);
+
+            acc00 = vmlaq_n_f32(acc00, weights00, row0[depth_offset]);
+            acc01 = vmlaq_n_f32(acc01, weights01, row0[depth_offset]);
+            acc00 = vmlaq_n_f32(acc00, weights10, row0[depth_offset + 1]);
+            acc01 = vmlaq_n_f32(acc01, weights11, row0[depth_offset + 1]);
+
+            acc10 = vmlaq_n_f32(acc10, weights00, row1[depth_offset]);
+            acc11 = vmlaq_n_f32(acc11, weights01, row1[depth_offset]);
+            acc10 = vmlaq_n_f32(acc10, weights10, row1[depth_offset + 1]);
+            acc11 = vmlaq_n_f32(acc11, weights11, row1[depth_offset + 1]);
+
+            acc20 = vmlaq_n_f32(acc20, weights00, row2[depth_offset]);
+            acc21 = vmlaq_n_f32(acc21, weights01, row2[depth_offset]);
+            acc20 = vmlaq_n_f32(acc20, weights10, row2[depth_offset + 1]);
+            acc21 = vmlaq_n_f32(acc21, weights11, row2[depth_offset + 1]);
+
+            acc30 = vmlaq_n_f32(acc30, weights00, row3[depth_offset]);
+            acc31 = vmlaq_n_f32(acc31, weights01, row3[depth_offset]);
+            acc30 = vmlaq_n_f32(acc30, weights10, row3[depth_offset + 1]);
+            acc31 = vmlaq_n_f32(acc31, weights11, row3[depth_offset + 1]);
+
+            acc40 = vmlaq_n_f32(acc40, weights00, row4[depth_offset]);
+            acc41 = vmlaq_n_f32(acc41, weights01, row4[depth_offset]);
+            acc40 = vmlaq_n_f32(acc40, weights10, row4[depth_offset + 1]);
+            acc41 = vmlaq_n_f32(acc41, weights11, row4[depth_offset + 1]);
+
+            acc50 = vmlaq_n_f32(acc50, weights00, row5[depth_offset]);
+            acc51 = vmlaq_n_f32(acc51, weights01, row5[depth_offset]);
+            acc50 = vmlaq_n_f32(acc50, weights10, row5[depth_offset + 1]);
+            acc51 = vmlaq_n_f32(acc51, weights11, row5[depth_offset + 1]);
+
+            acc60 = vmlaq_n_f32(acc60, weights00, row6[depth_offset]);
+            acc61 = vmlaq_n_f32(acc61, weights01, row6[depth_offset]);
+            acc60 = vmlaq_n_f32(acc60, weights10, row6[depth_offset + 1]);
+            acc61 = vmlaq_n_f32(acc61, weights11, row6[depth_offset + 1]);
+
+            acc70 = vmlaq_n_f32(acc70, weights00, row7[depth_offset]);
+            acc71 = vmlaq_n_f32(acc71, weights01, row7[depth_offset]);
+            acc70 = vmlaq_n_f32(acc70, weights10, row7[depth_offset + 1]);
+            acc71 = vmlaq_n_f32(acc71, weights11, row7[depth_offset + 1]);
+
+            weights += 2 * panel_cols;
+          }
+          for (; depth_offset < depth; ++depth_offset) {
+            const float32x4_t weights0 = vld1q_f32(weights);
+            const float32x4_t weights1 = vld1q_f32(weights + 4);
+            acc00 = vmlaq_n_f32(acc00, weights0, row0[depth_offset]);
+            acc01 = vmlaq_n_f32(acc01, weights1, row0[depth_offset]);
+            acc10 = vmlaq_n_f32(acc10, weights0, row1[depth_offset]);
+            acc11 = vmlaq_n_f32(acc11, weights1, row1[depth_offset]);
+            acc20 = vmlaq_n_f32(acc20, weights0, row2[depth_offset]);
+            acc21 = vmlaq_n_f32(acc21, weights1, row2[depth_offset]);
+            acc30 = vmlaq_n_f32(acc30, weights0, row3[depth_offset]);
+            acc31 = vmlaq_n_f32(acc31, weights1, row3[depth_offset]);
+            acc40 = vmlaq_n_f32(acc40, weights0, row4[depth_offset]);
+            acc41 = vmlaq_n_f32(acc41, weights1, row4[depth_offset]);
+            acc50 = vmlaq_n_f32(acc50, weights0, row5[depth_offset]);
+            acc51 = vmlaq_n_f32(acc51, weights1, row5[depth_offset]);
+            acc60 = vmlaq_n_f32(acc60, weights0, row6[depth_offset]);
+            acc61 = vmlaq_n_f32(acc61, weights1, row6[depth_offset]);
+            acc70 = vmlaq_n_f32(acc70, weights0, row7[depth_offset]);
+            acc71 = vmlaq_n_f32(acc71, weights1, row7[depth_offset]);
+            weights += panel_cols;
+          }
+
+          if constexpr (fuse_batch_norm) {
+            if (last_depth_block) {
+              const float * scale =
+                  request.batch_norm_scale + static_cast<size_t>(panel_col + local_col);
+              const float * shift =
+                  request.batch_norm_shift + static_cast<size_t>(panel_col + local_col);
+              const float32x4_t scale0 = vld1q_f32(scale);
+              const float32x4_t scale1 = vld1q_f32(scale + 4);
+              const float32x4_t shift0 = vld1q_f32(shift);
+              const float32x4_t shift1 = vld1q_f32(shift + 4);
+              acc00 = vmlaq_f32(shift0, acc00, scale0);
+              acc01 = vmlaq_f32(shift1, acc01, scale1);
+              acc10 = vmlaq_f32(shift0, acc10, scale0);
+              acc11 = vmlaq_f32(shift1, acc11, scale1);
+              acc20 = vmlaq_f32(shift0, acc20, scale0);
+              acc21 = vmlaq_f32(shift1, acc21, scale1);
+              acc30 = vmlaq_f32(shift0, acc30, scale0);
+              acc31 = vmlaq_f32(shift1, acc31, scale1);
+              acc40 = vmlaq_f32(shift0, acc40, scale0);
+              acc41 = vmlaq_f32(shift1, acc41, scale1);
+              acc50 = vmlaq_f32(shift0, acc50, scale0);
+              acc51 = vmlaq_f32(shift1, acc51, scale1);
+              acc60 = vmlaq_f32(shift0, acc60, scale0);
+              acc61 = vmlaq_f32(shift1, acc61, scale1);
+              acc70 = vmlaq_f32(shift0, acc70, scale0);
+              acc71 = vmlaq_f32(shift1, acc71, scale1);
+              if constexpr (apply_relu) {
+                acc00 = vmaxq_f32(acc00, zero);
+                acc01 = vmaxq_f32(acc01, zero);
+                acc10 = vmaxq_f32(acc10, zero);
+                acc11 = vmaxq_f32(acc11, zero);
+                acc20 = vmaxq_f32(acc20, zero);
+                acc21 = vmaxq_f32(acc21, zero);
+                acc30 = vmaxq_f32(acc30, zero);
+                acc31 = vmaxq_f32(acc31, zero);
+                acc40 = vmaxq_f32(acc40, zero);
+                acc41 = vmaxq_f32(acc41, zero);
+                acc50 = vmaxq_f32(acc50, zero);
+                acc51 = vmaxq_f32(acc51, zero);
+                acc60 = vmaxq_f32(acc60, zero);
+                acc61 = vmaxq_f32(acc61, zero);
+                acc70 = vmaxq_f32(acc70, zero);
+                acc71 = vmaxq_f32(acc71, zero);
+              }
+            }
+          }
+
+          vst1q_f32(out0, acc00);
+          vst1q_f32(out0 + 4, acc01);
+          vst1q_f32(out1, acc10);
+          vst1q_f32(out1 + 4, acc11);
+          vst1q_f32(out2, acc20);
+          vst1q_f32(out2 + 4, acc21);
+          vst1q_f32(out3, acc30);
+          vst1q_f32(out3 + 4, acc31);
+          vst1q_f32(out4, acc40);
+          vst1q_f32(out4 + 4, acc41);
+          vst1q_f32(out5, acc50);
+          vst1q_f32(out5 + 4, acc51);
+          vst1q_f32(out6, acc60);
+          vst1q_f32(out6 + 4, acc61);
+          vst1q_f32(out7, acc70);
+          vst1q_f32(out7 + 4, acc71);
+        }
+
+        for (; pixel_index < request.pixel_count; ++pixel_index) {
+          float * out =
+              c + static_cast<size_t>(pixel_index) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float32x4_t acc0 = zero;
+          float32x4_t acc1 = zero;
+          if (!first_depth_block) {
+            acc0 = vld1q_f32(out);
+            acc1 = vld1q_f32(out + 4);
+          }
+          const float * row =
+              a + static_cast<size_t>(pixel_index) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * weights =
+              panel + static_cast<size_t>(depth_base) * static_cast<size_t>(panel_cols) +
+              static_cast<size_t>(local_col);
+          int32_t depth_offset = 0;
+          for (; depth_offset + 2 <= depth; depth_offset += 2) {
+            const float32x4_t weights00 = vld1q_f32(weights);
+            const float32x4_t weights01 = vld1q_f32(weights + 4);
+            const float32x4_t weights10 = vld1q_f32(weights + panel_cols);
+            const float32x4_t weights11 = vld1q_f32(weights + panel_cols + 4);
+            acc0 = vmlaq_n_f32(acc0, weights00, row[depth_offset]);
+            acc1 = vmlaq_n_f32(acc1, weights01, row[depth_offset]);
+            acc0 = vmlaq_n_f32(acc0, weights10, row[depth_offset + 1]);
+            acc1 = vmlaq_n_f32(acc1, weights11, row[depth_offset + 1]);
+            weights += 2 * panel_cols;
+          }
+          for (; depth_offset < depth; ++depth_offset) {
+            const float32x4_t weights0 = vld1q_f32(weights);
+            const float32x4_t weights1 = vld1q_f32(weights + 4);
+            acc0 = vmlaq_n_f32(acc0, weights0, row[depth_offset]);
+            acc1 = vmlaq_n_f32(acc1, weights1, row[depth_offset]);
+            weights += panel_cols;
+          }
+          if constexpr (fuse_batch_norm) {
+            if (last_depth_block) {
+              const float * scale =
+                  request.batch_norm_scale + static_cast<size_t>(panel_col + local_col);
+              const float * shift =
+                  request.batch_norm_shift + static_cast<size_t>(panel_col + local_col);
+              acc0 = vmlaq_f32(vld1q_f32(shift), acc0, vld1q_f32(scale));
+              acc1 = vmlaq_f32(vld1q_f32(shift + 4), acc1, vld1q_f32(scale + 4));
+              if constexpr (apply_relu) {
+                acc0 = vmaxq_f32(acc0, zero);
+                acc1 = vmaxq_f32(acc1, zero);
+              }
+            }
+          }
+          vst1q_f32(out, acc0);
+          vst1q_f32(out + 4, acc1);
+        }
+      }
+
+      for (int32_t local_col = vec_pair_cols; local_col < vec_cols; local_col += k_col_vec) {
+        int32_t pixel_index = 0;
+        for (; pixel_index + k_row_block <= request.pixel_count; pixel_index += k_row_block) {
+          float * out0 = c + static_cast<size_t>(pixel_index + 0) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out1 = c + static_cast<size_t>(pixel_index + 1) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out2 = c + static_cast<size_t>(pixel_index + 2) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out3 = c + static_cast<size_t>(pixel_index + 3) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out4 = c + static_cast<size_t>(pixel_index + 4) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out5 = c + static_cast<size_t>(pixel_index + 5) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out6 = c + static_cast<size_t>(pixel_index + 6) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float * out7 = c + static_cast<size_t>(pixel_index + 7) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+
+          float32x4_t acc0 = zero;
+          float32x4_t acc1 = zero;
+          float32x4_t acc2 = zero;
+          float32x4_t acc3 = zero;
+          float32x4_t acc4 = zero;
+          float32x4_t acc5 = zero;
+          float32x4_t acc6 = zero;
+          float32x4_t acc7 = zero;
+          if (!first_depth_block) {
+            acc0 = vld1q_f32(out0);
+            acc1 = vld1q_f32(out1);
+            acc2 = vld1q_f32(out2);
+            acc3 = vld1q_f32(out3);
+            acc4 = vld1q_f32(out4);
+            acc5 = vld1q_f32(out5);
+            acc6 = vld1q_f32(out6);
+            acc7 = vld1q_f32(out7);
+          }
+
+          const float * row0 =
+              a + static_cast<size_t>(pixel_index + 0) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row1 =
+              a + static_cast<size_t>(pixel_index + 1) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row2 =
+              a + static_cast<size_t>(pixel_index + 2) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row3 =
+              a + static_cast<size_t>(pixel_index + 3) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row4 =
+              a + static_cast<size_t>(pixel_index + 4) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row5 =
+              a + static_cast<size_t>(pixel_index + 5) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row6 =
+              a + static_cast<size_t>(pixel_index + 6) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * row7 =
+              a + static_cast<size_t>(pixel_index + 7) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * weights =
+              panel + static_cast<size_t>(depth_base) * static_cast<size_t>(panel_cols) +
+              static_cast<size_t>(local_col);
+
+          for (int32_t depth_offset = 0; depth_offset < depth; ++depth_offset) {
+            const float32x4_t weights0 = vld1q_f32(weights);
+            acc0 = vmlaq_n_f32(acc0, weights0, row0[depth_offset]);
+            acc1 = vmlaq_n_f32(acc1, weights0, row1[depth_offset]);
+            acc2 = vmlaq_n_f32(acc2, weights0, row2[depth_offset]);
+            acc3 = vmlaq_n_f32(acc3, weights0, row3[depth_offset]);
+            acc4 = vmlaq_n_f32(acc4, weights0, row4[depth_offset]);
+            acc5 = vmlaq_n_f32(acc5, weights0, row5[depth_offset]);
+            acc6 = vmlaq_n_f32(acc6, weights0, row6[depth_offset]);
+            acc7 = vmlaq_n_f32(acc7, weights0, row7[depth_offset]);
+            weights += panel_cols;
+          }
+
+          if constexpr (fuse_batch_norm) {
+            if (last_depth_block) {
+              const float * scale =
+                  request.batch_norm_scale + static_cast<size_t>(panel_col + local_col);
+              const float * shift =
+                  request.batch_norm_shift + static_cast<size_t>(panel_col + local_col);
+              const float32x4_t scale0 = vld1q_f32(scale);
+              const float32x4_t shift0 = vld1q_f32(shift);
+              acc0 = vmlaq_f32(shift0, acc0, scale0);
+              acc1 = vmlaq_f32(shift0, acc1, scale0);
+              acc2 = vmlaq_f32(shift0, acc2, scale0);
+              acc3 = vmlaq_f32(shift0, acc3, scale0);
+              acc4 = vmlaq_f32(shift0, acc4, scale0);
+              acc5 = vmlaq_f32(shift0, acc5, scale0);
+              acc6 = vmlaq_f32(shift0, acc6, scale0);
+              acc7 = vmlaq_f32(shift0, acc7, scale0);
+              if constexpr (apply_relu) {
+                acc0 = vmaxq_f32(acc0, zero);
+                acc1 = vmaxq_f32(acc1, zero);
+                acc2 = vmaxq_f32(acc2, zero);
+                acc3 = vmaxq_f32(acc3, zero);
+                acc4 = vmaxq_f32(acc4, zero);
+                acc5 = vmaxq_f32(acc5, zero);
+                acc6 = vmaxq_f32(acc6, zero);
+                acc7 = vmaxq_f32(acc7, zero);
+              }
+            }
+          }
+
+          vst1q_f32(out0, acc0);
+          vst1q_f32(out1, acc1);
+          vst1q_f32(out2, acc2);
+          vst1q_f32(out3, acc3);
+          vst1q_f32(out4, acc4);
+          vst1q_f32(out5, acc5);
+          vst1q_f32(out6, acc6);
+          vst1q_f32(out7, acc7);
+        }
+
+        for (; pixel_index < request.pixel_count; ++pixel_index) {
+          float * out =
+              c + static_cast<size_t>(pixel_index) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col);
+          float32x4_t acc = zero;
+          if (!first_depth_block) {
+            acc = vld1q_f32(out);
+          }
+          const float * row =
+              a + static_cast<size_t>(pixel_index) * static_cast<size_t>(k) +
+              static_cast<size_t>(depth_base);
+          const float * weights =
+              panel + static_cast<size_t>(depth_base) * static_cast<size_t>(panel_cols) +
+              static_cast<size_t>(local_col);
+          for (int32_t depth_offset = 0; depth_offset < depth; ++depth_offset) {
+            acc = vmlaq_n_f32(acc, vld1q_f32(weights), row[depth_offset]);
+            weights += panel_cols;
+          }
+          if constexpr (fuse_batch_norm) {
+            if (last_depth_block) {
+              const float * scale =
+                  request.batch_norm_scale + static_cast<size_t>(panel_col + local_col);
+              const float * shift =
+                  request.batch_norm_shift + static_cast<size_t>(panel_col + local_col);
+              acc = vmlaq_f32(vld1q_f32(shift), acc, vld1q_f32(scale));
+              if constexpr (apply_relu) {
+                acc = vmaxq_f32(acc, zero);
+              }
+            }
+          }
+          vst1q_f32(out, acc);
+        }
+      }
+
+      for (int32_t local_col = vec_cols; local_col < panel_cols; ++local_col) {
+        for (int32_t pixel_index = 0; pixel_index < request.pixel_count; ++pixel_index) {
+          float acc = first_depth_block
+              ? 0.0f
+              : c[static_cast<size_t>(pixel_index) * static_cast<size_t>(n) +
+                  static_cast<size_t>(panel_col + local_col)];
+          for (int32_t depth_offset = 0; depth_offset < depth; ++depth_offset) {
+            acc += a[static_cast<size_t>(pixel_index) * static_cast<size_t>(k) +
+                     static_cast<size_t>(depth_base + depth_offset)] *
+                panel[static_cast<size_t>(depth_base + depth_offset) *
+                          static_cast<size_t>(panel_cols) +
+                      static_cast<size_t>(local_col)];
+          }
+          if constexpr (fuse_batch_norm) {
+            if (last_depth_block) {
+              acc = acc *
+                      request.batch_norm_scale[static_cast<size_t>(panel_col + local_col)] +
+                  request.batch_norm_shift[static_cast<size_t>(panel_col + local_col)];
+              if constexpr (apply_relu) {
+                acc = std::max(acc, 0.0f);
+              }
+            }
+          }
+          c[static_cast<size_t>(pixel_index) * static_cast<size_t>(n) +
+              static_cast<size_t>(panel_col + local_col)] = acc;
+        }
+      }
+    }
+  }
+
+  return true;
+#endif
+}
+
+inline bool execute_neon_image_depthwise_f32(
+    const emel_image_depthwise_f32_request & request) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void) request;
+  return false;
+#else
+  if (request.input == nullptr ||
+      request.kernel_major == nullptr ||
+      request.output == nullptr ||
+      request.input_spatial <= 0 ||
+      request.output_spatial <= 0 ||
+      request.output_channels <= 0 ||
+      request.kernel_h <= 0 ||
+      request.kernel_w <= 0 ||
+      request.stride <= 0) {
+    return false;
+  }
+
+  const int32_t channels = request.output_channels;
+  const float32x4_t zero = vdupq_n_f32(0.0f);
+  for (int32_t oy = 0; oy < request.output_spatial; ++oy) {
+    for (int32_t ox = 0; ox < request.output_spatial; ++ox) {
+      float * output_pixel =
+          request.output + static_cast<size_t>(oy * request.output_spatial + ox) *
+              static_cast<size_t>(channels);
+      int32_t channel = 0;
+      for (; channel + 16 <= channels; channel += 16) {
+        float32x4_t acc0 = zero;
+        float32x4_t acc1 = zero;
+        float32x4_t acc2 = zero;
+        float32x4_t acc3 = zero;
+        for (int32_t ky = 0; ky < request.kernel_h; ++ky) {
+          const int32_t iy = oy * request.stride + ky - request.pad_h;
+          if (iy < 0 || iy >= request.input_spatial) {
+            continue;
+          }
+          for (int32_t kx = 0; kx < request.kernel_w; ++kx) {
+            const int32_t ix = ox * request.stride + kx - request.pad_w;
+            if (ix < 0 || ix >= request.input_spatial) {
+              continue;
+            }
+            const float * input_pixel =
+                request.input +
+                static_cast<size_t>(iy * request.input_spatial + ix) *
+                    static_cast<size_t>(channels);
+            const float * kernel_weights =
+                request.kernel_major +
+                static_cast<size_t>(ky * request.kernel_w + kx) * static_cast<size_t>(channels);
+            acc0 = vmlaq_f32(acc0,
+                             vld1q_f32(input_pixel + static_cast<size_t>(channel)),
+                             vld1q_f32(kernel_weights + static_cast<size_t>(channel)));
+            acc1 = vmlaq_f32(acc1,
+                             vld1q_f32(input_pixel + static_cast<size_t>(channel + 4)),
+                             vld1q_f32(kernel_weights + static_cast<size_t>(channel + 4)));
+            acc2 = vmlaq_f32(acc2,
+                             vld1q_f32(input_pixel + static_cast<size_t>(channel + 8)),
+                             vld1q_f32(kernel_weights + static_cast<size_t>(channel + 8)));
+            acc3 = vmlaq_f32(acc3,
+                             vld1q_f32(input_pixel + static_cast<size_t>(channel + 12)),
+                             vld1q_f32(kernel_weights + static_cast<size_t>(channel + 12)));
+          }
+        }
+        vst1q_f32(output_pixel + static_cast<size_t>(channel), acc0);
+        vst1q_f32(output_pixel + static_cast<size_t>(channel + 4), acc1);
+        vst1q_f32(output_pixel + static_cast<size_t>(channel + 8), acc2);
+        vst1q_f32(output_pixel + static_cast<size_t>(channel + 12), acc3);
+      }
+      for (; channel + 4 <= channels; channel += 4) {
+        float32x4_t acc = zero;
+        for (int32_t ky = 0; ky < request.kernel_h; ++ky) {
+          const int32_t iy = oy * request.stride + ky - request.pad_h;
+          if (iy < 0 || iy >= request.input_spatial) {
+            continue;
+          }
+          for (int32_t kx = 0; kx < request.kernel_w; ++kx) {
+            const int32_t ix = ox * request.stride + kx - request.pad_w;
+            if (ix < 0 || ix >= request.input_spatial) {
+              continue;
+            }
+            const float * input_pixel =
+                request.input +
+                static_cast<size_t>(iy * request.input_spatial + ix) *
+                    static_cast<size_t>(channels);
+            const float * kernel_weights =
+                request.kernel_major +
+                static_cast<size_t>(ky * request.kernel_w + kx) * static_cast<size_t>(channels);
+            acc = vmlaq_f32(acc,
+                            vld1q_f32(input_pixel + static_cast<size_t>(channel)),
+                            vld1q_f32(kernel_weights + static_cast<size_t>(channel)));
+          }
+        }
+        vst1q_f32(output_pixel + static_cast<size_t>(channel), acc);
+      }
+      for (; channel < channels; ++channel) {
+        float acc = 0.0f;
+        for (int32_t ky = 0; ky < request.kernel_h; ++ky) {
+          const int32_t iy = oy * request.stride + ky - request.pad_h;
+          if (iy < 0 || iy >= request.input_spatial) {
+            continue;
+          }
+          for (int32_t kx = 0; kx < request.kernel_w; ++kx) {
+            const int32_t ix = ox * request.stride + kx - request.pad_w;
+            if (ix < 0 || ix >= request.input_spatial) {
+              continue;
+            }
+            const float * input_pixel =
+                request.input +
+                static_cast<size_t>(iy * request.input_spatial + ix) *
+                    static_cast<size_t>(channels);
+            const float * kernel_weights =
+                request.kernel_major +
+                static_cast<size_t>(ky * request.kernel_w + kx) * static_cast<size_t>(channels);
+            acc += kernel_weights[static_cast<size_t>(channel)] *
+                input_pixel[static_cast<size_t>(channel)];
+          }
+        }
+        output_pixel[static_cast<size_t>(channel)] = acc;
+      }
+    }
+  }
+
+  return true;
+#endif
+}
+
 template <class request_type>
 inline bool can_use_neon(const request_type & request, const bool neon_available) noexcept {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
@@ -202,6 +858,58 @@ inline bool can_use_neon_mul_mat_q6_vector(const event::op_mul_mat & request,
                                            const bool neon_available) noexcept {
   return neon_available &&
       can_run_neon_mul_mat_q6_vector_request(request);
+}
+
+inline bool neon_q5_0_vector_supported() noexcept {
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(__ARM_FEATURE_DOTPROD)
+  return true;
+#else
+  return false;
+#endif
+}
+
+inline bool can_run_neon_mul_mat_q5_0_vector_request(
+    const event::op_mul_mat & request) noexcept {
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK5_0;
+  const size_t row_bytes =
+      ::emel::kernel::detail::quantized_row_storage_bytes(
+          ::emel::kernel::detail::dtype_q5_0, k);
+  return k != 0u &&
+      m != 0u &&
+      block_count != 0u &&
+      block_count <= ::emel::kernel::detail::quant::MAX_Q8_0_BLOCKS &&
+      request.src1.ne[0] == 1u &&
+      request.src1.ne[1] == k &&
+      request.dst.ne[0] == 1u &&
+      request.dst.ne[1] == m &&
+      request.src0.ne[2] == 1u &&
+      request.src0.ne[3] == 1u &&
+      request.src1.ne[2] == 1u &&
+      request.src1.ne[3] == 1u &&
+      request.dst.ne[2] == 1u &&
+      request.dst.ne[3] == 1u &&
+      ::emel::kernel::detail::dtype_code(request.src0.type) ==
+          ::emel::kernel::detail::dtype_q5_0 &&
+      ::emel::kernel::detail::dtype_code(request.src1.type) ==
+          ::emel::kernel::detail::dtype_f32 &&
+      ::emel::kernel::detail::dtype_code(request.dst.type) ==
+          ::emel::kernel::detail::dtype_f32 &&
+      request.src0.nb[0] == 1u &&
+      row_bytes != 0u &&
+      request.src0.nb[1] == row_bytes &&
+      request.src0.nb[2] == row_bytes * m &&
+      request.src0.nb[3] == request.src0.nb[2] &&
+      is_dense_contiguous(request.src1) &&
+      is_dense_contiguous(request.dst);
+}
+
+inline bool can_use_neon_mul_mat_q5_0_vector(const event::op_mul_mat & request,
+                                             const bool neon_available) noexcept {
+  return neon_available &&
+      neon_q5_0_vector_supported() &&
+      can_run_neon_mul_mat_q5_0_vector_request(request);
 }
 
 inline bool can_run_neon_mul_mat_q8_0_vector_request(
@@ -2682,6 +3390,153 @@ inline int32_t dot_q8_0_q8_0_block_sum_neon(
   return horizontal_sum_s32_neon(acc);
 }
 
+inline constexpr std::array<std::array<uint8_t, 8>, 256> make_q5_0_high_bit_lookup() noexcept {
+  std::array<std::array<uint8_t, 8>, 256> table = {};
+  for (size_t bits = 0; bits < table.size(); ++bits) {
+    for (size_t lane = 0; lane < table[bits].size(); ++lane) {
+      table[bits][lane] = static_cast<uint8_t>(((bits >> lane) & 0x1u) << 4u);
+    }
+  }
+  return table;
+}
+
+inline constexpr auto k_q5_0_high_bit_lookup = make_q5_0_high_bit_lookup();
+
+inline uint8x8_t load_q5_0_high_bit_mask_u8(const uint8_t bits) noexcept {
+  return vld1_u8(k_q5_0_high_bit_lookup[bits].data());
+}
+
+inline void decode_q5_0_block_neon(const ::emel::kernel::detail::quant::block_q5_0 & block,
+                                   int8x16_t & low_out,
+                                   int8x16_t & high_out) noexcept {
+  const uint8x16_t qs = vld1q_u8(block.qs.data());
+  const uint8x16_t low_nibbles = vandq_u8(qs, vdupq_n_u8(0x0f));
+  const uint8x16_t high_nibbles = vshrq_n_u8(qs, 4u);
+  const uint8x16_t low_mask = vcombine_u8(
+      load_q5_0_high_bit_mask_u8(block.qh[0]), load_q5_0_high_bit_mask_u8(block.qh[1]));
+  const uint8x16_t high_mask = vcombine_u8(
+      load_q5_0_high_bit_mask_u8(block.qh[2]), load_q5_0_high_bit_mask_u8(block.qh[3]));
+  const int8x16_t bias = vdupq_n_s8(16);
+  low_out = vsubq_s8(vreinterpretq_s8_u8(vorrq_u8(low_nibbles, low_mask)), bias);
+  high_out = vsubq_s8(vreinterpretq_s8_u8(vorrq_u8(high_nibbles, high_mask)), bias);
+}
+
+inline float dot_q5_0_q8_0_row_neon(const ::emel::kernel::detail::quant::block_q5_0 * lhs,
+                                    const ::emel::kernel::detail::quant::block_q8_0 * rhs,
+                                    const uint64_t block_count) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON))
+  return ::emel::kernel::detail::dot_q5_0_q8_0_row_scalar(lhs, rhs, block_count);
+#else
+  float sumf = 0.0f;
+
+  for (uint64_t block = 0; block < block_count; ++block) {
+    int8x16_t lhs_lo = {};
+    int8x16_t lhs_hi = {};
+    decode_q5_0_block_neon(lhs[block], lhs_lo, lhs_hi);
+    const int8x16_t rhs_lo = vld1q_s8(rhs[block].qs.data());
+    const int8x16_t rhs_hi = vld1q_s8(rhs[block].qs.data() + 16u);
+#if defined(__ARM_FEATURE_DOTPROD)
+    int32x4_t acc = vdupq_n_s32(0);
+    acc = vdotq_s32(acc, lhs_lo, rhs_lo);
+    acc = vdotq_s32(acc, lhs_hi, rhs_hi);
+#else
+    const int16x8_t prod0_lo = vmull_s8(vget_low_s8(lhs_lo), vget_low_s8(rhs_lo));
+    const int16x8_t prod0_hi = vmull_s8(vget_high_s8(lhs_lo), vget_high_s8(rhs_lo));
+    const int16x8_t prod1_lo = vmull_s8(vget_low_s8(lhs_hi), vget_low_s8(rhs_hi));
+    const int16x8_t prod1_hi = vmull_s8(vget_high_s8(lhs_hi), vget_high_s8(rhs_hi));
+    const int32x4_t acc = vaddq_s32(
+        vaddq_s32(vpaddlq_s16(prod0_lo), vpaddlq_s16(prod0_hi)),
+        vaddq_s32(vpaddlq_s16(prod1_lo), vpaddlq_s16(prod1_hi)));
+#endif
+    sumf += static_cast<float>(horizontal_sum_s32_neon(acc)) *
+        (::emel::kernel::detail::quant::fp16_to_fp32(lhs[block].d) *
+         ::emel::kernel::detail::quant::fp16_to_fp32(rhs[block].d));
+  }
+
+  return sumf;
+#endif
+}
+
+inline void dot_q5_0_q8_0_4rows_neon(
+    const ::emel::kernel::detail::quant::block_q5_0 * row0,
+    const ::emel::kernel::detail::quant::block_q5_0 * row1,
+    const ::emel::kernel::detail::quant::block_q5_0 * row2,
+    const ::emel::kernel::detail::quant::block_q5_0 * row3,
+    const ::emel::kernel::detail::quant::block_q8_0 * rhs,
+    const uint64_t block_count,
+    float * out) noexcept {
+#if !(defined(__aarch64__) && defined(__ARM_NEON))
+  out[0] = ::emel::kernel::detail::dot_q5_0_q8_0_row_scalar(row0, rhs, block_count);
+  out[1] = ::emel::kernel::detail::dot_q5_0_q8_0_row_scalar(row1, rhs, block_count);
+  out[2] = ::emel::kernel::detail::dot_q5_0_q8_0_row_scalar(row2, rhs, block_count);
+  out[3] = ::emel::kernel::detail::dot_q5_0_q8_0_row_scalar(row3, rhs, block_count);
+#else
+  float sum0 = 0.0f;
+  float sum1 = 0.0f;
+  float sum2 = 0.0f;
+  float sum3 = 0.0f;
+
+  for (uint64_t block = 0; block < block_count; ++block) {
+    int8x16_t lhs0_lo = {};
+    int8x16_t lhs0_hi = {};
+    int8x16_t lhs1_lo = {};
+    int8x16_t lhs1_hi = {};
+    int8x16_t lhs2_lo = {};
+    int8x16_t lhs2_hi = {};
+    int8x16_t lhs3_lo = {};
+    int8x16_t lhs3_hi = {};
+    decode_q5_0_block_neon(row0[block], lhs0_lo, lhs0_hi);
+    decode_q5_0_block_neon(row1[block], lhs1_lo, lhs1_hi);
+    decode_q5_0_block_neon(row2[block], lhs2_lo, lhs2_hi);
+    decode_q5_0_block_neon(row3[block], lhs3_lo, lhs3_hi);
+    const int8x16_t rhs_lo = vld1q_s8(rhs[block].qs.data());
+    const int8x16_t rhs_hi = vld1q_s8(rhs[block].qs.data() + 16u);
+#if defined(__ARM_FEATURE_DOTPROD)
+    int32x4_t acc0 = vdupq_n_s32(0);
+    int32x4_t acc1 = vdupq_n_s32(0);
+    int32x4_t acc2 = vdupq_n_s32(0);
+    int32x4_t acc3 = vdupq_n_s32(0);
+    acc0 = vdotq_s32(acc0, lhs0_lo, rhs_lo);
+    acc0 = vdotq_s32(acc0, lhs0_hi, rhs_hi);
+    acc1 = vdotq_s32(acc1, lhs1_lo, rhs_lo);
+    acc1 = vdotq_s32(acc1, lhs1_hi, rhs_hi);
+    acc2 = vdotq_s32(acc2, lhs2_lo, rhs_lo);
+    acc2 = vdotq_s32(acc2, lhs2_hi, rhs_hi);
+    acc3 = vdotq_s32(acc3, lhs3_lo, rhs_lo);
+    acc3 = vdotq_s32(acc3, lhs3_hi, rhs_hi);
+#else
+    const auto accumulate = [&](const int8x16_t lhs_lo, const int8x16_t lhs_hi) noexcept {
+      const int16x8_t prod0_lo = vmull_s8(vget_low_s8(lhs_lo), vget_low_s8(rhs_lo));
+      const int16x8_t prod0_hi = vmull_s8(vget_high_s8(lhs_lo), vget_high_s8(rhs_lo));
+      const int16x8_t prod1_lo = vmull_s8(vget_low_s8(lhs_hi), vget_low_s8(rhs_hi));
+      const int16x8_t prod1_hi = vmull_s8(vget_high_s8(lhs_hi), vget_high_s8(rhs_hi));
+      return vaddq_s32(
+          vaddq_s32(vpaddlq_s16(prod0_lo), vpaddlq_s16(prod0_hi)),
+          vaddq_s32(vpaddlq_s16(prod1_lo), vpaddlq_s16(prod1_hi)));
+    };
+    const int32x4_t acc0 = accumulate(lhs0_lo, lhs0_hi);
+    const int32x4_t acc1 = accumulate(lhs1_lo, lhs1_hi);
+    const int32x4_t acc2 = accumulate(lhs2_lo, lhs2_hi);
+    const int32x4_t acc3 = accumulate(lhs3_lo, lhs3_hi);
+#endif
+    const float rhs_scale = ::emel::kernel::detail::quant::fp16_to_fp32(rhs[block].d);
+    sum0 += static_cast<float>(horizontal_sum_s32_neon(acc0)) *
+        (::emel::kernel::detail::quant::fp16_to_fp32(row0[block].d) * rhs_scale);
+    sum1 += static_cast<float>(horizontal_sum_s32_neon(acc1)) *
+        (::emel::kernel::detail::quant::fp16_to_fp32(row1[block].d) * rhs_scale);
+    sum2 += static_cast<float>(horizontal_sum_s32_neon(acc2)) *
+        (::emel::kernel::detail::quant::fp16_to_fp32(row2[block].d) * rhs_scale);
+    sum3 += static_cast<float>(horizontal_sum_s32_neon(acc3)) *
+        (::emel::kernel::detail::quant::fp16_to_fp32(row3[block].d) * rhs_scale);
+  }
+
+  out[0] = sum0;
+  out[1] = sum1;
+  out[2] = sum2;
+  out[3] = sum3;
+#endif
+}
+
 inline float dot_q8_0_q8_0_row_neon(const ::emel::kernel::detail::quant::block_q8_0 * lhs,
                                     const ::emel::kernel::detail::quant::block_q8_0 * rhs,
                                     const uint64_t block_count) noexcept {
@@ -4634,6 +5489,61 @@ inline void execute_neon_mul_mat_q8_0_vector_unchecked(
 #endif
 }
 
+inline void execute_neon_mul_mat_q5_0_vector_unchecked(
+    const event::op_mul_mat & request) noexcept {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  (void) request;
+#else
+  const uint64_t k = request.src0.ne[0];
+  const uint64_t m = request.src0.ne[1];
+  const uint64_t block_count = k / ::emel::kernel::detail::quant::QK5_0;
+  alignas(64) std::array<::emel::kernel::detail::quant::block_q8_0,
+                         ::emel::kernel::detail::quant::MAX_Q8_0_BLOCKS>
+      q8_blocks = {};
+
+  ::emel::kernel::detail::quant::quantize_row_q8_0_strided(
+      static_cast<const float *>(request.src1.data),
+      1u,
+      q8_blocks.data(),
+      static_cast<int64_t>(k));
+
+  const uint8_t * a = static_cast<const uint8_t *>(request.src0.data);
+  const size_t row_bytes = request.src0.nb[1];
+  float * c = static_cast<float *>(request.dst.data);
+  uint64_t row = 0u;
+  for (; row + 4u <= m; row += 4u) {
+    const auto * row0 = reinterpret_cast<const ::emel::kernel::detail::quant::block_q5_0 *>(
+        a + (row + 0u) * row_bytes);
+    const auto * row1 = reinterpret_cast<const ::emel::kernel::detail::quant::block_q5_0 *>(
+        a + (row + 1u) * row_bytes);
+    const auto * row2 = reinterpret_cast<const ::emel::kernel::detail::quant::block_q5_0 *>(
+        a + (row + 2u) * row_bytes);
+    const auto * row3 = reinterpret_cast<const ::emel::kernel::detail::quant::block_q5_0 *>(
+        a + (row + 3u) * row_bytes);
+    float sum[4] = {};
+    dot_q5_0_q8_0_4rows_neon(row0, row1, row2, row3, q8_blocks.data(), block_count, sum);
+    c[row + 0u] = sum[0];
+    c[row + 1u] = sum[1];
+    c[row + 2u] = sum[2];
+    c[row + 3u] = sum[3];
+  }
+
+  for (; row < m; ++row) {
+    const auto * row_ptr = reinterpret_cast<const ::emel::kernel::detail::quant::block_q5_0 *>(
+        a + row * row_bytes);
+    c[row] = dot_q5_0_q8_0_row_neon(row_ptr, q8_blocks.data(), block_count);
+  }
+#endif
+}
+
+inline bool execute_neon_mul_mat_q5_0_vector(const event::op_mul_mat & request) noexcept {
+  if (!can_run_neon_mul_mat_q5_0_vector_request(request) || !neon_q5_0_vector_supported()) {
+    return false;
+  }
+  execute_neon_mul_mat_q5_0_vector_unchecked(request);
+  return true;
+}
+
 inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {
 #if defined(__aarch64__) || defined(__ARM_NEON)
   const uint64_t k = request.src0.ne[0];
@@ -4781,10 +5691,15 @@ inline bool execute_neon_mul_mat(const event::op_mul_mat & request) noexcept {
         }
       }
 
-      const float preserve_existing = static_cast<float>(!first_depth_block);
+      const uint32_t keep_existing_mask =
+          static_cast<uint32_t>(-static_cast<int32_t>(!first_depth_block));
       for (uint64_t j = j_vec_end; j < j_end; ++j) {
         for (uint64_t i = 0; i < m; ++i) {
-          float acc = c[i * n + j] * preserve_existing;
+          uint32_t acc_bits = 0u;
+          std::memcpy(&acc_bits, c + i * n + j, sizeof(acc_bits));
+          acc_bits &= keep_existing_mask;
+          float acc = 0.0f;
+          std::memcpy(&acc, &acc_bits, sizeof(acc));
           for (uint64_t kk = 0; kk < depth; ++kk) {
             acc += a[i * k + pb + kk] * b[(pb + kk) * n + j];
           }
@@ -4991,6 +5906,8 @@ struct exec_scalar_op {
     } else {
       if constexpr (std::is_same_v<request_type, ::emel::kernel::event::op_mul_mat>) {
         const uint8_t src0_type = ::emel::kernel::detail::dtype_code(ev.request.src0.type);
+        ctx.shared_q5_0_dispatch_count +=
+            static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q5_0);
         ctx.shared_q8_0_dispatch_count +=
             static_cast<uint64_t>(src0_type == ::emel::kernel::detail::dtype_q8_0);
         ctx.shared_q2_dispatch_count +=
@@ -5109,6 +6026,16 @@ struct exec_simd_q8_0_vector_op_mul_mat {
     ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q8_0_vector_unchecked(ev.request);
     ++ctx.optimized_q8_0_dispatch_count;
     ++ctx.optimized_q8_0_vector_dispatch_count;
+    detail::mark_done(ev, ctx);
+  }
+};
+
+struct exec_simd_q5_0_vector_op_mul_mat {
+  void operator()(const ::emel::kernel::aarch64::event::dispatch_op_mul_mat & ev,
+                  context & ctx) const noexcept {
+    ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q5_0_vector_unchecked(ev.request);
+    ++ctx.optimized_q5_0_dispatch_count;
+    ++ctx.optimized_q5_0_vector_dispatch_count;
     detail::mark_done(ev, ctx);
   }
 };
@@ -5350,6 +6277,7 @@ using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8_t =
     detail::exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x8_op_mul_mat;
 using exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_t =
     detail::exec_simd_q4_vector_packed_q8_rhs_bl8_matrix_x4_op_mul_mat;
+using exec_simd_op_mul_mat_q5_0_vector_t = detail::exec_simd_q5_0_vector_op_mul_mat;
 using exec_simd_op_mul_mat_q8_0_packed_bl4_t = detail::exec_simd_q8_0_packed_bl4_op_mul_mat;
 using exec_simd_op_mul_mat_q8_0_packed_bl8_full_groups_t =
     detail::exec_simd_q8_0_packed_bl8_full_groups_op_mul_mat;
@@ -5435,6 +6363,7 @@ inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8_t
     exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x8{};
 inline constexpr exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4_t
     exec_simd_op_mul_mat_q4_vector_packed_q8_rhs_bl8_matrix_x4{};
+inline constexpr exec_simd_op_mul_mat_q5_0_vector_t exec_simd_op_mul_mat_q5_0_vector{};
 inline constexpr exec_simd_op_mul_mat_q8_0_packed_bl4_t exec_simd_op_mul_mat_q8_0_packed_bl4{};
 inline constexpr exec_simd_op_mul_mat_q8_0_packed_bl8_full_groups_t
     exec_simd_op_mul_mat_q8_0_packed_bl8_full_groups{};

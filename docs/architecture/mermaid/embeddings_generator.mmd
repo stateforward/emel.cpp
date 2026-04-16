@@ -50,8 +50,9 @@ stateDiagram-v2
   state_conditioning_decision --> state_embed_publish_error : completion_embed_text_run_ [guard_prepare_model_invalid_] / effect_set_embed_model_invalid_
   state_conditioning_decision --> state_embed_publish_error : completion_embed_text_run_ [guard_prepare_backend_error_] / effect_set_embed_backend_error_
   state_conditioning_decision --> state_encoding : completion_embed_text_run_ [guard_prepare_success_] / none
-  state_encoding --> state_embedding_decision : completion_embed_text_run_ [always] / effect_run_text_embedding_
-  state_embedding_decision --> state_embed_publish_error : completion_embed_text_run_ [guard_embedding_failed_] / none
+  state_encoding --> state_embed_publish_error : completion_embed_text_run_ [guard_text_route_unsupported_] / effect_set_embed_backend_error_
+  state_encoding --> state_embed_publish_error : completion_embed_text_run_ [guard_text_encode_bert_unready_] / effect_set_embed_backend_error_
+  state_encoding --> state_embedding_decision : completion_embed_text_run_ [guard_text_encode_bert_ready_] / effect_run_text_embedding_bert_
   state_embedding_decision --> state_embed_publish_success : completion_embed_text_run_ [guard_embedding_succeeded_full_] / effect_publish_full_embedding_
   state_embedding_decision --> state_embed_publish_success : completion_embed_text_run_ [guard_embedding_succeeded_truncate_] / effect_publish_truncated_embedding_
   state_embed_publish_success --> state_done : completion_embed_text_run_ [guard_has_embed_done_callback_] / effect_emit_embed_done_
@@ -59,11 +60,12 @@ stateDiagram-v2
   state_embed_publish_error --> state_embed_error_channel_decision : completion_embed_text_run_ [always] / effect_write_embed_error_out_
   state_embed_error_channel_decision --> state_errored : completion_embed_text_run_ [guard_has_embed_error_callback_] / effect_emit_embed_error_
   state_embed_error_channel_decision --> state_errored : completion_embed_text_run_ [guard_no_embed_error_callback_] / none
-  state_image_preparing --> state_image_preparing_decision : completion_embed_image_run_ [always] / effect_prepare_image_input_
-  state_image_preparing_decision --> state_embed_publish_error : completion_embed_image_run_ [guard_image_prepare_backend_error_] / effect_set_embed_backend_error_
-  state_image_preparing_decision --> state_image_encoding : completion_embed_image_run_ [guard_image_prepare_success_] / none
-  state_image_encoding --> state_embedding_decision : completion_embed_image_run_ [always] / effect_run_image_embedding_
-  state_embedding_decision --> state_embed_publish_error : completion_embed_image_run_ [guard_embedding_failed_] / none
+  state_image_preparing --> state_embed_publish_error : completion_embed_image_run_ [guard_image_route_unsupported_] / effect_set_embed_backend_error_
+  state_image_preparing --> state_embed_publish_error : completion_embed_image_run_ [guard_image_prepare_mobilenetv4_unready_] / effect_set_embed_backend_error_
+  state_image_preparing --> state_image_encoding : completion_embed_image_run_ [guard_image_prepare_mobilenetv4_ready_] / effect_prepare_image_input_mobilenetv4_
+  state_image_encoding --> state_embed_publish_error : completion_embed_image_run_ [guard_image_route_unsupported_] / effect_set_embed_backend_error_
+  state_image_encoding --> state_embed_publish_error : completion_embed_image_run_ [guard_image_encode_mobilenetv4_unready_] / effect_set_embed_backend_error_
+  state_image_encoding --> state_embedding_decision : completion_embed_image_run_ [guard_image_encode_mobilenetv4_ready_] / effect_run_image_embedding_mobilenetv4_
   state_embedding_decision --> state_embed_publish_success : completion_embed_image_run_ [guard_embedding_succeeded_full_] / effect_publish_full_embedding_
   state_embedding_decision --> state_embed_publish_success : completion_embed_image_run_ [guard_embedding_succeeded_truncate_] / effect_publish_truncated_embedding_
   state_embed_publish_success --> state_done : completion_embed_image_run_ [guard_has_embed_done_callback_] / effect_emit_embed_done_
@@ -71,11 +73,12 @@ stateDiagram-v2
   state_embed_publish_error --> state_embed_error_channel_decision : completion_embed_image_run_ [always] / effect_write_embed_error_out_
   state_embed_error_channel_decision --> state_errored : completion_embed_image_run_ [guard_has_embed_error_callback_] / effect_emit_embed_error_
   state_embed_error_channel_decision --> state_errored : completion_embed_image_run_ [guard_no_embed_error_callback_] / none
-  state_audio_preparing --> state_audio_preparing_decision : completion_embed_audio_run_ [always] / effect_prepare_audio_input_
-  state_audio_preparing_decision --> state_embed_publish_error : completion_embed_audio_run_ [guard_audio_prepare_backend_error_] / effect_set_embed_backend_error_
-  state_audio_preparing_decision --> state_audio_encoding : completion_embed_audio_run_ [guard_audio_prepare_success_] / none
-  state_audio_encoding --> state_embedding_decision : completion_embed_audio_run_ [always] / effect_run_audio_embedding_
-  state_embedding_decision --> state_embed_publish_error : completion_embed_audio_run_ [guard_embedding_failed_] / none
+  state_audio_preparing --> state_embed_publish_error : completion_embed_audio_run_ [guard_audio_route_unsupported_] / effect_set_embed_backend_error_
+  state_audio_preparing --> state_embed_publish_error : completion_embed_audio_run_ [guard_audio_prepare_efficientat_unready_] / effect_set_embed_backend_error_
+  state_audio_preparing --> state_audio_encoding : completion_embed_audio_run_ [guard_audio_prepare_efficientat_ready_] / effect_prepare_audio_input_efficientat_
+  state_audio_encoding --> state_embed_publish_error : completion_embed_audio_run_ [guard_audio_route_unsupported_] / effect_set_embed_backend_error_
+  state_audio_encoding --> state_embed_publish_error : completion_embed_audio_run_ [guard_audio_encode_efficientat_unready_] / effect_set_embed_backend_error_
+  state_audio_encoding --> state_embedding_decision : completion_embed_audio_run_ [guard_audio_encode_efficientat_ready_] / effect_run_audio_embedding_efficientat_
   state_embedding_decision --> state_embed_publish_success : completion_embed_audio_run_ [guard_embedding_succeeded_full_] / effect_publish_full_embedding_
   state_embedding_decision --> state_embed_publish_success : completion_embed_audio_run_ [guard_embedding_succeeded_truncate_] / effect_publish_truncated_embedding_
   state_embed_publish_success --> state_done : completion_embed_audio_run_ [guard_has_embed_done_callback_] / effect_emit_embed_done_
@@ -94,10 +97,8 @@ stateDiagram-v2
   state_conditioning_decision --> state_unexpected : _ [always] / effect_ignore_unexpected_
   state_encoding --> state_unexpected : _ [always] / effect_ignore_unexpected_
   state_image_preparing --> state_unexpected : _ [always] / effect_ignore_unexpected_
-  state_image_preparing_decision --> state_unexpected : _ [always] / effect_ignore_unexpected_
   state_image_encoding --> state_unexpected : _ [always] / effect_ignore_unexpected_
   state_audio_preparing --> state_unexpected : _ [always] / effect_ignore_unexpected_
-  state_audio_preparing_decision --> state_unexpected : _ [always] / effect_ignore_unexpected_
   state_audio_encoding --> state_unexpected : _ [always] / effect_ignore_unexpected_
   state_embedding_decision --> state_unexpected : _ [always] / effect_ignore_unexpected_
   state_embed_publish_success --> state_unexpected : _ [always] / effect_ignore_unexpected_

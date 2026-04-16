@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <cmath>
+#include <limits>
 
 #include "test_helpers.hpp"
 #include "emel/kernel/x86_64/actions.hpp"
@@ -255,6 +256,57 @@ TEST_CASE("kernel_x86_64_mul_mat_simd_matches_scalar_tiled_edges") {
   CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
 
   for (uint64_t idx = 0; idx < dst_simd.size(); ++idx) {
+    CHECK(dst_simd[static_cast<size_t>(idx)] ==
+          doctest::Approx(dst_scalar[static_cast<size_t>(idx)]).epsilon(1e-5f));
+  }
+}
+
+TEST_CASE("kernel_x86_64_mul_mat_tail_resets_nan_dst_on_first_depth_block") {
+  const bool host_avx2 = emel::kernel::x86_64::detail::avx2_intrinsics_compiled &&
+                         emel::kernel::x86_64::detail::detect_avx2();
+  if (!host_avx2) {
+    return;
+  }
+
+  constexpr uint64_t k = 5;
+  constexpr uint64_t m = 3;
+  constexpr uint64_t n = 9;
+
+  std::array<float, k * m> src0{};
+  std::array<float, k * n> src1{};
+  std::array<float, n * m> dst_simd{};
+  std::array<float, n * m> dst_scalar{};
+
+  for (uint64_t i = 0; i < src0.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 7u) - 3;
+    src0[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.125f;
+  }
+  for (uint64_t i = 0; i < src1.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 11u) - 5;
+    src1[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  std::fill(dst_simd.begin(), dst_simd.end(), std::numeric_limits<float>::quiet_NaN());
+  dst_scalar.fill(0.0f);
+
+  const emel::kernel::event::op_mul_mat simd_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_simd.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+
+  CHECK(emel::kernel::x86_64::detail::execute_avx2_mul_mat(simd_ev));
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  for (uint64_t idx = 0; idx < dst_simd.size(); ++idx) {
+    CHECK(std::isfinite(dst_simd[static_cast<size_t>(idx)]));
     CHECK(dst_simd[static_cast<size_t>(idx)] ==
           doctest::Approx(dst_scalar[static_cast<size_t>(idx)]).epsilon(1e-5f));
   }

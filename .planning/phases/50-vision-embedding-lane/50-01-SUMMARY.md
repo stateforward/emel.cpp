@@ -3,7 +3,7 @@ phase: 50-vision-embedding-lane
 plan: 01
 status: complete
 completed: 2026-04-14
-requirements:
+requirements-completed:
   - VIS-01
   - VIS-02
 ---

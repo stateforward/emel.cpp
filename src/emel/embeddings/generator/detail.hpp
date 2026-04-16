@@ -13,7 +13,9 @@
 #include "emel/embeddings/generator/context.hpp"
 #include "emel/embeddings/generator/errors.hpp"
 #include "emel/embeddings/generator/events.hpp"
+#include "emel/kernel/aarch64/actions.hpp"
 #include "emel/model/data.hpp"
+#include "emel/model/loader/errors.hpp"
 #include "emel/model/omniembed/detail.hpp"
 #include "emel/text/conditioner/events.hpp"
 #include "emel/text/conditioner/errors.hpp"
@@ -119,6 +121,48 @@ inline int32_t conditioner_error_code(const emel::text::conditioner::error err) 
   return emel::text::conditioner::detail::to_local_error_code(err);
 }
 
+template <class runtime_event_type>
+inline void begin_benchmark_stages(runtime_event_type & runtime_ev) noexcept {
+  auto & ev = unwrap_runtime_event(runtime_ev);
+  auto & timings = ev.request.benchmark_timings_out;
+  timings.prepare_ns = 0u;
+  timings.encode_ns = 0u;
+  timings.publish_ns = 0u;
+  timings.total_ns = 0u;
+  ev.ctx.total_start_ns = ev.request.benchmark_time_now();
+  ev.ctx.prepare_start_ns = ev.ctx.total_start_ns;
+  ev.ctx.prepare_end_ns = ev.ctx.total_start_ns;
+  ev.ctx.encode_start_ns = ev.ctx.total_start_ns;
+  ev.ctx.encode_end_ns = ev.ctx.total_start_ns;
+  ev.ctx.publish_start_ns = ev.ctx.total_start_ns;
+  ev.ctx.publish_end_ns = ev.ctx.total_start_ns;
+}
+
+template <class runtime_event_type>
+inline void finish_benchmark_prepare(runtime_event_type & runtime_ev) noexcept {
+  auto & ev = unwrap_runtime_event(runtime_ev);
+  ev.ctx.prepare_end_ns = ev.request.benchmark_time_now();
+  ev.ctx.encode_start_ns = ev.ctx.prepare_end_ns;
+}
+
+template <class runtime_event_type>
+inline void finish_benchmark_encode(runtime_event_type & runtime_ev) noexcept {
+  auto & ev = unwrap_runtime_event(runtime_ev);
+  ev.ctx.encode_end_ns = ev.request.benchmark_time_now();
+  ev.ctx.publish_start_ns = ev.ctx.encode_end_ns;
+}
+
+template <class runtime_event_type>
+inline void finish_benchmark_publish(runtime_event_type & runtime_ev) noexcept {
+  auto & ev = unwrap_runtime_event(runtime_ev);
+  auto & timings = ev.request.benchmark_timings_out;
+  ev.ctx.publish_end_ns = ev.request.benchmark_time_now();
+  timings.prepare_ns = ev.ctx.prepare_end_ns - ev.ctx.prepare_start_ns;
+  timings.encode_ns = ev.ctx.encode_end_ns - ev.ctx.encode_start_ns;
+  timings.publish_ns = ev.ctx.publish_end_ns - ev.ctx.publish_start_ns;
+  timings.total_ns = ev.ctx.publish_end_ns - ev.ctx.total_start_ns;
+}
+
 inline void copy_name(std::array<char, 256> & buffer, const std::string_view text) noexcept {
   std::fill(buffer.begin(), buffer.end(), '\0');
   const size_t length = std::min(buffer.size() - 1u, text.size());
@@ -171,10 +215,225 @@ inline size_t dense_row_bytes(const uint8_t dtype, const int32_t cols) noexcept 
   if (dtype == emel::kernel::detail::dtype_f16) {
     return static_cast<size_t>(cols) * sizeof(uint16_t);
   }
+  if (dtype == emel::kernel::detail::dtype_q5_0) {
+    return emel::kernel::detail::quantized_row_storage_bytes(dtype, static_cast<uint64_t>(cols));
+  }
   if (dtype == emel::kernel::detail::dtype_q8_0) {
     return emel::kernel::detail::quantized_row_storage_bytes(dtype, static_cast<uint64_t>(cols));
   }
   return 0u;
+}
+
+inline bool expand_f16_to_f32(const uint16_t * src,
+                              const size_t count,
+                              std::unique_ptr<float[]> & dst_out) noexcept {
+  dst_out = {};
+  if (src == nullptr || count == 0u) {
+    return false;
+  }
+
+  auto expanded = std::unique_ptr<float[]>{new (std::nothrow) float[count]};
+  if (expanded == nullptr) {
+    return false;
+  }
+
+  for (size_t index = 0; index < count; ++index) {
+    expanded[index] = emel::kernel::detail::quant::fp16_to_fp32(src[index]);
+  }
+
+  dst_out = std::move(expanded);
+  return true;
+}
+
+inline bool transpose_dense_f32_matrix(const float * src,
+                                       const int32_t rows,
+                                       const int32_t cols,
+                                       std::unique_ptr<float[]> & dst_out) noexcept {
+  dst_out = {};
+  if (src == nullptr || rows <= 0 || cols <= 0) {
+    return false;
+  }
+
+  const size_t element_count = static_cast<size_t>(rows) * static_cast<size_t>(cols);
+  auto transposed = std::unique_ptr<float[]>{new (std::nothrow) float[element_count]};
+  if (transposed == nullptr) {
+    return false;
+  }
+
+  for (int32_t row = 0; row < rows; ++row) {
+    const float * src_row = src + static_cast<size_t>(row) * static_cast<size_t>(cols);
+    for (int32_t col = 0; col < cols; ++col) {
+      transposed[static_cast<size_t>(col) * static_cast<size_t>(rows) +
+                 static_cast<size_t>(row)] = src_row[static_cast<size_t>(col)];
+    }
+  }
+
+  dst_out = std::move(transposed);
+  return true;
+}
+
+inline bool pack_depthwise_kernel_major(const float * src,
+                                        const int32_t kernel_h,
+                                        const int32_t kernel_w,
+                                        const int32_t channels,
+                                        std::unique_ptr<float[]> & dst_out) noexcept {
+  dst_out = {};
+  if (src == nullptr || kernel_h <= 0 || kernel_w <= 0 || channels <= 0) {
+    return false;
+  }
+
+  const size_t element_count =
+      static_cast<size_t>(kernel_h) * static_cast<size_t>(kernel_w) * static_cast<size_t>(channels);
+  auto packed = std::unique_ptr<float[]>{new (std::nothrow) float[element_count]};
+  if (packed == nullptr) {
+    return false;
+  }
+
+  for (int32_t ky = 0; ky < kernel_h; ++ky) {
+    for (int32_t kx = 0; kx < kernel_w; ++kx) {
+      float * packed_weights =
+          packed.get() +
+          static_cast<size_t>(ky * kernel_w + kx) * static_cast<size_t>(channels);
+      for (int32_t channel = 0; channel < channels; ++channel) {
+        const size_t src_index =
+            static_cast<size_t>(channel * kernel_h * kernel_w + ky * kernel_w + kx);
+        packed_weights[static_cast<size_t>(channel)] = src[src_index];
+      }
+    }
+  }
+
+  dst_out = std::move(packed);
+  return true;
+}
+
+inline bool pack_standard_conv_kernel_major(const float * src,
+                                            const int32_t patch_size,
+                                            const int32_t output_channels,
+                                            std::unique_ptr<float[]> & dst_out) noexcept {
+  dst_out = {};
+  if (src == nullptr || patch_size <= 0 || output_channels <= 0) {
+    return false;
+  }
+
+  const size_t element_count =
+      static_cast<size_t>(patch_size) * static_cast<size_t>(output_channels);
+  auto packed = std::unique_ptr<float[]>{new (std::nothrow) float[element_count]};
+  if (packed == nullptr) {
+    return false;
+  }
+
+  for (int32_t patch_index = 0; patch_index < patch_size; ++patch_index) {
+    float * packed_weights =
+        packed.get() +
+        static_cast<size_t>(patch_index) * static_cast<size_t>(output_channels);
+    for (int32_t output_channel = 0; output_channel < output_channels; ++output_channel) {
+      packed_weights[static_cast<size_t>(output_channel)] =
+          src[static_cast<size_t>(output_channel) * static_cast<size_t>(patch_size) +
+              static_cast<size_t>(patch_index)];
+    }
+  }
+
+  dst_out = std::move(packed);
+  return true;
+}
+
+inline emel::kernel::event::tensor_view make_dense_src0_view(const action::matrix_view & matrix) noexcept {
+  return emel::kernel::event::tensor_view{
+    .data = matrix.data,
+    .type = static_cast<emel::kernel::event::dtype>(matrix.dtype),
+    .ne = {
+      static_cast<uint64_t>(matrix.cols),
+      static_cast<uint64_t>(matrix.rows),
+      1u,
+      1u,
+    },
+    .nb = {
+      1u,
+      static_cast<uint64_t>(matrix.row_bytes),
+      static_cast<uint64_t>(matrix.row_bytes) * static_cast<uint64_t>(matrix.rows),
+      static_cast<uint64_t>(matrix.row_bytes) * static_cast<uint64_t>(matrix.rows),
+    },
+  };
+}
+
+inline emel::kernel::event::tensor_view make_dense_vector_src1_view(std::span<const float> input) noexcept {
+  return emel::kernel::event::tensor_view{
+    .data = input.data(),
+    .type = emel::kernel::event::dtype::f32,
+    .ne = {
+      1u,
+      static_cast<uint64_t>(input.size()),
+      1u,
+      1u,
+    },
+    .nb = {
+      sizeof(float),
+      sizeof(float),
+      sizeof(float) * static_cast<uint64_t>(input.size()),
+      sizeof(float) * static_cast<uint64_t>(input.size()),
+    },
+  };
+}
+
+inline emel::kernel::event::tensor_view make_dense_matrix_src1_view(const float * input,
+                                                                    const int32_t cols,
+                                                                    const int32_t rows) noexcept {
+  return emel::kernel::event::tensor_view{
+    .data = input,
+    .type = emel::kernel::event::dtype::f32,
+    .ne = {
+      static_cast<uint64_t>(cols),
+      static_cast<uint64_t>(rows),
+      1u,
+      1u,
+    },
+    .nb = {
+      sizeof(float),
+      sizeof(float) * static_cast<uint64_t>(cols),
+      sizeof(float) * static_cast<uint64_t>(cols) * static_cast<uint64_t>(rows),
+      sizeof(float) * static_cast<uint64_t>(cols) * static_cast<uint64_t>(rows),
+    },
+  };
+}
+
+inline emel::kernel::event::tensor_view_mut make_dense_vector_dst_view(std::span<float> output) noexcept {
+  return emel::kernel::event::tensor_view_mut{
+    .data = output.data(),
+    .type = emel::kernel::event::dtype::f32,
+    .ne = {
+      1u,
+      static_cast<uint64_t>(output.size()),
+      1u,
+      1u,
+    },
+    .nb = {
+      sizeof(float),
+      sizeof(float),
+      sizeof(float) * static_cast<uint64_t>(output.size()),
+      sizeof(float) * static_cast<uint64_t>(output.size()),
+    },
+  };
+}
+
+inline emel::kernel::event::tensor_view_mut make_dense_matrix_dst_view(float * output,
+                                                                       const int32_t cols,
+                                                                       const int32_t rows) noexcept {
+  return emel::kernel::event::tensor_view_mut{
+    .data = output,
+    .type = emel::kernel::event::dtype::f32,
+    .ne = {
+      static_cast<uint64_t>(cols),
+      static_cast<uint64_t>(rows),
+      1u,
+      1u,
+    },
+    .nb = {
+      sizeof(float),
+      sizeof(float) * static_cast<uint64_t>(cols),
+      sizeof(float) * static_cast<uint64_t>(cols) * static_cast<uint64_t>(rows),
+      sizeof(float) * static_cast<uint64_t>(cols) * static_cast<uint64_t>(rows),
+    },
+  };
 }
 
 inline bool bind_matrix(const emel::model::data::tensor_record & tensor,
@@ -195,10 +454,24 @@ inline bool bind_matrix(const emel::model::data::tensor_record & tensor,
   }
 
   view_out.tensor = &tensor;
-  view_out.data = tensor.data;
-  view_out.dtype = dtype;
   view_out.rows = rows;
   view_out.cols = cols;
+  if (dtype == emel::kernel::detail::dtype_f16) {
+    const size_t element_count = static_cast<size_t>(rows) * static_cast<size_t>(cols);
+    if (!expand_f16_to_f32(static_cast<const uint16_t *>(tensor.data),
+                           element_count,
+                           view_out.expanded_f32)) {
+      view_out = {};
+      return false;
+    }
+    view_out.data = view_out.expanded_f32.get();
+    view_out.dtype = emel::kernel::detail::dtype_f32;
+    view_out.row_bytes = static_cast<size_t>(cols) * sizeof(float);
+    return true;
+  }
+
+  view_out.data = tensor.data;
+  view_out.dtype = dtype;
   view_out.row_bytes = row_bytes;
   return true;
 }
@@ -222,6 +495,23 @@ inline bool bind_batch_norm(const emel::model::data::tensor_record & weight,
       !bind_running_vector_f32(running_var, expected_channels, view_out.running_var)) {
     return false;
   }
+  view_out.scale_storage = std::make_unique_for_overwrite<float[]>(
+      static_cast<size_t>(expected_channels));
+  view_out.shift_storage = std::make_unique_for_overwrite<float[]>(
+      static_cast<size_t>(expected_channels));
+  if (!view_out.scale_storage || !view_out.shift_storage) {
+    view_out = {};
+    return false;
+  }
+  for (int32_t channel = 0; channel < expected_channels; ++channel) {
+    const float scale = view_out.weight.data[channel] /
+        std::sqrt(view_out.running_var.data[channel] + 1.0e-5f);
+    view_out.scale_storage[static_cast<size_t>(channel)] = scale;
+    view_out.shift_storage[static_cast<size_t>(channel)] =
+        view_out.bias.data[channel] - view_out.running_mean.data[channel] * scale;
+  }
+  view_out.scale = view_out.scale_storage.get();
+  view_out.shift = view_out.shift_storage.get();
   view_out.channels = expected_channels;
   return true;
 }
@@ -245,10 +535,40 @@ inline bool bind_conv_f16_hwio(const emel::model::data::tensor_record & tensor,
 
   view_out.tensor = &tensor;
   view_out.data = static_cast<const uint16_t *>(tensor.data);
+  const size_t element_count =
+      static_cast<size_t>(expected_kernel_w) * static_cast<size_t>(expected_kernel_h) *
+      static_cast<size_t>(expected_input_channels) * static_cast<size_t>(expected_output_channels);
+  if (!expand_f16_to_f32(view_out.data, element_count, view_out.expanded_f32)) {
+    view_out = {};
+    return false;
+  }
+  view_out.data_f32 = view_out.expanded_f32.get();
   view_out.kernel_w = expected_kernel_w;
   view_out.kernel_h = expected_kernel_h;
   view_out.input_channels = expected_input_channels;
   view_out.output_channels = expected_output_channels;
+  if (expected_input_channels > 1) {
+    const int32_t patch_size =
+        expected_input_channels * expected_kernel_h * expected_kernel_w;
+    if (!pack_standard_conv_kernel_major(view_out.data_f32,
+                                         patch_size,
+                                         expected_output_channels,
+                                         view_out.kernel_major_storage)) {
+      view_out = {};
+      return false;
+    }
+  }
+  view_out.kernel_major_f32 = view_out.kernel_major_storage.get();
+  if (expected_input_channels == 1 &&
+      !pack_depthwise_kernel_major(view_out.data_f32,
+                                   expected_kernel_h,
+                                   expected_kernel_w,
+                                   expected_output_channels,
+                                   view_out.depthwise_kernel_major_storage)) {
+    view_out = {};
+    return false;
+  }
+  view_out.depthwise_kernel_major_f32 = view_out.depthwise_kernel_major_storage.get();
   return true;
 }
 
@@ -268,12 +588,62 @@ inline bool bind_pointwise_f16(const emel::model::data::tensor_record & tensor,
   }
 
   view_out.tensor = &tensor;
-  view_out.data = tensor.data;
-  view_out.dtype = static_cast<uint8_t>(tensor.type);
   view_out.rows = expected_rows;
   view_out.cols = expected_cols;
-  view_out.row_bytes = static_cast<size_t>(expected_cols) * sizeof(uint16_t);
+  const size_t element_count =
+      static_cast<size_t>(expected_rows) * static_cast<size_t>(expected_cols);
+  if (!expand_f16_to_f32(static_cast<const uint16_t *>(tensor.data),
+                         element_count,
+                         view_out.expanded_f32)) {
+    view_out = {};
+    return false;
+  }
+  if (!transpose_dense_f32_matrix(
+          view_out.expanded_f32.get(), expected_rows, expected_cols, view_out.transposed_f32)) {
+    view_out = {};
+    return false;
+  }
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  view_out.packed_rhs_f32 =
+      std::make_unique_for_overwrite<float[]>(element_count);
+  if (!view_out.packed_rhs_f32) {
+    view_out = {};
+    return false;
+  }
+  constexpr int32_t k_pointwise_panel_cols = 64;
+  for (int32_t panel_col = 0; panel_col < expected_rows; panel_col += k_pointwise_panel_cols) {
+    const int32_t panel_cols = std::min(k_pointwise_panel_cols, expected_rows - panel_col);
+    float * panel_dst =
+        view_out.packed_rhs_f32.get() +
+        static_cast<size_t>(panel_col) * static_cast<size_t>(expected_cols);
+    for (int32_t input_channel = 0; input_channel < expected_cols; ++input_channel) {
+      std::memcpy(panel_dst + static_cast<size_t>(input_channel) * static_cast<size_t>(panel_cols),
+                  view_out.transposed_f32.get() +
+                      static_cast<size_t>(input_channel) * static_cast<size_t>(expected_rows) +
+                      static_cast<size_t>(panel_col),
+                  static_cast<size_t>(panel_cols) * sizeof(float));
+    }
+  }
+  view_out.packed_rhs_cols = expected_rows;
+#endif
+  view_out.data = view_out.expanded_f32.get();
+  view_out.dtype = emel::kernel::detail::dtype_f32;
+  view_out.row_bytes = static_cast<size_t>(expected_cols) * sizeof(float);
+  view_out.transposed_row_bytes = static_cast<size_t>(expected_rows) * sizeof(float);
   return true;
+}
+
+inline action::matrix_view make_conv_matrix_view(const action::conv2d_view & conv) noexcept {
+  return action::matrix_view{
+    .tensor = conv.tensor,
+    .data = conv.data_f32,
+    .expanded_f32 = {},
+    .dtype = emel::kernel::detail::dtype_f32,
+    .rows = conv.output_channels,
+    .cols = conv.input_channels * conv.kernel_h * conv.kernel_w,
+    .row_bytes =
+        static_cast<size_t>(conv.input_channels * conv.kernel_h * conv.kernel_w) * sizeof(float),
+  };
 }
 
 inline bool make_layer_name(const int32_t layer_index,
@@ -678,10 +1048,16 @@ inline bool bind_projection_runtime(
   return true;
 }
 
-inline bool build_text_runtime(const emel::model::data & model,
+inline bool build_text_runtime(
+    const emel::model::data & model,
+    const emel::model::omniembed::detail::execution_contract & contract,
                                action::text_runtime & runtime_out) noexcept {
   runtime_out = {};
-  if (emel::model::architecture_name_view(model) != "omniembed") {
+  if (emel::model::architecture_name_view(model) != "omniembed" ||
+      contract.model != &model ||
+      contract.embedding_length <= 0 ||
+      contract.text_encoder.tensor_count == 0u ||
+      contract.text_projection.tensor_count == 0u) {
     return false;
   }
 
@@ -725,7 +1101,7 @@ inline bool build_text_runtime(const emel::model::data & model,
       token_type_count <= 0 ||
       output_size <= 0 ||
       intermediate_size <= 0 ||
-      model.params.n_embd_out <= 0) {
+      contract.embedding_length <= 0) {
     return false;
   }
 
@@ -733,7 +1109,7 @@ inline bool build_text_runtime(const emel::model::data & model,
   runtime_out.max_positions = max_positions;
   runtime_out.output_size = output_size;
   runtime_out.projection_hidden_size = intermediate_size;
-  runtime_out.shared_embedding_size = model.params.n_embd_out;
+  runtime_out.shared_embedding_size = contract.embedding_length;
   runtime_out.attention_head_count = 12;
   runtime_out.attention_head_dim = hidden_size / runtime_out.attention_head_count;
   if (runtime_out.attention_head_count <= 0 ||
@@ -776,7 +1152,7 @@ inline bool build_text_runtime(const emel::model::data & model,
     if (!bind_layer(model, layer_count, hidden_size, 4 * hidden_size, layer)) {
       break;
     }
-    runtime_out.layers[static_cast<size_t>(layer_count)] = layer;
+    runtime_out.layers[static_cast<size_t>(layer_count)] = std::move(layer);
   }
 
   if (layer_count <= 0) {
@@ -785,30 +1161,43 @@ inline bool build_text_runtime(const emel::model::data & model,
 
   runtime_out.layer_count = layer_count;
   runtime_out.intermediate_size = 4 * hidden_size;
+  runtime_out.route_kind = action::text_route_kind::omniembed_bert_text;
   runtime_out.ready = true;
   return true;
 }
 
-inline bool build_image_runtime(const emel::model::data & model,
-                               action::image_runtime & runtime_out) noexcept {
+inline int32_t output_dim_same(const int32_t input,
+                               const int32_t kernel,
+                               const int32_t stride) noexcept;
+
+inline bool build_image_runtime(
+    const emel::model::data & model,
+    const emel::model::omniembed::detail::execution_contract & contract,
+    action::image_runtime & runtime_out) noexcept {
   runtime_out = {};
-  if (emel::model::architecture_name_view(model) != "omniembed") {
-    return true;
+  if (emel::model::architecture_name_view(model) != "omniembed" ||
+      contract.model != &model ||
+      contract.embedding_length <= 0 ||
+      contract.image_encoder_length <= 0 ||
+      contract.image_encoder.tensor_count == 0u ||
+      contract.image_projection.tensor_count == 0u) {
+    return false;
   }
 
   if (model.meta.clip_vision_data.embedding_length <= 0 ||
-      model.meta.clip_vision_data.projection_dim != model.params.n_embd_out ||
+      model.meta.clip_vision_data.embedding_length != contract.image_encoder_length ||
+      model.meta.clip_vision_data.projection_dim != contract.embedding_length ||
       model.meta.clip_vision_data.preproc_image_size <= 0 ||
       model.meta.clip_vision_data.image_mean_count != 3u ||
       model.meta.clip_vision_data.image_std_count != 3u ||
       emel::model::metadata_string_view(model.meta, model.meta.clip_vision_data.encoder_name) !=
           "mobilenetv4_conv_medium.e180_r384_in12k") {
-    return true;
+    return false;
   }
 
   const int32_t input_size = model.meta.clip_vision_data.preproc_image_size;
   if (input_size <= 0) {
-    return true;
+    return false;
   }
 
   const auto * stem = find_tensor(model, "image_encoder.conv_stem.weight");
@@ -825,7 +1214,7 @@ inline bool build_image_runtime(const emel::model::data & model,
       !bind_batch_norm(
           *stem_bn_weight, *stem_bn_bias, *stem_bn_mean, *stem_bn_var, 32, runtime_out.stem_bn) ||
       !bind_image_stage0(model, runtime_out.stage0)) {
-    return true;
+    return false;
   }
 
   constexpr std::array<int32_t, 3> k_stage_counts = {2, 8, 11};
@@ -840,17 +1229,25 @@ inline bool build_image_runtime(const emel::model::data & model,
       const int32_t stride = block_index == 0 ? k_stage_strides[static_cast<size_t>(stage - 1)] : 1;
       auto & block = runtime_out.blocks[static_cast<size_t>(runtime_out.block_count)];
       if (!bind_image_ui_block(model, stage, block_index, stride, channels, block)) {
-        return true;
+        return false;
       }
       ++runtime_out.block_count;
 
+      int32_t expansion_spatial = spatial;
+      if (block.has_dw_start) {
+        const int32_t dw_start_stride = block.has_dw_mid ? 1 : block.stride;
+        expansion_spatial = output_dim_same(spatial, block.dw_start.kernel_h, dw_start_stride);
+      }
       if (block.expanded_channels > 0) {
-        const int32_t mid_spatial = stride > 1 && block.has_dw_mid ? spatial / stride : spatial;
         max_feature_elements = std::max(
-            max_feature_elements, block.expanded_channels * mid_spatial * mid_spatial);
+            max_feature_elements, block.expanded_channels * expansion_spatial * expansion_spatial);
       }
 
-      spatial = stride > 1 ? spatial / stride : spatial;
+      int32_t output_spatial = expansion_spatial;
+      if (block.has_dw_mid) {
+        output_spatial = output_dim_same(expansion_spatial, block.dw_mid.kernel_h, block.stride);
+      }
+      spatial = output_spatial;
       channels = block.output_channels;
       max_feature_elements = std::max(max_feature_elements, channels * spatial * spatial);
     }
@@ -871,18 +1268,20 @@ inline bool build_image_runtime(const emel::model::data & model,
                                k_image_projection_residual_norm_bias_name,
                                k_image_projection_project_weight_name,
                                k_image_projection_project_bias_name,
-                               model.meta.clip_vision_data.embedding_length,
+                               contract.image_encoder_length,
                                1920,
-                               model.params.n_embd_out,
+                               contract.embedding_length,
                                runtime_out.projection)) {
-    return true;
+    return false;
   }
 
   spatial = input_size / 32;
   max_feature_elements = std::max(max_feature_elements, 960 * spatial * spatial);
+  max_feature_elements = std::max(max_feature_elements, 1280 * spatial * spatial);
   runtime_out.input_size = input_size;
-  runtime_out.embedding_size = model.meta.clip_vision_data.embedding_length;
+  runtime_out.embedding_size = contract.image_encoder_length;
   runtime_out.feature_buffer_elements = max_feature_elements;
+  runtime_out.route_kind = action::image_route_kind::omniembed_mobilenetv4_medium;
   runtime_out.ready = runtime_out.embedding_size > 0 &&
       runtime_out.feature_buffer_elements > 0 &&
       runtime_out.block_count == 21;
@@ -1076,6 +1475,47 @@ inline void build_audio_fft_window(action::audio_runtime & runtime) noexcept {
   }
 }
 
+inline bool build_audio_fft_tables(action::audio_runtime & runtime) noexcept {
+  if (runtime.n_fft <= 0 || (runtime.n_fft & (runtime.n_fft - 1)) != 0) {
+    return false;
+  }
+
+  runtime.fft_twiddle_cos = std::unique_ptr<float[]>{new (std::nothrow) float[runtime.n_fft / 2]};
+  runtime.fft_twiddle_sin = std::unique_ptr<float[]>{new (std::nothrow) float[runtime.n_fft / 2]};
+  runtime.fft_bit_reverse = std::unique_ptr<int32_t[]>{new (std::nothrow) int32_t[runtime.n_fft]};
+  if (runtime.fft_twiddle_cos == nullptr ||
+      runtime.fft_twiddle_sin == nullptr ||
+      runtime.fft_bit_reverse == nullptr) {
+    runtime.fft_twiddle_cos = {};
+    runtime.fft_twiddle_sin = {};
+    runtime.fft_bit_reverse = {};
+    return false;
+  }
+
+  for (int32_t index = 0; index < runtime.n_fft / 2; ++index) {
+    const float angle =
+        -2.0f * k_pi * static_cast<float>(index) / static_cast<float>(runtime.n_fft);
+    runtime.fft_twiddle_cos[static_cast<size_t>(index)] = std::cos(angle);
+    runtime.fft_twiddle_sin[static_cast<size_t>(index)] = std::sin(angle);
+  }
+
+  int32_t log2_n_fft = 0;
+  while ((1 << log2_n_fft) < runtime.n_fft) {
+    ++log2_n_fft;
+  }
+  for (int32_t index = 0; index < runtime.n_fft; ++index) {
+    int32_t reversed = 0;
+    int32_t value = index;
+    for (int32_t bit = 0; bit < log2_n_fft; ++bit) {
+      reversed = (reversed << 1) | (value & 1);
+      value >>= 1;
+    }
+    runtime.fft_bit_reverse[static_cast<size_t>(index)] = reversed;
+  }
+
+  return true;
+}
+
 inline void build_audio_mel_filters(action::audio_runtime & runtime) noexcept {
   const int32_t fft_bin_count = runtime.n_fft / 2;
   const int32_t full_fft_bin_count = fft_bin_count + 1;
@@ -1108,10 +1548,47 @@ inline void build_audio_mel_filters(action::audio_runtime & runtime) noexcept {
   }
 }
 
-inline bool build_audio_runtime(const emel::model::data & model,
+inline bool build_audio_mel_ranges(action::audio_runtime & runtime) noexcept {
+  const int32_t fft_bin_count = runtime.n_fft / 2 + 1;
+  runtime.mel_bin_start =
+      std::unique_ptr<int32_t[]>{new (std::nothrow) int32_t[runtime.num_mel_bins]};
+  runtime.mel_bin_end =
+      std::unique_ptr<int32_t[]>{new (std::nothrow) int32_t[runtime.num_mel_bins]};
+  if (runtime.mel_bin_start == nullptr || runtime.mel_bin_end == nullptr) {
+    runtime.mel_bin_start = {};
+    runtime.mel_bin_end = {};
+    return false;
+  }
+
+  for (int32_t mel_bin = 0; mel_bin < runtime.num_mel_bins; ++mel_bin) {
+    const float * weights =
+        runtime.mel_filters.get() + static_cast<size_t>(mel_bin * fft_bin_count);
+    int32_t start = 0;
+    while (start < fft_bin_count && weights[static_cast<size_t>(start)] == 0.0f) {
+      ++start;
+    }
+    int32_t end = fft_bin_count;
+    while (end > start && weights[static_cast<size_t>(end - 1)] == 0.0f) {
+      --end;
+    }
+    runtime.mel_bin_start[static_cast<size_t>(mel_bin)] = start;
+    runtime.mel_bin_end[static_cast<size_t>(mel_bin)] = end;
+  }
+
+  return true;
+}
+
+inline bool build_audio_runtime(
+    const emel::model::data & model,
+    const emel::model::omniembed::detail::execution_contract & contract,
                                 action::audio_runtime & runtime_out) noexcept {
   runtime_out = {};
-  if (emel::model::architecture_name_view(model) != "omniembed") {
+  if (emel::model::architecture_name_view(model) != "omniembed" ||
+      contract.model != &model ||
+      contract.embedding_length <= 0 ||
+      contract.audio_encoder_length <= 0 ||
+      contract.audio_encoder.tensor_count == 0u ||
+      contract.audio_projection.tensor_count == 0u) {
     return false;
   }
   if (emel::model::metadata_string_view(model.meta, model.meta.clip_audio_data.encoder_name) !=
@@ -1150,7 +1627,7 @@ inline bool build_audio_runtime(const emel::model::data & model,
   runtime_out.num_mel_bins = model.meta.clip_audio_data.num_mel_bins;
   runtime_out.time_frames =
       1 + runtime_out.preemphasized_sample_count / runtime_out.hop_size;
-  runtime_out.embedding_size = model.meta.clip_audio_data.embedding_length;
+  runtime_out.embedding_size = contract.audio_encoder_length;
   runtime_out.batch_norm_epsilon = 1.0e-5f;
   runtime_out.low_frequency = model.meta.clip_audio_data.low_frequency;
   runtime_out.high_frequency = model.meta.clip_audio_data.high_frequency;
@@ -1212,6 +1689,10 @@ inline bool build_audio_runtime(const emel::model::data & model,
 
     const auto & config = k_configs[static_cast<size_t>(index)];
     max_dense_input = std::max(max_dense_input, config.expanded_channels);
+    // Audio expand layers run before any stride reduction, so the shared feature buffers
+    // must cover the pre-downsample expanded activation shape as well as the block output.
+    max_feature_elements =
+        std::max(max_feature_elements, height * width * config.expanded_channels);
     const int32_t output_height = output_dim_same(height, config.kernel_size, config.stride);
     const int32_t output_width = output_dim_same(width, config.kernel_size, config.stride);
     max_feature_elements =
@@ -1238,9 +1719,9 @@ inline bool build_audio_runtime(const emel::model::data & model,
                                k_audio_projection_residual_norm_bias_name,
                                k_audio_projection_project_weight_name,
                                k_audio_projection_project_bias_name,
-                               model.meta.clip_audio_data.embedding_length,
+                               contract.audio_encoder_length,
                                1920,
-                               model.params.n_embd_out,
+                               contract.embedding_length,
                                runtime_out.projection)) {
     return false;
   }
@@ -1256,24 +1737,42 @@ inline bool build_audio_runtime(const emel::model::data & model,
   }
 
   build_audio_fft_window(runtime_out);
+  if (!build_audio_fft_tables(runtime_out)) {
+    return false;
+  }
   build_audio_mel_filters(runtime_out);
+  if (!build_audio_mel_ranges(runtime_out)) {
+    return false;
+  }
+  runtime_out.route_kind = action::audio_route_kind::omniembed_efficientat_mn20_as;
   runtime_out.ready = runtime_out.input_sample_count > 0 &&
       runtime_out.resampled_sample_count > 0 &&
       runtime_out.preemphasized_sample_count > 0 &&
       runtime_out.time_frames > 0 &&
       runtime_out.embedding_size > 0 &&
       runtime_out.feature_buffer_elements > 0 &&
+      runtime_out.fft_twiddle_cos != nullptr &&
+      runtime_out.fft_twiddle_sin != nullptr &&
+      runtime_out.fft_bit_reverse != nullptr &&
+      runtime_out.mel_bin_start != nullptr &&
+      runtime_out.mel_bin_end != nullptr &&
       runtime_out.block_count == static_cast<int32_t>(k_configs.size());
   return runtime_out.ready;
 }
 
 inline bool reserve_scratch(action::context & ctx, const emel::model::data & model) noexcept {
-  if (!build_text_runtime(model, ctx.text)) {
+  ctx.execution_contract = {};
+  if (emel::model::omniembed::detail::build_execution_contract(model, ctx.execution_contract) !=
+          emel::error::cast(emel::model::loader::error::none) ||
+      !build_text_runtime(model, ctx.execution_contract, ctx.text) ||
+      !build_image_runtime(model, ctx.execution_contract, ctx.image) ||
+      !build_audio_runtime(model, ctx.execution_contract, ctx.audio)) {
+    ctx.text = {};
+    ctx.image = {};
+    ctx.audio = {};
     ctx.scratch = {};
     return false;
   }
-  (void) build_image_runtime(model, ctx.image);
-  (void) build_audio_runtime(model, ctx.audio);
 
   const size_t token_count = static_cast<size_t>(ctx.text.max_positions);
   const size_t hidden_size = static_cast<size_t>(ctx.text.hidden_size);
@@ -1441,6 +1940,14 @@ inline int32_t shared_embedding_size(const action::context & ctx) noexcept {
   return ctx.model != nullptr ? ctx.model->params.n_embd_out : ctx.text.shared_embedding_size;
 }
 
+inline size_t shared_dense_scratch_capacity(const action::context & ctx) noexcept {
+  return static_cast<size_t>(std::max(
+      ctx.text.projection_hidden_size,
+      std::max(ctx.image.ready ? ctx.image.projection.hidden_size : 0,
+               std::max(ctx.audio.ready ? ctx.audio.projection.hidden_size : 0,
+                        ctx.audio.ready ? ctx.audio.max_dense_input_size : 0))));
+}
+
 inline int32_t requested_output_dimension(const event::embed_text & request,
                                           const action::context & ctx) noexcept {
   const int32_t full_dimension = shared_embedding_size(ctx);
@@ -1541,6 +2048,49 @@ inline void set_error(const event::embed_audio_run & runtime_ev, const error err
   runtime_ev.ctx.err = to_error(err);
 }
 
+inline bool matmul_q5_0(const action::matrix_view & matrix,
+                        std::span<const float> input,
+                        std::span<emel::kernel::detail::quant::block_q8_0> q8_input,
+                        std::span<float> output) noexcept {
+  if (matrix.dtype != emel::kernel::detail::dtype_q5_0 ||
+      matrix.cols <= 0 ||
+      matrix.rows <= 0 ||
+      static_cast<size_t>(matrix.cols) != input.size() ||
+      static_cast<size_t>(matrix.rows) != output.size() ||
+      (static_cast<size_t>(matrix.cols) % static_cast<size_t>(emel::kernel::detail::quant::QK5_0)) != 0u) {
+    return false;
+  }
+
+  const size_t block_count =
+      static_cast<size_t>(matrix.cols) / static_cast<size_t>(emel::kernel::detail::quant::QK5_0);
+  if (block_count == 0u || block_count > q8_input.size()) {
+    return false;
+  }
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  emel::kernel::event::op_mul_mat request{
+    .src0 = make_dense_src0_view(matrix),
+    .src1 = make_dense_vector_src1_view(input),
+    .dst = make_dense_vector_dst_view(output),
+    .nth = 1u,
+  };
+  return ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q5_0_vector(request);
+#else
+  emel::kernel::detail::quant::quantize_row_q8_0_strided(
+      input.data(), 1u, q8_input.data(), matrix.cols);
+  const auto * base = static_cast<const uint8_t *>(matrix.data);
+  for (int32_t row = 0; row < matrix.rows; ++row) {
+    const auto * row_ptr = base + static_cast<size_t>(row) * matrix.row_bytes;
+    output[static_cast<size_t>(row)] =
+        emel::kernel::detail::dot_q5_0_q8_0_row_scalar(
+            reinterpret_cast<const emel::kernel::detail::quant::block_q5_0 *>(row_ptr),
+            q8_input.data(),
+            block_count);
+  }
+  return true;
+#endif
+}
+
 inline bool matmul_q8_0(const action::matrix_view & matrix,
                         std::span<const float> input,
                         std::span<emel::kernel::detail::quant::block_q8_0> q8_input,
@@ -1560,6 +2110,16 @@ inline bool matmul_q8_0(const action::matrix_view & matrix,
     return false;
   }
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  emel::kernel::event::op_mul_mat request{
+    .src0 = make_dense_src0_view(matrix),
+    .src1 = make_dense_vector_src1_view(input),
+    .dst = make_dense_vector_dst_view(output),
+    .nth = 1u,
+  };
+  ::emel::kernel::aarch64::detail::execute_neon_mul_mat_q8_0_vector_unchecked(request);
+  return true;
+#else
   emel::kernel::detail::quant::quantize_row_q8_0_strided(
       input.data(), 1u, q8_input.data(), matrix.cols);
   const auto * base = static_cast<const uint8_t *>(matrix.data);
@@ -1572,6 +2132,7 @@ inline bool matmul_q8_0(const action::matrix_view & matrix,
             block_count);
   }
   return true;
+#endif
 }
 
 inline bool matmul_f16(const action::matrix_view & matrix,
@@ -1610,6 +2171,15 @@ inline bool matmul_f32(const action::matrix_view & matrix,
     return false;
   }
 
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  emel::kernel::event::op_mul_mat request{
+    .src0 = make_dense_src0_view(matrix),
+    .src1 = make_dense_vector_src1_view(input),
+    .dst = make_dense_vector_dst_view(output),
+    .nth = 1u,
+  };
+  return ::emel::kernel::aarch64::detail::execute_neon_mul_mat(request);
+#else
   const auto * base = static_cast<const uint8_t *>(matrix.data);
   for (int32_t row = 0; row < matrix.rows; ++row) {
     const auto * weights =
@@ -1621,12 +2191,59 @@ inline bool matmul_f32(const action::matrix_view & matrix,
     output[static_cast<size_t>(row)] = acc;
   }
   return true;
+#endif
+}
+
+inline bool matmul_f32_matrix(const action::matrix_view & matrix,
+                              const float * input,
+                              const int32_t input_cols,
+                              float * output) noexcept {
+  if (matrix.dtype != emel::kernel::detail::dtype_f32 ||
+      matrix.cols <= 0 ||
+      matrix.rows <= 0 ||
+      input == nullptr ||
+      output == nullptr ||
+      input_cols <= 0) {
+    return false;
+  }
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  emel::kernel::event::op_mul_mat request{
+    .src0 = make_dense_src0_view(matrix),
+    .src1 = make_dense_matrix_src1_view(input, input_cols, matrix.cols),
+    .dst = make_dense_matrix_dst_view(output, input_cols, matrix.rows),
+    .nth = 1u,
+  };
+  return ::emel::kernel::aarch64::detail::execute_neon_mul_mat(request);
+#else
+  const auto * weights_base = static_cast<const float *>(matrix.data);
+  for (int32_t row = 0; row < matrix.rows; ++row) {
+    const auto * weights =
+        reinterpret_cast<const float *>(static_cast<const uint8_t *>(matrix.data) +
+                                        static_cast<size_t>(row) * matrix.row_bytes);
+    float * output_row = output + static_cast<size_t>(row) * static_cast<size_t>(input_cols);
+    for (int32_t col = 0; col < input_cols; ++col) {
+      float acc = 0.0f;
+      for (int32_t depth = 0; depth < matrix.cols; ++depth) {
+        acc += weights[static_cast<size_t>(depth)] *
+            input[static_cast<size_t>(depth) * static_cast<size_t>(input_cols) +
+                  static_cast<size_t>(col)];
+      }
+      output_row[static_cast<size_t>(col)] = acc;
+    }
+  }
+  (void) weights_base;
+  return true;
+#endif
 }
 
 inline bool matmul(const action::matrix_view & matrix,
                    std::span<const float> input,
                    std::span<emel::kernel::detail::quant::block_q8_0> q8_input,
                    std::span<float> output) noexcept {
+  if (matrix.dtype == emel::kernel::detail::dtype_q5_0) {
+    return matmul_q5_0(matrix, input, q8_input, output);
+  }
   if (matrix.dtype == emel::kernel::detail::dtype_q8_0) {
     return matmul_q8_0(matrix, input, q8_input, output);
   }
@@ -1722,17 +2339,25 @@ inline bool l2_normalize(std::span<float> values) noexcept {
   return true;
 }
 
-inline bool copy_q8_embedding_row(const action::matrix_view & embeddings,
-                                  const int32_t row,
-                                  std::span<float> output) noexcept {
-  if (embeddings.dtype != emel::kernel::detail::dtype_q8_0 ||
+inline bool copy_embedding_row(const action::matrix_view & embeddings,
+                               const int32_t row,
+                               std::span<float> output) noexcept {
+  if ((embeddings.dtype != emel::kernel::detail::dtype_q5_0 &&
+       embeddings.dtype != emel::kernel::detail::dtype_q8_0) ||
       row < 0 ||
       row >= embeddings.rows ||
       static_cast<int32_t>(output.size()) != embeddings.cols) {
     return false;
   }
-  const auto * row_ptr = reinterpret_cast<const emel::kernel::detail::quant::block_q8_0 *>(
-      static_cast<const uint8_t *>(embeddings.data) + static_cast<size_t>(row) * embeddings.row_bytes);
+  const auto * row_bytes =
+      static_cast<const uint8_t *>(embeddings.data) + static_cast<size_t>(row) * embeddings.row_bytes;
+  if (embeddings.dtype == emel::kernel::detail::dtype_q5_0) {
+    const auto * row_ptr =
+        reinterpret_cast<const emel::kernel::detail::quant::block_q5_0 *>(row_bytes);
+    emel::kernel::detail::quant::dequantize_row_q5_0(row_ptr, output.data(), embeddings.cols);
+    return true;
+  }
+  const auto * row_ptr = reinterpret_cast<const emel::kernel::detail::quant::block_q8_0 *>(row_bytes);
   emel::kernel::detail::quant::dequantize_row_q8_0(row_ptr, output.data(), embeddings.cols);
   return true;
 }
@@ -1811,9 +2436,9 @@ inline bool embed_tokens(action::context & ctx, const int32_t token_count) noexc
     if (token_id < 0 || token_id >= ctx.text.word_embeddings.rows) {
       return false;
     }
-    if (!copy_q8_embedding_row(ctx.text.word_embeddings, token_id, word) ||
-        !copy_q8_embedding_row(ctx.text.position_embeddings, token_index, pos) ||
-        !copy_q8_embedding_row(ctx.text.token_type_embeddings, 0, type)) {
+    if (!copy_embedding_row(ctx.text.word_embeddings, token_id, word) ||
+        !copy_embedding_row(ctx.text.position_embeddings, token_index, pos) ||
+        !copy_embedding_row(ctx.text.token_type_embeddings, 0, type)) {
       return false;
     }
     auto out = token_span(ctx.scratch.sequence_a.get(), token_index, ctx.text.hidden_size);
@@ -1969,21 +2594,66 @@ inline void apply_batch_norm_hwc(float * values,
                                  const int32_t spatial,
                                  const action::batch_norm_view & bn,
                                  const float epsilon) noexcept {
+  (void) epsilon;
   const int32_t channels = bn.channels;
   for (int32_t pixel_index = 0; pixel_index < spatial * spatial; ++pixel_index) {
     float * pixel = values + static_cast<size_t>(pixel_index) * static_cast<size_t>(channels);
-    for (int32_t channel = 0; channel < channels; ++channel) {
-      const float gamma = bn.weight.data[channel];
-      const float beta = bn.bias.data[channel];
-      const float mean = bn.running_mean.data[channel];
-      const float variance = bn.running_var.data[channel];
-      float value =
-          (pixel[channel] - mean) * (gamma / std::sqrt(variance + epsilon)) + beta;
+#if defined(__aarch64__) || defined(__ARM_NEON)
+    const float * scale = bn.scale;
+    const float * shift = bn.shift;
+    int32_t channel = 0;
+    const float32x4_t zero = vdupq_n_f32(0.0f);
+    for (; channel + 16 <= channels; channel += 16) {
+      float32x4_t value0 = vmlaq_f32(vld1q_f32(shift + static_cast<size_t>(channel)),
+                                     vld1q_f32(pixel + static_cast<size_t>(channel)),
+                                     vld1q_f32(scale + static_cast<size_t>(channel)));
+      float32x4_t value1 = vmlaq_f32(vld1q_f32(shift + static_cast<size_t>(channel + 4)),
+                                     vld1q_f32(pixel + static_cast<size_t>(channel + 4)),
+                                     vld1q_f32(scale + static_cast<size_t>(channel + 4)));
+      float32x4_t value2 = vmlaq_f32(vld1q_f32(shift + static_cast<size_t>(channel + 8)),
+                                     vld1q_f32(pixel + static_cast<size_t>(channel + 8)),
+                                     vld1q_f32(scale + static_cast<size_t>(channel + 8)));
+      float32x4_t value3 = vmlaq_f32(vld1q_f32(shift + static_cast<size_t>(channel + 12)),
+                                     vld1q_f32(pixel + static_cast<size_t>(channel + 12)),
+                                     vld1q_f32(scale + static_cast<size_t>(channel + 12)));
+      if constexpr (apply_relu) {
+        value0 = vmaxq_f32(value0, zero);
+        value1 = vmaxq_f32(value1, zero);
+        value2 = vmaxq_f32(value2, zero);
+        value3 = vmaxq_f32(value3, zero);
+      }
+      vst1q_f32(pixel + static_cast<size_t>(channel), value0);
+      vst1q_f32(pixel + static_cast<size_t>(channel + 4), value1);
+      vst1q_f32(pixel + static_cast<size_t>(channel + 8), value2);
+      vst1q_f32(pixel + static_cast<size_t>(channel + 12), value3);
+    }
+    for (; channel + 4 <= channels; channel += 4) {
+      float32x4_t value = vmlaq_f32(vld1q_f32(shift + static_cast<size_t>(channel)),
+                                    vld1q_f32(pixel + static_cast<size_t>(channel)),
+                                    vld1q_f32(scale + static_cast<size_t>(channel)));
+      if constexpr (apply_relu) {
+        value = vmaxq_f32(value, zero);
+      }
+      vst1q_f32(pixel + static_cast<size_t>(channel), value);
+    }
+    for (; channel < channels; ++channel) {
+      float value = pixel[channel] * scale[static_cast<size_t>(channel)] +
+          shift[static_cast<size_t>(channel)];
       if constexpr (apply_relu) {
         value = std::max(value, 0.0f);
       }
       pixel[channel] = value;
     }
+#else
+    for (int32_t channel = 0; channel < channels; ++channel) {
+      float value = pixel[channel] * bn.scale[static_cast<size_t>(channel)] +
+          bn.shift[static_cast<size_t>(channel)];
+      if constexpr (apply_relu) {
+        value = std::max(value, 0.0f);
+      }
+      pixel[channel] = value;
+    }
+#endif
   }
 }
 
@@ -1991,7 +2661,8 @@ inline bool pointwise_conv_hwc(const action::matrix_view & matrix,
                                const float * input,
                                const int32_t pixel_count,
                                float * output) noexcept {
-  if (matrix.dtype != emel::kernel::detail::dtype_f16 ||
+  if ((matrix.dtype != emel::kernel::detail::dtype_f32 &&
+       matrix.dtype != emel::kernel::detail::dtype_q8_0) ||
       matrix.rows <= 0 ||
       matrix.cols <= 0 ||
       input == nullptr ||
@@ -2009,19 +2680,149 @@ inline bool pointwise_conv_hwc(const action::matrix_view & matrix,
         output + static_cast<size_t>(pixel_index) * static_cast<size_t>(matrix.rows),
         static_cast<size_t>(matrix.rows),
     };
-    if (!matmul_f16(matrix, input_pixel, output_pixel)) {
+    if (!matmul(matrix,
+                input_pixel,
+                std::span<emel::kernel::detail::quant::block_q8_0>{},
+                output_pixel)) {
       return false;
     }
   }
   return true;
 }
 
-inline bool standard_conv_hwc(const action::conv2d_view & conv,
-                              const float * input,
-                              const int32_t input_spatial,
-                              const int32_t stride,
-                              float * output,
-                              int32_t & output_spatial_out) noexcept {
+template <bool fuse_batch_norm, bool apply_relu>
+inline bool pointwise_conv_hwc_direct_f32_impl(const action::matrix_view & matrix,
+                                               const float * input,
+                                               const int32_t pixel_count,
+                                               const action::batch_norm_view * batch_norm,
+                                               float * output) noexcept {
+  if (matrix.dtype != emel::kernel::detail::dtype_f32 ||
+      matrix.packed_rhs_f32 == nullptr ||
+      matrix.packed_rhs_cols != matrix.rows ||
+      matrix.rows <= 0 ||
+      matrix.cols <= 0 ||
+      input == nullptr ||
+      output == nullptr ||
+      pixel_count <= 0) {
+    return false;
+  }
+  if constexpr (fuse_batch_norm) {
+    if (batch_norm == nullptr ||
+        batch_norm->scale == nullptr ||
+        batch_norm->shift == nullptr ||
+        batch_norm->channels != matrix.rows) {
+      return false;
+    }
+  }
+
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  return ::emel::kernel::aarch64::detail::execute_neon_image_pointwise_f32<
+      fuse_batch_norm,
+      apply_relu>({
+      .input = input,
+      .packed_rhs = matrix.packed_rhs_f32.get(),
+      .batch_norm_scale = batch_norm != nullptr ? batch_norm->scale : nullptr,
+      .batch_norm_shift = batch_norm != nullptr ? batch_norm->shift : nullptr,
+      .output = output,
+      .pixel_count = pixel_count,
+      .input_channels = matrix.cols,
+      .output_channels = matrix.rows,
+      .packed_rhs_cols = matrix.packed_rhs_cols,
+  });
+#else
+  for (int32_t pixel_index = 0; pixel_index < pixel_count; ++pixel_index) {
+    const float * input_pixel =
+        input + static_cast<size_t>(pixel_index) * static_cast<size_t>(matrix.cols);
+    float * output_pixel =
+        output + static_cast<size_t>(pixel_index) * static_cast<size_t>(matrix.rows);
+    for (int32_t output_channel = 0; output_channel < matrix.rows; ++output_channel) {
+      float acc = 0.0f;
+      for (int32_t input_channel = 0; input_channel < matrix.cols; ++input_channel) {
+        acc += input_pixel[static_cast<size_t>(input_channel)] *
+            matrix.transposed_f32[static_cast<size_t>(input_channel) *
+                                  static_cast<size_t>(matrix.rows) +
+                                  static_cast<size_t>(output_channel)];
+      }
+      output_pixel[static_cast<size_t>(output_channel)] = acc;
+    }
+  }
+  return true;
+#endif
+}
+
+inline bool pointwise_conv_hwc_direct_f32(const action::matrix_view & matrix,
+                                          const float * input,
+                                          const int32_t pixel_count,
+                                          float * output) noexcept {
+  return pointwise_conv_hwc_direct_f32_impl<false, false>(
+      matrix, input, pixel_count, nullptr, output);
+}
+
+template <bool apply_relu>
+inline bool pointwise_conv_hwc_direct_f32_bn(const action::matrix_view & matrix,
+                                             const float * input,
+                                             const int32_t pixel_count,
+                                             const action::batch_norm_view & batch_norm,
+                                             float * output) noexcept {
+  return pointwise_conv_hwc_direct_f32_impl<true, apply_relu>(
+      matrix, input, pixel_count, &batch_norm, output);
+}
+
+inline bool build_standard_conv_patch_hwc_rect(const action::conv2d_view & conv,
+                                               const float * input,
+                                               const int32_t input_height,
+                                               const int32_t input_width,
+                                               const int32_t stride_h,
+                                               const int32_t stride_w,
+                                               const int32_t output_y,
+                                               const int32_t output_x,
+                                               float * patch_buffer,
+                                               const size_t patch_capacity) noexcept {
+  const size_t patch_size = static_cast<size_t>(conv.input_channels) *
+      static_cast<size_t>(conv.kernel_h) *
+      static_cast<size_t>(conv.kernel_w);
+  if (patch_buffer == nullptr || patch_capacity < patch_size) {
+    return false;
+  }
+
+  std::fill(patch_buffer, patch_buffer + patch_size, 0.0f);
+  const int32_t pad_h = same_padding(conv.kernel_h, stride_h);
+  const int32_t pad_w = same_padding(conv.kernel_w, stride_w);
+  for (int32_t input_channel = 0; input_channel < conv.input_channels; ++input_channel) {
+    const size_t patch_base =
+        static_cast<size_t>(input_channel * conv.kernel_h * conv.kernel_w);
+    for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
+      const int32_t input_y = output_y * stride_h + ky - pad_h;
+      if (input_y < 0 || input_y >= input_height) {
+        continue;
+      }
+      for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
+        const int32_t input_x = output_x * stride_w + kx - pad_w;
+        if (input_x < 0 || input_x >= input_width) {
+          continue;
+        }
+        const float * input_pixel =
+            input + static_cast<size_t>(input_y * input_width + input_x) *
+                static_cast<size_t>(conv.input_channels);
+        patch_buffer[patch_base + static_cast<size_t>(ky * conv.kernel_w + kx)] =
+            input_pixel[input_channel];
+      }
+    }
+  }
+
+  return true;
+}
+
+template <bool fuse_batch_norm, bool apply_relu>
+inline bool standard_conv_hwc_impl(const action::conv2d_view & conv,
+                                   const float * input,
+                                   const int32_t input_spatial,
+                                   const int32_t stride,
+                                   float * patch_buffer,
+                                   const size_t patch_capacity,
+                                   const action::batch_norm_view * batch_norm,
+                                   float * output,
+                                   int32_t & output_spatial_out) noexcept {
   if (conv.data == nullptr ||
       input == nullptr ||
       output == nullptr ||
@@ -2031,51 +2832,278 @@ inline bool standard_conv_hwc(const action::conv2d_view & conv,
       stride <= 0) {
     return false;
   }
+  if constexpr (fuse_batch_norm) {
+    if (batch_norm == nullptr ||
+        batch_norm->scale == nullptr ||
+        batch_norm->shift == nullptr ||
+        batch_norm->channels != conv.output_channels) {
+      return false;
+    }
+  }
 
   const int32_t output_spatial = output_dim_same(input_spatial, conv.kernel_h, stride);
+  if (conv.kernel_major_f32 == nullptr) {
+    return false;
+  }
+  const int32_t kernel_hw = conv.kernel_h * conv.kernel_w;
+  const size_t kernel_channel_stride =
+      static_cast<size_t>(kernel_hw) * static_cast<size_t>(conv.output_channels);
   const int32_t pad_h = same_padding(conv.kernel_h, stride);
   const int32_t pad_w = same_padding(conv.kernel_w, stride);
-  const auto * weights = conv.data;
-  for (int32_t oy = 0; oy < output_spatial; ++oy) {
-    for (int32_t ox = 0; ox < output_spatial; ++ox) {
+  (void) patch_buffer;
+  (void) patch_capacity;
+
+  for (int32_t output_y = 0; output_y < output_spatial; ++output_y) {
+    for (int32_t output_x = 0; output_x < output_spatial; ++output_x) {
       float * output_pixel =
-          output + static_cast<size_t>(oy * output_spatial + ox) *
+          output + static_cast<size_t>(output_y * output_spatial + output_x) *
               static_cast<size_t>(conv.output_channels);
-      std::fill(output_pixel, output_pixel + conv.output_channels, 0.0f);
-      for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
-        const int32_t iy = oy * stride + ky - pad_h;
-        if (iy < 0 || iy >= input_spatial) {
-          continue;
-        }
-        for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
-          const int32_t ix = ox * stride + kx - pad_w;
-          if (ix < 0 || ix >= input_spatial) {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+      const float32x4_t zero = vdupq_n_f32(0.0f);
+      int32_t output_channel = 0;
+      for (; output_channel + 16 <= conv.output_channels; output_channel += 16) {
+        float32x4_t acc0 = zero;
+        float32x4_t acc1 = zero;
+        float32x4_t acc2 = zero;
+        float32x4_t acc3 = zero;
+        for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
+          const int32_t input_y = output_y * stride + ky - pad_h;
+          if (input_y < 0 || input_y >= input_spatial) {
             continue;
           }
-          const float * input_pixel =
-              input + static_cast<size_t>(iy * input_spatial + ix) *
-                  static_cast<size_t>(conv.input_channels);
-          for (int32_t output_channel = 0; output_channel < conv.output_channels; ++output_channel) {
-            float acc = output_pixel[output_channel];
-            const size_t output_base =
-                static_cast<size_t>(output_channel) *
-                static_cast<size_t>(conv.input_channels * conv.kernel_h * conv.kernel_w);
-            for (int32_t input_channel = 0; input_channel < conv.input_channels; ++input_channel) {
-              const size_t index = output_base +
-                  static_cast<size_t>(input_channel * conv.kernel_h * conv.kernel_w +
-                                      ky * conv.kernel_w +
-                                      kx);
-              acc += emel::kernel::detail::quant::fp16_to_fp32(weights[index]) *
-                  input_pixel[input_channel];
+          for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
+            const int32_t input_x = output_x * stride + kx - pad_w;
+            if (input_x < 0 || input_x >= input_spatial) {
+              continue;
             }
-            output_pixel[output_channel] = acc;
+            const float * input_pixel =
+                input + static_cast<size_t>(input_y * input_spatial + input_x) *
+                    static_cast<size_t>(conv.input_channels);
+            const float * weights_base =
+                conv.kernel_major_f32 +
+                static_cast<size_t>(ky * conv.kernel_w + kx) *
+                    static_cast<size_t>(conv.output_channels) +
+                static_cast<size_t>(output_channel);
+            for (int32_t input_channel = 0; input_channel < conv.input_channels; ++input_channel) {
+              const float value = input_pixel[static_cast<size_t>(input_channel)];
+              const float32x4_t weights0 = vld1q_f32(weights_base);
+              const float32x4_t weights1 = vld1q_f32(weights_base + 4);
+              const float32x4_t weights2 = vld1q_f32(weights_base + 8);
+              const float32x4_t weights3 = vld1q_f32(weights_base + 12);
+              acc0 = vmlaq_n_f32(acc0, weights0, value);
+              acc1 = vmlaq_n_f32(acc1, weights1, value);
+              acc2 = vmlaq_n_f32(acc2, weights2, value);
+              acc3 = vmlaq_n_f32(acc3, weights3, value);
+              weights_base += kernel_channel_stride;
+            }
           }
         }
+        if constexpr (fuse_batch_norm) {
+          const float * scale = batch_norm->scale + static_cast<size_t>(output_channel);
+          const float * shift = batch_norm->shift + static_cast<size_t>(output_channel);
+          acc0 = vmlaq_f32(vld1q_f32(shift), acc0, vld1q_f32(scale));
+          acc1 = vmlaq_f32(vld1q_f32(shift + 4), acc1, vld1q_f32(scale + 4));
+          acc2 = vmlaq_f32(vld1q_f32(shift + 8), acc2, vld1q_f32(scale + 8));
+          acc3 = vmlaq_f32(vld1q_f32(shift + 12), acc3, vld1q_f32(scale + 12));
+          if constexpr (apply_relu) {
+            acc0 = vmaxq_f32(acc0, zero);
+            acc1 = vmaxq_f32(acc1, zero);
+            acc2 = vmaxq_f32(acc2, zero);
+            acc3 = vmaxq_f32(acc3, zero);
+          }
+        }
+        vst1q_f32(output_pixel + static_cast<size_t>(output_channel), acc0);
+        vst1q_f32(output_pixel + static_cast<size_t>(output_channel + 4), acc1);
+        vst1q_f32(output_pixel + static_cast<size_t>(output_channel + 8), acc2);
+        vst1q_f32(output_pixel + static_cast<size_t>(output_channel + 12), acc3);
       }
+      for (; output_channel + 8 <= conv.output_channels; output_channel += 8) {
+        float32x4_t acc0 = zero;
+        float32x4_t acc1 = zero;
+        for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
+          const int32_t input_y = output_y * stride + ky - pad_h;
+          if (input_y < 0 || input_y >= input_spatial) {
+            continue;
+          }
+          for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
+            const int32_t input_x = output_x * stride + kx - pad_w;
+            if (input_x < 0 || input_x >= input_spatial) {
+              continue;
+            }
+            const float * input_pixel =
+                input + static_cast<size_t>(input_y * input_spatial + input_x) *
+                    static_cast<size_t>(conv.input_channels);
+            const float * weights_base =
+                conv.kernel_major_f32 +
+                static_cast<size_t>(ky * conv.kernel_w + kx) *
+                    static_cast<size_t>(conv.output_channels) +
+                static_cast<size_t>(output_channel);
+            for (int32_t input_channel = 0; input_channel < conv.input_channels; ++input_channel) {
+              const float32x4_t weights0 =
+                  vld1q_f32(weights_base);
+              const float32x4_t weights1 =
+                  vld1q_f32(weights_base + 4);
+              const float value = input_pixel[static_cast<size_t>(input_channel)];
+              acc0 = vmlaq_n_f32(acc0, weights0, value);
+              acc1 = vmlaq_n_f32(acc1, weights1, value);
+              weights_base += kernel_channel_stride;
+            }
+          }
+        }
+        if constexpr (fuse_batch_norm) {
+          const float * scale = batch_norm->scale + static_cast<size_t>(output_channel);
+          const float * shift = batch_norm->shift + static_cast<size_t>(output_channel);
+          acc0 = vmlaq_f32(vld1q_f32(shift), acc0, vld1q_f32(scale));
+          acc1 = vmlaq_f32(vld1q_f32(shift + 4), acc1, vld1q_f32(scale + 4));
+          if constexpr (apply_relu) {
+            acc0 = vmaxq_f32(acc0, zero);
+            acc1 = vmaxq_f32(acc1, zero);
+          }
+        }
+        vst1q_f32(output_pixel + static_cast<size_t>(output_channel), acc0);
+        vst1q_f32(output_pixel + static_cast<size_t>(output_channel + 4), acc1);
+      }
+      for (; output_channel + 4 <= conv.output_channels; output_channel += 4) {
+        float32x4_t acc = zero;
+        for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
+          const int32_t input_y = output_y * stride + ky - pad_h;
+          if (input_y < 0 || input_y >= input_spatial) {
+            continue;
+          }
+          for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
+            const int32_t input_x = output_x * stride + kx - pad_w;
+            if (input_x < 0 || input_x >= input_spatial) {
+              continue;
+            }
+            const float * input_pixel =
+                input + static_cast<size_t>(input_y * input_spatial + input_x) *
+                    static_cast<size_t>(conv.input_channels);
+            const float * weights_base =
+                conv.kernel_major_f32 +
+                static_cast<size_t>(ky * conv.kernel_w + kx) *
+                    static_cast<size_t>(conv.output_channels) +
+                static_cast<size_t>(output_channel);
+            for (int32_t input_channel = 0; input_channel < conv.input_channels; ++input_channel) {
+              const float32x4_t weights = vld1q_f32(weights_base);
+              acc = vmlaq_n_f32(acc, weights, input_pixel[static_cast<size_t>(input_channel)]);
+              weights_base += kernel_channel_stride;
+            }
+          }
+        }
+        if constexpr (fuse_batch_norm) {
+          const float * scale = batch_norm->scale + static_cast<size_t>(output_channel);
+          const float * shift = batch_norm->shift + static_cast<size_t>(output_channel);
+          acc = vmlaq_f32(vld1q_f32(shift), acc, vld1q_f32(scale));
+          if constexpr (apply_relu) {
+            acc = vmaxq_f32(acc, zero);
+          }
+        }
+        vst1q_f32(output_pixel + static_cast<size_t>(output_channel), acc);
+      }
+      for (; output_channel < conv.output_channels; ++output_channel) {
+        float acc = 0.0f;
+        for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
+          const int32_t input_y = output_y * stride + ky - pad_h;
+          if (input_y < 0 || input_y >= input_spatial) {
+            continue;
+          }
+          for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
+            const int32_t input_x = output_x * stride + kx - pad_w;
+            if (input_x < 0 || input_x >= input_spatial) {
+              continue;
+            }
+            const float * input_pixel =
+                input + static_cast<size_t>(input_y * input_spatial + input_x) *
+                    static_cast<size_t>(conv.input_channels);
+            const float * weights_base =
+                conv.kernel_major_f32 +
+                static_cast<size_t>(ky * conv.kernel_w + kx) *
+                    static_cast<size_t>(conv.output_channels) +
+                static_cast<size_t>(output_channel);
+            for (int32_t input_channel = 0; input_channel < conv.input_channels; ++input_channel) {
+              acc += input_pixel[static_cast<size_t>(input_channel)] *
+                  weights_base[0];
+              weights_base += kernel_channel_stride;
+            }
+          }
+        }
+        if constexpr (fuse_batch_norm) {
+          acc = acc * batch_norm->scale[static_cast<size_t>(output_channel)] +
+              batch_norm->shift[static_cast<size_t>(output_channel)];
+          if constexpr (apply_relu) {
+            acc = std::max(acc, 0.0f);
+          }
+        }
+        output_pixel[static_cast<size_t>(output_channel)] = acc;
+      }
+#else
+      for (int32_t output_channel = 0; output_channel < conv.output_channels; ++output_channel) {
+        float acc = 0.0f;
+        for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
+          const int32_t input_y = output_y * stride + ky - pad_h;
+          if (input_y < 0 || input_y >= input_spatial) {
+            continue;
+          }
+          for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
+            const int32_t input_x = output_x * stride + kx - pad_w;
+            if (input_x < 0 || input_x >= input_spatial) {
+              continue;
+            }
+            const float * input_pixel =
+                input + static_cast<size_t>(input_y * input_spatial + input_x) *
+                    static_cast<size_t>(conv.input_channels);
+            for (int32_t input_channel = 0; input_channel < conv.input_channels; ++input_channel) {
+              const float * weights_base =
+                  conv.kernel_major_f32 +
+                  static_cast<size_t>(input_channel * kernel_hw + ky * conv.kernel_w + kx) *
+                      static_cast<size_t>(conv.output_channels);
+              acc += input_pixel[static_cast<size_t>(input_channel)] *
+                  weights_base[static_cast<size_t>(output_channel)];
+            }
+          }
+        }
+        if constexpr (fuse_batch_norm) {
+          acc = acc * batch_norm->scale[static_cast<size_t>(output_channel)] +
+              batch_norm->shift[static_cast<size_t>(output_channel)];
+          if constexpr (apply_relu) {
+            acc = std::max(acc, 0.0f);
+          }
+        }
+        output_pixel[static_cast<size_t>(output_channel)] = acc;
+      }
+#endif
     }
   }
   output_spatial_out = output_spatial;
   return true;
+}
+
+inline bool standard_conv_hwc(const action::conv2d_view & conv,
+                              const float * input,
+                              const int32_t input_spatial,
+                              const int32_t stride,
+                              float * patch_buffer,
+                              const size_t patch_capacity,
+                              float * output,
+                              int32_t & output_spatial_out) noexcept {
+  return standard_conv_hwc_impl<false, false>(
+      conv, input, input_spatial, stride, patch_buffer, patch_capacity, nullptr, output,
+      output_spatial_out);
+}
+
+template <bool apply_relu>
+inline bool standard_conv_hwc_bn(const action::conv2d_view & conv,
+                                 const float * input,
+                                 const int32_t input_spatial,
+                                 const int32_t stride,
+                                 float * patch_buffer,
+                                 const size_t patch_capacity,
+                                 const action::batch_norm_view & batch_norm,
+                                 float * output,
+                                 int32_t & output_spatial_out) noexcept {
+  return standard_conv_hwc_impl<true, apply_relu>(
+      conv, input, input_spatial, stride, patch_buffer, patch_capacity, &batch_norm, output,
+      output_spatial_out);
 }
 
 inline bool depthwise_conv_hwc(const action::conv2d_view & conv,
@@ -2098,37 +3126,55 @@ inline bool depthwise_conv_hwc(const action::conv2d_view & conv,
   const int32_t output_spatial = output_dim_same(input_spatial, conv.kernel_h, stride);
   const int32_t pad_h = same_padding(conv.kernel_h, stride);
   const int32_t pad_w = same_padding(conv.kernel_w, stride);
-  const auto * weights = conv.data;
+  const float * weights = conv.depthwise_kernel_major_f32;
+  if (weights == nullptr) {
+    return false;
+  }
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  if (!::emel::kernel::aarch64::detail::execute_neon_image_depthwise_f32({
+          .input = input,
+          .kernel_major = weights,
+          .output = output,
+          .input_spatial = input_spatial,
+          .output_spatial = output_spatial,
+          .output_channels = channels,
+          .kernel_h = conv.kernel_h,
+          .kernel_w = conv.kernel_w,
+          .stride = stride,
+          .pad_h = pad_h,
+          .pad_w = pad_w,
+      })) {
+    return false;
+  }
+#else
   for (int32_t oy = 0; oy < output_spatial; ++oy) {
     for (int32_t ox = 0; ox < output_spatial; ++ox) {
       float * output_pixel =
           output + static_cast<size_t>(oy * output_spatial + ox) * static_cast<size_t>(channels);
-      for (int32_t channel = 0; channel < channels; ++channel) {
-        float acc = 0.0f;
-        const size_t channel_base =
-            static_cast<size_t>(channel * conv.kernel_h * conv.kernel_w);
-        for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
-          const int32_t iy = oy * stride + ky - pad_h;
-          if (iy < 0 || iy >= input_spatial) {
+      std::fill(output_pixel, output_pixel + channels, 0.0f);
+      for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
+        const int32_t iy = oy * stride + ky - pad_h;
+        if (iy < 0 || iy >= input_spatial) {
+          continue;
+        }
+        for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
+          const int32_t ix = ox * stride + kx - pad_w;
+          if (ix < 0 || ix >= input_spatial) {
             continue;
           }
-          for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
-            const int32_t ix = ox * stride + kx - pad_w;
-            if (ix < 0 || ix >= input_spatial) {
-              continue;
-            }
-            const float * input_pixel =
-                input + static_cast<size_t>(iy * input_spatial + ix) * static_cast<size_t>(channels);
-            const size_t index =
-                channel_base + static_cast<size_t>(ky * conv.kernel_w + kx);
-            acc += emel::kernel::detail::quant::fp16_to_fp32(weights[index]) *
-                input_pixel[channel];
+          const float * input_pixel =
+              input + static_cast<size_t>(iy * input_spatial + ix) * static_cast<size_t>(channels);
+          const float * kernel_weights =
+              weights + static_cast<size_t>(ky * conv.kernel_w + kx) * static_cast<size_t>(channels);
+          for (int32_t channel = 0; channel < channels; ++channel) {
+            output_pixel[channel] +=
+                kernel_weights[static_cast<size_t>(channel)] * input_pixel[channel];
           }
         }
-        output_pixel[channel] = acc;
       }
     }
   }
+#endif
   output_spatial_out = output_spatial;
   return true;
 }
@@ -2170,17 +3216,64 @@ inline void apply_batch_norm_hwc_rect(float * values,
                                       const int32_t width,
                                       const action::batch_norm_view & bn,
                                       const float epsilon) noexcept {
+  (void) epsilon;
   const int32_t channels = bn.channels;
   const int32_t pixel_count = height * width;
   for (int32_t pixel_index = 0; pixel_index < pixel_count; ++pixel_index) {
     float * pixel = values + static_cast<size_t>(pixel_index) * static_cast<size_t>(channels);
+#if defined(__aarch64__) || defined(__ARM_NEON)
+    if constexpr (!apply_hardswish) {
+      const float * scale = bn.scale;
+      const float * shift = bn.shift;
+      int32_t channel = 0;
+      const float32x4_t zero = vdupq_n_f32(0.0f);
+      for (; channel + 16 <= channels; channel += 16) {
+        float32x4_t value0 = vmlaq_f32(vld1q_f32(shift + static_cast<size_t>(channel)),
+                                       vld1q_f32(pixel + static_cast<size_t>(channel)),
+                                       vld1q_f32(scale + static_cast<size_t>(channel)));
+        float32x4_t value1 = vmlaq_f32(vld1q_f32(shift + static_cast<size_t>(channel + 4)),
+                                       vld1q_f32(pixel + static_cast<size_t>(channel + 4)),
+                                       vld1q_f32(scale + static_cast<size_t>(channel + 4)));
+        float32x4_t value2 = vmlaq_f32(vld1q_f32(shift + static_cast<size_t>(channel + 8)),
+                                       vld1q_f32(pixel + static_cast<size_t>(channel + 8)),
+                                       vld1q_f32(scale + static_cast<size_t>(channel + 8)));
+        float32x4_t value3 = vmlaq_f32(vld1q_f32(shift + static_cast<size_t>(channel + 12)),
+                                       vld1q_f32(pixel + static_cast<size_t>(channel + 12)),
+                                       vld1q_f32(scale + static_cast<size_t>(channel + 12)));
+        if constexpr (apply_relu) {
+          value0 = vmaxq_f32(value0, zero);
+          value1 = vmaxq_f32(value1, zero);
+          value2 = vmaxq_f32(value2, zero);
+          value3 = vmaxq_f32(value3, zero);
+        }
+        vst1q_f32(pixel + static_cast<size_t>(channel), value0);
+        vst1q_f32(pixel + static_cast<size_t>(channel + 4), value1);
+        vst1q_f32(pixel + static_cast<size_t>(channel + 8), value2);
+        vst1q_f32(pixel + static_cast<size_t>(channel + 12), value3);
+      }
+      for (; channel + 4 <= channels; channel += 4) {
+        float32x4_t value = vmlaq_f32(vld1q_f32(shift + static_cast<size_t>(channel)),
+                                      vld1q_f32(pixel + static_cast<size_t>(channel)),
+                                      vld1q_f32(scale + static_cast<size_t>(channel)));
+        if constexpr (apply_relu) {
+          value = vmaxq_f32(value, zero);
+        }
+        vst1q_f32(pixel + static_cast<size_t>(channel), value);
+      }
+      for (; channel < channels; ++channel) {
+        float value = pixel[channel] * scale[static_cast<size_t>(channel)] +
+            shift[static_cast<size_t>(channel)];
+        if constexpr (apply_relu) {
+          value = std::max(value, 0.0f);
+        }
+        pixel[channel] = value;
+      }
+      continue;
+    }
+#endif
     for (int32_t channel = 0; channel < channels; ++channel) {
-      const float gamma = bn.weight.data[channel];
-      const float beta = bn.bias.data[channel];
-      const float mean = bn.running_mean.data[channel];
-      const float variance = bn.running_var.data[channel];
-      float value =
-          (pixel[channel] - mean) * (gamma / std::sqrt(variance + epsilon)) + beta;
+      float value = pixel[channel] * bn.scale[static_cast<size_t>(channel)] +
+          bn.shift[static_cast<size_t>(channel)];
       if constexpr (apply_relu) {
         value = std::max(value, 0.0f);
       } else if constexpr (apply_hardswish) {
@@ -2197,11 +3290,14 @@ inline bool standard_conv_hwc_rect(const action::conv2d_view & conv,
                                    const int32_t input_width,
                                    const int32_t stride_h,
                                    const int32_t stride_w,
+                                   float * patch_buffer,
+                                   const size_t patch_capacity,
                                    float * output,
                                    int32_t & output_height_out,
                                    int32_t & output_width_out) noexcept {
   if (conv.data == nullptr ||
       input == nullptr ||
+      patch_buffer == nullptr ||
       output == nullptr ||
       conv.input_channels <= 0 ||
       conv.output_channels <= 0 ||
@@ -2214,44 +3310,32 @@ inline bool standard_conv_hwc_rect(const action::conv2d_view & conv,
 
   const int32_t output_height = output_dim_same(input_height, conv.kernel_h, stride_h);
   const int32_t output_width = output_dim_same(input_width, conv.kernel_w, stride_w);
-  const int32_t pad_h = same_padding(conv.kernel_h, stride_h);
-  const int32_t pad_w = same_padding(conv.kernel_w, stride_w);
-  const auto * weights = conv.data;
+  const size_t patch_size = static_cast<size_t>(conv.input_channels) *
+      static_cast<size_t>(conv.kernel_h) * static_cast<size_t>(conv.kernel_w);
+  if (conv.data_f32 == nullptr || patch_capacity < patch_size) {
+    return false;
+  }
+  const auto matrix = make_conv_matrix_view(conv);
   for (int32_t oy = 0; oy < output_height; ++oy) {
     for (int32_t ox = 0; ox < output_width; ++ox) {
       float * output_pixel =
           output + static_cast<size_t>(oy * output_width + ox) *
               static_cast<size_t>(conv.output_channels);
-      std::fill(output_pixel, output_pixel + conv.output_channels, 0.0f);
-      for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
-        const int32_t iy = oy * stride_h + ky - pad_h;
-        if (iy < 0 || iy >= input_height) {
-          continue;
-        }
-        for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
-          const int32_t ix = ox * stride_w + kx - pad_w;
-          if (ix < 0 || ix >= input_width) {
-            continue;
-          }
-          const float * input_pixel =
-              input + static_cast<size_t>(iy * input_width + ix) *
-                  static_cast<size_t>(conv.input_channels);
-          for (int32_t output_channel = 0; output_channel < conv.output_channels; ++output_channel) {
-            float acc = output_pixel[output_channel];
-            const size_t output_base =
-                static_cast<size_t>(output_channel) *
-                static_cast<size_t>(conv.input_channels * conv.kernel_h * conv.kernel_w);
-            for (int32_t input_channel = 0; input_channel < conv.input_channels; ++input_channel) {
-              const size_t index = output_base +
-                  static_cast<size_t>(input_channel * conv.kernel_h * conv.kernel_w +
-                                      ky * conv.kernel_w +
-                                      kx);
-              acc += emel::kernel::detail::quant::fp16_to_fp32(weights[index]) *
-                  input_pixel[input_channel];
-            }
-            output_pixel[output_channel] = acc;
-          }
-        }
+      if (!build_standard_conv_patch_hwc_rect(
+              conv,
+              input,
+              input_height,
+              input_width,
+              stride_h,
+              stride_w,
+              oy,
+              ox,
+              patch_buffer,
+              patch_capacity) ||
+          !matmul_f32(matrix,
+                      std::span<const float>{patch_buffer, patch_size},
+                      std::span<float>{output_pixel, static_cast<size_t>(conv.output_channels)})) {
+        return false;
       }
     }
   }
@@ -2286,34 +3370,34 @@ inline bool depthwise_conv_hwc_rect(const action::conv2d_view & conv,
   const int32_t output_width = output_dim_same(input_width, conv.kernel_w, stride_w);
   const int32_t pad_h = same_padding(conv.kernel_h, stride_h);
   const int32_t pad_w = same_padding(conv.kernel_w, stride_w);
-  const auto * weights = conv.data;
+  const float * weights = conv.depthwise_kernel_major_f32;
+  if (weights == nullptr) {
+    return false;
+  }
   for (int32_t oy = 0; oy < output_height; ++oy) {
     for (int32_t ox = 0; ox < output_width; ++ox) {
       float * output_pixel =
           output + static_cast<size_t>(oy * output_width + ox) * static_cast<size_t>(channels);
-      for (int32_t channel = 0; channel < channels; ++channel) {
-        float acc = 0.0f;
-        const size_t channel_base =
-            static_cast<size_t>(channel * conv.kernel_h * conv.kernel_w);
-        for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
-          const int32_t iy = oy * stride_h + ky - pad_h;
-          if (iy < 0 || iy >= input_height) {
+      std::fill(output_pixel, output_pixel + channels, 0.0f);
+      for (int32_t ky = 0; ky < conv.kernel_h; ++ky) {
+        const int32_t iy = oy * stride_h + ky - pad_h;
+        if (iy < 0 || iy >= input_height) {
+          continue;
+        }
+        for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
+          const int32_t ix = ox * stride_w + kx - pad_w;
+          if (ix < 0 || ix >= input_width) {
             continue;
           }
-          for (int32_t kx = 0; kx < conv.kernel_w; ++kx) {
-            const int32_t ix = ox * stride_w + kx - pad_w;
-            if (ix < 0 || ix >= input_width) {
-              continue;
-            }
-            const float * input_pixel =
-                input + static_cast<size_t>(iy * input_width + ix) * static_cast<size_t>(channels);
-            const size_t index =
-                channel_base + static_cast<size_t>(ky * conv.kernel_w + kx);
-            acc += emel::kernel::detail::quant::fp16_to_fp32(weights[index]) *
-                input_pixel[channel];
+          const float * input_pixel =
+              input + static_cast<size_t>(iy * input_width + ix) * static_cast<size_t>(channels);
+          const float * kernel_weights =
+              weights + static_cast<size_t>(ky * conv.kernel_w + kx) * static_cast<size_t>(channels);
+          for (int32_t channel = 0; channel < channels; ++channel) {
+            output_pixel[channel] +=
+                kernel_weights[static_cast<size_t>(channel)] * input_pixel[channel];
           }
         }
-        output_pixel[channel] = acc;
       }
     }
   }
@@ -2347,6 +3431,60 @@ inline int32_t reflect_index(int32_t index, const int32_t length) noexcept {
     }
   }
   return index;
+}
+
+inline bool compute_fft_power_spectrum(const action::audio_runtime & audio,
+                                       const float * frame_input,
+                                       float * fft_state,
+                                       float * power_out) noexcept {
+  if (frame_input == nullptr ||
+      fft_state == nullptr ||
+      power_out == nullptr ||
+      audio.fft_twiddle_cos == nullptr ||
+      audio.fft_twiddle_sin == nullptr ||
+      audio.fft_bit_reverse == nullptr) {
+    return false;
+  }
+
+  for (int32_t index = 0; index < audio.n_fft; ++index) {
+    const int32_t reversed = audio.fft_bit_reverse[static_cast<size_t>(index)];
+    fft_state[static_cast<size_t>(2 * reversed)] = frame_input[index];
+    fft_state[static_cast<size_t>(2 * reversed + 1)] = 0.0f;
+  }
+
+  for (int32_t fft_len = 2; fft_len <= audio.n_fft; fft_len <<= 1) {
+    const int32_t half_len = fft_len >> 1;
+    const int32_t twiddle_step = audio.n_fft / fft_len;
+    for (int32_t base = 0; base < audio.n_fft; base += fft_len) {
+      for (int32_t index = 0; index < half_len; ++index) {
+        const int32_t twiddle_index = index * twiddle_step;
+        const float weight_real = audio.fft_twiddle_cos[static_cast<size_t>(twiddle_index)];
+        const float weight_imag = audio.fft_twiddle_sin[static_cast<size_t>(twiddle_index)];
+        const size_t even_index = static_cast<size_t>(2 * (base + index));
+        const size_t odd_index = static_cast<size_t>(2 * (base + index + half_len));
+        const float odd_real = fft_state[odd_index];
+        const float odd_imag = fft_state[odd_index + 1u];
+        const float temp_real = weight_real * odd_real - weight_imag * odd_imag;
+        const float temp_imag = weight_real * odd_imag + weight_imag * odd_real;
+        const float even_real = fft_state[even_index];
+        const float even_imag = fft_state[even_index + 1u];
+        fft_state[even_index] = even_real + temp_real;
+        fft_state[even_index + 1u] = even_imag + temp_imag;
+        fft_state[odd_index] = even_real - temp_real;
+        fft_state[odd_index + 1u] = even_imag - temp_imag;
+      }
+    }
+  }
+
+  const int32_t fft_bin_count = audio.n_fft / 2 + 1;
+  for (int32_t bin = 0; bin < fft_bin_count; ++bin) {
+    const size_t index = static_cast<size_t>(2 * bin);
+    const float real = fft_state[index];
+    const float imag = fft_state[index + 1u];
+    power_out[static_cast<size_t>(bin)] = real * real + imag * imag;
+  }
+
+  return true;
 }
 
 inline float bicubic_weight(const float value) noexcept {
@@ -2440,7 +3578,12 @@ inline bool prepare_audio_input(action::context & ctx,
       ctx.scratch.audio_power == nullptr ||
       ctx.scratch.audio_input == nullptr ||
       ctx.audio.fft_window == nullptr ||
-      ctx.audio.mel_filters == nullptr) {
+      ctx.audio.mel_filters == nullptr ||
+      ctx.audio.fft_twiddle_cos == nullptr ||
+      ctx.audio.fft_twiddle_sin == nullptr ||
+      ctx.audio.fft_bit_reverse == nullptr ||
+      ctx.audio.mel_bin_start == nullptr ||
+      ctx.audio.mel_bin_end == nullptr) {
     return false;
   }
 
@@ -2476,32 +3619,19 @@ inline bool prepare_audio_input(action::context & ctx,
           preemphasized[reflected_index] * ctx.audio.fft_window[sample_index];
     }
 
+    float * fft_state = ctx.scratch.audio_waveform.get();
     float * power = ctx.scratch.audio_power.get();
-    for (int32_t bin = 0; bin < fft_bin_count; ++bin) {
-      const float angle_step =
-          -2.0f * k_pi * static_cast<float>(bin) / static_cast<float>(ctx.audio.n_fft);
-      const float cos_step = std::cos(angle_step);
-      const float sin_step = std::sin(angle_step);
-      float cos_value = 1.0f;
-      float sin_value = 0.0f;
-      float real = 0.0f;
-      float imag = 0.0f;
-      for (int32_t sample_index = 0; sample_index < ctx.audio.n_fft; ++sample_index) {
-        const float value = fft_frame[sample_index];
-        real += value * cos_value;
-        imag += value * sin_value;
-        const float next_cos = cos_value * cos_step - sin_value * sin_step;
-        sin_value = sin_value * cos_step + cos_value * sin_step;
-        cos_value = next_cos;
-      }
-      power[bin] = real * real + imag * imag;
+    if (!compute_fft_power_spectrum(ctx.audio, fft_frame, fft_state, power)) {
+      return false;
     }
 
     for (int32_t mel_bin = 0; mel_bin < ctx.audio.num_mel_bins; ++mel_bin) {
       const float * weights =
           ctx.audio.mel_filters.get() + static_cast<size_t>(mel_bin * fft_bin_count);
+      const int32_t fft_start = ctx.audio.mel_bin_start[static_cast<size_t>(mel_bin)];
+      const int32_t fft_end = ctx.audio.mel_bin_end[static_cast<size_t>(mel_bin)];
       float energy = 0.0f;
-      for (int32_t fft_bin = 0; fft_bin < fft_bin_count; ++fft_bin) {
+      for (int32_t fft_bin = fft_start; fft_bin < fft_end; ++fft_bin) {
         energy += weights[fft_bin] * power[fft_bin];
       }
       const float value = std::log(energy + ctx.audio.log_offset);
@@ -2562,11 +3692,13 @@ inline bool run_audio_se(action::context & ctx,
 
 inline bool run_audio_block(action::context & ctx,
                             const action::audio_inverted_residual_runtime & block,
+                            float *& current_buffer,
+                            float *& alternate_buffer,
                             int32_t & height,
                             int32_t & width) noexcept {
   if (!block.ready ||
-      ctx.scratch.audio_a == nullptr ||
-      ctx.scratch.audio_b == nullptr ||
+      current_buffer == nullptr ||
+      alternate_buffer == nullptr ||
       ctx.scratch.audio_c == nullptr) {
     return false;
   }
@@ -2575,39 +3707,38 @@ inline bool run_audio_block(action::context & ctx,
       static_cast<size_t>(height) * static_cast<size_t>(width) *
       static_cast<size_t>(block.input_channels);
   if (block.has_skip) {
-    std::memcpy(
-        ctx.scratch.audio_c.get(), ctx.scratch.audio_a.get(), input_elements * sizeof(float));
+    std::memcpy(ctx.scratch.audio_c.get(), current_buffer, input_elements * sizeof(float));
   }
 
-  const float * depthwise_src = ctx.scratch.audio_a.get();
-  float * depthwise_dst = ctx.scratch.audio_b.get();
+  const float * depthwise_src = current_buffer;
+  float * depthwise_dst = alternate_buffer;
   int32_t work_height = height;
   int32_t work_width = width;
   if (block.has_expand) {
     if (!pointwise_conv_hwc(
             block.expand,
-            ctx.scratch.audio_a.get(),
+            current_buffer,
             height * width,
-            ctx.scratch.audio_b.get())) {
+            alternate_buffer)) {
       return false;
     }
     if (block.use_hardswish) {
       apply_batch_norm_hwc_rect<false, true>(
-          ctx.scratch.audio_b.get(),
+          alternate_buffer,
           height,
           width,
           block.expand_bn,
           ctx.audio.batch_norm_epsilon);
     } else {
       apply_batch_norm_hwc_rect<true, false>(
-          ctx.scratch.audio_b.get(),
+          alternate_buffer,
           height,
           width,
           block.expand_bn,
           ctx.audio.batch_norm_epsilon);
     }
-    depthwise_src = ctx.scratch.audio_b.get();
-    depthwise_dst = ctx.scratch.audio_a.get();
+    depthwise_src = alternate_buffer;
+    depthwise_dst = current_buffer;
   }
 
   int32_t output_height = 0;
@@ -2644,9 +3775,7 @@ inline bool run_audio_block(action::context & ctx,
     return false;
   }
 
-  float * project_dst = depthwise_dst == ctx.scratch.audio_a.get() ?
-      ctx.scratch.audio_b.get() :
-      ctx.scratch.audio_a.get();
+  float * project_dst = depthwise_dst == current_buffer ? alternate_buffer : current_buffer;
   if (!pointwise_conv_hwc(
           block.project,
           depthwise_dst,
@@ -2669,14 +3798,10 @@ inline bool run_audio_block(action::context & ctx,
     }
   }
 
-  if (project_dst != ctx.scratch.audio_a.get()) {
-    const size_t output_elements =
-        static_cast<size_t>(output_height) * static_cast<size_t>(output_width) *
-        static_cast<size_t>(block.output_channels);
-    std::memcpy(
-        ctx.scratch.audio_a.get(), project_dst, output_elements * sizeof(float));
-  }
-
+  current_buffer = project_dst;
+  alternate_buffer = project_dst == ctx.scratch.audio_a.get() ?
+      ctx.scratch.audio_b.get() :
+      ctx.scratch.audio_a.get();
   height = output_height;
   width = output_width;
   return true;
@@ -2688,9 +3813,12 @@ inline bool run_audio_embedding(action::context & ctx) noexcept {
       ctx.scratch.audio_input == nullptr ||
       ctx.scratch.audio_a == nullptr ||
       ctx.scratch.audio_b == nullptr ||
-      ctx.scratch.audio_embedding == nullptr) {
+      ctx.scratch.audio_embedding == nullptr ||
+      ctx.scratch.projection_residual == nullptr) {
     return false;
   }
+  float * conv_patch = ctx.scratch.projection_residual.get();
+  const size_t conv_patch_capacity = shared_dense_scratch_capacity(ctx);
 
   int32_t height = 0;
   int32_t width = 0;
@@ -2700,6 +3828,8 @@ inline bool run_audio_embedding(action::context & ctx) noexcept {
                               ctx.audio.time_frames,
                               2,
                               2,
+                              conv_patch,
+                              conv_patch_capacity,
                               ctx.scratch.audio_a.get(),
                               height,
                               width)) {
@@ -2711,10 +3841,17 @@ inline bool run_audio_embedding(action::context & ctx) noexcept {
       width,
       ctx.audio.stem.norm,
       ctx.audio.batch_norm_epsilon);
+  float * current_buffer = ctx.scratch.audio_a.get();
+  float * alternate_buffer = ctx.scratch.audio_b.get();
 
   for (int32_t index = 0; index < ctx.audio.block_count; ++index) {
     if (!run_audio_block(
-            ctx, ctx.audio.blocks[static_cast<size_t>(index)], height, width)) {
+            ctx,
+            ctx.audio.blocks[static_cast<size_t>(index)],
+            current_buffer,
+            alternate_buffer,
+            height,
+            width)) {
       return false;
     }
   }
@@ -2722,24 +3859,26 @@ inline bool run_audio_embedding(action::context & ctx) noexcept {
   int32_t head_height = 0;
   int32_t head_width = 0;
   if (!standard_conv_hwc_rect(ctx.audio.head.conv,
-                              ctx.scratch.audio_a.get(),
+                              current_buffer,
                               height,
                               width,
                               1,
                               1,
-                              ctx.scratch.audio_b.get(),
+                              conv_patch,
+                              conv_patch_capacity,
+                              alternate_buffer,
                               head_height,
                               head_width)) {
     return false;
   }
   apply_batch_norm_hwc_rect<false, true>(
-      ctx.scratch.audio_b.get(),
+      alternate_buffer,
       head_height,
       head_width,
       ctx.audio.head.norm,
       ctx.audio.batch_norm_epsilon);
   average_pool_hwc_rect(
-      ctx.scratch.audio_b.get(),
+      alternate_buffer,
       head_height,
       head_width,
       ctx.audio.embedding_size,
@@ -2752,29 +3891,41 @@ inline bool run_audio_embedding(action::context & ctx) noexcept {
 }
 
 inline bool run_edge_residual(action::context & ctx, int32_t & spatial) noexcept {
-  if (!ctx.image.stage0.ready) {
+  if (!ctx.image.stage0.ready ||
+      ctx.scratch.projection_residual == nullptr) {
     return false;
   }
+  float * conv_patch = ctx.scratch.projection_residual.get();
+  const size_t conv_patch_capacity = shared_dense_scratch_capacity(ctx);
 
   int32_t stage_spatial = 0;
-  if (!standard_conv_hwc(
-          ctx.image.stage0.conv_exp, ctx.scratch.image_a.get(), spatial, ctx.image.stage0.stride, ctx.scratch.image_b.get(), stage_spatial)) {
+  if (!standard_conv_hwc_bn<true>(
+          ctx.image.stage0.conv_exp,
+          ctx.scratch.image_a.get(),
+          spatial,
+          ctx.image.stage0.stride,
+          conv_patch,
+          conv_patch_capacity,
+          ctx.image.stage0.bn1,
+          ctx.scratch.image_b.get(),
+          stage_spatial)) {
     return false;
   }
-  apply_batch_norm_hwc<true>(
-      ctx.scratch.image_b.get(), stage_spatial, ctx.image.stage0.bn1, ctx.image.batch_norm_epsilon);
-  if (!pointwise_conv_hwc(
-          ctx.image.stage0.conv_pwl, ctx.scratch.image_b.get(), stage_spatial * stage_spatial, ctx.scratch.image_a.get())) {
+  if (!pointwise_conv_hwc_direct_f32_bn<false>(ctx.image.stage0.conv_pwl,
+                                               ctx.scratch.image_b.get(),
+                                               stage_spatial * stage_spatial,
+                                               ctx.image.stage0.bn2,
+                                               ctx.scratch.image_a.get())) {
     return false;
   }
-  apply_batch_norm_hwc<false>(
-      ctx.scratch.image_a.get(), stage_spatial, ctx.image.stage0.bn2, ctx.image.batch_norm_epsilon);
   spatial = stage_spatial;
   return true;
 }
 
 inline bool run_universal_inverted_block(action::context & ctx,
                                          const action::universal_inverted_runtime & block,
+                                         float *& current_buffer,
+                                         float *& alternate_buffer,
                                          int32_t & spatial) noexcept {
   if (!block.ready) {
     return false;
@@ -2784,50 +3935,42 @@ inline bool run_universal_inverted_block(action::context & ctx,
       static_cast<size_t>(spatial) * static_cast<size_t>(spatial) *
       static_cast<size_t>(block.input_channels);
   if (block.has_skip) {
-    std::memcpy(
-        ctx.scratch.image_c.get(), ctx.scratch.image_a.get(), input_elements * sizeof(float));
+    std::memcpy(ctx.scratch.image_c.get(), current_buffer, input_elements * sizeof(float));
   }
 
-  const float * expansion_src = ctx.scratch.image_a.get();
-  float * expansion_dst = ctx.scratch.image_b.get();
+  const float * expansion_src = current_buffer;
+  float * expansion_dst = alternate_buffer;
   int32_t expansion_spatial = spatial;
   if (block.has_dw_start) {
     const int32_t dw_start_stride = block.has_dw_mid ? 1 : block.stride;
     if (!depthwise_conv_hwc(
             block.dw_start,
-            ctx.scratch.image_a.get(),
+            current_buffer,
             spatial,
             dw_start_stride,
-            ctx.scratch.image_b.get(),
+            alternate_buffer,
             expansion_spatial)) {
       return false;
     }
     apply_batch_norm_hwc<false>(
-        ctx.scratch.image_b.get(),
+        alternate_buffer,
         expansion_spatial,
         block.dw_start_bn,
         ctx.image.batch_norm_epsilon);
-    expansion_src = ctx.scratch.image_b.get();
-    expansion_dst = ctx.scratch.image_a.get();
+    expansion_src = alternate_buffer;
+    expansion_dst = current_buffer;
   }
 
-  if (!pointwise_conv_hwc(
-          block.pw_exp,
-          expansion_src,
-          expansion_spatial * expansion_spatial,
-          expansion_dst)) {
+  if (!pointwise_conv_hwc_direct_f32_bn<true>(block.pw_exp,
+                                              expansion_src,
+                                              expansion_spatial * expansion_spatial,
+                                              block.pw_exp_bn,
+                                              expansion_dst)) {
     return false;
   }
-  apply_batch_norm_hwc<true>(
-      expansion_dst,
-      expansion_spatial,
-      block.pw_exp_bn,
-      ctx.image.batch_norm_epsilon);
 
   const float * projection_src = expansion_dst;
-  float * projection_dst = expansion_dst == ctx.scratch.image_a.get() ?
-      ctx.scratch.image_b.get() :
-      ctx.scratch.image_a.get();
+  float * projection_dst = expansion_dst == current_buffer ? alternate_buffer : current_buffer;
   int32_t output_spatial = expansion_spatial;
   if (block.has_dw_mid) {
     if (!depthwise_conv_hwc(
@@ -2845,23 +3988,16 @@ inline bool run_universal_inverted_block(action::context & ctx,
         block.dw_mid_bn,
         ctx.image.batch_norm_epsilon);
     projection_src = projection_dst;
-    projection_dst = projection_dst == ctx.scratch.image_a.get() ?
-        ctx.scratch.image_b.get() :
-        ctx.scratch.image_a.get();
+    projection_dst = projection_dst == current_buffer ? alternate_buffer : current_buffer;
   }
 
-  if (!pointwise_conv_hwc(
-          block.pw_proj,
-          projection_src,
-          output_spatial * output_spatial,
-          projection_dst)) {
+  if (!pointwise_conv_hwc_direct_f32_bn<false>(block.pw_proj,
+                                               projection_src,
+                                               output_spatial * output_spatial,
+                                               block.pw_proj_bn,
+                                               projection_dst)) {
     return false;
   }
-  apply_batch_norm_hwc<false>(
-      projection_dst,
-      output_spatial,
-      block.pw_proj_bn,
-      ctx.image.batch_norm_epsilon);
 
   if (block.has_skip) {
     if (!add_in_place(
@@ -2871,14 +4007,10 @@ inline bool run_universal_inverted_block(action::context & ctx,
     }
   }
 
-  if (projection_dst != ctx.scratch.image_a.get()) {
-    const size_t output_elements =
-        static_cast<size_t>(output_spatial) * static_cast<size_t>(output_spatial) *
-        static_cast<size_t>(block.output_channels);
-    std::memcpy(
-        ctx.scratch.image_a.get(), projection_dst, output_elements * sizeof(float));
-  }
-
+  current_buffer = projection_dst;
+  alternate_buffer = projection_dst == ctx.scratch.image_a.get() ?
+      ctx.scratch.image_b.get() :
+      ctx.scratch.image_a.get();
   spatial = output_spatial;
   return true;
 }
@@ -2890,59 +4022,65 @@ inline bool run_image_embedding(action::context & ctx) noexcept {
       ctx.scratch.image_a == nullptr ||
       ctx.scratch.image_b == nullptr ||
       ctx.scratch.image_c == nullptr ||
-      ctx.scratch.image_embedding == nullptr) {
+      ctx.scratch.image_embedding == nullptr ||
+      ctx.scratch.projection_residual == nullptr) {
     return false;
   }
+  float * conv_patch = ctx.scratch.projection_residual.get();
+  const size_t conv_patch_capacity = shared_dense_scratch_capacity(ctx);
 
   int32_t spatial = 0;
-  if (!standard_conv_hwc(
+  if (!standard_conv_hwc_bn<true>(
           ctx.image.stem,
           ctx.scratch.image_input.get(),
           ctx.image.input_size,
           2,
+          conv_patch,
+          conv_patch_capacity,
+          ctx.image.stem_bn,
           ctx.scratch.image_a.get(),
           spatial)) {
     return false;
   }
-  apply_batch_norm_hwc<true>(
-      ctx.scratch.image_a.get(), spatial, ctx.image.stem_bn, ctx.image.batch_norm_epsilon);
 
   if (!run_edge_residual(ctx, spatial)) {
     return false;
   }
+  float * current_buffer = ctx.scratch.image_a.get();
+  float * alternate_buffer = ctx.scratch.image_b.get();
 
   for (int32_t block_index = 0; block_index < ctx.image.block_count; ++block_index) {
     if (!run_universal_inverted_block(
-            ctx, ctx.image.blocks[static_cast<size_t>(block_index)], spatial)) {
+            ctx,
+            ctx.image.blocks[static_cast<size_t>(block_index)],
+            current_buffer,
+            alternate_buffer,
+            spatial)) {
       return false;
     }
   }
 
-  if (!pointwise_conv_hwc(
-          ctx.image.stage4.conv,
-          ctx.scratch.image_a.get(),
-          spatial * spatial,
-          ctx.scratch.image_b.get())) {
+  if (!pointwise_conv_hwc_direct_f32_bn<true>(ctx.image.stage4.conv,
+                                              current_buffer,
+                                              spatial * spatial,
+                                              ctx.image.stage4.norm,
+                                              alternate_buffer)) {
     return false;
   }
-  apply_batch_norm_hwc<true>(
-      ctx.scratch.image_b.get(), spatial, ctx.image.stage4.norm, ctx.image.batch_norm_epsilon);
-  const size_t stage4_elements =
-      static_cast<size_t>(spatial) * static_cast<size_t>(spatial) *
-      static_cast<size_t>(ctx.image.stage4.output_channels);
-  std::memcpy(ctx.scratch.image_a.get(), ctx.scratch.image_b.get(), stage4_elements * sizeof(float));
+  current_buffer = alternate_buffer;
 
   average_pool_hwc(
-      ctx.scratch.image_a.get(),
+      current_buffer,
       spatial,
       ctx.image.stage4.output_channels,
       ctx.scratch.projection_hidden.get());
-  if (!pointwise_conv_hwc(
-          ctx.image.head.conv, ctx.scratch.projection_hidden.get(), 1, ctx.scratch.image_embedding.get())) {
+  if (!pointwise_conv_hwc_direct_f32_bn<true>(ctx.image.head.conv,
+                                              ctx.scratch.projection_hidden.get(),
+                                              1,
+                                              ctx.image.head.norm,
+                                              ctx.scratch.image_embedding.get())) {
     return false;
   }
-  apply_batch_norm_hwc<true>(
-      ctx.scratch.image_embedding.get(), 1, ctx.image.head.norm, ctx.image.batch_norm_epsilon);
 
   return run_projection_head(
       ctx,

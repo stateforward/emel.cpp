@@ -3,7 +3,7 @@ phase: 52-shared-embedding-session
 plan: 01
 status: complete
 completed: 2026-04-14
-requirements:
+requirements-completed:
   - EMB-01
   - EMB-02
 ---

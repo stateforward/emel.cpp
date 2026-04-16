@@ -34,6 +34,25 @@ using tokenizer_tokenize_dispatch_fn =
 
 namespace emel::embeddings::generator::event {
 
+using benchmark_timestamp_now_fn = std::uint64_t (*)() noexcept;
+
+struct benchmark_stage_timings {
+  std::uint64_t prepare_ns = 0u;
+  std::uint64_t encode_ns = 0u;
+  std::uint64_t publish_ns = 0u;
+  std::uint64_t total_ns = 0u;
+};
+
+inline std::uint64_t benchmark_timestamp_zero() noexcept {
+  return 0u;
+}
+
+inline benchmark_stage_timings & default_benchmark_stage_timings() noexcept {
+  static thread_local benchmark_stage_timings sink = {};
+  sink = {};
+  return sink;
+}
+
 struct initialize {
   initialize(void * tokenizer_sm_ref,
              emel::embeddings::generator::tokenizer_bind_dispatch_fn & dispatch_tokenizer_bind_ref,
@@ -74,7 +93,17 @@ struct embed_text {
              int32_t & output_dimension_out_ref) noexcept
       : messages(messages_ref),
         output(output_ref),
-        output_dimension_out(output_dimension_out_ref) {}
+        output_dimension_out(output_dimension_out_ref),
+        benchmark_timings_out(default_benchmark_stage_timings()) {}
+
+  embed_text(std::span<const emel::text::formatter::chat_message> messages_ref,
+             std::span<float> output_ref,
+             int32_t & output_dimension_out_ref,
+             benchmark_stage_timings & benchmark_timings_out_ref) noexcept
+      : messages(messages_ref),
+        output(output_ref),
+        output_dimension_out(output_dimension_out_ref),
+        benchmark_timings_out(benchmark_timings_out_ref) {}
 
   std::span<const emel::text::formatter::chat_message> messages = {};
   bool add_generation_prompt = false;
@@ -83,6 +112,8 @@ struct embed_text {
   std::span<float> output = {};
   int32_t & output_dimension_out;
   emel::error::type * error_out = nullptr;
+  benchmark_timestamp_now_fn benchmark_time_now = benchmark_timestamp_zero;
+  benchmark_stage_timings & benchmark_timings_out;
   emel::callback<void(const events::text_embedding_done &)> on_done = {};
   emel::callback<void(const events::text_embedding_error &)> on_error = {};
 };
@@ -93,6 +124,13 @@ struct embed_text_ctx {
   int32_t prepare_err_code = 0;
   int32_t token_count = 0;
   int32_t output_dimension = 0;
+  std::uint64_t total_start_ns = 0u;
+  std::uint64_t prepare_start_ns = 0u;
+  std::uint64_t prepare_end_ns = 0u;
+  std::uint64_t encode_start_ns = 0u;
+  std::uint64_t encode_end_ns = 0u;
+  std::uint64_t publish_start_ns = 0u;
+  std::uint64_t publish_end_ns = 0u;
 };
 
 struct embed_text_run {
@@ -110,7 +148,21 @@ struct embed_image {
         width(width_ref),
         height(height_ref),
         output(output_ref),
-        output_dimension_out(output_dimension_out_ref) {}
+        output_dimension_out(output_dimension_out_ref),
+        benchmark_timings_out(default_benchmark_stage_timings()) {}
+
+  embed_image(std::span<const uint8_t> rgba_ref,
+              const int32_t width_ref,
+              const int32_t height_ref,
+              std::span<float> output_ref,
+              int32_t & output_dimension_out_ref,
+              benchmark_stage_timings & benchmark_timings_out_ref) noexcept
+      : rgba(rgba_ref),
+        width(width_ref),
+        height(height_ref),
+        output(output_ref),
+        output_dimension_out(output_dimension_out_ref),
+        benchmark_timings_out(benchmark_timings_out_ref) {}
 
   std::span<const uint8_t> rgba = {};
   int32_t width = 0;
@@ -119,14 +171,22 @@ struct embed_image {
   std::span<float> output = {};
   int32_t & output_dimension_out;
   emel::error::type * error_out = nullptr;
+  benchmark_timestamp_now_fn benchmark_time_now = benchmark_timestamp_zero;
+  benchmark_stage_timings & benchmark_timings_out;
   emel::callback<void(const events::image_embedding_done &)> on_done = {};
   emel::callback<void(const events::image_embedding_error &)> on_error = {};
 };
 
 struct embed_image_ctx {
   emel::error::type err = emel::error::cast(error::none);
-  bool prepared = false;
   int32_t output_dimension = 0;
+  std::uint64_t total_start_ns = 0u;
+  std::uint64_t prepare_start_ns = 0u;
+  std::uint64_t prepare_end_ns = 0u;
+  std::uint64_t encode_start_ns = 0u;
+  std::uint64_t encode_end_ns = 0u;
+  std::uint64_t publish_start_ns = 0u;
+  std::uint64_t publish_end_ns = 0u;
 };
 
 struct embed_image_run {
@@ -142,7 +202,19 @@ struct embed_audio {
       : pcm(pcm_ref),
         sample_rate(sample_rate_ref),
         output(output_ref),
-        output_dimension_out(output_dimension_out_ref) {}
+        output_dimension_out(output_dimension_out_ref),
+        benchmark_timings_out(default_benchmark_stage_timings()) {}
+
+  embed_audio(std::span<const float> pcm_ref,
+              const int32_t sample_rate_ref,
+              std::span<float> output_ref,
+              int32_t & output_dimension_out_ref,
+              benchmark_stage_timings & benchmark_timings_out_ref) noexcept
+      : pcm(pcm_ref),
+        sample_rate(sample_rate_ref),
+        output(output_ref),
+        output_dimension_out(output_dimension_out_ref),
+        benchmark_timings_out(benchmark_timings_out_ref) {}
 
   std::span<const float> pcm = {};
   int32_t sample_rate = 0;
@@ -150,14 +222,22 @@ struct embed_audio {
   std::span<float> output = {};
   int32_t & output_dimension_out;
   emel::error::type * error_out = nullptr;
+  benchmark_timestamp_now_fn benchmark_time_now = benchmark_timestamp_zero;
+  benchmark_stage_timings & benchmark_timings_out;
   emel::callback<void(const events::audio_embedding_done &)> on_done = {};
   emel::callback<void(const events::audio_embedding_error &)> on_error = {};
 };
 
 struct embed_audio_ctx {
   emel::error::type err = emel::error::cast(error::none);
-  bool prepared = false;
   int32_t output_dimension = 0;
+  std::uint64_t total_start_ns = 0u;
+  std::uint64_t prepare_start_ns = 0u;
+  std::uint64_t prepare_end_ns = 0u;
+  std::uint64_t encode_start_ns = 0u;
+  std::uint64_t encode_end_ns = 0u;
+  std::uint64_t publish_start_ns = 0u;
+  std::uint64_t publish_end_ns = 0u;
 };
 
 struct embed_audio_run {

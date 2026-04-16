@@ -19,9 +19,25 @@
   SHA256: `07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3`
   Runtime use: supplies the MiniLM/BERT WordPiece vocabulary for the maintained TE text-lane
   proof because the GGUF slice does not embed tokenizer vocab metadata.
-- Official sibling files: `TE-75M-q5_0.gguf`.
-  Its presence is source truth for the upstream release, not proof of maintained support in this
-  repo.
+
+## TE-75M-q5_0.gguf
+- Source: `https://huggingface.co/augmem/TE-75M-GGUF`
+- File: `TE-75M-q5_0.gguf`
+- Stable maintained path: `tests/models/TE-75M-q5_0.gguf`
+- License: Apache-2.0
+- Size: `111149248` bytes (`106M`)
+- SHA256: `c63eb0db4fe4364e05d732063b45adb1dddfa206ba53886ed6d9b1b6fe1f9b73`
+- Download URL: `https://huggingface.co/augmem/TE-75M-GGUF/resolve/main/TE-75M-q5_0.gguf`
+- Executable metadata truth: treat current Hugging Face GGUF/model metadata as authoritative for
+  this approved maintained sibling slice, including `gguf.architecture=omniembed`, shared
+  embedding width `1280`, supported Matryoshka truncation `1280/768/512/256/128`, and the current
+  upstream component families `LEAF-IR`, `MobileNetV4-Medium`, and `EfficientAT mn20_as`.
+- Maintained proof note: this repo keeps `q5_0` on a separate maintained proof and benchmark lane
+  from the default `q8_0` slice; promoting `q5_0` does not imply support for arbitrary TE quant
+  siblings.
+- Approved maintained TE fixtures in `v1.11`: `TE-75M-q8_0.gguf`, `TE-75M-q5_0.gguf`.
+- Other upstream TE sibling artifacts remain unapproved unless they gain explicit maintained
+  proof, benchmark, and requirements coverage in a later phase.
 
 ## gemma-4-e2b-it-Q8_0.gguf
 - Source: `https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF`
@@ -98,3 +114,58 @@
 - Size: 386 MB
 - SHA256: `fea5c54f3fd2370ac90ae58f2ecd6cbe57c31df023598aed4c95b0966170f9c8`
 - Download URL: `https://huggingface.co/zhiyuan8/RWKV-v7-0.1B-G1-GGUF/resolve/main/rwkv7-0.1B-g1-F16.gguf`
+
+## Reference baseline fixtures
+
+These assets back the maintained `tools/bench/embedding_reference_bench.cpp` lane for the approved
+same-host ARM comparison matrix in Phase `59.1.1`.
+
+## snowflake-arctic-embed-s-Q8_0.gguf
+- Source: `https://huggingface.co/yixuan-chia/snowflake-arctic-embed-s-GGUF`
+- File: `snowflake-arctic-embed-s-Q8_0.gguf`
+- Stable maintained path: `tests/models/reference/snowflake-arctic-embed-s-Q8_0.gguf`
+- Size: `36685120` bytes
+- SHA256: `4db660cc9122d6153be9306fb8707bba6b77035cbeb2ab078d9a58c33dfea6be`
+- Download URL: `https://huggingface.co/yixuan-chia/snowflake-arctic-embed-s-GGUF/resolve/main/snowflake-arctic-embed-s-Q8_0.gguf`
+- Provenance note: this is a third-party GGUF mirror used for the `llama.cpp` reference lane because
+  no official `ggml-org` Arctic S GGUF repo was found during Phase `59.1.1`.
+
+## embeddinggemma-300M-Q8_0.gguf
+- Source: `https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF`
+- File: `embeddinggemma-300M-Q8_0.gguf`
+- Stable maintained path: `tests/models/reference/embeddinggemma-300M-Q8_0.gguf`
+- Size: `328576992` bytes
+- SHA256: `f470220f84b6235197541352d22f10bf00098a8242c18eaacea9c8a4add557bc`
+- Download URL: `https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF/resolve/main/embeddinggemma-300M-Q8_0.gguf`
+
+## LFM2-VL-450M-Q8_0.gguf
+- Source: `https://huggingface.co/ggml-org/LFM2-VL-450M-GGUF`
+- File: `LFM2-VL-450M-Q8_0.gguf`
+- Stable maintained path: `tests/models/reference/LFM2-VL-450M-Q8_0.gguf`
+- Size: `379215264` bytes
+- SHA256: `e97704a0cf0a1d00ca604b4c672c82f4234318dba9d43a7f7a4c0d2df6747844`
+- Download URL: `https://huggingface.co/ggml-org/LFM2-VL-450M-GGUF/resolve/main/LFM2-VL-450M-Q8_0.gguf`
+
+## mmproj-LFM2-VL-450M-Q8_0.gguf
+- Source: `https://huggingface.co/ggml-org/LFM2-VL-450M-GGUF`
+- File: `mmproj-LFM2-VL-450M-Q8_0.gguf`
+- Stable maintained path: `tests/models/reference/mmproj-LFM2-VL-450M-Q8_0.gguf`
+- Size: `103890016` bytes
+- SHA256: `a6a813fae4ba3f90852a990fdd4786a017dba0e80e599a366853ba539ee2b5ef`
+- Download URL: `https://huggingface.co/ggml-org/LFM2-VL-450M-GGUF/resolve/main/mmproj-LFM2-VL-450M-Q8_0.gguf`
+
+## Llama-3.2-1B-Instruct-Q8_0.gguf
+- Source: `https://huggingface.co/ggml-org/ultravox-v0_5-llama-3_2-1b-GGUF`
+- File: `Llama-3.2-1B-Instruct-Q8_0.gguf`
+- Stable maintained path: `tests/models/reference/Llama-3.2-1B-Instruct-Q8_0.gguf`
+- Size: `1321083008` bytes
+- SHA256: `432f310a77f4650a88d0fd59ecdd7cebed8d684bafea53cbff0473542964f0c3`
+- Download URL: `https://huggingface.co/ggml-org/ultravox-v0_5-llama-3_2-1b-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q8_0.gguf`
+
+## mmproj-ultravox-v0_5-llama-3_2-1b-f16.gguf
+- Source: `https://huggingface.co/ggml-org/ultravox-v0_5-llama-3_2-1b-GGUF`
+- File: `mmproj-ultravox-v0_5-llama-3_2-1b-f16.gguf`
+- Stable maintained path: `tests/models/reference/mmproj-ultravox-v0_5-llama-3_2-1b-f16.gguf`
+- Size: `1371123616` bytes
+- SHA256: `b34dde1835752949d6b960528269af93c92fec91c61ea0534fcc73f96c1ed8b2`
+- Download URL: `https://huggingface.co/ggml-org/ultravox-v0_5-llama-3_2-1b-GGUF/resolve/main/mmproj-ultravox-v0_5-llama-3_2-1b-f16.gguf`

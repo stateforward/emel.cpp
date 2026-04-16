@@ -1,4 +1,5 @@
 #pragma once
+// benchmark: designed
 
 #include <boost/sml.hpp>
 
@@ -22,10 +23,8 @@ struct state_conditioning {};
 struct state_conditioning_decision {};
 struct state_encoding {};
 struct state_image_preparing {};
-struct state_image_preparing_decision {};
 struct state_image_encoding {};
 struct state_audio_preparing {};
-struct state_audio_preparing_decision {};
 struct state_audio_encoding {};
 struct state_embedding_decision {};
 struct state_embed_publish_success {};
@@ -196,11 +195,15 @@ struct model {
       , sml::state<state_encoding> <= sml::state<state_conditioning_decision>
           + sml::completion<event::embed_text_run> [ guard::guard_prepare_success{} ]
 
+      , sml::state<state_embed_publish_error> <= sml::state<state_encoding>
+          + sml::completion<event::embed_text_run> [ guard::guard_text_route_unsupported{} ]
+          / action::effect_set_embed_backend_error
+      , sml::state<state_embed_publish_error> <= sml::state<state_encoding>
+          + sml::completion<event::embed_text_run> [ guard::guard_text_encode_bert_unready{} ]
+          / action::effect_set_embed_backend_error
       , sml::state<state_embedding_decision> <= sml::state<state_encoding>
-          + sml::completion<event::embed_text_run>
-          / action::effect_run_text_embedding
-      , sml::state<state_embed_publish_error> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_text_run> [ guard::guard_embedding_failed{} ]
+          + sml::completion<event::embed_text_run> [ guard::guard_text_encode_bert_ready{} ]
+          / action::effect_run_text_embedding_bert
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
           + sml::completion<event::embed_text_run> [ guard::guard_embedding_succeeded_full{} ]
           / action::effect_publish_full_embedding
@@ -224,20 +227,25 @@ struct model {
           + sml::completion<event::embed_text_run> [ guard::guard_no_embed_error_callback{} ]
 
       //------------------------------------------------------------------------------//
-      , sml::state<state_image_preparing_decision> <= sml::state<state_image_preparing>
-          + sml::completion<event::embed_image_run>
-          / action::effect_prepare_image_input
-      , sml::state<state_embed_publish_error> <= sml::state<state_image_preparing_decision>
-          + sml::completion<event::embed_image_run> [ guard::guard_image_prepare_backend_error{} ]
+      , sml::state<state_embed_publish_error> <= sml::state<state_image_preparing>
+          + sml::completion<event::embed_image_run> [ guard::guard_image_route_unsupported{} ]
           / action::effect_set_embed_backend_error
-      , sml::state<state_image_encoding> <= sml::state<state_image_preparing_decision>
-          + sml::completion<event::embed_image_run> [ guard::guard_image_prepare_success{} ]
+      , sml::state<state_embed_publish_error> <= sml::state<state_image_preparing>
+          + sml::completion<event::embed_image_run> [ guard::guard_image_prepare_mobilenetv4_unready{} ]
+          / action::effect_set_embed_backend_error
+      , sml::state<state_image_encoding> <= sml::state<state_image_preparing>
+          + sml::completion<event::embed_image_run> [ guard::guard_image_prepare_mobilenetv4_ready{} ]
+          / action::effect_prepare_image_input_mobilenetv4
 
+      , sml::state<state_embed_publish_error> <= sml::state<state_image_encoding>
+          + sml::completion<event::embed_image_run> [ guard::guard_image_route_unsupported{} ]
+          / action::effect_set_embed_backend_error
+      , sml::state<state_embed_publish_error> <= sml::state<state_image_encoding>
+          + sml::completion<event::embed_image_run> [ guard::guard_image_encode_mobilenetv4_unready{} ]
+          / action::effect_set_embed_backend_error
       , sml::state<state_embedding_decision> <= sml::state<state_image_encoding>
-          + sml::completion<event::embed_image_run>
-          / action::effect_run_image_embedding
-      , sml::state<state_embed_publish_error> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_image_run> [ guard::guard_embedding_failed{} ]
+          + sml::completion<event::embed_image_run> [ guard::guard_image_encode_mobilenetv4_ready{} ]
+          / action::effect_run_image_embedding_mobilenetv4
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
           + sml::completion<event::embed_image_run> [ guard::guard_embedding_succeeded_full{} ]
           / action::effect_publish_full_embedding
@@ -261,20 +269,25 @@ struct model {
           + sml::completion<event::embed_image_run> [ guard::guard_no_embed_error_callback{} ]
 
       //------------------------------------------------------------------------------//
-      , sml::state<state_audio_preparing_decision> <= sml::state<state_audio_preparing>
-          + sml::completion<event::embed_audio_run>
-          / action::effect_prepare_audio_input
-      , sml::state<state_embed_publish_error> <= sml::state<state_audio_preparing_decision>
-          + sml::completion<event::embed_audio_run> [ guard::guard_audio_prepare_backend_error{} ]
+      , sml::state<state_embed_publish_error> <= sml::state<state_audio_preparing>
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_route_unsupported{} ]
           / action::effect_set_embed_backend_error
-      , sml::state<state_audio_encoding> <= sml::state<state_audio_preparing_decision>
-          + sml::completion<event::embed_audio_run> [ guard::guard_audio_prepare_success{} ]
+      , sml::state<state_embed_publish_error> <= sml::state<state_audio_preparing>
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_prepare_efficientat_unready{} ]
+          / action::effect_set_embed_backend_error
+      , sml::state<state_audio_encoding> <= sml::state<state_audio_preparing>
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_prepare_efficientat_ready{} ]
+          / action::effect_prepare_audio_input_efficientat
 
+      , sml::state<state_embed_publish_error> <= sml::state<state_audio_encoding>
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_route_unsupported{} ]
+          / action::effect_set_embed_backend_error
+      , sml::state<state_embed_publish_error> <= sml::state<state_audio_encoding>
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_encode_efficientat_unready{} ]
+          / action::effect_set_embed_backend_error
       , sml::state<state_embedding_decision> <= sml::state<state_audio_encoding>
-          + sml::completion<event::embed_audio_run>
-          / action::effect_run_audio_embedding
-      , sml::state<state_embed_publish_error> <= sml::state<state_embedding_decision>
-          + sml::completion<event::embed_audio_run> [ guard::guard_embedding_failed{} ]
+          + sml::completion<event::embed_audio_run> [ guard::guard_audio_encode_efficientat_ready{} ]
+          / action::effect_run_audio_embedding_efficientat
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
           + sml::completion<event::embed_audio_run> [ guard::guard_embedding_succeeded_full{} ]
           / action::effect_publish_full_embedding
@@ -320,13 +333,9 @@ struct model {
           / action::effect_ignore_unexpected
       , sml::state<state_unexpected> <= sml::state<state_image_preparing> + sml::unexpected_event<sml::_>
           / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_image_preparing_decision> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
       , sml::state<state_unexpected> <= sml::state<state_image_encoding> + sml::unexpected_event<sml::_>
           / action::effect_ignore_unexpected
       , sml::state<state_unexpected> <= sml::state<state_audio_preparing> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_audio_preparing_decision> + sml::unexpected_event<sml::_>
           / action::effect_ignore_unexpected
       , sml::state<state_unexpected> <= sml::state<state_audio_encoding> + sml::unexpected_event<sml::_>
           / action::effect_ignore_unexpected

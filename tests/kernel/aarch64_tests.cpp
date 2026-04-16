@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <cmath>
+#include <limits>
 #include <random>
 #include <span>
 #include <vector>
@@ -199,6 +200,280 @@ TEST_CASE("kernel_aarch64_mul_mat_simd_matches_scalar_tiled_edges") {
 #endif
 }
 
+TEST_CASE("kernel_aarch64_mul_mat_tail_resets_nan_dst_on_first_depth_block") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t k = 5;
+  constexpr uint64_t m = 3;
+  constexpr uint64_t n = 5;
+
+  std::array<float, k * m> src0{};
+  std::array<float, k * n> src1{};
+  std::array<float, n * m> dst_simd{};
+  std::array<float, n * m> dst_scalar{};
+
+  for (uint64_t i = 0; i < src0.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 7u) - 3;
+    src0[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.125f;
+  }
+  for (uint64_t i = 0; i < src1.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>(i % 11u) - 5;
+    src1[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  std::fill(dst_simd.begin(), dst_simd.end(), std::numeric_limits<float>::quiet_NaN());
+  dst_scalar.fill(0.0f);
+
+  const emel::kernel::event::op_mul_mat simd_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_simd.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+
+  CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat(simd_ev));
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  for (uint64_t idx = 0; idx < dst_simd.size(); ++idx) {
+    CHECK(std::isfinite(dst_simd[static_cast<size_t>(idx)]));
+    CHECK(dst_simd[static_cast<size_t>(idx)] ==
+          doctest::Approx(dst_scalar[static_cast<size_t>(idx)]).epsilon(1e-5f));
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_mul_mat_simd_matches_scalar_when_matrix_has_eight_rows") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr uint64_t k = 96;
+  constexpr uint64_t m = 8;
+  constexpr uint64_t n = 64;
+
+  std::array<float, k * m> src0{};
+  std::array<float, k * n> src1{};
+  std::array<float, n * m> dst_simd{};
+  std::array<float, n * m> dst_scalar{};
+
+  for (uint64_t i = 0; i < src0.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>((i * 5u) % 23u) - 11;
+    src0[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.03125f;
+  }
+  for (uint64_t i = 0; i < src1.size(); ++i) {
+    const int64_t centered = static_cast<int64_t>((i * 7u) % 31u) - 15;
+    src1[static_cast<size_t>(i)] = static_cast<float>(centered) * 0.015625f;
+  }
+
+  const emel::kernel::event::op_mul_mat simd_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_simd.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+  const emel::kernel::event::op_mul_mat scalar_ev{
+      .src0 = make_src(src0.data(), dtype::f32, k, m),
+      .src1 = make_src(src1.data(), dtype::f32, n, k),
+      .dst = make_dst(dst_scalar.data(), dtype::f32, n, m),
+      .nth = 1,
+  };
+
+  CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat(simd_ev));
+  CHECK(emel::kernel::detail::execute_scalar(scalar_ev));
+
+  for (uint64_t idx = 0; idx < dst_simd.size(); ++idx) {
+    CHECK(dst_simd[static_cast<size_t>(idx)] ==
+          doctest::Approx(dst_scalar[static_cast<size_t>(idx)]).epsilon(1e-5f));
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_image_pointwise_f32_matches_scalar_reference") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr int32_t output_channels = 77;
+  constexpr int32_t input_channels = 48;
+  constexpr int32_t pixel_count = 9;
+  constexpr int32_t panel_cols = 64;
+
+  std::array<float, static_cast<size_t>(pixel_count) * static_cast<size_t>(input_channels)> input = {};
+  std::array<float, static_cast<size_t>(input_channels) * static_cast<size_t>(output_channels)>
+      transposed_weights = {};
+  std::array<float, static_cast<size_t>(input_channels) * static_cast<size_t>(output_channels)>
+      packed_weights = {};
+  std::array<float, static_cast<size_t>(output_channels)> scale = {};
+  std::array<float, static_cast<size_t>(output_channels)> shift = {};
+  std::array<float, static_cast<size_t>(pixel_count) * static_cast<size_t>(output_channels)>
+      output_kernel = {};
+  std::array<float, static_cast<size_t>(pixel_count) * static_cast<size_t>(output_channels)>
+      output_scalar = {};
+
+  for (size_t idx = 0; idx < input.size(); ++idx) {
+    const int32_t centered = static_cast<int32_t>((idx * 5u) % 29u) - 14;
+    input[idx] = static_cast<float>(centered) * 0.0625f;
+  }
+  for (int32_t output_channel = 0; output_channel < output_channels; ++output_channel) {
+    scale[static_cast<size_t>(output_channel)] =
+        0.75f + static_cast<float>((output_channel % 7) + 1) * 0.0625f;
+    shift[static_cast<size_t>(output_channel)] =
+        static_cast<float>((output_channel % 9) - 4) * 0.03125f;
+    for (int32_t input_channel = 0; input_channel < input_channels; ++input_channel) {
+      const size_t idx =
+          static_cast<size_t>(input_channel) * static_cast<size_t>(output_channels) +
+          static_cast<size_t>(output_channel);
+      const int32_t centered =
+          static_cast<int32_t>(((static_cast<size_t>(output_channel) * 13u) +
+                                (static_cast<size_t>(input_channel) * 7u)) %
+                                   41u) -
+          20;
+      transposed_weights[idx] = static_cast<float>(centered) * 0.015625f;
+    }
+  }
+  for (int32_t panel_col = 0; panel_col < output_channels; panel_col += panel_cols) {
+    const int32_t cols_this_panel = std::min(panel_cols, output_channels - panel_col);
+    float * panel_dst =
+        packed_weights.data() + static_cast<size_t>(panel_col) * static_cast<size_t>(input_channels);
+    for (int32_t input_channel = 0; input_channel < input_channels; ++input_channel) {
+      for (int32_t local_col = 0; local_col < cols_this_panel; ++local_col) {
+        panel_dst[static_cast<size_t>(input_channel) * static_cast<size_t>(cols_this_panel) +
+                  static_cast<size_t>(local_col)] =
+            transposed_weights[static_cast<size_t>(input_channel) *
+                                   static_cast<size_t>(output_channels) +
+                               static_cast<size_t>(panel_col + local_col)];
+      }
+    }
+  }
+
+  CHECK(emel::kernel::aarch64::detail::execute_neon_image_pointwise_f32<true, true>({
+      .input = input.data(),
+      .packed_rhs = packed_weights.data(),
+      .batch_norm_scale = scale.data(),
+      .batch_norm_shift = shift.data(),
+      .output = output_kernel.data(),
+      .pixel_count = pixel_count,
+      .input_channels = input_channels,
+      .output_channels = output_channels,
+      .packed_rhs_cols = output_channels,
+  }));
+
+  for (int32_t pixel_index = 0; pixel_index < pixel_count; ++pixel_index) {
+    const float * input_pixel =
+        input.data() + static_cast<size_t>(pixel_index) * static_cast<size_t>(input_channels);
+    float * output_pixel =
+        output_scalar.data() + static_cast<size_t>(pixel_index) * static_cast<size_t>(output_channels);
+    for (int32_t output_channel = 0; output_channel < output_channels; ++output_channel) {
+      float acc = 0.0f;
+      for (int32_t input_channel = 0; input_channel < input_channels; ++input_channel) {
+        acc += input_pixel[static_cast<size_t>(input_channel)] *
+            transposed_weights[static_cast<size_t>(input_channel) *
+                                   static_cast<size_t>(output_channels) +
+                               static_cast<size_t>(output_channel)];
+      }
+      acc = acc * scale[static_cast<size_t>(output_channel)] +
+          shift[static_cast<size_t>(output_channel)];
+      output_pixel[static_cast<size_t>(output_channel)] = std::max(acc, 0.0f);
+    }
+  }
+
+  for (size_t idx = 0; idx < output_kernel.size(); ++idx) {
+    CHECK(output_kernel[idx] == doctest::Approx(output_scalar[idx]).epsilon(1.0e-5f));
+  }
+#endif
+}
+
+TEST_CASE("kernel_aarch64_image_depthwise_f32_matches_scalar_reference") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  constexpr int32_t channels = 29;
+  constexpr int32_t input_spatial = 7;
+  constexpr int32_t kernel_h = 3;
+  constexpr int32_t kernel_w = 3;
+  constexpr int32_t stride = 2;
+  constexpr int32_t pad = ((stride - 1) + (kernel_h - 1)) / 2;
+  constexpr int32_t output_spatial = (input_spatial + 2 * pad - kernel_h) / stride + 1;
+
+  std::array<float, static_cast<size_t>(input_spatial) * static_cast<size_t>(input_spatial) *
+                        static_cast<size_t>(channels)>
+      input = {};
+  std::array<float, static_cast<size_t>(kernel_h) * static_cast<size_t>(kernel_w) *
+                        static_cast<size_t>(channels)>
+      kernel_major = {};
+  std::array<float, static_cast<size_t>(output_spatial) * static_cast<size_t>(output_spatial) *
+                        static_cast<size_t>(channels)>
+      output_kernel = {};
+  std::array<float, static_cast<size_t>(output_spatial) * static_cast<size_t>(output_spatial) *
+                        static_cast<size_t>(channels)>
+      output_scalar = {};
+
+  for (size_t idx = 0; idx < input.size(); ++idx) {
+    const int32_t centered = static_cast<int32_t>((idx * 7u) % 23u) - 11;
+    input[idx] = static_cast<float>(centered) * 0.03125f;
+  }
+  for (size_t idx = 0; idx < kernel_major.size(); ++idx) {
+    const int32_t centered = static_cast<int32_t>((idx * 11u) % 19u) - 9;
+    kernel_major[idx] = static_cast<float>(centered) * 0.0625f;
+  }
+
+  CHECK(emel::kernel::aarch64::detail::execute_neon_image_depthwise_f32({
+      .input = input.data(),
+      .kernel_major = kernel_major.data(),
+      .output = output_kernel.data(),
+      .input_spatial = input_spatial,
+      .output_spatial = output_spatial,
+      .output_channels = channels,
+      .kernel_h = kernel_h,
+      .kernel_w = kernel_w,
+      .stride = stride,
+      .pad_h = pad,
+      .pad_w = pad,
+  }));
+
+  for (int32_t oy = 0; oy < output_spatial; ++oy) {
+    for (int32_t ox = 0; ox < output_spatial; ++ox) {
+      float * output_pixel =
+          output_scalar.data() +
+          static_cast<size_t>(oy * output_spatial + ox) * static_cast<size_t>(channels);
+      std::fill(output_pixel, output_pixel + channels, 0.0f);
+      for (int32_t ky = 0; ky < kernel_h; ++ky) {
+        const int32_t iy = oy * stride + ky - pad;
+        if (iy < 0 || iy >= input_spatial) {
+          continue;
+        }
+        for (int32_t kx = 0; kx < kernel_w; ++kx) {
+          const int32_t ix = ox * stride + kx - pad;
+          if (ix < 0 || ix >= input_spatial) {
+            continue;
+          }
+          const float * input_pixel =
+              input.data() +
+              static_cast<size_t>(iy * input_spatial + ix) * static_cast<size_t>(channels);
+          const float * kernel_weights =
+              kernel_major.data() +
+              static_cast<size_t>(ky * kernel_w + kx) * static_cast<size_t>(channels);
+          for (int32_t channel = 0; channel < channels; ++channel) {
+            output_pixel[static_cast<size_t>(channel)] +=
+                kernel_weights[static_cast<size_t>(channel)] *
+                input_pixel[static_cast<size_t>(channel)];
+          }
+        }
+      }
+    }
+  }
+
+  for (size_t idx = 0; idx < output_kernel.size(); ++idx) {
+    CHECK(output_kernel[idx] == doctest::Approx(output_scalar[idx]).epsilon(1.0e-5f));
+  }
+#endif
+}
+
 TEST_CASE("kernel_aarch64_quantized_mul_mat_simd_matches_scalar") {
 #if !(defined(__aarch64__) || defined(__ARM_NEON))
   return;
@@ -279,6 +554,70 @@ TEST_CASE("kernel_aarch64_quantized_mul_mat_simd_matches_scalar") {
   run_case(q2, dtype::q2_k);
   run_case(q3, dtype::q3_k);
   run_case(q6, dtype::q6_k);
+#endif
+}
+
+TEST_CASE("kernel_aarch64_q5_0_vector_route_is_explicit_and_numeric_match") {
+#if !(defined(__aarch64__) || defined(__ARM_NEON))
+  return;
+#else
+  if (!emel::kernel::aarch64::detail::neon_q5_0_vector_supported()) {
+    return;
+  }
+
+  using emel::kernel::detail::quant::QK5_0;
+  using emel::kernel::detail::quant::block_q5_0;
+  using emel::kernel::detail::quant::block_q8_0;
+  using emel::kernel::detail::quant::quantize_row_q5_0_ref;
+  using emel::kernel::detail::quant::quantize_row_q8_0_strided;
+
+  constexpr uint64_t row_count = 4u;
+  std::array<float, QK5_0 * row_count> dense_rows = {};
+  for (size_t index = 0; index < dense_rows.size(); ++index) {
+    dense_rows[index] = static_cast<float>(static_cast<int32_t>((index * 5u) % 21u) - 10) * 0.125f;
+  }
+
+  std::array<block_q5_0, row_count> q5_rows = {};
+  for (uint64_t row = 0; row < row_count; ++row) {
+    quantize_row_q5_0_ref(
+        dense_rows.data() + row * QK5_0,
+        q5_rows.data() + row,
+        static_cast<int64_t>(QK5_0));
+  }
+
+  std::array<float, QK5_0> input = {};
+  for (size_t index = 0; index < input.size(); ++index) {
+    input[index] = static_cast<float>(static_cast<int32_t>((index * 7u) % 19u) - 9) * 0.25f;
+  }
+
+  std::array<block_q8_0, 1> q8_input = {};
+  quantize_row_q8_0_strided(input.data(), 1u, q8_input.data(), static_cast<int64_t>(QK5_0));
+
+  std::array<float, row_count> reference = {};
+  for (uint64_t row = 0; row < row_count; ++row) {
+    reference[row] =
+        emel::kernel::detail::dot_q5_0_q8_0_row_scalar(q5_rows.data() + row, q8_input.data(), 1u);
+  }
+
+  std::array<float, row_count> simd_out = {};
+  const emel::kernel::event::op_mul_mat ev{
+      .src0 = make_quantized_src(q5_rows.data(), dtype::q5_0, QK5_0, row_count),
+      .src1 = make_src(input.data(), dtype::f32, 1u, QK5_0),
+      .dst = make_dst(simd_out.data(), dtype::f32, 1u, row_count),
+      .nth = 1,
+  };
+
+  CHECK(emel::kernel::aarch64::detail::can_use_neon_mul_mat_q5_0_vector(ev, true));
+  CHECK(emel::kernel::aarch64::detail::execute_neon_mul_mat_q5_0_vector(ev));
+  for (uint64_t row = 0; row < row_count; ++row) {
+    CHECK(simd_out[row] == doctest::Approx(reference[row]).epsilon(1.0e-5f));
+  }
+
+  aarch64_sm machine{};
+  REQUIRE(machine.process_event(ev));
+  CHECK(machine.optimized_q5_0_dispatch_count() == 1u);
+  CHECK(machine.optimized_q5_0_vector_dispatch_count() == 1u);
+  CHECK(machine.shared_q5_0_dispatch_count() == 0u);
 #endif
 }
 

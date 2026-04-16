@@ -3,7 +3,7 @@ phase: 51-audio-embedding-lane
 plan: 01
 status: complete
 completed: 2026-04-14
-requirements:
+requirements-completed:
   - AUD-01
   - AUD-02
 ---

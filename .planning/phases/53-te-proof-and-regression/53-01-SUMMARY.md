@@ -3,7 +3,7 @@ phase: 53-te-proof-and-regression
 plan: 01
 status: complete
 completed: 2026-04-14
-requirements:
+requirements-completed:
   - PRF-01
   - PRF-02
 ---

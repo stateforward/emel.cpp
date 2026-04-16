@@ -1,5 +1,15 @@
 # Project Milestones: EMEL
 
+## v1.11 TE-75M GGUF Trimodal Embedding Runtime (Shipped: 2026-04-15)
+
+**Phases completed:** 3 phases, 3 plans, 0 tasks
+
+**Key accomplishments:**
+
+- (none recorded)
+
+---
+
 ## v1.9 Liquid LFM2.5-1.2B Thinking ARM Slice (Shipped: 2026-04-02)
 
 **Phases completed:** 8 phases, 9 plans, 0 tasks
@@ -8,12 +18,16 @@
 
 - Documented one official maintained `LFM2.5-1.2B-Thinking-Q4_K_M.gguf` fixture with executable
   metadata truth anchored on `lfm2` and `128000` context.
+
 - Added explicit `lfm2` model and runtime support for one maintained Liquid ARM slice through the
   shipped generator path.
+
 - Proved maintained Liquid parity against `llama.cpp` while preserving additive maintained Qwen
   coverage.
+
 - Published one maintained Liquid benchmark/docs path aligned with the parity-backed fixture and
   contract.
+
 - Reconstructed missing closeout artifacts and validation coverage so the milestone could pass
   audit and archive cleanly.
 
@@ -34,12 +48,16 @@ runtime smoke proof and generated README evidence.
 
 - Locked one exact maintained workload boundary on `tests/models/Qwen3-0.6B-Q8_0.gguf`,
   structured `hello`, and first-token generation.
+
 - Corrected the EMEL probe into a truthful final executable measurement and removed redundant
   fallback-vocab bloat that had inflated the binary to 56 MB.
+
 - Kept the published comparator set narrow to EMEL and one matched `llama.cpp` reference
   executable with shared smoke proof.
+
 - Refreshed the stored snapshot and generated README to publish the corrected executable-size
   values: `4,073,016` raw bytes for EMEL versus `3,334,264` for the reference row.
+
 - Backfilled the missing v1.8 proof chain and closed the milestone with a passing `8/8`
   requirement audit.
 
