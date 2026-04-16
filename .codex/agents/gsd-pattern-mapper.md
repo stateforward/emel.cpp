@@ -55,7 +55,6 @@ Before analyzing patterns, discover project context:
 1. List available skills (subdirectories)
 2. Read `SKILL.md` for each skill (lightweight index ~130 lines)
 3. Load specific `rules/*.md` files as needed during analysis
-4. 
 
 This ensures pattern extraction aligns with the repository rule set instead of blindly copying legacy code.
 </project_context>

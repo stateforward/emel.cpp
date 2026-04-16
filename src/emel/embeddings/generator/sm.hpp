@@ -32,7 +32,6 @@ struct state_embed_publish_error {};
 struct state_embed_error_channel_decision {};
 struct state_done {};
 struct state_errored {};
-struct state_unexpected {};
 
 struct model {
   auto operator()() const {
@@ -311,48 +310,47 @@ struct model {
           + sml::completion<event::embed_audio_run> [ guard::guard_no_embed_error_callback{} ]
 
       //------------------------------------------------------------------------------//
-      , sml::state<state_unexpected> <= sml::state<state_uninitialized> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_initializing> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_initialize_decision> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_initialize_publish_success> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_initialize_publish_error> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_initialize_error_channel_decision> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_idle> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_conditioning> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_conditioning_decision> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_encoding> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_image_preparing> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_image_encoding> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_audio_preparing> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_audio_encoding> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_embedding_decision> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_embed_publish_success> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_embed_publish_error> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_embed_error_channel_decision> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_done> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_errored> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
-      , sml::state<state_unexpected> <= sml::state<state_unexpected> + sml::unexpected_event<sml::_>
-          / action::effect_ignore_unexpected
+      , sml::state<state_uninitialized> <= sml::state<state_uninitialized> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_uninitialized> <= sml::state<state_initializing> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_uninitialized> <= sml::state<state_initialize_decision> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_idle> <= sml::state<state_initialize_publish_success> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_errored> <= sml::state<state_initialize_publish_error> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_errored> <= sml::state<state_initialize_error_channel_decision> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+
+      , sml::state<state_idle> <= sml::state<state_idle> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_idle> <= sml::state<state_conditioning> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_idle> <= sml::state<state_conditioning_decision> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_idle> <= sml::state<state_encoding> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_idle> <= sml::state<state_image_preparing> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_idle> <= sml::state<state_image_encoding> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_idle> <= sml::state<state_audio_preparing> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_idle> <= sml::state<state_audio_encoding> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_idle> <= sml::state<state_embedding_decision> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_done> <= sml::state<state_embed_publish_success> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_errored> <= sml::state<state_embed_publish_error> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_errored> <= sml::state<state_embed_error_channel_decision> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_done> <= sml::state<state_done> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
+      , sml::state<state_errored> <= sml::state<state_errored> + sml::unexpected_event<sml::_>
+          / action::effect_reject_unexpected
     );
     // clang-format on
   }

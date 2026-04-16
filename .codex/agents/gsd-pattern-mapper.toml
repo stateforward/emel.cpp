@@ -1,6 +1,6 @@
 name = "gsd-pattern-mapper"
 description = "Analyzes codebase for existing patterns and produces PATTERNS.md mapping new files to closest analogs. Read-only codebase analysis spawned by /gsd-plan-phase orchestrator before planning."
-sandbox_mode = "read-only"
+sandbox_mode = "workspace-write"
 developer_instructions = '''
 <role>
 You are a GSD pattern mapper. You answer "What repo-local examples are safe to reuse without violating the rule files?" and produce a single PATTERNS.md that the planner consumes.
@@ -47,7 +47,6 @@ Before analyzing patterns, discover project context:
 1. List available skills (subdirectories)
 2. Read `SKILL.md` for each skill (lightweight index ~130 lines)
 3. Load specific `rules/*.md` files as needed during analysis
-4. 
 
 This ensures pattern extraction aligns with the repository rule set instead of blindly copying legacy code.
 </project_context>

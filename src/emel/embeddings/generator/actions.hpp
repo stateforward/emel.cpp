@@ -346,8 +346,34 @@ struct effect_emit_embed_error {
   }
 };
 
-struct effect_ignore_unexpected {
-  void operator()() const noexcept {}
+inline void reject_unexpected(const event::initialize_run & runtime_ev) noexcept {
+  detail::set_error(runtime_ev, error::invalid_request);
+  detail::write_initialize_error_out(runtime_ev);
+}
+
+inline void reject_unexpected(const event::embed_text_run & runtime_ev) noexcept {
+  runtime_ev.ctx.output_dimension = 0;
+  detail::set_error(runtime_ev, error::invalid_request);
+  detail::write_embed_error_out(runtime_ev);
+}
+
+inline void reject_unexpected(const event::embed_image_run & runtime_ev) noexcept {
+  runtime_ev.ctx.output_dimension = 0;
+  detail::set_error(runtime_ev, error::invalid_request);
+  detail::write_embed_error_out(runtime_ev);
+}
+
+inline void reject_unexpected(const event::embed_audio_run & runtime_ev) noexcept {
+  runtime_ev.ctx.output_dimension = 0;
+  detail::set_error(runtime_ev, error::invalid_request);
+  detail::write_embed_error_out(runtime_ev);
+}
+
+struct effect_reject_unexpected {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev) const noexcept {
+    reject_unexpected(runtime_ev);
+  }
 };
 
 inline constexpr effect_begin_initialize effect_begin_initialize{};
@@ -379,6 +405,6 @@ inline constexpr effect_publish_truncated_embedding effect_publish_truncated_emb
 inline constexpr effect_write_embed_error_out effect_write_embed_error_out{};
 inline constexpr effect_emit_embed_done effect_emit_embed_done{};
 inline constexpr effect_emit_embed_error effect_emit_embed_error{};
-inline constexpr effect_ignore_unexpected effect_ignore_unexpected{};
+inline constexpr effect_reject_unexpected effect_reject_unexpected{};
 
 }  // namespace emel::embeddings::generator::action

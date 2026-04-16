@@ -769,6 +769,70 @@ TEST_CASE("embeddings generator state machine covers callback and prepare error 
     CHECK(initialize_probe.request == &initialize);
   }
 
+  SUBCASE("unexpected embed before initialize rejects without trapping later requests") {
+    fake_tokenizer_dispatch_state fake_tokenizer = {};
+    fake_tokenizer.token_ids[0] = fixture.model->vocab_data.cls_id;
+    fake_tokenizer.token_count = 1;
+    emel::text::conditioner::sm conditioner{};
+    emel::embeddings::generator::sm embedding_generator{
+      *fixture.model,
+      conditioner,
+      nullptr,
+      emel::text::formatter::format_raw,
+    };
+
+    std::array<float, 1280> preinit_output = {};
+    int32_t preinit_output_dimension = -1;
+    emel::error::type preinit_error =
+        emel::error::cast(emel::embeddings::generator::error::none);
+    emel::embeddings::generator::event::embed_text preinit_request{
+      messages,
+      preinit_output,
+      preinit_output_dimension,
+    };
+    preinit_request.error_out = &preinit_error;
+
+    CHECK_FALSE(embedding_generator.process_event(preinit_request));
+    CHECK(preinit_error ==
+          emel::error::cast(emel::embeddings::generator::error::invalid_request));
+    CHECK(preinit_output_dimension == 0);
+    CHECK(embedding_generator.is(
+        boost::sml::state<emel::embeddings::generator::state_uninitialized>));
+
+    emel::error::type initialize_error =
+        emel::error::cast(emel::embeddings::generator::error::none);
+    emel::embeddings::generator::event::initialize initialize{
+      &fake_tokenizer,
+      fake_tokenizer_bind_dispatch,
+      fake_tokenizer_tokenize_dispatch,
+    };
+    initialize.preprocessor_variant =
+        emel::text::tokenizer::preprocessor::preprocessor_kind::wpm;
+    initialize.encoder_variant = emel::text::encoders::encoder_kind::wpm;
+    initialize.error_out = &initialize_error;
+
+    REQUIRE(embedding_generator.process_event(initialize));
+    CHECK(initialize_error == emel::error::cast(emel::embeddings::generator::error::none));
+    CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_idle>));
+
+    std::array<float, 1280> output = {};
+    int32_t output_dimension = -1;
+    emel::error::type embed_error =
+        emel::error::cast(emel::embeddings::generator::error::none);
+    emel::embeddings::generator::event::embed_text request{
+      messages,
+      output,
+      output_dimension,
+    };
+    request.error_out = &embed_error;
+
+    REQUIRE(embedding_generator.process_event(request));
+    CHECK(embed_error == emel::error::cast(emel::embeddings::generator::error::none));
+    CHECK(output_dimension == 1280);
+    CHECK(fake_tokenizer.saw_bind);
+    CHECK(fake_tokenizer.saw_tokenize);
+  }
+
   SUBCASE("initialize maps tokenizer bind errors to model_invalid and backend") {
     fake_tokenizer_dispatch_state model_invalid_tokenizer = {};
     model_invalid_tokenizer.bind_accept = false;
