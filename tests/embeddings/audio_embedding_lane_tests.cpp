@@ -22,6 +22,7 @@ namespace te_fixture = emel::tests::embeddings::te_fixture;
 
 using te_fixture::cached_te_fixture;
 using te_fixture::initialize_embedding_generator;
+using te_fixture::inspectable_embedding_generator;
 using te_fixture::l2_norm;
 using te_fixture::make_rgba_square;
 using te_fixture::make_sine_wave;
@@ -153,7 +154,8 @@ TEST_CASE("embeddings audio detail path keeps prepare and encode outputs finite"
   };
   CHECK(is_finite(prepared));
 
-  REQUIRE(embedding_detail::run_audio_embedding(context));
+  REQUIRE(embedding_detail::run_audio_embedding(context) ==
+          emel::error::cast(emel::embeddings::generator::error::none));
   const auto pooled = std::span<const float>{
     context.scratch.audio_embedding.get(),
     static_cast<size_t>(context.audio.embedding_size),
@@ -296,6 +298,48 @@ TEST_CASE("embeddings audio lane stays stable after an image request on the same
                            std::span<const float>{audio_after_image.data(),
                                                  static_cast<size_t>(audio_after_image_dimension)}) <=
         1.0e-5f);
+}
+
+TEST_CASE("embeddings audio lane surfaces runtime encode failures as backend errors") {
+  if (!te_assets_present()) {
+    MESSAGE("skipping TE audio runtime-failure test because maintained assets are not present");
+    return;
+  }
+
+  const auto & fixture = cached_te_fixture();
+  const auto tone_440 = make_sine_wave(440.0f);
+
+  emel::text::tokenizer::sm tokenizer{};
+  emel::text::conditioner::sm conditioner{};
+  inspectable_embedding_generator embedding_generator{
+    *fixture.model,
+    conditioner,
+    nullptr,
+    emel::text::formatter::format_raw,
+  };
+
+  emel::error::type initialize_error =
+      emel::error::cast(emel::embeddings::generator::error::none);
+  initialize_embedding_generator(embedding_generator, initialize_error, tokenizer);
+
+  embedding_generator.context_ref().scratch.audio_embedding.reset();
+
+  std::array<float, 1280> output = {};
+  int32_t output_dimension = -1;
+  emel::error::type embed_error =
+      emel::error::cast(emel::embeddings::generator::error::none);
+  emel::embeddings::generator::event::embed_audio request{
+    tone_440,
+    k_audio_sample_rate,
+    output,
+    output_dimension,
+  };
+  request.error_out = &embed_error;
+
+  CHECK_FALSE(embedding_generator.process_event(request));
+  CHECK(embed_error == emel::error::cast(emel::embeddings::generator::error::backend));
+  CHECK(output_dimension == 0);
+  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_errored>));
 }
 
 TEST_CASE("embeddings audio lane stays stable after back-to-back text requests") {

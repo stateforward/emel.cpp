@@ -203,6 +203,8 @@ struct model {
       , sml::state<state_embedding_decision> <= sml::state<state_encoding>
           + sml::completion<event::embed_text_run> [ guard::guard_text_encode_bert_ready{} ]
           / action::effect_run_text_embedding_bert
+      , sml::state<state_embed_publish_error> <= sml::state<state_embedding_decision>
+          + sml::completion<event::embed_text_run> [ guard::guard_embedding_failed{} ]
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
           + sml::completion<event::embed_text_run> [ guard::guard_embedding_succeeded_full{} ]
           / action::effect_publish_full_embedding
@@ -245,6 +247,8 @@ struct model {
       , sml::state<state_embedding_decision> <= sml::state<state_image_encoding>
           + sml::completion<event::embed_image_run> [ guard::guard_image_encode_mobilenetv4_ready{} ]
           / action::effect_run_image_embedding_mobilenetv4
+      , sml::state<state_embed_publish_error> <= sml::state<state_embedding_decision>
+          + sml::completion<event::embed_image_run> [ guard::guard_embedding_failed{} ]
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
           + sml::completion<event::embed_image_run> [ guard::guard_embedding_succeeded_full{} ]
           / action::effect_publish_full_embedding
@@ -287,6 +291,8 @@ struct model {
       , sml::state<state_embedding_decision> <= sml::state<state_audio_encoding>
           + sml::completion<event::embed_audio_run> [ guard::guard_audio_encode_efficientat_ready{} ]
           / action::effect_run_audio_embedding_efficientat
+      , sml::state<state_embed_publish_error> <= sml::state<state_embedding_decision>
+          + sml::completion<event::embed_audio_run> [ guard::guard_embedding_failed{} ]
       , sml::state<state_embed_publish_success> <= sml::state<state_embedding_decision>
           + sml::completion<event::embed_audio_run> [ guard::guard_embedding_succeeded_full{} ]
           / action::effect_publish_full_embedding

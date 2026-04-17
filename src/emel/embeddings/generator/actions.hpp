@@ -260,7 +260,7 @@ struct effect_run_text_embedding_bert {
   void operator()(const runtime_event_type & runtime_ev,
                   context & ctx) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    (void) detail::run_text_embedding(ctx, ev.ctx.token_count);
+    ev.ctx.err = detail::run_text_embedding(ctx, ev.ctx.token_count);
     detail::finish_benchmark_encode(ev);
   }
 };
@@ -270,7 +270,7 @@ struct effect_run_image_embedding_mobilenetv4 {
   void operator()(const runtime_event_type & runtime_ev,
                   context & ctx) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    (void) detail::run_image_embedding(ctx);
+    ev.ctx.err = detail::run_image_embedding(ctx);
     detail::finish_benchmark_encode(ev);
   }
 };
@@ -280,7 +280,7 @@ struct effect_run_audio_embedding_efficientat {
   void operator()(const runtime_event_type & runtime_ev,
                   context & ctx) const noexcept {
     auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    (void) detail::run_audio_embedding(ctx);
+    ev.ctx.err = detail::run_audio_embedding(ctx);
     detail::finish_benchmark_encode(ev);
   }
 };

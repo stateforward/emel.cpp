@@ -3807,7 +3807,7 @@ inline bool run_audio_block(action::context & ctx,
   return true;
 }
 
-inline bool run_audio_embedding(action::context & ctx) noexcept {
+inline emel::error::type run_audio_embedding(action::context & ctx) noexcept {
   if (!ctx.audio.ready ||
       !ctx.scratch.ready ||
       ctx.scratch.audio_input == nullptr ||
@@ -3815,7 +3815,7 @@ inline bool run_audio_embedding(action::context & ctx) noexcept {
       ctx.scratch.audio_b == nullptr ||
       ctx.scratch.audio_embedding == nullptr ||
       ctx.scratch.projection_residual == nullptr) {
-    return false;
+    return to_error(error::backend);
   }
   float * conv_patch = ctx.scratch.projection_residual.get();
   const size_t conv_patch_capacity = shared_dense_scratch_capacity(ctx);
@@ -3833,7 +3833,7 @@ inline bool run_audio_embedding(action::context & ctx) noexcept {
                               ctx.scratch.audio_a.get(),
                               height,
                               width)) {
-    return false;
+    return to_error(error::backend);
   }
   apply_batch_norm_hwc_rect<false, true>(
       ctx.scratch.audio_a.get(),
@@ -3852,7 +3852,7 @@ inline bool run_audio_embedding(action::context & ctx) noexcept {
             alternate_buffer,
             height,
             width)) {
-      return false;
+      return to_error(error::backend);
     }
   }
 
@@ -3869,7 +3869,7 @@ inline bool run_audio_embedding(action::context & ctx) noexcept {
                               alternate_buffer,
                               head_height,
                               head_width)) {
-    return false;
+    return to_error(error::backend);
   }
   apply_batch_norm_hwc_rect<false, true>(
       alternate_buffer,
@@ -3883,11 +3883,14 @@ inline bool run_audio_embedding(action::context & ctx) noexcept {
       head_width,
       ctx.audio.embedding_size,
       ctx.scratch.audio_embedding.get());
-  return run_projection_head(
-      ctx,
-      ctx.audio.projection,
-      std::span<const float>{ctx.scratch.audio_embedding.get(),
-                             static_cast<size_t>(ctx.audio.embedding_size)});
+  if (!run_projection_head(
+          ctx,
+          ctx.audio.projection,
+          std::span<const float>{ctx.scratch.audio_embedding.get(),
+                                 static_cast<size_t>(ctx.audio.embedding_size)})) {
+    return to_error(error::backend);
+  }
+  return to_error(error::none);
 }
 
 inline bool run_edge_residual(action::context & ctx, int32_t & spatial) noexcept {
@@ -4015,7 +4018,7 @@ inline bool run_universal_inverted_block(action::context & ctx,
   return true;
 }
 
-inline bool run_image_embedding(action::context & ctx) noexcept {
+inline emel::error::type run_image_embedding(action::context & ctx) noexcept {
   if (!ctx.image.ready ||
       !ctx.scratch.ready ||
       ctx.scratch.image_input == nullptr ||
@@ -4024,7 +4027,7 @@ inline bool run_image_embedding(action::context & ctx) noexcept {
       ctx.scratch.image_c == nullptr ||
       ctx.scratch.image_embedding == nullptr ||
       ctx.scratch.projection_residual == nullptr) {
-    return false;
+    return to_error(error::backend);
   }
   float * conv_patch = ctx.scratch.projection_residual.get();
   const size_t conv_patch_capacity = shared_dense_scratch_capacity(ctx);
@@ -4040,11 +4043,11 @@ inline bool run_image_embedding(action::context & ctx) noexcept {
           ctx.image.stem_bn,
           ctx.scratch.image_a.get(),
           spatial)) {
-    return false;
+    return to_error(error::backend);
   }
 
   if (!run_edge_residual(ctx, spatial)) {
-    return false;
+    return to_error(error::backend);
   }
   float * current_buffer = ctx.scratch.image_a.get();
   float * alternate_buffer = ctx.scratch.image_b.get();
@@ -4056,7 +4059,7 @@ inline bool run_image_embedding(action::context & ctx) noexcept {
             current_buffer,
             alternate_buffer,
             spatial)) {
-      return false;
+      return to_error(error::backend);
     }
   }
 
@@ -4065,7 +4068,7 @@ inline bool run_image_embedding(action::context & ctx) noexcept {
                                               spatial * spatial,
                                               ctx.image.stage4.norm,
                                               alternate_buffer)) {
-    return false;
+    return to_error(error::backend);
   }
   current_buffer = alternate_buffer;
 
@@ -4079,16 +4082,19 @@ inline bool run_image_embedding(action::context & ctx) noexcept {
                                               1,
                                               ctx.image.head.norm,
                                               ctx.scratch.image_embedding.get())) {
-    return false;
+    return to_error(error::backend);
   }
 
-  return run_projection_head(
-      ctx,
-      ctx.image.projection,
-      std::span<const float>{
-          ctx.scratch.image_embedding.get(),
-          static_cast<size_t>(ctx.image.embedding_size),
-      });
+  if (!run_projection_head(
+          ctx,
+          ctx.image.projection,
+          std::span<const float>{
+              ctx.scratch.image_embedding.get(),
+              static_cast<size_t>(ctx.image.embedding_size),
+          })) {
+    return to_error(error::backend);
+  }
+  return to_error(error::none);
 }
 
 inline bool run_projection_head(action::context & ctx,
@@ -4156,16 +4162,17 @@ inline bool run_text_projection(action::context & ctx) noexcept {
   return run_projection_head(ctx, ctx.text.projection, text_embedding);
 }
 
-inline bool run_text_embedding(action::context & ctx, const int32_t token_count) noexcept {
+inline emel::error::type run_text_embedding(action::context & ctx,
+                                            const int32_t token_count) noexcept {
   if (!ctx.text.ready ||
       !ctx.scratch.ready ||
       token_count <= 0 ||
       token_count > ctx.text.max_positions) {
-    return false;
+    return to_error(error::backend);
   }
 
   if (!embed_tokens(ctx, token_count)) {
-    return false;
+    return to_error(error::backend);
   }
 
   float * sequence_in = ctx.scratch.sequence_a.get();
@@ -4173,12 +4180,15 @@ inline bool run_text_embedding(action::context & ctx, const int32_t token_count)
   for (int32_t layer_index = 0; layer_index < ctx.text.layer_count; ++layer_index) {
     if (!run_attention_layer(
             ctx, ctx.text.layers[static_cast<size_t>(layer_index)], token_count, sequence_in, sequence_out)) {
-      return false;
+      return to_error(error::backend);
     }
     std::swap(sequence_in, sequence_out);
   }
 
-  return mean_pool(ctx, token_count, sequence_in) && run_text_projection(ctx);
+  if (!mean_pool(ctx, token_count, sequence_in) || !run_text_projection(ctx)) {
+    return to_error(error::backend);
+  }
+  return to_error(error::none);
 }
 
 inline bool publish_embedding(const action::context & ctx,

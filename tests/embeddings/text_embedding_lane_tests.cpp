@@ -24,6 +24,8 @@ namespace embedding_detail = emel::embeddings::generator::detail;
 namespace te_fixture = emel::tests::embeddings::te_fixture;
 
 using te_fixture::cached_te_fixture;
+using te_fixture::initialize_embedding_generator;
+using te_fixture::inspectable_embedding_generator;
 using te_fixture::l2_norm;
 using te_fixture::max_abs_difference;
 using te_fixture::read_text_file;
@@ -287,6 +289,49 @@ TEST_CASE("embeddings generator initializes with TE q5 fixture when present") {
   REQUIRE(embedding_generator.process_event(initialize));
   CHECK(initialize_error == emel::error::cast(emel::embeddings::generator::error::none));
   CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_idle>));
+}
+
+TEST_CASE("embeddings text lane surfaces runtime encode failures as backend errors") {
+  if (!te_assets_present()) {
+    MESSAGE("skipping TE text runtime-failure test because maintained assets are not present");
+    return;
+  }
+
+  const auto & fixture = cached_te_fixture();
+  const std::array messages = {
+    emel::text::formatter::chat_message{.role = "user", .content = "runtime failure"},
+  };
+
+  emel::text::tokenizer::sm tokenizer{};
+  emel::text::conditioner::sm conditioner{};
+  inspectable_embedding_generator embedding_generator{
+    *fixture.model,
+    conditioner,
+    nullptr,
+    emel::text::formatter::format_raw,
+  };
+
+  emel::error::type initialize_error =
+      emel::error::cast(emel::embeddings::generator::error::none);
+  initialize_embedding_generator(embedding_generator, initialize_error, tokenizer);
+
+  embedding_generator.context_ref().text.word_embeddings.rows = 0;
+
+  std::array<float, 1280> output = {};
+  int32_t output_dimension = -1;
+  emel::error::type embed_error =
+      emel::error::cast(emel::embeddings::generator::error::none);
+  emel::embeddings::generator::event::embed_text request{
+    messages,
+    output,
+    output_dimension,
+  };
+  request.error_out = &embed_error;
+
+  CHECK_FALSE(embedding_generator.process_event(request));
+  CHECK(embed_error == emel::error::cast(emel::embeddings::generator::error::backend));
+  CHECK(output_dimension == 0);
+  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_errored>));
 }
 
 TEST_CASE("maintained TE fixture selector approves q8 and q5 only") {

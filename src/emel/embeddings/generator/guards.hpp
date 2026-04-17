@@ -386,7 +386,8 @@ struct guard_embedding_succeeded_full {
   bool operator()(const runtime_event_type & runtime_ev,
                   const action::context & ctx) const noexcept {
     const auto & ev = detail::unwrap_runtime_event(runtime_ev);
-    return detail::requested_output_dimension(ev.request, ctx) == detail::shared_embedding_size(ctx);
+    return ev.ctx.err == detail::to_error(error::none) &&
+        detail::requested_output_dimension(ev.request, ctx) == detail::shared_embedding_size(ctx);
   }
 };
 
@@ -396,8 +397,17 @@ struct guard_embedding_succeeded_truncate {
                   const action::context & ctx) const noexcept {
     const auto & ev = detail::unwrap_runtime_event(runtime_ev);
     const int32_t requested = detail::requested_output_dimension(ev.request, ctx);
-    return requested > 0 &&
+    return ev.ctx.err == detail::to_error(error::none) &&
+        requested > 0 &&
         requested < detail::shared_embedding_size(ctx);
+  }
+};
+
+struct guard_embedding_failed {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type & runtime_ev) const noexcept {
+    const auto & ev = detail::unwrap_runtime_event(runtime_ev);
+    return ev.ctx.err != detail::to_error(error::none);
   }
 };
 

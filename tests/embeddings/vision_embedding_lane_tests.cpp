@@ -22,6 +22,7 @@ namespace te_fixture = emel::tests::embeddings::te_fixture;
 
 using te_fixture::cached_te_fixture;
 using te_fixture::initialize_embedding_generator;
+using te_fixture::inspectable_embedding_generator;
 using te_fixture::l2_norm;
 using te_fixture::make_rgba_square;
 using te_fixture::max_abs_difference;
@@ -221,6 +222,49 @@ TEST_CASE("embeddings vision lane supports truncation and rejects malformed imag
   CHECK_FALSE(embedding_generator.process_event(invalid_request));
   CHECK(invalid_error == emel::error::cast(emel::embeddings::generator::error::invalid_request));
   CHECK(invalid_dimension == 0);
+  CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_errored>));
+}
+
+TEST_CASE("embeddings vision lane surfaces runtime encode failures as backend errors") {
+  if (!te_assets_present()) {
+    MESSAGE("skipping TE vision runtime-failure test because maintained assets are not present");
+    return;
+  }
+
+  const auto & fixture = cached_te_fixture();
+  const std::vector<uint8_t> red_square = make_rgba_square(255u, 0u, 0u, 32, 32);
+
+  emel::text::tokenizer::sm tokenizer{};
+  emel::text::conditioner::sm conditioner{};
+  inspectable_embedding_generator embedding_generator{
+    *fixture.model,
+    conditioner,
+    nullptr,
+    emel::text::formatter::format_raw,
+  };
+
+  emel::error::type initialize_error =
+      emel::error::cast(emel::embeddings::generator::error::none);
+  initialize_embedding_generator(embedding_generator, initialize_error, tokenizer);
+
+  embedding_generator.context_ref().scratch.image_c.reset();
+
+  std::array<float, 1280> output = {};
+  int32_t output_dimension = -1;
+  emel::error::type embed_error =
+      emel::error::cast(emel::embeddings::generator::error::none);
+  emel::embeddings::generator::event::embed_image request{
+    red_square,
+    32,
+    32,
+    output,
+    output_dimension,
+  };
+  request.error_out = &embed_error;
+
+  CHECK_FALSE(embedding_generator.process_event(request));
+  CHECK(embed_error == emel::error::cast(emel::embeddings::generator::error::backend));
+  CHECK(output_dimension == 0);
   CHECK(embedding_generator.is(boost::sml::state<emel::embeddings::generator::state_errored>));
 }
 

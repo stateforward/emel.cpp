@@ -11,6 +11,14 @@
 
 namespace emel::tests::embeddings::te_fixture {
 
+struct inspectable_embedding_generator : emel::embeddings::generator::sm {
+  using emel::embeddings::generator::sm::sm;
+
+  emel::embeddings::generator::action::context & context_ref() noexcept {
+    return this->context_;
+  }
+};
+
 inline void initialize_embedding_generator(emel::embeddings::generator::sm & embedding_generator,
                                            emel::error::type & initialize_error,
                                            emel::text::tokenizer::sm & tokenizer) {

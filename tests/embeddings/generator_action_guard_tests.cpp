@@ -26,6 +26,12 @@ void check_absent(const std::string & content,
   CHECK_MESSAGE(content.find(needle) == std::string::npos, label);
 }
 
+void check_present(const std::string & content,
+                   const std::string_view needle,
+                   const std::string_view label) {
+  CHECK_MESSAGE(content.find(needle) != std::string::npos, label);
+}
+
 }  // namespace
 
 TEST_CASE("embedding generator no longer hides phase outcome latches in actions and guards") {
@@ -112,7 +118,16 @@ TEST_CASE("embedding generator no longer hides phase outcome latches in actions 
   check_absent(sm,
                "guard::guard_audio_prepare_success",
                "state machine still routes audio prepare via a post-action success latch");
-  check_absent(sm,
-               "guard::guard_embedding_backend_error",
-               "state machine still routes encode publication via a backend latch");
+  check_absent(actions,
+               "(void) detail::run_text_embedding(",
+               "text encode action still discards the embedding kernel result");
+  check_absent(actions,
+               "(void) detail::run_image_embedding(",
+               "image encode action still discards the embedding kernel result");
+  check_absent(actions,
+               "(void) detail::run_audio_embedding(",
+               "audio encode action still discards the embedding kernel result");
+  check_present(sm,
+                "guard::guard_embedding_failed",
+                "state machine no longer routes runtime embedding failures to error publication");
 }
