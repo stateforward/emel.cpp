@@ -18,7 +18,7 @@ struct architecture {
 
 using architectures = std::span<const architecture>;
 
-extern const std::array<architecture, 4> default_architectures;
+extern const std::array<architecture, 5> default_architectures;
 
 architectures default_architecture_span() noexcept;
 

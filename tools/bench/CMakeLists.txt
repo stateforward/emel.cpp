@@ -126,6 +126,11 @@ set(LLAMA_BUILD_NUMBER 0 CACHE STRING "" FORCE)
 set(LLAMA_INSTALL_VERSION 0.0.0 CACHE STRING "" FORCE)
 add_subdirectory(${reference_impl_SOURCE_DIR}/ggml ggml)
 add_subdirectory(${reference_impl_SOURCE_DIR}/src llama_src)
+if(EXISTS "${reference_impl_SOURCE_DIR}/tools/mtmd/CMakeLists.txt")
+  add_subdirectory(${reference_impl_SOURCE_DIR}/tools/mtmd mtmd_tools)
+else()
+  message(STATUS "Reference mtmd tools unavailable; embedding_reference_bench_runner target disabled")
+endif()
 
 set(EMEL_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${EMEL_ROOT} emel)
@@ -167,6 +172,7 @@ set(BENCH_RUNNER_SOURCES
   ${reference_impl_SOURCE_DIR}/common/jinja/value.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/string.cpp
   ${reference_impl_SOURCE_DIR}/common/jinja/caps.cpp
+  ${reference_impl_SOURCE_DIR}/common/unicode.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_cases.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/kernel/bench_common.hpp
@@ -200,8 +206,8 @@ target_include_directories(bench_runner
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${EMEL_ROOT}/src
     ${EMEL_ROOT}/include
-    ${reference_impl_SOURCE_DIR}/src
     ${reference_impl_SOURCE_DIR}/common
+    ${reference_impl_SOURCE_DIR}/src
     ${reference_impl_SOURCE_DIR}/ggml/include
     ${reference_impl_SOURCE_DIR}/include
     ${NLOHMANN_JSON_INCLUDE_DIR}
@@ -260,3 +266,54 @@ target_include_directories(gbnf_bench_runner
     ${reference_impl_SOURCE_DIR}/ggml/include
     ${reference_impl_SOURCE_DIR}/include
 )
+
+add_executable(embedding_generator_bench_runner
+  ${CMAKE_CURRENT_SOURCE_DIR}/embedding_generator_bench.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/embedding_generator_bench_main.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp
+)
+
+target_link_libraries(embedding_generator_bench_runner
+  PRIVATE
+    emel_core
+    emel
+)
+
+target_include_directories(embedding_generator_bench_runner
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${EMEL_ROOT}
+    ${EMEL_ROOT}/src
+    ${EMEL_ROOT}/include
+)
+
+if(TARGET mtmd)
+  add_executable(embedding_reference_bench_runner
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding_reference_bench.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embedding_reference_bench_main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/bench_common.hpp
+  )
+
+  target_link_libraries(embedding_reference_bench_runner
+    PRIVATE
+      mtmd
+      ggml
+      llama
+  )
+
+  target_compile_definitions(embedding_reference_bench_runner
+    PRIVATE
+      EMBEDDING_REFERENCE_SOURCE=\"${BENCH_REFERENCE_SOURCE}\"
+      EMBEDDING_REFERENCE_REF=\"${BENCH_REFERENCE_REF_VALUE}\"
+      EMBEDDING_REFERENCE_REPOSITORY=\"${REF_IMPL_REPOSITORY}\"
+  )
+
+  target_include_directories(embedding_reference_bench_runner
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${reference_impl_SOURCE_DIR}/tools/mtmd
+      ${reference_impl_SOURCE_DIR}/src
+      ${reference_impl_SOURCE_DIR}/ggml/include
+      ${reference_impl_SOURCE_DIR}/include
+  )
+endif()

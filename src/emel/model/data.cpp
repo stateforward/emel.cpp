@@ -9,6 +9,7 @@
 #include "emel/model/gemma4/detail.hpp"
 #include "emel/model/lfm2/detail.hpp"
 #include "emel/model/llama/detail.hpp"
+#include "emel/model/omniembed/detail.hpp"
 #include "emel/model/loader/errors.hpp"
 
 namespace emel::model {
@@ -296,6 +297,18 @@ std::string_view tensor_name_view(const data & model_data,
   return std::string_view{model_data.name_storage.data() + begin, length};
 }
 
+std::string_view metadata_string_view(
+    const data::metadata & metadata,
+    const data::metadata::string_view & value) noexcept {
+  const size_t begin = static_cast<size_t>(value.offset);
+  const size_t length = static_cast<size_t>(value.length);
+  if (length == 0u || begin + length > metadata.blob_bytes_used || begin + length > metadata.blob.size()) {
+    return {};
+  }
+
+  return std::string_view{metadata.blob.data() + begin, length};
+}
+
 bool try_parse_block_index(const std::string_view name, int32_t & block_index_out) noexcept {
   constexpr std::string_view k_prefix = "blk.";
   if (!name.starts_with(k_prefix)) {
@@ -344,6 +357,10 @@ bool is_lfm2_execution_architecture(const std::string_view architecture) noexcep
 
 bool is_gemma4_execution_architecture(const std::string_view architecture) noexcept {
   return emel::model::gemma4::detail::is_execution_architecture(architecture);
+}
+
+bool is_omniembed_execution_architecture(const std::string_view architecture) noexcept {
+  return emel::model::omniembed::detail::is_execution_architecture(architecture);
 }
 
 emel::error::type validate_execution_contract(const data & model_data) noexcept {

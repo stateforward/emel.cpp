@@ -26,6 +26,12 @@ struct config {
 struct result {
   std::string name;
   double ns_per_op = 0.0;
+  double prepare_ns_per_op = 0.0;
+  double encode_ns_per_op = 0.0;
+  double publish_ns_per_op = 0.0;
+  std::uint64_t output_tokens = 0;
+  std::uint64_t output_dim = 0;
+  std::uint64_t output_checksum = 0;
   std::uint64_t iterations = 0;
   std::size_t runs = 0;
 };

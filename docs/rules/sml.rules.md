@@ -89,6 +89,10 @@ primary sources consulted (non-exhaustive)
 7. actions MUST NOT contain orchestration branching or validation logic. any runtime control-flow
    decision (success vs error, retries, mode selection) MUST be expressed as guarded transitions or
    explicit choice states.
+   runtime control-flow decisions are semantic. they include helper-local selection on dtype,
+   backend support, variant/family, payload shape/layout, feature flags, activation mode,
+   fallback availability, callback/error channel, or output lane when that selection changes which
+   algorithm/path/behavior executes.
 8. runtime branching statements MUST NOT appear inside actions, state machine member methods, or
    functions called from actions/member methods. this ban includes `if`, `else if`, `switch`, and
    conditional operators (`?:`). all runtime control flow MUST be modeled as explicit guarded
@@ -129,6 +133,9 @@ primary sources consulted (non-exhaustive)
 19. compile-time conditionals remain allowed in actions/member methods/action
     callees (`if constexpr`, `#if`, `#ifdef`). this allowance does not permit
     runtime control-flow emulation.
+20. moving a runtime decision out of `actions.hpp` and into a helper does not make it compliant.
+    if a helper or helper return value still determines which variant/path/behavior runs, the
+    control flow remains hidden and MUST be modeled in guards/transitions instead.
 
 ## 7. reentrancy and nested dispatch
 1. an actor MUST NOT call its own `process_event` (directly or indirectly) from inside a guard/action. this prevents unbounded recursion and makes WCET analysis tractable. (motivation: `process_event` is synchronous and can be re-entered; SML users report deep call stacks if they do this.)
@@ -203,10 +210,34 @@ primary sources consulted (non-exhaustive)
    - if unhandled, parent transitions may run (fallback). (source: `boost/sml.hpp`, `transitions_sub<sm<tsm>, ...>::execute_impl`.)
 3. entry into a composite state MUST initialize its submachine(s) deterministically. SML updates composite state initialization during state updates. (source: `boost/sml.hpp`, `update_current_state` overload for `state<back::sm<T>>`.)
 4. do NOT introduce ad-hoc shared base classes for machine wrappers (e.g. `sm_base`). inheritance from project base wrappers in `emel/sm.hpp` (for example `emel::sm<model>`) is acceptable. each machine MUST own its context and define its own `process_event` wrapper. share behavior via `actions.hpp`/`detail.hpp` helpers and `sm_any` dispatch.
+5. state-machine structure changes MAY be made directly when they are required
+   for correctness, performance, or to convert hidden runtime control flow into
+   explicit guards, states, transitions, completion edges, or
+   unexpected-event handling.
+   such changes SHOULD preserve or narrow the declared contract unless a
+   semantic change is intentional and explicitly documented.
 
 ### orthogonal regions
 4. orthogonal regions (multiple initial states) MUST be designed so that the same event does not cause side effects in more than one region, unless those side effects commute and ordering does not matter.
 5. if a cross-region coordination is required, it MUST be expressed via explicit context variables and deterministic guards, not by relying on region evaluation order.
+
+## 11.1 helper litmus tests
+
+- helper functions called from actions/member methods MAY do only already-chosen algorithm work:
+  numeric kernels, bounds handling, padding, clamping, local iteration, format expansion, and
+  other data-plane work with bounded monotonic loops.
+- such helpers MUST NOT decide which algorithm or behavior family runs.
+- forbidden hidden-control-flow examples:
+  - choosing among runtime dtypes/formats/encodings inside a helper
+  - choosing backend/native/fallback path inside a helper from runtime support probes
+  - choosing variant/family path inside a helper from runtime metadata or feature flags
+  - choosing block/activation/skip-residual behavior inside a helper from runtime flags
+  - choosing which output lane/buffer/result becomes authoritative next-stage input when that
+    choice changes the behavior path rather than merely implementing one already-chosen path
+- if a helper's output affects which guard passes, which action should have been chosen, which
+  callback/error channel fires, or whether the dispatch is considered accepted/done/failed, that
+  helper is orchestration and belongs in guards/transitions or explicit action surfaces, not in a
+  generic implementation-details helper layer.
 
 ## 12. observability and tracing
 1. production tracing MUST be constant-time and bounded-memory. it MUST NOT allocate during dispatch.
