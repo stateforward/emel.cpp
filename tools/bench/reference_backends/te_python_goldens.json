@@ -1,0 +1,12 @@
+{
+  "id": "te_python_goldens",
+  "display_name": "TE Python goldens",
+  "language": "python",
+  "description": "Maintained Python reference backend that emits the stored upstream TE-75M goldens through the canonical compare contract.",
+  "run_command": [
+    "python3",
+    "tools/bench/embedding_reference_python.py",
+    "--backend",
+    "te75m_goldens"
+  ]
+}

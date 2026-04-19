@@ -1,5 +1,39 @@
 # Project Milestones: EMEL
 
+## v1.12 Pluggable Reference Parity Bench Architecture (Shipped: 2026-04-18)
+
+**Delivered:** EMEL now ships one pluggable embedding compare architecture that keeps the EMEL
+lane isolated while running Python and C++ reference engines through one canonical comparison
+contract, with repaired multi-record C++ publication and refreshed closeout evidence.
+
+**Phases completed:** 6 phases, 6 plans, 0 tasks
+
+**Key accomplishments:**
+
+- Defined one canonical `embedding_compare/v1` contract shared by EMEL and reference lanes without
+  changing the EMEL-owned runtime lane.
+
+- Added maintained Python reference backends for deterministic stored-golden TE parity and
+  explicit live-environment failure reporting.
+
+- Moved the maintained Liquid C++ reference workflow behind the same manifest-driven backend
+  contract used by Python backends.
+
+- Published one operator-facing compare workflow that emits machine-readable JSONL lane records,
+  dumped vectors, and `compare_summary.json`.
+
+- Repaired the lossy C++ summary path so both maintained baseline records survive shared-group
+  publication.
+
+- Backfilled the missing requirement-traceability and Nyquist evidence so the milestone rerun
+  audit passed cleanly.
+
+**What's next:** Define the next milestone and create a fresh requirements set. The immediate
+follow-on work could broaden reference backends, extend the compare architecture beyond
+embeddings, or formalize plugin/remote-backend scope if that is still desired.
+
+---
+
 ## v1.11 TE-75M GGUF Trimodal Embedding Runtime (Shipped: 2026-04-15)
 
 **Phases completed:** 3 phases, 3 plans, 0 tasks

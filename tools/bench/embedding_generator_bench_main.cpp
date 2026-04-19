@@ -7,10 +7,13 @@
 #include <vector>
 
 #include "bench_common.hpp"
+#include "embedding_compare_contract.hpp"
 
 namespace emel::bench {
 
-void append_embedding_generator_cases(std::vector<result> & results, const config & cfg);
+void append_embedding_generator_cases(std::vector<result> & results,
+                                      const config & cfg,
+                                      std::vector<embedding_compare_record> * compare_records);
 void print_embedding_generator_bench_metadata();
 
 }  // namespace emel::bench
@@ -85,7 +88,19 @@ int main() {
 
   std::vector<bench::result> results;
   results.reserve(1);
-  bench::append_embedding_generator_cases(results, cfg);
+  std::vector<bench::embedding_compare_record> compare_records = {};
+  bench::append_embedding_generator_cases(
+    results,
+    cfg,
+    bench::embedding_compare_emit_jsonl() ? &compare_records : nullptr);
+
+  if (bench::embedding_compare_emit_jsonl()) {
+    for (auto & record : compare_records) {
+      bench::maybe_dump_embedding_output(record);
+      bench::print_embedding_compare_record_jsonl(record);
+    }
+    return 0;
+  }
   print_snapshot(results, cfg);
   return 0;
 }

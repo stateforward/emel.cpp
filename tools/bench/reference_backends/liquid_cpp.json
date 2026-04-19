@@ -1,0 +1,14 @@
+{
+  "id": "liquid_cpp",
+  "display_name": "Liquid AI C++ reference baseline",
+  "language": "cpp",
+  "description": "Existing C++/mtmd embedding reference runner for the approved external baseline matrix.",
+  "build_command": [
+    "scripts/bench_embedding_reference_liquid.sh",
+    "--build-only"
+  ],
+  "run_command": [
+    "scripts/bench_embedding_reference_liquid.sh",
+    "--run-only"
+  ]
+}
