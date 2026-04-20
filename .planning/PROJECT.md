@@ -21,10 +21,12 @@ Status: `v1.12` shipped on 2026-04-18 and adds one canonical pluggable embedding
 contract, maintained Python and C++ reference backends on the same compare surface, and repaired
 multi-record C++ publication. The milestone reopened on 2026-04-19 for one narrow archival
 closeout-proof repair after the post-archive rerun audit found stale Phase `67` planning-path
-references.
+references. Phase `68` closed that repair on 2026-04-20, restoring `v1.12` to a passing rerun
+audit.
 
-Current planning focus: plan and execute Phase `68` so the archived `v1.12` closeout evidence is
-self-consistent and the rerun milestone audit can pass from the reopened live ledger.
+Current planning focus: No active milestone is defined. The next lifecycle step is
+`$gsd-new-milestone`, which should create a fresh requirements set before new phase planning
+starts.
 
 ## Latest Shipped Milestone: v1.12 Pluggable Reference Parity Bench Architecture
 
@@ -171,8 +173,8 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- `v1.12` is reopened for archival closeout-proof repair only. No product requirements were
-  reopened; the active work is to refresh archived Phase `67` proof paths and rerun the audit.
+- No active milestone requirements are defined yet. Run `$gsd-new-milestone` to create the next
+  milestone scope and a fresh `.planning/REQUIREMENTS.md`.
 
 ### Out of Scope
 
@@ -186,7 +188,7 @@ truth anchor and without broadening into generic Liquid-family support.
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
 The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.12` remains the latest
-shipped milestone and is now reopened narrowly for archival proof repair. The current maintained
+shipped milestone after the narrow archival proof repair closed cleanly. The current maintained
 state includes a repo-owned EMEL compare lane plus pluggable Python and C++ reference backends
 that publish through one canonical compare contract without shared runtime state.
 
@@ -198,8 +200,8 @@ that publish through one canonical compare contract without shared runtime state
   state, objects, and execution dependencies.
 - **Reproducibility**: Preserve truthful compare artifacts with backend identity, fixture
   identity, and enough metadata to reproduce results.
-- **Lifecycle**: Reopen `v1.12` only for archived closeout-proof repair. Do not broaden scope or
-  mutate satisfied runtime claims while fixing the rerun-audit evidence.
+- **Lifecycle**: Start the next milestone from the repaired `v1.12` state with a fresh
+  requirements file instead of mutating the shipped milestone ledger further.
 
 ## Key Decisions
 
@@ -246,4 +248,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-19 after reopening v1.12 for archived closeout-proof repair*
+*Last updated: 2026-04-20 after closing the v1.12 archival-proof repair*

@@ -1,12 +1,12 @@
 # Project Milestones: EMEL
 
-## v1.12 Pluggable Reference Parity Bench Architecture (Shipped: 2026-04-18, Reopened: 2026-04-19)
+## v1.12 Pluggable Reference Parity Bench Architecture (Shipped: 2026-04-18, Closeout Repaired: 2026-04-20)
 
 **Delivered:** EMEL now ships one pluggable embedding compare architecture that keeps the EMEL
 lane isolated while running Python and C++ reference engines through one canonical comparison
 contract, with repaired multi-record C++ publication and refreshed closeout evidence.
 
-**Phases completed:** 6 phases, 6 plans, 0 tasks
+**Phases completed:** 7 phases, 7 plans, 0 tasks
 
 **Key accomplishments:**
 
@@ -26,10 +26,12 @@ contract, with repaired multi-record C++ publication and refreshed closeout evid
   publication.
 
 - Backfilled the missing requirement-traceability and Nyquist evidence for the shipped closeout.
+- Repaired the archived Phase `67` proof-path drift so the rerun milestone audit is self-consistent
+  after archival.
 
-**Current reopen focus:** Refresh archived Phase `67` proof paths so the post-archive rerun audit
-stops depending on removed live-root planning paths. No runtime or scope expansion is part of the
-reopen.
+**What's next:** Define the next milestone and create a fresh requirements set. The immediate
+follow-on work could broaden reference backends, extend the compare architecture beyond
+embeddings, or formalize plugin/remote-backend scope if that is still desired.
 
 ---
 

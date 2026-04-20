@@ -32,8 +32,8 @@ created: 2026-04-17
 |----------|-------|
 | **Framework** | planning-artifact verification via `rg` |
 | **Config file** | none — closeout uses repo artifacts directly |
-| **Quick run command** | `rg -n '^## Requirements|\\| `?(REF|ISO|PY|CPP|CMP)-' .planning/phases/{62-reference-backend-contract,63-python-reference-backend,64-cpp-reference-backend-integration,65-unified-compare-workflow-and-publication}/*-VERIFICATION.md` |
-| **Full suite command** | `rg -n 'Rule Compliance Review|No rule violations found within validation scope|nyquist_compliant: true' .planning/phases/{62-reference-backend-contract,63-python-reference-backend,64-cpp-reference-backend-integration,65-unified-compare-workflow-and-publication}/*-VALIDATION.md` |
+| **Quick run command** | `rg -n '^## Requirements|\\| `?(REF|ISO|PY|CPP|CMP)-' .planning/milestones/v1.12-phases/{62-reference-backend-contract,63-python-reference-backend,64-cpp-reference-backend-integration,65-unified-compare-workflow-and-publication}/*-VERIFICATION.md` |
+| **Full suite command** | `rg -n 'Rule Compliance Review|No rule violations found within validation scope|nyquist_compliant: true' .planning/milestones/v1.12-phases/{62-reference-backend-contract,63-python-reference-backend,64-cpp-reference-backend-integration,65-unified-compare-workflow-and-publication}/*-VALIDATION.md` |
 | **Estimated runtime** | ~5 seconds |
 
 ## Sampling Rate
@@ -47,9 +47,9 @@ created: 2026-04-17
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 67-01-01 | 01 | 1 | `REF-01`, `REF-02`, `ISO-01`, `PY-01`, `PY-02`, `CPP-02` | — | Reopened requirements are no longer orphaned in phase verification artifacts | documentation | `rg -n '^## Requirements|\\| `?(REF|ISO|PY|CPP|CMP)-' .planning/phases/{62-reference-backend-contract,63-python-reference-backend,64-cpp-reference-backend-integration,65-unified-compare-workflow-and-publication}/*-VERIFICATION.md` | ✅ | ✅ green |
-| 67-01-02 | 01 | 1 | `REF-01`, `REF-02`, `ISO-01`, `PY-01`, `PY-02`, `CPP-02` | — | Prior validation docs now carry explicit rule-review evidence | documentation | `rg -n 'Rule Compliance Review|No rule violations found within validation scope|nyquist_compliant: true' .planning/phases/{62-reference-backend-contract,63-python-reference-backend,64-cpp-reference-backend-integration,65-unified-compare-workflow-and-publication}/*-VALIDATION.md` | ✅ | ✅ green |
-| 67-01-03 | 01 | 1 | `REF-01`, `REF-02`, `ISO-01`, `PY-01`, `PY-02`, `CPP-02` | — | Requirements ledger matches the refreshed closeout truth | documentation | `rg -n '\\[x\\] \\*\\*(REF-01|REF-02|ISO-01|PY-01|PY-02|CPP-02)\\*\\*' .planning/REQUIREMENTS.md` | ✅ | ✅ green |
+| 67-01-01 | 01 | 1 | `REF-01`, `REF-02`, `ISO-01`, `PY-01`, `PY-02`, `CPP-02` | — | Reopened requirements are no longer orphaned in phase verification artifacts | documentation | `rg -n '^## Requirements|\\| `?(REF|ISO|PY|CPP|CMP)-' .planning/milestones/v1.12-phases/{62-reference-backend-contract,63-python-reference-backend,64-cpp-reference-backend-integration,65-unified-compare-workflow-and-publication}/*-VERIFICATION.md` | ✅ | ✅ green |
+| 67-01-02 | 01 | 1 | `REF-01`, `REF-02`, `ISO-01`, `PY-01`, `PY-02`, `CPP-02` | — | Prior validation docs now carry explicit rule-review evidence | documentation | `rg -n 'Rule Compliance Review|No rule violations found within validation scope|nyquist_compliant: true' .planning/milestones/v1.12-phases/{62-reference-backend-contract,63-python-reference-backend,64-cpp-reference-backend-integration,65-unified-compare-workflow-and-publication}/*-VALIDATION.md` | ✅ | ✅ green |
+| 67-01-03 | 01 | 1 | `REF-01`, `REF-02`, `ISO-01`, `PY-01`, `PY-02`, `CPP-02` | — | Requirements ledger matches the refreshed closeout truth | documentation | `rg -n '\\[x\\] \\*\\*(REF-01|REF-02|ISO-01|PY-01|PY-02|CPP-02)\\*\\*' .planning/milestones/v1.12-REQUIREMENTS.md` | ✅ | ✅ green |
 
 ## Wave 0 Requirements
 

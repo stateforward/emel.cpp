@@ -26,8 +26,8 @@ review, and the requirements ledger has been reconciled to the refreshed milesto
   through `65`.
 - Replaced the old minimal `VALIDATION.md` files for phases `62` through `65` with the current
   Nyquist-ready format, including completion preconditions and rule-compliance review.
-- Reconciled `.planning/REQUIREMENTS.md` so the reopened `v1.12` requirements are checked off
-  again and coverage totals match the refreshed closeout evidence.
+- Reconciled the archived `v1.12` requirements ledger so the reopened closeout proof matches
+  `.planning/milestones/v1.12-REQUIREMENTS.md` after archival.
 
 ## Refreshed Closeout Truth
 
