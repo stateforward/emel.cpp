@@ -9,11 +9,19 @@ import math
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 
 SCHEMA = "embedding_compare/v1"
 SUMMARY_SCHEMA = "embedding_compare_summary/v1"
+
+
+@dataclass(frozen=True)
+class command_result:
+  returncode: int
+  error_kind: str = ""
+  error_message: str = ""
 
 
 def repo_root() -> Path:
@@ -51,26 +59,87 @@ def command_to_strings(command: object) -> list[str]:
   return [str(part) for part in command]
 
 
+def error_record(*,
+                 lane: str,
+                 backend_id: str,
+                 backend_language: str,
+                 error_kind: str,
+                 error_message: str,
+                 note: str = "") -> dict[str, object]:
+  return {
+    "schema": SCHEMA,
+    "record_type": "error",
+    "status": "error",
+    "case_name": f"{lane}/{backend_id}",
+    "compare_group": "backend",
+    "lane": lane,
+    "backend_id": backend_id,
+    "backend_language": backend_language,
+    "comparison_mode": "parity",
+    "model_id": "",
+    "fixture_id": "",
+    "modality": "",
+    "ns_per_op": 0.0,
+    "prepare_ns_per_op": 0.0,
+    "encode_ns_per_op": 0.0,
+    "publish_ns_per_op": 0.0,
+    "output_tokens": 0,
+    "output_dim": 0,
+    "output_checksum": 0,
+    "iterations": 0,
+    "runs": 0,
+    "output_path": "",
+    "note": note,
+    "error_kind": error_kind,
+    "error_message": error_message,
+  }
+
+
+def append_jsonl_record(path: Path, record: dict[str, object]) -> None:
+  path.parent.mkdir(parents=True, exist_ok=True)
+  with path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(record, sort_keys=True))
+    handle.write("\n")
+
+
+def ensure_error_record(path: Path, record: dict[str, object]) -> None:
+  records = parse_jsonl_records(path)
+  if any(existing.get("record_type") == "error" for existing in records):
+    return
+  append_jsonl_record(path, record)
+
+
 def run_command(command: list[str],
                 env_updates: dict[str, str],
                 stdout_path: Path,
-                stderr_path: Path) -> int:
+                stderr_path: Path) -> command_result:
   env = os.environ.copy()
   env.update(env_updates)
   stdout_path.parent.mkdir(parents=True, exist_ok=True)
   stderr_path.parent.mkdir(parents=True, exist_ok=True)
-  process = subprocess.run(
-    command,
-    cwd=repo_root(),
-    env=env,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-    text=True,
-    check=False,
-  )
+  try:
+    process = subprocess.run(
+      command,
+      cwd=repo_root(),
+      env=env,
+      stdout=subprocess.PIPE,
+      stderr=subprocess.PIPE,
+      text=True,
+      check=False,
+    )
+  except FileNotFoundError as exc:
+    stdout_path.write_text("", encoding="utf-8")
+    stderr_path.write_text(f"{exc}\n", encoding="utf-8")
+    return command_result(returncode=127,
+                          error_kind="missing_executable",
+                          error_message=str(exc))
+  except OSError as exc:
+    stdout_path.write_text("", encoding="utf-8")
+    stderr_path.write_text(f"{exc}\n", encoding="utf-8")
+    return command_result(returncode=126, error_kind="os_error", error_message=str(exc))
   stdout_path.write_text(process.stdout, encoding="utf-8")
   stderr_path.write_text(process.stderr, encoding="utf-8")
-  return process.returncode
+  return command_result(returncode=process.returncode)
 
 
 def parse_jsonl_records(path: Path) -> list[dict[str, object]]:
@@ -295,10 +364,20 @@ def main() -> int:
     emel_env = dict(env_updates)
     emel_env["EMEL_EMBEDDING_RESULT_DIR"] = str(emel_vector_dir)
     emel_stderr = raw_dir / "emel.stderr.txt"
-    emel_rc = run_command([str(args.emel_runner)], emel_env, emel_jsonl, emel_stderr)
-    if emel_rc != 0:
-      print(f"error: EMEL runner failed with exit code {emel_rc}", file=sys.stderr)
-      return emel_rc
+    emel_result = run_command([str(args.emel_runner)], emel_env, emel_jsonl, emel_stderr)
+    if emel_result.returncode != 0:
+      error_kind = emel_result.error_kind or "runner_failed"
+      error_message = emel_result.error_message or (
+        f"EMEL runner failed with exit code {emel_result.returncode}"
+      )
+      ensure_error_record(
+        emel_jsonl,
+        error_record(lane="emel",
+                     backend_id="emel.generator",
+                     backend_language="cpp",
+                     error_kind=error_kind,
+                     error_message=error_message),
+      )
 
   if args.reference_input is None:
     if manifest is None:
@@ -308,24 +387,45 @@ def main() -> int:
     if "build_command" in manifest:
       build_stdout = raw_dir / "reference.build.stdout.txt"
       build_stderr = raw_dir / "reference.build.stderr.txt"
-      build_rc = run_command(command_to_strings(manifest["build_command"]),
-                             dict(env_updates),
-                             build_stdout,
-                             build_stderr)
-      if build_rc != 0:
-        print(f"error: reference backend build failed with exit code {build_rc}", file=sys.stderr)
-        return build_rc
+      build_result = run_command(command_to_strings(manifest["build_command"]),
+                                 dict(env_updates),
+                                 build_stdout,
+                                 build_stderr)
+      if build_result.returncode != 0:
+        error_kind = build_result.error_kind or "backend_build_failed"
+        error_message = build_result.error_message or (
+          f"reference backend build failed with exit code {build_result.returncode}"
+        )
+        ensure_error_record(
+          reference_jsonl,
+          error_record(lane="reference",
+                       backend_id=str(manifest.get("id", "reference.backend")),
+                       backend_language=str(manifest.get("language", "")),
+                       error_kind=error_kind,
+                       error_message=error_message),
+        )
     reference_vector_dir = args.output_dir / "vectors" / "reference"
     reference_env = dict(env_updates)
     reference_env["EMEL_EMBEDDING_RESULT_DIR"] = str(reference_vector_dir)
     reference_stderr = raw_dir / "reference.stderr.txt"
-    reference_rc = run_command(command_to_strings(manifest["run_command"]),
-                               reference_env,
-                               reference_jsonl,
-                               reference_stderr)
-    if reference_rc not in (0, 1):
-      print(f"error: reference backend run failed with exit code {reference_rc}", file=sys.stderr)
-      return reference_rc
+    if not parse_jsonl_records(reference_jsonl):
+      reference_result = run_command(command_to_strings(manifest["run_command"]),
+                                     reference_env,
+                                     reference_jsonl,
+                                     reference_stderr)
+      if reference_result.returncode not in (0, 1):
+        error_kind = reference_result.error_kind or "backend_run_failed"
+        error_message = reference_result.error_message or (
+          f"reference backend run failed with exit code {reference_result.returncode}"
+        )
+        ensure_error_record(
+          reference_jsonl,
+          error_record(lane="reference",
+                       backend_id=str(manifest.get("id", "reference.backend")),
+                       backend_language=str(manifest.get("language", "")),
+                       error_kind=error_kind,
+                       error_message=error_message),
+        )
 
   emel_records = parse_jsonl_records(emel_jsonl)
   reference_records = parse_jsonl_records(reference_jsonl)
