@@ -169,8 +169,13 @@ def summarize_group(compare_group: str,
     summary["comparison_status"] = "unavailable"
     summary["reason"] = "missing_output_vectors"
     return summary
-  lhs = load_float_vector(Path(emel_output_path))
-  rhs = load_float_vector(Path(reference_output_path))
+  try:
+    lhs = load_float_vector(Path(emel_output_path))
+    rhs = load_float_vector(Path(reference_output_path))
+  except FileNotFoundError:
+    summary["comparison_status"] = "unavailable"
+    summary["reason"] = "missing_output_vectors"
+    return summary
   if len(lhs) != len(rhs):
     summary["comparison_status"] = "unavailable"
     summary["reason"] = "dimension_mismatch"

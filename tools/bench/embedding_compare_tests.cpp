@@ -44,6 +44,10 @@ std::filesystem::path bench_embedding_compare_wrapper_path() {
   return repo_root() / "scripts" / "bench_embedding_compare.sh";
 }
 
+std::filesystem::path bench_embedding_reference_liquid_wrapper_path() {
+  return repo_root() / "scripts" / "bench_embedding_reference_liquid.sh";
+}
+
 std::string read_file(const std::filesystem::path & path) {
   std::ifstream input(path, std::ios::binary);
   if (!input.good()) {
@@ -431,6 +435,66 @@ TEST_CASE("embedding compare fails when a compare group is missing a reference l
   CHECK(summary.find("\"reason\": \"missing_reference_record\"") != std::string::npos);
 }
 
+TEST_CASE("embedding compare reports missing output vector files without aborting") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "missing-vectors";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path emel_jsonl = tmp_dir / "emel.jsonl";
+  const std::filesystem::path ref_jsonl = tmp_dir / "ref.jsonl";
+  const std::filesystem::path output_dir = tmp_dir / "out";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::filesystem::path missing_emel_vector = tmp_dir / "missing-emel.f32";
+  const std::filesystem::path missing_ref_vector = tmp_dir / "missing-ref.f32";
+
+  write_text_file(
+    emel_jsonl,
+    "{\"schema\":\"embedding_compare/v1\",\"record_type\":\"result\",\"status\":\"ok\","
+    "\"case_name\":\"emel/text\",\"compare_group\":\"text/red_square/full_dim\","
+    "\"lane\":\"emel\",\"backend_id\":\"emel.generator\",\"backend_language\":\"cpp\","
+    "\"comparison_mode\":\"parity\",\"model_id\":\"te\",\"fixture_id\":\"fixture\","
+    "\"modality\":\"text\",\"ns_per_op\":1.0,\"prepare_ns_per_op\":0.1,"
+    "\"encode_ns_per_op\":0.8,\"publish_ns_per_op\":0.1,\"output_tokens\":1,"
+    "\"output_dim\":3,\"output_checksum\":1,\"iterations\":1,\"runs\":1,"
+    "\"output_path\":\"" + missing_emel_vector.string() + "\",\"note\":\"\",\"error_kind\":\"\","
+    "\"error_message\":\"\"}\n");
+  write_text_file(
+    ref_jsonl,
+    "{\"schema\":\"embedding_compare/v1\",\"record_type\":\"result\",\"status\":\"ok\","
+    "\"case_name\":\"reference/text\",\"compare_group\":\"text/red_square/full_dim\","
+    "\"lane\":\"reference\",\"backend_id\":\"python.reference.test\",\"backend_language\":\"python\","
+    "\"comparison_mode\":\"parity\",\"model_id\":\"te\",\"fixture_id\":\"fixture\","
+    "\"modality\":\"text\",\"ns_per_op\":1.0,\"prepare_ns_per_op\":0.1,"
+    "\"encode_ns_per_op\":0.8,\"publish_ns_per_op\":0.1,\"output_tokens\":1,"
+    "\"output_dim\":3,\"output_checksum\":1,\"iterations\":1,\"runs\":1,"
+    "\"output_path\":\"" + missing_ref_vector.string() + "\",\"note\":\"\",\"error_kind\":\"\","
+    "\"error_message\":\"\"}\n");
+
+  std::string command;
+#if defined(_WIN32)
+  command = "python3 " + quote_arg_windows(embedding_compare_script_path().string());
+  command += " --emel-input " + quote_arg_windows(emel_jsonl.string());
+  command += " --reference-input " + quote_arg_windows(ref_jsonl.string());
+  command += " --output-dir " + quote_arg_windows(output_dir.string());
+  command += " > " + quote_arg_windows(stdout_path.string());
+  command += " 2> " + quote_arg_windows(stderr_path.string());
+#else
+  command = "python3 " + quote_arg_posix(embedding_compare_script_path().string());
+  command += " --emel-input " + quote_arg_posix(emel_jsonl.string());
+  command += " --reference-input " + quote_arg_posix(ref_jsonl.string());
+  command += " --output-dir " + quote_arg_posix(output_dir.string());
+  command += " > " + quote_arg_posix(stdout_path.string());
+  command += " 2> " + quote_arg_posix(stderr_path.string());
+#endif
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  const std::string summary = read_file(output_dir / "compare_summary.json");
+  CHECK(summary.find("\"comparison_status\": \"unavailable\"") != std::string::npos);
+  CHECK(summary.find("\"reason\": \"missing_output_vectors\"") != std::string::npos);
+}
+
 #if !defined(_WIN32)
 TEST_CASE("run_command_capture reports signal termination deterministically") {
   const std::filesystem::path tmp_dir =
@@ -486,6 +550,52 @@ TEST_CASE("compare wrapper honors --skip-emel-build without requiring cmake or n
   CHECK(capture.exit_code == 0);
   CHECK(capture.stderr_text.empty());
   CHECK(read_file(invoked_path).find("python-invoked") != std::string::npos);
+}
+
+TEST_CASE("liquid wrapper honors --run-only without requiring build tools") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "liquid-run-only";
+  const std::filesystem::path fake_bin_dir = tmp_dir / "bin";
+  const std::filesystem::path fake_dirname = fake_bin_dir / "dirname";
+  const std::filesystem::path fake_mkdir = fake_bin_dir / "mkdir";
+  const std::filesystem::path build_dir = tmp_dir / "build";
+  const std::filesystem::path asset_dir = tmp_dir / "assets";
+  const std::filesystem::path fake_runner = build_dir / "embedding_reference_bench_runner";
+  const std::filesystem::path invoked_path = tmp_dir / "runner-invoked.txt";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  std::filesystem::create_directories(fake_bin_dir);
+  std::filesystem::create_directories(build_dir);
+
+  write_text_file(fake_dirname,
+                  "#!/bin/sh\n"
+                  "/usr/bin/dirname \"$@\"\n");
+  make_executable(fake_dirname);
+  write_text_file(fake_mkdir,
+                  "#!/bin/sh\n"
+                  "/bin/mkdir \"$@\"\n");
+  make_executable(fake_mkdir);
+  write_text_file(fake_runner,
+                  "#!/bin/sh\n"
+                  "printf 'runner-invoked\\n' > \"$EMEL_TEST_INVOKED_PATH\"\n"
+                  "exit 0\n");
+  make_executable(fake_runner);
+
+  std::string command;
+  command = "PATH=" + quote_arg_posix(fake_bin_dir.string()) + " ";
+  command += "EMEL_TEST_INVOKED_PATH=" + quote_arg_posix(invoked_path.string()) + " ";
+  command += "EMEL_REFERENCE_BUILD_DIR=" + quote_arg_posix(build_dir.string()) + " ";
+  command += "EMEL_REFERENCE_ASSET_DIR=" + quote_arg_posix(asset_dir.string()) + " ";
+  command += quote_arg_posix("/bin/bash") + " " +
+    quote_arg_posix(bench_embedding_reference_liquid_wrapper_path().string());
+  command += " --run-only --system";
+  command += " > " + quote_arg_posix(stdout_path.string());
+  command += " 2> " + quote_arg_posix(stderr_path.string());
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  CHECK(read_file(invoked_path).find("runner-invoked") != std::string::npos);
 }
 #endif
 

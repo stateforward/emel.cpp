@@ -114,12 +114,14 @@ if $DOWNLOAD_KNOWN_ASSETS; then
   download_hf_asset "ggml-org/ultravox-v0_5-llama-3_2-1b-GGUF" "mmproj-ultravox-v0_5-llama-3_2-1b-f16.gguf" "$hf_bin"
 fi
 
-for tool in cmake ninja git; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "error: required tool missing: $tool" >&2
-    exit 1
-  fi
-done
+if ! $RUN_ONLY; then
+  for tool in cmake ninja git; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "error: required tool missing: $tool" >&2
+      exit 1
+    fi
+  done
+fi
 
 bench_cc="${BENCH_CC:-cc}"
 bench_cxx="${BENCH_CXX:-c++}"
@@ -128,7 +130,7 @@ bench_cxx_arg=""
 bench_asm_arg=""
 bench_c_flags=""
 bench_cxx_flags=""
-if $USE_ZIG; then
+if $USE_ZIG && ! $RUN_ONLY; then
   if ! command -v zig >/dev/null 2>&1; then
     echo "error: zig not found (use --system to use system compilers)" >&2
     exit 1
