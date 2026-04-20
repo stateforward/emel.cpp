@@ -1,60 +1,60 @@
 ---
 gsd_state_version: 1.0
-milestone: none
-milestone_name: No Active Milestone
-status: ready_for_next_milestone
-stopped_at: shipped and archived `v1.12`, moved Phases `62` through `67` into
-  `.planning/milestones/v1.12-phases/`, and left the project ready for the next milestone
-last_updated: "2026-04-18T01:30:00.000Z"
-last_activity: 2026-04-18
+milestone: v1.12
+milestone_name: Pluggable Reference Parity Bench Architecture
+status: planning_gap_closure
+stopped_at: reopened `v1.12` on 2026-04-19 to repair archived Phase `67`
+  closeout-proof drift before treating the milestone as audit-clean
+last_updated: "2026-04-20T04:59:34Z"
+last_activity: 2026-04-19
 progress:
-  total_phases: 6
+  total_phases: 7
   completed_phases: 6
   total_plans: 6
   completed_plans: 6
-  percent: 100
+  percent: 86
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-18)
+See: .planning/PROJECT.md (updated 2026-04-19)
 
 **Core value:** Prove real end-to-end behavior with explicit SML orchestration and parity-oriented
 verification before widening API surface or model scope.
-**Current focus:** No active milestone is defined; the next step is to create a fresh requirements
-set for the next milestone.
+**Current focus:** Reopened `v1.12` closeout repair. The next step is to plan and execute Phase
+`68` so the archived Phase `67` proof paths and rerun audit become self-consistent again.
 
 ## Current Position
 
-Phase: None
-Plan: Complete
-Status: Milestone `v1.12` is shipped, archived, and cleaned up. The pluggable compare architecture
-is now the latest shipped state, and there is no active milestone in progress.
-Last activity: 2026-04-18
-Closeout used the passing rerun audit plus direct ledger verification because the current
-`gsd-tools audit-open` preflight throws `ReferenceError: output is not defined`.
+Phase: 68
+Plan: Not started
+Status: `v1.12` is reopened for one narrow archival-proof repair. The implementation remains
+shipped, but the current rerun audit found that archived Phase `67` still references removed
+live-root planning paths.
+Last activity: 2026-04-19
+Closeout still depends on repairing archived Phase `67` proof paths while the known
+`gsd-tools audit-open` preflight bug remains non-blocking tooling debt.
 
-Progress: [##########] 100%
+Progress: [########--] 86%
 
 ## Performance Metrics
 
 **Latest shipped milestone:**
 
 - Milestone: v1.12 Pluggable Reference Parity Bench Architecture
-- Completed phases: `6/6`
-- Completed plans: `6/6`
-- Audit status: `passed` after the Phase `66` repair and Phase `67` closeout backfill
+- Completed phases: `6/7`
+- Completed plans: `6/7`
+- Audit status: `gaps_found` after the archived rerun exposed stale Phase `67` proof paths
 
 **Current planning shape:**
 
-- Active milestone: none
-- Latest fully archived milestone: `v1.12`
-- Next action: Run `$gsd-new-milestone` to define the next shipped scope and recreate
-  `.planning/REQUIREMENTS.md`
-- Git release note: no closeout commit or `v1.12` tag was created because the branch still
-  contains broader uncommitted milestone work outside the safe closeout-only write set
+- Active milestone: `v1.12` (reopened)
+- Latest shipped milestone: `v1.12`
+- Next action: Run `$gsd-plan-phase 68` to plan the archived closeout-proof repair
+- Current blocker: archived Phase `67` validation and verification still target removed
+  `.planning/phases/...` and `.planning/REQUIREMENTS.md` paths
 
 ## Accumulated Context
 

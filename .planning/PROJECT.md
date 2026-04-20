@@ -18,13 +18,13 @@ before widening API surface or model scope.
 Latest shipped milestone: `v1.12`
 
 Status: `v1.12` shipped on 2026-04-18 and adds one canonical pluggable embedding compare
-contract, maintained Python and C++ reference backends on the same compare surface, repaired
-multi-record C++ publication, and refreshed traceability / Nyquist closeout evidence with a
-passing rerun milestone audit.
+contract, maintained Python and C++ reference backends on the same compare surface, and repaired
+multi-record C++ publication. The milestone reopened on 2026-04-19 for one narrow archival
+closeout-proof repair after the post-archive rerun audit found stale Phase `67` planning-path
+references.
 
-Current planning focus: No active milestone is defined. The next lifecycle step is
-`$gsd-new-milestone`, which should create a fresh requirements set before new phase planning
-starts.
+Current planning focus: plan and execute Phase `68` so the archived `v1.12` closeout evidence is
+self-consistent and the rerun milestone audit can pass from the reopened live ledger.
 
 ## Latest Shipped Milestone: v1.12 Pluggable Reference Parity Bench Architecture
 
@@ -171,8 +171,8 @@ truth anchor and without broadening into generic Liquid-family support.
 
 ### Active
 
-- No active milestone requirements are defined yet. Run `$gsd-new-milestone` to create the next
-  milestone scope and a fresh `.planning/REQUIREMENTS.md`.
+- `v1.12` is reopened for archival closeout-proof repair only. No product requirements were
+  reopened; the active work is to refresh archived Phase `67` proof paths and rerun the audit.
 
 ### Out of Scope
 
@@ -185,11 +185,10 @@ truth anchor and without broadening into generic Liquid-family support.
 ## Context
 
 This remains a brownfield repository with an existing codebase map under `.planning/codebase/`.
-The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.12` is now shipped and
-archived as the latest milestone, so the project has no active milestone-specific context until a
-new requirements set is defined. The current maintained state includes a repo-owned EMEL compare
-lane plus pluggable Python and C++ reference backends that publish through one canonical compare
-contract without shared runtime state.
+The repo stays governed by `AGENTS.md` and `docs/rules/sml.rules.md`. `v1.12` remains the latest
+shipped milestone and is now reopened narrowly for archival proof repair. The current maintained
+state includes a repo-owned EMEL compare lane plus pluggable Python and C++ reference backends
+that publish through one canonical compare contract without shared runtime state.
 
 ## Constraints
 
@@ -199,8 +198,8 @@ contract without shared runtime state.
   state, objects, and execution dependencies.
 - **Reproducibility**: Preserve truthful compare artifacts with backend identity, fixture
   identity, and enough metadata to reproduce results.
-- **Lifecycle**: Start the next milestone from the archived `v1.12` state with a fresh
-  requirements file instead of mutating the shipped milestone ledger.
+- **Lifecycle**: Reopen `v1.12` only for archived closeout-proof repair. Do not broaden scope or
+  mutate satisfied runtime claims while fixing the rerun-audit evidence.
 
 ## Key Decisions
 
@@ -247,4 +246,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-17 after starting milestone v1.12*
+*Last updated: 2026-04-19 after reopening v1.12 for archived closeout-proof repair*
