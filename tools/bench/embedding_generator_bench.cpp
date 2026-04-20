@@ -208,6 +208,7 @@ void append_embedding_generator_cases(std::vector<result> & results,
   initialized_embedding_generator text_state{*fixture.model};
   initialized_embedding_generator image_state{*fixture.model};
   initialized_embedding_generator audio_state{*fixture.model};
+  const bool capture_compare_outputs = compare_records != nullptr;
 
   std::array<float, 1280> text_output = {};
   int32_t text_output_dimension = 0;
@@ -253,6 +254,15 @@ void append_embedding_generator_cases(std::vector<result> & results,
   };
   audio_request.error_out = &audio_error;
   audio_request.benchmark_time_now = benchmark_timestamp_now_ns;
+  std::uint64_t text_anchor_checksum = 0u;
+  std::uint64_t image_anchor_checksum = 0u;
+  std::uint64_t audio_anchor_checksum = 0u;
+  bool text_anchor_checksum_captured = false;
+  bool image_anchor_checksum_captured = false;
+  bool audio_anchor_checksum_captured = false;
+  bool text_anchor_output_captured = false;
+  bool image_anchor_output_captured = false;
+  bool audio_anchor_output_captured = false;
 
   auto text_fn = [&]() -> embedding_case_sample {
     text_error = emel::error::cast(emel::embeddings::generator::error::none);
@@ -267,10 +277,17 @@ void append_embedding_generator_cases(std::vector<result> & results,
     sample.timings = text_timings;
     sample.output_tokens = 1u;
     sample.output_dim = static_cast<std::uint64_t>(text_output_dimension);
-    sample.output_values.assign(text_output.begin(), text_output.end());
-    sample.output_checksum = checksum_bytes(
-      reinterpret_cast<const std::uint8_t *>(sample.output_values.data()),
-      sample.output_values.size() * sizeof(float));
+    if (!text_anchor_checksum_captured) {
+      text_anchor_checksum = checksum_bytes(
+        reinterpret_cast<const std::uint8_t *>(text_output.data()),
+        sizeof(text_output));
+      text_anchor_checksum_captured = true;
+    }
+    sample.output_checksum = text_anchor_checksum;
+    if (capture_compare_outputs && !text_anchor_output_captured) {
+      sample.output_values.assign(text_output.begin(), text_output.end());
+      text_anchor_output_captured = true;
+    }
     return sample;
   };
 
@@ -287,10 +304,17 @@ void append_embedding_generator_cases(std::vector<result> & results,
     sample.timings = image_timings;
     sample.output_tokens = 1u;
     sample.output_dim = static_cast<std::uint64_t>(image_output_dimension);
-    sample.output_values.assign(image_output.begin(), image_output.end());
-    sample.output_checksum = checksum_bytes(
-      reinterpret_cast<const std::uint8_t *>(sample.output_values.data()),
-      sample.output_values.size() * sizeof(float));
+    if (!image_anchor_checksum_captured) {
+      image_anchor_checksum = checksum_bytes(
+        reinterpret_cast<const std::uint8_t *>(image_output.data()),
+        sizeof(image_output));
+      image_anchor_checksum_captured = true;
+    }
+    sample.output_checksum = image_anchor_checksum;
+    if (capture_compare_outputs && !image_anchor_output_captured) {
+      sample.output_values.assign(image_output.begin(), image_output.end());
+      image_anchor_output_captured = true;
+    }
     return sample;
   };
 
@@ -307,10 +331,17 @@ void append_embedding_generator_cases(std::vector<result> & results,
     sample.timings = audio_timings;
     sample.output_tokens = 1u;
     sample.output_dim = static_cast<std::uint64_t>(audio_output_dimension);
-    sample.output_values.assign(audio_output.begin(), audio_output.end());
-    sample.output_checksum = checksum_bytes(
-      reinterpret_cast<const std::uint8_t *>(sample.output_values.data()),
-      sample.output_values.size() * sizeof(float));
+    if (!audio_anchor_checksum_captured) {
+      audio_anchor_checksum = checksum_bytes(
+        reinterpret_cast<const std::uint8_t *>(audio_output.data()),
+        sizeof(audio_output));
+      audio_anchor_checksum_captured = true;
+    }
+    sample.output_checksum = audio_anchor_checksum;
+    if (capture_compare_outputs && !audio_anchor_output_captured) {
+      sample.output_values.assign(audio_output.begin(), audio_output.end());
+      audio_anchor_output_captured = true;
+    }
     return sample;
   };
 

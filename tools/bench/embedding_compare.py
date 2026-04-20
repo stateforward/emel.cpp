@@ -231,7 +231,7 @@ def build_summary(emel_records: list[dict[str, object]],
       select_records(reference_records, lane="reference", compare_group=compare_group),
     )
     for group_summary in group_summaries:
-      if group_summary["comparison_status"] == "error":
+      if group_summary["comparison_status"] in ("error", "missing"):
         failure = True
       groups.append(group_summary)
   return {

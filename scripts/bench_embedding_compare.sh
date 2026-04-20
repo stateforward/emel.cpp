@@ -67,12 +67,19 @@ if [[ -z "$REFERENCE_BACKEND" ]]; then
   exit 1
 fi
 
-for tool in cmake ninja python3; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "error: required tool missing: $tool" >&2
-    exit 1
-  fi
-done
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "error: required tool missing: python3" >&2
+  exit 1
+fi
+
+if ! $SKIP_EMEL_BUILD; then
+  for tool in cmake ninja; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "error: required tool missing: $tool" >&2
+      exit 1
+    fi
+  done
+fi
 
 bench_cc="${BENCH_CC:-cc}"
 bench_cxx="${BENCH_CXX:-c++}"
@@ -81,7 +88,7 @@ bench_cxx_arg=""
 bench_asm_arg=""
 bench_c_flags=""
 bench_cxx_flags=""
-if $USE_ZIG; then
+if $USE_ZIG && ! $SKIP_EMEL_BUILD; then
   if ! command -v zig >/dev/null 2>&1; then
     echo "error: zig not found (use --system to use system compilers)" >&2
     exit 1

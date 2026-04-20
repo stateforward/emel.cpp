@@ -10,6 +10,7 @@
 #include <doctest/doctest.h>
 
 #if !defined(_WIN32)
+#include <csignal>
 #include <sys/wait.h>
 #endif
 
@@ -37,6 +38,10 @@ std::filesystem::path embedding_reference_python_path() {
 #else
   return repo_root() / "tools" / "bench" / "embedding_reference_python.py";
 #endif
+}
+
+std::filesystem::path bench_embedding_compare_wrapper_path() {
+  return repo_root() / "scripts" / "bench_embedding_compare.sh";
 }
 
 std::string read_file(const std::filesystem::path & path) {
@@ -86,6 +91,21 @@ std::string quote_arg_windows(const std::string & arg) {
   return out;
 }
 
+std::string set_env_windows(const std::string & name, const std::string & value) {
+  std::string out = "set \"";
+  out += name;
+  out += "=";
+  for (const char c : value) {
+    if (c == '"') {
+      out += "\"\"";
+    } else {
+      out.push_back(c);
+    }
+  }
+  out += "\"";
+  return out;
+}
+
 struct process_capture {
   int exit_code = -1;
   std::string stdout_text = {};
@@ -108,7 +128,22 @@ process_capture run_command_capture(const std::string & command,
 #if defined(_WIN32)
   capture.exit_code = status;
 #else
-  capture.exit_code = WEXITSTATUS(status);
+  if (WIFEXITED(status)) {
+    capture.exit_code = WEXITSTATUS(status);
+  } else if (WIFSIGNALED(status)) {
+    capture.exit_code = 128 + WTERMSIG(status);
+    if (!capture.stderr_text.empty() && capture.stderr_text.back() != '\n') {
+      capture.stderr_text.push_back('\n');
+    }
+    capture.stderr_text +=
+      "process terminated by signal " + std::to_string(WTERMSIG(status)) + "\n";
+  } else {
+    capture.exit_code = 1;
+    if (!capture.stderr_text.empty() && capture.stderr_text.back() != '\n') {
+      capture.stderr_text.push_back('\n');
+    }
+    capture.stderr_text += "process exited with unknown wait status\n";
+  }
 #endif
   return capture;
 }
@@ -127,6 +162,17 @@ void write_text_file(const std::filesystem::path & path, const std::string & tex
   REQUIRE(output.good());
   output << text;
   REQUIRE(output.good());
+}
+
+void make_executable(const std::filesystem::path & path) {
+  std::error_code ec = {};
+  std::filesystem::permissions(path,
+                               std::filesystem::perms::owner_read |
+                                 std::filesystem::perms::owner_write |
+                                 std::filesystem::perms::owner_exec,
+                               std::filesystem::perm_options::replace,
+                               ec);
+  REQUIRE(!ec);
 }
 
 }  // namespace
@@ -334,6 +380,115 @@ TEST_CASE("embedding compare preserves every reference record that shares a comp
         2);
 }
 
+TEST_CASE("embedding compare fails when a compare group is missing a reference lane record") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "missing-reference";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path emel_vector = tmp_dir / "emel.f32";
+  const std::filesystem::path emel_jsonl = tmp_dir / "emel.jsonl";
+  const std::filesystem::path ref_jsonl = tmp_dir / "ref.jsonl";
+  const std::filesystem::path output_dir = tmp_dir / "out";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+
+  write_binary_floats(emel_vector, {1.0f, 0.0f, 0.0f});
+  write_text_file(
+    emel_jsonl,
+    "{\"schema\":\"embedding_compare/v1\",\"record_type\":\"result\",\"status\":\"ok\","
+    "\"case_name\":\"emel/text\",\"compare_group\":\"text/red_square/full_dim\","
+    "\"lane\":\"emel\",\"backend_id\":\"emel.generator\",\"backend_language\":\"cpp\","
+    "\"comparison_mode\":\"parity\",\"model_id\":\"te\",\"fixture_id\":\"fixture\","
+    "\"modality\":\"text\",\"ns_per_op\":1.0,\"prepare_ns_per_op\":0.1,"
+    "\"encode_ns_per_op\":0.8,\"publish_ns_per_op\":0.1,\"output_tokens\":1,"
+    "\"output_dim\":3,\"output_checksum\":1,\"iterations\":1,\"runs\":1,"
+    "\"output_path\":\"" + emel_vector.string() + "\",\"note\":\"\",\"error_kind\":\"\","
+    "\"error_message\":\"\"}\n");
+  write_text_file(ref_jsonl, "");
+
+  std::string command;
+#if defined(_WIN32)
+  command = "python3 " + quote_arg_windows(embedding_compare_script_path().string());
+  command += " --emel-input " + quote_arg_windows(emel_jsonl.string());
+  command += " --reference-input " + quote_arg_windows(ref_jsonl.string());
+  command += " --output-dir " + quote_arg_windows(output_dir.string());
+  command += " > " + quote_arg_windows(stdout_path.string());
+  command += " 2> " + quote_arg_windows(stderr_path.string());
+#else
+  command = "python3 " + quote_arg_posix(embedding_compare_script_path().string());
+  command += " --emel-input " + quote_arg_posix(emel_jsonl.string());
+  command += " --reference-input " + quote_arg_posix(ref_jsonl.string());
+  command += " --output-dir " + quote_arg_posix(output_dir.string());
+  command += " > " + quote_arg_posix(stdout_path.string());
+  command += " 2> " + quote_arg_posix(stderr_path.string());
+#endif
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 1);
+  CHECK(capture.stderr_text.empty());
+  const std::string summary = read_file(output_dir / "compare_summary.json");
+  CHECK(summary.find("\"failed\": true") != std::string::npos);
+  CHECK(summary.find("\"comparison_status\": \"missing\"") != std::string::npos);
+  CHECK(summary.find("\"reason\": \"missing_reference_record\"") != std::string::npos);
+}
+
+#if !defined(_WIN32)
+TEST_CASE("run_command_capture reports signal termination deterministically") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "signal-status";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+    "kill -TERM $$ > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+    quote_arg_posix(stderr_path.string());
+
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 128 + SIGTERM);
+  CHECK(capture.stderr_text.find("process terminated by signal") != std::string::npos);
+}
+#endif
+
+#if !defined(_WIN32)
+TEST_CASE("compare wrapper honors --skip-emel-build without requiring cmake or ninja") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "skip-build";
+  const std::filesystem::path fake_bin_dir = tmp_dir / "bin";
+  const std::filesystem::path fake_python = fake_bin_dir / "python3";
+  const std::filesystem::path fake_dirname = fake_bin_dir / "dirname";
+  const std::filesystem::path invoked_path = tmp_dir / "python-invoked.txt";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::filesystem::path output_dir = tmp_dir / "out";
+  std::filesystem::create_directories(fake_bin_dir);
+
+  write_text_file(fake_python,
+                  "#!/bin/sh\n"
+                  "printf 'python-invoked\\n' > \"$EMEL_TEST_INVOKED_PATH\"\n"
+                  "exit 0\n");
+  make_executable(fake_python);
+  write_text_file(fake_dirname,
+                  "#!/bin/sh\n"
+                  "/usr/bin/dirname \"$@\"\n");
+  make_executable(fake_dirname);
+
+  std::string command;
+  command = "PATH=" + quote_arg_posix(fake_bin_dir.string()) + " ";
+  command += "EMEL_TEST_INVOKED_PATH=" + quote_arg_posix(invoked_path.string()) + " ";
+  command += quote_arg_posix("/bin/bash") + " " +
+    quote_arg_posix(bench_embedding_compare_wrapper_path().string());
+  command += " --reference-backend te_python_goldens --skip-emel-build --system --output-dir " +
+    quote_arg_posix(output_dir.string());
+  command += " > " + quote_arg_posix(stdout_path.string());
+  command += " 2> " + quote_arg_posix(stderr_path.string());
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+  CHECK(read_file(invoked_path).find("python-invoked") != std::string::npos);
+}
+#endif
+
 TEST_CASE("python golden backend emits canonical compare records") {
   const std::filesystem::path tmp_dir =
     std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "python-goldens";
@@ -344,8 +499,8 @@ TEST_CASE("python golden backend emits canonical compare records") {
 
   std::string command;
 #if defined(_WIN32)
-  command = "set EMEL_EMBEDDING_BENCH_FORMAT=jsonl && ";
-  command += "set EMEL_EMBEDDING_RESULT_DIR=" + quote_arg_windows(result_dir.string()) + " && ";
+  command = set_env_windows("EMEL_EMBEDDING_BENCH_FORMAT", "jsonl") + " && ";
+  command += set_env_windows("EMEL_EMBEDDING_RESULT_DIR", result_dir.string()) + " && ";
   command += "python3 " + quote_arg_windows(embedding_reference_python_path().string());
   command += " --backend te75m_goldens > " + quote_arg_windows(stdout_path.string());
   command += " 2> " + quote_arg_windows(stderr_path.string());
