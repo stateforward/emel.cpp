@@ -405,6 +405,9 @@ def main() -> int:
       print("error: reference backend manifest is required when --reference-input is omitted",
             file=sys.stderr)
       return 1
+    reference_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    reference_jsonl.write_text("", encoding="utf-8")
+    reference_build_failed = False
     if "build_command" in manifest:
       build_stdout = raw_dir / "reference.build.stdout.txt"
       build_stderr = raw_dir / "reference.build.stderr.txt"
@@ -425,11 +428,12 @@ def main() -> int:
                        error_kind=error_kind,
                        error_message=error_message),
         )
+        reference_build_failed = True
     reference_vector_dir = args.output_dir / "vectors" / "reference"
     reference_env = dict(env_updates)
     reference_env["EMEL_EMBEDDING_RESULT_DIR"] = str(reference_vector_dir)
     reference_stderr = raw_dir / "reference.stderr.txt"
-    if not parse_jsonl_records(reference_jsonl):
+    if not reference_build_failed:
       reference_result = run_command(command_to_strings(manifest["run_command"]),
                                      reference_env,
                                      reference_jsonl,

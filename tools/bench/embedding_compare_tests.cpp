@@ -532,6 +532,97 @@ TEST_CASE("embedding compare records malformed jsonl lines in the summary") {
         std::string::npos);
 }
 
+TEST_CASE("embedding compare reruns the reference backend instead of reusing stale jsonl") {
+  const std::filesystem::path tmp_dir =
+    std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" /
+    "stale-reference-jsonl";
+  const std::filesystem::path emel_jsonl = tmp_dir / "emel.jsonl";
+  const std::filesystem::path manifest_json = tmp_dir / "backend.json";
+  const std::filesystem::path output_dir = tmp_dir / "out";
+  const std::filesystem::path raw_dir = output_dir / "raw";
+  const std::filesystem::path reference_jsonl = raw_dir / "reference.jsonl";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  std::error_code ec = {};
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(raw_dir);
+
+  write_text_file(emel_jsonl, "");
+  write_text_file(
+    reference_jsonl,
+    "{\"schema\":\"embedding_compare/v1\",\"record_type\":\"error\",\"status\":\"error\","
+    "\"case_name\":\"reference/stale.reference\",\"compare_group\":\"backend\","
+    "\"lane\":\"reference\",\"backend_id\":\"stale.reference\",\"backend_language\":\"python\","
+    "\"comparison_mode\":\"parity\",\"model_id\":\"\",\"fixture_id\":\"\",\"modality\":\"\","
+    "\"ns_per_op\":0.0,\"prepare_ns_per_op\":0.0,\"encode_ns_per_op\":0.0,"
+    "\"publish_ns_per_op\":0.0,\"output_tokens\":0,\"output_dim\":0,\"output_checksum\":0,"
+    "\"iterations\":0,\"runs\":0,\"output_path\":\"\",\"note\":\"\",\"error_kind\":\"stale\","
+    "\"error_message\":\"stale output should not be reused\"}\n");
+  write_text_file(
+    manifest_json,
+    "{\n"
+    "  \"id\": \"fresh.reference\",\n"
+    "  \"language\": \"python\",\n"
+    "  \"run_command\": [\n"
+    "    \"python3\",\n"
+    "    \"-c\",\n"
+    "    \"import json; print(json.dumps({"
+    "\\\"schema\\\": \\\"embedding_compare/v1\\\", "
+    "\\\"record_type\\\": \\\"error\\\", "
+    "\\\"status\\\": \\\"error\\\", "
+    "\\\"case_name\\\": \\\"reference/fresh.reference\\\", "
+    "\\\"compare_group\\\": \\\"backend\\\", "
+    "\\\"lane\\\": \\\"reference\\\", "
+    "\\\"backend_id\\\": \\\"fresh.reference\\\", "
+    "\\\"backend_language\\\": \\\"python\\\", "
+    "\\\"comparison_mode\\\": \\\"parity\\\", "
+    "\\\"model_id\\\": \\\"\\\", "
+    "\\\"fixture_id\\\": \\\"\\\", "
+    "\\\"modality\\\": \\\"\\\", "
+    "\\\"ns_per_op\\\": 0.0, "
+    "\\\"prepare_ns_per_op\\\": 0.0, "
+    "\\\"encode_ns_per_op\\\": 0.0, "
+    "\\\"publish_ns_per_op\\\": 0.0, "
+    "\\\"output_tokens\\\": 0, "
+    "\\\"output_dim\\\": 0, "
+    "\\\"output_checksum\\\": 0, "
+    "\\\"iterations\\\": 0, "
+    "\\\"runs\\\": 0, "
+    "\\\"output_path\\\": \\\"\\\", "
+    "\\\"note\\\": \\\"\\\", "
+    "\\\"error_kind\\\": \\\"fresh\\\", "
+    "\\\"error_message\\\": \\\"fresh output from this invocation\\\"}))\"\n"
+    "  ]\n"
+    "}\n");
+
+  std::string command;
+#if defined(_WIN32)
+  command = "python3 " + quote_arg_windows(embedding_compare_script_path().string());
+  command += " --emel-input " + quote_arg_windows(emel_jsonl.string());
+  command += " --backend-manifest " + quote_arg_windows(manifest_json.string());
+  command += " --output-dir " + quote_arg_windows(output_dir.string());
+  command += " > " + quote_arg_windows(stdout_path.string());
+  command += " 2> " + quote_arg_windows(stderr_path.string());
+#else
+  command = "python3 " + quote_arg_posix(embedding_compare_script_path().string());
+  command += " --emel-input " + quote_arg_posix(emel_jsonl.string());
+  command += " --backend-manifest " + quote_arg_posix(manifest_json.string());
+  command += " --output-dir " + quote_arg_posix(output_dir.string());
+  command += " > " + quote_arg_posix(stdout_path.string());
+  command += " 2> " + quote_arg_posix(stderr_path.string());
+#endif
+  const process_capture capture = run_command_capture(command, stdout_path, stderr_path);
+
+  CHECK(capture.exit_code == 1);
+  CHECK(capture.stderr_text.empty());
+  const std::string summary = read_file(output_dir / "compare_summary.json");
+  CHECK(summary.find("\"backend_id\": \"fresh.reference\"") != std::string::npos);
+  CHECK(summary.find("\"backend_id\": \"stale.reference\"") == std::string::npos);
+  CHECK(summary.find("\"error_kind\": \"fresh\"") != std::string::npos);
+  CHECK(read_file(reference_jsonl).find("fresh.reference") != std::string::npos);
+  CHECK(read_file(reference_jsonl).find("stale.reference") == std::string::npos);
+}
+
 TEST_CASE("embedding compare fails when both lanes produce no compare groups") {
   const std::filesystem::path tmp_dir =
     std::filesystem::temp_directory_path() / "emel-embedding-compare-tests" / "no-groups";
