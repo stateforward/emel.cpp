@@ -250,6 +250,9 @@ add_dependencies(embedding_compare_tests embedding_generator_bench_runner)
 target_include_directories(embedding_compare_tests
   PRIVATE
     ${DOCTEST_INCLUDE_DIR}
+    ${EMEL_ROOT}/src
+    ${EMEL_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_compile_definitions(embedding_compare_tests

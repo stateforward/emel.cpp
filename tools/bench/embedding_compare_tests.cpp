@@ -1,13 +1,18 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 
+#include <array>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
 #include <string>
+#include <vector>
 
 #include <doctest/doctest.h>
+
+#include "embedding_generator_bench_helpers.hpp"
 
 #if !defined(_WIN32)
 #include <csignal>
@@ -591,6 +596,42 @@ TEST_CASE("embedding generator compare output survives warmup iterations") {
     }
   }
   CHECK(dumped_outputs == 1u);
+}
+
+TEST_CASE("embedding generator sample capture recomputes checksum after warmup") {
+  struct capture_sample {
+    std::uint64_t output_checksum = 0u;
+    std::vector<float> output_values = {};
+  };
+
+  capture_sample warmup_sample = {};
+  capture_sample measured_sample = {};
+  bool anchor_output_captured = false;
+  const std::array<float, 4> warmup_output = {1.0f, 0.0f, 0.0f, 0.0f};
+  const std::array<float, 4> measured_output = {0.0f, 1.0f, 0.0f, 0.0f};
+
+  emel::bench::capture_embedding_case_output(warmup_sample,
+                                             warmup_output.data(),
+                                             warmup_output.size(),
+                                             true,
+                                             false,
+                                             anchor_output_captured);
+  emel::bench::capture_embedding_case_output(measured_sample,
+                                             measured_output.data(),
+                                             measured_output.size(),
+                                             true,
+                                             true,
+                                             anchor_output_captured);
+
+  CHECK(warmup_sample.output_checksum != measured_sample.output_checksum);
+  CHECK(measured_sample.output_checksum ==
+        emel::bench::checksum_bytes(
+          reinterpret_cast<const std::uint8_t *>(measured_output.data()),
+          measured_output.size() * sizeof(float)));
+  REQUIRE(measured_sample.output_values.size() == measured_output.size());
+  CHECK(measured_sample.output_values[0] == doctest::Approx(measured_output[0]));
+  CHECK(measured_sample.output_values[1] == doctest::Approx(measured_output[1]));
+  CHECK(anchor_output_captured);
 }
 
 #if !defined(_WIN32)
