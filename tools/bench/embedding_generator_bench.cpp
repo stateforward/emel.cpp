@@ -134,7 +134,7 @@ measured_embedding_case measure_embedding_case(const char * name, const config &
 
   for (std::size_t run = 0; run < cfg.warmup_runs; ++run) {
     for (std::uint64_t i = 0; i < cfg.warmup_iterations; ++i) {
-      (void) fn();
+      (void) fn(false);
     }
   }
 
@@ -144,7 +144,7 @@ measured_embedding_case measure_embedding_case(const char * name, const config &
     std::uint64_t publish_ns = 0u;
     const auto start = std::chrono::steady_clock::now();
     for (std::uint64_t i = 0; i < cfg.iterations; ++i) {
-      const auto sample = fn();
+      const auto sample = fn(!anchor_seen);
       prepare_ns += sample.timings.prepare_ns;
       encode_ns += sample.timings.encode_ns;
       publish_ns += sample.timings.publish_ns;
@@ -264,7 +264,7 @@ void append_embedding_generator_cases(std::vector<result> & results,
   bool image_anchor_output_captured = false;
   bool audio_anchor_output_captured = false;
 
-  auto text_fn = [&]() -> embedding_case_sample {
+  auto text_fn = [&](const bool capture_anchor_output) -> embedding_case_sample {
     text_error = emel::error::cast(emel::embeddings::generator::error::none);
     text_output_dimension = 0;
     if (!text_state.generator.process_event(text_request) ||
@@ -284,14 +284,14 @@ void append_embedding_generator_cases(std::vector<result> & results,
       text_anchor_checksum_captured = true;
     }
     sample.output_checksum = text_anchor_checksum;
-    if (capture_compare_outputs && !text_anchor_output_captured) {
+    if (capture_compare_outputs && capture_anchor_output && !text_anchor_output_captured) {
       sample.output_values.assign(text_output.begin(), text_output.end());
       text_anchor_output_captured = true;
     }
     return sample;
   };
 
-  auto image_fn = [&]() -> embedding_case_sample {
+  auto image_fn = [&](const bool capture_anchor_output) -> embedding_case_sample {
     image_error = emel::error::cast(emel::embeddings::generator::error::none);
     image_output_dimension = 0;
     if (!image_state.generator.process_event(image_request) ||
@@ -311,14 +311,14 @@ void append_embedding_generator_cases(std::vector<result> & results,
       image_anchor_checksum_captured = true;
     }
     sample.output_checksum = image_anchor_checksum;
-    if (capture_compare_outputs && !image_anchor_output_captured) {
+    if (capture_compare_outputs && capture_anchor_output && !image_anchor_output_captured) {
       sample.output_values.assign(image_output.begin(), image_output.end());
       image_anchor_output_captured = true;
     }
     return sample;
   };
 
-  auto audio_fn = [&]() -> embedding_case_sample {
+  auto audio_fn = [&](const bool capture_anchor_output) -> embedding_case_sample {
     audio_error = emel::error::cast(emel::embeddings::generator::error::none);
     audio_output_dimension = 0;
     if (!audio_state.generator.process_event(audio_request) ||
@@ -338,7 +338,7 @@ void append_embedding_generator_cases(std::vector<result> & results,
       audio_anchor_checksum_captured = true;
     }
     sample.output_checksum = audio_anchor_checksum;
-    if (capture_compare_outputs && !audio_anchor_output_captured) {
+    if (capture_compare_outputs && capture_anchor_output && !audio_anchor_output_captured) {
       sample.output_values.assign(audio_output.begin(), audio_output.end());
       audio_anchor_output_captured = true;
     }

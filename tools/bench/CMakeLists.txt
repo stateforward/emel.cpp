@@ -245,6 +245,8 @@ add_executable(embedding_compare_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/embedding_compare_tests.cpp
 )
 
+add_dependencies(embedding_compare_tests embedding_generator_bench_runner)
+
 target_include_directories(embedding_compare_tests
   PRIVATE
     ${DOCTEST_INCLUDE_DIR}
@@ -255,6 +257,7 @@ target_compile_definitions(embedding_compare_tests
     BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
     EMBEDDING_COMPARE_SCRIPT_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/embedding_compare.py\"
     EMBEDDING_REFERENCE_PYTHON_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/embedding_reference_python.py\"
+    EMBEDDING_GENERATOR_BENCH_RUNNER_PATH=\"$<TARGET_FILE:embedding_generator_bench_runner>\"
 )
 
 add_test(

@@ -228,7 +228,10 @@ def build_summary(emel_records: list[dict[str, object]],
     if record.get("compare_group")
   }
   groups = []
-  failure = any(record.get("record_type") == "error" for record in emel_records + reference_records)
+  failure = not compare_groups
+  failure = failure or any(
+    record.get("record_type") == "error" for record in emel_records + reference_records
+  )
   for compare_group in sorted(compare_groups):
     group_summaries = summarize_group_matches(
       compare_group,
